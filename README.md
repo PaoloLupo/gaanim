@@ -79,6 +79,12 @@ en las dependencias de `pyproject.toml`, deja `.python-version` y prepara
 `.venv` con esa misma versión. Los proyectos sin `.venv` pueden usar un Python
 3.14+ detectado en el sistema.
 
+Los proyectos pueden crecer con un layout `src/`: Gaanim añade automáticamente
+`src` y la carpeta del entrypoint a la ruta de imports. Durante la
+previsualización observa todos los archivos Python del proyecto y vuelve a
+importar sus módulos al guardar, por lo que no hacen falta modificaciones
+manuales de `sys.path` en `main.py`.
+
 Las presentaciones usan el mismo concepto de segmento que los videos. Los
 límites son continuos y solo `stop()` solicita input durante la reproducción:
 

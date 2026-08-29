@@ -356,7 +356,7 @@ impl CartesianSpace {
             if self.visibility.x_numbers && tick.major && !tick.label.is_empty() {
                 numbers.push(LabelGeometry {
                     text: tick.label.clone(),
-                    position: Point::new(x, x_axis_y - style.tick_length - 12.0),
+                    position: Point::new(x, x_axis_y - style.tick_length - 0.12),
                     rotation: 0.0,
                     color: style.number_color,
                 });
@@ -387,7 +387,7 @@ impl CartesianSpace {
             {
                 numbers.push(LabelGeometry {
                     text: tick.label.clone(),
-                    position: Point::new(y_axis_x - style.tick_length - 12.0, y),
+                    position: Point::new(y_axis_x - style.tick_length - 0.12, y),
                     rotation: 0.0,
                     color: style.number_color,
                 });
@@ -410,7 +410,7 @@ impl CartesianSpace {
             labels.push(LabelGeometry {
                 text: label.to_owned(),
                 position: if position == AxisLabelPosition::Center {
-                    Point::new(0.0, x_axis_y - self.map.x.style_value().tick_length - 12.0)
+                    Point::new(0.0, x_axis_y - self.map.x.style_value().tick_length - 0.12)
                 } else {
                     Point::new(axis_title_coordinate(position, frame.width), x_axis_y)
                 },
@@ -425,7 +425,7 @@ impl CartesianSpace {
             labels.push(LabelGeometry {
                 text: label.to_owned(),
                 position: if position == AxisLabelPosition::Center {
-                    Point::new(y_axis_x - self.map.y.style_value().tick_length - 12.0, 0.0)
+                    Point::new(y_axis_x - self.map.y.style_value().tick_length - 0.12, 0.0)
                 } else {
                     Point::new(y_axis_x, axis_title_coordinate(position, frame.height))
                 },
@@ -521,13 +521,20 @@ mod tests {
     fn cartesian_geometry_has_separate_layers() {
         let x = Axis::linear(-2.0, 2.0).unwrap().ticks(1.0).unwrap();
         let y = Axis::linear(-1.0, 1.0).unwrap().ticks(0.5).unwrap();
-        let geometry = CartesianSpace::number_plane(x, y, PlotFrame::new(400.0, 200.0).unwrap())
+        let geometry = CartesianSpace::number_plane(x, y, PlotFrame::new(8.0, 4.0).unwrap())
             .geometry()
             .unwrap();
         assert!(!geometry.axes.is_empty());
         assert!(!geometry.major_grid.is_empty());
         assert!(!geometry.ticks.is_empty());
         assert!(!geometry.numbers.is_empty());
+        assert!(
+            geometry
+                .numbers
+                .iter()
+                .all(|label| label.position.x.abs() < 5.0 && label.position.y.abs() < 3.0),
+            "axis text must remain close to a logical-unit plot"
+        );
     }
 
     #[test]

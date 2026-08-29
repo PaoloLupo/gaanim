@@ -846,7 +846,10 @@ class Drawable:
         """
         ...
     def stroke(self, paint: Paint, width: float) -> Self:
-        """Apply stroke to this drawable and return the result.
+        """Apply a stroke whose width is measured in logical scene units.
+
+        On an imported SVG root, the width remains logical even when the
+        source hierarchy is scaled to fit the scene.
 
         Example:
             result = drawable.stroke(BLUE, 1.0)
@@ -3170,7 +3173,7 @@ class MediaLibrary:
         """
         ...
     def svg(self, path: str) -> Drawable:
-        """Create a svg drawable in the scene.
+        """Create an SVG hierarchy whose fluent stroke widths use logical scene units.
 
         Example:
             result = scene.svg("assets/example.svg")

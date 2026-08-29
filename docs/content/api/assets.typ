@@ -188,6 +188,10 @@ resuelve:
 - filtros habituales `feGaussianBlur` y `feDropShadow` mediante los efectos
   vectoriales retenidos de Gaanim.
 
+Los grosores aplicados al drawable raíz con `stroke(...)` se expresan en
+unidades lógicas de escena y no se reducen al escalar la geometría fuente del
+SVG para colocarla en el frame.
+
 Los grupos, trayectorias y textos con nombre siguen siendo direccionables:
 
 ```python

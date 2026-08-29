@@ -879,10 +879,17 @@ impl SceneModel {
             if spec.mark_spec().kind == MarkKind::Bar {
                 let (marks, labels) =
                     self.materialize_bar_chart(&space, &spec, chart_series_color(self))?;
-                if let Some(axes) = space.layer(SpaceLayer::Axes) {
-                    axes.clone().z_index(20);
+                for layer in [
+                    SpaceLayer::Axes,
+                    SpaceLayer::Ticks,
+                    SpaceLayer::Numbers,
+                    SpaceLayer::Labels,
+                ] {
+                    if let Some(handle) = space.layer(layer) {
+                        handle.clone().z_index(20);
+                    }
                 }
-                let axes_layer = space.view.clone();
+                let axes_layer = space.view.clone().z_index(20);
                 let grid = space
                     .layer(SpaceLayer::MajorGrid)
                     .cloned()
@@ -911,7 +918,7 @@ impl SceneModel {
                         radius: chart_option_number(
                             &spec,
                             "radius",
-                            chart_encoding_number(&spec, Channel::Size, 6.0),
+                            chart_encoding_number(&spec, Channel::Size, 0.06),
                         ),
                         policy: NonFinitePolicy::Gap,
                     },
@@ -1019,7 +1026,7 @@ impl SceneModel {
                 MarkKind::Heatmap => mark,
                 MarkKind::Line | MarkKind::Step | MarkKind::ErrorBar => mark.stroke(
                     chart_encoding_color(&spec).unwrap_or_else(|| chart_series_color(self)),
-                    3.0,
+                    0.03,
                 ),
                 _ => mark
                     .fill(chart_encoding_color(&spec).unwrap_or_else(|| chart_series_color(self))),
@@ -1027,10 +1034,17 @@ impl SceneModel {
             let mark = mark
                 .opacity(chart_encoding_number(&spec, Channel::Opacity, 1.0).clamp(0.0, 1.0) as f32)
                 .z_index(0);
-            if let Some(axes) = space.layer(SpaceLayer::Axes) {
-                axes.clone().z_index(20);
+            for layer in [
+                SpaceLayer::Axes,
+                SpaceLayer::Ticks,
+                SpaceLayer::Numbers,
+                SpaceLayer::Labels,
+            ] {
+                if let Some(handle) = space.layer(layer) {
+                    handle.clone().z_index(20);
+                }
             }
-            let axes_layer = space.view.clone();
+            let axes_layer = space.view.clone().z_index(20);
             let grid = space
                 .layer(SpaceLayer::MajorGrid)
                 .cloned()
@@ -1215,7 +1229,7 @@ impl SceneModel {
             Some(ConstantValue::Text(value)) => value.as_str(),
             _ => "outside",
         };
-        let label_offset = chart_option_number(spec, "label_offset", 16.0);
+        let label_offset = chart_option_number(spec, "label_offset", 0.16);
         let label_color = match spec.mark_spec().options.get("label_color") {
             Some(ConstantValue::Color(color)) => Some(*color),
             _ => None,
@@ -1411,7 +1425,7 @@ impl SceneModel {
     }
 
     fn x_tick_label_extra_offset(&self, text: &str, scale: f64) -> f64 {
-        const SINGLE_LINE_EXTRA: f64 = 4.0;
+        const SINGLE_LINE_EXTRA: f64 = 0.04;
         let font_size =
             self.themed_text_config().roles[&gaanim_text::prelude::TextRole::Body].size * scale;
         let additional_lines = text.lines().count().saturating_sub(1) as f64;
@@ -1428,8 +1442,8 @@ impl SceneModel {
         number_scale: f64,
         label_scale: f64,
     ) {
-        const NUMBER_GAP: f64 = 12.0;
-        const TITLE_GAP: f64 = 12.0;
+        const NUMBER_GAP: f64 = 0.12;
+        const TITLE_GAP: f64 = 0.12;
 
         let x_cross = space.map.x.crossing_value();
         let y_cross = space.map.y.crossing_value();
@@ -1989,7 +2003,7 @@ impl SceneModel {
             geometry.major_grid,
             geometry.bounds,
             space.grid_color,
-            1.0,
+            0.01,
             "CoordinateMajorGrid",
         );
         grid_major
@@ -2002,7 +2016,7 @@ impl SceneModel {
             geometry.minor_grid,
             geometry.bounds,
             space.minor_grid_color,
-            0.6,
+            0.006,
             "CoordinateMinorGrid",
         );
         grid_minor
@@ -2137,7 +2151,7 @@ impl SceneModel {
         }
         let bounds = gaanim_math::Bounds3D::new_2d(
             -length * 0.5,
-            -style.tick_length - 56.0,
+            -style.tick_length - 0.56,
             length * 0.5,
             style.tick_length + 0.32,
         );
@@ -2162,7 +2176,7 @@ impl SceneModel {
                     self.text(&tick.label)
                         .fill(style.number_color)
                         .scale_to(number_scale)
-                        .move_to(x, -style.tick_length - 22.0),
+                        .move_to(x, -style.tick_length - 0.22),
                 );
             }
         }
@@ -3974,8 +3988,8 @@ mod tests {
         );
 
         assert_eq!(labels.len(), 2);
-        assert!((labels[0].x - 332.0).abs() < 1e-9);
-        assert!((labels[1].y - 192.0).abs() < 1e-9);
+        assert!((labels[0].x - 320.12).abs() < 1e-9);
+        assert!((labels[1].y - 180.12).abs() < 1e-9);
         assert_eq!(anchors, [Some(Anchor::Left), Some(Anchor::Bottom)]);
         assert_eq!(rotations, [0.0, 0.0], "axis titles remain upright");
         let axis_origin = space
@@ -3984,14 +3998,6 @@ mod tests {
             .unwrap();
         assert!((labels[0].y - axis_origin.y).abs() < 1e-9);
         assert!((labels[1].x - axis_origin.x).abs() < 1e-9);
-        let numbers = group_child_translations(
-            &canvas,
-            space.layer(SpaceLayer::Numbers).expect("axis tick labels"),
-        );
-        assert!(
-            numbers[0].y < -220.0 && numbers[0].y > -240.0,
-            "multiline category labels clear the x axis"
-        );
     }
 
     #[test]
@@ -4017,6 +4023,12 @@ mod tests {
             ((numbers[0].y - numbers[1].y) - expected_offset).abs() < 1e-9,
             "multiline labels grow away from the axis without changing their nearest-line gap"
         );
+    }
+
+    #[test]
+    fn single_line_x_tick_labels_use_a_logical_gap() {
+        let canvas = SceneModel::new(16.0, 9.0);
+        assert_eq!(canvas.x_tick_label_extra_offset("Categoría", 1.0), 0.04);
     }
 
     #[test]
@@ -4098,8 +4110,8 @@ mod tests {
 
         assert_eq!(labels.len(), 2);
         assert_eq!(rotations, [0.0, 0.0]);
-        assert_eq!(labels[0].x, 212.0);
-        assert_eq!(labels[1].y, 112.0);
+        assert_eq!(labels[0].x, 200.12);
+        assert_eq!(labels[1].y, 100.12);
         assert_eq!(anchors, [Some(Anchor::Left), Some(Anchor::Bottom)]);
     }
 

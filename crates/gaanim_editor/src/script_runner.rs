@@ -9,6 +9,7 @@
 
 use crossbeam_channel::{Receiver, Sender};
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -281,6 +282,8 @@ fn run_script_file(py: Python<'_>, path: &Path) -> PyResult<()> {
         .to_str()
         .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("script path is not UTF-8"))?;
 
+    prepare_script_execution(py, path)?;
+
     // Build a tiny bootstrap that runs the file as __main__.
     // Using runpy.run_path executes the file with a fresh __main__ module,
     // which gives each reload a clean global namespace.
@@ -291,4 +294,154 @@ fn run_script_file(py: Python<'_>, path: &Path) -> PyResult<()> {
     );
     py.run(&std::ffi::CString::new(code).unwrap(), None, None)?;
     Ok(())
+}
+
+fn prepare_script_execution(py: Python<'_>, path: &Path) -> PyResult<()> {
+    let root = gaanim_project::find_project_for_script(path)
+        .map(|project| project.root)
+        .or_else(|| path.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| path.to_path_buf());
+    evict_project_modules(py, &root)?;
+
+    let mut import_paths = Vec::new();
+    let source_root = root.join("src");
+    if source_root.is_dir() {
+        import_paths.push(source_root);
+    }
+    if let Some(parent) = path.parent() {
+        import_paths.push(parent.to_path_buf());
+    }
+    import_paths.push(root);
+    import_paths.dedup();
+
+    let sys_path = py.import("sys")?.getattr("path")?;
+    for import_path in import_paths.iter().rev() {
+        let import_path = import_path.to_string_lossy().into_owned();
+        while sys_path.contains(&import_path)? {
+            sys_path.call_method1("remove", (&import_path,))?;
+        }
+        sys_path.call_method1("insert", (0, import_path))?;
+    }
+    py.import("importlib")?.call_method0("invalidate_caches")?;
+    Ok(())
+}
+
+fn evict_project_modules(py: Python<'_>, root: &Path) -> PyResult<()> {
+    let sys = py.import("sys")?;
+    let modules = sys.getattr("modules")?;
+    let modules = modules.cast::<PyDict>()?;
+    let mut module_names = Vec::new();
+    let mut bytecode_paths = Vec::new();
+
+    for (name, module) in modules.iter() {
+        let Ok(file) = module.getattr("__file__") else {
+            continue;
+        };
+        let Ok(file) = file.extract::<String>() else {
+            continue;
+        };
+        let file = PathBuf::from(file);
+        if !is_reloadable_project_module(&file, root) {
+            continue;
+        }
+        module_names.push(name.unbind());
+        if let Ok(cached) = module.getattr("__cached__")
+            && let Ok(cached) = cached.extract::<String>()
+        {
+            bytecode_paths.push(PathBuf::from(cached));
+        }
+    }
+
+    for name in module_names {
+        modules.del_item(name.bind(py))?;
+    }
+    for bytecode in bytecode_paths {
+        let _ = std::fs::remove_file(bytecode);
+    }
+    Ok(())
+}
+
+fn is_reloadable_project_module(path: &Path, root: &Path) -> bool {
+    let absolute = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let Ok(relative) = absolute.strip_prefix(root) else {
+        return false;
+    };
+    if relative.components().any(|component| {
+        component
+            .as_os_str()
+            .to_str()
+            .is_some_and(|name| matches!(name, ".venv" | "venv" | "env" | "__pycache__" | "target"))
+    }) {
+        return false;
+    }
+    absolute
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("py") || extension.eq_ignore_ascii_case("pyc")
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_project_manifest(root: &Path) {
+        std::fs::write(
+            root.join("gaanim.toml"),
+            "name = \"reload-test\"\nkind = \"video\"\nentry = \"main.py\"\n",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn project_src_is_available_without_entrypoint_path_hacks() {
+        Python::initialize();
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("src/reload_src_case");
+        std::fs::create_dir_all(&source).unwrap();
+        write_project_manifest(temp.path());
+        std::fs::write(source.join("__init__.py"), "VALUE = 'from-src'\n").unwrap();
+        let output = temp.path().join("result.txt");
+        let entry = temp.path().join("main.py");
+        std::fs::write(
+            &entry,
+            format!(
+                "from pathlib import Path\nfrom reload_src_case import VALUE\nPath({:?}).write_text(VALUE)\n",
+                output
+            ),
+        )
+        .unwrap();
+
+        Python::attach(|py| run_script_file(py, &entry)).unwrap();
+        assert_eq!(std::fs::read_to_string(output).unwrap(), "from-src");
+    }
+
+    #[test]
+    fn rerun_reimports_changed_project_modules() {
+        Python::initialize();
+        let temp = tempfile::tempdir().unwrap();
+        let source_root = temp.path().join("src");
+        let package = source_root.join("reload_cache_case");
+        std::fs::create_dir_all(&package).unwrap();
+        write_project_manifest(temp.path());
+        std::fs::write(package.join("__init__.py"), "VALUE = 'first'\n").unwrap();
+        let output = temp.path().join("result.txt");
+        let entry = temp.path().join("main.py");
+        std::fs::write(
+            &entry,
+            format!(
+                "import sys\nfrom pathlib import Path\nsys.path.insert(0, {:?})\nfrom reload_cache_case import VALUE\nPath({:?}).write_text(VALUE)\n",
+                source_root, output
+            ),
+        )
+        .unwrap();
+
+        Python::attach(|py| run_script_file(py, &entry)).unwrap();
+        std::fs::write(package.join("__init__.py"), "VALUE = 'second-value'\n").unwrap();
+        Python::attach(|py| run_script_file(py, &entry)).unwrap();
+
+        assert_eq!(std::fs::read_to_string(output).unwrap(), "second-value");
+    }
 }

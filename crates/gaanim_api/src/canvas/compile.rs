@@ -2433,7 +2433,7 @@ impl SceneModel {
                             anim,
                             id_map,
                         );
-                        if let Some(anim) = Self::remap_anim(anim, id_map) {
+                        if let Some(anim) = Self::remap_anim(anim, id_map, object_specs) {
                             if anim.anim_type.is_camera() {
                                 let start = builder.current_time;
                                 Self::schedule_camera_animation(
@@ -2457,7 +2457,7 @@ impl SceneModel {
                     }
                 }
                 Op::Immediate(anim) => {
-                    if let Some(mut anim) = Self::remap_anim(anim, id_map) {
+                    if let Some(mut anim) = Self::remap_anim(anim, id_map, object_specs) {
                         anim.duration = 0.0;
                         anim.delay = 0.0;
                         builder.play(anim);
@@ -2475,7 +2475,7 @@ impl SceneModel {
                     }
                     let remapped: Vec<AnimationBuilder> = anims
                         .iter()
-                        .filter_map(|anim| Self::remap_anim(anim, id_map))
+                        .filter_map(|anim| Self::remap_anim(anim, id_map, object_specs))
                         .collect();
                     let start = builder.current_time;
                     let max_duration = remapped
@@ -5867,13 +5867,14 @@ impl SceneModel {
     fn remap_anim(
         anim: &AnimationBuilder,
         id_map: &HashMap<ObjectId, ObjectId>,
+        object_specs: &HashMap<ObjectId, ObjectSpec>,
     ) -> Option<AnimationBuilder> {
         let target = if anim.anim_type.is_camera() {
             anim.target
         } else {
             *id_map.get(&anim.target)?
         };
-        let anim_type = match &anim.anim_type {
+        let mut anim_type = match &anim.anim_type {
             AnimationType::CameraFrame { target, margin } => AnimationType::CameraFrame {
                 target: *id_map.get(target)?,
                 margin: *margin,
@@ -5960,6 +5961,29 @@ impl SceneModel {
             }
             other => other.clone(),
         };
+        if let Some(spec) = object_specs.get(&anim.target).filter(|spec| spec.svg_root) {
+            let mut scale = DVec3::ONE;
+            for op in &spec.layout_ops {
+                match op {
+                    LayoutOp::SetScale(factor) => scale = DVec3::splat(*factor),
+                    LayoutOp::SetScale3D(value) => scale = *value,
+                    LayoutOp::ScaleBy(value) => scale *= *value,
+                    _ => {}
+                }
+            }
+            let scale = (scale.x.abs() * scale.y.abs()).sqrt();
+            if scale.is_finite() && scale > 1.0e-12 {
+                match &mut anim_type {
+                    AnimationType::StrokeWidthTo { to } => *to /= scale,
+                    AnimationType::Properties(properties) => {
+                        if let Some(width) = &mut properties.stroke_width {
+                            *width /= scale;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
         Some(AnimationBuilder {
             target,
             anim_type,
@@ -7617,6 +7641,19 @@ impl SceneModel {
             }
         }
         Self::apply_layout(builder, id, spec, id_map, frame_bounds);
+        if spec.svg_root
+            && spec.stroke_overridden
+            && let Some(state) = builder.states.get_mut(id)
+        {
+            let scale = (state.transform.scale.x.abs() * state.transform.scale.y.abs()).sqrt();
+            if scale.is_finite() && scale > 1.0e-12 {
+                state.stroke.style.width /= scale;
+                builder
+                    .commands
+                    .entity(state.entity)
+                    .insert(state.stroke.clone());
+            }
+        }
     }
 
     fn apply_layout(

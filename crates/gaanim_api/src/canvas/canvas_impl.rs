@@ -6410,6 +6410,65 @@ mod tests {
     }
 
     #[test]
+    fn scaled_svg_group_stroke_remains_in_logical_scene_units() {
+        let temp = std::env::temp_dir().join(format!(
+            "gaanim_svg_logical_stroke_test_{}.svg",
+            std::process::id()
+        ));
+        std::fs::write(
+            &temp,
+            r##"<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">
+                <rect id="body" x="10" y="10" width="80" height="80" fill="#ffffff"/>
+              </svg>"##,
+        )
+        .unwrap();
+
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        let svg = canvas
+            .svg(&temp)
+            .unwrap()
+            .scale_to(0.01)
+            .stroke(Color::BLACK, 0.025);
+        canvas.play(vec![
+            svg.animate()
+                .stroke(Color::from_rgb8(0x80, 0x80, 0x80), 0.0167)
+                .duration(1.0),
+        ]);
+        std::fs::remove_file(temp).unwrap();
+
+        let mut app = bevy::prelude::App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin);
+        canvas.compile(app.world_mut());
+        app.finish();
+        app.cleanup();
+        app.update();
+        app.world_mut().resource_mut::<Timeline>().seek_request = Some(1.0);
+        app.update();
+
+        let effective_width = app
+            .world_mut()
+            .query::<(
+                &gaanim_scene::ObjectTag,
+                &gaanim_scene::StrokeBrush,
+                &gaanim_math::GlobalSpatialTransform,
+            )>()
+            .iter(app.world())
+            .find_map(|(tag, stroke, transform)| {
+                (tag.0 == "SvgPath#body").then(|| {
+                    let [a, b, c, d, _, _] = transform.affine_2d.as_coeffs();
+                    let scale = ((a.hypot(b)) * (c.hypot(d))).sqrt();
+                    stroke.style.width * scale
+                })
+            })
+            .expect("compiled SVG body");
+        assert!((effective_width - 0.0167).abs() < 1.0e-9);
+    }
+
+    #[test]
     fn scaled_svg_clip_mask_inherits_the_visible_hierarchy_transform() {
         let temp = std::env::temp_dir().join(format!(
             "gaanim_svg_scaled_clip_api_test_{}.svg",
@@ -7307,9 +7366,9 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        assert!(layers.contains(&("SvgPath#AxesLines", axis_color, 3.0)));
-        assert!(layers.contains(&("SvgPath#AxesGrid", grid_color, 1.0)));
-        assert!(layers.contains(&("SvgPath#AxesTicks", tick_color, 2.0)));
+        assert!(layers.contains(&("SvgPath#AxesLines", axis_color, 0.03)));
+        assert!(layers.contains(&("SvgPath#AxesGrid", grid_color, 0.01)));
+        assert!(layers.contains(&("SvgPath#AxesTicks", tick_color, 0.02)));
     }
 
     #[test]

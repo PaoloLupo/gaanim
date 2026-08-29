@@ -93,12 +93,25 @@ impl Default for AxisStyle {
         Self {
             color: Color::from_rgb8(0x20, 0x20, 0x20),
             tick_color: Color::from_rgb8(0x20, 0x20, 0x20),
-            width: 3.0,
-            tick_length: 8.0,
-            tick_width: 2.0,
+            width: 0.03,
+            tick_length: 0.08,
+            tick_width: 0.02,
             number_color: Color::from_rgb8(0x20, 0x20, 0x20),
             label_color: Color::from_rgb8(0x20, 0x20, 0x20),
         }
+    }
+}
+
+#[cfg(test)]
+mod logical_unit_tests {
+    use super::AxisStyle;
+
+    #[test]
+    fn default_axis_metrics_are_logical_scene_units() {
+        let style = AxisStyle::default();
+        assert_eq!(style.width, 0.03);
+        assert_eq!(style.tick_length, 0.08);
+        assert_eq!(style.tick_width, 0.02);
     }
 }
 

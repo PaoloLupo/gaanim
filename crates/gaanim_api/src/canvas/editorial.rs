@@ -828,7 +828,7 @@ impl SceneModel {
                     -height * 0.5 + spec.padding.1 * 0.45,
                 )
                 .no_fill()
-                .stroke(style.compact_text, 3.0);
+                .stroke(style.compact_text, 0.03);
             Ok(self.group(&[&header, &rule]))
         } else {
             Ok(header)
@@ -892,7 +892,7 @@ impl SceneModel {
         } else {
             panel.fill(style.background)
         };
-        panel.stroke(style.border, 2.0)
+        panel.stroke(style.border, 0.02)
     }
 
     fn editorial_block(
@@ -1210,5 +1210,31 @@ mod tests {
             handle.spec.lock().unwrap().kind,
             super::super::SpawnKind::Group(_)
         )));
+    }
+
+    #[test]
+    fn badge_panel_uses_a_logical_stroke_width() {
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        canvas.badge(BadgeSpec::new("Ready")).unwrap();
+
+        let mut app = bevy::prelude::App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin);
+        canvas.compile(app.world_mut());
+        app.finish();
+        app.cleanup();
+        app.update();
+
+        let widths = app
+            .world_mut()
+            .query::<&gaanim_scene::StrokeBrush>()
+            .iter(app.world())
+            .filter(|stroke| stroke.brush.is_some())
+            .map(|stroke| stroke.style.width)
+            .collect::<Vec<_>>();
+        assert_eq!(widths, vec![0.02]);
     }
 }

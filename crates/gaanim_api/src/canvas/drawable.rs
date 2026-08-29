@@ -545,6 +545,7 @@ impl DrawableHandle {
     }
 
     pub(crate) fn with_svg_parts(mut self, parts: HashMap<String, DrawableHandle>) -> Self {
+        self.spec.lock().expect("object spec poisoned").svg_root = true;
         self.named_parts = Some(Arc::new(parts));
         self
     }
