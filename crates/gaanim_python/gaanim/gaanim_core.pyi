@@ -553,7 +553,12 @@ class Anim:
         """Target a finite Parameter or Variable value without scheduling it."""
         ...
     def transform_to(self, target: Drawable) -> Anim:
-        """Morph in place to a same-scene target, preserving absent fill and composed timing."""
+        """Morph in place to a same-scene target.
+
+        Text transforms adopt the target's measured typographic baseline at
+        the endpoint, including equations with scripts or limits. Absent fill
+        and composed timing are preserved.
+        """
         ...
     def fill_level(self, level: float) -> Anim:
         """Animate a ``Scene.fill_level`` drawable to a normalized value in ``[0, 1]``."""

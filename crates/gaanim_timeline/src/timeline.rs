@@ -899,6 +899,14 @@ impl Timeline {
                         }
                     }
                 }
+                ClipPayload::SetTextBaseline { target, baseline } => {
+                    if clip.start <= self.current_time
+                        && let Some(&target_entity) = entity_map.get(&target)
+                        && let Ok(mut entity_mut) = world.get_entity_mut(target_entity)
+                    {
+                        entity_mut.insert(gaanim_scene::TextBaseline(baseline));
+                    }
+                }
                 ClipPayload::Transition {
                     ref transition_type,
                     from,

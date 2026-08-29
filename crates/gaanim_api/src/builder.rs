@@ -3470,6 +3470,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             Some(s) => s.clone(),
             None => return,
         };
+        let target_text_metrics = self.text_metrics.get(&target).copied();
         let target_visual_opacity = target_state.opacity;
         let source_has_children =
             !source_state.child_spans.is_empty() || !source_state.children.is_empty();
@@ -3782,6 +3783,18 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }),
         );
 
+        if !is_replacement && let Some(metrics) = target_text_metrics {
+            self.timeline.add_clip(
+                parent_track,
+                morph_end_time,
+                0.0,
+                ClipPayload::SetTextBaseline {
+                    target: anim.target,
+                    baseline: metrics.first_baseline,
+                },
+            );
+        }
+
         if is_replacement {
             // ReplacementTransform swaps identities at the end: the source
             // disappears and the actual target hierarchy/entity becomes visible.
@@ -3839,6 +3852,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             // ends the source object's lifetime instead.
             state.child_spans.clear();
             state.children.clear();
+        }
+        if !is_replacement && let Some(metrics) = target_text_metrics {
+            self.text_metrics.insert(anim.target, metrics);
         }
     }
 
@@ -7005,6 +7021,18 @@ mod tests {
             target_id,
             hierarchy_state(target_entity, target_path.clone(), vec![target_child]),
         );
+        builder.text_metrics.insert(
+            source_id,
+            gaanim_text::prelude::TextMetrics {
+                first_baseline: -0.1,
+                line_count: 1,
+            },
+        );
+        let target_metrics = gaanim_text::prelude::TextMetrics {
+            first_baseline: -0.3,
+            line_count: 1,
+        };
+        builder.text_metrics.insert(target_id, target_metrics);
 
         builder.play(AnimationBuilder {
             target: source_id,
@@ -7051,6 +7079,12 @@ mod tests {
             !synthesized_stroke,
             "no-stroke text/math morph must not create a white outline"
         );
+        assert_eq!(builder.text_metrics.get(&source_id), Some(&target_metrics));
+        assert!(builder.timeline.clips.values().any(|clip| matches!(
+            &clip.payload,
+            ClipPayload::SetTextBaseline { target, baseline }
+                if *target == source_id && *baseline == target_metrics.first_baseline
+        )));
     }
 
     #[test]

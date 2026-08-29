@@ -585,10 +585,15 @@ fn effective_line_baselines(mut samples: Vec<LineBaselineSample>) -> Vec<f64> {
     samples.sort_by(|left, right| right.y.total_cmp(&left.y));
     let mut clusters: Vec<LineBaselineSample> = Vec::new();
     for sample in samples {
-        if let Some(cluster) = clusters
-            .iter_mut()
-            .find(|cluster| (cluster.y - sample.y).abs() <= 0.5)
-        {
+        if let Some(cluster) = clusters.iter_mut().find(|cluster| {
+            let tolerance = cluster.size.max(sample.size) * 0.02;
+            (cluster.y - sample.y).abs() <= tolerance.max(1.0e-9)
+        }) {
+            // Prefer the baseline carried by the larger (main-line) run when
+            // tiny shaping differences place equivalent runs a fraction apart.
+            if sample.size > cluster.size {
+                cluster.y = sample.y;
+            }
             cluster.size = cluster.size.max(sample.size);
         } else {
             clusters.push(sample);
@@ -767,7 +772,7 @@ fn compile_typst_source_with_resources(
         *baseline -= text_center.y;
     }
     line_baselines.sort_by(|left, right| right.total_cmp(left));
-    line_baselines.dedup_by(|left, right| (*left - *right).abs() <= 0.5);
+    line_baselines.dedup_by(|left, right| (*left - *right).abs() <= 1.0e-9);
     let metrics = TextMetrics {
         first_baseline: line_baselines.first().copied().unwrap_or(0.0),
         line_count: line_baselines.len(),
@@ -1125,5 +1130,18 @@ mod tests {
         .expect("logical-unit paragraph should compile");
 
         assert_eq!(paragraph.metrics.line_count, 2);
+    }
+
+    #[test]
+    fn logical_unit_superscript_does_not_replace_the_main_baseline() {
+        let baselines = effective_line_baselines(vec![
+            LineBaselineSample {
+                y: 0.22,
+                size: 0.38,
+            },
+            LineBaselineSample { y: 0.0, size: 0.64 },
+        ]);
+
+        assert_eq!(baselines, vec![0.0]);
     }
 }

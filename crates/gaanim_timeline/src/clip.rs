@@ -115,6 +115,11 @@ pub enum ClipPayload {
         target: ObjectId,
         scene: Option<SceneId>,
     },
+    /// Replaces the typographic baseline carried by a text root.
+    ///
+    /// This is a seek-reversible handoff used when a transform preserves the
+    /// source identity while adopting a target text hierarchy.
+    SetTextBaseline { target: ObjectId, baseline: f64 },
     /// A scene transition spanning the boundary between two scenes.
     Transition {
         /// The outgoing scene.

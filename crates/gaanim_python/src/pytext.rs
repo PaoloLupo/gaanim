@@ -858,6 +858,18 @@ impl PyText {
         Ok(slf)
     }
 
+    fn shift_by(slf: PyRef<'_, Self>, dx: f64, dy: f64) -> PyResult<PyRef<'_, Self>> {
+        slf.require_free_position("shift_by")?;
+        slf.handle.clone().shift_by(dx, dy);
+        Ok(slf)
+    }
+
+    fn shift_by_3d(slf: PyRef<'_, Self>, dx: f64, dy: f64, dz: f64) -> PyResult<PyRef<'_, Self>> {
+        slf.require_free_position("shift_by_3d")?;
+        slf.handle.clone().shift_by_3d(dx, dy, dz);
+        Ok(slf)
+    }
+
     fn billboard(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
         slf.handle.clone().billboard();
         slf
@@ -873,8 +885,18 @@ impl PyText {
         slf
     }
 
+    fn scale_by(slf: PyRef<'_, Self>, factor: f64) -> PyRef<'_, Self> {
+        slf.handle.clone().scale_by(factor);
+        slf
+    }
+
     fn scale_to_3d(slf: PyRef<'_, Self>, x: f64, y: f64, z: f64) -> PyRef<'_, Self> {
         slf.handle.clone().scale_to_3d(x, y, z);
+        slf
+    }
+
+    fn scale_by_3d(slf: PyRef<'_, Self>, x: f64, y: f64, z: f64) -> PyRef<'_, Self> {
+        slf.handle.clone().scale_by_3d(x, y, z);
         slf
     }
 
@@ -883,9 +905,26 @@ impl PyText {
         slf
     }
 
+    fn rotate_by(slf: PyRef<'_, Self>, radians: f64) -> PyRef<'_, Self> {
+        slf.handle.clone().rotate_by(radians);
+        slf
+    }
+
     fn rotate_to_3d(slf: PyRef<'_, Self>, x: f64, y: f64, z: f64) -> PyRef<'_, Self> {
         slf.handle.clone().rotate_to_3d(x, y, z);
         slf
+    }
+
+    fn rotate_by_3d<'py>(
+        slf: PyRef<'py, Self>,
+        axis: &str,
+        radians: f64,
+    ) -> PyResult<PyRef<'py, Self>> {
+        slf.handle
+            .clone()
+            .rotate_by_3d(axis, radians)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Ok(slf)
     }
 
     fn with_pivot(slf: PyRef<'_, Self>, x: f64, y: f64) -> PyRef<'_, Self> {

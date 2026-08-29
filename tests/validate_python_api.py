@@ -592,6 +592,9 @@ def validate_visualization_contract(module: object) -> list[str]:
     )
     if not isinstance(chained_text, module.Text):
         failures.append("Text fluent styling or positioning erased the Text subtype")
+    scaled_equation = scene.text.equation("x^2 d x").scale_by(3).move_to(0.0, 0.0)
+    if not isinstance(scaled_equation, module.Text):
+        failures.append("Text.scale_by erased the Text subtype before baseline positioning")
     baseline_text = scene.text("Baseline").move_to(
         0.0, 0.0, anchor=module.TextAnchor.BASELINE_LEFT
     )

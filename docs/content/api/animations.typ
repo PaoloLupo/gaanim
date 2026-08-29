@@ -471,7 +471,7 @@ ownership, and error behavior, is documented in
     (name: "duration", type: "float", default: "1.0", desc: [Positive finite seconds.]),
   ),
   returns: (type: "Anim", desc: [A structured transition accepted by `scene.play()`; Layout v2 reflow shares its duration.]),
-  desc: [The descriptor remains pure until `scene.play()` commits it. Cross-scene or incompatible Layout owners raise `LayoutOwnershipError`.],
+  desc: [The descriptor remains pure until `scene.play()` commits it. At the endpoint, the source identity adopts the target's measured typographic baseline, including equations with scripts or limits. Cross-scene or incompatible Layout owners raise `LayoutOwnershipError`.],
 )[
 ```python
 # show-code: true

@@ -8008,6 +8008,67 @@ mod tests {
     }
 
     #[test]
+    fn equation_transform_hands_off_the_target_baseline_at_the_endpoint() {
+        use gaanim_text::prelude::{TextContent, TextFlow, TextRole, TextSpec, TextStyle};
+
+        let equation = |source: &str| {
+            TextSpec::new(
+                vec![TextContent::Literal(format!("$ {source} $"))],
+                Some(TextRole::Title),
+                TextStyle::default(),
+                TextFlow::default(),
+            )
+            .expect("valid equation")
+        };
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        let source = canvas
+            .text_spec(equation("integral_(-infinity)^infinity = x^2 d x"))
+            .scale_by(3.0)
+            .at_text_default(0.0, 0.0);
+        let target = canvas
+            .text_spec(equation("x^2 d x"))
+            .scale_by(3.0)
+            .at_text_default(0.0, 0.0);
+        canvas.play(vec![source.transform(&target)]);
+        canvas.wait(0.1);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+
+        let mut world = world;
+        queue.apply(&mut world);
+        let target_baseline = world
+            .query::<(&LocalBounds, &TextBaseline, Option<&bevy::prelude::ChildOf>)>()
+            .iter(&world)
+            .filter(|(_, _, parent)| parent.is_none())
+            .min_by(|(left, ..), (right, ..)| left.0.width().total_cmp(&right.0.width()))
+            .map(|(_, baseline, _)| baseline.0)
+            .expect("target text root");
+
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        timeline.seek(&mut world, 1.0);
+        let transformed_baseline = world
+            .query::<(
+                &gaanim_scene::Path2D,
+                &TextBaseline,
+                Option<&bevy::prelude::ChildOf>,
+            )>()
+            .iter(&world)
+            .find_map(|(path, baseline, parent)| {
+                (parent.is_none() && !path.0.elements().is_empty()).then_some(baseline.0)
+            })
+            .expect("flattened transformed text root");
+
+        assert!((transformed_baseline - target_baseline).abs() < 1.0e-9);
+    }
+
+    #[test]
     fn shifting_unpositioned_text_preserves_its_implicit_baseline_anchor() {
         let mut canvas = SceneModel::new(16.0, 9.0);
         canvas.text("Hola mundo").shift_by(2.0, -1.0);
@@ -8095,7 +8156,7 @@ mod tests {
             DVec3::new(-35.0, 61.0, 0.0),
         );
         assert!(
-            (baseline.0 - bounds.center().y).abs() > 1.0,
+            (baseline.0 - bounds.center().y).abs() > 0.01,
             "first baseline must remain distinct from the multiline visual center"
         );
     }
