@@ -276,7 +276,24 @@ pub struct MobjectState {
 fn compose_child_paths(children: &[HierarchyChild]) -> std::sync::Arc<gaanim_core::kurbo::BezPath> {
     let mut merged = gaanim_core::kurbo::BezPath::new();
     for child in children {
-        let mut path = (*child.path).clone();
+        // Typst emits fraction rules and similar decorations as open,
+        // stroke-only shapes. The flattened transform proxy is painted with
+        // the text root's fill, so an open centerline contributes no visible
+        // area unless its authored stroke is expanded into a closed outline.
+        let mut path = if child.fill.is_none()
+            && child.stroke.brush.is_some()
+            && child.stroke.style.width.is_finite()
+            && child.stroke.style.width > 0.0
+        {
+            kurbo::stroke(
+                (*child.path).clone(),
+                &child.stroke.style,
+                &kurbo::StrokeOpts::default(),
+                (child.stroke.style.width * 1.0e-3).clamp(1.0e-6, 1.0e-3),
+            )
+        } else {
+            (*child.path).clone()
+        };
         path.apply_affine(child.transform.to_affine_2d());
         merged.extend(path);
     }
@@ -6745,6 +6762,78 @@ mod tests {
             parent: None,
             exclude_from_parent_draw: false,
         }
+    }
+
+    #[test]
+    fn flattened_text_proxy_expands_stroke_only_fraction_rules() {
+        let mut rule = gaanim_core::kurbo::BezPath::new();
+        rule.move_to((-10.0, 0.0));
+        rule.line_to((10.0, 0.0));
+        let child = HierarchyChild {
+            id: ObjectId::from_parts(1, 1),
+            entity: Entity::PLACEHOLDER,
+            span: gaanim_scene::components::TextSpan {
+                character: '_',
+                char_index: 0,
+                source_range: (0..0).into(),
+            },
+            path: std::sync::Arc::new(rule),
+            bounds: Bounds3D::default(),
+            transform: SpatialTransform::default(),
+            fill: None,
+            stroke: StrokeBrush::new(Color::BLACK, 2.0),
+        };
+
+        let flattened = compose_child_paths(&[child]);
+        let bounds = flattened.bounding_box();
+        assert!(
+            bounds.height() >= 1.9,
+            "fraction rule collapsed to an unfillable line: {bounds:?}"
+        );
+        assert!(
+            flattened.elements().len() > 2,
+            "fraction rule was not expanded into outline geometry"
+        );
+    }
+
+    #[test]
+    fn typst_fraction_rule_contributes_area_to_the_transform_proxy() {
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        let mut builder = SceneBuilder::new(&mut commands, &mut timeline, &fonts, &text_config);
+
+        let equation = builder.typst(
+            "sum_(k=1)^n k = (n(n+1)) / 2",
+            true,
+            None,
+            None,
+            Some(32.0),
+            Some(32.0),
+        );
+        let state = builder.states.get(equation.id).expect("compiled equation");
+        let centerline_element_count: usize = state
+            .child_spans
+            .iter()
+            .map(|child| child.path.elements().len())
+            .sum();
+        let fraction_rules = state
+            .child_spans
+            .iter()
+            .filter(|child| child.fill.is_none() && child.stroke.brush.is_some())
+            .count();
+
+        assert!(
+            fraction_rules > 0,
+            "Typst fraction must expose a stroke-only rule"
+        );
+        assert!(
+            state.path.elements().len() > centerline_element_count,
+            "flattened transform proxy kept only the fraction centerline"
+        );
     }
 
     #[test]
