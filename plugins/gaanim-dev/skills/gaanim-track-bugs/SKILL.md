@@ -31,12 +31,14 @@ the existing `bug` label unless the user explicitly names another repository.
    python <SKILL_ROOT>/scripts/github_issues.py --repo PaoloLupo/gaanim create --title "<title>" --actual "<observed>" --summary "<summary>" --steps "<steps>" --expected "<expected>" --evidence "<evidence>" --environment "<environment>" --dry-run
    ```
 
-5. Show the rendered title, body, `bug` label, target repository, and likely
-   duplicate candidates. Ask for explicit confirmation even when the original
-   request said to save the bug. If a likely duplicate exists, offer to use
-   that issue or create the new one; do not decide silently.
-6. Only after confirmation, rerun the same `create` command without
-   `--dry-run`. Return the created issue number and URL.
+5. Review the rendered issue and duplicate candidates against the user's request.
+   An explicit request to save or report the bug authorizes creation in the
+   established repository. Ask for explicit confirmation only if publication
+   was not requested or the destination or duplicate choice is unresolved;
+   show the exact proposed issue and candidates when asking.
+6. With authorization established, rerun the same `create` command without
+   `--dry-run`. Return the created issue number and URL. Do not retry an
+   ambiguous write failure until checking whether the issue was created.
 
 The script constructs these sections in order: Resumen, Pasos para reproducir,
 Resultado actual, Resultado esperado, Evidencia, and Entorno. It sends the

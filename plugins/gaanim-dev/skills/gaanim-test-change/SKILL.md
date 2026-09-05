@@ -5,18 +5,28 @@ description: Select and run change-aware Gaanim verification profiles for Rust c
 
 # Test a Gaanim change
 
-Use a focused-first validation ladder and report skipped checks distinctly from
-passes.
+Select validation by affected behavior and report skipped checks distinctly
+from passes. Reuse successful checks from this session when their inputs have
+not changed; broaden only for an uncovered risk, new failure, or requested CI parity.
 Resolve `PLUGIN_ROOT` as the directory two levels above this `SKILL.md`; invoke
 bundled scripts by absolute path while keeping the Gaanim repository as cwd.
 
 ## Select a profile
+
+For changes limited to `AGENTS.md`, skill prose, or plugin metadata, review the
+diff, validate changed skill/plugin structure, and run `scripts/audit.py`.
+Do not invoke a build profile merely because several instruction files changed.
 
 Read `../../references/verification-matrix.md`, then preview with:
 
 ```text
 python <PLUGIN_ROOT>/scripts/verify.py <fast|api|visual|performance|full> --dry-run
 ```
+
+Apply the matrix's compilation reuse guidance before execution. Batch edits,
+preserve the existing Cargo cache inputs, and coordinate shared-cache builds.
+Choose direct affected-layer checks if a profile would compile unrelated targets;
+record which required checks they cover. Never treat a stale binary as validation.
 
 - Choose `fast` for local implementation feedback.
 - Choose `api` for public Rust/Python or Typst changes.

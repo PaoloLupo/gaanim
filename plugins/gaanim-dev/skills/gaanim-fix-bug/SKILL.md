@@ -17,11 +17,13 @@ bundled scripts by absolute path while keeping the Gaanim repository as cwd.
    lowest owning layer instead of patching the public facade first.
 3. Reproduce with the smallest existing test, example, or new focused test.
    Record the exact command and failure. If reproduction is impossible, state
-   the missing condition and continue with safe diagnostics only.
+   the missing condition. Continue code analysis and make a focused fix when
+   evidence establishes the cause; report reproduction as unverified.
 4. Form a cause hypothesis and verify it against code paths, state transitions,
    and neighboring tests. Distinguish the trigger from the defect.
-5. Add a regression test that fails for the defect, then implement the narrowest
-   fix. Avoid unrelated cleanup.
+5. Implement the narrowest fix with regression coverage for changed runtime
+   behavior. For prose or instruction defects, validate the corrected artifact
+   directly instead of adding tests that assert its wording. Avoid unrelated cleanup.
 6. If the fix changes public behavior, read `../../references/python-bridge.md`
    and `../../references/api-doc-map.md`; update the contract and docs rather
    than silently changing semantics. This includes the affected public

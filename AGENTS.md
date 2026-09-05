@@ -2,6 +2,24 @@
 
 GPU-accelerated 2D vector animation engine (Manim-style). Rust workspace using Bevy ECS + Vello renderer, with Python bindings via PyO3/Maturin.
 
+## Agent workflow
+
+Adapted for GPT-6 Astra from [OpenAI model guidance](https://developers.openai.com/api/docs/guides/latest-model#prompting-best-practices), reviewed 2026-09-05.
+This file guides repository work; model selection belongs to the calling client.
+
+- Complete requested changes through the affected Rust/Python/docs layers.
+  Choose routine implementation details from existing patterns; ask only when
+  missing information changes the public contract or authorized scope.
+- Carry forward user corrections and prior authorization. Skill guidance must
+  not override explicit user instructions or platform permissions. When a skill
+  blocks progress, identify its file and exact rule, and continue independent work.
+- Delegate bounded, independent work when available and useful, with distinct
+  file ownership; integrate results before dependent checks. Keep small edits local.
+- Select checks by changed behavior. Stop after relevant checks pass unless new
+  evidence warrants more. Preserve visual-baseline approval and user-owned edits.
+- Answer in the user's language. Lead with the result, then concise evidence,
+  affected files, and any unfinished validation. Avoid mandatory report templates.
+
 ## Repo layout
 
 - **Workspace root:** `Cargo.toml` defines 19 workspace members: 18 crates under
@@ -69,6 +87,22 @@ all use the application host, which owns the native runtime.
 
 ## Testing
 
+- Compilation time is a project constraint. Batch edits before compiling;
+  prefer inspection, formatting checks, and existing evidence during iteration.
+  Run the smallest affected package/target set once, then the required completion
+  checks. Do not stack `check`, `build`, `test`, `clippy`, and `doctor` by habit.
+- Preserve Cargo cache inputs: the existing target directory, toolchain, profile,
+  features, Rust flags, and `.cargo/config.toml` Python interpreter. Do not
+  introduce a fresh target directory, switch debug/release, touch dependencies,
+  or clean caches just to validate a change. Keep necessary configuration changes
+  explicit; `check`, `test`, and `build` do not produce interchangeable artifacts.
+- Reuse binaries only when their relevant sources and build inputs are unchanged
+  since a successful build. Otherwise let Cargo check freshness incrementally.
+  Serialize Cargo jobs across agents sharing a target directory, while retaining
+  Cargo's own default parallelism. Share successful validation results with agents.
+- The commands below are available workflows, not a checklist for every edit.
+  For agent instructions and skill prose, review the diff, validate skill
+  structure, and run the plugin audit; no Rust build or visual capture is needed.
 - Inline unit tests are present in several crates. Repository-level Python/API
   and visual fixtures live under `tests/`; per-crate Rust integration-test
   directories are not yet common.

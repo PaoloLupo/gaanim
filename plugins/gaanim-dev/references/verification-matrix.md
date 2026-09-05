@@ -1,9 +1,11 @@
 # Change-aware verification matrix
 
-Start with the narrowest relevant check and expand after it passes.
+Run focused and completion checks for the changed layers. After they pass,
+expand only when new evidence or the requested scope requires it.
 
 | Change | Focused checks | Completion checks |
 |---|---|---|
+| Agent instructions, skill prose, plugin metadata | diff and reference review; skill/plugin validators | plugin audit; no runtime build |
 | Internal crate | `cargo test -p <crate>` | `just check` |
 | Rust public facade | focused crate test | `just check`, `just clippy` |
 | Python binding or stub | focused Rust test | `just wheel`, `just validate-python-api` through the executable |
@@ -14,8 +16,9 @@ Start with the narrowest relevant check and expand after it passes.
 
 Profiles exposed by `scripts/verify.py`:
 
-- `fast`: docs-only builds docs; otherwise format-check, test changed crates,
-  and run `just check`.
+- `fast`: builds docs for docs changes without other non-plugin changes; for Rust
+  changes, format-checks, tests changed crates, and runs `just check`; for plugin
+  changes, runs plugin utility tests and the audit. Agent prose alone adds no build.
 - `api`: run `fast`, Clippy, authoring-wheel/API validation, and
   docs.
 - `visual`: build the snapshot runner and compare selected or inferred
@@ -30,3 +33,24 @@ Run `python plugins/gaanim-dev/scripts/verify.py <profile> --dry-run` before a
 long validation when the scope is uncertain. A skipped visual suite is not a
 pass; the command returns a distinct nonzero status if visual execution is not
 available.
+
+## Reuse compilation work
+
+Gaanim builds are expensive. Plan required checks together after edits stabilize.
+Inspect recipe dependencies and the dry-run output before selecting a profile;
+`api` and `full` include broad work and are not mandatory for every public edit.
+Use the table's affected-layer checks directly when a profile adds unrelated work.
+
+Keep the existing Cargo target directory, toolchain, features, profile, flags,
+and configured PyO3 interpreter stable. Never clear `target/`, use `cargo clean`,
+or create an isolated build cache as a troubleshooting default. Coordinate agents
+so only one Cargo invocation uses a shared target directory at a time; leave
+Cargo's internal job count at its default unless the user requests a limit.
+
+Reuse a successful check when no relevant input changed, and an existing binary
+when its matching build is known to be current. File existence alone is not
+freshness evidence. If freshness is uncertain, use the supported Cargo/just
+command so Cargo can reuse valid cached artifacts and rebuild what changed.
+Do not assume a successful `check` produced a runnable binary or that debug
+artifacts satisfy release benchmarks. A missing artifact does not justify a
+workspace build when the required package and target can be built directly.

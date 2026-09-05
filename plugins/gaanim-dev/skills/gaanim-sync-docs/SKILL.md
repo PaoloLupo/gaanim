@@ -26,7 +26,9 @@ bundled scripts by absolute path while keeping the Gaanim repository as cwd.
 5. Prefer a short executable Python example. Update an existing example when
    it is the canonical demonstration; avoid ornamental examples that cannot be
    run.
-6. Run `just docs`. Execute or validate the example when its correctness is
+6. Run `just docs` when Typst content or its build inputs changed. For read-only
+   drift audits, report source evidence without rebuilding. Execute or validate
+   a changed example when its correctness is
    not already covered by a test.
 7. Run `python <PLUGIN_ROOT>/scripts/audit.py` and resolve objective errors. Treat its
    semantic warnings as review prompts, not automatic failures.

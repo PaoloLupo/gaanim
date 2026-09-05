@@ -30,6 +30,9 @@ bundled scripts by absolute path while keeping the Gaanim repository as cwd.
 - Let Cargo use its default all-core build parallelism. Do not add
   `CARGO_BUILD_JOBS` or another fixed job cap unless the user explicitly asks
   for a resource limit.
+- Preserve the established compilation cache and batch validation after edits.
+  Follow `../../references/verification-matrix.md` when selecting build checks;
+  instruction maintenance alone needs no compilation.
 - Keep the performance contract aligned across the `benchmark` recipe, runner,
   budgets, scheduled CI evidence, and performance guide.
 - Do not run `just clean`, delete environments, overwrite baselines, or remove
@@ -40,5 +43,10 @@ bundled scripts by absolute path while keeping the Gaanim repository as cwd.
 - Preserve the centralized system-ordering and dependency-direction rules in
   `repo-map.md` when adding crates or systems.
 
-After maintenance, re-run the audit and the relevant profile from
-`$gaanim-test-change`. Report remaining warnings separately from failures.
+For instruction maintenance, inspect loaded skill rules and references for
+unconditional approval pauses, scope expansion, and redundant validation.
+Keep real invariants and make recommendations conditional on the changed layer.
+
+After maintenance, re-run the audit. For skill prose, validate changed skills
+and review references; use `$gaanim-test-change` profiles when implementation or
+build behavior changes. Report remaining warnings separately from failures.

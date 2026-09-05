@@ -15,7 +15,9 @@ bundled scripts by absolute path while keeping the Gaanim repository as cwd.
 1. Read `../../references/performance-testing.md` and inspect `git status --short`.
 2. Run `python <PLUGIN_ROOT>/scripts/impact.py --format json` before changing the
    harness, budgets, runtime hot paths, `justfile`, or CI.
-3. Run `just benchmark smoke` to validate wiring. Use `just benchmark standard`
+3. For new measurements or harness changes, run `just benchmark smoke` to
+   validate wiring. For report-only review, inspect existing evidence without
+   rebuilding or rerunning workloads. Use `just benchmark standard`
    for a comparable measurement only when the task warrants its 300-frame
    export cost.
 4. Inspect `target/performance/runtime-benchmark.json` and the per-scenario logs.
@@ -41,6 +43,9 @@ bundled scripts by absolute path while keeping the Gaanim repository as cwd.
   machine-specific reports.
 - Let Cargo use its default all-core parallelism. Add a job limit only when the
   user explicitly requests a resource cap.
+- Keep release cache inputs stable and reuse a verified current release build
+  when the benchmark runner supports it. Avoid a preliminary debug build just
+  to prepare release measurements. Coordinate builds sharing the target directory.
 
 For harness changes, run its Python unit tests, the smoke profile, `just check`,
 the plugin audit, and plugin utility tests. Finish with the report path and the

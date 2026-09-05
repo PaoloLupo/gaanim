@@ -29,7 +29,8 @@ bundled scripts by absolute path while keeping the Gaanim repository as cwd.
 6. If the feature is user-facing, read `../../references/api-doc-map.md` and
    update the mapped Typst page in the same change.
 7. Read `../../references/verification-matrix.md`, run the narrowest relevant
-   tests, then expand. Use `$gaanim-test-change` for execution-heavy validation.
+   tests and completion checks for the affected layers. Expand only for new
+   failures or uncovered behavior. Use `$gaanim-test-change` when needed.
 8. Re-run `impact.py` and explain any recommended layer deliberately omitted.
 
 ## Guardrails
@@ -41,8 +42,9 @@ bundled scripts by absolute path while keeping the Gaanim repository as cwd.
   as incomplete, even when the Typst page is updated separately.
 - Do not expose lower-level ECS details merely because the implementation uses
   them.
-- Do not update visual baselines while implementing. Compare first and require
-  explicit approval through `$gaanim-test-change` before blessing.
+- Compare visuals before blessing; use `$gaanim-test-change` for its interlocks.
+  Explicit approval of the exact visual change is required and remains valid
+  within the session; do not ask again for an already approved replacement.
 
 Finish with changed public behavior, documentation location, tests executed,
 visual status, and remaining warnings.
