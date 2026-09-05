@@ -13,8 +13,6 @@ This file guides repository work; model selection belongs to the calling client.
 - Carry forward user corrections and prior authorization. Skill guidance must
   not override explicit user instructions or platform permissions. When a skill
   blocks progress, identify its file and exact rule, and continue independent work.
-- Delegate bounded, independent work when available and useful, with distinct
-  file ownership; integrate results before dependent checks. Keep small edits local.
 - Select checks by changed behavior. Stop after relevant checks pass unless new
   evidence warrants more. Preserve visual-baseline approval and user-owned edits.
 - Answer in the user's language. Lead with the result, then concise evidence,
