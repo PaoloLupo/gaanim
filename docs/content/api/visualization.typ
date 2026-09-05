@@ -365,7 +365,7 @@ scene.play(streams.flow(3.0, time_width=0.12))
   signature: "field(function, *, inputs=()) -> VectorField",
   params: (
     (name: "function", type: "Callable", default: none, desc: [Devuelve dos componentes en 2D o tres en 3D; recibe coordenadas y luego valores de `inputs`.]),
-    (name: "inputs", type: "Sequence[Parameter | Variable | TimeInput]", default: "()", desc: [Entradas reactivas explícitas en orden.]),
+    (name: "inputs", type: "Sequence[Parameter | Variable | Computed | TimeInput]", default: "()", desc: [Entradas reactivas explícitas en orden.]),
   ),
   returns: (type: "VectorField", desc: [Evaluador reutilizable asociado al dominio y la transformación del espacio.]),
   desc: [No dibuja por sí solo. Usa `arrows`, `streamlines` o las operaciones de advección del campo. La propiedad `evaluation` vale `"python"`.],

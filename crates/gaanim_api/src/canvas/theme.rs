@@ -1041,7 +1041,7 @@ mod tests {
     #[test]
     fn layout_tokens_are_inherited_and_overridable() {
         let mut theme = CanvasTheme::builtin("presentation").unwrap();
-        assert_eq!(theme.layout.get("page_padding").unwrap(), 48.0);
+        assert_eq!(theme.layout.get("page_padding").unwrap(), 0.48);
         theme
             .layout
             .set(&HashMap::from([
@@ -1190,7 +1190,7 @@ mod tests {
             .and_then(|style| style.size)
             .unwrap();
 
-        assert_eq!(number_size, 32.0);
-        assert_eq!(label_size, 36.0);
+        assert_eq!(number_size, 0.32);
+        assert_eq!(label_size, 0.36);
     }
 }

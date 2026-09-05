@@ -119,6 +119,14 @@ pub enum PropertyLens {
         from: Color,
         to: Color,
     },
+    FillPaint {
+        from: gaanim_core::peniko::Brush,
+        to: gaanim_core::peniko::Brush,
+    },
+    StrokePaint {
+        from: gaanim_core::peniko::Brush,
+        to: gaanim_core::peniko::Brush,
+    },
     StrokeColor {
         from: Color,
         to: Color,
@@ -300,6 +308,8 @@ impl std::fmt::Debug for PropertyLens {
             Self::Scale { from, to } => write!(f, "Scale({:?} -> {:?})", from, to),
             Self::Opacity { from, to } => write!(f, "Opacity({} -> {})", from, to),
             Self::FillColor { from, to } => write!(f, "FillColor({:?} -> {:?})", from, to),
+            Self::FillPaint { from, to } => write!(f, "FillPaint({from:?} -> {to:?})"),
+            Self::StrokePaint { from, to } => write!(f, "StrokePaint({from:?} -> {to:?})"),
             Self::StrokeColor { from, to } => write!(f, "StrokeColor({:?} -> {:?})", from, to),
             Self::StrokeWidth { from, to } => write!(f, "StrokeWidth({} -> {})", from, to),
             Self::Material3D { from, to } => write!(f, "Material3D({from:?} -> {to:?})"),
@@ -449,6 +459,16 @@ pub fn evaluate_tweens_system(
                 if let Ok(mut fill) = fills.get_mut(tween.target) {
                     let c = gaanim_core::interpolate_color(*from, *to, t);
                     *fill = FillBrush::color(c);
+                }
+            }
+            PropertyLens::FillPaint { from, to } => {
+                if let Ok(mut fill) = fills.get_mut(tween.target) {
+                    fill.0 = Some(crate::paint::interpolate_paint(from, to, t));
+                }
+            }
+            PropertyLens::StrokePaint { from, to } => {
+                if let Ok(mut stroke) = strokes.get_mut(tween.target) {
+                    stroke.brush = Some(crate::paint::interpolate_paint(from, to, t));
                 }
             }
             PropertyLens::StrokeColor { from, to } => {

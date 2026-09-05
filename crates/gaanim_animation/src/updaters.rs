@@ -1021,6 +1021,11 @@ impl std::fmt::Debug for SampledSeriesDriver {
 }
 
 impl SampledSeriesDriver {
+    /// Pure absolute-time sampling, shared by playback and frozen reactive targets.
+    pub fn sample_at(&self, time: f64) -> f64 {
+        let time = self.stop_at.map_or(time, |stop| time.min(stop));
+        self.offset + self.scale * self.sample((time - self.start_at).max(0.0))
+    }
     /// Valida y construye el driver. Los tiempos deben ser finitos y no
     /// decrecientes; los valores, finitos y de la misma longitud que los tiempos.
     pub fn new(

@@ -11,7 +11,9 @@ use gaanim_text::prelude::{
 
 use crate::brush::PyPaint;
 use crate::color::PyColor;
-use crate::pydrawable::{resolve_at_target, PyAtTarget, PyCanvasAnim, PyDrawable};
+use crate::pydrawable::{
+    resolve_at_target, validate_at_target_owner, PyAtTarget, PyCanvasAnim, PyDrawable,
+};
 use crate::pylayout::{PyAnchor, PyDirection};
 
 #[pyclass(name = "TextAnchor", module = "gaanim_core", frozen, from_py_object)]
@@ -533,61 +535,71 @@ pub struct PyTextSelectionAnimation {
 
 #[pymethods]
 impl PyTextSelectionAnimation {
-    fn fill(&self, color: PyColor) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn fill(&self, color: PyColor) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCanvasAnim {
             inner: self.source.clone().animate_properties().fill(color.0),
-        }
+        })
     }
 
-    fn opacity(&self, value: f32) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn opacity(&self, value: f32) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCanvasAnim {
             inner: self.source.clone().animate_properties().opacity(value),
-        }
+        })
     }
 
-    fn indicate(&self) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn indicate(&self) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCanvasAnim {
             inner: self.source.clone().animate_properties().indicate(),
-        }
+        })
     }
 
-    fn wiggle(&self) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn wiggle(&self) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCanvasAnim {
             inner: self.source.clone().animate_properties().wiggle(),
-        }
+        })
     }
 
-    fn pulse(&self) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn pulse(&self) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCanvasAnim {
             inner: self.source.clone().animate_properties().pulse(),
-        }
+        })
     }
 
-    fn wave(&self) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn wave(&self) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCanvasAnim {
             inner: self.source.clone().animate_properties().wave(),
-        }
+        })
     }
 
-    fn highlight(&self) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn highlight(&self) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCanvasAnim {
             inner: self.source.clone().animate_properties().highlight(),
-        }
+        })
     }
 
-    fn focus(&self) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn focus(&self) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCanvasAnim {
             inner: self.source.clone().animate_properties().focus(),
-        }
+        })
     }
 
-    fn cancel(&self) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn cancel(&self) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCanvasAnim {
             inner: self.source.clone().animate_properties().cancel(),
-        }
+        })
     }
 
     fn morph_to(&self, target: &PyTextSelection) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
         self.source
             .clone()
             .morph_to(&target.inner(), None)
@@ -596,6 +608,7 @@ impl PyTextSelectionAnimation {
     }
 
     fn copy_to(&self, target: &PyTextSelection) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
         self.source
             .clone()
             .copy_to(&target.inner(), None)
@@ -624,6 +637,7 @@ impl PyTextSelection {
 #[pymethods]
 impl PyTextSelection {
     fn __getitem__(&self, name: &str) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
         let mut path = self.path.clone();
         path.push(name.to_string());
         let Some(part) = self.spec.parts().into_iter().find(|part| part.path == path) else {
@@ -638,19 +652,23 @@ impl PyTextSelection {
         })
     }
 
-    fn fill(&self, color: PyColor) -> Self {
-        if !self.handle.fill_text_part(&self.path, color.0) {
-            self.inner().fill(color.0);
-        }
-        self.clone()
+    fn fill(&self, color: PyColor) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            if !self.handle.fill_text_part(&self.path, color.0) {
+                self.inner().fill(color.0);
+            }
+            self.clone()
+        })
     }
 
     /// Start a compound fill/opacity animation scoped to this selection.
     #[getter]
-    fn animate(&self) -> PyTextSelectionAnimation {
-        PyTextSelectionAnimation {
+    fn animate(&self) -> PyResult<PyTextSelectionAnimation> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyTextSelectionAnimation {
             source: self.inner(),
-        }
+        })
     }
 }
 
@@ -731,24 +749,36 @@ mod tests {
 #[pymethods]
 impl PyText {
     /// Apply a fill while preserving the specialized Text handle.
-    fn fill(slf: PyRef<'_, Self>, paint: PyPaint) -> PyRef<'_, Self> {
-        slf.handle.clone().fill_brush(paint.0);
-        slf
+    fn fill(slf: PyRef<'_, Self>, paint: PyPaint) -> PyResult<PyRef<'_, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            slf.handle.clone().fill_brush(paint.0);
+            slf
+        })
     }
 
-    fn no_fill(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
-        slf.handle.clone().no_fill();
-        slf
+    fn no_fill(slf: PyRef<'_, Self>) -> PyResult<PyRef<'_, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            slf.handle.clone().no_fill();
+            slf
+        })
     }
 
-    fn stroke(slf: PyRef<'_, Self>, paint: PyPaint, width: f64) -> PyRef<'_, Self> {
-        slf.handle.clone().stroke_brush(paint.0, width);
-        slf
+    fn stroke(slf: PyRef<'_, Self>, paint: PyPaint, width: f64) -> PyResult<PyRef<'_, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            slf.handle.clone().stroke_brush(paint.0, width);
+            slf
+        })
     }
 
-    fn no_stroke(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
-        slf.handle.clone().no_stroke();
-        slf
+    fn no_stroke(slf: PyRef<'_, Self>) -> PyResult<PyRef<'_, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            slf.handle.clone().no_stroke();
+            slf
+        })
     }
 
     #[pyo3(signature = (color, radius=16.0, intensity=1.0))]
@@ -758,6 +788,7 @@ impl PyText {
         radius: f64,
         intensity: f32,
     ) -> PyResult<PyRef<'_, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
         if !radius.is_finite() || radius <= 0.0 {
             return Err(PyValueError::new_err("radius must be finite and positive"));
         }
@@ -772,6 +803,7 @@ impl PyText {
 
     #[pyo3(signature = (sigma=4.0))]
     fn blur(slf: PyRef<'_, Self>, sigma: f64) -> PyResult<PyRef<'_, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
         if !sigma.is_finite() || sigma <= 0.0 {
             return Err(PyValueError::new_err("sigma must be finite and positive"));
         }
@@ -787,6 +819,7 @@ impl PyText {
         y: f64,
         blur: f64,
     ) -> PyResult<PyRef<'_, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
         if !x.is_finite() || !y.is_finite() {
             return Err(PyValueError::new_err("shadow offset must be finite"));
         }
@@ -801,30 +834,74 @@ impl PyText {
         Ok(slf)
     }
 
-    fn no_effects(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
-        slf.handle.clone().no_effects();
-        slf
+    fn no_effects(slf: PyRef<'_, Self>) -> PyResult<PyRef<'_, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            slf.handle.clone().no_effects();
+            slf
+        })
     }
 
-    fn opacity(slf: PyRef<'_, Self>, value: f32) -> PyRef<'_, Self> {
-        slf.handle.clone().opacity(value);
-        slf
+    fn opacity<'py>(slf: PyRef<'py, Self>, value: &Bound<'_, PyAny>) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        PyDrawable(slf.handle.clone()).opacity(value)?;
+        Ok(slf)
     }
 
-    fn z_index(slf: PyRef<'_, Self>, value: i32) -> PyRef<'_, Self> {
-        slf.handle.clone().z_index(value);
-        slf
+    fn z_index(slf: PyRef<'_, Self>, value: i32) -> PyResult<PyRef<'_, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            slf.handle.clone().z_index(value);
+            slf
+        })
     }
 
     #[pyo3(signature = (x, y=None, anchor=None))]
     fn move_to<'py>(
         slf: PyRef<'py, Self>,
         x: &Bound<'_, PyAny>,
-        y: Option<f64>,
+        y: Option<&Bound<'_, PyAny>>,
         anchor: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
         slf.require_free_position("move_to")?;
-        match resolve_at_target("move_to", x, y, anchor.is_some())? {
+        let mut numeric_y = None;
+        if let Some(y) = y {
+            let sx =
+                crate::visualization::extract_scalar_source_for_drawable(x.clone(), &slf.handle)?;
+            let sy =
+                crate::visualization::extract_scalar_source_for_drawable(y.clone(), &slf.handle)?;
+            if let (Some(_), Some(y)) = (sx.constant_value(), sy.constant_value()) {
+                numeric_y = Some(y);
+            } else {
+                let values = [sx, sy, gaanim_animation::ScalarSource::Constant(0.0)];
+                match anchor.map(resolve_text_anchor).transpose()? {
+                    Some(ResolvedTextAnchor::Geometric(anchor)) => {
+                        PyDrawable(slf.handle.clone()).move_to(
+                            x,
+                            Some(y),
+                            Some(&PyAnchor(anchor)),
+                        )?;
+                    }
+                    Some(ResolvedTextAnchor::Typographic(anchor)) => {
+                        slf.handle
+                            .clone()
+                            .bind_text_position(values, anchor, false)
+                            .map_err(PyValueError::new_err)?;
+                    }
+                    None => {
+                        slf.handle
+                            .clone()
+                            .bind_text_position(values, TextAnchor::BaselineCenter, true)
+                            .map_err(PyValueError::new_err)?;
+                    }
+                }
+                return Ok(slf);
+            }
+        }
+        let target = resolve_at_target("move_to", x, numeric_y, anchor.is_some())?;
+        validate_at_target_owner(&target, &slf.handle)?;
+        match target {
             PyAtTarget::Coordinates { x, y } => {
                 match anchor.map(resolve_text_anchor).transpose()? {
                     Some(ResolvedTextAnchor::Geometric(anchor)) => {
@@ -852,67 +929,111 @@ impl PyText {
         Ok(slf)
     }
 
-    fn move_to_3d(slf: PyRef<'_, Self>, x: f64, y: f64, z: f64) -> PyResult<PyRef<'_, Self>> {
-        slf.require_free_position("move_to_3d")?;
-        slf.handle.clone().move_to_3d(x, y, z);
+    fn move_to_3d<'py>(
+        slf: PyRef<'py, Self>,
+        x: &Bound<'_, PyAny>,
+        y: &Bound<'_, PyAny>,
+        z: &Bound<'_, PyAny>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        PyDrawable(slf.handle.clone()).move_to_3d(x, y, z)?;
         Ok(slf)
     }
 
-    fn shift_by(slf: PyRef<'_, Self>, dx: f64, dy: f64) -> PyResult<PyRef<'_, Self>> {
-        slf.require_free_position("shift_by")?;
-        slf.handle.clone().shift_by(dx, dy);
+    fn shift_by<'py>(slf: PyRef<'py, Self>, dx: f64, dy: f64) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        PyDrawable(slf.handle.clone()).shift_by(dx, dy)?;
         Ok(slf)
     }
 
-    fn shift_by_3d(slf: PyRef<'_, Self>, dx: f64, dy: f64, dz: f64) -> PyResult<PyRef<'_, Self>> {
-        slf.require_free_position("shift_by_3d")?;
-        slf.handle.clone().shift_by_3d(dx, dy, dz);
+    fn shift_by_3d<'py>(
+        slf: PyRef<'py, Self>,
+        dx: f64,
+        dy: f64,
+        dz: f64,
+    ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        PyDrawable(slf.handle.clone()).shift_by_3d(dx, dy, dz)?;
         Ok(slf)
     }
 
-    fn billboard(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
-        slf.handle.clone().billboard();
-        slf
+    fn billboard(slf: PyRef<'_, Self>) -> PyResult<PyRef<'_, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            slf.handle.clone().billboard();
+            slf
+        })
     }
 
-    fn hud(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
-        slf.handle.clone().hud();
-        slf
+    fn hud(slf: PyRef<'_, Self>) -> PyResult<PyRef<'_, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            slf.handle.clone().hud();
+            slf
+        })
     }
 
-    fn scale_to(slf: PyRef<'_, Self>, factor: f64) -> PyRef<'_, Self> {
-        slf.handle.clone().scale_to(factor);
-        slf
+    fn scale_to<'py>(
+        slf: PyRef<'py, Self>,
+        factor: &Bound<'_, PyAny>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        PyDrawable(slf.handle.clone()).scale_to(factor)?;
+        Ok(slf)
     }
 
-    fn scale_by(slf: PyRef<'_, Self>, factor: f64) -> PyRef<'_, Self> {
-        slf.handle.clone().scale_by(factor);
-        slf
+    fn scale_by<'py>(slf: PyRef<'py, Self>, factor: f64) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        PyDrawable(slf.handle.clone()).scale_by(factor)?;
+        Ok(slf)
     }
 
-    fn scale_to_3d(slf: PyRef<'_, Self>, x: f64, y: f64, z: f64) -> PyRef<'_, Self> {
-        slf.handle.clone().scale_to_3d(x, y, z);
-        slf
+    fn scale_to_3d<'py>(
+        slf: PyRef<'py, Self>,
+        x: &Bound<'_, PyAny>,
+        y: &Bound<'_, PyAny>,
+        z: &Bound<'_, PyAny>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        PyDrawable(slf.handle.clone()).scale_to_3d(x, y, z)?;
+        Ok(slf)
     }
 
-    fn scale_by_3d(slf: PyRef<'_, Self>, x: f64, y: f64, z: f64) -> PyRef<'_, Self> {
-        slf.handle.clone().scale_by_3d(x, y, z);
-        slf
+    fn scale_by_3d<'py>(
+        slf: PyRef<'py, Self>,
+        x: f64,
+        y: f64,
+        z: f64,
+    ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        PyDrawable(slf.handle.clone()).scale_by_3d(x, y, z)?;
+        Ok(slf)
     }
 
-    fn rotate_to(slf: PyRef<'_, Self>, radians: f64) -> PyRef<'_, Self> {
-        slf.handle.clone().rotate_to(radians);
-        slf
+    fn rotate_to<'py>(
+        slf: PyRef<'py, Self>,
+        radians: &Bound<'_, PyAny>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        PyDrawable(slf.handle.clone()).rotate_to(radians)?;
+        Ok(slf)
     }
 
-    fn rotate_by(slf: PyRef<'_, Self>, radians: f64) -> PyRef<'_, Self> {
-        slf.handle.clone().rotate_by(radians);
-        slf
+    fn rotate_by<'py>(slf: PyRef<'py, Self>, radians: f64) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        PyDrawable(slf.handle.clone()).rotate_by(radians)?;
+        Ok(slf)
     }
 
-    fn rotate_to_3d(slf: PyRef<'_, Self>, x: f64, y: f64, z: f64) -> PyRef<'_, Self> {
-        slf.handle.clone().rotate_to_3d(x, y, z);
-        slf
+    fn rotate_to_3d<'py>(
+        slf: PyRef<'py, Self>,
+        x: &Bound<'_, PyAny>,
+        y: &Bound<'_, PyAny>,
+        z: &Bound<'_, PyAny>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        PyDrawable(slf.handle.clone()).rotate_to_3d(x, y, z)?;
+        Ok(slf)
     }
 
     fn rotate_by_3d<'py>(
@@ -920,26 +1041,33 @@ impl PyText {
         axis: &str,
         radians: f64,
     ) -> PyResult<PyRef<'py, Self>> {
-        slf.handle
-            .clone()
-            .rotate_by_3d(axis, radians)
-            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        crate::custom::ensure_authoring_allowed()?;
+        PyDrawable(slf.handle.clone()).rotate_by_3d(axis, radians)?;
         Ok(slf)
     }
 
-    fn with_pivot(slf: PyRef<'_, Self>, x: f64, y: f64) -> PyRef<'_, Self> {
-        slf.handle.clone().with_pivot(x, y);
-        slf
+    fn with_pivot(slf: PyRef<'_, Self>, x: f64, y: f64) -> PyResult<PyRef<'_, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            slf.handle.clone().with_pivot(x, y);
+            slf
+        })
     }
 
-    fn with_pivot_3d(slf: PyRef<'_, Self>, x: f64, y: f64, z: f64) -> PyRef<'_, Self> {
-        slf.handle.clone().with_pivot_3d(x, y, z);
-        slf
+    fn with_pivot_3d(slf: PyRef<'_, Self>, x: f64, y: f64, z: f64) -> PyResult<PyRef<'_, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            slf.handle.clone().with_pivot_3d(x, y, z);
+            slf
+        })
     }
 
-    fn pivot(slf: PyRef<'_, Self>, x: f64, y: f64) -> PyRef<'_, Self> {
-        slf.handle.clone().pivot(x, y);
-        slf
+    fn pivot(slf: PyRef<'_, Self>, x: f64, y: f64) -> PyResult<PyRef<'_, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            slf.handle.clone().pivot(x, y);
+            slf
+        })
     }
 
     #[pyo3(signature = (reference, direction, spacing=24.0, aligned_edge=None))]
@@ -950,6 +1078,7 @@ impl PyText {
         spacing: f64,
         aligned_edge: Option<&PyAnchor>,
     ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
         slf.require_free_position("next_to")?;
         let aligned_edge = aligned_edge
             .map(|anchor| anchor.0)
@@ -967,6 +1096,7 @@ impl PyText {
         target_anchor: &PyAnchor,
         reference_anchor: Option<&PyAnchor>,
     ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
         slf.require_free_position("align_to")?;
         let reference_anchor = reference_anchor
             .map(|anchor| anchor.0)
@@ -983,6 +1113,7 @@ impl PyText {
         direction: &PyDirection,
         buff: f64,
     ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
         slf.require_free_position("to_edge")?;
         slf.handle.clone().to_edge(direction.0, buff);
         Ok(slf)
@@ -994,12 +1125,14 @@ impl PyText {
         corner: &PyAnchor,
         buff: f64,
     ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
         slf.require_free_position("to_corner")?;
         slf.handle.clone().to_corner(corner.0, buff);
         Ok(slf)
     }
 
     fn __getitem__(&self, key: &Bound<'_, PyAny>) -> PyResult<PyTextSelection> {
+        crate::custom::ensure_authoring_allowed()?;
         if let Ok(name) = key.extract::<String>() {
             self.named(&name)
         } else if let Ok(index) = key.extract::<isize>() {
@@ -1024,36 +1157,40 @@ impl PyText {
     }
 
     #[getter]
-    fn graphemes(&self) -> PyTextQuery {
-        PyTextQuery {
+    fn graphemes(&self) -> PyResult<PyTextQuery> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyTextQuery {
             handle: self.handle.clone(),
             spec: self.spec.clone(),
             kind: QueryKind::Grapheme,
-        }
+        })
     }
     #[getter]
-    fn words(&self) -> PyTextQuery {
-        PyTextQuery {
+    fn words(&self) -> PyResult<PyTextQuery> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyTextQuery {
             handle: self.handle.clone(),
             spec: self.spec.clone(),
             kind: QueryKind::Word,
-        }
+        })
     }
     #[getter]
-    fn lines(&self) -> PyTextQuery {
-        PyTextQuery {
+    fn lines(&self) -> PyResult<PyTextQuery> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyTextQuery {
             handle: self.handle.clone(),
             spec: self.spec.clone(),
             kind: QueryKind::Line,
-        }
+        })
     }
     #[getter]
-    fn parts(&self) -> PyTextQuery {
-        PyTextQuery {
+    fn parts(&self) -> PyResult<PyTextQuery> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyTextQuery {
             handle: self.handle.clone(),
             spec: self.spec.clone(),
             kind: QueryKind::Part,
-        }
+        })
     }
 
     #[pyo3(signature = (*content, role=None, style=None, flow=None))]

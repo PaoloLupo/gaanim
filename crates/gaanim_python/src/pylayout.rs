@@ -381,20 +381,25 @@ impl PyLayout {
 #[pymethods]
 impl PyLayout {
     #[getter]
-    fn animate(&self) -> crate::pydrawable::PyCanvasAnim {
-        let root = self.inner.lock().expect("layout poisoned").root.clone();
-        crate::pydrawable::PyCanvasAnim {
-            inner: root.animate(),
-        }
+    fn animate(&self) -> PyResult<crate::pydrawable::PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            let root = self.inner.lock().expect("layout poisoned").root.clone();
+            crate::pydrawable::PyCanvasAnim {
+                inner: root.animate(),
+            }
+        })
     }
 
     #[getter]
-    fn count(&self) -> usize {
-        self.inner.lock().expect("layout poisoned").members.len()
+    fn count(&self) -> PyResult<usize> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.inner.lock().expect("layout poisoned").members.len())
     }
 
     #[pyo3(signature = (child, *, at=None))]
     fn add(&self, child: &Bound<'_, PyAny>, at: Option<usize>) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let member = Self::member_from_python(child)?;
         let handle = member.handle.clone();
         {
@@ -425,6 +430,7 @@ impl PyLayout {
     }
 
     fn remove(&self, child: &Bound<'_, PyAny>) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
         let handle = Self::direct_member(child)?;
         let removed = {
             let mut state = self.inner.lock().expect("layout poisoned");
@@ -447,6 +453,7 @@ impl PyLayout {
 
     /// Detach a direct child without hiding it, releasing positional ownership.
     fn detach(&self, child: &Bound<'_, PyAny>) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
         let handle = Self::direct_member(child)?;
         {
             let mut state = self.inner.lock().expect("layout poisoned");
@@ -468,6 +475,7 @@ impl PyLayout {
 
     #[pyo3(signature = (old, new))]
     fn replace(&self, old: &Bound<'_, PyAny>, new: &Bound<'_, PyAny>) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let old = Self::direct_member(old)?;
         let replacement = Self::member_from_python(new)?;
         let replacement_handle = replacement.handle.clone();
@@ -515,6 +523,7 @@ impl PyLayout {
         wrap: Option<bool>,
         within: Option<&str>,
     ) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
         {
             let mut state = self.inner.lock().expect("layout poisoned");
             if let Some(gap) = gap {
@@ -596,6 +605,7 @@ impl PyLayout {
         offset: Option<(f64, f64)>,
         fit: Option<&str>,
     ) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
         let handle = Self::direct_member(child)?;
         {
             let mut state = self.inner.lock().expect("layout poisoned");
@@ -648,20 +658,26 @@ impl PyLayout {
         Ok(())
     }
 
-    fn reflow(&self) {
-        Self::reflow_inner(&self.inner, None, None, None);
+    fn reflow(&self) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            Self::reflow_inner(&self.inner, None, None, None);
+        })
     }
 
-    fn diagnostics(&self) -> Vec<String> {
-        let (canvas, root) = {
-            let state = self.inner.lock().expect("layout poisoned");
-            (state.canvas.clone(), state.root.clone())
-        };
-        let diagnostics = canvas
-            .lock()
-            .expect("scene canvas poisoned")
-            .layout_diagnostics(&root);
-        diagnostics
+    fn diagnostics(&self) -> PyResult<Vec<String>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            let (canvas, root) = {
+                let state = self.inner.lock().expect("layout poisoned");
+                (state.canvas.clone(), state.root.clone())
+            };
+            let diagnostics = canvas
+                .lock()
+                .expect("scene canvas poisoned")
+                .layout_diagnostics(&root);
+            diagnostics
+        })
     }
 }
 

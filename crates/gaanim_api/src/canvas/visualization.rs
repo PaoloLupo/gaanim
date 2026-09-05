@@ -76,7 +76,21 @@ impl Parameter {
     /// Internal scalar source used by the Python binding.
     #[doc(hidden)]
     pub fn source(&self) -> ScalarSource {
-        ScalarSource::signal(self.handle.id)
+        let owner = self
+            .handle
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .scene_id;
+        ScalarSource::Function(
+            ReactiveFunction::new(
+                0,
+                1,
+                vec![gaanim_animation::ReactiveInput::Signal(self.handle.id)],
+                |values| Ok(vec![values[0]]),
+            )
+            .with_scene_owner(owner),
+        )
     }
 
     pub fn current(&self) -> f64 {
@@ -2393,6 +2407,25 @@ impl SceneModel {
         Ok(handle)
     }
 
+    fn validate_reactive_function_owner(
+        &self,
+        function: &ReactiveFunction,
+    ) -> Result<(), VisualizationError> {
+        let state = self.state.lock().expect("canvas state poisoned");
+        if function
+            .scene_owners()
+            .iter()
+            .any(|owner| *owner != state.scene_id)
+            || function
+                .parameter_ids()
+                .iter()
+                .any(|id| !state.parameter_values.contains_key(id))
+        {
+            return Err(VisualizationError::InvalidParameter);
+        }
+        Ok(())
+    }
+
     #[doc(hidden)]
     pub fn reactive_plot(
         &mut self,
@@ -2401,6 +2434,7 @@ impl SceneModel {
         domain: (f64, f64),
         sampling: Sampling,
     ) -> Result<DrawableHandle, VisualizationError> {
+        self.validate_reactive_function_owner(&function)?;
         if !domain.0.is_finite() || !domain.1.is_finite() || domain.0 >= domain.1 {
             return Err(gaanim_visualization::SamplingError::InvalidDomain.into());
         }
@@ -2426,6 +2460,7 @@ impl SceneModel {
         domain: (f64, f64),
         sampling: Sampling,
     ) -> Result<DrawableHandle, VisualizationError> {
+        self.validate_reactive_function_owner(&function)?;
         if !domain.0.is_finite() || !domain.1.is_finite() || domain.0 >= domain.1 {
             return Err(gaanim_visualization::SamplingError::InvalidDomain.into());
         }
@@ -2450,6 +2485,7 @@ impl SceneModel {
         domain: (f64, f64),
         samples: usize,
     ) -> Result<DrawableHandle, VisualizationError> {
+        self.validate_reactive_function_owner(&function)?;
         if samples < 2 || !domain.0.is_finite() || !domain.1.is_finite() || domain.0 >= domain.1 {
             return Err(gaanim_visualization::SamplingError::InvalidDomain.into());
         }
@@ -2473,6 +2509,7 @@ impl SceneModel {
         function: ReactiveFunction,
         resolution: [usize; 2],
     ) -> Result<DrawableHandle, VisualizationError> {
+        self.validate_reactive_function_owner(&function)?;
         if resolution[0] < 2 || resolution[1] < 2 {
             return Err(gaanim_visualization::SamplingError::TooFewSamples.into());
         }
@@ -2500,6 +2537,7 @@ impl SceneModel {
         reveal: Option<ScalarSource>,
         sampling: Sampling,
     ) -> Result<DrawableHandle, VisualizationError> {
+        self.validate_reactive_function_owner(&function)?;
         if !normal_scale.is_finite() || normal_scale <= 0.0 {
             return Err(VisualizationError::InvalidSize);
         }
@@ -2671,6 +2709,7 @@ impl SceneModel {
         space: &CoordinateSpaceHandle,
         function: ReactiveFunction,
     ) -> Result<VectorField2DHandle, VisualizationError> {
+        self.validate_reactive_function_owner(&function)?;
         if function.coordinate_arity() != 2 || function.output_arity() != 2 {
             return Err(VisualizationError::InvalidParameter);
         }
@@ -2717,6 +2756,7 @@ impl SceneModel {
         space: &CoordinateSpace3DHandle,
         function: ReactiveFunction,
     ) -> Result<VectorField3DHandle, VisualizationError> {
+        self.validate_reactive_function_owner(&function)?;
         if function.coordinate_arity() != 3 || function.output_arity() != 3 {
             return Err(VisualizationError::InvalidParameter);
         }

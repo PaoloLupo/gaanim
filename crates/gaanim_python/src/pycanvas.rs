@@ -188,38 +188,59 @@ fn surrounding_padding(value: Option<Bound<'_, PyAny>>) -> PyResult<[f64; 4]> {
 
 #[pymethods]
 impl PySurroundingRect {
-    fn fill<'py>(slf: PyRef<'py, Self>, paint: PyPaint) -> PyRef<'py, Self> {
-        slf.handle.drawable.clone().fill_brush(paint.0);
-        slf
+    fn fill<'py>(slf: PyRef<'py, Self>, paint: PyPaint) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            slf.handle.drawable.clone().fill_brush(paint.0);
+            slf
+        })
     }
 
-    fn no_fill(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
-        slf.handle.drawable.clone().no_fill();
-        slf
+    fn no_fill(slf: PyRef<'_, Self>) -> PyResult<PyRef<'_, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            slf.handle.drawable.clone().no_fill();
+            slf
+        })
     }
 
-    fn stroke<'py>(slf: PyRef<'py, Self>, paint: PyPaint, width: f64) -> PyRef<'py, Self> {
-        slf.handle.drawable.clone().stroke_brush(paint.0, width);
-        slf
+    fn stroke<'py>(
+        slf: PyRef<'py, Self>,
+        paint: PyPaint,
+        width: f64,
+    ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            slf.handle.drawable.clone().stroke_brush(paint.0, width);
+            slf
+        })
     }
 
-    fn no_stroke(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
-        slf.handle.drawable.clone().no_stroke();
-        slf
+    fn no_stroke(slf: PyRef<'_, Self>) -> PyResult<PyRef<'_, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            slf.handle.drawable.clone().no_stroke();
+            slf
+        })
     }
 
-    fn opacity(slf: PyRef<'_, Self>, value: f32) -> PyRef<'_, Self> {
-        slf.handle.drawable.clone().opacity(value);
-        slf
+    fn opacity<'py>(slf: PyRef<'py, Self>, value: &Bound<'_, PyAny>) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        PyDrawable(slf.handle.drawable.clone()).opacity(value)?;
+        Ok(slf)
     }
 
-    fn z_index(slf: PyRef<'_, Self>, value: i32) -> PyRef<'_, Self> {
-        slf.handle.drawable.clone().z_index(value);
-        slf
+    fn z_index(slf: PyRef<'_, Self>, value: i32) -> PyResult<PyRef<'_, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            slf.handle.drawable.clone().z_index(value);
+            slf
+        })
     }
 
     /// Move and resize this frame to new live drawable or text-selection bounds.
     fn retarget(&self, targets: &Bound<'_, PyAny>) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
         let targets = bounds_targets(targets)?;
         let canvas = self.scene.lock().expect("scene canvas poisoned");
         if targets
@@ -257,28 +278,34 @@ impl PyAngleDimension {
 #[pymethods]
 impl PyAngleDimension {
     #[getter]
-    fn arc(&self) -> PyDrawable {
-        self.arc.clone()
+    fn arc(&self) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.arc.clone())
     }
     #[getter]
-    fn arrows(&self) -> PyDrawable {
-        self.arrows.clone()
+    fn arrows(&self) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.arrows.clone())
     }
     #[getter]
-    fn extensions(&self) -> PyDrawable {
-        self.extensions.clone()
+    fn extensions(&self) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.extensions.clone())
     }
     #[getter]
-    fn label(&self) -> Option<PyDrawable> {
-        self.label.clone()
+    fn label(&self) -> PyResult<Option<PyDrawable>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.label.clone())
     }
     #[getter]
-    fn number(&self) -> Option<PyDrawable> {
-        self.number.clone()
+    fn number(&self) -> PyResult<Option<PyDrawable>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.number.clone())
     }
     #[getter]
-    fn unit(&self) -> Option<PyDrawable> {
-        self.unit.clone()
+    fn unit(&self) -> PyResult<Option<PyDrawable>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.unit.clone())
     }
 }
 
@@ -318,24 +345,29 @@ impl PyForceVector {
 #[pymethods]
 impl PyForceVector {
     #[getter]
-    fn shaft(&self) -> PyDrawable {
-        self.shaft.clone()
+    fn shaft(&self) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.shaft.clone())
     }
     #[getter]
-    fn head(&self) -> PyDrawable {
-        self.head.clone()
+    fn head(&self) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.head.clone())
     }
     #[getter]
-    fn label(&self) -> Option<PyDrawable> {
-        self.label.clone()
+    fn label(&self) -> PyResult<Option<PyDrawable>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.label.clone())
     }
     #[getter]
-    fn number(&self) -> Option<PyDrawable> {
-        self.number.clone()
+    fn number(&self) -> PyResult<Option<PyDrawable>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.number.clone())
     }
     #[getter]
-    fn unit(&self) -> Option<PyDrawable> {
-        self.unit.clone()
+    fn unit(&self) -> PyResult<Option<PyDrawable>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.unit.clone())
     }
 }
 
@@ -355,28 +387,34 @@ impl PySupport {
 #[pymethods]
 impl PySupport {
     #[getter]
-    fn joint(&self) -> PyDrawable {
-        self.joint.clone()
+    fn joint(&self) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.joint.clone())
     }
     #[getter]
-    fn body(&self) -> PyDrawable {
-        self.body.clone()
+    fn body(&self) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.body.clone())
     }
     #[getter]
-    fn ground(&self) -> PyDrawable {
-        self.ground.clone()
+    fn ground(&self) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.ground.clone())
     }
     #[getter]
-    fn rollers(&self) -> PyDrawable {
-        self.rollers.clone()
+    fn rollers(&self) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.rollers.clone())
     }
     #[getter]
-    fn guides(&self) -> PyDrawable {
-        self.guides.clone()
+    fn guides(&self) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.guides.clone())
     }
     #[getter]
-    fn hatching(&self) -> PyDrawable {
-        self.hatching.clone()
+    fn hatching(&self) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.hatching.clone())
     }
 }
 
@@ -395,28 +433,33 @@ impl PyDimension {
 #[pymethods]
 impl PyDimension {
     #[getter]
-    fn line(&self) -> PyDrawable {
-        self.line.clone()
+    fn line(&self) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.line.clone())
     }
 
     #[getter]
-    fn extensions(&self) -> PyDrawable {
-        self.extensions.clone()
+    fn extensions(&self) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.extensions.clone())
     }
 
     #[getter]
-    fn label(&self) -> Option<PyDrawable> {
-        self.label.clone()
+    fn label(&self) -> PyResult<Option<PyDrawable>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.label.clone())
     }
 
     #[getter]
-    fn number(&self) -> Option<PyDrawable> {
-        self.number.clone()
+    fn number(&self) -> PyResult<Option<PyDrawable>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.number.clone())
     }
 
     #[getter]
-    fn unit(&self) -> Option<PyDrawable> {
-        self.unit.clone()
+    fn unit(&self) -> PyResult<Option<PyDrawable>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.unit.clone())
     }
 }
 
@@ -843,80 +886,101 @@ impl PyLottie {
 #[pymethods]
 impl PyLottie {
     #[getter]
-    fn source_width(&self) -> usize {
-        self.inner.source_width()
+    fn source_width(&self) -> PyResult<usize> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.inner.source_width())
     }
 
     #[getter]
-    fn source_height(&self) -> usize {
-        self.inner.source_height()
+    fn source_height(&self) -> PyResult<usize> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.inner.source_height())
     }
 
     #[getter]
-    fn frame_rate(&self) -> f64 {
-        self.inner.frame_rate()
+    fn frame_rate(&self) -> PyResult<f64> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.inner.frame_rate())
     }
 
     #[getter]
-    fn source_duration(&self) -> f64 {
-        self.inner.source_duration()
+    fn source_duration(&self) -> PyResult<f64> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.inner.source_duration())
     }
 
     #[getter]
-    fn warnings(&self) -> Vec<String> {
-        self.inner.warnings().to_vec()
+    fn warnings(&self) -> PyResult<Vec<String>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.inner.warnings().to_vec())
     }
 }
 
 #[pymethods]
 impl PyCanvas {
     #[getter]
-    fn frame_width(&self) -> f64 {
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .frame
-            .width
+    fn frame_width(&self) -> PyResult<f64> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .frame
+                .width
+        })
     }
 
     #[getter]
-    fn frame_height(&self) -> f64 {
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .frame
-            .height
+    fn frame_height(&self) -> PyResult<f64> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .frame
+                .height
+        })
     }
 
     #[getter]
-    fn aspect_ratio(&self) -> f64 {
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .frame
-            .aspect_ratio()
+    fn aspect_ratio(&self) -> PyResult<f64> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .frame
+                .aspect_ratio()
+        })
     }
 
     #[getter]
-    fn safe_width(&self) -> f64 {
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .safe_frame()
-            .width()
+    fn safe_width(&self) -> PyResult<f64> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .safe_frame()
+                .width()
+        })
     }
 
     #[getter]
-    fn safe_height(&self) -> f64 {
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .safe_frame()
-            .height()
+    fn safe_height(&self) -> PyResult<f64> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .safe_frame()
+                .height()
+        })
     }
 
     #[getter]
     fn background(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+        crate::custom::ensure_authoring_allowed()?;
         let canvas = self.inner.lock().expect("scene canvas poisoned");
         let Some(paint) = canvas.background_paint.clone() else {
             return Ok(None);
@@ -932,21 +996,27 @@ impl PyCanvas {
     }
 
     #[setter]
-    fn set_background(&self, background: Option<crate::brush::PyBackgroundInput>) {
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .set_background_paint(background.map(|background| background.0));
+    fn set_background(&self, background: Option<crate::brush::PyBackgroundInput>) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .set_background_paint(background.map(|background| background.0));
+        })
     }
 
     /// Name of the selected built-in or custom visual theme, if any.
     #[getter]
-    fn theme(&self) -> Option<String> {
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .theme
-            .clone()
+    fn theme(&self) -> PyResult<Option<String>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .theme
+                .clone()
+        })
     }
 
     /// Apply a built-in visual theme.
@@ -955,6 +1025,7 @@ impl PyCanvas {
     /// Custom themes can derive a scheme and override semantic colors,
     /// typography, sizes, and embedded font files.
     fn set_theme(&self, theme: &Bound<'_, PyAny>) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
         let mut canvas = self.inner.lock().expect("scene canvas poisoned");
         if let Ok(name) = theme.extract::<String>() {
             canvas
@@ -982,6 +1053,7 @@ impl PyCanvas {
         math_font: Option<String>,
         code_font: Option<String>,
     ) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
         self.inner
             .lock()
             .expect("scene canvas poisoned")
@@ -991,6 +1063,7 @@ impl PyCanvas {
 
     /// Resolve a semantic token from the active theme.
     fn color(&self, role: &str) -> PyResult<PyColor> {
+        crate::custom::ensure_authoring_allowed()?;
         self.inner
             .lock()
             .expect("scene canvas poisoned")
@@ -1001,6 +1074,7 @@ impl PyCanvas {
 
     /// Resolve a layout token from the active theme or the default scale.
     fn layout_token(&self, name: &str) -> PyResult<f64> {
+        crate::custom::ensure_authoring_allowed()?;
         self.inner
             .lock()
             .expect("scene canvas poisoned")
@@ -1010,6 +1084,7 @@ impl PyCanvas {
 
     /// Return readability warnings for the active theme.
     fn validate_theme(&self) -> PyResult<Vec<String>> {
+        crate::custom::ensure_authoring_allowed()?;
         self.inner
             .lock()
             .expect("scene canvas poisoned")
@@ -1019,14 +1094,18 @@ impl PyCanvas {
 
     /// Set a uniform margin on all four sides. It affects `to_edge` and
     /// `to_corner` layout operations.
-    fn set_margin(&self, margin: f64) {
-        self.inner.lock().expect("scene canvas poisoned").margin =
-            gaanim_api::canvas::Margin::all(margin);
+    fn set_margin(&self, margin: f64) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            self.inner.lock().expect("scene canvas poisoned").margin =
+                gaanim_api::canvas::Margin::all(margin);
+        })
     }
 
     /// Configure a per-edge safe area in canvas coordinates.
     #[pyo3(signature = (*, top=0.0, right=0.0, bottom=0.0, left=0.0))]
     fn set_safe_area(&self, top: f64, right: f64, bottom: f64, left: f64) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
         for (name, value) in [
             ("top", top),
             ("right", right),
@@ -1050,6 +1129,7 @@ impl PyCanvas {
 
     /// Apply a common logical frame and its conservative safe area.
     fn set_preset(&self, name: &str) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
         let (frame, margin) = match name.to_ascii_lowercase().as_str() {
             "widescreen" | "youtube" | "16:9" => (
                 gaanim_api::canvas::SceneFrame::WIDESCREEN,
@@ -1145,13 +1225,19 @@ pub struct PyCameraConstraint {
 #[pymethods]
 impl PyCameraConstraint {
     /// Enable this constraint at the current timeline cursor.
-    fn enable(&self) {
-        self.inner.enable();
+    fn enable(&self) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            self.inner.enable();
+        })
     }
 
     /// Disable this constraint at the current timeline cursor.
-    fn disable(&self) {
-        self.inner.disable();
+    fn disable(&self) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            self.inner.disable();
+        })
     }
 }
 
@@ -1252,6 +1338,7 @@ impl PyCamera {
     /// Create a concrete orthographic camera state.
     #[pyo3(signature = (center=(0.0, 0.0), zoom=1.0, rotation=0.0))]
     fn state_2d(&self, center: (f64, f64), zoom: f64, rotation: f64) -> PyResult<PyCameraState> {
+        crate::custom::ensure_authoring_allowed()?;
         let inner = self
             .inner
             .lock()
@@ -1276,6 +1363,7 @@ impl PyCamera {
         near: f64,
         far: f64,
     ) -> PyResult<PyCameraState> {
+        crate::custom::ensure_authoring_allowed()?;
         let inner = self
             .inner
             .lock()
@@ -1293,20 +1381,24 @@ impl PyCamera {
     }
 
     /// Capture authored camera state at the current timeline cursor.
-    fn capture(&self) -> PyCameraState {
-        let inner = self
-            .inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .camera_capture();
-        PyCameraState { inner }
+    fn capture(&self) -> PyResult<PyCameraState> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            let inner = self
+                .inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .camera_capture();
+            PyCameraState { inner }
+        })
     }
 
     #[getter]
-    fn animate(&self) -> PyCameraAnimation {
-        PyCameraAnimation {
+    fn animate(&self) -> PyResult<PyCameraAnimation> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCameraAnimation {
             inner: self.inner.clone(),
-        }
+        })
     }
 }
 
@@ -1314,6 +1406,7 @@ impl PyCamera {
 impl PyCameraAnimation {
     /// Animate to a reusable camera state.
     fn to(&self, state: &PyCameraState) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
         let inner = self
             .inner
             .lock()
@@ -1325,6 +1418,7 @@ impl PyCameraAnimation {
 
     /// Animate to a previously saved named camera state.
     fn restore(&self, name: &str) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
         let inner = self
             .inner
             .lock()
@@ -1337,6 +1431,7 @@ impl PyCameraAnimation {
     /// Pan to a world-space point.
     #[pyo3(signature = (target, y=None))]
     fn pan_to(&self, target: Bound<'_, PyAny>, y: Option<f64>) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
         let inner = if let Some(y) = y {
             let x = target.extract::<f64>().map_err(|_| {
                 pyo3::exceptions::PyTypeError::new_err(
@@ -1359,6 +1454,7 @@ impl PyCameraAnimation {
 
     /// Set the orthographic zoom. Values above one zoom in.
     fn zoom_to(&self, zoom: Bound<'_, PyAny>) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
         if let Ok(value) = zoom.extract::<f64>() {
             if !value.is_finite() || value <= 0.0 {
                 return Err(pyo3::exceptions::PyValueError::new_err(
@@ -1383,6 +1479,7 @@ impl PyCameraAnimation {
         margin: Option<Bound<'_, PyAny>>,
         dynamic: bool,
     ) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
         let margins = if let Some(margin) = margin {
             if let Ok(value) = margin.extract::<f64>() {
                 [value; 4]
@@ -1441,6 +1538,7 @@ impl PyCameraAnimation {
 
     /// Rotate the camera around the viewport center, in radians.
     fn rotate_to(&self, angle: Bound<'_, PyAny>) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
         if let Ok(value) = angle.extract::<f64>() {
             require_finite(value, "angle")?;
         }
@@ -1462,6 +1560,7 @@ impl PyCameraAnimation {
         offset_space: &str,
         lag: f64,
     ) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
         if !offset.0.is_finite() || !offset.1.is_finite() {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "offset must be finite",
@@ -1498,6 +1597,7 @@ impl PyCameraAnimation {
     /// Apply a deterministic shake that settles at the original position.
     #[pyo3(signature = (amplitude=0.12, frequency=8.0))]
     fn shake(&self, amplitude: f64, frequency: f64) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
         if !amplitude.is_finite() || amplitude < 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "amplitude must be finite and non-negative",
@@ -1524,6 +1624,7 @@ impl PyCameraAnimation {
         target: Bound<'_, PyAny>,
         up: Option<(f64, f64, f64)>,
     ) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
         if let Some(up) = up {
             if ![up.0, up.1, up.2].iter().all(|v| v.is_finite()) {
                 return Err(pyo3::exceptions::PyValueError::new_err("up must be finite"));
@@ -1561,6 +1662,7 @@ impl PyCameraAnimation {
 
     /// Orbit around current target by yaw/pitch (radians).
     fn orbit(&self, delta_yaw: f64, delta_pitch: f64) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
         if ![delta_yaw, delta_pitch].iter().all(|v| v.is_finite()) {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "delta_yaw/delta_pitch must be finite",
@@ -1577,6 +1679,7 @@ impl PyCameraAnimation {
     /// Animate perspective projection (fov in radians).
     #[pyo3(signature = (fov_y, near=0.1, far=1000.0))]
     fn perspective(&self, fov_y: f64, near: f64, far: f64) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
         if ![fov_y, near, far].iter().all(|v| v.is_finite())
             || fov_y <= 0.0
             || fov_y >= std::f64::consts::PI
@@ -1598,6 +1701,7 @@ impl PyCameraAnimation {
     /// Select orthographic projection. Values above one zoom in.
     #[pyo3(signature = (zoom=1.0))]
     fn orthographic(&self, zoom: f64) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
         if !zoom.is_finite() || zoom <= 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "zoom must be finite and positive",
@@ -1613,6 +1717,7 @@ impl PyCameraAnimation {
 
     /// Restore the default authored 2D pose and projection.
     fn reset(&self) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
         let inner = self
             .inner
             .lock()
@@ -1623,6 +1728,7 @@ impl PyCameraAnimation {
 
     /// Dolly camera toward/away from target (factor <1 closer).
     fn dolly(&self, factor: f64) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
         if !factor.is_finite() || factor <= 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "factor must be finite and positive",
@@ -1640,6 +1746,7 @@ impl PyCameraAnimation {
 #[pymethods]
 impl PyCamera {
     fn save(&self, name: &str) -> PyResult<PyCameraState> {
+        crate::custom::ensure_authoring_allowed()?;
         let inner = self
             .inner
             .lock()
@@ -1650,6 +1757,7 @@ impl PyCamera {
     }
 
     fn to(&self, state: &PyCameraState) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
         let animation = PyCameraAnimation {
             inner: self.inner.clone(),
         }
@@ -1659,6 +1767,7 @@ impl PyCamera {
     }
 
     fn restore(&self, name: &str) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
         let animation = PyCameraAnimation {
             inner: self.inner.clone(),
         }
@@ -1669,6 +1778,7 @@ impl PyCamera {
 
     #[pyo3(signature = (target, y=None))]
     fn pan_to(&self, target: Bound<'_, PyAny>, y: Option<f64>) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
         let animation = PyCameraAnimation {
             inner: self.inner.clone(),
         }
@@ -1678,6 +1788,7 @@ impl PyCamera {
     }
 
     fn zoom_to(&self, zoom: Bound<'_, PyAny>) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
         let animation = PyCameraAnimation {
             inner: self.inner.clone(),
         }
@@ -1693,6 +1804,7 @@ impl PyCamera {
         margin: Option<Bound<'_, PyAny>>,
         dynamic: bool,
     ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
         let animation = PyCameraAnimation {
             inner: self.inner.clone(),
         }
@@ -1702,6 +1814,7 @@ impl PyCamera {
     }
 
     fn rotate_to(&self, angle: Bound<'_, PyAny>) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
         let animation = PyCameraAnimation {
             inner: self.inner.clone(),
         }
@@ -1717,6 +1830,7 @@ impl PyCamera {
         target: Bound<'_, PyAny>,
         up: Option<(f64, f64, f64)>,
     ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
         let animation = PyCameraAnimation {
             inner: self.inner.clone(),
         }
@@ -1727,6 +1841,7 @@ impl PyCamera {
 
     #[pyo3(signature = (fov_y, near=0.1, far=1000.0))]
     fn perspective(&self, fov_y: f64, near: f64, far: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
         let animation = PyCameraAnimation {
             inner: self.inner.clone(),
         }
@@ -1737,6 +1852,7 @@ impl PyCamera {
 
     #[pyo3(signature = (zoom=1.0))]
     fn orthographic(&self, zoom: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
         let animation = PyCameraAnimation {
             inner: self.inner.clone(),
         }
@@ -1746,6 +1862,7 @@ impl PyCamera {
     }
 
     fn reset(&self) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
         let animation = PyCameraAnimation {
             inner: self.inner.clone(),
         }
@@ -1764,6 +1881,7 @@ impl PyCamera {
         influence: Option<Bound<'_, PyAny>>,
         enabled: bool,
     ) -> PyResult<PyCameraConstraint> {
+        crate::custom::ensure_authoring_allowed()?;
         let center = center.as_ref().map(resolve_endpoint).transpose()?;
         let zoom = zoom
             .map(|value| extract_scalar_source(value, &self.inner))
@@ -1795,6 +1913,7 @@ impl PyCamera {
         influence: Option<Bound<'_, PyAny>>,
         enabled: bool,
     ) -> PyResult<PyCameraConstraint> {
+        crate::custom::ensure_authoring_allowed()?;
         let eye = eye.as_ref().map(resolve_endpoint_3d).transpose()?;
         let target = target.as_ref().map(resolve_endpoint_3d).transpose()?;
         let fov_y = fov_y
@@ -1832,6 +1951,7 @@ impl PySegment {
         py: Python<'py>,
         slots: Option<&Bound<'py, PyDict>>,
     ) -> PyResult<Py<PyLayout>> {
+        crate::custom::ensure_authoring_allowed()?;
         let template = self.template.as_ref().ok_or_else(|| {
             pyo3::exceptions::PyValueError::new_err(
                 "this segment has no template; pass template= to scene.segment()",
@@ -1849,6 +1969,15 @@ impl PySegment {
 
 #[pymethods]
 impl PyScene {
+    /// Absolute timeline time as a pure reactive input.
+    #[getter]
+    fn time(&self) -> PyResult<crate::visualization::PyTimeInput> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(crate::visualization::PyTimeInput {
+            canvas: self.inner.clone(),
+        })
+    }
+
     #[new]
     #[pyo3(signature = (*, frame=(16.0, 9.0), background=None, margin=None, theme=None))]
     fn new(
@@ -1857,6 +1986,7 @@ impl PyScene {
         margin: Option<f64>,
         theme: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
         let frame = gaanim_api::canvas::SceneFrame::new(frame.0, frame.1)
             .validate()
             .map_err(pyo3::exceptions::PyValueError::new_err)?;
@@ -1887,72 +2017,98 @@ impl PyScene {
 
     /// The scene viewport and visual configuration.
     #[getter]
-    fn canvas(&self) -> PyCanvas {
-        PyCanvas {
+    fn canvas(&self) -> PyResult<PyCanvas> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCanvas {
             inner: self.inner.clone(),
-        }
+        })
     }
 
     /// Editorial camera controller.
     #[getter]
-    fn camera(&self) -> PyCamera {
-        PyCamera {
+    fn camera(&self) -> PyResult<PyCamera> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCamera {
             inner: self.inner.clone(),
-        }
+        })
     }
 
     #[getter]
-    fn geometry(slf: &Bound<'_, Self>) -> PyGeometry {
-        let inner = slf.borrow().inner.clone();
-        PyGeometry { inner }
+    fn geometry(slf: &Bound<'_, Self>) -> PyResult<PyGeometry> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            let inner = slf.borrow().inner.clone();
+            PyGeometry { inner }
+        })
     }
 
     #[getter]
-    fn text(slf: &Bound<'_, Self>) -> PyTypography {
-        let inner = slf.borrow().inner.clone();
-        PyTypography { inner }
+    fn text(slf: &Bound<'_, Self>) -> PyResult<PyTypography> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            let inner = slf.borrow().inner.clone();
+            PyTypography { inner }
+        })
     }
 
     #[getter]
-    fn layout(slf: &Bound<'_, Self>) -> PyLayoutBuilder {
-        let inner = slf.borrow().inner.clone();
-        PyLayoutBuilder {
-            inner,
-            scene: slf.clone().unbind(),
-        }
+    fn layout(slf: &Bound<'_, Self>) -> PyResult<PyLayoutBuilder> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            let inner = slf.borrow().inner.clone();
+            PyLayoutBuilder {
+                inner,
+                scene: slf.clone().unbind(),
+            }
+        })
     }
 
     #[getter]
-    fn media(slf: &Bound<'_, Self>) -> PyMediaLibrary {
-        let inner = slf.borrow().inner.clone();
-        PyMediaLibrary { inner }
+    fn media(slf: &Bound<'_, Self>) -> PyResult<PyMediaLibrary> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            let inner = slf.borrow().inner.clone();
+            PyMediaLibrary { inner }
+        })
     }
 
     #[getter]
-    fn viz(slf: &Bound<'_, Self>) -> PyVisualization {
-        let inner = slf.borrow().inner.clone();
-        PyVisualization {
-            inner,
-            scene: slf.clone().unbind(),
-        }
+    fn viz(slf: &Bound<'_, Self>) -> PyResult<PyVisualization> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            let inner = slf.borrow().inner.clone();
+            PyVisualization {
+                inner,
+                scene: slf.clone().unbind(),
+            }
+        })
     }
 
     #[getter]
-    fn slides(slf: &Bound<'_, Self>) -> PySlideKit {
-        let inner = slf.borrow().inner.clone();
-        PySlideKit { inner }
+    fn slides(slf: &Bound<'_, Self>) -> PyResult<PySlideKit> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            let inner = slf.borrow().inner.clone();
+            PySlideKit { inner }
+        })
     }
 
     #[getter]
-    fn mechanics(slf: &Bound<'_, Self>) -> PyMechanics {
-        let inner = slf.borrow().inner.clone();
-        PyMechanics { inner }
+    fn mechanics(slf: &Bound<'_, Self>) -> PyResult<PyMechanics> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            let inner = slf.borrow().inner.clone();
+            PyMechanics { inner }
+        })
     }
 
     #[getter]
-    fn assets(slf: &Bound<'_, Self>) -> PyAssetManager {
-        let inner = slf.borrow().inner.clone();
-        PyAssetManager { inner }
+    fn assets(slf: &Bound<'_, Self>) -> PyResult<PyAssetManager> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            let inner = slf.borrow().inner.clone();
+            PyAssetManager { inner }
+        })
     }
 }
 
@@ -1969,6 +2125,7 @@ impl PySlideKit {
         show_on_cover: bool,
         logo_scale: f64,
     ) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
         if !logo_scale.is_finite() || logo_scale <= 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "logo_scale must be finite and positive",
@@ -2007,6 +2164,7 @@ impl PyLayoutBuilder {
         wrap: bool,
         within: Option<&str>,
     ) -> PyResult<Py<PyLayout>> {
+        crate::custom::ensure_authoring_allowed()?;
         Py::new(
             py,
             PyLayout::initializer(
@@ -2042,6 +2200,7 @@ impl PyLayoutBuilder {
         wrap: bool,
         within: Option<&str>,
     ) -> PyResult<Py<PyLayout>> {
+        crate::custom::ensure_authoring_allowed()?;
         Py::new(
             py,
             PyLayout::initializer(
@@ -2081,6 +2240,7 @@ impl PyLayoutBuilder {
         auto_flow: &str,
         within: Option<&str>,
     ) -> PyResult<Py<PyLayout>> {
+        crate::custom::ensure_authoring_allowed()?;
         let kind = grid_kind(
             parse_grid_tracks(rows, "rows")?,
             parse_grid_tracks(columns, "columns")?,
@@ -2107,6 +2267,7 @@ impl PyLayoutBuilder {
         align: &str,
         within: Option<&str>,
     ) -> PyResult<Py<PyLayout>> {
+        crate::custom::ensure_authoring_allowed()?;
         Py::new(
             py,
             PyLayout::initializer(
@@ -2144,6 +2305,7 @@ impl PyLayoutBuilder {
         offset: (f64, f64),
         fit: &str,
     ) -> PyResult<PyLayoutItem> {
+        crate::custom::ensure_authoring_allowed()?;
         layout_item_from_python(
             child,
             grow,
@@ -2163,6 +2325,7 @@ impl PyLayoutBuilder {
     /// Register prioritized linear relations between drawable bounds.
     #[pyo3(signature = (*constraints))]
     fn constrain(&self, constraints: &Bound<'_, PyTuple>) -> PyResult<PyConstraintSet> {
+        crate::custom::ensure_authoring_allowed()?;
         let mut parsed = Vec::with_capacity(constraints.len());
         for constraint in constraints.iter() {
             let constraint = constraint
@@ -2200,11 +2363,14 @@ impl PyLayoutBuilder {
     }
 
     /// Return weak-constraint diagnostics known before rendering.
-    fn check_layout(&self) -> Vec<String> {
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .check_layout()
+    fn check_layout(&self) -> PyResult<Vec<String>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .check_layout()
+        })
     }
 
     /// Instantiate a typed Python layout template with this scene.
@@ -2215,6 +2381,7 @@ impl PyLayoutBuilder {
         template: &Bound<'py, PyAny>,
         slots: Option<&Bound<'py, PyDict>>,
     ) -> PyResult<Py<PyLayout>> {
+        crate::custom::ensure_authoring_allowed()?;
         let result = template.call((self.scene.bind(py),), slots)?;
         if !result.is_instance_of::<PyLayout>() {
             return Err(pyo3::exceptions::PyTypeError::new_err(
@@ -2229,6 +2396,7 @@ impl PyLayoutBuilder {
 impl PyAssetManager {
     /// Sets the directory used to resolve relative image and SVG paths.
     fn assets_dir(&self, path: &str) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
         self.inner
             .lock()
             .expect("scene canvas poisoned")
@@ -2238,6 +2406,7 @@ impl PyAssetManager {
 
     /// Resolve and validate raster/SVG assets before the scene is played.
     fn preload(&self, paths: Vec<String>) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
         let paths = paths
             .into_iter()
             .map(std::path::PathBuf::from)
@@ -2255,6 +2424,7 @@ impl PyAssetManager {
     /// relative to the manifest file.
     #[pyo3(signature = (path=None))]
     fn load_project(&self, py: Python<'_>, path: Option<&str>) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
         let manifest = match path {
             Some(path) => PathBuf::from(path),
             None => default_project_manifest(py)?,
@@ -2296,11 +2466,14 @@ impl PyAssetManager {
     }
 
     /// Invalidate decoded raster assets so a hot reload reads changed files.
-    fn reload_assets(&self) {
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .reload_assets();
+    fn reload_assets(&self) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .reload_assets();
+        })
     }
 }
 
@@ -2323,6 +2496,7 @@ impl PyMediaLibrary {
         fade_in: f64,
         fade_out: f64,
     ) -> PyResult<PyAudio> {
+        crate::custom::ensure_authoring_allowed()?;
         self.inner
             .lock()
             .expect("scene canvas poisoned")
@@ -2334,29 +2508,38 @@ impl PyMediaLibrary {
 
 #[pymethods]
 impl PyGeometry {
-    fn circle(&self, radius: f64) -> PyDrawable {
-        PyDrawable(
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .circle(radius),
-        )
+    fn circle(&self, radius: f64) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            PyDrawable(
+                self.inner
+                    .lock()
+                    .expect("scene canvas poisoned")
+                    .circle(radius),
+            )
+        })
     }
-    fn rect(&self, width: f64, height: f64) -> PyDrawable {
-        PyDrawable(
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .rect(width, height),
-        )
+    fn rect(&self, width: f64, height: f64) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            PyDrawable(
+                self.inner
+                    .lock()
+                    .expect("scene canvas poisoned")
+                    .rect(width, height),
+            )
+        })
     }
-    fn rounded_rect(&self, width: f64, height: f64, radius: f64) -> PyDrawable {
-        PyDrawable(
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .rounded_rect(width, height, radius),
-        )
+    fn rounded_rect(&self, width: f64, height: f64, radius: f64) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            PyDrawable(
+                self.inner
+                    .lock()
+                    .expect("scene canvas poisoned")
+                    .rounded_rect(width, height, radius),
+            )
+        })
     }
     /// Create a live frame around drawable or text-selection bounds.
     #[pyo3(signature = (targets, *, padding=None, corner_radius=0.08))]
@@ -2367,6 +2550,7 @@ impl PyGeometry {
         padding: Option<Bound<'_, PyAny>>,
         corner_radius: f64,
     ) -> PyResult<Py<PySurroundingRect>> {
+        crate::custom::ensure_authoring_allowed()?;
         let targets = bounds_targets(targets)?;
         let padding = surrounding_padding(padding)?;
         let mut canvas = self.inner.lock().expect("scene canvas poisoned");
@@ -2388,24 +2572,33 @@ impl PyGeometry {
             PySurroundingRect::initializer(handle, self.inner.clone()),
         )
     }
-    fn square(&self, s: f64) -> PyDrawable {
-        PyDrawable(self.inner.lock().expect("scene canvas poisoned").square(s))
+    fn square(&self, s: f64) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyDrawable(
+            self.inner.lock().expect("scene canvas poisoned").square(s),
+        ))
     }
-    fn dot(&self, radius: f64) -> PyDrawable {
-        PyDrawable(
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .dot(radius),
-        )
+    fn dot(&self, radius: f64) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            PyDrawable(
+                self.inner
+                    .lock()
+                    .expect("scene canvas poisoned")
+                    .dot(radius),
+            )
+        })
     }
-    fn ellipse(&self, rx: f64, ry: f64) -> PyDrawable {
-        PyDrawable(
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .ellipse(rx, ry),
-        )
+    fn ellipse(&self, rx: f64, ry: f64) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            PyDrawable(
+                self.inner
+                    .lock()
+                    .expect("scene canvas poisoned")
+                    .ellipse(rx, ry),
+            )
+        })
     }
     #[pyo3(signature = (p1, p2, x2=None, y2=None))]
     fn line(
@@ -2415,6 +2608,7 @@ impl PyGeometry {
         x2: Option<f64>,
         y2: Option<f64>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let mut canvas = self.inner.lock().expect("scene canvas poisoned");
         match (x2, y2) {
             (None, None) => Ok(PyDrawable(
@@ -2438,13 +2632,16 @@ impl PyGeometry {
             )),
         }
     }
-    fn arrow(&self, x1: f64, y1: f64, x2: f64, y2: f64) -> PyDrawable {
-        PyDrawable(
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .arrow(x1, y1, x2, y2),
-        )
+    fn arrow(&self, x1: f64, y1: f64, x2: f64, y2: f64) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            PyDrawable(
+                self.inner
+                    .lock()
+                    .expect("scene canvas poisoned")
+                    .arrow(x1, y1, x2, y2),
+            )
+        })
     }
     #[pyo3(signature = (x1, y1, x2, y2, *, dash_length=0.16, gap_length=0.10))]
     fn dashed_line(
@@ -2456,6 +2653,7 @@ impl PyGeometry {
         dash_length: f64,
         gap_length: f64,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if !dash_length.is_finite()
             || !gap_length.is_finite()
             || dash_length <= 0.0
@@ -2483,6 +2681,7 @@ impl PyGeometry {
         head_length: Option<f64>,
         head_width: Option<f64>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         for value in [head_length, head_width].into_iter().flatten() {
             if !value.is_finite() || value <= 0.0 {
                 return Err(pyo3::exceptions::PyValueError::new_err(
@@ -2499,6 +2698,7 @@ impl PyGeometry {
     }
 
     fn polygon(&self, points: Vec<(f64, f64)>) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if points.len() < 3 || points.iter().any(|(x, y)| !x.is_finite() || !y.is_finite()) {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "polygon requires at least three finite points",
@@ -2513,6 +2713,7 @@ impl PyGeometry {
     }
 
     fn star(&self, points: u32, outer_radius: f64, inner_radius: f64) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if points < 2
             || !outer_radius.is_finite()
             || !inner_radius.is_finite()
@@ -2533,6 +2734,7 @@ impl PyGeometry {
     }
 
     fn regular_polygon(&self, sides: u32, radius: f64) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if sides < 3 || !radius.is_finite() || radius <= 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "regular_polygon requires at least three sides and a finite positive radius",
@@ -2554,6 +2756,7 @@ impl PyGeometry {
         start_angle: f64,
         sweep_angle: f64,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if !radius.is_finite()
             || !start_angle.is_finite()
             || !sweep_angle.is_finite()
@@ -2575,6 +2778,7 @@ impl PyGeometry {
     }
 
     fn annulus(&self, outer_radius: f64, inner_radius: f64) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if !outer_radius.is_finite()
             || !inner_radius.is_finite()
             || inner_radius <= 0.0
@@ -2593,6 +2797,7 @@ impl PyGeometry {
     }
 
     fn brace(&self, x1: f64, y1: f64, x2: f64, y2: f64, height: f64) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if !x1.is_finite()
             || !y1.is_finite()
             || !x2.is_finite()
@@ -2614,6 +2819,7 @@ impl PyGeometry {
     }
 
     fn checkmark(&self, size: f64) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if !size.is_finite() || size <= 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "checkmark size must be a finite positive number",
@@ -2628,6 +2834,7 @@ impl PyGeometry {
     }
 
     fn cross(&self, size: f64) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if !size.is_finite() || size <= 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "cross size must be a finite positive number",
@@ -2642,6 +2849,7 @@ impl PyGeometry {
     }
 
     fn right_angle(&self, arm_length: f64) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if !arm_length.is_finite() || arm_length <= 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "right_angle arm_length must be a finite positive number",
@@ -2655,22 +2863,35 @@ impl PyGeometry {
         ))
     }
 
-    fn arc(&self, cx: f64, cy: f64, radius: f64, start_angle: f64, sweep_angle: f64) -> PyDrawable {
-        PyDrawable(self.inner.lock().expect("scene canvas poisoned").arc(
-            cx,
-            cy,
-            radius,
-            start_angle,
-            sweep_angle,
-        ))
+    fn arc(
+        &self,
+        cx: f64,
+        cy: f64,
+        radius: f64,
+        start_angle: f64,
+        sweep_angle: f64,
+    ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            PyDrawable(self.inner.lock().expect("scene canvas poisoned").arc(
+                cx,
+                cy,
+                radius,
+                start_angle,
+                sweep_angle,
+            ))
+        })
     }
-    fn curved_arrow(&self, x1: f64, y1: f64, x2: f64, y2: f64, angle: f64) -> PyDrawable {
-        PyDrawable(
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .curved_arrow(x1, y1, x2, y2, angle),
-        )
+    fn curved_arrow(&self, x1: f64, y1: f64, x2: f64, y2: f64, angle: f64) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            PyDrawable(
+                self.inner
+                    .lock()
+                    .expect("scene canvas poisoned")
+                    .curved_arrow(x1, y1, x2, y2, angle),
+            )
+        })
     }
     fn curved_arrow_arc(
         &self,
@@ -2679,25 +2900,31 @@ impl PyGeometry {
         radius: f64,
         start_angle: f64,
         sweep_angle: f64,
-    ) -> PyDrawable {
-        PyDrawable(
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .curved_arrow_arc(cx, cy, radius, start_angle, sweep_angle),
-        )
+    ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            PyDrawable(
+                self.inner
+                    .lock()
+                    .expect("scene canvas poisoned")
+                    .curved_arrow_arc(cx, cy, radius, start_angle, sweep_angle),
+            )
+        })
     }
 }
 
 #[pymethods]
 impl PyMechanics {
-    fn dimension(&self, x1: f64, y1: f64, x2: f64, y2: f64, offset: f64) -> PyDrawable {
-        PyDrawable(
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .dimension(x1, y1, x2, y2, offset),
-        )
+    fn dimension(&self, x1: f64, y1: f64, x2: f64, y2: f64, offset: f64) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            PyDrawable(
+                self.inner
+                    .lock()
+                    .expect("scene canvas poisoned")
+                    .dimension(x1, y1, x2, y2, offset),
+            )
+        })
     }
 }
 
@@ -2708,6 +2935,7 @@ impl PyGeometry {
     /// This is the primary path entry point. `polyline()` and `curve()` remain
     /// available when the caller prefers an explicit shape kind.
     fn path(&self, definition: Bound<'_, PyAny>) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if let Ok(points) = definition.extract::<Vec<(f64, f64)>>() {
             if points.len() < 2 {
                 return Err(pyo3::exceptions::PyValueError::new_err(
@@ -2736,13 +2964,16 @@ impl PyGeometry {
         ))
     }
 
-    fn polyline(&self, points: Vec<(f64, f64)>) -> PyDrawable {
-        PyDrawable(
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .polyline(&points),
-        )
+    fn polyline(&self, points: Vec<(f64, f64)>) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            PyDrawable(
+                self.inner
+                    .lock()
+                    .expect("scene canvas poisoned")
+                    .polyline(&points),
+            )
+        })
     }
 
     fn bezier(
@@ -2751,6 +2982,7 @@ impl PyGeometry {
         controls: Vec<(f64, f64)>,
         end: (f64, f64),
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if !(1..=2).contains(&controls.len()) {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "controls must contain one point (quadratic) or two points (cubic)",
@@ -2773,6 +3005,7 @@ impl PyGeometry {
     /// a point, `None` (a collapsed handle), or `"auto"` (a reflected handle).
     /// Finish a subpath with `close` or `close_smooth`, both with no arguments.
     fn curve(&self, commands: Bound<'_, PyAny>) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let elements = parse_curve_elements(&commands)?;
         Ok(PyDrawable(
             self.inner
@@ -2812,6 +3045,7 @@ impl PyTypography {
         direction: Option<&str>,
         hyphenate: Option<bool>,
     ) -> PyResult<Py<PyText>> {
+        crate::custom::ensure_authoring_allowed()?;
         let spec = build_text_spec(
             content,
             false,
@@ -2871,6 +3105,7 @@ impl PyTypography {
         direction: Option<&str>,
         hyphenate: Option<bool>,
     ) -> PyResult<Py<PyText>> {
+        crate::custom::ensure_authoring_allowed()?;
         let spec = build_text_spec(
             content,
             true,
@@ -2914,6 +3149,7 @@ impl PyVisualization {
         data: &Bound<'py, PyAny>,
         options: Option<&Bound<'py, PyDict>>,
     ) -> PyResult<Py<PyAny>> {
+        crate::custom::ensure_authoring_allowed()?;
         let module = py.import("gaanim.matrix")?;
         Ok(module
             .getattr("_build_matrix")?
@@ -2931,6 +3167,7 @@ impl PyGeometry {
         size: f64,
         material: Option<PyMaterial3D>,
     ) -> PyResult<Py<PyPrimitive3D>> {
+        crate::custom::ensure_authoring_allowed()?;
         let handle = self
             .inner
             .lock()
@@ -2949,6 +3186,7 @@ impl PyGeometry {
         rings: u32,
         material: Option<PyMaterial3D>,
     ) -> PyResult<Py<PyPrimitive3D>> {
+        crate::custom::ensure_authoring_allowed()?;
         let handle = self
             .inner
             .lock()
@@ -2973,6 +3211,7 @@ impl PyGeometry {
         caps: bool,
         material: Option<PyMaterial3D>,
     ) -> PyResult<Py<PyPrimitive3D>> {
+        crate::custom::ensure_authoring_allowed()?;
         let handle = self
             .inner
             .lock()
@@ -2998,6 +3237,7 @@ impl PyGeometry {
         cap: bool,
         material: Option<PyMaterial3D>,
     ) -> PyResult<Py<PyPrimitive3D>> {
+        crate::custom::ensure_authoring_allowed()?;
         let handle = self
             .inner
             .lock()
@@ -3022,6 +3262,7 @@ impl PyGeometry {
         subdivisions: (u32, u32),
         material: Option<PyMaterial3D>,
     ) -> PyResult<Py<PyPrimitive3D>> {
+        crate::custom::ensure_authoring_allowed()?;
         let handle = self
             .inner
             .lock()
@@ -3038,6 +3279,7 @@ impl PyGeometry {
 
     #[pyo3(signature = (preset="studio", intensity=1.0, shadows=true))]
     fn lighting_3d(&self, preset: &str, intensity: f32, shadows: bool) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
         if !intensity.is_finite() || intensity < 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "intensity must be finite and non-negative",
@@ -3069,6 +3311,7 @@ impl PyGeometry {
         y_samples: usize,
         color: Option<PyColor>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if ![x_range.0, x_range.1, y_range.0, y_range.1]
             .iter()
             .all(|v| v.is_finite())
@@ -3125,6 +3368,7 @@ impl PyGeometry {
         colors: Option<Vec<PyColor>>,
         colormap: Option<PyColorMapArg>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if points.len() < 2 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "polyline_3d requires at least 2 points",
@@ -3198,6 +3442,7 @@ impl PyTypography {
         source: &Bound<'_, PyAny>,
         width: Option<pyo3::Py<pyo3::PyAny>>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let source = if let Ok(source) = source.extract::<String>() {
             if source.trim().is_empty() {
                 return Err(pyo3::exceptions::PyValueError::new_err(
@@ -3276,6 +3521,7 @@ impl PyGeometry {
         target: &PyDrawable,
         duration: f64,
     ) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
         if !duration.is_finite() || duration <= 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "duration must be a finite positive number",
@@ -3304,6 +3550,7 @@ impl PyGeometry {
         mode: &str,
         duration: f64,
     ) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
         if !duration.is_finite() || duration <= 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "duration must be a finite positive number",
@@ -3331,6 +3578,7 @@ impl PyMediaLibrary {
         crop: Option<(f64, f64, f64, f64)>,
         quality: &str,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let fit = match fit {
             "contain" => ImageFit::Contain,
             "cover" => ImageFit::Cover,
@@ -3398,6 +3646,7 @@ impl PyMediaLibrary {
         audio: bool,
         volume: f64,
     ) -> PyResult<Py<PyVideo>> {
+        crate::custom::ensure_authoring_allowed()?;
         let fit = match fit {
             "contain" => ImageFit::Contain,
             "cover" => ImageFit::Cover,
@@ -3469,6 +3718,7 @@ impl PyMediaLibrary {
         r#loop: bool,
         speed: f64,
     ) -> PyResult<Py<PyLottie>> {
+        crate::custom::ensure_authoring_allowed()?;
         let fit = match fit {
             "contain" => ImageFit::Contain,
             "cover" => ImageFit::Cover,
@@ -3507,6 +3757,7 @@ impl PyMediaLibrary {
 
     /// Load an SVG as an animatable group of vector paths.
     fn svg(&self, path: &str) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         self.inner
             .lock()
             .expect("scene canvas poisoned")
@@ -3518,6 +3769,7 @@ impl PyMediaLibrary {
     /// Load a local glTF 2.0 model, selecting a scene by name or index.
     #[pyo3(signature = (path, *, scene=None))]
     fn gltf(&self, path: &str, scene: Option<&Bound<'_, PyAny>>) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let selector = match scene {
             None => gaanim_objects::prelude::GltfSceneSelector::Default,
             Some(value) => {
@@ -3543,14 +3795,18 @@ impl PyMediaLibrary {
 
 #[pymethods]
 impl PyGeometry {
-    fn group(&self, members: Vec<PyDrawable>) -> PyDrawable {
-        let refs: Vec<&gaanim_api::canvas::DrawableHandle> = members.iter().map(|m| &m.0).collect();
-        PyDrawable(
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .group(&refs),
-        )
+    fn group(&self, members: Vec<PyDrawable>) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            let refs: Vec<&gaanim_api::canvas::DrawableHandle> =
+                members.iter().map(|m| &m.0).collect();
+            PyDrawable(
+                self.inner
+                    .lock()
+                    .expect("scene canvas poisoned")
+                    .group(&refs),
+            )
+        })
     }
 
     #[pyo3(signature = (*operands, live=false, tolerance=0.25, rule="nonzero"))]
@@ -3561,6 +3817,7 @@ impl PyGeometry {
         tolerance: f64,
         rule: &str,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         self.boolean_py_tuple(
             operands,
             gaanim_api::canvas::BooleanOperation::Union,
@@ -3577,6 +3834,7 @@ impl PyGeometry {
         tolerance: f64,
         rule: &str,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         self.boolean_py_tuple(
             operands,
             gaanim_api::canvas::BooleanOperation::Intersection,
@@ -3594,6 +3852,7 @@ impl PyGeometry {
         tolerance: f64,
         rule: &str,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let mut operands = vec![subject];
         operands.extend(clips.extract::<Vec<PyDrawable>>()?);
         self.boolean_py(
@@ -3612,6 +3871,7 @@ impl PyGeometry {
         tolerance: f64,
         rule: &str,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         self.boolean_py_tuple(
             operands,
             gaanim_api::canvas::BooleanOperation::Xor,
@@ -3630,6 +3890,7 @@ impl PyGeometry {
         direction: &str,
         keep_outline: bool,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let direction = match direction {
             "up" => gaanim_api::canvas::FillLevelDirection::Up,
             "down" => gaanim_api::canvas::FillLevelDirection::Down,
@@ -3671,6 +3932,7 @@ impl PyTypography {
         color: Option<PyColor>,
         wrap: Option<f64>,
     ) -> PyResult<(f64, f64)> {
+        crate::custom::ensure_authoring_allowed()?;
         if content.is_empty() {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "measure_text content must not be empty",
@@ -3711,6 +3973,7 @@ impl PySlideKit {
         background: Option<PyColor>,
         border: Option<PyColor>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let style = editorial_style(variant, appearance, color, background, border)?;
         let mut spec = BadgeSpec::new(text).style(style);
         spec.padding = padding;
@@ -3737,6 +4000,7 @@ impl PySlideKit {
         background: Option<PyColor>,
         border: Option<PyColor>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let style = editorial_style(variant, appearance, color, background, border)?;
         let mut spec = ChipSpec::new(text).style(style);
         spec.dot = dot;
@@ -3770,6 +4034,7 @@ impl PySlideKit {
         background: Option<PyColor>,
         border: Option<PyColor>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let style = editorial_style(variant, appearance, color, background, border)?;
         let mut spec = CardSpec::new(title).style(style);
         spec.body = body;
@@ -3806,6 +4071,7 @@ impl PySlideKit {
         background: Option<PyColor>,
         border: Option<PyColor>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let position = match position.to_ascii_lowercase().as_str() {
             "top" => BannerPosition::Top,
             "bottom" => BannerPosition::Bottom,
@@ -3852,6 +4118,7 @@ impl PySlideKit {
         background: Option<PyColor>,
         border: Option<PyColor>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let side = match side.to_ascii_lowercase().as_str() {
             "left" => LowerThirdSide::Left,
             "right" => LowerThirdSide::Right,
@@ -3898,6 +4165,7 @@ impl PySlideKit {
         background: Option<PyColor>,
         border: Option<PyColor>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let style = editorial_style(variant, appearance, color, background, border)?;
         let mut spec = StatCardSpec::new(value, label).style(style);
         spec.delta = delta;
@@ -3931,6 +4199,7 @@ impl PySlideKit {
         background: Option<PyColor>,
         border: Option<PyColor>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let style = editorial_style(variant, appearance, color, background, border)?;
         let mut spec = QuoteCardSpec::new(quote).style(style);
         spec.attribution = attribution;
@@ -3966,6 +4235,7 @@ impl PySlideKit {
         background: Option<PyColor>,
         border: Option<PyColor>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let align = match align.to_ascii_lowercase().as_str() {
             "left" => EditorialAlign::Left,
             "center" => EditorialAlign::Center,
@@ -4015,6 +4285,7 @@ impl PySlideKit {
         background: Option<PyColor>,
         color: Option<PyColor>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if text.trim().is_empty() {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "callout text must not be empty",
@@ -4080,6 +4351,7 @@ impl PySlideKit {
         color: Option<PyColor>,
         accent: Option<PyColor>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if title.trim().is_empty() {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "title must not be empty",
@@ -4171,6 +4443,7 @@ impl PySlideKit {
         bullet_color: Option<PyColor>,
         color: Option<PyColor>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if items.is_empty() || items.iter().any(|item| item.trim().is_empty()) {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "items must contain at least one non-empty string",
@@ -4246,6 +4519,7 @@ impl PySlideKit {
         rule_color: Option<PyColor>,
         color: Option<PyColor>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if headers.is_empty() || headers.iter().any(|header| header.trim().is_empty()) {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "headers must contain at least one non-empty string",
@@ -4350,6 +4624,7 @@ impl PyTypography {
         color: Option<PyColor>,
         accent: Option<PyColor>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if source.trim().is_empty() {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "source must not be empty",
@@ -4427,6 +4702,7 @@ impl PyScene {
         template: Option<&Bound<'py, PyAny>>,
         background: Option<crate::brush::PyBackgroundInput>,
     ) -> PyResult<PySegment> {
+        crate::custom::ensure_authoring_allowed()?;
         let template_name = template.and_then(|template| {
             template
                 .getattr("__name__")
@@ -4460,6 +4736,7 @@ impl PyScene {
         to: &PySegment,
         transition: &PyTransitionType,
     ) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
         self.inner
             .lock()
             .expect("scene canvas poisoned")
@@ -4470,6 +4747,7 @@ impl PyScene {
     /// Reuse one or more drawables in the active segment at the current cursor.
     #[pyo3(signature = (object, *others))]
     fn reuse(&self, object: &PyDrawable, others: &Bound<'_, PyTuple>) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
         let drawables = drawable_args(object, others)?;
         self.inner
             .lock()
@@ -4481,6 +4759,7 @@ impl PyScene {
     /// Keep one or more drawables available across future segments.
     #[pyo3(signature = (object, *others))]
     fn persist(&self, object: &PyDrawable, others: &Bound<'_, PyTuple>) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
         let drawables = drawable_args(object, others)?;
         self.inner
             .lock()
@@ -4492,6 +4771,7 @@ impl PyScene {
     /// Stop persistence and attach one or more drawables to the active segment.
     #[pyo3(signature = (object, *others))]
     fn release(&self, object: &PyDrawable, others: &Bound<'_, PyTuple>) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
         let drawables = drawable_args(object, others)?;
         self.inner
             .lock()
@@ -4500,11 +4780,14 @@ impl PyScene {
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
 
-    fn wait(&self, seconds: f64) {
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .wait(seconds);
+    fn wait(&self, seconds: f64) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .wait(seconds);
+        })
     }
 
     /// Insert an explicit zero-duration interactive stop.
@@ -4512,6 +4795,7 @@ impl PyScene {
     /// A terminal stop holds the completed segment until playback advances.
     #[pyo3(signature = (name=None))]
     fn stop(&self, name: Option<String>) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
         self.inner
             .lock()
             .expect("scene canvas poisoned")
@@ -4526,6 +4810,7 @@ impl PyScene {
         duration: Option<f64>,
         easing: Option<&crate::easing::PyEasing>,
     ) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
         if duration.is_some_and(|value| !value.is_finite() || value < 0.0) {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "duration must be finite and non-negative",
@@ -4542,13 +4827,17 @@ impl PyScene {
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
 
-    fn fade_out_all(&self, seconds: f64) {
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .fade_out_all(seconds);
+    fn fade_out_all(&self, seconds: f64) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .fade_out_all(seconds);
+        })
     }
     fn render(&self) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
         if self
             .inner
             .lock()
@@ -4566,6 +4855,7 @@ impl PyScene {
     }
     /// Ask the Gaanim host to render exact timeline seeks into PNG snapshots.
     fn snapshots(&self, directory: &str, times: Vec<f64>) -> PyResult<usize> {
+        crate::custom::ensure_authoring_allowed()?;
         let scene = self.inner.lock().expect("scene canvas poisoned").clone();
         gaanim_api::host::request_snapshots(scene, directory, &times)
             .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
@@ -4582,6 +4872,7 @@ impl PyGeometry {
         curve: &PyDrawable,
         tracker: Bound<'_, PyAny>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let (tracker, _) = reactive_scalar(tracker)?;
         Ok(PyDrawable(
             self.inner
@@ -4598,6 +4889,7 @@ impl PyGeometry {
         tracker: Bound<'_, PyAny>,
         length: f64,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let (tracker, _) = reactive_scalar(tracker)?;
         Ok(PyDrawable(
             self.inner
@@ -4614,6 +4906,7 @@ impl PyGeometry {
         tracker: Bound<'_, PyAny>,
         length: f64,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let (tracker, _) = reactive_scalar(tracker)?;
         Ok(PyDrawable(
             self.inner
@@ -4630,6 +4923,7 @@ impl PyGeometry {
         tracker: Bound<'_, PyAny>,
         window: f64,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let (tracker, _) = reactive_scalar(tracker)?;
         Ok(PyDrawable(
             self.inner
@@ -4650,6 +4944,7 @@ impl PyGeometry {
         sweep_scale: f64,
         sweep_offset: f64,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let (tracker, current) = reactive_scalar(tracker)?;
         Ok(PyDrawable(
             self.inner
@@ -4676,6 +4971,7 @@ impl PyGeometry {
         max_points: Option<usize>,
         min_distance: f64,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if !min_distance.is_finite() || min_distance < 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "min_distance must be finite and non-negative",
@@ -4714,6 +5010,7 @@ impl PyGeometry {
         max_points: Option<usize>,
         min_distance: f64,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if !min_distance.is_finite() || min_distance < 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "min_distance must be finite and non-negative",
@@ -4748,6 +5045,7 @@ impl PyGeometry {
     }
 
     fn tracking_line(&self, from: Bound<'_, PyAny>, to: Bound<'_, PyAny>) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let from = resolve_endpoint(&from)?;
         let to = resolve_endpoint(&to)?;
         Ok(PyDrawable(
@@ -4759,6 +5057,7 @@ impl PyGeometry {
     }
 
     fn point_ref(&self, x: Bound<'_, PyAny>, y: Bound<'_, PyAny>) -> PyResult<PyPointRef> {
+        crate::custom::ensure_authoring_allowed()?;
         let x = extract_scalar_source(x, &self.inner)?;
         let y = extract_scalar_source(y, &self.inner)?;
         let point = self
@@ -4775,6 +5074,7 @@ impl PyGeometry {
         dx: Bound<'_, PyAny>,
         dy: Bound<'_, PyAny>,
     ) -> PyResult<PyPointRef> {
+        crate::custom::ensure_authoring_allowed()?;
         let dx = extract_scalar_source(dx, &self.inner)?;
         let dy = extract_scalar_source(dy, &self.inner)?;
         let point = self
@@ -4793,6 +5093,7 @@ impl PyGeometry {
         alpha: f64,
         offset: (f64, f64),
     ) -> PyResult<PyPointRef> {
+        crate::custom::ensure_authoring_allowed()?;
         if !alpha.is_finite() || !offset.0.is_finite() || !offset.1.is_finite() {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "alpha and offset must be finite",
@@ -4817,6 +5118,7 @@ impl PyGeometry {
         radius: Bound<'_, PyAny>,
         angle: Bound<'_, PyAny>,
     ) -> PyResult<PyPointRef> {
+        crate::custom::ensure_authoring_allowed()?;
         let radius = extract_scalar_source(radius, &self.inner)?;
         let angle = extract_scalar_source(angle, &self.inner)?;
         let point = self
@@ -4837,6 +5139,7 @@ impl PyMechanics {
         to: Bound<'_, PyAny>,
         width: f64,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if !width.is_finite() || width <= 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "width must be finite and greater than zero",
@@ -4863,6 +5166,7 @@ impl PyMechanics {
         start_straight: f64,
         end_straight: f64,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if !start_straight.is_finite() || start_straight < 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "start_straight must be finite and non-negative",
@@ -4914,6 +5218,7 @@ impl PyMechanics {
         dash_length: f64,
         gap_length: f64,
     ) -> PyResult<Py<PyDimension>> {
+        crate::custom::ensure_authoring_allowed()?;
         if !offset.is_finite() {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "offset must be finite",
@@ -5021,6 +5326,7 @@ impl PyMechanics {
         font_size: Option<f64>,
         color: Option<PyColor>,
     ) -> PyResult<Py<PyAngleDimension>> {
+        crate::custom::ensure_authoring_allowed()?;
         if !radius.is_finite() || radius <= 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "radius must be finite and positive",
@@ -5110,6 +5416,7 @@ impl PyMechanics {
         font_size: Option<f64>,
         color: Option<PyColor>,
     ) -> PyResult<Py<PyForceVector>> {
+        crate::custom::ensure_authoring_allowed()?;
         if !scale.is_finite() || scale <= 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "scale must be finite and greater than zero",
@@ -5157,6 +5464,7 @@ impl PyMechanics {
         font_size: Option<f64>,
         color: Option<PyColor>,
     ) -> PyResult<Py<PyForceVector>> {
+        crate::custom::ensure_authoring_allowed()?;
         validate_force_metrics(visual_scale, label_gap, font_size)?;
         let magnitude = extract_scalar_source(magnitude, &self.inner)?;
         let direction = direction
@@ -5201,6 +5509,7 @@ impl PyMechanics {
         font_size: Option<f64>,
         color: Option<PyColor>,
     ) -> PyResult<Py<PyForceVector>> {
+        crate::custom::ensure_authoring_allowed()?;
         validate_force_metrics(visual_scale, label_gap, font_size)?;
         let fx = extract_scalar_source(fx, &self.inner)?;
         let fy = extract_scalar_source(fy, &self.inner)?;
@@ -5236,6 +5545,7 @@ impl PyMechanics {
         ground_length: f64,
         color: Option<PyColor>,
     ) -> PyResult<Py<PySupport>> {
+        crate::custom::ensure_authoring_allowed()?;
         if !matches!(
             kind,
             "fixed" | "pin" | "roller" | "simple" | "guided" | "prismatic" | "cable" | "spring"
@@ -5282,6 +5592,7 @@ impl PyMechanics {
         ground_length: f64,
         color: Option<PyColor>,
     ) -> PyResult<Py<PySupport>> {
+        crate::custom::ensure_authoring_allowed()?;
         self.support_at(py, point, "fixed", direction, size, ground_length, color)
     }
 
@@ -5295,6 +5606,7 @@ impl PyMechanics {
         ground_length: f64,
         color: Option<PyColor>,
     ) -> PyResult<Py<PySupport>> {
+        crate::custom::ensure_authoring_allowed()?;
         self.support_at(py, point, "pin", direction, size, ground_length, color)
     }
 
@@ -5308,6 +5620,7 @@ impl PyMechanics {
         ground_length: f64,
         color: Option<PyColor>,
     ) -> PyResult<Py<PySupport>> {
+        crate::custom::ensure_authoring_allowed()?;
         self.support_at(py, point, "roller", direction, size, ground_length, color)
     }
 
@@ -5321,6 +5634,7 @@ impl PyMechanics {
         ground_length: f64,
         color: Option<PyColor>,
     ) -> PyResult<Py<PySupport>> {
+        crate::custom::ensure_authoring_allowed()?;
         self.support_at(py, point, "guided", direction, size, ground_length, color)
     }
 
@@ -5333,6 +5647,7 @@ impl PyMechanics {
         size: f64,
         color: Option<PyColor>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if !matches!(kind, "revolute" | "prismatic") {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "kind must be 'revolute' or 'prismatic'",
@@ -5360,6 +5675,7 @@ impl PyMechanics {
         bore_radius: f64,
         color: Option<PyColor>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if !radius.is_finite()
             || radius <= 0.0
             || teeth < 4
@@ -5382,6 +5698,7 @@ impl PyMechanics {
 
     #[pyo3(signature = (length, teeth, *, color=None))]
     fn rack(&self, length: f64, teeth: usize, color: Option<PyColor>) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if !length.is_finite() || length <= 0.0 || teeth == 0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "length and teeth must be positive",
@@ -5403,6 +5720,7 @@ impl PyMechanics {
         bore_radius: f64,
         color: Option<PyColor>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if samples.len() < 3
             || samples
                 .iter()
@@ -5428,6 +5746,7 @@ impl PyMechanics {
         tangent_length: f64,
         normal_length: f64,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let (tracker, _) = reactive_scalar(tracker)?;
         Ok(PyDrawable(
             self.inner
@@ -5446,6 +5765,7 @@ impl PyMechanics {
         label: Option<String>,
         color: Option<PyColor>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let ccw = match direction {
             "ccw" => true,
             "cw" => false,
@@ -5479,6 +5799,7 @@ impl PyMechanics {
         labels: Option<(String, String)>,
         color: Option<PyColor>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let handle = self
             .inner
             .lock()

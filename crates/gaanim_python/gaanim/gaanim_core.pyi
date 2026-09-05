@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from typing import Any, Callable, ClassVar, Literal, Mapping, Optional, Self, Sequence, TypeAlias, overload
 from .matrix import Matrix
+from .animation_types import AnimationChannel, CustomAnimationValues
 
 CurvePoint: TypeAlias = tuple[float, float]
 """A coordinate pair used by :meth:`Scene.path` and :meth:`Scene.curve`."""
@@ -528,26 +529,51 @@ class Transition:
         ...
 
 class Anim:
-    def fill(self, color: ColorLike) -> Anim:
-        """Target a solid fill color in a compound ``Drawable.animate`` animation.
+    def custom(self, callback: Callable[[float], CustomAnimationValues], *, channels: Sequence[AnimationChannel]) -> Anim:
+        """Describe a pure custom animation without scheduling or sampling it.
+
+        The callback receives eased progress at the exact requested time and
+        returns absolute local values for exactly the declared channels. It
+        must be synchronous, deterministic, and must not mutate the scene.
+        Easing may overshoot 0..1. Use duration/delay/easing and composition as
+        with native animations; combine other setters using ``parallel``.
+        Invalid channels, conflicting writes, non-finite values, or mutations
+        raise errors. A runtime failure restores this clip's initial channel
+        values and reports a diagnostic; exports fail explicitly.
+
+        Example:
+            scene.play(dot.animate.custom(lambda a: {"position": (3*a, a*a)}, channels=("position",)).duration(2))
+        """
+        ...
+    def fill(self, color: Paint) -> Anim:
+        """Target a vector fill paint in a compound ``Drawable.animate`` animation.
 
         Text glyphs interpolate independently from their current fills, so
         fragment-specific colors converge to this target. On ``Primitive3D``
-        this targets the PBR material base color instead.
+        this targets the PBR material base color instead and requires a solid.
+        Same-kind gradients interpolate geometry and normalized color stops;
+        a solid can transition to a gradient. Incompatible gradient kinds raise
+        ``ValueError``. Text selections retain their solid-color contract.
         """
         ...
 
-    def stroke(self, color: ColorLike, width: float) -> Anim:
-        """Target vector stroke color and width, including every text glyph.
+    def stroke(self, color: Paint, width: float) -> Anim:
+        """Target vector stroke paint and width, including every text glyph.
 
-        This is unavailable for ``Primitive3D``.
+        Paint interpolation follows ``fill``; incompatible gradient kinds
+        raise ``ValueError``. This is unavailable for ``Primitive3D``.
         """
         ...
     def material(self, material: Material3D) -> Anim:
         """Target every animatable PBR channel of a native Primitive3D."""
         ...
-    def opacity(self, value: float) -> Anim:
-        """Target drawable opacity, clamped to the 0..1 range."""
+    def opacity(self, value: ScalarSource) -> Anim:
+        """Target drawable opacity, clamped to the 0..1 range.
+
+        Reactive targets are evaluated at the clip start and frozen for this
+        interpolation. An already linked target channel must first be fixed
+        with a numeric setter, or animated through its Parameter.
+        """
         ...
     def set(self, value: float) -> Anim:
         """Target a finite Parameter or Variable value without scheduling it."""
@@ -566,27 +592,52 @@ class Anim:
     def shift_by(self, dx: float, dy: float) -> Anim:
         """Target a relative 2D translation in a compound property animation."""
         ...
-    def move_to(self, x: float, y: float, anchor: Optional[Anchor] = None) -> Anim:
+    @overload
+    def move_to(self, reference: Drawable, /) -> Anim: ...
+    @overload
+    def move_to(self, point: AnchorPoint, /) -> Anim: ...
+    @overload
+    def move_to(self, x: ScalarSource, y: ScalarSource, anchor: Optional[Anchor] = None) -> Anim:
         """Target an absolute 2D position, placing ``anchor`` at ``(x, y)``.
 
         Omitting ``anchor`` uses ``Anchor.CENTER``. The returned animation can
         be chained with other property targets.
+
+
+        Reactive targets are evaluated at the clip start and frozen for this
+        interpolation. An already linked target channel must first be fixed
+        with a numeric setter, or animated through its Parameter.
         """
         ...
     def shift_by_3d(self, dx: float, dy: float, dz: float) -> Anim:
         """Target a relative 3D translation in scene units."""
         ...
-    def move_to_3d(self, x: float, y: float, z: float) -> Anim:
-        """Target an absolute 3D position in scene units."""
+    def move_to_3d(self, x: ScalarSource, y: ScalarSource, z: ScalarSource) -> Anim:
+        """Target an absolute 3D position in scene units.
+
+        Reactive targets are evaluated at the clip start and frozen for this
+        interpolation. An already linked target channel must first be fixed
+        with a numeric setter, or animated through its Parameter.
+        """
         ...
     def scale_by(self, factor: float) -> Anim:
         """Multiply the current uniform scale by ``factor``."""
         ...
-    def scale_to(self, factor: float) -> Anim:
-        """Target an absolute uniform scale."""
+    def scale_to(self, factor: ScalarSource) -> Anim:
+        """Target an absolute uniform scale.
+
+        Reactive targets are evaluated at the clip start and frozen for this
+        interpolation. An already linked target channel must first be fixed
+        with a numeric setter, or animated through its Parameter.
+        """
         ...
-    def scale_to_3d(self, x: float, y: float, z: float) -> Anim:
-        """Target absolute scale independently on three axes."""
+    def scale_to_3d(self, x: ScalarSource, y: ScalarSource, z: ScalarSource) -> Anim:
+        """Target absolute scale independently on three axes.
+
+        Reactive targets are evaluated at the clip start and frozen for this
+        interpolation. An already linked target channel must first be fixed
+        with a numeric setter, or animated through its Parameter.
+        """
         ...
     def scale_by_3d(self, x: float, y: float, z: float) -> Anim:
         """Multiply the current scale independently on three axes."""
@@ -594,14 +645,24 @@ class Anim:
     def rotate_by(self, radians: float) -> Anim:
         """Target a relative Z rotation in radians."""
         ...
-    def rotate_to(self, radians: float) -> Anim:
-        """Target an absolute Z rotation in radians."""
+    def rotate_to(self, radians: ScalarSource) -> Anim:
+        """Target an absolute Z rotation in radians.
+
+        Reactive targets are evaluated at the clip start and frozen for this
+        interpolation. An already linked target channel must first be fixed
+        with a numeric setter, or animated through its Parameter.
+        """
         ...
     def rotate_by_3d(self, axis: Literal["x", "y", "z"], radians: float) -> Anim:
         """Target a relative rotation around one 3D axis."""
         ...
-    def rotate_to_3d(self, x: float, y: float, z: float) -> Anim:
-        """Target an absolute XYZ Euler orientation in radians."""
+    def rotate_to_3d(self, x: ScalarSource, y: ScalarSource, z: ScalarSource) -> Anim:
+        """Target an absolute XYZ Euler orientation in radians.
+
+        Reactive targets are evaluated at the clip start and frozen for this
+        interpolation. An already linked target channel must first be fixed
+        with a numeric setter, or animated through its Parameter.
+        """
         ...
     def fade_in(self) -> Anim:
         """Select the drawable fade-in effect; scheduling occurs in ``Scene.play``."""
@@ -927,11 +988,17 @@ class Drawable:
     def set_fill_level(self, level: float) -> Drawable:
         """Set a ``Scene.fill_level`` drawable immediately; invalid values or other drawables raise ``ValueError``."""
         ...
-    def opacity(self, op: float) -> Self:
+    def opacity(self, op: ScalarSource) -> Self:
         """Apply opacity to this drawable and return the result.
 
         Example:
             result = drawable.opacity(1.0)
+
+
+        A reactive source binds this channel from the current cursor; another
+        source replaces it and a numeric setter ends the binding reversibly.
+        Sources must belong to this Scene. Animate the source Parameter while
+        linked; direct animation or relative writes to this channel error.
         """
         ...
     def z_index(self, z: int) -> Self:
@@ -946,7 +1013,7 @@ class Drawable:
     @overload
     def move_to(self, point: AnchorPoint, /) -> Self: ...
     @overload
-    def move_to(self, x: float, y: float, anchor: Optional[Anchor] = None) -> Self:
+    def move_to(self, x: ScalarSource, y: ScalarSource, anchor: Optional[Anchor] = None) -> Self:
         """Place this drawable at coordinates, another drawable, or an anchor point.
 
         Omitting ``anchor`` places ordinary drawables by their visual center.
@@ -963,6 +1030,12 @@ class Drawable:
             result = drawable.move_to(1.0, 1.0, Anchor.TOP_LEFT)
             centered = label.move_to(drawable)
             corner_label = label.move_to(drawable.anchor_point(Anchor.TOP_RIGHT))
+
+
+        A reactive source binds this channel from the current cursor; another
+        source replaces it and a numeric setter ends the binding reversibly.
+        Sources must belong to this Scene. Animate the source Parameter while
+        linked; direct animation or relative writes to this channel error.
         """
         ...
     def anchor_point(
@@ -985,7 +1058,7 @@ class Drawable:
     def at_coordinate(self, coordinate: CoordinateRef) -> Drawable:
         """Place this drawable at a symbolic coordinate owned by a coordinate space."""
         ...
-    def move_to_3d(self, x: float, y: float, z: float) -> Self:
+    def move_to_3d(self, x: ScalarSource, y: ScalarSource, z: ScalarSource) -> Self:
         """Place the drawable at a 3D world-space position.
 
         Coordinates are interpreted by the perspective camera. The method is
@@ -993,6 +1066,12 @@ class Drawable:
 
         Example:
             dot = scene.dot(8).fill(RED).move_to_3d(1.0, 2.0, 0.5)
+
+
+        A reactive source binds this channel from the current cursor; another
+        source replaces it and a numeric setter ends the binding reversibly.
+        Sources must belong to this Scene. Animate the source Parameter while
+        linked; direct animation or relative writes to this channel error.
         """
         ...
     def shift_by(self, dx: float, dy: float) -> Self:
@@ -1026,41 +1105,65 @@ class Drawable:
     def scale_by(self, factor: float) -> Self:
         """Multiply uniform scale immediately at the current cursor."""
         ...
-    def scale_to(self, factor: float) -> Self:
+    def scale_to(self, factor: ScalarSource) -> Self:
         """Apply scaled to this drawable and return the result.
 
         Example:
             result = drawable.scale_to(1.0)
+
+
+        A reactive source binds this channel from the current cursor; another
+        source replaces it and a numeric setter ends the binding reversibly.
+        Sources must belong to this Scene. Animate the source Parameter while
+        linked; direct animation or relative writes to this channel error.
         """
         ...
     def scale_by_3d(self, x: float, y: float, z: float) -> Self:
         """Multiply per-axis scale immediately at the current cursor."""
         ...
-    def scale_to_3d(self, x: float, y: float, z: float) -> Self:
+    def scale_to_3d(self, x: ScalarSource, y: ScalarSource, z: ScalarSource) -> Self:
         """Scale independently on three axes and preserve the specialized handle.
 
         Example:
             label = scene.text("depth").scale_to_3d(1.0, 1.0, 0.5)
+
+
+        A reactive source binds this channel from the current cursor; another
+        source replaces it and a numeric setter ends the binding reversibly.
+        Sources must belong to this Scene. Animate the source Parameter while
+        linked; direct animation or relative writes to this channel error.
         """
         ...
     def rotate_by(self, radians: float) -> Self:
         """Apply a relative Z rotation immediately at the current cursor."""
         ...
-    def rotate_to(self, radians: float) -> Self:
+    def rotate_to(self, radians: ScalarSource) -> Self:
         """Apply rotated to this drawable and return the result.
 
         Example:
             result = drawable.rotate_to(1.0)
+
+
+        A reactive source binds this channel from the current cursor; another
+        source replaces it and a numeric setter ends the binding reversibly.
+        Sources must belong to this Scene. Animate the source Parameter while
+        linked; direct animation or relative writes to this channel error.
         """
         ...
     def rotate_by_3d(self, axis: Literal["x", "y", "z"], radians: float) -> Self:
         """Apply a relative 3D axis rotation immediately at the current cursor."""
         ...
-    def rotate_to_3d(self, x: float, y: float, z: float) -> Self:
+    def rotate_to_3d(self, x: ScalarSource, y: ScalarSource, z: ScalarSource) -> Self:
         """Apply Euler rotation in radians and preserve the specialized handle.
 
         Example:
             label = scene.text("axis").rotate_to_3d(0.0, 0.0, 0.5)
+
+
+        A reactive source binds this channel from the current cursor; another
+        source replaces it and a numeric setter ends the binding reversibly.
+        Sources must belong to this Scene. Animate the source Parameter while
+        linked; direct animation or relative writes to this channel error.
         """
         ...
     def with_pivot(self, x: float, y: float) -> Self:
@@ -1315,7 +1418,7 @@ class Support(Drawable):
     def hatching(self) -> Drawable: ...
 
 Endpoint: TypeAlias = Drawable | AnchorPoint | PointRef | tuple[float, float] | tuple[float, float, float]
-ScalarSource: TypeAlias = float | Parameter | Variable | Computed
+ScalarSource: TypeAlias = float | Parameter | Variable | Computed | TimeInput
 AngleRay: TypeAlias = Direction | Endpoint
 
 class Material3D:
@@ -1561,8 +1664,8 @@ class Text(Drawable):
     @overload
     def move_to(
         self,
-        x: float,
-        y: float,
+        x: ScalarSource,
+        y: ScalarSource,
         anchor: Optional[Anchor | TextAnchor] = None,
     ) -> Self:
         """Place this Text and preserve its specialized handle.
@@ -1580,6 +1683,12 @@ class Text(Drawable):
             label.move_to(0.0, 40.0, TextAnchor.BASELINE_LEFT)
             label.move_to(marker)
             label.move_to(marker.anchor_point(Anchor.TOP))
+
+
+        A reactive source binds this channel from the current cursor; another
+        source replaces it and a numeric setter ends the binding reversibly.
+        Sources must belong to this Scene. Animate the source Parameter while
+        linked; direct animation or relative writes to this channel error.
         """
         ...
     def become(self, *content: TextContent, role: Optional[TextRole] = None, style: Optional[TextStyle] = None, flow: Optional[TextFlow] = None) -> None:
@@ -2031,8 +2140,18 @@ class Computed:
 class TimeInput:
     """The scene timeline time, valid only as an explicit reactive input."""
 
-def computed(callback: Callable[..., float], *, inputs: Sequence[Parameter | Variable | TimeInput] = ()) -> Computed:
-    """Create a deterministic scalar callback whose arguments follow ``inputs`` order."""
+def computed(callback: Callable[..., float], *, inputs: Sequence[Parameter | Variable | Computed | TimeInput] = ()) -> Computed:
+    """Create a deterministic scalar whose arguments follow ``inputs`` order.
+
+    Inputs can include other Computed values. Shared dependencies reuse cached
+    results for identical input snapshots; changing time or a leaf parameter
+    invalidates dependent results. Consumers reject transitive references to
+    another Scene. The callback must be synchronous and return a finite scalar.
+
+    Example:
+        area = computed(lambda r: math.pi*r*r, inputs=[radius])
+        doubled = computed(lambda a: 2*a, inputs=[area])
+    """
     ...
 
 class Parameter:
@@ -2119,7 +2238,7 @@ class Variable(Drawable):
     def number(self) -> Drawable: ...
     @property
     def unit(self) -> Optional[Drawable]: ...
-_ReactiveScalar: TypeAlias = float | Parameter | Variable | Computed
+_ReactiveScalar: TypeAlias = ScalarSource
 
 class CoordinateRef:
     def place(self, drawable: Drawable) -> Drawable: ...
@@ -2301,12 +2420,12 @@ class CoordinateSpace:
         samples: Optional[int] = None,
         tolerance: float = 0.0075,
         derivative: Optional[Callable[..., float]] = None,
-        inputs: Sequence[Parameter | Variable | TimeInput] = (),
+        inputs: Sequence[Parameter | Variable | Computed | TimeInput] = (),
     ) -> Drawable: ...
-    def parametric(self, function: Callable[..., tuple[float, float]], domain: tuple[float, float], *, samples: Optional[int] = None, tolerance: float = 0.0075, inputs: Sequence[Parameter | Variable | TimeInput] = ()) -> Drawable: ...
+    def parametric(self, function: Callable[..., tuple[float, float]], domain: tuple[float, float], *, samples: Optional[int] = None, tolerance: float = 0.0075, inputs: Sequence[Parameter | Variable | Computed | TimeInput] = ()) -> Drawable: ...
     def implicit(self, function: Callable[[float, float], float], *, resolution: tuple[int, int] = (96, 64)) -> Drawable: ...
     def contour(self, function: Callable[[float, float], float], levels: Sequence[float], *, resolution: tuple[int, int] = (96, 64)) -> Drawable: ...
-    def field(self, function: Callable[..., tuple[float, float]], *, inputs: Sequence[Parameter | Variable | TimeInput] = ()) -> VectorField:
+    def field(self, function: Callable[..., tuple[float, float]], *, inputs: Sequence[Parameter | Variable | Computed | TimeInput] = ()) -> VectorField:
         """Evaluate a vector callback from coordinates followed by explicit inputs."""
         ...
     def projections(self, x: float, y: float) -> Drawable: ...
@@ -2384,7 +2503,7 @@ class NumberLine:
         reveal: Optional[_ReactiveScalar] = None,
         samples: Optional[int] = None,
         tolerance: float = 0.0075,
-        inputs: Sequence[Parameter | Variable | TimeInput] = (),
+        inputs: Sequence[Parameter | Variable | Computed | TimeInput] = (),
     ) -> Drawable:
         """Plot a scalar Python function perpendicular to this number line.
 
@@ -2421,9 +2540,9 @@ class CoordinateSpace3D:
     def scale_to(self, factor: float) -> CoordinateSpace3D: ...
     def data_to_local(self, x: float, y: float, z: float) -> tuple[float, float, float]: ...
     def local_to_data(self, x: float, y: float, z: float) -> tuple[float, float, float]: ...
-    def surface(self, function: Callable[..., float], *, resolution: tuple[int, int] = (64, 48), inputs: Sequence[Parameter | Variable | TimeInput] = ()) -> Drawable: ...
-    def parametric(self, function: Callable[..., tuple[float, float, float]], domain: tuple[float, float], *, samples: int = 320, inputs: Sequence[Parameter | Variable | TimeInput] = ()) -> Drawable: ...
-    def field(self, function: Callable[..., tuple[float, float, float]], *, inputs: Sequence[Parameter | Variable | TimeInput] = ()) -> VectorField: ...
+    def surface(self, function: Callable[..., float], *, resolution: tuple[int, int] = (64, 48), inputs: Sequence[Parameter | Variable | Computed | TimeInput] = ()) -> Drawable: ...
+    def parametric(self, function: Callable[..., tuple[float, float, float]], domain: tuple[float, float], *, samples: int = 320, inputs: Sequence[Parameter | Variable | Computed | TimeInput] = ()) -> Drawable: ...
+    def field(self, function: Callable[..., tuple[float, float, float]], *, inputs: Sequence[Parameter | Variable | Computed | TimeInput] = ()) -> VectorField: ...
 
 Cartesian2D: TypeAlias = CoordinateSpace
 Cartesian3D: TypeAlias = CoordinateSpace3D
@@ -3306,7 +3425,7 @@ class Visualization:
         omitted axes retain the default ``Re`` and ``Im`` titles.
         """
         ...
-    def readout(self, source: _ReactiveScalar | Callable[..., float], *, inputs: Sequence[Parameter | Variable | TimeInput] = (), label: Optional[str] = None, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[Color] = None, invalid: str = "invalid") -> Readout:
+    def readout(self, source: _ReactiveScalar | Callable[..., float], *, inputs: Sequence[Parameter | Variable | Computed | TimeInput] = (), label: Optional[str] = None, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[Color] = None, invalid: str = "invalid") -> Readout:
         """Create a native numeric display with equally spaced, baseline-aligned terms.
 
         The label, equality sign, number, and unit all use ``font_size``;
@@ -3901,6 +4020,14 @@ class AssetManager:
         ...
 
 class Scene:
+    @property
+    def time(self) -> TimeInput:
+        """Return absolute timeline seconds as an explicit reactive input.
+
+        This is the same source as ``scene.viz.time``. Pass it to ``computed``
+        or an absolute property setter; it follows exact seeks and export.
+        """
+        ...
     def __init__(
         self,
         *,

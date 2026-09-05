@@ -119,6 +119,20 @@ struct ExportPipeline {
     pub result_sent: bool,
 }
 
+fn check_custom_animation_errors(world: &World) -> Result<()> {
+    match world
+        .get_resource::<gaanim_animation::CustomAnimationDiagnostics>()
+        .and_then(|errors| errors.first_error())
+        .or_else(|| {
+            world
+                .get_resource::<gaanim_animation::PropertyBindingDiagnostics>()
+                .and_then(|errors| errors.first_error())
+        }) {
+        Some(message) => Err(ExportError::Capture(message)),
+        None => Ok(()),
+    }
+}
+
 fn publish_export_result(
     result_tx: &SyncSender<Result<()>>,
     result_sent: &mut bool,
@@ -142,6 +156,8 @@ struct WindowRenderSize {
 
 fn export_pipeline_system(
     mut commands: Commands,
+    custom_errors: Option<Res<gaanim_animation::CustomAnimationDiagnostics>>,
+    property_errors: Option<Res<gaanim_animation::PropertyBindingDiagnostics>>,
     mut pipeline_res: ResMut<ExportPipeline>,
     mut timeline: ResMut<Timeline>,
     mut exit: MessageWriter<'_, AppExit>,
@@ -154,6 +170,25 @@ fn export_pipeline_system(
         ),
     >,
 ) {
+    if let Some(message) = custom_errors
+        .as_ref()
+        .and_then(|errors| errors.first_error())
+        .or_else(|| {
+            property_errors
+                .as_ref()
+                .and_then(|errors| errors.first_error())
+        })
+    {
+        let pipeline = &mut *pipeline_res;
+        export_log(&pipeline.telemetry, format!("  ERROR: {message}"));
+        publish_export_result(
+            &pipeline.result_tx,
+            &mut pipeline.result_sent,
+            Err(ExportError::Capture(message)),
+        );
+        exit.write(AppExit::Success);
+        return;
+    }
     if gltf_models.iter().count() != ready_gltf_models.iter().count() {
         return;
     }
@@ -433,6 +468,7 @@ where
     app.finish();
     app.cleanup();
     app.update();
+    check_custom_animation_errors(app.world())?;
     if let Some(mut background) = app
         .world_mut()
         .get_resource_mut::<gaanim_renderer::pipeline::CanvasBackground>()
@@ -496,6 +532,7 @@ where
     app.add_systems(Update, export_pipeline_system);
 
     app.run();
+    check_custom_animation_errors(app.world())?;
 
     match result_rx.try_recv() {
         Ok(result) => result,
@@ -578,6 +615,7 @@ where
     app.finish();
     app.cleanup();
     app.update();
+    check_custom_animation_errors(app.world())?;
     if let Some(mut background) = app
         .world_mut()
         .get_resource_mut::<gaanim_renderer::pipeline::CanvasBackground>()
@@ -628,6 +666,7 @@ where
         }
 
         app.update();
+        check_custom_animation_errors(app.world())?;
 
         let vello_scene = {
             let camera = app.world().get_resource::<gaanim_math::Camera>().cloned();
@@ -796,6 +835,7 @@ where
     app.finish();
     app.cleanup();
     app.update();
+    check_custom_animation_errors(app.world())?;
     if let Some(mut background) = app
         .world_mut()
         .get_resource_mut::<gaanim_renderer::pipeline::CanvasBackground>()
@@ -819,6 +859,7 @@ where
         let phase_started = Instant::now();
         app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
         app.update();
+        check_custom_animation_errors(app.world())?;
         timeline_update += phase_started.elapsed();
 
         let phase_started = Instant::now();
@@ -1001,6 +1042,8 @@ fn accept_hybrid_capture(pipeline: &mut HybridCapturePipeline, rgba: Vec<u8>) {
 
 fn hybrid_capture_system(
     mut commands: Commands,
+    custom_errors: Option<Res<gaanim_animation::CustomAnimationDiagnostics>>,
+    property_errors: Option<Res<gaanim_animation::PropertyBindingDiagnostics>>,
     mut pipeline: ResMut<HybridCapturePipeline>,
     mut timeline: ResMut<Timeline>,
     mut exit: MessageWriter<'_, AppExit>,
@@ -1017,6 +1060,17 @@ fn hybrid_capture_system(
         With<gaanim_scene::GltfMaterialBaseline>,
     >,
 ) {
+    if custom_errors
+        .as_ref()
+        .is_some_and(|errors| errors.first_error().is_some())
+        || property_errors
+            .as_ref()
+            .is_some_and(|errors| errors.first_error().is_some())
+    {
+        publish_hybrid_capture_result(&mut pipeline);
+        exit.write(AppExit::Success);
+        return;
+    }
     if gltf_models.iter().count() != ready_gltf_models.iter().count() {
         return;
     }
@@ -1185,6 +1239,7 @@ where
     );
 
     app.run();
+    check_custom_animation_errors(app.world())?;
     let frames = result_rx.recv().map_err(|_| {
         ExportError::Capture("hybrid capture exited before returning its frames".to_string())
     })?;
@@ -1201,6 +1256,37 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn export_rejects_custom_callback_diagnostics() {
+        let mut world = World::new();
+        assert!(check_custom_animation_errors(&world).is_ok());
+        world.insert_resource(gaanim_animation::CustomAnimationDiagnostics(vec![
+            gaanim_animation::CustomAnimationDiagnostic {
+                target: gaanim_core::ObjectId::from_raw(7),
+                alpha: 0.375,
+                message: "invalid callback output".into(),
+            },
+        ]));
+        let error = check_custom_animation_errors(&world)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("0.375"));
+        assert!(error.contains("invalid callback output"));
+        world.remove_resource::<gaanim_animation::CustomAnimationDiagnostics>();
+        world.insert_resource(gaanim_animation::PropertyBindingDiagnostics(vec![
+            gaanim_animation::PropertyBindingDiagnostic {
+                target: gaanim_core::ObjectId::from_raw(8),
+                time: 1.25,
+                message: "invalid computed value".into(),
+            },
+        ]));
+        let error = check_custom_animation_errors(&world)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("1.25"));
+        assert!(error.contains("invalid computed value"));
+    }
 
     #[test]
     fn export_result_channel_preserves_the_first_failure() {

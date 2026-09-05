@@ -158,6 +158,7 @@ const GAANIM_PACKAGE_INIT: &str = include_str!("../../gaanim_python/gaanim/__ini
 const GAANIM_COLORS: &str = include_str!("../../gaanim_python/gaanim/colors.py");
 const GAANIM_TEMPLATES: &str = include_str!("../../gaanim_python/gaanim/templates.py");
 const GAANIM_MATRIX: &str = include_str!("../../gaanim_python/gaanim/matrix.py");
+const GAANIM_ANIMATION_TYPES: &str = include_str!("../../gaanim_python/gaanim/animation_types.py");
 
 /// Build the public `gaanim` package around the builtin `gaanim_core` module.
 ///
@@ -195,6 +196,12 @@ fn bootstrap_gaanim_package(py: Python<'_>) -> PyResult<()> {
     let matrix_name = std::ffi::CString::new("gaanim.matrix").unwrap();
     let matrix = PyModule::from_code(py, &matrix_source, &matrix_file, &matrix_name)?;
     modules.set_item("gaanim.matrix", &matrix)?;
+
+    let types_source = std::ffi::CString::new(GAANIM_ANIMATION_TYPES).unwrap();
+    let types_file = std::ffi::CString::new("gaanim/animation_types.py").unwrap();
+    let types_name = std::ffi::CString::new("gaanim.animation_types").unwrap();
+    let animation_types = PyModule::from_code(py, &types_source, &types_file, &types_name)?;
+    modules.set_item("gaanim.animation_types", &animation_types)?;
 
     let init_source = std::ffi::CString::new(GAANIM_PACKAGE_INIT).unwrap();
     py.run(&init_source, Some(&package.dict()), None)

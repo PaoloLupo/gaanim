@@ -6,6 +6,31 @@ use gaanim_math::RateFunc;
 
 use crate::canvas::CanvasEndpoint;
 
+#[derive(Debug, Clone)]
+pub struct PropertySourceTarget {
+    pub sources: gaanim_animation::PropertySources,
+    pub parameters: Vec<(ObjectId, ObjectId)>,
+}
+
+impl PropertySourceTarget {
+    pub fn new(sources: gaanim_animation::PropertySources) -> Self {
+        let mut parameters = Vec::new();
+        for id in sources
+            .sources()
+            .iter()
+            .flat_map(|source| source.parameter_ids())
+        {
+            if !parameters.iter().any(|(logical, _)| *logical == id) {
+                parameters.push((id, id));
+            }
+        }
+        Self {
+            sources,
+            parameters,
+        }
+    }
+}
+
 /// An authored source whose live visual bounds can drive derived geometry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BoundsTarget {
@@ -30,12 +55,13 @@ pub struct DrawAnimationConfig {
 /// compile time, so compound animations retain deterministic seek behavior.
 #[derive(Debug, Clone, Default)]
 pub struct PropertyAnimation {
+    pub source_targets: Vec<PropertySourceTarget>,
     pub translation: Option<PropertyTranslation>,
     pub rotation: Option<PropertyRotation>,
     pub scale: Option<PropertyScale>,
     pub opacity: Option<f32>,
-    pub fill: Option<Color>,
-    pub stroke_color: Option<Color>,
+    pub fill: Option<gaanim_core::peniko::Brush>,
+    pub stroke_color: Option<gaanim_core::peniko::Brush>,
     pub stroke_width: Option<f64>,
     /// Manim-style color shortcut for currently visible vector paints.
     pub visible_color: Option<Color>,
@@ -45,7 +71,8 @@ pub struct PropertyAnimation {
 
 impl PropertyAnimation {
     pub fn is_empty(&self) -> bool {
-        self.translation.is_none()
+        self.source_targets.is_empty()
+            && self.translation.is_none()
             && self.rotation.is_none()
             && self.scale.is_none()
             && self.opacity.is_none()
@@ -58,7 +85,8 @@ impl PropertyAnimation {
     }
 
     pub(crate) fn is_transform_only(&self) -> bool {
-        (self.translation.is_some() || self.rotation.is_some() || self.scale.is_some())
+        self.source_targets.is_empty()
+            && (self.translation.is_some() || self.rotation.is_some() || self.scale.is_some())
             && self.opacity.is_none()
             && self.fill.is_none()
             && self.stroke_color.is_none()
@@ -74,6 +102,7 @@ pub enum PropertyTranslation {
     To(DVec3),
     ToAnchor { to: DVec3, anchor: Anchor },
     By(DVec3),
+    ToAnchorPoint(crate::canvas::AnchorPoint),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -94,6 +123,9 @@ pub enum PropertyScale {
 /// the initial "from" properties (resolved dynamically at timeline playback scheduling).
 #[derive(Debug, Clone)]
 pub enum AnimationType {
+    PropertySource(PropertySourceTarget),
+    /// Pure extension callback with explicitly owned property channels.
+    CustomProperties(gaanim_animation::CustomAnimation),
     /// Several typed property targets evaluated concurrently.
     Properties(PropertyAnimation),
     /// Fill/opacity targets applied only to glyphs resolved by a text selection.
@@ -227,6 +259,12 @@ pub enum AnimationType {
     },
     FillColorTo {
         to: Color,
+    },
+    FillPaintTo {
+        to: gaanim_core::peniko::Brush,
+    },
+    StrokePaintTo {
+        to: gaanim_core::peniko::Brush,
     },
     StrokeColorTo {
         to: Color,

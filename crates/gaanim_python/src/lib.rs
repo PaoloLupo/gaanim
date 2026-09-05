@@ -10,6 +10,7 @@ pyo3::create_exception!(
 mod brush;
 mod color;
 mod composition;
+mod custom;
 mod easing;
 mod py3d;
 mod pycanvas;

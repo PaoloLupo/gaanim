@@ -4,7 +4,7 @@ use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 
 use crate::color::PyColor;
-use crate::pydrawable::{resolve_at_target, PyAtTarget, PyDrawable};
+use crate::pydrawable::PyDrawable;
 use crate::pylayout::PyAnchor;
 
 #[pyclass(name = "Material3D", module = "gaanim_core", frozen, from_py_object)]
@@ -106,92 +106,97 @@ impl PyPrimitive3D {
     ) -> PyClassInitializer<Self> {
         PyClassInitializer::from(PyDrawable(handle.clone())).add_subclass(Self { handle })
     }
-
-    fn require_free_position(&self, operation: &str) -> PyResult<()> {
-        if self.handle.layout_owner().is_some() {
-            Err(crate::LayoutOwnershipError::new_err(format!(
-                "layout owns this Primitive3D's translation; operation: {operation}"
-            )))
-        } else {
-            Ok(())
-        }
-    }
 }
 
 #[pymethods]
 impl PyPrimitive3D {
-    fn opacity(slf: PyRef<'_, Self>, value: f32) -> PyRef<'_, Self> {
-        slf.handle.clone().opacity(value);
-        slf
+    fn opacity<'py>(slf: PyRef<'py, Self>, value: &Bound<'_, PyAny>) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        PyDrawable(slf.handle.clone()).opacity(value)?;
+        Ok(slf)
     }
 
-    fn z_index(slf: PyRef<'_, Self>, value: i32) -> PyRef<'_, Self> {
-        slf.handle.clone().z_index(value);
-        slf
+    fn z_index(slf: PyRef<'_, Self>, value: i32) -> PyResult<PyRef<'_, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            slf.handle.clone().z_index(value);
+            slf
+        })
     }
 
     #[pyo3(signature = (x, y=None, anchor=None))]
     fn move_to<'py>(
         slf: PyRef<'py, Self>,
         x: &Bound<'_, PyAny>,
-        y: Option<f64>,
+        y: Option<&Bound<'_, PyAny>>,
         anchor: Option<&PyAnchor>,
     ) -> PyResult<PyRef<'py, Self>> {
-        slf.require_free_position("move_to")?;
-        match resolve_at_target("move_to", x, y, anchor.is_some())? {
-            PyAtTarget::Coordinates { x, y } => {
-                slf.handle.clone().at_anchor(
-                    x,
-                    y,
-                    anchor.map(|anchor| anchor.0).unwrap_or_default(),
-                );
-            }
-            PyAtTarget::Drawable(reference) => {
-                slf.handle.clone().align_to(
-                    &reference,
-                    gaanim_api::canvas::Anchor::Center,
-                    gaanim_api::canvas::Anchor::Center,
-                );
-            }
-            PyAtTarget::AnchorPoint(point) => {
-                slf.handle.clone().at_anchor_point(point);
-            }
-        }
+        crate::custom::ensure_authoring_allowed()?;
+        PyDrawable(slf.handle.clone()).move_to(x, y, anchor)?;
         Ok(slf)
     }
 
-    fn move_to_3d(slf: PyRef<'_, Self>, x: f64, y: f64, z: f64) -> PyResult<PyRef<'_, Self>> {
-        slf.require_free_position("move_to_3d")?;
-        slf.handle.clone().move_to_3d(x, y, z);
+    fn move_to_3d<'py>(
+        slf: PyRef<'py, Self>,
+        x: &Bound<'_, PyAny>,
+        y: &Bound<'_, PyAny>,
+        z: &Bound<'_, PyAny>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        PyDrawable(slf.handle.clone()).move_to_3d(x, y, z)?;
         Ok(slf)
     }
 
-    fn scale_to(slf: PyRef<'_, Self>, factor: f64) -> PyRef<'_, Self> {
-        slf.handle.clone().scale_to(factor);
-        slf
+    fn scale_to<'py>(
+        slf: PyRef<'py, Self>,
+        factor: &Bound<'_, PyAny>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        PyDrawable(slf.handle.clone()).scale_to(factor)?;
+        Ok(slf)
     }
 
-    fn scale_to_3d(slf: PyRef<'_, Self>, x: f64, y: f64, z: f64) -> PyRef<'_, Self> {
-        slf.handle.clone().scale_to_3d(x, y, z);
-        slf
+    fn scale_to_3d<'py>(
+        slf: PyRef<'py, Self>,
+        x: &Bound<'_, PyAny>,
+        y: &Bound<'_, PyAny>,
+        z: &Bound<'_, PyAny>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        PyDrawable(slf.handle.clone()).scale_to_3d(x, y, z)?;
+        Ok(slf)
     }
 
-    fn rotate_to(slf: PyRef<'_, Self>, radians: f64) -> PyRef<'_, Self> {
-        slf.handle.clone().rotate_to(radians);
-        slf
+    fn rotate_to<'py>(
+        slf: PyRef<'py, Self>,
+        radians: &Bound<'_, PyAny>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        PyDrawable(slf.handle.clone()).rotate_to(radians)?;
+        Ok(slf)
     }
 
-    fn rotate_to_3d(slf: PyRef<'_, Self>, x: f64, y: f64, z: f64) -> PyRef<'_, Self> {
-        slf.handle.clone().rotate_to_3d(x, y, z);
-        slf
+    fn rotate_to_3d<'py>(
+        slf: PyRef<'py, Self>,
+        x: &Bound<'_, PyAny>,
+        y: &Bound<'_, PyAny>,
+        z: &Bound<'_, PyAny>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        PyDrawable(slf.handle.clone()).rotate_to_3d(x, y, z)?;
+        Ok(slf)
     }
 
-    fn with_pivot_3d(slf: PyRef<'_, Self>, x: f64, y: f64, z: f64) -> PyRef<'_, Self> {
-        slf.handle.clone().with_pivot_3d(x, y, z);
-        slf
+    fn with_pivot_3d(slf: PyRef<'_, Self>, x: f64, y: f64, z: f64) -> PyResult<PyRef<'_, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            slf.handle.clone().with_pivot_3d(x, y, z);
+            slf
+        })
     }
 
     fn material(slf: PyRef<'_, Self>, material: PyMaterial3D) -> PyResult<PyRef<'_, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
         slf.handle
             .clone()
             .material(material.0)

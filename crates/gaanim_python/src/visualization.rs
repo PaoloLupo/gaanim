@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use gaanim_animation::{ReactiveFunction, ReactiveInput, ScalarSource};
+use gaanim_animation::{ReactiveFunction, ScalarSource};
 use gaanim_api::canvas::{
     ArrowFieldOptions, ArrowVectorFieldHandle, Cartesian3DVisibility, CartesianVisibility,
     ChartHandle, CoordinateRef, CoordinateSpace3DHandle, CoordinateSpaceHandle,
@@ -52,7 +52,7 @@ enum ReactiveOwner {
 #[pyclass(name = "TimeInput", module = "gaanim_core", from_py_object)]
 #[derive(Clone)]
 pub struct PyTimeInput {
-    canvas: Arc<Mutex<ApiCanvas>>,
+    pub(crate) canvas: Arc<Mutex<ApiCanvas>>,
 }
 
 #[pyclass(name = "Computed", module = "gaanim_core", from_py_object)]
@@ -81,27 +81,28 @@ fn validate_owners(owners: &[ReactiveOwner], canvas: &Arc<Mutex<ApiCanvas>>) -> 
 fn parse_inputs(
     py: Python<'_>,
     inputs: Vec<Py<PyAny>>,
-) -> PyResult<(Vec<ReactiveInput>, Vec<ReactiveOwner>)> {
+) -> PyResult<(Vec<ScalarSource>, Vec<ReactiveOwner>)> {
     let mut native = Vec::with_capacity(inputs.len());
     let mut owners = Vec::with_capacity(inputs.len());
     for input in inputs {
         let value = input.bind(py);
-        if let Ok(parameter) = value.extract::<PyRef<'_, PyParameter>>() {
-            native.push(ReactiveInput::Signal(parameter.inner.drawable().id));
+        if let Ok(computed) = value.extract::<PyRef<'_, PyComputed>>() {
+            native.push(computed.source.clone());
+            owners.extend(computed.owners.iter().cloned());
+        } else if let Ok(parameter) = value.extract::<PyRef<'_, PyParameter>>() {
+            native.push(ScalarSource::Signal(parameter.inner.drawable().id));
             owners.push(ReactiveOwner::Drawable(parameter.inner.drawable().clone()));
         } else if let Ok(variable) = value.extract::<PyRef<'_, PyVariable>>() {
-            native.push(ReactiveInput::Signal(
-                variable.parameter.inner.drawable().id,
-            ));
+            native.push(ScalarSource::Signal(variable.parameter.inner.drawable().id));
             owners.push(ReactiveOwner::Drawable(
                 variable.parameter.inner.drawable().clone(),
             ));
         } else if let Ok(time) = value.extract::<PyRef<'_, PyTimeInput>>() {
-            native.push(ReactiveInput::Time);
+            native.push(ScalarSource::Time);
             owners.push(ReactiveOwner::Time(time.canvas.clone()));
         } else {
             return Err(PyTypeError::new_err(
-                "inputs must contain only Parameter, Variable, or scene.time values",
+                "inputs must contain only Parameter, Variable, Computed, or scene.time values",
             ));
         }
     }
@@ -112,30 +113,36 @@ fn python_function(
     callback: Py<PyAny>,
     coordinate_arity: usize,
     output_arity: usize,
-    inputs: Vec<ReactiveInput>,
+    inputs: Vec<ScalarSource>,
 ) -> ReactiveFunction {
-    ReactiveFunction::new(coordinate_arity, output_arity, inputs, move |arguments| {
-        Python::attach(|py| {
-            let tuple = PyTuple::new(py, arguments).map_err(|error| error.to_string())?;
-            let result = callback
-                .bind(py)
-                .call1(tuple)
-                .map_err(|error| error.to_string())?;
-            if output_arity == 1 {
-                result
-                    .extract::<f64>()
-                    .map(|value| vec![value])
-                    .map_err(|error| error.to_string())
-            } else {
-                result
-                    .extract::<Vec<f64>>()
-                    .map_err(|error| error.to_string())
-            }
+    ReactiveFunction::from_sources(coordinate_arity, output_arity, inputs, move |arguments| {
+        crate::custom::with_pure_callback(|| {
+            Python::attach(|py| {
+                let tuple = PyTuple::new(py, arguments).map_err(|error| error.to_string())?;
+                let result = callback
+                    .bind(py)
+                    .call1(tuple)
+                    .map_err(|error| error.to_string())?;
+                if output_arity == 1 {
+                    result
+                        .extract::<f64>()
+                        .map(|value| vec![value])
+                        .map_err(|error| error.to_string())
+                } else {
+                    result
+                        .extract::<Vec<f64>>()
+                        .map_err(|error| error.to_string())
+                }
+            })
         })
     })
 }
 
-fn validate_callback(py: Python<'_>, callback: &Bound<'_, PyAny>, arity: usize) -> PyResult<()> {
+pub(crate) fn validate_callback(
+    py: Python<'_>,
+    callback: &Bound<'_, PyAny>,
+    arity: usize,
+) -> PyResult<()> {
     if !callback.is_callable() {
         return Err(PyTypeError::new_err("callback must be callable"));
     }
@@ -229,6 +236,56 @@ pub(crate) fn extract_scalar_source(
             "expected float, Parameter, Variable, Computed, or scene.time",
         ))
     }
+}
+
+/// Resolve a source for an existing handle without exposing its canvas internals.
+pub(crate) fn extract_scalar_source_for_drawable(
+    value: Bound<'_, PyAny>,
+    target: &gaanim_api::canvas::DrawableHandle,
+) -> PyResult<ScalarSource> {
+    let (source, owners) = if let Ok(computed) = value.extract::<PyRef<'_, PyComputed>>() {
+        (computed.source.clone(), computed.owners.clone())
+    } else if let Ok(parameter) = value.extract::<PyRef<'_, PyParameter>>() {
+        (
+            parameter.inner.source(),
+            vec![ReactiveOwner::Drawable(parameter.inner.drawable().clone())],
+        )
+    } else if let Ok(variable) = value.extract::<PyRef<'_, PyVariable>>() {
+        (
+            variable.parameter.inner.source(),
+            vec![ReactiveOwner::Drawable(
+                variable.parameter.inner.drawable().clone(),
+            )],
+        )
+    } else if let Ok(time) = value.extract::<PyRef<'_, PyTimeInput>>() {
+        (
+            ScalarSource::Time,
+            vec![ReactiveOwner::Time(time.canvas.clone())],
+        )
+    } else if let Ok(number) = value.extract::<f64>() {
+        if !number.is_finite() {
+            return Err(value_error("reactive scalars must be finite"));
+        }
+        return Ok(ScalarSource::constant(number));
+    } else {
+        return Err(PyTypeError::new_err(
+            "expected float, Parameter, Variable, Computed, or scene.time",
+        ));
+    };
+    for owner in owners {
+        let valid = match owner {
+            ReactiveOwner::Drawable(handle) => target.same_canvas(&handle),
+            ReactiveOwner::Time(canvas) => {
+                canvas.lock().expect("scene canvas poisoned").owns(target)
+            }
+        };
+        if !valid {
+            return Err(value_error(
+                "reactive inputs cannot reference values from another Scene",
+            ));
+        }
+    }
+    Ok(source)
 }
 
 #[pyfunction(signature = (callback, *, inputs=Vec::new()))]
@@ -806,19 +863,22 @@ pub struct PyParameter {
 #[pymethods]
 impl PyParameter {
     #[getter]
-    fn current(&self) -> f64 {
-        self.inner.current()
+    fn current(&self) -> PyResult<f64> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.inner.current())
     }
 
     fn set(&self, value: f64) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
         self.inner.set(value).map_err(value_error)
     }
 
     #[getter]
-    fn animate(&self) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn animate(&self) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCanvasAnim {
             inner: self.inner.animate(),
-        }
+        })
     }
 
     /// Drive this scalar directly from a Python callback.
@@ -829,6 +889,7 @@ impl PyParameter {
         reset: Option<Py<PyAny>>,
         fixed_dt: Option<f64>,
     ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
         if !Python::attach(|py| callback.bind(py).is_callable()) {
             return Err(PyValueError::new_err("callback must be callable"));
         }
@@ -912,8 +973,11 @@ impl PyParameter {
         Ok(self.clone())
     }
 
-    fn remove_updater(&self) {
-        self.inner.drawable().remove_updater();
+    fn remove_updater(&self) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            self.inner.drawable().remove_updater();
+        })
     }
 
     /// Drive this parameter's value along a sampled `(times, values)` series,
@@ -932,6 +996,7 @@ impl PyParameter {
         scale: f64,
         offset: f64,
     ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
         let interpolation = crate::pydrawable::parse_sampled_interpolation(interpolation)?;
         self.inner
             .drawable()
@@ -986,19 +1051,22 @@ impl PyVariable {
 #[pymethods]
 impl PyVariable {
     #[getter]
-    fn current(&self) -> f64 {
-        self.parameter.inner.current()
+    fn current(&self) -> PyResult<f64> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.parameter.inner.current())
     }
 
     fn set(&self, value: f64) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
         self.parameter.inner.set(value).map_err(value_error)
     }
 
     #[getter]
-    fn animate(&self) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn animate(&self) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCanvasAnim {
             inner: self.parameter.inner.animate(),
-        }
+        })
     }
 
     #[pyo3(signature = (callback, *, reset=None, fixed_dt=None))]
@@ -1008,29 +1076,37 @@ impl PyVariable {
         reset: Option<Py<PyAny>>,
         fixed_dt: Option<f64>,
     ) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
         self.parameter.add_updater_fn(callback, reset, fixed_dt)?;
         Ok(())
     }
 
-    fn remove_updater(&self) {
-        self.parameter.remove_updater();
+    fn remove_updater(&self) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            self.parameter.remove_updater()?;
+        })
     }
 
     #[getter]
-    fn label(&self) -> Option<PyDrawable> {
-        self.label_part.clone()
+    fn label(&self) -> PyResult<Option<PyDrawable>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.label_part.clone())
     }
     #[getter]
-    fn equals(&self) -> Option<PyDrawable> {
-        self.equals_part.clone()
+    fn equals(&self) -> PyResult<Option<PyDrawable>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.equals_part.clone())
     }
     #[getter]
-    fn number(&self) -> PyDrawable {
-        self.number_part.clone()
+    fn number(&self) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.number_part.clone())
     }
     #[getter]
-    fn unit(&self) -> Option<PyDrawable> {
-        self.unit_part.clone()
+    fn unit(&self) -> PyResult<Option<PyDrawable>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.unit_part.clone())
     }
 }
 
@@ -1064,20 +1140,24 @@ impl PyReadout {
 #[pymethods]
 impl PyReadout {
     #[getter]
-    fn label(&self) -> Option<PyDrawable> {
-        self.label_part.clone()
+    fn label(&self) -> PyResult<Option<PyDrawable>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.label_part.clone())
     }
     #[getter]
-    fn equals(&self) -> Option<PyDrawable> {
-        self.equals_part.clone()
+    fn equals(&self) -> PyResult<Option<PyDrawable>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.equals_part.clone())
     }
     #[getter]
-    fn number(&self) -> PyDrawable {
-        self.number_part.clone()
+    fn number(&self) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.number_part.clone())
     }
     #[getter]
-    fn unit(&self) -> Option<PyDrawable> {
-        self.unit_part.clone()
+    fn unit(&self) -> PyResult<Option<PyDrawable>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.unit_part.clone())
     }
 }
 
@@ -1087,8 +1167,9 @@ pub struct PyCoordinateRef(pub CoordinateRef);
 
 #[pymethods]
 impl PyCoordinateRef {
-    fn place(&self, drawable: &PyDrawable) -> PyDrawable {
-        PyDrawable(drawable.0.clone().at_coordinate(self.0))
+    fn place(&self, drawable: &PyDrawable) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyDrawable(drawable.0.clone().at_coordinate(self.0)))
     }
 }
 
@@ -1112,49 +1193,57 @@ pub struct PyCoordinateSpaceAnimation {
 
 #[pymethods]
 impl PyCoordinateSpaceAnimation {
-    fn create(&self) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn create(&self) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCanvasAnim {
             inner: self.inner.drawable().animate().create(),
-        }
+        })
     }
 
-    fn write(&self) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn write(&self) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCanvasAnim {
             inner: self.inner.drawable().animate().write(),
-        }
+        })
     }
 
-    fn fade_in(&self) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn fade_in(&self) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCanvasAnim {
             inner: self.inner.drawable().animate().fade_in(),
-        }
+        })
     }
 
-    fn fade_out(&self) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn fade_out(&self) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCanvasAnim {
             inner: self.inner.drawable().animate().fade_out(),
-        }
+        })
     }
 
-    fn move_to(&self, x: f64, y: f64) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn move_to(&self, x: f64, y: f64) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCanvasAnim {
             inner: self.inner.drawable().animate().move_to(x, y),
-        }
+        })
     }
 
-    fn scale_to(&self, factor: f64) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn scale_to(&self, factor: f64) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCanvasAnim {
             inner: self.inner.drawable().animate().scale_to(factor),
-        }
+        })
     }
 
-    fn rotate_to(&self, radians: f64) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn rotate_to(&self, radians: f64) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCanvasAnim {
             inner: self.inner.drawable().animate().rotate_to(radians),
-        }
+        })
     }
 
     fn view_to(&self, x_domain: (f64, f64), y_domain: (f64, f64)) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
         self.inner
             .view_to_animation(x_domain, y_domain)
             .map(|inner| PyCanvasAnim { inner })
@@ -1225,16 +1314,18 @@ fn stream_direction(value: &str) -> PyResult<StreamDirection> {
 #[pymethods]
 impl PyVectorField {
     #[getter]
-    fn dimensions(&self) -> usize {
-        match self.inner {
+    fn dimensions(&self) -> PyResult<usize> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(match self.inner {
             PyVectorFieldInner::Two(_) => 2,
             PyVectorFieldInner::Three(_) => 3,
-        }
+        })
     }
 
     #[getter]
-    fn evaluation(&self) -> &'static str {
-        self.evaluation
+    fn evaluation(&self) -> PyResult<&'static str> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.evaluation)
     }
 
     #[pyo3(signature = (*, resolution=None, min_length=0.0, max_length=None, length_scale=1.0, width=0.02, tip_length=None, tip_width=None, color=None, colormap=None, color_range=None))]
@@ -1251,6 +1342,7 @@ impl PyVectorField {
         colormap: Option<PyColorMapArg>,
         color_range: Option<(f64, f64)>,
     ) -> PyResult<PyArrowVectorField> {
+        crate::custom::ensure_authoring_allowed()?;
         if color.is_some() && colormap.is_some() {
             return Err(value_error("color and colormap are mutually exclusive"));
         }
@@ -1321,6 +1413,7 @@ impl PyVectorField {
         colormap: Option<PyColorMapArg>,
         color_range: Option<(f64, f64)>,
     ) -> PyResult<PyStreamLines> {
+        crate::custom::ensure_authoring_allowed()?;
         if color.is_some() && colormap.is_some() {
             return Err(value_error("color and colormap are mutually exclusive"));
         }
@@ -1389,6 +1482,7 @@ impl PyVectorField {
         stagnation: f64,
         padding: f64,
     ) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
         let integration = StreamlineOptions {
             direction: stream_direction(direction)?,
             tolerance,
@@ -1436,6 +1530,7 @@ impl PyVectorField {
         color_range: Option<(f64, f64)>,
         opacity: f64,
     ) -> PyResult<PyFlowParticles> {
+        crate::custom::ensure_authoring_allowed()?;
         if color.is_some() && colormap.is_some() {
             return Err(value_error("color and colormap are mutually exclusive"));
         }
@@ -1482,33 +1577,38 @@ impl PyVectorField {
 
 #[pymethods]
 impl PyArrowVectorField {
-    fn drawable(&self) -> PyDrawable {
-        PyDrawable(self.inner.drawable().clone())
+    fn drawable(&self) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyDrawable(self.inner.drawable().clone()))
     }
 
     #[getter]
-    fn animate(&self) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn animate(&self) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCanvasAnim {
             inner: self.inner.drawable().animate(),
-        }
+        })
     }
 }
 
 #[pymethods]
 impl PyStreamLines {
-    fn drawable(&self) -> PyDrawable {
-        PyDrawable(self.inner.drawable().clone())
+    fn drawable(&self) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyDrawable(self.inner.drawable().clone()))
     }
 
     #[getter]
-    fn animate(&self) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn animate(&self) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCanvasAnim {
             inner: self.inner.drawable().animate(),
-        }
+        })
     }
 
     #[pyo3(signature = (duration=2.0, *, time_width=0.15))]
     fn flow(&self, duration: f64, time_width: f64) -> PyResult<Vec<PyCanvasAnim>> {
+        crate::custom::ensure_authoring_allowed()?;
         if !duration.is_finite() || duration <= 0.0 {
             return Err(value_error("duration must be finite and positive"));
         }
@@ -1526,23 +1626,28 @@ impl PyStreamLines {
 
 #[pymethods]
 impl PyFlowParticles {
-    fn drawable(&self) -> PyDrawable {
-        PyDrawable(self.inner.drawable().clone())
+    fn drawable(&self) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyDrawable(self.inner.drawable().clone()))
     }
 
     #[getter]
-    fn animate(&self) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn animate(&self) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCanvasAnim {
             inner: self.inner.drawable().animate(),
-        }
+        })
     }
 
-    fn flow(&self) -> Vec<PyCanvasAnim> {
-        self.inner
-            .flow()
-            .into_iter()
-            .map(|inner| PyCanvasAnim { inner })
-            .collect()
+    fn flow(&self) -> PyResult<Vec<PyCanvasAnim>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            self.inner
+                .flow()
+                .into_iter()
+                .map(|inner| PyCanvasAnim { inner })
+                .collect()
+        })
     }
 }
 
@@ -1567,6 +1672,7 @@ pub struct PyChartAnimation {
 impl PyChartAnimation {
     #[pyo3(signature = (target, *, match_="key", fallback="error"))]
     fn to(&self, target: &PyChartSpec, match_: &str, fallback: &str) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
         let matching = match match_ {
             "key" => MatchPolicy::Key,
             "index" => MatchPolicy::Index,
@@ -1603,19 +1709,22 @@ impl PyChart {
 
 #[pymethods]
 impl PyChart {
-    fn drawable(&self) -> PyDrawable {
-        PyDrawable(self.inner.drawable().clone())
+    fn drawable(&self) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyDrawable(self.inner.drawable().clone()))
     }
 
     #[getter]
-    fn animate(&self) -> PyChartAnimation {
-        PyChartAnimation {
+    fn animate(&self) -> PyResult<PyChartAnimation> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyChartAnimation {
             inner: self.inner.clone(),
             canvas: self.canvas.clone(),
-        }
+        })
     }
 
     fn layer(&self, name: &str) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         self.inner
             .layer(name)
             .cloned()
@@ -1623,26 +1732,36 @@ impl PyChart {
             .ok_or_else(|| value_error("layer must be marks, axes, grid, guides, or labels"))
     }
 
-    fn move_to(&self, x: f64, y: f64) -> Self {
-        let mut result = self.clone();
-        result.inner = result.inner.clone().move_to(x, y);
-        result
+    fn move_to(&self, x: f64, y: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            let mut result = self.clone();
+            result.inner = result.inner.clone().move_to(x, y);
+            result
+        })
     }
 
-    fn move_to_3d(&self, x: f64, y: f64, z: f64) -> Self {
-        let mut result = self.clone();
-        result.inner = result.inner.clone().move_to_3d(x, y, z);
-        result
+    fn move_to_3d(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            let mut result = self.clone();
+            result.inner = result.inner.clone().move_to_3d(x, y, z);
+            result
+        })
     }
 
-    fn scale_to(&self, factor: f64) -> Self {
-        let mut result = self.clone();
-        result.inner = result.inner.clone().scale_to(factor);
-        result
+    fn scale_to(&self, factor: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            let mut result = self.clone();
+            result.inner = result.inner.clone().scale_to(factor);
+            result
+        })
     }
 
     #[pyo3(signature = (fields, *, format=None))]
     fn inspect(&self, fields: Vec<String>, format: Option<String>) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
         for field in &fields {
             self.inner
                 .spec()
@@ -1657,8 +1776,9 @@ impl PyChart {
     }
 
     #[getter]
-    fn inspection_enabled(&self) -> bool {
-        !self.inspection_fields.is_empty()
+    fn inspection_enabled(&self) -> PyResult<bool> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(!self.inspection_fields.is_empty())
     }
 }
 
@@ -1671,18 +1791,21 @@ pub struct PyNumberLine {
 
 #[pymethods]
 impl PyNumberLine {
-    fn drawable(&self) -> PyDrawable {
-        PyDrawable(self.inner.drawable().clone())
+    fn drawable(&self) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyDrawable(self.inner.drawable().clone()))
     }
 
     #[getter]
-    fn animate(&self) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn animate(&self) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCanvasAnim {
             inner: self.inner.drawable().animate(),
-        }
+        })
     }
 
     fn coord(&self, value: f64) -> PyResult<PyCoordinateRef> {
+        crate::custom::ensure_authoring_allowed()?;
         self.inner
             .coord(value)
             .map(PyCoordinateRef)
@@ -1690,6 +1813,7 @@ impl PyNumberLine {
     }
 
     fn data_to_local(&self, value: f64) -> PyResult<f64> {
+        crate::custom::ensure_authoring_allowed()?;
         self.inner.data_to_local(value).map_err(value_error)
     }
 
@@ -1699,6 +1823,7 @@ impl PyNumberLine {
         value: Bound<'_, PyAny>,
         normal_offset: Option<Bound<'_, PyAny>>,
     ) -> PyResult<PyPointRef> {
+        crate::custom::ensure_authoring_allowed()?;
         let value = extract_scalar_source(value, &self.canvas)?;
         let normal_offset = normal_offset
             .map(|value| extract_scalar_source(value, &self.canvas))
@@ -1722,6 +1847,7 @@ impl PyNumberLine {
         tolerance: f64,
         inputs: Vec<Py<PyAny>>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let function = checked_python_function(py, function, 1, 1, inputs, &self.canvas)?;
         let reveal = reveal
             .map(|value| extract_scalar_source(value, &self.canvas))
@@ -1742,6 +1868,7 @@ impl PyNumberLine {
     }
 
     fn layer(&self, name: &str) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let layer = match name {
             "axis" => SpaceLayer::Axes,
             "ticks" => SpaceLayer::Ticks,
@@ -1766,18 +1893,21 @@ pub struct PyPolarSpace {
 
 #[pymethods]
 impl PyPolarSpace {
-    fn drawable(&self) -> PyDrawable {
-        PyDrawable(self.inner.drawable().clone())
+    fn drawable(&self) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyDrawable(self.inner.drawable().clone()))
     }
 
     #[getter]
-    fn animate(&self) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn animate(&self) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCanvasAnim {
             inner: self.inner.drawable().animate(),
-        }
+        })
     }
 
     fn coord(&self, radius: f64, angle: f64) -> PyResult<PyCoordinateRef> {
+        crate::custom::ensure_authoring_allowed()?;
         self.inner
             .coord(radius, angle)
             .map(PyCoordinateRef)
@@ -1785,6 +1915,7 @@ impl PyPolarSpace {
     }
 
     fn layer(&self, name: &str) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let layer = match name {
             "grid" => SpaceLayer::MajorGrid,
             "axes" => SpaceLayer::Axes,
@@ -1806,6 +1937,7 @@ impl PyPolarSpace {
         domain: (f64, f64),
         samples: usize,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if !function.is_callable() {
             return Err(PyTypeError::new_err("function must be callable"));
         }
@@ -1831,18 +1963,21 @@ impl PyCoordinateSpace3D {
 
 #[pymethods]
 impl PyCoordinateSpace3D {
-    fn drawable(&self) -> PyDrawable {
-        PyDrawable(self.inner.drawable().clone())
+    fn drawable(&self) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyDrawable(self.inner.drawable().clone()))
     }
 
     #[getter]
-    fn animate(&self) -> PyCanvasAnim {
-        PyCanvasAnim {
+    fn animate(&self) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCanvasAnim {
             inner: self.inner.drawable().animate(),
-        }
+        })
     }
 
     fn layer(&self, name: &str) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let layer = match name {
             "grid" => SpaceLayer::MajorGrid,
             "axis" | "axes" => SpaceLayer::Axes,
@@ -1862,15 +1997,24 @@ impl PyCoordinateSpace3D {
             .ok_or_else(|| value_error(format!("layer {name:?} is not present")))
     }
 
-    fn move_to_3d(&self, x: f64, y: f64, z: f64) -> Self {
-        Self::new(self.inner.clone().move_to([x, y, z]), self.canvas.clone())
+    fn move_to_3d(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self::new(
+            self.inner.clone().move_to([x, y, z]),
+            self.canvas.clone(),
+        ))
     }
 
-    fn scale_to(&self, factor: f64) -> Self {
-        Self::new(self.inner.clone().scale_to(factor), self.canvas.clone())
+    fn scale_to(&self, factor: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self::new(
+            self.inner.clone().scale_to(factor),
+            self.canvas.clone(),
+        ))
     }
 
     fn data_to_local(&self, x: f64, y: f64, z: f64) -> PyResult<(f64, f64, f64)> {
+        crate::custom::ensure_authoring_allowed()?;
         self.inner
             .data_to_local([x, y, z])
             .map(|point| (point[0], point[1], point[2]))
@@ -1878,6 +2022,7 @@ impl PyCoordinateSpace3D {
     }
 
     fn local_to_data(&self, x: f64, y: f64, z: f64) -> PyResult<(f64, f64, f64)> {
+        crate::custom::ensure_authoring_allowed()?;
         self.inner
             .local_to_data([x, y, z])
             .map(|point| (point[0], point[1], point[2]))
@@ -1892,6 +2037,7 @@ impl PyCoordinateSpace3D {
         resolution: (usize, usize),
         inputs: Vec<Py<PyAny>>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let function = checked_python_function(py, function, 2, 1, inputs, &self.canvas)?;
         self.canvas
             .lock()
@@ -1910,6 +2056,7 @@ impl PyCoordinateSpace3D {
         samples: usize,
         inputs: Vec<Py<PyAny>>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let function = checked_python_function(py, function, 1, 3, inputs, &self.canvas)?;
         self.canvas
             .lock()
@@ -1926,6 +2073,7 @@ impl PyCoordinateSpace3D {
         function: Py<PyAny>,
         inputs: Vec<Py<PyAny>>,
     ) -> PyResult<PyVectorField> {
+        crate::custom::ensure_authoring_allowed()?;
         let (inner, evaluation) =
             field_evaluator_3d(py, function, inputs, &self.canvas, &self.inner)?;
         Ok(PyVectorField {
@@ -1944,30 +2092,45 @@ impl PyCoordinateSpace {
 
 #[pymethods]
 impl PyCoordinateSpace {
-    fn drawable(&self) -> PyDrawable {
-        PyDrawable(self.inner.drawable().clone())
+    fn drawable(&self) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyDrawable(self.inner.drawable().clone()))
     }
 
     #[getter]
-    fn animate(&self) -> PyCoordinateSpaceAnimation {
-        PyCoordinateSpaceAnimation {
+    fn animate(&self) -> PyResult<PyCoordinateSpaceAnimation> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCoordinateSpaceAnimation {
             inner: self.inner.clone(),
-        }
+        })
     }
 
-    fn move_to(&self, x: f64, y: f64) -> Self {
-        Self::new(self.inner.clone().move_to(x, y), self.canvas.clone())
+    fn move_to(&self, x: f64, y: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self::new(
+            self.inner.clone().move_to(x, y),
+            self.canvas.clone(),
+        ))
     }
 
-    fn scale_to(&self, factor: f64) -> Self {
-        Self::new(self.inner.clone().scale_to(factor), self.canvas.clone())
+    fn scale_to(&self, factor: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self::new(
+            self.inner.clone().scale_to(factor),
+            self.canvas.clone(),
+        ))
     }
 
-    fn rotate_to(&self, radians: f64) -> Self {
-        Self::new(self.inner.clone().rotate_to(radians), self.canvas.clone())
+    fn rotate_to(&self, radians: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self::new(
+            self.inner.clone().rotate_to(radians),
+            self.canvas.clone(),
+        ))
     }
 
     fn view_to(&self, x_domain: (f64, f64), y_domain: (f64, f64)) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
         self.inner
             .view_to(x_domain, y_domain)
             .map_err(value_error)?;
@@ -1975,6 +2138,7 @@ impl PyCoordinateSpace {
     }
 
     fn coord(&self, x: f64, y: f64) -> PyResult<PyCoordinateRef> {
+        crate::custom::ensure_authoring_allowed()?;
         self.inner
             .coord(x, y)
             .map(PyCoordinateRef)
@@ -1982,14 +2146,17 @@ impl PyCoordinateSpace {
     }
 
     fn data_to_local(&self, x: f64, y: f64) -> PyResult<(f64, f64)> {
+        crate::custom::ensure_authoring_allowed()?;
         self.inner.data_to_local(x, y).map_err(value_error)
     }
 
     fn local_to_data(&self, x: f64, y: f64) -> PyResult<(f64, f64)> {
+        crate::custom::ensure_authoring_allowed()?;
         self.inner.local_to_data(x, y).map_err(value_error)
     }
 
     fn layer(&self, name: &str) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let layer = match name {
             "grid" | "major_grid" => SpaceLayer::MajorGrid,
             "minor_grid" => SpaceLayer::MinorGrid,
@@ -2021,6 +2188,7 @@ impl PyCoordinateSpace {
         derivative: Option<Py<PyAny>>,
         inputs: Vec<Py<PyAny>>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let domain = domain.unwrap_or_else(|| self.inner.map().x.domain());
         let sampling = sampling(samples, tolerance)?;
         let callback = derivative.unwrap_or(function);
@@ -2042,6 +2210,7 @@ impl PyCoordinateSpace {
         tolerance: f64,
         inputs: Vec<Py<PyAny>>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let function = checked_python_function(py, function, 1, 2, inputs, &self.canvas)?;
         self.canvas
             .lock()
@@ -2057,6 +2226,7 @@ impl PyCoordinateSpace {
         function: Bound<'_, PyAny>,
         resolution: (usize, usize),
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if !function.is_callable() {
             return Err(PyTypeError::new_err("function must be callable"));
         }
@@ -2080,6 +2250,7 @@ impl PyCoordinateSpace {
         levels: Vec<f64>,
         resolution: (usize, usize),
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if !function.is_callable() {
             return Err(PyTypeError::new_err("function must be callable"));
         }
@@ -2108,6 +2279,7 @@ impl PyCoordinateSpace {
         function: Py<PyAny>,
         inputs: Vec<Py<PyAny>>,
     ) -> PyResult<PyVectorField> {
+        crate::custom::ensure_authoring_allowed()?;
         let (inner, evaluation) =
             field_evaluator_2d(py, function, inputs, &self.canvas, &self.inner)?;
         Ok(PyVectorField {
@@ -2119,6 +2291,7 @@ impl PyCoordinateSpace {
 
     /// Orthogonal projections from a data point to both coordinate axes.
     fn projections(&self, x: f64, y: f64) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         let x_cross = self.inner.map().x.crossing_value();
         let y_cross = self.inner.map().y.crossing_value();
         let mut canvas = self.canvas.lock().expect("scene canvas poisoned");
@@ -2134,6 +2307,7 @@ impl PyCoordinateSpace {
     }
 
     fn secant(&self, function: Bound<'_, PyAny>, x0: f64, x1: f64) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if !function.is_callable() || !x0.is_finite() || !x1.is_finite() || x0 == x1 {
             return Err(value_error(
                 "secant requires a callable and two distinct finite x values",
@@ -2157,6 +2331,7 @@ impl PyCoordinateSpace {
         length: Option<f64>,
         dx: Option<f64>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         self.calculus_line(function, x, length, dx, false)
     }
 
@@ -2168,6 +2343,7 @@ impl PyCoordinateSpace {
         length: Option<f64>,
         dx: Option<f64>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         self.calculus_line(function, x, length, dx, true)
     }
 
@@ -2179,6 +2355,7 @@ impl PyCoordinateSpace {
         samples: usize,
         baseline: f64,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if !function.is_callable() || samples < 2 || domain.0 >= domain.1 {
             return Err(value_error(
                 "area_under requires a valid callable, domain, and samples >= 2",
@@ -2232,6 +2409,7 @@ impl PyCoordinateSpace {
         color: Option<PyColor>,
         width: Option<f64>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if xs.is_empty() || xs.len() != ys.len() {
             return Err(value_error(
                 "plot_data requires non-empty xs and ys lists of matching length",
@@ -2269,6 +2447,7 @@ impl PyCoordinateSpace {
         policy: &str,
         color: Option<PyColor>,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if xs.is_empty() || xs.len() != ys.len() {
             return Err(value_error(
                 "scatter_data requires non-empty xs and ys lists of matching length",
@@ -2302,6 +2481,7 @@ impl PyCoordinateSpace {
         method: &str,
         baseline: f64,
     ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
         if !function.is_callable() || rectangles == 0 || domain.0 >= domain.1 {
             return Err(value_error(
                 "riemann_sum requires a valid callable, domain, and positive rectangle count",
@@ -2508,21 +2688,24 @@ impl PyDataSource {
 
 #[pymethods]
 impl PyDrawable {
-    fn at_coordinate(&self, coordinate: &PyCoordinateRef) -> Self {
-        Self(self.0.clone().at_coordinate(coordinate.0))
+    fn at_coordinate(&self, coordinate: &PyCoordinateRef) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self(self.0.clone().at_coordinate(coordinate.0)))
     }
 }
 
 #[pymethods]
 impl PyVisualization {
     #[getter]
-    fn time(&self) -> PyTimeInput {
-        PyTimeInput {
+    fn time(&self) -> PyResult<PyTimeInput> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyTimeInput {
             canvas: self.inner.clone(),
-        }
+        })
     }
 
     fn parameter(&self, initial: f64) -> PyResult<PyParameter> {
+        crate::custom::ensure_authoring_allowed()?;
         let inner = self
             .inner
             .lock()
@@ -2548,6 +2731,7 @@ impl PyVisualization {
         color: Option<PyColor>,
         invalid: &str,
     ) -> PyResult<Py<PyReadout>> {
+        crate::custom::ensure_authoring_allowed()?;
         let source = if source.is_callable() {
             callable_source(py, source.unbind(), inputs, &self.inner)?
         } else {
@@ -2591,6 +2775,7 @@ impl PyVisualization {
         color: Option<PyColor>,
         invalid: &str,
     ) -> PyResult<Py<PyVariable>> {
+        crate::custom::ensure_authoring_allowed()?;
         let mut canvas = self.inner.lock().expect("scene canvas poisoned");
         let parameter = PyParameter {
             inner: canvas.parameter(initial).map_err(value_error)?,
@@ -2621,6 +2806,7 @@ impl PyVisualization {
     }
 
     fn chart(&self, spec: &PyChartSpec) -> PyResult<PyChart> {
+        crate::custom::ensure_authoring_allowed()?;
         let inner = self
             .inner
             .lock()
@@ -2660,6 +2846,7 @@ impl PyVisualization {
         x_labels: Option<bool>,
         y_labels: Option<bool>,
     ) -> PyResult<PyCoordinateSpace> {
+        crate::custom::ensure_authoring_allowed()?;
         let visibility = CartesianVisibility {
             x_axis: x_axis.unwrap_or(axes),
             y_axis: y_axis.unwrap_or(axes),
@@ -2718,6 +2905,7 @@ impl PyVisualization {
         y_labels: Option<bool>,
         z_labels: Option<bool>,
     ) -> PyResult<PyCoordinateSpace3D> {
+        crate::custom::ensure_authoring_allowed()?;
         let visibility = Cartesian3DVisibility {
             x_axis: x_axis.unwrap_or(axes),
             y_axis: y_axis.unwrap_or(axes),
@@ -2767,6 +2955,7 @@ impl PyVisualization {
         rings: Option<bool>,
         spokes: Option<bool>,
     ) -> PyResult<PyPolarSpace> {
+        crate::custom::ensure_authoring_allowed()?;
         let inner = self
             .inner
             .lock()
@@ -2820,6 +3009,7 @@ impl PyVisualization {
         x_labels: Option<bool>,
         y_labels: Option<bool>,
     ) -> PyResult<PyCoordinateSpace> {
+        crate::custom::ensure_authoring_allowed()?;
         let x = x.map(|axis| axis.0.clone()).unwrap_or(
             NativeAxis::linear(-5.0, 5.0)
                 .map_err(value_error)?
@@ -2869,6 +3059,7 @@ impl PyVisualization {
         numbers: bool,
         labels: bool,
     ) -> PyResult<PyNumberLine> {
+        crate::custom::ensure_authoring_allowed()?;
         let inner = self
             .inner
             .lock()

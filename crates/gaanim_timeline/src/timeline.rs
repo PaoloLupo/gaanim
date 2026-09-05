@@ -15,6 +15,11 @@ use gaanim_scene::{
     FillBrush, LineListData, LineListSource, MobjectId, Opacity, Path2D, StrokeBrush,
 };
 
+static NEXT_PROPERTY_REVISION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+#[derive(Resource)]
+struct PreparedPropertyTimeline(u64);
+
 /// Whether real-time playback pauses at authored presentation stops.
 ///
 /// Explicit seeks, snapshots, and exports do not consult this policy.
@@ -58,6 +63,8 @@ fn absolute_lens_channel(lens: &PropertyLensSpec) -> Option<AbsoluteLensChannel>
         PropertyLensSpec::Scale { .. } => AbsoluteLensChannel::Scale,
         PropertyLensSpec::Opacity { .. } => AbsoluteLensChannel::Opacity,
         PropertyLensSpec::FillColor { .. } => AbsoluteLensChannel::FillColor,
+        PropertyLensSpec::FillPaint { .. } => AbsoluteLensChannel::FillColor,
+        PropertyLensSpec::StrokePaint { .. } => AbsoluteLensChannel::StrokeColor,
         PropertyLensSpec::StrokeColor { .. } => AbsoluteLensChannel::StrokeColor,
         PropertyLensSpec::StrokeWidth { .. } => AbsoluteLensChannel::StrokeWidth,
         PropertyLensSpec::PathCompletion { .. } => AbsoluteLensChannel::PathCompletion,
@@ -155,6 +162,8 @@ pub struct SegmentPosition {
 #[derive(Resource, Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Timeline {
+    #[cfg_attr(feature = "serde", serde(skip))]
+    property_revision: u64,
     /// Arena collection of tracks.
     pub tracks: SlotMap<TrackId, Track>,
     /// Arena collection of clips.
@@ -202,6 +211,8 @@ pub struct Timeline {
 impl Default for Timeline {
     fn default() -> Self {
         Self {
+            property_revision: NEXT_PROPERTY_REVISION
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             tracks: SlotMap::with_key(),
             clips: SlotMap::with_key(),
             clip_index: BTreeMap::new(),
@@ -513,6 +524,8 @@ impl Timeline {
         duration: f64,
         payload: ClipPayload,
     ) -> ClipId {
+        self.property_revision =
+            NEXT_PROPERTY_REVISION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let clip_id = self.clips.insert_with_key(|id| Clip {
             id,
             track,
@@ -540,6 +553,8 @@ impl Timeline {
 
     /// Removes a clip from the timeline.
     pub fn remove_clip(&mut self, id: ClipId) -> Option<Clip> {
+        self.property_revision =
+            NEXT_PROPERTY_REVISION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let clip = self.clips.remove(id)?;
 
         // Remove from index
@@ -564,16 +579,22 @@ impl Timeline {
 
     /// Registers a world state snapshot as a seek keyframe at the specified timestamp.
     pub fn add_keyframe(&mut self, time: f64, snapshot: WorldSnapshot) {
+        self.property_revision =
+            NEXT_PROPERTY_REVISION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.keyframes.insert(OrderedFloat(time), snapshot);
     }
 
     /// Removes a keyframe from the timeline.
     pub fn remove_keyframe(&mut self, time: f64) -> Option<WorldSnapshot> {
+        self.property_revision =
+            NEXT_PROPERTY_REVISION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.keyframes.remove(&OrderedFloat(time))
     }
 
     /// Recomputes cached bounds (max clip duration and total timeline duration).
     pub fn recompute_bounds(&mut self) {
+        self.property_revision =
+            NEXT_PROPERTY_REVISION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.max_clip_duration = 0.0;
         self.cached_duration = 0.0;
 
@@ -660,6 +681,7 @@ impl Timeline {
             With<gaanim_animation::TracedPath3D>,
             With<gaanim_animation::FloatSignal>,
             With<gaanim_animation::SurroundingRect>,
+            With<gaanim_animation::PropertyBinding>,
         )>>();
         if reactive.iter(world).next().is_some() {
             return false;
@@ -700,6 +722,98 @@ impl Timeline {
         path_completion_targets.is_disjoint(&path_morph_targets)
     }
 
+    /// Capture destinations and callback baselines against the actual start-time
+    /// world, including simultaneous clips, hierarchy, samples and simulations.
+    /// This is an exact evaluation at each distinct clip start, never a sampled
+    /// approximation of a custom animation. The resulting immutable snapshots
+    /// are shared by timeline seeks and live tween lenses.
+    fn prepare_property_starts(&mut self, world: &mut World) {
+        if world.contains_resource::<gaanim_animation::PreparingPropertySources>() {
+            return;
+        }
+        if self.property_revision == 0 {
+            self.property_revision =
+                NEXT_PROPERTY_REVISION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        if world
+            .get_resource::<PreparedPropertyTimeline>()
+            .is_some_and(|prepared| prepared.0 == self.property_revision)
+        {
+            return;
+        }
+        let mut starts: BTreeMap<
+            OrderedFloat<f64>,
+            Vec<(gaanim_core::ObjectId, PropertyLensSpec)>,
+        > = BTreeMap::new();
+        for clip in self.clips.values() {
+            let ClipPayload::Animation(animation) = &clip.payload else {
+                continue;
+            };
+            match &animation.lens {
+                PropertyLensSpec::PropertySource(lens) => {
+                    *lens.frozen.lock().expect("property snapshot poisoned") = None;
+                }
+                PropertyLensSpec::CustomProperties(lens) => {
+                    *lens
+                        .frozen_baseline
+                        .lock()
+                        .expect("custom baseline poisoned") = None;
+                }
+                _ => continue,
+            }
+            starts
+                .entry(OrderedFloat(clip.start))
+                .or_default()
+                .push((animation.target, animation.lens.clone()));
+        }
+        if world.query::<&gaanim_animation::PropertyBinding>().iter(world).next().is_some() || self.clips.values().any(|clip| matches!(&clip.payload, ClipPayload::Animation(animation) if matches!(animation.lens, PropertyLensSpec::PropertySource(_)))) {
+            let mut history = gaanim_animation::PropertySignalTimeline::default();
+            let mut stops = gaanim_animation::PropertySignalStops::default();
+            for clip in self.clips.values() {
+                if let ClipPayload::RemoveUpdater { target } = clip.payload {
+                    stops.0.entry(target).and_modify(|time| *time = time.min(clip.start)).or_insert(clip.start);
+                }
+                if let ClipPayload::Animation(animation) = &clip.payload
+                    && let PropertyLensSpec::SignalFloat { from, to } = animation.lens {
+                    history.0.entry(animation.target).or_default().push(gaanim_animation::PropertySignalClip { start: clip.start, duration: clip.duration, from, to, rate: animation.rate_func.clone() });
+                }
+            }
+            for clips in history.0.values_mut() { clips.sort_by(|a, b| a.start.total_cmp(&b.start)); }
+            world.insert_resource(history);
+            world.insert_resource(stops);
+        }
+        if !starts.is_empty() {
+            let saved_loop = self.loop_range.take();
+            world.insert_resource(gaanim_animation::PreparingPropertySources);
+            for (time, lenses) in starts {
+                self.last_restore_kf_time = None;
+                self.seek(world, time.into_inner());
+                let entities = world
+                    .query::<(Entity, &MobjectId)>()
+                    .iter(world)
+                    .map(|(entity, id)| (id.0, entity))
+                    .collect::<HashMap<_, _>>();
+                // All clips beginning together observe one common pre-clip state.
+                for (target, lens) in lenses {
+                    let Some(&entity) = entities.get(&target) else {
+                        continue;
+                    };
+                    match lens {
+                        PropertyLensSpec::PropertySource(lens) => lens.capture_start(world, entity),
+                        PropertyLensSpec::CustomProperties(lens) => {
+                            lens.capture_start(world, entity)
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+            }
+            world.remove_resource::<gaanim_animation::PreparingPropertySources>();
+            self.loop_range = saved_loop;
+            self.last_restore_kf_time = None;
+        }
+        world.insert_resource(PreparedPropertyTimeline(self.property_revision));
+    }
+
     /// Performs a random-access seek on the entire Bevy `World`, jumping instantly to `target_time`.
     ///
     /// This restores the closest keyframe snapshot before `target_time` and replays all subsequent
@@ -709,6 +823,7 @@ impl Timeline {
     /// absolute 2D property clips may replay from an already-restored keyframe without repeating
     /// the full world restore; every other payload keeps the deterministic restore path.
     pub fn seek(&mut self, world: &mut World, target_time: f64) {
+        self.prepare_property_starts(world);
         let max_time = self
             .loop_range
             .map(|(_, end)| end)
@@ -1109,6 +1224,7 @@ impl Timeline {
 
         self.update_segment_position();
         self.restore_followed_shake_origin(world);
+        gaanim_animation::apply_property_bindings(world, self.current_time);
         if let Some(mut playback_state) =
             world.get_resource_mut::<gaanim_animation::PlaybackState>()
         {
@@ -1868,6 +1984,16 @@ fn apply_lens_spec(
                 *fill = FillBrush(Some(gaanim_core::peniko::Brush::Solid(c)));
             }
         }
+        PropertyLensSpec::FillPaint { from, to } => {
+            if let Some(mut fill) = world.get_mut::<FillBrush>(target) {
+                fill.0 = Some(gaanim_animation::paint::interpolate_paint(from, to, t));
+            }
+        }
+        PropertyLensSpec::StrokePaint { from, to } => {
+            if let Some(mut stroke) = world.get_mut::<StrokeBrush>(target) {
+                stroke.brush = Some(gaanim_animation::paint::interpolate_paint(from, to, t));
+            }
+        }
         PropertyLensSpec::StrokeColor { from, to } => {
             if let Some(mut stroke) = world.get_mut::<StrokeBrush>(target) {
                 let c = gaanim_core::interpolate_color(*from, *to, t);
@@ -2254,6 +2380,10 @@ fn apply_lens_spec(
                 }
             }
         }
+        PropertyLensSpec::PropertySource(lens) => {
+            gaanim_animation::AnimatableLens::interpolate(lens, world, target, t)
+        }
+        PropertyLensSpec::CustomProperties(lens) => lens.apply(world, target, t),
         PropertyLensSpec::Custom { .. } => {
             // Custom dynamically-registered extensions are evaluated by normal ECS tween systems.
         }
@@ -2683,6 +2813,109 @@ mod tests {
         assert!((middle.roughness - 0.5).abs() < 1e-6);
         assert!((middle.metallic - 0.5).abs() < 1e-6);
         assert!((middle.emissive_strength - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn paint_seek_is_exact_and_reversible_for_fill_and_stroke() {
+        use gaanim_core::peniko::{Brush, Color, Gradient};
+        let mut world = World::new();
+        let id = ObjectId::from_raw(707);
+        let from = Brush::Solid(Color::BLACK);
+        let to = Brush::Gradient(
+            Gradient::new_linear((0., 0.), (20., 0.)).with_stops([Color::WHITE, Color::BLACK]),
+        );
+        let mut stroke = StrokeBrush::default();
+        stroke.brush = Some(from.clone());
+        let entity = world
+            .spawn((
+                MobjectId(id),
+                SpatialTransform::default(),
+                FillBrush(Some(from.clone())),
+                stroke,
+            ))
+            .id();
+        let snapshot = WorldSnapshot::capture(&mut world);
+        let mut timeline = Timeline::default();
+        let track = timeline.add_track("Paint", 0);
+        timeline.add_keyframe(0., snapshot);
+        for lens in [
+            PropertyLensSpec::FillPaint {
+                from: from.clone(),
+                to: to.clone(),
+            },
+            PropertyLensSpec::StrokePaint {
+                from: from.clone(),
+                to: to.clone(),
+            },
+        ] {
+            timeline.add_clip(
+                track,
+                1.,
+                1.,
+                ClipPayload::Animation(AnimationSpec {
+                    target: id,
+                    lens,
+                    rate_func: RateFunc::Linear,
+                    delay: 0.,
+                    label: None,
+                }),
+            );
+        }
+        for time in [2., 0.5, 1.5, 2., 1.5] {
+            timeline.seek(&mut world, time);
+            let expected = gaanim_animation::paint::interpolate_paint(&from, &to, time - 1.);
+            assert_eq!(
+                world.get::<FillBrush>(entity).unwrap().0,
+                Some(expected.clone())
+            );
+            assert_eq!(
+                world.get::<StrokeBrush>(entity).unwrap().brush,
+                Some(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn paint_cut_can_replace_gradient_kind_and_rewind() {
+        use gaanim_core::peniko::{Brush, Color, Gradient};
+        let mut world = World::new();
+        let id = ObjectId::from_raw(708);
+        let from = Brush::Gradient(
+            Gradient::new_linear((0., 0.), (20., 0.)).with_stops([Color::WHITE, Color::BLACK]),
+        );
+        let to = Brush::Gradient(
+            Gradient::new_radial((0., 0.), 20.).with_stops([Color::WHITE, Color::BLACK]),
+        );
+        let entity = world
+            .spawn((
+                MobjectId(id),
+                SpatialTransform::default(),
+                FillBrush(Some(from.clone())),
+            ))
+            .id();
+        let snapshot = WorldSnapshot::capture(&mut world);
+        let mut timeline = Timeline::default();
+        let track = timeline.add_track("Paint cut", 0);
+        timeline.add_keyframe(0., snapshot);
+        timeline.add_clip(
+            track,
+            1.,
+            0.,
+            ClipPayload::Animation(AnimationSpec {
+                target: id,
+                lens: PropertyLensSpec::FillPaint {
+                    from: from.clone(),
+                    to: to.clone(),
+                },
+                rate_func: RateFunc::Linear,
+                delay: 0.,
+                label: None,
+            }),
+        );
+        timeline.seek(&mut world, 1.);
+        assert_eq!(world.get::<FillBrush>(entity).unwrap().0, Some(to));
+        timeline.seek(&mut world, 0.5);
+        assert_eq!(world.get::<FillBrush>(entity).unwrap().0, Some(from));
     }
 
     #[test]

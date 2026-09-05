@@ -20,6 +20,7 @@ pub use types::{
     Margin, ObjectSpec, OptDuration, SceneFrame, SpawnKind, VideoOptions,
 };
 mod drawable;
+mod property_bindings;
 pub use drawable::{
     ClipOptions, DrawableHandle, FragmentSelection, GltfAnimationError, LayoutOwnershipError,
     Primitive3DHandleError, RotationAxisError, SvgPartError,

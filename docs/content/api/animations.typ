@@ -46,7 +46,7 @@ scene.play([
 ```
 
 El proxy admite movimiento 2D y 3D, escala 3D absoluta, rotación relativa o
-absoluta, opacidad, relleno sólido y trazo vectorial. Llamar `fill(c)` tras `no_fill()`, o
+absoluta, opacidad, pinturas de relleno y trazo vectorial. Llamar `fill(c)` tras `no_fill()`, o
 `stroke(c, width)` tras `no_stroke()`, revela suavemente la pintura desde la
 transparencia; un trazo nuevo también crece desde ancho cero.
 
@@ -65,6 +65,73 @@ sobre una primitiva 3D producen `TypeError`.
 El proxy es una propiedad de solo lectura, no una función. Cada `Anim` es de un
 solo uso y los objetivos de posición conservan la restricción normal de
 propiedad del layout.
+
+== Fuentes reactivas y destinos
+
+Los setters absolutos de posición, rotación, escala y opacidad aceptan
+`ScalarSource`: un número, `Parameter`, `Variable`, `Computed` o `scene.time`.
+Esto incluye sus variantes 3D y permite mezclar números y fuentes por eje.
+
+```python
+phase = scene.viz.parameter(0.0)
+height = computed(lambda x: x*x, inputs=[phase])
+dot.move_to(phase, height)
+scene.play(phase.animate.set(2).duration(2))
+dot.move_to(2, 4)
+scene.play(dot.animate.move_to(other).opacity(0.5))
+```
+
+En el setter directo, una fuente mantiene el canal enlazado desde el cursor.
+Otra fuente lo reemplaza; un valor fijo lo termina con un corte reversible.
+Al retroceder se recupera el enlace anterior. Posición, rotación y escala
+ocupan cada una su canal completo. Mientras esté enlazado, anima el parámetro
+o fija primero el canal: las animaciones directas y operaciones relativas
+conflictivas producen un error. Los otros canales siguen disponibles.
+
+Bajo `.animate`, las fuentes destino se evalúan al inicio efectivo del clip,
+incluidos retrasos y secuencias, y quedan congeladas durante la interpolación.
+`animate.move_to` también acepta un `Drawable` o `AnchorPoint` de la misma
+escena, resuelto al inicio; no registra seguimiento persistente.
+
+== Animaciones personalizadas
+
+```python
+animation = dot.animate.custom(callback, channels=("position", "opacity"))
+```
+
+`callback(alpha)` recibe el progreso después de aplicar easing y devuelve un
+diccionario con exactamente los canales declarados. Usa valores absolutos:
+`position` es una pareja o terna local en unidades de escena; `rotation` es un
+ángulo Z en radianes; `scale` es un factor uniforme o terna XYZ; `opacity` está
+entre cero y uno; `fill` y `stroke` son pinturas; `stroke_width` es un ancho
+no negativo. Todos los números deben ser finitos. Los tipos públicos
+`AnimationChannel` y `CustomAnimationValues` describen este contrato.
+
+```python
+from gaanim import Easing, parallel
+
+motion = dot.animate.custom(
+    lambda alpha: {
+        "position": (3*alpha, alpha*alpha),
+        "opacity": 1 - 0.5*alpha,
+    },
+    channels=("position", "opacity"),
+).duration(2).easing(Easing.SMOOTH)
+scene.play(parallel(motion, dot.animate.fill(BLUE).duration(2)))
+```
+
+La función se evalúa en el tiempo exacto al reproducir, buscar o exportar;
+no se convierte en muestras. Debe ser síncrona, pura y depender solamente del
+progreso y constantes capturadas: no puede modificar la escena ni consultar
+estado mutable para acumular movimiento. Algunas curvas producen progreso
+fuera de cero y uno. El final respeta también curvas de ida y vuelta.
+
+Los canales no declarados se conservan. No mezcles `custom` y setters en un
+mismo proxy: usa `parallel`, que valida conflictos antes de programarlos.
+Duración, retraso, composición y consumo único funcionan como en cualquier
+`Anim`. Se valida todo el resultado antes de escribir propiedades. Ante un
+fallo se restaura el estado inicial de los canales afectados y aparece un
+diagnóstico; la exportación falla explícitamente.
 
 == Acciones glTF
 

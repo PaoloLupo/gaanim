@@ -1,5 +1,6 @@
 //! Core types: coordinate system, mobject kinds, specs, and queued Anim.
 
+use gaanim_animation::{PropertySources, ScalarSource};
 use gaanim_core::ObjectId;
 use gaanim_core::glam::{DQuat, DVec3, EulerRot};
 use gaanim_core::peniko::{Brush, Color, ImageData, ImageQuality};
@@ -974,7 +975,7 @@ impl ObjectSpec {
 #[derive(Debug, Clone)]
 pub struct Anim {
     pub inner: AnimationBuilder,
-    owner: Option<SharedCanvasState>,
+    pub(crate) owner: Option<SharedCanvasState>,
     consumed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     duration_explicit: bool,
     rate_explicit: bool,
@@ -1055,13 +1056,82 @@ impl Anim {
         self.camera_capture_before_play
     }
 
-    fn update_properties(mut self, update: impl FnOnce(&mut PropertyAnimation)) -> Self {
+    /// Replace an empty animation proxy with a pure property callback.
+    pub fn custom(mut self, animation: gaanim_animation::CustomAnimation) -> Result<Self, String> {
+        if !matches!(&self.inner.anim_type, AnimationType::Properties(properties) if properties.is_empty())
+        {
+            return Err("custom() requires an empty Drawable.animate proxy; combine separate animations with parallel()".into());
+        }
+        if animation.channels().iter().any(|channel| {
+            matches!(
+                channel,
+                gaanim_animation::CustomChannel::Position
+                    | gaanim_animation::CustomChannel::Rotation
+                    | gaanim_animation::CustomChannel::Scale
+            )
+        }) && !self.property_position_is_free()
+        {
+            return Err("layout or live derived geometry owns this drawable's transform".into());
+        }
+        if self.property_target_is_primitive_3d()
+            && animation
+                .channels()
+                .iter()
+                .any(|channel| channel.is_paint())
+        {
+            return Err(
+                "custom paint channels require a vector Drawable; use material() for Primitive3D"
+                    .into(),
+            );
+        }
+        if let Some(drawable) = self.property_drawable() {
+            for channel in animation.channels() {
+                let property = match channel {
+                    gaanim_animation::CustomChannel::Position => {
+                        Some(gaanim_animation::PropertyChannel::Translation)
+                    }
+                    gaanim_animation::CustomChannel::Rotation => {
+                        Some(gaanim_animation::PropertyChannel::Rotation)
+                    }
+                    gaanim_animation::CustomChannel::Scale => {
+                        Some(gaanim_animation::PropertyChannel::Scale)
+                    }
+                    gaanim_animation::CustomChannel::Opacity => {
+                        Some(gaanim_animation::PropertyChannel::Opacity)
+                    }
+                    _ => None,
+                };
+                if property.is_some_and(|property| drawable.property_is_bound(property)) {
+                    return Err(format!(
+                        "{} is reactively bound; assign a fixed value before custom animation",
+                        channel.name()
+                    ));
+                }
+            }
+        }
+        self.inner.anim_type = AnimationType::CustomProperties(animation);
+        Ok(self)
+    }
+
+    pub(crate) fn update_properties(mut self, update: impl FnOnce(&mut PropertyAnimation)) -> Self {
         let properties = match &mut self.inner.anim_type {
             AnimationType::Properties(properties)
             | AnimationType::TextSelectionProperties { properties, .. } => properties,
             _ => panic!("property modifiers require a compound property animation"),
         };
         update(properties);
+        let translation = properties.translation.is_some();
+        let rotation = properties.rotation.is_some();
+        let scale = properties.scale.is_some();
+        let opacity = properties.opacity.is_some();
+        properties
+            .source_targets
+            .retain(|target| match target.sources.channel() {
+                gaanim_animation::PropertyChannel::Translation => !translation,
+                gaanim_animation::PropertyChannel::Rotation => !rotation,
+                gaanim_animation::PropertyChannel::Scale => !scale,
+                gaanim_animation::PropertyChannel::Opacity => !opacity,
+            });
         self
     }
 
@@ -1134,6 +1204,35 @@ impl Anim {
 
     pub(crate) fn commit_authoring_target(&self) {
         match &self.inner.anim_type {
+            AnimationType::CustomProperties(animation) => {
+                // Evaluate before locking authoring state: Python callbacks are
+                // guarded against mutation and must never run beneath this lock.
+                if let (Some(spec), Ok(values)) = (
+                    &self.property_spec,
+                    animation.evaluate(self.inner.rate_func.evaluate(1.0)),
+                ) {
+                    let mut spec = spec.lock().expect("object spec poisoned");
+                    if let Some(paint) = values.fill {
+                        spec.fill = Some(paint);
+                    }
+                    if let Some(paint) = values.stroke {
+                        let width = values
+                            .stroke_width
+                            .or_else(|| spec.stroke.as_ref().map(|(_, width)| *width))
+                            .unwrap_or(1.0);
+                        spec.stroke = Some((paint, width));
+                    } else if let Some(width) = values.stroke_width {
+                        if let Some((_, current_width)) = &mut spec.stroke {
+                            *current_width = width;
+                        }
+                    }
+                    if let Some(width) = values.stroke_width {
+                        if let Some(style) = &mut spec.stroke_style {
+                            style.width = width;
+                        }
+                    }
+                }
+            }
             AnimationType::Properties(properties) => {
                 if let Some(spec) = &self.property_spec {
                     let mut spec = spec.lock().expect("object spec poisoned");
@@ -1142,6 +1241,24 @@ impl Anim {
                     }
                     if let Some((_, level)) = properties.fill_level {
                         spec.fill_level_cursor = Some(level);
+                    }
+                    if let Some(color) = properties.visible_color {
+                        if spec.fill.is_some() {
+                            spec.fill = Some(Brush::Solid(color));
+                        }
+                        if let Some((paint, _)) = &mut spec.stroke {
+                            *paint = Brush::Solid(color);
+                        }
+                    }
+                    if let Some(paint) = &properties.fill {
+                        spec.fill = Some(paint.clone());
+                    }
+                    if let Some(paint) = &properties.stroke_color {
+                        let width = properties
+                            .stroke_width
+                            .or_else(|| spec.stroke.as_ref().map(|(_, width)| *width))
+                            .unwrap_or(1.0);
+                        spec.stroke = Some((paint.clone(), width));
                     }
                 }
             }
@@ -1292,25 +1409,122 @@ impl Anim {
         })
     }
 
-    /// Animate fill color, or the PBR base color for a Primitive3D.
-    pub fn fill(self, color: Color) -> Self {
+    /// Animate vector paint, or a solid PBR base color for a Primitive3D.
+    pub fn fill(self, paint: impl Into<Brush>) -> Self {
+        self.try_fill_paint(paint.into())
+            .expect("incompatible fill paint")
+    }
+
+    fn fill_solid(self, color: Color) -> Self {
         if let Some(from) = self.material_target() {
             let mut to = from;
             to.color = color;
             return self.set_material_target(from, to);
         }
-        self.update_properties(|properties| properties.fill = Some(color))
+        self.update_properties(|properties| properties.fill = Some(Brush::Solid(color)))
     }
 
-    pub fn stroke(self, color: Color, width: f64) -> Self {
-        assert!(
-            !self.property_target_is_primitive_3d(),
-            "stroke() is only available for vector drawables"
-        );
-        self.update_properties(|properties| {
-            properties.stroke_color = Some(color);
-            properties.stroke_width = Some(width.max(0.0));
-        })
+    /// Animate a solid or compatible gradient fill.
+    pub fn try_fill_paint(self, paint: Brush) -> Result<Self, &'static str> {
+        self.validate_paint(&paint, false)?;
+        if let Brush::Solid(color) = paint {
+            return Ok(self.fill_solid(color));
+        }
+        if self.property_target_is_primitive_3d() || self.property_target_is_text_selection() {
+            return Err("gradient fill animations require a vector Drawable");
+        }
+        Ok(self.update_properties(|properties| properties.fill = Some(paint)))
+    }
+
+    pub fn fill_paint(self, paint: Brush) -> Self {
+        self.try_fill_paint(paint)
+            .expect("incompatible fill paints")
+    }
+
+    fn validate_paint(&self, paint: &Brush, _stroke: bool) -> Result<(), &'static str> {
+        gaanim_animation::paint::validate_paint_transition(paint, paint)
+    }
+
+    pub(crate) fn validate_paint_targets(
+        &self,
+        paints: &mut std::collections::HashMap<(ObjectId, bool), Brush>,
+    ) -> Result<(), &'static str> {
+        let (fill, stroke) = match &self.inner.anim_type {
+            AnimationType::Properties(properties)
+            | AnimationType::TextSelectionProperties { properties, .. } => (
+                properties
+                    .fill
+                    .clone()
+                    .or_else(|| properties.visible_color.map(Brush::Solid)),
+                properties
+                    .stroke_color
+                    .clone()
+                    .or_else(|| properties.visible_color.map(Brush::Solid)),
+            ),
+            AnimationType::FillPaintTo { to } => (Some(to.clone()), None),
+            AnimationType::StrokePaintTo { to } => (None, Some(to.clone())),
+            AnimationType::FillColorTo { to } => (Some(Brush::Solid(*to)), None),
+            AnimationType::StrokeColorTo { to } => (None, Some(Brush::Solid(*to))),
+            AnimationType::CustomProperties(callback) => {
+                let values = callback
+                    .evaluate(self.inner.rate_func.evaluate(1.0))
+                    .map_err(|_| "custom animation endpoint failed validation")?;
+                // Custom callbacks author complete paints directly and may change
+                // gradient kinds without interpolation. Seed subsequent native targets.
+                if let Some(fill) = values.fill {
+                    paints.insert((self.inner.target, false), fill);
+                }
+                if let Some(stroke) = values.stroke {
+                    paints.insert((self.inner.target, true), stroke);
+                }
+                return Ok(());
+            }
+            _ => return Ok(()),
+        };
+        for (stroke, to) in [(false, fill), (true, stroke)] {
+            let Some(to) = to else {
+                continue;
+            };
+            let key = (self.inner.target, stroke);
+            let initial = self.property_spec.as_ref().and_then(|spec| {
+                let spec = spec.lock().expect("object spec poisoned");
+                if stroke {
+                    spec.stroke.as_ref().map(|(paint, _)| paint.clone())
+                } else {
+                    spec.fill.clone()
+                }
+            });
+            if let Some(from) = paints.get(&key).or(initial.as_ref()) {
+                gaanim_animation::paint::validate_paint_transition(from, &to)?;
+            }
+            paints.insert(key, to);
+        }
+        Ok(())
+    }
+
+    /// Animate a solid or compatible gradient stroke and its width.
+    pub fn try_stroke_paint(self, paint: Brush, width: f64) -> Result<Self, &'static str> {
+        if self.property_target_is_primitive_3d() || self.property_target_is_text_selection() {
+            return Err("stroke animations require a vector Drawable");
+        }
+        if !width.is_finite() || width < 0.0 {
+            return Err("stroke width must be finite and nonnegative");
+        }
+        self.validate_paint(&paint, true)?;
+        Ok(self.update_properties(|properties| {
+            properties.stroke_color = Some(paint);
+            properties.stroke_width = Some(width);
+        }))
+    }
+
+    pub fn stroke_paint(self, paint: Brush, width: f64) -> Self {
+        self.try_stroke_paint(paint, width)
+            .expect("incompatible stroke paints")
+    }
+
+    pub fn stroke(self, paint: impl Into<Brush>, width: f64) -> Self {
+        self.try_stroke_paint(paint.into(), width.max(0.0))
+            .expect("incompatible stroke paint")
     }
 
     pub fn stroke_color(self, color: Color) -> Self {
@@ -1318,10 +1532,17 @@ impl Anim {
             !self.property_target_is_primitive_3d(),
             "stroke_color() is only available for vector drawables"
         );
-        self.update_properties(|properties| properties.stroke_color = Some(color))
+        self.update_properties(|properties| properties.stroke_color = Some(Brush::Solid(color)))
     }
 
-    pub fn opacity(self, opacity: f32) -> Self {
+    pub fn opacity(self, opacity: impl Into<ScalarSource>) -> Self {
+        let opacity = opacity.into();
+        let Some(opacity) = opacity.constant_value() else {
+            return self
+                .property_source(PropertySources::Opacity(opacity))
+                .expect("invalid reactive opacity source");
+        };
+        let opacity = opacity as f32;
         self.update_properties(|properties| properties.opacity = Some(opacity.clamp(0.0, 1.0)))
     }
 
@@ -1353,12 +1574,50 @@ impl Anim {
         })
     }
 
-    pub fn move_to(self, x: f64, y: f64) -> Self {
+    pub fn move_to(self, x: impl Into<ScalarSource>, y: impl Into<ScalarSource>) -> Self {
         self.move_to_anchor(x, y, Anchor::Center)
     }
 
+    /// Capture a drawable's bounds center when the animation is scheduled.
+    pub fn move_to_drawable(self, target: &super::DrawableHandle) -> Result<Self, &'static str> {
+        if !self.belongs_to(&target.state) {
+            return Err("move_to target must belong to the same Scene");
+        }
+        self.move_to_anchor_point(target.anchor_point(Anchor::Center, DVec3::ZERO))
+    }
+
+    /// Capture a bounds anchor when the animation is scheduled.
+    pub fn move_to_anchor_point(self, point: super::AnchorPoint) -> Result<Self, &'static str> {
+        self.assert_free_position();
+        if !self.owner.as_ref().is_some_and(|owner| {
+            let owner = owner.lock().expect("canvas state poisoned");
+            owner.scene_id == point.scene_id && owner.object_specs.contains_key(&point.object)
+        }) {
+            return Err("move_to anchor must belong to the same Scene");
+        }
+        Ok(self.update_properties(|properties| {
+            properties.translation = Some(PropertyTranslation::ToAnchorPoint(point));
+        }))
+    }
+
     /// Animate so the selected local bounds anchor reaches `(x, y)`.
-    pub fn move_to_anchor(self, x: f64, y: f64, anchor: Anchor) -> Self {
+    pub fn move_to_anchor(
+        self,
+        x: impl Into<ScalarSource>,
+        y: impl Into<ScalarSource>,
+        anchor: Anchor,
+    ) -> Self {
+        let x = x.into();
+        let y = y.into();
+        let (Some(x), Some(y)) = (x.constant_value(), y.constant_value()) else {
+            let offset = anchor.to_offset();
+            return self
+                .property_source(PropertySources::Translation {
+                    values: [x, y, 0.0.into()],
+                    anchor: Some(DVec3::new(offset.x, offset.y, 0.0)),
+                })
+                .expect("invalid reactive position source");
+        };
         self.assert_free_position();
         self.update_properties(|properties| {
             properties.translation = Some(PropertyTranslation::ToAnchor {
@@ -1375,7 +1634,25 @@ impl Anim {
         })
     }
 
-    pub fn move_to_3d(self, x: f64, y: f64, z: f64) -> Self {
+    pub fn move_to_3d(
+        self,
+        x: impl Into<ScalarSource>,
+        y: impl Into<ScalarSource>,
+        z: impl Into<ScalarSource>,
+    ) -> Self {
+        let x = x.into();
+        let y = y.into();
+        let z = z.into();
+        let (Some(x), Some(y), Some(z)) =
+            (x.constant_value(), y.constant_value(), z.constant_value())
+        else {
+            return self
+                .property_source(PropertySources::Translation {
+                    values: [x, y, z],
+                    anchor: None,
+                })
+                .expect("invalid reactive property source");
+        };
         self.assert_free_position();
         self.update_properties(|properties| {
             properties.translation = Some(PropertyTranslation::To(DVec3::new(x, y, z)))
@@ -1386,13 +1663,38 @@ impl Anim {
         self.update_properties(|properties| properties.scale = Some(PropertyScale::Uniform(factor)))
     }
 
-    pub fn scale_to(self, factor: f64) -> Self {
+    pub fn scale_to(self, factor: impl Into<ScalarSource>) -> Self {
+        let factor = factor.into();
+        let Some(factor) = factor.constant_value() else {
+            return self
+                .property_source(PropertySources::Scale([
+                    factor.clone(),
+                    factor.clone(),
+                    factor,
+                ]))
+                .expect("invalid reactive property source");
+        };
         self.update_properties(|properties| {
             properties.scale = Some(PropertyScale::To(DVec3::splat(factor)))
         })
     }
 
-    pub fn scale_to_3d(self, x: f64, y: f64, z: f64) -> Self {
+    pub fn scale_to_3d(
+        self,
+        x: impl Into<ScalarSource>,
+        y: impl Into<ScalarSource>,
+        z: impl Into<ScalarSource>,
+    ) -> Self {
+        let x = x.into();
+        let y = y.into();
+        let z = z.into();
+        let (Some(x), Some(y), Some(z)) =
+            (x.constant_value(), y.constant_value(), z.constant_value())
+        else {
+            return self
+                .property_source(PropertySources::Scale([x, y, z]))
+                .expect("invalid reactive property source");
+        };
         self.update_properties(|properties| {
             properties.scale = Some(PropertyScale::To(DVec3::new(x, y, z)))
         })
@@ -1411,7 +1713,13 @@ impl Anim {
         })
     }
 
-    pub fn rotate_to(self, radians: f64) -> Self {
+    pub fn rotate_to(self, radians: impl Into<ScalarSource>) -> Self {
+        let radians = radians.into();
+        let Some(radians) = radians.constant_value() else {
+            return self
+                .property_source(PropertySources::Rotation([0.0.into(), 0.0.into(), radians]))
+                .expect("invalid reactive property source");
+        };
         self.update_properties(|properties| {
             properties.rotation = Some(PropertyRotation::To(DQuat::from_rotation_z(radians)))
         })
@@ -1433,7 +1741,22 @@ impl Anim {
         }))
     }
 
-    pub fn rotate_to_3d(self, x: f64, y: f64, z: f64) -> Self {
+    pub fn rotate_to_3d(
+        self,
+        x: impl Into<ScalarSource>,
+        y: impl Into<ScalarSource>,
+        z: impl Into<ScalarSource>,
+    ) -> Self {
+        let x = x.into();
+        let y = y.into();
+        let z = z.into();
+        let (Some(x), Some(y), Some(z)) =
+            (x.constant_value(), y.constant_value(), z.constant_value())
+        else {
+            return self
+                .property_source(PropertySources::Rotation([x, y, z]))
+                .expect("invalid reactive property source");
+        };
         self.update_properties(|properties| {
             properties.rotation = Some(PropertyRotation::To(DQuat::from_euler(
                 EulerRot::XYZ,
@@ -1723,6 +2046,63 @@ impl OptDuration for Option<f64> {
 mod tests {
     use super::{ImageCrop, ImageFit, ImageOptions, SceneFrame};
     use gaanim_core::peniko::ImageQuality;
+
+    #[test]
+    fn paint_targets_validate_and_commit_without_mutating_pending_anim() {
+        use crate::canvas::SceneModel;
+        use gaanim_core::peniko::{Brush, Color, Gradient};
+        let mut scene = SceneModel::new(640, 360);
+        let shape = scene.circle(10.0).fill(Color::BLACK);
+        let paint = Brush::Gradient(
+            Gradient::new_linear((0., 0.), (10., 0.)).with_stops([Color::BLACK, Color::WHITE]),
+        );
+        let anim = shape.animate().try_fill_paint(paint.clone()).unwrap();
+        assert_eq!(
+            shape.spec.lock().unwrap().fill,
+            Some(Brush::Solid(Color::BLACK))
+        );
+        scene.play(vec![anim]);
+        assert_eq!(shape.spec.lock().unwrap().fill, Some(paint));
+        let incompatible = Brush::Gradient(
+            Gradient::new_radial((0., 0.), 10.).with_stops([Color::BLACK, Color::WHITE]),
+        );
+        let invalid = shape.animate().try_fill_paint(incompatible).unwrap();
+        let before = scene.current_time();
+        assert!(scene.play_items(vec![invalid.clone().into()]).is_err());
+        assert!(!invalid.is_consumed());
+        assert_eq!(scene.current_time(), before);
+        assert!(
+            shape
+                .animate()
+                .try_stroke_paint(Brush::Solid(Color::BLACK), f64::NAN)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn animation_move_to_accepts_same_scene_bounds_targets() {
+        use crate::canvas::{Anchor, SceneModel};
+        use gaanim_core::glam::DVec3;
+        let mut scene = SceneModel::new(640, 360);
+        let shape = scene.circle(10.0);
+        let target = scene.rect(20.0, 30.0);
+        assert!(shape.animate().move_to_drawable(&target).is_ok());
+        assert!(
+            shape
+                .animate()
+                .move_to_anchor_point(target.anchor_point(Anchor::TopRight, DVec3::ZERO))
+                .is_ok()
+        );
+        let mut other = SceneModel::new(640, 360);
+        let foreign = other.circle(2.0);
+        assert!(shape.animate().move_to_drawable(&foreign).is_err());
+        assert!(
+            shape
+                .animate()
+                .move_to_anchor_point(foreign.anchor_point(Anchor::Center, DVec3::ZERO))
+                .is_err()
+        );
+    }
 
     #[test]
     fn image_fit_resolves_contain_cover_and_crop() {

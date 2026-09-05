@@ -76,6 +76,7 @@ pub struct ReactiveFunction {
     coordinate_arity: usize,
     output_arity: usize,
     inputs: Arc<[ReactiveInput]>,
+    scene_owners: Arc<[u64]>,
     callback: ReactiveCallback,
     cache: Arc<Mutex<FunctionCache>>,
 }
@@ -105,6 +106,7 @@ impl ReactiveFunction {
             coordinate_arity,
             output_arity,
             inputs: inputs.into(),
+            scene_owners: Arc::from([]),
             callback: Arc::new(callback),
             cache: Arc::new(Mutex::new(FunctionCache::default())),
         }
@@ -112,6 +114,78 @@ impl ReactiveFunction {
 
     pub fn coordinate_arity(&self) -> usize {
         self.coordinate_arity
+    }
+
+    /// Scene identities attached by an authoring facade, retained transitively.
+    pub fn scene_owners(&self) -> &[u64] {
+        &self.scene_owners
+    }
+
+    pub fn with_scene_owner(mut self, owner: u64) -> Self {
+        let mut owners = self.scene_owners.to_vec();
+        if !owners.contains(&owner) {
+            owners.push(owner);
+        }
+        self.scene_owners = owners.into();
+        self
+    }
+
+    /// Compose scalar sources while retaining a single snapshot of their leaf inputs.
+    ///
+    /// Sources may share other functions. Their existing caches remain shared, so a
+    /// diamond of derived values evaluates its common dependencies only once for
+    /// each input snapshot. The callback receives coordinates followed by source
+    /// values in declaration order, independently of leaf deduplication.
+    pub fn from_sources(
+        coordinate_arity: usize,
+        output_arity: usize,
+        sources: Vec<ScalarSource>,
+        callback: impl Fn(&[f64]) -> Result<Vec<f64>, String> + Send + Sync + 'static,
+    ) -> Self {
+        let mut owners = Vec::new();
+        let mut leaves = Vec::new();
+        for source in &sources {
+            for owner in source.scene_owners() {
+                if !owners.contains(owner) {
+                    owners.push(*owner);
+                }
+            }
+            let inputs = match source {
+                ScalarSource::Constant(_) => Vec::new(),
+                ScalarSource::Signal(id) => vec![ReactiveInput::Signal(*id)],
+                ScalarSource::Time => vec![ReactiveInput::Time],
+                ScalarSource::Function(function) => function.inputs().to_vec(),
+            };
+            for input in inputs {
+                if !leaves.contains(&input) {
+                    leaves.push(input);
+                }
+            }
+        }
+        let snapshot_inputs = leaves.clone();
+        let mut composed = Self::new(coordinate_arity, output_arity, leaves, move |arguments| {
+            let snapshot = &arguments[coordinate_arity..];
+            let time = snapshot_inputs
+                .iter()
+                .position(|input| *input == ReactiveInput::Time)
+                .map_or(0.0, |index| snapshot[index]);
+            let mut values = arguments[..coordinate_arity].to_vec();
+            for source in &sources {
+                values.push(
+                    source
+                        .evaluate(time, |id| {
+                            snapshot_inputs
+                                .iter()
+                                .position(|input| *input == ReactiveInput::Signal(id))
+                                .map(|index| snapshot[index])
+                        })
+                        .map_err(|error| error.to_string())?,
+                );
+            }
+            callback(&values)
+        });
+        composed.scene_owners = owners.into();
+        composed
     }
 
     pub fn output_arity(&self) -> usize {
@@ -154,11 +228,12 @@ impl ReactiveFunction {
                 actual: self.output_arity,
             });
         }
-        let callback = self.callback.clone();
-        Ok(Self::new(0, 1, self.inputs.to_vec(), move |arguments| {
-            let value = callback(arguments)?;
-            Ok(vec![map(value[0])])
-        }))
+        Ok(Self::from_sources(
+            0,
+            1,
+            vec![ScalarSource::Function(self.clone())],
+            move |arguments| Ok(vec![map(arguments[0])]),
+        ))
     }
 
     /// Evaluate using a caller-provided logical signal resolver.
@@ -242,6 +317,12 @@ pub enum ScalarSource {
 }
 
 impl ScalarSource {
+    pub fn scene_owners(&self) -> &[u64] {
+        match self {
+            Self::Function(function) => function.scene_owners(),
+            _ => &[],
+        }
+    }
     pub fn constant(value: f64) -> Self {
         Self::Constant(value)
     }
@@ -338,6 +419,12 @@ impl From<f64> for ScalarSource {
     }
 }
 
+impl From<f32> for ScalarSource {
+    fn from(value: f32) -> Self {
+        Self::Constant(f64::from(value))
+    }
+}
+
 /// Runtime scalar with logical signal ids resolved to ECS entities.
 #[derive(Debug, Clone)]
 pub struct ResolvedScalarSource {
@@ -365,6 +452,76 @@ impl ResolvedScalarSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn composed_sources_share_diamond_cache_and_preserve_argument_order() {
+        let id = ObjectId::from_raw(42);
+        let calls = Arc::new(Mutex::new(0));
+        let observed = calls.clone();
+        let common = ScalarSource::function(ReactiveFunction::from_sources(
+            0,
+            1,
+            vec![ScalarSource::Signal(id)],
+            move |values| {
+                *observed.lock().unwrap() += 1;
+                Ok(vec![values[0] * values[0]])
+            },
+        ))
+        .unwrap();
+        let left = ScalarSource::function(ReactiveFunction::from_sources(
+            0,
+            1,
+            vec![common.clone()],
+            |values| Ok(vec![values[0] + 1.0]),
+        ))
+        .unwrap();
+        let right = ScalarSource::function(ReactiveFunction::from_sources(
+            0,
+            1,
+            vec![common],
+            |values| Ok(vec![values[0] * 2.0]),
+        ))
+        .unwrap();
+        let result =
+            ReactiveFunction::from_sources(1, 1, vec![right, ScalarSource::Time, left], |values| {
+                Ok(vec![values[0] + values[1] * 10.0 + values[2] + values[3]])
+            });
+        assert_eq!(result.parameter_ids(), vec![id]);
+        assert!(result.depends_on_time());
+        assert_eq!(result.evaluate(&[3.0], 2.0, |_| Some(2.0)), Ok(vec![90.0]));
+        assert_eq!(result.evaluate(&[3.0], 2.0, |_| Some(2.0)), Ok(vec![90.0]));
+        assert_eq!(result.evaluate(&[4.0], 3.0, |_| Some(2.0)), Ok(vec![92.0]));
+        assert_eq!(*calls.lock().unwrap(), 1);
+        assert_eq!(result.evaluate(&[3.0], 2.0, |_| Some(3.0)), Ok(vec![195.0]));
+        assert_eq!(*calls.lock().unwrap(), 2);
+    }
+
+    #[test]
+    fn composed_sources_propagate_failures_and_seek_exactly() {
+        let inner = ScalarSource::function(ReactiveFunction::from_sources(
+            0,
+            1,
+            vec![ScalarSource::Time],
+            |values| {
+                if values[0] == 1.0 {
+                    Ok(vec![f64::NAN])
+                } else {
+                    Ok(vec![values[0] * 2.0])
+                }
+            },
+        ))
+        .unwrap();
+        let outer =
+            ReactiveFunction::from_sources(0, 1, vec![inner], |values| Ok(vec![values[0] + 1.0]));
+        for time in [0.0, 2.0, 0.5, 2.0] {
+            assert_eq!(
+                outer.evaluate(&[], time, |_| None),
+                Ok(vec![time * 2.0 + 1.0])
+            );
+        }
+        assert!(outer.evaluate(&[], 1.0, |_| None).is_err());
+        assert_eq!(outer.evaluate(&[], 2.0, |_| None), Ok(vec![5.0]));
+    }
 
     #[test]
     fn explicit_inputs_keep_declared_order_and_cache_identical_snapshots() {

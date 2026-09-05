@@ -168,6 +168,8 @@ pub struct AnimationSpec {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum PropertyLensSpec {
+    #[cfg_attr(feature = "serde", serde(skip))]
+    PropertySource(gaanim_animation::PropertySourceLens),
     Translation {
         from: gaanim_core::glam::DVec3,
         to: gaanim_core::glam::DVec3,
@@ -187,6 +189,14 @@ pub enum PropertyLensSpec {
     FillColor {
         from: Color,
         to: Color,
+    },
+    FillPaint {
+        from: gaanim_core::peniko::Brush,
+        to: gaanim_core::peniko::Brush,
+    },
+    StrokePaint {
+        from: gaanim_core::peniko::Brush,
+        to: gaanim_core::peniko::Brush,
     },
     StrokeColor {
         from: Color,
@@ -355,6 +365,9 @@ pub enum PropertyLensSpec {
         to: f64,
         time_width: f64,
     },
+    /// Runtime callback evaluated identically during playback and exact seeks.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    CustomProperties(gaanim_animation::CustomPropertyLens),
     Custom {
         type_name: String,
         params: String,
@@ -384,6 +397,14 @@ impl PropertyLensSpec {
             Self::FillColor { from, to } => PropertyLens::FillColor {
                 from: *from,
                 to: *to,
+            },
+            Self::FillPaint { from, to } => PropertyLens::FillPaint {
+                from: from.clone(),
+                to: to.clone(),
+            },
+            Self::StrokePaint { from, to } => PropertyLens::StrokePaint {
+                from: from.clone(),
+                to: to.clone(),
             },
             Self::StrokeColor { from, to } => PropertyLens::StrokeColor {
                 from: *from,
@@ -582,6 +603,8 @@ impl PropertyLensSpec {
                 to: *to,
                 time_width: *time_width,
             },
+            Self::CustomProperties(lens) => PropertyLens::Custom(Box::new(lens.clone())),
+            Self::PropertySource(lens) => PropertyLens::Custom(Box::new(lens.clone())),
             Self::Custom { type_name, .. } => PropertyLens::Custom(Box::new(DummyLens {
                 type_name: type_name.clone(),
             })),

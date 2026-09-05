@@ -1312,7 +1312,7 @@ scene.render()
 
 == Reactividad nativa
 
-Los valores reactivos se trazan una sola vez al construir la escena. Durante la
+Las dependencias reactivas se declaran al construir la escena. Durante la
 reproducción, Gaanim resuelve primero un snapshot numérico estable en Rust y
 llama después a las funciones Python declaradas.
 
@@ -1330,6 +1330,33 @@ Usa funciones Python puras, incluido el módulo estándar `math`, helpers y cont
 de flujo. Declara las dependencias con `inputs=[...]`: las coordenadas llegan
 primero y los valores reactivos después, exactamente en el orden declarado.
 `scene.viz.time` permite depender explícitamente del tiempo.
+
+`scene.time` expone la misma fuente. `Computed` también puede aparecer dentro
+de `inputs`, tanto en otro `computed` como en gráficas, campos y readouts:
+
+```python
+from gaanim import computed
+import math
+
+radius = scene.viz.parameter(1.0)
+area = computed(lambda r: math.pi*r*r, inputs=[radius])
+doubled = computed(lambda value: 2*value, inputs=[area])
+scene.viz.readout(doubled, label="2A")
+```
+
+Las dependencias compartidas conservan su caché para el mismo snapshot de
+entradas. La validación de escena sigue todas las dependencias transitivas;
+envolver un parámetro ajeno en `Computed` no permite usarlo en otra escena.
+`Computed` sigue siendo escalar: no devuelve colores, texto ni geometría.
+
+Los setters absolutos `move_to`, `rotate_to`, `scale_to` y `opacity`, incluidas
+sus variantes 3D, aceptan estas fuentes. Un setter reactivo enlaza el canal
+desde el cursor; otro lo reemplaza y uno numérico lo termina mediante un corte
+reversible. La posición, rotación y escala se tratan como canales completos,
+incluso al mezclar constantes y fuentes por eje. Mientras el canal esté
+enlazado, anima el parámetro; las escrituras relativas y animaciones directas
+conflictivas se rechazan. Consulta la página de animaciones para destinos
+reactivos congelados al inicio de un clip.
 
 La ventaja principal aparece al hacer seek: una relación pura se evalúa para el
 instante solicitado y no depende de haber reproducido todos los fotogramas
@@ -1376,7 +1403,7 @@ scene.play([k.animate.create(), k.animate.set(100).duration(1.5)])
   name: "Visualization.readout",
   kind: "factory",
   signature: "readout(source, *, inputs=(), label=None, format='.2f', prefix='', suffix='', unit=None, font_size=None, color=None, invalid='invalid') -> Readout",
-  params: ((name: "source", type: "number | Parameter | Variable | Computed | callable", default: none, desc: [Escalar o función Python pura cuyos argumentos corresponden a `inputs`.]), (name: "inputs", type: "Sequence[Parameter | Variable | TimeInput]", default: "()", desc: [Dependencias explícitas en orden.]), (name: "invalid", type: "str", default: "'invalid'", desc: [Texto usado cuando la evaluación es inválida o no finita.]),),
+  params: ((name: "source", type: "number | Parameter | Variable | Computed | callable", default: none, desc: [Escalar o función Python pura cuyos argumentos corresponden a `inputs`.]), (name: "inputs", type: "Sequence[Parameter | Variable | Computed | TimeInput]", default: "()", desc: [Dependencias explícitas en orden.]), (name: "invalid", type: "str", default: "'invalid'", desc: [Texto usado cuando la evaluación es inválida o no finita.]),),
   returns: (type: "Readout", desc: [Grupo dibujable reactivo.]),
   desc: [The numeric path is regenerated only if the formatted text changes, avoiding work for sub-precision animation steps. `label`, `equals`, `number`, and `unit` are available as drawable parts; every part uses `font_size`, defaulting together to 48 scene units. They keep equal equation-style spacing and a shared visual baseline for textual terms. `color` paints the complete row and remains applied to regenerated numeric glyphs and timeline seeks.],
 )[

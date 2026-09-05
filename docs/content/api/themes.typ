@@ -38,6 +38,25 @@ from gaanim import Color
 scene.canvas.background = Color(40, 42, 54)
 ```
 
+== Animar pinturas
+
+`drawable.animate.fill(paint)` y `drawable.animate.stroke(paint, width)` aceptan
+los mismos colores y `Brush` que los setters inmediatos para objetos
+vectoriales. Los gradientes del mismo tipo interpolan su geometría y colores;
+si tienen cantidades distintas de stops, se normalizan sus posiciones para
+interpolar. Un color sólido también puede transformarse en un gradiente y
+viceversa. Los extremos conservan exactamente las pinturas originales.
+
+```python
+paint = Brush.linear([BLUE, GOLD], start=(-1, 0), end=(1, 0))
+scene.play(circle.animate.fill(paint).duration(1.5))
+```
+
+Cambiar entre tipos de gradiente incompatibles, como lineal y radial, o entre
+modos distintos de extensión/interpolación, produce un error explícito al
+programar la animación. Los materiales 3D y las selecciones de texto conservan
+sus restricciones de colores sólidos.
+
 == Fondos con gradientes y WGSL
 
 `Scene.background` y `scene.canvas.background` aceptan los mismos gradientes

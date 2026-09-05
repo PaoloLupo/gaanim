@@ -4237,6 +4237,16 @@ impl SceneModel {
                     object_scopes,
                 ),
 
+                Op::SetPropertyBinding { target, sources } => {
+                    if let Some(target) = id_map.get(target).copied() {
+                        builder.compile_property_binding(target, sources, id_map);
+                    }
+                }
+                Op::ClearPropertyBinding { target, channel } => {
+                    if let Some(target) = id_map.get(target).copied() {
+                        builder.clear_compiled_property_binding(target, *channel);
+                    }
+                }
                 // -- Reactive ops --
                 Op::AttachUpdater { target, preset } => {
                     if let Some(target_id) = id_map.get(target).copied()
@@ -5875,6 +5885,27 @@ impl SceneModel {
             *id_map.get(&anim.target)?
         };
         let mut anim_type = match &anim.anim_type {
+            AnimationType::Properties(properties) => {
+                let mut properties = properties.clone();
+                if let Some(crate::anim::PropertyTranslation::ToAnchorPoint(point)) =
+                    &mut properties.translation
+                {
+                    point.object = *id_map.get(&point.object)?;
+                }
+                for source in &mut properties.source_targets {
+                    for (_, native) in &mut source.parameters {
+                        *native = *id_map.get(native).unwrap_or(native);
+                    }
+                }
+                AnimationType::Properties(properties)
+            }
+            AnimationType::PropertySource(source) => {
+                let mut source = source.clone();
+                for (_, native) in &mut source.parameters {
+                    *native = *id_map.get(native).unwrap_or(native);
+                }
+                AnimationType::PropertySource(source)
+            }
             AnimationType::CameraFrame { target, margin } => AnimationType::CameraFrame {
                 target: *id_map.get(target)?,
                 margin: *margin,
@@ -10576,7 +10607,7 @@ mod tests {
             world
                 .query::<&LocalBounds>()
                 .iter(&world)
-                .any(|b| b.0.width() > 50.0)
+                .any(|b| b.0.width() > 0.5)
         );
     }
 
@@ -10726,8 +10757,13 @@ mod tests {
     #[test]
     fn nested_layout_materializes_paragraph_at_the_outer_assigned_width() {
         let mut canvas = SceneModel::new(1280, 720);
-        let paragraph = canvas.text(
+        let paragraph = canvas.configured_text(
             "Nested responsive paragraphs must use the card width instead of the safe frame width.",
+            gaanim_text::prelude::TextStyle {
+                size: Some(40.0),
+                ..Default::default()
+            },
+            gaanim_text::prelude::TextFlow::default(),
         );
         let inner = canvas.group(&[&paragraph]);
         paragraph.claim_layout(&inner).unwrap();

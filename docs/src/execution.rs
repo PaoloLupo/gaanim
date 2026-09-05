@@ -76,7 +76,8 @@ fn adjust_stderr_line_numbers(stderr: &str, temp_file: &str, prelude_lines: usiz
         }
 
         let mut replaced = line.to_string();
-        if (line.contains(&file_name) || line.contains(temp_file))
+        if !temp_file.is_empty()
+            && (line.contains(&file_name) || line.contains(temp_file))
             && let Some(byte_idx) = line.find("line ")
         {
             let start_byte = byte_idx + 5;
@@ -161,6 +162,18 @@ fn find_companion_file_by_cell(root: &Path, cell_name: &str, ext: &str) -> Optio
         None
     }
     scan_dir(root, cell_name, ext)
+}
+
+fn requires_gaanim_host(code: &str) -> bool {
+    code.contains(".render(")
+        || code.lines().any(|line| {
+            let line = line.trim_start();
+            line.starts_with("from gaanim ")
+                || line.starts_with("from gaanim.")
+                || line == "import gaanim"
+                || line.starts_with("import gaanim ")
+                || line.starts_with("import gaanim.")
+        })
 }
 
 #[func]
@@ -427,6 +440,7 @@ pub fn compile_code_cell(
         && let Ok(data) = fs::read_to_string(&cache_file)
         && let Ok(cache) = serde_json::from_str::<serde_json::Value>(&data)
         && cache["hash"].as_str() == Some(hex_hash.as_str())
+        && cache["stderr"].as_str().unwrap_or("").trim().is_empty()
     {
         let cached_webp = cache["webp"].as_str().unwrap_or("");
         // Una celda que promete una exportación no puede reutilizar una entrada
@@ -484,7 +498,7 @@ pub fn compile_code_cell(
 
         let prelude_lines = PYTHON_PRELUDE.lines().count();
 
-        let uses_gaanim_host = code_to_execute.contains(".render(");
+        let uses_gaanim_host = requires_gaanim_host(&code_to_execute);
         let core_binary = std::env::current_exe()
             .ok()
             .and_then(|executable| executable.parent().map(Path::to_path_buf))
@@ -504,8 +518,12 @@ pub fn compile_code_cell(
                     .arg(output)
                     .arg("--quality")
                     .arg("standard");
-            } else {
+            } else if code_to_execute.contains(".render(") {
                 command.arg("check").arg(&temp_file);
+            } else {
+                // Run authoring-only snippets against the same embedded module
+                // without requiring them to submit a scene for rendering.
+                command.arg("--validate-python-api").arg(&temp_file);
             }
             command
         } else {
@@ -657,7 +675,23 @@ pub fn compile_code_cell(
 
 #[cfg(test)]
 mod tests {
-    use super::{adjust_stderr_line_numbers, has_valid_webp_signature};
+    use super::{adjust_stderr_line_numbers, has_valid_webp_signature, requires_gaanim_host};
+
+    #[test]
+    fn authoring_cells_use_the_native_host_without_requiring_render() {
+        assert!(requires_gaanim_host(
+            "from gaanim import Scene\nscene = Scene()"
+        ));
+        assert!(requires_gaanim_host("from gaanim.matrix import Matrix"));
+        assert!(requires_gaanim_host("import gaanim as g"));
+        assert!(!requires_gaanim_host("import math\nprint(math.pi)"));
+    }
+
+    #[test]
+    fn cached_diagnostics_do_not_replace_empty_paths_between_every_character() {
+        let message = "File code cell, line 7, in <module>\nValueError: invalid input";
+        assert_eq!(adjust_stderr_line_numbers(message, "", 0), message);
+    }
 
     #[test]
     fn validates_the_riff_webp_signature() {

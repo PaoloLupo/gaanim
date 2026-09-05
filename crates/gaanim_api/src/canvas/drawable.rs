@@ -1,5 +1,6 @@
 //! DrawableHandle — ergonomic mobject handle with fluent configuration.
 
+use gaanim_animation::{PropertySources, ScalarSource};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -144,10 +145,16 @@ impl DrawableHandle {
     pub fn anchor_point(&self, anchor: Anchor, offset: DVec3) -> AnchorPoint {
         let normalized = anchor.to_offset();
         AnchorPoint {
+            scene_id: self.state.lock().expect("canvas state poisoned").scene_id,
             object: self.id,
             normalized: DVec3::new(normalized.x, normalized.y, 0.0),
             offset,
         }
+    }
+
+    /// Whether a bounds point was created by this drawable's Scene.
+    pub fn owns_anchor_point(&self, point: AnchorPoint) -> bool {
+        self.state.lock().expect("canvas state poisoned").scene_id == point.scene_id
     }
 
     /// Returns the immutable structured authoring snapshot for unified text.
@@ -446,14 +453,14 @@ impl DrawableHandle {
                 properties.opacity = Some(after.opacity);
             }
             if before.fill != after.fill
-                && let Some(Brush::Solid(color)) = after.fill.as_ref()
+                && let Some(paint) = after.fill.as_ref()
             {
-                properties.fill = Some(*color);
+                properties.fill = Some(paint.clone());
             }
             if before.stroke != after.stroke
-                && let Some((Brush::Solid(color), width)) = after.stroke.as_ref()
+                && let Some((paint, width)) = after.stroke.as_ref()
             {
-                properties.stroke_color = Some(*color);
+                properties.stroke_color = Some(paint.clone());
                 properties.stroke_width = Some(*width);
             }
             if !properties.is_empty() {
@@ -658,7 +665,53 @@ impl DrawableHandle {
     }
 
     fn push_layout(&self, op: LayoutOp) -> Self {
+        use gaanim_animation::PropertyChannel;
+        let channel = match &op {
+            LayoutOp::SetTranslation(_)
+            | LayoutOp::MoveAnchorTo { .. }
+            | LayoutOp::MoveToAnchorPoint { .. }
+            | LayoutOp::MoveTextAnchorTo { .. } => Some((PropertyChannel::Translation, false)),
+            LayoutOp::ShiftBy(_) => Some((PropertyChannel::Translation, true)),
+            LayoutOp::SetScale(_) | LayoutOp::SetScale3D(_) => {
+                Some((PropertyChannel::Scale, false))
+            }
+            LayoutOp::ScaleBy(_) => Some((PropertyChannel::Scale, true)),
+            LayoutOp::SetRotation(_) | LayoutOp::SetRotation3D(_) => {
+                Some((PropertyChannel::Rotation, false))
+            }
+            LayoutOp::RotateBy(_) => Some((PropertyChannel::Rotation, true)),
+            _ => None,
+        };
+        if let Some((channel, relative)) = channel {
+            assert!(
+                !relative || !self.property_is_bound(channel),
+                "channel is reactively bound; animate its Parameter or assign a fixed value first"
+            );
+            if !relative {
+                self.clear_property_binding(channel);
+            }
+        }
         let immediate = match &op {
+            LayoutOp::MoveTextAnchorTo {
+                target,
+                anchor,
+                center_multiline,
+            } => {
+                let horizontal = match anchor {
+                    TextAnchor::BaselineLeft => -1.0,
+                    TextAnchor::BaselineCenter => 0.0,
+                    TextAnchor::BaselineRight => 1.0,
+                };
+                Some(AnimationType::PropertySource(
+                    crate::anim::PropertySourceTarget::new(
+                        gaanim_animation::PropertySources::TextTranslation {
+                            values: [target.x.into(), target.y.into(), target.z.into()],
+                            horizontal,
+                            center_multiline: *center_multiline,
+                        },
+                    ),
+                ))
+            }
             LayoutOp::SetTranslation(to) => Some(AnimationType::TranslateTo { to: *to }),
             LayoutOp::ShiftBy(delta) => Some(AnimationType::TranslateBy { delta: *delta }),
             LayoutOp::SetScale(factor) => Some(AnimationType::ScaleTo {
@@ -1027,7 +1080,15 @@ impl DrawableHandle {
         result
     }
 
-    pub fn opacity(self, op: f32) -> Self {
+    pub fn opacity(self, op: impl Into<ScalarSource>) -> Self {
+        let op = op.into();
+        let Some(op) = op.constant_value() else {
+            return self
+                .bind_property(PropertySources::Opacity(op))
+                .expect("invalid reactive opacity source");
+        };
+        let op = op as f32;
+        self.clear_property_binding(gaanim_animation::PropertyChannel::Opacity);
         self.update_style(|spec| {
             spec.opacity = op;
             spec.opacity_overridden = true;
@@ -1038,7 +1099,17 @@ impl DrawableHandle {
         self.update_spec(|spec| spec.z_index = z)
     }
 
-    pub fn move_to(self, x: f64, y: f64) -> Self {
+    pub fn move_to(self, x: impl Into<ScalarSource>, y: impl Into<ScalarSource>) -> Self {
+        let x = x.into();
+        let y = y.into();
+        let (Some(x), Some(y)) = (x.constant_value(), y.constant_value()) else {
+            return self
+                .bind_property(PropertySources::Translation {
+                    values: [x, y, 0.0.into()],
+                    anchor: None,
+                })
+                .expect("invalid reactive property source");
+        };
         self.push_layout(LayoutOp::SetTranslation(DVec3::new(x, y, 0.0)))
     }
 
@@ -1069,7 +1140,25 @@ impl DrawableHandle {
     }
 
     /// 3D position in world space (perspective-aware).
-    pub fn move_to_3d(self, x: f64, y: f64, z: f64) -> Self {
+    pub fn move_to_3d(
+        self,
+        x: impl Into<ScalarSource>,
+        y: impl Into<ScalarSource>,
+        z: impl Into<ScalarSource>,
+    ) -> Self {
+        let x = x.into();
+        let y = y.into();
+        let z = z.into();
+        let (Some(x), Some(y), Some(z)) =
+            (x.constant_value(), y.constant_value(), z.constant_value())
+        else {
+            return self
+                .bind_property(PropertySources::Translation {
+                    values: [x, y, z],
+                    anchor: None,
+                })
+                .expect("invalid reactive property source");
+        };
         self.push_layout(LayoutOp::SetTranslation(DVec3::new(x, y, z)))
     }
 
@@ -1085,7 +1174,17 @@ impl DrawableHandle {
         self.update_spec(|spec| spec.hud = true)
     }
 
-    pub fn scale_to(self, factor: f64) -> Self {
+    pub fn scale_to(self, factor: impl Into<ScalarSource>) -> Self {
+        let factor = factor.into();
+        let Some(factor) = factor.constant_value() else {
+            return self
+                .bind_property(PropertySources::Scale([
+                    factor.clone(),
+                    factor.clone(),
+                    factor,
+                ]))
+                .expect("invalid reactive property source");
+        };
         self.push_layout(LayoutOp::SetScale(factor))
     }
 
@@ -1097,11 +1196,32 @@ impl DrawableHandle {
         self.push_layout(LayoutOp::ScaleBy(DVec3::new(x, y, z)))
     }
 
-    pub fn scale_to_3d(self, x: f64, y: f64, z: f64) -> Self {
+    pub fn scale_to_3d(
+        self,
+        x: impl Into<ScalarSource>,
+        y: impl Into<ScalarSource>,
+        z: impl Into<ScalarSource>,
+    ) -> Self {
+        let x = x.into();
+        let y = y.into();
+        let z = z.into();
+        let (Some(x), Some(y), Some(z)) =
+            (x.constant_value(), y.constant_value(), z.constant_value())
+        else {
+            return self
+                .bind_property(PropertySources::Scale([x, y, z]))
+                .expect("invalid reactive property source");
+        };
         self.push_layout(LayoutOp::SetScale3D(DVec3::new(x, y, z)))
     }
 
-    pub fn rotate_to(self, radians: f64) -> Self {
+    pub fn rotate_to(self, radians: impl Into<ScalarSource>) -> Self {
+        let radians = radians.into();
+        let Some(radians) = radians.constant_value() else {
+            return self
+                .bind_property(PropertySources::Rotation([0.0.into(), 0.0.into(), radians]))
+                .expect("invalid reactive property source");
+        };
         self.push_layout(LayoutOp::SetRotation(radians))
     }
 
@@ -1124,7 +1244,22 @@ impl DrawableHandle {
     }
 
     /// Set XYZ Euler rotation in radians.
-    pub fn rotate_to_3d(self, x: f64, y: f64, z: f64) -> Self {
+    pub fn rotate_to_3d(
+        self,
+        x: impl Into<ScalarSource>,
+        y: impl Into<ScalarSource>,
+        z: impl Into<ScalarSource>,
+    ) -> Self {
+        let x = x.into();
+        let y = y.into();
+        let z = z.into();
+        let (Some(x), Some(y), Some(z)) =
+            (x.constant_value(), y.constant_value(), z.constant_value())
+        else {
+            return self
+                .bind_property(PropertySources::Rotation([x, y, z]))
+                .expect("invalid reactive property source");
+        };
         self.push_layout(LayoutOp::SetRotation3D(DVec3::new(x, y, z)))
     }
 
@@ -1155,6 +1290,10 @@ impl DrawableHandle {
 
     /// Place this drawable's center at an anchor point derived from another drawable.
     pub fn at_anchor_point(self, point: AnchorPoint) -> Self {
+        assert!(
+            self.owns_anchor_point(point),
+            "anchor point must belong to the same Scene"
+        );
         self.push_layout(LayoutOp::MoveToAnchorPoint { point })
     }
 
@@ -1294,6 +1433,10 @@ impl DrawableHandle {
 
     /// Animate this drawable's center to an anchor point on another drawable.
     pub(crate) fn move_to_anchor_point(&self, point: AnchorPoint) -> Anim {
+        assert!(
+            self.owns_anchor_point(point),
+            "anchor point must belong to the same Scene"
+        );
         self.anim(AnimationType::TranslateToAnchorPoint { point })
     }
 

@@ -132,6 +132,7 @@ from .templates import (
     title_slide,
     vertical_short,
 )
+from .animation_types import AnimationChannel, CustomAnimationValues, ScalarSource
 from .matrix import (
     Matrix,
     MatrixAlgebraError,
@@ -155,6 +156,9 @@ def Canvas(*args, **kwargs):
 
 
 __all__ = [
+    "AnimationChannel",
+    "CustomAnimationValues",
+    "ScalarSource",
     "Scene",
     "Geometry",
     "Typography",

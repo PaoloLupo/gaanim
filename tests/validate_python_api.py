@@ -978,6 +978,82 @@ def validate_vector_geometry_contract(module) -> list[str]:
     return failures
 
 
+def validate_composable_properties_contract(module) -> list[str]:
+    """Exercise ownership, bindings and custom validation through the real host."""
+    failures: list[str] = []
+
+    def rejected(label, action, errors=(ValueError, TypeError, RuntimeError)):
+        try:
+            action()
+        except errors:
+            return
+        failures.append(label)
+
+    scene = module.Scene()
+    radius = scene.viz.parameter(1.0)
+    area = module.computed(lambda r: r*r, inputs=[radius])
+    doubled = module.computed(lambda a: 2*a, inputs=[area])
+    timed = module.computed(lambda a, t: a+t, inputs=[doubled, scene.time])
+    scene.viz.readout(timed)
+    dot = scene.geometry.circle(0.2).move_to(radius, area).opacity(0.8)
+    rejected("relative translation accepted a linked position", lambda: dot.shift_by(1, 0))
+    rejected("native animation accepted a linked position", lambda: scene.play(dot.animate.move_to(0, 0)))
+    scene.play(dot.animate.opacity(0.5))
+    dot.move_to(0, 0)
+    scene.play(dot.animate.move_to(radius, area))
+
+    foreign = module.Scene().viz.parameter(1.0)
+    hidden_foreign = module.computed(lambda a: a, inputs=[module.computed(lambda a: a, inputs=[foreign])])
+    rejected("nested computed bypassed readout ownership", lambda: scene.viz.readout(hidden_foreign))
+    rejected("nested computed bypassed setter ownership", lambda: dot.opacity(hidden_foreign))
+    rejected("nested computed bypassed animated target ownership", lambda: dot.animate.opacity(hidden_foreign))
+    other = module.Scene().geometry.circle(0.2)
+    rejected("animated anchor accepted another Scene", lambda: dot.animate.move_to(other.anchor_point()))
+
+    text = scene.text("Reactive")
+    if text.move_to(radius, area).opacity(doubled).scale_to(radius) is not text:
+        failures.append("reactive text setters lost the Text handle")
+    text.move_to(0, 0).opacity(1).scale_to(1)
+
+    native = dot.animate.custom(lambda alpha: {"position": (alpha, alpha*alpha), "opacity": 1-alpha/2}, channels=("position", "opacity"))
+    scene.play(module.parallel(native.duration(1), dot.animate.fill(module.BLUE)))
+    rejected("custom mixed with a native setter", lambda: dot.animate.custom(lambda a: {"opacity": a}, channels=("opacity",)).opacity(0.5))
+    rejected("custom accepted duplicate channels", lambda: dot.animate.custom(lambda a: {"opacity": a}, channels=("opacity", "opacity")))
+    rejected("custom accepted unknown channels", lambda: dot.animate.custom(lambda a: {"unknown": a}, channels=("unknown",)))
+    rejected("custom accepted a wrong callback signature", lambda: dot.animate.custom(lambda: {}, channels=("opacity",)))
+
+    async def async_callback(alpha):
+        return {"opacity": alpha}
+    rejected("custom accepted an async callback", lambda: dot.animate.custom(async_callback, channels=("opacity",)))
+    for value in ({}, {"opacity": math.nan}, {"opacity": 0.5, "scale": 1.0}):
+        rejected("custom accepted invalid callback values", lambda value=value: scene.play(dot.animate.custom(lambda a: value, channels=("opacity",))))
+
+    def mutate_drawable(alpha):
+        dot.fill(module.GOLD)
+        return {"opacity": 0.5}
+
+    def mutate_parameter(alpha):
+        radius.set(9)
+        return {"opacity": 0.5}
+
+    def mutate_scene(alpha):
+        scene.geometry.circle(0.1)
+        return {"opacity": 0.5}
+
+    for callback in (mutate_drawable, mutate_parameter, mutate_scene):
+        rejected("custom callback mutated authoring state", lambda callback=callback: scene.play(dot.animate.custom(callback, channels=("opacity",))))
+    rejected("custom callback read a locked scene", lambda: scene.play(dot.animate.custom(lambda a: {"opacity": scene.canvas.frame_width}, channels=("opacity",))))
+    rejected("custom callback read mutable parameter state", lambda: scene.play(dot.animate.custom(lambda a: {"opacity": radius.current}, channels=("opacity",))))
+    if radius.current == 9:
+        failures.append("rejected custom callback changed its Parameter")
+
+    paint = module.Brush.linear([module.BLUE, module.GOLD], start=(-1, 0), end=(1, 0))
+    scene.play(dot.animate.fill(color=paint).stroke(color=paint, width=0.05))
+    target = scene.geometry.circle(0.2).move_to(1, 1)
+    scene.play(dot.animate.move_to(target).opacity(1))
+    return failures
+
+
 def validate_composition_contract(module) -> list[str]:
     failures: list[str] = []
     for legacy in ("AnimationGroup", "Succession", "LaggedStart"):
@@ -1157,7 +1233,7 @@ def validate_scene_capability_surface(module) -> list[str]:
         "assets", "camera", "canvas", "geometry", "layout", "mechanics",
         "media", "slides", "text", "viz", "fade_out_all", "link", "persist",
         "play", "release", "render", "reuse", "segment", "snapshots", "stop",
-        "wait",
+        "wait", "time",
     }
     actual = {name for name in dir(module.Scene) if not name.startswith("_")}
     failures = []
@@ -1234,6 +1310,7 @@ def main() -> int:
     missing.extend(validate_matrix_stub_typing())
     missing.extend(validate_vector_geometry_contract(module))
     missing.extend(validate_composition_contract(module))
+    missing.extend(validate_composable_properties_contract(module))
     missing.extend(validate_easing_contract(module))
     missing.extend(validate_scene_capability_surface(module))
     missing.extend(validate_editorial_contract(module))

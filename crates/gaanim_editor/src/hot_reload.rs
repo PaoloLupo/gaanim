@@ -47,6 +47,13 @@ pub struct ScriptError {
     pub updated_at: Option<f64>,
 }
 
+/// Tracks delivered runtime errors so dismissing the overlay stays effective.
+#[derive(Resource, Default)]
+struct CustomErrorsShown(usize);
+
+#[derive(Resource, Default)]
+struct PropertyErrorsShown(usize);
+
 /// Receiver para tracebacks enviados por el hilo de Python.
 #[derive(Resource)]
 pub struct ScriptErrorReceiver {
@@ -59,9 +66,19 @@ pub struct ScriptErrorReceiver {
 /// The Camera2d + VelloView entity is intentionally kept alive so the window
 /// surface and egui context remain valid across hot-reloads.
 pub fn clear_scene_entities(world: &mut World) {
+    world.remove_resource::<gaanim_animation::CustomAnimationDiagnostics>();
+    world.remove_resource::<CustomErrorsShown>();
+    world.remove_resource::<gaanim_animation::PropertyBindingDiagnostics>();
+    world.remove_resource::<PropertyErrorsShown>();
+    world.remove_resource::<gaanim_animation::PropertySignalTimeline>();
+    world.remove_resource::<gaanim_animation::PropertySignalStops>();
     let to_despawn: Vec<Entity> = {
-        let mut q = world.query::<(Entity, &MobjectId)>();
-        q.iter(world).map(|(e, _)| e).collect()
+        let mut q = world.query_filtered::<Entity, Or<(
+            With<MobjectId>,
+            With<gaanim_animation::PropertyBinding>,
+            With<gaanim_animation::CameraBinding>,
+        )>>();
+        q.iter(world).collect()
     };
     for e in to_despawn {
         if world.get_entity(e).is_ok() {
@@ -89,12 +106,43 @@ pub fn clear_scene_entities(world: &mut World) {
 
 /// System: drains pending error strings and updates [`ScriptError`].
 pub fn script_error_listener_system(world: &mut World) {
-    let errors: Vec<String> = {
-        let Some(rx_res) = world.get_resource::<ScriptErrorReceiver>() else {
-            return;
-        };
-        rx_res.rx.try_iter().collect()
-    };
+    let mut errors: Vec<String> = world
+        .get_resource::<ScriptErrorReceiver>()
+        .map(|receiver| receiver.rx.try_iter().collect())
+        .unwrap_or_default();
+    let shown = world
+        .get_resource::<CustomErrorsShown>()
+        .map_or(0, |shown| shown.0);
+    let new_custom_error = world.get_resource::<gaanim_animation::CustomAnimationDiagnostics>()
+        .filter(|diagnostics| diagnostics.0.len() > shown)
+        .map(|diagnostics| {
+            let error = diagnostics.0.last().expect("new diagnostic");
+            (diagnostics.0.len(), format!("Custom animation failed for {:?} at alpha {}\n{}\n\nThe affected properties were restored to their state before this animation.", error.target, error.alpha, error.message))
+        });
+    if let Some((count, message)) = new_custom_error {
+        world.insert_resource(CustomErrorsShown(count));
+        errors.push(message);
+    }
+    let shown = world
+        .get_resource::<PropertyErrorsShown>()
+        .map_or(0, |shown| shown.0);
+    let new_property_error = world
+        .get_resource::<gaanim_animation::PropertyBindingDiagnostics>()
+        .filter(|diagnostics| diagnostics.0.len() > shown)
+        .map(|diagnostics| {
+            let error = diagnostics.0.last().expect("new diagnostic");
+            (
+                diagnostics.0.len(),
+                format!(
+                    "Reactive property failed for {:?} at {} seconds\n{}",
+                    error.target, error.time, error.message
+                ),
+            )
+        });
+    if let Some((count, message)) = new_property_error {
+        world.insert_resource(PropertyErrorsShown(count));
+        errors.push(message);
+    }
     if errors.is_empty() {
         return;
     }
@@ -226,6 +274,55 @@ mod tests {
     use gaanim_timeline::timeline::SegmentMetadata;
 
     #[test]
+    fn custom_callback_error_uses_preview_overlay_once_and_clears_on_reload() {
+        let mut world = World::new();
+        world.insert_resource(Time::<()>::default());
+        world.insert_resource(ScriptError::default());
+        world.insert_resource(gaanim_animation::CustomAnimationDiagnostics(vec![
+            gaanim_animation::CustomAnimationDiagnostic {
+                target: ObjectId::from_raw(4),
+                alpha: 0.375,
+                message: "callback returned NaN".into(),
+            },
+        ]));
+        script_error_listener_system(&mut world);
+        assert!(
+            world
+                .resource::<ScriptError>()
+                .message
+                .as_ref()
+                .unwrap()
+                .contains("0.375")
+        );
+        world.resource_mut::<ScriptError>().message = None;
+        script_error_listener_system(&mut world);
+        assert!(world.resource::<ScriptError>().message.is_none());
+        clear_scene_entities(&mut world);
+        assert!(!world.contains_resource::<gaanim_animation::CustomAnimationDiagnostics>());
+        world.insert_resource(gaanim_animation::PropertyBindingDiagnostics(vec![
+            gaanim_animation::PropertyBindingDiagnostic {
+                target: ObjectId::from_raw(5),
+                time: 1.25,
+                message: "computed value failed".into(),
+            },
+        ]));
+        script_error_listener_system(&mut world);
+        assert!(
+            world
+                .resource::<ScriptError>()
+                .message
+                .as_ref()
+                .unwrap()
+                .contains("1.25")
+        );
+        world.resource_mut::<ScriptError>().message = None;
+        script_error_listener_system(&mut world);
+        assert!(world.resource::<ScriptError>().message.is_none());
+        clear_scene_entities(&mut world);
+        assert!(!world.contains_resource::<gaanim_animation::PropertyBindingDiagnostics>());
+    }
+
+    #[test]
     fn reload_keeps_fractional_time_inside_the_current_segment() {
         let mut timeline = Timeline::default();
         timeline.cached_duration = 8.0;
@@ -266,10 +363,24 @@ mod tests {
         let editor_entity = world.spawn_empty().id();
 
         for revision in 0..2 {
-            world.spawn((
-                MobjectId(ObjectId::from_raw(10 + revision)),
-                ObjectTag("force_at label".to_owned()),
-            ));
+            let target = world
+                .spawn((
+                    MobjectId(ObjectId::from_raw(10 + revision)),
+                    ObjectTag("force_at label".to_owned()),
+                ))
+                .id();
+            world.spawn(gaanim_animation::PropertyBinding {
+                target,
+                source: gaanim_animation::ResolvedPropertySources {
+                    sources: gaanim_animation::PropertySources::Opacity(0.5.into()),
+                    parameters: Vec::new(),
+                    anchor_offset: gaanim_core::glam::DVec3::ZERO,
+                    local_anchor: None,
+                },
+                start: 0.0,
+                end: None,
+                fallback: gaanim_animation::PropertyValue::Opacity(1.0),
+            });
             world.spawn((
                 MobjectId(ObjectId::from_raw(20 + revision)),
                 ObjectTag("theta angle label".to_owned()),
@@ -285,6 +396,13 @@ mod tests {
             assert!(
                 world.get_entity(editor_entity).is_ok(),
                 "editor-owned entities must survive scene clearing"
+            );
+            assert_eq!(
+                world
+                    .query::<&gaanim_animation::PropertyBinding>()
+                    .iter(&world)
+                    .count(),
+                0
             );
         }
     }

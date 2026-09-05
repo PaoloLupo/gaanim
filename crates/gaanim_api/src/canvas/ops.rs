@@ -28,6 +28,9 @@ use crate::canvas::types::{LayoutTreeSnapshot, ObjectSpec};
 /// the same deferred operation stream that will later be compiled.
 #[derive(Debug)]
 pub(crate) struct CanvasState {
+    pub scene_id: u64,
+    pub(crate) bound_properties:
+        std::collections::HashSet<(ObjectId, gaanim_animation::PropertyChannel)>,
     pub segments: Vec<Segment>,
     pub active_idx: usize,
     pub next_id: u32,
@@ -51,7 +54,9 @@ pub(crate) struct CanvasState {
 
 impl CanvasState {
     pub fn new() -> Self {
+        static NEXT_SCENE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         Self {
+            scene_id: NEXT_SCENE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             segments: vec![Segment::implicit()],
             active_idx: 0,
             next_id: 1,
@@ -63,6 +68,7 @@ impl CanvasState {
             layout_constraints: Vec::new(),
             layout_diagnostics: Vec::new(),
             latest_layouts: HashMap::new(),
+            bound_properties: Default::default(),
             parameter_values: HashMap::new(),
             object_specs: HashMap::new(),
             frozen_spawn_specs: HashMap::new(),
@@ -153,10 +159,10 @@ impl CanvasState {
                             previous.opacity = incoming.opacity;
                         }
                         if incoming.fill.is_some() {
-                            previous.fill = incoming.fill;
+                            previous.fill = incoming.fill.clone();
                         }
                         if incoming.stroke_color.is_some() {
-                            previous.stroke_color = incoming.stroke_color;
+                            previous.stroke_color = incoming.stroke_color.clone();
                         }
                         if incoming.stroke_width.is_some() {
                             previous.stroke_width = incoming.stroke_width;
@@ -234,6 +240,14 @@ pub(crate) struct CameraBindingSpec {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) enum Op {
+    SetPropertyBinding {
+        target: ObjectId,
+        sources: gaanim_animation::PropertySources,
+    },
+    ClearPropertyBinding {
+        target: ObjectId,
+        channel: gaanim_animation::PropertyChannel,
+    },
     /// Spawn a mobject from a shared ObjectSpec. The spec is intentionally
     /// shared so fluent setters after factory creation update the spawned
     /// object seen by compile.
@@ -756,6 +770,7 @@ pub enum CanvasRay {
 /// A non-rendered reactive point attached to a drawable's local bounds.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AnchorPoint {
+    pub(crate) scene_id: u64,
     pub object: ObjectId,
     pub normalized: DVec3,
     pub offset: DVec3,

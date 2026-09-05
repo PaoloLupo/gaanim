@@ -419,6 +419,17 @@ impl From<LottieClip> for PlayItem {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PlayError {
+    #[error("invalid paint animation: {0}")]
+    InvalidPaint(String),
+    #[error(
+        "channel '{channel}' on {target:?} is reactively bound; animate its Parameter or assign a fixed value first"
+    )]
+    BoundProperty {
+        target: gaanim_core::ObjectId,
+        channel: String,
+    },
+    #[error("invalid custom animation: {0}")]
+    CustomAnimation(String),
     #[error("animations can only be played by their owning Scene")]
     ForeignAnimation,
     #[error("an Anim can only be played once")]
@@ -456,6 +467,19 @@ pub enum PlayError {
 
 fn animation_channels(anim: &Anim) -> Vec<String> {
     use crate::anim::AnimationType::*;
+    if let PropertySource(source) = &anim.inner.anim_type {
+        return vec![source.sources.channel().name().to_owned()];
+    }
+    if matches!(anim.inner.anim_type, FadeInFrom { .. }) {
+        return vec!["translation".into(), "opacity".into()];
+    }
+    if let CustomProperties(animation) = &anim.inner.anim_type {
+        return animation
+            .channels()
+            .iter()
+            .map(|channel| channel.timeline_channel().to_owned())
+            .collect();
+    }
     let properties = match &anim.inner.anim_type {
         Properties(properties) | TextSelectionProperties { properties, .. } => Some(properties),
         _ => None,
@@ -473,14 +497,26 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
         };
         let mut channels = Vec::new();
         for (present, name) in [
-            (properties.translation.is_some(), "translation"),
+            (
+                properties.translation.is_some()
+                    || matches!(
+                        properties.rotation,
+                        Some(crate::anim::PropertyRotation::By2D { pivot: Some(_), .. })
+                    ),
+                "translation",
+            ),
             (properties.rotation.is_some(), "rotation"),
             (properties.scale.is_some(), "scale"),
             (properties.opacity.is_some(), "opacity"),
-            (properties.fill.is_some(), "fill"),
-            (properties.stroke_color.is_some(), "stroke_color"),
+            (
+                properties.fill.is_some() || properties.visible_color.is_some(),
+                "fill",
+            ),
+            (
+                properties.stroke_color.is_some() || properties.visible_color.is_some(),
+                "stroke_color",
+            ),
             (properties.stroke_width.is_some(), "stroke_width"),
-            (properties.visible_color.is_some(), "visible_color"),
             (properties.material.is_some(), "material"),
             (properties.fill_level.is_some(), "fill_level"),
         ] {
@@ -488,18 +524,56 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
                 channels.push(format!("{prefix}{name}"));
             }
         }
+        channels.extend(
+            properties
+                .source_targets
+                .iter()
+                .map(|target| target.sources.channel().name().to_owned()),
+        );
         return channels;
+    }
+    let compound_channels: &[&str] = match &anim.inner.anim_type {
+        FadeInFrom { .. } => &["translation", "opacity"],
+        RotateBy { pivot: Some(_), .. } => &["rotation", "translation"],
+        GrowFromPoint { .. } | GrowFromEdge { .. } => &["translation", "scale"],
+        SpinInFromNothing => &["scale", "rotation"],
+        Create3D => &["scale", "opacity"],
+        Indicate { .. } => &["translation", "scale", "fill"],
+        Transform { .. } | ReplacementTransform { .. } => &[
+            "translation",
+            "rotation",
+            "scale",
+            "fill",
+            "stroke_color",
+            "stroke_width",
+            "opacity",
+            "effect",
+        ],
+        _ => &[],
+    };
+    if !compound_channels.is_empty() {
+        return compound_channels
+            .iter()
+            .map(|channel| (*channel).to_owned())
+            .collect();
     }
     let channel = match &anim.inner.anim_type {
         TranslateTo { .. }
         | TranslateAnchorTo { .. }
         | TranslateToAnchorPoint { .. }
-        | TranslateBy { .. } => "translation",
+        | TranslateBy { .. }
+        | MoveAlongPath { .. }
+        | MoveAlongPath3D { .. }
+        | Wiggle => "translation",
         RotateTo { .. } | RotateBy { .. } | RotateBy3D { .. } => "rotation",
-        ScaleTo { .. } | ScaleUniform { .. } | ScaleBy3D { .. } => "scale",
+        ScaleTo { .. }
+        | ScaleUniform { .. }
+        | ScaleBy3D { .. }
+        | GrowFromCenter
+        | ShrinkToCenter => "scale",
         FadeTo { .. } | FadeIn | FadeOut | FadeInFrom { .. } => "opacity",
-        FillColorTo { .. } => "fill",
-        StrokeColorTo { .. } => "stroke_color",
+        FillColorTo { .. } | FillPaintTo { .. } => "fill",
+        StrokeColorTo { .. } | StrokePaintTo { .. } => "stroke_color",
         StrokeWidthTo { .. } => "stroke_width",
         Material3DTo { .. } => "material",
         SignalFloat { .. } => "signal",
@@ -3365,6 +3439,21 @@ impl SceneModel {
                 return Err(PlayError::DuplicateAnimation);
             }
         }
+        for anim in &animations {
+            if let crate::anim::AnimationType::CustomProperties(callback) = &anim.inner.anim_type {
+                callback
+                    .evaluate(anim.inner.rate_func.evaluate(0.0))
+                    .map_err(PlayError::CustomAnimation)?;
+                callback
+                    .evaluate(anim.inner.rate_func.evaluate(1.0))
+                    .map_err(PlayError::CustomAnimation)?;
+            }
+        }
+        let mut paint_targets = std::collections::HashMap::new();
+        for anim in &animations {
+            anim.validate_paint_targets(&mut paint_targets)
+                .map_err(|error| PlayError::InvalidPaint(error.to_owned()))?;
+        }
         let mut occupied: Vec<(gaanim_core::ObjectId, String, f64, f64)> = Vec::new();
         for resolved_item in &resolved {
             let PlayItem::Animation(anim) = &resolved_item.item else {
@@ -3373,6 +3462,22 @@ impl SceneModel {
             let start = resolved_item.start;
             let end = start + resolved_item.duration.unwrap_or(0.0);
             for channel in animation_channels(anim) {
+                if self
+                    .state
+                    .lock()
+                    .expect("canvas state poisoned")
+                    .bound_properties
+                    .iter()
+                    .any(|(target, bound)| {
+                        *target == anim.inner.target
+                            && (bound.name() == channel || channel == "effect")
+                    })
+                {
+                    return Err(PlayError::BoundProperty {
+                        target: anim.inner.target,
+                        channel,
+                    });
+                }
                 let conflicts = occupied.iter().any(
                     |(target, occupied_channel, occupied_start, occupied_end)| {
                         if *target != anim.inner.target || *occupied_channel != channel {
@@ -6677,7 +6782,13 @@ mod tests {
             Anchor::TopRight,
             gaanim_core::glam::DVec3::new(-5.0, -3.0, 0.0),
         );
-        canvas.play(vec![moving.move_to_anchor_point(point).duration(1.0)]);
+        canvas.play(vec![
+            moving
+                .animate()
+                .move_to_anchor_point(point)
+                .unwrap()
+                .duration(1.0),
+        ]);
 
         let mut world = World::new();
         world.insert_resource(Timeline::new());
@@ -7484,8 +7595,8 @@ mod tests {
                 .as_ref()
                 .and_then(DrawableHandle::text_spec)
                 .and_then(|spec| spec.style.size),
-            Some(48.0),
-            "dimension labels default to a 1080p-readable size"
+            Some(0.48),
+            "dimension labels use the theme's scene-unit size"
         );
 
         let mut world = World::new();
@@ -8167,6 +8278,158 @@ mod tests {
         assert_eq!(outline_paths[0].3, Some(1.0));
         assert_eq!(outline_paths[0].5, true);
         assert!(outline_paths[0].4.is_none());
+    }
+
+    #[test]
+    fn custom_animation_composes_and_preserves_exact_seek_and_following_baselines() {
+        use gaanim_animation::{CustomAnimation, CustomChannel, CustomValues};
+        let mut canvas = SceneModel::new(320, 180);
+        let dot = canvas.circle(10.0).move_to(4.0, 0.0);
+        let callback = CustomAnimation::new(vec![CustomChannel::Position], |alpha| {
+            Ok(CustomValues {
+                position: Some(DVec3::new(4.0 + alpha * alpha * 100.0, 0.0, 0.0)),
+                ..Default::default()
+            })
+        })
+        .unwrap();
+        let custom = dot
+            .animate()
+            .custom(callback)
+            .unwrap()
+            .duration(2.0)
+            .rate_func(RateFunc::Linear);
+        let opacity = dot
+            .animate()
+            .opacity(0.5)
+            .duration(2.0)
+            .rate_func(RateFunc::Linear);
+        canvas
+            .play_items(vec![custom.into(), opacity.into()])
+            .unwrap();
+        canvas
+            .play_items(vec![
+                dot.animate()
+                    .shift_by(10.0, 0.0)
+                    .duration(1.0)
+                    .rate_func(RateFunc::Linear)
+                    .into(),
+            ])
+            .unwrap();
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        let entity = world
+            .query::<(bevy::prelude::Entity, &MobjectId)>()
+            .iter(&world)
+            .next()
+            .unwrap()
+            .0;
+        let mut timeline = world.remove_resource::<Timeline>().unwrap();
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        for (time, x) in [
+            (0.2469, 4.0 + 0.12345_f64.powi(2) * 100.0),
+            (3.0, 114.0),
+            (2.5, 109.0),
+            (0.2469, 4.0 + 0.12345_f64.powi(2) * 100.0),
+            (0.0, 4.0),
+        ] {
+            timeline.seek(&mut world, time);
+            assert!(
+                (world.get::<SpatialTransform>(entity).unwrap().translation.x - x).abs() < 1e-9
+            );
+        }
+    }
+
+    #[test]
+    fn custom_animation_endpoint_uses_easing_before_following_relative_animation() {
+        use gaanim_animation::{CustomAnimation, CustomChannel, CustomValues};
+        let mut canvas = SceneModel::new(320, 180);
+        let dot = canvas.circle(10.0).move_to(4.0, 0.0);
+        let callback = CustomAnimation::new(vec![CustomChannel::Position], |alpha| {
+            Ok(CustomValues {
+                position: Some(DVec3::new(4.0 + alpha * 100.0, 0.0, 0.0)),
+                ..Default::default()
+            })
+        })
+        .unwrap();
+        let custom = dot
+            .animate()
+            .custom(callback)
+            .unwrap()
+            .duration(1.0)
+            .rate_func(RateFunc::ThereAndBack);
+        let after = dot
+            .animate()
+            .shift_by(10.0, 0.0)
+            .duration(1.0)
+            .rate_func(RateFunc::Linear);
+        canvas
+            .play_composition_configured(
+                Composition::sequence(
+                    vec![Composition::leaf(custom), Composition::leaf(after)],
+                    0.0,
+                )
+                .unwrap(),
+                None,
+                None,
+            )
+            .unwrap();
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        let entity = world
+            .query::<(bevy::prelude::Entity, &MobjectId)>()
+            .iter(&world)
+            .next()
+            .unwrap()
+            .0;
+        let mut timeline = world.remove_resource::<Timeline>().unwrap();
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        for (time, x) in [(0.5, 104.0), (2.0, 14.0), (1.5, 9.0), (0.0, 4.0)] {
+            timeline.seek(&mut world, time);
+            assert!(
+                (world.get::<SpatialTransform>(entity).unwrap().translation.x - x).abs() < 1e-9
+            );
+        }
+    }
+
+    #[test]
+    fn custom_animation_rejects_conflicts_and_invalid_outputs_without_consuming() {
+        use gaanim_animation::{CustomAnimation, CustomChannel, CustomValues};
+        let mut scene = SceneModel::new(320, 180);
+        let dot = scene.circle(10.0);
+        let valid = CustomAnimation::new(vec![CustomChannel::Opacity], |alpha| {
+            Ok(CustomValues {
+                opacity: Some(alpha as f32),
+                ..Default::default()
+            })
+        })
+        .unwrap();
+        let custom = dot.animate().custom(valid).unwrap();
+        assert!(
+            matches!(scene.play_items(vec![custom.clone().into(), dot.animate().opacity(0.2).into()]), Err(PlayError::ConflictingChannel { channel, .. }) if channel == "opacity")
+        );
+        assert_eq!(scene.current_time(), 0.0);
+        scene.play_items(vec![custom.into()]).unwrap();
+        let invalid =
+            CustomAnimation::new(
+                vec![CustomChannel::Opacity],
+                |_| Ok(CustomValues::default()),
+            )
+            .unwrap();
+        let cursor = scene.current_time();
+        assert!(matches!(
+            scene.play_items(vec![dot.animate().custom(invalid).unwrap().into()]),
+            Err(PlayError::CustomAnimation(_))
+        ));
+        assert_eq!(scene.current_time(), cursor);
     }
 
     #[test]

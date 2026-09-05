@@ -414,10 +414,8 @@ copy = scene.text(
 copy["concept"].fill(GOLD)
 copy["formula"]["mass"].fill(BLUE)
 scene.play([copy.animate.write(by="word").duration(1.0)])
-scene.play([
-    copy.words[1].animate.pulse(0.6),
-    copy["formula"]["mass"].animate.focus(0.6),
-])
+scene.play(copy.words[1].animate.pulse().duration(0.6))
+scene.play(copy["formula"]["mass"].animate.focus().duration(0.6))
 # output: text_selection.webp
 scene.render()
 ```

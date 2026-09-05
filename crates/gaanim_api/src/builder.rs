@@ -522,6 +522,14 @@ impl<'a, 'w, 's, 'b> CoordinatedAnimationBuilder<'a, 'w, 's, 'b> {
 /// Manages auto-incrementing ObjectId generation, relative layouts, active states,
 /// and sequential/parallel animation clip registration on the Timeline clock.
 pub struct SceneBuilder<'w, 's, 'a> {
+    pub(crate) property_source_cursors: HashMap<
+        (ObjectId, gaanim_animation::PropertyChannel),
+        std::sync::Arc<gaanim_animation::PropertySourceLens>,
+    >,
+    pub(crate) property_bindings: HashMap<
+        (ObjectId, gaanim_animation::PropertyChannel),
+        (Entity, gaanim_animation::PropertyBinding),
+    >,
     pub commands: &'a mut Commands<'w, 's>,
     pub timeline: &'a mut Timeline,
     pub font_registry: &'a FontRegistry,
@@ -535,7 +543,7 @@ pub struct SceneBuilder<'w, 's, 'a> {
     mobject_tracks: HashMap<ObjectId, TrackId>,
     mobject_names: HashMap<ObjectId, String>,
     next_track: u32,
-    current_label: Option<String>,
+    pub(crate) current_label: Option<String>,
     /// The currently active scene (None when outside any scene scope).
     pub current_scene: Option<SceneId>,
     /// Tracks the current value of each float signal / value tracker
@@ -834,6 +842,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             current_label: None,
             current_scene: None,
             float_signals: HashMap::new(),
+            property_bindings: HashMap::new(),
+            property_source_cursors: HashMap::new(),
             persistent_objects: HashSet::new(),
             membership_managed_objects: HashSet::new(),
             text_cancellation_marks: HashMap::new(),
@@ -982,6 +992,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     fn anim_label(ty: &AnimationType) -> &'static str {
         match ty {
+            AnimationType::PropertySource(_) => "Properties",
+            AnimationType::CustomProperties(_) => "Custom",
             AnimationType::CameraState { .. }
             | AnimationType::CameraPosition { .. }
             | AnimationType::CameraPositionSource { .. }
@@ -1023,6 +1035,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::FadeOut
             | AnimationType::FadeInFrom { .. } => "Fade",
             AnimationType::FillColorTo { .. } => "Fill",
+            AnimationType::FillPaintTo { .. } => "Fill",
+            AnimationType::StrokePaintTo { .. } => "Stroke",
             AnimationType::TextSelectionProperties { .. } => "TextSelectionProperties",
             AnimationType::Material3DTo { .. } => "Material3D",
             AnimationType::FillLevelTo { .. } => "FillLevel",
@@ -2007,6 +2021,87 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     /// Internal method to resolve and schedule a single animation clip.
     fn play_internal(&mut self, anim: AnimationBuilder) {
+        if let AnimationType::CustomProperties(animation) = &anim.anim_type {
+            // One root clip owns transforms/opacity. Descendant clips receive
+            // paint only, matching the visible paint behavior of native setters.
+            let mut targets = vec![(anim.target, false)];
+            if animation
+                .channels()
+                .iter()
+                .any(|channel| channel.is_paint())
+            {
+                let mut index = 0;
+                while index < targets.len() {
+                    if let Some(state) = self.states.get(targets[index].0) {
+                        for child in &state.child_spans {
+                            if !targets.iter().any(|(id, _)| *id == child.id) {
+                                targets.push((child.id, true));
+                            }
+                        }
+                    }
+                    index += 1;
+                }
+            }
+            let endpoint_alpha = anim.rate_func.evaluate(1.0);
+            let endpoint = animation.evaluate(endpoint_alpha);
+            for (target, paint_only) in targets {
+                let Some(state) = self.states.get_mut(target) else {
+                    continue;
+                };
+                let baseline = gaanim_animation::CustomBaseline {
+                    transform: state.transform,
+                    opacity: state.opacity,
+                    fill: state.fill.clone(),
+                    stroke: state.stroke.clone(),
+                };
+                if let Ok(values) = &endpoint {
+                    let mut cursor = baseline.clone();
+                    cursor.apply_values(values, paint_only);
+                    state.transform = cursor.transform;
+                    state.opacity = cursor.opacity;
+                    state.fill = cursor.fill;
+                    state.stroke = cursor.stroke;
+                }
+                let lens = gaanim_animation::CustomPropertyLens {
+                    animation: animation.clone(),
+                    baseline,
+                    target,
+                    paint_only,
+
+                    frozen_baseline: Default::default(),
+                };
+                let track = self.ensure_track(target);
+                self.timeline.add_clip(
+                    track,
+                    self.current_time + anim.delay,
+                    anim.duration,
+                    ClipPayload::Animation(AnimationSpec {
+                        target,
+                        lens: PropertyLensSpec::CustomProperties(lens),
+                        rate_func: anim.rate_func.clone(),
+                        delay: 0.0,
+                        label: Some("Custom".into()),
+                    }),
+                );
+            }
+            if let Err(message) = endpoint {
+                let target = anim.target;
+                self.commands
+                    .queue(move |world: &mut gaanim_scene::prelude::World| {
+                        world
+                            .get_resource_or_insert_with(
+                                gaanim_animation::CustomAnimationDiagnostics::default,
+                            )
+                            .0
+                            .push(gaanim_animation::CustomAnimationDiagnostic {
+                                target,
+                                alpha: endpoint_alpha,
+                                message,
+                            });
+                    });
+            }
+            return;
+        }
         if let AnimationType::Properties(properties) = anim.anim_type.clone() {
             if properties.is_empty() {
                 return;
@@ -2017,11 +2112,21 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 .get(anim.target)
                 .map(|state| (state.fill.is_some(), state.stroke.brush.is_some()));
             let mut channels = Vec::new();
+            channels.extend(
+                properties
+                    .source_targets
+                    .iter()
+                    .cloned()
+                    .map(AnimationType::PropertySource),
+            );
             if let Some(translation) = properties.translation {
                 channels.push(match translation {
                     crate::anim::PropertyTranslation::To(to) => AnimationType::TranslateTo { to },
                     crate::anim::PropertyTranslation::ToAnchor { to, anchor } => {
                         AnimationType::TranslateAnchorTo { to, anchor }
+                    }
+                    crate::anim::PropertyTranslation::ToAnchorPoint(point) => {
+                        AnimationType::TranslateToAnchorPoint { point }
                     }
                     crate::anim::PropertyTranslation::By(delta) => {
                         AnimationType::TranslateBy { delta }
@@ -2058,9 +2163,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 properties
                     .visible_color
                     .filter(|_| visible_paints.is_some_and(|paints| paints.0))
+                    .map(Brush::Solid)
             });
             if let Some(fill) = fill {
-                channels.push(AnimationType::FillColorTo { to: fill });
+                channels.push(AnimationType::FillPaintTo { to: fill });
             }
             // Width is deliberately scheduled before color so a missing stroke
             // starts at width zero before the color lens makes it visible.
@@ -2071,9 +2177,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 properties
                     .visible_color
                     .filter(|_| visible_paints.is_some_and(|paints| paints.1))
+                    .map(Brush::Solid)
             });
             if let Some(stroke_color) = stroke_color {
-                channels.push(AnimationType::StrokeColorTo { to: stroke_color });
+                channels.push(AnimationType::StrokePaintTo { to: stroke_color });
             }
             if let Some((from, to)) = properties.material {
                 channels.push(AnimationType::Material3DTo { from, to });
@@ -2103,6 +2210,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         if matches!(
             anim.anim_type,
             AnimationType::FillColorTo { .. }
+                | AnimationType::FillPaintTo { .. }
+                | AnimationType::StrokePaintTo { .. }
                 | AnimationType::StrokeColorTo { .. }
                 | AnimationType::StrokeWidthTo { .. }
         ) {
@@ -2126,6 +2235,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         self.current_label = Some(Self::anim_label(&anim.anim_type).to_string());
         let track = self.ensure_track(anim.target);
+
+        if self.try_schedule_anchor_source(&anim, track)
+            || self.try_schedule_property_continuation(&anim, track)
+        {
+            return;
+        }
 
         if let AnimationType::SurroundingRectRetarget { from, to } = anim.anim_type.clone() {
             let mut resolve = |targets: Vec<crate::anim::BoundsTarget>| {
@@ -2276,6 +2391,63 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             return;
         }
 
+        if let AnimationType::PropertySource(source) = &anim.anim_type {
+            let to = self.resolve_property_sources(anim.target, source);
+            let from = self.property_source_from(anim.target, source.sources.channel());
+            let start = self.current_time + anim.delay;
+            let provisional = source.sources.evaluate(start, |logical| {
+                source
+                    .parameters
+                    .iter()
+                    .find(|(id, _)| *id == logical)
+                    .and_then(|(_, native)| self.float_signals.get(native).copied())
+            });
+            if let Ok(value) = provisional {
+                let state = self
+                    .states
+                    .get_mut(anim.target)
+                    .expect("property target exists");
+                match value {
+                    gaanim_animation::PropertyValue::Translation(value) => {
+                        state.transform.translation = value - to.anchor_offset
+                    }
+                    gaanim_animation::PropertyValue::Rotation(value) => {
+                        state.transform.rotation = value
+                    }
+                    gaanim_animation::PropertyValue::Scale(value) => state.transform.scale = value,
+                    gaanim_animation::PropertyValue::Opacity(value) => state.opacity = value,
+                }
+            }
+            let channel = source.sources.channel();
+            let lens = gaanim_animation::PropertySourceLens {
+                from,
+                to,
+                start,
+                previous: self
+                    .property_source_cursors
+                    .get(&(anim.target, channel))
+                    .cloned(),
+                continuation: None,
+                end_alpha: anim.rate_func.evaluate(1.0),
+                frozen: Default::default(),
+                endpoint: None,
+            };
+            self.property_source_cursors
+                .insert((anim.target, channel), std::sync::Arc::new(lens.clone()));
+            self.timeline.add_clip(
+                track,
+                start,
+                anim.duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: anim.target,
+                    lens: PropertyLensSpec::PropertySource(lens),
+                    rate_func: anim.rate_func,
+                    delay: 0.0,
+                    label: self.current_label.clone(),
+                }),
+            );
+            return;
+        }
         if let AnimationType::GltfAnimation {
             animation_index,
             source_duration,
@@ -2509,6 +2681,41 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 state.fill = Some(Brush::Solid(to));
                 PropertyLensSpec::FillColor { from, to }
             }
+            AnimationType::FillPaintTo { to } => {
+                let from = state
+                    .fill
+                    .clone()
+                    .unwrap_or_else(|| to.clone().multiply_alpha(0.0));
+                if anim.duration > 0.0 {
+                    gaanim_animation::paint::validate_paint_transition(&from, &to)
+                        .expect("incompatible fill paints");
+                }
+                state.fill = Some(to.clone());
+                match (from, to) {
+                    (Brush::Solid(from), Brush::Solid(to)) => {
+                        PropertyLensSpec::FillColor { from, to }
+                    }
+                    (from, to) => PropertyLensSpec::FillPaint { from, to },
+                }
+            }
+            AnimationType::StrokePaintTo { to } => {
+                let from = state
+                    .stroke
+                    .brush
+                    .clone()
+                    .unwrap_or_else(|| to.clone().multiply_alpha(0.0));
+                if anim.duration > 0.0 {
+                    gaanim_animation::paint::validate_paint_transition(&from, &to)
+                        .expect("incompatible stroke paints");
+                }
+                state.stroke.brush = Some(to.clone());
+                match (from, to) {
+                    (Brush::Solid(from), Brush::Solid(to)) => {
+                        PropertyLensSpec::StrokeColor { from, to }
+                    }
+                    (from, to) => PropertyLensSpec::StrokePaint { from, to },
+                }
+            }
             AnimationType::StrokeColorTo { to } => {
                 let from = match &state.stroke.brush {
                     Some(Brush::Solid(c)) => *c,
@@ -2536,7 +2743,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     "surrounding-rectangle retargeting is dispatched before lens resolution"
                 )
             }
-            AnimationType::Properties(_) => {
+            AnimationType::CustomProperties(_) => {
+                unreachable!("custom property callbacks are dispatched before lens resolution")
+            }
+            AnimationType::PropertySource(_) | AnimationType::Properties(_) => {
                 unreachable!("property animations expand before lens resolution")
             }
             AnimationType::GrowFromCenter => {

@@ -18,6 +18,10 @@ pub use crate::canvas::{
 pub use crate::matrix::{
     MatrixError, MatrixIndex, MatrixOrder, MatrixShape, order_indices, validate_rows,
 };
+pub use crate::{
+    CustomAnimation, CustomChannel, CustomValues, PropertyChannel, PropertySources,
+    ReactiveFunction, ScalarSource,
+};
 pub use gaanim_core::{ColorMap, ColorMapError};
 pub use gaanim_objects::primitives3d::Primitive3DError;
 pub use gaanim_scene::{Lighting3D, Material3D, Material3DError};

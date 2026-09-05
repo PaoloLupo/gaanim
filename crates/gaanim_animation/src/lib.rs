@@ -1,12 +1,20 @@
 pub mod camera;
+pub mod custom;
+pub mod paint;
 pub mod prelude;
+pub mod property_bindings;
 pub mod reactive;
+pub use property_bindings::*;
 pub mod signals;
 pub mod tween;
 pub mod updaters;
 pub mod writing;
 
 pub use camera::{CameraBinding, CameraBindingKind, CameraBindingWindow, apply_camera_bindings};
+pub use custom::{
+    CustomAnimation, CustomAnimationDiagnostic, CustomAnimationDiagnostics, CustomBaseline,
+    CustomChannel, CustomPropertyLens, CustomValues,
+};
 pub use reactive::{
     ReactiveError, ReactiveFunction, ReactiveInput, ResolvedScalarSource, ScalarMap, ScalarSource,
 };
@@ -101,7 +109,10 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
             (
                 updater_system,
                 sampled_series_system.after(updater_system),
-                position_binding_system.after(sampled_series_system),
+                (
+                    property_binding_system.after(sampled_series_system),
+                    position_binding_system.after(property_binding_system),
+                ),
                 mechanism_binding_system.after(position_binding_system),
                 endpoint_follow_system.after(mechanism_binding_system),
                 always_redraw_regen_system.after(endpoint_follow_system),

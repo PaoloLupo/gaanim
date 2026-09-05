@@ -14,7 +14,9 @@ use gaanim_text::font::FontRegistry;
 use gaanim_text::shaper::compile_text_to_path;
 
 pub use gaanim_animation::{
-    ReactiveReadout, format_reactive_number, reactive_readout_update_system,
+    CustomAnimation, CustomChannel, CustomValues, PropertyChannel, PropertySources,
+    ReactiveFunction, ReactiveReadout, ScalarSource, format_reactive_number,
+    reactive_readout_update_system,
 };
 
 /// Component for dynamically-rendered decimal numbers that bind to a FloatSignal.
