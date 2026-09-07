@@ -111,9 +111,10 @@ impl SceneFrame {
         )
     }
 
-    /// Stable raster used only by the interactive host. Export chooses its own pixels.
+    /// Stable 1920-pixel long-edge raster (1080p at 16:9) for the interactive host.
+    /// Export chooses its own pixels.
     pub fn preview_pixel_size(self) -> (u32, u32) {
-        const LONG_EDGE: f64 = 1280.0;
+        const LONG_EDGE: f64 = 1920.0;
         if self.width >= self.height {
             (
                 LONG_EDGE as u32,
@@ -2245,7 +2246,9 @@ mod tests {
         let bounds = frame.bounds();
         assert_eq!((bounds.min.x, bounds.min.y), (-8.0, -4.5));
         assert_eq!((bounds.max.x, bounds.max.y), (8.0, 4.5));
-        assert_eq!(frame.preview_pixel_size(), (1280, 720));
+        assert_eq!(frame.preview_pixel_size(), (1920, 1080));
+        assert_eq!(SceneFrame::VERTICAL.preview_pixel_size(), (1080, 1920));
+        assert_eq!(SceneFrame::SQUARE.preview_pixel_size(), (1920, 1920));
         assert_eq!(SceneFrame::VERTICAL.bounds().min.x, -4.5);
         assert_eq!(SceneFrame::VERTICAL.bounds().max.y, 8.0);
         assert_eq!(SceneFrame::SQUARE.aspect_ratio(), 1.0);
