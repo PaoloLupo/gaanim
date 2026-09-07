@@ -2004,6 +2004,7 @@ impl SceneModel {
             .id();
         builder.tag_entity(group_entity);
         let state = MobjectState {
+            fill_level: 0.0,
             path: std::sync::Arc::new(gaanim_core::kurbo::BezPath::new()),
             bounds,
             transform: SpatialTransform::default(),
@@ -3427,10 +3428,20 @@ impl SceneModel {
                         let Some(parent) = materialized_by_id.get(parent_id).copied() else {
                             continue;
                         };
-                        let children: Vec<_> = child_ids
+                        let mut children: Vec<_> = child_ids
                             .iter()
                             .filter_map(|id| materialized_by_id.get(id).copied())
                             .collect();
+                        let background = tree
+                            .source_by_id
+                            .get(parent_id)
+                            .and_then(|source| object_specs.get(source))
+                            .and_then(|spec| spec.layout_background)
+                            .and_then(|source| id_map.get(&source))
+                            .copied();
+                        if let Some(background) = background {
+                            children.insert(0, background);
+                        }
                         let removed_children: Vec<_> = builder
                             .states
                             .get(parent)
@@ -3459,6 +3470,17 @@ impl SceneModel {
                                 );
                             }
                         }
+                        if let Some(background) = background
+                            && let Some(state) = builder.states.get_mut(background)
+                        {
+                            // Group attachment preserves world placement by default;
+                            // a decoration instead uses its container's local box.
+                            state.transform = SpatialTransform::identity();
+                            builder
+                                .commands
+                                .entity(state.entity)
+                                .insert(state.transform);
+                        }
                         if let Some(state) = builder.states.get_mut(parent) {
                             state.children = children;
                         }
@@ -3486,6 +3508,18 @@ impl SceneModel {
                             .commands
                             .entity(state.entity)
                             .insert((LocalBounds(local_root_bounds), state.transform));
+                        let entity = state.entity;
+                        let time = builder.current_time;
+                        let span = duration.unwrap_or(0.0);
+                        builder.commands.queue(move |world: &mut World| {
+                            gaanim_animation::updaters::record_layout_bounds(
+                                world,
+                                entity,
+                                time,
+                                span,
+                                local_root_bounds,
+                            );
+                        });
                     }
                     if let Some(root_spec) = object_specs.get(&root_source) {
                         // The responsive solve changes the root's bounds, so
@@ -3529,6 +3563,18 @@ impl SceneModel {
                                 .commands
                                 .entity(state.entity)
                                 .insert((LocalBounds(local_bounds), target));
+                            let entity = state.entity;
+                            let time = builder.current_time;
+                            let span = duration.unwrap_or(0.0);
+                            builder.commands.queue(move |world: &mut World| {
+                                gaanim_animation::updaters::record_layout_bounds(
+                                    world,
+                                    entity,
+                                    time,
+                                    span,
+                                    local_bounds,
+                                );
+                            });
                             targets.push((*member, target));
                             continue;
                         }
@@ -3595,42 +3641,36 @@ impl SceneModel {
                     // layout visible at the current timeline cursor, then let
                     // the regular animation machinery interpolate to the new
                     // arrangement and advance its cursor.
-                    if duration.is_some() {
-                        for (member, transform) in before {
-                            if let Some(state) = builder.states.get_mut(member) {
-                                state.transform = transform;
-                                builder.commands.entity(state.entity).insert(transform);
-                            }
+                    for (member, transform) in before {
+                        if let Some(state) = builder.states.get_mut(member) {
+                            state.transform = transform;
+                            builder.commands.entity(state.entity).insert(transform);
                         }
                     }
                     let transition_duration = (*duration).unwrap_or(0.0);
-                    let mut animations: Vec<AnimationBuilder> = if duration.is_some() {
-                        targets
-                            .into_iter()
-                            .flat_map(|(target, to)| {
-                                [
-                                    AnimationBuilder {
-                                        target,
-                                        anim_type: AnimationType::TranslateTo {
-                                            to: to.translation,
-                                        },
-                                        duration: transition_duration,
-                                        rate_func: RateFunc::Smooth,
-                                        delay: 0.0,
-                                    },
-                                    AnimationBuilder {
-                                        target,
-                                        anim_type: AnimationType::ScaleTo { to: to.scale },
-                                        duration: transition_duration,
-                                        rate_func: RateFunc::Smooth,
-                                        delay: 0.0,
-                                    },
-                                ]
-                            })
-                            .collect()
-                    } else {
-                        Vec::new()
-                    };
+                    // Zero-duration clips retain reversible cuts for immediate
+                    // reflow; otherwise earlier seeks inherit final positions.
+                    let mut animations: Vec<AnimationBuilder> = targets
+                        .into_iter()
+                        .flat_map(|(target, to)| {
+                            [
+                                AnimationBuilder {
+                                    target,
+                                    anim_type: AnimationType::TranslateTo { to: to.translation },
+                                    duration: transition_duration,
+                                    rate_func: RateFunc::Smooth,
+                                    delay: 0.0,
+                                },
+                                AnimationBuilder {
+                                    target,
+                                    anim_type: AnimationType::ScaleTo { to: to.scale },
+                                    duration: transition_duration,
+                                    rate_func: RateFunc::Smooth,
+                                    delay: 0.0,
+                                },
+                            ]
+                        })
+                        .collect();
                     for (old, new) in text_crossfades {
                         animations.push(AnimationBuilder {
                             target: old,
@@ -4399,6 +4439,48 @@ impl SceneModel {
                     }
                 }
 
+                Op::AttachTrackingConnector {
+                    target,
+                    points,
+                    head_length,
+                    head_width,
+                    body_width,
+                    max_head_ratio,
+                } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(st) = builder.states.get(target_id)
+                    {
+                        builder.commands.entity(st.entity).insert(
+                            gaanim_animation::updaters::TrackingConnector {
+                                points: points
+                                    .iter()
+                                    .map(|p| compile_tracking_endpoint(p, &id_map, &builder.states))
+                                    .collect(),
+                                head_length: *head_length,
+                                head_width: *head_width,
+                                body_width: *body_width,
+                                max_head_ratio: *max_head_ratio,
+                            },
+                        );
+                    }
+                }
+                Op::AttachLayoutBackground {
+                    target,
+                    container,
+                    radius,
+                } => {
+                    if let (Some(target), Some(container)) = (
+                        id_map.get(target).and_then(|id| builder.states.get(*id)),
+                        id_map.get(container).and_then(|id| builder.states.get(*id)),
+                    ) {
+                        builder.commands.entity(target.entity).insert(
+                            gaanim_animation::updaters::LayoutBackground {
+                                container: container.entity,
+                                radius: *radius,
+                            },
+                        );
+                    }
+                }
                 Op::AttachSurroundingRect {
                     target,
                     sources,
@@ -6175,7 +6257,8 @@ impl SceneModel {
                     .flat_map(|id| Self::visual_leaf_ids(builder, *id))
                     .filter_map(|id| builder.states.get(id).map(|state| state.entity))
                     .collect();
-                if let Some(state) = builder.states.get(mr.id) {
+                if let Some(state) = builder.states.get_mut(mr.id) {
+                    state.fill_level = *level;
                     builder.commands.entity(state.entity).insert((
                         gaanim_scene::FillLevel(*level),
                         gaanim_renderer::effects::FillLevelBinding {
@@ -6298,6 +6381,24 @@ impl SceneModel {
             }
             SpawnKind::Arrow(x1, y1, x2, y2) => {
                 let b = builder.arrow(Point::new(*x1, *y1), Point::new(*x2, *y2));
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
+            }
+            SpawnKind::SizedArrow {
+                start,
+                end,
+                head_length,
+                head_width,
+                body_width,
+            } => {
+                let b = builder.arrow_with_dimensions(
+                    Point::new(start.0, start.1),
+                    Point::new(end.0, end.1),
+                    *head_length,
+                    *head_width,
+                    *body_width,
+                );
                 let mr = Self::finish_spawn_builder(b, spec);
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
                 mr
@@ -7206,6 +7307,7 @@ impl SceneModel {
                 builder.states.insert(
                     id,
                     MobjectState {
+                        fill_level: 0.0,
                         path: std::sync::Arc::new(gaanim_core::kurbo::BezPath::new()),
                         bounds: *bounds,
                         transform,
@@ -7304,6 +7406,7 @@ impl SceneModel {
                 builder.states.insert(
                     id,
                     MobjectState {
+                        fill_level: 0.0,
                         path: std::sync::Arc::new(gaanim_core::kurbo::BezPath::new()),
                         bounds: *bounds,
                         transform,
@@ -7503,6 +7606,7 @@ impl SceneModel {
                 builder.states.insert(
                     new_id,
                     MobjectState {
+                        fill_level: 0.0,
                         path: std::sync::Arc::new(gaanim_core::kurbo::BezPath::new()),
                         bounds: Bounds3D::default(),
                         transform: SpatialTransform::default(),

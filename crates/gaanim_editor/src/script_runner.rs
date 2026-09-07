@@ -157,6 +157,7 @@ fn run_script_thread(
 const GAANIM_PACKAGE_INIT: &str = include_str!("../../gaanim_python/gaanim/__init__.py");
 const GAANIM_COLORS: &str = include_str!("../../gaanim_python/gaanim/colors.py");
 const GAANIM_TEMPLATES: &str = include_str!("../../gaanim_python/gaanim/templates.py");
+const GAANIM_SECTIONS: &str = include_str!("../../gaanim_python/gaanim/sections.py");
 const GAANIM_MATRIX: &str = include_str!("../../gaanim_python/gaanim/matrix.py");
 const GAANIM_ANIMATION_TYPES: &str = include_str!("../../gaanim_python/gaanim/animation_types.py");
 
@@ -190,6 +191,13 @@ fn bootstrap_gaanim_package(py: Python<'_>) -> PyResult<()> {
     let templates_name = std::ffi::CString::new("gaanim.templates").unwrap();
     let templates = PyModule::from_code(py, &templates_source, &templates_file, &templates_name)?;
     modules.set_item("gaanim.templates", &templates)?;
+
+    // Register before execution so dataclasses can resolve their defining module.
+    let sections = PyModule::new(py, "gaanim.sections")?;
+    sections.setattr("__package__", "gaanim")?;
+    modules.set_item("gaanim.sections", &sections)?;
+    let sections_source = std::ffi::CString::new(GAANIM_SECTIONS).unwrap();
+    py.run(&sections_source, Some(&sections.dict()), None)?;
 
     let matrix_source = std::ffi::CString::new(GAANIM_MATRIX).unwrap();
     let matrix_file = std::ffi::CString::new("gaanim/matrix.py").unwrap();

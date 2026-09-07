@@ -1954,6 +1954,7 @@ impl SceneModel {
                 spec.kind,
                 SpawnKind::Line(..)
                     | SpawnKind::Arrow(..)
+                    | SpawnKind::SizedArrow { .. }
                     | SpawnKind::DashedLine { .. }
                     | SpawnKind::DoubleArrow { .. }
                     | SpawnKind::Arc { .. }
@@ -2096,6 +2097,46 @@ impl SceneModel {
     }
     pub fn arrow(&mut self, x1: f64, y1: f64, x2: f64, y2: f64) -> DrawableHandle {
         self.spawn(SpawnKind::Arrow(x1, y1, x2, y2))
+    }
+    /// Spawn a dimensioned arrow. Units are scene units; the optional ratio
+    /// caps head length relative to shaft length, scaling head width with it.
+    /// Invalid endpoints, dimensions or ratios fail before modifying the scene.
+    pub fn arrow_with_dimensions(
+        &mut self,
+        start: (f64, f64),
+        end: (f64, f64),
+        head_length: f64,
+        head_width: f64,
+        body_width: f64,
+        max_head_ratio: Option<f64>,
+    ) -> Result<DrawableHandle, &'static str> {
+        if ![start.0, start.1, end.0, end.1]
+            .iter()
+            .all(|v| v.is_finite())
+        {
+            return Err("arrow endpoints must be finite");
+        }
+        if ![head_length, head_width, body_width]
+            .iter()
+            .all(|v| v.is_finite() && *v > 0.0)
+        {
+            return Err("arrow dimensions must be finite and positive");
+        }
+        if max_head_ratio.is_some_and(|v| !v.is_finite() || v <= 0.0 || v > 1.0) {
+            return Err("max_head_ratio must be in (0, 1]");
+        }
+        let length = (end.0 - start.0).hypot(end.1 - start.1);
+        if !length.is_finite() {
+            return Err("arrow length must be finite");
+        }
+        let factor = max_head_ratio.map_or(1.0, |ratio| (length * ratio / head_length).min(1.0));
+        Ok(self.spawn(SpawnKind::SizedArrow {
+            start,
+            end,
+            head_length: head_length * factor,
+            head_width: head_width * factor,
+            body_width,
+        }))
     }
     pub fn dashed_line(
         &mut self,
@@ -3024,9 +3065,69 @@ impl SceneModel {
     /// can continue treating groups as immutable.
     pub fn set_group_members(&mut self, group: &DrawableHandle, members: &[&DrawableHandle]) {
         let mut spec = group.spec.lock().expect("group spec poisoned");
+        let background = spec.layout_background;
         if let SpawnKind::Group(children) = &mut spec.kind {
-            *children = members.iter().map(|member| member.id).collect();
+            *children = background
+                .into_iter()
+                .chain(members.iter().map(|member| member.id))
+                .collect();
         }
+    }
+
+    /// Decorate a layout group with a background excluded from content measurement.
+    /// Call before its first reflow; the returned child can be styled independently.
+    pub fn decorate_layout(
+        &mut self,
+        container: &DrawableHandle,
+        fill: Option<Brush>,
+        border: Option<(Brush, f64)>,
+        radius: f64,
+    ) -> Result<DrawableHandle, &'static str> {
+        if !Arc::ptr_eq(&container.state, &self.state) {
+            return Err("card must belong to this Scene");
+        }
+        if !radius.is_finite()
+            || radius < 0.0
+            || border
+                .as_ref()
+                .is_some_and(|(_, width)| !width.is_finite() || *width < 0.0)
+        {
+            return Err("card radius and border width must be finite and nonnegative");
+        }
+        {
+            let spec = container.spec.lock().expect("object spec poisoned");
+            if !matches!(spec.kind, SpawnKind::Group(_)) || spec.layout_background.is_some() {
+                return Err("card needs an undecorated layout group");
+            }
+        }
+        let mut background = self.rect(1.0, 1.0).no_fill().no_stroke().z_index(-1);
+        if let Some(fill) = fill {
+            background = background.fill_brush(fill);
+        }
+        if let Some((paint, width)) = border {
+            background = background.stroke_with_style(paint, Stroke::new(width));
+        }
+        background
+            .claim_layout(container)
+            .map_err(|_| "card owns its background placement")?;
+        {
+            let mut spec = container.spec.lock().expect("object spec poisoned");
+            spec.layout_background = Some(background.id);
+            if let SpawnKind::Group(children) = &mut spec.kind {
+                children.insert(0, background.id);
+            }
+        }
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachLayoutBackground {
+                target: background.id,
+                container: container.id,
+                radius,
+            });
+        Ok(background)
     }
 
     /// Queue a layout recalculation. `duration = Some(_)` animates the move
@@ -5343,6 +5444,107 @@ impl SceneModel {
         self.endpoint_line(from, to, true)
     }
 
+    /// A filled polyline arrow whose endpoints and waypoints follow their references.
+    /// Dimensions are world units; the head is capped to the last nonzero segment.
+    #[allow(clippy::too_many_arguments)]
+    pub fn connector(
+        &mut self,
+        from: CanvasEndpoint,
+        to: CanvasEndpoint,
+        via: Vec<CanvasEndpoint>,
+        head_length: f64,
+        head_width: f64,
+        body_width: f64,
+        max_head_ratio: Option<f64>,
+    ) -> Result<DrawableHandle, &'static str> {
+        if [head_length, head_width, body_width]
+            .iter()
+            .any(|x| !x.is_finite() || *x <= 0.0)
+            || max_head_ratio.is_some_and(|x| !x.is_finite() || x <= 0.0 || x > 1.0)
+        {
+            return Err(
+                "connector dimensions must be finite and positive; max_head_ratio must be in (0, 1]",
+            );
+        }
+        let mut points = vec![from];
+        points.extend(via);
+        points.push(to);
+        {
+            let state = self.state.lock().expect("canvas state poisoned");
+            fn valid(point: &CanvasEndpoint, state: &CanvasState) -> bool {
+                let scalar = |s: &ScalarSource| {
+                    s.scene_owners().iter().all(|id| *id == state.scene_id)
+                        && s.constant_value().is_none_or(f64::is_finite)
+                };
+                match point {
+                    CanvasEndpoint::Static(p) => p.is_finite(),
+                    CanvasEndpoint::Entity(id) => state.object_specs.contains_key(id),
+                    CanvasEndpoint::Anchor(p) => {
+                        p.scene_id == state.scene_id
+                            && state.object_specs.contains_key(&p.object)
+                            && p.normalized.is_finite()
+                            && p.offset.is_finite()
+                    }
+                    CanvasEndpoint::Expression { x, y } => scalar(x) && scalar(y),
+                    CanvasEndpoint::LocalExpression { space, x, y, z } => {
+                        state.object_specs.contains_key(space)
+                            && scalar(x)
+                            && scalar(y)
+                            && scalar(z)
+                    }
+                    CanvasEndpoint::LocalNumberLine {
+                        space,
+                        value,
+                        normal_offset,
+                        ..
+                    } => {
+                        state.object_specs.contains_key(space)
+                            && scalar(value)
+                            && scalar(normal_offset)
+                    }
+                    CanvasEndpoint::Offset { origin, dx, dy } => {
+                        valid(origin, state) && scalar(dx) && scalar(dy)
+                    }
+                    CanvasEndpoint::Between {
+                        from,
+                        to,
+                        alpha,
+                        offset,
+                    } => {
+                        valid(from, state)
+                            && valid(to, state)
+                            && alpha.is_finite()
+                            && offset.is_finite()
+                    }
+                    CanvasEndpoint::Polar {
+                        origin,
+                        radius,
+                        angle,
+                    } => valid(origin, state) && scalar(radius) && scalar(angle),
+                }
+            }
+            if !points.iter().all(|p| valid(p, &state)) {
+                return Err("connector endpoints must be finite and belong to this Scene");
+            }
+        }
+        let color = self.theme_color("foreground").unwrap_or(Color::BLACK);
+        let handle = self.spawn(SpawnKind::TrackingLine).fill(color).no_stroke();
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachTrackingConnector {
+                target: handle.id,
+                points,
+                head_length,
+                head_width,
+                body_width,
+                max_head_ratio,
+            });
+        Ok(handle)
+    }
+
     fn endpoint_line(
         &mut self,
         from: CanvasEndpoint,
@@ -5649,6 +5851,60 @@ impl SceneModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dimensioned_arrow_caps_head_and_rejects_invalid_inputs() {
+        let mut canvas = SceneModel::new(16, 9);
+        let arrow = canvas
+            .arrow_with_dimensions((0.0, 0.0), (0.2, 0.0), 0.18, 0.15, 0.036, Some(0.3))
+            .unwrap();
+        let spec = arrow.spec.lock().unwrap();
+        let SpawnKind::SizedArrow {
+            head_length,
+            head_width,
+            body_width,
+            ..
+        } = spec.kind
+        else {
+            panic!("expected dimensioned arrow");
+        };
+        assert!((head_length - 0.06).abs() < 1e-12);
+        assert!((head_width - 0.05).abs() < 1e-12);
+        assert_eq!(body_width, 0.036);
+        drop(spec);
+        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(
+                canvas
+                    .arrow_with_dimensions((0.0, 0.0), (1.0, 0.0), bad, 0.15, 0.036, None)
+                    .is_err()
+            );
+            assert!(
+                canvas
+                    .arrow_with_dimensions((0.0, 0.0), (1.0, 0.0), 0.18, bad, 0.036, None)
+                    .is_err()
+            );
+            assert!(
+                canvas
+                    .arrow_with_dimensions((0.0, 0.0), (1.0, 0.0), 0.18, 0.15, bad, None)
+                    .is_err()
+            );
+            assert!(
+                canvas
+                    .arrow_with_dimensions((0.0, 0.0), (1.0, 0.0), 0.18, 0.15, 0.036, Some(bad))
+                    .is_err()
+            );
+        }
+        assert!(
+            canvas
+                .arrow_with_dimensions((f64::NAN, 0.0), (1.0, 0.0), 0.18, 0.15, 0.036, None)
+                .is_err()
+        );
+        assert!(
+            canvas
+                .arrow_with_dimensions((0.0, 0.0), (1.0, 0.0), 0.18, 0.15, 0.036, Some(1.1))
+                .is_err()
+        );
+    }
 
     #[test]
     fn typst_asset_uses_the_configured_asset_root() {

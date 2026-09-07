@@ -2138,6 +2138,79 @@ impl PySlideKit {
 
 #[pymethods]
 impl PyLayoutBuilder {
+    /// A persistent layout with a separately styled background and named ports.
+    #[pyo3(signature = (children, *, direction="column", gap=0.24, padding=None, width=None, height=None, align="center", justify="start", background=None, border=None, border_width=0.025, radius=0.08, ports=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn card<'py>(
+        &self,
+        py: Python<'py>,
+        children: &Bound<'py, PyAny>,
+        direction: &str,
+        gap: f64,
+        padding: Option<&Bound<'py, PyAny>>,
+        width: Option<&Bound<'py, PyAny>>,
+        height: Option<&Bound<'py, PyAny>>,
+        align: &str,
+        justify: &str,
+        background: Option<PyPaint>,
+        border: Option<PyPaint>,
+        border_width: f64,
+        radius: f64,
+        ports: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Py<PyLayout>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let kind = match direction {
+            "column" => column_kind(false),
+            "row" => row_kind(false),
+            "stack" => stack_kind(),
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "card direction must be column, row or stack",
+                ))
+            }
+        };
+        if !radius.is_finite() || radius < 0.0 || !border_width.is_finite() || border_width < 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "card radius and border_width must be finite and nonnegative",
+            ));
+        }
+        let mut parsed_ports = Vec::new();
+        if let Some(ports) = ports {
+            for (name, value) in ports.iter() {
+                let name = name.extract::<String>()?;
+                let (anchor, offset) = if let Ok(anchor) = value.extract::<PyAnchor>() {
+                    (anchor, (0.0, 0.0))
+                } else {
+                    value.extract::<(PyAnchor, (f64, f64))>()?
+                };
+                if name.trim().is_empty() || !offset.0.is_finite() || !offset.1.is_finite() {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "port name must be nonempty and its offset finite",
+                    ));
+                }
+                parsed_ports.push((
+                    name,
+                    anchor.0,
+                    gaanim_core::glam::DVec3::new(offset.0, offset.1, 0.0),
+                ));
+            }
+        }
+        Py::new(
+            py,
+            PyLayout::initializer_decorated(
+                self.inner.clone(),
+                layout_spec(kind, gap, padding, width, height, align, justify, None)?,
+                layout_members(children)?,
+                Some((
+                    background.map(|paint| paint.0),
+                    border.map(|paint| (paint.0, border_width)),
+                    radius,
+                )),
+                parsed_ports,
+            )?,
+        )
+    }
+
     /// Horizontal Layout v2 container.
     #[pyo3(signature = (children, *, gap=0.24, padding=None, width=None, height=None, align="center", justify="start", wrap=false, within=None))]
     #[allow(clippy::too_many_arguments)]
@@ -2648,16 +2721,79 @@ impl PyGeometry {
             )),
         }
     }
-    fn arrow(&self, x1: f64, y1: f64, x2: f64, y2: f64) -> PyResult<PyDrawable> {
+    #[pyo3(signature = (x1, y1, x2, y2, *, head_length=None, head_width=None, body_width=None, max_head_ratio=None))]
+    fn arrow(
+        &self,
+        x1: f64,
+        y1: f64,
+        x2: f64,
+        y2: f64,
+        head_length: Option<f64>,
+        head_width: Option<f64>,
+        body_width: Option<f64>,
+        max_head_ratio: Option<f64>,
+    ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            PyDrawable(
-                self.inner
-                    .lock()
-                    .expect("scene canvas poisoned")
-                    .arrow(x1, y1, x2, y2),
+        let mut canvas = self.inner.lock().expect("scene canvas poisoned");
+        canvas
+            .arrow_with_dimensions(
+                (x1, y1),
+                (x2, y2),
+                head_length.unwrap_or(18.0),
+                head_width.unwrap_or(18.0),
+                body_width.unwrap_or(6.0),
+                max_head_ratio,
             )
-        })
+            .map(PyDrawable)
+            .map_err(pyo3::exceptions::PyValueError::new_err)
+    }
+    #[pyo3(signature = (start, end, *, via=None, head_length=0.18, head_width=0.15, body_width=0.036, max_head_ratio=None))]
+    fn connector(
+        &self,
+        start: &Bound<'_, PyAny>,
+        end: &Bound<'_, PyAny>,
+        via: Option<Vec<Bound<'_, PyAny>>>,
+        head_length: f64,
+        head_width: f64,
+        body_width: f64,
+        max_head_ratio: Option<f64>,
+    ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        // Preserve ownership when a drawable is used directly as an endpoint.
+        let endpoint = |value: &Bound<'_, PyAny>| -> PyResult<CanvasEndpoint> {
+            if let Ok(drawable) = value.extract::<PyRef<PyDrawable>>() {
+                Ok(drawable
+                    .0
+                    .anchor_point(
+                        gaanim_api::canvas::Anchor::Center,
+                        gaanim_core::glam::DVec3::ZERO,
+                    )
+                    .into())
+            } else {
+                resolve_endpoint(value)
+            }
+        };
+        let start = endpoint(start)?;
+        let end = endpoint(end)?;
+        let via = via
+            .unwrap_or_default()
+            .iter()
+            .map(endpoint)
+            .collect::<PyResult<Vec<_>>>()?;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .connector(
+                start,
+                end,
+                via,
+                head_length,
+                head_width,
+                body_width,
+                max_head_ratio,
+            )
+            .map(PyDrawable)
+            .map_err(pyo3::exceptions::PyValueError::new_err)
     }
     #[pyo3(signature = (x1, y1, x2, y2, *, dash_length=0.16, gap_length=0.10))]
     fn dashed_line(
@@ -3898,16 +4034,20 @@ impl PyGeometry {
         )
     }
 
-    #[pyo3(signature = (mask, paint, level=0.0, *, direction="up", keep_outline=true))]
+    #[pyo3(signature = (mask, paint, level=None, *, direction="up", keep_outline=true))]
     fn fill_level(
         &self,
         mask: &PyDrawable,
         paint: PyPaint,
-        level: f64,
+        level: Option<&Bound<'_, PyAny>>,
         direction: &str,
         keep_outline: bool,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
+        let level = level
+            .map(|value| crate::visualization::extract_scalar_source(value.clone(), &self.inner))
+            .transpose()?
+            .unwrap_or_else(|| gaanim_animation::ScalarSource::constant(0.0));
         let direction = match direction {
             "up" => gaanim_api::canvas::FillLevelDirection::Up,
             "down" => gaanim_api::canvas::FillLevelDirection::Down,
@@ -3919,12 +4059,25 @@ impl PyGeometry {
                 ))
             }
         };
-        self.inner
+        let result = self
+            .inner
             .lock()
             .expect("scene canvas poisoned")
-            .fill_level(&mask.0, paint.0, level, direction, keep_outline)
+            .fill_level(
+                &mask.0,
+                paint.0,
+                level.constant_value().unwrap_or(0.0),
+                direction,
+                keep_outline,
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        if level.constant_value().is_some() {
+            return Ok(PyDrawable(result));
+        }
+        result
+            .set_fill_level(level)
             .map(PyDrawable)
-            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+            .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 }
 

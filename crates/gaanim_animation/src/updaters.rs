@@ -1133,6 +1133,105 @@ pub struct TrackingLine {
     pub to: TrackingEndpoint,
 }
 
+/// Filled arrow following a polyline of reactive world-space endpoints.
+#[derive(Component)]
+pub struct TrackingConnector {
+    pub points: Vec<TrackingEndpoint>,
+    pub head_length: f64,
+    pub head_width: f64,
+    pub body_width: f64,
+    pub max_head_ratio: Option<f64>,
+}
+
+/// A card background reads its parent's resolved local layout box.
+#[derive(Component)]
+pub struct LayoutBackground {
+    pub container: Entity,
+    pub radius: f64,
+}
+
+/// Immutable layout-box history, evaluated at the absolute playback cursor.
+#[derive(Component, Default)]
+pub struct LayoutBoundsTrack(Vec<(f64, f64, gaanim_math::Bounds3D, gaanim_math::Bounds3D)>);
+
+impl LayoutBoundsTrack {
+    fn at(&self, time: f64) -> Option<gaanim_math::Bounds3D> {
+        let &(start, duration, from, to) = self
+            .0
+            .iter()
+            .rev()
+            .find(|sample| sample.0 <= time)
+            .or_else(|| self.0.first())?;
+        let progress = if duration > 0.0 {
+            gaanim_math::RateFunc::Smooth.evaluate(((time - start) / duration).clamp(0.0, 1.0))
+        } else {
+            1.0
+        };
+        Some(lerp_bounds(from, to, progress))
+    }
+}
+
+pub fn record_layout_bounds(
+    world: &mut World,
+    entity: Entity,
+    time: f64,
+    duration: f64,
+    bounds: gaanim_math::Bounds3D,
+) {
+    if let Some(mut track) = world.get_mut::<LayoutBoundsTrack>(entity) {
+        let from = track.at(time).unwrap_or(bounds);
+        track.0.push((time, duration, from, bounds));
+    } else {
+        world
+            .entity_mut(entity)
+            .insert(LayoutBoundsTrack(vec![(time, 0.0, bounds, bounds)]));
+    }
+}
+
+fn connector_path(
+    points: &[DVec3],
+    head_length: f64,
+    head_width: f64,
+    body_width: f64,
+    ratio: Option<f64>,
+) -> BezPath {
+    use gaanim_core::kurbo::{Point, Stroke, StrokeOpts, stroke};
+    let mut points = points.to_vec();
+    if points.iter().any(|p| !p.is_finite()) {
+        return BezPath::new();
+    }
+    points.dedup_by(|a, b| (a.truncate() - b.truncate()).length_squared() < 1e-20);
+    if points.len() < 2 {
+        return BezPath::new();
+    }
+    let tip = points[points.len() - 1];
+    let delta = (tip - points[points.len() - 2]).truncate();
+    let length = delta.length();
+    let direction = delta / length;
+    let head = head_length.min(length * ratio.unwrap_or(1.0));
+    let half_head = head_width * (head / head_length) * 0.5;
+    let shoulder = tip.truncate() - direction * head;
+    let normal = gaanim_core::glam::DVec2::new(-direction.y, direction.x);
+    let mut centerline = BezPath::new();
+    centerline.move_to((points[0].x, points[0].y));
+    for p in &points[1..points.len() - 1] {
+        centerline.line_to((p.x, p.y));
+    }
+    centerline.line_to((shoulder.x, shoulder.y));
+    let mut style = Stroke::new(body_width);
+    style.start_cap = gaanim_core::kurbo::Cap::Butt;
+    style.end_cap = gaanim_core::kurbo::Cap::Butt;
+    style.join = gaanim_core::kurbo::Join::Miter;
+    let mut path = stroke(centerline.iter(), &style, &StrokeOpts::default(), 0.001);
+    let left = shoulder + normal * half_head;
+    let right = shoulder - normal * half_head;
+    path.move_to(Point::new(left.x, left.y));
+    path.line_to((tip.x, tip.y));
+    path.line_to((right.x, right.y));
+    path.close_path();
+    path
+}
+
 /// A live, axis-aligned frame around one or more scene objects.
 ///
 /// `from` and `to` contain compiled object ids (including text glyph ids).
@@ -1266,6 +1365,15 @@ impl TrackingLine {
 
 /// Sistema exclusivo que resuelve los endpoints de cada TrackingLine y regenera su Path2D.
 pub fn tracking_line_system(world: &mut World) {
+    let time = world
+        .get_resource::<PlaybackState>()
+        .map_or(0.0, |state| state.current_time);
+    let mut boxes = world.query::<(&LayoutBoundsTrack, &mut LocalBounds)>();
+    for (track, mut bounds) in boxes.iter_mut(world) {
+        if let Some(value) = track.at(time) {
+            bounds.0 = value;
+        }
+    }
     let mut updates = Vec::new();
 
     let mut query = world.query::<(Entity, &TrackingLine)>();
@@ -1286,6 +1394,56 @@ pub fn tracking_line_system(world: &mut World) {
         }
     }
 
+    let mut connectors = world.query::<(Entity, &TrackingConnector)>();
+    for (entity, connector) in connectors.iter(world) {
+        let points: Option<Vec<_>> = connector
+            .points
+            .iter()
+            .map(|p| resolve_tracking_endpoint(p, world))
+            .collect();
+        let mut path = points
+            .map(|points| {
+                connector_path(
+                    &points,
+                    connector.head_length,
+                    connector.head_width,
+                    connector.body_width,
+                    connector.max_head_ratio,
+                )
+            })
+            .unwrap_or_default();
+        let inverse = entity_world_matrix(entity, world)
+            .unwrap_or(DMat4::IDENTITY)
+            .inverse();
+        if inverse.is_finite() {
+            path.apply_affine(gaanim_core::kurbo::Affine::new([
+                inverse.x_axis.x,
+                inverse.x_axis.y,
+                inverse.y_axis.x,
+                inverse.y_axis.y,
+                inverse.w_axis.x,
+                inverse.w_axis.y,
+            ]));
+        } else {
+            path = BezPath::new();
+        }
+        updates.push((entity, path));
+    }
+    let mut backgrounds = world.query::<(Entity, &LayoutBackground)>();
+    for (entity, background) in backgrounds.iter(world) {
+        if let Some(bounds) = world.get::<LocalBounds>(background.container) {
+            let b = bounds.0;
+            let radius = background
+                .radius
+                .min(b.width().max(0.0) * 0.5)
+                .min(b.height().max(0.0) * 0.5);
+            updates.push((
+                entity,
+                gaanim_core::kurbo::RoundedRect::new(b.min.x, b.min.y, b.max.x, b.max.y, radius)
+                    .to_path(0.001),
+            ));
+        }
+    }
     for (entity, path) in updates {
         write_path(world, entity, path);
     }
@@ -2008,6 +2166,18 @@ mod tests {
     use super::*;
     use bevy::prelude::BuildChildrenTransformExt;
     use gaanim_core::kurbo::Shape;
+
+    #[test]
+    fn connector_handles_collapsed_points_and_short_final_segment() {
+        assert!(connector_path(&[DVec3::ZERO, DVec3::ZERO], 0.18, 0.15, 0.036, None).is_empty());
+        assert!(connector_path(&[DVec3::ZERO, DVec3::NAN], 0.18, 0.15, 0.036, None).is_empty());
+        let points = [DVec3::ZERO, DVec3::ZERO, DVec3::new(0.1, 0.0, 0.0)];
+        let path = connector_path(&points, 0.18, 0.15, 0.036, Some(0.5));
+        let bounds = path.bounding_box();
+        assert!((bounds.x1 - 0.1).abs() < 1e-9);
+        assert!(bounds.x0.abs() < 1e-9);
+        assert!((bounds.height() - 0.15 * 0.05 / 0.18).abs() < 1e-9);
+    }
 
     #[test]
     fn surrounding_rect_unions_live_bounds_and_interpolates_edges() {

@@ -514,6 +514,20 @@ pub(crate) enum Op {
         from: CanvasEndpoint,
         to: CanvasEndpoint,
     },
+    /// Filled arrow following endpoints and optional intermediate points.
+    AttachTrackingConnector {
+        target: ObjectId,
+        points: Vec<CanvasEndpoint>,
+        head_length: f64,
+        head_width: f64,
+        body_width: f64,
+        max_head_ratio: Option<f64>,
+    },
+    AttachLayoutBackground {
+        target: ObjectId,
+        container: ObjectId,
+        radius: f64,
+    },
     /// Attach a live frame to compiled drawable or text-selection bounds.
     AttachSurroundingRect {
         target: ObjectId,

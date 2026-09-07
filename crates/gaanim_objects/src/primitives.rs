@@ -368,13 +368,26 @@ pub fn checkmark(id: ObjectId, size: f64) -> MobjectBundle {
 /// the path as a continuous pen stroke: top of body, top of head, tip,
 /// bottom of head, bottom of body, then closes around the tail.
 pub fn arrow(id: ObjectId, start: kurbo::Point, end: kurbo::Point) -> MobjectBundle {
+    arrow_with_dimensions(id, start, end, 18.0, 18.0, 6.0)
+}
+
+/// Build a solid arrow with absolute head length, head width and body width.
+/// Callers must supply finite endpoints and positive finite dimensions.
+pub fn arrow_with_dimensions(
+    id: ObjectId,
+    start: kurbo::Point,
+    end: kurbo::Point,
+    head_length: f64,
+    head_width: f64,
+    body_width: f64,
+) -> MobjectBundle {
     let dx = end.x - start.x;
     let dy = end.y - start.y;
     let len = (dx * dx + dy * dy).sqrt();
 
-    let head_len: f64 = 18.0;
-    let head_half_width: f64 = 9.0;
-    let body_half_t: f64 = 3.0;
+    let head_len = head_length;
+    let head_half_width = head_width / 2.0;
+    let body_half_t = body_width / 2.0;
 
     let mut path = kurbo::BezPath::new();
     if len > 0.0 {
@@ -1331,6 +1344,40 @@ mod arrow_tests {
     use super::*;
     use gaanim_core::ObjectId;
     use kurbo::Shape;
+
+    #[test]
+    fn dimensioned_arrow_preserves_legacy_and_rotates_scene_unit_geometry() {
+        let id = ObjectId::from_raw(0);
+        let origin = kurbo::Point::ZERO;
+        let end = kurbo::Point::new(100.0, 0.0);
+        assert_eq!(
+            arrow(id, origin, end).path.0,
+            arrow_with_dimensions(id, origin, end, 18.0, 18.0, 6.0)
+                .path
+                .0
+        );
+        for end in [
+            kurbo::Point::new(2.0, 0.0),
+            kurbo::Point::new(0.0, 2.0),
+            kurbo::Point::new(-1.2, 1.6),
+        ] {
+            let path = arrow_with_dimensions(id, origin, end, 0.18, 0.15, 0.036)
+                .path
+                .0;
+            assert_eq!(count_subpaths(&path), 1);
+            assert!(path.elements().contains(&kurbo::PathEl::LineTo(end)));
+            // Rectangle body plus triangular head, independent of orientation.
+            let expected_area = (2.0 - 0.18) * 0.036 + 0.18 * 0.15 / 2.0;
+            assert!((path.area().abs() - expected_area).abs() < 1e-10);
+        }
+        assert!(
+            arrow_with_dimensions(id, origin, origin, 0.18, 0.15, 0.036)
+                .path
+                .0
+                .elements()
+                .is_empty()
+        );
+    }
 
     fn count_subpaths(path: &kurbo::BezPath) -> usize {
         path.iter()

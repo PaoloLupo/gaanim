@@ -242,6 +242,7 @@ struct LayoutState {
     root: DrawableHandle,
     version: u64,
     parents: Vec<Weak<Mutex<LayoutState>>>,
+    background: Option<DrawableHandle>,
 }
 
 /// Per-child sizing and placement metadata used by Layout v2.
@@ -277,10 +278,38 @@ impl PyLayout {
         spec: LayoutSpec,
         members: Vec<LayoutMember>,
     ) -> PyResult<PyClassInitializer<Self>> {
+        Self::initializer_decorated(canvas, spec, members, None, Vec::new())
+    }
+
+    pub(crate) fn initializer_decorated(
+        canvas: Arc<Mutex<ApiCanvas>>,
+        spec: LayoutSpec,
+        members: Vec<LayoutMember>,
+        decoration: Option<(
+            Option<gaanim_core::peniko::Brush>,
+            Option<(gaanim_core::peniko::Brush, f64)>,
+            f64,
+        )>,
+        ports: Vec<(String, Anchor, DVec3)>,
+    ) -> PyResult<PyClassInitializer<Self>> {
         let refs: Vec<_> = members.iter().map(|member| &member.handle).collect();
         let root = canvas.lock().expect("scene canvas poisoned").group(&refs);
         for member in &members {
             member.handle.claim_layout(&root).map_err(layout_error)?;
+        }
+        let background = decoration
+            .map(|(fill, border, radius)| {
+                canvas
+                    .lock()
+                    .expect("scene canvas poisoned")
+                    .decorate_layout(&root, fill, border, radius)
+                    .map_err(pyo3::exceptions::PyValueError::new_err)
+            })
+            .transpose()?;
+        for (name, anchor, offset) in ports {
+            root.clone()
+                .with_port(&name, anchor, offset)
+                .map_err(pyo3::exceptions::PyValueError::new_err)?;
         }
         let inner = Arc::new(Mutex::new(LayoutState {
             canvas,
@@ -289,6 +318,7 @@ impl PyLayout {
             root: root.clone(),
             version: 0,
             parents: Vec::new(),
+            background,
         }));
         {
             let state = inner.lock().expect("layout poisoned");
@@ -380,6 +410,36 @@ impl PyLayout {
 
 #[pymethods]
 impl PyLayout {
+    #[getter]
+    fn background(&self) -> PyResult<Option<PyDrawable>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self
+            .inner
+            .lock()
+            .expect("layout poisoned")
+            .background
+            .clone()
+            .map(PyDrawable))
+    }
+
+    #[pyo3(signature = (x, y=None, anchor=None))]
+    fn move_to<'py>(
+        slf: PyRef<'py, Self>,
+        x: &Bound<'_, PyAny>,
+        y: Option<&Bound<'_, PyAny>>,
+        anchor: Option<&PyAnchor>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        let root = slf.inner.lock().expect("layout poisoned").root.clone();
+        PyDrawable(root).move_to(x, y, anchor)?;
+        Ok(slf)
+    }
+
+    fn shift_by<'py>(slf: PyRef<'py, Self>, dx: f64, dy: f64) -> PyResult<PyRef<'py, Self>> {
+        let root = slf.inner.lock().expect("layout poisoned").root.clone();
+        PyDrawable(root).shift_by(dx, dy)?;
+        Ok(slf)
+    }
+
     #[getter]
     fn animate(&self) -> PyResult<crate::pydrawable::PyCanvasAnim> {
         crate::custom::ensure_authoring_allowed()?;

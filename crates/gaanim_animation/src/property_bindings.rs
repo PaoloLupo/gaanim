@@ -7,7 +7,7 @@ use gaanim_core::{
     glam::{DQuat, DVec3, EulerRot},
 };
 use gaanim_math::{RateFunc, SpatialTransform};
-use gaanim_scene::Opacity;
+use gaanim_scene::{FillLevel, Opacity};
 
 use crate::{AnimatableLens, FloatSignal, PlaybackState, ScalarSource};
 
@@ -17,6 +17,7 @@ pub enum PropertyChannel {
     Rotation,
     Scale,
     Opacity,
+    FillLevel,
 }
 
 impl PropertyChannel {
@@ -26,6 +27,7 @@ impl PropertyChannel {
             Self::Rotation => "rotation",
             Self::Scale => "scale",
             Self::Opacity => "opacity",
+            Self::FillLevel => "fill_level",
         }
     }
 }
@@ -45,6 +47,7 @@ pub enum PropertySources {
     Rotation([ScalarSource; 3]),
     Scale([ScalarSource; 3]),
     Opacity(ScalarSource),
+    FillLevel(ScalarSource),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -53,6 +56,7 @@ pub enum PropertyValue {
     Rotation(DQuat),
     Scale(DVec3),
     Opacity(f32),
+    FillLevel(f64),
 }
 
 impl PropertySources {
@@ -62,6 +66,7 @@ impl PropertySources {
             Self::Rotation(_) => PropertyChannel::Rotation,
             Self::Scale(_) => PropertyChannel::Scale,
             Self::Opacity(_) => PropertyChannel::Opacity,
+            Self::FillLevel(_) => PropertyChannel::FillLevel,
         }
     }
     pub fn sources(&self) -> &[ScalarSource] {
@@ -70,7 +75,7 @@ impl PropertySources {
             | Self::Translation { values, .. }
             | Self::Rotation(values)
             | Self::Scale(values) => values,
-            Self::Opacity(value) => std::slice::from_ref(value),
+            Self::Opacity(value) | Self::FillLevel(value) => std::slice::from_ref(value),
         }
     }
     pub fn is_constant(&self) -> bool {
@@ -104,12 +109,18 @@ impl PropertySources {
             )),
             Self::Scale(_) => PropertyValue::Scale(DVec3::new(values[0], values[1], values[2])),
             Self::Opacity(_) => PropertyValue::Opacity(values[0].clamp(0.0, 1.0) as f32),
+            Self::FillLevel(_) => PropertyValue::FillLevel(values[0].clamp(0.0, 1.0)),
         })
     }
 }
 
 impl PropertyValue {
     pub fn read(world: &World, target: Entity, channel: PropertyChannel) -> Option<Self> {
+        if channel == PropertyChannel::FillLevel {
+            return world
+                .get::<FillLevel>(target)
+                .map(|value| Self::FillLevel(value.0));
+        }
         if channel == PropertyChannel::Opacity {
             return world
                 .get::<Opacity>(target)
@@ -120,7 +131,7 @@ impl PropertyValue {
             PropertyChannel::Translation => Self::Translation(transform.translation),
             PropertyChannel::Rotation => Self::Rotation(transform.rotation),
             PropertyChannel::Scale => Self::Scale(transform.scale),
-            PropertyChannel::Opacity => unreachable!(),
+            PropertyChannel::Opacity | PropertyChannel::FillLevel => unreachable!(),
         })
     }
     pub fn interpolate(self, to: Self, alpha: f64) -> Self {
@@ -129,10 +140,19 @@ impl PropertyValue {
             (Self::Scale(a), Self::Scale(b)) => Self::Scale(a.lerp(b, alpha)),
             (Self::Rotation(a), Self::Rotation(b)) => Self::Rotation(a.slerp(b, alpha)),
             (Self::Opacity(a), Self::Opacity(b)) => Self::Opacity(a + (b - a) * alpha as f32),
+            (Self::FillLevel(a), Self::FillLevel(b)) => Self::FillLevel(a + (b - a) * alpha),
             _ => self,
         }
     }
     pub fn apply(self, world: &mut World, target: Entity) {
+        if let Self::FillLevel(value) = self {
+            if let Some(mut level) = world.get_mut::<FillLevel>(target) {
+                if level.0 != value {
+                    level.0 = value;
+                }
+            }
+            return;
+        }
         if let Self::Opacity(value) = self {
             if let Some(mut opacity) = world.get_mut::<Opacity>(target) {
                 if opacity.0 != value {
@@ -145,7 +165,7 @@ impl PropertyValue {
                 Self::Translation(value) => next.translation = value,
                 Self::Rotation(value) => next.rotation = value,
                 Self::Scale(value) => next.scale = value,
-                Self::Opacity(_) => unreachable!(),
+                Self::Opacity(_) | Self::FillLevel(_) => unreachable!(),
             }
             if *transform != next {
                 *transform = next;
@@ -430,6 +450,9 @@ impl PropertySourceLens {
 
     pub fn capture_start(&self, world: &World, target: Entity) {
         let from = match self.from {
+            PropertyValue::FillLevel(_) => world
+                .get::<FillLevel>(target)
+                .map(|value| PropertyValue::FillLevel(value.0)),
             PropertyValue::Translation(_) => world
                 .get::<SpatialTransform>(target)
                 .map(|t| PropertyValue::Translation(t.translation)),

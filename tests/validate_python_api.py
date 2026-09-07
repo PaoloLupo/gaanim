@@ -1293,6 +1293,150 @@ def validate_scene_capability_surface(module) -> list[str]:
     return failures
 
 
+def validate_section_and_arrow_contract(module) -> list[str]:
+    from gaanim import Section, SectionStep
+
+    failures = []
+    scene = module.Scene(frame=(16, 9))
+    seen = []
+    def body(original):
+        if original is not scene:
+            failures.append("Section replaced the native Scene")
+        arrow = original.geometry.arrow(0, 0, 2, 0, head_length=0.18,
+            head_width=0.15, body_width=0.036, max_head_ratio=0.3).no_stroke()
+        original.play(arrow.animate.create(), duration=0.1)
+        original.stop()
+        original.wait(0.1)
+        original.stop()
+
+    section = Section("contract", [SectionStep(name="one", build=body),
+        SectionStep(name="two", build=body, notes="notes")])
+    for _ in range(2):
+        handles = section.build(scene, on_enter=lambda s, p: seen.append(p))
+        if not all(isinstance(handle, module.Segment) for handle in handles):
+            failures.append("Section did not return native segment handles")
+    if [p.fraction for p in seen] != [0.5, 1, 0.5, 1]:
+        failures.append("Section entry progress changed with internal stops")
+    for kwargs in ({"head_length": 0}, {"head_width": float("nan")},
+                   {"body_width": -1}, {"max_head_ratio": 1.1},
+                   {"max_head_ratio": 0}):
+        try:
+            scene.geometry.arrow(0, 0, 1, 0, **kwargs)
+        except ValueError:
+            pass
+        else:
+            failures.append(f"arrow accepted invalid dimensions: {kwargs}")
+    return failures
+
+
+def validate_reactive_fill_level_contract(module) -> list[str]:
+    from gaanim import computed
+
+    scene = module.Scene(frame=(16, 9))
+    amount = scene.viz.parameter(0)
+    fraction = computed(lambda value: value / 100, inputs=[amount])
+    mask = scene.geometry.rect(2, 2)
+    fill = scene.geometry.fill_level(mask, "blue", fraction, keep_outline=False)
+    failures = []
+    try:
+        fill.animate.fill_level(0.5)
+    except ValueError:
+        pass
+    else:
+        failures.append("bound fill accepted a conflicting level animation")
+    scene.play(amount.animate.set(80), duration=1)
+    fill.set_fill_level(0.4)
+    scene.play(fill.animate.fill_level(0.6), duration=1)
+    fill.set_fill_level(amount)
+    foreign = module.Scene(frame=(16, 9)).viz.parameter(0.3)
+    for operation in (lambda: fill.set_fill_level(foreign),
+                      lambda: scene.geometry.fill_level(mask, "blue", foreign),
+                      lambda: mask.set_fill_level(amount),
+                      lambda: fill.set_fill_level(float("nan"))):
+        try:
+            operation()
+        except ValueError:
+            pass
+        else:
+            failures.append("reactive fill accepted an invalid target/source")
+    return failures
+
+
+def validate_polyline_connector_contract(module):
+    failures = []
+    scene = module.Scene(frame=(16, 9))
+    left = scene.geometry.rect(2, 1).move_to(-3, 0)
+    right = scene.geometry.rect(2, 1).move_to(3, 0)
+    connector = scene.geometry.connector(
+        left.anchor_point(module.Anchor.RIGHT), right.anchor_point(module.Anchor.LEFT),
+        via=[(0, -1)], max_head_ratio=0.3,
+    )
+    scene.play(connector.animate.create().duration(0.2))
+    scene.play(right.animate.shift_by(0, 1).duration(0.2))
+    scene.geometry.connector(left, right)
+    scene.geometry.connector((0, 0), (0, 0), via=[(0, 0)])
+    foreign = module.Scene(frame=(16, 9)).geometry.rect(1, 1)
+    for operation in (
+        lambda: scene.geometry.connector(foreign, right),
+        lambda: scene.geometry.connector(left, right, via=[foreign.anchor_point(module.Anchor.LEFT)]),
+        lambda: scene.geometry.connector(left, right, head_length=0),
+        lambda: scene.geometry.connector(left, right, body_width=float("nan")),
+        lambda: scene.geometry.connector(left, right, max_head_ratio=1.1),
+        lambda: scene.geometry.connector((float("nan"), 0), right),
+    ):
+        try:
+            operation()
+        except ValueError:
+            pass
+        else:
+            failures.append("connector accepted invalid dimensions or foreign endpoints")
+    return failures
+
+
+def validate_layout_card_ports_contract(module):
+    failures = []
+    scene = module.Scene(frame=(16, 9))
+    child = scene.geometry.rect(1, 1)
+    nested = scene.layout.column([child])
+    card = scene.layout.card([nested], padding=0.2, background="white", border="black",
+                             ports={"in": module.Anchor.LEFT, "out": (module.Anchor.RIGHT, (0.1, 0))})
+    if card.count != 1 or card.background is None:
+        failures.append("card background must not count as content")
+    if card.move_to(-2, 0) is not card or card.shift_by(0.1, 0) is not card:
+        failures.append("positioning lost the Layout subclass")
+    if card.with_port("bottom", module.Anchor.BOTTOM) is not card:
+        failures.append("with_port lost the Layout subclass")
+    scene.geometry.connector(card.port("out"), (5, 0))
+    scene.play(card.animate.fade_in().duration(0.2))
+    added = scene.geometry.rect(2, 1)
+    card.add(added)
+    card.remove(added)
+    if scene.layout.stack([]).background is not None:
+        failures.append("ordinary layout unexpectedly has a background")
+    try:
+        card.port("missing")
+    except KeyError:
+        pass
+    else:
+        failures.append("unknown port must raise KeyError")
+    for operation in (
+        lambda: card.with_port("in", module.Anchor.RIGHT),
+        lambda: card.with_port("", module.Anchor.LEFT),
+        lambda: card.with_port("bad", module.Anchor.LEFT, offset=(float("nan"), 0)),
+        lambda: scene.layout.card([], radius=-1),
+        lambda: scene.layout.card([], border_width=float("nan")),
+        lambda: scene.layout.card([], direction="diagonal"),
+        lambda: scene.layout.card([], ports={"": module.Anchor.LEFT}),
+    ):
+        try:
+            operation()
+        except ValueError:
+            pass
+        else:
+            failures.append("card or port accepted invalid arguments")
+    return failures
+
+
 def main() -> int:
     tree = ast.parse(STUB.read_text(encoding="utf-8"), filename=str(STUB))
     module = importlib.import_module("gaanim.gaanim_core")
@@ -1347,6 +1491,10 @@ def main() -> int:
     missing.extend(validate_composable_properties_contract(module))
     missing.extend(validate_easing_contract(module))
     missing.extend(validate_scene_capability_surface(module))
+    missing.extend(validate_section_and_arrow_contract(module))
+    missing.extend(validate_reactive_fill_level_contract(module))
+    missing.extend(validate_polyline_connector_contract(module))
+    missing.extend(validate_layout_card_ports_contract(module))
     missing.extend(validate_editorial_contract(module))
     missing.extend(documented_text_api_failures(tree))
     missing.extend(documented_editorial_api_failures(tree))

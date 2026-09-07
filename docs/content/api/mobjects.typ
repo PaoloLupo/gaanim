@@ -31,7 +31,7 @@ y positiva; `rule` acepta `"nonzero"` o `"evenodd"`.
 
 == Relleno porcentual de siluetas
 
-`scene.geometry.fill_level(mask, paint, level=0.0, direction="up", keep_outline=True)`
+`scene.geometry.fill_level(mask, paint, level=None, *, direction="up", keep_outline=True)`
 genera un interior vectorial que se intersecta con la silueta en cada frame.
 `level` pertenece a `[0, 1]`; las direcciones disponibles son `up`, `down`,
 `left` y `right`. El SVG o drawable usado como `mask` conserva visibilidad
@@ -43,6 +43,27 @@ drop = scene.media.svg("drop.svg").no_fill().stroke("#dbeafe", 4).opacity(0)
 water = scene.geometry.fill_level(drop, "#38bdf8", 0.0)
 scene.play([water.animate.fill_level(0.72).duration(1.4)])
 ```
+
+También acepta `Parameter`, `Variable`, `Computed` o tiempo como fuente. `None`
+equivale al nivel inicial cero. Los valores fijos deben estar en `[0, 1]`;
+las muestras reactivas finitas se limitan a ese intervalo. Las fuentes de otra
+escena se rechazan. Una muestra no finita genera un diagnóstico y usa el valor
+de respaldo de la vinculación.
+
+```python
+from gaanim import computed
+
+amount = scene.viz.parameter(0)
+fraction = computed(lambda value: value / 100, inputs=[amount])
+water = scene.geometry.fill_level(drop, "#38bdf8", fraction)
+label = scene.viz.readout(amount, format=".1f", suffix="%")
+scene.play(amount.animate.set(72), duration=1.4)
+```
+
+`water.set_fill_level(otra_fuente)` reemplaza el vínculo desde el cursor actual.
+`water.set_fill_level(0.4)` lo termina y registra un corte reversible. Mientras
+esté vinculado, anima el parámetro: `water.animate.fill_level(...)` se rechaza.
+Los saltos temporales restauran tanto el vínculo como sus valores y cortes.
 
 == Clases de tema y trazos completos
 
@@ -347,10 +368,17 @@ scene.render()
 #api-entry(
   name: "Geometry.arrow",
   kind: "factory",
-  signature: "arrow(x1, y1, x2, y2) -> Drawable",
+  signature: "arrow(x1, y1, x2, y2, *, head_length=None, head_width=None, body_width=None, max_head_ratio=None) -> Drawable",
   params: ((name: "x1", type: "float", default: none, desc: [Tail x.]), (name: "y1", type: "float", default: none, desc: [Tail y.]), (name: "x2", type: "float", default: none, desc: [Head x.]), (name: "y2", type: "float", default: none, desc: [Head y.]),),
   returns: (type: "Drawable", desc: [Arrow with head at (x2,y2).]),
-  desc: [Transitions, causality, flow. For curved, use `curved_arrow`.],
+  desc: [Transitions, causality, flow. For curved, use `curved_arrow`.
+    Dimensions are in scene units. Omitted values preserve head length 18,
+    head width 18 and body width 6. `max_head_ratio` in `(0, 1]` caps head
+    length relative to total length and scales head width proportionally;
+    `None` leaves it uncapped. Nonfinite endpoints or nonpositive/nonfinite
+    dimensions raise `ValueError`. Coincident endpoints produce an empty path.
+    For a 16×9 scene, use `head_length=0.18, head_width=0.15,
+    body_width=0.036, max_head_ratio=0.3` and `.no_stroke()` for a solid silhouette.],
 )[
 ```python
 # show-code: true
@@ -359,6 +387,34 @@ scene = Scene(frame=(16, 9), background="#0f172a")
 arrow = scene.geometry.arrow(-100, 0, 100, 0).stroke(GOLD, 4)
 scene.play([arrow.animate.create().duration(0.8)])
 # output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Geometry.connector",
+  kind: "factory",
+  signature: "connector(start, end, *, via=None, head_length=0.18, head_width=0.15, body_width=0.036, max_head_ratio=None) -> Drawable",
+  params: ((name: "start", type: "Endpoint", default: none, desc: [Tail point or reference.]), (name: "end", type: "Endpoint", default: none, desc: [Tip point or reference.]), (name: "via", type: "Sequence[Endpoint] | None", default: "None", desc: [Ordered intermediate points.]),),
+  returns: (type: "Drawable", desc: [One filled reactive polyline arrow.]),
+  desc: [Endpoints accept drawables, anchors, point references and coordinate tuples.
+    The path follows references during animation and exact seek. Use explicit
+    waypoints for bends; this API does not route around obstacles.
+    Dimensions are positive finite world units. Head length is capped to the
+    final nonzero segment, optionally multiplied by `max_head_ratio` in `(0, 1]`;
+    head width scales proportionally. Repeated points are ignored; a collapsed
+    connector has an empty path. Invalid dimensions, nonfinite fixed points or
+    references from another Scene raise `ValueError`. Defaults use the theme
+    foreground fill and no stroke. Animate the whole connector with `create()`.],
+)[
+```python
+from gaanim import Anchor, Scene
+scene = Scene(frame=(16, 9))
+left = scene.geometry.rect(2, 1).move_to(-3, 0)
+right = scene.geometry.rect(2, 1).move_to(3, 0)
+link = scene.geometry.connector(left.anchor_point(Anchor.RIGHT), right.anchor_point(Anchor.LEFT))
+scene.play(link.animate.create())
+scene.play(right.animate.shift_by(0, 1))
 scene.render()
 ```
 ]

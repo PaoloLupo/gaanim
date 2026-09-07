@@ -226,6 +226,38 @@ impl DrawableHandle {
         }
     }
 
+    /// Define a unique named anchor; existing point references remain immutable.
+    pub fn with_port(
+        self,
+        name: &str,
+        anchor: Anchor,
+        offset: DVec3,
+    ) -> Result<Self, &'static str> {
+        if name.trim().is_empty() || !offset.is_finite() {
+            return Err("port name must be nonempty and its offset finite");
+        }
+        let mut spec = self.spec.lock().expect("object spec poisoned");
+        if spec.ports.contains_key(name) {
+            return Err("port name already defined");
+        }
+        spec.ports.insert(name.to_owned(), (anchor, offset));
+        drop(spec);
+        Ok(self)
+    }
+
+    /// Resolve an immutable named local anchor, following the drawable's bounds.
+    pub fn port(&self, name: &str) -> Result<AnchorPoint, &'static str> {
+        let (anchor, offset) = self
+            .spec
+            .lock()
+            .expect("object spec poisoned")
+            .ports
+            .get(name)
+            .copied()
+            .ok_or("unknown port name")?;
+        Ok(self.anchor_point(anchor, offset))
+    }
+
     /// Whether a bounds point was created by this drawable's Scene.
     pub fn owns_anchor_point(&self, point: AnchorPoint) -> bool {
         self.state.lock().expect("canvas state poisoned").scene_id == point.scene_id
@@ -437,18 +469,30 @@ impl DrawableHandle {
         )
     }
 
-    /// Set a derived fill level before compilation.
-    pub fn set_fill_level(self, level: f64) -> Result<Self, &'static str> {
+    /// Set or bind a normalized fill level. Fixed values end a binding reversibly.
+    pub fn set_fill_level(self, level: impl Into<ScalarSource>) -> Result<Self, String> {
+        let level = level.into();
+        let Some(level) = level.constant_value() else {
+            return self.bind_property(PropertySources::FillLevel(level));
+        };
         if !level.is_finite() || !(0.0..=1.0).contains(&level) {
-            return Err("fill level must be finite and between zero and one");
+            return Err("fill level must be finite and between zero and one".into());
         }
         let mut spec = self.spec.lock().expect("object spec poisoned");
         let SpawnKind::FillLevel { level: current, .. } = &mut spec.kind else {
-            return Err("set_fill_level() requires a Scene.fill_level drawable");
+            return Err("set_fill_level() requires a Scene.fill_level drawable".into());
         };
         *current = level;
         spec.fill_level_cursor = Some(level);
         drop(spec);
+        self.clear_property_binding(gaanim_animation::PropertyChannel::FillLevel);
+        self.push_immediate(
+            self.id,
+            AnimationType::FillLevelTo {
+                from: level,
+                to: level,
+            },
+        );
         Ok(self)
     }
 

@@ -260,6 +260,7 @@ fn extract_brush_color(brush: &Brush) -> Option<Color> {
 /// their offsets and "from" properties without manual user input.
 #[derive(Debug, Clone)]
 pub struct MobjectState {
+    pub fill_level: f64,
     pub path: std::sync::Arc<gaanim_core::kurbo::BezPath>,
     pub bounds: Bounds3D,
     pub transform: SpatialTransform,
@@ -585,6 +586,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 .entity(child.entity)
                 .set_parent_in_place(entity);
             let child_state = MobjectState {
+                fill_level: 0.0,
                 path: child.path.clone(),
                 bounds: child.bounds,
                 transform: child.transform,
@@ -602,6 +604,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         self.tag_entity(entity);
         let state = MobjectState {
+            fill_level: 0.0,
             path: parent_path,
             bounds,
             transform: SpatialTransform::default(),
@@ -2422,6 +2425,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     }
                     gaanim_animation::PropertyValue::Scale(value) => state.transform.scale = value,
                     gaanim_animation::PropertyValue::Opacity(value) => state.opacity = value,
+                    gaanim_animation::PropertyValue::FillLevel(value) => state.fill_level = value,
                 }
             }
             let channel = source.sources.channel();
@@ -2757,7 +2761,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 );
                 PropertyLensSpec::MediaFrame { from, to }
             }
-            AnimationType::FillLevelTo { from, to } => PropertyLensSpec::FillLevel { from, to },
+            AnimationType::FillLevelTo { from, to } => {
+                if let Some(state) = self.states.get_mut(anim.target) {
+                    state.fill_level = to;
+                }
+                PropertyLensSpec::FillLevel { from, to }
+            }
             AnimationType::SurroundingRectRetarget { .. } => {
                 unreachable!(
                     "surrounding-rectangle retargeting is dispatched before lens resolution"
@@ -5310,6 +5319,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         // 6. Store group state
         let group_state = MobjectState {
+            fill_level: 0.0,
             path: std::sync::Arc::new(gaanim_core::kurbo::BezPath::new()),
             bounds: union_bounds,
             transform: group_transform,
@@ -5387,6 +5397,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.ensure_track(child_id);
         }
         let group_state = MobjectState {
+            fill_level: 0.0,
             path: std::sync::Arc::new(gaanim_core::kurbo::BezPath::new()),
             bounds: union_bounds,
             transform: group_transform,
@@ -5609,6 +5620,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         self.tag_entity(entity);
 
         let state = MobjectState {
+            fill_level: 0.0,
             path: std::sync::Arc::new(gaanim_core::kurbo::BezPath::new()),
             bounds: Bounds3D::default(),
             transform: SpatialTransform::default(),
@@ -5860,6 +5872,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
         self.tag_entity(entity);
         let state = MobjectState {
+            fill_level: 0.0,
             path: std::sync::Arc::new(kurbo::BezPath::new()),
             bounds,
             transform: SpatialTransform::default(),
@@ -5953,6 +5966,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             .id();
         self.tag_entity(entity);
         let state = MobjectState {
+            fill_level: 0.0,
             path: std::sync::Arc::new(kurbo::BezPath::new()),
             bounds,
             transform: SpatialTransform::default(),
@@ -6282,6 +6296,32 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
         let id = self.next_id();
         let bundle = gaanim_objects::primitives::arrow(id, start, end);
+        MobjectSpawnBuilder {
+            builder: self,
+            id,
+            bundle,
+            parent_entity: None,
+        }
+    }
+
+    /// Spawns a solid arrow with positive finite dimensions in scene units.
+    pub fn arrow_with_dimensions(
+        &mut self,
+        start: kurbo::Point,
+        end: kurbo::Point,
+        head_length: f64,
+        head_width: f64,
+        body_width: f64,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        let id = self.next_id();
+        let bundle = gaanim_objects::primitives::arrow_with_dimensions(
+            id,
+            start,
+            end,
+            head_length,
+            head_width,
+            body_width,
+        );
         MobjectSpawnBuilder {
             builder: self,
             id,
@@ -6789,6 +6829,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         self.tag_entity(entity);
 
         let state = MobjectState {
+            fill_level: 0.0,
             path: std::sync::Arc::new(gaanim_core::kurbo::BezPath::new()),
             bounds,
             transform: SpatialTransform::default(),
@@ -6980,6 +7021,7 @@ mod tests {
         children: Vec<HierarchyChild>,
     ) -> MobjectState {
         MobjectState {
+            fill_level: 0.0,
             path,
             bounds: Bounds3D::default(),
             transform: SpatialTransform::default(),
@@ -7226,6 +7268,7 @@ mod tests {
         builder.states.insert(
             target_id,
             MobjectState {
+                fill_level: 0.0,
                 path: square_path(40.0),
                 // This mimics a glyph whose bounds have already been centered
                 // relative to its textual parent, while its path remains local.
@@ -7980,6 +8023,7 @@ impl<'b, 'w, 's, 'a> MobjectSpawnBuilder<'b, 'w, 's, 'a> {
         }
 
         let state = MobjectState {
+            fill_level: 0.0,
             path: self.bundle.path.0.clone(),
             bounds: self.bundle.bounds.0,
             transform: self.bundle.transform,

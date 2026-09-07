@@ -727,3 +727,58 @@ import os
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(snapshots, [0.0, 1.0])
 ```
+
+== Composing sections
+
+`Section(key, steps)` groups ordered Python content builders. Each immutable
+`SectionStep` supplies a name, builder and optional `transition`, `notes`,
+`template` and `background`, with the same meanings as `Scene.segment`.
+The helper opens the segment itself; builders receive the original `Scene`
+and author content and stops without calling `segment` again.
+
+```python
+from gaanim import Scene, Section, SectionStep
+
+scene = Scene(frame=(16, 9))
+
+def context(scene):
+    title = scene.text("Context", size=0.5)
+    scene.play(title.animate.write())
+    scene.stop()
+
+def proposal(scene):
+    title = scene.text("Proposal", size=0.5)
+    scene.play(title.animate.write())
+    scene.stop()
+
+section = Section("introduction", [
+    SectionStep(name="Context", build=context, notes="Introduce the problem."),
+    SectionStep(name="Proposal", build=proposal),
+])
+
+def enter(scene, progress):
+    print(progress.key, progress.index, progress.total, progress.fraction)
+
+segments = section.build(scene, on_enter=enter)
+scene.render()
+```
+
+`build(scene, *, on_enter=None)` returns native segment handles in order.
+It first opens a segment, calls `on_enter(scene, progress)`, then invokes its
+builder. The callback may animate a persistent navigation indicator or bind
+template slots through `progress.segment`. `SectionProgress` also exposes
+`key`, `step`, one-based `index`, `total`, one-based `visit` and
+`fraction = index / total`. Stops inside the builder never advance progress.
+No stops or divider slides are inserted automatically.
+
+Reuse the same `Section` instance to repeat a section, including after other
+sections: progress restarts and generated segment names include its key, visit,
+ordinal and step name. Use a unique key for each instance within a scene.
+This is an authoring helper, not a new runtime navigation-group type.
+
+Empty keys, names or step lists raise `ValueError`; invalid step types and
+noncallable builders or callbacks raise `TypeError`. Native segment errors
+still apply, including a transition on the scene's first segment. Exceptions
+propagate without rolling back already authored content; a failed build
+consumes its visit number. See `examples/section_composition.py` for an animated
+progress rail and configurable arrows in a 16×9 frame.

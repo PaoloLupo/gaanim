@@ -404,6 +404,20 @@ class LayoutItem:
     """Immutable per-child grow, grid, absolute-placement, offset, and fit rules."""
 
 class Layout(Drawable):
+    def move_to(self, x: ScalarSource | tuple[float, float] | Drawable | AnchorPoint, y: Optional[ScalarSource] = None, anchor: Optional[Anchor] = None) -> Self:
+        """Position the container using Drawable semantics and preserve this Layout."""
+        ...
+    def shift_by(self, dx: float, dy: float) -> Self:
+        """Shift the container in scene units and preserve its layout methods."""
+        ...
+    @property
+    def background(self) -> Optional[Drawable]:
+        """Card background for independent styling; None for ordinary layouts.
+
+        This child follows the outer layout box, including padding, and is
+        excluded from count and content measurement.
+        """
+        ...
     @property
     def animate(self) -> Anim:
         """Return the pure animation proxy for the layout root."""
@@ -595,7 +609,11 @@ class Anim:
         """
         ...
     def fill_level(self, level: float) -> Anim:
-        """Animate a ``Scene.fill_level`` drawable to a normalized value in ``[0, 1]``."""
+        """Animate an unbound fill drawable to a normalized value in [0, 1].
+
+        A bound fill raises ValueError: animate its source or first call
+        set_fill_level(number) to end the binding.
+        """
         ...
     def shift_by(self, dx: float, dy: float) -> Anim:
         """Target a relative 2D translation in a compound property animation."""
@@ -997,8 +1015,14 @@ class Drawable:
             result = drawable.no_clip()
         """
         ...
-    def set_fill_level(self, level: float) -> Drawable:
-        """Set a ``Scene.fill_level`` drawable immediately; invalid values or other drawables raise ``ValueError``."""
+    def set_fill_level(self, level: ScalarSource) -> Drawable:
+        """Set or bind this fill's normalized level and return the drawable.
+
+        A reactive source follows its value at every seek; finite values are
+        clamped to [0, 1]. A fixed number in [0, 1] ends the binding reversibly
+        at the current cursor. Invalid fixed values, foreign sources and other
+        drawable types raise ValueError. Animate the source while bound.
+        """
         ...
     def opacity(self, op: ScalarSource) -> Self:
         """Apply opacity to this drawable and return the result.
@@ -1066,6 +1090,16 @@ class Drawable:
         Example:
             corner = frame.anchor_point(Anchor.TOP_RIGHT)
         """
+        ...
+    def with_port(self, name: str, anchor: Anchor, *, offset: tuple[float, float] = (0.0, 0.0)) -> Self:
+        """Define a unique named local anchor and return this same drawable.
+
+        Empty/duplicate names and nonfinite offsets raise ValueError. A port
+        follows bounds, reflow and parent transforms; definitions are immutable.
+        """
+        ...
+    def port(self, name: str) -> AnchorPoint:
+        """Return a named reactive endpoint; an unknown name raises KeyError."""
         ...
     def at_coordinate(self, coordinate: CoordinateRef) -> Drawable:
         """Place this drawable at a symbolic coordinate owned by a coordinate space."""
@@ -2828,11 +2862,26 @@ class Geometry:
             result = scene.line((-100.0, 0.0), card.anchor_point(Anchor.LEFT))
         """
         ...
-    def arrow(self, x1: float, y1: float, x2: float, y2: float) -> Drawable:
-        """Create a arrow drawable in the scene.
+    def connector(self, start: Endpoint, end: Endpoint, *, via: Optional[Sequence[Endpoint]] = None, head_length: float = 0.18, head_width: float = 0.15, body_width: float = 0.036, max_head_ratio: Optional[float] = None) -> Drawable:
+        """Filled reactive arrow through optional waypoints, in world units.
+
+        Head length is capped to the last nonzero segment; width scales with it.
+        References must belong to this Scene. Coincident points are ignored.
+        One Drawable supports fill, opacity and create; no obstacle routing.
+        """
+        ...
+    def arrow(self, x1: float, y1: float, x2: float, y2: float, *, head_length: Optional[float] = None, head_width: Optional[float] = None, body_width: Optional[float] = None, max_head_ratio: Optional[float] = None) -> Drawable:
+        """Create a solid arrow with optional dimensions in scene units.
+
+        Omitted dimensions preserve head length 18, head width 18 and body
+        width 6. max_head_ratio in (0, 1] caps head length relative to arrow
+        length and scales head width proportionally; None leaves it uncapped.
+        Nonfinite endpoints or nonpositive/nonfinite dimensions raise
+        ValueError. Coincident endpoints produce an empty path.
 
         Example:
-            result = scene.arrow(1.0, 1.0, 1.0, 1.0)
+            result = scene.geometry.arrow(-1, 0, 1, 0, head_length=0.18,
+                head_width=0.15, body_width=0.036, max_head_ratio=0.3)
         """
         ...
     def dashed_line(
@@ -3040,8 +3089,15 @@ class Geometry:
     def xor(self, *operands: Drawable, live: bool = False, tolerance: float = 0.25, rule: Literal["nonzero", "evenodd"] = "nonzero") -> Drawable:
         """Return the symmetric difference of at least two vector drawables."""
         ...
-    def fill_level(self, mask: Drawable, paint: Paint, level: float = 0.0, *, direction: Literal["up", "down", "left", "right"] = "up", keep_outline: bool = True) -> Drawable:
-        """Create a dynamic vector fill clipped to ``mask``. The source mask remains visible as the outline when requested."""
+    def fill_level(self, mask: Drawable, paint: Paint, level: Optional[ScalarSource] = None, *, direction: Literal["up", "down", "left", "right"] = "up", keep_outline: bool = True) -> Drawable:
+        """Create a vector fill clipped to mask; None starts empty.
+
+        A number sets a level in [0, 1]. Parameter, Variable and Computed sources
+        bind the level and clamp finite samples to [0, 1]. Foreign sources and
+        invalid fixed levels raise ValueError. Animate the source while bound;
+        set_fill_level(number) ends the binding reversibly. keep_outline retains
+        the mask as a visible outline when requested.
+        """
         ...
     def point_on_curve(self, curve: Drawable, tracker: Parameter) -> Drawable:
         """Create a hidden point-on-curve drawable; reveal it in ``scene.play``.
@@ -3301,6 +3357,17 @@ class Typography:
 
 class LayoutBuilder:
     """Scene-owned factory for responsive layouts, items, constraints, and templates."""
+    def card(self, children: Sequence[Drawable | Layout | LayoutItem], *, direction: Literal["column", "row", "stack"] = "column", gap: float = 0.24, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "center", justify: Justify = "start", background: Optional[Paint] = None, border: Optional[Paint] = None, border_width: float = 0.025, radius: float = 0.08, ports: Optional[dict[str, Anchor | tuple[Anchor, tuple[float, float]]]] = None) -> Layout:
+        """Compose arbitrary children inside a persistent card in scene units.
+
+        Background and border default to transparent. The rounded background
+        follows the resolved outer box, including padding, through reflow and
+        seek. It does not affect content measurement or count. Radius is capped
+        to half the smaller box dimension. Style it via card.background.
+        Ports map names to anchors or (anchor, offset) pairs. Invalid dimensions,
+        names or offsets raise ValueError; content uses normal layout ownership.
+        """
+        ...
     def row(self, children: Sequence[Drawable | Layout | LayoutItem], *, gap: float = 0.24, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "center", justify: Justify = "start", wrap: bool = False, within: Optional[Literal["safe", "frame"]] = None) -> Layout:
         """Create a horizontal Layout v2 container in canvas units.
 

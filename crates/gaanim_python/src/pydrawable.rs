@@ -984,6 +984,33 @@ impl PyDrawable {
         )))
     }
 
+    #[pyo3(signature = (name, anchor, *, offset=(0.0, 0.0)))]
+    fn with_port<'py>(
+        slf: PyRef<'py, Self>,
+        name: &str,
+        anchor: PyAnchor,
+        offset: (f64, f64),
+    ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        slf.0
+            .clone()
+            .with_port(
+                name,
+                anchor.0,
+                gaanim_core::glam::DVec3::new(offset.0, offset.1, 0.0),
+            )
+            .map_err(PyValueError::new_err)?;
+        Ok(slf)
+    }
+
+    fn port(&self, name: &str) -> PyResult<PyAnchorPoint> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.0
+            .port(name)
+            .map(PyAnchorPoint)
+            .map_err(pyo3::exceptions::PyKeyError::new_err)
+    }
+
     #[getter]
     fn left(&self) -> PyResult<PyLayoutExpression> {
         crate::custom::ensure_authoring_allowed()?;
@@ -1227,8 +1254,9 @@ impl PyDrawable {
         crate::custom::ensure_authoring_allowed()?;
         Ok(Self(self.0.clone().no_clip()))
     }
-    fn set_fill_level(&self, level: f64) -> PyResult<Self> {
+    fn set_fill_level(&self, level: &Bound<'_, PyAny>) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
+        let level = extract_scalar_source_for_drawable(level.clone(), &self.0)?;
         self.0
             .clone()
             .set_fill_level(level)
@@ -1930,7 +1958,7 @@ macro_rules! media_drawable_methods {
         Ok(slf)
     }
 
-    fn set_fill_level<'py>(slf: PyRef<'py, Self>, level: f64) -> PyResult<PyRef<'py, Self>> {
+    fn set_fill_level<'py>(slf: PyRef<'py, Self>, level: &Bound<'py, PyAny>) -> PyResult<PyRef<'py, Self>> {
         PyDrawable(slf.handle()).set_fill_level(level)?;
         Ok(slf)
     }

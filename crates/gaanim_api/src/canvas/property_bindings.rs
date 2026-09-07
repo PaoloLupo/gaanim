@@ -62,10 +62,22 @@ impl DrawableHandle {
     /// Bind an absolute channel to explicit scalar sources from this scene.
     pub fn bind_property(self, sources: PropertySources) -> Result<Self, String> {
         let channel = sources.channel();
-        if channel != PropertyChannel::Opacity
-            && (self.layout_owner().is_some() || self.is_live_derived_geometry())
+        if !matches!(
+            channel,
+            PropertyChannel::Opacity | PropertyChannel::FillLevel
+        ) && (self.layout_owner().is_some() || self.is_live_derived_geometry())
         {
             return Err("layout or live derived geometry owns this drawable's transform".into());
+        }
+        if channel == PropertyChannel::FillLevel
+            && self
+                .spec
+                .lock()
+                .expect("object spec poisoned")
+                .fill_level_cursor
+                .is_none()
+        {
+            return Err("fill_level binding requires a fill_level drawable".into());
         }
         let mut state = self.state.lock().expect("canvas state poisoned");
         if sources
@@ -120,6 +132,16 @@ impl Anim {
         let drawable = self
             .property_drawable()
             .ok_or("property sources require a Drawable animation proxy")?;
+        if channel == PropertyChannel::FillLevel
+            && drawable
+                .spec
+                .lock()
+                .expect("object spec poisoned")
+                .fill_level_cursor
+                .is_none()
+        {
+            return Err("fill_level source requires a fill_level drawable".into());
+        }
         if drawable.property_is_bound(channel) {
             return Err(format!(
                 "{} is reactively bound; animate its Parameter or assign a fixed value first",
@@ -145,7 +167,11 @@ impl Anim {
                 return Err("reactive inputs must belong to this Scene".into());
             }
         }
-        if channel != PropertyChannel::Opacity && !self.property_position_is_free() {
+        if !matches!(
+            channel,
+            PropertyChannel::Opacity | PropertyChannel::FillLevel
+        ) && !self.property_position_is_free()
+        {
             return Err("layout or live derived geometry owns this drawable's transform".into());
         }
         Ok(self.update_properties(|properties| {
@@ -154,6 +180,7 @@ impl Anim {
                 PropertyChannel::Rotation => properties.rotation = None,
                 PropertyChannel::Scale => properties.scale = None,
                 PropertyChannel::Opacity => properties.opacity = None,
+                PropertyChannel::FillLevel => properties.fill_level = None,
             }
             properties
                 .source_targets
@@ -333,6 +360,7 @@ impl SceneBuilder<'_, '_, '_> {
             V::Rotation(value) => state.transform.rotation = value,
             V::Scale(value) => state.transform.scale = value,
             V::Opacity(value) => state.opacity = value,
+            V::FillLevel(value) => state.fill_level = value,
         }
         let start = self.current_time + anim.delay;
         let lens = PropertySourceLens {
@@ -483,6 +511,7 @@ impl SceneBuilder<'_, '_, '_> {
             PropertyChannel::Rotation => PropertyValue::Rotation(state.transform.rotation),
             PropertyChannel::Scale => PropertyValue::Scale(state.transform.scale),
             PropertyChannel::Opacity => PropertyValue::Opacity(state.opacity),
+            PropertyChannel::FillLevel => PropertyValue::FillLevel(state.fill_level),
         }
     }
 }
@@ -496,6 +525,215 @@ mod tests {
     use gaanim_math::{RateFunc, SpatialTransform};
     use gaanim_scene::Opacity;
     use gaanim_timeline::{snapshot::WorldSnapshot, timeline::Timeline};
+
+    #[test]
+    fn reactive_fill_level_seeks_rebinds_and_fixed_cuts() {
+        let mut canvas = SceneModel::new(16, 9);
+        let amount = canvas.parameter(0.0).unwrap();
+        let other = canvas.parameter(0.8).unwrap();
+        let mask = canvas.rect(2.0, 2.0);
+        let fill = canvas
+            .fill_level(
+                &mask,
+                gaanim_core::peniko::Color::WHITE.into(),
+                0.1,
+                super::super::FillLevelDirection::Up,
+                false,
+            )
+            .unwrap()
+            .set_fill_level(amount.source())
+            .unwrap();
+        assert!(fill.animate().try_fill_level(0.5).is_err());
+        assert!(canvas.circle(1.0).set_fill_level(amount.source()).is_err());
+        canvas.play(vec![
+            amount
+                .animate()
+                .set(1.5)
+                .duration(1.0)
+                .rate_func(RateFunc::Linear),
+        ]);
+        let fill = fill.set_fill_level(other.source()).unwrap();
+        canvas.wait(1.0);
+        fill.set_fill_level(0.4).unwrap();
+        canvas.wait(1.0);
+        let (mut world, mut timeline, _) = compile(&canvas);
+        let entity = world
+            .query_filtered::<Entity, With<gaanim_scene::FillLevel>>()
+            .single(&world)
+            .unwrap();
+        for (time, expected) in [
+            (0.0, 0.0),
+            (0.5, 0.75),
+            (0.9, 1.0),
+            (1.0, 0.8),
+            (2.0, 0.4),
+            (1.5, 0.8),
+            (0.5, 0.75),
+            (2.5, 0.4),
+        ] {
+            timeline.seek(&mut world, time);
+            assert!(
+                (world.get::<gaanim_scene::FillLevel>(entity).unwrap().0 - expected).abs() < 1e-8,
+                "fill at {time}"
+            );
+        }
+    }
+
+    #[test]
+    fn connector_follows_anchors_through_reverse_seek() {
+        use super::super::{Anchor, CanvasEndpoint};
+        use gaanim_core::kurbo::Shape;
+        let mut canvas = SceneModel::new(16, 9);
+        let target = canvas.rect(2.0, 2.0).move_to(3.0, 0.0);
+        canvas
+            .connector(
+                CanvasEndpoint::Static(DVec3::new(-3.0, 0.0, 0.0)),
+                target.anchor_point(Anchor::Left, DVec3::ZERO).into(),
+                vec![CanvasEndpoint::Static(DVec3::new(0.0, -1.0, 0.0))],
+                0.18,
+                0.15,
+                0.036,
+                None,
+            )
+            .unwrap();
+        canvas.play(vec![
+            target
+                .animate()
+                .shift_by(2.0, 0.0)
+                .duration(1.0)
+                .rate_func(RateFunc::Linear),
+        ]);
+        let (mut world, mut timeline, _) = compile(&canvas);
+        let entity = world
+            .query_filtered::<Entity, With<gaanim_animation::updaters::TrackingConnector>>()
+            .single(&world)
+            .unwrap();
+        for (time, tip_x) in [(0.0, 2.0), (0.5, 3.0), (1.0, 4.0), (0.5, 3.0), (0.0, 2.0)] {
+            timeline.seek(&mut world, time);
+            // Runtime schedules derived geometry after timeline evaluation.
+            gaanim_animation::tracking_line_system(&mut world);
+            let path = &world.get::<gaanim_scene::PathSource>(entity).unwrap().0;
+            assert!(
+                (path.bounding_box().x1 - tip_x).abs() < 1e-8,
+                "tip at {time}"
+            );
+        }
+        let mut foreign = SceneModel::new(16, 9);
+        let anchor = foreign
+            .rect(1.0, 1.0)
+            .anchor_point(Anchor::Left, DVec3::ZERO);
+        assert!(
+            canvas
+                .connector(
+                    anchor.into(),
+                    CanvasEndpoint::Static(DVec3::ZERO),
+                    vec![],
+                    0.18,
+                    0.15,
+                    0.036,
+                    None
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn layout_card_background_and_ports_survive_reflow_and_seek() {
+        use super::super::{Anchor, LayoutMemberSpec, LayoutSpec};
+        use gaanim_core::kurbo::Shape;
+        let mut canvas = SceneModel::new(16, 9);
+        let content = canvas.rect(2.0, 1.0);
+        let card = canvas
+            .group(&[&content])
+            .move_to(-3.0, 1.0)
+            .with_port("out", Anchor::Right, DVec3::new(0.1, 0.0, 0.0))
+            .unwrap();
+        assert!(
+            card.clone()
+                .with_port("out", Anchor::Left, DVec3::ZERO)
+                .is_err()
+        );
+        assert!(card.port("missing").is_err());
+        assert!(
+            card.clone()
+                .with_port("", Anchor::Left, DVec3::ZERO)
+                .is_err()
+        );
+        let background = canvas
+            .decorate_layout(
+                &card,
+                Some(gaanim_core::peniko::Color::WHITE.into()),
+                None,
+                0.08,
+            )
+            .unwrap();
+        content.claim_layout(&card).unwrap();
+        let members = vec![LayoutMemberSpec {
+            id: content.id,
+            style: Default::default(),
+        }];
+        let spec = LayoutSpec {
+            style: gaanim_layout::LayoutStyle {
+                padding: gaanim_layout::Insets::all(0.25),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        canvas.reflow_layout(&card, members.clone(), spec.clone(), 1, None, None, None);
+        canvas.wait(1.0);
+        let mut wide = spec;
+        wide.style.width = gaanim_layout::SizeRule::Fixed(4.0);
+        canvas.set_group_members(&card, &[&content]);
+        canvas.reflow_layout(&card, members, wide, 2, None, None, None);
+        canvas.wait(1.0);
+        let point = card.port("out").unwrap();
+        canvas
+            .connector(
+                point.into(),
+                super::super::CanvasEndpoint::Static(DVec3::new(6.0, 0.0, 0.0)),
+                vec![],
+                0.18,
+                0.15,
+                0.036,
+                None,
+            )
+            .unwrap();
+        let (mut world, mut timeline, content_entity) = compile(&canvas);
+        let entity = world
+            .query_filtered::<Entity, With<gaanim_animation::updaters::LayoutBackground>>()
+            .single(&world)
+            .unwrap();
+        world.insert_resource(gaanim_animation::PlaybackState::default());
+        for (time, width) in [(0.0, 2.5), (1.5, 4.0), (0.5, 2.5), (1.5, 4.0)] {
+            timeline.seek(&mut world, time);
+            gaanim_animation::tracking_line_system(&mut world);
+            let path = &world.get::<gaanim_scene::PathSource>(entity).unwrap().0;
+            assert!(
+                (path.bounding_box().width() - width).abs() < 1e-8,
+                "card background at {time}: {:?}",
+                path.bounding_box()
+            );
+            assert!(world.get::<bevy::prelude::ChildOf>(entity).is_some());
+            let content_x = world
+                .get::<gaanim_math::SpatialTransform>(content_entity)
+                .unwrap()
+                .translation
+                .x;
+            let expected_x = if time < 1.0 { 0.0 } else { -0.75 };
+            assert!(
+                (content_x - expected_x).abs() < 1e-8,
+                "content at {time}: {content_x}"
+            );
+            assert_eq!(
+                world
+                    .get::<gaanim_math::SpatialTransform>(entity)
+                    .unwrap()
+                    .translation,
+                DVec3::ZERO
+            );
+        }
+        let _ = background;
+    }
 
     fn compile(canvas: &SceneModel) -> (World, Timeline, Entity) {
         let mut world = World::new();

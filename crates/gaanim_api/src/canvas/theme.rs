@@ -902,6 +902,7 @@ fn spawn_family(kind: &SpawnKind) -> &'static str {
         | SpawnKind::RightAngle(_) => "shape",
         SpawnKind::Line(_, _, _, _)
         | SpawnKind::Arrow(_, _, _, _)
+        | SpawnKind::SizedArrow { .. }
         | SpawnKind::DashedLine { .. }
         | SpawnKind::DoubleArrow { .. }
         | SpawnKind::Brace { .. }
@@ -943,6 +944,7 @@ fn spawn_name(kind: &SpawnKind) -> &'static str {
         SpawnKind::Ellipse(_, _) => "ellipse",
         SpawnKind::Line(_, _, _, _) => "line",
         SpawnKind::Arrow(_, _, _, _) => "arrow",
+        SpawnKind::SizedArrow { .. } => "arrow",
         SpawnKind::DashedLine { .. } => "dashed_line",
         SpawnKind::DoubleArrow { .. } => "double_arrow",
         SpawnKind::Polygon(_) => "polygon",

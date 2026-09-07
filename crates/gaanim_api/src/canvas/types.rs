@@ -557,6 +557,13 @@ pub enum SpawnKind {
     Ellipse(f64, f64),
     Line(f64, f64, f64, f64),
     Arrow(f64, f64, f64, f64),
+    SizedArrow {
+        start: (f64, f64),
+        end: (f64, f64),
+        head_length: f64,
+        head_width: f64,
+        body_width: f64,
+    },
     DashedLine {
         start: (f64, f64),
         end: (f64, f64),
@@ -896,6 +903,8 @@ pub(crate) struct ReactiveReadoutLayoutSpec {
 #[derive(Debug, Clone)]
 pub struct ObjectSpec {
     pub id: ObjectId,
+    pub(crate) ports: std::collections::HashMap<String, (Anchor, DVec3)>,
+    pub(crate) layout_background: Option<ObjectId>,
     pub kind: SpawnKind,
     pub fill: Option<Brush>,
     pub fill_overridden: bool,
@@ -946,6 +955,8 @@ impl ObjectSpec {
     pub(crate) fn new(id: ObjectId, kind: SpawnKind) -> Self {
         Self {
             id,
+            ports: Default::default(),
+            layout_background: None,
             kind,
             fill: None,
             fill_overridden: false,
@@ -1217,6 +1228,7 @@ impl Anim {
         let rotation = properties.rotation.is_some();
         let scale = properties.scale.is_some();
         let opacity = properties.opacity.is_some();
+        let fill_level = properties.fill_level.is_some();
         properties
             .source_targets
             .retain(|target| match target.sources.channel() {
@@ -1224,6 +1236,7 @@ impl Anim {
                 gaanim_animation::PropertyChannel::Rotation => !rotation,
                 gaanim_animation::PropertyChannel::Scale => !scale,
                 gaanim_animation::PropertyChannel::Opacity => !opacity,
+                gaanim_animation::PropertyChannel::FillLevel => !fill_level,
             });
         self
     }
@@ -1645,6 +1658,13 @@ impl Anim {
     }
 
     pub fn try_fill_level(self, level: f64) -> Result<Self, &'static str> {
+        if self.property_drawable().is_some_and(|drawable| {
+            drawable.property_is_bound(gaanim_animation::PropertyChannel::FillLevel)
+        }) {
+            return Err(
+                "fill_level is reactively bound; animate its Parameter or assign a fixed value first",
+            );
+        }
         if !level.is_finite() || !(0.0..=1.0).contains(&level) {
             return Err("fill level must be finite and between zero and one");
         }

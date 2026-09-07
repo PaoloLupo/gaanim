@@ -72,6 +72,41 @@ producen `ValueError`. El texto adaptable se compone con el ancho ofrecido por
 su fila, columna, track o caja final. Los límites visuales más estrechos de los
 glifos no se convierten después en un nuevo límite de ajuste.
 
+== Tarjetas de contenido y puertos
+
+`scene.layout.card(children, *, direction="column", gap=0.24, padding=0,
+width="hug", height="hug", align="center", justify="start", background=None,
+border=None, border_width=0.025, radius=0.08, ports=None)` devuelve un `Layout`.
+Acepta drawables, layouts anidados e items; `direction` admite `column`, `row`
+y `stack`. A diferencia de `editorial.card`, no impone título, cuerpo ni estilos
+de texto. Fondo y borde son transparentes por defecto y aceptan los mismos
+paints que un drawable.
+
+El fondo sigue la caja exterior resuelta, incluido el padding, durante reflow,
+transformaciones y seek. No participa en la medición ni en `card.count`.
+`card.background` devuelve ese drawable para cambiar su estilo; en layouts
+ordinarios devuelve `None`. El layout controla la posición del fondo.
+El radio se limita a la mitad de la dimensión menor de la caja. Radio y ancho
+de borde negativos o no finitos producen `ValueError`.
+
+```python
+card = scene.layout.card(
+    [scene.text("Modelo"), scene.text("Resultados")],
+    padding=0.3, gap=0.2, background="#f5f5f5", border="#626878",
+    ports={"entrada": Anchor.LEFT, "salida": (Anchor.RIGHT, (0.1, 0))},
+)
+link = scene.geometry.connector(card.port("salida"), (5, 0))
+```
+
+`ports` es un diccionario de nombres a `Anchor` o a `(Anchor, (dx, dy))`.
+`Layout.move_to(...)` y `Layout.shift_by(dx, dy)` conservan la misma instancia
+de `Layout`, por lo que se pueden encadenar con `add`, `configure` y `port`.
+Cualquier drawable admite también `with_port(name, anchor, *, offset=(0, 0))`,
+que devuelve el mismo objeto. `port(name)` devuelve un `AnchorPoint` reactivo
+que sigue los bounds y las transformaciones locales. Los nombres son únicos
+e inmutables: nombres vacíos, repetidos u offsets no finitos producen
+`ValueError`; consultar un nombre desconocido produce `KeyError`.
+
 == Posicionamiento mediante anchors
 
 Fuera de un árbol `Layout`, `at()` también acepta el `AnchorPoint` de otro
