@@ -950,7 +950,7 @@ pub(crate) fn resolve_at_target(
 }
 
 impl PyDrawable {
-    fn require_free_position(&self, operation: &str) -> PyResult<()> {
+    pub(crate) fn require_free_position(&self, operation: &str) -> PyResult<()> {
         if self.0.is_live_derived_geometry() {
             return Err(PyValueError::new_err(format!(
                 "live derived geometry owns this drawable's path and position; operation '{operation}' is not available"

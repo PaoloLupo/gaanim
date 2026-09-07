@@ -194,7 +194,7 @@ pub fn reactive_readout_update_system(
             }
             path.0 = crate::writing::path_at_reveal(&readout.last_path, reveal);
             bounds.0 = readout.last_bounds;
-            baseline.0 = 0.0;
+            baseline.0 = rolling.baseline();
             continue;
         }
         let text = format!(

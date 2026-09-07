@@ -37,9 +37,39 @@ impl PyRollingNumber {
         slf: PyRef<'py, Self>,
         x: &Bound<'py, PyAny>,
         y: Option<&Bound<'py, PyAny>>,
-        anchor: Option<&crate::pylayout::PyAnchor>,
+        anchor: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<PyRef<'py, Self>> {
-        slf.visual.move_to(x, y, anchor)?;
+        crate::custom::ensure_authoring_allowed()?;
+        if let Some(anchor) = anchor.and_then(|value| {
+            value
+                .extract::<PyRef<'_, crate::pytext::PyTextAnchor>>()
+                .ok()
+        }) {
+            slf.visual.require_free_position("move_to")?;
+            let y = y.ok_or_else(|| {
+                pyo3::exceptions::PyTypeError::new_err(
+                    "move_to with a TextAnchor requires both x and y coordinates",
+                )
+            })?;
+            let sx =
+                crate::visualization::extract_scalar_source_for_drawable(x.clone(), &slf.visual.0)?;
+            let sy =
+                crate::visualization::extract_scalar_source_for_drawable(y.clone(), &slf.visual.0)?;
+            if let (Some(x), Some(y)) = (sx.constant_value(), sy.constant_value()) {
+                slf.visual.0.clone().at_text_anchor(x, y, anchor.0);
+            } else {
+                slf.visual
+                    .0
+                    .clone()
+                    .bind_text_position([sx, sy, 0.0.into()], anchor.0, false)
+                    .map_err(PyValueError::new_err)?;
+            }
+        } else {
+            let anchor = anchor
+                .map(|value| value.extract::<PyRef<'_, crate::pylayout::PyAnchor>>())
+                .transpose()?;
+            slf.visual.move_to(x, y, anchor.as_deref())?;
+        }
         Ok(slf)
     }
 
@@ -100,7 +130,7 @@ impl PyRollingNumber {
 
 #[pymethods]
 impl PyVisualization {
-    #[pyo3(signature = (value=0.0, *, decimals=0, min_digits=1, group_separator="", decimal_separator=".", prefix="", suffix="", show_plus=false, font_family="sans-serif", font_size=0.75, digit_spacing=0.02, line_height=1.25, mode="odometer", direction="up", color=None))]
+    #[pyo3(signature = (value=0.0, *, decimals=0, min_digits=1, group_separator="", decimal_separator=".", prefix="", suffix="", show_plus=false, font_family=None, font_size=0.75, digit_spacing=0.02, line_height=1.25, mode="odometer", direction="up", color=None))]
     fn rolling_number(
         &self,
         py: Python<'_>,
@@ -112,7 +142,7 @@ impl PyVisualization {
         prefix: &str,
         suffix: &str,
         show_plus: bool,
-        font_family: &str,
+        font_family: Option<String>,
         font_size: f64,
         digit_spacing: f64,
         line_height: f64,
@@ -131,7 +161,7 @@ impl PyVisualization {
             prefix: prefix.into(),
             suffix: suffix.into(),
             show_plus,
-            font_family: font_family.into(),
+            font_family,
             font_size,
             digit_spacing,
             line_height,

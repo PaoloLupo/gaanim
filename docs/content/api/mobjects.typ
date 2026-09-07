@@ -1423,7 +1423,7 @@ scene.play([area.animate.create(), radius.animate.set(3.0).duration(1.5)])
 #api-entry(
   name: "Visualization.rolling_number",
   kind: "factory",
-  signature: "rolling_number(value=0.0, *, decimals=0, min_digits=1, group_separator='', decimal_separator='.', prefix='', suffix='', show_plus=False, font_family='sans-serif', font_size=0.75, digit_spacing=0.02, line_height=1.25, mode='odometer', direction='up', color=None) -> RollingNumber",
+  signature: "rolling_number(value=0.0, *, decimals=0, min_digits=1, group_separator='', decimal_separator='.', prefix='', suffix='', show_plus=False, font_family=None, font_size=0.75, digit_spacing=0.02, line_height=1.25, mode='odometer', direction='up', color=None) -> RollingNumber",
   params: (
     (name: "value", type: "float", default: "0.0", desc: [Valor inicial finito; su magnitud multiplicada por `10**decimals` debe ser menor que `1e15`.]),
     (name: "decimals / min_digits", type: "int", default: "0 / 1", desc: [De 0 a 6 decimales y de 1 a 15 posiciones enteras, con ceros iniciales. La suma no debe superar 15.]),
@@ -1458,10 +1458,27 @@ contador al encadenarse; las otras operaciones heredadas pueden devolver su
 readouts o `drive_from_samples`. `current` tiene la semántica de consulta del
 Parameter, como espejo del valor de autoría.
 
+Para alinear el contador con texto, usa `TextAnchor.BASELINE_LEFT`,
+`BASELINE_CENTER` o `BASELINE_RIGHT` en `move_to`. Estos anclajes colocan la
+línea base de las cifras asentadas en `y`, independientemente de `line_height`.
+`Anchor.BOTTOM_LEFT` coloca el borde inferior de la ventana, incluido el espacio
+de la rueda, y por eso no equivale a una línea base. Sin anchor explícito, el
+contador conserva el posicionamiento por centro visual de un Drawable.
+
+```python
+from gaanim import TextAnchor
+
+number = scene.viz.rolling_number(2, min_digits=2, font_size=1)
+number.move_to(-5, 1.12, TextAnchor.BASELINE_LEFT)
+scene.text("Objetivos", size=1).move_to(-3.5, 1.12, TextAnchor.BASELINE_LEFT)
+```
+
 `group_separator` admite cero o un carácter; `decimal_separator` requiere uno y
 debe ser diferente. `prefix` y `suffix` son textos de una línea con un máximo
 combinado de 256 bytes UTF-8. `show_plus=True` muestra el signo positivo.
-La familia tipográfica utiliza el fallback habitual de Gaanim. Opciones inválidas,
+`font_family=None` hereda la fuente de cuerpo de la escena al compilar, incluida
+la tipografía del tema. Una familia explícita la reemplaza y utiliza el fallback
+habitual de Gaanim. Opciones inválidas,
 valores fuera de rango en creación, `set` o `count_to`, y duraciones negativas o
 no finitas producen `ValueError`. Si un driver del Parameter sale del rango,
 el contador muestra un guion largo.

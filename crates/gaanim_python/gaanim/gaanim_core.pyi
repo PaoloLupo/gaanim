@@ -2225,8 +2225,14 @@ class RollingNumber(Drawable):
     Use visual.animate for position, opacity and other drawable animations.
     Formatting is fixed at creation; movement is deterministic under seeks.
     """
-    def move_to(self, x: Any, y: Any = None, anchor: Optional[Anchor] = None) -> RollingNumber:
-        """Position the display using Drawable.move_to semantics; return this counter."""
+    def move_to(self, x: Any, y: Any = None, anchor: Anchor | TextAnchor | None = None) -> RollingNumber:
+        """Position the display and return this counter.
+
+        Anchor uses the complete wheel window, including line_height padding;
+        omitted anchor preserves Drawable's visual-center placement. TextAnchor
+        uses the font baseline of settled digits, allowing alignment with Text.
+        TextAnchor requires x and y; either coordinate may be a reactive scalar.
+        """
         ...
     def fill(self, paint: Paint) -> RollingNumber:
         """Set the glyph fill and preserve the counter for fluent chaining."""
@@ -3445,7 +3451,7 @@ class Visualization:
         self, value: float = 0.0, *, decimals: int = 0, min_digits: int = 1,
         group_separator: str = "", decimal_separator: str = ".",
         prefix: str = "", suffix: str = "", show_plus: bool = False,
-        font_family: str = "sans-serif", font_size: float = 0.75,
+        font_family: Optional[str] = None, font_size: float = 0.75,
         digit_spacing: float = 0.02, line_height: float = 1.25,
         mode: str = "odometer", direction: str = "up", color: Optional[Color] = None,
     ) -> RollingNumber:
@@ -3465,7 +3471,9 @@ class Visualization:
         Fractional smallest units intentionally show a wheel between digits;
         use representable endpoints for settled digits (no implicit rounding).
         In continuous mode, higher wheels can remain between digits at endpoints.
-        Font lookup uses Gaanim's normal fallback. Sources driven outside the
+        font_family=None inherits the scene's body font when compiled, including
+        theme typography; an explicit family overrides it with normal font fallback.
+        Sources driven outside the
         finite abs(value)*10**decimals < 1e15 range display an em dash.
         """
         ...

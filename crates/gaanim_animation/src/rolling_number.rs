@@ -26,7 +26,8 @@ pub struct RollingNumberOptions {
     pub prefix: String,
     pub suffix: String,
     pub show_plus: bool,
-    pub font_family: String,
+    /// None inherits the scene's body font when the display is compiled.
+    pub font_family: Option<String>,
     pub font_size: f64,
     /// Extra horizontal space between cells, in scene units.
     pub digit_spacing: f64,
@@ -47,7 +48,7 @@ impl Default for RollingNumberOptions {
             prefix: String::new(),
             suffix: String::new(),
             show_plus: false,
-            font_family: "sans-serif".into(),
+            font_family: None,
             font_size: 0.75,
             digit_spacing: 0.02,
             line_height: 1.25,
@@ -74,7 +75,10 @@ impl RollingNumberOptions {
         {
             return Err("font_size must be positive, digit_spacing non-negative, and line_height at least 1; all must be finite".into());
         }
-        if self.font_family.trim().is_empty()
+        if self
+            .font_family
+            .as_ref()
+            .is_some_and(|family| family.trim().is_empty())
             || self.decimal_separator.chars().count() != 1
             || self.group_separator.chars().count() > 1
             || self.prefix.len() + self.suffix.len() > 256
@@ -120,6 +124,7 @@ pub struct RollingNumber {
     glyphs: HashMap<char, Glyph>,
     digit_width: f64,
     digit_height: f64,
+    baseline: f64,
     pub last_value: Option<f64>,
 }
 
@@ -142,7 +147,7 @@ impl RollingNumber {
         let (digits, _) = compile_text_to_path(
             registry,
             "0123456789",
-            &options.font_family,
+            options.font_family.as_deref().unwrap_or("sans-serif"),
             options.font_size,
         )
         .map_err(|error| error.to_string())?;
@@ -161,7 +166,7 @@ impl RollingNumber {
             let (mut path, _) = compile_text_to_path(
                 registry,
                 &ch.to_string(),
-                &options.font_family,
+                options.font_family.as_deref().unwrap_or("sans-serif"),
                 options.font_size,
             )
             .map_err(|error| error.to_string())?;
@@ -182,8 +187,14 @@ impl RollingNumber {
             glyphs,
             digit_width,
             digit_height,
+            baseline: -center_y,
             last_value: None,
         })
+    }
+
+    /// Typographic baseline of settled glyphs in the display's local coordinates.
+    pub fn baseline(&self) -> f64 {
+        self.baseline
     }
 
     /// Pure geometry at a value: identical for playback, reverse seeks, and export.
@@ -447,6 +458,12 @@ mod tests {
             .0 = 1.0;
         app.update();
         assert_eq!(*app.world().get::<Path2D>(entity).unwrap().0, *cached);
+        let expected_baseline = app.world().get::<RollingNumber>(entity).unwrap().baseline();
+        assert!(expected_baseline.abs() > 1e-3);
+        assert_eq!(
+            app.world().get::<TextBaseline>(entity).unwrap().0,
+            expected_baseline
+        );
         app.world_mut()
             .get_mut::<FloatSignal>(signal)
             .unwrap()

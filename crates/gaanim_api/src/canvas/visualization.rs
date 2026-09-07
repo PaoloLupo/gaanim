@@ -3751,8 +3751,118 @@ mod tests {
             .single(&world)
             .unwrap();
         let (expected, expected_bounds) = rolling.geometry(99.5);
+        let text_config = world.resource::<gaanim_text::prelude::TextConfig>();
+        assert_eq!(
+            rolling.options.font_family.as_deref(),
+            Some(
+                text_config.roles[&gaanim_text::prelude::TextRole::Body]
+                    .font_family
+                    .as_str()
+            )
+        );
         assert_eq!(*path.0, expected);
         assert_eq!(bounds.0, expected_bounds);
+    }
+
+    #[test]
+    fn rolling_number_inherits_custom_body_font_and_preserves_explicit_override() {
+        for font in [None, Some("New Computer Modern")] {
+            let mut canvas = SceneModel::new(16.0, 9.0);
+            canvas
+                .rolling_number(
+                    ScalarSource::constant(42.0),
+                    gaanim_animation::RollingNumberOptions {
+                        font_family: font.map(str::to_owned),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            let mut world = bevy::prelude::World::new();
+            world.insert_resource(gaanim_timeline::timeline::Timeline::new());
+            world.insert_resource(gaanim_text::font::FontRegistry::new());
+            let mut config = gaanim_text::prelude::TextConfig::default();
+            config
+                .roles
+                .get_mut(&gaanim_text::prelude::TextRole::Body)
+                .unwrap()
+                .font_family = "monospace".into();
+            world.insert_resource(config);
+            canvas.compile(&mut world);
+            world.flush();
+            let rolling = world
+                .query::<&gaanim_animation::RollingNumber>()
+                .single(&world)
+                .unwrap();
+            assert_eq!(
+                rolling.options.font_family.as_deref(),
+                Some(font.unwrap_or("monospace"))
+            );
+        }
+    }
+
+    #[test]
+    fn rolling_number_baseline_anchors_ignore_wheel_padding_and_handle_transforms() {
+        use gaanim_core::kurbo::Shape;
+        use gaanim_text::prelude::TextAnchor;
+        for anchor in [
+            TextAnchor::BaselineLeft,
+            TextAnchor::BaselineCenter,
+            TextAnchor::BaselineRight,
+        ] {
+            for line_height in [1.0, 2.0] {
+                let mut canvas = SceneModel::new(16.0, 9.0);
+                canvas
+                    .rolling_number(
+                        ScalarSource::constant(2.0),
+                        gaanim_animation::RollingNumberOptions {
+                            min_digits: 2,
+                            font_size: 1.0,
+                            line_height,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap()
+                    .at_text_anchor(-2.87, 1.12, anchor)
+                    .scale_to(1.3)
+                    .rotate_to(0.2);
+                let mut world = bevy::prelude::World::new();
+                world.insert_resource(gaanim_timeline::timeline::Timeline::new());
+                world.insert_resource(gaanim_text::font::FontRegistry::new());
+                world.insert_resource(gaanim_text::prelude::TextConfig::default());
+                canvas.compile(&mut world);
+                world.flush();
+                let (rolling, bounds, baseline, transform) = world
+                    .query::<(
+                        &gaanim_animation::RollingNumber,
+                        &gaanim_scene::LocalBounds,
+                        &gaanim_scene::TextBaseline,
+                        &gaanim_math::SpatialTransform,
+                    )>()
+                    .single(&world)
+                    .unwrap();
+                let (digits, _) = gaanim_text::shaper::compile_text_to_path(
+                    world.resource::<gaanim_text::font::FontRegistry>(),
+                    "0123456789",
+                    rolling.options.font_family.as_deref().unwrap(),
+                    1.0,
+                )
+                .unwrap();
+                let ink = digits.bounding_box();
+                assert!((baseline.0 + (ink.y0 + ink.y1) * 0.5).abs() < 1e-9);
+                let x = match anchor {
+                    TextAnchor::BaselineLeft => bounds.0.min.x,
+                    TextAnchor::BaselineCenter => bounds.0.center().x,
+                    TextAnchor::BaselineRight => bounds.0.max.x,
+                };
+                let actual = transform
+                    .to_mat4()
+                    .transform_point3(DVec3::new(x, baseline.0, 0.0));
+                assert!(
+                    actual.distance(DVec3::new(-2.87, 1.12, 0.0)) < 1e-9,
+                    "{anchor:?}: {actual:?}"
+                );
+            }
+        }
     }
 
     fn layer_is_empty(handle: &DrawableHandle) -> bool {

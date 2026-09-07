@@ -6896,9 +6896,16 @@ impl SceneModel {
                 let baseline = gaanim_animation::right_aligned_readout_baseline(bounds);
                 let (path, bounds) = gaanim_animation::right_align_readout_path(path, bounds);
                 let rolling_component = rolling.as_ref().map(|options| {
-                    gaanim_animation::RollingNumber::new(builder.font_registry, options.clone())
+                    let mut options = options.clone();
+                    options
+                        .font_family
+                        .get_or_insert_with(|| body.font_family.clone());
+                    gaanim_animation::RollingNumber::new(builder.font_registry, options)
                         .expect("validated rolling number font must compile")
                 });
+                let baseline = rolling_component
+                    .as_ref()
+                    .map_or(baseline, |rolling| rolling.baseline());
                 let (path, bounds) = if let Some(rolling) = &rolling_component {
                     let value = source
                         .evaluate(builder.current_time, |logical| {
@@ -6921,6 +6928,15 @@ impl SceneModel {
                 let source_path = std::sync::Arc::new(svg_path.path.clone());
                 let b = builder.svg_path(&svg_path);
                 let mr = Self::finish_spawn_builder(b, spec);
+                if rolling_component.is_some() {
+                    builder.text_metrics.insert(
+                        mr.id,
+                        gaanim_text::prelude::TextMetrics {
+                            first_baseline: baseline,
+                            line_count: 1,
+                        },
+                    );
+                }
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
                 if let Some(state) = builder.states.get(mr.id) {
                     if let Some(rolling) = rolling_component {
