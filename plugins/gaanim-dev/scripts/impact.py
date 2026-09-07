@@ -196,8 +196,9 @@ def analyze_paths(repo: Path, paths: Iterable[str]) -> Impact:
         commands.append("just docs")
     elif rust_files:
         commands.append("cargo fmt --all -- --check")
-        commands.extend(f"cargo test -p {crate}" for crate in crates)
-        commands.append("just check")
+        rust_crates = sorted({crate for path in rust_files if (crate := _crate_for(path))})
+        if rust_crates:
+            commands.append("just dev test " + " ".join(f"-p {crate}" for crate in rust_crates))
     if rust_api:
         commands.append("just clippy")
     if python_binding:
@@ -209,8 +210,9 @@ def analyze_paths(repo: Path, paths: Iterable[str]) -> Impact:
     if performance:
         commands.append("just benchmark smoke")
     for example in visual_examples:
+        runner = "target/debug/gaanim.exe" if sys.platform == "win32" else "target/debug/gaanim"
         commands.append(
-            f"target/debug/gaanim --diff --example examples/{example}.py --no-gui"
+            f"just dev-exec {runner} --diff --example examples/{example}.py --no-gui"
         )
 
     return Impact(

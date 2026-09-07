@@ -67,6 +67,7 @@ pub struct PropertyAnimation {
     pub visible_color: Option<Color>,
     pub material: Option<(gaanim_scene::Material3D, gaanim_scene::Material3D)>,
     pub fill_level: Option<(f64, f64)>,
+    pub media_frame: Option<(gaanim_scene::MediaFrame, gaanim_scene::MediaFrame)>,
 }
 
 impl PropertyAnimation {
@@ -82,6 +83,7 @@ impl PropertyAnimation {
             && self.visible_color.is_none()
             && self.material.is_none()
             && self.fill_level.is_none()
+            && self.media_frame.is_none()
     }
 
     pub(crate) fn is_transform_only(&self) -> bool {
@@ -94,6 +96,7 @@ impl PropertyAnimation {
             && self.visible_color.is_none()
             && self.material.is_none()
             && self.fill_level.is_none()
+            && self.media_frame.is_none()
     }
 }
 
@@ -277,6 +280,10 @@ pub enum AnimationType {
         to: gaanim_scene::Material3D,
     },
     /// Interpolate a Scene.fill_level normalized amount.
+    MediaFrameTo {
+        from: gaanim_scene::MediaFrame,
+        to: gaanim_scene::MediaFrame,
+    },
     FillLevelTo {
         from: f64,
         to: f64,

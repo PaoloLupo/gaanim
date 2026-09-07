@@ -105,6 +105,16 @@ impl PyCanvasAnim {
 
 #[pymethods]
 impl PyCanvasAnim {
+    #[pyo3(signature = (x, y, width, height, *, normalized=false))]
+    fn crop(&self, x: f64, y: f64, width: f64, height: f64, normalized: bool) -> PyResult<Self> {
+        self.require_native_animation()?;
+        self.inner
+            .clone()
+            .crop(x, y, width, height, normalized)
+            .map(|inner| Self { inner })
+            .map_err(PyValueError::new_err)
+    }
+
     /// Evaluate a pure callback at exact eased progress during playback and seek.
     #[pyo3(signature = (callback, *, channels))]
     fn custom(&self, callback: Py<PyAny>, channels: Vec<String>) -> PyResult<Self> {
@@ -1796,3 +1806,333 @@ impl PyDrawable {
         Ok(())
     }
 }
+
+#[pyclass(name = "Image", module = "gaanim_core", extends = PyDrawable, from_py_object)]
+#[derive(Clone, Debug)]
+pub struct PyImage {
+    pub(crate) inner: gaanim_api::canvas::DrawableHandle,
+}
+impl PyImage {
+    pub(crate) fn initializer(
+        inner: gaanim_api::canvas::DrawableHandle,
+    ) -> PyClassInitializer<Self> {
+        PyClassInitializer::from(PyDrawable(inner.clone())).add_subclass(Self { inner })
+    }
+    fn handle(&self) -> gaanim_api::canvas::DrawableHandle {
+        self.inner.clone()
+    }
+}
+#[pyclass(name = "Video", module = "gaanim_core", extends = PyDrawable, from_py_object)]
+#[derive(Clone, Debug)]
+pub struct PyVideo {
+    pub(crate) inner: gaanim_api::canvas::VideoClip,
+}
+impl PyVideo {
+    pub(crate) fn initializer(inner: gaanim_api::canvas::VideoClip) -> PyClassInitializer<Self> {
+        PyClassInitializer::from(PyDrawable(inner.drawable.clone())).add_subclass(Self { inner })
+    }
+    fn handle(&self) -> gaanim_api::canvas::DrawableHandle {
+        self.inner.drawable.clone()
+    }
+}
+#[pyclass(name = "VideoSegment", module = "gaanim_core", from_py_object)]
+#[derive(Clone, Debug)]
+pub struct PyVideoSegment {
+    pub(crate) inner: gaanim_api::canvas::VideoSegment,
+}
+
+// Override fluent base setters once for both classes, retaining the Python identity.
+macro_rules! media_drawable_methods {
+    ($class:ident, $($extra:item),* $(,)?) => {
+        #[pymethods]
+        impl $class {
+
+    #[pyo3(signature = (width, height, fit="contain"))]
+    fn frame<'py>(slf: PyRef<'py, Self>, width: f64, height: f64, fit: &str) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let fit = match fit { "contain" => gaanim_api::canvas::ImageFit::Contain, "cover" => gaanim_api::canvas::ImageFit::Cover, "stretch" => gaanim_api::canvas::ImageFit::Stretch, _ => return Err(PyValueError::new_err("fit must be 'contain', 'cover', or 'stretch'")) };
+        slf.handle().frame(width, height, fit).map_err(PyValueError::new_err)?;
+        Ok(slf)
+    }
+    #[pyo3(signature = (x, y, width, height, *, normalized=false))]
+    fn crop<'py>(slf: PyRef<'py, Self>, x: f64, y: f64, width: f64, height: f64, normalized: bool) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        slf.handle().crop(x, y, width, height, normalized).map_err(PyValueError::new_err)?;
+        Ok(slf)
+    }
+    fn quality<'py>(slf: PyRef<'py, Self>, value: &str) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        slf.handle().quality(crate::pycanvas::image_quality(value)?).map_err(PyValueError::new_err)?;
+        Ok(slf)
+    }
+    #[getter]
+    fn source_width(&self) -> PyResult<u32> { crate::custom::ensure_authoring_allowed()?; self.handle().source_width().map_err(PyValueError::new_err) }
+    #[getter]
+    fn source_height(&self) -> PyResult<u32> { crate::custom::ensure_authoring_allowed()?; self.handle().source_height().map_err(PyValueError::new_err) }
+
+    fn fill<'py>(slf: PyRef<'py, Self>, paint: PyPaint) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).fill(paint)?;
+        Ok(slf)
+    }
+
+    fn no_fill<'py>(slf: PyRef<'py, Self>) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).no_fill()?;
+        Ok(slf)
+    }
+
+    fn stroke<'py>(slf: PyRef<'py, Self>, paint: PyPaint, width: f64) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).stroke(paint, width)?;
+        Ok(slf)
+    }
+
+    fn stroke_style<'py>(slf: PyRef<'py, Self>, style: PyStrokeStyle) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).stroke_style(style)?;
+        Ok(slf)
+    }
+
+    fn no_stroke<'py>(slf: PyRef<'py, Self>) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).no_stroke()?;
+        Ok(slf)
+    }
+
+    fn style_class<'py>(slf: PyRef<'py, Self>, name: &str) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).style_class(name)?;
+        Ok(slf)
+    }
+    #[pyo3(signature = (color, radius=0.16, intensity=1.0))]
+    fn glow<'py>(slf: PyRef<'py, Self>, color: PyColor, radius: f64, intensity: f32) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).glow(color, radius, intensity)?;
+        Ok(slf)
+    }
+    #[pyo3(signature = (sigma=0.04))]
+    fn blur<'py>(slf: PyRef<'py, Self>, sigma: f64) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).blur(sigma)?;
+        Ok(slf)
+    }
+    #[pyo3(signature = (color, x=0.08, y=-0.08, blur=0.06))]
+    fn shadow<'py>(slf: PyRef<'py, Self>, color: PyColor, x: f64, y: f64, blur: f64) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).shadow(color, x, y, blur)?;
+        Ok(slf)
+    }
+
+    fn no_effects<'py>(slf: PyRef<'py, Self>) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).no_effects()?;
+        Ok(slf)
+    }
+    #[pyo3(signature = (mask, rule="nonzero", invert=false))]
+    fn clip<'py>(slf: PyRef<'py, Self>, mask: &PyDrawable, rule: &str, invert: bool) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).clip(mask, rule, invert)?;
+        Ok(slf)
+    }
+
+    fn no_clip<'py>(slf: PyRef<'py, Self>) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).no_clip()?;
+        Ok(slf)
+    }
+
+    fn set_fill_level<'py>(slf: PyRef<'py, Self>, level: f64) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).set_fill_level(level)?;
+        Ok(slf)
+    }
+
+    fn opacity<'py>(slf: PyRef<'py, Self>, op: &Bound<'_, PyAny>) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).opacity(op)?;
+        Ok(slf)
+    }
+
+    fn z_index<'py>(slf: PyRef<'py, Self>, z: i32) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).z_index(z)?;
+        Ok(slf)
+    }
+    #[pyo3(signature = (x, y=None, anchor=None))]
+    fn move_to<'py>(slf: PyRef<'py, Self>, x: &Bound<'_, PyAny>,
+        y: Option<&Bound<'_, PyAny>>,
+        anchor: Option<&PyAnchor>,) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).move_to(x, y, anchor)?;
+        Ok(slf)
+    }
+
+    fn move_to_3d<'py>(slf: PyRef<'py, Self>, x: &Bound<'_, PyAny>,
+        y: &Bound<'_, PyAny>,
+        z: &Bound<'_, PyAny>,) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).move_to_3d(x, y, z)?;
+        Ok(slf)
+    }
+
+    fn shift_by<'py>(slf: PyRef<'py, Self>, dx: f64, dy: f64) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).shift_by(dx, dy)?;
+        Ok(slf)
+    }
+
+    fn shift_by_3d<'py>(slf: PyRef<'py, Self>, dx: f64, dy: f64, dz: f64) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).shift_by_3d(dx, dy, dz)?;
+        Ok(slf)
+    }
+
+    fn billboard<'py>(slf: PyRef<'py, Self>) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).billboard()?;
+        Ok(slf)
+    }
+
+    fn hud<'py>(slf: PyRef<'py, Self>) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).hud()?;
+        Ok(slf)
+    }
+
+    fn scale_to<'py>(slf: PyRef<'py, Self>, factor: &Bound<'_, PyAny>) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).scale_to(factor)?;
+        Ok(slf)
+    }
+
+    fn scale_to_3d<'py>(slf: PyRef<'py, Self>, x: &Bound<'_, PyAny>,
+        y: &Bound<'_, PyAny>,
+        z: &Bound<'_, PyAny>,) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).scale_to_3d(x, y, z)?;
+        Ok(slf)
+    }
+
+    fn scale_by<'py>(slf: PyRef<'py, Self>, factor: f64) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).scale_by(factor)?;
+        Ok(slf)
+    }
+
+    fn scale_by_3d<'py>(slf: PyRef<'py, Self>, x: f64, y: f64, z: f64) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).scale_by_3d(x, y, z)?;
+        Ok(slf)
+    }
+
+    fn rotate_to<'py>(slf: PyRef<'py, Self>, radians: &Bound<'_, PyAny>) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).rotate_to(radians)?;
+        Ok(slf)
+    }
+
+    fn rotate_to_3d<'py>(slf: PyRef<'py, Self>, x: &Bound<'_, PyAny>,
+        y: &Bound<'_, PyAny>,
+        z: &Bound<'_, PyAny>,) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).rotate_to_3d(x, y, z)?;
+        Ok(slf)
+    }
+
+    fn rotate_by<'py>(slf: PyRef<'py, Self>, radians: f64) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).rotate_by(radians)?;
+        Ok(slf)
+    }
+
+    fn rotate_by_3d<'py>(slf: PyRef<'py, Self>, axis: &str, radians: f64) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).rotate_by_3d(axis, radians)?;
+        Ok(slf)
+    }
+
+    fn with_pivot<'py>(slf: PyRef<'py, Self>, x: f64, y: f64) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).with_pivot(x, y)?;
+        Ok(slf)
+    }
+
+    fn with_pivot_3d<'py>(slf: PyRef<'py, Self>, x: f64, y: f64, z: f64) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).with_pivot_3d(x, y, z)?;
+        Ok(slf)
+    }
+
+    fn pivot<'py>(slf: PyRef<'py, Self>, x: f64, y: f64) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).pivot(x, y)?;
+        Ok(slf)
+    }
+    #[pyo3(signature = (reference, direction, spacing=0.24, aligned_edge=None))]
+    fn next_to<'py>(slf: PyRef<'py, Self>, reference: &PyDrawable,
+        direction: &PyDirection,
+        spacing: f64,
+        aligned_edge: Option<&PyAnchor>,) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).next_to(reference, direction, spacing, aligned_edge)?;
+        Ok(slf)
+    }
+    #[pyo3(signature = (reference, target_anchor, reference_anchor=None))]
+    fn align_to<'py>(slf: PyRef<'py, Self>, reference: &PyDrawable,
+        target_anchor: &PyAnchor,
+        reference_anchor: Option<&PyAnchor>,) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).align_to(reference, target_anchor, reference_anchor)?;
+        Ok(slf)
+    }
+    #[pyo3(signature = (direction, buff=0.24))]
+    fn to_edge<'py>(slf: PyRef<'py, Self>, direction: &PyDirection, buff: f64) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).to_edge(direction, buff)?;
+        Ok(slf)
+    }
+    #[pyo3(signature = (corner, buff=0.24))]
+    fn to_corner<'py>(slf: PyRef<'py, Self>, corner: &PyAnchor, buff: f64) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).to_corner(corner, buff)?;
+        Ok(slf)
+    }
+    #[pyo3(signature = (callback, *, reset=None, fixed_dt=None))]
+    fn add_updater_fn<'py>(slf: PyRef<'py, Self>, callback: Py<PyAny>,
+        reset: Option<Py<PyAny>>,
+        fixed_dt: Option<f64>,) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).add_updater_fn(callback, reset, fixed_dt)?;
+        Ok(slf)
+    }
+    #[pyo3(signature = (times, values, property = "x", *, interpolation = "linear", scale = 1.0, offset = 0.0))]
+    fn drive_from_samples<'py>(slf: PyRef<'py, Self>, times: Vec<f64>,
+        values: Vec<f64>,
+        property: &str,
+        interpolation: &str,
+        scale: f64,
+        offset: f64,) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).drive_from_samples(times, values, property, interpolation, scale, offset)?;
+        Ok(slf)
+    }
+    #[pyo3(signature = (source, *, offset=(0.0, 0.0), offset_space="world"))]
+    fn follow<'py>(slf: PyRef<'py, Self>, source: Bound<'_, PyAny>,
+        offset: (f64, f64),
+        offset_space: &str,) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).follow(source, offset, offset_space)?;
+        Ok(slf)
+    }
+    #[pyo3(signature = (source, *, ratio=1.0, phase=0.0))]
+    fn bind_rotation_from<'py>(slf: PyRef<'py, Self>, source: &PyDrawable, ratio: f64, phase: f64) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).bind_rotation_from(source, ratio, phase)?;
+        Ok(slf)
+    }
+    #[pyo3(signature = (source, *, axis=None, scale=1.0))]
+    fn bind_translation_from_rotation<'py>(slf: PyRef<'py, Self>, source: &PyDrawable,
+        axis: Option<PyDirection>,
+        scale: f64,) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).bind_translation_from_rotation(source, axis, scale)?;
+        Ok(slf)
+    }
+            $($extra)*
+        }
+    };
+}
+media_drawable_methods!(PyImage,);
+media_drawable_methods!(
+    PyVideo,
+    #[getter]
+    fn source_duration(&self) -> PyResult<f64> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.inner.source_duration())
+    },
+    #[getter]
+    fn frame_rate(&self) -> PyResult<f64> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.inner.frame_rate())
+    },
+    #[pyo3(signature = (*, start, end, speed=None, audio=None, volume=None))]
+    fn segment(
+        &self,
+        start: f64,
+        end: f64,
+        speed: Option<f64>,
+        audio: Option<bool>,
+        volume: Option<f64>,
+    ) -> PyResult<PyVideoSegment> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.inner
+            .segment(start, end, speed, audio, volume)
+            .map(|inner| PyVideoSegment { inner })
+            .map_err(|error| match error {
+                gaanim_api::canvas::VideoLoadError::Media(_) => {
+                    pyo3::exceptions::PyRuntimeError::new_err(error.to_string())
+                }
+                _ => PyValueError::new_err(error.to_string()),
+            })
+    }
+);

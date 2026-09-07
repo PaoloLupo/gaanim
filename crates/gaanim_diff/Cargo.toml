@@ -10,6 +10,10 @@ path = "src/main.rs"
 required-features = ["gui"]
 
 [features]
+dev-dynamic = [
+    "gaanim_api/dev-dynamic",
+    "gaanim_export/dev-dynamic",
+]
 default = ["gui"]
 gui = ["dep:eframe"]
 

@@ -5,6 +5,14 @@ python := python_dir + if os_family() == "windows" { "/python.exe" } else { "/py
 system_python := if os_family() == "windows" { "py.exe" } else { "python" }
 release_runtime := if os_family() == "windows" { "./target/release/gaanim-core.exe" } else { "./target/release/gaanim-core" }
 
+# All development Cargo commands select the same opt-in dynamic-linking feature.
+dev +args:
+    {{ system_python }} scripts/dev.py {{ args }}
+
+# Run an existing dev binary/harness with Bevy and Rust DLL search paths; no build.
+dev-exec +args:
+    {{ system_python }} scripts/dev.py exec {{ args }}
+
 default:
     @just --choose
 
@@ -36,21 +44,31 @@ clean: clean-venv
 
 # Type-check the entire workspace (no codegen, fastest feedback).
 check:
-    cargo check --workspace
+    {{ system_python }} scripts/dev.py check --workspace
+
+# Type-check one package and its dependencies. Usage: just check-package gaanim_math
+check-package package:
+    {{ system_python }} scripts/dev.py check -p "{{ package }}"
+
+# Test one package; optional arguments select a target, test name, or harness flags.
+test-package package *args:
+    {{ system_python }} scripts/dev.py test -p "{{ package }}" {{ args }}
 
 # Lint the entire workspace.
 clippy:
-    cargo clippy --workspace
+    {{ system_python }} scripts/dev.py clippy --workspace
 
 # Build the `gaanim` application binary (debug mode).
 build:
-    cargo build -p gaanim_editor
-    cargo build -p gaanim_launcher
+    {{ system_python }} scripts/dev.py build -p gaanim_editor -p gaanim_launcher
+
+# Build the runtime and write target/cargo-timings/cargo-timing.html.
+build-timings:
+    {{ system_python }} scripts/dev.py build -p gaanim_editor --bin gaanim-core --timings
 
 # Build the `gaanim` application binary (release mode).
 build-release:
-    cargo build -p gaanim_editor --release
-    cargo build -p gaanim_launcher --release
+    cargo build -p gaanim_editor -p gaanim_launcher --release
 
 [windows]
 build-release-install: build-release wheel
@@ -76,12 +94,12 @@ wheel:
 
 # Check that the embedded extension exports every public stub declaration.
 validate-python-api:
-    cargo run -p gaanim_editor --bin gaanim-core -- --validate-python-api tests/validate_python_api.py
+    {{ system_python }} scripts/dev.py run -p gaanim_editor --bin gaanim-core -- --validate-python-api tests/validate_python_api.py
 
 # Export every supported format plus one isolated 3D MP4 and inspect their contracts.
 test-exports encoder="libx264":
-    cargo build -p gaanim_editor --bin gaanim-core
-    {{ system_python }} tests/validate_exports.py --output target/export-smoke --encoder {{ encoder }}
+    {{ system_python }} scripts/dev.py build -p gaanim_editor --bin gaanim-core
+    {{ system_python }} scripts/dev.py exec {{ system_python }} tests/validate_exports.py --output target/export-smoke --encoder {{ encoder }}
 
 # Measure runtime p50/p95, throughput, and peak memory using the native release executable.
 # Profiles: smoke (fast wiring check) or standard (300-frame export and stable sample counts).
@@ -93,40 +111,32 @@ benchmark profile="smoke" encoder="libx264":
 
 # Run an example script inside the Gaanim application. Usage: just run my_example
 [windows]
-run EX:
-    cargo run -p gaanim_launcher -- examples/{{ EX }}.py
+run EX: build
+    {{ system_python }} scripts/dev.py exec ./target/debug/gaanim.exe examples/{{ EX }}.py
 
 [unix]
-run EX:
-    cargo run -p gaanim_editor -- examples/{{ EX }}.py
+run EX: build
+    {{ system_python }} scripts/dev.py exec ./target/debug/gaanim examples/{{ EX }}.py
 
 # Build documentation site and PDF (one-shot).
 docs:
-    cargo build -p gaanim_editor --bin gaanim-core
-    cargo run -p docs -- compile
+    {{ system_python }} scripts/dev.py build -p gaanim_editor --bin gaanim-core
+    {{ system_python }} scripts/dev.py run -p docs -- compile
 
 # Build documentation PDF explicitly to custom output path.
 docs-pdf output="documentation.pdf":
-    cargo run -p docs -- compile --pdf-output {{ output }}
+    {{ system_python }} scripts/dev.py run -p docs -- compile --pdf-output {{ output }}
 
 # Build documentation site and open in browser.
 docs-open:
-    cargo run -p docs -- compile --open
+    {{ system_python }} scripts/dev.py run -p docs -- compile --open
 
 # Watch mode for documentation with live reload.
 docs-watch:
-    cargo run -p docs -- watch
+    {{ system_python }} scripts/dev.py run -p docs -- watch
 
 # ---- Doctor -----------------------------------------------------------------
 
 # Sanity check: the workspace compiles and the `gaanim` binary responds.
-[windows]
-doctor: check
-    cargo build -p gaanim_editor 2>&1
-    cargo build -p gaanim_launcher 2>&1
-    cargo run -p gaanim_launcher -- --help
-
-[unix]
-doctor: check
-    cargo build -p gaanim_editor 2>&1
-    cargo run -p gaanim_editor -- --help
+doctor: check build
+    {{ system_python }} scripts/dev.py run -p gaanim_launcher -- --help

@@ -33,6 +33,9 @@ bundled scripts by absolute path while keeping the Gaanim repository as cwd.
 - Preserve the established compilation cache and batch validation after edits.
   Follow `../../references/verification-matrix.md` when selecting build checks;
   instruction maintenance alone needs no compilation.
+- Use the checkout's dynamic dev recipes for focused checks/tests. Do not
+  alternate them with raw static Cargo builds or add a workspace completion
+  check by default. Prefer current checkout scripts over an older installed copy.
 - Keep the performance contract aligned across the `benchmark` recipe, runner,
   budgets, scheduled CI evidence, and performance guide.
 - Do not run `just clean`, delete environments, overwrite baselines, or remove

@@ -742,7 +742,7 @@ that reference the parameter follow the measured series for free.
   kind: "function",
   signature: "parallel(*items) | sequence(*items, gap=0.0) | stagger(*items, each=0.1) -> Composition",
   params: (
-    (name: "items", type: "Anim | Audio | Video | Lottie | Composition", default: none, desc: [One or more pure leaves or nested compositions.]),
+    (name: "items", type: "Anim | Audio | Video | VideoSegment | Lottie | Composition", default: none, desc: [One or more pure leaves or nested compositions.]),
     (name: "gap", type: "float", default: "0.0", desc: [Seconds between sequence steps; a bounded negative value overlaps adjacent steps.]),
     (name: "each", type: "float", default: "0.1", desc: [Non-negative start offset between staggered children.]),
   ),
@@ -858,3 +858,9 @@ scene.play([path.animate.write().with_pen_tip().duration(1.4)])
 scene.render()
 ```
 ]
+
+
+`Image.animate.crop(...)` y `Video.animate.crop(...)` animan el rectángulo
+fuente dentro de un marco fijo, con las unidades descritas en la API de medios.
+`VideoSegment` es una hoja finita de composición: admite `parallel`, `sequence`
+y `stagger`, pero no `stretch`. Su velocidad se configura al crear el fragmento.

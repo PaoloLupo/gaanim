@@ -13,5 +13,6 @@ peniko = { workspace = true }
 thiserror = { workspace = true }
 
 [features]
+dev-dynamic = ["gaanim_math/dev-dynamic"]
 default = []
 serde = ["gaanim_core/serde", "gaanim_math/serde", "glam/serde", "kurbo/serde", "peniko/serde"]

@@ -211,12 +211,69 @@ Esta función requiere `ffmpeg` y `ffprobe` disponibles en `PATH`.
 | Objetivo | Comando |
 | --- | --- |
 | Comprobar todo el workspace | `just check` |
+| Comprobar un crate y sus dependencias | `just check-package gaanim_math` |
+| Probar un crate | `just test-package gaanim_math --lib` |
+| Probar varios crates en una sola ejecución | `just dev test -p gaanim_math -p gaanim_scene --lib` |
 | Ejecutar Clippy | `just clippy` |
 | Verificar entorno y aplicación | `just doctor` |
 | Compilar la aplicación | `just build` |
+| Compilar el runtime con informe de tiempos | `just build-timings` |
 | Ejecutar un ejemplo | `just run quickstart` |
 | Medir presupuestos del runtime | `just benchmark smoke` |
 | Generar la documentación | `just docs` |
+
+Durante la iteración, comprueba el crate afectado y conserva `target/`, el
+toolchain y las opciones de compilación para aprovechar la caché. El perfil
+`dev` conserva optimización de nivel 1 para Gaanim y nivel 3 para dependencias,
+pero genera solo tablas de líneas para el workspace y omite los símbolos de
+depuración de dependencias. Esto reduce el trabajo de compilación y enlace a
+cambio de limitar la inspección de variables en el depurador. Para depurar con
+información completa, cambia temporalmente ambos ajustes `debug` a `true`;
+esto requiere recompilar los artefactos afectados.
+
+Los comandos dev de `just` usan `scripts/dev.py` para activar `dev-dynamic`,
+que habilita `bevy/dynamic_linking` en los crates seleccionados que usan Bevy.
+Mantén ese modo en `check`, `test`, `build` y `run`: alternarlo con comandos
+Cargo sin la feature genera variantes distintas de los artefactos. Para pasar
+opciones de Cargo usa `just dev`, por ejemplo
+`just dev check -p gaanim_scene --tests`. `just dev --dry-run test -p gaanim_math`
+muestra el comando sin ejecutarlo. Las recetas de release y benchmarks no
+activan enlace dinámico; evita `--all-features` en builds de distribución.
+
+`just run` comprueba la vigencia de los binarios mediante Cargo antes de abrir
+la escena. Para ejecutar un binario ya validado sin invocar un build, usa
+`just dev-exec target/debug/gaanim.exe examples/quickstart.py` en Windows
+(`target/debug/gaanim` en Unix). Ese comando prepara las rutas de las bibliotecas
+compartidas de Bevy y Rust y conserva las de Python. No copies únicamente el
+ejecutable dev para distribuirlo; utiliza `just build-release`.
+
+La verificación rápida de agentes prueba los crates con cambios Rust en una
+sola invocación, sin añadir automáticamente otro `check` de todo el workspace.
+El enlace dinámico reduce el trabajo de enlace, pero no elimina la compilación
+de código modificado ni permite intercambiar los artefactos de `check`, `test`
+y `build`. La primera activación de este modo necesita compilar la biblioteca
+dinámica; los siguientes comandos reutilizan lo que Cargo considere vigente.
+
+En Windows MSVC, configura LLD en `.cargo/config.toml`, conservando la selección
+local del intérprete Python. Este archivo está excluido de Git, por lo que cada
+checkout necesita su propia configuración:
+
+```toml
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld.exe"
+```
+
+Si el comando no está disponible, instala `cargo-binutils` y el componente
+`llvm-tools-preview` de Rust. Las funciones de Bevy se activan en los crates
+que las necesitan: matemáticas usa la base ECS, escena conserva PBR/glTF,
+multimedia añade audio y los hosts añaden ventanas nativas.
+
+`just build-timings` compila el runtime y genera
+`target/cargo-timings/cargo-timing.html`. Para medir una iteración representativa,
+úsalo después de un cambio habitual en Rust; una ejecución sin cambios mide
+principalmente la comprobación de caché. La primera compilación tras modificar
+perfiles o linker reconstruye los artefactos afectados. Usa `just build-release`
+para distribución y validación de rendimiento.
 
 La API pública de Python comienza en `Scene`, que conserva la orquestación y
 expone las capacidades `geometry`, `text`, `layout`, `media`, `viz`, `slides`,

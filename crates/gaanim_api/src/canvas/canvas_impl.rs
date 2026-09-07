@@ -51,6 +51,15 @@ pub struct VideoClip {
     activated: Arc<AtomicBool>,
 }
 
+/// A finite selection of a video, consumed once by Scene.play.
+#[derive(Debug, Clone)]
+pub struct VideoSegment {
+    video: VideoClip,
+    interval: gaanim_media::VideoInterval,
+    audio: Option<AudioTrack>,
+    consumed: Arc<AtomicBool>,
+}
+
 /// A timeline-synchronized Lottie declaration activated by [`SceneModel::play_items`].
 #[derive(Debug, Clone)]
 pub struct LottieClip {
@@ -62,6 +71,119 @@ pub struct LottieClip {
 }
 
 impl VideoClip {
+    pub fn frame(mut self, width: f64, height: f64, fit: ImageFit) -> Result<Self, &'static str> {
+        self.drawable = self.drawable.frame(width, height, fit)?;
+        Ok(self)
+    }
+    pub fn crop(
+        mut self,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        normalized: bool,
+    ) -> Result<Self, &'static str> {
+        self.drawable = self.drawable.crop(x, y, width, height, normalized)?;
+        Ok(self)
+    }
+    pub fn quality(
+        mut self,
+        quality: gaanim_core::peniko::ImageQuality,
+    ) -> Result<Self, &'static str> {
+        self.drawable = self.drawable.quality(quality)?;
+        Ok(self)
+    }
+    pub fn animate(&self) -> Anim {
+        self.drawable.animate()
+    }
+    pub fn move_to(mut self, x: f64, y: f64) -> Self {
+        self.drawable = self.drawable.move_to(x, y);
+        self
+    }
+    pub fn scale_to(mut self, factor: f64) -> Self {
+        self.drawable = self.drawable.scale_to(factor);
+        self
+    }
+    pub fn opacity(mut self, opacity: f32) -> Self {
+        self.drawable = self.drawable.opacity(opacity);
+        self
+    }
+
+    pub fn source_width(&self) -> u32 {
+        self.metadata().width
+    }
+    pub fn source_height(&self) -> u32 {
+        self.metadata().height
+    }
+    pub fn source_duration(&self) -> f64 {
+        self.metadata().duration
+    }
+    pub fn frame_rate(&self) -> f64 {
+        self.metadata().fps
+    }
+    fn metadata(&self) -> gaanim_media::VideoMetadata {
+        let spec = self.drawable.spec.lock().expect("object spec poisoned");
+        let SpawnKind::Video { playback, .. } = &spec.kind else {
+            unreachable!()
+        };
+        playback.metadata.clone()
+    }
+    /// Select absolute source seconds; omitted controls inherit the declaration.
+    pub fn segment(
+        &self,
+        start: f64,
+        end: f64,
+        speed: Option<f64>,
+        audio: Option<bool>,
+        volume: Option<f64>,
+    ) -> Result<VideoSegment, VideoLoadError> {
+        let spec = self.drawable.spec.lock().expect("object spec poisoned");
+        let SpawnKind::Video { playback, .. } = &spec.kind else {
+            unreachable!()
+        };
+        let speed = speed.unwrap_or(playback.speed);
+        let volume = volume.unwrap_or(playback.volume);
+        if !start.is_finite()
+            || !end.is_finite()
+            || start < 0.0
+            || end <= start
+            || end > playback.metadata.duration
+        {
+            return Err(VideoLoadError::DurationOutOfRange);
+        }
+        for (name, value, positive) in [("speed", speed, true), ("volume", volume, false)] {
+            if !value.is_finite() || if positive { value <= 0.0 } else { value < 0.0 } {
+                return Err(VideoLoadError::InvalidNumber {
+                    name,
+                    requirement: if positive { "positive" } else { "non-negative" },
+                });
+            }
+        }
+        let track = if audio.unwrap_or(playback.audio) && playback.metadata.has_audio {
+            Some(AudioTrack::from_media(
+                playback.path.clone(),
+                0.0,
+                start,
+                end - start,
+                speed,
+                false,
+                volume,
+            )?)
+        } else {
+            None
+        };
+        Ok(VideoSegment {
+            video: self.clone(),
+            interval: gaanim_media::VideoInterval {
+                scene_start: 0.0,
+                source_start: start,
+                source_end: end,
+                speed,
+            },
+            audio: track,
+            consumed: Arc::new(AtomicBool::new(false)),
+        })
+    }
     fn belongs_to(&self, state: &SharedCanvasState) -> bool {
         Arc::ptr_eq(&self.state, state)
     }
@@ -105,6 +227,7 @@ pub enum PlayItem {
     Animation(Anim),
     Audio(AudioClip),
     Video(VideoClip),
+    VideoSegment(VideoSegment),
     Lottie(LottieClip),
 }
 
@@ -270,6 +393,7 @@ impl Composition {
                     }
                     PlayItem::Audio(audio) => (0.0, audio.track.duration),
                     PlayItem::Video(video) => (0.0, video.duration),
+                    PlayItem::VideoSegment(segment) => (0.0, Some(segment.interval.scene_end())),
                     PlayItem::Lottie(lottie) => (0.0, lottie.duration),
                 };
                 vec![ResolvedPlayItem {
@@ -382,6 +506,7 @@ fn play_item_kind(item: &PlayItem) -> &'static str {
         PlayItem::Animation(_) => "animation",
         PlayItem::Audio(_) => "audio",
         PlayItem::Video(_) => "video",
+        PlayItem::VideoSegment(_) => "video_segment",
         PlayItem::Lottie(_) => "lottie",
     }
 }
@@ -411,6 +536,12 @@ impl From<VideoClip> for PlayItem {
     }
 }
 
+impl From<VideoSegment> for PlayItem {
+    fn from(value: VideoSegment) -> Self {
+        Self::VideoSegment(value)
+    }
+}
+
 impl From<LottieClip> for PlayItem {
     fn from(value: LottieClip) -> Self {
         Self::Lottie(value)
@@ -419,6 +550,14 @@ impl From<LottieClip> for PlayItem {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PlayError {
+    #[error(
+        "cannot mix whole-video playback and segments on the same Video; create a separate Video"
+    )]
+    MixedVideoPlayback,
+    #[error("video segments overlap on the same Video")]
+    OverlappingVideoSegments,
+    #[error("VideoSegment already scheduled; create another segment to repeat")]
+    VideoSegmentConsumed,
     #[error("invalid paint animation: {0}")]
     InvalidPaint(String),
     #[error(
@@ -519,6 +658,7 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
             (properties.stroke_width.is_some(), "stroke_width"),
             (properties.material.is_some(), "material"),
             (properties.fill_level.is_some(), "fill_level"),
+            (properties.media_frame.is_some(), "media_frame"),
         ] {
             if present {
                 channels.push(format!("{prefix}{name}"));
@@ -576,6 +716,7 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
         StrokeColorTo { .. } | StrokePaintTo { .. } => "stroke_color",
         StrokeWidthTo { .. } => "stroke_width",
         Material3DTo { .. } => "material",
+        MediaFrameTo { .. } => "media_frame",
         SignalFloat { .. } => "signal",
         CameraPosition { .. }
         | CameraPositionSource { .. }
@@ -2468,7 +2609,13 @@ impl SceneModel {
             options.height = Some(safe.height());
         }
         let view = options.resolve(image.width, image.height)?;
-        Ok(self.spawn(SpawnKind::Image { image, view }))
+        let drawable = self.spawn(SpawnKind::Image { image, view });
+        drawable
+            .spec
+            .lock()
+            .expect("object spec poisoned")
+            .media_frame = Some(options.media_frame(view));
+        Ok(drawable)
     }
 
     /// Load a timeline-synchronized MP4 as an animatable raster drawable.
@@ -2537,6 +2684,7 @@ impl SceneModel {
             audio: options.audio,
             volume: options.volume,
             last_frame: None,
+            intervals: Vec::new(),
         };
         let audio = if options.audio && has_audio {
             Some(AudioTrack::from_media(
@@ -2557,6 +2705,11 @@ impl SceneModel {
             view,
             playback,
         });
+        drawable
+            .spec
+            .lock()
+            .expect("object spec poisoned")
+            .media_frame = Some(options.image.media_frame(view));
         Ok(VideoClip {
             drawable,
             state: self.state.clone(),
@@ -3528,6 +3681,64 @@ impl SceneModel {
         }) {
             return Err(PlayError::VideoAlreadyActivated);
         }
+        let mut pending_intervals: HashMap<
+            gaanim_core::ObjectId,
+            Vec<gaanim_media::VideoInterval>,
+        > = HashMap::new();
+        let mut segment_tokens = HashSet::new();
+        for item in &resolved {
+            match &item.item {
+                PlayItem::Video(video) => {
+                    let spec = video.drawable.spec.lock().expect("object spec poisoned");
+                    let SpawnKind::Video { playback, .. } = &spec.kind else {
+                        unreachable!()
+                    };
+                    if !playback.intervals.is_empty() || resolved.iter().any(|other| matches!(&other.item, PlayItem::VideoSegment(segment) if segment.video.drawable.id == video.drawable.id && segment.video.belongs_to(&self.state))) {
+                        return Err(PlayError::MixedVideoPlayback);
+                    }
+                }
+                PlayItem::VideoSegment(segment) => {
+                    if !segment.video.belongs_to(&self.state) {
+                        return Err(PlayError::ForeignVideo);
+                    }
+                    if segment.video.activated.load(Ordering::Acquire) {
+                        return Err(PlayError::MixedVideoPlayback);
+                    }
+                    if segment.consumed.load(Ordering::Acquire)
+                        || !segment_tokens.insert(Arc::as_ptr(&segment.consumed))
+                    {
+                        return Err(PlayError::VideoSegmentConsumed);
+                    }
+                    let mut interval = segment.interval.clone();
+                    interval.scene_start = self.current_time() + item.start;
+                    if !interval.scene_start.is_finite() || !interval.scene_end().is_finite() {
+                        return Err(PlayError::InvalidCompositionTiming("video segment"));
+                    }
+                    let intervals = pending_intervals
+                        .entry(segment.video.drawable.id)
+                        .or_insert_with(|| {
+                            let spec = segment
+                                .video
+                                .drawable
+                                .spec
+                                .lock()
+                                .expect("object spec poisoned");
+                            let SpawnKind::Video { playback, .. } = &spec.kind else {
+                                unreachable!()
+                            };
+                            playback.intervals.clone()
+                        });
+                    if intervals.iter().any(|other| {
+                        interval.scene_start < other.scene_end()
+                            && other.scene_start < interval.scene_end()
+                    }) {
+                        return Err(PlayError::OverlappingVideoSegments);
+                    }
+                    intervals.push(interval);
+                }
+                _ => {}
+            }
+        }
         let mut lottie_activations = HashSet::new();
         if resolved.iter().any(|item| match &item.item {
             PlayItem::Lottie(lottie) => {
@@ -3581,6 +3792,28 @@ impl SceneModel {
                     }
                     if let Some(mut track) = video.audio {
                         track.start_time = start_time;
+                        self.audio_tracks.push(track);
+                    }
+                }
+                PlayItem::VideoSegment(segment) => {
+                    segment.consumed.store(true, Ordering::Release);
+                    let mut spec = segment
+                        .video
+                        .drawable
+                        .spec
+                        .lock()
+                        .expect("object spec poisoned");
+                    let SpawnKind::Video { playback, .. } = &mut spec.kind else {
+                        unreachable!()
+                    };
+                    let mut interval = segment.interval;
+                    interval.scene_start = play_start + delay;
+                    playback.intervals.push(interval);
+                    playback
+                        .intervals
+                        .sort_by(|a, b| a.scene_start.total_cmp(&b.scene_start));
+                    if let Some(mut track) = segment.audio {
+                        track.start_time = play_start + delay;
                         self.audio_tracks.push(track);
                     }
                 }
@@ -7930,6 +8163,7 @@ mod tests {
             audio: true,
             volume: 0.75,
             last_frame: None,
+            intervals: Vec::new(),
         };
         let poster = gaanim_core::peniko::ImageData {
             data: gaanim_core::peniko::Blob::from(vec![0, 0, 0, 255]),
@@ -7974,6 +8208,162 @@ mod tests {
         );
         assert_eq!(canvas.audio_tracks.len(), 1);
         let _ = std::fs::remove_file(path);
+    }
+
+    fn synthetic_video(canvas: &mut SceneModel) -> VideoClip {
+        let poster = gaanim_core::peniko::ImageData {
+            data: gaanim_core::peniko::Blob::from(vec![0; 400 * 200 * 4]),
+            format: gaanim_core::peniko::ImageFormat::Rgba8,
+            alpha_type: gaanim_core::peniko::ImageAlphaType::Alpha,
+            width: 400,
+            height: 200,
+        };
+        let options = ImageOptions {
+            width: Some(8.0),
+            height: Some(4.0),
+            ..Default::default()
+        };
+        let view = options.resolve(400, 200).unwrap();
+        let playback = gaanim_media::VideoPlayback {
+            path: "unused.mp4".into(),
+            metadata: gaanim_media::VideoMetadata {
+                width: 400,
+                height: 200,
+                duration: 10.0,
+                fps: 30.0,
+                has_audio: false,
+            },
+            scene_start: 0.0,
+            source_offset: 1.0,
+            source_duration: 2.0,
+            looping: true,
+            speed: 2.0,
+            audio: false,
+            volume: 0.5,
+            last_frame: None,
+            intervals: Vec::new(),
+        };
+        let drawable = canvas.spawn(SpawnKind::Video {
+            poster,
+            view,
+            playback,
+        });
+        drawable.spec.lock().unwrap().media_frame = Some(options.media_frame(view));
+        VideoClip {
+            drawable,
+            state: canvas.state.clone(),
+            duration: None,
+            audio: None,
+            activated: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    #[test]
+    fn media_segments_are_finite_atomic_and_composable() {
+        let mut scene = SceneModel::new(1280, 720);
+        let video = synthetic_video(&mut scene);
+        let a = video.segment(2.0, 5.0, None, None, None).unwrap();
+        let b = video.segment(5.0, 8.0, Some(1.0), None, None).unwrap();
+        assert_eq!(
+            Composition::leaf(a.clone()).schedule(None).unwrap().span,
+            1.5
+        );
+        assert!(matches!(
+            Composition::leaf(a.clone()).stretch(4.0),
+            Err(PlayError::StretchContainsMedia)
+        ));
+        assert_eq!(
+            scene.play_items(vec![a.clone().into(), b.clone().into()]),
+            Err(PlayError::OverlappingVideoSegments)
+        );
+        assert_eq!(scene.current_time(), 0.0);
+        assert!(!a.consumed.load(Ordering::Acquire));
+        let sequence = Composition::sequence(
+            vec![Composition::leaf(a.clone()), Composition::leaf(b.clone())],
+            1.0,
+        )
+        .unwrap();
+        scene
+            .play_composition_configured(sequence, None, None)
+            .unwrap();
+        assert_eq!(scene.current_time(), 5.5);
+        assert_eq!(
+            scene.play_items(vec![a.into()]),
+            Err(PlayError::VideoSegmentConsumed)
+        );
+        assert_eq!(
+            scene.play_items(vec![video.clone().into()]),
+            Err(PlayError::MixedVideoPlayback)
+        );
+        scene
+            .play_items(vec![
+                video.segment(2.0, 5.0, None, None, None).unwrap().into(),
+            ])
+            .unwrap();
+        let spec = video.drawable.spec.lock().unwrap();
+        let SpawnKind::Video { playback, .. } = &spec.kind else {
+            unreachable!()
+        };
+        assert_eq!(playback.intervals.len(), 3);
+        assert_eq!(playback.intervals[1].scene_start, 2.5);
+    }
+
+    #[test]
+    fn media_segments_validate_owner_mode_and_ranges() {
+        let mut scene = SceneModel::new(1280, 720);
+        let video = synthetic_video(&mut scene);
+        for (start, end) in [(f64::NAN, 2.0), (-1.0, 2.0), (2.0, 2.0), (0.0, 11.0)] {
+            assert!(video.segment(start, end, None, None, None).is_err());
+        }
+        assert!(video.segment(0.0, 2.0, Some(0.0), None, None).is_err());
+        assert!(video.segment(0.0, 2.0, None, None, Some(f64::NAN)).is_err());
+        let segment = video.segment(0.0, 2.0, None, None, None).unwrap();
+        let mut other = SceneModel::new(1280, 720);
+        assert_eq!(
+            other.play_items(vec![segment.clone().into()]),
+            Err(PlayError::ForeignVideo)
+        );
+        assert_eq!(
+            scene.play_items(vec![segment.clone().into(), video.clone().into()]),
+            Err(PlayError::MixedVideoPlayback)
+        );
+        assert_eq!(scene.current_time(), 0.0);
+        scene.play_items(vec![video.into()]).unwrap();
+        assert_eq!(
+            scene.play_items(vec![segment.into()]),
+            Err(PlayError::MixedVideoPlayback)
+        );
+    }
+
+    #[test]
+    fn media_framing_validates_and_preserves_birth_state() {
+        let mut scene = SceneModel::new(1280, 720);
+        let video = synthetic_video(&mut scene)
+            .frame(8.0, 4.5, ImageFit::Cover)
+            .unwrap();
+        let image = video.drawable.clone();
+        assert_eq!(image.source_width().unwrap(), 400);
+        assert!(image.clone().frame(0.0, 1.0, ImageFit::Contain).is_err());
+        assert!(image.clone().crop(0.5, 0.0, 1.0, 1.0, true).is_err());
+        let birth = image.spec.lock().unwrap().media_frame.unwrap();
+        scene.wait(1.0);
+        let anim = image.animate().crop(0.25, 0.25, 0.5, 0.5, true).unwrap();
+        scene.play_items(vec![anim.into()]).unwrap();
+        assert_eq!(
+            image.spec.lock().unwrap().media_frame.unwrap().crop,
+            gaanim_core::kurbo::Rect::new(100.0, 50.0, 300.0, 150.0)
+        );
+        image
+            .clone()
+            .quality(gaanim_core::peniko::ImageQuality::High)
+            .unwrap();
+        assert_eq!(
+            scene.state.lock().unwrap().frozen_spawn_specs[&image.id]
+                .media_frame
+                .unwrap(),
+            birth
+        );
+        assert_eq!(image.spec.lock().unwrap().media_frame.unwrap().width, 8.0);
     }
 
     #[test]

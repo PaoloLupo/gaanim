@@ -24,6 +24,11 @@ usvg = { version = "0.47", default-features = false, features = ["text", "system
 serde = { version = "1.0", features = ["derive"], optional = true }
 
 [features]
+dev-dynamic = [
+    "bevy/dynamic_linking",
+    "gaanim_math/dev-dynamic",
+    "gaanim_scene/dev-dynamic",
+]
 default = []
 serde = [
     "dep:serde",

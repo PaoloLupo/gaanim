@@ -10,7 +10,16 @@ gaanim_core = { path = "../gaanim_core" }
 gaanim_math = { path = "../gaanim_math" }
 
 # Re-use workspace dependencies
-bevy = { workspace = true }
+# Scene components and systems own glTF instances, materials, and 3D meshes.
+bevy = { workspace = true, features = [
+    "bevy_asset",
+    "bevy_world_serialization",
+    "bevy_gltf",
+    "bevy_animation",
+    "gltf_animation",
+    "bevy_pbr",
+    "bevy_render",
+] }
 glam = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }
@@ -18,5 +27,9 @@ thiserror = { workspace = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 
 [features]
+dev-dynamic = [
+    "bevy/dynamic_linking",
+    "gaanim_math/dev-dynamic",
+]
 default = []
 serde = ["dep:serde", "gaanim_core/serde", "gaanim_math/serde", "peniko/serde", "kurbo/serde"]

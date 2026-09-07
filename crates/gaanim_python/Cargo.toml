@@ -19,3 +19,16 @@ gaanim_scene = { path = "../gaanim_scene" }
 gaanim_text = { path = "../gaanim_text" }
 gaanim_timeline = { path = "../gaanim_timeline" }
 gaanim_visualization = { path = "../gaanim_visualization" }
+
+[features]
+dev-dynamic = [
+    "gaanim_animation/dev-dynamic",
+    "gaanim_api/dev-dynamic",
+    "gaanim_layout/dev-dynamic",
+    "gaanim_math/dev-dynamic",
+    "gaanim_objects/dev-dynamic",
+    "gaanim_scene/dev-dynamic",
+    "gaanim_text/dev-dynamic",
+    "gaanim_timeline/dev-dynamic",
+    "gaanim_visualization/dev-dynamic",
+]

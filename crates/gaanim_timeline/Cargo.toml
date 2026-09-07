@@ -26,6 +26,14 @@ ordered-float = { version = "5.3" }
 serde = { version = "1.0", features = ["derive"], optional = true }
 
 [features]
+dev-dynamic = [
+    "bevy/dynamic_linking",
+    "gaanim_animation/dev-dynamic",
+    "gaanim_math/dev-dynamic",
+    "gaanim_objects/dev-dynamic",
+    "gaanim_renderer/dev-dynamic",
+    "gaanim_scene/dev-dynamic",
+]
 default = []
 serde = [
     "dep:serde",
@@ -41,5 +49,7 @@ serde = [
 ]
 
 [dev-dependencies]
+# The visual_demo example hosts a native window; the library does not.
+bevy = { workspace = true, features = ["bevy_winit", "wayland"] }
 gaanim_renderer = { path = "../gaanim_renderer" }
 gaanim_objects = { path = "../gaanim_objects" }

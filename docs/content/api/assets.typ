@@ -36,8 +36,8 @@ Vello 0.9, especialmente útil para fotos, capturas y vídeo que se escalan o
 rotan; tiene un coste de GPU mayor que la calidad media.
 
 ```python
-hero = scene.media.image("cover.png", width=960, quality="high")
-clip = scene.media.video("intro.mp4", height=540, quality="high", audio=False)
+hero = scene.media.image("cover.png", width=8, quality="high")
+clip = scene.media.video("intro.mp4", height=4.5, quality="high", audio=False)
 scene.play([clip])
 ```
 
@@ -205,3 +205,9 @@ patrones de pintura, máscaras de luminancia o alfa, imágenes ráster incrustad
 ni grafos arbitrarios de filtros SVG. Para obtener contornos de texto portables,
 instala la fuente solicitada en cada máquina de renderizado o convierte el texto
 en trayectorias dentro del SVG de origen.
+
+
+Las imágenes devuelven `Image` y los videos `Video`, ambos compatibles con
+`Drawable`. Consulta la API de medios para `frame`, `crop`, `quality`, metadatos
+de origen y `Video.segment`. Estas operaciones usan archivos locales y respetan
+`assets_dir`; no descargan URLs ni aceptan arrays o bytes.

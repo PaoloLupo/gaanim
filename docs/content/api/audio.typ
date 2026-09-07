@@ -59,3 +59,12 @@ El video sigue el mismo modelo: `clip = scene.media.video(...)` solo declara el
 drawable y `scene.play([clip])` activa juntos sus frames y su audio embebido.
 Ambos se pausan, recorren y repiten junto con el timeline. `audio=false`
 silencia ese video y `volume` configura su ganancia.
+
+
+== Audio de fragmentos de video
+
+`video.segment(start=..., end=..., speed=None, audio=None, volume=None)` usa
+la misma selección temporal para imagen y audio. Las opciones omitidas heredan
+las del video. Cada fragmento genera una pista finita; las pausas entre fragmentos
+son silenciosas aunque el último fotograma siga visible. `speed` conserva el tono,
+como en la reproducción de video existente. `audio=False` silencia ese fragmento.

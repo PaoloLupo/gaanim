@@ -158,6 +158,10 @@ pub enum PropertyLens {
         from: f32,
         to: f32,
     },
+    MediaFrame {
+        from: gaanim_scene::MediaFrame,
+        to: gaanim_scene::MediaFrame,
+    },
     FillLevel {
         from: f64,
         to: f64,
@@ -318,6 +322,7 @@ impl std::fmt::Debug for PropertyLens {
             Self::FillDrawProgress { from, to } => {
                 write!(f, "FillDrawProgress({} -> {})", from, to)
             }
+            Self::MediaFrame { from, to } => write!(f, "MediaFrame({from:?} -> {to:?})"),
             Self::FillLevel { from, to } => write!(f, "FillLevel({from} -> {to})"),
             Self::SurroundingRectTargets { .. } => write!(f, "SurroundingRectTargets"),
             Self::CameraState { .. } => write!(f, "CameraState"),
@@ -524,6 +529,11 @@ pub fn evaluate_tweens_system(
                 if let Ok(mut fdp) = fill_progress.get_mut(tween.target) {
                     fdp.0 = v;
                 }
+            }
+            PropertyLens::MediaFrame { from, to } => {
+                commands
+                    .entity(tween.target)
+                    .insert(from.interpolate(*to, t as f64));
             }
             PropertyLens::FillLevel { from, to } => {
                 if let Ok(mut level) = fill_levels.get_mut(tween.target) {

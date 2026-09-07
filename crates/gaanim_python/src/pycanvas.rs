@@ -30,7 +30,7 @@ use crate::pytext::{build_text_spec, PyText, PyTextFlow, PyTextSelection, PyText
 use crate::transition::PyTransitionType;
 use crate::visualization::{extract_scalar_source, PyParameter, PyVariable};
 
-fn image_quality(value: &str) -> PyResult<gaanim_core::peniko::ImageQuality> {
+pub(crate) fn image_quality(value: &str) -> PyResult<gaanim_core::peniko::ImageQuality> {
     match value {
         "low" => Ok(gaanim_core::peniko::ImageQuality::Low),
         "medium" => Ok(gaanim_core::peniko::ImageQuality::Medium),
@@ -858,17 +858,7 @@ pub struct PyAudio {
 }
 
 /// A drawable video declaration that starts only when passed to ``Scene.play``.
-#[pyclass(name = "Video", module = "gaanim_core", extends = PyDrawable, from_py_object)]
-#[derive(Clone, Debug)]
-pub struct PyVideo {
-    pub(crate) inner: gaanim_api::canvas::VideoClip,
-}
-
-impl PyVideo {
-    fn initializer(inner: gaanim_api::canvas::VideoClip) -> PyClassInitializer<Self> {
-        PyClassInitializer::from(PyDrawable(inner.drawable.clone())).add_subclass(Self { inner })
-    }
-}
+pub(crate) use crate::pydrawable::{PyImage, PyVideo};
 
 /// A drawable Lottie declaration that starts only when passed to ``Scene.play``.
 #[pyclass(name = "Lottie", module = "gaanim_core", extends = PyDrawable, from_py_object)]
@@ -3571,13 +3561,14 @@ impl PyMediaLibrary {
     #[pyo3(signature = (path, *, width=None, height=None, fit="contain", crop=None, quality="medium"))]
     fn image(
         &self,
+        py: Python<'_>,
         path: &str,
         width: Option<f64>,
         height: Option<f64>,
         fit: &str,
         crop: Option<(f64, f64, f64, f64)>,
         quality: &str,
-    ) -> PyResult<PyDrawable> {
+    ) -> PyResult<Py<PyImage>> {
         crate::custom::ensure_authoring_allowed()?;
         let fit = match fit {
             "contain" => ImageFit::Contain,
@@ -3605,13 +3596,13 @@ impl PyMediaLibrary {
             .lock()
             .expect("scene canvas poisoned")
             .image_with_options(path, options)
-            .map(PyDrawable)
             .map_err(|error| match error {
                 gaanim_api::canvas::ImageLoadError::Options(error) => {
                     pyo3::exceptions::PyValueError::new_err(error.to_string())
                 }
                 error => pyo3::exceptions::PyRuntimeError::new_err(error.to_string()),
             })
+            .and_then(|inner| Py::new(py, PyImage::initializer(inner)))
     }
 
     /// Load an MP4 as a timeline-synchronized drawable with embedded audio.

@@ -32,6 +32,12 @@ unicode-segmentation = "1.12"
 serde = { version = "1.0", features = ["derive"], optional = true }
 
 [features]
+dev-dynamic = [
+    "bevy/dynamic_linking",
+    "gaanim_math/dev-dynamic",
+    "gaanim_objects/dev-dynamic",
+    "gaanim_scene/dev-dynamic",
+]
 default = []
 serde = [
     "dep:serde",

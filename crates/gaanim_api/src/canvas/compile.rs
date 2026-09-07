@@ -2304,13 +2304,24 @@ impl SceneModel {
             match op {
                 Op::Spawn(spec) => {
                     let live = spec.lock().expect("object spec poisoned").clone();
-                    let authored = diagnostic_state
+                    let mut authored = diagnostic_state
                         .lock()
                         .expect("canvas state poisoned")
                         .frozen_spawn_specs
                         .get(&live.id)
                         .cloned()
-                        .unwrap_or(live);
+                        .unwrap_or_else(|| live.clone());
+                    if let (
+                        SpawnKind::Video {
+                            playback: frozen, ..
+                        },
+                        SpawnKind::Video {
+                            playback: current, ..
+                        },
+                    ) = (&mut authored.kind, &live.kind)
+                    {
+                        *frozen = current.clone();
+                    }
                     let spec = theme
                         .map(|theme| theme.resolve_object(&authored))
                         .transpose()
@@ -7299,6 +7310,17 @@ impl SceneModel {
             SpawnKind::Image { image, view } => {
                 let b = builder.image(image.clone(), *view);
                 let mr = Self::finish_spawn_builder(b, spec);
+                if let (Some(frame), Some(state)) =
+                    (spec.media_frame, builder.states.get_mut(mr.id))
+                {
+                    state.bounds = Bounds3D::new_2d(
+                        -frame.width / 2.0,
+                        -frame.height / 2.0,
+                        frame.width / 2.0,
+                        frame.height / 2.0,
+                    );
+                    builder.commands.entity(state.entity).insert(frame);
+                }
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
@@ -7309,6 +7331,17 @@ impl SceneModel {
             } => {
                 let b = builder.image(poster.clone(), *view);
                 let mr = Self::finish_spawn_builder(b, spec);
+                if let (Some(frame), Some(state)) =
+                    (spec.media_frame, builder.states.get_mut(mr.id))
+                {
+                    state.bounds = Bounds3D::new_2d(
+                        -frame.width / 2.0,
+                        -frame.height / 2.0,
+                        frame.width / 2.0,
+                        frame.height / 2.0,
+                    );
+                    builder.commands.entity(state.entity).insert(frame);
+                }
                 if let Some(state) = builder.states.get(mr.id) {
                     builder
                         .commands

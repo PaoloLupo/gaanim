@@ -231,6 +231,91 @@ class VerifySafetyTests(unittest.TestCase):
         self.assertEqual(0, status)
         self.assertIn("just benchmark smoke", output.getvalue())
 
+    def test_fast_batches_only_rust_changes_without_workspace_check(self):
+        change = impact.analyze_paths(Path.cwd(), [
+            "crates/gaanim_math/src/camera.rs",
+            "crates/gaanim_scene/src/components.rs",
+            "crates/gaanim_editor/Cargo.toml",
+        ])
+        commands = self.verify._fast_commands(Path.cwd(), change)
+        self.assertEqual([
+            ["cargo", "fmt", "--all", "--", "--check"],
+            ["just", "dev", "test", "-p", "gaanim_math", "-p", "gaanim_scene"],
+        ], commands)
+        self.assertIn("just dev test -p gaanim_math -p gaanim_scene", change.commands)
+        self.assertNotIn("just check", change.commands)
+
+
+class DevCommandTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.repo = PLUGIN.parents[1]
+        spec = importlib.util.spec_from_file_location("gaanim_dev", cls.repo / "scripts/dev.py")
+        cls.dev = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.dev)
+
+    def test_dynamic_feature_is_added_before_harness_arguments(self):
+        command = self.dev.cargo_command(self.repo, [
+            "test", "-p", "gaanim_math", "--lib", "--", "--nocapture",
+        ])
+        self.assertEqual([
+            "cargo", "test", "--features", "gaanim_math/dev-dynamic",
+            "-p", "gaanim_math", "--lib", "--", "--nocapture",
+        ], command)
+
+    def test_lightweight_packages_do_not_acquire_bevy(self):
+        for name in ["gaanim_core", "gaanim_project", "gaanim_launcher", "docs"]:
+            self.assertEqual(
+                ["cargo", "check", "-p", name],
+                self.dev.cargo_command(self.repo, ["check", "-p", name]),
+            )
+
+    def test_mixed_batch_enables_only_the_bevy_consumer(self):
+        command = self.dev.cargo_command(self.repo, [
+            "build", "-p", "gaanim_editor", "-p", "gaanim_launcher",
+        ])
+        self.assertEqual("gaanim_editor/dev-dynamic", command[3])
+
+    def test_release_and_implicit_workspace_are_rejected(self):
+        for args in [
+            ["build"], ["build", "-p", "gaanim_editor", "--release"],
+            ["build", "-p", "gaanim_editor", "--profile=release"],
+        ]:
+            with self.assertRaises(ValueError):
+                self.dev.cargo_command(self.repo, args)
+
+    def test_dry_run_never_invokes_cargo_rustc_or_the_program(self):
+        for args in [
+            ["--dry-run", "test", "-p", "gaanim_math"],
+            ["--dry-run", "exec", "target/debug/gaanim", "demo.py"],
+        ]:
+            with (
+                patch.object(self.dev.subprocess, "run") as run,
+                patch.object(self.dev.subprocess, "check_output") as output,
+                redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(0, self.dev.main(args))
+                run.assert_not_called()
+                output.assert_not_called()
+
+    def test_library_environment_preserves_existing_paths_and_target_directory(self):
+        target = self.repo / "target"
+        rustlib = str(self.repo / "test-rustlib")
+        key = "PATH" if self.dev.os.name == "nt" else (
+            "DYLD_FALLBACK_LIBRARY_PATH" if sys.platform == "darwin" else "LD_LIBRARY_PATH"
+        )
+        with (
+            patch.object(self.dev.subprocess, "check_output", side_effect=[
+                json.dumps({"target_directory": str(target)}), rustlib,
+            ]),
+            patch.dict(self.dev.os.environ, {key: "existing-python-and-tools"}),
+        ):
+            env = self.dev.library_environment(self.repo)
+        self.assertEqual(self.dev.os.pathsep.join([
+            str(target / "debug/deps"), str(target / "debug"), rustlib,
+            "existing-python-and-tools",
+        ]), env[key])
+
 
 class AuditTests(unittest.TestCase):
     def test_native_contract_ignores_typed_pure_python_imports(self):

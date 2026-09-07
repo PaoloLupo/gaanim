@@ -130,6 +130,9 @@ pub(crate) fn extract_playable(item: &Bound<'_, PyAny>) -> PyResult<Composition>
     if let Ok(audio) = item.extract::<PyRef<'_, PyAudio>>() {
         return Ok(Composition::leaf(audio.inner.clone()));
     }
+    if let Ok(segment) = item.extract::<PyRef<'_, crate::pydrawable::PyVideoSegment>>() {
+        return Ok(Composition::leaf(segment.inner.clone()));
+    }
     if let Ok(video) = item.extract::<PyRef<'_, PyVideo>>() {
         return Ok(Composition::leaf(video.inner.clone()));
     }
@@ -137,7 +140,7 @@ pub(crate) fn extract_playable(item: &Bound<'_, PyAny>) -> PyResult<Composition>
         return Ok(Composition::leaf(lottie.inner.clone()));
     }
     Err(pyo3::exceptions::PyTypeError::new_err(
-        "expected Anim, Audio, Video, Lottie, or Composition",
+        "expected Anim, Audio, Video, VideoSegment, Lottie, or Composition",
     ))
 }
 

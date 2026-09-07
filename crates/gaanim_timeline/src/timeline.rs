@@ -54,6 +54,7 @@ enum AbsoluteLensChannel {
     PathMorph,
     FillDrawProgress,
     FillLevel,
+    MediaFrame,
 }
 
 fn absolute_lens_channel(lens: &PropertyLensSpec) -> Option<AbsoluteLensChannel> {
@@ -71,6 +72,7 @@ fn absolute_lens_channel(lens: &PropertyLensSpec) -> Option<AbsoluteLensChannel>
         PropertyLensSpec::PathMorph { .. } => AbsoluteLensChannel::PathMorph,
         PropertyLensSpec::FillDrawProgress { .. } => AbsoluteLensChannel::FillDrawProgress,
         PropertyLensSpec::FillLevel { .. } => AbsoluteLensChannel::FillLevel,
+        PropertyLensSpec::MediaFrame { .. } => AbsoluteLensChannel::MediaFrame,
         _ => return None,
     })
 }
@@ -2097,6 +2099,12 @@ fn apply_lens_spec(
                 em.insert(gaanim_animation::FillDrawProgress(v));
             }
         }
+        PropertyLensSpec::MediaFrame { from, to } => {
+            let value = from.interpolate(*to, t as f64);
+            if world.get::<gaanim_scene::MediaFrame>(target) != Some(&value) {
+                world.entity_mut(target).insert(value);
+            }
+        }
         PropertyLensSpec::FillLevel { from, to } => {
             let value = (*from + (*to - *from) * t).clamp(0.0, 1.0);
             if let Some(mut level) = world.get_mut::<gaanim_scene::FillLevel>(target) {
@@ -2769,6 +2777,66 @@ mod tests {
         assert_eq!(restored.from, vec![from]);
         assert_eq!(restored.to, vec![from]);
         assert_eq!(restored.progress, 1.0);
+    }
+
+    #[test]
+    fn media_frame_seek_restores_crop_and_immediate_cuts() {
+        use gaanim_scene::{ImageFit, MediaFrame};
+        let mut world = World::new();
+        let object_id = ObjectId::from_raw(0);
+        let from = MediaFrame {
+            crop: gaanim_core::kurbo::Rect::new(0.0, 0.0, 400.0, 200.0),
+            width: 8.0,
+            height: 4.5,
+            fit: ImageFit::Cover,
+            quality: gaanim_core::peniko::ImageQuality::Medium,
+            centered: true,
+        };
+        let to = MediaFrame {
+            crop: gaanim_core::kurbo::Rect::new(100.0, 50.0, 300.0, 150.0),
+            ..from
+        };
+        let cut = MediaFrame {
+            width: 4.0,
+            quality: gaanim_core::peniko::ImageQuality::High,
+            ..to
+        };
+        let entity = world
+            .spawn((MobjectId(object_id), SpatialTransform::default(), from))
+            .id();
+        let snapshot = WorldSnapshot::capture(&mut world);
+        let mut timeline = Timeline::default();
+        let track = timeline.add_track("MediaFrame", 0);
+        timeline.add_keyframe(0.0, snapshot);
+        for (start, duration, a, b) in [(1.0, 2.0, from, to), (4.0, 0.0, to, cut)] {
+            timeline.add_clip(
+                track,
+                start,
+                duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: object_id,
+                    lens: PropertyLensSpec::MediaFrame { from: a, to: b },
+                    rate_func: RateFunc::Linear,
+                    delay: 0.0,
+                    label: None,
+                }),
+            );
+        }
+        for (time, expected) in [
+            (5.0, cut),
+            (0.0, from),
+            (2.0, from.interpolate(to, 0.5)),
+            (3.5, to),
+            (4.0, cut),
+            (0.5, from),
+        ] {
+            timeline.seek(&mut world, time);
+            assert_eq!(
+                *world.get::<MediaFrame>(entity).unwrap(),
+                expected,
+                "time {time}"
+            );
+        }
     }
 
     #[test]

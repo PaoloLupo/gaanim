@@ -254,6 +254,20 @@ pub fn probe_video(path: impl AsRef<Path>) -> Result<VideoMetadata, VideoError> 
     }
 }
 
+/// A finite interval on the scene timeline, selecting source seconds.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VideoInterval {
+    pub scene_start: f64,
+    pub source_start: f64,
+    pub source_end: f64,
+    pub speed: f64,
+}
+impl VideoInterval {
+    pub fn scene_end(&self) -> f64 {
+        self.scene_start + (self.source_end - self.source_start) / self.speed
+    }
+}
+
 /// Timeline mapping and playback policy for one video drawable.
 #[derive(Component, Debug, Clone)]
 pub struct VideoPlayback {
@@ -267,6 +281,8 @@ pub struct VideoPlayback {
     pub audio: bool,
     pub volume: f64,
     pub last_frame: Option<u64>,
+    /// Empty preserves legacy playback; otherwise intervals are sorted by scene start.
+    pub intervals: Vec<VideoInterval>,
 }
 
 fn append_atempo_args(filter: &mut String, mut tempo: f64) {
@@ -325,6 +341,20 @@ pub fn decode_preview_audio(
 
 impl VideoPlayback {
     pub fn source_time(&self, scene_time: f64) -> f64 {
+        if !self.intervals.is_empty() {
+            let index = self
+                .intervals
+                .partition_point(|item| item.scene_start <= scene_time);
+            if index == 0 {
+                return self.source_offset;
+            }
+            let item = &self.intervals[index - 1];
+            // End is exclusive. Freeze on the last source frame within the selection.
+            let last =
+                ((item.source_end * self.metadata.fps).ceil() - 1.0).max(0.0) / self.metadata.fps;
+            return (item.source_start + (scene_time - item.scene_start).max(0.0) * item.speed)
+                .min(last.max(item.source_start));
+        }
         let elapsed = ((scene_time - self.scene_start).max(0.0) * self.speed).max(0.0);
         let local = if self.looping {
             elapsed.rem_euclid(self.source_duration)
@@ -969,6 +999,40 @@ mod tests {
             audio: true,
             volume: 1.0,
             last_frame: None,
+            intervals: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn media_segments_sample_absolute_time_and_exclusive_ends() {
+        let mut video = playback(true, 1.0);
+        video.intervals = vec![
+            VideoInterval {
+                scene_start: 1.0,
+                source_start: 2.0,
+                source_end: 4.0,
+                speed: 2.0,
+            },
+            VideoInterval {
+                scene_start: 3.0,
+                source_start: 6.0,
+                source_end: 8.0,
+                speed: 1.0,
+            },
+        ];
+        for (time, expected) in [
+            (0.0, 90),
+            (1.0, 60),
+            (1.5, 90),
+            (2.0, 119),
+            (2.9, 119),
+            (3.0, 180),
+            (4.0, 210),
+            (10.0, 239),
+            (1.0, 60),
+            (0.0, 90),
+        ] {
+            assert_eq!(video.frame_index(time), expected, "time {time}");
         }
     }
 

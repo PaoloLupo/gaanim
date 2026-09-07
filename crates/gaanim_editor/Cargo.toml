@@ -27,7 +27,13 @@ gaanim_python = { path = "../gaanim_python" }
 gaanim_text = { path = "../gaanim_text" }
 gaanim_project = { path = "../gaanim_project" }
 
-bevy = { workspace = true }
+bevy = { workspace = true, features = [
+    "bevy_winit",
+    "wayland",      # native windowing on Hyprland/Omarchy
+    "keyboard",
+    "mouse",
+    "default_font",
+] }
 glam = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }
@@ -44,3 +50,19 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
+
+[features]
+dev-dynamic = [
+    "bevy/dynamic_linking",
+    "gaanim_animation/dev-dynamic",
+    "gaanim_api/dev-dynamic",
+    "gaanim_diff/dev-dynamic",
+    "gaanim_export/dev-dynamic",
+    "gaanim_math/dev-dynamic",
+    "gaanim_media/dev-dynamic",
+    "gaanim_python/dev-dynamic",
+    "gaanim_renderer/dev-dynamic",
+    "gaanim_scene/dev-dynamic",
+    "gaanim_text/dev-dynamic",
+    "gaanim_timeline/dev-dynamic",
+]

@@ -989,9 +989,9 @@ scene.render()
 #api-entry(
   name: "MediaLibrary.image",
   kind: "factory",
-  signature: "image(path: str, *, width?, height?, fit=\"contain\", crop?) -> Drawable",
+  signature: "image(path: str, *, width?, height?, fit=\"contain\", crop?, quality=\"medium\") -> Image",
   params: ((name: "path", type: "str", default: none, desc: [PNG/JPEG/WebP path.]), (name: "fit", type: "str", default: "\"contain\"", desc: ["contain|cover|stretch"]), (name: "width", type: "float", default: "None", desc: [Target width.]), (name: "crop", type: "(x,y,w,h)", default: "None", desc: [Source crop in pixels, top-left origin.]),),
-  returns: (type: "Drawable", desc: [Textured drawable.]),
+  returns: (type: "Image", desc: [Textured drawable.]),
   desc: [Shares decoded texture across same path. Use `scaled`, `at` as usual.],
 )[
 ```python
@@ -1855,3 +1855,62 @@ scene.play([
 scene.render()
 ```
 ]
+
+
+== Encuadre de imágenes y videos
+
+`Image` y `Video` conservan su tipo al encadenar los setters de `Drawable`.
+Ambos ofrecen `source_width` y `source_height` en píxeles del archivo original;
+`Video` añade `source_duration` en segundos y `frame_rate` en fotogramas por segundo.
+
+- `frame(width, height, fit="contain")` fija un marco centrado en unidades de
+  escena. `contain` conserva la proporción con bandas transparentes, `cover`
+  llena el marco recortando el excedente y `stretch` permite deformación.
+- `crop(x, y, width, height, normalized=False)` selecciona un rectángulo del
+  archivo original sin mover el marco. El origen es la esquina superior izquierda,
+  con Y hacia abajo. `normalized=True` usa fracciones de las dimensiones originales.
+- `quality(value)` elige `"low"`, `"medium"` o `"high"`.
+
+Estos setters devuelven el mismo objeto. Tras congelarse la declaración,
+crean cortes reversibles en el cursor actual. Tamaños no positivos, números
+no finitos, recortes fuera del origen o modos desconocidos producen `ValueError`.
+
+`obj.animate.crop(x, y, width, height, normalized=False)` interpola el recorte
+para hacer paneo o zoom dentro del marco. Se combina con `.duration(...)` y
+con las transformaciones habituales. `frame` y `quality` son setters inmediatos.
+
+```python
+foto = scene.media.image("foto.jpg").frame(8, 4.5, fit="cover")
+scene.play([
+    foto.animate.crop(0.25, 0.25, 0.5, 0.5, normalized=True).duration(2)
+])
+```
+
+== Fragmentos de video
+
+`video.segment(*, start, end, speed=None, audio=None, volume=None)` devuelve
+un `VideoSegment` inerte hasta incluirlo en `scene.play` o en una composición.
+`start` y `end` seleccionan segundos absolutos del archivo, con
+`0 <= start < end <= video.source_duration`. Las opciones omitidas heredan
+velocidad, audio y volumen del video; no heredan `offset`, `duration` ni `loop`.
+El fragmento dura `(end - start) / speed` segundos de escena y siempre es finito.
+
+```python
+video = scene.media.video("clip.mp4").frame(8, 4.5)
+scene.play([video.segment(start=2, end=5)])
+scene.wait(1)
+scene.play([video.segment(start=5, end=8)])
+```
+
+Antes del primer fragmento se conserva el póster de la declaración. Entre
+fragmentos y después del último se mantiene el último fotograma seleccionado,
+sin audio. Para repetir, crea otro `segment` con el mismo rango.
+
+Un fragmento se programa una sola vez y pertenece a la escena de su video.
+Los solapamientos sobre la misma instancia, `stretch` de composiciones con
+medios y la mezcla de fragmentos con `scene.play([video])` producen `ValueError`.
+Los lotes inválidos no consumen fragmentos ni modifican la programación.
+La activación directa del video conserva sus opciones y restricciones previas.
+
+El ejemplo `examples/media_segments_demo.py` genera sus propios archivos
+locales de prueba y muestra recorte animado, pausa y repetición.

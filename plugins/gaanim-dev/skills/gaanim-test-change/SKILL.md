@@ -28,6 +28,12 @@ preserve the existing Cargo cache inputs, and coordinate shared-cache builds.
 Choose direct affected-layer checks if a profile would compile unrelated targets;
 record which required checks they cover. Never treat a stale binary as validation.
 
+In a checkout with `scripts/dev.py`, use `just test-package`, `just check-package`,
+or `just dev` so development validation keeps `bevy/dynamic_linking` enabled.
+Prefer the checkout's verification script if the installed copy is older.
+Do not append a workspace check after focused tests pass without a concrete
+integration reason. Use `just dev-exec` for already-current native dev runners.
+
 - Choose `fast` for local implementation feedback.
 - Choose `api` for public Rust/Python or Typst changes.
 - Choose `visual` for rendering, transforms, layout, text, scene, animation, or

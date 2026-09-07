@@ -50,7 +50,7 @@ pub use canvas_impl::{
     DimensionOptions, ForceVectorHandle, ImageLoadError, LottieClip, LottieLoadError, PlayError,
     PlayItem, SceneModel, SceneObjectError, Schedule, ScheduleEntry, SupportHandle,
     SurroundingRectError, SurroundingRectHandle, ThemeError, TypstAssetError, VideoClip,
-    VideoLoadError,
+    VideoLoadError, VideoSegment,
 };
 mod theme;
 pub use gaanim_objects::prelude::SvgLoadError;

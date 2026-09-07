@@ -67,6 +67,11 @@ impl Plugin for GaanimScenePlugin {
                 crate::systems::resolve_camera_system.in_set(SceneSet::Camera),
             );
 
+        app.add_systems(
+            Update,
+            crate::media_frame::update_media_frames.in_set(SceneSet::Visualization),
+        );
+
         // Register default propagation systems in the Propagation SystemSet.
         // Both propagation systems use `run_if` to skip entirely when no
         // local component has changed, avoiding unnecessary per-entity iteration

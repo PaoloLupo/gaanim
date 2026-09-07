@@ -226,6 +226,10 @@ pub enum PropertyLensSpec {
         from: f32,
         to: f32,
     },
+    MediaFrame {
+        from: gaanim_scene::MediaFrame,
+        to: gaanim_scene::MediaFrame,
+    },
     FillLevel {
         from: f64,
         to: f64,
@@ -428,6 +432,10 @@ impl PropertyLensSpec {
                 table: gaanim_animation::MorphTable,
             },
             Self::FillDrawProgress { from, to } => PropertyLens::FillDrawProgress {
+                from: *from,
+                to: *to,
+            },
+            Self::MediaFrame { from, to } => PropertyLens::MediaFrame {
                 from: *from,
                 to: *to,
             },

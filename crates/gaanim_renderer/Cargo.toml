@@ -13,7 +13,7 @@ gaanim_animation = { path = "../gaanim_animation" }
 gaanim_objects = { path = "../gaanim_objects" }
 
 # Third-party dependencies from workspace
-bevy = { workspace = true }
+bevy = { workspace = true, features = ["bevy_render", "bevy_log", "hdr"] }
 glam = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }
@@ -32,6 +32,13 @@ serde = { version = "1.0", features = ["derive"], optional = true }
 bevy_vello = "0.14.0"
 
 [features]
+dev-dynamic = [
+    "bevy/dynamic_linking",
+    "gaanim_animation/dev-dynamic",
+    "gaanim_math/dev-dynamic",
+    "gaanim_objects/dev-dynamic",
+    "gaanim_scene/dev-dynamic",
+]
 default = []
 serde = [
     "dep:serde",

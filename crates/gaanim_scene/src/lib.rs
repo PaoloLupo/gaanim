@@ -1,3 +1,5 @@
+pub mod media_frame;
+pub use media_frame::{ImageFit, MediaFrame};
 pub mod components;
 pub mod hierarchy;
 pub mod prelude;

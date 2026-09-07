@@ -17,6 +17,7 @@ thiserror = { workspace = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 
 [features]
+dev-dynamic = ["bevy/dynamic_linking"]
 default = []
 dim3 = []
 serde = ["dep:serde", "gaanim_core/serde", "glam/serde", "kurbo/serde", "peniko/serde"]

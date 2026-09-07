@@ -10,10 +10,11 @@ outputs. A visual example must call `scene.snapshots(...)` conditionally when
 
 ## Compare
 
-Build the editor snapshot runner, then execute:
+Use `just build` when the editor/launcher sources or build inputs changed, then
+execute the current dev runner with its dynamic-library search paths:
 
 ```text
-target/debug/gaanim.exe --diff --example examples/<name>.py --no-gui
+just dev-exec target/debug/gaanim.exe --diff --example examples/<name>.py --no-gui
 ```
 
 On failure, inspect `tests/visual/<name>/report/index.html` and its JSON report.

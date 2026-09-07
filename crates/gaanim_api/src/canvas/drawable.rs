@@ -137,6 +137,80 @@ fn math_source_terms(source: &str) -> Vec<String> {
 
 #[allow(dead_code)]
 impl DrawableHandle {
+    /// Source pixel width for raster images and video.
+    pub fn source_width(&self) -> Result<u32, &'static str> {
+        super::types::media_dimensions(&self.spec.lock().expect("object spec poisoned"))
+            .map(|size| size.0)
+    }
+    pub fn source_height(&self) -> Result<u32, &'static str> {
+        super::types::media_dimensions(&self.spec.lock().expect("object spec poisoned"))
+            .map(|size| size.1)
+    }
+    /// Configure a fixed destination frame in scene units.
+    pub fn frame(
+        self,
+        width: f64,
+        height: f64,
+        fit: super::ImageFit,
+    ) -> Result<Self, &'static str> {
+        if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
+            return Err("frame dimensions must be finite and positive");
+        }
+        self.update_media_frame(|mut frame| {
+            frame.width = width;
+            frame.height = height;
+            frame.fit = fit;
+            frame.centered = true;
+            frame
+        })
+    }
+    pub fn crop(
+        self,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        normalized: bool,
+    ) -> Result<Self, &'static str> {
+        let to = super::types::cropped_frame(
+            &self.spec.lock().expect("object spec poisoned"),
+            x,
+            y,
+            width,
+            height,
+            normalized,
+        )?;
+        self.update_media_frame(|_| to)
+    }
+    pub fn quality(self, quality: gaanim_core::peniko::ImageQuality) -> Result<Self, &'static str> {
+        self.update_media_frame(|mut frame| {
+            frame.quality = quality;
+            frame
+        })
+    }
+    fn update_media_frame(
+        self,
+        update: impl FnOnce(gaanim_scene::MediaFrame) -> gaanim_scene::MediaFrame,
+    ) -> Result<Self, &'static str> {
+        let (from, to) = {
+            let mut spec = self.spec.lock().expect("object spec poisoned");
+            let from = spec
+                .media_frame
+                .ok_or("media operation requires Image or Video")?;
+            let to = update(from);
+            spec.media_frame = Some(to);
+            (from, to)
+        };
+        self.push_immediate(
+            self.id,
+            AnimationType::Properties(PropertyAnimation {
+                media_frame: Some((from, to)),
+                ..Default::default()
+            }),
+        );
+        Ok(self)
+    }
+
     pub fn bounds_target(&self) -> crate::anim::BoundsTarget {
         crate::anim::BoundsTarget::Drawable(self.id)
     }

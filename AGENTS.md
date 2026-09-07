@@ -48,9 +48,14 @@ All commands assume `just` is installed. Do not run `cargo build` at the workspa
 
 | Task | Command |
 |------|---------|
-| Type-check workspace | `just check` (alias: `cargo check --workspace`) |
+| Type-check workspace (explicit broad validation) | `just check` |
+| Type-check one package and dependencies | `just check-package <crate>` |
+| Test one package | `just test-package <crate> [test arguments]` |
+| Batch focused dev checks/tests | `just dev <check\|test\|clippy> -p <crate> ...` |
+| Run a current dev binary/harness without building | `just dev-exec <command> ...` |
 | Lint workspace | `just clippy` |
 | Build application binaries (debug) | `just build` |
+| Build runtime with compilation timings | `just build-timings` |
 | Build application binaries (release) | `just build-release` |
 | Install authoring wheel in `.venv` | `just python-develop` |
 | Build wheel | `just wheel` → outputs to `target/wheels/` |
@@ -82,6 +87,18 @@ all use the application host, which owns the native runtime.
 - Rust editions vary: most crates use **2024**; `gaanim_python` uses **2021**.
 - `Cargo.lock` exists locally but is **gitignored** (library/workspace convention).
 - Workspace profiles: `dev` uses `opt-level = 1` for workspace crates, `opt-level = 3` for dependencies.
+- Development debug info is limited to line tables for workspace crates and
+  disabled for dependencies. Configure `rust-lld.exe` for Windows MSVC in the
+  gitignored `.cargo/config.toml` as described in README; preserve `PYO3_PYTHON`.
+- Shared Bevy features only enable `multi_threaded`; consumer manifests enable
+  their required subsystems. `gaanim_scene` still requires PBR and glTF for its
+  3D components and systems. Keep window/audio features out of the shared base.
+- Prefer `just check-package <crate>` during local iteration. `just build-timings`
+  writes `target/cargo-timings/cargo-timing.html`; it performs a real build.
+- Dev recipes use `scripts/dev.py` to opt selected Bevy consumers into
+  `dev-dynamic` (`bevy/dynamic_linking`). Keep this feature enabled consistently
+  across dev check/test/build/run commands. It is not a default Cargo feature;
+  release recipes and runtime benchmarks remain statically linked.
 
 ## Testing
 
@@ -89,6 +106,19 @@ all use the application host, which owns the native runtime.
   prefer inspection, formatting checks, and existing evidence during iteration.
   Run the smallest affected package/target set once, then the required completion
   checks. Do not stack `check`, `build`, `test`, `clippy`, and `doctor` by habit.
+- For normal agent work, run the smallest affected package/target set through
+  `just check-package`, `just test-package`, or `just dev`. Batch multiple
+  packages in one invocation when they need the same check. After focused tests
+  pass, do not append a workspace check/build/test automatically. Broaden only
+  for affected consumers, an explicit user request, or concrete integration risk.
+- Use dynamic linking for dev validation; never alternate raw static Cargo
+  commands and dynamic dev recipes in the same workflow. `check` still needs
+  type-check artifacts; dynamic linking primarily reduces repeated linking and
+  does not make check/test/build caches interchangeable. Changed inputs may
+  require recompilation; do not promise zero rebuilds or validate stale binaries.
+- Use the checkout's `plugins/gaanim-dev/scripts/verify.py` and `impact.py` when
+  installed plugin copies are older. The `fast` profile tests changed Rust crates
+  in one dev invocation and does not append `just check`.
 - Preserve Cargo cache inputs: the existing target directory, toolchain, profile,
   features, Rust flags, and `.cargo/config.toml` Python interpreter. Do not
   introduce a fresh target directory, switch debug/release, touch dependencies,
@@ -104,8 +134,8 @@ all use the application host, which owns the native runtime.
 - Inline unit tests are present in several crates. Repository-level Python/API
   and visual fixtures live under `tests/`; per-crate Rust integration-test
   directories are not yet common.
-- Run per-crate tests: `cargo test -p <crate>`
-- Run workspace tests: `cargo test --workspace`.
+- Run per-crate tests: `just test-package <crate>` (add `--lib` or a test filter
+  when appropriate). Run explicit workspace tests: `just dev test --workspace`.
 - Verify the Rust→Python bridge with `just python-develop` followed by
   `just validate-python-api`.
 - Verify the five output formats, including audio streams in MP4/WebM, with
@@ -135,8 +165,8 @@ all use the application host, which owns the native runtime.
 
   ```powershell
   . .\.venv\Scripts\Activate.ps1
-  target/debug/gaanim.exe --diff --example examples/visual_diff_demo.py --bless
-  target/debug/gaanim.exe --diff --example examples/visual_diff_demo.py
+  just dev-exec target/debug/gaanim.exe --diff --example examples/visual_diff_demo.py --bless
+  just dev-exec target/debug/gaanim.exe --diff --example examples/visual_diff_demo.py
   ```
 
   `--bless` overwrites the example baseline, so use it only after intentionally approving a visual change. The normal command captures `current/`, compares it with `baseline/`, and opens egui. Add `--no-gui` for CI; use `--pixel-threshold` and `--max-changed-ratio` to tolerate controlled raster differences.

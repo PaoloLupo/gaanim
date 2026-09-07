@@ -52,9 +52,16 @@ def _fast_commands(repo: Path, change: impact_tool.Impact) -> list[list[str]]:
         _append_unique(commands, ["just", "docs"])
     if rust_changed:
         _append_unique(commands, ["cargo", "fmt", "--all", "--", "--check"])
-        for crate in change.crates:
-            _append_unique(commands, ["cargo", "test", "-p", crate])
-        _append_unique(commands, ["just", "check"])
+        # One focused invocation lets Cargo unify features and reuse dependencies.
+        # A successful test compilation does not need a redundant workspace check.
+        crates = sorted({
+            Path(path).parts[1] for path in change.changed_files
+            if path.startswith("crates/") and path.endswith(".rs")
+        })
+        if crates:
+            _append_unique(commands, ["just", "dev", "test", *[
+                arg for crate in crates for arg in ("-p", crate)
+            ]])
     if plugin_changed:
         _append_unique(
             commands,
@@ -88,8 +95,8 @@ def _profile_commands(
     if profile == "full":
         return [
             ["cargo", "fmt", "--all", "--", "--check"],
-            ["cargo", "test", "--workspace"],
-            ["cargo", "clippy", "--workspace", "--all-targets"],
+            ["just", "dev", "test", "--workspace"],
+            ["just", "dev", "clippy", "--workspace", "--all-targets"],
             ["just", "wheel"],
             ["just", "validate-python-api"],
             ["just", "docs"],
@@ -113,10 +120,7 @@ def _visual(
         print("SKIP: cargo is unavailable, so the visual runner cannot be built", file=sys.stderr)
         return 2
 
-    builds = [
-        ["cargo", "build", "-p", "gaanim_editor", "--bin", "gaanim-core"],
-        ["cargo", "build", "-p", "gaanim_launcher", "--bin", "gaanim"],
-    ]
+    builds = [["just", "build"]]
     for build in builds:
         if _run(repo, build, dry_run) != 0:
             return 1
@@ -135,7 +139,7 @@ def _visual(
             print(f"SKIP: {example} has no source or approved baseline", file=sys.stderr)
             status = 2 if status == 0 else status
             continue
-        command = [runner_arg, "--diff", "--example", f"examples/{example}.py"]
+        command = ["just", "dev-exec", runner_arg, "--diff", "--example", f"examples/{example}.py"]
         if bless:
             command.append("--bless")
         command.append("--no-gui")

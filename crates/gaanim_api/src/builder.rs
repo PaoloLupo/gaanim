@@ -1039,6 +1039,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::StrokePaintTo { .. } => "Stroke",
             AnimationType::TextSelectionProperties { .. } => "TextSelectionProperties",
             AnimationType::Material3DTo { .. } => "Material3D",
+            AnimationType::MediaFrameTo { .. } => "MediaFrame",
             AnimationType::FillLevelTo { .. } => "FillLevel",
             AnimationType::SurroundingRectRetarget { .. } => "Retarget",
             AnimationType::StrokeColorTo { .. } => "Stroke",
@@ -2185,6 +2186,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             if let Some((from, to)) = properties.material {
                 channels.push(AnimationType::Material3DTo { from, to });
             }
+            if let Some((from, to)) = properties.media_frame {
+                channels.push(AnimationType::MediaFrameTo { from, to });
+            }
             if let Some((from, to)) = properties.fill_level {
                 channels.push(AnimationType::FillLevelTo { from, to });
             }
@@ -2737,6 +2741,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 PropertyLensSpec::StrokeWidth { from, to }
             }
             AnimationType::Material3DTo { from, to } => PropertyLensSpec::Material3D { from, to },
+            AnimationType::MediaFrameTo { from, to } => PropertyLensSpec::MediaFrame { from, to },
             AnimationType::FillLevelTo { from, to } => PropertyLensSpec::FillLevel { from, to },
             AnimationType::SurroundingRectRetarget { .. } => {
                 unreachable!(

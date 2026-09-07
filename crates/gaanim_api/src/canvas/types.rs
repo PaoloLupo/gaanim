@@ -356,16 +356,7 @@ impl Default for Margin {
 }
 
 /// How an image should use a requested target size.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ImageFit {
-    /// Preserve aspect ratio inside the target rectangle.
-    #[default]
-    Contain,
-    /// Preserve aspect ratio while filling the target rectangle, clipping excess pixels.
-    Cover,
-    /// Fill the target rectangle even when that distorts the source aspect ratio.
-    Stretch,
-}
+pub use gaanim_scene::ImageFit;
 
 /// A rectangle in source image pixel coordinates (top-left origin).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -450,6 +441,22 @@ pub enum ImageOptionsError {
 }
 
 impl ImageOptions {
+    pub(crate) fn media_frame(self, view: ImageView) -> gaanim_scene::MediaFrame {
+        gaanim_scene::MediaFrame {
+            crop: gaanim_core::kurbo::Rect::new(
+                view.source_x,
+                view.source_y,
+                view.source_x + view.source_width,
+                view.source_y + view.source_height,
+            ),
+            width: view.display_width,
+            height: view.display_height,
+            fit: self.fit,
+            quality: self.quality,
+            centered: false,
+        }
+    }
+
     /// Resolve options into the exact source-to-destination mapping used by the renderer.
     pub fn resolve(
         self,
@@ -930,6 +937,7 @@ pub struct ObjectSpec {
     pub layout_ops: Vec<LayoutOp>,
     pub(crate) reactive_readout_layout: Option<ReactiveReadoutLayoutSpec>,
     pub fill_level_cursor: Option<f64>,
+    pub media_frame: Option<gaanim_scene::MediaFrame>,
 }
 
 impl ObjectSpec {
@@ -963,6 +971,7 @@ impl ObjectSpec {
             layout_ops: Vec::new(),
             reactive_readout_layout: None,
             fill_level_cursor: None,
+            media_frame: None,
         }
     }
 }
@@ -983,7 +992,72 @@ pub struct Anim {
     camera_capture_before_play: Option<u64>,
 }
 
+pub(crate) fn media_dimensions(spec: &ObjectSpec) -> Result<(u32, u32), &'static str> {
+    match &spec.kind {
+        SpawnKind::Image { image, .. } => Ok((image.width, image.height)),
+        SpawnKind::Video { playback, .. } => {
+            Ok((playback.metadata.width, playback.metadata.height))
+        }
+        _ => Err("media operation requires Image or Video"),
+    }
+}
+pub(crate) fn cropped_frame(
+    spec: &ObjectSpec,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    normalized: bool,
+) -> Result<gaanim_scene::MediaFrame, &'static str> {
+    let (sw, sh) = media_dimensions(spec)?;
+    let mut frame = spec.media_frame.ok_or("missing media frame")?;
+    let (x, y, width, height) = if normalized {
+        (
+            x * sw as f64,
+            y * sh as f64,
+            width * sw as f64,
+            height * sh as f64,
+        )
+    } else {
+        (x, y, width, height)
+    };
+    ImageOptions {
+        crop: Some(ImageCrop {
+            x,
+            y,
+            width,
+            height,
+        }),
+        ..Default::default()
+    }
+    .resolve(sw, sh)
+    .map_err(|_| "crop must be finite, positive and inside the original source")?;
+    frame.crop = gaanim_core::kurbo::Rect::new(x, y, x + width, y + height);
+    frame.centered = true;
+    Ok(frame)
+}
+
 impl Anim {
+    /// Animate source crop in pixels, or fractions of the original image dimensions.
+    pub fn crop(
+        self,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        normalized: bool,
+    ) -> Result<Self, &'static str> {
+        let spec = self
+            .property_spec
+            .as_ref()
+            .ok_or("crop requires Drawable.animate")?;
+        let spec = spec.lock().expect("object spec poisoned");
+        let from = spec.media_frame.ok_or("crop requires Image or Video")?;
+        let to = cropped_frame(&spec, x, y, width, height, normalized)?;
+        drop(spec);
+        Ok(self.update_properties(|properties| properties.media_frame = Some((from, to))))
+    }
+
     pub(crate) fn new(target: ObjectId, anim_type: AnimationType) -> Self {
         Self {
             inner: AnimationBuilder {
@@ -1238,6 +1312,9 @@ impl Anim {
                     let mut spec = spec.lock().expect("object spec poisoned");
                     if let Some((_, material)) = properties.material {
                         spec.material_animation_cursor = Some(material);
+                    }
+                    if let Some((_, frame)) = properties.media_frame {
+                        spec.media_frame = Some(frame);
                     }
                     if let Some((_, level)) = properties.fill_level {
                         spec.fill_level_cursor = Some(level);

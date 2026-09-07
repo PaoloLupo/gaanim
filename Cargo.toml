@@ -24,9 +24,11 @@ members = [
 
 [profile.dev]
 opt-level = 1
+debug = "line-tables-only"
 
 [profile.dev.package."*"]
 opt-level = 3
+debug = false
 
 [profile.release]
 lto = "thin"
@@ -34,26 +36,10 @@ codegen-units = 1
 strip = true
 
 [workspace.dependencies]
+# Keep the shared ECS foundation small; consumers opt into rendering, audio,
+# asset loading, and native windows in their own manifests.
 bevy = {version = "0.19.1", default-features = false, features = [
-  "bevy_winit",       # windowing (not included by bevy_vello)
-  "wayland",          # native windowing on Hyprland/Omarchy
   "multi_threaded",   # parallel execution
-  "keyboard",         # KeyCode input
-  "mouse",            # MouseButton input
-  "default_font",     # font for egui
-  "bevy_asset",
-  "bevy_world_serialization",
-  "bevy_gltf",
-  "bevy_animation",
-  "bevy_audio",
-  "wav",              # registers Bevy's generic AudioSource asset
-  "aac",
-  "mp4",
-  "symphonia-wav",    # decodes FFmpeg's streaming in-memory WAV output
-  "gltf_animation",
-  "bevy_pbr",
-  "bevy_render",
-  "hdr",
 ]}
 thiserror = "2.0"
 peniko = "0.6.1"

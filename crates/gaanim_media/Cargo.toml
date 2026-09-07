@@ -8,9 +8,21 @@ description = "Timeline-synchronized video and embedded-audio playback for gaani
 gaanim_core = { path = "../gaanim_core" }
 gaanim_scene = { path = "../gaanim_scene" }
 gaanim_timeline = { path = "../gaanim_timeline" }
-bevy = { workspace = true }
+bevy = { workspace = true, features = [
+    "bevy_audio",
+    "wav",           # registers Bevy's generic AudioSource asset
+    "aac",
+    "mp4",
+    "symphonia-wav", # decodes FFmpeg's streaming in-memory WAV output
+] }
 crossbeam-channel = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
+[features]
+dev-dynamic = [
+    "bevy/dynamic_linking",
+    "gaanim_scene/dev-dynamic",
+    "gaanim_timeline/dev-dynamic",
+]

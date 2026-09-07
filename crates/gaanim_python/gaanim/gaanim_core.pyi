@@ -529,6 +529,14 @@ class Transition:
         ...
 
 class Anim:
+    def crop(self, x: float, y: float, width: float, height: float, *, normalized: bool = False) -> Anim:
+        """Animate an Image/Video source rectangle inside its fixed frame.
+
+        Pixels use the original source's top-left origin; normalized=True uses
+        fractions of original dimensions. Reject invalid rectangles or non-media
+        targets with ValueError. Position, rotation and scale remain independent.
+        """
+        ...
     def custom(self, callback: Callable[[float], CustomAnimationValues], *, channels: Sequence[AnimationChannel]) -> Anim:
         """Describe a pure custom animation without scheduling or sampling it.
 
@@ -787,7 +795,7 @@ class Composition:
         """Resolve local offsets using the supplied outer defaults without scheduling."""
         ...
 
-Playable: TypeAlias = Anim | Audio | Video | Lottie | Composition
+Playable: TypeAlias = Anim | Audio | Video | VideoSegment | Lottie | Composition
 
 def parallel(*items: Playable) -> Composition:
     """Compose one or more items at the same local origin."""
@@ -2548,11 +2556,96 @@ Cartesian2D: TypeAlias = CoordinateSpace
 Cartesian3D: TypeAlias = CoordinateSpace3D
 ComplexSpace: TypeAlias = CoordinateSpace
 
-class Video(Drawable):
-    """A transformable MP4 declaration activated explicitly by ``Scene.play``.
+class Image(Drawable):
+    """A local raster image with fluent framing and animatable source crop."""
+    def frame(self, width: float, height: float, fit: Literal["contain", "cover", "stretch"] = "contain") -> Self:
+        """Set a centered destination frame in scene units and return this object.
 
-    Its frames and optional embedded audio share the scene timeline. A video
-    declaration belongs to one scene and can be activated once.
+        Dimensions must be finite and positive. Later calls create reversible
+        cuts at the scene cursor. Contain leaves transparent bands.
+        """
+        ...
+    def crop(self, x: float, y: float, width: float, height: float, *, normalized: bool = False) -> Self:
+        """Select source pixels within the fixed frame and return this object.
+
+        Coordinates use the original source's top-left origin, with Y down.
+        normalized=True uses fractions of its original dimensions. Invalid or
+        out-of-bounds rectangles raise ValueError. Later calls are timeline cuts.
+        """
+        ...
+    def quality(self, value: Literal["low", "medium", "high"]) -> Self:
+        """Set raster sampling quality at the cursor; return this object.
+
+        Invalid values raise ValueError. Video frame changes preserve quality.
+        """
+        ...
+    @property
+    def source_width(self) -> int:
+        """Original source width in pixels, independent of crop and transforms."""
+        ...
+    @property
+    def source_height(self) -> int:
+        """Original source height in pixels, independent of crop and transforms."""
+        ...
+
+class Video(Drawable):
+    """A local video drawable sharing the scene timeline with embedded audio.
+
+    Use either one legacy Scene.play([video]) activation or finite segments.
+    Mixing modes on one instance raises ValueError. Fluent setters retain Video.
+    """
+    def frame(self, width: float, height: float, fit: Literal["contain", "cover", "stretch"] = "contain") -> Self:
+        """Set a centered destination frame in scene units and return this object.
+
+        Dimensions must be finite and positive. Later calls create reversible
+        cuts at the scene cursor. Contain leaves transparent bands.
+        """
+        ...
+    def crop(self, x: float, y: float, width: float, height: float, *, normalized: bool = False) -> Self:
+        """Select source pixels within the fixed frame and return this object.
+
+        Coordinates use the original source's top-left origin, with Y down.
+        normalized=True uses fractions of its original dimensions. Invalid or
+        out-of-bounds rectangles raise ValueError. Later calls are timeline cuts.
+        """
+        ...
+    def quality(self, value: Literal["low", "medium", "high"]) -> Self:
+        """Set raster sampling quality at the cursor; return this object.
+
+        Invalid values raise ValueError. Video frame changes preserve quality.
+        """
+        ...
+    @property
+    def source_width(self) -> int:
+        """Original source width in pixels, independent of crop and transforms."""
+        ...
+    @property
+    def source_height(self) -> int:
+        """Original source height in pixels, independent of crop and transforms."""
+        ...
+    @property
+    def source_duration(self) -> float:
+        """Full source duration in seconds, before trim or speed changes."""
+        ...
+    @property
+    def frame_rate(self) -> float:
+        """Source frames per second used by deterministic timeline sampling."""
+        ...
+    def segment(self, *, start: float, end: float, speed: Optional[float] = None, audio: Optional[bool] = None, volume: Optional[float] = None) -> VideoSegment:
+        """Declare a finite selection of absolute source seconds for Scene.play.
+
+        Require 0 <= start < end <= source_duration. Omitted controls inherit
+        the video's speed, audio and volume, but never its offset/duration/loop.
+        Playback lasts (end-start)/speed scene seconds; gaps hold the last frame
+        silently. Overlap on this video or use in another scene raises ValueError.
+        Creation does not schedule playback. Make a new segment to repeat it.
+        """
+        ...
+
+class VideoSegment:
+    """A single-use, finite Video selection accepted by play and compositions.
+
+    Cannot be stretched. Scheduling is atomic: invalid batches consume nothing.
     """
 
 class Lottie(Drawable):
@@ -3227,15 +3320,15 @@ class MediaLibrary:
         fit: str = "contain",
         crop: Optional[tuple[float, float, float, float]] = None,
         quality: Literal["low", "medium", "high"] = "medium",
-    ) -> Drawable:
-        """Create an image drawable in the scene.
+    ) -> Image:
+        """Create a local Image with fluent framing and source metadata.
 
         ``quality`` selects Vello image sampling: ``"low"`` is nearest-like,
         ``"medium"`` is bilinear-like, and ``"high"`` requests bicubic sampling.
         Invalid fit, crop, dimensions, or quality values raise ``ValueError``.
 
         Example:
-            result = scene.image("assets/example.svg")
+            result = scene.media.image("assets/example.png").frame(8, 4.5)
         """
         ...
     def video(
