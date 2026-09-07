@@ -2219,6 +2219,50 @@ class Readout(Drawable):
     @property
     def unit(self) -> Optional[Drawable]: ...
 
+class RollingNumber(Drawable):
+    """A numeric wheel display. Animate the value with animate.set or count_to.
+
+    Use visual.animate for position, opacity and other drawable animations.
+    Formatting is fixed at creation; movement is deterministic under seeks.
+    """
+    def move_to(self, x: Any, y: Any = None, anchor: Optional[Anchor] = None) -> RollingNumber:
+        """Position the display using Drawable.move_to semantics; return this counter."""
+        ...
+    def fill(self, paint: Paint) -> RollingNumber:
+        """Set the glyph fill and preserve the counter for fluent chaining."""
+        ...
+    def opacity(self, op: ScalarSource) -> RollingNumber:
+        """Set or bind display opacity and return this counter."""
+        ...
+    @property
+    def parameter(self) -> Parameter:
+        """Underlying scalar, usable in computed inputs, readouts and sampled drivers."""
+        ...
+    @property
+    def visual(self) -> Drawable:
+        """The display drawable; use visual.animate for geometry and appearance animations."""
+        ...
+    @property
+    def current(self) -> float:
+        """Return the underlying Parameter's authoring-side current value."""
+        ...
+    def set(self, value: float) -> RollingNumber:
+        """Set the numeric value immediately and return self; after declaration this is a reversible cut.
+
+        Raise ValueError for non-finite values or abs(value)*10**decimals >= 1e15.
+        """
+        ...
+    @property
+    def animate(self) -> Anim:
+        """Scalar animation proxy: animate.set(value).duration(seconds).easing(...)."""
+        ...
+    def count_to(self, value: float, *, duration: float = 1.0) -> Anim:
+        """Build a count animation for scene.play; accepts Anim easing and delay modifiers.
+
+        Raise ValueError for an out-of-range value or non-finite/negative duration.
+        """
+        ...
+
 class Variable(Drawable):
     """A visible ``Parameter`` with an equation-aligned reactive readout group."""
     @property
@@ -3397,6 +3441,34 @@ class MediaLibrary:
 
 class Visualization:
     """Scene-owned API for reactive values, coordinate spaces, charts, and matrices."""
+    def rolling_number(
+        self, value: float = 0.0, *, decimals: int = 0, min_digits: int = 1,
+        group_separator: str = "", decimal_separator: str = ".",
+        prefix: str = "", suffix: str = "", show_plus: bool = False,
+        font_family: str = "sans-serif", font_size: float = 0.75,
+        digit_spacing: float = 0.02, line_height: float = 1.25,
+        mode: str = "odometer", direction: str = "up", color: Optional[Color] = None,
+    ) -> RollingNumber:
+        """Create a right-anchored rolling counter with fixed-width digit cells.
+
+        decimals is 0..6; min_digits counts zero-padded integer positions (1..15;
+        their sum is at most 15). Group/decimal separators are zero-or-one/one
+        characters. Affixes are single-line, at most 256 UTF-8 bytes combined.
+        Sizes and spacing use scene units; line_height is a digit-ink-height multiplier
+        of at least 1. All dimensions must be finite, font_size positive and
+        digit_spacing non-negative. Invalid options raise ValueError.
+
+        odometer carries higher wheels in the final smallest unit;
+        continuous turns all wheels at their place-value speed. direction is
+        up or down for increasing magnitude; decreasing values reverse it.
+        Negative values roll their magnitude with a static minus sign.
+        Fractional smallest units intentionally show a wheel between digits;
+        use representable endpoints for settled digits (no implicit rounding).
+        In continuous mode, higher wheels can remain between digits at endpoints.
+        Font lookup uses Gaanim's normal fallback. Sources driven outside the
+        finite abs(value)*10**decimals < 1e15 range display an em dash.
+        """
+        ...
     @property
     def time(self) -> TimeInput: ...
     def parameter(self, initial: float) -> Parameter: ...

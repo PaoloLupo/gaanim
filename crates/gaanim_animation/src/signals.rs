@@ -158,10 +158,13 @@ pub fn reactive_readout_update_system(
         &mut LocalBounds,
         &mut TextBaseline,
         Option<&crate::writing::PathReveal>,
+        Option<&mut crate::RollingNumber>,
     )>,
     signals: Query<&FloatSignal>,
 ) {
-    for (mut readout, mut path, path_source, mut bounds, mut baseline, reveal) in &mut query {
+    for (mut readout, mut path, path_source, mut bounds, mut baseline, reveal, rolling) in
+        &mut query
+    {
         let reveal = reveal
             .map(|progress| progress.0)
             .unwrap_or(1.0)
@@ -178,6 +181,22 @@ pub fn reactive_readout_update_system(
                     .map(|signal| signal.value)
             })
             .unwrap_or(f64::NAN);
+        if let Some(mut rolling) = rolling {
+            if rolling.last_value != Some(value) {
+                let (new_path, new_bounds) = rolling.geometry(value);
+                readout.last_path = Arc::new(new_path);
+                readout.last_bounds = new_bounds;
+                rolling.last_value = Some(value);
+            }
+            // Snapshot replay can restore the old path while retaining this cache.
+            if let Some(mut source) = path_source {
+                source.0 = readout.last_path.clone();
+            }
+            path.0 = crate::writing::path_at_reveal(&readout.last_path, reveal);
+            bounds.0 = readout.last_bounds;
+            baseline.0 = 0.0;
+            continue;
+        }
         let text = format!(
             "{}{}{}",
             readout.prefix,

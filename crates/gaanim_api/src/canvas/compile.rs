@@ -6846,6 +6846,7 @@ impl SceneModel {
                 suffix,
                 invalid,
                 font_size,
+                rolling,
             } => {
                 let parameter_entities: Vec<(gaanim_core::ObjectId, bevy::prelude::Entity)> =
                     source
@@ -6894,6 +6895,22 @@ impl SceneModel {
                 .unwrap_or_else(|_| (gaanim_core::kurbo::BezPath::new(), Bounds3D::default()));
                 let baseline = gaanim_animation::right_aligned_readout_baseline(bounds);
                 let (path, bounds) = gaanim_animation::right_align_readout_path(path, bounds);
+                let rolling_component = rolling.as_ref().map(|options| {
+                    gaanim_animation::RollingNumber::new(builder.font_registry, options.clone())
+                        .expect("validated rolling number font must compile")
+                });
+                let (path, bounds) = if let Some(rolling) = &rolling_component {
+                    let value = source
+                        .evaluate(builder.current_time, |logical| {
+                            values
+                                .iter()
+                                .find_map(|(id, value)| (*id == logical).then_some(*value))
+                        })
+                        .unwrap_or(f64::NAN);
+                    rolling.geometry(value)
+                } else {
+                    (path, bounds)
+                };
                 let svg_path = gaanim_objects::prelude::SvgPath {
                     id: "ReactiveReadout".to_owned(),
                     path,
@@ -6906,6 +6923,9 @@ impl SceneModel {
                 let mr = Self::finish_spawn_builder(b, spec);
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
                 if let Some(state) = builder.states.get(mr.id) {
+                    if let Some(rolling) = rolling_component {
+                        builder.commands.entity(state.entity).insert(rolling);
+                    }
                     builder.commands.entity(state.entity).insert((
                         gaanim_scene::PathSource(source_path.clone()),
                         gaanim_scene::TextBaseline(baseline),

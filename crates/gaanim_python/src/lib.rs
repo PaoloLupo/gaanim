@@ -19,6 +19,7 @@ mod pylayout;
 mod pymatrix;
 mod pystyle;
 mod pytext;
+mod rolling_number;
 mod transition;
 mod updater;
 mod visualization;
@@ -115,6 +116,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<visualization::PyParameter>()?;
     m.add_class::<visualization::PyReadout>()?;
     m.add_class::<visualization::PyVariable>()?;
+    m.add_class::<rolling_number::PyRollingNumber>()?;
     m.add_class::<visualization::PyCoordinateRef>()?;
     m.add_class::<visualization::PyCoordinateSpace>()?;
     m.add_class::<visualization::PyCoordinateSpaceAnimation>()?;

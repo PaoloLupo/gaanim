@@ -2581,7 +2581,45 @@ impl SceneModel {
             suffix: suffix.into(),
             invalid: invalid.into(),
             font_size,
+            rolling: None,
         })
+    }
+
+    /// A rolling numeric drawable driven by a parameter, time, or computed source.
+    /// Animate its source with `Parameter::animate`; normal drawable transforms
+    /// and styles apply to the display independently.
+    pub fn rolling_number(
+        &mut self,
+        source: ScalarSource,
+        options: gaanim_animation::RollingNumberOptions,
+    ) -> Result<DrawableHandle, String> {
+        options.validate()?;
+        if let Some(value) = source.constant_value() {
+            options.validate_value(value)?;
+        }
+        {
+            let state = self.state.lock().expect("canvas state poisoned");
+            if source
+                .parameter_ids()
+                .iter()
+                .any(|id| !state.parameter_values.contains_key(id))
+            {
+                return Err("rolling source parameters must belong to this scene".into());
+            }
+        }
+        if let ScalarSource::Function(function) = &source {
+            self.validate_reactive_function_owner(function)
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(self.spawn(SpawnKind::ReactiveReadout {
+            source,
+            format: String::new(),
+            prefix: String::new(),
+            suffix: String::new(),
+            invalid: "—".into(),
+            font_size: Some(options.font_size),
+            rolling: Some(options),
+        }))
     }
 
     pub fn function_plot(
@@ -3679,6 +3717,43 @@ impl SceneModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rolling_number_compiles_native_geometry_and_validates_sources() {
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        let options = gaanim_animation::RollingNumberOptions::default();
+        assert!(
+            canvas
+                .rolling_number(ScalarSource::constant(f64::NAN), options.clone())
+                .is_err()
+        );
+        let mut other = SceneModel::new(16.0, 9.0);
+        let foreign = other.parameter(1.0).unwrap();
+        assert!(
+            canvas
+                .rolling_number(foreign.source(), options.clone())
+                .is_err()
+        );
+        let parameter = canvas.parameter(99.5).unwrap();
+        canvas.rolling_number(parameter.source(), options).unwrap();
+        let mut world = bevy::prelude::World::new();
+        world.insert_resource(gaanim_timeline::timeline::Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        let (rolling, path, bounds) = world
+            .query::<(
+                &gaanim_animation::RollingNumber,
+                &gaanim_scene::Path2D,
+                &gaanim_scene::LocalBounds,
+            )>()
+            .single(&world)
+            .unwrap();
+        let (expected, expected_bounds) = rolling.geometry(99.5);
+        assert_eq!(*path.0, expected);
+        assert_eq!(bounds.0, expected_bounds);
+    }
 
     fn layer_is_empty(handle: &DrawableHandle) -> bool {
         let spec = handle.spec.lock().expect("layer spec poisoned");

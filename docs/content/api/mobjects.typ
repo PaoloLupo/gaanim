@@ -1418,6 +1418,63 @@ scene.play([area.animate.create(), radius.animate.set(3.0).duration(1.5)])
 ```
 ]
 
+== Contador rodante
+
+#api-entry(
+  name: "Visualization.rolling_number",
+  kind: "factory",
+  signature: "rolling_number(value=0.0, *, decimals=0, min_digits=1, group_separator='', decimal_separator='.', prefix='', suffix='', show_plus=False, font_family='sans-serif', font_size=0.75, digit_spacing=0.02, line_height=1.25, mode='odometer', direction='up', color=None) -> RollingNumber",
+  params: (
+    (name: "value", type: "float", default: "0.0", desc: [Valor inicial finito; su magnitud multiplicada por `10**decimals` debe ser menor que `1e15`.]),
+    (name: "decimals / min_digits", type: "int", default: "0 / 1", desc: [De 0 a 6 decimales y de 1 a 15 posiciones enteras, con ceros iniciales. La suma no debe superar 15.]),
+    (name: "mode", type: "str", default: "'odometer'", desc: [`odometer` arrastra las ruedas superiores durante la última unidad mínima antes del acarreo. `continuous` gira cada rueda continuamente a la velocidad de su posición decimal.]),
+    (name: "direction", type: "str", default: "'up'", desc: [`up` o `down` para magnitudes crecientes. Al disminuir la magnitud se invierte el movimiento.]),
+    (name: "font_size / digit_spacing", type: "float", default: "0.75 / 0.02", desc: [Tamaño de fuente y espacio adicional entre celdas, en unidades de escena. Positivo y no negativo, respectivamente.]),
+    (name: "line_height", type: "float", default: "1.25", desc: [Altura de la ventana y distancia entre dígitos, como múltiplo de la altura visible de las cifras; al menos 1.]),
+  ),
+  returns: (type: "RollingNumber", desc: [Drawable con un Parameter propio y animación escalar.]),
+  desc: [Las cifras son contornos vectoriales de ancho fijo, recortados dentro de cada celda. Los glifos se preparan una vez y la geometría depende del valor actual, sin acumular estado entre fotogramas. Esto permite reproducción, seeks en cualquier orden y exportación consistentes. El borde derecho permanece anclado; `min_digits` reserva posiciones para evitar crecimiento durante un acarreo. El signo y los separadores permanecen estáticos. Las magnitudes negativas giran como sus valores absolutos.],
+)[
+```python
+from gaanim import Easing, Scene
+
+scene = Scene()
+counter = scene.viz.rolling_number(
+    98, min_digits=4, prefix="$ ", group_separator=",",
+).move_to(0, 0)
+scene.play([counter.count_to(1250, duration=3).easing(Easing.SMOOTH)])
+scene.play([counter.animate.set(500).duration(2)])
+counter.set(0)  # Corte reversible en el cursor actual.
+scene.wait(0.5)
+scene.render()
+```
+
+`count_to(value, *, duration=1.0)` crea un `Anim` compatible con easing, delay y
+las composiciones de `scene.play`. `animate.set(value)` utiliza el mismo proxy
+escalar que un `Parameter`. Para animar posición, opacidad o aparición, usa
+`counter.visual.animate`. `move_to`, `fill`, `opacity` y `set` conservan el
+contador al encadenarse; las otras operaciones heredadas pueden devolver su
+`Drawable`. `counter.parameter` permite reutilizar el escalar en `computed`,
+readouts o `drive_from_samples`. `current` tiene la semántica de consulta del
+Parameter, como espejo del valor de autoría.
+
+`group_separator` admite cero o un carácter; `decimal_separator` requiere uno y
+debe ser diferente. `prefix` y `suffix` son textos de una línea con un máximo
+combinado de 256 bytes UTF-8. `show_plus=True` muestra el signo positivo.
+La familia tipográfica utiliza el fallback habitual de Gaanim. Opciones inválidas,
+valores fuera de rango en creación, `set` o `count_to`, y duraciones negativas o
+no finitas producen `ValueError`. Si un driver del Parameter sale del rango,
+el contador muestra un guion largo.
+
+Una fracción de la unidad mínima deja la rueda entre dos cifras: no se redondea
+implícitamente. Para que termine asentado, usa valores representables con los
+decimales elegidos, por ejemplo `12.34` con `decimals=2`. En modo `continuous`,
+las ruedas superiores pueden quedar entre cifras incluso al terminar en un entero.
+Los símbolos no giran.
+Consulta `examples/rolling_number_demo.py` para dinero, ceros iniciales, cuenta
+regresiva y movimiento continuo.
+]
+
 == Geometría reactiva
 
 La geometría reactiva conecta extremos, magnitudes y referencias espaciales en

@@ -669,6 +669,7 @@ pub enum SpawnKind {
         suffix: String,
         invalid: String,
         font_size: Option<f64>,
+        rolling: Option<gaanim_animation::RollingNumberOptions>,
     },
     /// One table-backed mark regenerated natively when its DataSource changes.
     DataMark {
