@@ -65,7 +65,10 @@ Esta separación evita tener un segundo solucionador de cajas de texto. Consulta
     (name: "flow overrides", type: "keyword arguments", default: "None", desc: [Direct wrap, alignment, line limit, overflow, direction, and hyphenation values.]),
   ),
   returns: (type: "Text", desc: [Structured vector text measured by the same intrinsic Layout v2 pass in every context.]),
-  desc: [Direct keywords override `TextStyle` and `TextFlow`. Invalid content, delimiters, roles, metrics, or flow values raise `TypeError` or `ValueError`.],
+  desc: [Direct keywords override `TextStyle` and `TextFlow`. The `color` argument
+    accepts `ColorLike`: a `Color`, CSS/hex string, or RGB/RGBA tuple of bytes.
+    `None` inherits the style/theme color. This also applies to `equation`.
+    Invalid content, delimiters, roles, metrics, or flow values raise `TypeError` or `ValueError`.],
 )[
 ```python
 # show-code: true

@@ -2115,8 +2115,12 @@ class Scale:
     def category(values: Optional[Sequence[str]] = None) -> Scale:
         """Create a categorical scale; omitted values are inferred from data order."""
         ...
-    def colors(self, colors: Sequence[Color]) -> Scale:
-        """Return a copy with an explicit ordered color range."""
+    def colors(self, colors: Sequence[ColorLike]) -> Scale:
+        """Return a copy with an explicit ordered color range.
+
+        Entries accept Color, CSS/hex strings, and RGB/RGBA byte tuples.
+        Mixed representations are allowed; invalid colors raise ValueError.
+        """
         ...
 
 class Field:
@@ -3226,7 +3230,7 @@ class Typography:
         size: Optional[float] = None,
         weight: Optional[int] = None,
         italic: Optional[bool] = None,
-        color: Optional[Color] = None,
+        color: Optional[ColorLike] = None,
         opacity: Optional[float] = None,
         letter_spacing: Optional[float] = None,
         word_spacing: Optional[float] = None,
@@ -3240,6 +3244,9 @@ class Typography:
         hyphenate: Optional[bool] = None,
     ) -> Text:
         """Create structured vector text, paragraphs, mathematics, or mixed content.
+
+        ``color`` accepts Color, CSS/hex strings, RGB/RGBA byte tuples, or
+        None to inherit the style/theme color.
 
         ``*strong*`` selects bold text and ``_emphasis_`` selects italic text;
         escape literal markers as ``\\*`` and ``\\_``. Markers inside
@@ -3268,7 +3275,7 @@ class Typography:
         size: Optional[float] = None,
         weight: Optional[int] = None,
         italic: Optional[bool] = None,
-        color: Optional[Color] = None,
+        color: Optional[ColorLike] = None,
         opacity: Optional[float] = None,
         letter_spacing: Optional[float] = None,
         word_spacing: Optional[float] = None,
@@ -3282,6 +3289,9 @@ class Typography:
         hyphenate: Optional[bool] = None,
     ) -> Text:
         """Create a standalone display equation as structured vector text.
+
+        ``color`` accepts Color, CSS/hex strings, RGB/RGBA byte tuples, or
+        None to inherit the style/theme color.
 
         The content is wrapped internally as ``$ ... $`` and accepts the same
         semantic parts, styles, flow options, selections, and animations as

@@ -93,6 +93,9 @@ bars = (
 Un `Value(BLUE)` conserva un único color técnico para toda la serie. Un
 `Field(..., scale=Scale.category(...).colors(...))` resuelve un color por fila
 y agrupa internamente las barras que comparten ese color.
+`Scale.colors(colors)` acepta una secuencia de `ColorLike`: objetos `Color`,
+cadenas CSS/hex y tuplas RGB/RGBA de bytes, incluso mezclados en la misma lista.
+Devuelve una copia de la escala; colores inválidos producen `ValueError`.
 
 #api-entry(
   name: "ChartSpec",
