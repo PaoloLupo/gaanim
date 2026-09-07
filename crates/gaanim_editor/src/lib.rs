@@ -359,6 +359,54 @@ impl EditorState {
     }
 }
 
+// Opaque margins hide foreground geometry extending outside the fitted scene.
+fn paint_viewport_letterbox(ctx: &egui::Context, viewport_frame: &ViewportFrame, opaque: bool) {
+    if viewport_frame.size.x > 0.0 && viewport_frame.size.y > 0.0 {
+        let screen = ctx.viewport_rect();
+        let x0 = viewport_frame.origin.x as f32;
+        let y0 = viewport_frame.origin.y as f32;
+        let x1 = (viewport_frame.origin.x + viewport_frame.size.x) as f32;
+        let y1 = (viewport_frame.origin.y + viewport_frame.size.y) as f32;
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Background,
+            egui::Id::new("viewport_letterbox"),
+        ));
+        let shade = if opaque {
+            egui::Color32::BLACK
+        } else {
+            egui::Color32::from_black_alpha(145)
+        };
+        painter.rect_filled(
+            egui::Rect::from_min_max(screen.min, egui::pos2(screen.max.x, y0)),
+            0.0,
+            shade,
+        );
+        painter.rect_filled(
+            egui::Rect::from_min_max(egui::pos2(screen.min.x, y1), screen.max),
+            0.0,
+            shade,
+        );
+        painter.rect_filled(
+            egui::Rect::from_min_max(egui::pos2(screen.min.x, y0), egui::pos2(x0, y1)),
+            0.0,
+            shade,
+        );
+        painter.rect_filled(
+            egui::Rect::from_min_max(egui::pos2(x1, y0), egui::pos2(screen.max.x, y1)),
+            0.0,
+            shade,
+        );
+        if !opaque {
+            painter.rect_stroke(
+                egui::Rect::from_min_max(egui::pos2(x0, y0), egui::pos2(x1, y1)),
+                0.0,
+                egui::Stroke::new(1.0, egui::Color32::from_white_alpha(70)),
+                egui::StrokeKind::Inside,
+            );
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn editor_ui_system(
     mut ctx: bevy_egui::EguiContexts,
@@ -384,49 +432,18 @@ fn editor_ui_system(
     }
     if presentation_mode.active {
         inset.bottom = 0.0;
-        return;
     }
     let Ok(ctx) = ctx.ctx_mut() else {
         return;
     };
 
-    if viewport_frame.size.x > 0.0 && viewport_frame.size.y > 0.0 {
-        let screen = ctx.content_rect();
-        let x0 = viewport_frame.origin.x as f32;
-        let y0 = viewport_frame.origin.y as f32;
-        let x1 = (viewport_frame.origin.x + viewport_frame.size.x) as f32;
-        let y1 = (viewport_frame.origin.y + viewport_frame.size.y) as f32;
-        let painter = ctx.layer_painter(egui::LayerId::new(
-            egui::Order::Background,
-            egui::Id::new("viewport_letterbox"),
-        ));
-        let shade = egui::Color32::from_black_alpha(145);
-        painter.rect_filled(
-            egui::Rect::from_min_max(screen.min, egui::pos2(screen.max.x, y0)),
-            0.0,
-            shade,
-        );
-        painter.rect_filled(
-            egui::Rect::from_min_max(egui::pos2(screen.min.x, y1), screen.max),
-            0.0,
-            shade,
-        );
-        painter.rect_filled(
-            egui::Rect::from_min_max(egui::pos2(screen.min.x, y0), egui::pos2(x0, y1)),
-            0.0,
-            shade,
-        );
-        painter.rect_filled(
-            egui::Rect::from_min_max(egui::pos2(x1, y0), egui::pos2(screen.max.x, y1)),
-            0.0,
-            shade,
-        );
-        painter.rect_stroke(
-            egui::Rect::from_min_max(egui::pos2(x0, y0), egui::pos2(x1, y1)),
-            0.0,
-            egui::Stroke::new(1.0, egui::Color32::from_white_alpha(70)),
-            egui::StrokeKind::Inside,
-        );
+    let opaque = presentation_mode.active
+        || windows
+            .single()
+            .is_ok_and(|window| !matches!(window.mode, bevy::window::WindowMode::Windowed));
+    paint_viewport_letterbox(ctx, &viewport_frame, opaque);
+    if presentation_mode.active {
+        return;
     }
 
     let is_exporting = export_state.active;
@@ -2670,6 +2687,55 @@ fn viewport_adjust_system(
 mod tests {
     use super::*;
     use gaanim_timeline::timeline::SegmentMetadata;
+
+    #[test]
+    fn fullscreen_letterbox_occludes_overflow_on_all_four_edges() {
+        let ctx = egui::Context::default();
+        let frame = ViewportFrame {
+            origin: glam::DVec2::new(20.0, 60.0),
+            size: glam::DVec2::new(160.0, 80.0),
+            output_size: glam::DVec2::new(160.0, 80.0),
+        };
+        for opaque in [false, true] {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(200.0, 200.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| paint_viewport_letterbox(ui.ctx(), &frame, opaque),
+            );
+            output.textures_delta.clear();
+            let masks: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| {
+                    if let egui::Shape::Rect(rect) = &shape.shape {
+                        (rect.fill != egui::Color32::TRANSPARENT).then_some(rect)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            assert_eq!(masks.len(), 4);
+            for point in [
+                egui::pos2(100.0, 59.0),
+                egui::pos2(100.0, 141.0),
+                egui::pos2(19.0, 100.0),
+                egui::pos2(181.0, 100.0),
+            ] {
+                let mask = masks.iter().find(|mask| mask.rect.contains(point)).unwrap();
+                assert_eq!(mask.fill.a(), if opaque { 255 } else { 145 });
+            }
+            assert!(
+                masks
+                    .iter()
+                    .all(|mask| !mask.rect.contains(egui::pos2(100.0, 100.0)))
+            );
+        }
+    }
 
     #[test]
     fn scene_loop_range_resolves_first_and_last_semantic_scenes() {
