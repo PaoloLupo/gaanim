@@ -22,7 +22,8 @@ pub struct MediaFrame {
     pub height: f64,
     pub fit: ImageFit,
     pub quality: ImageQuality,
-    pub centered: bool,
+    /// 0 preserves legacy top-left cover; 0.5 centers new framing operations.
+    pub alignment: f64,
 }
 impl MediaFrame {
     pub fn interpolate(self, to: Self, t: f64) -> Self {
@@ -37,6 +38,7 @@ impl MediaFrame {
             ),
             width: lerp(self.width, to.width),
             height: lerp(self.height, to.height),
+            alignment: lerp(self.alignment, to.alignment),
             ..to
         }
     }
@@ -51,11 +53,10 @@ impl MediaFrame {
         };
         let w = self.width.min(self.crop.width() * sx);
         let h = self.height.min(self.crop.height() * sy);
-        let center = if self.centered {
-            self.crop.center()
-        } else {
-            gaanim_core::kurbo::Point::new(self.crop.x0 + w / sx / 2.0, self.crop.y0 + h / sy / 2.0)
-        };
+        let center = gaanim_core::kurbo::Point::new(
+            self.crop.x0 + w / sx / 2.0 + (self.crop.width() - w / sx) * self.alignment,
+            self.crop.y0 + h / sy / 2.0 + (self.crop.height() - h / sy) * self.alignment,
+        );
         (
             Rect::new(-w / 2.0, -h / 2.0, w / 2.0, h / 2.0),
             Affine::new([sx, 0.0, 0.0, -sy, -center.x * sx, center.y * sy]),
@@ -114,7 +115,7 @@ mod tests {
             height: 8.0,
             fit: ImageFit::Contain,
             quality: ImageQuality::High,
-            centered: true,
+            alignment: 0.5,
         };
         let (rect, transform) = frame.geometry();
         assert_eq!(rect, Rect::new(-4.0, -2.0, 4.0, 2.0));

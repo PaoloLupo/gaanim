@@ -7308,7 +7308,12 @@ impl SceneModel {
                 mr
             }
             SpawnKind::Image { image, view } => {
-                let b = builder.image(image.clone(), *view);
+                let b = builder.image(
+                    image.clone(),
+                    spec.media_frame
+                        .map(super::types::media_view)
+                        .unwrap_or(*view),
+                );
                 let mr = Self::finish_spawn_builder(b, spec);
                 if let (Some(frame), Some(state)) =
                     (spec.media_frame, builder.states.get_mut(mr.id))
@@ -7319,6 +7324,7 @@ impl SceneModel {
                         frame.width / 2.0,
                         frame.height / 2.0,
                     );
+                    builder.media_frames.insert(mr.id, frame);
                     builder.commands.entity(state.entity).insert(frame);
                 }
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
@@ -7329,7 +7335,12 @@ impl SceneModel {
                 view,
                 playback,
             } => {
-                let b = builder.image(poster.clone(), *view);
+                let b = builder.image(
+                    poster.clone(),
+                    spec.media_frame
+                        .map(super::types::media_view)
+                        .unwrap_or(*view),
+                );
                 let mr = Self::finish_spawn_builder(b, spec);
                 if let (Some(frame), Some(state)) =
                     (spec.media_frame, builder.states.get_mut(mr.id))
@@ -7340,6 +7351,7 @@ impl SceneModel {
                         frame.width / 2.0,
                         frame.height / 2.0,
                     );
+                    builder.media_frames.insert(mr.id, frame);
                     builder.commands.entity(state.entity).insert(frame);
                 }
                 if let Some(state) = builder.states.get(mr.id) {

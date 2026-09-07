@@ -36,6 +36,7 @@ def contracts():
         invalid(lambda: obj.quality("unknown"))
     assert abs(video.source_duration - 3) < 0.05
     assert video.frame_rate == 30
+    invalid(lambda: scene.geometry.rect(1, 1).animate.crop(0, 0, 1, 1))
     a = video.segment(start=0.1, end=0.9)
     b = video.segment(start=1, end=2, speed=1)
     assert isinstance(a, VideoSegment)
@@ -56,8 +57,10 @@ if os.environ.get("GAANIM_MEDIA_CROP"):
     obj = scene.media.image(str(image_path)).frame(16, 9, fit="cover").quality("low")
     scene.wait(0.5)
     scene.play([obj.animate.crop(0, 0, 0.5, 0.5, normalized=True).duration(1)])
-    obj.crop(0.5, 0.5, 0.5, 0.5, normalized=True)
-    scene.wait(0.5)
+    obj.crop(0.5, 0.5, 0.5, 0.5, normalized=True).frame(8, 4.5).quality("high")
+    scene.wait(0.2)
+    obj.frame(16, 9)
+    scene.wait(0.3)
 else:
     obj = scene.media.video(str(video_path)).frame(16, 9)
     scene.wait(0.5)
@@ -66,6 +69,6 @@ else:
     scene.play([obj.segment(start=1, end=2)])
     scene.wait(0.5)
 if "GAANIM_SNAPSHOTS" in os.environ:
-    times = [1.8, 0.0, 1.0, 0.0, 1.8] if os.environ.get("GAANIM_MEDIA_CROP") else [2.7, 0.2, 0.7, 1.1, 1.7, 0.7]
+    times = [1.8, 0.0, 1.0, 1.6, 0.0, 1.8] if os.environ.get("GAANIM_MEDIA_CROP") else [2.7, 0.2, 0.7, 1.1, 1.7, 0.7]
     scene.snapshots(os.environ["GAANIM_SNAPSHOTS"], times)
 scene.render()

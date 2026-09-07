@@ -24,8 +24,8 @@ use crate::canvas::ops::{
     SharedCanvasState,
 };
 use crate::canvas::types::{
-    Anim, BooleanOperation, BooleanRule, FillLevelDirection, ImageOptions, ImageOptionsError,
-    LayoutMemberSpec, LayoutSpec, LayoutTreeSnapshot, LottieOptions, Margin,
+    Anim, BooleanOperation, BooleanRule, FillLevelDirection, ImageFit, ImageOptions,
+    ImageOptionsError, LayoutMemberSpec, LayoutSpec, LayoutTreeSnapshot, LottieOptions, Margin,
     ReactiveReadoutLayoutSpec, SceneFrame, SpawnKind, VideoOptions,
 };
 use crate::canvas::{
@@ -2592,7 +2592,7 @@ impl SceneModel {
     ///
     /// Source pixels are decoded once per canonical path. With no explicit
     /// destination size, the image is contained inside the logical safe frame.
-    pub fn image(&mut self, path: impl AsRef<Path>) -> Result<DrawableHandle, ImageLoadError> {
+    pub fn image(&mut self, path: impl AsRef<Path>) -> Result<super::ImageHandle, ImageLoadError> {
         self.image_with_options(path, ImageOptions::default())
     }
 
@@ -2601,7 +2601,7 @@ impl SceneModel {
         &mut self,
         path: impl AsRef<Path>,
         mut options: ImageOptions,
-    ) -> Result<DrawableHandle, ImageLoadError> {
+    ) -> Result<super::ImageHandle, ImageLoadError> {
         let image = load_image(self.resolve_asset_path(path))?;
         if options.width.is_none() && options.height.is_none() {
             let safe = self.safe_frame();
@@ -2684,6 +2684,7 @@ impl SceneModel {
             audio: options.audio,
             volume: options.volume,
             last_frame: None,
+            active: false,
             intervals: Vec::new(),
         };
         let audio = if options.audio && has_audio {
@@ -3789,6 +3790,7 @@ impl SceneModel {
                             unreachable!("VideoClip must retain a video spawn kind");
                         };
                         playback.scene_start = start_time;
+                        playback.active = true;
                     }
                     if let Some(mut track) = video.audio {
                         track.start_time = start_time;
@@ -3808,6 +3810,7 @@ impl SceneModel {
                     };
                     let mut interval = segment.interval;
                     interval.scene_start = play_start + delay;
+                    playback.active = true;
                     playback.intervals.push(interval);
                     playback
                         .intervals
@@ -8163,6 +8166,7 @@ mod tests {
             audio: true,
             volume: 0.75,
             last_frame: None,
+            active: true,
             intervals: Vec::new(),
         };
         let poster = gaanim_core::peniko::ImageData {
@@ -8241,6 +8245,7 @@ mod tests {
             audio: false,
             volume: 0.5,
             last_frame: None,
+            active: true,
             intervals: Vec::new(),
         };
         let drawable = canvas.spawn(SpawnKind::Video {

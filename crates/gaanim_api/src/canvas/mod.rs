@@ -19,6 +19,9 @@ pub use types::{
     LayoutMemberSpec, LayoutOp, LayoutSpec, LayoutTreeSnapshot, LayoutWithin, LottieOptions,
     Margin, ObjectSpec, OptDuration, SceneFrame, SpawnKind, VideoOptions,
 };
+/// Raster image handle; remains compatible with every DrawableHandle consumer.
+pub type ImageHandle = DrawableHandle;
+
 mod drawable;
 mod property_bindings;
 pub use drawable::{

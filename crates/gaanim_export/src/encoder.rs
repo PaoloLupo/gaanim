@@ -459,7 +459,7 @@ impl ParallelEncoder {
             if let Some(duration) = track.source_duration {
                 filter.push_str(&format!(":duration={duration:.6}"));
             }
-            filter.push_str(",asetpts=PTS-STARTPTS");
+            filter.push_str(",asetpts=N/SR/TB");
         }
         if track.looping {
             let samples = track
@@ -480,13 +480,16 @@ impl ParallelEncoder {
         if (tempo - 1.0).abs() > 1e-9 {
             filter.push_str(&format!(",atempo={tempo:.9}"));
         }
+        // Tempo filters can emit unknown PTS. Rebuild timestamps from the
+        // sample clock before applying output-time trims and scheduled silence.
+        filter.push_str(",asetpts=N/SR/TB");
         if output_trim > 0.0 || track.duration.is_some() {
             filter.push_str(&format!(",atrim=start={output_trim:.6}"));
             if let Some(duration) = track.duration {
                 let remaining = (duration - output_trim).max(0.0);
                 filter.push_str(&format!(":duration={remaining:.6}"));
             }
-            filter.push_str(",asetpts=PTS-STARTPTS");
+            filter.push_str(",asetpts=N/SR/TB");
         }
         filter.push_str(&format!(",volume={:.6}", track.volume));
         if track.fade_in > 0.0 {
@@ -504,6 +507,7 @@ impl ParallelEncoder {
             let delay_ms = (relative_start * 1000.0).round().max(0.0) as u64;
             filter.push_str(&format!(",adelay={delay_ms}:all=1"));
         }
+        filter.push_str(",asetpts=N/SR/TB");
         filter
     }
 
@@ -534,7 +538,7 @@ impl ParallelEncoder {
             .map(|index| format!("[audio_{index}]"))
             .collect::<String>();
         let mix = format!(
-            "{inputs}amix=inputs={}:duration=longest:normalize=0,atrim=duration={:.6}[audio_out]",
+            "{inputs}amix=inputs={}:duration=longest:normalize=0,apad,atrim=duration={:.6},asetpts=N/SR/TB[audio_out]",
             config.audio_tracks.len(),
             config.render_duration
         );

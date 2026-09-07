@@ -281,6 +281,8 @@ pub struct VideoPlayback {
     pub audio: bool,
     pub volume: f64,
     pub last_frame: Option<u64>,
+    /// Inactive playback holds the constructor poster until scheduled.
+    pub active: bool,
     /// Empty preserves legacy playback; otherwise intervals are sorted by scene start.
     pub intervals: Vec<VideoInterval>,
 }
@@ -341,6 +343,9 @@ pub fn decode_preview_audio(
 
 impl VideoPlayback {
     pub fn source_time(&self, scene_time: f64) -> f64 {
+        if !self.active {
+            return self.source_offset;
+        }
         if !self.intervals.is_empty() {
             let index = self
                 .intervals
@@ -999,8 +1004,18 @@ mod tests {
             audio: true,
             volume: 1.0,
             last_frame: None,
+            active: true,
             intervals: Vec::new(),
         }
+    }
+
+    #[test]
+    fn media_video_declaration_holds_poster_until_activation() {
+        let mut video = playback(false, 2.0);
+        video.active = false;
+        assert_eq!(video.source_time(100.0), 3.0);
+        video.active = true;
+        assert_eq!(video.source_time(100.0), 7.0);
     }
 
     #[test]

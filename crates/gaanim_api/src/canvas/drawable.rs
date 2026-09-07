@@ -160,7 +160,7 @@ impl DrawableHandle {
             frame.width = width;
             frame.height = height;
             frame.fit = fit;
-            frame.centered = true;
+            frame.alignment = 0.5;
             frame
         })
     }

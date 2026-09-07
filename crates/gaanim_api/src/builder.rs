@@ -548,6 +548,7 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub current_scene: Option<SceneId>,
     /// Tracks the current value of each float signal / value tracker
     pub float_signals: HashMap<ObjectId, f64>,
+    pub(crate) media_frames: HashMap<ObjectId, gaanim_scene::MediaFrame>,
     /// Objects whose scene membership is intentionally global at the current authoring cursor.
     persistent_objects: HashSet<ObjectId>,
     /// Objects whose membership has an explicit reuse/persist/release schedule in this scene.
@@ -842,6 +843,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             current_label: None,
             current_scene: None,
             float_signals: HashMap::new(),
+            media_frames: HashMap::new(),
             property_bindings: HashMap::new(),
             property_source_cursors: HashMap::new(),
             persistent_objects: HashSet::new(),
@@ -2741,7 +2743,20 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 PropertyLensSpec::StrokeWidth { from, to }
             }
             AnimationType::Material3DTo { from, to } => PropertyLensSpec::Material3D { from, to },
-            AnimationType::MediaFrameTo { from, to } => PropertyLensSpec::MediaFrame { from, to },
+            AnimationType::MediaFrameTo { from, to } => {
+                let from = self.media_frames.get(&anim.target).copied().unwrap_or(from);
+                self.media_frames.insert(
+                    anim.target,
+                    from.interpolate(to, anim.rate_func.evaluate(1.0)),
+                );
+                state.bounds = Bounds3D::new_2d(
+                    -to.width / 2.0,
+                    -to.height / 2.0,
+                    to.width / 2.0,
+                    to.height / 2.0,
+                );
+                PropertyLensSpec::MediaFrame { from, to }
+            }
             AnimationType::FillLevelTo { from, to } => PropertyLensSpec::FillLevel { from, to },
             AnimationType::SurroundingRectRetarget { .. } => {
                 unreachable!(

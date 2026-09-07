@@ -454,7 +454,7 @@ impl ImageOptions {
             height: view.display_height,
             fit: self.fit,
             quality: self.quality,
-            centered: false,
+            alignment: 0.0,
         }
     }
 
@@ -993,6 +993,23 @@ pub struct Anim {
     camera_capture_before_play: Option<u64>,
 }
 
+pub(crate) fn media_view(frame: gaanim_scene::MediaFrame) -> ImageView {
+    let (rect, transform) = frame.geometry();
+    let [sx, _, _, neg_sy, tx, ty] = transform.as_coeffs();
+    let sy = -neg_sy;
+    ImageView {
+        source_x: (-tx - rect.width() / 2.0) / sx,
+        source_y: (ty - rect.height() / 2.0) / sy,
+        source_width: frame.crop.width(),
+        source_height: frame.crop.height(),
+        display_width: rect.width(),
+        display_height: rect.height(),
+        scale_x: sx,
+        scale_y: sy,
+        quality: frame.quality,
+    }
+}
+
 pub(crate) fn media_dimensions(spec: &ObjectSpec) -> Result<(u32, u32), &'static str> {
     match &spec.kind {
         SpawnKind::Image { image, .. } => Ok((image.width, image.height)),
@@ -1034,7 +1051,7 @@ pub(crate) fn cropped_frame(
     .resolve(sw, sh)
     .map_err(|_| "crop must be finite, positive and inside the original source")?;
     frame.crop = gaanim_core::kurbo::Rect::new(x, y, x + width, y + height);
-    frame.centered = true;
+    frame.alignment = 0.5;
     Ok(frame)
 }
 
@@ -1314,8 +1331,10 @@ impl Anim {
                     if let Some((_, material)) = properties.material {
                         spec.material_animation_cursor = Some(material);
                     }
-                    if let Some((_, frame)) = properties.media_frame {
-                        spec.media_frame = Some(frame);
+                    if let Some((from, to)) = properties.media_frame {
+                        let from = spec.media_frame.unwrap_or(from);
+                        spec.media_frame =
+                            Some(from.interpolate(to, self.inner.rate_func.evaluate(1.0)));
                     }
                     if let Some((_, level)) = properties.fill_level {
                         spec.fill_level_cursor = Some(level);

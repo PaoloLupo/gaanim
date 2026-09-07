@@ -173,6 +173,10 @@ impl CanvasState {
                         if incoming.material.is_some() {
                             previous.material = incoming.material;
                         }
+                        if let Some((from, to)) = incoming.media_frame {
+                            previous.media_frame =
+                                Some((previous.media_frame.map_or(from, |pair| pair.0), to));
+                        }
                         if incoming.fill_level.is_some() {
                             previous.fill_level = incoming.fill_level;
                         }

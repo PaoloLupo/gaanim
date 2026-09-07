@@ -2790,7 +2790,7 @@ mod tests {
             height: 4.5,
             fit: ImageFit::Cover,
             quality: gaanim_core::peniko::ImageQuality::Medium,
-            centered: true,
+            alignment: 0.5,
         };
         let to = MediaFrame {
             crop: gaanim_core::kurbo::Rect::new(100.0, 50.0, 300.0, 150.0),
