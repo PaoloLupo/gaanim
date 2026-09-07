@@ -692,6 +692,40 @@ def validate_reactive_connector_contract(module: object) -> list[str]:
     failures: list[str] = []
     scene = module.Scene(frame=(16, 9))
     frame = scene.geometry.rect(240.0, 120.0)
+    for line in [
+        scene.geometry.line(length=3.0).next_to(frame, module.Direction.DOWN, spacing=0.2),
+        scene.geometry.line(length=2.0, direction=module.Direction.UP),
+        scene.geometry.line((0.0, 0.0), (1.0, 0.0)),
+        scene.geometry.line(0.0, 0.0, 1.0, 0.0),
+    ]:
+        if not isinstance(line, module.Drawable):
+            failures.append("Geometry.line did not return a Drawable")
+    for kwargs in [
+        {"length": value} for value in [0.0, -1.0, math.inf, math.nan]
+    ] + [
+        {"length": 2.0, "direction": module.Direction.custom(0.0, 0.0, 0.0)},
+        {"length": 2.0, "direction": module.Direction.custom(1.0, 0.0, 1.0)},
+    ]:
+        try:
+            scene.geometry.line(**kwargs)
+        except ValueError:
+            pass
+        else:
+            failures.append(f"Geometry.line accepted invalid geometry: {kwargs}")
+    for args, kwargs in [
+        ((), {}),
+        ((3.0,), {}),
+        ((), {"direction": module.Direction.UP}),
+        (((0.0, 0.0), (1.0, 0.0)), {"length": 2.0}),
+        ((0.0, 0.0, 1.0, 0.0), {"length": 2.0}),
+        (((0.0, 0.0), (1.0, 0.0)), {"direction": module.Direction.UP}),
+    ]:
+        try:
+            scene.geometry.line(*args, **kwargs)
+        except TypeError:
+            pass
+        else:
+            failures.append("Geometry.line accepted mixed or incomplete arguments")
     corner = frame.anchor_point(module.Anchor.TOP_RIGHT, offset=(5.0, -3.0))
     if not isinstance(corner, module.AnchorPoint):
         failures.append("Drawable.anchor_point did not return AnchorPoint")

@@ -2590,16 +2590,42 @@ impl PyGeometry {
             )
         })
     }
-    #[pyo3(signature = (p1, p2, x2=None, y2=None))]
+    #[pyo3(signature = (p1=None, p2=None, x2=None, y2=None, *, length=None, direction=None))]
     fn line(
         &self,
-        p1: Bound<'_, PyAny>,
-        p2: Bound<'_, PyAny>,
+        p1: Option<Bound<'_, PyAny>>,
+        p2: Option<Bound<'_, PyAny>>,
         x2: Option<f64>,
         y2: Option<f64>,
+        length: Option<f64>,
+        direction: Option<&crate::pylayout::PyDirection>,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
         let mut canvas = self.inner.lock().expect("scene canvas poisoned");
+        if let Some(length) = length {
+            if p1.is_some() || p2.is_some() || x2.is_some() || y2.is_some() {
+                return Err(pyo3::exceptions::PyTypeError::new_err(
+                    "line(length=...) cannot be combined with endpoints or coordinates",
+                ));
+            }
+            return canvas
+                .line_with_length(
+                    length,
+                    direction.map_or(gaanim_layout::Direction::Right, |direction| direction.0),
+                )
+                .map(PyDrawable)
+                .map_err(pyo3::exceptions::PyValueError::new_err);
+        }
+        if direction.is_some() {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "line(direction=...) requires length",
+            ));
+        }
+        let (Some(p1), Some(p2)) = (p1, p2) else {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "line() expects length=..., two endpoints, or four numeric coordinates",
+            ));
+        };
         match (x2, y2) {
             (None, None) => Ok(PyDrawable(
                 canvas.line_between(resolve_endpoint(&p1)?, resolve_endpoint(&p2)?),

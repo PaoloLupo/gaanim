@@ -337,7 +337,7 @@ scene.render()
   signature: ".animate.fade_in() .animate.fade_out() .animate.opacity(alpha: 0..1)",
   params: (),
   returns: (type: "Anim", desc: [Opacity anim.]),
-  desc: [`fade_to` animates to target alpha. `fade_in_from` below is directional.],
+  desc: [`fade_to` animates to target alpha. A scheduled `fade_in` keeps the drawable hidden before its start, including late declarations and group members. `fade_in_from` below is directional.],
 )[
 ```python
 # show-code: true

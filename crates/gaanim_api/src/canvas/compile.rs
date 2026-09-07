@@ -2300,6 +2300,24 @@ impl SceneModel {
     ) {
         let scene_start = builder.current_time;
         let transform_targets = Self::transform_targets(&seg.ops);
+        let fade_in_targets: HashSet<ObjectId> = seg
+            .ops
+            .iter()
+            .flat_map(|op| {
+                let anims: &[AnimationBuilder] = match op {
+                    Op::Animate { anim, active: true } => std::slice::from_ref(anim),
+                    Op::Play(anims) => anims,
+                    _ => &[],
+                };
+                anims.iter().filter_map(|anim| {
+                    matches!(
+                        anim.anim_type,
+                        AnimationType::FadeIn | AnimationType::FadeInFrom { .. }
+                    )
+                    .then_some(anim.target)
+                })
+            })
+            .collect();
         for op in &seg.ops {
             match op {
                 Op::Spawn(spec) => {
@@ -2364,7 +2382,21 @@ impl SceneModel {
                         && let Some(state) = builder.states.get(actual.id).cloned()
                     {
                         builder.hide_visuals_now(&state);
-                        builder.schedule_show_now(actual.id);
+                        // A declaration makes new geometry available, but must not
+                        // override a later fade-in, including on a group member.
+                        let fade_roots: HashSet<ObjectId> = fade_in_targets
+                            .iter()
+                            .filter_map(|id| id_map.get(id).copied())
+                            .collect();
+                        if fade_roots.is_empty() {
+                            builder.schedule_show_now(actual.id);
+                        } else {
+                            for target in builder.hierarchy_ids(actual.id) {
+                                if !fade_roots.contains(&target) {
+                                    builder.schedule_show_root_at(target, builder.current_time);
+                                }
+                            }
+                        }
                     }
                     if transform_targets.contains(&spec.id) {
                         if let Some(state) = builder.states.get(actual.id).cloned() {
@@ -9169,6 +9201,62 @@ mod tests {
             let forward = camera.rotation * -DVec3::Z;
             let expected = (target - camera.position).normalize();
             assert!(forward.dot(expected) > 1.0 - 1e-9);
+        }
+    }
+
+    #[test]
+    fn late_declared_group_members_stay_hidden_until_fade_in() {
+        let mut canvas = SceneModel::new(640, 360);
+        canvas.wait(0.8);
+        let outline = canvas.circle(20.0);
+        let number = canvas.reactive_readout(
+            gaanim_animation::ScalarSource::Constant(54.0),
+            ".0f",
+            "",
+            "%",
+            "invalid",
+            Some(24.0),
+        );
+        let readout = canvas.reactive_readout_group(None, None, &number, None, 10.0);
+        let _group = canvas.group(&[&outline, &readout]);
+        let caption = canvas.circle(10.0);
+        canvas.play(vec![outline.fade_in(1.0)]);
+        canvas.play(vec![readout.fade_in(1.0), caption.fade_in(1.0)]);
+
+        let mut world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &config);
+        drop(commands);
+        queue.apply(&mut world);
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+
+        for time in [0.0, 1.3, 2.3, 3.0, 1.3, 0.0] {
+            timeline.seek(&mut world, time);
+            for handle in [&readout, &caption] {
+                let id = ObjectId::from_raw(handle.id.as_raw() - 1);
+                let opacity = world
+                    .query::<(&MobjectId, &Opacity)>()
+                    .iter(&world)
+                    .find(|(object, _)| object.0 == id)
+                    .unwrap()
+                    .1
+                    .0;
+                let expected = if time < 1.8 {
+                    0.0
+                } else if time > 2.8 {
+                    1.0
+                } else {
+                    0.5
+                };
+                assert!(
+                    (opacity - expected).abs() < 1e-5,
+                    "opacity {opacity} at {time}"
+                );
+            }
         }
     }
 

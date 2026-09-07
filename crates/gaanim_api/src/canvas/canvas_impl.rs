@@ -1904,6 +1904,29 @@ impl SceneModel {
         self.spawn(SpawnKind::Line(x1, y1, x2, y2))
     }
 
+    /// Create a 2D line centered at the origin with a length in scene units.
+    /// Its orientation is independent of subsequent `next_to` placement.
+    /// Rejects nonpositive/nonfinite lengths and zero, nonfinite, or 3D directions.
+    pub fn line_with_length(
+        &mut self,
+        length: f64,
+        direction: gaanim_layout::Direction,
+    ) -> Result<DrawableHandle, String> {
+        if !length.is_finite() || length <= 0.0 {
+            return Err("line length must be a finite positive number".into());
+        }
+        let vector = match direction {
+            gaanim_layout::Direction::Custom(vector) => vector,
+            direction => direction.to_vector(),
+        };
+        let magnitude = vector.x.hypot(vector.y);
+        if !vector.is_finite() || vector.z != 0.0 || magnitude == 0.0 || !magnitude.is_finite() {
+            return Err("line direction must be a finite nonzero 2D vector".into());
+        }
+        let half = vector / magnitude * (length * 0.5);
+        Ok(self.line(-half.x, -half.y, half.x, half.y))
+    }
+
     /// Create a vector boolean result while retaining the source drawables.
     pub fn boolean(
         &mut self,
@@ -5971,6 +5994,79 @@ mod tests {
         assert!(spring_opacity > 0.0);
         assert!(dimension_opacity > 0.0);
         assert!(label_opacity > 0.0);
+    }
+
+    #[test]
+    fn length_lines_preserve_size_and_orientation_with_next_to() {
+        use gaanim_layout::Direction;
+        let mut canvas = SceneModel::new(640, 360);
+        let card = canvas.rect(4.0, 2.0).move_to(1.0, 1.0);
+        let horizontal = canvas
+            .line_with_length(3.0, Direction::Right)
+            .unwrap()
+            .next_to(&card, Direction::Down, 0.5);
+        let vertical = canvas
+            .line_with_length(3.0, Direction::Up)
+            .unwrap()
+            .next_to(&card, Direction::Right, 0.5);
+        let diagonal = canvas
+            .line_with_length(5.0, Direction::Custom(DVec3::new(3.0, 4.0, 0.0)))
+            .unwrap();
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        for (handle, expected_start, expected_end) in [
+            (horizontal, (-0.5, -0.5), (2.5, -0.5)),
+            (vertical, (3.5, -0.5), (3.5, 2.5)),
+            (diagonal, (-1.5, -2.0), (1.5, 2.0)),
+        ] {
+            let id = gaanim_core::ObjectId::from_raw(handle.id.as_raw() - 1);
+            let (_, path, transform) = world
+                .query::<(
+                    &gaanim_scene::MobjectId,
+                    &gaanim_scene::Path2D,
+                    &gaanim_math::SpatialTransform,
+                )>()
+                .iter(&world)
+                .find(|(object, _, _)| object.0 == id)
+                .unwrap();
+            let affine = transform.to_affine_2d();
+            let elements = path.0.elements();
+            let [
+                gaanim_core::kurbo::PathEl::MoveTo(start),
+                gaanim_core::kurbo::PathEl::LineTo(end),
+            ] = elements
+            else {
+                panic!("expected a single line segment");
+            };
+            assert!((affine * *start).distance(expected_start.into()) < 1e-9);
+            assert!((affine * *end).distance(expected_end.into()) < 1e-9);
+        }
+    }
+
+    #[test]
+    fn length_lines_reject_invalid_geometry() {
+        use gaanim_layout::Direction;
+        let mut canvas = SceneModel::new(640, 360);
+        for length in [0.0, -1.0, f64::INFINITY, f64::NAN] {
+            assert!(canvas.line_with_length(length, Direction::Right).is_err());
+        }
+        for vector in [
+            DVec3::ZERO,
+            DVec3::Z,
+            DVec3::new(1.0, 0.0, 1.0),
+            DVec3::splat(f64::NAN),
+        ] {
+            assert!(
+                canvas
+                    .line_with_length(2.0, Direction::Custom(vector))
+                    .is_err()
+            );
+        }
     }
 
     #[test]

@@ -299,6 +299,28 @@ scene.render()
 == Líneas y flechas
 
 #api-entry(
+  name: "Geometry.line por longitud",
+  kind: "factory",
+  signature: "line(*, length: float, direction: Direction = Direction.RIGHT) -> Drawable",
+  params: ((name: "length", type: "float", default: none, desc: [Longitud positiva y finita en unidades de escena.]), (name: "direction", type: "Direction", default: "Direction.RIGHT", desc: [Orientación de la línea; admite direcciones diagonales y vectores 2D no nulos.])),
+  returns: (type: "Drawable", desc: [Línea centrada inicialmente en el origen.]),
+  desc: [`next_to` coloca la línea sin cambiar su longitud ni orientación. Usa `Direction.UP` para una línea vertical. No combines `length` con extremos o coordenadas: genera `TypeError`. Una longitud o dirección inválida genera `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import Direction, GOLD, WHITE, Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+title = scene.text("Una línea bajo el título", size=0.5).fill(WHITE)
+rule = scene.geometry.line(length=5).stroke(GOLD, 0.035).next_to(
+    title, Direction.DOWN, spacing=0.25,
+)
+scene.play([title.animate.fade_in(), rule.animate.create()], duration=1)
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
   name: "Geometry.line",
   kind: "reactive factory",
   signature: "line(p1: Endpoint, p2: Endpoint) -> Drawable",

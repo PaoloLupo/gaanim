@@ -673,7 +673,11 @@ class Anim:
         """
         ...
     def fade_in(self) -> Anim:
-        """Select the drawable fade-in effect; scheduling occurs in ``Scene.play``."""
+        """Select the drawable fade-in effect; scheduling occurs in ``Scene.play``.
+
+        The drawable stays hidden before the scheduled fade, including when
+        declared after earlier animations or placed inside a group.
+        """
         ...
     def fade_in_from(self, direction: Direction, distance: float = 0.48) -> Anim: ...
     def fade_out(self) -> Anim:
@@ -2792,6 +2796,20 @@ class Geometry:
 
         Example:
             result = scene.ellipse(1.0, 1.0)
+        """
+        ...
+    @overload
+    def line(self, *, length: float, direction: Direction = Direction.RIGHT) -> Drawable:
+        """Create a line centered at the origin with length in scene units.
+
+        The default is horizontal. ``direction`` sets its orientation; a later
+        ``next_to`` sets placement independently without changing its length.
+        Length must be finite and positive; direction must be a finite nonzero
+        2D vector. Invalid geometry raises ``ValueError``. Combining this form
+        with endpoints or coordinates raises ``TypeError``.
+
+        Example:
+            rule = scene.geometry.line(length=3).next_to(title, Direction.DOWN, spacing=0.2)
         """
         ...
     @overload
