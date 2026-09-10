@@ -261,6 +261,24 @@ pub struct LottiePlayer {
     renderer: velato::Renderer,
     scene: Arc<vello::Scene>,
     sampled_frame: f64,
+    draw_state: LottieDrawState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct LottieDrawState {
+    reveal: f64,
+    fill: f32,
+    outline_width: f64,
+}
+
+impl Default for LottieDrawState {
+    fn default() -> Self {
+        Self {
+            reveal: 1.0,
+            fill: 1.0,
+            outline_width: 0.03,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -282,6 +300,7 @@ struct LottieRenderSink<'a> {
     root_transform: vello::kurbo::Affine,
     root_alpha: f64,
     layer_groups: Vec<Option<LottieLayerContext<'a>>>,
+    draw_state: LottieDrawState,
 }
 
 impl<'a> LottieRenderSink<'a> {
@@ -319,6 +338,12 @@ impl<'a> LottieRenderSink<'a> {
             return;
         };
         let bounds = vello::kurbo::Rect::new(0.0, 0.0, image_layer.width, image_layer.height);
+        let alpha = alpha
+            * if self.draw_state.reveal >= 1.0 {
+                f64::from(self.draw_state.fill)
+            } else {
+                0.0
+            };
         let Some(mask_count) =
             self.push_content_layer(context, layer_index, bounds, transform, alpha)
         else {
@@ -358,11 +383,11 @@ impl<'a> LottieRenderSink<'a> {
         else {
             return;
         };
-        self.scene.fill(
-            vello::peniko::Fill::NonZero,
-            transform,
-            solid.color,
+        velato::RenderSink::draw(
+            self,
             None,
+            transform,
+            &vello::peniko::Brush::Solid(solid.color),
             &bounds,
         );
         self.pop_content_layer(mask_count);
@@ -497,6 +522,35 @@ impl velato::RenderSink for LottieRenderSink<'_> {
         brush: &velato::model::fixed::Brush,
         shape: &impl vello::kurbo::Shape,
     ) {
+        let state = self.draw_state;
+        if state.reveal <= 0.0 {
+            return;
+        }
+        if state.reveal < 1.0 || (stroke.is_none() && state.fill < 1.0) {
+            let source = shape.to_path(0.05);
+            let outline = gaanim_math::get_subpath(&source, state.reveal);
+            if let Some(stroke) = stroke {
+                self.scene.stroke(stroke, transform, brush, None, &outline);
+            } else {
+                // Temporary outlines use logical scene units, while authored
+                // Lottie paths and strokes are expressed in composition pixels.
+                let scale = transform.determinant().abs().sqrt().max(1e-9);
+                let style = vello::kurbo::Stroke::new(state.outline_width / scale);
+                let outline_alpha = if state.reveal < 1.0 {
+                    1.0
+                } else {
+                    1.0 - state.fill
+                };
+                let paint = brush.clone().multiply_alpha(outline_alpha);
+                self.scene.stroke(&style, transform, &paint, None, &outline);
+                if state.reveal >= 1.0 && state.fill > 0.0 {
+                    let paint = brush.clone().multiply_alpha(state.fill);
+                    self.scene
+                        .fill(vello::peniko::Fill::NonZero, transform, &paint, None, shape);
+                }
+            }
+            return;
+        }
         if let Some(stroke) = stroke {
             self.scene.stroke(stroke, transform, brush, None, shape);
         } else {
@@ -562,6 +616,7 @@ impl LottiePlayer {
             renderer: velato::Renderer::new(),
             scene: Arc::new(vello::Scene::new()),
             sampled_frame,
+            draw_state: LottieDrawState::default(),
         };
         player.render(sampled_frame);
         player
@@ -593,6 +648,7 @@ impl LottiePlayer {
             root_transform: transform,
             root_alpha: 1.0,
             layer_groups: Vec::new(),
+            draw_state: self.draw_state,
         };
         self.renderer.append(
             &self.playback.asset.composition,
@@ -617,14 +673,25 @@ impl LottiePlayer {
 
 pub fn sample_lottie_system(
     playback_state: Option<Res<gaanim_animation::PlaybackState>>,
-    mut players: Query<&mut LottiePlayer>,
+    mut players: Query<(
+        &mut LottiePlayer,
+        Option<&gaanim_animation::PathReveal>,
+        Option<&gaanim_animation::FillDrawProgress>,
+        Option<&gaanim_scene::StrokeBrush>,
+    )>,
 ) {
     let scene_time = playback_state
         .as_ref()
         .map_or(0.0, |state| state.current_time);
-    for mut player in &mut players {
+    for (mut player, reveal, fill, stroke) in &mut players {
         let frame = player.playback.source_frame(scene_time);
-        if frame.to_bits() != player.sampled_frame.to_bits() {
+        let draw_state = LottieDrawState {
+            reveal: reveal.map_or(1.0, |value| value.0.clamp(0.0, 1.0)),
+            fill: fill.map_or(1.0, |value| value.0.clamp(0.0, 1.0)),
+            outline_width: stroke.map_or(0.03, |value| value.style.width.max(0.0)),
+        };
+        if frame.to_bits() != player.sampled_frame.to_bits() || draw_state != player.draw_state {
+            player.draw_state = draw_state;
             player.render(frame);
         }
     }
@@ -1138,6 +1205,17 @@ fn sanitize_transform(
         return;
     };
 
+    // Compact exports can omit identity translation. Velato's schema requires
+    // `p` for both layer and shape-group transforms, unlike Lottie Web.
+    transform
+        .entry("p")
+        .or_insert_with(|| serde_json::json!({"a": 0, "k": [0.0, 0.0]}));
+    // Lottie scales are percentages. Velato's fallback is [1, 1], which
+    // shrinks every group with omitted scale instead of preserving its size.
+    transform
+        .entry("s")
+        .or_insert_with(|| serde_json::json!({"a": 0, "k": [100.0, 100.0]}));
+
     let rotation = transform
         .get("r")
         .and_then(Value::as_object)
@@ -1359,6 +1437,79 @@ mod tests {
                 .all(|warning| !warning.starts_with("gradient_color_stops:"))
         );
         assert!(velato::Composition::from_json(json).is_ok());
+    }
+
+    #[test]
+    fn omitted_transform_defaults_load_and_render_in_layers_groups_and_precompositions() {
+        let layer = serde_json::json!({
+            "ty": 4, "ind": 1, "st": 0, "ip": 0, "op": 30,
+            "ks": {"o": {"a": 0, "k": 75}},
+            "shapes": [{"ty": "gr", "it": [
+                {"ty": "gr", "it": [
+                    {"ty": "rc", "p": {"a": 0, "k": [50, 50]},
+                     "s": {"a": 0, "k": [20, 20]}, "r": {"a": 0, "k": 0}},
+                    {"ty": "fl", "c": {"a": 0, "k": [1, 0, 0, 1]},
+                     "o": {"a": 0, "k": 100}, "r": 1},
+                    {"ty": "tr", "o": {"a": 0, "k": 50}}
+                ]},
+                {"ty": "tr"}
+            ]}]
+        });
+        for in_precomposition in [false, true] {
+            let mut json = serde_json::json!({
+                "v": "5.7.5", "fr": 30, "ip": 0, "op": 30, "w": 100, "h": 100,
+                "layers": [layer.clone()]
+            });
+            if in_precomposition {
+                json["assets"] = serde_json::json!([{"id": "nested", "layers": [layer.clone()]}]);
+                json["layers"] = serde_json::json!([{
+                    "ty": 0, "ind": 1, "st": 0, "ip": 0, "op": 30,
+                    "refId": "nested", "w": 100, "h": 100, "ks": {}
+                }]);
+            }
+            let error = velato::Composition::from_json(json.clone()).unwrap_err();
+            assert!(error.to_string().contains("missing field `p`"));
+            assert!(compatibility_warnings(&mut json).is_empty());
+            let composition =
+                velato::Composition::from_json(json).expect("identity defaults parse");
+            assert_eq!(
+                composition.layers[0].transform.evaluate(0.0).into_owned(),
+                vello::kurbo::Affine::IDENTITY,
+                "omitted position and scale must preserve placement and size"
+            );
+            let mut renderer = velato::Renderer::new();
+            for frame in [0.0, 15.0, 29.0] {
+                let scene = renderer.render_to_vello_scene(
+                    &composition,
+                    frame,
+                    vello::kurbo::Affine::IDENTITY,
+                    1.0,
+                );
+                assert!(
+                    !scene.encoding().path_data.is_empty(),
+                    "the rectangle must render"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn existing_transform_positions_and_scales_are_preserved() {
+        let positions = [
+            serde_json::json!({"a": 0, "k": [10, 20]}),
+            serde_json::json!({"a": 1, "k": [
+                {"t": 0, "s": [10, 20]}, {"t": 30, "s": [30, 40]}
+            ]}),
+        ];
+        for position in positions {
+            for shape_transform in [false, true] {
+                let mut transform =
+                    serde_json::json!({"p": position.clone(), "s": position.clone()});
+                sanitize_transform(Some(&mut transform), shape_transform, &mut BTreeMap::new());
+                assert_eq!(transform["p"], position);
+                assert_eq!(transform["s"], position);
+            }
+        }
     }
 
     #[test]

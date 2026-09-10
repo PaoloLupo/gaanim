@@ -2746,6 +2746,10 @@ class Lottie(Drawable):
     Rendering stays vector-based through Velato/Vello and follows exact scene
     seeks. Unsupported source features may be omitted and are listed in
     ``warnings``. A declaration belongs to one scene and can be activated once.
+    ``animate.write()`` and ``animate.create()`` reveal vector contours in
+    parallel, then fade in their authored fills and any raster images. These
+    introductions do not start source playback; sequence the clip after them
+    to animate from its selected first frame.
     """
     @property
     def source_width(self) -> int: ...
@@ -3522,8 +3526,14 @@ class MediaLibrary:
         image/video sizing. Solid layers are rendered at the root and inside
         precompositions; external image assets in both locations are resolved
         relative to the JSON file. Linear and radial gradient fills/strokes
-        preserve static or animated color and opacity stops. The first frame
-        remains visible until the value is passed once to ``Scene.play``.
+        preserve static or animated color and opacity stops. Omitted layer or
+        shape-group transform positions default to zero translation and omitted
+        scales to 100%. The selected first frame is displayed until the value is
+        passed once to ``Scene.play``. Playback follows the scene clock from
+        its scheduled start, including backward timeline seeks.
+        ``animate.fade_in()``, ``animate.write()``, and ``animate.create()``
+        can introduce that first frame before playback. Write/create trace
+        vector contours in parallel, then fade in fills and raster images.
         Invalid options raise ``ValueError``; file, JSON, image, and unsafe
         importer failures raise ``RuntimeError`` rather than aborting the scene
         load.

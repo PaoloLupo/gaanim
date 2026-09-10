@@ -1347,6 +1347,33 @@ pub fn gaanim_render_system(
             .get(entity)
             .unwrap_or((None, None, None, None, None, None, None, None));
 
+        // Invalidate before skipping hidden or culled objects. Their new geometry
+        // may stop changing before they become visible again (e.g. a rewound Lottie).
+        let path_changed = path_ref.as_ref().is_some_and(|r| r.is_changed());
+        let changed = path_changed
+            || path_source_ref.as_ref().is_some_and(|r| r.is_changed())
+            // Fill-level geometry is derived later in the frame. Track the
+            // source value too, so a retained fragment can never outlive a
+            // rewind or a segment replay that changes only this component.
+            || fill_level_ref.as_ref().is_some_and(|r| r.is_changed())
+            || fill_ref.as_ref().is_some_and(|r| r.is_changed())
+            || stroke_ref.as_ref().is_some_and(|r| r.is_changed())
+            || raster_image_ref.as_ref().is_some_and(|r| r.is_changed())
+            || reactive_readout_ref
+                .as_ref()
+                .is_some_and(|r| r.is_changed())
+            || lottie_ref.as_ref().is_some_and(|r| r.is_changed())
+            || shadow_ref.as_ref().is_some_and(|r| r.is_changed())
+            || glow_ref.as_ref().is_some_and(|r| r.is_changed())
+            || blur_ref.as_ref().is_some_and(|r| r.is_changed())
+            || clip_ref.as_ref().is_some_and(|r| r.is_changed())
+            || fill_progress_ref.as_ref().is_some_and(|r| r.is_changed())
+            || tip_glow_ref.as_ref().is_some_and(|r| r.is_changed());
+
+        if changed {
+            cache.fragment_cache.remove(&mobj_id.0);
+        }
+
         // 2. Perform camera frustum culling and hierarchical culling propagation
         if let Some(bounds) = cam_bounds {
             // Check if any ancestor of this entity is already culled
@@ -1386,32 +1413,6 @@ pub fn gaanim_render_system(
         // Groups do not draw visual geometry directly, they only act as spatial nodes.
         if is_group_opt.is_some() {
             continue;
-        }
-
-        // Fragment Invalidation Check: Only visual components trigger rebuild.
-        let path_changed = path_ref.as_ref().is_some_and(|r| r.is_changed());
-        let changed = path_changed
-            || path_source_ref.as_ref().is_some_and(|r| r.is_changed())
-            // Fill-level geometry is derived later in the frame. Track the
-            // source value too, so a retained fragment can never outlive a
-            // rewind or a segment replay that changes only this component.
-            || fill_level_ref.as_ref().is_some_and(|r| r.is_changed())
-            || fill_ref.as_ref().is_some_and(|r| r.is_changed())
-            || stroke_ref.as_ref().is_some_and(|r| r.is_changed())
-            || raster_image_ref.as_ref().is_some_and(|r| r.is_changed())
-            || reactive_readout_ref
-                .as_ref()
-                .is_some_and(|r| r.is_changed())
-            || lottie_ref.as_ref().is_some_and(|r| r.is_changed())
-            || shadow_ref.as_ref().is_some_and(|r| r.is_changed())
-            || glow_ref.as_ref().is_some_and(|r| r.is_changed())
-            || blur_ref.as_ref().is_some_and(|r| r.is_changed())
-            || clip_ref.as_ref().is_some_and(|r| r.is_changed())
-            || fill_progress_ref.as_ref().is_some_and(|r| r.is_changed())
-            || tip_glow_ref.as_ref().is_some_and(|r| r.is_changed());
-
-        if changed {
-            cache.fragment_cache.remove(&mobj_id.0);
         }
 
         // Read the current fill progress. If the component is absent
@@ -1829,6 +1830,47 @@ mod tests {
         assert!(
             !Arc::ptr_eq(&first, &second),
             "a retained fragment must not survive a fill-level change"
+        );
+    }
+
+    #[test]
+    fn hidden_geometry_changes_invalidate_fragment_before_fade_in() {
+        let mut app = App::new();
+        app.init_resource::<GaanimRenderCache>()
+            .add_systems(Update, gaanim_render_system);
+        let id = ObjectId::from_raw(48);
+        let entity = app
+            .world_mut()
+            .spawn((
+                MobjectId(id),
+                GlobalSpatialTransform::default(),
+                GlobalOpacity(1.0),
+                RenderOrder::default(),
+                RenderLayer::Vello2D,
+                Path2D(rect_path(0.0, 0.0, 20.0, 20.0)),
+                FillBrush::color(peniko::Color::WHITE),
+                StrokeBrush::transparent(),
+                Visible,
+            ))
+            .id();
+        app.update();
+        let last_frame = app.world().resource::<GaanimRenderCache>().fragment_cache[&id].clone();
+        app.world_mut().get_mut::<GlobalOpacity>(entity).unwrap().0 = 0.0;
+        app.world_mut().get_mut::<Path2D>(entity).unwrap().0 = rect_path(30.0, 0.0, 40.0, 10.0);
+        app.update();
+        assert!(
+            !app.world()
+                .resource::<GaanimRenderCache>()
+                .fragment_cache
+                .contains_key(&id)
+        );
+        // The geometry stays unchanged during the fade; only opacity changes.
+        app.world_mut().get_mut::<GlobalOpacity>(entity).unwrap().0 = 0.5;
+        app.update();
+        let first_frame = &app.world().resource::<GaanimRenderCache>().fragment_cache[&id];
+        assert_ne!(
+            first_frame.encoding().path_data,
+            last_frame.encoding().path_data
         );
     }
 

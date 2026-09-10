@@ -2330,16 +2330,23 @@ impl SceneModel {
                         .get(&live.id)
                         .cloned()
                         .unwrap_or_else(|| live.clone());
-                    if let (
-                        SpawnKind::Video {
-                            playback: frozen, ..
-                        },
-                        SpawnKind::Video {
-                            playback: current, ..
-                        },
-                    ) = (&mut authored.kind, &live.kind)
-                    {
-                        *frozen = current.clone();
+                    // Playback is scheduled after declaration geometry has been
+                    // frozen. Keep the final media schedule while retaining the
+                    // original geometry and its reversible timeline cuts.
+                    match (&mut authored.kind, &live.kind) {
+                        (
+                            SpawnKind::Video {
+                                playback: frozen, ..
+                            },
+                            SpawnKind::Video {
+                                playback: current, ..
+                            },
+                        ) => *frozen = current.clone(),
+                        (
+                            SpawnKind::Lottie { playback: frozen },
+                            SpawnKind::Lottie { playback: current },
+                        ) => *frozen = current.clone(),
+                        _ => {}
                     }
                     let spec = theme
                         .map(|theme| theme.resolve_object(&authored))
@@ -7541,7 +7548,9 @@ impl SceneModel {
                     id: "Lottie".to_owned(),
                     path: gaanim_core::kurbo::BezPath::new(),
                     bounds: Bounds3D::new_2d(-w2, -h2, w2, h2),
-                    fill: None,
+                    // The empty marker advertises a fill phase to the drawing
+                    // scheduler. LottiePlayer renders the actual authored paints.
+                    fill: Some(gaanim_core::peniko::Brush::Solid(PenikoColor::WHITE)),
                     stroke: StrokeBrush::transparent(),
                 };
                 let b = builder.svg_path(&placeholder);
@@ -8187,6 +8196,159 @@ mod tests {
         let mut world = world;
         queue.apply(&mut world);
         world
+    }
+
+    fn lottie_test_asset(name: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "gaanim-compiled-lottie-{name}-{}.json",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            r#"{
+            "v":"5.7.5","fr":30,"ip":0,"op":30,"w":100,"h":100,
+            "layers":[{"ty":4,"ind":1,"st":0,"ip":0,"op":30,
+                "ks":{"p":{"a":1,"k":[
+                    {"t":0,"s":[0,0],"o":{"x":0.33,"y":0.33},"i":{"x":0.67,"y":0.67}},
+                    {"t":30,"s":[60,0]}
+                ]},"s":{"a":0,"k":[100,100]},"r":{"a":0,"k":0}},
+                "shapes":[
+                    {"ty":"rc","p":{"a":0,"k":[10,50]},"s":{"a":0,"k":[10,10]},"r":{"a":0,"k":0}},
+                    {"ty":"fl","c":{"a":0,"k":[1,0,0,1]},"o":{"a":0,"k":100},"r":1}
+                ]
+            }]
+        }"#,
+        )
+        .unwrap();
+
+        path
+    }
+
+    #[test]
+    fn compiled_lottie_playback_animates_after_frozen_declaration_and_seeks_back() {
+        use gaanim_renderer::lottie::{LottiePlayer, sample_lottie_system};
+
+        let path = lottie_test_asset("playback");
+
+        for (activate, looping) in [(false, false), (true, false), (true, true)] {
+            let mut canvas = SceneModel::new(100, 100);
+            let clip = canvas
+                .lottie_with_options(
+                    &path,
+                    crate::canvas::LottieOptions {
+                        offset: 0.25,
+                        duration: Some(0.5),
+                        speed: 2.0,
+                        looping,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            canvas.wait(1.0); // Freeze the declaration before scheduling playback.
+            canvas.segment("lottie", None).unwrap();
+            canvas.wait(2.0);
+            if activate {
+                canvas.play_items(vec![clip.into()]).unwrap();
+            }
+            canvas.wait(1.0);
+            let mut world = compile_canvas_for_layout(canvas);
+            world.insert_resource(gaanim_animation::PlaybackState::default());
+            let mut schedule = Schedule::default();
+            schedule.add_systems(sample_lottie_system);
+            let mut sample = |time| {
+                world
+                    .resource_mut::<gaanim_animation::PlaybackState>()
+                    .current_time = time;
+                schedule.run(&mut world);
+                world
+                    .query::<&LottiePlayer>()
+                    .single(&world)
+                    .unwrap()
+                    .scene()
+                    .encoding()
+                    .transforms
+                    .clone()
+            };
+            let first = sample(0.0);
+            assert_eq!(sample(2.9), first, "hold the source offset before play");
+            assert_eq!(
+                sample(3.0),
+                first,
+                "play begins at the absolute scene cursor"
+            );
+            let middle = sample(3.125);
+            if activate {
+                assert_ne!(middle, first, "Scene.play must produce visible motion");
+                if looping {
+                    assert_eq!(sample(3.375), middle, "repeat the selected source interval");
+                } else {
+                    assert_ne!(sample(3.5), middle, "advance to the final frame");
+                    assert_eq!(sample(3.5), sample(4.0), "hold the final frame");
+                }
+            } else {
+                assert_eq!(middle, first, "an unplayed declaration must remain still");
+            }
+            assert_eq!(sample(0.0), first, "backward seek restores the first frame");
+            assert_eq!(sample(3.125), middle, "forward seek is deterministic");
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn lottie_write_and_create_reveal_vectors_before_playback() {
+        use gaanim_renderer::lottie::{LottiePlayer, sample_lottie_system};
+        let path = lottie_test_asset("reveal");
+        for write in [false, true] {
+            let mut canvas = SceneModel::new(100, 100);
+            let clip = canvas.lottie(&path).unwrap();
+            let animation = if write {
+                clip.drawable.write(1.0)
+            } else {
+                clip.drawable.create(1.0)
+            };
+            canvas.play(vec![animation]);
+            canvas.play_items(vec![clip.into()]).unwrap();
+            let (mut world, mut timeline) = compile_camera_timeline(canvas);
+            world.insert_resource(gaanim_animation::PlaybackState::default());
+            let mut schedule = Schedule::default();
+            schedule.add_systems(sample_lottie_system);
+            let mut sample = |time| {
+                timeline.seek(&mut world, time);
+                world
+                    .resource_mut::<gaanim_animation::PlaybackState>()
+                    .current_time = time;
+                schedule.run(&mut world);
+                let player = world.query::<&LottiePlayer>().single(&world).unwrap();
+                let encoded = player.scene().encoding();
+                (
+                    encoded.path_data.clone(),
+                    encoded.draw_data.clone(),
+                    encoded.transforms.clone(),
+                )
+            };
+            let empty = sample(0.0);
+            let outline = sample(0.35);
+            let fill = sample(0.85);
+            let first = sample(1.0);
+            assert!(
+                outline.0.len() > empty.0.len(),
+                "draw visible contours during reveal"
+            );
+            assert_ne!(
+                outline, fill,
+                "cross-fade the authored fill after the outline"
+            );
+            assert_ne!(fill, first, "finish the fill phase");
+            assert_ne!(sample(1.5).2, first.2, "start source playback after reveal");
+            assert_eq!(sample(0.0), empty, "rewind hides the composition");
+            assert_eq!(sample(0.35), outline, "rewind restores partial outlines");
+            assert_eq!(
+                sample(1.0),
+                first,
+                "reveal returns to the first source frame"
+            );
+        }
+        let _ = std::fs::remove_file(path);
     }
 
     fn only_text_root(

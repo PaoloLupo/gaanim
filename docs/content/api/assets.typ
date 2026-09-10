@@ -125,6 +125,22 @@ nativa anterior y todos sus descendientes antes de reconstruirla.
 Vello mediante Velato. Los parámetros `width`, `height` y `fit` siguen la misma
 semántica que en imágenes; `offset`, `duration`, `loop` y `speed` controlan el
 intervalo reproducido. Activa el clip con `scene.play([clip])`.
+La reproducción sigue el tiempo absoluto de la escena, incluso al declararlo
+antes de otras pausas o segmentos y al saltar hacia atrás en el timeline.
+
+Puedes introducir el primer fotograma seleccionado con `fade_in`, `write` o
+`create` antes de reproducir el clip. `write` y `create` revelan los contornos
+vectoriales en paralelo y después incorporan sus rellenos originales. Las
+imágenes ráster aparecen durante la fase de relleno. La introducción no inicia
+por sí sola la animación interna del JSON:
+
+```python
+from gaanim import Scene, sequence
+
+scene = Scene()
+clip = scene.media.lottie("pulse.json")
+scene.play(sequence(clip.animate.create().duration(1.0), clip))
+```
 
 El soporte inicial prioriza formas vectoriales, transformaciones, rellenos,
 trazos y máscaras. Las capas sólidas se dibujan con su color y tamaño tanto en
@@ -137,6 +153,8 @@ Los rellenos y trazos con gradientes lineales o radiales conservan sus color
 stops y opacity stops independientes, tanto estáticos como animados.
 Texto, imágenes embebidas y efectos todavía pueden omitirse o aproximarse.
 Consulta `clip.warnings` para detectar esas diferencias.
+Cuando una transformación de capa o grupo omite su posición o escala, se usa
+una traslación de cero o una escala del 100 %, también dentro de precomposiciones.
 Las posiciones separadas X/Y de una capa sí se reproducen; si Velato encuentra
 otra construcción que no puede convertir de forma segura, la carga devuelve un
 error en vez de abortar el proceso. El contenedor `.lottie` todavía no está
