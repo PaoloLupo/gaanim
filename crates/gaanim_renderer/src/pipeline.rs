@@ -4,6 +4,7 @@ use crate::effects::{
     VectorOutlineBinding,
 };
 use crate::lottie::LottiePlayer;
+use crate::stroke::{draw_stroke, view_stroke_transform};
 use bevy::prelude::*;
 use gaanim_animation::{FillDrawProgress, ReactiveReadout, WriteTipGlow};
 use gaanim_core::ObjectId;
@@ -149,6 +150,7 @@ pub struct GaanimPbrCamera;
 #[derive(Resource, Default)]
 pub struct GaanimRenderCache {
     pub fragment_cache: HashMap<ObjectId, Arc<vello::Scene>>,
+    stroke_views: HashMap<ObjectId, kurbo::Affine>,
 }
 
 pub struct ExtractedElement {
@@ -572,20 +574,27 @@ fn draw_soft_stroke(
     brush: &peniko::Brush,
     style: &kurbo::Stroke,
     sigma: f64,
+    view: Option<kurbo::Affine>,
 ) {
     for ((x, y), weight) in BLUR_KERNEL {
         let sample_brush = brush.clone().multiply_alpha(weight);
-        scene.stroke(
+        draw_stroke(
+            scene,
             style,
             kurbo::Affine::translate((x * sigma, y * sigma)),
             &sample_brush,
-            None,
+            view,
             path,
         );
     }
 }
 
-fn draw_glow(scene: &mut vello::Scene, path: &kurbo::BezPath, glow: &Glow) {
+fn draw_glow(
+    scene: &mut vello::Scene,
+    path: &kurbo::BezPath,
+    glow: &Glow,
+    view: Option<kurbo::Affine>,
+) {
     if !glow.radius.is_finite()
         || glow.radius <= 0.0
         || !glow.intensity.is_finite()
@@ -600,11 +609,12 @@ fn draw_glow(scene: &mut vello::Scene, path: &kurbo::BezPath, glow: &Glow) {
         let sample = brush
             .clone()
             .multiply_alpha((glow.intensity * 0.18 * falloff * falloff).clamp(0.0, 1.0));
-        scene.stroke(
+        draw_stroke(
+            scene,
             &kurbo::Stroke::new(spread * 2.0),
             kurbo::Affine::IDENTITY,
             &sample,
-            None,
+            view,
             path,
         );
     }
@@ -841,6 +851,7 @@ pub fn gaanim_render_cache_sweep_system(
     }
     let active: std::collections::HashSet<ObjectId> = query_mobj_ids.iter().map(|m| m.0).collect();
     cache.fragment_cache.retain(|id, _| active.contains(id));
+    cache.stroke_views.retain(|id, _| active.contains(id));
 }
 
 /// Standalone function: extracts all visible Vello2D mobjects from a Bevy World
@@ -1006,6 +1017,19 @@ pub fn compile_scene_from_world(
         let elem_fill = fill_opt.and_then(|f| f.0.as_ref());
         let elem_stroke = stroke_opt.and_then(|s| s.brush.as_ref());
         let elem_stroke_style = stroke_opt.map(|s| &s.style);
+        let stroke_view = if elem_stroke.is_some() || glow_opt.is_some() {
+            view_stroke_transform(entity, |ancestor| {
+                Some((
+                    *world.get::<gaanim_math::SpatialTransform>(ancestor)?,
+                    world.get::<ChildOf>(ancestor).map(|parent| parent.parent()),
+                    world
+                        .get::<gaanim_scene::CoordinateViewRole>(ancestor)
+                        .copied(),
+                ))
+            })
+        } else {
+            None
+        };
 
         if let Some(shadow) = shadow_opt {
             let shadow_transform = kurbo::Affine::translate((shadow.offset.x, shadow.offset.y));
@@ -1031,7 +1055,7 @@ pub fn compile_scene_from_world(
         }
 
         if let Some(glow) = glow_opt {
-            draw_glow(&mut scene, elem_path, glow);
+            draw_glow(&mut scene, elem_path, glow, stroke_view);
         }
 
         let is_trimmed_closed = source_path.is_some_and(|src| {
@@ -1054,7 +1078,14 @@ pub fn compile_scene_from_world(
                 );
             }
             if let (Some(stroke_brush), Some(style)) = (elem_stroke, elem_stroke_style) {
-                draw_soft_stroke(&mut scene, elem_path, stroke_brush, style, sigma);
+                draw_soft_stroke(
+                    &mut scene,
+                    elem_path,
+                    stroke_brush,
+                    style,
+                    sigma,
+                    stroke_view,
+                );
             }
             if is_trimmed_closed {
                 elem_stroke.is_some()
@@ -1136,20 +1167,22 @@ pub fn compile_scene_from_world(
                     kurbo::Affine::IDENTITY,
                     clip_path,
                 );
-                scene.stroke(
+                draw_stroke(
+                    &mut scene,
                     &effective_style,
                     kurbo::Affine::IDENTITY,
                     &effective_stroke_brush,
-                    None,
+                    stroke_view,
                     elem_path,
                 );
                 scene.pop_layer();
             } else {
-                scene.stroke(
+                draw_stroke(
+                    &mut scene,
                     &effective_style,
                     kurbo::Affine::IDENTITY,
                     &effective_stroke_brush,
-                    None,
+                    stroke_view,
                     elem_path,
                 );
             }
@@ -1245,6 +1278,10 @@ pub fn gaanim_render_system(
     playback_state: Option<Res<gaanim_animation::PlaybackState>>,
     canvas_bg: Option<Res<CanvasBackground>>,
     child_query: Query<&ChildOf>,
+    view_query: Query<(
+        &gaanim_math::SpatialTransform,
+        Option<&gaanim_scene::CoordinateViewRole>,
+    )>,
     query_mobjects: Query<
         (
             Entity,
@@ -1349,8 +1386,29 @@ pub fn gaanim_render_system(
 
         // Invalidate before skipping hidden or culled objects. Their new geometry
         // may stop changing before they become visible again (e.g. a rewound Lottie).
+        let stroke_view = if stroke_ref
+            .as_ref()
+            .is_some_and(|stroke| stroke.brush.is_some())
+            || glow_ref.is_some()
+        {
+            view_stroke_transform(entity, |ancestor| {
+                let (local, role) = view_query.get(ancestor).ok()?;
+                Some((
+                    *local,
+                    child_query.get(ancestor).ok().map(|parent| parent.parent()),
+                    role.copied(),
+                ))
+            })
+        } else {
+            None
+        };
+        let previous_view = match stroke_view {
+            Some(view) => cache.stroke_views.insert(mobj_id.0, view),
+            None => cache.stroke_views.remove(&mobj_id.0),
+        };
         let path_changed = path_ref.as_ref().is_some_and(|r| r.is_changed());
         let changed = path_changed
+            || stroke_view != previous_view
             || path_source_ref.as_ref().is_some_and(|r| r.is_changed())
             // Fill-level geometry is derived later in the frame. Track the
             // source value too, so a retained fragment can never outlive a
@@ -1481,7 +1539,7 @@ pub fn gaanim_render_system(
             }
 
             if let Some(glow) = elem_glow {
-                draw_glow(&mut scene, elem_path, glow);
+                draw_glow(&mut scene, elem_path, glow, stroke_view);
             }
 
             let is_trimmed_closed = source_path.is_some_and(|src| {
@@ -1504,7 +1562,14 @@ pub fn gaanim_render_system(
                     );
                 }
                 if let (Some(stroke_brush), Some(style)) = (elem_stroke, elem_stroke_style) {
-                    draw_soft_stroke(&mut scene, elem_path, stroke_brush, style, sigma);
+                    draw_soft_stroke(
+                        &mut scene,
+                        elem_path,
+                        stroke_brush,
+                        style,
+                        sigma,
+                        stroke_view,
+                    );
                 }
                 if is_trimmed_closed {
                     elem_stroke.is_some()
@@ -1578,20 +1643,22 @@ pub fn gaanim_render_system(
                         kurbo::Affine::IDENTITY,
                         clip_path,
                     );
-                    scene.stroke(
+                    draw_stroke(
+                        &mut scene,
                         &effective_style,
                         kurbo::Affine::IDENTITY,
                         &effective_stroke_brush,
-                        None,
+                        stroke_view,
                         elem_path,
                     );
                     scene.pop_layer();
                 } else {
-                    scene.stroke(
+                    draw_stroke(
+                        &mut scene,
                         &effective_style,
                         kurbo::Affine::IDENTITY,
                         &effective_stroke_brush,
-                        None,
+                        stroke_view,
                         elem_path,
                     );
                 }
@@ -1772,6 +1839,152 @@ mod tests {
 
     fn rect_path(x0: f64, y0: f64, x1: f64, y1: f64) -> Arc<kurbo::BezPath> {
         Arc::new(kurbo::Rect::new(x0, y0, x1, y1).to_path(0.1))
+    }
+
+    #[test]
+    fn coordinate_view_keeps_the_stroke_pen_unscaled_in_headless_output() {
+        let mut world = World::new();
+        let view_local = gaanim_math::SpatialTransform::default().with_scale_2d(3.0, 1.0);
+        let view = world
+            .spawn((
+                view_local,
+                GlobalSpatialTransform::from_local(&view_local),
+                gaanim_scene::CoordinateViewRole::View,
+            ))
+            .id();
+        let path = kurbo::Line::new((2.0, 1.0), (2.0, 5.0)).to_path(0.01);
+        world.spawn((
+            MobjectId(ObjectId::from_raw(91)),
+            gaanim_math::SpatialTransform::default(),
+            GlobalSpatialTransform::from_local(&view_local),
+            GlobalOpacity(1.0),
+            RenderOrder::default(),
+            RenderLayer::Vello2D,
+            Path2D(Arc::new(path)),
+            StrokeBrush::new(peniko::Color::BLACK, 0.03),
+            Visible,
+            ChildOf(view),
+        ));
+        let scene = compile_scene_from_world(&mut world, None);
+        assert_eq!(
+            scene.encoding().transforms[0].matrix,
+            [1.0, 0.0, 0.0, 1.0],
+            "the domain zoom must move the path without widening the stroke pen"
+        );
+    }
+
+    #[test]
+    fn coordinate_view_rebuilds_strokes_on_zoom_and_rewind_but_reuses_them_on_pan() {
+        use gaanim_math::SpatialTransform;
+        let mut app = App::new();
+        app.init_resource::<GaanimRenderCache>().add_systems(
+            Update,
+            (
+                gaanim_scene::transform_propagation_system,
+                gaanim_render_system,
+            )
+                .chain(),
+        );
+        let view = app
+            .world_mut()
+            .spawn((
+                SpatialTransform::default(),
+                GlobalSpatialTransform::default(),
+                gaanim_scene::CoordinateViewRole::View,
+            ))
+            .id();
+        let id = ObjectId::from_raw(92);
+        let path = kurbo::BezPath::from_svg("M 2 1 L 2 5 L 6 5 L 8 7 Q 9 9 6 10").unwrap();
+        let style = kurbo::Stroke::new(0.04).with_dashes(0.1, [0.2, 0.1]);
+        let brush = peniko::Brush::Solid(peniko::Color::BLACK);
+        let entity = app
+            .world_mut()
+            .spawn((
+                MobjectId(id),
+                SpatialTransform::default(),
+                GlobalSpatialTransform::default(),
+                GlobalOpacity(1.0),
+                RenderOrder::default(),
+                RenderLayer::Vello2D,
+                Path2D(Arc::new(path.clone())),
+                StrokeBrush {
+                    brush: Some(brush.clone()),
+                    style: style.clone(),
+                },
+                Visible,
+                ChildOf(view),
+            ))
+            .id();
+        app.update();
+        let original = app.world().resource::<GaanimRenderCache>().fragment_cache[&id].clone();
+        for (sx, sy) in [(3.0, 1.0), (1.0, 2.0), (2.0, 2.0), (1.0, 1.0), (3.0, 1.0)] {
+            app.world_mut()
+                .entity_mut(view)
+                .insert(SpatialTransform::default().with_scale_2d(sx, sy));
+            app.update();
+            let fragment = app.world().resource::<GaanimRenderCache>().fragment_cache[&id].clone();
+            assert!(!Arc::ptr_eq(&original, &fragment));
+            let expected_path = kurbo::Affine::scale_non_uniform(sx, sy) * &path;
+            let mut expected = vello::Scene::new();
+            expected.stroke(
+                &style,
+                kurbo::Affine::IDENTITY,
+                &brush,
+                None,
+                &expected_path,
+            );
+            assert_eq!(
+                fragment.encoding().path_data,
+                expected.encoding().path_data,
+                "dash lengths and curve geometry must be generated after domain zoom"
+            );
+            let headless = compile_scene_from_world(app.world_mut(), None);
+            let live = app
+                .world_mut()
+                .query::<&VelloScene2d>()
+                .single(app.world())
+                .unwrap();
+            assert_eq!(headless.encoding().path_data, live.encoding().path_data);
+            assert_eq!(headless.encoding().transforms, live.encoding().transforms);
+            assert_eq!(
+                headless.encoding().transforms[0].matrix,
+                [1.0, 0.0, 0.0, 1.0]
+            );
+            app.update();
+            assert!(Arc::ptr_eq(
+                &fragment,
+                &app.world().resource::<GaanimRenderCache>().fragment_cache[&id]
+            ));
+            app.world_mut()
+                .get_mut::<SpatialTransform>(view)
+                .unwrap()
+                .translation
+                .x += 2.0;
+            app.update();
+            assert!(Arc::ptr_eq(
+                &fragment,
+                &app.world().resource::<GaanimRenderCache>().fragment_cache[&id]
+            ));
+        }
+        app.world_mut().get_mut::<GlobalOpacity>(entity).unwrap().0 = 0.0;
+        app.world_mut()
+            .entity_mut(view)
+            .insert(SpatialTransform::default());
+        app.update();
+        assert!(
+            !app.world()
+                .resource::<GaanimRenderCache>()
+                .fragment_cache
+                .contains_key(&id)
+        );
+        app.world_mut().get_mut::<GlobalOpacity>(entity).unwrap().0 = 1.0;
+        app.update();
+        let restored = &app.world().resource::<GaanimRenderCache>().fragment_cache[&id];
+        assert_eq!(original.encoding().path_data, restored.encoding().path_data);
+        assert_eq!(
+            original.encoding().transforms,
+            restored.encoding().transforms
+        );
     }
 
     #[test]

@@ -63,3 +63,6 @@ pub use theme::{
 };
 mod compile;
 pub(crate) use compile::{split_text_math, text_inline_typst_source};
+
+/// dotLottie selectors and typed inputs.
+pub use gaanim_renderer::lottie::{LottieInput, LottiePackageOptions};

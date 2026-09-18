@@ -1,6 +1,7 @@
 use crate::components::{
-    FillBrush, GlobalOpacity, GroupMarker, LineListData, LocalBounds, Material3D,
-    Material3DBaseline, Mesh3DMarker, Opacity, StrokeBrush, TriangleMeshData, WorldBounds,
+    CoordinateViewRole, FillBrush, GlobalOpacity, GroupMarker, LineListData, LocalBounds,
+    Material3D, Material3DBaseline, Mesh3DMarker, Opacity, StrokeBrush, TriangleMeshData,
+    WorldBounds,
 };
 use bevy::animation::AnimationPlayer;
 use bevy::animation::graph::{AnimationGraph, AnimationGraphHandle};
@@ -61,9 +62,18 @@ pub fn transform_propagation_system(
     roots: Query<Entity, (Without<ChildOf>, With<SpatialTransform>)>,
     children_query: Query<&Children>,
     mut transforms: Query<(&SpatialTransform, &mut GlobalSpatialTransform)>,
+    view_roles: Query<&CoordinateViewRole>,
+    parents: Query<&ChildOf>,
 ) {
     for root in &roots {
-        propagate_transforms_recursive(root, None, &children_query, &mut transforms);
+        propagate_transforms_recursive(
+            root,
+            None,
+            &children_query,
+            &mut transforms,
+            &view_roles,
+            &parents,
+        );
     }
 }
 
@@ -72,6 +82,8 @@ fn propagate_transforms_recursive(
     parent_global: Option<GlobalSpatialTransform>,
     children_query: &Query<&Children>,
     transforms: &mut Query<(&SpatialTransform, &mut GlobalSpatialTransform)>,
+    view_roles: &Query<&CoordinateViewRole>,
+    parents: &Query<&ChildOf>,
 ) {
     let Ok((local, mut global)) = transforms.get_mut(entity) else {
         return;
@@ -80,8 +92,45 @@ fn propagate_transforms_recursive(
         .as_ref()
         .map(|parent| GlobalSpatialTransform::from_parent_and_local(parent, local))
         .unwrap_or_else(|| GlobalSpatialTransform::from_local(local));
-    let current_global = *global;
+    let mut current_global = *global;
     drop(global);
+
+    if matches!(view_roles.get(entity), Ok(CoordinateViewRole::Label)) {
+        // Only text roots need this alternate linear transform. Keep the fully
+        // transformed origin, but omit domain-view scale from the glyph basis.
+        // Apply before descending so every glyph gets the correction this frame.
+        // Recompose from locals rather than inverting a possibly singular scale.
+        let mut basis = GlobalSpatialTransform::default();
+        let mut ancestor = entity;
+        let mut needs_compensation = false;
+        loop {
+            let Ok((local, _)) = transforms.get(ancestor) else {
+                break;
+            };
+            let mut local = *local;
+            if matches!(view_roles.get(ancestor), Ok(CoordinateViewRole::View)) {
+                needs_compensation |= local.scale != gaanim_core::glam::DVec3::ONE;
+                local.scale = gaanim_core::glam::DVec3::ONE;
+            }
+            basis.affine_2d = local.to_affine_2d() * basis.affine_2d;
+            basis.mat4 = local.to_mat4() * basis.mat4;
+            let Ok(parent) = parents.get(ancestor) else {
+                break;
+            };
+            ancestor = parent.parent();
+        }
+        // Keep unzoomed output bit-for-bit identical to ordinary propagation.
+        if needs_compensation {
+            let [a, b, c, d, _, _] = basis.affine_2d.as_coeffs();
+            let [_, _, _, _, tx, ty] = current_global.affine_2d.as_coeffs();
+            current_global.affine_2d = gaanim_core::kurbo::Affine::new([a, b, c, d, tx, ty]);
+            basis.mat4.w_axis = current_global.mat4.w_axis;
+            current_global.mat4 = basis.mat4;
+            if let Ok((_, mut global)) = transforms.get_mut(entity) {
+                *global = current_global;
+            }
+        }
+    }
 
     if let Ok(children) = children_query.get(entity) {
         for child in children.iter() {
@@ -90,6 +139,8 @@ fn propagate_transforms_recursive(
                 Some(current_global),
                 children_query,
                 transforms,
+                view_roles,
+                parents,
             );
         }
     }
@@ -1210,6 +1261,120 @@ pub fn update_3d_triangle_meshes_system(
 mod tests {
     use super::*;
     use bevy::prelude::{App, BuildChildrenTransformExt, Schedule, Update, World};
+
+    #[test]
+    fn coordinate_view_scales_positions_but_keeps_label_basis_and_glyph_offsets() {
+        use gaanim_core::glam::DVec3;
+        let mut world = World::new();
+        let root_local = SpatialTransform::new_2d(4.0, -2.0)
+            .with_rotation_2d(0.3)
+            .scale_uniform(1.5);
+        let root = world
+            .spawn((root_local, GlobalSpatialTransform::default()))
+            .id();
+        let view_local = SpatialTransform::new_2d(-3.0, 1.0).with_scale_2d(4.0, 0.5);
+        let view = world
+            .spawn((
+                view_local,
+                GlobalSpatialTransform::default(),
+                CoordinateViewRole::View,
+                ChildOf(root),
+            ))
+            .id();
+        let layer_local = SpatialTransform::new_2d(0.5, 0.8).with_rotation_2d(0.1);
+        let layer = world
+            .spawn((
+                layer_local,
+                GlobalSpatialTransform::default(),
+                ChildOf(view),
+            ))
+            .id();
+        let label_local = SpatialTransform::new_2d(2.0, -1.0)
+            .with_rotation_2d(0.7)
+            .scale_uniform(0.8);
+        let label = world
+            .spawn((
+                label_local,
+                GlobalSpatialTransform::default(),
+                CoordinateViewRole::Label,
+                ChildOf(layer),
+            ))
+            .id();
+        let glyph_local = SpatialTransform::new_2d(0.4, 0.2);
+        let glyph = world
+            .spawn((
+                glyph_local,
+                GlobalSpatialTransform::default(),
+                ChildOf(label),
+            ))
+            .id();
+        let plot = world
+            .spawn((
+                label_local,
+                GlobalSpatialTransform::default(),
+                ChildOf(layer),
+            ))
+            .id();
+        let mut schedule = Schedule::default();
+        schedule.add_systems(transform_propagation_system);
+
+        // Include singular scales from fade animations: compensation must not
+        // produce NaNs or cancel a user's intentional scale on the whole plot.
+        for scale in [
+            DVec3::new(4.0, 0.5, 1.0),
+            DVec3::ONE,
+            DVec3::new(0.0, 2.0, 1.0),
+        ] {
+            let mut view_local = view_local;
+            view_local.scale = scale;
+            world.entity_mut(view).insert(view_local);
+            schedule.run(&mut world);
+            let normal = root_local.to_mat4()
+                * view_local.to_mat4()
+                * layer_local.to_mat4()
+                * label_local.to_mat4();
+            let mut unscaled_view = view_local;
+            unscaled_view.scale = DVec3::ONE;
+            let mut expected = root_local.to_mat4()
+                * unscaled_view.to_mat4()
+                * layer_local.to_mat4()
+                * label_local.to_mat4();
+            expected.w_axis = normal.w_axis;
+            let global = world.get::<GlobalSpatialTransform>(label).unwrap();
+            assert!(global.mat4.abs_diff_eq(expected, 1e-9));
+            if scale == DVec3::ONE {
+                assert_eq!(global.mat4, normal, "unzoomed output must remain exact");
+                assert_eq!(
+                    global.affine_2d,
+                    root_local.to_affine_2d()
+                        * view_local.to_affine_2d()
+                        * layer_local.to_affine_2d()
+                        * label_local.to_affine_2d()
+                );
+            }
+            for point in [DVec3::ZERO, DVec3::X, DVec3::Y] {
+                let affine_point =
+                    global.affine_2d * gaanim_core::kurbo::Point::new(point.x, point.y);
+                let expected_point = expected.transform_point3(point);
+                assert!((affine_point.x - expected_point.x).abs() < 1e-9);
+                assert!((affine_point.y - expected_point.y).abs() < 1e-9);
+            }
+            assert!(
+                world
+                    .get::<GlobalSpatialTransform>(glyph)
+                    .unwrap()
+                    .mat4
+                    .abs_diff_eq(expected * glyph_local.to_mat4(), 1e-9)
+            );
+            assert!(
+                world
+                    .get::<GlobalSpatialTransform>(plot)
+                    .unwrap()
+                    .mat4
+                    .abs_diff_eq(normal, 1e-9)
+            );
+        }
+    }
 
     fn lit_triangle() -> TriangleMeshData {
         TriangleMeshData {

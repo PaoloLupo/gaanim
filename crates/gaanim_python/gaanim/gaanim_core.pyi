@@ -2498,7 +2498,14 @@ class CoordinateSpaceAnimation:
     def move_to(self, x: float, y: float) -> Anim: ...
     def scale_to(self, factor: float) -> Anim: ...
     def rotate_to(self, radians: float) -> Anim: ...
-    def view_to(self, x_domain: tuple[float, float], y_domain: tuple[float, float]) -> Anim: ...
+    def view_to(self, x_domain: tuple[float, float], y_domain: tuple[float, float]) -> Anim:
+        """Animate the data-domain window, keeping axis text and stroke widths.
+
+        Numbers and titles keep their size and proportions. Axes, grids and plotted
+        paths keep their stroke widths throughout the zoom. Returns an unscheduled
+        animation. Raises ValueError for invalid domains or non-linear/time axes.
+        """
+        ...
 
 class CoordinateSpace:
     def drawable(self) -> Drawable: ...
@@ -2507,7 +2514,14 @@ class CoordinateSpace:
     def move_to(self, x: float, y: float) -> CoordinateSpace: ...
     def scale_to(self, factor: float) -> CoordinateSpace: ...
     def rotate_to(self, radians: float) -> CoordinateSpace: ...
-    def view_to(self, x_domain: tuple[float, float], y_domain: tuple[float, float]) -> CoordinateSpace: ...
+    def view_to(self, x_domain: tuple[float, float], y_domain: tuple[float, float]) -> CoordinateSpace:
+        """Set the data-domain window at the cursor and return this space.
+
+        Axis text keeps its size and proportions while following the view positions.
+        Axes, grids and plotted paths retain their authored stroke widths.
+        Raises ValueError unless domains are finite and increasing on linear/time axes.
+        """
+        ...
     def coord(self, x: float, y: float) -> CoordinateRef: ...
     def data_to_local(self, x: float, y: float) -> tuple[float, float]: ...
     def local_to_data(self, x: float, y: float) -> tuple[float, float]: ...
@@ -2741,7 +2755,7 @@ class VideoSegment:
     """
 
 class Lottie(Drawable):
-    """A transformable Lottie JSON composition activated by ``Scene.play``.
+    """A transformable Lottie JSON or dotLottie composition activated by ``Scene.play``.
 
     Rendering stays vector-based through Velato/Vello and follows exact scene
     seeks. Unsupported source features may be omitted and are listed in
@@ -2751,6 +2765,41 @@ class Lottie(Drawable):
     introductions do not start source playback; sequence the clip after them
     to animate from its selected first frame.
     """
+    @property
+    def animation_ids(self) -> list[str]:
+        """Animation IDs in manifest order; empty for a JSON source."""
+        ...
+    @property
+    def theme_ids(self) -> list[str]:
+        """Available theme IDs in manifest order; empty for JSON."""
+        ...
+    @property
+    def state_machine_ids(self) -> list[str]:
+        """Available machine IDs in manifest order; empty for JSON."""
+        ...
+    def set_theme(self, id: Optional[str] = None) -> Lottie:
+        """Apply a static theme at the current cursor; None restores the base.
+
+        Before activation, sets the initial theme. Returns this clip without
+        advancing time. Invalid or unsupported themes raise ValueError.
+        """
+        ...
+    def set_input(self, name: str, value: float | int | bool | str) -> Lottie:
+        """Set a typed machine input at the cursor, or initially before play.
+
+        Returns this clip without advancing time. Unknown inputs, mismatched
+        types and non-finite numbers raise ValueError. Bool is distinct from
+        numeric inputs; other Python objects raise TypeError.
+        """
+        ...
+    def fire_event(self, name: str) -> Lottie:
+        """Fire a declared event at the current cursor and return this clip.
+
+        Requires activation by Scene.play. Invalid names or inactive clips
+        raise ValueError. Same-time commands preserve declaration order and
+        replay deterministically when seeking and exporting.
+        """
+        ...
     @property
     def source_width(self) -> int: ...
     @property
@@ -3511,6 +3560,9 @@ class MediaLibrary:
         self,
         path: str,
         *,
+        animation_id: Optional[str] = None,
+        theme_id: Optional[str] = None,
+        state_machine_id: Optional[str] = None,
         width: Optional[float] = None,
         height: Optional[float] = None,
         fit: Literal["contain", "cover", "stretch"] = "contain",
@@ -3519,7 +3571,17 @@ class MediaLibrary:
         loop: bool = False,
         speed: float = 1.0,
     ) -> Lottie:
-        """Load a local Lottie JSON composition as a vector drawable.
+        """Load local Lottie JSON or a dotLottie v1/v2 package as a vector drawable.
+
+        Package selectors choose an animation, static theme or state machine.
+        ``animation_id`` and ``state_machine_id`` are mutually exclusive; absent
+        selectors use the manifest initial content, then the first animation.
+        Machine activation does not extend the scene; use ``Scene.wait`` to
+        author its duration. Machines reject non-default offset/duration/loop/
+        speed options and control playback through their states instead.
+        Packaged images are decoded in memory. Invalid packages, selectors,
+        themes and unsupported machine features raise ``ValueError``.
+        JSON does not accept package selectors.
 
         ``offset`` and ``duration`` select source seconds; ``speed`` must be
         positive. ``width`` and ``height`` use scene units and ``fit`` follows
@@ -4272,8 +4334,9 @@ class AssetManager:
         """
         ...
     def preload(self, paths: Sequence[str]) -> None:
-        """Use preload on this Scene or create the requested value.
+        """Validate local assets and cache raster, Lottie JSON and .lottie resources.
 
+        dotLottie packages preload their default animation or state machine.
         Example:
             scene.preload(["assets/example.svg"])
         """
@@ -4290,8 +4353,9 @@ class AssetManager:
         """
         ...
     def reload_assets(self) -> None:
-        """Use reload assets on this Scene or create the requested value.
+        """Clear raster, Lottie JSON, dotLottie package and glTF asset caches.
 
+        Existing clips retain their resources; subsequent loads see disk changes.
         Example:
             scene.reload_assets()
         """

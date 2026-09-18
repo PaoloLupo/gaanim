@@ -269,7 +269,53 @@ impl GpuContext {
 
 #[cfg(test)]
 mod tests {
-    use super::GpuContextError;
+    use super::{GpuContext, GpuContextError};
+
+    #[test]
+    #[ignore = "requires a GPU adapter; run explicitly for raster replay validation"]
+    fn raster_images_survive_vector_only_frames_and_replay() {
+        use bevy_vello::vello::{Scene, kurbo::Affine, peniko};
+
+        let mut gpu = GpuContext::new(32, 32).expect("GPU context");
+        let image = peniko::ImageData {
+            data: peniko::Blob::new(std::sync::Arc::new([255, 0, 0, 255].repeat(4))),
+            format: peniko::ImageFormat::Rgba8,
+            alpha_type: peniko::ImageAlphaType::Alpha,
+            width: 2,
+            height: 2,
+        };
+        let brush = peniko::ImageBrush::new(image);
+        let mut image_scene = Scene::new();
+        image_scene.draw_image(&brush, Affine::scale(16.0));
+        let mut vector_scene = Scene::new();
+        vector_scene.fill(
+            peniko::Fill::NonZero,
+            Affine::IDENTITY,
+            peniko::Color::from_rgb8(0, 0, 255),
+            None,
+            &bevy_vello::vello::kurbo::Rect::new(0.0, 0.0, 32.0, 32.0),
+        );
+
+        let first = gpu
+            .render_frame(&image_scene, peniko::Color::BLACK)
+            .unwrap();
+        assert_eq!(&first[(16 * 32 + 16) * 4..][..4], &[255, 0, 0, 255]);
+        for pass in 1..=3 {
+            let vectors = gpu
+                .render_frame(&vector_scene, peniko::Color::BLACK)
+                .unwrap();
+            assert_eq!(&vectors[(16 * 32 + 16) * 4..][..4], &[0, 0, 255, 255]);
+            let replay = gpu
+                .render_frame(&image_scene, peniko::Color::BLACK)
+                .unwrap();
+            assert_eq!(
+                &replay[(16 * 32 + 16) * 4..][..4],
+                &first[(16 * 32 + 16) * 4..][..4],
+                "image pixels must survive returning from a vector-only slide (pass {pass})"
+            );
+            assert_eq!(replay, first, "replay must reproduce the complete image");
+        }
+    }
 
     #[test]
     fn only_terminal_gpu_failures_require_a_fresh_context() {

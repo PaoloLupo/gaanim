@@ -32,3 +32,5 @@ pub use gaanim_visualization::{
     MatchPolicy, NonFinitePolicy, NumberFormat, Sampling, Scale, ScaleSpec, SpaceLayer,
     StreamDirection, Streamline, StreamlineOptions, TransitionFallback, VectorField,
 };
+
+pub use crate::canvas::{LottieInput, LottiePackageOptions};

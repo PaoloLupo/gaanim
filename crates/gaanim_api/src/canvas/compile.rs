@@ -7841,6 +7841,11 @@ impl SceneModel {
             }
         }
         // Billboard / HUD chaining (.billboard() / .hud())
+        if let Some(role) = spec.coordinate_view_role {
+            if let Some(state) = builder.states.get(id) {
+                builder.commands.entity(state.entity).insert(role);
+            }
+        }
         if spec.billboard {
             if let Some(state) = builder.states.get(id) {
                 builder
@@ -8292,6 +8297,76 @@ mod tests {
             assert_eq!(sample(3.125), middle, "forward seek is deterministic");
         }
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn dotlottie_commands_survive_compilation_and_exact_seeks() {
+        use gaanim_renderer::lottie::{
+            LottieInput, LottiePackageOptions, LottiePlayer, sample_lottie_system,
+        };
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/assets/dotlottie_demo.lottie");
+        let mut canvas = SceneModel::new(200, 160);
+        canvas.preload(std::slice::from_ref(&path)).unwrap();
+        let clip = canvas
+            .lottie_with_package_options(
+                &path,
+                Default::default(),
+                LottiePackageOptions {
+                    state_machine_id: Some("main".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(clip.animation_ids(), ["idle", "active"]);
+        assert!(clip.clone().fire_event("reset").is_err());
+        canvas.play(vec![clip.drawable.write(1.0)]);
+        let start = canvas.current_time();
+        canvas.play_items(vec![clip.clone().into()]).unwrap();
+        assert_eq!(
+            canvas.current_time(),
+            start,
+            "machine activation is non-blocking"
+        );
+        canvas.wait(1.0);
+        clip.clone()
+            .set_input("active", LottieInput::Boolean(true))
+            .unwrap();
+        clip.clone().set_theme(Some("gold")).unwrap();
+        canvas.wait(1.0);
+        clip.clone().fire_event("reset").unwrap();
+        canvas.wait(1.0);
+        clip.set_theme(None).unwrap();
+        canvas.wait(1.0);
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+        world.insert_resource(gaanim_animation::PlaybackState::default());
+        let mut schedule = Schedule::default();
+        schedule.add_systems(sample_lottie_system);
+        let mut sample = |time| {
+            timeline.seek(&mut world, time);
+            world
+                .resource_mut::<gaanim_animation::PlaybackState>()
+                .current_time = time;
+            schedule.run(&mut world);
+            let player = world.query::<&LottiePlayer>().single(&world).unwrap();
+            let encoding = player.scene().encoding();
+            (
+                encoding.path_data.clone(),
+                encoding.draw_data.clone(),
+                encoding.transforms.clone(),
+            )
+        };
+        let times = [0.0, 0.35, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0];
+        let expected: Vec<_> = times.iter().map(|t| sample(*t)).collect();
+        assert_ne!(expected[0], expected[1]);
+        assert_ne!(expected[3], expected[4]);
+        assert_ne!(
+            expected[6], expected[7],
+            "theme resets even at an unchanged source frame"
+        );
+        for index in (0..times.len()).rev() {
+            assert_eq!(sample(times[index]), expected[index]);
+        }
     }
 
     #[test]

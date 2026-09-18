@@ -934,6 +934,7 @@ pub struct ObjectSpec {
     pub exclude_from_parent_draw: bool,
     /// If true, this object should billboard (face camera) in 3D.
     pub billboard: bool,
+    pub(crate) coordinate_view_role: Option<gaanim_scene::CoordinateViewRole>,
     /// Fill overrides applied to matching glyph fragments after textual objects
     /// have been compiled into their vector hierarchy.
     pub fragment_fills: Vec<(String, Color)>,
@@ -974,6 +975,7 @@ impl ObjectSpec {
             defer_visibility_until_play: false,
             z_index: 0,
             billboard: false,
+            coordinate_view_role: None,
             hud: false,
             exclude_from_parent_draw: false,
             fragment_fills: Vec::new(),

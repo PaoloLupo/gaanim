@@ -1,5 +1,6 @@
 [workspace]
 resolver = "2"
+exclude = ["vendor/vello_encoding"]
 members = [
   "crates/gaanim_core",
   "crates/gaanim_math",
@@ -21,6 +22,11 @@ members = [
   "crates/gaanim_launcher",
   "docs"
 ]
+
+[patch.crates-io]
+# Preserve Vello's resident image atlas across vector-only frames and replay.
+# See vendor/vello_encoding/GAANIM-PATCH.md for the upstream source and fix.
+vello_encoding = { path = "vendor/vello_encoding" }
 
 [profile.dev]
 opt-level = 1

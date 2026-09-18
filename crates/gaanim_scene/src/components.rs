@@ -223,6 +223,16 @@ pub enum RenderLayer {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MobjectId(pub gaanim_core::ObjectId);
 
+/// Internal transform roles for a Cartesian domain view and its text roots.
+/// Labels follow the view's positions while retaining their authored glyph size.
+#[doc(hidden)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum CoordinateViewRole {
+    View,
+    Label,
+}
+
 /// A metadata component attached to individual glyph and shape entities of text or equations,
 /// tracking their character value, sequence index, and source range.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]

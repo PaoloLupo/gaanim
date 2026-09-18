@@ -754,6 +754,8 @@ impl CoordinateSpaceHandle {
     }
 
     /// Change the affine view window immediately at the current cursor.
+    /// Axis numbers and titles keep their size while following the view positions.
+    /// Axes, grid lines and plotted paths retain their authored stroke widths.
     pub fn view_to(
         &self,
         x_domain: (f64, f64),
@@ -766,6 +768,8 @@ impl CoordinateSpaceHandle {
     }
 
     /// Describe an affine view-window animation without touching the timeline.
+    /// Axis numbers and titles keep their size throughout the animation.
+    /// Axes, grid lines and plotted paths retain their authored stroke widths.
     pub fn view_to_animation(
         &self,
         x_domain: (f64, f64),
@@ -2114,6 +2118,17 @@ impl SceneModel {
 
         let members = [&grid_major, &grid_minor, &axes, &ticks, &numbers, &labels];
         let view = self.group_no_center(&members);
+        view.spec
+            .lock()
+            .expect("view spec poisoned")
+            .coordinate_view_role = Some(gaanim_scene::CoordinateViewRole::View);
+        for label in number_handles.iter().chain(&label_handles) {
+            label
+                .spec
+                .lock()
+                .expect("label spec poisoned")
+                .coordinate_view_role = Some(gaanim_scene::CoordinateViewRole::Label);
+        }
         let root = self.group_no_center(&[&view]);
         Ok(CoordinateSpaceHandle {
             root,
@@ -4512,6 +4527,103 @@ mod tests {
             1,
             "a sampled number-line function must remain one retained path",
         );
+    }
+
+    #[test]
+    fn coordinate_view_preserves_glyph_shape_during_animation_and_rewind() {
+        use bevy::prelude::Schedule;
+        use gaanim_math::GlobalSpatialTransform;
+        use gaanim_scene::prelude::{ChildOf, World};
+
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        let space = canvas
+            .coordinate_axes(
+                Axis::linear(-4.0, 4.0)
+                    .unwrap()
+                    .ticks(1.0)
+                    .unwrap()
+                    .label("x"),
+                Axis::linear(-3.0, 3.0)
+                    .unwrap()
+                    .ticks(1.0)
+                    .unwrap()
+                    .label("y"),
+                Some(10.0),
+                Some(5.0),
+                true,
+            )
+            .unwrap()
+            .scale_to(1.2)
+            .rotate_to(0.2)
+            .move_to(1.0, -0.5);
+        canvas.play(vec![
+            space
+                .view_to_animation((-1.0, 3.0), (-3.0, 3.0))
+                .unwrap()
+                .duration(1.0),
+        ]);
+        canvas.play(vec![
+            space
+                .view_to_animation((-4.0, 4.0), (-1.0, 2.0))
+                .unwrap()
+                .duration(1.0),
+        ]);
+        canvas.wait(0.2);
+        space.view_to((-4.0, 4.0), (-3.0, 3.0)).unwrap();
+        canvas.wait(0.2);
+
+        let mut world = World::new();
+        world.insert_resource(gaanim_timeline::timeline::Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        let mut timeline = world
+            .remove_resource::<gaanim_timeline::timeline::Timeline>()
+            .unwrap();
+        timeline.add_keyframe(
+            0.0,
+            gaanim_timeline::snapshot::WorldSnapshot::capture(&mut world),
+        );
+        let mut propagation = Schedule::default();
+        propagation.add_systems(gaanim_scene::transform_propagation_system);
+        timeline.seek(&mut world, 0.0);
+        propagation.run(&mut world);
+        let glyphs: Vec<_> = world
+            .query::<(
+                gaanim_scene::prelude::Entity,
+                &gaanim_scene::components::TextSpan,
+                &GlobalSpatialTransform,
+            )>()
+            .iter(&world)
+            .map(|(entity, _, global)| (entity, global.mat4))
+            .collect();
+        assert!(!glyphs.is_empty(), "axes must compile real text glyphs");
+
+        for time in [0.5, 1.0, 1.5, 2.0, 2.3, 0.5, 0.0, 1.5] {
+            timeline.seek(&mut world, time);
+            propagation.run(&mut world);
+            for (entity, initial) in &glyphs {
+                let current = world.get::<GlobalSpatialTransform>(*entity).unwrap().mat4;
+                for direction in [DVec3::X, DVec3::Y] {
+                    assert!(
+                        (current.transform_vector3(direction)
+                            - initial.transform_vector3(direction))
+                        .length()
+                            < 1e-9,
+                        "domain view deformed a glyph at t={time}"
+                    );
+                }
+                // Glyphs must still inherit their text group's corrected transform.
+                let parent = world.get::<ChildOf>(*entity).unwrap().parent();
+                let expected = world.get::<GlobalSpatialTransform>(parent).unwrap().mat4
+                    * world
+                        .get::<gaanim_math::SpatialTransform>(*entity)
+                        .unwrap()
+                        .to_mat4();
+                assert!(current.abs_diff_eq(expected, 1e-9));
+            }
+        }
     }
 
     #[test]

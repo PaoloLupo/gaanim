@@ -82,6 +82,8 @@ pub struct EntitySnapshot {
     pub material_3d: Option<gaanim_scene::Material3D>,
     #[cfg_attr(feature = "serde", serde(default))]
     pub media_frame: Option<gaanim_scene::MediaFrame>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub coordinate_view_role: Option<gaanim_scene::CoordinateViewRole>,
     /// Runtime state of a traced path, used to restore scrubbing/replay cleanly.
     pub traced_path_points: Option<Vec<gaanim_core::glam::DVec3>>,
     /// Timeline timestamps paired with `traced_path_points`.
@@ -142,11 +144,50 @@ fn sync_optional<T: Component + PartialEq>(entity_mut: &mut EntityWorldMut<'_>, 
     }
 }
 
+/// Reconcile the native local pose without re-registering an unchanged parent.
+/// Repeated ChildOf insertion runs relationship hooks for every text glyph,
+/// even when its parent and native transforms already match the snapshot.
+fn restore_parent(world: &mut World, entity: Entity, parent: Option<Entity>) {
+    use bevy::prelude::{ChildOf, GlobalTransform, Transform};
+
+    if world.get::<ChildOf>(entity).map(ChildOf::parent) != parent {
+        match parent {
+            Some(parent) => {
+                world.entity_mut(entity).set_parent_in_place(parent);
+            }
+            None => {
+                world.entity_mut(entity).remove_parent_in_place();
+            }
+        }
+        return;
+    }
+
+    // Native transforms are live state rather than snapshot fields. They must
+    // still be reconciled if changed, even when the ChildOf relation matches.
+    if world.get::<Transform>(entity).is_some() {
+        let local = world
+            .get::<GlobalTransform>(entity)
+            .and_then(|global| match parent {
+                Some(parent) => world
+                    .get::<GlobalTransform>(parent)
+                    .map(|parent_global| global.reparented_to(parent_global)),
+                None => Some(global.compute_transform()),
+            });
+        if let Some(local) = local {
+            insert_if_changed(&mut world.entity_mut(entity), local);
+        }
+    }
+}
+
 /// Insert or update all components of an `EntitySnapshot` onto a Bevy entity.
 ///
 /// Restoration remains complete and deterministic, while equal renderer-invalidating
 /// values are left untouched so Bevy does not report false geometry/style changes.
-fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &EntitySnapshot) {
+fn insert_snapshot_components(
+    entity_mut: &mut EntityWorldMut<'_>,
+    snap: &EntitySnapshot,
+    restore_scene_visibility: bool,
+) {
     let global_transform = snap
         .global_transform
         .unwrap_or_else(|| GlobalSpatialTransform::from_local(&snap.transform));
@@ -181,7 +222,12 @@ fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &Entity
             style: style.clone(),
         }),
     );
-    sync_optional(entity_mut, snap.visible.then_some(Visible));
+    // Timeline seeks resolve scene visibility after replaying membership and
+    // transition events. Restoring it here would move every inactive slide's
+    // entities between archetypes twice per frame just to hide them again.
+    if restore_scene_visibility || snap.scene.is_none() {
+        sync_optional(entity_mut, snap.visible.then_some(Visible));
+    }
     sync_optional(entity_mut, snap.tags.first().cloned().map(ObjectTag));
     sync_optional(entity_mut, snap.path2d.clone().map(Path2D));
     sync_optional(entity_mut, snap.path_source.clone().map(PathSource));
@@ -192,6 +238,7 @@ fn insert_snapshot_components(entity_mut: &mut EntityWorldMut<'_>, snap: &Entity
     );
     sync_optional(entity_mut, snap.fill_level.map(FillLevel));
     sync_optional(entity_mut, snap.media_frame);
+    sync_optional(entity_mut, snap.coordinate_view_role);
     sync_optional(entity_mut, snap.surrounding_rect.clone());
     sync_optional(entity_mut, snap.write_tip_glow.clone());
     sync_optional(
@@ -329,6 +376,9 @@ impl WorldSnapshot {
                         .map(|s| s.value),
                     material_3d: world.get::<gaanim_scene::Material3D>(entity).copied(),
                     media_frame: world.get::<gaanim_scene::MediaFrame>(entity).copied(),
+                    coordinate_view_role: world
+                        .get::<gaanim_scene::CoordinateViewRole>(entity)
+                        .copied(),
                     traced_path_points: world
                         .get::<gaanim_animation::TracedPath>(entity)
                         .map(|t| t.points.clone())
@@ -368,13 +418,19 @@ impl WorldSnapshot {
 
     /// Restores the states stored in this snapshot back to the Bevy `World`.
     pub fn restore(&self, world: &mut World) {
-        let _ = self.restore_with_entity_map(world);
+        let _ = self.restore_with_entity_map(world, true);
     }
 
     /// Restore a snapshot and return the identity map built as part of the work.
     /// Timeline replay consumes the same map immediately, so returning it avoids
     /// querying every Mobject twice on full seeks.
-    pub(crate) fn restore_with_entity_map(&self, world: &mut World) -> HashMap<ObjectId, Entity> {
+    /// When the caller resolves scene visibility after replay, leave that
+    /// component alone for scene members until their final visibility is known.
+    pub(crate) fn restore_with_entity_map(
+        &self,
+        world: &mut World,
+        restore_scene_visibility: bool,
+    ) -> HashMap<ObjectId, Entity> {
         if let Some(camera) = self.camera {
             if world.get_resource::<gaanim_math::Camera>() != Some(&camera) {
                 world.insert_resource(camera);
@@ -422,15 +478,10 @@ impl WorldSnapshot {
             if let Some(&entity) = entity_map.get(obj_id) {
                 if let Some(parent_id) = snap.parent {
                     if let Some(&parent_entity) = entity_map.get(&parent_id) {
-                        // `set_parent_in_place` also reconciles Bevy's native
-                        // `Transform` from the preserved `GlobalTransform`.
-                        // Those components are runtime state, not snapshot
-                        // fields, so this must run even when `ChildOf` already
-                        // names the expected parent.
-                        world.entity_mut(entity).set_parent_in_place(parent_entity);
+                        restore_parent(world, entity, Some(parent_entity));
                     }
                 } else {
-                    world.entity_mut(entity).remove_parent_in_place();
+                    restore_parent(world, entity, None);
                 }
             }
         }
@@ -439,7 +490,7 @@ impl WorldSnapshot {
         for (obj_id, snap) in &self.entities {
             if let Some(&entity) = entity_map.get(obj_id) {
                 let mut entity_mut = world.entity_mut(entity);
-                insert_snapshot_components(&mut entity_mut, snap);
+                insert_snapshot_components(&mut entity_mut, snap, restore_scene_visibility);
             }
         }
 
@@ -525,10 +576,10 @@ impl SnapshotDiff {
             if let Some(&entity) = entity_map.get(&snap.id) {
                 if let Some(parent_id) = snap.parent {
                     if let Some(&parent_entity) = entity_map.get(&parent_id) {
-                        world.entity_mut(entity).set_parent_in_place(parent_entity);
+                        restore_parent(world, entity, Some(parent_entity));
                     }
                 } else {
-                    world.entity_mut(entity).remove_parent_in_place();
+                    restore_parent(world, entity, None);
                 }
             }
         }
@@ -537,7 +588,7 @@ impl SnapshotDiff {
         for snap in &self.updates {
             if let Some(&entity) = entity_map.get(&snap.id) {
                 let mut entity_mut = world.entity_mut(entity);
-                insert_snapshot_components(&mut entity_mut, snap);
+                insert_snapshot_components(&mut entity_mut, snap, true);
             }
         }
     }
@@ -557,6 +608,32 @@ mod tests {
             .query_filtered::<bevy::prelude::Entity, Changed<T>>()
             .iter(world)
             .count()
+    }
+
+    #[test]
+    fn coordinate_view_roles_survive_snapshot_recreation() {
+        use gaanim_scene::CoordinateViewRole;
+        let mut world = World::new();
+        for (index, role) in [CoordinateViewRole::View, CoordinateViewRole::Label]
+            .into_iter()
+            .enumerate()
+        {
+            world.spawn((
+                MobjectId(ObjectId::from_parts(index as u32 + 1, 1)),
+                SpatialTransform::default(),
+                role,
+            ));
+        }
+        let snapshot = WorldSnapshot::capture(&mut world);
+        world.clear_entities();
+        snapshot.restore(&mut world);
+        for captured in snapshot.entities.values() {
+            let role = world
+                .query::<(&MobjectId, &CoordinateViewRole)>()
+                .iter(&world)
+                .find_map(|(id, role)| (id.0 == captured.id).then_some(*role));
+            assert_eq!(role, captured.coordinate_view_role);
+        }
     }
 
     #[test]
@@ -644,6 +721,11 @@ mod tests {
             Vec3::new(5.0, 0.0, 0.0),
             "restoring an unchanged ChildOf must still reconcile Bevy Transform from GlobalTransform"
         );
+
+        world.clear_trackers();
+        snapshot.restore(&mut world);
+        assert_eq!(changed_count::<ChildOf>(&mut world), 0);
+        assert_eq!(changed_count::<Transform>(&mut world), 0);
     }
 
     #[test]

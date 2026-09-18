@@ -6,6 +6,7 @@ pub mod effects;
 pub mod lottie;
 pub mod pipeline;
 pub mod prelude;
+mod stroke;
 
 // MainVelloScene is re-exported via prelude; used implicitly by the plugin system registration.
 #[allow(unused_imports)]

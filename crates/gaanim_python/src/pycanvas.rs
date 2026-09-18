@@ -876,6 +876,65 @@ impl PyLottie {
 #[pymethods]
 impl PyLottie {
     #[getter]
+    fn animation_ids(&self) -> PyResult<Vec<String>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.inner.animation_ids())
+    }
+    #[getter]
+    fn theme_ids(&self) -> PyResult<Vec<String>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.inner.theme_ids())
+    }
+    #[getter]
+    fn state_machine_ids(&self) -> PyResult<Vec<String>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self.inner.state_machine_ids())
+    }
+    #[pyo3(signature = (id=None))]
+    fn set_theme<'py>(slf: PyRef<'py, Self>, id: Option<&str>) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        slf.inner
+            .clone()
+            .set_theme(id)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        Ok(slf)
+    }
+    fn set_input<'py>(
+        slf: PyRef<'py, Self>,
+        name: &str,
+        value: &Bound<'py, PyAny>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        use gaanim_api::canvas::LottieInput;
+        let value = if value.is_instance_of::<pyo3::types::PyBool>() {
+            LottieInput::Boolean(value.extract()?)
+        } else if value.is_instance_of::<pyo3::types::PyString>() {
+            LottieInput::String(value.extract()?)
+        } else if value.is_instance_of::<pyo3::types::PyFloat>()
+            || value.is_instance_of::<pyo3::types::PyInt>()
+        {
+            LottieInput::Numeric(value.extract()?)
+        } else {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "input value must be bool, int, float or str",
+            ));
+        };
+        slf.inner
+            .clone()
+            .set_input(name, value)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        Ok(slf)
+    }
+    fn fire_event<'py>(slf: PyRef<'py, Self>, name: &str) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        slf.inner
+            .clone()
+            .fire_event(name)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        Ok(slf)
+    }
+
+    #[getter]
     fn source_width(&self) -> PyResult<usize> {
         crate::custom::ensure_authoring_allowed()?;
         Ok(self.inner.source_width())
@@ -3851,6 +3910,9 @@ impl PyMediaLibrary {
     #[pyo3(signature = (
         path,
         *,
+        animation_id=None,
+        theme_id=None,
+        state_machine_id=None,
         width=None,
         height=None,
         fit="contain",
@@ -3863,6 +3925,9 @@ impl PyMediaLibrary {
         &self,
         py: Python<'_>,
         path: &str,
+        animation_id: Option<String>,
+        theme_id: Option<String>,
+        state_machine_id: Option<String>,
         width: Option<f64>,
         height: Option<f64>,
         fit: &str,
@@ -3886,7 +3951,7 @@ impl PyMediaLibrary {
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .lottie_with_options(
+            .lottie_with_package_options(
                 path,
                 LottieOptions {
                     width,
@@ -3896,6 +3961,11 @@ impl PyMediaLibrary {
                     duration,
                     looping: r#loop,
                     speed,
+                },
+                gaanim_api::canvas::LottiePackageOptions {
+                    animation_id,
+                    theme_id,
+                    state_machine_id,
                 },
             )
             .map_err(|error| {

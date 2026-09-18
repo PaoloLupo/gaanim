@@ -331,6 +331,20 @@ plane = scene.viz.cartesian_2d(
 scene.play([plane.animate.write().duration(1.2)])
 ```
 
+`plane.view_to(x_domain, y_domain)` cambia la ventana de datos en el cursor
+actual; `plane.animate.view_to(x_domain, y_domain)` devuelve la animación para
+`scene.play`. Los números y títulos de los ejes siguen sus posiciones en la
+vista y conservan su tamaño y proporciones, incluso cuando el acercamiento en
+X es distinto del de Y. Los trazos de los ejes, ticks, grillas y curvas conservan
+su grosor durante el cambio de dominio; también se conservan las longitudes de
+los guiones en trazos discontinuos. El escalado general con `plane.scale_to(...)`
+y el zoom de cámara siguen afectando al conjunto, incluido el texto y los trazos.
+Los dominios deben ser finitos y crecientes y los ejes, lineales o temporales.
+
+```python
+scene.play([plane.animate.view_to((-2, 2), (-3, 3)).duration(1.0)])
+```
+
 `Parameter`, `Variable`, `Computed` y `scene.viz.time` forman la ruta reactiva. Rust
 resuelve sus valores en un snapshot estable y llama la función Python con las
 coordenadas primero y los valores de `inputs=` después.

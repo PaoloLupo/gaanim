@@ -119,9 +119,9 @@ Los metadatos glTF se guardan por ruta canónica y fecha de modificación.
 `reload_assets()` también limpia esta caché; el editor elimina la instancia
 nativa anterior y todos sus descendientes antes de reconstruirla.
 
-== Lottie JSON
+== Lottie JSON y dotLottie
 
-`MediaLibrary.lottie` acepta archivos Lottie en formato JSON y los compone directamente en
+`MediaLibrary.lottie` acepta archivos Lottie en formato JSON y paquetes `.lottie` v1/v2 y los compone directamente en
 Vello mediante Velato. Los parámetros `width`, `height` y `fit` siguen la misma
 semántica que en imágenes; `offset`, `duration`, `loop` y `speed` controlan el
 intervalo reproducido. Activa el clip con `scene.play([clip])`.
@@ -157,8 +157,57 @@ Cuando una transformación de capa o grupo omite su posición o escala, se usa
 una traslación de cero o una escala del 100 %, también dentro de precomposiciones.
 Las posiciones separadas X/Y de una capa sí se reproducen; si Velato encuentra
 otra construcción que no puede convertir de forma segura, la carga devuelve un
-error en vez de abortar el proceso. El contenedor `.lottie` todavía no está
-soportado.
+error en vez de abortar el proceso.
+
+=== Paquetes `.lottie`
+
+Los paquetes se leen en memoria, incluidas sus imágenes PNG/JPEG/WebP; no se
+extraen al disco ni se buscan recursos externos al ZIP. `scene.assets.preload` y
+`scene.assets.reload_assets` también admiten estos paquetes. La caché comparte
+recursos, pero cada clip mantiene sus propias entradas y operaciones.
+
+`animation_id` selecciona una animación y `state_machine_id` una máquina;
+son mutuamente excluyentes. Sin selección explícita se utiliza el contenido
+inicial del manifiesto y, en su ausencia, la primera animación. `theme_id`
+selecciona el tema inicial. Para reproducción simple se usan las opciones de
+Gaanim; no se aplican los controles de reproducción del manifiesto v1.
+`clip.animation_ids`, `clip.theme_ids` y
+`clip.state_machine_ids` enumeran los identificadores disponibles.
+
+```python
+clip = scene.media.lottie("button.lottie", state_machine_id="main", width=4)
+clip.set_input("active", False)
+scene.play([clip])
+scene.wait(1)
+clip.set_input("active", True).set_theme("gold")
+scene.wait(1)
+clip.fire_event("reset").set_theme(None)
+scene.wait(1)
+```
+
+`set_theme(id)`, `set_input(name, value)` y `fire_event(name)` devuelven el mismo
+clip y registran la operación en el cursor sin avanzar el tiempo. Antes de
+activar el clip, tema y entradas configuran el estado inicial; los eventos
+requieren activación. Las operaciones simultáneas mantienen su orden de
+declaración y se reproducen al buscar cualquier instante o exportar.
+
+Activar una máquina no alarga la escena: usa `scene.wait` u otras animaciones.
+El estado controla velocidad, dirección, bucles, segmento por marcador y fondo;
+no se aceptan valores globales de `offset`, `duration`, `loop` o `speed`
+distintos de sus valores predeterminados. Un estado final detiene las
+transiciones. Un marcador ausente utiliza el intervalo completo de la animación.
+
+Esta versión admite `PlaybackState`, `GlobalState`, transiciones inmediatas y
+condiciones numéricas, booleanas, de cadena y evento. Los temas admiten valores
+estáticos de color, escalar, posición, vector y gradiente. No admite acciones,
+interacciones de ratón, entradas automáticas reservadas, transiciones suavizadas,
+temas con keyframes/expresiones ni sustituciones temáticas de imágenes o texto.
+Estas funciones provocan `ValueError` cuando se selecciona el tema o máquina
+que las contiene; otras animaciones del paquete siguen disponibles. Los ciclos
+de transiciones instantáneas también se rechazan. Se conservan las limitaciones
+visuales y `warnings` del importador JSON, junto con `Write` y `Create`.
+
+Ejemplo ejecutable: `examples/dotlottie_demo.py`.
 
 == Modelos 3D glTF
 

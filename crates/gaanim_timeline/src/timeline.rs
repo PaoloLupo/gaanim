@@ -867,7 +867,10 @@ impl Timeline {
             replay_without_restore =
                 self.can_replay_without_restore(world, kf_time, clamped_target);
             if !replay_without_restore {
-                restored_entity_map = Some(self.keyframes[&kf_time].restore_with_entity_map(world));
+                restored_entity_map = Some(
+                    self.keyframes[&kf_time]
+                        .restore_with_entity_map(world, self.scenes.is_empty()),
+                );
                 self.last_restore_kf_time = Some(kf_time);
             }
             kf_time.0
@@ -3263,6 +3266,67 @@ mod tests {
             .expect("updater should remain present but frozen");
         assert_eq!(updater.stop_at, Some(1.0));
         assert!((updater.elapsed - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn seeking_within_a_scene_does_not_toggle_inactive_scene_visibility() {
+        use bevy::ecs::system::SystemState;
+        use bevy::prelude::RemovedComponents;
+        use gaanim_scene::Visible;
+
+        let mut world = World::new();
+        let mut timeline = Timeline::default();
+        let first = timeline.add_scene("first");
+        let second = timeline.add_scene("second");
+        timeline.index_scene(first, 0.0);
+        timeline.index_scene(second, 1.0);
+        let track = timeline.add_track("slides", 0);
+        timeline.add_clip(track, 0.0, 2.0, ClipPayload::Wait);
+        timeline.add_clip(
+            track,
+            0.75,
+            0.5,
+            ClipPayload::Transition {
+                from: first,
+                to: second,
+                transition_type: TransitionType::CrossFade { duration: 0.5 },
+            },
+        );
+        let first_entity = world
+            .spawn((MobjectId(ObjectId::from_raw(700)), SceneMember(first), Visible))
+            .id();
+        let second_entity = world
+            .spawn((MobjectId(ObjectId::from_raw(701)), SceneMember(second), Visible))
+            .id();
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        timeline.seek(&mut world, 0.25);
+        assert!(world.get::<Visible>(first_entity).is_some());
+        assert!(world.get::<Visible>(second_entity).is_none());
+        let mut removals = SystemState::<RemovedComponents<Visible>>::new(&mut world);
+        assert_eq!(removals.get_mut(&mut world).unwrap().read().count(), 1);
+        world.clear_trackers();
+
+        timeline.seek(&mut world, 0.5);
+        assert_eq!(
+            removals.get_mut(&mut world).unwrap().read().count(),
+            0,
+            "inactive slide entities must not be shown and hidden again every frame"
+        );
+
+        timeline.seek(&mut world, 0.875);
+        assert!(world.get::<Visible>(first_entity).is_some());
+        assert!(world.get::<Visible>(second_entity).is_some());
+        assert_eq!(world.get::<Opacity>(first_entity).unwrap().0, 0.75);
+        assert_eq!(world.get::<Opacity>(second_entity).unwrap().0, 0.25);
+        timeline.seek(&mut world, 1.5);
+        assert!(world.get::<Visible>(first_entity).is_none());
+        assert!(world.get::<Visible>(second_entity).is_some());
+        timeline.seek(&mut world, 0.25);
+        assert!(world.get::<Visible>(first_entity).is_some());
+        assert!(world.get::<Visible>(second_entity).is_none());
+        timeline.keyframes[&OrderedFloat(0.0)].restore(&mut world);
+        assert!(world.get::<Visible>(first_entity).is_some());
+        assert!(world.get::<Visible>(second_entity).is_some());
     }
 
     #[test]

@@ -190,6 +190,84 @@ impl VideoClip {
 }
 
 impl LottieClip {
+    fn command(
+        &self,
+        command: gaanim_renderer::lottie::LottieCommand,
+    ) -> Result<(), LottieLoadError> {
+        let time: f64 = self
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .segments
+            .iter()
+            .map(|s| s.cursor)
+            .sum();
+        let mut spec = self.drawable.spec.lock().expect("object spec poisoned");
+        let SpawnKind::Lottie { playback } = &mut spec.kind else {
+            unreachable!()
+        };
+        let package = playback.package.as_mut().ok_or_else(|| {
+            gaanim_renderer::lottie::LottieError::Package(
+                "package controls require a .lottie file".into(),
+            )
+        })?;
+        package.record(command, time, playback.scene_start, playback.active)?;
+        Ok(())
+    }
+    /// Apply a static package theme at the cursor, or restore the base with None.
+    pub fn set_theme(self, id: Option<&str>) -> Result<Self, LottieLoadError> {
+        self.command(gaanim_renderer::lottie::LottieCommand::Theme(
+            id.map(str::to_owned),
+        ))?;
+        Ok(self)
+    }
+    /// Set a typed machine input without advancing the cursor.
+    pub fn set_input(
+        self,
+        name: &str,
+        value: gaanim_renderer::lottie::LottieInput,
+    ) -> Result<Self, LottieLoadError> {
+        self.command(gaanim_renderer::lottie::LottieCommand::Input(
+            name.to_owned(),
+            value,
+        ))?;
+        Ok(self)
+    }
+    /// Fire an event at the cursor; requires prior activation.
+    pub fn fire_event(self, name: &str) -> Result<Self, LottieLoadError> {
+        self.command(gaanim_renderer::lottie::LottieCommand::Event(
+            name.to_owned(),
+        ))?;
+        Ok(self)
+    }
+    fn package_ids(&self, kind: u8) -> Vec<String> {
+        let spec = self.drawable.spec.lock().expect("object spec poisoned");
+        let SpawnKind::Lottie { playback } = &spec.kind else {
+            unreachable!()
+        };
+        playback
+            .package
+            .as_ref()
+            .map(|p| match kind {
+                0 => p.package.animation_ids.clone(),
+                1 => p.package.theme_ids.clone(),
+                _ => p.package.state_machine_ids.clone(),
+            })
+            .unwrap_or_default()
+    }
+    /// Animation IDs in manifest order; empty for JSON.
+    pub fn animation_ids(&self) -> Vec<String> {
+        self.package_ids(0)
+    }
+    /// Theme IDs in manifest order; empty for JSON.
+    pub fn theme_ids(&self) -> Vec<String> {
+        self.package_ids(1)
+    }
+    /// State machine IDs in manifest order; empty for JSON.
+    pub fn state_machine_ids(&self) -> Vec<String> {
+        self.package_ids(2)
+    }
+
     fn belongs_to(&self, state: &SharedCanvasState) -> bool {
         Arc::ptr_eq(&self.state, state)
     }
@@ -1084,7 +1162,8 @@ impl LottieLoadError {
             Self::Options(_)
                 | Self::DimensionsOutOfRange
                 | Self::Lottie(
-                    gaanim_renderer::lottie::LottieError::InvalidOffset
+                    gaanim_renderer::lottie::LottieError::Package(_)
+                        | gaanim_renderer::lottie::LottieError::InvalidOffset
                         | gaanim_renderer::lottie::LottieError::InvalidDuration
                         | gaanim_renderer::lottie::LottieError::InvalidSpeed
                 )
@@ -1632,7 +1711,7 @@ impl SceneModel {
                 .extension()
                 .and_then(|extension| extension.to_str())
                 .unwrap_or_default();
-            if extension.eq_ignore_ascii_case("json") {
+            if extension.eq_ignore_ascii_case("json") || extension.eq_ignore_ascii_case("lottie") {
                 gaanim_renderer::lottie::LottieAsset::load(&resolved).map_err(|source| {
                     AssetPreloadError::Lottie {
                         path: resolved.clone(),
@@ -2793,9 +2872,56 @@ impl SceneModel {
     pub fn lottie_with_options(
         &mut self,
         path: impl AsRef<Path>,
-        mut options: LottieOptions,
+        options: LottieOptions,
     ) -> Result<LottieClip, LottieLoadError> {
-        let asset = gaanim_renderer::lottie::LottieAsset::load(self.resolve_asset_path(path))?;
+        self.lottie_with_package_options(path, options, Default::default())
+    }
+    /// Load JSON or dotLottie with explicit package selectors.
+    pub fn lottie_with_package_options(
+        &mut self,
+        path: impl AsRef<Path>,
+        mut options: LottieOptions,
+        selectors: gaanim_renderer::lottie::LottiePackageOptions,
+    ) -> Result<LottieClip, LottieLoadError> {
+        use gaanim_renderer::lottie::{LottieAsset, LottieError, PackagePlayback};
+        let path = self.resolve_asset_path(path);
+        let mut package = if path
+            .extension()
+            .is_some_and(|v| v.eq_ignore_ascii_case("lottie"))
+        {
+            Some(PackagePlayback::load(&path, &selectors)?)
+        } else {
+            if selectors != Default::default() {
+                return Err(LottieError::Package(
+                    "package selectors require a .lottie file".into(),
+                )
+                .into());
+            }
+            None
+        };
+        if let Some(package) = &mut package {
+            package.fit = match options.fit {
+                ImageFit::Contain => "contain",
+                ImageFit::Cover => "cover",
+                ImageFit::Stretch => "stretch",
+            };
+            if package.is_machine()
+                && (options.offset != 0.0
+                    || options.duration.is_some()
+                    || options.looping
+                    || options.speed != 1.0)
+            {
+                return Err(LottieError::Package(
+                    "state machines control their own offset, duration, loop and speed".into(),
+                )
+                .into());
+            }
+        }
+        let asset = if let Some(package) = &package {
+            package.initial_asset()?
+        } else {
+            LottieAsset::load(&path)?
+        };
         let width =
             u32::try_from(asset.width()).map_err(|_| LottieLoadError::DimensionsOutOfRange)?;
         let height =
@@ -2813,7 +2939,7 @@ impl SceneModel {
             quality: Default::default(),
         }
         .resolve(width, height)?;
-        let playback = gaanim_renderer::lottie::LottiePlayback::new(
+        let mut playback = gaanim_renderer::lottie::LottiePlayback::new(
             asset.clone(),
             view,
             options.offset,
@@ -2821,7 +2947,10 @@ impl SceneModel {
             options.looping,
             options.speed,
         )?;
-        let duration = (!playback.looping).then_some(playback.source_duration / playback.speed);
+        let machine = package.as_ref().is_some_and(PackagePlayback::is_machine);
+        playback.package = package;
+        let duration =
+            (!machine && !playback.looping).then_some(playback.source_duration / playback.speed);
         let drawable = self.spawn(SpawnKind::Lottie { playback });
         Ok(LottieClip {
             drawable,

@@ -6,11 +6,16 @@ use bevy::prelude::*;
 use gaanim_objects::prelude::ImageView;
 use serde_json::Value;
 
+pub mod package;
+pub use package::{LottieCommand, LottieInput, LottiePackageOptions, PackagePlayback};
+
 static LOTTIE_CACHE: OnceLock<Mutex<HashMap<PathBuf, Arc<LottieAsset>>>> = OnceLock::new();
 static WARNED_ASSETS: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
 
 #[derive(Debug, thiserror::Error)]
 pub enum LottieError {
+    #[error("dotLottie: {0}")]
+    Package(String),
     #[error("could not read Lottie JSON '{path}': {source}")]
     Read {
         path: PathBuf,
@@ -85,6 +90,14 @@ struct LottieSolidLayer {
 impl LottieAsset {
     pub fn load(path: impl AsRef<Path>) -> Result<Arc<Self>, LottieError> {
         let requested = path.as_ref();
+        if requested
+            .extension()
+            .is_some_and(|v| v.eq_ignore_ascii_case("lottie"))
+        {
+            return PackagePlayback::load(requested, &LottiePackageOptions::default())?
+                .sample(0.0, 0.0)
+                .map(|v| v.asset);
+        }
         let cache_key = requested
             .canonicalize()
             .unwrap_or_else(|_| requested.to_path_buf());
@@ -102,11 +115,38 @@ impl LottieAsset {
             path: cache_key.clone(),
             source,
         })?;
-        let mut json: Value =
-            serde_json::from_slice(&bytes).map_err(|error| LottieError::Parse {
-                path: cache_key.clone(),
-                message: error.to_string(),
-            })?;
+        let json: Value = serde_json::from_slice(&bytes).map_err(|error| LottieError::Parse {
+            path: cache_key.clone(),
+            message: error.to_string(),
+        })?;
+        let asset = Self::from_json(cache_key.clone(), json, None)?;
+        cache
+            .lock()
+            .expect("Lottie cache poisoned")
+            .insert(cache_key.clone(), asset.clone());
+
+        if !asset.warnings.is_empty()
+            && WARNED_ASSETS
+                .get_or_init(|| Mutex::new(HashSet::new()))
+                .lock()
+                .expect("Lottie warning cache poisoned")
+                .insert(cache_key)
+        {
+            for warning in &asset.warnings {
+                eprintln!(
+                    "[gaanim] Lottie warning for '{}': {warning}",
+                    asset.path.display()
+                );
+            }
+        }
+        Ok(asset)
+    }
+
+    fn from_json(
+        cache_key: PathBuf,
+        mut json: Value,
+        package: Option<&package::Package>,
+    ) -> Result<Arc<Self>, LottieError> {
         let image_assets = image_asset_specs(&json);
         let mut warnings = compatibility_warnings(&mut json);
         let image_layer_specs = image_layer_specs(&json);
@@ -135,8 +175,13 @@ impl LottieAsset {
         {
             return Err(LottieError::InvalidMetadata { path: cache_key });
         }
-        let image_layers =
-            load_image_layers(&cache_key, &image_assets, &image_layer_specs, &mut warnings)?;
+        let image_layers = load_image_layers(
+            &cache_key,
+            &image_assets,
+            &image_layer_specs,
+            &mut warnings,
+            package,
+        )?;
 
         let asset = Arc::new(Self {
             path: cache_key.clone(),
@@ -145,25 +190,6 @@ impl LottieAsset {
             solid_layers,
             warnings,
         });
-        cache
-            .lock()
-            .expect("Lottie cache poisoned")
-            .insert(cache_key.clone(), asset.clone());
-
-        if !asset.warnings.is_empty()
-            && WARNED_ASSETS
-                .get_or_init(|| Mutex::new(HashSet::new()))
-                .lock()
-                .expect("Lottie warning cache poisoned")
-                .insert(cache_key)
-        {
-            for warning in &asset.warnings {
-                eprintln!(
-                    "[gaanim] Lottie warning for '{}': {warning}",
-                    asset.path.display()
-                );
-            }
-        }
         Ok(asset)
     }
 
@@ -199,6 +225,7 @@ pub struct LottiePlayback {
     pub looping: bool,
     pub speed: f64,
     pub active: bool,
+    pub package: Option<PackagePlayback>,
 }
 
 impl LottiePlayback {
@@ -233,6 +260,7 @@ impl LottiePlayback {
             looping,
             speed,
             active: false,
+            package: None,
         })
     }
 
@@ -262,6 +290,8 @@ pub struct LottiePlayer {
     scene: Arc<vello::Scene>,
     sampled_frame: f64,
     draw_state: LottieDrawState,
+    rendered_asset: Arc<LottieAsset>,
+    background: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -612,13 +642,16 @@ impl LottiePlayer {
     pub fn new(playback: LottiePlayback) -> Self {
         let sampled_frame = playback.source_frame(0.0);
         let mut player = Self {
+            rendered_asset: playback.asset.clone(),
+            background: None,
             playback,
             renderer: velato::Renderer::new(),
             scene: Arc::new(vello::Scene::new()),
             sampled_frame,
             draw_state: LottieDrawState::default(),
         };
-        player.render(sampled_frame);
+        player.sampled_frame = f64::NAN;
+        player.sample(0.0);
         player
     }
 
@@ -626,8 +659,51 @@ impl LottiePlayer {
         &self.scene
     }
 
+    fn sample(&mut self, scene_time: f64) {
+        let mut frame = self.playback.source_frame(scene_time);
+        let mut asset = self.playback.asset.clone();
+        let mut background = None;
+        if let Some(package) = &self.playback.package {
+            let time = if self.playback.active {
+                scene_time
+            } else {
+                f64::NEG_INFINITY
+            };
+            // Commands and all resource variants were validated before compilation.
+            let sample = package
+                .sample(time, self.playback.scene_start)
+                .expect("validated Lottie schedule");
+            asset = sample.asset;
+            if let Some(selected_frame) = sample.frame {
+                frame = selected_frame;
+            }
+            background = sample.background;
+        }
+        let changed = !Arc::ptr_eq(&asset, &self.rendered_asset) || self.background != background;
+        self.rendered_asset = asset;
+        self.background = background;
+        if changed || frame.to_bits() != self.sampled_frame.to_bits() {
+            self.render(frame);
+        }
+    }
+
     fn render(&mut self, frame: f64) {
-        let view = self.playback.view;
+        let mut view = self.playback.view;
+        if let Some(package) = &self.playback.package {
+            let sw = self.rendered_asset.width() as f64;
+            let sh = self.rendered_asset.height() as f64;
+            let sx = view.display_width / sw;
+            let sy = view.display_height / sh;
+            let scale = if package.fit == "cover" {
+                sx.max(sy)
+            } else {
+                sx.min(sy)
+            };
+            view.scale_x = if package.fit == "stretch" { sx } else { scale };
+            view.scale_y = if package.fit == "stretch" { sy } else { scale };
+            view.source_x = (sw - view.display_width / view.scale_x) * 0.5;
+            view.source_y = (sh - view.display_height / view.scale_y) * 0.5;
+        }
         let w2 = view.display_width * 0.5;
         let h2 = view.display_height * 0.5;
         let transform = vello::kurbo::Affine::new([
@@ -641,9 +717,9 @@ impl LottiePlayer {
         let mut rendered = vello::Scene::new();
         let mut sink = LottieRenderSink {
             scene: &mut rendered,
-            composition: &self.playback.asset.composition,
-            image_layers: &self.playback.asset.image_layers,
-            solid_layers: &self.playback.asset.solid_layers,
+            composition: &self.rendered_asset.composition,
+            image_layers: &self.rendered_asset.image_layers,
+            solid_layers: &self.rendered_asset.solid_layers,
             frame,
             root_transform: transform,
             root_alpha: 1.0,
@@ -651,7 +727,7 @@ impl LottiePlayer {
             draw_state: self.draw_state,
         };
         self.renderer.append(
-            &self.playback.asset.composition,
+            &self.rendered_asset.composition,
             frame,
             transform,
             1.0,
@@ -664,6 +740,21 @@ impl LottiePlayer {
             vello::kurbo::Affine::IDENTITY,
             &clip,
         );
+        if let Some(rgba) = self.background {
+            let color = vello::peniko::Color::from_rgba8(
+                (rgba >> 24) as u8,
+                (rgba >> 16) as u8,
+                (rgba >> 8) as u8,
+                ((rgba as u8) as f32 * self.draw_state.fill.clamp(0.0, 1.0)).round() as u8,
+            );
+            scene.fill(
+                vello::peniko::Fill::NonZero,
+                vello::kurbo::Affine::IDENTITY,
+                color,
+                None,
+                &clip,
+            );
+        }
         scene.append(&rendered, None);
         scene.pop_layer();
         self.scene = Arc::new(scene);
@@ -684,20 +775,21 @@ pub fn sample_lottie_system(
         .as_ref()
         .map_or(0.0, |state| state.current_time);
     for (mut player, reveal, fill, stroke) in &mut players {
-        let frame = player.playback.source_frame(scene_time);
         let draw_state = LottieDrawState {
             reveal: reveal.map_or(1.0, |value| value.0.clamp(0.0, 1.0)),
             fill: fill.map_or(1.0, |value| value.0.clamp(0.0, 1.0)),
             outline_width: stroke.map_or(0.03, |value| value.style.width.max(0.0)),
         };
-        if frame.to_bits() != player.sampled_frame.to_bits() || draw_state != player.draw_state {
+        if draw_state != player.draw_state {
             player.draw_state = draw_state;
-            player.render(frame);
+            player.sampled_frame = f64::NAN;
         }
+        player.sample(scene_time);
     }
 }
 
 pub fn clear_lottie_cache() {
+    package::clear_cache();
     if let Some(cache) = LOTTIE_CACHE.get() {
         cache.lock().expect("Lottie cache poisoned").clear();
     }
@@ -846,6 +938,7 @@ fn load_image_layers(
     assets: &HashMap<String, LottieImageAssetSpec>,
     layers: &[LottieImageLayerSpec],
     warnings: &mut Vec<String>,
+    package: Option<&package::Package>,
 ) -> Result<Vec<LottieImageLayer>, LottieError> {
     let mut image_layers = Vec::with_capacity(layers.len());
     let mut embedded_count = 0_usize;
@@ -856,7 +949,7 @@ fn load_image_layers(
                 asset_id: layer.asset_id.clone(),
             });
         };
-        if asset.embedded {
+        if asset.embedded && package.is_none() {
             embedded_count += 1;
             continue;
         }
@@ -869,7 +962,16 @@ fn load_image_layers(
             asset_path.push(directory);
         }
         asset_path.push(&asset.file_name);
-        let decoded = image::open(&asset_path).map_err(|source| LottieError::ImageAsset {
+        let decoded = if let Some(package) = package {
+            let bytes = package.image(asset.directory.as_deref(), &asset.file_name)?;
+            image::ImageReader::new(std::io::Cursor::new(bytes))
+                .with_guessed_format()
+                .map_err(|e| package::invalid(e.to_string()))?
+                .decode()
+        } else {
+            image::open(&asset_path)
+        }
+        .map_err(|source| LottieError::ImageAsset {
             path: lottie_path.to_path_buf(),
             asset_path: asset_path.clone(),
             source: Box::new(source),
