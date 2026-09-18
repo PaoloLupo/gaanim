@@ -1749,13 +1749,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             .iter()
             .filter_map(|target| {
                 let state = self.states.get(*target)?;
-                // Text child bounds are already expressed in the owning text's local
-                // coordinate system. Applying the child's transform here would center
-                // them a second time and shift selection decorations to the left.
-                let world_transform = state
-                    .parent
-                    .map(|parent| self.get_world_transform(parent))
-                    .unwrap_or_else(|| self.get_world_transform(*target));
+                // Text child bounds live in the child's own local space, so decorations
+                // need the child's full world transform (parent ∘ child). Using only the
+                // parent's transform drops the child's layout offset and shifts selection
+                // decorations away from their glyphs.
+                let world_transform = self.get_world_transform(*target);
                 Some(state.bounds.transform_2d(&world_transform.to_affine_2d()))
             })
             .reduce(|bounds, next| bounds.union(&next))
@@ -1791,7 +1789,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 kurbo::Point::new(bounds.max.x + pad, bounds.max.y + pad * 0.25),
             )
             .no_fill()
-            .stroke(color, 3.0)
+            .stroke(color, 0.03)
             .spawn();
         self.text_cancellation_marks
             .entry(anim.target)
@@ -1835,21 +1833,21 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let y = if above {
             bounds.max.y + 0.12
         } else {
-            bounds.min.y - 12.0
+            bounds.min.y - 0.12
         };
         let color = self.text_selection_color(selected);
         let brace = self
             .brace(
                 kurbo::Point::new(bounds.min.x, y),
                 kurbo::Point::new(bounds.max.x, y),
-                -side * 10.0,
+                -side * 0.10,
             )
             .no_fill()
-            .stroke(color, 2.0)
+            .stroke(color, 0.02)
             .spawn();
-        let label_ref = self.text(&label, "Inter", 28.0);
+        let label_ref = self.text(&label, "Inter", 0.28);
         if let Some(state) = self.states.get_mut(label_ref.id) {
-            state.transform.translation = DVec3::new(bounds.center().x, y + side * 25.0, 0.0);
+            state.transform.translation = DVec3::new(bounds.center().x, y + side * 0.25, 0.0);
             self.commands.entity(state.entity).insert(state.transform);
         }
         for (target, anim_type) in [
@@ -1882,7 +1880,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             return;
         };
         let position = bounds.center() + offset;
-        let label_ref = self.text(&label, "Inter", 28.0);
+        let label_ref = self.text(&label, "Inter", 0.28);
         if let Some(state) = self.states.get_mut(label_ref.id) {
             state.transform.translation = position;
             self.commands.entity(state.entity).insert(state.transform);
@@ -1894,7 +1892,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 kurbo::Point::new(position.x, position.y),
             )
             .no_fill()
-            .stroke(color, 2.0)
+            .stroke(color, 0.02)
             .spawn();
         for (target, anim_type) in [
             (
@@ -1993,7 +1991,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         ),
                         TextSelectionEffect::RevealFromBelow => (
                             AnimationType::FadeInFrom {
-                                offset: DVec3::new(0.0, -24.0, 0.0),
+                                offset: DVec3::new(0.0, -0.24, 0.0),
                             },
                             RateFunc::Smooth,
                             0.0,
@@ -4580,7 +4578,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let origin = state.transform.translation;
         let num_wiggles = 6;
         let step = anim.duration / num_wiggles as f64;
-        let amplitude = 5.0;
+        let amplitude = 0.05;
 
         for i in 0..num_wiggles {
             let dir = if i % 2 == 0 { 1.0_f64 } else { -1.0_f64 };

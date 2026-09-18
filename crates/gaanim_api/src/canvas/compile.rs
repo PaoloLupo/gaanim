@@ -2647,7 +2647,7 @@ impl SceneModel {
                                     config: Default::default(),
                                 },
                                 FragmentRevealStyle::FromBelow => AnimationType::FadeInFrom {
-                                    offset: DVec3::new(0.0, -24.0, 0.0),
+                                    offset: DVec3::new(0.0, -0.24, 0.0),
                                 },
                             },
                             duration: *duration,
