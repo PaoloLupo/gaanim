@@ -1,5 +1,7 @@
 //! Presenter view hosted in a second native window.
 
+mod thumbnails;
+
 use bevy::{
     camera::RenderTarget,
     ecs::schedule::ScheduleLabel,
@@ -10,13 +12,15 @@ use bevy::{
     },
 };
 use bevy_egui::{EguiContext, EguiSchedule, egui, input::EguiWantsInput};
-use crossbeam_channel::{Receiver, TryRecvError, bounded};
-use gaanim_export::prelude::{AspectRatioPreset, ExportConfig, capture_scene_direct};
-use gaanim_timeline::timeline::Timeline;
-use std::collections::HashMap;
+use gaanim_timeline::timeline::{SegmentMetadata, Timeline};
 use std::time::{Duration, Instant};
 
-use crate::{AudienceBlank, PresentationMode, export::StashedReplay};
+pub(crate) use thumbnails::PresenterThumbnailCache;
+use thumbnails::{
+    PreviewStatus, ThumbnailKey, ThumbnailMoment, desired_thumbnail_edge, entry_segment_time,
+};
+
+use crate::{AudienceBlank, PresentationMode, export::StashedReplay, truncate_with_ellipsis};
 
 /// Dedicated egui schedule for the presenter window.
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
@@ -30,23 +34,33 @@ pub(crate) struct PresenterCamera {
     window: Entity,
 }
 
-/// Ephemeral controls for navigating a presentation by segment name.
+/// Ephemeral controls for navigating a presentation by slide name.
 #[derive(Resource, Default)]
 pub(crate) struct PresenterOverviewState {
     pub(crate) open: bool,
     pub(crate) query: String,
     focus_search: bool,
-    texture_revision: u64,
-    texture_generation: u64,
-    uploaded_camera: Option<Entity>,
-    textures: HashMap<(u32, ThumbnailMoment), egui::TextureHandle>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum ThumbnailMoment {
-    Entry,
-    Stop(u32),
-    Complete,
+const NOTES_SIZE_MIN: f32 = 14.0;
+const NOTES_SIZE_MAX: f32 = 44.0;
+
+/// Speaker-adjustable Presenter View settings for the current session.
+#[derive(Resource, Debug, Clone, Copy)]
+pub(crate) struct PresenterPreferences {
+    notes_size: f32,
+}
+
+impl Default for PresenterPreferences {
+    fn default() -> Self {
+        Self { notes_size: 22.0 }
+    }
+}
+
+impl PresenterPreferences {
+    fn adjust_notes_size(&mut self, delta: f32) {
+        self.notes_size = (self.notes_size + delta).clamp(NOTES_SIZE_MIN, NOTES_SIZE_MAX);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,204 +82,6 @@ pub(crate) enum PresentationAction {
 #[derive(Resource, Default)]
 pub(crate) struct AudienceControlsState {
     pointer_over: bool,
-}
-
-#[derive(Debug)]
-struct ThumbnailPixels {
-    segment_id: u32,
-    moment: ThumbnailMoment,
-    width: u32,
-    height: u32,
-    rgba: Vec<u8>,
-}
-
-type ThumbnailResult = Result<Vec<ThumbnailPixels>, String>;
-
-/// Async thumbnail state. Captures use a fresh headless world, so generating
-/// the overview never seeks or mutates the audience's live presentation.
-#[derive(Resource, Default)]
-pub(crate) struct PresenterThumbnailCache {
-    requested_revision: u64,
-    requested_dimensions: (u32, u32),
-    request_attempts: u8,
-    pixel_revision: u64,
-    pixel_dimensions: (u32, u32),
-    pixel_generation: u64,
-    pixels: Vec<ThumbnailPixels>,
-    receiver: Option<Receiver<(u64, ThumbnailResult)>>,
-    error: Option<String>,
-}
-
-impl PresenterThumbnailCache {
-    fn request(&mut self, stash: &StashedReplay, timeline: &Timeline, max_edge: u32) {
-        // Never replace the receiver of an in-flight render. Hot reload and
-        // resize can ask for a newer generation while the GPU worker is still
-        // active; dropping that receiver used to orphan the worker and launch
-        // overlapping GPU captures.
-        if self.receiver.is_some() {
-            return;
-        }
-        let Some(canvas) = stash.canvas.clone() else {
-            return;
-        };
-        let (preview_width, preview_height) = canvas.frame.preview_pixel_size();
-        let dimensions = thumbnail_dimensions(preview_width, preview_height, max_edge);
-        if stash.revision == 0 || timeline.segments.is_empty() {
-            return;
-        }
-
-        let revision = stash.revision;
-        let request_changed =
-            revision != self.requested_revision || dimensions != self.requested_dimensions;
-        if request_changed {
-            self.requested_revision = revision;
-            self.requested_dimensions = dimensions;
-            self.request_attempts = 0;
-        }
-        if (self.pixel_revision == revision && self.pixel_dimensions == dimensions)
-            || self.request_attempts >= 2
-        {
-            return;
-        }
-
-        let requests = timeline
-            .segments
-            .iter()
-            .flat_map(|segment| {
-                let mut cues = Vec::with_capacity(segment.stops.len() + 2);
-                cues.push((
-                    segment.id,
-                    ThumbnailMoment::Entry,
-                    entry_segment_time(segment.start_time, segment.end_time),
-                ));
-                cues.extend(segment.stops.iter().enumerate().map(|(index, stop)| {
-                    (segment.id, ThumbnailMoment::Stop(index as u32), stop.time)
-                }));
-                cues.push((
-                    segment.id,
-                    ThumbnailMoment::Complete,
-                    representative_segment_time(segment.start_time, segment.end_time),
-                ));
-                cues
-            })
-            .collect::<Vec<_>>();
-        let times = requests
-            .iter()
-            .map(|(_, _, time)| *time)
-            .collect::<Vec<_>>();
-        let (width, height) = dimensions;
-        let (sender, receiver) = bounded(1);
-
-        self.request_attempts += 1;
-        self.receiver = Some(receiver);
-        self.error = None;
-
-        let spawn_result = std::thread::Builder::new()
-            .name("gaanim-presenter-thumbnails".to_string())
-            .spawn(move || {
-                let mut config = ExportConfig::new("presenter-thumbnails.png");
-                config.width = width;
-                config.height = height;
-                config.aspect_ratio = AspectRatioPreset::Custom;
-                config.headless = true;
-                let result = capture_scene_direct(config, &times, move |world| {
-                    gaanim_api::runtime::replay_canvas_into(world, canvas)
-                })
-                .map(|frames| {
-                    requests
-                        .into_iter()
-                        .zip(frames)
-                        .map(|((segment_id, moment, _), frame)| ThumbnailPixels {
-                            segment_id,
-                            moment,
-                            width: frame.width,
-                            height: frame.height,
-                            rgba: frame.rgba,
-                        })
-                        .collect()
-                })
-                .map_err(|error| error.to_string());
-                let _ = sender.send((revision, result));
-            });
-
-        if let Err(error) = spawn_result {
-            self.receiver = None;
-            self.error = Some(format!("could not start thumbnail renderer: {error}"));
-        }
-    }
-
-    fn receive(&mut self) -> Option<(u64, ThumbnailResult)> {
-        let result = match self.receiver.as_ref()?.try_recv() {
-            Ok(result) => Some(result),
-            Err(TryRecvError::Empty) => None,
-            Err(TryRecvError::Disconnected) => {
-                self.error = Some("thumbnail renderer stopped unexpectedly".to_string());
-                self.receiver = None;
-                None
-            }
-        };
-        if result.is_some() {
-            self.receiver = None;
-        }
-        result
-    }
-
-    fn is_loading(&self) -> bool {
-        self.receiver.is_some()
-    }
-
-    fn store(&mut self, revision: u64, frames: Vec<ThumbnailPixels>) {
-        self.pixel_revision = revision;
-        self.pixel_dimensions = frames
-            .first()
-            .map(|frame| (frame.width, frame.height))
-            .unwrap_or(self.requested_dimensions);
-        self.pixel_generation = self.pixel_generation.wrapping_add(1).max(1);
-        self.pixels = frames;
-        self.error = None;
-    }
-
-    fn fail(&mut self, error: String) {
-        self.error = Some(error);
-    }
-
-    fn retry(&mut self) {
-        if self.receiver.is_none() {
-            self.requested_revision = 0;
-            self.requested_dimensions = (0, 0);
-            self.request_attempts = 0;
-            self.error = None;
-        }
-    }
-}
-
-fn thumbnail_dimensions(canvas_width: u32, canvas_height: u32, max_edge: u32) -> (u32, u32) {
-    let max_edge = max_edge.max(1) as f64;
-    let width = canvas_width.max(1) as f64;
-    let height = canvas_height.max(1) as f64;
-    let scale = max_edge / width.max(height);
-    (
-        (width * scale).round().max(1.0) as u32,
-        (height * scale).round().max(1.0) as u32,
-    )
-}
-
-fn desired_thumbnail_edge(viewport_width: f32, pixels_per_point: f32) -> u32 {
-    let physical_preview_width = viewport_width.max(1.0) * 0.66 * pixels_per_point.max(1.0);
-    let quantized = (physical_preview_width / 160.0).ceil() * 160.0;
-    quantized.clamp(960.0, 1600.0) as u32
-}
-
-fn thumbnail_upload_required(
-    overview: &PresenterOverviewState,
-    cache: &PresenterThumbnailCache,
-    camera_entity: Entity,
-    revision: u64,
-) -> bool {
-    cache.pixel_revision == revision
-        && (overview.uploaded_camera != Some(camera_entity)
-            || overview.texture_revision != revision
-            || overview.texture_generation != cache.pixel_generation)
 }
 
 /// Wall-clock timer for one presentation session. It survives closing and
@@ -313,32 +129,207 @@ fn format_timeline_time(seconds: f64) -> String {
     format!("{:02}:{:02}", seconds / 60, seconds % 60)
 }
 
-fn cue_label(
-    segment: &gaanim_timeline::timeline::SegmentMetadata,
-    stop_index: Option<usize>,
-) -> String {
-    stop_index
-        .and_then(|index| segment.stops.get(index).map(|stop| (index, stop)))
-        .map(|(index, stop)| {
-            stop.name
-                .as_deref()
-                .filter(|name| !name.trim().is_empty())
-                .map(str::to_owned)
-                .unwrap_or_else(|| format!("Cue {}", index + 1))
-        })
-        .unwrap_or_else(|| "Start".to_string())
+/// Presenter View colors. Text is bright by default: the speaker reads it
+/// at a glance from a distance, often on a dimmed laptop screen.
+mod palette {
+    use bevy_egui::egui::Color32;
+
+    pub(super) const BACKGROUND: Color32 = Color32::from_rgb(7, 11, 22);
+    pub(super) const PANEL: Color32 = Color32::from_rgb(10, 16, 30);
+    pub(super) const SURFACE: Color32 = Color32::from_rgb(16, 25, 44);
+    pub(super) const RAISED: Color32 = Color32::from_rgb(25, 37, 63);
+    pub(super) const BORDER: Color32 = Color32::from_rgb(38, 54, 84);
+    pub(super) const PREVIEW: Color32 = Color32::from_rgb(3, 6, 13);
+    pub(super) const TEXT: Color32 = Color32::from_rgb(236, 241, 250);
+    pub(super) const MUTED: Color32 = Color32::from_rgb(160, 174, 198);
+    pub(super) const FAINT: Color32 = Color32::from_rgb(110, 125, 150);
+    pub(super) const ACCENT: Color32 = Color32::from_rgb(125, 175, 255);
+    pub(super) const ACCENT_FILL: Color32 = Color32::from_rgb(62, 108, 214);
+    pub(super) const ACCENT_DIM: Color32 = Color32::from_rgb(50, 78, 136);
+    pub(super) const LIVE: Color32 = Color32::from_rgb(105, 220, 155);
+    pub(super) const WARN: Color32 = Color32::from_rgb(255, 209, 102);
+    pub(super) const DANGER: Color32 = Color32::from_rgb(255, 146, 146);
 }
 
-fn next_cue_label(
-    current_segment_id: Option<u32>,
-    next_segment: &gaanim_timeline::timeline::SegmentMetadata,
+// ---------------------------------------------------------------------------
+// Presentation semantics shared by Presenter View and the audience dock.
+// ---------------------------------------------------------------------------
+
+/// Where the presentation currently rests, in speaker terms: a slide
+/// (segment) and, optionally, the last step (stop) it reached.
+#[derive(Debug, Clone)]
+struct SlideView {
+    index: usize,
+    segment: SegmentMetadata,
     stop_index: Option<usize>,
-) -> String {
-    let cue = cue_label(next_segment, stop_index);
-    if current_segment_id == Some(next_segment.id) {
-        cue
+}
+
+impl SlideView {
+    fn at(timeline: &Timeline, time: f64) -> Option<Self> {
+        let position = timeline.segment_position_at(time)?;
+        let index = timeline
+            .segments
+            .iter()
+            .position(|segment| segment.id == position.segment_id)?;
+        Some(Self {
+            index,
+            segment: timeline.segments[index].clone(),
+            stop_index: position.stop_index,
+        })
+    }
+
+    fn thumbnail_key(&self) -> ThumbnailKey {
+        (
+            self.segment.id,
+            self.stop_index
+                .map(|index| ThumbnailMoment::Stop(index as u32))
+                .unwrap_or(ThumbnailMoment::Entry),
+        )
+    }
+}
+
+fn authored_step_name(segment: &SegmentMetadata, index: usize) -> Option<&str> {
+    segment
+        .stops
+        .get(index)
+        .and_then(|stop| stop.name.as_deref())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+}
+
+fn step_name(segment: &SegmentMetadata, index: usize) -> String {
+    authored_step_name(segment, index)
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("Step {}", index + 1))
+}
+
+/// One line describing where the slide is, e.g. `Step 2 of 3 · reveal`.
+fn step_caption(segment: &SegmentMetadata, stop_index: Option<usize>) -> String {
+    let count = segment.stops.len();
+    match stop_index {
+        Some(index) => {
+            let progress = format!("Step {} of {}", index + 1, count);
+            match authored_step_name(segment, index) {
+                Some(name) => format!("{progress} · {name}"),
+                None => progress,
+            }
+        }
+        None if count == 0 => "No steps · plays straight through".to_string(),
+        None if count == 1 => "Slide start · 1 step".to_string(),
+        None => format!("Slide start · {count} steps"),
+    }
+}
+
+/// The next resting point, described relative to the current slide.
+#[derive(Debug, Clone, PartialEq)]
+struct NextCue {
+    title: String,
+    detail: String,
+    key: ThumbnailKey,
+}
+
+fn next_cue(timeline: &Timeline, time: f64, current_segment: Option<u32>) -> Option<NextCue> {
+    let target = timeline.next_stop(time)?;
+    let next = SlideView::at(timeline, target)?;
+    let Some(index) = next.stop_index else {
+        return Some(NextCue {
+            title: next.segment.name.clone(),
+            detail: format!("Slide {} of {}", next.index + 1, timeline.segments.len()),
+            key: next.thumbnail_key(),
+        });
+    };
+    let (title, detail) = if current_segment == Some(next.segment.id) {
+        (
+            step_name(&next.segment, index),
+            format!(
+                "Same slide · step {} of {}",
+                index + 1,
+                next.segment.stops.len()
+            ),
+        )
     } else {
-        format!("{} / {}", next_segment.name, cue)
+        (
+            next.segment.name.clone(),
+            format!(
+                "Slide {} of {} · {}",
+                next.index + 1,
+                timeline.segments.len(),
+                step_caption(&next.segment, Some(index))
+            ),
+        )
+    };
+    Some(NextCue {
+        title,
+        detail,
+        key: next.thumbnail_key(),
+    })
+}
+
+/// Time that shows a slide's own initial state.
+///
+/// When the previous slide ends on a terminal stop, the shared boundary
+/// belongs to that stop, so seeking to it would keep the previous slide on
+/// screen. Direct navigation then lands just inside this slide, matching the
+/// slide's entry preview.
+fn segment_entry_time(timeline: &Timeline, segment: &SegmentMetadata) -> f64 {
+    let owns_start = timeline
+        .segment_position_at(segment.start_time)
+        .is_some_and(|position| position.segment_id == segment.id);
+    if owns_start {
+        segment.start_time
+    } else {
+        entry_segment_time(segment.start_time, segment.end_time)
+    }
+}
+
+fn segment_matches(segment: &SegmentMetadata, query: &str) -> bool {
+    query.is_empty()
+        || segment.name.to_lowercase().contains(query)
+        || segment
+            .notes
+            .as_deref()
+            .is_some_and(|notes| notes.to_lowercase().contains(query))
+        || segment.stops.iter().any(|stop| {
+            stop.name
+                .as_deref()
+                .is_some_and(|name| name.to_lowercase().contains(query))
+        })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlaybackStatus {
+    Playing,
+    Paused,
+    Finished,
+}
+
+impl PlaybackStatus {
+    fn of(timeline: &Timeline) -> Self {
+        if timeline.is_playing {
+            Self::Playing
+        } else if timeline.cached_duration > 0.0
+            && timeline.current_time >= timeline.cached_duration - 1e-6
+        {
+            Self::Finished
+        } else {
+            Self::Paused
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Playing => "PLAYING",
+            Self::Paused => "PAUSED",
+            Self::Finished => "END",
+        }
+    }
+
+    fn color(self) -> egui::Color32 {
+        match self {
+            Self::Playing => palette::LIVE,
+            Self::Paused => palette::WARN,
+            Self::Finished => palette::MUTED,
+        }
     }
 }
 
@@ -373,57 +364,50 @@ fn cursor_in_audience_dock_zone(
         && cursor.y <= window_height
 }
 
-fn representative_segment_time(start_time: f64, end_time: f64) -> f64 {
-    if end_time > start_time + 1e-4 {
-        (end_time - 1e-4).max(start_time)
-    } else {
-        start_time
-    }
-}
-
-fn entry_segment_time(start_time: f64, end_time: f64) -> f64 {
-    if end_time > start_time + 2e-4 {
-        (start_time + 1e-4).min(end_time - 1e-4)
-    } else {
-        start_time
-    }
-}
-
 fn apply_presenter_style(ctx: &egui::Context) {
     use egui::{Color32, FontFamily, FontId, TextStyle};
 
     let mut style = (*ctx.global_style()).clone();
-    style.spacing.item_spacing = egui::vec2(12.0, 10.0);
-    style.spacing.button_padding = egui::vec2(16.0, 10.0);
+    style.spacing.item_spacing = egui::vec2(12.0, 8.0);
+    style.spacing.button_padding = egui::vec2(14.0, 8.0);
     style.spacing.window_margin = egui::Margin::same(18);
     style.visuals = egui::Visuals::dark();
-    style.visuals.panel_fill = Color32::from_rgb(7, 11, 22);
-    style.visuals.window_fill = Color32::from_rgb(13, 20, 36);
+    style.visuals.panel_fill = palette::BACKGROUND;
+    style.visuals.window_fill = palette::PANEL;
     style.visuals.extreme_bg_color = Color32::from_rgb(5, 8, 16);
-    style.visuals.faint_bg_color = Color32::from_rgb(17, 26, 46);
-    style.visuals.widgets.inactive.bg_fill = Color32::from_rgb(22, 33, 57);
+    style.visuals.faint_bg_color = palette::SURFACE;
+    style.visuals.widgets.noninteractive.fg_stroke.color = palette::TEXT;
+    style.visuals.widgets.noninteractive.bg_stroke.color = palette::BORDER;
+    style.visuals.widgets.inactive.fg_stroke.color = palette::TEXT;
+    style.visuals.widgets.inactive.bg_fill = palette::RAISED;
+    style.visuals.widgets.inactive.weak_bg_fill = palette::RAISED;
+    style.visuals.widgets.hovered.fg_stroke.color = Color32::WHITE;
     style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(39, 58, 92);
+    style.visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(39, 58, 92);
+    style.visuals.widgets.active.fg_stroke.color = Color32::WHITE;
     style.visuals.widgets.active.bg_fill = Color32::from_rgb(56, 83, 132);
-    style.visuals.selection.bg_fill = Color32::from_rgb(69, 105, 174);
-    style.visuals.hyperlink_color = Color32::from_rgb(110, 168, 254);
+    style.visuals.widgets.active.weak_bg_fill = Color32::from_rgb(56, 83, 132);
+    style.visuals.selection.bg_fill = palette::ACCENT_FILL;
+    style.visuals.selection.stroke.color = Color32::WHITE;
+    style.visuals.hyperlink_color = palette::ACCENT;
     style.text_styles.insert(
         TextStyle::Heading,
-        FontId::new(30.0, FontFamily::Proportional),
+        FontId::new(28.0, FontFamily::Proportional),
     );
     style
         .text_styles
-        .insert(TextStyle::Body, FontId::new(18.0, FontFamily::Proportional));
+        .insert(TextStyle::Body, FontId::new(17.0, FontFamily::Proportional));
     style.text_styles.insert(
         TextStyle::Button,
         FontId::new(16.0, FontFamily::Proportional),
     );
     style.text_styles.insert(
         TextStyle::Small,
-        FontId::new(14.0, FontFamily::Proportional),
+        FontId::new(13.0, FontFamily::Proportional),
     );
     style.text_styles.insert(
         TextStyle::Monospace,
-        FontId::new(17.0, FontFamily::Monospace),
+        FontId::new(16.0, FontFamily::Monospace),
     );
     ctx.set_global_style(style);
 }
@@ -664,6 +648,398 @@ pub(crate) fn presentation_input_system(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Shared widgets.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ButtonStyle {
+    /// The single action the speaker performs most: advance.
+    Primary,
+    Secondary,
+    /// A mode such as the overview; highlighted while active.
+    Toggle(bool),
+    /// A mode that hides the slides from the audience; loud while active.
+    Alert(bool),
+}
+
+fn styled_button(
+    ui: &mut egui::Ui,
+    label: &str,
+    size: egui::Vec2,
+    style: ButtonStyle,
+) -> egui::Response {
+    let (fill, stroke, text_color) = match style {
+        ButtonStyle::Primary => (palette::ACCENT_FILL, palette::ACCENT, egui::Color32::WHITE),
+        ButtonStyle::Toggle(true) => (palette::ACCENT_DIM, palette::ACCENT, egui::Color32::WHITE),
+        ButtonStyle::Alert(true) => (palette::WARN, palette::WARN, palette::BACKGROUND),
+        ButtonStyle::Secondary | ButtonStyle::Toggle(false) | ButtonStyle::Alert(false) => {
+            (palette::RAISED, palette::BORDER, palette::TEXT)
+        }
+    };
+    let mut text = egui::RichText::new(label).size(16.0).color(text_color);
+    if matches!(style, ButtonStyle::Primary | ButtonStyle::Alert(true)) {
+        text = text.strong();
+    }
+    ui.add_sized(
+        size,
+        egui::Button::new(text)
+            .fill(fill)
+            .stroke(egui::Stroke::new(1.0, stroke))
+            .corner_radius(9.0),
+    )
+}
+
+fn section_label(ui: &mut egui::Ui, text: &str, color: egui::Color32) {
+    ui.label(egui::RichText::new(text).strong().size(11.0).color(color));
+}
+
+fn status_pill(ui: &mut egui::Ui, status: PlaybackStatus) {
+    let color = status.color();
+    egui::Frame::new()
+        .fill(palette::SURFACE)
+        .stroke(egui::Stroke::new(1.0, color.gamma_multiply(0.55)))
+        .corner_radius(12.0)
+        .inner_margin(egui::Margin::symmetric(10, 4))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                let (dot, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
+                ui.painter().circle_filled(dot.center(), 4.0, color);
+                ui.label(
+                    egui::RichText::new(status.label())
+                        .strong()
+                        .size(12.0)
+                        .color(color),
+                );
+            });
+        });
+}
+
+/// A labelled monospace value for a right-to-left row, read as `LABEL 00:00`.
+fn readout_rtl(ui: &mut egui::Ui, label: &str, value: &str, color: egui::Color32) {
+    ui.label(
+        egui::RichText::new(value)
+            .monospace()
+            .strong()
+            .size(22.0)
+            .color(color),
+    );
+    ui.label(
+        egui::RichText::new(label)
+            .strong()
+            .size(10.0)
+            .color(palette::FAINT),
+    );
+}
+
+fn paint_badge(
+    painter: &egui::Painter,
+    anchor: egui::Pos2,
+    align_right: bool,
+    text: &str,
+    fill: egui::Color32,
+    color: egui::Color32,
+) {
+    let galley = painter.layout_no_wrap(text.to_owned(), egui::FontId::proportional(12.0), color);
+    let size = galley.size() + egui::vec2(16.0, 8.0);
+    let min = if align_right {
+        egui::pos2(anchor.x - size.x, anchor.y)
+    } else {
+        anchor
+    };
+    let rect = egui::Rect::from_min_size(min, size);
+    painter.rect_filled(rect, 8.0, fill);
+    painter.galley(rect.min + egui::vec2(8.0, 4.0), galley, color);
+}
+
+/// Slide-by-slide progress: one block per slide, the current block filled up
+/// to the playhead and step ticks inside each block. Returns a seek target
+/// when an interactive bar is clicked.
+fn paint_slide_progress(
+    ui: &mut egui::Ui,
+    timeline: &Timeline,
+    current_time: f64,
+    height: f32,
+    interactive: bool,
+) -> Option<f64> {
+    let sense = if interactive {
+        egui::Sense::click()
+    } else {
+        egui::Sense::hover()
+    };
+    let width = ui.available_width().max(40.0);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), sense);
+    let painter = ui.painter_at(rect.expand(2.0));
+    let radius = (height * 0.5).min(3.0);
+    let segments = &timeline.segments;
+    if segments.is_empty() {
+        let total = timeline.cached_duration;
+        let fraction = if total > 0.0 {
+            (current_time / total).clamp(0.0, 1.0) as f32
+        } else {
+            0.0
+        };
+        painter.rect_filled(rect, radius, palette::RAISED);
+        let mut filled = rect;
+        filled.set_width(rect.width() * fraction);
+        painter.rect_filled(filled, radius, palette::ACCENT);
+        return None;
+    }
+
+    let count = segments.len();
+    let gap = if count > 60 { 1.0 } else { 3.0 };
+    let block = ((rect.width() - gap * (count - 1) as f32) / count as f32).max(1.0);
+    let current_index = SlideView::at(timeline, current_time).map(|slide| slide.index);
+    let hover_x = response.hover_pos().map(|pos| pos.x);
+    let mut hovered = None;
+    for (index, segment) in segments.iter().enumerate() {
+        let left = rect.left() + index as f32 * (block + gap);
+        let block_rect =
+            egui::Rect::from_min_size(egui::pos2(left, rect.top()), egui::vec2(block, height));
+        let span = segment.end_time - segment.start_time;
+        let fraction_of = |time: f64| {
+            if span > 1e-9 {
+                ((time - segment.start_time) / span).clamp(0.0, 1.0) as f32
+            } else {
+                1.0
+            }
+        };
+        let (fill, color) = match current_index {
+            Some(current) if index < current => (1.0, palette::ACCENT_DIM),
+            Some(current) if index == current => (fraction_of(current_time), palette::ACCENT),
+            _ => (0.0, palette::ACCENT),
+        };
+        painter.rect_filled(block_rect, radius, palette::RAISED);
+        if fill > 0.0 {
+            let mut filled = block_rect;
+            filled.set_width((block * fill).max(radius * 2.0).min(block));
+            painter.rect_filled(filled, radius, color);
+        }
+        if block >= 8.0 {
+            for stop in &segment.stops {
+                let fraction = fraction_of(stop.time);
+                if fraction < 0.98 {
+                    let x = block_rect.left() + block * fraction;
+                    painter.line_segment(
+                        [
+                            egui::pos2(x, block_rect.top() + 1.0),
+                            egui::pos2(x, block_rect.bottom() - 1.0),
+                        ],
+                        egui::Stroke::new(1.5, palette::BACKGROUND),
+                    );
+                }
+            }
+        }
+        if Some(index) == current_index {
+            painter.rect_stroke(
+                block_rect.expand(1.0),
+                radius + 1.0,
+                egui::Stroke::new(1.0, palette::TEXT.gamma_multiply(0.7)),
+                egui::StrokeKind::Outside,
+            );
+        }
+        if hover_x.is_some_and(|x| x >= left - gap * 0.5 && x < left + block + gap * 0.5) {
+            hovered = Some(index);
+        }
+    }
+
+    let hovered = hovered?;
+    let segment = &segments[hovered];
+    let hint = if interactive {
+        format!(
+            "Slide {} · {}\nClick to jump here",
+            hovered + 1,
+            segment.name
+        )
+    } else {
+        format!("Slide {} · {}", hovered + 1, segment.name)
+    };
+    let response = response.on_hover_text_at_pointer(hint);
+    (interactive && response.clicked()).then(|| segment_entry_time(timeline, segment))
+}
+
+#[derive(Default, Clone)]
+struct CuePreview {
+    texture: Option<egui::TextureHandle>,
+    stale: bool,
+}
+
+impl CuePreview {
+    fn lookup(cache: &PresenterThumbnailCache, key: ThumbnailKey, revision: u64) -> Self {
+        cache
+            .texture(key, revision)
+            .map(|(texture, stale)| Self {
+                texture: Some(texture),
+                stale,
+            })
+            .unwrap_or_default()
+    }
+
+    fn aspect(&self) -> f32 {
+        self.texture
+            .as_ref()
+            .map(|texture| {
+                let size = texture.size_vec2();
+                size.x / size.y.max(1.0)
+            })
+            .unwrap_or(16.0 / 9.0)
+    }
+}
+
+#[derive(Default, Clone, Copy)]
+struct PreviewOverlay {
+    blank: AudienceBlank,
+    playing: bool,
+    badge: Option<&'static str>,
+}
+
+fn show_preview(
+    ui: &mut egui::Ui,
+    preview: &CuePreview,
+    size: egui::Vec2,
+    empty_message: &str,
+    overlay: PreviewOverlay,
+    sense: egui::Sense,
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(size.max(egui::vec2(1.0, 1.0)), sense);
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 10.0, palette::PREVIEW);
+    let image_rect = match &preview.texture {
+        Some(texture) => {
+            let texture_size = texture.size_vec2();
+            let scale = (rect.width() / texture_size.x).min(rect.height() / texture_size.y);
+            let image_rect = egui::Rect::from_center_size(rect.center(), texture_size * scale);
+            egui::Image::new(texture)
+                .corner_radius(6.0)
+                .paint_at(ui, image_rect);
+            image_rect
+        }
+        None => {
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                empty_message,
+                egui::FontId::proportional(15.0),
+                palette::FAINT,
+            );
+            rect
+        }
+    };
+    let hover_stroke = if response.hovered() && sense.senses_click() {
+        palette::ACCENT
+    } else {
+        palette::BORDER
+    };
+    painter.rect_stroke(
+        rect,
+        10.0,
+        egui::Stroke::new(1.0, hover_stroke),
+        egui::StrokeKind::Inside,
+    );
+
+    let badge_fill = egui::Color32::from_rgba_premultiplied(5, 9, 18, 225);
+    if overlay.playing {
+        paint_badge(
+            &painter,
+            rect.left_top() + egui::vec2(10.0, 10.0),
+            false,
+            "⏵ Playing to the next step",
+            badge_fill,
+            palette::LIVE,
+        );
+    }
+    if let Some(badge) = overlay.badge {
+        paint_badge(
+            &painter,
+            rect.right_top() + egui::vec2(-10.0, 10.0),
+            true,
+            badge,
+            palette::ACCENT_FILL,
+            egui::Color32::WHITE,
+        );
+    } else if preview.stale {
+        paint_badge(
+            &painter,
+            rect.right_top() + egui::vec2(-10.0, 10.0),
+            true,
+            "Updating preview…",
+            badge_fill,
+            palette::MUTED,
+        );
+    }
+
+    let blank = match overlay.blank {
+        AudienceBlank::Black => Some((
+            egui::Color32::from_black_alpha(238),
+            egui::Color32::WHITE,
+            "Audience screen is black",
+            "Press B to show the slide again",
+        )),
+        AudienceBlank::White => Some((
+            egui::Color32::from_white_alpha(238),
+            egui::Color32::BLACK,
+            "Audience screen is white",
+            "Press W to show the slide again",
+        )),
+        AudienceBlank::None => None,
+    };
+    if let Some((fill, color, title, hint)) = blank {
+        painter.rect_filled(image_rect, 6.0, fill);
+        painter.text(
+            image_rect.center() - egui::vec2(0.0, 12.0),
+            egui::Align2::CENTER_CENTER,
+            title,
+            egui::FontId::proportional(22.0),
+            color,
+        );
+        painter.text(
+            image_rect.center() + egui::vec2(0.0, 16.0),
+            egui::Align2::CENTER_CENTER,
+            hint,
+            egui::FontId::proportional(14.0),
+            color.gamma_multiply(0.75),
+        );
+    }
+    response
+}
+
+const SHORTCUTS: &[(&str, &str)] = &[
+    ("Space  Enter  →", "Advance to the next step"),
+    ("←  Backspace", "Back to the previous step"),
+    ("Home  End", "First / last step"),
+    ("O", "Open or close the overview"),
+    ("B  W", "Black or white audience screen"),
+    ("Click", "Advance (on the audience screen)"),
+    ("P", "Reopen Presenter View"),
+    ("Esc", "Close overview, clear blank, then exit"),
+];
+
+fn show_shortcuts(ui: &mut egui::Ui) {
+    ui.set_min_width(360.0);
+    section_label(ui, "KEYBOARD SHORTCUTS", palette::ACCENT);
+    ui.add_space(4.0);
+    egui::Grid::new("presenter-shortcuts")
+        .num_columns(2)
+        .spacing([18.0, 6.0])
+        .show(ui, |ui| {
+            for (keys, action) in SHORTCUTS {
+                ui.label(
+                    egui::RichText::new(*keys)
+                        .monospace()
+                        .size(14.0)
+                        .color(palette::ACCENT),
+                );
+                ui.label(egui::RichText::new(*action).size(14.0));
+                ui.end_row();
+            }
+        });
+}
+
+// ---------------------------------------------------------------------------
+// Audience dock.
+// ---------------------------------------------------------------------------
+
 /// Compact playback dock rendered over the fullscreen audience window.
 ///
 /// It deliberately exposes only presentation-safe navigation and uses the
@@ -706,24 +1082,25 @@ pub(crate) fn audience_playback_controls_system(
 
     let total = timeline.cached_duration.max(0.0);
     let current = timeline.current_time.clamp(0.0, total);
-    let progress = if total > 0.0 {
-        (current / total) as f32
-    } else {
-        0.0
-    };
-    let current_cue = timeline
-        .segment_position_at(current)
-        .and_then(|position| {
-            timeline
-                .segments
-                .iter()
-                .find(|segment| segment.id == position.segment_id)
-                .map(|segment| cue_label(segment, position.stop_index))
-        })
+    let slide = SlideView::at(&timeline, current);
+    let status = PlaybackStatus::of(&timeline);
+    let title = slide
+        .as_ref()
+        .map(|slide| slide.segment.name.clone())
         .unwrap_or_else(|| "Presentation".to_string());
-    let format_time = |seconds: f64| {
-        let seconds = seconds.max(0.0).round() as u64;
-        format!("{:02}:{:02}", seconds / 60, seconds % 60)
+    let counter = match &slide {
+        Some(slide) => format!(
+            "{} / {}   {} / {}",
+            slide.index + 1,
+            timeline.segments.len(),
+            format_timeline_time(current),
+            format_timeline_time(total)
+        ),
+        None => format!(
+            "{} / {}",
+            format_timeline_time(current),
+            format_timeline_time(total)
+        ),
     };
     let mut actions = Vec::new();
 
@@ -743,113 +1120,62 @@ pub(crate) fn audience_playback_controls_system(
                 .show(ui, |ui| {
                     let width = (ctx.viewport_rect().width() - 48.0).clamp(280.0, 920.0);
                     ui.set_width(width);
-                    ui.spacing_mut().item_spacing = egui::vec2(9.0, 7.0);
+                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 6.0);
                     ui.horizontal(|ui| {
-                        let status_color = if timeline.is_playing {
-                            egui::Color32::from_rgb(105, 220, 155)
-                        } else {
-                            egui::Color32::from_rgb(255, 209, 102)
-                        };
-                        egui::Frame::new()
-                            .fill(egui::Color32::from_rgb(17, 27, 47))
-                            .corner_radius(8.0)
-                            .inner_margin(egui::Margin::symmetric(9, 7))
-                            .show(ui, |ui| {
-                                ui.label(
-                                    egui::RichText::new(if timeline.is_playing {
-                                        "PLAYING"
-                                    } else {
-                                        "READY"
-                                    })
-                                    .strong()
-                                    .size(11.0)
-                                    .color(status_color),
-                                );
-                            });
-                        if ui
-                            .add_sized(
-                                [58.0, 34.0],
-                                egui::Button::new("Start")
-                                    .fill(egui::Color32::from_rgb(22, 33, 57))
-                                    .corner_radius(8.0),
-                            )
+                        if styled_button(ui, "⏮", egui::vec2(40.0, 36.0), ButtonStyle::Secondary)
+                            .on_hover_text("First step  ·  Home")
                             .clicked()
                         {
                             actions.push(PresentationAction::Home);
                         }
-                        if ui
-                            .add_sized(
-                                [84.0, 34.0],
-                                egui::Button::new("Previous")
-                                    .fill(egui::Color32::from_rgb(22, 33, 57))
-                                    .corner_radius(8.0),
-                            )
+                        if styled_button(ui, "⏴", egui::vec2(44.0, 36.0), ButtonStyle::Secondary)
+                            .on_hover_text("Previous step  ·  Left arrow")
                             .clicked()
                         {
                             actions.push(PresentationAction::Previous);
                         }
-                        let primary_label = if timeline.is_playing {
-                            "Pause"
+                        let (label, action) = if status == PlaybackStatus::Playing {
+                            ("⏸  Pause", PresentationAction::TogglePlayback)
                         } else {
-                            "Advance"
+                            ("⏵  Advance", PresentationAction::Advance)
                         };
-                        if ui
-                            .add_sized(
-                                [112.0, 36.0],
-                                egui::Button::new(primary_label)
-                                    .fill(egui::Color32::from_rgb(70, 112, 207))
-                                    .stroke(egui::Stroke::new(
-                                        1.0,
-                                        egui::Color32::from_rgb(125, 168, 255),
-                                    ))
-                                    .corner_radius(8.0),
-                            )
+                        if styled_button(ui, label, egui::vec2(124.0, 38.0), ButtonStyle::Primary)
+                            .on_hover_text("Space, Enter or Right arrow")
                             .clicked()
                         {
-                            actions.push(if timeline.is_playing {
-                                PresentationAction::TogglePlayback
-                            } else {
-                                PresentationAction::Advance
-                            });
+                            actions.push(action);
                         }
-                        if ui
-                            .add_sized(
-                                [50.0, 34.0],
-                                egui::Button::new("End")
-                                    .fill(egui::Color32::from_rgb(22, 33, 57))
-                                    .corner_radius(8.0),
-                            )
+                        if styled_button(ui, "⏭", egui::vec2(40.0, 36.0), ButtonStyle::Secondary)
+                            .on_hover_text("Last step  ·  End")
                             .clicked()
                         {
                             actions.push(PresentationAction::End);
                         }
                         ui.separator();
                         ui.vertical(|ui| {
-                            ui.set_width(ui.available_width().max(150.0));
                             ui.horizontal(|ui| {
-                                ui.label(
-                                    egui::RichText::new("CURRENT CUE")
-                                        .strong()
-                                        .size(10.0)
-                                        .color(egui::Color32::from_rgb(145, 190, 255)),
-                                );
-                                ui.label(egui::RichText::new(&current_cue).strong());
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
-                                        ui.monospace(format!(
-                                            "{} / {}",
-                                            format_time(current),
-                                            format_time(total)
-                                        ));
+                                        ui.label(
+                                            egui::RichText::new(&counter)
+                                                .monospace()
+                                                .size(13.0)
+                                                .color(palette::MUTED),
+                                        );
+                                        ui.add(
+                                            egui::Label::new(
+                                                egui::RichText::new(&title)
+                                                    .strong()
+                                                    .size(15.0)
+                                                    .color(palette::TEXT),
+                                            )
+                                            .truncate(),
+                                        );
                                     },
                                 );
                             });
-                            ui.add(
-                                egui::ProgressBar::new(progress.clamp(0.0, 1.0))
-                                    .desired_height(6.0)
-                                    .fill(egui::Color32::from_rgb(91, 143, 255)),
-                            );
+                            paint_slide_progress(ui, &timeline, current, 6.0, false);
                         });
                     });
                 });
@@ -861,733 +1187,899 @@ pub(crate) fn audience_playback_controls_system(
     }
 }
 
-/// Speaker-facing controls and semantic presentation information.
-fn cue_texture(
-    overview: &PresenterOverviewState,
-    segment_id: u32,
-    stop_index: Option<usize>,
-) -> Option<egui::TextureHandle> {
-    let moment = stop_index
-        .map(|index| ThumbnailMoment::Stop(index as u32))
-        .unwrap_or(ThumbnailMoment::Entry);
-    overview.textures.get(&(segment_id, moment)).cloned()
+// ---------------------------------------------------------------------------
+// Presenter View.
+// ---------------------------------------------------------------------------
+
+/// Everything the cockpit shows for one frame, derived before any widgets run
+/// so panels never disagree about the current position.
+struct PresenterFrame {
+    status: PlaybackStatus,
+    slide: Option<SlideView>,
+    next: Option<NextCue>,
+    slide_count: usize,
+    current_preview: CuePreview,
+    next_preview: CuePreview,
+    blank: AudienceBlank,
+    preview_status: PreviewStatus,
+    omits_native_3d: bool,
+    overview_open: bool,
+    elapsed: String,
+    clock: String,
+    current_time: f64,
+    total_time: f64,
 }
 
-fn show_cue_image(
-    ui: &mut egui::Ui,
-    texture: Option<&egui::TextureHandle>,
-    max_width: f32,
-    max_height: f32,
-    empty_message: &str,
-) {
-    let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(max_width.max(1.0), max_height.max(1.0)),
-        egui::Sense::hover(),
-    );
-    ui.painter()
-        .rect_filled(rect, 10.0, egui::Color32::from_rgb(3, 6, 13));
-    ui.painter().rect_stroke(
-        rect,
-        10.0,
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(31, 45, 69)),
-        egui::StrokeKind::Inside,
-    );
-    if let Some(texture) = texture {
-        let texture_size = texture.size_vec2();
-        let scale = (rect.width() / texture_size.x).min(rect.height() / texture_size.y);
-        let image_size = texture_size * scale;
-        let image_rect = egui::Rect::from_center_size(rect.center(), image_size);
-        egui::Image::new(texture).paint_at(ui, image_rect);
-    } else {
-        ui.painter().text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            empty_message,
-            egui::FontId::proportional(16.0),
-            egui::Color32::from_rgb(112, 126, 149),
-        );
+impl PresenterFrame {
+    fn preview_message(&self) -> &'static str {
+        match self.preview_status {
+            PreviewStatus::Failed(_) => "Preview unavailable",
+            _ => "Rendering preview…",
+        }
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn show_current_cue(
+fn show_header(
     ui: &mut egui::Ui,
-    segment: &gaanim_timeline::timeline::SegmentMetadata,
-    segment_index: usize,
-    segment_count: usize,
-    stop_index: Option<usize>,
-    texture: Option<&egui::TextureHandle>,
-    preview_message: &str,
-    requested_seek: &mut Option<f64>,
+    frame: &PresenterFrame,
     timeline: &Timeline,
-) {
-    let cue_name = cue_label(segment, stop_index);
-    let cue_number = stop_index.map(|index| index + 2).unwrap_or(1);
-    let cue_count = segment.stops.len() + 1;
-    ui.horizontal(|ui| {
-        ui.label(
-            egui::RichText::new("CURRENT CUE")
-                .strong()
-                .size(12.0)
-                .color(egui::Color32::from_rgb(145, 190, 255)),
-        );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.monospace(format!("CUE {:02} / {:02}", cue_number, cue_count));
-            ui.label(
-                egui::RichText::new(format!(
-                    "SEGMENT {:02} / {:02}",
-                    segment_index + 1,
-                    segment_count
-                ))
-                .size(11.0)
-                .color(egui::Color32::from_rgb(112, 126, 149)),
-            );
-        });
-    });
-    ui.label(
-        egui::RichText::new(cue_name)
-            .strong()
-            .size(28.0)
-            .color(egui::Color32::from_rgb(238, 244, 255)),
-    );
-    let preview_height = (ui.available_height() - 92.0).clamp(180.0, 520.0);
-    show_cue_image(
-        ui,
-        texture,
-        ui.available_width(),
-        preview_height,
-        preview_message,
-    );
-    ui.add_space(8.0);
-    ui.horizontal_wrapped(|ui| {
-        let entry_active = stop_index.is_none();
-        let entry = egui::Button::new("Start").selected(entry_active);
-        if ui.add(entry).clicked() {
-            *requested_seek = timeline.segment_time_indexed(&segment.name, None);
-        }
-        for (index, stop) in segment.stops.iter().enumerate() {
-            let label = stop
-                .name
-                .as_deref()
-                .map(str::to_owned)
-                .unwrap_or_else(|| format!("Cue {}", index + 1));
-            if ui
-                .add(egui::Button::new(label).selected(stop_index == Some(index)))
-                .clicked()
-            {
-                *requested_seek = timeline.segment_time_indexed(&segment.name, Some(index));
+    timer: &mut PresentationTimer,
+    compact: bool,
+) -> Option<f64> {
+    let slide_position = |ui: &mut egui::Ui| {
+        status_pill(ui, frame.status);
+        match &frame.slide {
+            Some(slide) => {
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(format!(
+                            "Slide {} of {}",
+                            slide.index + 1,
+                            frame.slide_count
+                        ))
+                        .strong()
+                        .size(19.0)
+                        .color(palette::TEXT),
+                    )
+                    .extend(),
+                );
+            }
+            None => {
+                ui.label(
+                    egui::RichText::new("No slides")
+                        .size(17.0)
+                        .color(palette::MUTED),
+                );
             }
         }
-    });
+    };
+    // Right-to-left: the clock sits at the far right, elapsed time before it.
+    let timers = |ui: &mut egui::Ui, timer: &mut PresentationTimer| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        readout_rtl(ui, "CLOCK", &frame.clock, palette::TEXT);
+        ui.add_space(18.0);
+        if ui
+            .add(
+                egui::Button::new(egui::RichText::new("↺").size(16.0).color(palette::MUTED))
+                    .fill(palette::SURFACE)
+                    .corner_radius(8.0)
+                    .min_size(egui::vec2(32.0, 32.0)),
+            )
+            .on_hover_text("Restart the session timer")
+            .clicked()
+        {
+            timer.reset();
+        }
+        ui.add_space(4.0);
+        readout_rtl(ui, "ELAPSED", &frame.elapsed, palette::ACCENT);
+    };
+
+    if compact {
+        ui.horizontal(slide_position);
+        ui.horizontal(|ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                timers(ui, timer)
+            });
+        });
+    } else {
+        ui.horizontal(|ui| {
+            slide_position(ui);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                timers(ui, timer)
+            });
+        });
+    }
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        let time = format!(
+            "{} / {}",
+            format_timeline_time(frame.current_time),
+            format_timeline_time(frame.total_time)
+        );
+        let bar_width = (ui.available_width() - 110.0).max(60.0);
+        let seek = ui
+            .allocate_ui_with_layout(
+                egui::vec2(bar_width, 12.0),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| paint_slide_progress(ui, timeline, frame.current_time, 10.0, true),
+            )
+            .inner;
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(
+                egui::RichText::new(time)
+                    .monospace()
+                    .size(13.0)
+                    .color(palette::FAINT),
+            );
+        });
+        seek
+    })
+    .inner
+}
+
+/// Height reserved below the current preview for the step strip.
+const STEP_STRIP_HEIGHT: f32 = 58.0;
+
+fn show_step_strip(
+    ui: &mut egui::Ui,
+    timeline: &Timeline,
+    slide: &SlideView,
+    requested_seek: &mut Option<f64>,
+) {
+    let segment = &slide.segment;
+    egui::ScrollArea::horizontal()
+        .id_salt("presenter-steps")
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                let chip = |ui: &mut egui::Ui, label: String, active: bool, passed: bool| {
+                    let (fill, stroke, color) = if active {
+                        (palette::ACCENT_FILL, palette::ACCENT, egui::Color32::WHITE)
+                    } else if passed {
+                        (palette::SURFACE, palette::BORDER, palette::MUTED)
+                    } else {
+                        (palette::RAISED, palette::BORDER, palette::TEXT)
+                    };
+                    ui.add(
+                        egui::Button::new(egui::RichText::new(label).size(14.0).color(color))
+                            .fill(fill)
+                            .stroke(egui::Stroke::new(1.0, stroke))
+                            .corner_radius(16.0)
+                            .min_size(egui::vec2(0.0, 32.0)),
+                    )
+                };
+                if chip(
+                    ui,
+                    "↺  Slide start".to_string(),
+                    slide.stop_index.is_none(),
+                    slide.stop_index.is_some(),
+                )
+                .on_hover_text("Jump to the beginning of this slide")
+                .clicked()
+                {
+                    *requested_seek = Some(segment_entry_time(timeline, segment));
+                }
+                for (index, stop) in segment.stops.iter().enumerate() {
+                    let passed = slide.stop_index.is_some_and(|current| index < current);
+                    let name = step_name(segment, index);
+                    let label = match authored_step_name(segment, index) {
+                        Some(name) => {
+                            format!("{}  {}", index + 1, truncate_with_ellipsis(name, 28))
+                        }
+                        None => name.clone(),
+                    };
+                    let label = if passed {
+                        format!("✔ {label}")
+                    } else {
+                        label
+                    };
+                    if chip(ui, label, slide.stop_index == Some(index), passed)
+                        .on_hover_text(format!("Jump to step {} · {name}", index + 1))
+                        .clicked()
+                    {
+                        *requested_seek = Some(stop.time);
+                    }
+                }
+            });
+        });
+}
+
+fn show_now_panel(
+    ui: &mut egui::Ui,
+    frame: &PresenterFrame,
+    slide: &SlideView,
+    timeline: &Timeline,
+    preview_height: Option<f32>,
+    requested_seek: &mut Option<f64>,
+) {
+    section_label(ui, "NOW ON SCREEN", palette::ACCENT);
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(&slide.segment.name)
+                .strong()
+                .size(28.0)
+                .color(palette::TEXT),
+        )
+        .truncate(),
+    );
+    ui.label(
+        egui::RichText::new(step_caption(&slide.segment, slide.stop_index))
+            .size(17.0)
+            .color(if slide.stop_index.is_some() {
+                palette::ACCENT
+            } else {
+                palette::MUTED
+            }),
+    );
+    ui.add_space(6.0);
+    let height = preview_height
+        .unwrap_or_else(|| ui.available_height() - STEP_STRIP_HEIGHT)
+        .max(140.0);
+    show_preview(
+        ui,
+        &frame.current_preview,
+        egui::vec2(ui.available_width(), height),
+        frame.preview_message(),
+        PreviewOverlay {
+            blank: frame.blank,
+            playing: frame.status == PlaybackStatus::Playing,
+            badge: None,
+        },
+        egui::Sense::hover(),
+    );
+    ui.add_space(10.0);
+    show_step_strip(ui, timeline, slide, requested_seek);
 }
 
 fn show_speaker_column(
     ui: &mut egui::Ui,
-    notes: Option<&str>,
-    next_label: Option<&str>,
-    next_texture: Option<&egui::TextureHandle>,
-    preview_message: &str,
+    frame: &PresenterFrame,
+    preferences: &mut PresenterPreferences,
+    notes_min_height: f32,
 ) {
-    ui.label(
-        egui::RichText::new("UP NEXT")
-            .strong()
-            .size(12.0)
-            .color(egui::Color32::from_rgb(145, 190, 255)),
+    section_label(ui, "UP NEXT", palette::ACCENT);
+    let (title, detail) = match &frame.next {
+        Some(next) => (next.title.as_str(), next.detail.as_str()),
+        None => ("End of presentation", "Nothing left to advance"),
+    };
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(title)
+                .strong()
+                .size(20.0)
+                .color(palette::TEXT),
+        )
+        .truncate(),
     );
-    ui.label(
-        egui::RichText::new(next_label.unwrap_or("End of presentation"))
-            .strong()
-            .size(20.0),
+    ui.add(
+        egui::Label::new(egui::RichText::new(detail).size(14.0).color(palette::MUTED)).truncate(),
     );
-    let next_message = if next_label.is_some() {
-        preview_message
+    ui.add_space(4.0);
+    let width = ui.available_width();
+    let height = (width / frame.next_preview.aspect()).min((ui.available_height() * 0.4).max(90.0));
+    let empty = if frame.next.is_some() {
+        frame.preview_message()
     } else {
         "Presentation complete"
     };
-    show_cue_image(ui, next_texture, ui.available_width(), 150.0, next_message);
-    ui.add_space(16.0);
-    ui.label(
-        egui::RichText::new("SPEAKER NOTES")
-            .strong()
-            .size(12.0)
-            .color(egui::Color32::from_rgb(255, 209, 102)),
+    show_preview(
+        ui,
+        &frame.next_preview,
+        egui::vec2(width, height),
+        empty,
+        PreviewOverlay::default(),
+        egui::Sense::hover(),
     );
+
+    ui.add_space(14.0);
+    ui.horizontal(|ui| {
+        section_label(ui, "SPEAKER NOTES", palette::WARN);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let size = preferences.notes_size;
+            if ui
+                .add_enabled(size < NOTES_SIZE_MAX, egui::Button::new("A+").small())
+                .on_hover_text("Larger notes")
+                .clicked()
+            {
+                preferences.adjust_notes_size(2.0);
+            }
+            if ui
+                .add_enabled(size > NOTES_SIZE_MIN, egui::Button::new("A−").small())
+                .on_hover_text("Smaller notes")
+                .clicked()
+            {
+                preferences.adjust_notes_size(-2.0);
+            }
+        });
+    });
+    let notes = frame
+        .slide
+        .as_ref()
+        .and_then(|slide| slide.segment.notes.as_deref())
+        .map(str::trim)
+        .filter(|notes| !notes.is_empty());
     egui::Frame::new()
-        .fill(egui::Color32::from_rgb(13, 20, 36))
-        .corner_radius(9.0)
+        .fill(palette::SURFACE)
+        .corner_radius(10.0)
         .inner_margin(egui::Margin::same(14))
         .show(ui, |ui| {
+            let height = ui.available_height().max(notes_min_height);
+            egui::ScrollArea::vertical()
+                .id_salt("presenter-notes")
+                .auto_shrink([false, false])
+                .max_height(height)
+                .show(ui, |ui| match notes {
+                    Some(notes) => {
+                        let size = preferences.notes_size;
+                        ui.label(
+                            egui::RichText::new(notes)
+                                .size(size)
+                                .color(palette::TEXT)
+                                .line_height(Some(size * 1.4)),
+                        );
+                    }
+                    None => {
+                        ui.label(
+                            egui::RichText::new("No speaker notes for this slide.")
+                                .size(16.0)
+                                .italics()
+                                .color(palette::FAINT),
+                        );
+                    }
+                });
+        });
+}
+
+fn show_preview_status(ui: &mut egui::Ui, frame: &PresenterFrame, retry: &mut bool) {
+    match &frame.preview_status {
+        PreviewStatus::Rendering { done, total } => {
+            ui.label(
+                egui::RichText::new(format!("Rendering previews {done}/{total}"))
+                    .size(13.0)
+                    .color(palette::MUTED),
+            );
+            ui.spinner();
+        }
+        PreviewStatus::Failed(error) => {
+            if ui
+                .add(egui::Button::new("Retry").small())
+                .on_hover_text("Render the cue previews again")
+                .clicked()
+            {
+                *retry = true;
+            }
+            ui.label(
+                egui::RichText::new("⚠ Previews failed")
+                    .size(13.0)
+                    .color(palette::DANGER),
+            )
+            .on_hover_text(error.as_str());
+        }
+        PreviewStatus::Waiting if frame.slide.is_some() => {
+            ui.spinner();
+        }
+        PreviewStatus::Waiting | PreviewStatus::Ready => {}
+    }
+    if frame.omits_native_3d {
+        ui.label(
+            egui::RichText::new("⚠ 3D not in previews")
+                .size(13.0)
+                .color(palette::WARN),
+        )
+        .on_hover_text(
+            "Cue previews draw the 2D layers only. Native 3D objects still appear on the audience screen.",
+        );
+    }
+}
+
+fn show_dock(
+    ui: &mut egui::Ui,
+    frame: &PresenterFrame,
+    compact: bool,
+    actions: &mut Vec<PresentationAction>,
+    retry: &mut bool,
+) {
+    ui.horizontal_centered(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+        let height = 42.0;
+        let label = |icon: &'static str, text: &'static str| {
+            if compact {
+                icon.to_string()
+            } else {
+                format!("{icon}  {text}")
+            }
+        };
+        if styled_button(ui, "⏮", egui::vec2(44.0, height), ButtonStyle::Secondary)
+            .on_hover_text("First step  ·  Home")
+            .clicked()
+        {
+            actions.push(PresentationAction::Home);
+        }
+        let previous_width = if compact { 48.0 } else { 122.0 };
+        if styled_button(
+            ui,
+            &label("⏴", "Previous"),
+            egui::vec2(previous_width, height),
+            ButtonStyle::Secondary,
+        )
+        .on_hover_text("Previous step  ·  Left arrow or Backspace")
+        .clicked()
+        {
+            actions.push(PresentationAction::Previous);
+        }
+        let (primary, action) = if frame.status == PlaybackStatus::Playing {
+            (label("⏸", "Pause"), PresentationAction::TogglePlayback)
+        } else {
+            (label("⏵", "Advance"), PresentationAction::Advance)
+        };
+        let primary_width = if compact { 64.0 } else { 170.0 };
+        if styled_button(
+            ui,
+            &primary,
+            egui::vec2(primary_width, height),
+            ButtonStyle::Primary,
+        )
+        .on_hover_text("Space, Enter or Right arrow")
+        .clicked()
+        {
+            actions.push(action);
+        }
+        if styled_button(ui, "⏭", egui::vec2(44.0, height), ButtonStyle::Secondary)
+            .on_hover_text("Last step  ·  End")
+            .clicked()
+        {
+            actions.push(PresentationAction::End);
+        }
+        ui.add_space(4.0);
+        ui.separator();
+        ui.add_space(4.0);
+        let mode_width = if compact { 48.0 } else { 118.0 };
+        if styled_button(
+            ui,
+            &label("⊞", "Overview"),
+            egui::vec2(mode_width, height),
+            ButtonStyle::Toggle(frame.overview_open),
+        )
+        .on_hover_text("Find and jump to any slide  ·  O")
+        .clicked()
+        {
+            actions.push(PresentationAction::ToggleOverview);
+        }
+        let blank_width = if compact { 48.0 } else { 100.0 };
+        if styled_button(
+            ui,
+            &label("⬛", "Black"),
+            egui::vec2(blank_width, height),
+            ButtonStyle::Alert(frame.blank == AudienceBlank::Black),
+        )
+        .on_hover_text("Black out the audience screen  ·  B")
+        .clicked()
+        {
+            actions.push(PresentationAction::ToggleBlack);
+        }
+        if styled_button(
+            ui,
+            &label("⬜", "White"),
+            egui::vec2(blank_width, height),
+            ButtonStyle::Alert(frame.blank == AudienceBlank::White),
+        )
+        .on_hover_text("White out the audience screen  ·  W")
+        .clicked()
+        {
+            actions.push(PresentationAction::ToggleWhite);
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.menu_button(egui::RichText::new("⌨").size(18.0), show_shortcuts)
+                .response
+                .on_hover_text("Keyboard shortcuts");
+            show_preview_status(ui, frame, retry);
+        });
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn show_overview(
+    ctx: &egui::Context,
+    overview: &mut PresenterOverviewState,
+    frame: &PresenterFrame,
+    timeline: &Timeline,
+    thumbnails: &PresenterThumbnailCache,
+    revision: u64,
+    actions: &mut Vec<PresentationAction>,
+    requested_seek: &mut Option<f64>,
+) {
+    let rect = ctx.viewport_rect().shrink(12.0);
+    let current_segment = frame.slide.as_ref().map(|slide| slide.segment.id);
+    egui::Window::new("Presentation overview")
+        .title_bar(false)
+        .resizable(false)
+        .fixed_rect(rect)
+        .frame(
+            egui::Frame::new()
+                .fill(palette::PANEL)
+                .stroke(egui::Stroke::new(1.0, palette::BORDER))
+                .corner_radius(12.0)
+                .inner_margin(egui::Margin::same(18)),
+        )
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Overview")
+                        .strong()
+                        .size(24.0)
+                        .color(palette::TEXT),
+                );
+                if let Some(slide) = &frame.slide {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "Now on slide {} of {}",
+                            slide.index + 1,
+                            frame.slide_count
+                        ))
+                        .color(palette::MUTED),
+                    );
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if styled_button(
+                        ui,
+                        "Close  Esc",
+                        egui::vec2(110.0, 34.0),
+                        ButtonStyle::Secondary,
+                    )
+                    .clicked()
+                    {
+                        actions.push(PresentationAction::ToggleOverview);
+                    }
+                });
+            });
+            ui.add_space(6.0);
+            let search = ui.add(
+                egui::TextEdit::singleline(&mut overview.query)
+                    .hint_text("🔍  Search slides, steps or notes · Enter jumps to the first match")
+                    .desired_width(f32::INFINITY),
+            );
+            if overview.focus_search {
+                search.request_focus();
+                overview.focus_search = false;
+            }
+            let query = overview.query.trim().to_lowercase();
+            let matches = timeline
+                .segments
+                .iter()
+                .enumerate()
+                .filter(|(_, segment)| segment_matches(segment, &query))
+                .map(|(index, _)| index)
+                .collect::<Vec<_>>();
+            if search.lost_focus()
+                && ui.input(|input| input.key_pressed(egui::Key::Enter))
+                && let Some(&first) = matches.first()
+            {
+                *requested_seek = Some(segment_entry_time(timeline, &timeline.segments[first]));
+            }
+            ui.add_space(10.0);
+            if matches.is_empty() {
+                ui.label(
+                    egui::RichText::new("No slides match this search.")
+                        .italics()
+                        .color(palette::FAINT),
+                );
+                return;
+            }
+
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
-                .max_height(ui.available_height().max(160.0))
                 .show(ui, |ui| {
-                    let notes = notes.filter(|notes| !notes.trim().is_empty());
-                    let mut text =
-                        egui::RichText::new(notes.unwrap_or("No speaker notes for this segment."))
-                            .size(20.0);
-                    if notes.is_none() {
-                        text = text.color(egui::Color32::from_rgb(126, 140, 163));
+                    let gap = 14.0;
+                    let available = ui.available_width();
+                    let columns = ((available + gap) / (250.0 + gap)).floor().max(1.0);
+                    let card_width = ((available - gap * (columns - 1.0)) / columns).floor();
+                    ui.spacing_mut().item_spacing = egui::vec2(gap, gap);
+                    // Explicit rows: a wrapped layout cannot know a card's
+                    // size before placing it, so it would never break lines.
+                    for row in matches.chunks(columns as usize) {
+                        ui.horizontal_top(|ui| {
+                            for &index in row {
+                                let segment = &timeline.segments[index];
+                                let preview = CuePreview::lookup(
+                                    thumbnails,
+                                    (segment.id, ThumbnailMoment::Complete),
+                                    revision,
+                                );
+                                show_overview_card(
+                                    ui,
+                                    timeline,
+                                    index,
+                                    segment,
+                                    current_segment == Some(segment.id),
+                                    &preview,
+                                    frame.preview_message(),
+                                    card_width,
+                                    requested_seek,
+                                );
+                            }
+                        });
                     }
-                    ui.label(text.line_height(Some(28.0)));
                 });
         });
 }
 
 #[allow(clippy::too_many_arguments)]
-fn show_presenter_status(
+fn show_overview_card(
     ui: &mut egui::Ui,
-    current_segment: Option<(usize, &str)>,
-    segment_count: usize,
-    current_time: f64,
-    total_time: f64,
-    is_playing: bool,
-    audience_blank: AudienceBlank,
-    talk_elapsed: &str,
-    local_time: &str,
-    compact: bool,
-    presentation_timer: &mut PresentationTimer,
+    timeline: &Timeline,
+    index: usize,
+    segment: &SegmentMetadata,
+    is_current: bool,
+    preview: &CuePreview,
+    preview_message: &str,
+    card_width: f32,
+    requested_seek: &mut Option<f64>,
 ) {
-    let status_text = if is_playing { "PLAYING" } else { "READY" };
-    let status_color = if is_playing {
-        egui::Color32::from_rgb(105, 220, 155)
+    let stroke = if is_current {
+        egui::Stroke::new(2.0, palette::ACCENT)
     } else {
-        egui::Color32::from_rgb(255, 209, 102)
+        egui::Stroke::new(1.0, palette::BORDER)
     };
-    let progress = if total_time > 0.0 {
-        (current_time / total_time) as f32
-    } else {
-        0.0
-    };
-
-    if compact {
-        ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new(status_text)
-                    .strong()
-                    .color(status_color),
-            );
-            if let Some((index, segment_name)) = current_segment {
-                ui.separator();
-                ui.label(egui::RichText::new(segment_name).strong().size(17.0));
-                ui.weak(format!("{} / {}", index + 1, segment_count));
-            }
-        });
-        ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new(talk_elapsed)
-                    .monospace()
-                    .strong()
-                    .size(22.0)
-                    .color(egui::Color32::from_rgb(145, 190, 255)),
-            );
-            if ui.small_button("Reset").clicked() {
-                presentation_timer.reset();
-            }
-            ui.separator();
-            ui.monospace(format!(
-                "{} / {}",
-                format_timeline_time(current_time),
-                format_timeline_time(total_time)
-            ));
-            ui.weak(format!("Local {local_time}"));
-        });
-    } else {
-        ui.horizontal(|ui| {
-            let left_width = (ui.available_width() - 290.0).max(360.0);
-            ui.allocate_ui_with_layout(
-                egui::vec2(left_width, 64.0),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
-                    ui.horizontal(|ui| {
-                        egui::Frame::new()
-                            .fill(egui::Color32::from_rgb(17, 27, 47))
-                            .corner_radius(7.0)
-                            .inner_margin(egui::Margin::symmetric(9, 5))
-                            .show(ui, |ui| {
-                                ui.label(
-                                    egui::RichText::new(status_text)
-                                        .strong()
-                                        .size(11.0)
-                                        .color(status_color),
-                                );
-                            });
-                        if let Some((index, segment_name)) = current_segment {
-                            ui.label(egui::RichText::new(segment_name).strong().size(19.0));
-                            ui.label(
-                                egui::RichText::new(format!(
-                                    "SEGMENT {} / {}",
-                                    index + 1,
-                                    segment_count
-                                ))
-                                .size(11.0)
-                                .color(egui::Color32::from_rgb(112, 126, 149)),
-                            );
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new("TIMELINE")
-                                .strong()
-                                .size(10.0)
-                                .color(egui::Color32::from_rgb(112, 126, 149)),
-                        );
-                        ui.monospace(format!(
-                            "{} / {}",
-                            format_timeline_time(current_time),
-                            format_timeline_time(total_time)
-                        ));
-                        match audience_blank {
-                            AudienceBlank::Black => {
-                                ui.colored_label(
-                                    egui::Color32::from_rgb(255, 209, 102),
-                                    "AUDIENCE BLACK",
-                                );
-                            }
-                            AudienceBlank::White => {
-                                ui.colored_label(
-                                    egui::Color32::from_rgb(255, 209, 102),
-                                    "AUDIENCE WHITE",
-                                );
-                            }
-                            AudienceBlank::None => {}
-                        }
-                    });
-                },
-            );
-            ui.separator();
+    let inner_width = (card_width - 24.0).max(80.0);
+    egui::Frame::new()
+        .fill(palette::SURFACE)
+        .stroke(stroke)
+        .corner_radius(10.0)
+        .inner_margin(egui::Margin::same(10))
+        .show(ui, |ui| {
+            ui.set_width(inner_width);
             ui.vertical(|ui| {
-                ui.label(
-                    egui::RichText::new("SESSION TIMER")
-                        .strong()
-                        .size(10.0)
-                        .color(egui::Color32::from_rgb(112, 126, 149)),
+                ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+                let height = inner_width / preview.aspect();
+                let response = show_preview(
+                    ui,
+                    preview,
+                    egui::vec2(inner_width, height),
+                    preview_message,
+                    PreviewOverlay {
+                        badge: is_current.then_some("NOW"),
+                        ..default()
+                    },
+                    egui::Sense::click(),
                 );
+                if response
+                    .on_hover_text("Jump to the start of this slide")
+                    .clicked()
+                {
+                    *requested_seek = Some(segment_entry_time(timeline, segment));
+                }
                 ui.horizontal(|ui| {
                     ui.label(
-                        egui::RichText::new(talk_elapsed)
+                        egui::RichText::new(format!("{:02}", index + 1))
                             .monospace()
-                            .strong()
-                            .size(24.0)
-                            .color(egui::Color32::from_rgb(145, 190, 255)),
+                            .size(14.0)
+                            .color(if is_current {
+                                palette::ACCENT
+                            } else {
+                                palette::FAINT
+                            }),
                     );
-                    if ui
-                        .add(
-                            egui::Button::new("Reset")
-                                .fill(egui::Color32::from_rgb(22, 33, 57))
-                                .corner_radius(7.0),
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(&segment.name)
+                                .strong()
+                                .size(15.0)
+                                .color(palette::TEXT),
                         )
-                        .clicked()
-                    {
-                        presentation_timer.reset();
-                    }
+                        .truncate(),
+                    );
                 });
-                ui.label(
-                    egui::RichText::new(format!("Local time  {local_time}"))
-                        .monospace()
-                        .size(11.0)
-                        .color(egui::Color32::from_rgb(137, 151, 174)),
-                );
+                if !segment.stops.is_empty() {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+                        for (stop_index, stop) in segment.stops.iter().enumerate() {
+                            let name = step_name(segment, stop_index);
+                            let label = format!(
+                                "{}  {}",
+                                stop_index + 1,
+                                truncate_with_ellipsis(&name, 16)
+                            );
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new(label).size(12.0).color(palette::MUTED),
+                                    )
+                                    .fill(palette::RAISED)
+                                    .corner_radius(10.0),
+                                )
+                                .on_hover_text(format!("Jump to step {} · {name}", stop_index + 1))
+                                .clicked()
+                            {
+                                *requested_seek = Some(stop.time);
+                            }
+                        }
+                    });
+                }
             });
         });
-    }
-
-    ui.add(
-        egui::ProgressBar::new(progress.clamp(0.0, 1.0))
-            .desired_height(6.0)
-            .fill(egui::Color32::from_rgb(91, 143, 255)),
-    );
 }
 
 /// Focus-first speaker cockpit for live presentations.
+///
+/// Layout, in reading order: a slim header (status, slide position, clock,
+/// elapsed time and a slide-by-slide progress bar), the slide on screen now
+/// with its steps, the next resting point and the speaker notes, and a dock
+/// with the navigation controls.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn presenter_view_system(
     mut contexts: Query<(Entity, &mut EguiContext), With<PresenterCamera>>,
     mut timeline: ResMut<Timeline>,
     mut audience_blank: ResMut<AudienceBlank>,
     replay_stash: Res<StashedReplay>,
-    mut thumbnail_cache: ResMut<PresenterThumbnailCache>,
+    mut thumbnails: ResMut<PresenterThumbnailCache>,
     mut overview: ResMut<PresenterOverviewState>,
     mut presentation_timer: ResMut<PresentationTimer>,
+    mut preferences: ResMut<PresenterPreferences>,
 ) {
     let Ok((camera_entity, mut context)) = contexts.single_mut() else {
         return;
     };
     let ctx = context.get_mut();
     apply_presenter_style(ctx);
-
-    if overview.texture_revision != replay_stash.revision {
-        overview.textures.clear();
-        overview.uploaded_camera = None;
-    }
-    let max_thumbnail_edge =
-        desired_thumbnail_edge(ctx.viewport_rect().width(), ctx.pixels_per_point());
-    thumbnail_cache.request(&replay_stash, &timeline, max_thumbnail_edge);
-    if let Some((revision, result)) = thumbnail_cache.receive()
-        && revision == replay_stash.revision
-    {
-        match result {
-            Ok(frames) => thumbnail_cache.store(revision, frames),
-            Err(error) => thumbnail_cache.fail(error),
-        }
-    }
-    if thumbnail_upload_required(
-        &overview,
-        &thumbnail_cache,
-        camera_entity,
-        replay_stash.revision,
-    ) {
-        overview.textures.clear();
-        for frame in &thumbnail_cache.pixels {
-            let image = egui::ColorImage::from_rgba_unmultiplied(
-                [frame.width as usize, frame.height as usize],
-                &frame.rgba,
-            );
-            let texture = ctx.load_texture(
-                format!(
-                    "presenter-cue-{}-{:?}-{}-{}",
-                    frame.segment_id,
-                    frame.moment,
-                    replay_stash.revision,
-                    thumbnail_cache.pixel_generation
-                ),
-                image,
-                egui::TextureOptions::LINEAR,
-            );
-            overview
-                .textures
-                .insert((frame.segment_id, frame.moment), texture);
-        }
-        overview.texture_revision = replay_stash.revision;
-        overview.texture_generation = thumbnail_cache.pixel_generation;
-        overview.uploaded_camera = Some(camera_entity);
-    }
+    let revision = replay_stash.revision;
+    let viewport = ctx.viewport_rect();
+    let compact = viewport.width() < 900.0;
 
     let current_time = timeline.current_time;
-    let current_position = timeline.segment_position_at(current_time);
-    let current = current_position.and_then(|position| {
-        timeline
-            .segments
-            .iter()
-            .position(|segment| segment.id == position.segment_id)
-            .map(|index| (index, position, timeline.segments[index].clone()))
-    });
-    let current_texture = current
+    let slide = SlideView::at(&timeline, current_time);
+    let next = next_cue(
+        &timeline,
+        current_time,
+        slide.as_ref().map(|slide| slide.segment.id),
+    );
+    let priority = slide
         .as_ref()
-        .and_then(|(_, position, segment)| cue_texture(&overview, segment.id, position.stop_index));
-    let current_segment_id = current.as_ref().map(|(_, _, segment)| segment.id);
-    let next = timeline.next_stop(current_time).and_then(|time| {
-        let position = timeline.segment_position_at(time)?;
-        let segment = timeline
-            .segments
-            .iter()
-            .find(|segment| segment.id == position.segment_id)?
-            .clone();
-        Some((
-            next_cue_label(current_segment_id, &segment, position.stop_index),
-            cue_texture(&overview, segment.id, position.stop_index),
-        ))
-    });
+        .map(SlideView::thumbnail_key)
+        .into_iter()
+        .chain(next.as_ref().map(|next| next.key))
+        .collect::<Vec<_>>();
+    thumbnails.update(
+        &replay_stash,
+        &timeline,
+        desired_thumbnail_edge(viewport.width(), ctx.pixels_per_point()),
+        &priority,
+        Instant::now(),
+    );
+    thumbnails.sync_textures(ctx, camera_entity, &priority);
 
-    let talk_elapsed = format_stopwatch(presentation_timer.elapsed());
-    let local_time = chrono::Local::now().format("%H:%M:%S").to_string();
+    let frame = PresenterFrame {
+        status: PlaybackStatus::of(&timeline),
+        current_preview: slide
+            .as_ref()
+            .map(|slide| CuePreview::lookup(&thumbnails, slide.thumbnail_key(), revision))
+            .unwrap_or_default(),
+        next_preview: next
+            .as_ref()
+            .map(|next| CuePreview::lookup(&thumbnails, next.key, revision))
+            .unwrap_or_default(),
+        slide,
+        next,
+        slide_count: timeline.segments.len(),
+        blank: *audience_blank,
+        preview_status: thumbnails.status(revision),
+        omits_native_3d: thumbnails.omits_native_3d(revision),
+        overview_open: overview.open,
+        elapsed: format_stopwatch(presentation_timer.elapsed()),
+        clock: chrono::Local::now().format("%H:%M").to_string(),
+        current_time,
+        total_time: timeline.cached_duration,
+    };
     let mut actions = Vec::new();
     let mut requested_seek = None;
-    let compact_header = ctx.viewport_rect().width() < 900.0;
-    let preview_message = if thumbnail_cache.error.is_some() {
-        "Preview unavailable — retry below"
-    } else {
-        "Rendering cue preview…"
-    };
+    let mut retry = false;
 
     let mut viewport_ui = egui::Ui::new(
         ctx.clone(),
         "presenter-viewport".into(),
         egui::UiBuilder::new()
             .layer_id(egui::LayerId::background())
-            .max_rect(ctx.viewport_rect()),
+            .max_rect(viewport),
     );
 
-    egui::Panel::top("presenter-status")
-        .exact_size(if compact_header { 112.0 } else { 94.0 })
+    egui::Panel::top("presenter-header")
+        .exact_size(if compact { 118.0 } else { 90.0 })
         .frame(
             egui::Frame::new()
-                .fill(egui::Color32::from_rgb(7, 11, 22))
-                .inner_margin(egui::Margin::symmetric(20, 10)),
+                .fill(palette::PANEL)
+                .inner_margin(egui::Margin::symmetric(20, 12)),
         )
         .show(&mut viewport_ui, |ui| {
-            show_presenter_status(
-                ui,
-                current
-                    .as_ref()
-                    .map(|(index, _, segment)| (*index, segment.name.as_str())),
-                timeline.segments.len(),
-                current_time,
-                timeline.cached_duration,
-                timeline.is_playing,
-                *audience_blank,
-                &talk_elapsed,
-                &local_time,
-                compact_header,
-                &mut presentation_timer,
-            );
+            if let Some(time) = show_header(ui, &frame, &timeline, &mut presentation_timer, compact)
+            {
+                requested_seek = Some(time);
+            }
         });
 
     egui::Panel::bottom("presenter-dock")
-        .exact_size(72.0)
+        .exact_size(68.0)
         .frame(
             egui::Frame::new()
-                .fill(egui::Color32::from_rgb(9, 15, 28))
-                .inner_margin(egui::Margin::symmetric(18, 13)),
+                .fill(palette::PANEL)
+                .inner_margin(egui::Margin::symmetric(16, 12)),
         )
         .show(&mut viewport_ui, |ui| {
-            ui.horizontal_centered(|ui| {
-                ui.spacing_mut().item_spacing.x = 10.0;
-                if ui
-                    .add_sized(
-                        [118.0, 42.0],
-                        egui::Button::new("Previous")
-                            .fill(egui::Color32::from_rgb(22, 33, 57))
-                            .corner_radius(8.0),
-                    )
-                    .on_hover_text("Left arrow or Backspace")
-                    .clicked()
-                {
-                    actions.push(PresentationAction::Previous);
-                }
-                let primary_label = if timeline.is_playing {
-                    "Pause"
-                } else {
-                    "Advance"
-                };
-                if ui
-                    .add_sized(
-                        [164.0, 42.0],
-                        egui::Button::new(primary_label)
-                            .fill(egui::Color32::from_rgb(70, 112, 207))
-                            .stroke(egui::Stroke::new(
-                                1.0,
-                                egui::Color32::from_rgb(125, 168, 255),
-                            ))
-                            .corner_radius(8.0),
-                    )
-                    .on_hover_text("Space, Enter, or Right arrow")
-                    .clicked()
-                {
-                    actions.push(if timeline.is_playing {
-                        PresentationAction::TogglePlayback
-                    } else {
-                        PresentationAction::Advance
-                    });
-                }
-                if ui
-                    .add_sized(
-                        [124.0, 42.0],
-                        egui::Button::new("Overview  O")
-                            .fill(egui::Color32::from_rgb(22, 33, 57))
-                            .corner_radius(8.0),
-                    )
-                    .clicked()
-                {
-                    actions.push(PresentationAction::ToggleOverview);
-                }
-                ui.separator();
-                if ui
-                    .add_sized(
-                        [96.0, 42.0],
-                        egui::Button::new("Black  B")
-                            .selected(*audience_blank == AudienceBlank::Black)
-                            .fill(egui::Color32::from_rgb(22, 33, 57))
-                            .corner_radius(8.0),
-                    )
-                    .clicked()
-                {
-                    actions.push(PresentationAction::ToggleBlack);
-                }
-                if ui
-                    .add_sized(
-                        [96.0, 42.0],
-                        egui::Button::new("White  W")
-                            .selected(*audience_blank == AudienceBlank::White)
-                            .fill(egui::Color32::from_rgb(22, 33, 57))
-                            .corner_radius(8.0),
-                    )
-                    .clicked()
-                {
-                    actions.push(PresentationAction::ToggleWhite);
-                }
-                if ui.available_width() > 190.0 {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            egui::RichText::new("SPACE / ENTER / RIGHT to advance")
-                                .size(10.0)
-                                .color(egui::Color32::from_rgb(112, 126, 149)),
-                        );
-                    });
-                }
-            });
+            show_dock(ui, &frame, compact, &mut actions, &mut retry);
         });
 
-    let wide = ctx.viewport_rect().width() >= 900.0;
-    if wide {
-        egui::Panel::right("presenter-notes")
-            .exact_size((ctx.viewport_rect().width() * 0.34).clamp(300.0, 470.0))
+    if !compact && frame.slide.is_some() {
+        egui::Panel::right("presenter-speaker")
+            .exact_size((viewport.width() * 0.36).clamp(320.0, 540.0))
             .frame(
                 egui::Frame::new()
-                    .fill(egui::Color32::from_rgb(9, 15, 28))
+                    .fill(palette::BACKGROUND)
                     .inner_margin(egui::Margin::same(18)),
             )
             .show(&mut viewport_ui, |ui| {
-                show_speaker_column(
-                    ui,
-                    current
-                        .as_ref()
-                        .and_then(|(_, _, segment)| segment.notes.as_deref()),
-                    next.as_ref().map(|(label, _)| label.as_str()),
-                    next.as_ref().and_then(|(_, texture)| texture.as_ref()),
-                    preview_message,
-                );
+                show_speaker_column(ui, &frame, &mut preferences, 120.0);
             });
     }
 
     egui::CentralPanel::default()
         .frame(
             egui::Frame::new()
-                .fill(egui::Color32::from_rgb(7, 11, 22))
+                .fill(palette::BACKGROUND)
                 .inner_margin(egui::Margin::same(20)),
         )
-        .show(&mut viewport_ui, |ui| {
-            if let Some((index, position, segment)) = &current {
-                if wide {
-                    show_current_cue(
+        .show(&mut viewport_ui, |ui| match &frame.slide {
+            Some(slide) if compact => {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    let height = ui.available_width() / frame.current_preview.aspect();
+                    show_now_panel(
                         ui,
-                        segment,
-                        *index,
-                        timeline.segments.len(),
-                        position.stop_index,
-                        current_texture.as_ref(),
-                        preview_message,
-                        &mut requested_seek,
+                        &frame,
+                        slide,
                         &timeline,
+                        Some(height),
+                        &mut requested_seek,
                     );
-                } else {
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        show_current_cue(
-                            ui,
-                            segment,
-                            *index,
-                            timeline.segments.len(),
-                            position.stop_index,
-                            current_texture.as_ref(),
-                            preview_message,
-                            &mut requested_seek,
-                            &timeline,
-                        );
-                        ui.add_space(18.0);
-                        show_speaker_column(
-                            ui,
-                            segment.notes.as_deref(),
-                            next.as_ref().map(|(label, _)| label.as_str()),
-                            next.as_ref().and_then(|(_, texture)| texture.as_ref()),
-                            preview_message,
-                        );
-                    });
-                }
-            } else {
-                ui.centered_and_justified(|ui| {
-                    ui.heading("No presentation segments are defined.");
+                    ui.add_space(18.0);
+                    show_speaker_column(ui, &frame, &mut preferences, 220.0);
                 });
             }
-            if thumbnail_cache.is_loading() && overview.textures.is_empty() {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.small("Rendering cue previews…");
-                });
-            } else if let Some(error) = thumbnail_cache.error.clone() {
-                ui.horizontal_wrapped(|ui| {
-                    ui.colored_label(
-                        egui::Color32::from_rgb(255, 140, 140),
-                        format!("Cue previews unavailable: {error}"),
+            Some(slide) => {
+                show_now_panel(ui, &frame, slide, &timeline, None, &mut requested_seek);
+            }
+            None => {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(ui.available_height() * 0.35);
+                    ui.label(
+                        egui::RichText::new("No slides to present")
+                            .strong()
+                            .size(26.0)
+                            .color(palette::TEXT),
                     );
-                    if ui.button("Retry previews").clicked() {
-                        thumbnail_cache.retry();
-                    }
+                    ui.label(
+                        egui::RichText::new(
+                            "Add scene.segment(...) and scene.stop(...) to the script to build slides.",
+                        )
+                        .color(palette::MUTED),
+                    );
                 });
             }
         });
 
     if overview.open {
-        let rect = ctx.viewport_rect().shrink(12.0);
-        egui::Window::new("Presentation overview")
-            .title_bar(false)
-            .resizable(false)
-            .fixed_rect(rect)
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.heading("Jump to a cue");
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("Close  Esc").clicked() {
-                            actions.push(PresentationAction::ToggleOverview);
-                        }
-                    });
-                });
-                let search = ui.add(
-                    egui::TextEdit::singleline(&mut overview.query)
-                        .hint_text("Search segments…")
-                        .desired_width(f32::INFINITY),
-                );
-                if overview.focus_search {
-                    search.request_focus();
-                    overview.focus_search = false;
-                }
-                ui.add_space(10.0);
-                let query = overview.query.trim().to_lowercase();
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        for (index, segment) in timeline.segments.iter().enumerate() {
-                            if !query.is_empty() && !segment.name.to_lowercase().contains(&query) {
-                                continue;
-                            }
-                            egui::Frame::new()
-                                .fill(egui::Color32::from_rgb(13, 20, 36))
-                                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 58, 82)))
-                                .corner_radius(8.0)
-                                .inner_margin(egui::Margin::same(10))
-                                .show(ui, |ui| {
-                                    ui.set_width(250.0);
-                                    let texture = overview
-                                        .textures
-                                        .get(&(segment.id, ThumbnailMoment::Complete));
-                                    show_cue_image(ui, texture, 250.0, 140.0, preview_message);
-                                    if ui
-                                        .button(format!("{:02}  {}", index + 1, segment.name))
-                                        .clicked()
-                                    {
-                                        requested_seek =
-                                            timeline.segment_time_indexed(&segment.name, None);
-                                    }
-                                    ui.horizontal_wrapped(|ui| {
-                                        for (stop_index, stop) in segment.stops.iter().enumerate() {
-                                            let label = stop
-                                                .name
-                                                .as_deref()
-                                                .map(str::to_owned)
-                                                .unwrap_or_else(|| {
-                                                    format!("Cue {}", stop_index + 1)
-                                                });
-                                            if ui.small_button(label).clicked() {
-                                                requested_seek = timeline.segment_time_indexed(
-                                                    &segment.name,
-                                                    Some(stop_index),
-                                                );
-                                            }
-                                        }
-                                    });
-                                });
-                        }
-                    });
-                });
-            });
+        show_overview(
+            ctx,
+            &mut overview,
+            &frame,
+            &timeline,
+            &thumbnails,
+            revision,
+            &mut actions,
+            &mut requested_seek,
+        );
     }
 
+    if retry {
+        thumbnails.retry();
+    }
     for action in actions {
         apply_presentation_action(action, &mut timeline, &mut audience_blank, &mut overview);
     }
@@ -1601,13 +2093,12 @@ pub(crate) fn presenter_view_system(
 #[cfg(test)]
 mod tests {
     use super::{
-        AudienceControlsState, PresentationAction, PresentationTimer, PresenterCamera,
-        PresenterOverviewState, PresenterThumbnailCache, PresenterWindow, ThumbnailMoment,
-        ThumbnailPixels, apply_presentation_action, audience_controls_visible,
-        cleanup_presenter_before_window_close_system, cue_label, cursor_in_audience_dock_zone,
-        desired_thumbnail_edge, entry_segment_time, format_stopwatch, next_cue_label,
-        presentation_input_system, representative_segment_time, sync_presentation_timer_system,
-        thumbnail_dimensions, thumbnail_upload_required,
+        AudienceControlsState, NOTES_SIZE_MAX, NOTES_SIZE_MIN, PlaybackStatus, PresentationAction,
+        PresentationTimer, PresenterCamera, PresenterOverviewState, PresenterPreferences,
+        PresenterWindow, SlideView, ThumbnailMoment, apply_presentation_action,
+        audience_controls_visible, cleanup_presenter_before_window_close_system,
+        cursor_in_audience_dock_zone, format_stopwatch, next_cue, presentation_input_system,
+        segment_entry_time, segment_matches, step_caption, sync_presentation_timer_system,
     };
     use crate::{AudienceBlank, PresentationMode};
     use bevy::{
@@ -1618,6 +2109,38 @@ mod tests {
     use bevy_egui::input::EguiWantsInput;
     use gaanim_timeline::timeline::{SegmentMetadata, SegmentStop, Timeline};
     use std::time::{Duration, Instant};
+
+    fn stop(name: Option<&str>, time: f64) -> SegmentStop {
+        SegmentStop {
+            name: name.map(str::to_owned),
+            time,
+        }
+    }
+
+    /// Two slides, each ending on a terminal stop, like `presentation_demo.py`.
+    fn deck() -> Timeline {
+        let mut timeline = Timeline::new();
+        timeline.cached_duration = 4.0;
+        timeline.set_segments(vec![
+            SegmentMetadata {
+                id: 1,
+                name: "Reveal in steps".to_string(),
+                notes: Some("Advance once per benefit.".to_string()),
+                start_time: 0.0,
+                end_time: 2.0,
+                stops: vec![stop(Some("named-segments"), 1.0), stop(None, 2.0)],
+            },
+            SegmentMetadata {
+                id: 2,
+                name: "Thank you".to_string(),
+                notes: None,
+                start_time: 2.0,
+                end_time: 4.0,
+                stops: vec![stop(Some("questions"), 4.0)],
+            },
+        ]);
+        timeline
+    }
 
     #[test]
     fn close_request_removes_presenter_camera_before_the_window() {
@@ -1652,10 +2175,7 @@ mod tests {
             notes: None,
             start_time: 0.0,
             end_time: 2.0,
-            stops: vec![SegmentStop {
-                name: Some("cue".to_string()),
-                time: 1.0,
-            }],
+            stops: vec![stop(Some("cue"), 1.0)],
         }]);
         let mut blank = AudienceBlank::None;
         let mut overview = PresenterOverviewState::default();
@@ -1679,32 +2199,100 @@ mod tests {
     }
 
     #[test]
-    fn cue_labels_prefer_authored_names_and_avoid_repeating_the_current_segment() {
-        let segment = SegmentMetadata {
-            id: 1,
-            name: "Reveal in steps".to_string(),
-            notes: None,
-            start_time: 0.0,
-            end_time: 3.0,
-            stops: vec![
-                SegmentStop {
-                    name: Some("named-segments".to_string()),
-                    time: 1.0,
-                },
-                SegmentStop {
-                    name: None,
-                    time: 2.0,
-                },
-            ],
-        };
-        assert_eq!(cue_label(&segment, None), "Start");
-        assert_eq!(cue_label(&segment, Some(0)), "named-segments");
-        assert_eq!(cue_label(&segment, Some(1)), "Cue 2");
-        assert_eq!(next_cue_label(Some(1), &segment, Some(0)), "named-segments");
+    fn step_captions_count_only_resting_points() {
+        let timeline = deck();
+        let segment = &timeline.segments[0];
+
+        assert_eq!(step_caption(segment, None), "Slide start · 2 steps");
         assert_eq!(
-            next_cue_label(Some(2), &segment, Some(0)),
-            "Reveal in steps / named-segments"
+            step_caption(segment, Some(0)),
+            "Step 1 of 2 · named-segments"
         );
+        assert_eq!(step_caption(segment, Some(1)), "Step 2 of 2");
+        let mut plain = segment.clone();
+        plain.stops.clear();
+        assert_eq!(
+            step_caption(&plain, None),
+            "No steps · plays straight through"
+        );
+    }
+
+    #[test]
+    fn up_next_names_the_step_or_the_following_slide() {
+        let timeline = deck();
+
+        let within = next_cue(&timeline, 0.5, Some(1)).unwrap();
+        assert_eq!(within.title, "named-segments");
+        assert_eq!(within.detail, "Same slide · step 1 of 2");
+        assert_eq!(within.key, (1, ThumbnailMoment::Stop(0)));
+
+        let across = next_cue(&timeline, 2.0, Some(1)).unwrap();
+        assert_eq!(across.title, "Thank you");
+        assert_eq!(across.detail, "Slide 2 of 2 · Step 1 of 1 · questions");
+        assert_eq!(across.key, (2, ThumbnailMoment::Stop(0)));
+
+        assert!(next_cue(&timeline, 4.0, Some(2)).is_none());
+    }
+
+    #[test]
+    fn terminal_stop_keeps_the_finished_slide_on_screen() {
+        let timeline = deck();
+
+        let slide = SlideView::at(&timeline, 2.0).unwrap();
+
+        assert_eq!(slide.index, 0);
+        assert_eq!(slide.stop_index, Some(1));
+        assert_eq!(slide.thumbnail_key(), (1, ThumbnailMoment::Stop(1)));
+    }
+
+    #[test]
+    fn jumping_to_a_slide_after_a_terminal_stop_shows_that_slide() {
+        let timeline = deck();
+
+        let first = segment_entry_time(&timeline, &timeline.segments[0]);
+        let second = segment_entry_time(&timeline, &timeline.segments[1]);
+
+        assert_eq!(first, 0.0);
+        assert!(second > 2.0 && second < 4.0);
+        let landed = SlideView::at(&timeline, second).unwrap();
+        assert_eq!(landed.segment.id, 2);
+        assert_eq!(landed.stop_index, None);
+    }
+
+    #[test]
+    fn overview_search_matches_names_steps_and_notes() {
+        let timeline = deck();
+        let segment = &timeline.segments[0];
+
+        assert!(segment_matches(segment, ""));
+        assert!(segment_matches(segment, "reveal"));
+        assert!(segment_matches(segment, "named-seg"));
+        assert!(segment_matches(segment, "benefit"));
+        assert!(!segment_matches(segment, "questions"));
+    }
+
+    #[test]
+    fn playback_status_distinguishes_pause_from_the_end() {
+        let mut timeline = deck();
+        assert_eq!(PlaybackStatus::of(&timeline), PlaybackStatus::Paused);
+        timeline.is_playing = true;
+        assert_eq!(PlaybackStatus::of(&timeline), PlaybackStatus::Playing);
+        timeline.is_playing = false;
+        timeline.current_time = 4.0;
+        assert_eq!(PlaybackStatus::of(&timeline), PlaybackStatus::Finished);
+    }
+
+    #[test]
+    fn notes_size_stays_readable() {
+        let mut preferences = PresenterPreferences::default();
+        for _ in 0..40 {
+            preferences.adjust_notes_size(2.0);
+        }
+        assert_eq!(preferences.notes_size, NOTES_SIZE_MAX);
+        for _ in 0..40 {
+            preferences.adjust_notes_size(-2.0);
+        }
+        assert_eq!(preferences.notes_size, NOTES_SIZE_MIN);
     }
 
     #[test]
@@ -1773,8 +2361,7 @@ mod tests {
         assert!(!cursor_in_audience_dock_zone(None, 1920.0, 1080.0));
     }
 
-    #[test]
-    fn focused_audience_window_receives_advance_shortcuts() {
+    fn input_app() -> App {
         let mut app = App::new();
         app.init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<ButtonInput<MouseButton>>()
@@ -1785,6 +2372,12 @@ mod tests {
             .init_resource::<PresenterOverviewState>()
             .insert_resource(PresentationMode { active: true })
             .add_systems(Update, presentation_input_system);
+        app
+    }
+
+    #[test]
+    fn focused_audience_window_receives_advance_shortcuts() {
+        let mut app = input_app();
         app.world_mut().spawn((
             Window {
                 focused: true,
@@ -1803,15 +2396,8 @@ mod tests {
 
     #[test]
     fn presentation_input_skips_frames_without_a_timeline() {
-        let mut app = App::new();
-        app.init_resource::<ButtonInput<KeyCode>>()
-            .init_resource::<ButtonInput<MouseButton>>()
-            .init_resource::<EguiWantsInput>()
-            .init_resource::<AudienceBlank>()
-            .init_resource::<AudienceControlsState>()
-            .init_resource::<PresenterOverviewState>()
-            .insert_resource(PresentationMode { active: true })
-            .add_systems(Update, presentation_input_system);
+        let mut app = input_app();
+        app.world_mut().remove_resource::<Timeline>();
         app.world_mut().spawn((
             Window {
                 focused: true,
@@ -1830,16 +2416,7 @@ mod tests {
 
     #[test]
     fn focused_presenter_window_receives_advance_shortcuts() {
-        let mut app = App::new();
-        app.init_resource::<ButtonInput<KeyCode>>()
-            .init_resource::<ButtonInput<MouseButton>>()
-            .init_resource::<EguiWantsInput>()
-            .init_resource::<Timeline>()
-            .init_resource::<AudienceBlank>()
-            .init_resource::<AudienceControlsState>()
-            .init_resource::<PresenterOverviewState>()
-            .insert_resource(PresentationMode { active: true })
-            .add_systems(Update, presentation_input_system);
+        let mut app = input_app();
         app.world_mut().spawn((
             Window {
                 focused: false,
@@ -1865,16 +2442,7 @@ mod tests {
 
     #[test]
     fn audience_click_advances_when_the_audience_window_is_focused() {
-        let mut app = App::new();
-        app.init_resource::<ButtonInput<KeyCode>>()
-            .init_resource::<ButtonInput<MouseButton>>()
-            .init_resource::<EguiWantsInput>()
-            .init_resource::<Timeline>()
-            .init_resource::<AudienceBlank>()
-            .init_resource::<AudienceControlsState>()
-            .init_resource::<PresenterOverviewState>()
-            .insert_resource(PresentationMode { active: true })
-            .add_systems(Update, presentation_input_system);
+        let mut app = input_app();
         app.world_mut().spawn((
             Window {
                 focused: true,
@@ -1893,16 +2461,8 @@ mod tests {
 
     #[test]
     fn audience_control_click_does_not_also_advance_the_slide() {
-        let mut app = App::new();
-        app.init_resource::<ButtonInput<KeyCode>>()
-            .init_resource::<ButtonInput<MouseButton>>()
-            .init_resource::<EguiWantsInput>()
-            .init_resource::<Timeline>()
-            .init_resource::<AudienceBlank>()
-            .insert_resource(AudienceControlsState { pointer_over: true })
-            .init_resource::<PresenterOverviewState>()
-            .insert_resource(PresentationMode { active: true })
-            .add_systems(Update, presentation_input_system);
+        let mut app = input_app();
+        app.insert_resource(AudienceControlsState { pointer_over: true });
         app.world_mut().spawn((
             Window {
                 focused: true,
@@ -1921,16 +2481,7 @@ mod tests {
 
     #[test]
     fn reopen_shortcut_does_not_duplicate_an_existing_presenter() {
-        let mut app = App::new();
-        app.init_resource::<ButtonInput<KeyCode>>()
-            .init_resource::<ButtonInput<MouseButton>>()
-            .init_resource::<EguiWantsInput>()
-            .init_resource::<Timeline>()
-            .init_resource::<AudienceBlank>()
-            .init_resource::<AudienceControlsState>()
-            .init_resource::<PresenterOverviewState>()
-            .insert_resource(PresentationMode { active: true })
-            .add_systems(Update, presentation_input_system);
+        let mut app = input_app();
         app.world_mut().spawn((
             Window {
                 focused: true,
@@ -1949,102 +2500,6 @@ mod tests {
             .world_mut()
             .query_filtered::<Entity, With<PresenterWindow>>();
         assert_eq!(query.iter(app.world()).count(), 1);
-    }
-
-    #[test]
-    fn thumbnail_dimensions_preserve_common_aspect_ratios() {
-        assert_eq!(thumbnail_dimensions(1920, 1080, 960), (960, 540));
-        assert_eq!(thumbnail_dimensions(1080, 1920, 960), (540, 960));
-        assert_eq!(thumbnail_dimensions(0, 0, 960), (960, 960));
-    }
-
-    #[test]
-    fn thumbnail_resolution_adapts_to_viewport_and_dpi() {
-        assert_eq!(desired_thumbnail_edge(1180.0, 1.0), 960);
-        assert_eq!(desired_thumbnail_edge(1180.0, 2.0), 1600);
-        assert_eq!(desired_thumbnail_edge(4000.0, 2.0), 1600);
-    }
-
-    #[test]
-    fn raw_thumbnail_cache_reuploads_for_a_reopened_presenter_camera() {
-        let mut app = App::new();
-        let old_camera = app.world_mut().spawn_empty().id();
-        let reopened_camera = app.world_mut().spawn_empty().id();
-        let mut cache = PresenterThumbnailCache::default();
-        cache.store(
-            7,
-            vec![ThumbnailPixels {
-                segment_id: 1,
-                moment: ThumbnailMoment::Entry,
-                width: 2,
-                height: 1,
-                rgba: vec![0; 8],
-            }],
-        );
-        let overview = PresenterOverviewState {
-            texture_revision: 7,
-            texture_generation: cache.pixel_generation,
-            uploaded_camera: Some(old_camera),
-            ..default()
-        };
-
-        assert!(!thumbnail_upload_required(&overview, &cache, old_camera, 7));
-        assert!(thumbnail_upload_required(
-            &overview,
-            &cache,
-            reopened_camera,
-            7
-        ));
-        assert_eq!(cache.pixels.len(), 1);
-    }
-
-    #[test]
-    fn thumbnail_cache_keeps_one_gpu_worker_during_hot_reload() {
-        let mut cache = PresenterThumbnailCache {
-            requested_revision: 1,
-            requested_dimensions: (320, 180),
-            request_attempts: 1,
-            ..default()
-        };
-        let (_sender, receiver) = crossbeam_channel::bounded(1);
-        cache.receiver = Some(receiver);
-        let stash = crate::export::StashedReplay {
-            canvas: Some(gaanim_api::canvas::SceneModel::new(1920, 1080)),
-            revision: 2,
-        };
-        let mut timeline = Timeline::new();
-        timeline.set_segments(vec![SegmentMetadata {
-            id: 1,
-            name: "updated".into(),
-            notes: None,
-            start_time: 0.0,
-            end_time: 1.0,
-            stops: Vec::new(),
-        }]);
-
-        cache.request(&stash, &timeline, 960);
-
-        assert_eq!(cache.requested_revision, 1);
-        assert_eq!(cache.requested_dimensions, (320, 180));
-        assert_eq!(cache.request_attempts, 1);
-    }
-
-    #[test]
-    fn failed_thumbnail_cache_can_be_retried_explicitly() {
-        let mut cache = PresenterThumbnailCache {
-            requested_revision: 4,
-            requested_dimensions: (960, 540),
-            request_attempts: 2,
-            error: Some("adapter temporarily unavailable".into()),
-            ..default()
-        };
-
-        cache.retry();
-
-        assert_eq!(cache.requested_revision, 0);
-        assert_eq!(cache.requested_dimensions, (0, 0));
-        assert_eq!(cache.request_attempts, 0);
-        assert!(cache.error.is_none());
     }
 
     #[test]
@@ -2079,19 +2534,5 @@ mod tests {
         );
         app.world_mut().resource_mut::<PresentationTimer>().reset();
         assert!(app.world().resource::<PresentationTimer>().elapsed() < Duration::from_secs(1));
-    }
-
-    #[test]
-    fn representative_time_stays_inside_the_segment() {
-        assert_eq!(representative_segment_time(2.0, 2.0), 2.0);
-        let time = representative_segment_time(2.0, 5.0);
-        assert!(time >= 2.0 && time < 5.0);
-    }
-
-    #[test]
-    fn entry_time_stays_inside_the_segment() {
-        assert_eq!(entry_segment_time(2.0, 2.0), 2.0);
-        let time = entry_segment_time(2.0, 5.0);
-        assert!(time > 2.0 && time < 5.0);
     }
 }

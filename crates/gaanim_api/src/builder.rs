@@ -545,6 +545,8 @@ pub struct SceneBuilder<'w, 's, 'a> {
     mobject_names: HashMap<ObjectId, String>,
     next_track: u32,
     pub(crate) current_label: Option<String>,
+    /// Exact playhead time of every interactive stop, in authoring order.
+    pub(crate) stop_times: Vec<f64>,
     /// The currently active scene (None when outside any scene scope).
     pub current_scene: Option<SceneId>,
     /// Tracks the current value of each float signal / value tracker
@@ -844,6 +846,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             mobject_names: HashMap::new(),
             next_track: 0,
             current_label: None,
+            stop_times: Vec::new(),
             current_scene: None,
             float_signals: HashMap::new(),
             media_frames: HashMap::new(),
@@ -1105,6 +1108,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     /// Registers an explicit interactive stop at the current timeline playhead.
     pub fn stop(&mut self) {
+        self.stop_times.push(self.current_time);
         self.timeline.add_clip(
             self.default_track,
             self.current_time,
