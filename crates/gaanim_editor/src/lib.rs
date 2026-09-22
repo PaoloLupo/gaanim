@@ -6,6 +6,7 @@ use gaanim_timeline::timeline::{PlaybackStopPolicy, Timeline};
 
 pub mod export;
 mod fps_overlay;
+pub mod frame_profile;
 pub mod overlays;
 mod presenter;
 pub mod project_hub;
