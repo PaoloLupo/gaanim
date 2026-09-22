@@ -3512,4 +3512,92 @@ mod tests {
             Some("2 / 2 · Área · stop 1")
         );
     }
+
+    #[test]
+    fn playback_seeks_only_rebuild_fragments_of_animating_objects() {
+        use bevy::prelude::{App, Update};
+        use gaanim_math::GlobalSpatialTransform;
+        use gaanim_renderer::pipeline::{GaanimRenderCache, gaanim_render_system};
+        use gaanim_scene::{GlobalOpacity, RenderLayer, RenderOrder, Visible};
+
+        // `SetTextBaseline` is not an absolute 2D clip, so it forces every
+        // playback seek through the full keyframe restore and clip replay.
+        for force_restore in [false, true] {
+            let mut app = App::new();
+            app.init_resource::<GaanimRenderCache>()
+                .add_systems(Update, gaanim_render_system);
+            let mut timeline = Timeline::default();
+            let track = timeline.add_track("segments", 0);
+            let ids: Vec<_> = (1..=3).map(ObjectId::from_raw).collect();
+            for (index, &id) in ids.iter().enumerate() {
+                let mut path = BezPath::new();
+                path.move_to((0.0, 0.0));
+                path.curve_to((10.0, 20.0), (20.0, 20.0), (30.0, 0.0));
+                app.world_mut().spawn((
+                    MobjectId(id),
+                    SpatialTransform::default(),
+                    GlobalSpatialTransform::default(),
+                    Opacity(1.0),
+                    GlobalOpacity(1.0),
+                    RenderOrder::default(),
+                    RenderLayer::Vello2D,
+                    Visible,
+                    FillBrush::color(gaanim_core::peniko::Color::WHITE),
+                    Path2D(Arc::new(path.clone())),
+                    PathSource(Arc::new(path)),
+                ));
+                timeline.add_clip(
+                    track,
+                    index as f64,
+                    1.0,
+                    ClipPayload::Animation(AnimationSpec {
+                        target: id,
+                        lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
+                        rate_func: RateFunc::Linear,
+                        delay: 0.0,
+                        label: None,
+                    }),
+                );
+                if force_restore {
+                    timeline.add_clip(
+                        track,
+                        index as f64,
+                        0.0,
+                        ClipPayload::SetTextBaseline {
+                            target: id,
+                            baseline: 1.0,
+                        },
+                    );
+                }
+            }
+            timeline.add_keyframe(0.0, WorldSnapshot::capture(app.world_mut()));
+            app.world_mut()
+                .insert_resource(gaanim_animation::PlaybackState::default());
+
+            let fragments = |app: &App| {
+                let cache = &app.world().resource::<GaanimRenderCache>().fragment_cache;
+                ids.iter().map(|id| cache[id].clone()).collect::<Vec<_>>()
+            };
+            timeline.seek(app.world_mut(), 2.25);
+            app.update();
+            let before = fragments(&app);
+            app.world_mut()
+                .resource_mut::<gaanim_animation::PlaybackState>()
+                .scaled_dt = 1.0 / 60.0;
+            timeline.seek(app.world_mut(), 2.25 + 1.0 / 60.0);
+            app.update();
+            let after = fragments(&app);
+
+            let rebuilt: Vec<_> = before
+                .iter()
+                .zip(&after)
+                .map(|(before, after)| !Arc::ptr_eq(before, after))
+                .collect();
+            assert_eq!(
+                rebuilt,
+                [false, false, true],
+                "restore={force_restore}: completed objects must keep their retained fragments"
+            );
+        }
+    }
 }

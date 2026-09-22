@@ -151,6 +151,67 @@ pub struct GaanimPbrCamera;
 pub struct GaanimRenderCache {
     pub fragment_cache: HashMap<ObjectId, Arc<vello::Scene>>,
     stroke_views: HashMap<ObjectId, kurbo::Affine>,
+    fragment_inputs: HashMap<ObjectId, FragmentInputs>,
+}
+
+/// Values of the timeline-driven components a retained fragment was built from.
+///
+/// Every playback frame is an exact seek: it restores the t=0 keyframe and
+/// replays each earlier clip, so these components are rewritten (and flagged as
+/// changed by Bevy) even when their final value is identical to the previous
+/// frame. Comparing the values keeps completed and not-yet-started objects
+/// retained instead of re-encoding the whole scene on every frame.
+#[derive(Clone)]
+struct FragmentInputs {
+    path: Option<Arc<kurbo::BezPath>>,
+    path_source: Option<Arc<kurbo::BezPath>>,
+    fill_level: Option<FillLevel>,
+    fill: Option<FillBrush>,
+    stroke: Option<StrokeBrush>,
+    fill_progress: Option<FillDrawProgress>,
+    tip_glow: Option<WriteTipGlow>,
+}
+
+impl FragmentInputs {
+    fn capture(
+        path: Option<&Path2D>,
+        path_source: Option<&PathSource>,
+        fill_level: Option<&FillLevel>,
+        fill: Option<&FillBrush>,
+        stroke: Option<&StrokeBrush>,
+        fill_progress: Option<&FillDrawProgress>,
+        tip_glow: Option<&WriteTipGlow>,
+    ) -> Self {
+        Self {
+            path: path.map(|path| Arc::clone(&path.0)),
+            path_source: path_source.map(|source| Arc::clone(&source.0)),
+            fill_level: fill_level.copied(),
+            fill: fill.cloned(),
+            stroke: stroke.cloned(),
+            fill_progress: fill_progress.copied(),
+            tip_glow: tip_glow.cloned(),
+        }
+    }
+}
+
+fn same_path(left: &Option<Arc<kurbo::BezPath>>, right: &Option<Arc<kurbo::BezPath>>) -> bool {
+    match (left, right) {
+        (Some(left), Some(right)) => Arc::ptr_eq(left, right) || left == right,
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+impl PartialEq for FragmentInputs {
+    fn eq(&self, other: &Self) -> bool {
+        same_path(&self.path, &other.path)
+            && same_path(&self.path_source, &other.path_source)
+            && self.fill_level == other.fill_level
+            && self.fill == other.fill
+            && self.stroke == other.stroke
+            && self.fill_progress == other.fill_progress
+            && self.tip_glow == other.tip_glow
+    }
 }
 
 pub struct ExtractedElement {
@@ -224,10 +285,6 @@ fn append_extracted_elements(
 
         if elem.clip_mask.is_none() && elem.opacity < 1.0 {
             let end = opacity_run_end(elements, index);
-            let mut opacity_scene = vello::Scene::new();
-            for grouped in &elements[index..end] {
-                opacity_scene.append(&grouped.scene, Some(grouped.transform));
-            }
             main_scene.push_layer(
                 peniko::Fill::NonZero,
                 peniko::BlendMode::default(),
@@ -235,7 +292,9 @@ fn append_extracted_elements(
                 kurbo::Affine::IDENTITY,
                 &composition_bounds,
             );
-            main_scene.append(&opacity_scene, None);
+            for grouped in &elements[index..end] {
+                main_scene.append(&grouped.scene, Some(grouped.transform));
+            }
             main_scene.pop_layer();
             index = end;
             continue;
@@ -852,6 +911,7 @@ pub fn gaanim_render_cache_sweep_system(
     let active: std::collections::HashSet<ObjectId> = query_mobj_ids.iter().map(|m| m.0).collect();
     cache.fragment_cache.retain(|id, _| active.contains(id));
     cache.stroke_views.retain(|id, _| active.contains(id));
+    cache.fragment_inputs.retain(|id, _| active.contains(id));
 }
 
 /// Standalone function: extracts all visible Vello2D mobjects from a Bevy World
@@ -1406,16 +1466,31 @@ pub fn gaanim_render_system(
             Some(view) => cache.stroke_views.insert(mobj_id.0, view),
             None => cache.stroke_views.remove(&mobj_id.0),
         };
-        let path_changed = path_ref.as_ref().is_some_and(|r| r.is_changed());
-        let changed = path_changed
-            || stroke_view != previous_view
+        // Fill-level geometry is derived later in the frame. Track the source
+        // value too, so a retained fragment can never outlive a rewind or a
+        // segment replay that changes only this component.
+        let timeline_inputs_touched = path_ref.as_ref().is_some_and(|r| r.is_changed())
             || path_source_ref.as_ref().is_some_and(|r| r.is_changed())
-            // Fill-level geometry is derived later in the frame. Track the
-            // source value too, so a retained fragment can never outlive a
-            // rewind or a segment replay that changes only this component.
             || fill_level_ref.as_ref().is_some_and(|r| r.is_changed())
             || fill_ref.as_ref().is_some_and(|r| r.is_changed())
             || stroke_ref.as_ref().is_some_and(|r| r.is_changed())
+            || fill_progress_ref.as_ref().is_some_and(|r| r.is_changed())
+            || tip_glow_ref.as_ref().is_some_and(|r| r.is_changed());
+        let current_inputs = timeline_inputs_touched.then(|| {
+            FragmentInputs::capture(
+                path_ref.as_deref(),
+                path_source_ref.as_deref(),
+                fill_level_ref.as_deref(),
+                fill_ref.as_deref(),
+                stroke_ref.as_deref(),
+                fill_progress_ref.as_deref(),
+                tip_glow_ref.as_deref(),
+            )
+        });
+        let changed = current_inputs
+            .as_ref()
+            .is_some_and(|inputs| cache.fragment_inputs.get(&mobj_id.0) != Some(inputs))
+            || stroke_view != previous_view
             || raster_image_ref.as_ref().is_some_and(|r| r.is_changed())
             || reactive_readout_ref
                 .as_ref()
@@ -1424,9 +1499,7 @@ pub fn gaanim_render_system(
             || shadow_ref.as_ref().is_some_and(|r| r.is_changed())
             || glow_ref.as_ref().is_some_and(|r| r.is_changed())
             || blur_ref.as_ref().is_some_and(|r| r.is_changed())
-            || clip_ref.as_ref().is_some_and(|r| r.is_changed())
-            || fill_progress_ref.as_ref().is_some_and(|r| r.is_changed())
-            || tip_glow_ref.as_ref().is_some_and(|r| r.is_changed());
+            || clip_ref.as_ref().is_some_and(|r| r.is_changed());
 
         if changed {
             cache.fragment_cache.remove(&mobj_id.0);
@@ -1489,6 +1562,20 @@ pub fn gaanim_render_system(
             0.0
         };
 
+        if !cache.fragment_cache.contains_key(&mobj_id.0) {
+            let inputs = current_inputs.unwrap_or_else(|| {
+                FragmentInputs::capture(
+                    path_ref.as_deref(),
+                    path_source_ref.as_deref(),
+                    fill_level_ref.as_deref(),
+                    fill_ref.as_deref(),
+                    stroke_ref.as_deref(),
+                    fill_progress_ref.as_deref(),
+                    tip_glow_ref.as_deref(),
+                )
+            });
+            cache.fragment_inputs.insert(mobj_id.0, inputs);
+        }
         let fragment = cache.fragment_cache.entry(mobj_id.0).or_insert_with(|| {
             let mut scene = vello::Scene::new();
 
@@ -1768,8 +1855,8 @@ pub fn gaanim_render_system(
     // Update the single global VelloScene2d or spawn it on demand
     let mut scene_entity_found = false;
     for (entity, mut scene, mut scene_transform) in &mut query_vello_scene {
-        scene.reset();
-        scene.append(&main_scene, None);
+        // Hand over the composited encoding instead of copying it again.
+        **scene = Box::new(std::mem::take(&mut main_scene));
         scene_transform.scale = Vec3::new(1.0, -1.0, 1.0);
         scene_entity_found = true;
 
@@ -2044,6 +2131,47 @@ mod tests {
             !Arc::ptr_eq(&first, &second),
             "a retained fragment must not survive a fill-level change"
         );
+    }
+
+    #[test]
+    fn seek_replay_of_identical_values_keeps_the_retained_fragment() {
+        let mut app = App::new();
+        app.init_resource::<GaanimRenderCache>()
+            .add_systems(Update, gaanim_render_system);
+        let id = ObjectId::from_raw(49);
+        let entity = app
+            .world_mut()
+            .spawn((
+                MobjectId(id),
+                GlobalSpatialTransform::default(),
+                GlobalOpacity(1.0),
+                RenderOrder::default(),
+                RenderLayer::Vello2D,
+                Path2D(rect_path(0.0, 0.0, 20.0, 20.0)),
+                PathSource(rect_path(0.0, 0.0, 20.0, 20.0)),
+                FillBrush::color(peniko::Color::WHITE),
+                StrokeBrush::transparent(),
+                Visible,
+            ))
+            .id();
+        app.update();
+        let fragment =
+            |app: &App| app.world().resource::<GaanimRenderCache>().fragment_cache[&id].clone();
+        let retained = fragment(&app);
+
+        // An exact seek restores the keyframe and replays completed clips,
+        // rewriting equal values that Bevy still reports as changed.
+        let mut entity_mut = app.world_mut().entity_mut(entity);
+        entity_mut.get_mut::<Path2D>().unwrap().0 = rect_path(0.0, 0.0, 20.0, 20.0);
+        entity_mut.get_mut::<PathSource>().unwrap().0 = rect_path(0.0, 0.0, 20.0, 20.0);
+        entity_mut.insert(FillBrush::color(peniko::Color::WHITE));
+        entity_mut.insert(StrokeBrush::transparent());
+        app.update();
+        assert!(Arc::ptr_eq(&retained, &fragment(&app)));
+
+        app.world_mut().get_mut::<Path2D>(entity).unwrap().0 = rect_path(0.0, 0.0, 10.0, 20.0);
+        app.update();
+        assert!(!Arc::ptr_eq(&retained, &fragment(&app)));
     }
 
     #[test]
