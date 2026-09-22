@@ -1,0 +1,17 @@
+{
+  "name": "gaanim-dev",
+  "version": "0.1.0",
+  "description": "Repository-aware workflows for adding, documenting, tracking, fixing, testing, profiling, and maintaining Gaanim.",
+  "author": {
+    "name": "Gaanim contributors"
+  },
+  "keywords": [
+    "gaanim",
+    "rust",
+    "pyo3",
+    "typst",
+    "bug-tracking",
+    "performance",
+    "visual-testing"
+  ]
+}

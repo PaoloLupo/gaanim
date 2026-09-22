@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "gaanim": {
+      "source": {
+        "source": "directory",
+        "path": "./"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "gaanim-dev@gaanim": true
+  }
+}
