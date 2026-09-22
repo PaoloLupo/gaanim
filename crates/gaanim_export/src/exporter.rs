@@ -794,6 +794,30 @@ where
     Ok(())
 }
 
+/// Timestamps this close to the scene duration capture its final frame.
+///
+/// Segment metadata and timeline clips accumulate the same authored durations
+/// in different orders, so a stop authored at the very end of a scene can land
+/// a few ULPs after the clip-derived duration.
+const CAPTURE_DURATION_TOLERANCE: f64 = 1e-6;
+
+/// Clamp capture timestamps that differ from the scene end only by floating
+/// point accumulation; reject timestamps that are genuinely out of range.
+fn resolve_capture_times(times: &[f64], duration: f64) -> Result<Vec<f64>> {
+    times
+        .iter()
+        .map(|&time| {
+            if time > duration + CAPTURE_DURATION_TOLERANCE {
+                Err(ExportError::Capture(format!(
+                    "snapshot timestamp {time:.6}s exceeds scene duration {duration:.6}s"
+                )))
+            } else {
+                Ok(time.min(duration))
+            }
+        })
+        .collect()
+}
+
 /// Render a sparse set of exact timeline seeks with a single headless GPU context.
 ///
 /// Unlike a PNG-sequence export, this does not advance at a fixed frame rate:
@@ -806,6 +830,30 @@ pub fn capture_scene_direct<F>(
 ) -> Result<Vec<CapturedFrame>>
 where
     F: FnOnce(&mut World) + Send + Sync + 'static,
+{
+    let mut frames = Vec::with_capacity(times.len());
+    capture_scene_direct_streaming(config, times, setup_world_fn, |frame| {
+        frames.push(frame);
+        std::ops::ControlFlow::Continue(())
+    })?;
+    Ok(frames)
+}
+
+/// Streaming form of [`capture_scene_direct`].
+///
+/// `on_frame` receives every frame as soon as it has been read back, in the
+/// order of `times`. Returning [`ControlFlow::Break`](std::ops::ControlFlow)
+/// stops the capture early without an error, which lets interactive callers
+/// cancel obsolete work between frames.
+pub fn capture_scene_direct_streaming<F, C>(
+    config: ExportConfig,
+    times: &[f64],
+    setup_world_fn: F,
+    mut on_frame: C,
+) -> Result<()>
+where
+    F: FnOnce(&mut World) + Send + Sync + 'static,
+    C: FnMut(CapturedFrame) -> std::ops::ControlFlow<()>,
 {
     let capture_started = Instant::now();
     if times.is_empty() {
@@ -845,19 +893,14 @@ where
     let setup_ms = capture_started.elapsed().as_secs_f64() * 1000.0;
 
     let duration = app.world().resource::<Timeline>().cached_duration;
-    if let Some(time) = times.iter().find(|time| **time > duration) {
-        return Err(ExportError::Capture(format!(
-            "snapshot timestamp {time:.6}s exceeds scene duration {duration:.6}s"
-        )));
-    }
+    let seek_times = resolve_capture_times(times, duration)?;
 
-    let mut frames = Vec::with_capacity(times.len());
     let mut timeline_update = Duration::ZERO;
     let mut scene_compile = Duration::ZERO;
     let mut render_readback = Duration::ZERO;
-    for &time in times {
+    for (&time, &seek_time) in times.iter().zip(&seek_times) {
         let phase_started = Instant::now();
-        app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
+        app.world_mut().resource_mut::<Timeline>().seek_request = Some(seek_time);
         app.update();
         check_custom_animation_errors(app.world())?;
         timeline_update += phase_started.elapsed();
@@ -910,12 +953,15 @@ where
         let phase_started = Instant::now();
         let rgba = gpu.render_frame(&scene, background)?;
         render_readback += phase_started.elapsed();
-        frames.push(CapturedFrame {
+        let flow = on_frame(CapturedFrame {
             time,
             width: config.width,
             height: config.height,
             rgba,
         });
+        if flow.is_break() {
+            break;
+        }
     }
 
     if std::env::var_os("GAANIM_CAPTURE_TELEMETRY").is_some() {
@@ -928,7 +974,7 @@ where
         );
     }
 
-    Ok(frames)
+    Ok(())
 }
 
 /// Map a canvas-sized scene into a capture target while preserving its aspect
@@ -1302,6 +1348,22 @@ mod tests {
 
         let error = result_rx.recv().unwrap().unwrap_err();
         assert!(error.to_string().contains("encoder failed"));
+    }
+
+    #[test]
+    fn capture_times_absorb_floating_point_drift_at_the_scene_end() {
+        // 135.55 accumulated in a different order than the clip duration.
+        let duration = 135.55;
+        let drifted = duration + 2.0 * f64::EPSILON * duration;
+        assert!(drifted > duration);
+
+        let resolved = resolve_capture_times(&[0.0, 12.5, drifted], duration).unwrap();
+
+        assert_eq!(resolved, vec![0.0, 12.5, duration]);
+        let error = resolve_capture_times(&[duration + 0.01], duration)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("exceeds scene duration"));
     }
 
     #[test]

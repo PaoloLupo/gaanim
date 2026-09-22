@@ -2085,27 +2085,26 @@ impl SceneModel {
             .layout_diagnostics
             .clear();
         let manifest = self.segment_manifest();
-        timeline.set_segments(
-            manifest
-                .segments
-                .into_iter()
-                .map(|segment| SegmentMetadata {
-                    id: segment.id.raw(),
-                    name: segment.name,
-                    notes: segment.notes,
-                    start_time: segment.start_time,
-                    end_time: segment.end_time,
-                    stops: segment
-                        .stops
-                        .into_iter()
-                        .map(|stop| SegmentStop {
-                            name: stop.name,
-                            time: stop.time,
-                        })
-                        .collect(),
-                })
-                .collect(),
-        );
+        let mut segment_metadata = manifest
+            .segments
+            .into_iter()
+            .map(|segment| SegmentMetadata {
+                id: segment.id.raw(),
+                name: segment.name,
+                notes: segment.notes,
+                start_time: segment.start_time,
+                end_time: segment.end_time,
+                stops: segment
+                    .stops
+                    .into_iter()
+                    .map(|stop| SegmentStop {
+                        name: stop.name,
+                        time: stop.time,
+                    })
+                    .collect(),
+            })
+            .collect::<Vec<_>>();
+        timeline.set_segments(segment_metadata.clone());
         let segments = self
             .state
             .lock()
@@ -2145,31 +2144,14 @@ impl SceneModel {
             .background_paint
             .clone()
             .unwrap_or_else(|| gaanim_renderer::background::BackgroundPaint::solid(bg_color));
-        let mut segment_start_time = 0.0;
-        let segment_paints = segments
-            .iter()
-            .map(|segment| {
-                let end_time = segment_start_time + segment.cursor;
-                let paint = gaanim_renderer::pipeline::SegmentBackgroundPaint {
-                    start_time: segment_start_time,
-                    end_time,
-                    paint: segment.background.clone(),
-                    hold_at_end: segment
-                        .stops
-                        .iter()
-                        .any(|stop| (stop.time - segment.cursor).abs() <= 1e-5),
-                };
-                segment_start_time = end_time;
-                paint
-            })
-            .collect();
-
-        for seg in &segments {
+        for (index, seg) in segments.iter().enumerate() {
             let previous_scene = seg
                 .prev_segment
                 .and_then(|index| scene_ids.get(index).copied());
             let scene_id = builder.begin_scene(&seg.name);
             scene_ids.push(scene_id);
+            let start_time = builder.current_time;
+            let first_stop = builder.stop_times.len();
             Self::replay_seg(
                 &mut builder,
                 seg,
@@ -2198,8 +2180,39 @@ impl SceneModel {
                 &mut revealed_deferred,
                 &self.state,
             );
+            // The manifest sums each segment's local cursor, while clips,
+            // stops, and scene starts use the builder's running clock. The two
+            // float sums can differ by a few ULPs, which made a terminal stop
+            // resolve to the next scene or land past the scene duration.
+            // Segment metadata adopts the builder clock so they agree exactly.
+            let stop_times = &builder.stop_times[first_stop..];
+            if let Some(metadata) = segment_metadata.get_mut(index)
+                && metadata.stops.len() == stop_times.len()
+            {
+                metadata.start_time = start_time;
+                metadata.end_time = builder.current_time;
+                for (stop, &time) in metadata.stops.iter_mut().zip(stop_times) {
+                    stop.time = time;
+                }
+            }
             builder.end_scene();
         }
+        let segment_paints = segments
+            .iter()
+            .zip(&segment_metadata)
+            .map(
+                |(segment, metadata)| gaanim_renderer::pipeline::SegmentBackgroundPaint {
+                    start_time: metadata.start_time,
+                    end_time: metadata.end_time,
+                    paint: segment.background.clone(),
+                    hold_at_end: metadata
+                        .stops
+                        .iter()
+                        .any(|stop| (stop.time - metadata.end_time).abs() <= 1e-5),
+                },
+            )
+            .collect();
+        builder.timeline.set_segments(segment_metadata);
 
         for (i, seg) in segments.iter().enumerate() {
             if let Some(prev) = seg.prev_segment
@@ -9808,6 +9821,71 @@ mod tests {
         timeline.seek(&mut world, 1.000_001);
         assert!(!visible_for(&mut world, red));
         assert!(visible_for(&mut world, blue));
+    }
+
+    #[test]
+    fn segment_metadata_uses_the_compiled_clock_exactly() {
+        // Per-segment cursors and the builder's running clock sum these waits
+        // in different orders: the manifest ends at 9.4, the clips at
+        // 9.399999999999999.
+        let slides: [&[f64]; 8] = [
+            &[0.15],
+            &[0.55, 1.05, 0.35],
+            &[0.45, 0.55, 0.35],
+            &[0.35, 0.25],
+            &[1.05, 1.05],
+            &[0.95, 0.55],
+            &[0.45, 0.35],
+            &[0.95],
+        ];
+        let mut canvas = SceneModel::new(640, 360);
+        for (index, waits) in slides.iter().enumerate() {
+            canvas.segment(format!("slide {index}"), None).unwrap();
+            for &wait in *waits {
+                canvas.wait(wait);
+                canvas.stop(None).unwrap();
+            }
+        }
+        let manifest_end = canvas
+            .segment_manifest()
+            .segments
+            .last()
+            .map(|segment| segment.end_time)
+            .unwrap();
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+
+        assert!(
+            manifest_end > timeline.cached_duration,
+            "fixture must reproduce the float drift"
+        );
+        let stop_clips = timeline
+            .clips
+            .values()
+            .filter(|clip| matches!(clip.payload, gaanim_timeline::clip::ClipPayload::Stop))
+            .map(|clip| clip.start.to_bits())
+            .collect::<HashSet<_>>();
+        for segment in &timeline.segments {
+            assert!(segment.end_time <= timeline.cached_duration);
+            for stop in &segment.stops {
+                assert!(
+                    stop_clips.contains(&stop.time.to_bits()),
+                    "{} has a stop at {} without a matching clip",
+                    segment.name,
+                    stop.time
+                );
+            }
+            // A terminal stop keeps its own scene on screen, not the next one.
+            let terminal = segment.stops.last().unwrap();
+            let scene = timeline.scene_at(terminal.time).unwrap();
+            assert_eq!(timeline.scenes[scene].name, segment.name);
+        }
     }
 
     #[test]
