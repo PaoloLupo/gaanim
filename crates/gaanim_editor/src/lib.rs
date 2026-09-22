@@ -151,6 +151,7 @@ impl Plugin for GaanimEditorPlugin {
             .init_resource::<export::StashedReplay>()
             .init_resource::<presenter::PresenterThumbnailCache>()
             .init_resource::<presenter::PresenterOverviewState>()
+            .init_resource::<presenter::PresenterPreferences>()
             .init_resource::<presenter::AudienceControlsState>()
             .init_resource::<presenter::PresentationTimer>()
             .init_resource::<fps_overlay::FpsOverlay>()

@@ -119,12 +119,15 @@ Presenter Mode siempre respeta los stops. Durante una presentación,
 `Left`/`Backspace` retroceden, `O` abre el overview y `B`/`W` controlan el
 blanking. Cerrar Presenter View mantiene la audiencia activa y `P` vuelve a
 abrir el cockpit sin regenerar sus previews; `Esc` sale del modo presentación.
-  El encabezado incluye un cronómetro de exposición reiniciable y la hora local.
-  La pantalla fullscreen revela un dock compacto con Previous, Advance/Pause,
-  inicio, fin y progreso al llevar el cursor a su zona inferior; se oculta al
-  retirar el cursor o perder foco. Presenter View
-  identifica el cue activo sin repetir el nombre del segmento y mantiene Up Next
-  por encima de las notas con scroll independiente.
+Presenter View muestra cada segmento como *slide* y cada stop como *step*: un
+encabezado con estado, `Slide n of N`, hora, tiempo transcurrido y una barra
+por diapositiva; la preview grande de lo que ve la audiencia con sus steps;
+Up Next; notas con tamaño ajustable; y un dock con navegación, overview,
+blanking y el progreso de las previews. Las previews se generan en segundo
+plano, primero la diapositiva actual y la siguiente. La pantalla fullscreen
+revela un dock compacto con Previous, Advance/Pause, inicio, fin y progreso al
+llevar el cursor a su zona inferior; se oculta al retirar el cursor o perder
+foco. Consulta `docs/content/guides/slides.typ` para el detalle.
 
 ## 3D nativo e inspección
 
