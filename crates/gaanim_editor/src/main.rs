@@ -108,6 +108,9 @@ fn main() {
         (reload_status_overlay_system, script_error_overlay_system),
     )
     .add_systems(Update, open_project_request_system);
+    if gaanim_editor::frame_profile::enabled() {
+        app.add_plugins(gaanim_editor::frame_profile::FrameProfilePlugin);
+    }
 
     // bevy_egui creates its primary context when the application starts. Keep
     // this camera alive for both the project hub and script launches, so a

@@ -418,7 +418,7 @@ impl WorldSnapshot {
 
     /// Restores the states stored in this snapshot back to the Bevy `World`.
     pub fn restore(&self, world: &mut World) {
-        let _ = self.restore_with_entity_map(world, true);
+        let _ = self.restore_with_entity_map(world, true, |_, _, _| true);
     }
 
     /// Restore a snapshot and return the identity map built as part of the work.
@@ -426,10 +426,13 @@ impl WorldSnapshot {
     /// querying every Mobject twice on full seeks.
     /// When the caller resolves scene visibility after replay, leave that
     /// component alone for scene members until their final visibility is known.
+    /// `needs_restore` selects the existing entities whose components are
+    /// rewritten; entities spawned from the snapshot are always restored.
     pub(crate) fn restore_with_entity_map(
         &self,
         world: &mut World,
         restore_scene_visibility: bool,
+        mut needs_restore: impl FnMut(&World, ObjectId, Entity) -> bool,
     ) -> HashMap<ObjectId, Entity> {
         if let Some(camera) = self.camera {
             if world.get_resource::<gaanim_math::Camera>() != Some(&camera) {
@@ -456,6 +459,7 @@ impl WorldSnapshot {
         }
 
         // 3. Spawn any missing entities first so they exist in entity_map
+        let mut spawned = Vec::new();
         for (obj_id, snap) in &self.entities {
             if !entity_map.contains_key(obj_id) {
                 let mut entity = world.spawn((
@@ -470,28 +474,34 @@ impl WorldSnapshot {
                 let new_entity = entity.id();
 
                 entity_map.insert(*obj_id, new_entity);
+                spawned.push(new_entity);
             }
         }
+        let restored: Vec<_> = self
+            .entities
+            .iter()
+            .filter_map(|(obj_id, snap)| {
+                let entity = *entity_map.get(obj_id)?;
+                (needs_restore(world, *obj_id, entity) || spawned.contains(&entity))
+                    .then_some((snap, entity))
+            })
+            .collect();
 
-        // 4. Pass 1: Set parent-child relationships for all entities
-        for (obj_id, snap) in &self.entities {
-            if let Some(&entity) = entity_map.get(obj_id) {
-                if let Some(parent_id) = snap.parent {
-                    if let Some(&parent_entity) = entity_map.get(&parent_id) {
-                        restore_parent(world, entity, Some(parent_entity));
-                    }
-                } else {
-                    restore_parent(world, entity, None);
+        // 4. Pass 1: Set parent-child relationships for restored entities
+        for &(snap, entity) in &restored {
+            if let Some(parent_id) = snap.parent {
+                if let Some(&parent_entity) = entity_map.get(&parent_id) {
+                    restore_parent(world, entity, Some(parent_entity));
                 }
+            } else {
+                restore_parent(world, entity, None);
             }
         }
 
         // 5. Pass 2: Overwrite all properties (including transforms) with correct snapshot values
-        for (obj_id, snap) in &self.entities {
-            if let Some(&entity) = entity_map.get(obj_id) {
-                let mut entity_mut = world.entity_mut(entity);
-                insert_snapshot_components(&mut entity_mut, snap, restore_scene_visibility);
-            }
+        for &(snap, entity) in &restored {
+            let mut entity_mut = world.entity_mut(entity);
+            insert_snapshot_components(&mut entity_mut, snap, restore_scene_visibility);
         }
 
         entity_map

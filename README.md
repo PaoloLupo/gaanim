@@ -240,6 +240,12 @@ opciones de Cargo usa `just dev`, por ejemplo
 muestra el comando sin ejecutarlo. Las recetas de release y benchmarks no
 activan enlace dinámico; evita `--all-features` en builds de distribución.
 
+Para diagnosticar los FPS de la previsualización, abre un proyecto con
+`GAANIM_FRAME_PROFILE=1`: el editor reproduce la línea de tiempo completa sin
+detenerse en las paradas, escribe en stderr una línea por segundo con el coste
+del seek, la compilación de fragmentos y el render (incluida la espera de
+vsync) y, al terminar, cierra la ventana tras listar las ventanas más lentas.
+
 `just run` comprueba la vigencia de los binarios mediante Cargo antes de abrir
 la escena. Para ejecutar un binario ya validado sin invocar un build, usa
 `just dev-exec target/debug/gaanim.exe examples/quickstart.py` en Windows
