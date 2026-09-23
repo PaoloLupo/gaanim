@@ -267,16 +267,37 @@ class Theme:
         heatmap: Optional[Sequence[ColorLike]] = None,
         layout: Optional[dict[str, float]] = None,
         font_files: Optional[dict[str, str]] = None,
+        font_dir: Optional[str | os.PathLike[str]] = None,
+        text_markup: Optional[bool] = None,
     ) -> None:
         """Create or derive a centralized visual theme.
 
         Rules use family/type/part selectors or ``.classes``. Text values reuse
-        the structured ``TextStyle`` overlay. Invalid selectors, tokens, roles,
-        metrics, or font files raise ``ValueError`` or ``OSError``.
+        the structured ``TextStyle`` overlay.
+
+        ``font_dir`` embeds every ``.ttf``, ``.otf``, ``.ttc`` and ``.otc``
+        file directly inside the directory (not subdirectories). Each face is
+        resolved by the family, weight and style its file declares, so
+        ``fonts={"text": "Inter"}`` with ``weight=700`` finds the bold file
+        without naming it. ``font_files`` still registers single files.
+
+        ``text_markup=False`` makes ``*`` and ``_`` literal by default in
+        ``scene.text``, ``scene.text.measure``, ``badge`` and ``chip``; a call
+        that passes ``markup=`` keeps its own choice. ``None`` keeps the
+        base theme's value (``True`` for a new theme).
+
+        Invalid selectors, tokens, roles or metrics, a ``font_dir`` without
+        font files, or an unreadable font raise ``ValueError``; a missing
+        file or directory raises ``OSError``.
 
         Example:
-            Theme()
+            Theme("paper", font_dir="assets/fonts", fonts={"text": "Inter"},
+                  text_markup=False)
         """
+        ...
+    @property
+    def text_markup(self) -> bool:
+        """Default markup mode for text created while this theme is active."""
         ...
     @property
     def name(self) -> str:
@@ -1723,8 +1744,11 @@ class Text(Drawable):
         A single visual line defaults to ``TextAnchor.BASELINE_CENTER``. A
         multiline block defaults to its visual center. Explicit
         ``TextAnchor`` values align the first line's baseline; geometric
-        ``Anchor`` values retain bounds-based placement. Layout-owned text
-        raises ``LayoutOwnershipError``. Passing one ``Drawable`` aligns the
+        ``Anchor`` values retain bounds-based placement. When a text with
+        explicit line breaks was created without ``flow`` or ``text_align``,
+        an explicit anchor also aligns its lines: ``*_LEFT`` anchors left, ``*_RIGHT`` anchors right,
+        and the others center. Layout-owned text raises
+        ``LayoutOwnershipError``. Passing one ``Drawable`` aligns the
         text's visual center to the reference's center. Passing an
         ``AnchorPoint`` aligns the visual center to that transformed anchor;
         neither form creates a reactive follow relationship.
@@ -3359,7 +3383,7 @@ class Typography:
         overflow: Optional[TextOverflow] = None,
         direction: Optional[TextDirection] = None,
         hyphenate: Optional[bool] = None,
-        markup: bool = True,
+        markup: Optional[bool] = None,
     ) -> Text:
         """Create structured vector text, paragraphs, mathematics, or mixed content.
 
@@ -3371,7 +3395,14 @@ class Typography:
         ``$...$`` remain math syntax, and ``\\$`` emits a literal dollar.
         ``markup=False`` keeps every ``*`` and ``_`` literal (and their
         backslashes), for technical labels such as ``tb:dist_comp`` or
-        ``X1_2``; ``$...$`` math still applies.
+        ``X1_2``; ``$...$`` math still applies. ``markup=None`` uses the
+        theme's ``text_markup`` (``True`` without a theme).
+
+        Without ``flow`` or ``text_align``, the lines of a text with explicit
+        line breaks take their horizontal alignment from the anchor of
+        ``move_to``: left anchors align left, right anchors align right, and
+        centered anchors center. An explicit ``flow`` or ``text_align``
+        always wins.
         Unbalanced or crossed markup, unbalanced math, duplicate sibling part
         names, and invalid metrics raise ``ValueError``. Direct keywords
         override reusable style/flow objects. Responsive wrapping consumes the
@@ -3456,7 +3487,7 @@ class Typography:
         wrap: Optional[float] = None,
         weight: Optional[int] = None,
         style: Optional[TextStyle] = None,
-        markup: bool = True,
+        markup: Optional[bool] = None,
     ) -> tuple[float, float]:
         """Measure laid-out text without spawning it.
 
@@ -3465,9 +3496,9 @@ class Typography:
         scene units. ``wrap`` composes at a fixed line width; ``None``
         measures a single unwrapped block. ``style`` overlays a ``TextStyle``
         (weight, italic, spacing, …); ``size``, ``font``, ``weight`` and
-        ``color`` override it. ``markup`` matches ``scene.text``: with the
-        default ``True``, ``*`` and ``_`` are markup and are not measured as
-        characters. Empty content, an invalid weight or unbalanced markup
+        ``color`` override it. ``markup`` matches ``scene.text``: with markup
+        on, ``*`` and ``_`` are markup and are not measured as characters;
+        ``None`` uses the theme's ``text_markup``. Empty content, an invalid weight or unbalanced markup
         raise ``ValueError``.
 
         Example:
@@ -3950,7 +3981,7 @@ class SlideKit:
         font: Optional[str] = None,
         weight: Optional[int] = None,
         style: Optional[TextStyle] = None,
-        markup: bool = True,
+        markup: Optional[bool] = None,
     ) -> Drawable:
         """Create an auto-sized editorial badge at the scene origin.
 
@@ -3988,7 +4019,7 @@ class SlideKit:
         font: Optional[str] = None,
         weight: Optional[int] = None,
         style: Optional[TextStyle] = None,
-        markup: bool = True,
+        markup: Optional[bool] = None,
     ) -> Drawable:
         """Create a compact auto-sized chip with an optional semantic dot.
 

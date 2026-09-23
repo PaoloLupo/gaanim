@@ -3,7 +3,7 @@ use gaanim_core::kurbo::{BezPath, Point};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use ttf_parser::OutlineBuilder;
 
@@ -309,9 +309,148 @@ impl FontRegistry {
     }
 }
 
+/// A font file found by [`scan_font_dir`], described by its first face.
+#[derive(Debug, Clone)]
+pub struct FontFile {
+    pub path: PathBuf,
+    /// Family name declared by the font (the typographic family when present).
+    pub family: String,
+    /// OpenType weight class, 1..=1000.
+    pub weight: u16,
+    pub italic: bool,
+    pub bytes: Arc<[u8]>,
+}
+
+impl FontFile {
+    /// A registry key that is unique per face: the bare family for the
+    /// face closest to regular, `"<family> <weight>[ italic]"` otherwise.
+    pub fn registry_key(&self, regular: bool) -> String {
+        if regular {
+            self.family.clone()
+        } else if self.italic {
+            format!("{} {} italic", self.family, self.weight)
+        } else {
+            format!("{} {}", self.family, self.weight)
+        }
+    }
+}
+
+/// Font file extensions recognised by [`scan_font_dir`].
+pub const FONT_FILE_EXTENSIONS: &[&str] = &["ttf", "otf", "ttc", "otc"];
+
+/// Read every `.ttf`, `.otf`, `.ttc` and `.otc` file directly inside `dir`
+/// (not in subdirectories), sorted by path, with the family, weight and style
+/// that each file declares. A file with a font extension that cannot be parsed
+/// is an `InvalidData` error rather than being skipped silently.
+pub fn scan_font_dir(dir: impl AsRef<Path>) -> std::io::Result<Vec<FontFile>> {
+    let mut paths = std::fs::read_dir(dir.as_ref())?
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| {
+            path.is_file()
+                && path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| {
+                        FONT_FILE_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())
+                    })
+        })
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths
+        .into_iter()
+        .map(|path| {
+            let bytes: Arc<[u8]> = std::fs::read(&path)?.into();
+            let mut database = fontdb::Database::new();
+            database.load_font_data(bytes.to_vec());
+            let face = database.faces().next().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("'{}' is not a readable font", path.display()),
+                )
+            })?;
+            let family = face
+                .families
+                .first()
+                .map(|(name, _)| name.clone())
+                .unwrap_or_default();
+            Ok(FontFile {
+                family,
+                weight: face.weight.0,
+                italic: face.style != fontdb::Style::Normal,
+                bytes,
+                path,
+            })
+        })
+        .collect()
+}
+
+/// For each family, the index of the face closest to an upright 400 weight.
+pub fn regular_faces(fonts: &[FontFile]) -> Vec<bool> {
+    let mut best: HashMap<&str, usize> = HashMap::new();
+    let distance = |font: &FontFile| (font.italic, font.weight.abs_diff(400));
+    for (index, font) in fonts.iter().enumerate() {
+        best.entry(font.family.as_str())
+            .and_modify(|current| {
+                if distance(font) < distance(&fonts[*current]) {
+                    *current = index;
+                }
+            })
+            .or_insert(index);
+    }
+    (0..fonts.len())
+        .map(|index| best.get(fonts[index].family.as_str()) == Some(&index))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::FontRegistry;
+    use super::{FontRegistry, regular_faces, scan_font_dir};
+
+    #[test]
+    fn font_dir_scan_reads_family_weight_and_style_from_each_file() {
+        let dir = std::env::temp_dir().join(format!("gaanim_font_dir_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("nested")).unwrap();
+        let mut written = 0;
+        let mut seen = std::collections::HashSet::new();
+        for (index, bytes) in typst_assets::fonts().enumerate() {
+            let Ok(face) = ttf_parser::Face::parse(bytes, 0) else {
+                continue;
+            };
+            let style = (face.weight().to_number(), face.is_italic());
+            if written < 3 && seen.insert(style) {
+                std::fs::write(dir.join(format!("face{index}.OTF")), bytes).unwrap();
+                written += 1;
+            }
+        }
+        assert!(
+            written >= 2,
+            "Typst ships faces of several weights and styles"
+        );
+        std::fs::write(dir.join("notes.txt"), "not a font").unwrap();
+        std::fs::write(dir.join("nested").join("ignored.ttf"), "nested").unwrap();
+
+        let fonts = scan_font_dir(&dir).unwrap();
+        assert_eq!(fonts.len(), written);
+        assert!(fonts.windows(2).all(|pair| pair[0].path < pair[1].path));
+        assert!(fonts.iter().all(|font| !font.family.is_empty()));
+        let regular = regular_faces(&fonts);
+        let keys = fonts
+            .iter()
+            .zip(&regular)
+            .map(|(font, regular)| font.registry_key(*regular))
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(
+            keys.len(),
+            fonts.len(),
+            "every face needs its own registry key"
+        );
+
+        std::fs::write(dir.join("broken.ttf"), "not a font").unwrap();
+        let error = scan_font_dir(&dir).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn bundled_new_computer_modern_is_resolvable() {

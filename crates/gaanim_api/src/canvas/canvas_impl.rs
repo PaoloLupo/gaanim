@@ -1536,6 +1536,14 @@ impl SceneModel {
         config
     }
 
+    /// Markup mode for text that does not choose one: the active theme's
+    /// `text_markup`, or markup enabled without a theme.
+    pub fn default_text_markup(&self) -> bool {
+        self.theme_style
+            .as_ref()
+            .is_none_or(|theme| theme.text_markup)
+    }
+
     pub(crate) fn register_theme_fonts(&self, registry: &mut gaanim_text::font::FontRegistry) {
         if let Some(theme) = &self.theme_style {
             for font in &theme.fonts {

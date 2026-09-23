@@ -680,6 +680,9 @@ impl PyTextSelection {
 pub struct PyText {
     handle: gaanim_api::canvas::DrawableHandle,
     spec: TextSpec,
+    /// Derive the horizontal line alignment from the anchor of `move_to`
+    /// because the text was created without `flow` or `text_align`.
+    derive_align: bool,
 }
 
 impl PyText {
@@ -687,7 +690,49 @@ impl PyText {
         handle: gaanim_api::canvas::DrawableHandle,
         spec: TextSpec,
     ) -> PyClassInitializer<Self> {
-        PyClassInitializer::from(PyDrawable(handle.clone())).add_subclass(Self { handle, spec })
+        PyClassInitializer::from(PyDrawable(handle.clone())).add_subclass(Self {
+            handle,
+            spec,
+            derive_align: false,
+        })
+    }
+
+    /// Like [`Self::initializer`] for text created by `scene.text`, whose
+    /// line alignment follows the anchor of `move_to` when `derive_align`.
+    pub(crate) fn initializer_with_derived_align(
+        handle: gaanim_api::canvas::DrawableHandle,
+        spec: TextSpec,
+        derive_align: bool,
+    ) -> PyClassInitializer<Self> {
+        PyClassInitializer::from(PyDrawable(handle.clone())).add_subclass(Self {
+            handle,
+            spec,
+            derive_align,
+        })
+    }
+
+    /// Align the lines of a multiline text with the side of an explicit
+    /// anchor: left anchors left-align, right anchors right-align and
+    /// centered anchors center. Single-line text keeps its alignment, since a
+    /// non-left alignment widens its layout box (and any gradient mapped to
+    /// it) without moving the glyphs.
+    fn align_with_anchor(&mut self, anchor: &ResolvedTextAnchor) {
+        if !self.derive_align || !flatten_content(&self.spec.content).contains('\n') {
+            return;
+        }
+        use gaanim_api::canvas::Anchor;
+        let align = match anchor {
+            ResolvedTextAnchor::Geometric(Anchor::Left | Anchor::TopLeft | Anchor::BottomLeft)
+            | ResolvedTextAnchor::Typographic(TextAnchor::BaselineLeft) => TextAlign::Left,
+            ResolvedTextAnchor::Geometric(
+                Anchor::Right | Anchor::TopRight | Anchor::BottomRight,
+            )
+            | ResolvedTextAnchor::Typographic(TextAnchor::BaselineRight) => TextAlign::Right,
+            _ => TextAlign::Center,
+        };
+        if self.spec.flow.align != align && self.handle.set_text_align(align) {
+            self.spec.flow.align = align;
+        }
     }
 
     fn named(&self, name: &str) -> PyResult<PyTextSelection> {
@@ -718,6 +763,63 @@ impl PyText {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn theme_markup_default_and_anchor_alignment_apply_to_new_text() {
+        Python::initialize();
+        Python::attach(|py| -> PyResult<()> {
+            let module = PyModule::new(py, "gaanim_core")?;
+            crate::gaanim_core(py, &module)?;
+            let kwargs = pyo3::types::PyDict::new(py);
+            kwargs.set_item("text_markup", false)?;
+            let theme = module.getattr("Theme")?.call((), Some(&kwargs))?;
+            assert!(!theme.getattr("text_markup")?.extract::<bool>()?);
+            let scene_kwargs = pyo3::types::PyDict::new(py);
+            scene_kwargs.set_item("theme", &theme)?;
+            let scene = module.getattr("Scene")?.call((), Some(&scene_kwargs))?;
+            let typography = scene.getattr("text")?;
+
+            let literal = typography.call1(("tb:dist_comp_x",))?;
+            assert!(!literal.extract::<PyRef<'_, PyText>>()?.spec.markup);
+            let explicit = pyo3::types::PyDict::new(py);
+            explicit.set_item("markup", true)?;
+            let marked = typography.call(("*Nota*",), Some(&explicit))?;
+            assert!(marked.extract::<PyRef<'_, PyText>>()?.spec.markup);
+
+            let anchor = module.getattr("Anchor")?;
+            let note = typography.call1(("Fuente
+Escala 1:50",))?;
+            note.call_method1("move_to", (1.0, 0.0, anchor.getattr("BOTTOM_RIGHT")?))?;
+            let align = |text: &Bound<'_, PyAny>| -> PyResult<(TextAlign, TextAlign)> {
+                let text = text.extract::<PyRef<'_, PyText>>()?;
+                let spawned = text.handle.text_spec().expect("expected text").flow.align;
+                Ok((text.spec.flow.align, spawned))
+            };
+            assert_eq!(align(&note)?, (TextAlign::Right, TextAlign::Right));
+            let baseline = module.getattr("TextAnchor")?.getattr("BASELINE_CENTER")?;
+            note.call_method1("move_to", (0.0, 0.0, baseline))?;
+            assert_eq!(align(&note)?, (TextAlign::Center, TextAlign::Center));
+
+            let fixed_kwargs = pyo3::types::PyDict::new(py);
+            fixed_kwargs.set_item("text_align", "left")?;
+            let fixed = typography.call(
+                ("a
+bb",),
+                Some(&fixed_kwargs),
+            )?;
+            fixed.call_method1("move_to", (1.0, 0.0, anchor.getattr("RIGHT")?))?;
+            assert_eq!(align(&fixed)?, (TextAlign::Left, TextAlign::Left));
+            let single = typography.call1(("una sola línea",))?;
+            single.call_method1("move_to", (1.0, 0.0, anchor.getattr("RIGHT")?))?;
+            assert_eq!(align(&single)?, (TextAlign::Left, TextAlign::Left));
+            let unanchored = typography.call1(("a
+bb",))?;
+            unanchored.call_method1("move_to", (1.0, 0.0))?;
+            assert_eq!(align(&unanchored)?, (TextAlign::Left, TextAlign::Left));
+            Ok(())
+        })
+        .unwrap();
+    }
 
     #[test]
     fn visual_effects_preserve_text_handle_and_typographic_placement() {
@@ -861,13 +963,17 @@ impl PyText {
 
     #[pyo3(signature = (x, y=None, anchor=None))]
     fn move_to<'py>(
-        slf: PyRef<'py, Self>,
+        mut slf: PyRefMut<'py, Self>,
         x: &Bound<'_, PyAny>,
         y: Option<&Bound<'_, PyAny>>,
         anchor: Option<&Bound<'_, PyAny>>,
-    ) -> PyResult<PyRef<'py, Self>> {
+    ) -> PyResult<PyRefMut<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
         slf.require_free_position("move_to")?;
+        if let Some(anchor) = anchor {
+            let anchor = resolve_text_anchor(anchor)?;
+            slf.align_with_anchor(&anchor);
+        }
         let mut numeric_y = None;
         if let Some(y) = y {
             let sx =

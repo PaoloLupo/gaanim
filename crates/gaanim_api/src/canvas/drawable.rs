@@ -403,6 +403,18 @@ impl DrawableHandle {
 
     /// Replace the authoring snapshot while preserving this handle identity.
     /// Timeline materialization observes the incremented version.
+    /// Change the horizontal alignment of a Text object's lines in place,
+    /// keeping its content, styles and fragment fills. Returns `false` for a
+    /// drawable that is not text.
+    pub fn set_text_align(&self, align: gaanim_text::prelude::TextAlign) -> bool {
+        let mut spec = self.spec.lock().expect("object spec poisoned");
+        let SpawnKind::Text(text) = &mut spec.kind else {
+            return false;
+        };
+        text.flow.align = align;
+        true
+    }
+
     pub fn r#become(&self, text: gaanim_text::prelude::TextSpec, duration: Option<f64>) {
         let parts = text.parts();
         let mut spec = self.spec.lock().expect("object spec poisoned");

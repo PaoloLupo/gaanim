@@ -192,6 +192,34 @@ def validate_timeline_cursor_contract(module: object) -> list[str]:
     return failures
 
 
+def validate_theme_typography_contract(module: object) -> list[str]:
+    """Theme font directories and the theme-wide markup default."""
+    failures: list[str] = []
+    if module.Theme().text_markup is not True:
+        failures.append("Theme().text_markup must default to True")
+    literal = module.Theme(text_markup=False)
+    if module.Theme(literal).text_markup is not False:
+        failures.append("a derived Theme did not keep text_markup")
+    scene = module.Scene(frame=(16, 9), theme=literal)
+    # Unbalanced markers are only valid when markup is off.
+    scene.text("tb:dist_comp *x")
+    scene.text.measure("_a")
+    scene.slides.badge("_vel_max")
+    try:
+        scene.text("*x", markup=True)
+    except ValueError:
+        pass
+    else:
+        failures.append("an explicit markup=True did not override the theme")
+    try:
+        module.Theme(font_dir="this/font/dir/does/not/exist")
+    except OSError:
+        pass
+    else:
+        failures.append("Theme(font_dir=...) accepted a missing directory")
+    return failures
+
+
 def validate_editorial_contract(module: object) -> list[str]:
     """Exercise the editorial kit without starting the renderer."""
     failures: list[str] = []
@@ -1563,6 +1591,7 @@ def main() -> int:
     missing.extend(validate_polyline_connector_contract(module))
     missing.extend(validate_layout_card_ports_contract(module))
     missing.extend(validate_editorial_contract(module))
+    missing.extend(validate_theme_typography_contract(module))
     missing.extend(validate_timeline_cursor_contract(module))
     missing.extend(validate_runtime_type_aliases(module))
     missing.extend(documented_text_api_failures(tree))
