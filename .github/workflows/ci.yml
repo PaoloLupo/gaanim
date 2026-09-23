@@ -1,10 +1,10 @@
 name: CI
 
 on:
-  pull_request:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
-  schedule:
-    - cron: "17 7 * * 1"
 
 permissions:
   contents: read
@@ -164,7 +164,6 @@ jobs:
 
   performance:
     name: Runtime performance (Ubuntu, informational)
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
