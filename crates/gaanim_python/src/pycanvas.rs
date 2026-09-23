@@ -692,6 +692,8 @@ impl PyTheme {
         heatmap=None,
         layout=None,
         font_files=None,
+        font_dir=None,
+        text_markup=None,
     ))]
     fn new(
         base: Option<&Bound<'_, PyAny>>,
@@ -705,6 +707,8 @@ impl PyTheme {
         heatmap: Option<Vec<PyColor>>,
         layout: Option<HashMap<String, f64>>,
         font_files: Option<HashMap<String, String>>,
+        font_dir: Option<std::path::PathBuf>,
+        text_markup: Option<bool>,
     ) -> PyResult<Self> {
         let mut theme = match base {
             Some(base) => {
@@ -825,12 +829,32 @@ impl PyTheme {
                 });
             }
         }
+        if let Some(font_dir) = font_dir {
+            theme.add_font_dir(&font_dir).map_err(|error| {
+                let message = format!("could not load font_dir '{}': {error}", font_dir.display());
+                match error.kind() {
+                    std::io::ErrorKind::InvalidData | std::io::ErrorKind::InvalidInput => {
+                        pyo3::exceptions::PyValueError::new_err(message)
+                    }
+                    _ => pyo3::exceptions::PyIOError::new_err(message),
+                }
+            })?;
+        }
+        if let Some(text_markup) = text_markup {
+            theme.text_markup = text_markup;
+        }
         Ok(Self { inner: theme })
     }
 
     #[getter]
     fn name(&self) -> &str {
         &self.inner.name
+    }
+
+    /// Default markup mode for text that does not pass ``markup=``.
+    #[getter]
+    fn text_markup(&self) -> bool {
+        self.inner.text_markup
     }
 
     /// Names accepted by `Theme(name)` and `scene.canvas.set_theme(name)`.
@@ -3342,9 +3366,29 @@ impl PyGeometry {
     }
 }
 
+impl PyTypography {
+    /// Markup mode used when a call does not pass ``markup=``.
+    fn default_markup(&self) -> bool {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .default_text_markup()
+    }
+}
+
+impl PySlideKit {
+    /// Markup mode used when a call does not pass ``markup=``.
+    fn default_markup(&self) -> bool {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .default_text_markup()
+    }
+}
+
 #[pymethods]
 impl PyTypography {
-    #[pyo3(signature = (*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None, markup=true))]
+    #[pyo3(signature = (*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None, markup=None))]
     #[allow(clippy::too_many_arguments)]
     fn __call__<'py>(
         &self,
@@ -3370,9 +3414,12 @@ impl PyTypography {
         overflow: Option<&str>,
         direction: Option<&str>,
         hyphenate: Option<bool>,
-        markup: bool,
+        markup: Option<bool>,
     ) -> PyResult<Py<PyText>> {
         crate::custom::ensure_authoring_allowed()?;
+        let markup = markup.unwrap_or_else(|| self.default_markup());
+        // Without an explicit alignment, an anchored move_to decides it.
+        let derive_align = flow.is_none() && text_align.is_none();
         let spec = build_text_spec(
             content,
             false,
@@ -3403,7 +3450,10 @@ impl PyTypography {
             .lock()
             .expect("scene canvas poisoned")
             .text_spec(spec.clone());
-        Py::new(py, PyText::initializer(handle, spec))
+        Py::new(
+            py,
+            PyText::initializer_with_derived_align(handle, spec, derive_align),
+        )
     }
 
     #[pyo3(signature = (*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None))]
@@ -4279,7 +4329,7 @@ impl PyTypography {
     /// w, h = scene.text.measure("PGA = 0.35 g", role="label")
     /// box = scene.geometry.rounded_rect(w + 0.56, h + 0.32, 0.14)
     /// ```
-    #[pyo3(signature = (content, *, role=None, size=None, font=None, color=None, wrap=None, weight=None, style=None, markup=true))]
+    #[pyo3(signature = (content, *, role=None, size=None, font=None, color=None, wrap=None, weight=None, style=None, markup=None))]
     #[pyo3(name = "measure")]
     #[allow(clippy::too_many_arguments)]
     fn measure_text_py(
@@ -4292,11 +4342,12 @@ impl PyTypography {
         wrap: Option<f64>,
         weight: Option<u16>,
         style: Option<PyTextStyle>,
-        markup: bool,
+        markup: Option<bool>,
     ) -> PyResult<(f64, f64)> {
         use gaanim_text::prelude::{TextFlow, TextRole, TextSpec, TextWrap};
 
         crate::custom::ensure_authoring_allowed()?;
+        let markup = markup.unwrap_or_else(|| self.default_markup());
         if content.is_empty() {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "measure_text content must not be empty",
@@ -4330,7 +4381,7 @@ impl PyTypography {
 #[pymethods]
 impl PySlideKit {
     /// Create an auto-sized editorial badge.
-    #[pyo3(signature = (text, *, variant="neutral", appearance="soft", padding=(0.18, 0.10), radius=None, font_size=None, min_width=None, color=None, background=None, border=None, font=None, weight=None, style=None, markup=true))]
+    #[pyo3(signature = (text, *, variant="neutral", appearance="soft", padding=(0.18, 0.10), radius=None, font_size=None, min_width=None, color=None, background=None, border=None, font=None, weight=None, style=None, markup=None))]
     #[pyo3(name = "badge")]
     #[allow(clippy::too_many_arguments)]
     fn badge_py(
@@ -4348,9 +4399,10 @@ impl PySlideKit {
         font: Option<String>,
         weight: Option<u16>,
         style: Option<PyTextStyle>,
-        markup: bool,
+        markup: Option<bool>,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
+        let markup = markup.unwrap_or_else(|| self.default_markup());
         let text_style = label_text_style(style, font, weight, None, None);
         let style = editorial_style(variant, appearance, color, background, border)?;
         let mut spec = BadgeSpec::new(text)
@@ -4366,7 +4418,7 @@ impl PySlideKit {
     }
 
     /// Create a compact chip with an optional semantic dot.
-    #[pyo3(signature = (text, *, dot=true, variant="neutral", appearance="soft", padding=(0.14, 0.08), radius=None, font_size=None, color=None, background=None, border=None, font=None, weight=None, style=None, markup=true))]
+    #[pyo3(signature = (text, *, dot=true, variant="neutral", appearance="soft", padding=(0.14, 0.08), radius=None, font_size=None, color=None, background=None, border=None, font=None, weight=None, style=None, markup=None))]
     #[allow(clippy::too_many_arguments)]
     fn chip(
         &self,
@@ -4383,9 +4435,10 @@ impl PySlideKit {
         font: Option<String>,
         weight: Option<u16>,
         style: Option<PyTextStyle>,
-        markup: bool,
+        markup: Option<bool>,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
+        let markup = markup.unwrap_or_else(|| self.default_markup());
         let text_style = label_text_style(style, font, weight, None, None);
         let style = editorial_style(variant, appearance, color, background, border)?;
         let mut spec = ChipSpec::new(text)
