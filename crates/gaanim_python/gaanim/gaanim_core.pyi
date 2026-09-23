@@ -2567,6 +2567,12 @@ class CoordinateSpace:
         Axes, grids and plotted paths retain their authored stroke widths.
         Axes with automatic ticks regenerate their grid lines, ticks and
         numbers for the new window; axes with a fixed ``.ticks(step)`` keep it.
+        Curves from ``plot`` without ``domain=`` cover every x window authored
+        with ``view_to`` (before or after the curve is declared), so they
+        reach the edge of a zoomed-out view; an explicit ``domain=`` is always
+        kept. ``plot`` and ``parametric`` curves, reactive ones included, are
+        sampled with their tolerance divided by the largest view
+        magnification so they stay smooth when zoomed in.
         Raises ValueError unless domains are finite and increasing on linear/time axes.
         """
         ...

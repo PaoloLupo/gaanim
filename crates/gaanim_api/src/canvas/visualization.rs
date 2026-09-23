@@ -131,6 +131,132 @@ pub struct CoordinateSpaceHandle {
     pub(crate) ticks: Option<Arc<Mutex<super::view_ticks::CartesianTicks>>>,
     /// Plot-window clip for data marks, fixed while `view_to` rescales them.
     pub(crate) data_mask: Option<DrawableHandle>,
+    /// Sampled curves that resample for every authored view window.
+    pub(crate) curves: Arc<Mutex<ViewCurves>>,
+}
+
+/// Curves of a Cartesian space and the view windows authored for it, shared
+/// by every clone of the space handle.
+///
+/// A curve is sampled when the scene compiles, from the domain and sampling
+/// stored in its spawn spec. Each `view_to` widens the domain of curves
+/// without an explicit one to the union of every x window, and divides the
+/// sampling tolerance by the largest magnification, so curves reach the edge
+/// of a zoomed-out window and stay smooth in a zoomed-in one.
+#[derive(Debug)]
+pub(crate) struct ViewCurves {
+    curves: Vec<ViewCurve>,
+    /// Union of the x windows of every authored view.
+    x_reach: Option<(f64, f64)>,
+    /// Largest magnification of any authored view, at least 1.
+    zoom: f64,
+}
+
+impl Default for ViewCurves {
+    fn default() -> Self {
+        Self {
+            curves: Vec::new(),
+            x_reach: None,
+            zoom: 1.0,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ViewCurve {
+    handle: DrawableHandle,
+    /// Domain the curve was declared with.
+    domain: (f64, f64),
+    /// Whether the domain came from the axis and may grow with the views.
+    follows_views: bool,
+    sampling: Sampling,
+}
+
+impl ViewCurves {
+    /// Record a view window and update every registered curve for it.
+    fn add_view(&mut self, original: [(f64, f64); 2], window: [(f64, f64); 2]) {
+        let reach = self.x_reach.get_or_insert(window[0]);
+        *reach = (reach.0.min(window[0].0), reach.1.max(window[0].1));
+        for axis in 0..2 {
+            let magnification = (original[axis].1 - original[axis].0).abs()
+                / (window[axis].1 - window[axis].0).abs();
+            if magnification.is_finite() {
+                self.zoom = self.zoom.max(magnification);
+            }
+        }
+        for curve in &self.curves {
+            self.apply(curve);
+        }
+    }
+
+    fn register(&mut self, curve: ViewCurve) {
+        self.apply(&curve);
+        self.curves.push(curve);
+    }
+
+    /// Write the domain and sampling for the authored views into the curve's
+    /// live and frozen spawn specs.
+    fn apply(&self, curve: &ViewCurve) {
+        let domain = match self.x_reach {
+            Some(reach) if curve.follows_views => {
+                (curve.domain.0.min(reach.0), curve.domain.1.max(reach.1))
+            }
+            _ => curve.domain,
+        };
+        let sampling = view_sampling(curve.sampling, self.zoom, curve.domain, domain);
+        let update = |kind: &mut SpawnKind| match kind {
+            SpawnKind::ReactivePlot {
+                domain: current,
+                sampling: current_sampling,
+                ..
+            } => {
+                *current = domain;
+                *current_sampling = sampling;
+            }
+            SpawnKind::ReactiveParametric2D {
+                sampling: current_sampling,
+                ..
+            } => *current_sampling = sampling,
+            _ => {}
+        };
+        update(&mut curve.handle.spec.lock().expect("curve spec poisoned").kind);
+        // Compilation uses the declaration frozen by the first play or wait.
+        if let Some(frozen) = curve
+            .handle
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .frozen_spawn_specs
+            .get_mut(&curve.handle.id)
+        {
+            update(&mut frozen.kind);
+        }
+    }
+}
+
+/// Sampling that keeps the declared on-screen accuracy under `zoom` and the
+/// declared density over a domain widened from `declared` to `domain`.
+fn view_sampling(
+    sampling: Sampling,
+    zoom: f64,
+    declared: (f64, f64),
+    domain: (f64, f64),
+) -> Sampling {
+    let widening = ((domain.1 - domain.0) / (declared.1 - declared.0)).max(1.0);
+    match sampling {
+        Sampling::Adaptive {
+            min_samples,
+            max_depth,
+            tolerance,
+        } => Sampling::Adaptive {
+            min_samples: (min_samples as f64 * widening).ceil() as usize,
+            max_depth: max_depth + zoom.log2().ceil().max(0.0) as usize,
+            tolerance: tolerance / zoom,
+        },
+        Sampling::Fixed { samples } => Sampling::Fixed {
+            samples: (samples as f64 * widening * zoom).ceil() as usize,
+        },
+    }
 }
 
 /// Typed 3D coordinate space with immediate data/local conversions.
@@ -695,6 +821,33 @@ impl CoordinateSpaceHandle {
             space: self.view.id,
             local: DVec3::new(point.x, point.y, 0.0),
         })
+    }
+
+    /// Track a sampled curve so later `view_to` windows update its domain
+    /// and sampling. Registering the same curve again replaces its entry.
+    fn register_view_curve(
+        &self,
+        handle: &DrawableHandle,
+        domain: (f64, f64),
+        follows_views: bool,
+        sampling: Sampling,
+    ) {
+        let mut curves = self.curves.lock().expect("view curves poisoned");
+        curves.curves.retain(|curve| curve.handle.id != handle.id);
+        curves.register(ViewCurve {
+            handle: handle.clone(),
+            domain,
+            follows_views,
+            sampling,
+        });
+    }
+
+    /// Record an authored view window for the curves of this space.
+    pub(crate) fn add_view_to_curves(&self, window: [(f64, f64); 2]) {
+        self.curves
+            .lock()
+            .expect("view curves poisoned")
+            .add_view([self.map.x.domain(), self.map.y.domain()], window);
     }
 
     /// Convert data to space-local coordinates through the view at the authoring cursor.
@@ -2409,6 +2562,7 @@ impl SceneModel {
             layers,
             ticks: Some(Arc::new(Mutex::new(ticks_state))),
             data_mask: Some(data_mask),
+            curves: Arc::default(),
         })
     }
 
@@ -2738,6 +2892,26 @@ impl SceneModel {
             sampling,
         });
         self.attach_mark_to_space(space, &handle);
+        space.register_view_curve(&handle, domain, false, sampling);
+        Ok(handle)
+    }
+
+    /// Plot `y = f(x)` over `domain`, or over the x axis when `domain` is
+    /// `None`. Without an explicit domain the curve also covers every x window
+    /// authored with `view_to`, before or after this call.
+    #[doc(hidden)]
+    pub fn reactive_plot_in_view(
+        &mut self,
+        space: &CoordinateSpaceHandle,
+        function: ReactiveFunction,
+        domain: Option<(f64, f64)>,
+        sampling: Sampling,
+    ) -> Result<DrawableHandle, VisualizationError> {
+        let declared = domain.unwrap_or_else(|| space.map.x.domain());
+        let handle = self.reactive_plot(space, function, declared, sampling)?;
+        if domain.is_none() {
+            space.register_view_curve(&handle, declared, true, sampling);
+        }
         Ok(handle)
     }
 
@@ -2763,6 +2937,7 @@ impl SceneModel {
             sampling,
         });
         self.attach_mark_to_space(space, &handle);
+        space.register_view_curve(&handle, domain, false, sampling);
         Ok(handle)
     }
 
@@ -4989,6 +5164,84 @@ mod tests {
                 assert!(current.abs_diff_eq(expected, 1e-9));
             }
         }
+    }
+
+    #[test]
+    fn curves_resample_for_every_authored_view_window() {
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        let space = canvas
+            .coordinate_axes(
+                Axis::linear(0.0, 1.0).unwrap(),
+                Axis::linear(0.0, 10.0).unwrap(),
+                Some(8.0),
+                Some(5.0),
+                true,
+            )
+            .unwrap();
+        let line = || ReactiveFunction::new(1, 1, Vec::new(), |values| Ok(vec![10.0 * values[0]]));
+        let automatic = canvas
+            .reactive_plot_in_view(&space, line(), None, Sampling::default())
+            .unwrap();
+        let explicit = canvas
+            .reactive_plot_in_view(&space, line(), Some((0.2, 0.6)), Sampling::default())
+            .unwrap();
+        let curve = |handle: &DrawableHandle| {
+            let frozen = handle
+                .state
+                .lock()
+                .unwrap()
+                .frozen_spawn_specs
+                .get(&handle.id)
+                .map(|spec| spec.kind.clone());
+            let live = handle.spec.lock().unwrap().kind.clone();
+            let read = |kind: SpawnKind| match kind {
+                SpawnKind::ReactivePlot {
+                    domain,
+                    sampling:
+                        Sampling::Adaptive {
+                            tolerance,
+                            max_depth,
+                            ..
+                        },
+                    ..
+                } => (domain, tolerance, max_depth),
+                other => panic!("expected an adaptive plot, got {other:?}"),
+            };
+            let live = read(live);
+            if let Some(frozen) = frozen {
+                assert_eq!(read(frozen), live, "frozen and live specs must agree");
+            }
+            live
+        };
+        assert_eq!(curve(&automatic), ((0.0, 1.0), 0.0075, 8));
+
+        // Played first, so the declaration is frozen; zoom out to 0..1.6.
+        canvas.play(vec![automatic.animate().fade_in().duration(0.5)]);
+        canvas
+            .coordinate_view_to(&space, (0.0, 1.6), (0.0, 16.0))
+            .unwrap();
+        assert_eq!(
+            curve(&automatic).0,
+            (0.0, 1.6),
+            "the line reaches the window edge"
+        );
+        assert_eq!(curve(&explicit).0, (0.2, 0.6), "explicit domains are kept");
+
+        // Zoom in 4x on y: the tolerance keeps the on-screen accuracy.
+        canvas
+            .coordinate_view_to_animation(&space, (0.0, 1.0), (4.0, 6.5))
+            .unwrap();
+        let (domain, tolerance, depth) = curve(&automatic);
+        assert_eq!(domain, (0.0, 1.6));
+        assert!((tolerance - 0.0075 / 4.0).abs() < 1e-15);
+        assert_eq!(depth, 10);
+        assert!((curve(&explicit).1 - 0.0075 / 4.0).abs() < 1e-15);
+
+        // A curve declared after the views starts with their reach.
+        let late = canvas
+            .reactive_plot_in_view(&space, line(), None, Sampling::default())
+            .unwrap();
+        assert_eq!(curve(&late).0, (0.0, 1.6));
     }
 
     #[test]

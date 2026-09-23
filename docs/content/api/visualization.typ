@@ -357,7 +357,18 @@ fundido cruzado mientras el anterior se desvanece, y al alejarse el eje y la
 grilla se extienden más allá del dominio original. Un eje con paso fijo
 (`.ticks(1.0)`) lo conserva en cualquier vista. Los ticks regenerados copian el
 estilo de las capas vigente al declarar el `view_to`; aplica los estilos de
-`plane.layer(...)` antes del primer cambio de vista. Para ubicar un objeto en
+`plane.layer(...)` antes del primer cambio de vista.
+
+Las curvas también se adaptan a las vistas declaradas. Una curva de `plot` sin
+`domain=` cubre la unión de las ventanas x de todos los `view_to` del plano,
+declarados antes o después de la curva, así que al alejarse llega al borde de la
+ventana. Un `domain=` explícito se respeta siempre. Además, `plot` y
+`parametric` (también con `inputs=`) se muestrean con la tolerancia dividida por
+el mayor acercamiento declarado, para que no se vean facetadas con zoom. El
+costo es proporcional: un acercamiento de 4× usa como mucho dos niveles más de
+subdivisión.
+
+Para ubicar un objeto en
 una coordenada de datos que siga la vista usa `obj.at_coordinate(plane.coord(x, y))`.
 
 Las marcas de datos de un espacio cartesiano (`plot`, `parametric`,

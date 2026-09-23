@@ -221,6 +221,7 @@ impl SceneModel {
         y_domain: (f64, f64),
     ) -> Result<(), VisualizationError> {
         space.view_to(x_domain, y_domain)?;
+        space.add_view_to_curves([x_domain, y_domain]);
         self.retick_coordinate_view(space, [x_domain, y_domain])
     }
 
@@ -233,6 +234,7 @@ impl SceneModel {
         y_domain: (f64, f64),
     ) -> Result<super::types::Anim, VisualizationError> {
         let animation = space.view_to_animation(x_domain, y_domain)?;
+        space.add_view_to_curves([x_domain, y_domain]);
         self.retick_coordinate_view(space, [x_domain, y_domain])?;
         Ok(animation)
     }

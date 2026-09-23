@@ -2195,13 +2195,12 @@ impl PyCoordinateSpace {
         inputs: Vec<Py<PyAny>>,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
-        let domain = domain.unwrap_or_else(|| self.inner.map().x.domain());
         let sampling = sampling(samples, tolerance)?;
         let callback = derivative.unwrap_or(function);
         let function = checked_python_function(py, callback, 1, 1, inputs, &self.canvas)?;
         let mut canvas = self.canvas.lock().expect("scene canvas poisoned");
         canvas
-            .reactive_plot(&self.inner, function, domain, sampling)
+            .reactive_plot_in_view(&self.inner, function, domain, sampling)
             .map(PyDrawable)
             .map_err(value_error)
     }
