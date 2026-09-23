@@ -55,7 +55,7 @@ Esta separación evita tener un segundo solucionador de cajas de texto. Consulta
 #api-entry(
   name: "Scene.text",
   kind: "factory",
-  signature: "text(*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None, markup=True) -> Text",
+  signature: "text(*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None, markup=None) -> Text",
   params: (
     (name: "content", type: "str | TextPart | TextParts", default: none, desc: [One or more composable strings, semantic parts, or compact ordered part groups. The flattened result must not be empty.]),
     (name: "role", type: "TextRole | None", default: "None", desc: [Semantic role. Fully mathematical content infers `math`; everything else infers `body`.]),
@@ -63,7 +63,7 @@ Esta separación evita tener un segundo solucionador de cajas de texto. Consulta
     (name: "flow", type: "TextFlow | None", default: "None", desc: [Reusable internal line-composition options.]),
     (name: "style overrides", type: "keyword arguments", default: "None", desc: [Direct font, metric, color, opacity, spacing, and baseline values.]),
     (name: "flow overrides", type: "keyword arguments", default: "None", desc: [Direct wrap, alignment, line limit, overflow, direction, and hyphenation values.]),
-    (name: "markup", type: "bool", default: "True", desc: [Interpret `*strong*` and `_emphasis_`. `False` keeps `*` and `_` literal while `$...$` math still applies.]),
+    (name: "markup", type: "bool | None", default: "None", desc: [Interpret `*strong*` and `_emphasis_`. `False` keeps `*` and `_` literal while `$...$` math still applies. `None` uses the theme's `text_markup`, which is `True` by default.]),
   ),
   returns: (type: "Text", desc: [Structured vector text measured by the same intrinsic Layout v2 pass in every context.]),
   desc: [Direct keywords override `TextStyle` and `TextFlow`. The `color` argument
@@ -150,7 +150,7 @@ role/theme -> TextStyle/TextFlow -> direct scene.text keywords
 #api-entry(
   name: "Typography.measure",
   kind: "method",
-  signature: "measure(content, *, role=None, size=None, font=None, color=None, wrap=None, weight=None, style=None, markup=True) -> tuple[float, float]",
+  signature: "measure(content, *, role=None, size=None, font=None, color=None, wrap=None, weight=None, style=None, markup=None) -> tuple[float, float]",
   params: (
     (name: "content", type: "str", default: none, desc: [Text to measure; must not be empty.]),
     (name: "role", type: "TextRole | None", default: "None", desc: [Role whose theme defaults resolve size, family, and color (`body` when omitted).]),
@@ -158,7 +158,7 @@ role/theme -> TextStyle/TextFlow -> direct scene.text keywords
     (name: "wrap", type: "float | None", default: "None", desc: [Fixed composition width; `None` measures a single unwrapped block.]),
     (name: "weight", type: "int | None", default: "None", desc: [Font weight override.]),
     (name: "style", type: "TextStyle | None", default: "None", desc: [Reusable typography (italic, spacing, …); `size`, `font`, `weight` and `color` override it.]),
-    (name: "markup", type: "bool", default: "True", desc: [Same as `scene.text`: `False` measures `*` and `_` as literal characters.]),
+    (name: "markup", type: "bool | None", default: "None", desc: [Same as `scene.text`: `False` measures `*` and `_` as literal characters; `None` follows the theme.]),
   ),
   returns: (type: "tuple[float, float]", desc: [Laid-out `(width, height)` in scene units.]),
   desc: [Runs the same Typst pipeline that renders `scene.text` and shares its cache, so a later spawn of the same text reuses the measurement. Use it to size boxes to their content instead of guessing widths.],
@@ -213,6 +213,9 @@ scene.render()
   identifiers such as `X1_2`), pass `markup=False`: every `*` and `_` stays
   literal, backslashes included, while `$...$` math still applies.
   `text.become(...)` keeps the current mode unless `markup=` is given.
+- `Theme(text_markup=False)` makes that the default for `scene.text`,
+  `scene.text.measure`, `badge` and `chip`; a call that passes `markup=`
+  keeps its own choice.
 
 ```python
 label = scene.text("Valores: V_e del piso 1 (tb:agriet_xy)", markup=False)
@@ -221,12 +224,13 @@ label = scene.text("Valores: V_e del piso 1 (tb:agriet_xy)", markup=False)
 #api-entry(
   name: "parts",
   kind: "factory",
-  signature: "parts(**content: str) -> TextParts",
+  signature: "parts(mapping: Mapping[str, str] | None = None, /, **content: str) -> TextParts",
   params: (
-    (name: "content", type: "keyword str entries", default: none, desc: [Ordered semantic names and their plain text.]),
+    (name: "mapping", type: "Mapping[str, str] | None", default: "None", desc: [Ordered names and their plain text, named with strings as in `part()`. Keeps insertion order and accepts names that are not Python identifiers, such as `"tb:dist"`.]),
+    (name: "content", type: "keyword str entries", default: none, desc: [Shortcut for identifier names: `parts(mass="m")` equals `parts({"mass": "m"})`.]),
   ),
   returns: (type: "TextParts", desc: [Immutable ordered group accepted by `scene.text()`, `scene.text.equation()`, `Text.become()`, and `part()`.]),
-  desc: [Inside `$...$`, adjacent sibling entries become distinct Typst math tokens and retain Typst's native tight spacing. Empty input, empty names, or wholly empty content raise `ValueError`; non-string values raise `TypeError`. Use `part()` for local styles or nesting.],
+  desc: [Inside `$...$`, adjacent sibling entries become distinct Typst math tokens and retain Typst's native tight spacing. Empty input, mixing a mapping with keyword entries, repeated or empty names, or wholly empty content raise `ValueError`; a non-mapping positional argument, non-string names, or non-string values raise `TypeError`. Use `part()` for local styles or nesting.],
 )[
 ```python
 # show-code: true
@@ -243,6 +247,14 @@ scene.play([equation["gravity"].animate.indicate().duration(0.6)])
 scene.play([equation["acceleration"].animate.fill(GOLD).duration(0.6)])
 # output: compact_text_parts.webp
 scene.render()
+```
+
+A mapping names the parts with strings, like `part()` does, and admits names
+that keyword arguments cannot express:
+
+```python
+label = scene.text(parts({"tb:dist": "d = ", "x-1": "4.2 m"}))
+label["tb:dist"].fill(GOLD)
 ```
 ]
 
@@ -382,6 +394,21 @@ scene.play([page.animate.fade_in().duration(0.7)])
 scene.render()
 ```
 ]
+
+When `scene.text` receives neither `flow` nor `text_align`, an explicit anchor
+in `move_to` also chooses the alignment of a text with explicit line breaks: `Anchor.*_LEFT` and
+`TextAnchor.BASELINE_LEFT` align left, `*_RIGHT` align right, and centered
+anchors center. A right-anchored note therefore reads flush right without
+repeating the side:
+
+```python
+note = scene.text("Fuente: ensayo 3\nEscala 1:50").move_to(7.5, -4, Anchor.BOTTOM_RIGHT)
+```
+
+An explicit `flow` or `text_align` always wins. Text without an anchor, and
+single-line text, keep the default left alignment: centering a single line
+would not move its glyphs, but it would widen its layout box and any gradient
+mapped to it.
 
 `overflow="visible"` leaves the limited block unclipped. `"clip"` clips it.
 `"ellipsis"` is a distinct public/cache value but currently uses the same

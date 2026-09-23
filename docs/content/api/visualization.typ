@@ -119,6 +119,12 @@ es 0.06. Con `Field`, el dominio de la columna se asigna a radios entre 0.03 y
 0.12, con el área (no el radio) proporcional al valor. La opción de marca
 `radius` fija un radio común y tiene prioridad sobre `size`.
 
+`color` y `opacity` con `Field` también valen por fila en 2D, igual que en 3D.
+Cada punto y cada barra de error toman el color y la opacidad de su fila. En
+`line`, `step` y `area`, un `color=Field` sobre una columna de texto dibuja una
+serie por categoría. Un campo numérico conserva una sola serie. `box` y
+`violin` resumen la columna entera y usan un único color.
+
 Las marcas son `point`, `line`, `step`, `area`, `bar`, `histogram`, `box`,
 `violin`, `error_bar`, `heatmap` y `surface`. `point`, `line` y `bar` pueden
 transformarse entre representaciones 2D y 3D; `heatmap` y `surface` pueden
@@ -157,6 +163,10 @@ y = Axis.linear(0, 1).label("relative value", position="top")
 guide = Guide.colorbar(title="temperature")
 ```
 
+`Guide.legend(title=...)` sobre un `color=Field` categórico muestra el título
+y, debajo, una entrada por categoría con una muestra de su color, en el orden
+de `Scale.category` o, si no se indica, en el de aparición en los datos.
+
 == Gráfico materializado y transiciones
 
 `scene.viz.chart(spec)` materializa la receta y devuelve un `Chart`. Sus capas
@@ -170,9 +180,22 @@ entrada en `scene.play`.
 
 La opacidad del gráfico se propaga por las capas vectoriales y las mallas 3D
 nativas. Por eso `fade_in`, `fade_out` y la opacidad de un padre mantienen el
-mismo comportamiento en escenas mixtas. Si Gaanim infiere los ejes de un gráfico
-de barras, incluye automáticamente la línea base numérica y reserva espacio en
-los extremos. Un dominio definido explícitamente nunca se modifica.
+mismo comportamiento en escenas mixtas.
+
+Cuando Gaanim infiere los ejes de un gráfico 2D, amplía el dominio lo necesario
+para que las marcas quepan en el área de trazado:
+
+- *bar*: incluye la línea base y reserva media barra más un margen en los
+  extremos.
+- *heatmap*: añade media celda (`cell_width / 2`, `cell_height / 2`) por lado.
+- *area*: incluye la línea base (`baseline`, 0 por defecto).
+- *error_bar*: el eje y cubre `y - low` a `y + high`, más un margen del 5 %.
+- *point*, *line* y *step*: un margen del 5 % del rango de datos a cada lado,
+  para que los extremos no se solapen con los ejes.
+
+Un eje que cruzaba al otro en un borde del dominio sigue en ese borde. Un
+dominio definido explícitamente (`axes(...)` o `scale.domain`) nunca se
+modifica, y los gráficos 3D conservan el dominio de los datos.
 
 ```python
 target = spec.encode(z="height").axes(z=Axis.linear(-2, 2))
@@ -370,6 +393,18 @@ subdivisión.
 
 Para ubicar un objeto en
 una coordenada de datos que siga la vista usa `obj.at_coordinate(plane.coord(x, y))`.
+Si el objeto no debe ser hijo del espacio (una anotación, una flecha o un
+conector entre elementos de la escena), usa `plane.data_to_scene(x, y)`. Devuelve
+un `PointRef` en coordenadas de escena que se resuelve en cada fotograma con la
+ventana vigente y con la posición, escala y rotación del plano. Se acepta
+en cualquier lugar donde se admite un `Endpoint`:
+
+```python
+peak = plane.data_to_scene(2, 4)
+note = scene.text("máximo").follow(peak, offset=(0.6, 0.4))
+arrow = scene.geometry.connector(note, peak)
+scene.play([plane.animate.view_to((0, 4), (0, 6)).duration(1.2)])
+```
 
 Las marcas de datos de un espacio cartesiano (`plot`, `parametric`,
 `scatter_data`, campos, barras y demás marcas estadísticas) se recortan

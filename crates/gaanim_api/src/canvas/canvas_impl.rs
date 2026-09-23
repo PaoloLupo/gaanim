@@ -12,6 +12,9 @@ use gaanim_core::kurbo::{Cap, Shape, Stroke};
 use gaanim_core::peniko::{Brush, Color};
 use gaanim_math::RateFunc;
 use gaanim_objects::prelude::{GltfDocument, GltfLoadError, GltfSceneSelector, SvgLoadError};
+use gaanim_objects::primitives::{
+    DEFAULT_ARROW_BODY_WIDTH, DEFAULT_ARROW_HEAD_LENGTH, DEFAULT_ARROW_HEAD_WIDTH,
+};
 use gaanim_objects::primitives3d;
 use gaanim_text::prelude::TextRole;
 use gaanim_timeline::transition::TransitionType;
@@ -579,6 +582,31 @@ impl Composition {
     }
 }
 
+/// Validate solid-arrow dimensions and scale the head, keeping its
+/// proportions, so its length is at most `max_head_ratio` of `length`.
+fn capped_arrow_head(
+    length: f64,
+    head_length: f64,
+    head_width: f64,
+    body_width: f64,
+    max_head_ratio: Option<f64>,
+) -> Result<(f64, f64), &'static str> {
+    if ![head_length, head_width, body_width]
+        .iter()
+        .all(|v| v.is_finite() && *v > 0.0)
+    {
+        return Err("arrow dimensions must be finite and positive");
+    }
+    if max_head_ratio.is_some_and(|v| !v.is_finite() || v <= 0.0 || v > 1.0) {
+        return Err("max_head_ratio must be in (0, 1]");
+    }
+    if !length.is_finite() {
+        return Err("arrow length must be finite");
+    }
+    let factor = max_head_ratio.map_or(1.0, |ratio| (length * ratio / head_length).min(1.0));
+    Ok((head_length * factor, head_width * factor))
+}
+
 fn play_item_kind(item: &PlayItem) -> &'static str {
     match item {
         PlayItem::Animation(_) => "animation",
@@ -1075,7 +1103,14 @@ pub struct DimensionOptions {
     pub scale: f64,
     pub label_gap: f64,
     pub label_orientation: gaanim_animation::DimensionLabelOrientation,
+    /// Scene side of the dimension. When set, only the magnitude of the
+    /// offset is used, whatever the `from` → `to` direction.
+    pub side: Option<gaanim_animation::DimensionSide>,
     pub font_size: Option<f64>,
+    /// Typography of the annotation (label, value and unit). Unset fields use
+    /// the theme's body text; `font_size` overrides its size and its color
+    /// overrides `color` for the text.
+    pub label_style: gaanim_text::prelude::TextStyle,
     pub color: Option<Color>,
     pub line_width: f64,
     pub extension_style: DimensionExtensionStyle,
@@ -1094,7 +1129,9 @@ impl Default for DimensionOptions {
             scale: 1.0,
             label_gap: 10.0,
             label_orientation: gaanim_animation::DimensionLabelOrientation::Upright,
+            side: None,
             font_size: Some(DEFAULT_REACTIVE_TEXT_SIZE),
+            label_style: gaanim_text::prelude::TextStyle::default(),
             color: None,
             line_width: 3.0,
             extension_style: DimensionExtensionStyle::Solid,
@@ -1534,6 +1571,14 @@ impl SceneModel {
             config.roles.get_mut(&TextRole::Code).unwrap().font_family = code_font.clone();
         }
         config
+    }
+
+    /// Markup mode for text that does not choose one: the active theme's
+    /// `text_markup`, or markup enabled without a theme.
+    pub fn default_text_markup(&self) -> bool {
+        self.theme_style
+            .as_ref()
+            .is_none_or(|theme| theme.text_markup)
     }
 
     pub(crate) fn register_theme_fonts(&self, registry: &mut gaanim_text::font::FontRegistry) {
@@ -2211,25 +2256,14 @@ impl SceneModel {
         {
             return Err("arrow endpoints must be finite");
         }
-        if ![head_length, head_width, body_width]
-            .iter()
-            .all(|v| v.is_finite() && *v > 0.0)
-        {
-            return Err("arrow dimensions must be finite and positive");
-        }
-        if max_head_ratio.is_some_and(|v| !v.is_finite() || v <= 0.0 || v > 1.0) {
-            return Err("max_head_ratio must be in (0, 1]");
-        }
         let length = (end.0 - start.0).hypot(end.1 - start.1);
-        if !length.is_finite() {
-            return Err("arrow length must be finite");
-        }
-        let factor = max_head_ratio.map_or(1.0, |ratio| (length * ratio / head_length).min(1.0));
+        let (head_length, head_width) =
+            capped_arrow_head(length, head_length, head_width, body_width, max_head_ratio)?;
         Ok(self.spawn(SpawnKind::SizedArrow {
             start,
             end,
-            head_length: head_length * factor,
-            head_width: head_width * factor,
+            head_length,
+            head_width,
             body_width,
         }))
     }
@@ -2340,7 +2374,50 @@ impl SceneModel {
         y2: f64,
         angle: f64,
     ) -> DrawableHandle {
-        self.spawn(SpawnKind::CurvedArrow(x1, y1, x2, y2, angle))
+        self.spawn(SpawnKind::CurvedArrow {
+            start: (x1, y1),
+            end: (x2, y2),
+            angle,
+            head_length: DEFAULT_ARROW_HEAD_LENGTH,
+            head_width: DEFAULT_ARROW_HEAD_WIDTH,
+            body_width: DEFAULT_ARROW_BODY_WIDTH,
+        })
+    }
+    /// Spawn a dimensioned curved arrow between two points, with the same
+    /// units and validation as [`Self::arrow_with_dimensions`]. The optional
+    /// ratio caps head length relative to the arc length.
+    #[allow(clippy::too_many_arguments)]
+    pub fn curved_arrow_with_dimensions(
+        &mut self,
+        start: (f64, f64),
+        end: (f64, f64),
+        angle: f64,
+        head_length: f64,
+        head_width: f64,
+        body_width: f64,
+        max_head_ratio: Option<f64>,
+    ) -> Result<DrawableHandle, &'static str> {
+        if ![start.0, start.1, end.0, end.1, angle]
+            .iter()
+            .all(|v| v.is_finite())
+        {
+            return Err("curved arrow endpoints and angle must be finite");
+        }
+        let length = gaanim_objects::primitives::curved_arrow_length(
+            gaanim_core::kurbo::Point::new(start.0, start.1),
+            gaanim_core::kurbo::Point::new(end.0, end.1),
+            angle,
+        );
+        let (head_length, head_width) =
+            capped_arrow_head(length, head_length, head_width, body_width, max_head_ratio)?;
+        Ok(self.spawn(SpawnKind::CurvedArrow {
+            start,
+            end,
+            angle,
+            head_length,
+            head_width,
+            body_width,
+        }))
     }
     /// Creates a curved arrow along an explicit circular arc. Angles are in radians.
     pub fn curved_arrow_arc(
@@ -2356,7 +2433,47 @@ impl SceneModel {
             radius,
             start_angle,
             sweep_angle,
+            head_length: DEFAULT_ARROW_HEAD_LENGTH,
+            head_width: DEFAULT_ARROW_HEAD_WIDTH,
+            body_width: DEFAULT_ARROW_BODY_WIDTH,
         })
+    }
+    /// Spawn a dimensioned curved arrow along an explicit circular arc, with
+    /// the same units and validation as [`Self::curved_arrow_with_dimensions`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn curved_arrow_arc_with_dimensions(
+        &mut self,
+        center: (f64, f64),
+        radius: f64,
+        start_angle: f64,
+        sweep_angle: f64,
+        head_length: f64,
+        head_width: f64,
+        body_width: f64,
+        max_head_ratio: Option<f64>,
+    ) -> Result<DrawableHandle, &'static str> {
+        if ![center.0, center.1, radius, start_angle, sweep_angle]
+            .iter()
+            .all(|v| v.is_finite())
+        {
+            return Err("curved arrow center, radius and angles must be finite");
+        }
+        let (head_length, head_width) = capped_arrow_head(
+            radius.abs() * sweep_angle.abs(),
+            head_length,
+            head_width,
+            body_width,
+            max_head_ratio,
+        )?;
+        Ok(self.spawn(SpawnKind::CurvedArrowArc {
+            center,
+            radius,
+            start_angle,
+            sweep_angle,
+            head_length,
+            head_width,
+            body_width,
+        }))
     }
     /// Creates a dimension line offset perpendicularly from the measured segment.
     pub fn dimension(&mut self, x1: f64, y1: f64, x2: f64, y2: f64, offset: f64) -> DrawableHandle {
@@ -4964,6 +5081,7 @@ impl SceneModel {
                     from,
                     to,
                     offset: 0.0,
+                    side: None,
                     gap: label_gap,
                     orientation: gaanim_animation::DimensionLabelOrientation::Upright,
                     clear_label_width: false,
@@ -5834,16 +5952,18 @@ impl SceneModel {
         offset: f64,
     ) -> DrawableHandle {
         let (line, extensions, drawable) =
-            self.dimension_between_parts(from, to, offset, 3.0, None, Color::WHITE);
+            self.dimension_between_parts(from, to, offset, None, 3.0, None, Color::WHITE);
         let _ = (line, extensions);
         drawable
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn dimension_between_parts(
         &mut self,
         from: CanvasEndpoint,
         to: CanvasEndpoint,
         offset: f64,
+        side: Option<gaanim_animation::DimensionSide>,
         line_width: f64,
         extension_dash: Option<(f64, f64)>,
         color: Color,
@@ -5863,6 +5983,7 @@ impl SceneModel {
                 from,
                 to,
                 offset,
+                side,
                 line_width,
                 extension_dash,
             });
@@ -5885,6 +6006,7 @@ impl SceneModel {
             from.clone(),
             to.clone(),
             offset,
+            options.side,
             options.line_width,
             extension_dash,
             color,
@@ -5901,10 +6023,15 @@ impl SceneModel {
             });
         }
 
+        let text_size = options
+            .font_size
+            .or(options.label_style.size)
+            .unwrap_or(DEFAULT_REACTIVE_TEXT_SIZE);
+        let text_color = options.label_style.color.or(options.color);
         let text_part = |canvas: &mut SceneModel, text: &str| {
-            let mut style = gaanim_text::prelude::TextStyle::default();
-            style.size = Some(options.font_size.unwrap_or(DEFAULT_REACTIVE_TEXT_SIZE));
-            style.color = options.color;
+            let mut style = options.label_style.clone();
+            style.size = Some(text_size);
+            style.color = text_color;
             gaanim_text::prelude::TextSpec::new(
                 vec![text.into()],
                 None,
@@ -5939,15 +6066,17 @@ impl SceneModel {
                     });
                 ScalarSource::signal(tracker.id)
             };
-            let mut number_handle = self.reactive_readout(
+            let mut number_handle = self.reactive_readout_with_font(
                 value_expr,
                 options.format.clone(),
                 "",
                 "",
                 "—",
-                Some(options.font_size.unwrap_or(DEFAULT_REACTIVE_TEXT_SIZE)),
+                Some(text_size),
+                options.label_style.font.clone(),
+                options.label_style.weight,
             );
-            if let Some(color) = options.color {
+            if let Some(color) = text_color {
                 number_handle = number_handle.fill(color);
             }
             let equals = label.as_ref().map(|_| text_part(self, "=")).transpose()?;
@@ -5985,6 +6114,7 @@ impl SceneModel {
                 from,
                 to,
                 offset,
+                side: options.side,
                 gap: options.label_gap,
                 orientation: options.label_orientation,
                 clear_label_width: true,
@@ -6020,6 +6150,71 @@ impl SceneModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dimension_label_style_reaches_label_value_and_unit() {
+        let mut canvas = SceneModel::new(16, 9);
+        let style = gaanim_text::prelude::TextStyle {
+            font: Some("Cascadia Mono".into()),
+            weight: Some(700),
+            color: Some(Color::from_rgb8(200, 30, 30)),
+            ..Default::default()
+        };
+        let dimension = canvas
+            .dimension_between_with_options(
+                CanvasEndpoint::Static(DVec3::ZERO),
+                CanvasEndpoint::Static(DVec3::new(0.0, 2.0, 0.0)),
+                0.5,
+                DimensionOptions {
+                    label: Some("h".into()),
+                    show_value: true,
+                    unit: Some("m".into()),
+                    side: Some(gaanim_animation::DimensionSide::Right),
+                    font_size: Some(0.4),
+                    label_style: style,
+                    color: Some(Color::BLACK),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        for part in [&dimension.label, &dimension.unit] {
+            let spec = part.as_ref().unwrap().spec.lock().unwrap();
+            let SpawnKind::Text(text) = &spec.kind else {
+                panic!("expected a text part");
+            };
+            assert_eq!(text.style.font.as_deref(), Some("Cascadia Mono"));
+            assert_eq!(text.style.weight, Some(700));
+            assert_eq!(text.style.size, Some(0.4));
+            assert_eq!(text.style.color, Some(Color::from_rgb8(200, 30, 30)));
+        }
+        let number = dimension.number.unwrap();
+        let spec = number.spec.lock().unwrap();
+        let SpawnKind::ReactiveReadout {
+            font_family,
+            font_weight,
+            font_size,
+            ..
+        } = &spec.kind
+        else {
+            panic!("expected a reactive readout");
+        };
+        assert_eq!(font_family.as_deref(), Some("Cascadia Mono"));
+        assert_eq!(*font_weight, Some(700));
+        assert_eq!(*font_size, Some(0.4));
+        drop(spec);
+        let state = canvas.state.lock().unwrap();
+        let sides: Vec<_> = state
+            .active()
+            .ops
+            .iter()
+            .filter_map(|op| match op {
+                Op::AttachTrackingDimension { side, .. }
+                | Op::AttachDimensionLabelPlacement { side, .. } => Some(*side),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sides, [Some(gaanim_animation::DimensionSide::Right); 2]);
+    }
 
     #[test]
     fn dimensioned_arrow_caps_head_and_rejects_invalid_inputs() {
@@ -6071,6 +6266,90 @@ mod tests {
         assert!(
             canvas
                 .arrow_with_dimensions((0.0, 0.0), (1.0, 0.0), 0.18, 0.15, 0.036, Some(1.1))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn curved_arrows_accept_arrow_dimensions_capped_by_arc_length() {
+        let mut canvas = SceneModel::new(16, 9);
+        let dimensions = |handle: &DrawableHandle| match handle.spec.lock().unwrap().kind {
+            SpawnKind::CurvedArrow {
+                head_length,
+                head_width,
+                body_width,
+                ..
+            }
+            | SpawnKind::CurvedArrowArc {
+                head_length,
+                head_width,
+                body_width,
+                ..
+            } => (head_length, head_width, body_width),
+            _ => panic!("expected a curved arrow"),
+        };
+        let default = canvas.curved_arrow(-1.0, 0.0, 1.0, 0.0, 0.9);
+        assert_eq!(
+            dimensions(&default),
+            (
+                DEFAULT_ARROW_HEAD_LENGTH,
+                DEFAULT_ARROW_HEAD_WIDTH,
+                DEFAULT_ARROW_BODY_WIDTH
+            )
+        );
+        let bold = canvas
+            .curved_arrow_with_dimensions((-1.0, 0.0), (1.0, 0.0), 0.9, 0.3, 0.24, 0.06, None)
+            .unwrap();
+        assert_eq!(dimensions(&bold), (0.3, 0.24, 0.06));
+        // A quarter turn of radius 0.4 is about 0.63 long; 30 % of it is 0.19.
+        let arc_length = 0.4 * std::f64::consts::FRAC_PI_2;
+        let capped = canvas
+            .curved_arrow_arc_with_dimensions(
+                (0.0, 0.0),
+                0.4,
+                0.0,
+                std::f64::consts::FRAC_PI_2,
+                0.4,
+                0.2,
+                0.05,
+                Some(0.3),
+            )
+            .unwrap();
+        let (head_length, head_width, body_width) = dimensions(&capped);
+        assert!((head_length - arc_length * 0.3).abs() < 1e-12);
+        assert!((head_width - 0.2 * arc_length * 0.3 / 0.4).abs() < 1e-12);
+        assert_eq!(body_width, 0.05);
+
+        assert!(
+            canvas
+                .curved_arrow_with_dimensions((0.0, 0.0), (1.0, 0.0), 0.5, 0.0, 0.2, 0.05, None)
+                .is_err()
+        );
+        assert!(
+            canvas
+                .curved_arrow_with_dimensions(
+                    (0.0, 0.0),
+                    (1.0, 0.0),
+                    f64::NAN,
+                    0.3,
+                    0.2,
+                    0.05,
+                    None
+                )
+                .is_err()
+        );
+        assert!(
+            canvas
+                .curved_arrow_arc_with_dimensions(
+                    (0.0, 0.0),
+                    1.0,
+                    0.0,
+                    1.0,
+                    0.3,
+                    0.2,
+                    0.05,
+                    Some(0.0)
+                )
                 .is_err()
         );
     }

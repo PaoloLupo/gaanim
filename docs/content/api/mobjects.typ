@@ -478,17 +478,20 @@ scene.render()
 #api-entry(
   name: "Geometry.curved_arrow",
   kind: "factory",
-  signature: "curved_arrow(x1, y1, x2, y2, angle: float) -> Drawable",
-  params: ((name: "x1", type: "float", default: none, desc: [Start x.]), (name: "y1", type: "float", default: none, desc: [Start y.]), (name: "x2", type: "float", default: none, desc: [End x.]), (name: "y2", type: "float", default: none, desc: [End y.]), (name: "angle", type: "float", default: none, desc: [Deflection in radians.]),),
+  signature: "curved_arrow(x1, y1, x2, y2, angle: float, *, head_length=None, head_width=None, body_width=None, max_head_ratio=None) -> Drawable",
+  params: ((name: "x1", type: "float", default: none, desc: [Start x.]), (name: "y1", type: "float", default: none, desc: [Start y.]), (name: "x2", type: "float", default: none, desc: [End x.]), (name: "y2", type: "float", default: none, desc: [End y.]), (name: "angle", type: "float", default: none, desc: [Deflection in radians.]), (name: "head_length / head_width / body_width", type: "float | None", default: "None", desc: [Scene-unit dimensions, as in `arrow`. Omitted values use 0.18, 0.15 and 0.036.]), (name: "max_head_ratio", type: "float | None", default: "None", desc: [In `(0, 1]`, caps head length relative to the arc length and scales head width with it.]),),
   returns: (type: "Drawable", desc: [Curved arrow.]),
-  desc: [Feedback loops, rotations. Positive angle curves one way. The head (0.18 long, 0.15 wide) and 0.036-wide shaft use scene units and shrink to fit short or tight arcs.],
+  desc: [Feedback loops, rotations. Positive angle curves one way. The dimensions and their validation match `arrow`, so curved and straight arrows in a scene can share one style. The head still shortens to fit short arcs and narrows on tight radii. Nonfinite coordinates or nonpositive dimensions raise `ValueError`.],
 )[
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
 loop = scene.geometry.curved_arrow(-3, 0, 3, 0, 0.9).fill(WHITE)
-scene.play([loop.animate.create().duration(0.9)])
+bold = scene.geometry.curved_arrow(
+    -3, -1.5, 3, -1.5, -0.9, head_length=0.3, head_width=0.24, body_width=0.06,
+).fill(GOLD)
+scene.play([loop.animate.create().duration(0.9), bold.animate.create().duration(0.9)])
 # output: preview.webp
 scene.render()
 ```
@@ -497,10 +500,10 @@ scene.render()
 #api-entry(
   name: "Geometry.curved_arrow_arc",
   kind: "factory",
-  signature: "curved_arrow_arc(cx, cy, radius, start_angle, sweep_angle) -> Drawable",
-  params: ((name: "cx", type: "float", default: none, desc: [Center x.]), (name: "cy", type: "float", default: none, desc: [Center y.]), (name: "radius", type: "float", default: none, desc: [Radius.]), (name: "start_angle", type: "float", default: none, desc: [Start radians.]), (name: "sweep_angle", type: "float", default: none, desc: [Sweep radians.]),),
+  signature: "curved_arrow_arc(cx, cy, radius, start_angle, sweep_angle, *, head_length=None, head_width=None, body_width=None, max_head_ratio=None) -> Drawable",
+  params: ((name: "cx", type: "float", default: none, desc: [Center x.]), (name: "cy", type: "float", default: none, desc: [Center y.]), (name: "radius", type: "float", default: none, desc: [Radius.]), (name: "start_angle", type: "float", default: none, desc: [Start radians.]), (name: "sweep_angle", type: "float", default: none, desc: [Sweep radians.]), (name: "head_length / head_width / body_width / max_head_ratio", type: "float | None", default: "None", desc: [Same as `curved_arrow`; the ratio is relative to the arc length `radius * abs(sweep_angle)`.]),),
   returns: (type: "Drawable", desc: [Arc-following curved arrow.]),
-  desc: [Precise orbital arrows with explicit center/radius. Uses the same scene-unit head and shaft metrics as `curved_arrow`.],
+  desc: [Precise orbital arrows with explicit center/radius. Accepts the same dimensions and defaults as `curved_arrow`.],
 )[
 ```python
 # show-code: true
@@ -1211,8 +1214,8 @@ scene.render()
 #api-entry(
   name: "SlideKit.badge",
   kind: "factory",
-  signature: "badge(text, *, variant=\"neutral\", appearance=\"soft\", padding=(0.18, 0.10), radius=None, font_size=None, min_width=None, color=None, background=None, border=None, font=None, weight=None, style=None, markup=True) -> Drawable",
-  params: ((name: "text", type: "str", default: none, desc: [Non-empty label.]), (name: "variant", type: "str", default: "\"neutral\"", desc: [neutral, accent, success, warning, or danger.]), (name: "appearance", type: "str", default: "\"soft\"", desc: [soft, solid, or outline.]), (name: "font, weight", type: "str | int | None", default: "None", desc: [Label family and weight; override `style`.]), (name: "style", type: "TextStyle | None", default: "None", desc: [Typography overlaid on the theme `label` role (italic, spacing, …). Its color, if set, overrides the variant text color; `font_size` overrides its size.]), (name: "markup", type: "bool", default: "True", desc: [`False` keeps `*` and `_` literal, as in `scene.text`.])),
+  signature: "badge(text, *, variant=\"neutral\", appearance=\"soft\", padding=(0.18, 0.10), radius=None, font_size=None, min_width=None, color=None, background=None, border=None, font=None, weight=None, style=None, markup=None) -> Drawable",
+  params: ((name: "text", type: "str", default: none, desc: [Non-empty label.]), (name: "variant", type: "str", default: "\"neutral\"", desc: [neutral, accent, success, warning, or danger.]), (name: "appearance", type: "str", default: "\"soft\"", desc: [soft, solid, or outline.]), (name: "font, weight", type: "str | int | None", default: "None", desc: [Label family and weight; override `style`.]), (name: "style", type: "TextStyle | None", default: "None", desc: [Typography overlaid on the theme `label` role (italic, spacing, …). Its color, if set, overrides the variant text color; `font_size` overrides its size.]), (name: "markup", type: "bool | None", default: "None", desc: [`False` keeps `*` and `_` literal, as in `scene.text`; `None` follows the theme's `text_markup`.])),
   returns: (type: "Drawable", desc: [Auto-sized pill group at the origin.]),
   desc: [`radius=None` derives a pill radius from measured height. The panel is sized from the same styled text that is drawn. Invalid text, finite geometry, weight or unbalanced markup raises `ValueError`; position with `.move_to(...)`.],
 )[
@@ -1226,8 +1229,8 @@ scene.play([tag.animate.grow_from_center()])
 #api-entry(
   name: "SlideKit.chip",
   kind: "factory",
-  signature: "chip(text, *, dot=True, variant=\"neutral\", appearance=\"soft\", padding=(0.14, 0.08), radius=None, font_size=None, color=None, background=None, border=None, font=None, weight=None, style=None, markup=True) -> Drawable",
-  params: ((name: "text", type: "str", default: none, desc: [Non-empty label.]), (name: "dot", type: "bool", default: "True", desc: [Show the semantic tone dot.]), (name: "font, weight", type: "str | int | None", default: "None", desc: [Label family and weight; override `style`.]), (name: "style", type: "TextStyle | None", default: "None", desc: [Typography overlaid on the theme `label` role (italic, spacing, …). Its color, if set, overrides the variant text color; `font_size` overrides its size.]), (name: "markup", type: "bool", default: "True", desc: [`False` keeps `*` and `_` literal, as in `scene.text`.])),
+  signature: "chip(text, *, dot=True, variant=\"neutral\", appearance=\"soft\", padding=(0.14, 0.08), radius=None, font_size=None, color=None, background=None, border=None, font=None, weight=None, style=None, markup=None) -> Drawable",
+  params: ((name: "text", type: "str", default: none, desc: [Non-empty label.]), (name: "dot", type: "bool", default: "True", desc: [Show the semantic tone dot.]), (name: "font, weight", type: "str | int | None", default: "None", desc: [Label family and weight; override `style`.]), (name: "style", type: "TextStyle | None", default: "None", desc: [Typography overlaid on the theme `label` role (italic, spacing, …). Its color, if set, overrides the variant text color; `font_size` overrides its size.]), (name: "markup", type: "bool | None", default: "None", desc: [`False` keeps `*` and `_` literal, as in `scene.text`; `None` follows the theme's `text_markup`.])),
   returns: (type: "Drawable", desc: [Compact auto-sized group.]),
   desc: [A smaller badge for filters, states, and metadata. Theme, label typography and validation behavior match `badge`.],
 )[
@@ -1528,7 +1531,7 @@ scene.wait(0.5)
 scene.render()
 ```
 
-`count_to(value, *, duration=1.0)` crea un `Anim` compatible con easing, delay y
+`count_to(value, *, duration=1.0, snap=False)` crea un `Anim` compatible con easing, delay y
 las composiciones de `scene.play`. `animate.set(value)` utiliza el mismo proxy
 escalar que un `Parameter`. Para animar posición, opacidad o aparición, usa
 `counter.visual.animate`. `move_to`, `fill`, `opacity` y `set` conservan el
@@ -1566,7 +1569,16 @@ el contador muestra un guion largo.
 
 Una fracción de la unidad mínima deja la rueda entre dos cifras: no se redondea
 implícitamente. Para que termine asentado, usa valores representables con los
-decimales elegidos, por ejemplo `12.34` con `decimals=2`. En modo `continuous`,
+decimales elegidos, por ejemplo `12.34` con `decimals=2`, o pasa `snap=True` a
+`count_to` o a `set`. Con `snap=True`, el destino se redondea al valor más
+cercano que se puede mostrar, y `current` coincide con lo que se ve al terminar:
+
+```python
+mean = scene.viz.rolling_number(0, decimals=1)
+scene.play([mean.count_to(61.7956, snap=True)])  # Termina en 61.8.
+```
+
+ En modo `continuous`,
 las ruedas giran libremente mientras `count_to` o `animate.set` animan el
 parámetro, y se asientan durante el primer y el último 15 % de cada animación:
 al terminar, el valor final se lee limpio, como en `odometer`. Las fuentes que no
@@ -1754,8 +1766,8 @@ scene.render()
 #api-entry(
   name: "Mechanics.dimension_between",
   kind: "factory",
-  signature: "dimension_between(from, to, offset, *, label=None, show_value=False, value=None, format=\".2f\", unit=None, scale=1, label_gap=0.1, label_orientation=\"upright\", font_size=None, color=None, line_width=0.03, extension_style=\"solid\", dash_length=0.12, gap_length=0.08) -> Dimension",
-  params: ((name: "from", type: "Endpoint", default: none, desc: [Endpoint A.]), (name: "to", type: "Endpoint", default: none, desc: [Endpoint B.]), (name: "offset", type: "float", default: none, desc: [Signed perpendicular displacement.]), (name: "label", type: "str|None", default: "None", desc: [Optional symbolic text or inline math.]), (name: "show_value", type: "bool", default: "False", desc: [Show current XY distance.]), (name: "value", type: "float|Parameter|Variable|Computed|None", default: "None", desc: [Semantic numeric readout. Implies `show_value` and overrides measured distance and `scale`.]), (name: "format", type: "str", default: "\".2f\"", desc: [Reactive number format.]), (name: "unit", type: "str|None", default: "None", desc: [Optional unit text.]), (name: "scale", type: "float", default: "1", desc: [Positive multiplier from scene units to displayed units when `value` is omitted.]), (name: "label_gap", type: "float", default: "0.1", desc: [Non-negative outward annotation gap. Upright labels on steep lines add the part of their width that exceeds their height.]), (name: "label_orientation", type: "str", default: "\"upright\"", desc: [`upright` or readable `aligned`.]), (name: "line_width", type: "float", default: "0.03", desc: [Positive filled-line width. Arrowheads are six line widths long, capped for short dimensions.]), (name: "extension_style", type: "str", default: "\"solid\"", desc: [`solid` or `dashed`.]), (name: "dash_length", type: "float", default: "0.12", desc: [Positive dash length.]), (name: "gap_length", type: "float", default: "0.08", desc: [Positive dash gap.])),
+  signature: "dimension_between(from, to, offset, *, label=None, show_value=False, value=None, format=\".2f\", unit=None, scale=1, label_gap=0.1, label_orientation=\"upright\", font_size=None, color=None, line_width=0.03, extension_style=\"solid\", dash_length=0.12, gap_length=0.08, side=None, font=None, weight=None, label_style=None) -> Dimension",
+  params: ((name: "from", type: "Endpoint", default: none, desc: [Endpoint A.]), (name: "to", type: "Endpoint", default: none, desc: [Endpoint B.]), (name: "offset", type: "float", default: none, desc: [Perpendicular displacement. Without `side`, positive is to the left of `from` → `to`; with `side`, only its magnitude is used.]), (name: "side", type: "str|None", default: "None", desc: [`left`, `right`, `above` or `below`: keeps the dimension on that scene side whatever the endpoint order. Along the requested direction (for example `above` on a vertical dimension) the offset is used as a positive distance.]), (name: "font / weight", type: "str|None / int|None", default: "None / None", desc: [Family and weight (1 to 1000) of the label, value and unit, resolved as in `scene.text`.]), (name: "label_style", type: "TextStyle|None", default: "None", desc: [Style overlaid on the annotation. `font`, `weight` and `font_size` override it; its color overrides `color` for the text only. Unset fields use the theme's body text.]), (name: "label", type: "str|None", default: "None", desc: [Optional symbolic text or inline math.]), (name: "show_value", type: "bool", default: "False", desc: [Show current XY distance.]), (name: "value", type: "float|Parameter|Variable|Computed|None", default: "None", desc: [Semantic numeric readout. Implies `show_value` and overrides measured distance and `scale`.]), (name: "format", type: "str", default: "\".2f\"", desc: [Reactive number format.]), (name: "unit", type: "str|None", default: "None", desc: [Optional unit text.]), (name: "scale", type: "float", default: "1", desc: [Positive multiplier from scene units to displayed units when `value` is omitted.]), (name: "label_gap", type: "float", default: "0.1", desc: [Non-negative outward annotation gap. Upright labels on steep lines add the part of their width that exceeds their height.]), (name: "label_orientation", type: "str", default: "\"upright\"", desc: [`upright` or readable `aligned`.]), (name: "line_width", type: "float", default: "0.03", desc: [Positive filled-line width. Arrowheads are six line widths long, capped for short dimensions.]), (name: "extension_style", type: "str", default: "\"solid\"", desc: [`solid` or `dashed`.]), (name: "dash_length", type: "float", default: "0.12", desc: [Positive dash length.]), (name: "gap_length", type: "float", default: "0.08", desc: [Positive dash gap.])),
   returns: (type: "Dimension", desc: [Reactive drawable exposing compatible `line`, independent `extensions`, `label`, `number`, and `unit`.]),
   desc: [Keeps all geometry and annotations synchronized with moving endpoints. `value` accepts a number, Parameter, Variable, or Computed; it controls only the number, so changing it never changes the line length. Without `value`, `show_value=True` displays endpoint distance multiplied by `scale`. Labels, values, and units default to 0.48 scene units for 1080p readability. `color` initializes the complete silhouette and annotation, including the changing number after updates and seeks; `extensions` remains independently styleable. Invalid scalar types, metrics, extension styles, and orientation raise `TypeError` or `ValueError`; non-finite reactive results display the configured invalid-value marker.],
 )[
@@ -1771,7 +1783,17 @@ dim = scene.mechanics.dimension_between(
   0.6, label="$W_f$", value=physical_width, unit="m", color=BLACK,
   extension_style="dashed", line_width=0.03, dash_length=0.12, gap_length=0.08,
 )
-scene.play([dim.animate.fade_in().duration(0.3), physical_width.animate.set(4.0).duration(0.9)])
+height = scene.mechanics.dimension_between(
+  frame.anchor_point(Anchor.TOP_RIGHT),
+  frame.anchor_point(Anchor.BOTTOM_RIGHT),
+  0.6, side="right", show_value=True, unit="m", color=BLACK,
+  font="Cascadia Mono", weight=700,
+)
+scene.play([
+  dim.animate.fade_in().duration(0.3),
+  height.animate.fade_in().duration(0.3),
+  physical_width.animate.set(4.0).duration(0.9),
+])
 # output: preview.webp
 scene.render()
 ```

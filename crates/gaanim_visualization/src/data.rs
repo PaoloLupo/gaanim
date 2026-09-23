@@ -121,6 +121,31 @@ impl DataTable {
         self.len == 0
     }
 
+    /// A table with the given rows, in the given order, of every column.
+    /// Out-of-range rows are skipped.
+    pub fn select_rows(&self, rows: &[usize]) -> Self {
+        let rows: Vec<usize> = rows.iter().copied().filter(|row| *row < self.len).collect();
+        let columns = self
+            .columns
+            .iter()
+            .map(|(name, column)| {
+                let column = match column {
+                    Column::Numeric(values) => {
+                        Column::Numeric(rows.iter().map(|row| values[*row]).collect())
+                    }
+                    Column::Text(values) => {
+                        Column::Text(rows.iter().map(|row| values[*row].clone()).collect())
+                    }
+                };
+                (name.clone(), column)
+            })
+            .collect();
+        Self {
+            columns,
+            len: rows.len(),
+        }
+    }
+
     pub fn columns(&self) -> impl Iterator<Item = (&str, &Column)> {
         self.columns
             .iter()
@@ -204,6 +229,31 @@ impl DataSource {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn selected_rows_keep_every_column_in_the_requested_order() {
+        let table = DataTable::new([
+            (
+                "x".to_owned(),
+                Column::Numeric(vec![Some(1.0), None, Some(3.0)]),
+            ),
+            (
+                "name".to_owned(),
+                Column::Text(vec![Some("a".into()), Some("b".into()), None]),
+            ),
+        ])
+        .unwrap();
+        let selected = table.select_rows(&[2, 0, 7]);
+        assert_eq!(selected.len(), 2);
+        assert_eq!(
+            selected.numeric_column("x").unwrap(),
+            &[Some(3.0), Some(1.0)]
+        );
+        assert_eq!(
+            selected.text_column("name").unwrap(),
+            &[None, Some("a".into())]
+        );
+    }
+
     use super::*;
 
     #[test]

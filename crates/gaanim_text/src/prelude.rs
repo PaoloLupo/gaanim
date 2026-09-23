@@ -1,6 +1,6 @@
 pub use crate::GaanimTextPlugin;
 pub use crate::config::{RoleStyle, TextConfig, TextRole};
-pub use crate::font::{FontRegistry, OutlineCollector};
+pub use crate::font::{FontFile, FontRegistry, OutlineCollector, regular_faces, scan_font_dir};
 pub use crate::shaper::{
     HierarchyChild, ShapedGlyph, compile_text_to_hierarchy, compile_text_to_path, shape_text,
 };

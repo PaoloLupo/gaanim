@@ -2156,6 +2156,14 @@ impl PyCoordinateSpace {
         self.inner.data_to_local(x, y).map_err(value_error)
     }
 
+    fn data_to_scene(&self, x: f64, y: f64) -> PyResult<PyPointRef> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.inner
+            .data_to_scene(x, y)
+            .map(PyPointRef)
+            .map_err(value_error)
+    }
+
     fn local_to_data(&self, x: f64, y: f64) -> PyResult<(f64, f64)> {
         crate::custom::ensure_authoring_allowed()?;
         self.inner.local_to_data(x, y).map_err(value_error)

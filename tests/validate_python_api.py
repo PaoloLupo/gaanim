@@ -192,6 +192,34 @@ def validate_timeline_cursor_contract(module: object) -> list[str]:
     return failures
 
 
+def validate_theme_typography_contract(module: object) -> list[str]:
+    """Theme font directories and the theme-wide markup default."""
+    failures: list[str] = []
+    if module.Theme().text_markup is not True:
+        failures.append("Theme().text_markup must default to True")
+    literal = module.Theme(text_markup=False)
+    if module.Theme(literal).text_markup is not False:
+        failures.append("a derived Theme did not keep text_markup")
+    scene = module.Scene(frame=(16, 9), theme=literal)
+    # Unbalanced markers are only valid when markup is off.
+    scene.text("tb:dist_comp *x")
+    scene.text.measure("_a")
+    scene.slides.badge("_vel_max")
+    try:
+        scene.text("*x", markup=True)
+    except ValueError:
+        pass
+    else:
+        failures.append("an explicit markup=True did not override the theme")
+    try:
+        module.Theme(font_dir="this/font/dir/does/not/exist")
+    except OSError:
+        pass
+    else:
+        failures.append("Theme(font_dir=...) accepted a missing directory")
+    return failures
+
+
 def validate_editorial_contract(module: object) -> list[str]:
     """Exercise the editorial kit without starting the renderer."""
     failures: list[str] = []
@@ -419,6 +447,16 @@ def validate_visualization_contract(module: object) -> list[str]:
     round_trip = space.local_to_data(*local)
     if abs(round_trip[0] - 1.0) > 1e-9 or abs(round_trip[1] - 2.0) > 1e-9:
         failures.append("CoordinateSpace data/local round trip failed")
+    scene_point = space.data_to_scene(1.0, 2.0)
+    if not isinstance(scene_point, module.PointRef):
+        failures.append("CoordinateSpace.data_to_scene did not return a PointRef")
+    scene.geometry.dot(3.0).follow(scene_point, offset=(0.0, 0.3))
+    try:
+        space.data_to_scene(float("nan"), 0.0)
+    except ValueError:
+        pass
+    else:
+        failures.append("CoordinateSpace.data_to_scene accepted non-finite data")
 
     linear_space = scene.viz.cartesian_2d(
         module.Axis.linear(-4.0, 4.0),
@@ -596,6 +634,17 @@ def validate_visualization_contract(module: object) -> list[str]:
         pass
     else:
         failures.append("parts() accepted a non-string value")
+    mapped_parts = scene.text(module.parts({"tb:dist": "d", "x-1": "x"}))
+    if len(mapped_parts.parts) != 2 or any(
+        name not in mapped_parts.parts for name in ("tb:dist", "x-1")
+    ):
+        failures.append("parts(mapping) did not create parts with string names")
+    try:
+        module.parts({"a": "x"}, b="y")
+    except ValueError:
+        pass
+    else:
+        failures.append("parts() accepted a mapping mixed with keyword entries")
 
     formula = module.part(
         "formula", "$E = ", module.part("mass", "m", color=module.GOLD), " c^2$"
@@ -866,11 +915,19 @@ def validate_reactive_connector_contract(module: object) -> list[str]:
     else:
         failures.append("Scene.dimension_between accepted an invalid semantic value")
 
+    for side in ("left", "right", "above", "below"):
+        scene.mechanics.dimension_between(
+            (0.0, 0.0), (0.0, 1.0), -0.5, side=side, show_value=True,
+            font="Cascadia Mono", weight=600,
+            label_style=module.TextStyle(italic=True),
+        )
     for invalid in (
         {"line_width": 0.0},
         {"extension_style": "dots"},
         {"dash_length": 0.0},
         {"gap_length": float("nan")},
+        {"side": "up"},
+        {"weight": 0},
     ):
         try:
             scene.mechanics.dimension_between((0.0, 0.0), (1.0, 0.0), 10.0, **invalid)
@@ -1393,6 +1450,18 @@ def validate_section_and_arrow_contract(module) -> list[str]:
             pass
         else:
             failures.append(f"arrow accepted invalid dimensions: {kwargs}")
+        for name, args in (("curved_arrow", (0, 0, 1, 0, 0.8)),
+                           ("curved_arrow_arc", (0, 0, 1, 0, 1.2))):
+            try:
+                getattr(scene.geometry, name)(*args, **kwargs)
+            except ValueError:
+                pass
+            else:
+                failures.append(f"{name} accepted invalid dimensions: {kwargs}")
+    for name, args in (("curved_arrow", (0, 0, 1, 0, 0.8)),
+                       ("curved_arrow_arc", (0, 0, 1, 0, 1.2))):
+        getattr(scene.geometry, name)(*args, head_length=0.3, head_width=0.24,
+                                      body_width=0.06, max_head_ratio=0.3)
     return failures
 
 
@@ -1563,6 +1632,7 @@ def main() -> int:
     missing.extend(validate_polyline_connector_contract(module))
     missing.extend(validate_layout_card_ports_contract(module))
     missing.extend(validate_editorial_contract(module))
+    missing.extend(validate_theme_typography_contract(module))
     missing.extend(validate_timeline_cursor_contract(module))
     missing.extend(validate_runtime_type_aliases(module))
     missing.extend(documented_text_api_failures(tree))

@@ -14,6 +14,10 @@ assert isinstance(counter.visual, Drawable)
 assert isinstance(counter.count_to(100), Anim)
 assert counter.current == 99
 assert counter.set(99) is counter
+decimal = scene.viz.rolling_number(0, decimals=1).opacity(0)
+assert decimal.set(61.7956, snap=True).current == 61.8
+assert decimal.set(61.7956).current == 61.7956
+assert isinstance(decimal.count_to(12.34, snap=True, duration=0.5), Anim)
 assert counter.opacity(1) is counter
 for anchor in [TextAnchor.BASELINE_LEFT, TextAnchor.BASELINE_CENTER, TextAnchor.BASELINE_RIGHT]:
     assert counter.move_to(0, 0, anchor) is counter

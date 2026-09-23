@@ -267,16 +267,37 @@ class Theme:
         heatmap: Optional[Sequence[ColorLike]] = None,
         layout: Optional[dict[str, float]] = None,
         font_files: Optional[dict[str, str]] = None,
+        font_dir: Optional[str | os.PathLike[str]] = None,
+        text_markup: Optional[bool] = None,
     ) -> None:
         """Create or derive a centralized visual theme.
 
         Rules use family/type/part selectors or ``.classes``. Text values reuse
-        the structured ``TextStyle`` overlay. Invalid selectors, tokens, roles,
-        metrics, or font files raise ``ValueError`` or ``OSError``.
+        the structured ``TextStyle`` overlay.
+
+        ``font_dir`` embeds every ``.ttf``, ``.otf``, ``.ttc`` and ``.otc``
+        file directly inside the directory (not subdirectories). Each face is
+        resolved by the family, weight and style its file declares, so
+        ``fonts={"text": "Inter"}`` with ``weight=700`` finds the bold file
+        without naming it. ``font_files`` still registers single files.
+
+        ``text_markup=False`` makes ``*`` and ``_`` literal by default in
+        ``scene.text``, ``scene.text.measure``, ``badge`` and ``chip``; a call
+        that passes ``markup=`` keeps its own choice. ``None`` keeps the
+        base theme's value (``True`` for a new theme).
+
+        Invalid selectors, tokens, roles or metrics, a ``font_dir`` without
+        font files, or an unreadable font raise ``ValueError``; a missing
+        file or directory raises ``OSError``.
 
         Example:
-            Theme()
+            Theme("paper", font_dir="assets/fonts", fonts={"text": "Inter"},
+                  text_markup=False)
         """
+        ...
+    @property
+    def text_markup(self) -> bool:
+        """Default markup mode for text created while this theme is active."""
         ...
     @property
     def name(self) -> str:
@@ -1566,18 +1587,23 @@ class TextParts:
 
 TextContent: TypeAlias = str | TextPart | TextParts
 
-def parts(**content: str) -> TextParts:
+def parts(mapping: Optional[Mapping[str, str]] = None, /, **content: str) -> TextParts:
     """Build an ordered group of plain semantic text parts.
 
-    The keyword order is preserved. Inside ``$...$`` math, adjacent parts are
+    Name the parts either with a mapping, like :func:`part` takes its name as
+    a string, or with keyword arguments as a shortcut. A mapping keeps its
+    insertion order and accepts names that are not Python identifiers, such as
+    ``"tb:dist"`` or ``"x-1"``. Inside ``$...$`` math, adjacent parts are
     separated as distinct Typst tokens while retaining Typst's native tight
     spacing. Use explicit ``part`` values when local styling or nested content
-    is needed. Calling ``parts()`` without entries, using an
-    empty name, or producing wholly empty content raises ``ValueError``; a
-    non-string value raises ``TypeError``.
+    is needed. Calling ``parts()`` without entries, mixing a mapping with
+    keyword entries, repeating a name, using an empty name, or producing
+    wholly empty content raises ``ValueError``; a non-mapping positional
+    argument, a non-string name, or a non-string value raises ``TypeError``.
 
     Example:
         terms = parts(mass="m", gravity="g sin(theta)")
+        labels = parts({"tb:dist": "d", "x-1": "x"})
         equation = scene.text("$", terms, "$")
     """
     ...
@@ -1723,8 +1749,11 @@ class Text(Drawable):
         A single visual line defaults to ``TextAnchor.BASELINE_CENTER``. A
         multiline block defaults to its visual center. Explicit
         ``TextAnchor`` values align the first line's baseline; geometric
-        ``Anchor`` values retain bounds-based placement. Layout-owned text
-        raises ``LayoutOwnershipError``. Passing one ``Drawable`` aligns the
+        ``Anchor`` values retain bounds-based placement. When a text with
+        explicit line breaks was created without ``flow`` or ``text_align``,
+        an explicit anchor also aligns its lines: ``*_LEFT`` anchors left, ``*_RIGHT`` anchors right,
+        and the others center. Layout-owned text raises
+        ``LayoutOwnershipError``. Passing one ``Drawable`` aligns the
         text's visual center to the reference's center. Passing an
         ``AnchorPoint`` aligns the visual center to that transformed anchor;
         neither form creates a reactive follow relationship.
@@ -2157,7 +2186,12 @@ class Guide:
     """Configuration for a legend or continuous colorbar."""
     @staticmethod
     def legend(*, title: Optional[str] = None) -> Guide:
-        """Create a discrete legend guide."""
+        """Create a discrete legend guide.
+
+        On a categorical ``color`` field the legend lists every category with
+        a swatch of its color, in ``Scale.category`` order (or first
+        appearance in the data) below the optional title.
+        """
         ...
     @staticmethod
     def colorbar(*, title: Optional[str] = None) -> Guide:
@@ -2318,9 +2352,13 @@ class RollingNumber(Drawable):
     def current(self) -> float:
         """Return the underlying Parameter's authoring-side current value."""
         ...
-    def set(self, value: float) -> RollingNumber:
+    def set(self, value: float, *, snap: bool = False) -> RollingNumber:
         """Set the numeric value immediately and return self; after declaration this is a reversible cut.
 
+        The value is used exactly: a fraction of the smallest display unit
+        leaves a wheel between two digits. ``snap=True`` first rounds it to
+        the nearest value shown with ``decimals`` (61.7956 → 61.8 with
+        ``decimals=1``), so ``current`` matches the display.
         Raise ValueError for non-finite values or abs(value)*10**decimals >= 1e15.
         """
         ...
@@ -2328,9 +2366,13 @@ class RollingNumber(Drawable):
     def animate(self) -> Anim:
         """Scalar animation proxy: animate.set(value).duration(seconds).easing(...)."""
         ...
-    def count_to(self, value: float, *, duration: float = 1.0) -> Anim:
+    def count_to(self, value: float, *, duration: float = 1.0, snap: bool = False) -> Anim:
         """Build a count animation for scene.play; accepts Anim easing and delay modifiers.
 
+        The target is used exactly, with no implicit rounding. ``snap=True``
+        rounds it to the nearest value shown with ``decimals`` so the wheels
+        settle on clean digits and ``current`` matches the display at the end,
+        e.g. ``count_to(61.7956, snap=True)`` ends on 61.8 with ``decimals=1``.
         Raise ValueError for an out-of-range value or non-finite/negative duration.
         """
         ...
@@ -2579,6 +2621,17 @@ class CoordinateSpace:
     def coord(self, x: float, y: float) -> CoordinateRef: ...
     def data_to_local(self, x: float, y: float) -> tuple[float, float]:
         """Map data to this space's local coordinates through the view at the cursor."""
+        ...
+    def data_to_scene(self, x: float, y: float) -> PointRef:
+        """Return a scene-space point at data ``(x, y)`` for objects outside the space.
+
+        The point is resolved every frame through the live ``view_to`` window
+        and the space's own move, scale and rotation, so labels, arrows and
+        connectors that are not children of the space keep pointing at the
+        data. Use it wherever an ``Endpoint`` is accepted, for example
+        ``label.follow(plane.data_to_scene(2, 4), offset=(0, 0.3))``.
+        Non-finite or out-of-scale data raises ``ValueError``.
+        """
         ...
     def local_to_data(self, x: float, y: float) -> tuple[float, float]:
         """Map local coordinates to data through the view at the cursor."""
@@ -3093,21 +3146,27 @@ class Geometry:
             result = scene.arc(1.0, 1.0, 40.0, 1.0, 1.0)
         """
         ...
-    def curved_arrow(self, x1: float, y1: float, x2: float, y2: float, angle: float) -> Drawable:
+    def curved_arrow(self, x1: float, y1: float, x2: float, y2: float, angle: float, *, head_length: Optional[float] = None, head_width: Optional[float] = None, body_width: Optional[float] = None, max_head_ratio: Optional[float] = None) -> Drawable:
         """Create a curved arrow between two points deflected by ``angle`` radians.
 
-        The sign of ``angle`` selects the bulge side. The filled silhouette uses
-        a 0.18 x 0.15 head and a 0.036 shaft in scene units, shrinking the head
-        to fit short or tight arcs.
+        The sign of ``angle`` selects the bulge side. Dimensions work as in
+        ``arrow``: omitted values use head length 0.18, head width 0.15 and
+        body width 0.036 in scene units, and ``max_head_ratio`` in (0, 1] caps
+        head length relative to the arc length, scaling head width with it.
+        The head still shortens to fit short arcs and narrows on tight radii.
+        Nonfinite coordinates or nonpositive/nonfinite dimensions raise
+        ValueError.
 
         Example:
-            result = scene.geometry.curved_arrow(-3, 0, 3, 0, 0.9)
+            result = scene.geometry.curved_arrow(-3, 0, 3, 0, 0.9,
+                head_length=0.3, head_width=0.24, body_width=0.06)
         """
         ...
-    def curved_arrow_arc(self, cx: float, cy: float, radius: float, start_angle: float, sweep_angle: float) -> Drawable:
+    def curved_arrow_arc(self, cx: float, cy: float, radius: float, start_angle: float, sweep_angle: float, *, head_length: Optional[float] = None, head_width: Optional[float] = None, body_width: Optional[float] = None, max_head_ratio: Optional[float] = None) -> Drawable:
         """Create a curved arrow along a circular arc; angles are in radians.
 
-        Uses the same scene-unit head and shaft metrics as ``curved_arrow``.
+        Accepts the same dimensions, defaults and validation as ``curved_arrow``;
+        ``max_head_ratio`` is relative to the arc length ``radius * |sweep_angle|``.
 
         Example:
             result = scene.geometry.curved_arrow_arc(0, 0, 2.5, 0.2, 1.8)
@@ -3365,7 +3424,7 @@ class Typography:
         overflow: Optional[TextOverflow] = None,
         direction: Optional[TextDirection] = None,
         hyphenate: Optional[bool] = None,
-        markup: bool = True,
+        markup: Optional[bool] = None,
     ) -> Text:
         """Create structured vector text, paragraphs, mathematics, or mixed content.
 
@@ -3377,7 +3436,14 @@ class Typography:
         ``$...$`` remain math syntax, and ``\\$`` emits a literal dollar.
         ``markup=False`` keeps every ``*`` and ``_`` literal (and their
         backslashes), for technical labels such as ``tb:dist_comp`` or
-        ``X1_2``; ``$...$`` math still applies.
+        ``X1_2``; ``$...$`` math still applies. ``markup=None`` uses the
+        theme's ``text_markup`` (``True`` without a theme).
+
+        Without ``flow`` or ``text_align``, the lines of a text with explicit
+        line breaks take their horizontal alignment from the anchor of
+        ``move_to``: left anchors align left, right anchors align right, and
+        centered anchors center. An explicit ``flow`` or ``text_align``
+        always wins.
         Unbalanced or crossed markup, unbalanced math, duplicate sibling part
         names, and invalid metrics raise ``ValueError``. Direct keywords
         override reusable style/flow objects. Responsive wrapping consumes the
@@ -3462,7 +3528,7 @@ class Typography:
         wrap: Optional[float] = None,
         weight: Optional[int] = None,
         style: Optional[TextStyle] = None,
-        markup: bool = True,
+        markup: Optional[bool] = None,
     ) -> tuple[float, float]:
         """Measure laid-out text without spawning it.
 
@@ -3471,9 +3537,9 @@ class Typography:
         scene units. ``wrap`` composes at a fixed line width; ``None``
         measures a single unwrapped block. ``style`` overlays a ``TextStyle``
         (weight, italic, spacing, …); ``size``, ``font``, ``weight`` and
-        ``color`` override it. ``markup`` matches ``scene.text``: with the
-        default ``True``, ``*`` and ``_`` are markup and are not measured as
-        characters. Empty content, an invalid weight or unbalanced markup
+        ``color`` override it. ``markup`` matches ``scene.text``: with markup
+        on, ``*`` and ``_`` are markup and are not measured as characters;
+        ``None`` uses the theme's ``text_markup``. Empty content, an invalid weight or unbalanced markup
         raise ``ValueError``.
 
         Example:
@@ -3956,7 +4022,7 @@ class SlideKit:
         font: Optional[str] = None,
         weight: Optional[int] = None,
         style: Optional[TextStyle] = None,
-        markup: bool = True,
+        markup: Optional[bool] = None,
     ) -> Drawable:
         """Create an auto-sized editorial badge at the scene origin.
 
@@ -3994,7 +4060,7 @@ class SlideKit:
         font: Optional[str] = None,
         weight: Optional[int] = None,
         style: Optional[TextStyle] = None,
-        markup: bool = True,
+        markup: Optional[bool] = None,
     ) -> Drawable:
         """Create a compact auto-sized chip with an optional semantic dot.
 
@@ -4305,6 +4371,10 @@ class Mechanics:
         extension_style: Literal["solid", "dashed"] = "solid",
         dash_length: float = 0.12,
         gap_length: float = 0.08,
+        side: Optional[Literal["left", "right", "above", "below"]] = None,
+        font: Optional[str] = None,
+        weight: Optional[int] = None,
+        label_style: Optional[TextStyle] = None,
     ) -> Dimension:
         """Create a reactive technical dimension and optional annotation.
 
@@ -4323,12 +4393,29 @@ class Mechanics:
         reactive value. Math labels and reactive values share one 0.48-unit typographic baseline by default, including
         subscripted formulas. ``line_width`` controls the filled line geometry
         and sizes the arrowheads (six line widths long, capped for short spans);
-        dashed extensions use ``dash_length`` and ``gap_length``. Invalid
-        metrics, extension styles, or orientation raise ``ValueError``.
+        dashed extensions use ``dash_length`` and ``gap_length``.
+
+        Without ``side``, the sign of ``offset`` picks the side relative to
+        the ``from_`` → ``to`` direction (positive is to its left).
+        ``side`` fixes it in scene terms instead, and ``offset`` becomes
+        only the distance: the dimension stays on that side even when the
+        endpoints swap or move past each other. When the line runs along the
+        requested direction (``"above"`` on a vertical dimension), the
+        offset is used as a positive distance.
+
+        ``label_style`` overlays a ``TextStyle`` on the label, the value and
+        the unit; ``font`` and ``weight`` override it, and ``font_size``
+        overrides its size. Its color, when set, overrides ``color`` for the
+        text only. Unset fields use the theme's body text. Invalid metrics,
+        extension styles, orientation, side, or weight raise ``ValueError``.
 
         Example:
             width = scene.dimension_between(
                 left, right, 0.45, label="$W_f$", show_value=True, unit="mm"
+            )
+            height = scene.mechanics.dimension_between(
+                base, top, 0.45, side="right", show_value=True,
+                font="Cascadia Mono", weight=600,
             )
         """
         ...
