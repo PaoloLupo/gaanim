@@ -3087,21 +3087,27 @@ class Geometry:
             result = scene.arc(1.0, 1.0, 40.0, 1.0, 1.0)
         """
         ...
-    def curved_arrow(self, x1: float, y1: float, x2: float, y2: float, angle: float) -> Drawable:
+    def curved_arrow(self, x1: float, y1: float, x2: float, y2: float, angle: float, *, head_length: Optional[float] = None, head_width: Optional[float] = None, body_width: Optional[float] = None, max_head_ratio: Optional[float] = None) -> Drawable:
         """Create a curved arrow between two points deflected by ``angle`` radians.
 
-        The sign of ``angle`` selects the bulge side. The filled silhouette uses
-        a 0.18 x 0.15 head and a 0.036 shaft in scene units, shrinking the head
-        to fit short or tight arcs.
+        The sign of ``angle`` selects the bulge side. Dimensions work as in
+        ``arrow``: omitted values use head length 0.18, head width 0.15 and
+        body width 0.036 in scene units, and ``max_head_ratio`` in (0, 1] caps
+        head length relative to the arc length, scaling head width with it.
+        The head still shortens to fit short arcs and narrows on tight radii.
+        Nonfinite coordinates or nonpositive/nonfinite dimensions raise
+        ValueError.
 
         Example:
-            result = scene.geometry.curved_arrow(-3, 0, 3, 0, 0.9)
+            result = scene.geometry.curved_arrow(-3, 0, 3, 0, 0.9,
+                head_length=0.3, head_width=0.24, body_width=0.06)
         """
         ...
-    def curved_arrow_arc(self, cx: float, cy: float, radius: float, start_angle: float, sweep_angle: float) -> Drawable:
+    def curved_arrow_arc(self, cx: float, cy: float, radius: float, start_angle: float, sweep_angle: float, *, head_length: Optional[float] = None, head_width: Optional[float] = None, body_width: Optional[float] = None, max_head_ratio: Optional[float] = None) -> Drawable:
         """Create a curved arrow along a circular arc; angles are in radians.
 
-        Uses the same scene-unit head and shaft metrics as ``curved_arrow``.
+        Accepts the same dimensions, defaults and validation as ``curved_arrow``;
+        ``max_head_ratio`` is relative to the arc length ``radius * |sweep_angle|``.
 
         Example:
             result = scene.geometry.curved_arrow_arc(0, 0, 2.5, 0.2, 1.8)

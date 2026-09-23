@@ -615,13 +615,23 @@ pub enum SpawnKind {
         sweep_angle: f64,
     },
     /// Curved arrow connecting two points with an angular deflection.
-    CurvedArrow(f64, f64, f64, f64, f64),
+    CurvedArrow {
+        start: (f64, f64),
+        end: (f64, f64),
+        angle: f64,
+        head_length: f64,
+        head_width: f64,
+        body_width: f64,
+    },
     /// Curved arrow following an explicit circular arc.
     CurvedArrowArc {
         center: (f64, f64),
         radius: f64,
         start_angle: f64,
         sweep_angle: f64,
+        head_length: f64,
+        head_width: f64,
+        body_width: f64,
     },
     /// Technical measurement: extension lines plus a double-headed arrow.
     Dimension {

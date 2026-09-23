@@ -2689,6 +2689,22 @@ impl PyMediaLibrary {
     }
 }
 
+/// Fill omitted solid-arrow dimensions with the scene-unit defaults.
+fn arrow_dimensions(
+    head_length: Option<f64>,
+    head_width: Option<f64>,
+    body_width: Option<f64>,
+) -> (f64, f64, f64) {
+    use gaanim_objects::primitives::{
+        DEFAULT_ARROW_BODY_WIDTH, DEFAULT_ARROW_HEAD_LENGTH, DEFAULT_ARROW_HEAD_WIDTH,
+    };
+    (
+        head_length.unwrap_or(DEFAULT_ARROW_HEAD_LENGTH),
+        head_width.unwrap_or(DEFAULT_ARROW_HEAD_WIDTH),
+        body_width.unwrap_or(DEFAULT_ARROW_BODY_WIDTH),
+    )
+}
+
 #[pymethods]
 impl PyGeometry {
     fn circle(&self, radius: f64) -> PyResult<PyDrawable> {
@@ -2854,14 +2870,16 @@ impl PyGeometry {
         max_head_ratio: Option<f64>,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
+        let (head_length, head_width, body_width) =
+            arrow_dimensions(head_length, head_width, body_width);
         let mut canvas = self.inner.lock().expect("scene canvas poisoned");
         canvas
             .arrow_with_dimensions(
                 (x1, y1),
                 (x2, y2),
-                head_length.unwrap_or(gaanim_objects::primitives::DEFAULT_ARROW_HEAD_LENGTH),
-                head_width.unwrap_or(gaanim_objects::primitives::DEFAULT_ARROW_HEAD_WIDTH),
-                body_width.unwrap_or(gaanim_objects::primitives::DEFAULT_ARROW_BODY_WIDTH),
+                head_length,
+                head_width,
+                body_width,
                 max_head_ratio,
             )
             .map(PyDrawable)
@@ -3154,17 +3172,40 @@ impl PyGeometry {
             ))
         })
     }
-    fn curved_arrow(&self, x1: f64, y1: f64, x2: f64, y2: f64, angle: f64) -> PyResult<PyDrawable> {
+    #[pyo3(signature = (x1, y1, x2, y2, angle, *, head_length=None, head_width=None, body_width=None, max_head_ratio=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn curved_arrow(
+        &self,
+        x1: f64,
+        y1: f64,
+        x2: f64,
+        y2: f64,
+        angle: f64,
+        head_length: Option<f64>,
+        head_width: Option<f64>,
+        body_width: Option<f64>,
+        max_head_ratio: Option<f64>,
+    ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            PyDrawable(
-                self.inner
-                    .lock()
-                    .expect("scene canvas poisoned")
-                    .curved_arrow(x1, y1, x2, y2, angle),
+        let (head_length, head_width, body_width) =
+            arrow_dimensions(head_length, head_width, body_width);
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .curved_arrow_with_dimensions(
+                (x1, y1),
+                (x2, y2),
+                angle,
+                head_length,
+                head_width,
+                body_width,
+                max_head_ratio,
             )
-        })
+            .map(PyDrawable)
+            .map_err(pyo3::exceptions::PyValueError::new_err)
     }
+    #[pyo3(signature = (cx, cy, radius, start_angle, sweep_angle, *, head_length=None, head_width=None, body_width=None, max_head_ratio=None))]
+    #[allow(clippy::too_many_arguments)]
     fn curved_arrow_arc(
         &self,
         cx: f64,
@@ -3172,16 +3213,29 @@ impl PyGeometry {
         radius: f64,
         start_angle: f64,
         sweep_angle: f64,
+        head_length: Option<f64>,
+        head_width: Option<f64>,
+        body_width: Option<f64>,
+        max_head_ratio: Option<f64>,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            PyDrawable(
-                self.inner
-                    .lock()
-                    .expect("scene canvas poisoned")
-                    .curved_arrow_arc(cx, cy, radius, start_angle, sweep_angle),
+        let (head_length, head_width, body_width) =
+            arrow_dimensions(head_length, head_width, body_width);
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .curved_arrow_arc_with_dimensions(
+                (cx, cy),
+                radius,
+                start_angle,
+                sweep_angle,
+                head_length,
+                head_width,
+                body_width,
+                max_head_ratio,
             )
-        })
+            .map(PyDrawable)
+            .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 }
 

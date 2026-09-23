@@ -478,17 +478,20 @@ scene.render()
 #api-entry(
   name: "Geometry.curved_arrow",
   kind: "factory",
-  signature: "curved_arrow(x1, y1, x2, y2, angle: float) -> Drawable",
-  params: ((name: "x1", type: "float", default: none, desc: [Start x.]), (name: "y1", type: "float", default: none, desc: [Start y.]), (name: "x2", type: "float", default: none, desc: [End x.]), (name: "y2", type: "float", default: none, desc: [End y.]), (name: "angle", type: "float", default: none, desc: [Deflection in radians.]),),
+  signature: "curved_arrow(x1, y1, x2, y2, angle: float, *, head_length=None, head_width=None, body_width=None, max_head_ratio=None) -> Drawable",
+  params: ((name: "x1", type: "float", default: none, desc: [Start x.]), (name: "y1", type: "float", default: none, desc: [Start y.]), (name: "x2", type: "float", default: none, desc: [End x.]), (name: "y2", type: "float", default: none, desc: [End y.]), (name: "angle", type: "float", default: none, desc: [Deflection in radians.]), (name: "head_length / head_width / body_width", type: "float | None", default: "None", desc: [Scene-unit dimensions, as in `arrow`. Omitted values use 0.18, 0.15 and 0.036.]), (name: "max_head_ratio", type: "float | None", default: "None", desc: [In `(0, 1]`, caps head length relative to the arc length and scales head width with it.]),),
   returns: (type: "Drawable", desc: [Curved arrow.]),
-  desc: [Feedback loops, rotations. Positive angle curves one way. The head (0.18 long, 0.15 wide) and 0.036-wide shaft use scene units and shrink to fit short or tight arcs.],
+  desc: [Feedback loops, rotations. Positive angle curves one way. The dimensions and their validation match `arrow`, so curved and straight arrows in a scene can share one style. The head still shortens to fit short arcs and narrows on tight radii. Nonfinite coordinates or nonpositive dimensions raise `ValueError`.],
 )[
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
 loop = scene.geometry.curved_arrow(-3, 0, 3, 0, 0.9).fill(WHITE)
-scene.play([loop.animate.create().duration(0.9)])
+bold = scene.geometry.curved_arrow(
+    -3, -1.5, 3, -1.5, -0.9, head_length=0.3, head_width=0.24, body_width=0.06,
+).fill(GOLD)
+scene.play([loop.animate.create().duration(0.9), bold.animate.create().duration(0.9)])
 # output: preview.webp
 scene.render()
 ```
@@ -497,10 +500,10 @@ scene.render()
 #api-entry(
   name: "Geometry.curved_arrow_arc",
   kind: "factory",
-  signature: "curved_arrow_arc(cx, cy, radius, start_angle, sweep_angle) -> Drawable",
-  params: ((name: "cx", type: "float", default: none, desc: [Center x.]), (name: "cy", type: "float", default: none, desc: [Center y.]), (name: "radius", type: "float", default: none, desc: [Radius.]), (name: "start_angle", type: "float", default: none, desc: [Start radians.]), (name: "sweep_angle", type: "float", default: none, desc: [Sweep radians.]),),
+  signature: "curved_arrow_arc(cx, cy, radius, start_angle, sweep_angle, *, head_length=None, head_width=None, body_width=None, max_head_ratio=None) -> Drawable",
+  params: ((name: "cx", type: "float", default: none, desc: [Center x.]), (name: "cy", type: "float", default: none, desc: [Center y.]), (name: "radius", type: "float", default: none, desc: [Radius.]), (name: "start_angle", type: "float", default: none, desc: [Start radians.]), (name: "sweep_angle", type: "float", default: none, desc: [Sweep radians.]), (name: "head_length / head_width / body_width / max_head_ratio", type: "float | None", default: "None", desc: [Same as `curved_arrow`; the ratio is relative to the arc length `radius * abs(sweep_angle)`.]),),
   returns: (type: "Drawable", desc: [Arc-following curved arrow.]),
-  desc: [Precise orbital arrows with explicit center/radius. Uses the same scene-unit head and shaft metrics as `curved_arrow`.],
+  desc: [Precise orbital arrows with explicit center/radius. Accepts the same dimensions and defaults as `curved_arrow`.],
 )[
 ```python
 # show-code: true

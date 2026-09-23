@@ -1393,6 +1393,18 @@ def validate_section_and_arrow_contract(module) -> list[str]:
             pass
         else:
             failures.append(f"arrow accepted invalid dimensions: {kwargs}")
+        for name, args in (("curved_arrow", (0, 0, 1, 0, 0.8)),
+                           ("curved_arrow_arc", (0, 0, 1, 0, 1.2))):
+            try:
+                getattr(scene.geometry, name)(*args, **kwargs)
+            except ValueError:
+                pass
+            else:
+                failures.append(f"{name} accepted invalid dimensions: {kwargs}")
+    for name, args in (("curved_arrow", (0, 0, 1, 0, 0.8)),
+                       ("curved_arrow_arc", (0, 0, 1, 0, 1.2))):
+        getattr(scene.geometry, name)(*args, head_length=0.3, head_width=0.24,
+                                      body_width=0.06, max_head_ratio=0.3)
     return failures
 
 
