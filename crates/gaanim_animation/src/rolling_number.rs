@@ -108,6 +108,15 @@ impl RollingNumberOptions {
         Ok(())
     }
 
+    /// Round `value` to the nearest value the display can show with its
+    /// `decimals`, so the wheels settle instead of stopping between digits.
+    pub fn snap_value(&self, value: f64) -> f64 {
+        let scale = 10_f64.powi(self.decimals as i32);
+        let snapped = (value * scale).round() / scale;
+        // Avoid presenting a negative zero after rounding a tiny negative value.
+        if snapped == 0.0 { 0.0 } else { snapped }
+    }
+
     pub fn validate_value(&self, value: f64) -> Result<(), String> {
         if !value.is_finite() || value.abs() * 10_f64.powi(self.decimals as i32) >= 1e15 {
             Err(
@@ -434,6 +443,23 @@ mod tests {
         assert!(options.validate_value(-12.34).is_ok());
         options.min_digits = 15;
         assert!(options.validate().is_err());
+    }
+    #[test]
+    fn snapped_values_are_representable_with_the_display_decimals() {
+        let mut options = RollingNumberOptions {
+            decimals: 1,
+            ..Default::default()
+        };
+        assert_eq!(options.snap_value(61.7956), 61.8);
+        assert_eq!(options.snap_value(-61.74), -61.7);
+        assert_eq!(options.snap_value(12.0), 12.0);
+        assert!(options.snap_value(-0.01).is_sign_positive());
+        options.decimals = 0;
+        assert_eq!(options.snap_value(2.5), 3.0);
+        options.decimals = 2;
+        let snapped = options.snap_value(1.005_000_1);
+        assert_eq!(snapped, 1.01);
+        assert_eq!(snapped * 100.0, (snapped * 100.0).round());
     }
     #[test]
     fn rolling_geometry_is_stable_clipped_and_reversible() {

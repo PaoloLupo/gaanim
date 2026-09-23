@@ -16,6 +16,17 @@ pub struct PyRollingNumber {
     options: RollingNumberOptions,
 }
 
+impl PyRollingNumber {
+    /// The value to author: the exact request, or its displayable rounding.
+    fn target(&self, value: f64, snap: bool) -> f64 {
+        if snap && value.is_finite() {
+            self.options.snap_value(value)
+        } else {
+            value
+        }
+    }
+}
+
 #[pymethods]
 impl PyRollingNumber {
     fn fill<'py>(
@@ -91,8 +102,10 @@ impl PyRollingNumber {
         Ok(self.parameter.inner.current())
     }
 
-    fn set<'py>(slf: PyRef<'py, Self>, value: f64) -> PyResult<PyRef<'py, Self>> {
+    #[pyo3(signature = (value, *, snap=false))]
+    fn set<'py>(slf: PyRef<'py, Self>, value: f64, snap: bool) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
+        let value = slf.target(value, snap);
         slf.options
             .validate_value(value)
             .map_err(PyValueError::new_err)?;
@@ -111,9 +124,10 @@ impl PyRollingNumber {
         })
     }
 
-    #[pyo3(signature = (value, *, duration=1.0))]
-    fn count_to(&self, value: f64, duration: f64) -> PyResult<PyCanvasAnim> {
+    #[pyo3(signature = (value, *, duration=1.0, snap=false))]
+    fn count_to(&self, value: f64, duration: f64, snap: bool) -> PyResult<PyCanvasAnim> {
         crate::custom::ensure_authoring_allowed()?;
+        let value = self.target(value, snap);
         self.options
             .validate_value(value)
             .map_err(PyValueError::new_err)?;
