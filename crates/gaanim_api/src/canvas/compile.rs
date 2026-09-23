@@ -7019,25 +7019,23 @@ impl SceneModel {
                     .collect::<Vec<_>>();
                 let body = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
                 let size = font_size.unwrap_or(body.size);
-                let text = format!(
-                    "{}{}{}",
-                    prefix,
-                    gaanim_animation::format_reactive_number(
-                        source
-                            .evaluate(builder.current_time, |logical| {
-                                values
-                                    .iter()
-                                    .find_map(|(id, value)| (*id == logical).then_some(*value))
-                            })
-                            .unwrap_or(f64::NAN),
-                        format,
-                        invalid
-                    ),
-                    suffix,
+                let number = gaanim_animation::format_reactive_number(
+                    source
+                        .evaluate(builder.current_time, |logical| {
+                            values
+                                .iter()
+                                .find_map(|(id, value)| (*id == logical).then_some(*value))
+                        })
+                        .unwrap_or(f64::NAN),
+                    format,
+                    invalid,
                 );
-                let (path, bounds) = gaanim_text::shaper::compile_text_to_path(
+                let text = format!("{prefix}{number}{suffix}");
+                let (path, bounds) = gaanim_animation::shape_readout_text(
                     builder.font_registry,
-                    &text,
+                    prefix,
+                    &number,
+                    suffix,
                     &body.font_family,
                     size,
                 )
@@ -9549,6 +9547,72 @@ mod tests {
             let forward = camera.rotation * -DVec3::Z;
             let expected = (target - camera.position).normalize();
             assert!(forward.dot(expected) > 1.0 - 1e-9);
+        }
+    }
+
+    #[test]
+    fn reactive_readout_resolves_body_family_like_scene_text() {
+        use gaanim_core::kurbo::Shape as _;
+
+        let mut canvas = SceneModel::new(640, 360);
+        canvas.reactive_readout(
+            gaanim_animation::ScalarSource::Constant(54.0),
+            ".0f",
+            "",
+            "%",
+            "invalid",
+            Some(0.5),
+        );
+        let mut world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let mut config = gaanim_text::prelude::TextConfig::default();
+        // Typst embeds Libertinus; the legacy registry does not know it by name.
+        config
+            .roles
+            .get_mut(&gaanim_text::prelude::TextRole::Body)
+            .unwrap()
+            .font_family = "Libertinus Serif".to_owned();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &config);
+        drop(commands);
+        queue.apply(&mut world);
+
+        let (path, baseline) = world
+            .query::<(
+                &gaanim_animation::ReactiveReadout,
+                &gaanim_scene::PathSource,
+                &gaanim_scene::TextBaseline,
+            )>()
+            .iter(&world)
+            .map(|(_, path, baseline)| (path.0.clone(), baseline.0))
+            .next()
+            .expect("readout spawned");
+        let expected = gaanim_text::typst_compiler::shape_typst_text_run(
+            &fonts,
+            "54%",
+            "Libertinus Serif",
+            None,
+            0.5,
+        )
+        .unwrap()
+        .path;
+        let ink = expected.bounding_box();
+        let (expected, _) =
+            gaanim_animation::right_align_readout_path(expected, Bounds3D::default());
+        let (actual, expected) = (path.bounding_box(), expected.bounding_box());
+        for delta in [
+            actual.x0 - expected.x0,
+            actual.y0 - expected.y0,
+            actual.x1 - expected.x1,
+            actual.y1 - expected.y1,
+            baseline + (ink.y0 + ink.y1) * 0.5,
+        ] {
+            assert!(
+                delta.abs() < 1e-9,
+                "{actual:?} vs {expected:?}, baseline {baseline}"
+            );
         }
     }
 

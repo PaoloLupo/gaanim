@@ -6764,9 +6764,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             width = num_decimals
         );
 
-        let (path, bounds) = match gaanim_text::shaper::compile_text_to_path(
+        let (path, bounds) = match crate::shape_decimal_number(
             self.font_registry,
-            &text,
+            prefix,
+            initial_val,
+            num_decimals,
+            suffix,
             font_family,
             font_size,
         ) {

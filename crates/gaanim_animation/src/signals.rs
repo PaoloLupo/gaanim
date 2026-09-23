@@ -146,6 +146,50 @@ pub fn right_aligned_readout_baseline(bounds: Bounds3D) -> f64 {
     -(bounds.min.y + bounds.max.y) * 0.5
 }
 
+/// Shape readout text with Typst, the resolver `scene.text` uses, into a Y-up
+/// outline with its baseline at `y = 0` and its ink bounds.
+///
+/// The fixed prefix and suffix are shaped as whole runs; the number is laid
+/// out from per-character glyphs, so a continuously changing value reuses a
+/// bounded set of cached glyphs instead of compiling a new Typst document for
+/// every displayed value.
+pub fn shape_readout_text(
+    registry: &gaanim_text::font::FontRegistry,
+    prefix: &str,
+    number: &str,
+    suffix: &str,
+    font_family: &str,
+    font_size: f64,
+) -> Result<(BezPath, Bounds3D), String> {
+    let mut path = BezPath::new();
+    let mut pen = 0.0;
+    let mut place = |run: &str| -> Result<(), String> {
+        if run.is_empty() {
+            return Ok(());
+        }
+        let mut glyph = gaanim_text::typst_compiler::shape_typst_text_run(
+            registry,
+            run,
+            font_family,
+            None,
+            font_size,
+        )
+        .map_err(|errors| errors.join("; "))?;
+        glyph.path.apply_affine(Affine::translate((pen, 0.0)));
+        path.extend(glyph.path);
+        pen += glyph.advance;
+        Ok(())
+    };
+    place(prefix)?;
+    let mut buffer = [0; 4];
+    for ch in number.chars() {
+        place(ch.encode_utf8(&mut buffer))?;
+    }
+    place(suffix)?;
+    let rect = path.bounding_box();
+    Ok((path, Bounds3D::new_2d(rect.x0, rect.y0, rect.x1, rect.y1)))
+}
+
 /// Restore the cached outline after snapshot replay and only recompile it when
 /// the formatted text changes.
 pub fn reactive_readout_update_system(
@@ -197,12 +241,8 @@ pub fn reactive_readout_update_system(
             baseline.0 = rolling.baseline();
             continue;
         }
-        let text = format!(
-            "{}{}{}",
-            readout.prefix,
-            format_reactive_number(value, &readout.format, &readout.invalid),
-            readout.suffix
-        );
+        let number = format_reactive_number(value, &readout.format, &readout.invalid);
+        let text = format!("{}{}{}", readout.prefix, number, readout.suffix);
         if text == readout.last_text {
             let cached_geometry_is_current = path_source
                 .as_ref()
@@ -224,9 +264,11 @@ pub fn reactive_readout_update_system(
             bounds.0 = readout.last_bounds;
             continue;
         }
-        if let Ok((new_path, new_bounds)) = gaanim_text::shaper::compile_text_to_path(
+        if let Ok((new_path, new_bounds)) = shape_readout_text(
             &registry,
-            &text,
+            &readout.prefix,
+            &number,
+            &readout.suffix,
             &readout.font_family,
             readout.font_size,
         ) {
@@ -953,6 +995,107 @@ mod tests {
         assert_eq!(
             app.world().get::<LocalBounds>(readout).unwrap().0,
             expected_bounds
+        );
+    }
+
+    fn assert_same_outline(actual: &BezPath, expected: &BezPath) {
+        let points = |path: &BezPath| {
+            path.elements()
+                .iter()
+                .flat_map(|element| match *element {
+                    PathEl::MoveTo(p) | PathEl::LineTo(p) => vec![p],
+                    PathEl::QuadTo(a, b) => vec![a, b],
+                    PathEl::CurveTo(a, b, c) => vec![a, b, c],
+                    PathEl::ClosePath => vec![],
+                })
+                .collect::<Vec<_>>()
+        };
+        let kinds = |path: &BezPath| {
+            path.elements()
+                .iter()
+                .map(std::mem::discriminant)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(kinds(actual), kinds(expected));
+        for (actual, expected) in points(actual).into_iter().zip(points(expected)) {
+            assert!(
+                actual.distance(expected) < 1e-9,
+                "{actual:?} != {expected:?}"
+            );
+        }
+    }
+
+    /// Typst's own outline for `text`, placed like a readout.
+    fn typst_readout(
+        registry: &gaanim_text::font::FontRegistry,
+        text: &str,
+        family: &str,
+    ) -> (BezPath, f64) {
+        let path =
+            gaanim_text::typst_compiler::shape_typst_text_run(registry, text, family, None, 0.75)
+                .unwrap()
+                .path;
+        let rect = path.bounding_box();
+        let (path, _) = right_align_readout_path(path, Bounds3D::default());
+        (path, -(rect.y0 + rect.y1) * 0.5)
+    }
+
+    #[test]
+    fn reactive_readout_resolves_family_like_scene_text() {
+        let parameter_id = gaanim_core::ObjectId::from_raw(5);
+        let mut app = App::new();
+        app.insert_resource(gaanim_text::font::FontRegistry::new());
+        app.add_systems(Update, reactive_readout_update_system);
+        let signal = app.world_mut().spawn(FloatSignal::new(2.5)).id();
+        let empty = Arc::new(BezPath::new());
+        let readout = app
+            .world_mut()
+            .spawn((
+                ReactiveReadout {
+                    source: crate::reactive::ScalarSource::signal(parameter_id),
+                    parameters: vec![(parameter_id, signal)],
+                    format: ".1f".to_owned(),
+                    prefix: String::new(),
+                    suffix: String::new(),
+                    invalid: "—".to_owned(),
+                    font_family: "Libertinus Serif".to_owned(),
+                    font_size: 0.75,
+                    last_text: String::new(),
+                    last_path: empty.clone(),
+                    last_bounds: Bounds3D::default(),
+                },
+                Path2D(empty.clone()),
+                PathSource(empty),
+                LocalBounds(Bounds3D::default()),
+                TextBaseline::default(),
+            ))
+            .id();
+
+        app.update();
+        let registry = app.world().resource::<gaanim_text::font::FontRegistry>();
+
+        // Libertinus is known to Typst but not by name to the legacy registry,
+        // which silently fell back to a system sans face.
+        let (expected, baseline) = typst_readout(&registry, "2.5", "Libertinus Serif");
+        assert_same_outline(
+            &app.world().get::<PathSource>(readout).unwrap().0,
+            &expected,
+        );
+        assert!((app.world().get::<TextBaseline>(readout).unwrap().0 - baseline).abs() < 1e-9);
+        if let Ok((legacy, bounds)) =
+            gaanim_text::shaper::compile_text_to_path(&registry, "2.5", "Libertinus Serif", 0.75)
+        {
+            let (legacy, _) = right_align_readout_path(legacy, bounds);
+            assert_ne!(legacy.bounding_box(), expected.bounding_box());
+        }
+
+        // Fixed prefix/suffix runs and padded numbers keep Typst's advances.
+        let (path, bounds) =
+            shape_readout_text(&registry, "x = ", "  2.5", " m", "Libertinus Serif", 0.75).unwrap();
+        let (path, _) = right_align_readout_path(path, bounds);
+        assert_same_outline(
+            &path,
+            &typst_readout(&registry, "x =   2.5 m", "Libertinus Serif").0,
         );
     }
 

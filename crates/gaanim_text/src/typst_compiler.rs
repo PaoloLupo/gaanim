@@ -56,6 +56,8 @@ struct CachedTypstChild {
 struct CachedTypstHierarchy {
     parent_bounds: Bounds3D,
     metrics: TextMetrics,
+    /// Width of the first page frame; for auto-width plain text, its pen advance.
+    advance: f64,
     children: Vec<CachedTypstChild>,
 }
 
@@ -726,8 +728,10 @@ fn compile_typst_source_with_resources(
     let root_transform = kurbo::Affine::scale_non_uniform(1.0, -1.0);
     let mut extracted_children = Vec::new();
     let mut line_baselines = Vec::new();
+    let mut advance = 0.0;
 
     if let Some(page) = document.pages().first() {
+        advance = page.frame.width().to_pt();
         line_baselines =
             effective_line_baselines(collect_visual_line_baselines(&page.frame, &root_transform));
         let mut char_index_counter = 0;
@@ -781,6 +785,7 @@ fn compile_typst_source_with_resources(
     Ok(CachedTypstHierarchy {
         parent_bounds: total_bounds,
         metrics,
+        advance,
         children: centered_children,
     })
 }
@@ -868,18 +873,97 @@ pub fn compile_typst_text_to_path(
     weight: Option<u16>,
     font_size: f64,
 ) -> Result<kurbo::BezPath, Vec<String>> {
+    let cached = cached_plain_typst_text(font_registry, text, font_family, weight, font_size, "")?;
+    let mut path = kurbo::BezPath::new();
+    for child in &cached.children {
+        let offset = child.transform.translation;
+        let placed = kurbo::Affine::translate((offset.x, offset.y - cached.metrics.first_baseline))
+            * &child.path;
+        path.extend(placed.elements().iter().copied());
+    }
+    Ok(path)
+}
+
+/// Plain text shaped by Typst for manual horizontal layout.
+#[derive(Debug, Clone)]
+pub struct TypstTextRun {
+    /// Y-up outline with the pen origin at `x = 0` and the baseline at `y = 0`.
+    pub path: kurbo::BezPath,
+    /// Horizontal pen advance, including leading and trailing whitespace.
+    pub advance: f64,
+}
+
+/// Shape plain text like [`compile_typst_text_to_path`], but keep the pen
+/// origin and report the advance so callers can lay out cached runs.
+pub fn shape_typst_text_run(
+    font_registry: &FontRegistry,
+    text: &str,
+    font_family: &str,
+    weight: Option<u16>,
+    font_size: f64,
+) -> Result<TypstTextRun, Vec<String>> {
+    // Hanging punctuation would shrink the measured advance of `.` or `-`.
+    let shape = |text: &str| {
+        cached_plain_typst_text(
+            font_registry,
+            text,
+            font_family,
+            weight,
+            font_size,
+            ", overhang: false",
+        )
+    };
+    // Typst trims whitespace at line edges, so shape such text between two
+    // visible sentinels and remove them from the outline and the advance.
+    let padded = text.starts_with(char::is_whitespace) || text.ends_with(char::is_whitespace);
+    let (cached, sentinel) = if padded {
+        (shape(&format!("0{text}0"))?, shape("0")?.advance)
+    } else {
+        (shape(text)?, 0.0)
+    };
+    let glyphs = if padded {
+        cached
+            .children
+            .get(1..cached.children.len().saturating_sub(1))
+            .unwrap_or_default()
+    } else {
+        &cached.children[..]
+    };
+    let mut path = kurbo::BezPath::new();
+    for child in glyphs {
+        // Children share the page's origin; only undo the vertical centering.
+        let offset = child.transform.translation;
+        let placed =
+            kurbo::Affine::translate((-sentinel, offset.y - cached.metrics.first_baseline))
+                * &child.path;
+        path.extend(placed.elements().iter().copied());
+    }
+    Ok(TypstTextRun {
+        path,
+        advance: cached.advance - 2.0 * sentinel,
+    })
+}
+
+fn cached_plain_typst_text(
+    font_registry: &FontRegistry,
+    text: &str,
+    font_family: &str,
+    weight: Option<u16>,
+    font_size: f64,
+    extra_text_options: &str,
+) -> Result<Arc<CachedTypstHierarchy>, Vec<String>> {
     let escape = |value: &str| value.replace('\\', "\\\\").replace('"', "\\\"");
     let weight = weight
         .map(|weight| format!(", weight: {weight}"))
         .unwrap_or_default();
     let source = format!(
         "#set page(width: auto, height: auto, margin: 0pt)\n\
-         #set text(font: \"{}\", size: {font_size}pt{weight})\n\
+         #set text(font: \"{}\", size: {font_size}pt{weight}{extra_text_options})\n\
          #\"{}\"",
         escape(font_family),
         escape(text),
     );
-    let cached = cached_typst_hierarchy(
+    cached_typst_hierarchy(
         font_registry,
         &source,
         false,
@@ -889,15 +973,7 @@ pub fn compile_typst_text_to_path(
         None,
         &None,
         &StrokeBrush::transparent(),
-    )?;
-    let mut path = kurbo::BezPath::new();
-    for child in &cached.children {
-        let offset = child.transform.translation;
-        let placed = kurbo::Affine::translate((offset.x, offset.y - cached.metrics.first_baseline))
-            * &child.path;
-        path.extend(placed.elements().iter().copied());
-    }
-    Ok(path)
+    )
 }
 
 fn spawn_cached_typst_hierarchy(
@@ -1186,5 +1262,51 @@ mod tests {
         ]);
 
         assert_eq!(baselines, vec![0.0]);
+    }
+
+    #[test]
+    fn text_runs_keep_pen_origin_and_whitespace_advances() {
+        let registry = FontRegistry::new();
+        let run = |text: &str| {
+            shape_typst_text_run(&registry, text, "Libertinus Serif", None, 0.75).unwrap()
+        };
+        let close = |left: kurbo::Rect, right: kurbo::Rect| {
+            [
+                left.x0 - right.x0,
+                left.y0 - right.y0,
+                left.x1 - right.x1,
+                left.y1 - right.y1,
+            ]
+            .iter()
+            .all(|delta| delta.abs() < 1e-9)
+        };
+        let one = run("1");
+        let ink = one.path.bounding_box();
+        // Pen origin at x = 0 (ink starts at the side bearing), baseline at y = 0.
+        assert!(ink.x0 >= 0.0 && ink.x1 <= one.advance, "{ink:?}");
+        assert!(ink.y0.abs() < 0.02 && ink.y1 > 0.3, "{ink:?}");
+        assert!(close(
+            ink,
+            compile_typst_text_to_path(&registry, "1", "Libertinus Serif", None, 0.75)
+                .unwrap()
+                .bounding_box()
+                + kurbo::Vec2::new(ink.center().x, 0.0),
+        ));
+
+        // Typst trims whitespace at line edges; runs must still advance over it.
+        let space = run(" ");
+        assert!(space.path.elements().is_empty());
+        assert!(space.advance > 0.1 * 0.75, "{}", space.advance);
+        assert!((run("1 ").advance - (one.advance + space.advance)).abs() < 1e-9);
+        let leading = run(" 1");
+        assert!((leading.advance - (space.advance + one.advance)).abs() < 1e-9);
+        assert!(close(
+            leading.path.bounding_box(),
+            ink + kurbo::Vec2::new(space.advance, 0.0)
+        ));
+
+        // Hanging punctuation must not shrink an isolated glyph's advance.
+        let period = run(".");
+        assert!((run("1.1").advance - (2.0 * one.advance + period.advance)).abs() < 1e-9);
     }
 }
