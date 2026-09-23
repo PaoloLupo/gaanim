@@ -203,10 +203,11 @@ pub fn reactive_readout_update_system(
         &mut TextBaseline,
         Option<&crate::writing::PathReveal>,
         Option<&mut crate::RollingNumber>,
+        Option<&crate::RollingTweens>,
     )>,
     signals: Query<&FloatSignal>,
 ) {
-    for (mut readout, mut path, path_source, mut bounds, mut baseline, reveal, rolling) in
+    for (mut readout, mut path, path_source, mut bounds, mut baseline, reveal, rolling, tweens) in
         &mut query
     {
         let reveal = reveal
@@ -226,11 +227,12 @@ pub fn reactive_readout_update_system(
             })
             .unwrap_or(f64::NAN);
         if let Some(mut rolling) = rolling {
-            if rolling.last_value != Some(value) {
-                let (new_path, new_bounds) = rolling.geometry(value);
+            let continuous = tweens.map_or(1.0, |tweens| tweens.continuous_weight(time));
+            if rolling.last_value != Some((value, continuous)) {
+                let (new_path, new_bounds) = rolling.blended_geometry(value, continuous);
                 readout.last_path = Arc::new(new_path);
                 readout.last_bounds = new_bounds;
-                rolling.last_value = Some(value);
+                rolling.last_value = Some((value, continuous));
             }
             // Snapshot replay can restore the old path while retaining this cache.
             if let Some(mut source) = path_source {

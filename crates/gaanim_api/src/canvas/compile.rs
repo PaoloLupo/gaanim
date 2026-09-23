@@ -2208,6 +2208,38 @@ impl SceneModel {
             .collect();
         builder.timeline.set_segments(segment_metadata);
 
+        // Every tween is scheduled now: continuous rolling displays settle
+        // outside the windows in which their parameters are animated.
+        for (entity, sources) in std::mem::take(&mut builder.rolling_tween_sources) {
+            let mut windows: Vec<(f64, f64)> = builder
+                .timeline
+                .clips
+                .values()
+                .filter_map(|clip| match &clip.payload {
+                    gaanim_timeline::clip::ClipPayload::Animation(animation)
+                        if clip.duration > 0.0
+                            && sources.contains(&animation.target)
+                            && matches!(
+                                animation.lens,
+                                gaanim_timeline::clip::PropertyLensSpec::SignalFloat { .. }
+                            ) =>
+                    {
+                        Some((clip.start, clip.duration))
+                    }
+                    _ => None,
+                })
+                .collect();
+            // Untweened sources (e.g. sample drivers) keep free continuous wheels.
+            if windows.is_empty() {
+                continue;
+            }
+            windows.sort_by(|a, b| a.0.total_cmp(&b.0));
+            builder
+                .commands
+                .entity(entity)
+                .insert(gaanim_animation::RollingTweens(windows));
+        }
+
         for (i, seg) in segments.iter().enumerate() {
             if let Some(prev) = seg.prev_segment
                 && prev < i
@@ -7086,10 +7118,22 @@ impl SceneModel {
                 }
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
                 if let Some(state) = builder.states.get(mr.id) {
+                    let entity = state.entity;
                     if let Some(rolling) = rolling_component {
-                        builder.commands.entity(state.entity).insert(rolling);
+                        // Tweens are scheduled later; windows attach after compilation.
+                        let sources: Vec<_> = source
+                            .parameter_ids()
+                            .into_iter()
+                            .filter_map(|logical| id_map.get(&logical).copied())
+                            .collect();
+                        if rolling.options.mode == gaanim_animation::RollingMode::Continuous
+                            && !sources.is_empty()
+                        {
+                            builder.rolling_tween_sources.push((entity, sources));
+                        }
+                        builder.commands.entity(entity).insert(rolling);
                     }
-                    builder.commands.entity(state.entity).insert((
+                    builder.commands.entity(entity).insert((
                         gaanim_scene::PathSource(source_path.clone()),
                         gaanim_scene::TextBaseline(baseline),
                         gaanim_animation::ReactiveReadout {

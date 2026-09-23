@@ -3789,6 +3789,50 @@ mod tests {
     }
 
     #[test]
+    fn continuous_rolling_number_settles_outside_parameter_tweens() {
+        use gaanim_animation::{RollingMode, RollingNumber, RollingTweens};
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        let parameter = canvas.parameter(0.0).unwrap();
+        canvas
+            .rolling_number(
+                parameter.source(),
+                gaanim_animation::RollingNumberOptions {
+                    decimals: 1,
+                    mode: RollingMode::Continuous,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        canvas.wait(0.5);
+        canvas.play(vec![parameter.animate().set(68.8).duration(2.0)]);
+        canvas.wait(0.5);
+        let mut world = bevy::prelude::World::new();
+        world.insert_resource(gaanim_timeline::timeline::Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        let (rolling, tweens) = world
+            .query::<(&RollingNumber, &RollingTweens)>()
+            .single(&world)
+            .unwrap();
+        assert_eq!(tweens.0.len(), 1);
+        let (start, duration) = tweens.0[0];
+        assert!((start - 0.5).abs() < 1e-9 && (duration - 2.0).abs() < 1e-9);
+        assert_eq!(tweens.continuous_weight(0.4), 0.0);
+        assert_eq!(tweens.continuous_weight(1.5), 1.0);
+        assert_eq!(tweens.continuous_weight(2.5), 0.0);
+        // After the tween, wheels read exactly like an odometer at the final value.
+        let mut odometer = rolling.clone();
+        odometer.options.mode = RollingMode::Odometer;
+        let settled = rolling
+            .blended_geometry(68.8, tweens.continuous_weight(3.0))
+            .0;
+        assert_eq!(settled, odometer.geometry(68.8).0);
+        assert_ne!(rolling.geometry(68.8).0, settled);
+    }
+
+    #[test]
     fn rolling_number_inherits_custom_body_font_and_preserves_explicit_override() {
         for font in [None, Some("New Computer Modern")] {
             let mut canvas = SceneModel::new(16.0, 9.0);

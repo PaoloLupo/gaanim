@@ -134,16 +134,50 @@ pub struct RollingNumber {
     digit_width: f64,
     digit_height: f64,
     baseline: f64,
-    pub last_value: Option<f64>,
+    /// Cached (value, continuous weight) of the last generated geometry.
+    pub last_value: Option<(f64, f64)>,
+}
+
+/// Timeline windows `(start, duration)` of the parameter tweens driving a
+/// continuous display. Wheels spin continuously inside a window and settle
+/// outside it. Without this component, continuous displays never settle.
+#[derive(Component, Debug, Clone, Default)]
+pub struct RollingTweens(pub Vec<(f64, f64)>);
+
+/// Fraction of a tween spent blending between settled and continuous wheels.
+const SETTLE_RAMP: f64 = 0.15;
+
+impl RollingTweens {
+    /// Continuous weight at `time`: 0 settled, 1 fully continuous.
+    pub fn continuous_weight(&self, time: f64) -> f64 {
+        self.0
+            .iter()
+            .filter(|(_, duration)| *duration > 0.0)
+            .map(|(start, duration)| {
+                let progress = (time - start) / duration;
+                if !(0.0..=1.0).contains(&progress) {
+                    return 0.0;
+                }
+                let t = (progress.min(1.0 - progress) / SETTLE_RAMP).min(1.0);
+                t * t * (3.0 - 2.0 * t)
+            })
+            .fold(0.0, f64::max)
+    }
 }
 
 /// Returns the current digit and progress towards its successor.
-fn wheel(units: f64, place: usize, mode: RollingMode) -> (u8, f64) {
+/// `continuous` blends continuous phases towards settled odometer phases.
+fn wheel(units: f64, place: usize, mode: RollingMode, continuous: f64) -> (u8, f64) {
     let divisor = 10_f64.powi(place as i32);
     let quotient = (units / divisor).floor();
+    let odometer = || (units - quotient * divisor - (divisor - 1.0)).clamp(0.0, 1.0);
     let phase = match mode {
-        RollingMode::Continuous => units / divisor - quotient,
-        RollingMode::Odometer => (units - quotient * divisor - (divisor - 1.0)).clamp(0.0, 1.0),
+        RollingMode::Continuous if continuous >= 1.0 => units / divisor - quotient,
+        RollingMode::Continuous if continuous > 0.0 => {
+            let settled = odometer();
+            settled + (units / divisor - quotient - settled) * continuous
+        }
+        RollingMode::Continuous | RollingMode::Odometer => odometer(),
     };
     ((quotient % 10.0) as u8, phase)
 }
@@ -209,8 +243,14 @@ impl RollingNumber {
     }
 
     /// Pure geometry at a value: identical for playback, reverse seeks, and export.
-    /// Right anchored, with fixed-width digit cells.
+    /// Right anchored, with fixed-width digit cells. Continuous wheels spin freely.
     pub fn geometry(&self, value: f64) -> (BezPath, Bounds3D) {
+        self.blended_geometry(value, 1.0)
+    }
+
+    /// Geometry with continuous wheels weighted towards their settled positions
+    /// (`continuous` 0 settled, 1 free spinning); see [`RollingTweens`].
+    pub fn blended_geometry(&self, value: f64, continuous: f64) -> (BezPath, Bounds3D) {
         let o = &self.options;
         let height = self.digit_height * o.line_height;
         let mut path = BezPath::new();
@@ -274,7 +314,7 @@ impl RollingNumber {
             };
             let total = integer_digits.max(o.min_digits) + o.decimals;
             for place in (0..total).rev() {
-                let state = wheel(units, place, o.mode);
+                let state = wheel(units, place, o.mode, continuous);
                 append('0', Some(state));
                 if place == o.decimals && o.decimals > 0 {
                     append(o.decimal_separator.chars().next().unwrap(), None);
@@ -363,11 +403,26 @@ mod tests {
     use super::*;
     #[test]
     fn rolling_carry_and_continuous_wheels() {
-        assert_eq!(wheel(18.5, 1, RollingMode::Odometer), (1, 0.0));
-        assert_eq!(wheel(19.5, 1, RollingMode::Odometer), (1, 0.5));
-        assert_eq!(wheel(99.5, 2, RollingMode::Odometer), (0, 0.5));
-        assert_eq!(wheel(100.0, 2, RollingMode::Odometer), (1, 0.0));
-        assert_eq!(wheel(15.0, 1, RollingMode::Continuous), (1, 0.5));
+        assert_eq!(wheel(18.5, 1, RollingMode::Odometer, 1.0), (1, 0.0));
+        assert_eq!(wheel(19.5, 1, RollingMode::Odometer, 1.0), (1, 0.5));
+        assert_eq!(wheel(99.5, 2, RollingMode::Odometer, 1.0), (0, 0.5));
+        assert_eq!(wheel(100.0, 2, RollingMode::Odometer, 1.0), (1, 0.0));
+        assert_eq!(wheel(15.0, 1, RollingMode::Continuous, 1.0), (1, 0.5));
+        // Settling blends the continuous phase back to the odometer phase.
+        assert_eq!(wheel(15.0, 1, RollingMode::Continuous, 0.0), (1, 0.0));
+        assert_eq!(wheel(15.0, 1, RollingMode::Continuous, 0.5), (1, 0.25));
+    }
+    #[test]
+    fn rolling_tweens_ramp_in_and_settle_at_window_edges() {
+        let tweens = RollingTweens(vec![(1.0, 2.0), (4.0, 0.0)]);
+        for time in [0.0, 1.0, 3.0, 3.5, 4.0] {
+            assert_eq!(tweens.continuous_weight(time), 0.0, "t={time}");
+        }
+        assert_eq!(tweens.continuous_weight(2.0), 1.0);
+        let ramp = tweens.continuous_weight(1.15);
+        assert!(ramp > 0.0 && ramp < 1.0);
+        assert!((tweens.continuous_weight(1.3) - 1.0).abs() < 1e-12);
+        assert!((tweens.continuous_weight(2.85) - ramp).abs() < 1e-12);
     }
     #[test]
     fn rolling_validation_bounds_work() {
