@@ -5168,10 +5168,12 @@ impl PyScene {
         }
     }
     /// Ask the Gaanim host to render exact timeline seeks into PNG snapshots.
-    fn snapshots(&self, directory: &str, times: Vec<f64>) -> PyResult<usize> {
+    fn snapshots(&self, py: Python<'_>, directory: &str, times: Vec<f64>) -> PyResult<usize> {
         crate::custom::ensure_authoring_allowed()?;
         let scene = self.inner.lock().expect("scene canvas poisoned").clone();
-        gaanim_api::host::request_snapshots(scene, directory, &times)
+        // Capture renders synchronously while Bevy worker threads evaluate
+        // Python callbacks, so release the GIL rather than deadlock them.
+        py.detach(|| gaanim_api::host::request_snapshots(scene, directory, &times))
             .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
     }
 }

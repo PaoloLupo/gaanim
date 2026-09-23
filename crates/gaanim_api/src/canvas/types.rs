@@ -950,6 +950,8 @@ pub struct ObjectSpec {
     pub(crate) reactive_readout_layout: Option<ReactiveReadoutLayoutSpec>,
     pub fill_level_cursor: Option<f64>,
     pub media_frame: Option<gaanim_scene::MediaFrame>,
+    /// Scale and translation of a coordinate view after its queued view changes.
+    pub(crate) coordinate_view_cursor: Option<(DVec3, DVec3)>,
 }
 
 impl ObjectSpec {
@@ -987,6 +989,7 @@ impl ObjectSpec {
             reactive_readout_layout: None,
             fill_level_cursor: None,
             media_frame: None,
+            coordinate_view_cursor: None,
         }
     }
 }
@@ -1354,6 +1357,14 @@ impl Anim {
                     }
                     if let Some((_, level)) = properties.fill_level {
                         spec.fill_level_cursor = Some(level);
+                    }
+                    if spec.coordinate_view_role == Some(gaanim_scene::CoordinateViewRole::View)
+                        && let (
+                            Some(crate::anim::PropertyScale::To(scale)),
+                            Some(crate::anim::PropertyTranslation::To(translation)),
+                        ) = (properties.scale, &properties.translation)
+                    {
+                        spec.coordinate_view_cursor = Some((scale, *translation));
                     }
                     if let Some(color) = properties.visible_color {
                         if spec.fill.is_some() {

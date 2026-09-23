@@ -2519,9 +2519,12 @@ class CoordinateSpaceAnimation:
     def view_to(self, x_domain: tuple[float, float], y_domain: tuple[float, float]) -> Anim:
         """Animate the data-domain window, keeping axis text and stroke widths.
 
-        Numbers, titles and ``scatter_data`` markers keep their size and proportions.
+        The plot area keeps its position; axes, grids, ticks and numbers are
+        clipped to it, and axis titles stay in place. Numbers and
+        ``scatter_data`` markers keep their size and proportions.
         Axes, grids and plotted paths keep their stroke widths throughout the zoom. Returns an unscheduled
-        animation. Raises ValueError for invalid domains or non-linear/time axes.
+        animation; once played, ``data_to_local`` follows the new window.
+        Raises ValueError for invalid domains or non-linear/time axes.
         """
         ...
 
@@ -2535,15 +2538,21 @@ class CoordinateSpace:
     def view_to(self, x_domain: tuple[float, float], y_domain: tuple[float, float]) -> CoordinateSpace:
         """Set the data-domain window at the cursor and return this space.
 
-        Axis text and ``scatter_data`` markers keep their size and proportions while
+        The plot area keeps its position; axes, grids, ticks and numbers are
+        clipped to it, and axis titles stay in place. Numbers and
+        ``scatter_data`` markers keep their size and proportions while
         following the view positions.
         Axes, grids and plotted paths retain their authored stroke widths.
         Raises ValueError unless domains are finite and increasing on linear/time axes.
         """
         ...
     def coord(self, x: float, y: float) -> CoordinateRef: ...
-    def data_to_local(self, x: float, y: float) -> tuple[float, float]: ...
-    def local_to_data(self, x: float, y: float) -> tuple[float, float]: ...
+    def data_to_local(self, x: float, y: float) -> tuple[float, float]:
+        """Map data to this space's local coordinates through the view at the cursor."""
+        ...
+    def local_to_data(self, x: float, y: float) -> tuple[float, float]:
+        """Map local coordinates to data through the view at the cursor."""
+        ...
     def layer(self, name: Literal["grid", "major_grid", "minor_grid", "axis", "axes", "ticks", "numbers", "labels"]) -> Drawable: ...
     def plot(
         self,
@@ -4252,7 +4261,9 @@ class Mechanics:
         distance and ``scale`` while the dimension geometry keeps following its
         endpoints.
         ``label_orientation`` keeps text horizontal or aligned while avoiding
-        upside-down labels. ``color`` initializes the extension lines,
+        upside-down labels. Upright labels on steep lines move outward by the
+        part of their width that exceeds their height, keeping the
+        ``label_gap`` clearance of horizontal dimensions. ``color`` initializes the extension lines,
         solid triangular arrowheads and the complete annotation, including its
         reactive value. Math labels and reactive values share one 0.48-unit typographic baseline by default, including
         subscripted formulas. ``line_width`` controls the filled line geometry

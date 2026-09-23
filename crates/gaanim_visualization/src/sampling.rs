@@ -18,7 +18,7 @@ impl Default for Sampling {
         Self::Adaptive {
             min_samples: 32,
             max_depth: 8,
-            tolerance: 0.75,
+            tolerance: 0.0075,
         }
     }
 }

@@ -1121,6 +1121,8 @@ pub struct DimensionLabelPlacement {
     pub offset: f64,
     pub gap: f64,
     pub orientation: DimensionLabelOrientation,
+    /// Keep upright labels clear of steep lines by their width, not only their height.
+    pub clear_label_width: bool,
 }
 
 /// Componente que regenera un `Path2D` de línea recta entre dos endpoints cada frame.
@@ -1716,7 +1718,23 @@ pub fn dimension_label_placement_system(world: &mut World) {
         let direction = delta.truncate() / length;
         let normal = gaanim_core::glam::DVec2::new(-direction.y, direction.x);
         let side = if placement.offset < 0.0 { -1.0 } else { 1.0 };
-        let displacement = placement.offset + side * placement.gap;
+        // `gap` is measured to the label center across the label height. An
+        // upright label on a steep line is wider across the line than it is
+        // tall, so push it out by that excess to keep the same clearance.
+        let upright_clearance = match placement.orientation {
+            DimensionLabelOrientation::Upright if placement.clear_label_width => {
+                resolve_entity_bounds(placement.label, world)
+                    .map(|bounds| {
+                        let (half_width, half_height) =
+                            (bounds.width() * 0.5, bounds.height() * 0.5);
+                        (normal.x.abs() * half_width + normal.y.abs() * half_height - half_height)
+                            .max(0.0)
+                    })
+                    .unwrap_or(0.0)
+            }
+            _ => 0.0,
+        };
+        let displacement = placement.offset + side * (placement.gap + upright_clearance);
         let midpoint =
             (from + to) * 0.5 + DVec3::new(normal.x * displacement, normal.y * displacement, 0.0);
         let mut angle = match placement.orientation {
@@ -2613,12 +2631,62 @@ mod tests {
             offset: -20.0,
             gap: 5.0,
             orientation: DimensionLabelOrientation::Upright,
+            clear_label_width: true,
         });
         dimension_label_placement_system(&mut world);
         let transform = world.get::<SpatialTransform>(label).unwrap();
         assert!((transform.translation.x - 5.0).abs() < 1e-9);
         assert!((transform.translation.y + 25.0).abs() < 1e-9);
         assert!(transform.z_angle().abs() < 1e-9);
+    }
+
+    #[test]
+    fn upright_dimension_label_clears_steep_lines_by_its_width() {
+        let bounds =
+            gaanim_math::Bounds3D::new(DVec3::new(-0.5, -0.1, 0.0), DVec3::new(0.5, 0.1, 0.0));
+        let mut world = World::new();
+        let vertical = world
+            .spawn((SpatialTransform::default(), LocalBounds(bounds)))
+            .id();
+        let horizontal = world
+            .spawn((SpatialTransform::default(), LocalBounds(bounds)))
+            .id();
+        // Force labels reuse this placement without the width clearance.
+        let force = world
+            .spawn((SpatialTransform::default(), LocalBounds(bounds)))
+            .id();
+        for (label, to, clear_label_width) in [
+            (vertical, DVec3::new(0.0, 2.0, 0.0), true),
+            (horizontal, DVec3::new(2.0, 0.0, 0.0), true),
+            (force, DVec3::new(0.0, 2.0, 0.0), false),
+        ] {
+            world.spawn(DimensionLabelPlacement {
+                label,
+                from: TrackingEndpoint::Static(DVec3::ZERO),
+                to: TrackingEndpoint::Static(to),
+                offset: 0.35,
+                gap: 0.1,
+                orientation: DimensionLabelOrientation::Upright,
+                clear_label_width,
+            });
+        }
+        dimension_label_placement_system(&mut world);
+
+        // A bottom-to-top line puts positive offsets on its left. The label
+        // center moves out by its half width minus the half height `gap` covers.
+        let vertical = world.get::<SpatialTransform>(vertical).unwrap().translation;
+        assert!((vertical.x + (0.35 + 0.1 + 0.5 - 0.1)).abs() < 1e-9);
+        assert!((vertical.y - 1.0).abs() < 1e-9);
+        assert!(vertical.x + 0.5 <= -(0.35 + 0.1 - 0.1) + 1e-9);
+        // Horizontal lines keep their established placement.
+        let horizontal = world
+            .get::<SpatialTransform>(horizontal)
+            .unwrap()
+            .translation;
+        assert!((horizontal.x - 1.0).abs() < 1e-9);
+        assert!((horizontal.y - 0.45).abs() < 1e-9);
+        let force = world.get::<SpatialTransform>(force).unwrap().translation;
+        assert!((force.x + 0.45).abs() < 1e-9);
     }
 
     #[test]
@@ -2632,6 +2700,7 @@ mod tests {
             offset: 20.0,
             gap: 5.0,
             orientation: DimensionLabelOrientation::Aligned,
+            clear_label_width: true,
         });
         dimension_label_placement_system(&mut world);
         let transform = world.get::<SpatialTransform>(label).unwrap();

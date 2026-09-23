@@ -333,10 +333,13 @@ scene.play([plane.animate.write().duration(1.2)])
 
 `plane.view_to(x_domain, y_domain)` cambia la ventana de datos en el cursor
 actual; `plane.animate.view_to(x_domain, y_domain)` devuelve la animación para
-`scene.play`. Los números y títulos de los ejes siguen sus posiciones en la
-vista y conservan su tamaño y proporciones, incluso cuando el acercamiento en
-X es distinto del de Y; los marcadores de `scatter_data` también siguen sus
-posiciones sin deformarse. Los trazos de los ejes, ticks, grillas y curvas conservan
+`scene.play`. El área de trazado conserva su posición: los ejes, las grillas,
+los ticks y los números se recortan a ella y los títulos de los ejes quedan
+fijos. Los números siguen sus posiciones en la vista y conservan su tamaño y
+proporciones, incluso cuando el acercamiento en X es distinto del de Y; los
+marcadores de `scatter_data` también siguen sus posiciones sin deformarse.
+Tras reproducir la animación, `plane.data_to_local(...)` y
+`plane.local_to_data(...)` usan la ventana nueva. Los trazos de los ejes, ticks, grillas y curvas conservan
 su grosor durante el cambio de dominio; también se conservan las longitudes de
 los guiones en trazos discontinuos. El escalado general con `plane.scale_to(...)`
 y el zoom de cámara siguen afectando al conjunto, incluido el texto y los trazos.
@@ -528,14 +531,14 @@ que dos animaciones aparentemente equivalentes acumulen desfase.
 #api-entry(
   name: "NumberLine.function",
   kind: "method",
-  signature: "function(function, domain=None, *, normal_scale=120.0, reveal=None, samples=None, tolerance=0.75, inputs=()) -> Drawable",
+  signature: "function(function, domain=None, *, normal_scale=1.2, reveal=None, samples=None, tolerance=0.0075, inputs=()) -> Drawable",
   params: (
     (name: "function", type: "Callable[..., float]", default: none, desc: [Recibe la coordenada y después los valores declarados en `inputs`.]),
     (name: "domain", type: "(float, float) | None", default: "None", desc: [Intervalo de muestreo; usa el dominio del eje si se omite.]),
-    (name: "normal_scale", type: "float", default: "120.0", desc: [Distancia local positiva asignada a una salida de función igual a uno.]),
+    (name: "normal_scale", type: "float", default: "1.2", desc: [Distancia local positiva asignada a una salida de función igual a uno.]),
     (name: "reveal", type: "float | Parameter | Variable | Computed | None", default: "None", desc: [Extremo exacto de la curva visible, expresado en coordenadas de datos.]),
     (name: "samples", type: "int | None", default: "None", desc: [Cantidad fija de muestras; al omitirse se usa muestreo adaptativo.]),
-    (name: "tolerance", type: "float", default: "0.75", desc: [Tolerancia positiva del error adaptativo en unidades locales.]),
+    (name: "tolerance", type: "float", default: "0.0075", desc: [Tolerancia positiva del error adaptativo en unidades locales.]),
   ),
   returns: (type: "Drawable", desc: [Curva vectorial retenida y emparentada con la recta numérica.]),
   desc: [El muestreo y las actualizaciones reactivas se ejecutan en Rust, sin callbacks de Python por fotograma. Un `reveal` reactivo puede compartir el mismo escalar que los puntos móviles y evitar desfases de longitud de arco. Dominios inválidos, ajustes de muestreo incorrectos o escalas no positivas producen `ValueError`.],
@@ -550,7 +553,7 @@ line = scene.viz.number_line(
   Axis.linear(0, 3 * math.pi).ticks(math.pi).numbers("pi", denominator=1),
   length=760,
 )
-curve = line.function(lambda t: math.sin(t), normal_scale=120, reveal=theta)
+curve = line.function(lambda t: math.sin(t), normal_scale=1.2, reveal=theta)
 point = scene.geometry.dot(8).follow(
   line.point_ref(theta, normal_offset=computed(lambda t: 120 * math.sin(t), inputs=[theta]))
 )

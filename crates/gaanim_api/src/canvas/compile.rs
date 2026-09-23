@@ -4704,6 +4704,7 @@ impl SceneModel {
                     offset,
                     gap,
                     orientation,
+                    clear_label_width,
                 } => {
                     if let (Some(target_id), Some(label_id)) =
                         (id_map.get(target).copied(), id_map.get(label).copied())
@@ -4718,6 +4719,7 @@ impl SceneModel {
                                 offset: *offset,
                                 gap: *gap,
                                 orientation: *orientation,
+                                clear_label_width: *clear_label_width,
                             },
                         );
                     }

@@ -4811,7 +4811,7 @@ impl SceneModel {
                 equals.as_ref(),
                 &number_handle,
                 Some(&unit_handle),
-                8.0,
+                0.08,
             );
             number = Some(number_handle);
             unit = Some(unit_handle);
@@ -4931,7 +4931,7 @@ impl SceneModel {
                 equals.as_ref(),
                 &number,
                 unit.as_ref(),
-                8.0,
+                0.08,
             );
             number_part = Some(number);
             unit_part = unit;
@@ -4953,6 +4953,7 @@ impl SceneModel {
                     offset: 0.0,
                     gap: label_gap,
                     orientation: gaanim_animation::DimensionLabelOrientation::Upright,
+                    clear_label_width: false,
                 });
         }
         let mut members = vec![&shaft, &head];
@@ -5947,7 +5948,7 @@ impl SceneModel {
                 equals.as_ref(),
                 &number_handle,
                 unit_handle.as_ref(),
-                10.0,
+                0.1,
             );
             number = Some(number_handle);
             unit = unit_handle;
@@ -5973,6 +5974,7 @@ impl SceneModel {
                 offset,
                 gap: options.label_gap,
                 orientation: options.label_orientation,
+                clear_label_width: true,
             });
 
         Ok(DimensionHandle {
@@ -8475,6 +8477,38 @@ mod tests {
                 .is_some(),
             "the annotation placement must remain endpoint-driven"
         );
+    }
+
+    #[test]
+    fn readout_part_spacing_is_in_scene_units() {
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        canvas
+            .dimension_between_with_options(
+                CanvasEndpoint::Static(DVec3::new(-2.0, 0.0, 0.0)),
+                CanvasEndpoint::Static(DVec3::new(2.0, 0.0, 0.0)),
+                0.5,
+                DimensionOptions {
+                    label: Some("W".to_owned()),
+                    show_value: true,
+                    unit: Some("m".to_owned()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        // The gap between label, "=", value and unit is a fraction of the text size.
+        let layout = world
+            .query::<&gaanim_animation::ReactiveReadoutLayout>()
+            .single(&world)
+            .expect("dimension readout layout");
+        assert!(layout.spacing > 0.0 && layout.spacing < DEFAULT_REACTIVE_TEXT_SIZE * 0.5);
     }
 
     #[test]
