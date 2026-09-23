@@ -1,5 +1,15 @@
 #context asset(stdx.config.asset-base + "script.js", read("script.js"))
 
+// Search index: hand-written reference entries plus the full typed stub.
+#context asset(
+  stdx.config.asset-base + "api-index.json",
+  "{\"documented\":"
+    + json.encode(query(<api-entry-meta>).map(meta => meta.value), pretty: false)
+    + ",\"symbols\":"
+    + stdx.python-api()
+    + "}",
+)
+
 #context asset(
   stdx.config.asset-base + "base.css",
   read("base.css").replace(

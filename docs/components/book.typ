@@ -1,5 +1,5 @@
 #let book-part(number, title, description: none) = context {
-  if target() != "bundle" {
+  if target() not in ("bundle", "html") {
     pagebreak(weak: true)
     block(height: 78%, width: 100%)[
       #align(center + horizon)[

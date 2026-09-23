@@ -306,8 +306,8 @@ default gap and colors are suitable for a technical presentation; tune
 `width`, `gap`, `bullet_radius`, `bullet_color`, and `color` when needed.
 
 ```python
-agenda = scene.slides.bullets(["Setup", "Motion", "Export"], gap=72)
-scene.play([agenda.animate.fade_in_from(Direction.DOWN, distance=32).duration(0.5)])
+agenda = scene.slides.bullets(["Setup", "Motion", "Export"], gap=0.9)
+scene.play([agenda.animate.fade_in_from(Direction.DOWN, distance=0.4).duration(0.5)])
 ```
 
 Charts are immutable tabular specifications materialized into stable semantic
@@ -331,7 +331,7 @@ results = scene.slides.table(
     ["Method", "Error", "Time"],
     [["Baseline", "0.18", "48 ms"], ["GPU", "0.04", "15 ms"]],
 )
-scene.play([results.animate.fade_in_from(Direction.DOWN, distance=24).duration(0.5)])
+scene.play([results.animate.fade_in_from(Direction.DOWN, distance=0.3).duration(0.5)])
 ```
 
 `typst(source)` compiles full Typst document markup into a vector drawable.
@@ -375,18 +375,18 @@ path. The value is clamped to
 ```python
 t = scene.viz.parameter(0.0)
 curve = scene.geometry.polyline([
-  (180 * cos(u), 100 * sin(2 * u))
+  (2.25 * cos(u), 1.25 * sin(2 * u))
   for u in (2 * PI * index / 240 for index in range(241))
 ])
 dot = scene.geometry.point_on_curve(curve, t).fill(GOLD)
 scene.play([dot.animate.fade_in().duration(0.3), t.animate.set(1.0).duration(2.0)])
 ```
 
-`tangent_on_curve(curve, tracker, length=80)` returns a line centered on that
+`tangent_on_curve(curve, tracker, length=0.8)` returns a line centered on that
 same position and rotated to the current polyline segment. It uses the same
 native arc-length sampling as `point_on_curve`.
 
-`normal_on_curve(curve, tracker, length=80)` is the perpendicular companion,
+`normal_on_curve(curve, tracker, length=0.8)` is the perpendicular companion,
 rotated 90 degrees counter-clockwise from the tangent.
 
 `curvature_on_curve(curve, tracker, window=0.02)` returns the local osculating
@@ -412,7 +412,7 @@ scene.play([
     label.animate.write().duration(0.8),
 ])
 scene.wait(0.5)
-scene.play([circle.animate.shift_by(200, 0).duration(1.0)])
+scene.play([circle.animate.shift_by(2.5, 0).duration(1.0)])
 scene.play([rect.animate.fade_out().duration(0.5)])
 ```
 
@@ -441,7 +441,7 @@ details = scene.segment(
     "Details",
     Transition.cross_fade(0.4),
     template=lecture,
-    background=Brush.linear(["#172554", "#0f172a"], start=(-640, 0), end=(640, 0)),
+    background=Brush.linear(["#172554", "#0f172a"], start=(-8, 0), end=(8, 0)),
 )
 scene.link(intro, details, Transition.cross_fade(0.4))
 ```
@@ -488,12 +488,12 @@ if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
 from gaanim import BLUE, GOLD, Scene, Transition
 
 scene = Scene(frame=(16, 9), background="#0f172a")
-title = scene.text("Shared context", role="title").fill(GOLD).move_to(0, 70)
+title = scene.text("Shared context", role="title").fill(GOLD).move_to(0, 0.875)
 scene.play([title.animate.write().duration(0.5)])
 
 scene.segment("content", Transition.cross_fade(0.35))
 scene.reuse(title)
-dot = scene.geometry.dot(18).fill(BLUE).move_to(0, -30)
+dot = scene.geometry.dot(0.225).fill(BLUE).move_to(0, -0.375)
 scene.play([dot.animate.grow_from_center().duration(0.4)])
 scene.persist(title)
 
@@ -606,7 +606,7 @@ framing runs after bindings, and shake is always an additive final modifier.
 
 ```python
 theta = scene.viz.parameter(0.0)
-focus = scene.geometry.point_ref(theta * 180, (theta * 2).sin() * 80)
+focus = scene.geometry.point_ref(theta * 2.25, (theta * 2).sin())
 rig2d = scene.camera.bind_2d(center=focus, zoom=1 + theta * 0.3)
 scene.play([theta.animate.set(1.0).duration(2.0)])
 rig2d.disable()
@@ -664,7 +664,7 @@ scene.camera.look_at(eye=(7, 5, 6), target=(0, 0, 0))
   desc: [Use small yaw and pitch deltas for a smooth turn around the current target.],
 )[
 ```python
-marker = scene.geometry.dot(6)
+marker = scene.geometry.dot(0.075)
 scene.play([
     marker.animate.fade_in().duration(1.0),
     scene.camera.animate.orbit(delta_yaw=0.5, delta_pitch=0.1).duration(1.0),
@@ -692,7 +692,7 @@ group. The mask keeps its own visibility; make it transparent when it should
 only constrain content:
 
 ```python
-mask = scene.geometry.rounded_rect(420, 220, 28).no_fill().no_stroke()
+mask = scene.geometry.rounded_rect(5.25, 2.75, 0.35).no_fill().no_stroke()
 chart_group.clip(mask)
 ```
 

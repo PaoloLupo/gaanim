@@ -26,8 +26,8 @@ copy = scene.text(
     "La energía es ",
     formula,
     role="body",
-    style=TextStyle(size=34),
-    flow=TextFlow(wrap=520, align="center"),
+    style=TextStyle(size=0.34),
+    flow=TextFlow(wrap=6.5, align="center"),
 ).move_to(0, 0)
 
 scene.play([copy.animate.write(by="part", stagger=0.06).duration(1.2)])
@@ -79,7 +79,7 @@ formula = part("formula", "$E = ", part("mass", "m", color=GOLD), " c^2$")
 copy = scene.text(
     "La energía es ", formula,
     role="body",
-    flow=TextFlow(wrap=400, align="center", line_spacing=1.2),
+    flow=TextFlow(wrap=5, align="center", line_spacing=1.2),
 ).move_to(0, 0)
 scene.play([copy.animate.write(by="part").duration(1.0)])
 # output: text_factory.webp
@@ -134,8 +134,8 @@ typography. Under a theme, `kicker` resolves to the palette's `accent` color,
 which makes it the natural small line above a title:
 
 ```python
-kicker = scene.text("MISMO TERREMOTO. TRES EDIFICIOS.", role="kicker").move_to(0, 452)
-title = scene.text("¿Cuál sufrirá más?", role="title").move_to(0, 360)
+kicker = scene.text("MISMO TERREMOTO. TRES EDIFICIOS.", role="kicker").move_to(0, 3.77)
+title = scene.text("¿Cuál sufrirá más?", role="title").move_to(0, 3)
 ```
 
 Resolution order is:
@@ -191,7 +191,7 @@ from gaanim import GOLD, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
 copy = scene.text(
     "Normal, _emphasis_, *strong* and *_both_*.",
-    size=36,
+    size=0.36,
 ).move_to(0, 0)
 scene.play([copy.animate.write(by="word", stagger=0.05).duration(1.2)])
 scene.play([copy.words[3].animate.indicate().duration(0.6)])
@@ -340,7 +340,7 @@ display = TextStyle(
     font="New Computer Modern",
     math_font="New Computer Modern Math",
     fallbacks=("Arial",),
-    size=42,
+    size=0.42,
     weight=650,
     italic=False,
     color=GOLD,
@@ -379,7 +379,7 @@ baseline through the structured Typst tree. A later fluent `text.fill(...)`,
 ```python
 # show-code: true
 from gaanim import GOLD, Scene, TextFlow
-scene = Scene(frame=(16, 9), background="#0f172a", margin=30)
+scene = Scene(frame=(16, 9), background="#0f172a", margin=0.375)
 body = scene.text(
     "El mismo texto se mide con el ancho que ofrece su tarjeta de Layout v2.",
     role="body",
@@ -387,7 +387,7 @@ body = scene.text(
 )
 page = scene.layout.column(
     [scene.text("Texto responsive", role="heading").fill(GOLD), body],
-    within="safe", width="fill", height="fill", padding=28, gap=18,
+    within="safe", width="fill", height="fill", padding=0.35, gap=0.225,
 )
 scene.play([page.animate.fade_in().duration(0.7)])
 # output: text_flow.webp
@@ -605,9 +605,9 @@ copy.become("Resultado: ", part("value", "$42$", color=GOLD), duration=0.8)
 # show-code: true
 from gaanim import Anchor, Scene, TextAnchor
 scene = Scene(frame=(16, 9))
-scene.text("baseline left").move_to(-220, 60, anchor=TextAnchor.BASELINE_LEFT)
+scene.text("baseline left").move_to(-2.75, 0.75, anchor=TextAnchor.BASELINE_LEFT)
 scene.text.equation("frac(x_1^2, y_2) = 1").move_to(0, 0)
-scene.text("geometric corner").move_to(-220, -100, anchor=Anchor.TOP_LEFT)
+scene.text("geometric corner").move_to(-2.75, -1.25, anchor=Anchor.TOP_LEFT)
 ```
 ]
 
@@ -634,12 +634,12 @@ stable baseline:
 from gaanim import Scene, TextAnchor
 
 scene = Scene(frame=(16, 9))
-word = scene.text("Typography").move_to(0, 80)
+word = scene.text("Typography").move_to(0, 1)
 equation = scene.text.equation("frac(x_1^2, y_2) = 1").move_to(
-    0, -40, TextAnchor.BASELINE_CENTER
+    0, -0.5, TextAnchor.BASELINE_CENTER
 )
 left = scene.text("left aligned").move_to(
-    -320, -160, TextAnchor.BASELINE_LEFT
+    -4, -2, TextAnchor.BASELINE_LEFT
 )
 ```
 

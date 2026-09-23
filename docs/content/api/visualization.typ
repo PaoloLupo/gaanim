@@ -82,7 +82,7 @@ from gaanim import BLUE, GOLD, ChartSpec, Field, Scale
 
 bars = (
   ChartSpec({"method": ["one", "two"], "elapsed": [40, -10], "kind": ["new", "old"]})
-  .mark("bar", width=0.72, label_position="outside", label_offset=16)
+  .mark("bar", width=0.72, label_position="outside", label_offset=0.2)
   .encode(
     x="method", y="elapsed", label="elapsed",
     color=Field("kind", scale=Scale.category().colors([BLUE, GOLD])),
@@ -143,8 +143,8 @@ diferencias uniformes, `log` para órdenes de magnitud positivos, `symlog` para
 datos con signo alrededor de cero, `time` para fechas y `category` para grupos
 discretos.
 
-La tipografía visual predeterminada usa 32 unidades para números de ticks y 36
-para títulos de eje, de modo que siga siendo legible al reducir un vídeo 1080p.
+La tipografía visual predeterminada usa 0.32 unidades para números de ticks y
+0.36 para títulos de eje, de modo que siga siendo legible al reducir un vídeo 1080p.
 Los selectores de tema `axes/numbers` y `axes/labels` permiten sustituir estos
 valores globalmente.
 
@@ -217,7 +217,7 @@ la vista previa. Esa configuración no aparece en capturas ni exportaciones.
 == Espacios científicos tipados
 
 Un espacio tipado conserva la relación entre datos y lienzo. En vez de convertir
-manualmente cada valor a píxeles, describes los dominios mediante `Axis` y
+manualmente cada valor a coordenadas de la escena, describes los dominios mediante `Axis` y
 trabajas siempre en coordenadas científicas. Al mover o escalar el espacio,
 curvas, puntos, etiquetas y construcciones de cálculo permanecen unidos.
 
@@ -305,7 +305,7 @@ animación.
 #api-entry(
   name: "Visualization.polar",
   kind: "method",
-  signature: "polar(radial, *, radius=220.0, angle_divisions=12, grid=True, axes=True, numbers=True, labels=True, rings=None, spokes=None) -> PolarSpace",
+  signature: "polar(radial, *, radius=2.2, angle_divisions=12, grid=True, axes=True, numbers=True, labels=True, rings=None, spokes=None) -> PolarSpace",
   params: (
     (name: "rings / spokes", type: "bool | None", default: "None", desc: [Anillos y radios; `None` hereda `grid`.]),
     (name: "labels", type: "bool", default: "True", desc: [Muestra el título del eje radial cuando existe.]),
@@ -463,7 +463,7 @@ scene.play(streams.flow(3.0, time_width=0.12))
 #api-entry(
   name: "VectorField.arrows",
   kind: "method",
-  signature: "arrows(*, resolution=None, min_length=0, max_length=None, length_scale=1, width=2, tip_length=None, tip_width=None, color=None, colormap=None, color_range=None) -> ArrowVectorField",
+  signature: "arrows(*, resolution=None, min_length=0, max_length=None, length_scale=1, width=0.02, tip_length=None, tip_width=None, color=None, colormap=None, color_range=None) -> ArrowVectorField",
   params: (
     (name: "resolution", type: "(int,int) | (int,int,int) | None", default: "None", desc: [Muestras regulares por eje; los valores predeterminados dependen de la dimensión.]),
     (name: "min_length / max_length", type: "float", default: "0 / automático", desc: [Límites en unidades locales después de transformar el vector desde coordenadas de datos.]),
@@ -527,7 +527,7 @@ fondo, los ejes y cualquier estilo no sobrescrito por el usuario.
 `plot_data` y `scatter_data` dibujan series `(xs, ys)` directamente en las
 coordenadas de datos del espacio. El resultado queda emparentado con el plano:
 si el espacio se mueve o escala, la serie lo acompaña. No existe una conversión
-manual entre datos y píxeles que pueda desincronizarse.
+manual entre datos y coordenadas de la escena que pueda desincronizarse.
 
 #api-entry(
   name: "Cartesian2D.plot_data",
@@ -550,10 +550,10 @@ scene = Scene()
 plane = scene.viz.cartesian_2d(
   Axis.linear(0, 30).ticks(5).label("tiempo (s)"),
   Axis.linear(-0.4, 0.4).ticks(0.2).label("aceleración (g)"),
-  width=1460,
-  height=570,
+  width=12,
+  height=4.75,
 )
-curve = plane.plot_data(times, accel, color=CYAN, width=4)
+curve = plane.plot_data(times, accel, color=CYAN, width=0.05)
 scene.play([plane.animate.create().duration(0.85), curve.animate.create().duration(2.2)])
 ```
 ]
@@ -619,11 +619,11 @@ scene = Scene()
 theta = scene.viz.parameter(0.0)
 line = scene.viz.number_line(
   Axis.linear(0, 3 * math.pi).ticks(math.pi).numbers("pi", denominator=1),
-  length=760,
+  length=9.5,
 )
 curve = line.function(lambda t: math.sin(t), normal_scale=1.2, reveal=theta)
-point = scene.geometry.dot(8).follow(
-  line.point_ref(theta, normal_offset=computed(lambda t: 120 * math.sin(t), inputs=[theta]))
+point = scene.geometry.dot(0.1).follow(
+  line.point_ref(theta, normal_offset=computed(lambda t: 1.2 * math.sin(t), inputs=[theta]))
 )
 scene.play([line.animate.create(), curve.animate.fade_in().duration(0.01), point.animate.fade_in()])
 scene.play([theta.animate.set(3 * math.pi).duration(4)])

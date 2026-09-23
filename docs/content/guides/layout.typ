@@ -26,8 +26,8 @@ page = scene.layout.column(
     within="safe",
     width="fill",
     height="fill",
-    padding=48,
-    gap=32,
+    padding=0.6,
+    gap=0.4,
     align="stretch",
     justify="between",
 )
@@ -49,7 +49,7 @@ editoriales pequeños y constraints para relaciones entre ramas:
 
 ```python
 scene.layout.constrain(
-    label.left == chart.right + 24,
+    label.left == chart.right + 0.3,
     label.center_y == chart.center_y,
     (label.width <= page.width * 0.3).weak(),
 )

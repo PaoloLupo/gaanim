@@ -13,6 +13,11 @@ Gaanim se distribuye en dos piezas complementarias:
   el entorno del proyecto. No contiene renderer, extensión nativa ni un modo
   headless independiente. Requiere Python 3.12 o superior.
 
+La documentación (guía, recetas y referencia de la API) se publica en
+<https://paololupo.github.io/gaanim/>. El workflow `Docs` la reconstruye en
+cada push a `main`, renderizando las vistas previas de los ejemplos con el
+runtime real.
+
 ## Inicio rápido
 
 Requisitos: Rust (toolchain estable), Python y [`just`](https://just.systems).

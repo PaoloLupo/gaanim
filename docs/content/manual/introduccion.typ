@@ -31,7 +31,7 @@ Una animación se construye con cuatro piezas:
 from gaanim import BLUE, Scene
 
 scene = Scene(frame=(16, 9))
-circle = scene.geometry.circle(80).fill(BLUE)
+circle = scene.geometry.circle(1).fill(BLUE)
 scene.play([circle.animate.create().duration(1.0)])
 scene.render()
 ```
@@ -42,8 +42,11 @@ animación que `scene.play` añade a la línea de tiempo.
 
 == Unidades y coordenadas
 
-Gaanim usa unidades del lienzo, equivalentes normalmente a píxeles. El origen
-`(0, 0)` está en el centro; X crece hacia la derecha e Y hacia arriba. Las
+Gaanim usa unidades lógicas independientes de la resolución. El frame
+predeterminado mide 16 × 9 unidades: el origen `(0, 0)` está en el centro, X
+crece hacia la derecha (de `-8` a `8`) e Y hacia arriba (de `-4.5` a `4.5`).
+Posiciones, tamaños, grosores de trazo y tamaños de texto usan la misma unidad;
+los píxeles solo se eligen al exportar. Las
 duraciones se expresan en segundos y los ángulos 3D en radianes, salvo que una
 firma indique otra unidad.
 

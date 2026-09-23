@@ -1,0 +1,100 @@
+name: Docs
+
+# Build the Typst documentation site, rendering every example preview with the
+# real runtime, and publish it to GitHub Pages.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "crates/**"
+      - "Cargo.toml"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "docs/**"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build site
+    runs-on: ubuntu-24.04
+    env:
+      CARGO_TERM_COLOR: always
+      # Headless software Vulkan (lavapipe) renders the example previews.
+      VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev \
+            mesa-vulkan-drivers ffmpeg
+
+      - name: Expose the embedded Python runtime
+        run: |
+          echo "PYO3_PYTHON=$(which python)" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=${pythonLocation}/lib" >> "$GITHUB_ENV"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: docs
+
+      # Previews are keyed by each example's source hash, so a stale cache
+      # only re-renders the examples that changed.
+      - name: Restore rendered previews
+        uses: actions/cache@v4
+        with:
+          path: |
+            docs/target/code_cache
+            docs/assets/generated
+          key: docs-previews-${{ hashFiles('docs/content/**', 'crates/**/*.rs') }}
+          restore-keys: docs-previews-
+
+      - name: Build preview runtime
+        run: cargo build -p gaanim_editor --bin gaanim-core
+
+      - name: Build documentation
+        run: cargo run -p docs -- compile
+
+      - name: Fail on broken examples
+        run: |
+          if grep -rl 'docs-example-error' dist/site --include=index.html; then
+            echo "::error::Some documentation examples failed; see the pages listed above."
+            exit 1
+          fi
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
