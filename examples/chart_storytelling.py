@@ -20,7 +20,7 @@ base = (
         x="x",
         y="y",
         color=Field("group", scale=Scale.category(["A", "B", "C"])),
-        size=Value(10),
+        size=Value(0.1),
     )
     .axes(
         x=Axis.linear(-5, 5).ticks(1).label("x"),

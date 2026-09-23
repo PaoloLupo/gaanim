@@ -46,7 +46,7 @@ spec = (
     x="x",
     y="y",
     color=Field("group", scale=Scale.category()),
-    size=Value(8),
+    size=Value(0.08),
   )
   .axes(
     x=Axis.linear(-3, 3).ticks(1).label("x"),
@@ -112,6 +112,12 @@ Los canales disponibles son `x`, `y`, `z`, `color`, `size`, `opacity` y
 `label`. Un canal acepta el nombre de una columna, `Field(column, scale=...)`
 o `Value(constant)`. Usa `Field` cuando el valor cambia por fila y `Value`
 cuando todos los elementos comparten el mismo valor.
+
+En las marcas `point`, `size` es el radio en unidades de escena y significa lo
+mismo en 2D y en 3D. `Value(0.1)` da puntos de radio 0.1; sin `size` el radio
+es 0.06. Con `Field`, el dominio de la columna se asigna a radios entre 0.03 y
+0.12, con el área (no el radio) proporcional al valor. La opción de marca
+`radius` fija un radio común y tiene prioridad sobre `size`.
 
 Las marcas son `point`, `line`, `step`, `area`, `bar`, `histogram`, `box`,
 `violin`, `error_bar`, `heatmap` y `surface`. `point`, `line` y `bar` pueden

@@ -85,6 +85,11 @@ pub enum ScaleKind {
     Category,
 }
 
+/// Point radius, in scene units, of a chart without a `size` encoding.
+pub const DEFAULT_POINT_RADIUS: f64 = 0.06;
+/// Radii, in scene units, that a numeric `size` field maps its domain onto.
+pub const POINT_RADIUS_RANGE: (f64, f64) = (0.03, 0.12);
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScaleSpec {
     pub kind: ScaleKind,
@@ -360,6 +365,10 @@ impl ChartSpec {
         self.validate()?;
         let axes = self.resolved_axes()?;
         let mut data = Vec::with_capacity(self.data.len());
+        let size_axis = match self.encodings.get(&Channel::Size) {
+            Some(encoding @ Encoding::Field { .. }) => Some(infer_axis(&self.data, encoding)?),
+            _ => None,
+        };
         for row in 0..self.data.len() {
             let key = self.row_key(row)?;
             let position = [
@@ -367,7 +376,7 @@ impl ChartSpec {
                 self.position_value(row, Channel::Y, axes.get(&Channel::Y))?,
                 self.position_value(row, Channel::Z, axes.get(&Channel::Z))?,
             ];
-            let size = self.numeric_value(row, Channel::Size)?.unwrap_or(8.0);
+            let size = self.point_radius(row, size_axis.as_ref())?;
             let opacity = self
                 .numeric_value(row, Channel::Opacity)?
                 .unwrap_or(1.0)
@@ -576,6 +585,30 @@ impl ChartSpec {
             },
             Encoding::Value(_) => Err(ChartError::NonNumericPosition(channel)),
         }
+    }
+
+    /// Point radius in scene units, the same for 2D and 3D marks. A `radius`
+    /// mark option wins; a numeric `size` field maps its domain onto
+    /// [`POINT_RADIUS_RANGE`] with the area, not the radius, proportional.
+    fn point_radius(&self, row: usize, size_axis: Option<&Axis>) -> Result<f64, ChartError> {
+        if let Some(ConstantValue::Number(radius)) = self.mark.options.get("radius")
+            && radius.is_finite()
+            && *radius >= 0.0
+        {
+            return Ok(*radius);
+        }
+        let value = self.numeric_value(row, Channel::Size)?;
+        let (Some(value), Some(axis)) = (value, size_axis) else {
+            return Ok(value
+                .filter(|radius| radius.is_finite())
+                .unwrap_or(DEFAULT_POINT_RADIUS));
+        };
+        if !value.is_finite() {
+            return Ok(DEFAULT_POINT_RADIUS);
+        }
+        let t = axis.normalize(value)?.clamp(0.0, 1.0);
+        let (min, max) = POINT_RADIUS_RANGE;
+        Ok((min * min + t * (max * max - min * min)).sqrt())
     }
 
     fn numeric_value(&self, row: usize, channel: Channel) -> Result<Option<f64>, ChartError> {
@@ -841,6 +874,7 @@ pub struct BatchDatum {
     pub key: Option<DatumKey>,
     pub source_row: usize,
     pub position: [f64; 3],
+    /// Point radius in scene units.
     pub size: f64,
     pub opacity: f64,
     pub color: Option<Color>,
@@ -1028,6 +1062,50 @@ mod tests {
         assert_eq!(batch.data[0].size, 12.0);
         assert_eq!(batch.data[0].opacity, 0.4);
         assert_eq!(batch.data[1].label.as_deref(), Some("pilot"));
+    }
+
+    #[test]
+    fn point_size_is_a_scene_unit_radius_for_every_encoding() {
+        let data = DataTable::numeric([
+            ("x".to_owned(), vec![0.0, 1.0, 2.0]),
+            ("y".to_owned(), vec![0.0, 1.0, 2.0]),
+            ("w".to_owned(), vec![10.0, 55.0, 100.0]),
+        ])
+        .unwrap();
+        let points = |size: Option<Encoding>, options: BTreeMap<String, ConstantValue>| {
+            let mut spec = ChartSpec::new(data.clone(), None)
+                .unwrap()
+                .mark(MarkKind::Point, options)
+                .encode(Channel::X, Encoding::field("x"))
+                .unwrap()
+                .encode(Channel::Y, Encoding::field("y"))
+                .unwrap();
+            if let Some(size) = size {
+                spec = spec.encode(Channel::Size, size).unwrap();
+            }
+            spec.batch()
+                .unwrap()
+                .data
+                .iter()
+                .map(|datum| datum.size)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(points(None, BTreeMap::new()), vec![DEFAULT_POINT_RADIUS; 3]);
+        let constant = Encoding::Value(ConstantValue::Number(0.1));
+        assert_eq!(
+            points(Some(constant.clone()), BTreeMap::new()),
+            vec![0.1; 3]
+        );
+        // The field domain maps onto the radius range with area proportional
+        // to the value, so the middle value gets the middle area.
+        let (min, max) = POINT_RADIUS_RANGE;
+        let mapped = points(Some(Encoding::field("w")), BTreeMap::new());
+        assert!((mapped[0] - min).abs() < 1e-12 && (mapped[2] - max).abs() < 1e-12);
+        let middle_area = (min * min + max * max) * 0.5;
+        assert!((mapped[1] * mapped[1] - middle_area).abs() < 1e-12);
+        let radius = BTreeMap::from([("radius".to_owned(), ConstantValue::Number(0.2))]);
+        assert_eq!(points(Some(constant), radius), vec![0.2; 3]);
     }
 
     #[test]

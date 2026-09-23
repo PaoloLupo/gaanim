@@ -971,11 +971,10 @@ impl SceneModel {
                     DataMarkKind::Scatter {
                         x: chart_field(&spec, Channel::X)?,
                         y: chart_field(&spec, Channel::Y)?,
-                        radius: chart_option_number(
-                            &spec,
-                            "radius",
-                            chart_encoding_number(&spec, Channel::Size, 0.06),
-                        ),
+                        radius: gaanim_visualization::DEFAULT_POINT_RADIUS,
+                        // The same per-row radii as the 3D points, so `size`
+                        // means one thing in both dimensions.
+                        radii: spec.batch()?.data.iter().map(|datum| datum.size).collect(),
                         policy: NonFinitePolicy::Gap,
                     },
                 )?,
@@ -1147,7 +1146,7 @@ impl SceneModel {
                                 &mut vertices,
                                 &mut indices,
                                 normalized_local(datum.position, size),
-                                (datum.size * 0.0125).max(0.025) as f32,
+                                datum.size as f32,
                             );
                             colors.extend(std::iter::repeat_n(
                                 color_with_opacity(datum.color.unwrap_or(color), datum.opacity),

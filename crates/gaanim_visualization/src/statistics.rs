@@ -51,6 +51,8 @@ pub enum DataMarkKind {
         x: String,
         y: String,
         radius: f64,
+        /// Per-row radii in scene units; empty draws every point at `radius`.
+        radii: Vec<f64>,
         policy: NonFinitePolicy,
     },
     Bars {
@@ -165,17 +167,25 @@ pub fn data_mark_path(
             x,
             y,
             radius,
+            radii,
             policy,
         } => {
-            let points = scatter_points(
-                map,
-                &axis_values(table, x, &map.x)?,
-                &axis_values(table, y, &map.y)?,
-                *policy,
-            )?;
+            let x = axis_values(table, x, &map.x)?;
+            let y = axis_values(table, y, &map.y)?;
             let mut path = BezPath::new();
-            for point in points {
-                path.extend(Circle::new(point, *radius).to_path(0.1));
+            for (row, (x, y)) in x.iter().zip(&y).enumerate() {
+                let point = x
+                    .zip(*y)
+                    .filter(|(x, y)| x.is_finite() && y.is_finite())
+                    .and_then(|(x, y)| map.data_to_local(x, y).ok());
+                let Some(point) = point else {
+                    if *policy == NonFinitePolicy::Error {
+                        return Err(AxisError::OutOfDomain.into());
+                    }
+                    continue;
+                };
+                let radius = radii.get(row).copied().unwrap_or(*radius);
+                path.extend(Circle::new(point, radius).to_path(0.1));
             }
             Ok(path)
         }
@@ -585,6 +595,48 @@ mod tests {
         assert_eq!(stats.median, 2.5);
         assert_eq!(stats.q1, 1.75);
         assert_eq!(stats.q3, 3.25);
+    }
+
+    #[test]
+    fn scatter_radii_follow_their_rows_across_gaps() {
+        let map = CoordinateMap2D::new(
+            Axis::linear(0.0, 4.0).unwrap(),
+            Axis::linear(0.0, 4.0).unwrap(),
+            PlotFrame::new(4.0, 4.0).unwrap(),
+        );
+        let table = DataTable::numeric([
+            ("x".to_owned(), vec![1.0, f64::NAN, 3.0]),
+            ("y".to_owned(), vec![1.0, 2.0, 3.0]),
+        ])
+        .unwrap();
+        let path = data_mark_path(
+            &map,
+            &table,
+            &DataMarkKind::Scatter {
+                x: "x".into(),
+                y: "y".into(),
+                radius: 0.5,
+                radii: vec![0.1, 0.2, 0.3],
+                policy: NonFinitePolicy::Gap,
+            },
+        )
+        .unwrap();
+        let mut circles: Vec<BezPath> = Vec::new();
+        for element in path.elements() {
+            if matches!(element, gaanim_core::kurbo::PathEl::MoveTo(_)) {
+                circles.push(BezPath::new());
+            }
+            circles.last_mut().unwrap().push(*element);
+        }
+        let widths: Vec<f64> = circles
+            .iter()
+            .map(|circle| {
+                let radius = gaanim_core::kurbo::Shape::bounding_box(circle).width() * 0.5;
+                (radius * 100.0).round() / 100.0
+            })
+            .collect();
+        // The missing row is skipped without shifting the third point's radius.
+        assert_eq!(widths, vec![0.1, 0.3]);
     }
 
     #[test]

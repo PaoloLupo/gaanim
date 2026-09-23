@@ -2180,7 +2180,13 @@ class ChartSpec:
         """Return a copy using mark options; bars accept ``label_position`` (``outside``/``inside``), non-negative local ``label_offset``, and ``label_color``."""
         ...
     def encode(self, *, x: Optional[EncodingLike] = None, y: Optional[EncodingLike] = None, z: Optional[EncodingLike] = None, color: Optional[EncodingLike] = None, size: Optional[EncodingLike] = None, opacity: Optional[EncodingLike] = None, label: Optional[EncodingLike] = None) -> ChartSpec:
-        """Return a copy with validated positional and visual channel encodings."""
+        """Return a copy with validated positional and visual channel encodings.
+
+        For ``point`` marks ``size`` is the radius in scene units in 2D and 3D:
+        ``Value(0.1)`` draws radius-0.1 points and the default is 0.06. A
+        numeric ``Field`` maps its domain onto radii 0.03 to 0.12 with area
+        proportional to the value. A ``radius`` mark option overrides ``size``.
+        """
         ...
     def axes(self, *, x: Optional[Axis] = None, y: Optional[Axis] = None, z: Optional[Axis] = None) -> ChartSpec:
         """Return a copy with explicit positional axes; omitted axes are inferred.
