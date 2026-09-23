@@ -80,6 +80,18 @@
       asset-base: prefix + "assets/",
     )
 
+    // Authors write site-absolute routes such as `link("/api/scene/")`. Emit
+    // them relative to this page so the site works under any base path,
+    // e.g. GitHub Pages' `/<repo>/`.
+    show link: it => {
+      if type(it.dest) == str and it.dest.starts-with("/") and not it.dest.starts-with("//") {
+        let relative = prefix + it.dest.slice(1)
+        link(if relative == "" { "./" } else { relative }, it.body)
+      } else {
+        it
+      }
+    }
+
     document(route + "index.html", title: title, html.html(lang: "es", {
       html.head({
         html.meta(charset: "utf-8")
@@ -302,8 +314,10 @@
     }
 
     if result.stderr.len() > 0 {
+      let error-text = text(fill: rgb("c53030"), weight: 500, size: 9pt, result.stderr.trim())
+      // The class lets CI detect examples that failed to run.
       result-items.push(
-        text(fill: rgb("c53030"), weight: 500, size: 9pt, result.stderr.trim()),
+        if target() == "bundle" { html.div(class: "docs-example-error", error-text) } else { error-text },
       )
     }
 

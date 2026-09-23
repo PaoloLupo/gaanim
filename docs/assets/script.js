@@ -241,13 +241,11 @@ document.addEventListener("DOMContentLoaded", () => {
 // Búsqueda global de documentación
 // ============================================================================
 document.addEventListener("DOMContentLoaded", () => {
-    const input = document.getElementById("docs-search-input");
-    const resultsBox = document.getElementById("docs-search-results");
     const nav = document.getElementById("global-nav-sidebar");
-    if (!input || !resultsBox || !nav) return;
+    if (!nav) return;
 
+    // Every search box (sidebar and home page) shares one lazily built index.
     let indexPromise = null;
-    let searchVersion = 0;
 
     const normalize = (value) => value
         .toLocaleLowerCase()
@@ -372,72 +370,87 @@ document.addEventListener("DOMContentLoaded", () => {
             .slice(0, 8);
     };
 
-    const showMessage = (message) => {
-        resultsBox.replaceChildren();
-        const element = document.createElement("span");
-        element.className = "docs-search-message";
-        element.textContent = message;
-        resultsBox.appendChild(element);
-    };
+    const bindSearch = (input, resultsBox) => {
+        let searchVersion = 0;
 
-    const renderResults = (results) => {
-        resultsBox.replaceChildren();
-        if (results.length === 0) {
-            showMessage("No se encontraron resultados.");
-            return;
-        }
+        const showMessage = (message) => {
+            resultsBox.replaceChildren();
+            const element = document.createElement("span");
+            element.className = "docs-search-message";
+            element.textContent = message;
+            resultsBox.appendChild(element);
+        };
 
-        results.forEach((result) => {
-            const link = document.createElement("a");
-            link.className = "docs-search-result";
-            link.href = result.href;
-
-            const title = document.createElement("span");
-            title.className = "docs-search-result-title";
-            title.textContent = result.page.title;
-            link.appendChild(title);
-
-            if (result.section) {
-                const section = document.createElement("span");
-                section.className = "docs-search-result-section";
-                section.textContent = `§ ${result.section.text}`;
-                link.appendChild(section);
+        const renderResults = (results) => {
+            resultsBox.replaceChildren();
+            if (results.length === 0) {
+                showMessage("No se encontraron resultados.");
+                return;
             }
 
-            const snippet = document.createElement("span");
-            snippet.className = "docs-search-result-snippet";
-            snippet.textContent = result.snippet;
-            link.appendChild(snippet);
-            resultsBox.appendChild(link);
+            results.forEach((result) => {
+                const link = document.createElement("a");
+                link.className = "docs-search-result";
+                link.href = result.href;
+
+                const title = document.createElement("span");
+                title.className = "docs-search-result-title";
+                title.textContent = result.page.title;
+                link.appendChild(title);
+
+                if (result.section) {
+                    const section = document.createElement("span");
+                    section.className = "docs-search-result-section";
+                    section.textContent = `§ ${result.section.text}`;
+                    link.appendChild(section);
+                }
+
+                const snippet = document.createElement("span");
+                snippet.className = "docs-search-result-snippet";
+                snippet.textContent = result.snippet;
+                link.appendChild(snippet);
+                resultsBox.appendChild(link);
+            });
+        };
+
+        const search = async (query, version) => {
+            if (!query.trim()) {
+                resultsBox.replaceChildren();
+                return;
+            }
+
+            showMessage("Buscando…");
+            if (!indexPromise) indexPromise = buildIndex();
+            const pages = await indexPromise;
+            if (version !== searchVersion) return;
+            renderResults(rankedResults(pages, query));
+        };
+
+        input.addEventListener("input", () => {
+            searchVersion += 1;
+            search(input.value, searchVersion);
+        });
+
+        input.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") {
+                input.value = "";
+                searchVersion += 1;
+                resultsBox.replaceChildren();
+                input.blur();
+            }
         });
     };
 
-    const search = async (query, version) => {
-        if (!query.trim()) {
-            resultsBox.replaceChildren();
-            return;
-        }
-
-        showMessage("Buscando…");
-        if (!indexPromise) indexPromise = buildIndex();
-        const pages = await indexPromise;
-        if (version !== searchVersion) return;
-        renderResults(rankedResults(pages, query));
-    };
-
-    input.addEventListener("input", () => {
-        searchVersion += 1;
-        search(input.value, searchVersion);
-    });
-
-    input.addEventListener("keydown", (event) => {
-        if (event.key === "Escape") {
-            input.value = "";
-            searchVersion += 1;
-            resultsBox.replaceChildren();
-            input.blur();
-        }
-    });
+    const boxes = [
+        ["home-search-input", "home-search-results"],
+        ["docs-search-input", "docs-search-results"],
+    ]
+        .map(([inputId, resultsId]) => [document.getElementById(inputId), document.getElementById(resultsId)])
+        .filter(([input, resultsBox]) => input && resultsBox);
+    boxes.forEach(([input, resultsBox]) => bindSearch(input, resultsBox));
+    if (boxes.length === 0) return;
+    // "/" focuses the most prominent box: the home page search when present.
+    const primaryInput = boxes[0][0];
 
     document.addEventListener("keydown", (event) => {
         const target = event.target;
@@ -446,8 +459,8 @@ document.addEventListener("DOMContentLoaded", () => {
             || target.isContentEditable;
         if (event.key === "/" && !isTyping) {
             event.preventDefault();
-            input.focus();
-            input.select();
+            primaryInput.focus();
+            primaryInput.select();
         }
     });
 });
