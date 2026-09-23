@@ -335,7 +335,8 @@ scene.play([plane.animate.write().duration(1.2)])
 actual; `plane.animate.view_to(x_domain, y_domain)` devuelve la animación para
 `scene.play`. Los números y títulos de los ejes siguen sus posiciones en la
 vista y conservan su tamaño y proporciones, incluso cuando el acercamiento en
-X es distinto del de Y. Los trazos de los ejes, ticks, grillas y curvas conservan
+X es distinto del de Y; los marcadores de `scatter_data` también siguen sus
+posiciones sin deformarse. Los trazos de los ejes, ticks, grillas y curvas conservan
 su grosor durante el cambio de dominio; también se conservan las longitudes de
 los guiones en trazos discontinuos. El escalado general con `plane.scale_to(...)`
 y el zoom de cámara siguen afectando al conjunto, incluido el texto y los trazos.
@@ -489,10 +490,10 @@ scene.play([plane.animate.create().duration(0.85), curve.animate.create().durati
 #api-entry(
   name: "Cartesian2D.scatter_data",
   kind: "method",
-  signature: "scatter_data(xs, ys, *, radius=6.0, policy=\"gap\", color=None) -> Drawable",
+  signature: "scatter_data(xs, ys, *, radius=0.06, policy=\"gap\", color=None) -> Drawable",
   params: (
     (name: "xs, ys", type: "sequence[float | None]", default: none, desc: [Series de igual longitud en coordenadas de datos.]),
-    (name: "radius", type: "float", default: "6.0", desc: [Radio positivo de cada punto en unidades locales del lienzo.]),
+    (name: "radius", type: "float", default: "0.06", desc: [Radio positivo de cada punto en unidades de escena; `view_to` lo conserva y solo mueve los centros.]),
     (name: "policy", type: "\"gap\" | \"drop\" | \"error\"", default: "\"gap\"", desc: [Tratamiento de muestras no finitas.]),
     (name: "color", type: "Color | None", default: "None", desc: [Relleno opcional que sustituye el color de serie proporcionado por el tema.]),
   ),
@@ -500,7 +501,7 @@ scene.play([plane.animate.create().duration(0.85), curve.animate.create().durati
   desc: [Úsalo para destacar muestras sobre una curva de `plot_data`; ambos elementos siguen el mismo plano.],
 )[
 ```python
-peaks = plane.scatter_data(peak_times, peak_values, radius=7, color=GOLD)
+peaks = plane.scatter_data(peak_times, peak_values, radius=0.07, color=GOLD)
 scene.play([peaks.animate.fade_in()])
 ```
 ]
