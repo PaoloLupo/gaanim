@@ -1053,6 +1053,10 @@ class Drawable:
         Example:
             result = drawable.opacity(1.0)
 
+        Opacity multiplies down the hierarchy: a group's opacity scales its
+        members without changing their own values, exactly as
+        ``group.animate.opacity(...)`` does, so a group hidden with
+        ``opacity(0)`` reappears when its opacity is animated back up.
 
         A reactive source binds this channel from the current cursor; another
         source replaces it and a numeric setter ends the binding reversibly.
