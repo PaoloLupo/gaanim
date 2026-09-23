@@ -49,6 +49,19 @@ pub struct SvgShadow {
     pub blur_radius: f64,
 }
 
+impl SvgGroup {
+    /// Union of every descendant path's bounds, in document coordinates.
+    pub fn bounds(&self) -> Option<Bounds3D> {
+        self.children
+            .iter()
+            .filter_map(|child| match child {
+                SvgNode::Group(group) => group.bounds(),
+                SvgNode::Path(path) => Some(path.bounds),
+            })
+            .reduce(|a, b| a.union(&b))
+    }
+}
+
 /// One addressable node in an imported SVG hierarchy.
 #[derive(Debug, Clone)]
 pub enum SvgNode {
@@ -518,6 +531,23 @@ mod tests {
             .expect("bundled DejaVu Sans Bold should resolve");
         let face = database.face(id).expect("resolved face should exist");
         assert!(matches!(face.source, usvg::fontdb::Source::Binary(_)));
+    }
+
+    #[test]
+    fn group_bounds_cover_nested_paths() {
+        let temp = std::env::temp_dir().join("gaanim_svg_bounds_test.svg");
+        std::fs::write(
+            &temp,
+            r##"<svg width="80" height="80" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="40" cy="40" r="36" fill="#FFD166"/>
+                <g><rect x="30" y="30" width="10" height="10" fill="#17233D"/></g>
+            </svg>"##,
+        )
+        .unwrap();
+        let document = SvgDocument::load(&temp).unwrap();
+        let bounds = document.root.bounds().expect("paths have bounds");
+        assert!((bounds.width() - 72.0).abs() < 0.5, "{bounds:?}");
+        assert!((bounds.height() - 72.0).abs() < 0.5, "{bounds:?}");
     }
 
     #[test]

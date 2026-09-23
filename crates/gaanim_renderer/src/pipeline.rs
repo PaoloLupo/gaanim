@@ -224,6 +224,25 @@ pub struct ExtractedElement {
     clip_mask: Option<ClipMask>,
 }
 
+/// Stack order of a drawn element: its own `z_index` plus every ancestor's,
+/// so a group's or text's `z_index` moves its whole subtree while leaves
+/// inside unlayered groups keep their authored order. `creation_order`
+/// still breaks ties.
+fn stacked_render_order(
+    own: RenderOrder,
+    entity: Entity,
+    mut parent_of: impl FnMut(Entity) -> Option<Entity>,
+    mut z_index_of: impl FnMut(Entity) -> i32,
+) -> RenderOrder {
+    let mut z_index = own.z_index;
+    let mut current = entity;
+    while let Some(parent) = parent_of(current) {
+        z_index = z_index.saturating_add(z_index_of(parent));
+        current = parent;
+    }
+    RenderOrder { z_index, ..own }
+}
+
 fn opacity_layer_bounds(
     world_bounds: Option<&WorldBounds>,
     fallback: kurbo::Rect,
@@ -992,6 +1011,7 @@ pub fn compile_scene_from_world(
     )>();
 
     let mut child_query = world.query::<&ChildOf>();
+    let mut order_query = world.query::<&RenderOrder>();
 
     for (
         entity,
@@ -1263,7 +1283,12 @@ pub fn compile_scene_from_world(
                 blur_opt,
             ),
             opacity_group,
-            render_order: *render_order,
+            render_order: stacked_render_order(
+                *render_order,
+                entity,
+                |e| child_query.get(world, e).ok().map(ChildOf::parent),
+                |e| order_query.get(world, e).map_or(0, |order| order.z_index),
+            ),
             scene: Arc::new(scene),
             clip_mask: clip_opt.cloned(),
         });
@@ -1338,6 +1363,7 @@ pub fn gaanim_render_system(
     playback_state: Option<Res<gaanim_animation::PlaybackState>>,
     canvas_bg: Option<Res<CanvasBackground>>,
     child_query: Query<&ChildOf>,
+    order_query: Query<&RenderOrder>,
     view_query: Query<(
         &gaanim_math::SpatialTransform,
         Option<&gaanim_scene::CoordinateViewRole>,
@@ -1769,7 +1795,12 @@ pub fn gaanim_render_system(
                 blur_ref.as_deref(),
             ),
             opacity_group,
-            render_order: *render_order,
+            render_order: stacked_render_order(
+                *render_order,
+                entity,
+                |e| child_query.get(e).ok().map(ChildOf::parent),
+                |e| order_query.get(e).map_or(0, |order| order.z_index),
+            ),
             scene: Arc::clone(fragment),
             clip_mask: clip_ref.as_ref().map(|c| (**c).clone()),
         });
@@ -1926,6 +1957,36 @@ mod tests {
 
     fn rect_path(x0: f64, y0: f64, x1: f64, y1: f64) -> Arc<kurbo::BezPath> {
         Arc::new(kurbo::Rect::new(x0, y0, x1, y1).to_path(0.1))
+    }
+
+    #[test]
+    fn group_z_index_lifts_its_whole_subtree() {
+        // Regression for #25: group([box, text]).z_index(5) must draw above a
+        // root circle with z_index(2); glyphs inside a text with z 6 must stay
+        // above a sibling box with z 5.
+        let mut world = World::new();
+        let order = |z_index, creation_order| RenderOrder {
+            z_index,
+            creation_order,
+        };
+        let group = world.spawn(order(5, 1)).id();
+        let text = world.spawn((order(1, 3), ChildOf(group))).id();
+        let glyph = world.spawn((order(0, 4), ChildOf(text))).id();
+        let boxed = world.spawn((order(0, 2), ChildOf(group))).id();
+
+        let stacked = |world: &World, entity: Entity| {
+            stacked_render_order(
+                *world.get::<RenderOrder>(entity).unwrap(),
+                entity,
+                |e| world.get::<ChildOf>(e).map(ChildOf::parent),
+                |e| world.get::<RenderOrder>(e).map_or(0, |order| order.z_index),
+            )
+        };
+        let circle = order(2, 5);
+        assert_eq!(stacked(&world, boxed), order(5, 2));
+        assert_eq!(stacked(&world, glyph), order(6, 4));
+        assert!(stacked(&world, boxed).z_index > circle.z_index);
+        assert!(stacked(&world, glyph).z_index > stacked(&world, boxed).z_index);
     }
 
     #[test]

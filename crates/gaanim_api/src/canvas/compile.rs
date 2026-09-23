@@ -1871,25 +1871,19 @@ impl SceneModel {
                         .commands
                         .entity(state.entity)
                         .insert(gaanim_scene::HudOverlay);
+                    // Glyphs inherit the parent's z_index in the renderer.
                     builder
                         .commands
                         .entity(state.entity)
                         .insert(gaanim_scene::RenderOrder {
                             z_index: 1000,
-                            ..Default::default()
+                            creation_order: label.id.index() as u64,
                         });
                     for child in &child_entities {
                         builder
                             .commands
                             .entity(*child)
                             .insert(gaanim_scene::HudOverlay);
-                        builder
-                            .commands
-                            .entity(*child)
-                            .insert(gaanim_scene::RenderOrder {
-                                z_index: 1000,
-                                ..Default::default()
-                            });
                     }
                 }
             }
@@ -7774,9 +7768,10 @@ impl SceneModel {
                     .insert(Opacity(spec.opacity));
             }
             if spec.z_index != 0 {
+                // Keep the creation tie-breaker used by every other object.
                 builder.commands.entity(st.entity).insert(RenderOrder {
                     z_index: spec.z_index,
-                    ..Default::default()
+                    creation_order: id.index() as u64,
                 });
             }
         }
@@ -7894,26 +7889,20 @@ impl SceneModel {
                     .commands
                     .entity(entity)
                     .insert(gaanim_scene::HudOverlay);
-                // Keep Vello2D so the element is rendered; ensure high z for HUD.
-                builder
-                    .commands
-                    .entity(entity)
-                    .insert(gaanim_scene::RenderOrder {
-                        z_index: 1000,
-                        ..Default::default()
-                    });
             }
             if let Some(state) = builder.states.get(id) {
                 builder
                     .commands
                     .entity(state.entity)
                     .insert(gaanim_scene::HudOverlay);
+                // Keep Vello2D so the element is rendered; the high z on the
+                // parent is inherited by its glyphs.
                 builder
                     .commands
                     .entity(state.entity)
                     .insert(gaanim_scene::RenderOrder {
                         z_index: 1000,
-                        ..Default::default()
+                        creation_order: id.index() as u64,
                     });
             }
         }
@@ -10113,6 +10102,30 @@ mod tests {
 
         assert!(fills.contains(&PenikoColor::BLACK));
         assert!(!fills.contains(&PenikoColor::WHITE));
+    }
+
+    #[test]
+    fn group_z_index_keeps_its_creation_order() {
+        // Regression for #25: post_apply used to reset creation_order to 0,
+        // dropping the tie-breaker for layered groups and texts.
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        let first = canvas.rect(1.0, 1.0);
+        let second = canvas.circle(0.5);
+        canvas.group(&[&first, &second]).z_index(5);
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        let mut query = world.query_filtered::<&RenderOrder, With<gaanim_scene::GroupMarker>>();
+        let layered = query
+            .iter(&world)
+            .find(|order| order.z_index == 5)
+            .expect("layered group");
+        assert_ne!(layered.creation_order, 0);
     }
 
     #[test]

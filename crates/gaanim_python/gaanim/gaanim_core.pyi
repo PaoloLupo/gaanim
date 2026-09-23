@@ -1038,10 +1038,13 @@ class Drawable:
         """
         ...
     def z_index(self, z: int) -> Self:
-        """Apply z index to this drawable and return the result.
+        """Set the stacking layer; higher values draw on top.
+
+        A group's or text's ``z_index`` is added to every descendant's, so it
+        moves the whole subtree. Ties keep creation order.
 
         Example:
-            result = drawable.z_index(1)
+            card = scene.geometry.group([box, label]).z_index(5)
         """
         ...
     @overload
@@ -3852,10 +3855,14 @@ class SlideKit:
         show_on_cover: bool = False,
         logo_scale: float = 1.0,
     ) -> None:
-        """Use brand on this Scene or create the requested value.
+        """Configure the logo, rule, footer and slide number drawn in every segment.
+
+        The logo (SVG or raster) is fitted to 0.6 scene units tall and then
+        multiplied by ``logo_scale``; it sits in the top-right safe corner
+        above the slide content.
 
         Example:
-            scene.brand()
+            scene.slides.brand(logo="assets/logo.svg", footer="LAB · 2026")
         """
         ...
     def badge(

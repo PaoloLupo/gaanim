@@ -907,7 +907,9 @@ impl SceneModel {
                         handle.clone().z_index(20);
                     }
                 }
-                let axes_layer = space.view.clone().z_index(20);
+                // Layer z_index values inherit from the view; keep the view itself at
+                // the scene level so the chart does not rise above unrelated content.
+                let axes_layer = space.view.clone();
                 let grid = space
                     .layer(SpaceLayer::MajorGrid)
                     .cloned()
@@ -1062,7 +1064,9 @@ impl SceneModel {
                     handle.clone().z_index(20);
                 }
             }
-            let axes_layer = space.view.clone().z_index(20);
+            // Layer z_index values inherit from the view; keep the view itself at
+            // the scene level so the chart does not rise above unrelated content.
+            let axes_layer = space.view.clone();
             let grid = space
                 .layer(SpaceLayer::MajorGrid)
                 .cloned()
@@ -4955,9 +4959,25 @@ mod tests {
             .lock()
             .expect("bar mark spec poisoned")
             .z_index;
-        let axis_z = chart.axes.spec.lock().expect("axes spec poisoned").z_index;
+        // Group z_index is inherited by the renderer, so the structural layers
+        // inside the view carry the lift while the view stays at scene level.
+        let axes_spec = chart.axes.spec.lock().expect("axes spec poisoned").clone();
+        assert_eq!(
+            axes_spec.z_index, 0,
+            "the chart must not rise above unrelated scene content",
+        );
+        let SpawnKind::GroupNoCenter(children) = &axes_spec.kind else {
+            panic!("chart axes layer must be a structural group");
+        };
+        let state = canvas.state.lock().expect("canvas state poisoned");
+        let layer_z = children
+            .iter()
+            .filter_map(|id| state.object_specs.get(id))
+            .map(|spec| spec.lock().expect("layer spec poisoned").z_index)
+            .max()
+            .expect("axes view has layers");
         assert!(
-            axis_z > mark_z,
+            layer_z > mark_z,
             "semantic axes must remain readable when a bar intersects them",
         );
     }
