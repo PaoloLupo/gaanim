@@ -4556,7 +4556,8 @@ class Scene:
         """Stops authored so far, in timeline order, with absolute times.
 
         Read it at the end of the script, before ``render()``, to capture a
-        snapshot at every pause.
+        snapshot at every pause. ``gaanim --diff --example <SCRIPT>
+        --capture-stops`` does the same without script changes.
 
         Example:
             if "GAANIM_SNAPSHOTS" in os.environ:

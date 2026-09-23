@@ -872,6 +872,10 @@ struct DiffModeArgs {
     capture: bool,
     capture_only: bool,
     bless: bool,
+    /// Capture every `scene.stop(...)` instead of the script's `scene.snapshots`.
+    capture_stops: bool,
+    /// 1-based stops to capture; `None` captures all of them.
+    stops: Option<Vec<usize>>,
 }
 
 /// Handle `gaanim --diff ...` before Python, Bevy, or the editor are initialized.
@@ -922,7 +926,9 @@ fn dispatch_diff_mode() -> bool {
         if let Some(ref venv) = venv_root {
             python_home::inject_venv_site_packages(venv);
         }
-        if let Err(error) = script_runner::capture_script_snapshots(&script, capture_dir) {
+        if parsed.capture_stops {
+            capture_stop_snapshots(&script, capture_dir, parsed.stops.as_deref());
+        } else if let Err(error) = script_runner::capture_script_snapshots(&script, capture_dir) {
             eprintln!("gaanim --diff: snapshot capture failed: {error}");
             std::process::exit(2);
         }
@@ -984,6 +990,33 @@ fn dispatch_diff_mode() -> bool {
     std::process::exit(if passed { 0 } else { 1 });
 }
 
+/// Run the script like `gaanim check` and capture the frame shown at each stop.
+fn capture_stop_snapshots(script: &Path, capture_dir: &Path, stops: Option<&[usize]>) {
+    let canvas = script_runner::load_script_canvas(script).unwrap_or_else(|error| {
+        eprintln!("gaanim --diff: {error}");
+        std::process::exit(2);
+    });
+    let capture = gaanim_diff::capture_stops(canvas, capture_dir, stops).unwrap_or_else(|error| {
+        eprintln!("gaanim --diff: stop capture failed: {error}");
+        std::process::exit(2);
+    });
+    for stop in &capture.stops.stops {
+        let name = stop
+            .name
+            .as_deref()
+            .map(|name| format!(" · {name}"))
+            .unwrap_or_default();
+        println!(
+            "  stop {}/{} · {}{name} · {:.3}s -> {}",
+            stop.index, capture.stops.total, stop.segment, stop.time_seconds, stop.file
+        );
+    }
+    println!(
+        "Stops: {}",
+        capture_dir.join(gaanim_diff::STOPS_FILE).display()
+    );
+}
+
 fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String> {
     let mut baseline = None;
     let mut current = None;
@@ -995,6 +1028,8 @@ fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String>
     let mut capture = None;
     let mut capture_only = false;
     let mut bless = false;
+    let mut capture_stops = false;
+    let mut stops = None;
     let mut index = 0;
 
     while index < args.len() {
@@ -1028,6 +1063,13 @@ fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String>
             "--no-capture" => capture = Some(false),
             "--capture-only" => capture_only = true,
             "--bless" => bless = true,
+            "--capture-stops" => capture_stops = true,
+            "--stops" => {
+                stops = Some(
+                    gaanim_diff::parse_stop_selection(value(&mut index)?)
+                        .map_err(|error| format!("--stops: {error}"))?,
+                );
+            }
             "--help" | "-h" => return Ok(None),
             _ => return Err(format!("unknown option `{flag}`")),
         }
@@ -1038,6 +1080,12 @@ fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String>
     }
     if capture_only && capture == Some(false) {
         return Err("--capture-only cannot be combined with --no-capture".to_string());
+    }
+    if stops.is_some() && !capture_stops {
+        return Err("--stops requires --capture-stops".to_string());
+    }
+    if capture_stops && capture == Some(false) {
+        return Err("--capture-stops cannot be combined with --no-capture".to_string());
     }
 
     if let Some(example) = example {
@@ -1052,6 +1100,8 @@ fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String>
             capture: capture.unwrap_or(true),
             capture_only,
             bless,
+            capture_stops,
+            stops,
         }));
     }
 
@@ -1060,6 +1110,9 @@ fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String>
     }
     if capture_only {
         return Err("--capture-only requires --example <SCRIPT_OR_PROJECT>".to_string());
+    }
+    if capture_stops {
+        return Err("--capture-stops requires --example <SCRIPT_OR_PROJECT>".to_string());
     }
 
     Ok(Some(DiffModeArgs {
@@ -1076,6 +1129,8 @@ fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String>
         capture: false,
         capture_only: false,
         bless: false,
+        capture_stops: false,
+        stops: None,
     }))
 }
 
@@ -1127,6 +1182,11 @@ OPTIONS:
         --bless                      Capture this example as its baseline and exit
         --capture-only               Capture into current/ (or --current) and exit
         --no-capture                 Reuse the example's existing current snapshots
+        --capture-stops              Capture the frame shown at every scene.stop()
+                                     and write stops.json; the script need not call
+                                     scene.snapshots
+        --stops <LIST>               With --capture-stops, only these 1-based stops,
+                                     e.g. 12,30 or 3-7
     -b, --baseline <DIR>            Known-good snapshot directory
     -c, --current <DIR>             Candidate snapshot directory
     -o, --output <DIR>              Override the generated report directory
@@ -1382,6 +1442,39 @@ mod tests {
         ]
         .map(str::to_string);
         assert!(parse_diff_mode_args(&bless).is_err());
+    }
+
+    #[test]
+    fn parses_stop_capture_with_a_selection() {
+        let args = [
+            "--example",
+            ".",
+            "--capture-stops",
+            "--stops",
+            "12,30",
+            "--capture-only",
+        ]
+        .map(str::to_string);
+        let parsed = parse_diff_mode_args(&args).unwrap().unwrap();
+
+        assert!(parsed.capture_stops);
+        assert_eq!(parsed.stops, Some(vec![12, 30]));
+        assert!(parsed.capture_only);
+    }
+
+    #[test]
+    fn stop_capture_rejects_invalid_combinations() {
+        let reject = |args: &[&str]| {
+            let args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
+            parse_diff_mode_args(&args).unwrap_err()
+        };
+
+        assert!(reject(&["--example", ".", "--stops", "1"]).contains("--capture-stops"));
+        assert!(reject(&["--capture-stops"]).contains("--example"));
+        assert!(
+            reject(&["--example", ".", "--capture-stops", "--no-capture"]).contains("--no-capture")
+        );
+        assert!(reject(&["--example", ".", "--capture-stops", "--stops", "0"]).contains("--stops"));
     }
 
     #[test]

@@ -43,7 +43,22 @@ if os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(os.environ["GAANIM_SNAPSHOTS"], [0.0, 0.5, 1.0])
 ```
 
-Para revisar una presentación, captura cada pausa: `scene.stops` devuelve los `scene.stop()` con su tiempo absoluto, y `scene.cursor` el instante actual de autoría.
+== Capturar cada pausa de una presentación
+
+Para revisar una presentación, `--capture-stops` captura el fotograma que muestra el presentador en cada `scene.stop()`, sin tocar el script: no hace falta llamar a `scene.snapshots` ni leer `GAANIM_SNAPSHOTS`. El script solo debe terminar con `scene.render()`.
+
+```powershell
+gaanim --diff --example mi-charla --capture-stops --capture-only
+gaanim --diff --example mi-charla --capture-stops --stops 12,30 --capture-only
+```
+
+- Cada pausa se captura en su instante exacto: las animaciones anteriores ya terminaron y una pausa al final de un segmento conserva ese segmento en pantalla, sin desfases manuales.
+- Los archivos se llaman `stop_0001.png`, `stop_0002.png`, … según la numeración global (desde 1) de las pausas, así que el baseline y la captura actual se emparejan por pausa aunque cambien los tiempos.
+- `--stops` acepta números y rangos (`12,30`, `3-7`); los números siguen siendo los de la numeración completa.
+- Además de `manifest.json`, escribe `stops.json` con número, tiempo, segmento, nombre de la pausa y archivo de cada captura.
+- Funciona con `--bless`, `--capture-only` y `--no-gui`; no con `--no-capture`.
+
+Si prefieres elegir los tiempos desde el script, `scene.stops` devuelve las pausas con su tiempo absoluto y `scene.cursor` el instante actual de autoría:
 
 ```python
 if os.environ.get("GAANIM_SNAPSHOTS"):
@@ -60,6 +75,8 @@ gaanim --diff --example examples/visual_diff_demo.py --no-gui --pixel-threshold 
 - `--no-capture` — compara los PNG ya presentes en `current/`.
 - `--capture-only` — escribe `current/` (o `--current <DIR>`) y termina sin
   comparar ni modificar un baseline; sirve para diagnóstico y benchmarks.
+- `--capture-stops` / `--stops <LISTA>` — captura cada `scene.stop()` en lugar
+  de `scene.snapshots` (ver arriba).
 - `--tests-root <DIR>` — cambia la carpeta global por defecto.
 - `--pixel-threshold` / `--max-changed-ratio` — tolerancias.
 
