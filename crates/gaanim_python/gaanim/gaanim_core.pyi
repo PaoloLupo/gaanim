@@ -817,6 +817,7 @@ class Composition:
         """Resolve local offsets using the supplied outer defaults without scheduling."""
         ...
 
+# Typing-only in this native stub; import it at runtime with ``from gaanim import Playable``.
 Playable: TypeAlias = Anim | Audio | Video | VideoSegment | Lottie | Composition
 
 def parallel(*items: Playable) -> Composition:

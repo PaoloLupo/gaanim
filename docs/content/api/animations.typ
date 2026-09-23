@@ -767,6 +767,16 @@ scene.play(
 `plan.schedule()` returns a read-only local schedule without changing the
 cursor or consuming any leaf. `plan.stretch(seconds)` accepts animation-only
 trees; media are rejected because their playback speed is not silently changed.
+
+`Playable` names that union for annotations of your own helpers. Import it from
+`gaanim`; it also works at runtime, including with `isinstance`.
+
+```python
+from gaanim import Playable, parallel
+
+def entrance(*items: Playable) -> Playable:
+    return parallel(*items).delay(0.2)
+```
 ]
 
 == Tiempo y easing
