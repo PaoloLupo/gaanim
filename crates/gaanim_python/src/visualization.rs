@@ -2438,7 +2438,8 @@ impl PyCoordinateSpace {
     ///
     /// `xs` and `ys` are matching lists of floats (`None` marks a missing
     /// sample); `policy` handles non-finite samples (`"gap"`, `"drop"`,
-    /// `"error"`). Pass `color` to restyle the dots.
+    /// `"error"`). Pass `color` to restyle the dots. `radius` is in scene
+    /// units and survives `view_to`: markers follow the data window unscaled.
     fn scatter_data(
         &self,
         xs: Vec<Option<f64>>,

@@ -754,7 +754,7 @@ impl CoordinateSpaceHandle {
     }
 
     /// Change the affine view window immediately at the current cursor.
-    /// Axis numbers and titles keep their size while following the view positions.
+    /// Axis numbers, titles and scatter markers keep their size while following the view positions.
     /// Axes, grid lines and plotted paths retain their authored stroke widths.
     pub fn view_to(
         &self,
@@ -768,7 +768,7 @@ impl CoordinateSpaceHandle {
     }
 
     /// Describe an affine view-window animation without touching the timeline.
-    /// Axis numbers and titles keep their size throughout the animation.
+    /// Axis numbers, titles and scatter markers keep their size throughout the animation.
     /// Axes, grid lines and plotted paths retain their authored stroke widths.
     pub fn view_to_animation(
         &self,
@@ -3595,6 +3595,11 @@ impl SceneModel {
             .iter()
             .map(|point| {
                 let mark = self.dot(radius).move_to(point.x, point.y);
+                // Markers follow view positions but keep their scene-unit radius.
+                mark.spec
+                    .lock()
+                    .expect("marker spec poisoned")
+                    .coordinate_view_role = Some(gaanim_scene::CoordinateViewRole::Label);
                 if let Some(color) = series_color {
                     mark.fill(color)
                 } else {
@@ -4626,6 +4631,101 @@ mod tests {
                         .unwrap()
                         .to_mat4();
                 assert!(current.abs_diff_eq(expected, 1e-9));
+            }
+        }
+    }
+
+    #[test]
+    fn coordinate_view_preserves_scatter_marker_radius() {
+        use bevy::prelude::Schedule;
+        use gaanim_math::GlobalSpatialTransform;
+        use gaanim_scene::prelude::{ChildOf, World};
+
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        let space = canvas
+            .coordinate_axes(
+                Axis::linear(0.0, 0.55).unwrap(),
+                Axis::linear(0.5, 4.5).unwrap(),
+                Some(5.6),
+                Some(3.5),
+                true,
+            )
+            .unwrap();
+        let xs = [Some(0.05), Some(0.2), Some(0.4)];
+        let ys = [Some(1.0), Some(2.5), Some(4.0)];
+        canvas
+            .data_scatter(&space, &xs, &ys, 0.055, NonFinitePolicy::Gap)
+            .unwrap();
+        canvas.play(vec![
+            space
+                .view_to_animation((0.0, 0.2), (0.5, 4.5))
+                .unwrap()
+                .duration(1.0),
+        ]);
+
+        let mut world = World::new();
+        world.insert_resource(gaanim_timeline::timeline::Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        let mut timeline = world
+            .remove_resource::<gaanim_timeline::timeline::Timeline>()
+            .unwrap();
+        timeline.add_keyframe(
+            0.0,
+            gaanim_timeline::snapshot::WorldSnapshot::capture(&mut world),
+        );
+        let mut propagation = Schedule::default();
+        propagation.add_systems(gaanim_scene::transform_propagation_system);
+        timeline.seek(&mut world, 0.0);
+        propagation.run(&mut world);
+
+        // Markers are the only circular paths with the authored radius.
+        let markers: Vec<_> = world
+            .query::<(
+                gaanim_scene::prelude::Entity,
+                &gaanim_scene::prelude::Path2D,
+            )>()
+            .iter(&world)
+            .filter(|(_, path)| {
+                let bounds = path.0.bounding_box();
+                (bounds.width() - 0.11).abs() < 1e-6 && (bounds.height() - 0.11).abs() < 1e-6
+            })
+            .map(|(entity, _)| entity)
+            .collect();
+        assert_eq!(markers.len(), xs.len());
+        let initial: Vec<_> = markers
+            .iter()
+            .map(|marker| world.get::<GlobalSpatialTransform>(*marker).unwrap().mat4)
+            .collect();
+
+        for time in [0.5, 1.0, 0.0] {
+            timeline.seek(&mut world, time);
+            propagation.run(&mut world);
+            for (marker, initial) in markers.iter().zip(&initial) {
+                let current = world.get::<GlobalSpatialTransform>(*marker).unwrap().mat4;
+                for direction in [DVec3::X, DVec3::Y] {
+                    assert!(
+                        (current.transform_vector3(direction)
+                            - initial.transform_vector3(direction))
+                        .length()
+                            < 1e-9,
+                        "domain view deformed a scatter marker at t={time}"
+                    );
+                }
+                // The marker center still follows the zoomed data position.
+                let parent = world.get::<ChildOf>(*marker).unwrap().parent();
+                let local = world
+                    .get::<gaanim_math::SpatialTransform>(*marker)
+                    .unwrap()
+                    .translation;
+                let expected = world
+                    .get::<GlobalSpatialTransform>(parent)
+                    .unwrap()
+                    .mat4
+                    .transform_point3(local);
+                assert!((current.w_axis.truncate() - expected).length() < 1e-9);
             }
         }
     }

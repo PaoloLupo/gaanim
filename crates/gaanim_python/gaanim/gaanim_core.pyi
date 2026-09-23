@@ -2504,8 +2504,8 @@ class CoordinateSpaceAnimation:
     def view_to(self, x_domain: tuple[float, float], y_domain: tuple[float, float]) -> Anim:
         """Animate the data-domain window, keeping axis text and stroke widths.
 
-        Numbers and titles keep their size and proportions. Axes, grids and plotted
-        paths keep their stroke widths throughout the zoom. Returns an unscheduled
+        Numbers, titles and ``scatter_data`` markers keep their size and proportions.
+        Axes, grids and plotted paths keep their stroke widths throughout the zoom. Returns an unscheduled
         animation. Raises ValueError for invalid domains or non-linear/time axes.
         """
         ...
@@ -2520,7 +2520,8 @@ class CoordinateSpace:
     def view_to(self, x_domain: tuple[float, float], y_domain: tuple[float, float]) -> CoordinateSpace:
         """Set the data-domain window at the cursor and return this space.
 
-        Axis text keeps its size and proportions while following the view positions.
+        Axis text and ``scatter_data`` markers keep their size and proportions while
+        following the view positions.
         Axes, grids and plotted paths retain their authored stroke widths.
         Raises ValueError unless domains are finite and increasing on linear/time axes.
         """
@@ -2586,8 +2587,11 @@ class CoordinateSpace:
     ) -> Drawable:
         """Plot a data series as scatter dots in this space's data coordinates.
 
+        ``radius`` is in scene units; ``view_to`` moves the dot centers with the
+        data window while keeping each marker circular at that radius.
+
         Example:
-            dots = plane.scatter_data(periods, spectral_values, radius=7, color=GOLD)
+            dots = plane.scatter_data(periods, spectral_values, radius=0.07, color=GOLD)
         """
         ...
 

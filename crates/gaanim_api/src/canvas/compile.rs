@@ -6228,7 +6228,7 @@ impl SceneModel {
         text_config: &gaanim_text::prelude::TextConfig,
         scene_background: gaanim_core::peniko::Color,
     ) -> MobjectRef {
-        match &spec.kind {
+        let mref = match &spec.kind {
             SpawnKind::FillLevelOutline { mask } => {
                 let b = builder.svg_path(&gaanim_objects::prelude::SvgPath {
                     id: "FillLevelOutline".into(),
@@ -7659,7 +7659,15 @@ impl SceneModel {
                 Self::post_apply(builder, mref.id, spec, id_map, frame_bounds);
                 mref
             }
+        };
+        // Applies to primitives as well as groups/text, which skip `post_apply`
+        // when they finish through `finish_spawn_builder`.
+        if let Some(role) = spec.coordinate_view_role
+            && let Some(state) = builder.states.get(mref.id)
+        {
+            builder.commands.entity(state.entity).insert(role);
         }
+        mref
     }
 
     fn finish_spawn_builder<'b, 'w, 's, 'a>(
@@ -7851,11 +7859,6 @@ impl SceneModel {
             }
         }
         // Billboard / HUD chaining (.billboard() / .hud())
-        if let Some(role) = spec.coordinate_view_role {
-            if let Some(state) = builder.states.get(id) {
-                builder.commands.entity(state.entity).insert(role);
-            }
-        }
         if spec.billboard {
             if let Some(state) = builder.states.get(id) {
                 builder
