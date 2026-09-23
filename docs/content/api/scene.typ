@@ -508,8 +508,10 @@ scene.slides.brand(
 ```
 
 The logo, theme-colored rule, footer, and current slide number are generated
-inside every explicit segment, so navigation and independent segment export
-remain correct. Cover layouts omit the chrome by default.
+inside every explicit segment, above the slide content, so navigation and
+independent segment export remain correct. The logo is fitted to 0.6 scene
+units tall and multiplied by `logo_scale`. Cover layouts omit the chrome by
+default.
 
 `segment(template=...)` accepts a built-in or project-defined typed Python
 template. `bind(**slots)` validates required, optional, and extra slots and

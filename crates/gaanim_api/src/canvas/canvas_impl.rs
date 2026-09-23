@@ -1278,6 +1278,9 @@ fn load_image(path: impl AsRef<Path>) -> Result<gaanim_core::peniko::ImageData, 
     Ok(cache.entry(cache_key).or_insert(image).clone())
 }
 
+/// Default height of a presentation brand logo in scene units.
+const BRAND_LOGO_HEIGHT: f64 = 0.6;
+
 /// Top-level facade for building Gaanim animations.
 #[derive(Debug, Clone)]
 pub struct SceneModel {
@@ -2968,12 +2971,16 @@ impl SceneModel {
     /// Raster images, patterns, masks, and arbitrary filters remain omitted.
     pub fn svg(&mut self, path: impl AsRef<Path>) -> Result<DrawableHandle, SvgLoadError> {
         let document = gaanim_objects::prelude::SvgDocument::load(self.resolve_asset_path(path))?;
+        Ok(self.svg_document(&document))
+    }
+
+    fn svg_document(&mut self, document: &gaanim_objects::prelude::SvgDocument) -> DrawableHandle {
         let mut parts = HashMap::new();
         let (root, _) = self.spawn_svg_group(&document.root, true, &mut parts);
         if !document.root.id.is_empty() {
             parts.insert(document.root.id.clone(), root.clone());
         }
-        Ok(root.with_svg_parts(parts))
+        root.with_svg_parts(parts)
     }
 
     /// Import the default scene of a local glTF 2.0 `.gltf` or `.glb` model.
@@ -4143,7 +4150,7 @@ impl SceneModel {
         if branding.rule {
             self.line(frame.min.x, rule_y, frame.max.x, rule_y)
                 .no_fill()
-                .stroke(rule, 1.5)
+                .stroke(rule, 0.02)
                 .z_index(100);
         }
         let footer = match (branding.footer.as_deref(), branding.slide_numbers) {
@@ -4165,17 +4172,35 @@ impl SceneModel {
                 .and_then(|extension| extension.to_str())
                 .unwrap_or_default()
                 .to_ascii_lowercase();
-            let logo = if extension == "svg" {
-                self.svg(logo).map_err(|error| SegmentError::BrandAsset {
-                    message: error.to_string(),
-                })?
-            } else {
-                self.image(logo).map_err(|error| SegmentError::BrandAsset {
-                    message: error.to_string(),
-                })?
+            // Fit the logo to a fixed scene-unit height; `logo_scale`
+            // multiplies it. Source pixel sizes must not leak into the scene.
+            let height = BRAND_LOGO_HEIGHT * branding.logo_scale;
+            let brand_error = |error: &dyn std::fmt::Display| SegmentError::BrandAsset {
+                message: error.to_string(),
             };
-            logo.scale_to(branding.logo_scale)
-                .at_anchor(frame.max.x, frame.max.y, Anchor::TopRight)
+            let logo = if extension == "svg" {
+                let document =
+                    gaanim_objects::prelude::SvgDocument::load(self.resolve_asset_path(logo))
+                        .map_err(|error| brand_error(&error))?;
+                let source_height = document
+                    .root
+                    .bounds()
+                    .map(|bounds| bounds.height())
+                    .filter(|h| h.is_finite() && *h > f64::EPSILON)
+                    .unwrap_or(height);
+                self.svg_document(&document)
+                    .scale_to(height / source_height)
+            } else {
+                self.image_with_options(
+                    logo,
+                    ImageOptions {
+                        height: Some(height),
+                        ..Default::default()
+                    },
+                )
+                .map_err(|error| brand_error(&error))?
+            };
+            logo.at_anchor(frame.max.x, frame.max.y, Anchor::TopRight)
                 .z_index(101);
         }
         Ok(())
