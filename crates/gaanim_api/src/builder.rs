@@ -554,6 +554,8 @@ pub struct SceneBuilder<'w, 's, 'a> {
     /// Tracks the current value of each float signal / value tracker
     pub float_signals: HashMap<ObjectId, f64>,
     pub(crate) media_frames: HashMap<ObjectId, gaanim_scene::MediaFrame>,
+    /// Authored local geometry of solid arrows, used by `GrowArrow`.
+    pub(crate) arrow_shapes: HashMap<ObjectId, gaanim_math::ArrowShape>,
     /// Objects whose scene membership is intentionally global at the current authoring cursor.
     persistent_objects: HashSet<ObjectId>,
     /// Objects whose membership has an explicit reuse/persist/release schedule in this scene.
@@ -853,6 +855,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             current_scene: None,
             float_signals: HashMap::new(),
             media_frames: HashMap::new(),
+            arrow_shapes: HashMap::new(),
             property_bindings: HashMap::new(),
             property_source_cursors: HashMap::new(),
             persistent_objects: HashSet::new(),
@@ -5079,118 +5082,57 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
-    /// Internal: schedule a `GrowArrow` animation as a Create-style
-    /// outline draw followed by a brief scale "punch" that emphasizes
-    /// the arrowhead's arrival at the end of the trajectory.
+    /// Internal: schedule a `GrowArrow` animation. Authored solid arrows grow
+    /// from their tail: the tip travels along the (straight or curved) spine
+    /// with an undistorted head, instead of Manim's uniform scale about the
+    /// start point. Any other target, or an arrow whose geometry changed after
+    /// spawning, falls back to `Create`.
     fn play_grow_arrow_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
-        if self.states.get(anim.target).is_none() {
+        let Some(state) = self.states.get(anim.target) else {
             bevy::prelude::warn!(
                 "Attempted to GrowArrow unregistered Mobject: {:?}",
                 anim.target
             );
             return;
-        }
-
-        // (B) Set initial value via deferred commands to avoid first-frame
-        // flash: insert FillDrawProgress(0.0) AND an empty Path2D so the
-        // renderer sees "no fill, no path" before the timeline runs.
-        if let Some(state) = self.states.get(anim.target) {
-            self.commands
-                .entity(state.entity)
-                .insert(gaanim_animation::FillDrawProgress(0.0));
-            self.commands
-                .entity(state.entity)
-                .insert(gaanim_scene::components::Path2D(std::sync::Arc::new(
-                    gaanim_core::kurbo::BezPath::new(),
-                )));
-        }
-
-        // Phase 1: 70% of duration draws the outline (PathCompletion
-        // 0 -> 1). The fill is held hidden during the draw, then
-        // cross-fades in over the last 30% to give the arrowhead
-        // emphasis.
-        let draw_duration = anim.duration * 0.7;
-        let fill_duration = anim.duration * 0.3;
-
-        // Hold the fill at 0 during the draw phase so the outline-only
-        // stage is visible.
-        self.timeline.add_clip(
-            parent_track,
-            self.current_time,
-            draw_duration,
-            ClipPayload::Animation(AnimationSpec {
-                target: anim.target,
-                lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 0.0 },
-                rate_func: gaanim_math::RateFunc::Linear,
-                delay: 0.0,
-                label: self.current_label.clone(),
-            }),
-        );
-
-        // Trace the outline.
-        self.timeline.add_clip(
-            parent_track,
-            self.current_time,
-            draw_duration,
-            ClipPayload::Animation(AnimationSpec {
-                target: anim.target,
-                lens: PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
-                rate_func: anim.rate_func.clone(),
-                delay: 0.0,
-                label: self.current_label.clone(),
-            }),
-        );
-
-        // Cross-fade the fill in over the last segment, then a brief
-        // scale punch (1.0 -> 1.15 -> 1.0) to highlight the arrowhead.
-        self.timeline.add_clip(
-            parent_track,
-            self.current_time + draw_duration,
-            fill_duration,
-            ClipPayload::Animation(AnimationSpec {
-                target: anim.target,
-                lens: PropertyLensSpec::FillDrawProgress { from: 0.0, to: 1.0 },
-                rate_func: gaanim_math::RateFunc::Smooth,
-                delay: 0.0,
-                label: self.current_label.clone(),
-            }),
-        );
-
-        // Brief scale punch on the arrowhead (25% of the fill phase
-        // each way). Yields a quick "pop" as the fill reveals.
-        let punch_half = fill_duration * 0.5;
-        let original_scale = self
-            .states
-            .get(anim.target)
-            .map(|s| s.transform.scale)
-            .unwrap_or(gaanim_core::glam::DVec3::ONE);
-        let scale_to = original_scale * 1.15;
-        self.timeline.add_clip(
-            parent_track,
-            self.current_time + draw_duration,
-            punch_half,
-            ClipPayload::Animation(AnimationSpec {
-                target: anim.target,
-                lens: PropertyLensSpec::Scale {
-                    from: original_scale,
-                    to: scale_to,
+        };
+        let entity = state.entity;
+        let shape = self
+            .arrow_shapes
+            .get(&anim.target)
+            .filter(|shape| *state.path == shape.path())
+            .cloned();
+        let Some(shape) = shape else {
+            self.play_draw_animation_internal(
+                AnimationBuilder {
+                    anim_type: AnimationType::Create {
+                        config: crate::anim::DrawAnimationConfig::default(),
+                    },
+                    ..anim
                 },
-                rate_func: gaanim_math::RateFunc::Smooth,
-                delay: 0.0,
-                label: self.current_label.clone(),
-            }),
-        );
+                parent_track,
+            );
+            return;
+        };
+
+        // Hide the arrow before its clip starts, as Create does, so the first
+        // frame never flashes the complete silhouette.
+        self.commands
+            .entity(entity)
+            .insert(gaanim_scene::components::Path2D(std::sync::Arc::new(
+                gaanim_core::kurbo::BezPath::new(),
+            )));
         self.timeline.add_clip(
             parent_track,
-            self.current_time + draw_duration + punch_half,
-            punch_half,
+            self.current_time + anim.delay,
+            anim.duration,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
-                lens: PropertyLensSpec::Scale {
-                    from: scale_to,
-                    to: original_scale,
+                lens: PropertyLensSpec::ArrowGrow {
+                    shape,
+                    from: 0.0,
+                    to: 1.0,
                 },
-                rate_func: gaanim_math::RateFunc::Smooth,
+                rate_func: anim.rate_func,
                 delay: 0.0,
                 label: self.current_label.clone(),
             }),
@@ -5975,6 +5917,17 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
         let id = self.next_id();
         let bundle = gaanim_objects::primitives::curved_arrow(id, start, end, angle);
+        self.arrow_shapes.insert(
+            id,
+            gaanim_math::ArrowShape::curved(
+                start,
+                end,
+                angle,
+                gaanim_objects::primitives::DEFAULT_ARROW_HEAD_LENGTH,
+                gaanim_objects::primitives::DEFAULT_ARROW_HEAD_WIDTH,
+                gaanim_objects::primitives::DEFAULT_ARROW_BODY_WIDTH,
+            ),
+        );
         MobjectSpawnBuilder {
             builder: self,
             id,
@@ -6003,6 +5956,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             head_length,
             head_width,
             body_width,
+        );
+        self.arrow_shapes.insert(
+            id,
+            gaanim_math::ArrowShape::curved(start, end, angle, head_length, head_width, body_width),
         );
         MobjectSpawnBuilder {
             builder: self,
@@ -6036,6 +5993,18 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             head_width,
             body_width,
         );
+        self.arrow_shapes.insert(
+            id,
+            gaanim_math::ArrowShape::Arc {
+                center,
+                radius,
+                start_angle,
+                sweep_angle,
+                head_length,
+                head_width,
+                body_width,
+            },
+        );
         MobjectSpawnBuilder {
             builder: self,
             id,
@@ -6062,6 +6031,18 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             radius,
             start_angle,
             sweep_angle,
+        );
+        self.arrow_shapes.insert(
+            id,
+            gaanim_math::ArrowShape::Arc {
+                center,
+                radius,
+                start_angle,
+                sweep_angle,
+                head_length: gaanim_objects::primitives::DEFAULT_ARROW_HEAD_LENGTH,
+                head_width: gaanim_objects::primitives::DEFAULT_ARROW_HEAD_WIDTH,
+                body_width: gaanim_objects::primitives::DEFAULT_ARROW_BODY_WIDTH,
+            },
         );
         MobjectSpawnBuilder {
             builder: self,
@@ -6340,6 +6321,16 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
         let id = self.next_id();
         let bundle = gaanim_objects::primitives::arrow(id, start, end);
+        self.arrow_shapes.insert(
+            id,
+            gaanim_math::ArrowShape::Straight {
+                start,
+                end,
+                head_length: gaanim_objects::primitives::DEFAULT_ARROW_HEAD_LENGTH,
+                head_width: gaanim_objects::primitives::DEFAULT_ARROW_HEAD_WIDTH,
+                body_width: gaanim_objects::primitives::DEFAULT_ARROW_BODY_WIDTH,
+            },
+        );
         MobjectSpawnBuilder {
             builder: self,
             id,
@@ -6365,6 +6356,16 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             head_length,
             head_width,
             body_width,
+        );
+        self.arrow_shapes.insert(
+            id,
+            gaanim_math::ArrowShape::Straight {
+                start,
+                end,
+                head_length,
+                head_width,
+                body_width,
+            },
         );
         MobjectSpawnBuilder {
             builder: self,

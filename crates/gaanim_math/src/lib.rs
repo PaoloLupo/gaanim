@@ -1,3 +1,4 @@
+pub mod arrow;
 pub mod bounds;
 pub mod camera;
 pub mod easing;
@@ -6,6 +7,7 @@ pub mod path;
 pub mod prelude;
 pub mod spatial;
 
+pub use arrow::ArrowShape;
 pub use bounds::Bounds3D;
 pub use camera::{
     Camera, CameraPose, CameraRigCamera, CameraValidationError, CameraViewOverride, CameraViewport,
