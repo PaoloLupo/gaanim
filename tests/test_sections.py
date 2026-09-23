@@ -87,5 +87,59 @@ class SectionTests(unittest.TestCase):
         self.assertNotEqual(scene.events[0][1], scene.events[1][1])
 
 
+class NavigationTests(unittest.TestCase):
+    def test_entries_accept_sections_keys_and_pairs(self):
+        step = SectionStep(name="a", build=lambda scene: None)
+        entries = sections._navigation_entries([
+            Section("intro", [step], title="Introducción"),
+            "method",
+            ("results", "Resultados"),
+        ])
+        self.assertEqual([(e.key, e.title, e.index) for e in entries], [
+            ("intro", "Introducción", 0), ("method", "method", 1), ("results", "Resultados", 2),
+        ])
+        self.assertEqual(Section("plain", [step]).title, "plain")
+        with self.assertRaises(ValueError):
+            sections._navigation_entries(["a", "a"])
+        with self.assertRaises(ValueError):
+            sections._navigation_entries([])
+        with self.assertRaises(TypeError):
+            sections._navigation_entries("ab")
+        with self.assertRaises(ValueError):
+            Section("x", [step], title=" ")
+
+    def test_targets_resolve_by_key_index_entry_and_section(self):
+        step = SectionStep(name="a", build=lambda scene: None)
+        method = Section("method", [step])
+        entries = sections._navigation_entries(["intro", method])
+        for target in ("method", 1, entries[1], method):
+            self.assertEqual(sections._entry_index(entries, target), 1)
+        with self.assertRaises(KeyError):
+            sections._entry_index(entries, "missing")
+        with self.assertRaises(IndexError):
+            sections._entry_index(entries, 2)
+        with self.assertRaises(TypeError):
+            sections._entry_index(entries, True)
+        self.assertEqual([sections._state(i, 1) for i in range(3)],
+                         ["done", "current", "upcoming"])
+        self.assertEqual(sections._state(0, None), "upcoming")
+
+    def test_rail_fractions_fill_past_sections_and_share_the_current_one(self):
+        rail = object.__new__(sections.ProgressRail)
+        rail._entries = sections._navigation_entries(["a", "b", "c", "d"])
+        rail._count = 4
+        progress = sections.SectionProgress("c", None, 1, 2, 1, None)
+        self.assertEqual(rail.fraction(progress), 0.625)
+        self.assertEqual(rail.fraction(1.5), 1.0)
+        self.assertEqual(rail._segment_levels(0.625, 4), [1.0, 1.0, 0.5, 0.0])
+        self.assertEqual(rail._segment_levels(0.625, 1), [0.625])
+        self.assertEqual([rail._section_at(f) for f in (0.0, 0.1, 0.25, 0.26, 1.0)],
+                         [None, 0, 0, 1, 3])
+        other = sections.SectionProgress("elsewhere", None, 1, 4, 1, None)
+        self.assertEqual(rail.fraction(other), 0.25)
+        with self.assertRaises(ValueError):
+            rail.fraction(float("nan"))
+
+
 if __name__ == "__main__":
     unittest.main()

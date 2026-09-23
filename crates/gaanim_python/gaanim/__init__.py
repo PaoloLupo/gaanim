@@ -125,7 +125,14 @@ from .gaanim_core import (
 # Keep the semantic complex-space name available even when an embedding host
 # has an older abi3 module already loaded in-process.
 ComplexSpace = CoordinateSpace
-from .sections import Section, SectionStep, SectionProgress
+from .sections import (
+    Agenda,
+    NavigationEntry,
+    ProgressRail,
+    Section,
+    SectionProgress,
+    SectionStep,
+)
 from .templates import (
     LayoutTemplate,
     comparison,
@@ -164,6 +171,9 @@ __all__ = [
     "Section",
     "SectionStep",
     "SectionProgress",
+    "Agenda",
+    "NavigationEntry",
+    "ProgressRail",
     "AnimationChannel",
     "CustomAnimationValues",
     "Playable",

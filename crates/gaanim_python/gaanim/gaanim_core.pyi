@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from typing import Any, Callable, ClassVar, Literal, Mapping, Optional, Self, Sequence, TypeAlias, overload
 from .matrix import Matrix
+from .sections import SceneSections
 from .animation_types import AnimationChannel, CustomAnimationValues
 
 CurvePoint: TypeAlias = tuple[float, float]
@@ -4756,6 +4757,11 @@ class Scene:
     @property
     def layout(self) -> LayoutBuilder:
         """Return the scene-owned layout capability."""
+        ...
+
+    @property
+    def sections(self) -> SceneSections:
+        """Return section navigation: ``agenda`` and ``progress_rail``."""
         ...
 
     @property
