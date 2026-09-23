@@ -1566,18 +1566,23 @@ class TextParts:
 
 TextContent: TypeAlias = str | TextPart | TextParts
 
-def parts(**content: str) -> TextParts:
+def parts(mapping: Optional[Mapping[str, str]] = None, /, **content: str) -> TextParts:
     """Build an ordered group of plain semantic text parts.
 
-    The keyword order is preserved. Inside ``$...$`` math, adjacent parts are
+    Name the parts either with a mapping, like :func:`part` takes its name as
+    a string, or with keyword arguments as a shortcut. A mapping keeps its
+    insertion order and accepts names that are not Python identifiers, such as
+    ``"tb:dist"`` or ``"x-1"``. Inside ``$...$`` math, adjacent parts are
     separated as distinct Typst tokens while retaining Typst's native tight
     spacing. Use explicit ``part`` values when local styling or nested content
-    is needed. Calling ``parts()`` without entries, using an
-    empty name, or producing wholly empty content raises ``ValueError``; a
-    non-string value raises ``TypeError``.
+    is needed. Calling ``parts()`` without entries, mixing a mapping with
+    keyword entries, repeating a name, using an empty name, or producing
+    wholly empty content raises ``ValueError``; a non-mapping positional
+    argument, a non-string name, or a non-string value raises ``TypeError``.
 
     Example:
         terms = parts(mass="m", gravity="g sin(theta)")
+        labels = parts({"tb:dist": "d", "x-1": "x"})
         equation = scene.text("$", terms, "$")
     """
     ...

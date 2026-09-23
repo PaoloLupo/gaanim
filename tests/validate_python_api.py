@@ -596,6 +596,17 @@ def validate_visualization_contract(module: object) -> list[str]:
         pass
     else:
         failures.append("parts() accepted a non-string value")
+    mapped_parts = scene.text(module.parts({"tb:dist": "d", "x-1": "x"}))
+    if len(mapped_parts.parts) != 2 or any(
+        name not in mapped_parts.parts for name in ("tb:dist", "x-1")
+    ):
+        failures.append("parts(mapping) did not create parts with string names")
+    try:
+        module.parts({"a": "x"}, b="y")
+    except ValueError:
+        pass
+    else:
+        failures.append("parts() accepted a mapping mixed with keyword entries")
 
     formula = module.part(
         "formula", "$E = ", module.part("mass", "m", color=module.GOLD), " c^2$"

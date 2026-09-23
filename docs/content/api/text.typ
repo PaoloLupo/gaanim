@@ -221,12 +221,13 @@ label = scene.text("Valores: V_e del piso 1 (tb:agriet_xy)", markup=False)
 #api-entry(
   name: "parts",
   kind: "factory",
-  signature: "parts(**content: str) -> TextParts",
+  signature: "parts(mapping: Mapping[str, str] | None = None, /, **content: str) -> TextParts",
   params: (
-    (name: "content", type: "keyword str entries", default: none, desc: [Ordered semantic names and their plain text.]),
+    (name: "mapping", type: "Mapping[str, str] | None", default: "None", desc: [Ordered names and their plain text, named with strings as in `part()`. Keeps insertion order and accepts names that are not Python identifiers, such as `"tb:dist"`.]),
+    (name: "content", type: "keyword str entries", default: none, desc: [Shortcut for identifier names: `parts(mass="m")` equals `parts({"mass": "m"})`.]),
   ),
   returns: (type: "TextParts", desc: [Immutable ordered group accepted by `scene.text()`, `scene.text.equation()`, `Text.become()`, and `part()`.]),
-  desc: [Inside `$...$`, adjacent sibling entries become distinct Typst math tokens and retain Typst's native tight spacing. Empty input, empty names, or wholly empty content raise `ValueError`; non-string values raise `TypeError`. Use `part()` for local styles or nesting.],
+  desc: [Inside `$...$`, adjacent sibling entries become distinct Typst math tokens and retain Typst's native tight spacing. Empty input, mixing a mapping with keyword entries, repeated or empty names, or wholly empty content raise `ValueError`; a non-mapping positional argument, non-string names, or non-string values raise `TypeError`. Use `part()` for local styles or nesting.],
 )[
 ```python
 # show-code: true
@@ -243,6 +244,14 @@ scene.play([equation["gravity"].animate.indicate().duration(0.6)])
 scene.play([equation["acceleration"].animate.fill(GOLD).duration(0.6)])
 # output: compact_text_parts.webp
 scene.render()
+```
+
+A mapping names the parts with strings, like `part()` does, and admits names
+that keyword arguments cannot express:
+
+```python
+label = scene.text(parts({"tb:dist": "d = ", "x-1": "4.2 m"}))
+label["tb:dist"].fill(GOLD)
 ```
 ]
 
