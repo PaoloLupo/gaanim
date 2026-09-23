@@ -52,6 +52,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pycanvas::PyCameraState>()?;
     m.add_class::<pycanvas::PyCameraConstraint>()?;
     m.add_class::<pycanvas::PyScene>()?;
+    m.add_class::<pycanvas::PySceneStop>()?;
     m.add_class::<pycanvas::PyGeometry>()?;
     m.add_class::<pycanvas::PyTypography>()?;
     m.add_class::<pycanvas::PyLayoutBuilder>()?;

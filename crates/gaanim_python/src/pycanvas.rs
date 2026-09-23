@@ -1216,6 +1216,43 @@ pub struct PyScene {
     pub(crate) inner: Arc<Mutex<ApiCanvas>>,
 }
 
+/// An interactive stop authored with `scene.stop`, in absolute timeline seconds.
+#[pyclass(name = "SceneStop", module = "gaanim_core", frozen)]
+pub struct PySceneStop {
+    name: Option<String>,
+    time: f64,
+    segment: String,
+}
+
+#[pymethods]
+impl PySceneStop {
+    #[getter]
+    fn name(&self) -> Option<String> {
+        self.name.clone()
+    }
+
+    #[getter]
+    fn time(&self) -> f64 {
+        self.time
+    }
+
+    #[getter]
+    fn segment(&self) -> String {
+        self.segment.clone()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "SceneStop(name={}, time={}, segment={:?})",
+            self.name
+                .as_ref()
+                .map_or_else(|| "None".to_owned(), |name| format!("{name:?}")),
+            self.time,
+            self.segment
+        )
+    }
+}
+
 macro_rules! scene_capability {
     ($rust:ident, $python:literal) => {
         #[pyclass(name = $python, module = "gaanim_core", skip_from_py_object)]
@@ -5044,6 +5081,40 @@ impl PyScene {
             .expect("scene canvas poisoned")
             .stop(name)
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+    }
+
+    /// Current authoring cursor in absolute timeline seconds.
+    #[getter]
+    fn cursor(&self) -> PyResult<f64> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .current_time())
+    }
+
+    /// Stops authored so far, in timeline order, with absolute times.
+    #[getter]
+    fn stops(&self) -> PyResult<Vec<PySceneStop>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let manifest = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .segment_manifest();
+        Ok(manifest
+            .segments
+            .into_iter()
+            .flat_map(|segment| {
+                let name = segment.name;
+                segment.stops.into_iter().map(move |stop| PySceneStop {
+                    name: stop.name,
+                    time: stop.time,
+                    segment: name.clone(),
+                })
+            })
+            .collect())
     }
 
     #[pyo3(signature = (items, *, duration=None, easing=None))]
