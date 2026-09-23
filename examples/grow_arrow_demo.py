@@ -12,9 +12,9 @@ from gaanim import BLACK, CYAN, GOLD, PINK, WHITE, Easing, Scene
 scene = Scene(frame=(16, 9), background=BLACK)
 title = scene.text("GrowArrow", role="title").fill(WHITE).move_to(0, 3.4)
 
-straight = scene.geometry.arrow(-6, 1.5, -1.5, 1.5, head_length=0.4, head_width=0.34, body_width=0.08).fill(CYAN)
-curved = scene.geometry.curved_arrow(-6, -2.2, -1.5, -2.2, 1.4, head_length=0.4, head_width=0.34, body_width=0.08).fill(GOLD)
-orbit = scene.geometry.curved_arrow_arc(3.5, -0.3, 2.0, -1.2, 4.6, head_length=0.4, head_width=0.34, body_width=0.08).fill(PINK)
+straight = scene.geometry.arrow(-6, 1.5, -1.5, 1.5, head_length=0.4, head_width=0.34, body_width=0.08).fill(CYAN).stroke(CYAN, 0.02)
+curved = scene.geometry.curved_arrow(-6, -2.2, -1.5, -2.2, 1.4, head_length=0.4, head_width=0.34, body_width=0.08).fill(GOLD).stroke(GOLD, 0.02)
+orbit = scene.geometry.curved_arrow_arc(3.5, -0.3, 2.0, -1.2, 4.6, head_length=0.4, head_width=0.34, body_width=0.08).fill(PINK).stroke(PINK, 0.02)
 
 scene.play([straight.animate.grow_arrow().duration(1.2)])
 scene.play([curved.animate.grow_arrow().duration(1.2).easing(Easing.SMOOTH)])

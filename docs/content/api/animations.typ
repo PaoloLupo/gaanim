@@ -482,8 +482,8 @@ scene.render()
 # show-code: true
 from gaanim import CYAN, GOLD, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-straight = scene.geometry.arrow(-5, 1, 0, 1, head_length=0.4, head_width=0.34, body_width=0.08).fill(CYAN)
-curved = scene.geometry.curved_arrow(-5, -1.5, 0, -1.5, 1.2, head_length=0.4, head_width=0.34, body_width=0.08).fill(GOLD)
+straight = scene.geometry.arrow(-5, 1, 0, 1, head_length=0.4, head_width=0.34, body_width=0.08).fill(CYAN).stroke(CYAN, 0.02)
+curved = scene.geometry.curved_arrow(-5, -1.5, 0, -1.5, 1.2, head_length=0.4, head_width=0.34, body_width=0.08).fill(GOLD).stroke(GOLD, 0.02)
 scene.play([straight.animate.grow_arrow().duration(1.2), curved.animate.grow_arrow().duration(1.2)])
 # output: preview.webp
 scene.render()
