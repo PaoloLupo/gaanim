@@ -119,6 +119,12 @@ es 0.06. Con `Field`, el dominio de la columna se asigna a radios entre 0.03 y
 0.12, con el área (no el radio) proporcional al valor. La opción de marca
 `radius` fija un radio común y tiene prioridad sobre `size`.
 
+`color` y `opacity` con `Field` también valen por fila en 2D, igual que en 3D.
+Cada punto y cada barra de error toman el color y la opacidad de su fila. En
+`line`, `step` y `area`, un `color=Field` sobre una columna de texto dibuja una
+serie por categoría. Un campo numérico conserva una sola serie. `box` y
+`violin` resumen la columna entera y usan un único color.
+
 Las marcas son `point`, `line`, `step`, `area`, `bar`, `histogram`, `box`,
 `violin`, `error_bar`, `heatmap` y `surface`. `point`, `line` y `bar` pueden
 transformarse entre representaciones 2D y 3D; `heatmap` y `surface` pueden
@@ -156,6 +162,10 @@ x = Axis.log(0.1, 1000, base=10).ticks(10).label("frequency")
 y = Axis.linear(0, 1).label("relative value", position="top")
 guide = Guide.colorbar(title="temperature")
 ```
+
+`Guide.legend(title=...)` sobre un `color=Field` categórico muestra el título
+y, debajo, una entrada por categoría con una muestra de su color, en el orden
+de `Scale.category` o, si no se indica, en el de aparición en los datos.
 
 == Gráfico materializado y transiciones
 

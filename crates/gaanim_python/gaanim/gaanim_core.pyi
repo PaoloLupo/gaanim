@@ -2157,7 +2157,12 @@ class Guide:
     """Configuration for a legend or continuous colorbar."""
     @staticmethod
     def legend(*, title: Optional[str] = None) -> Guide:
-        """Create a discrete legend guide."""
+        """Create a discrete legend guide.
+
+        On a categorical ``color`` field the legend lists every category with
+        a swatch of its color, in ``Scale.category`` order (or first
+        appearance in the data) below the optional title.
+        """
         ...
     @staticmethod
     def colorbar(*, title: Optional[str] = None) -> Guide:

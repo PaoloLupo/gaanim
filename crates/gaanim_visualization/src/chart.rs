@@ -85,6 +85,9 @@ pub enum ScaleKind {
     Category,
 }
 
+/// Source rows that share one resolved color, in drawing order.
+pub type ColorRowGroups = Vec<(Color, Vec<usize>)>;
+
 /// Point radius, in scene units, of a chart without a `size` encoding.
 pub const DEFAULT_POINT_RADIUS: f64 = 0.06;
 /// Radii, in scene units, that a numeric `size` field maps its domain onto.
@@ -651,6 +654,58 @@ impl ChartSpec {
                 Some(crate::DataValue::Missing) | None => Ok(None),
             },
         }
+    }
+
+    /// Whether rows can differ in color or opacity: a `Field` encodes one of
+    /// those channels. Constant colors and opacities are uniform.
+    pub fn has_row_styles(&self) -> bool {
+        [Channel::Color, Channel::Opacity]
+            .iter()
+            .any(|channel| matches!(self.encodings.get(channel), Some(Encoding::Field { .. })))
+    }
+
+    /// The categories of a text `color` field, in legend order, with the
+    /// color each one is drawn with. `None` when color is not categorical.
+    pub fn color_categories(&self) -> Result<Option<Vec<(String, Color)>>, ChartError> {
+        let Some(Encoding::Field { column, scale }) = self.encodings.get(&Channel::Color) else {
+            return Ok(None);
+        };
+        if !matches!(self.data.column(column)?, Column::Text(_)) {
+            return Ok(None);
+        }
+        let categories = categorical_values(&self.data, column, scale.as_ref())?;
+        let colors = color_palette(scale.as_ref());
+        Ok(Some(
+            categories
+                .into_iter()
+                .enumerate()
+                .map(|(index, category)| (category, colors[index % colors.len()]))
+                .collect(),
+        ))
+    }
+
+    /// Row indices grouped by the category of a text `color` field, in
+    /// legend order. Rows without a category are left out.
+    pub fn rows_by_color_category(&self) -> Result<Option<ColorRowGroups>, ChartError> {
+        let Some(categories) = self.color_categories()? else {
+            return Ok(None);
+        };
+        let Some(Encoding::Field { column, .. }) = self.encodings.get(&Channel::Color) else {
+            return Ok(None);
+        };
+        let mut groups: Vec<(Color, Vec<usize>)> = categories
+            .iter()
+            .map(|(_, color)| (*color, Vec::new()))
+            .collect();
+        for row in 0..self.data.len() {
+            if let Some(crate::DataValue::Text(value)) = self.data.value(row, column)?
+                && let Some(index) = categories.iter().position(|(name, _)| *name == value)
+            {
+                groups[index].1.push(row);
+            }
+        }
+        groups.retain(|(_, rows)| !rows.is_empty());
+        Ok(Some(groups))
     }
 
     fn label_value(&self, row: usize) -> Result<Option<String>, ChartError> {
