@@ -3864,10 +3864,11 @@ mod tests {
                     )>()
                     .single(&world)
                     .unwrap();
-                let (digits, _) = gaanim_text::shaper::compile_text_to_path(
+                let digits = gaanim_text::typst_compiler::compile_typst_text_to_path(
                     world.resource::<gaanim_text::font::FontRegistry>(),
                     "0123456789",
                     rolling.options.font_family.as_deref().unwrap(),
+                    rolling.options.weight,
                     1.0,
                 )
                 .unwrap();

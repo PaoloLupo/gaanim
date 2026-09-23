@@ -857,6 +857,49 @@ pub fn measure_typst(
     .map(|cached| cached.parent_bounds)
 }
 
+/// Shape plain text into one Y-up outline with its baseline at `y = 0`.
+///
+/// Fonts resolve exactly as for scene text: by the family name stored in the
+/// font (including theme-registered and variable fonts) and by `weight`.
+pub fn compile_typst_text_to_path(
+    font_registry: &FontRegistry,
+    text: &str,
+    font_family: &str,
+    weight: Option<u16>,
+    font_size: f64,
+) -> Result<kurbo::BezPath, Vec<String>> {
+    let escape = |value: &str| value.replace('\\', "\\\\").replace('"', "\\\"");
+    let weight = weight
+        .map(|weight| format!(", weight: {weight}"))
+        .unwrap_or_default();
+    let source = format!(
+        "#set page(width: auto, height: auto, margin: 0pt)\n\
+         #set text(font: \"{}\", size: {font_size}pt{weight})\n\
+         #\"{}\"",
+        escape(font_family),
+        escape(text),
+    );
+    let cached = cached_typst_hierarchy(
+        font_registry,
+        &source,
+        false,
+        None,
+        None,
+        None,
+        None,
+        &None,
+        &StrokeBrush::transparent(),
+    )?;
+    let mut path = kurbo::BezPath::new();
+    for child in &cached.children {
+        let offset = child.transform.translation;
+        let placed = kurbo::Affine::translate((offset.x, offset.y - cached.metrics.first_baseline))
+            * &child.path;
+        path.extend(placed.elements().iter().copied());
+    }
+    Ok(path)
+}
+
 fn spawn_cached_typst_hierarchy(
     commands: &mut Commands,
     source: &str,
