@@ -27,7 +27,7 @@ PRIMARY = BLUE
 ACCENT = YELLOW
 MUTED = Color(148, 163, 184)
 
-scene = Scene(frame=(16, 9), background=BACKGROUND, margin=48)
+scene = Scene(frame=(16, 9), background=BACKGROUND, margin=0.6)
 ```
 
 Los nombres dicen para qué sirve cada color. Si la identidad visual cambia,
@@ -40,9 +40,9 @@ una trayectoria, así que no necesita relleno. El punto necesita contraste y el
 radio debe ser secundario:
 
 ```python
-orbit = scene.geometry.circle(120).stroke(PRIMARY, 4).no_fill().move_to(-320, 0)
-point = scene.geometry.dot(10).fill(ACCENT).move_to(-200, 0)
-radius = scene.geometry.line(-320, 0, -200, 0).stroke(MUTED, 2)
+orbit = scene.geometry.circle(1.5).stroke(PRIMARY, 0.05).no_fill().move_to(-4, 0)
+point = scene.geometry.dot(0.125).fill(ACCENT).move_to(-2.5, 0)
+radius = scene.geometry.line(-4, 0, -2.5, 0).stroke(MUTED, 0.025)
 ```
 
 El orden de creación también influye en la lectura cuando los objetos se
@@ -56,10 +56,10 @@ tema:
 
 ```python
 title = scene.text("Movimiento circular", role="title")
-title.fill(WHITE).move_to(0, 260)
+title.fill(WHITE).move_to(0, 3.25)
 
 caption = scene.text("Un punto, un radio constante", role="subtitle")
-caption.fill(MUTED).move_to(0, 215)
+caption.fill(MUTED).move_to(0, 2.69)
 ```
 
 == Agrupar sin perder las piezas
@@ -83,12 +83,12 @@ código. Agrupa objetos que el espectador debería reconocer como una unidad.
 Hasta aquí, la parte central de `main.py` se lee así:
 
 ```python
-title = scene.text("Movimiento circular", role="title").fill(WHITE).move_to(0, 260)
-caption = scene.text("Un punto, un radio constante", role="subtitle").fill(MUTED).move_to(0, 215)
+title = scene.text("Movimiento circular", role="title").fill(WHITE).move_to(0, 3.25)
+caption = scene.text("Un punto, un radio constante", role="subtitle").fill(MUTED).move_to(0, 2.69)
 
-orbit = scene.geometry.circle(120).stroke(PRIMARY, 4).no_fill().move_to(-320, 0)
-radius = scene.geometry.line(-320, 0, -200, 0).stroke(MUTED, 2)
-point = scene.geometry.dot(10).fill(ACCENT).move_to(-200, 0)
+orbit = scene.geometry.circle(1.5).stroke(PRIMARY, 0.05).no_fill().move_to(-4, 0)
+radius = scene.geometry.line(-4, 0, -2.5, 0).stroke(MUTED, 0.025)
+point = scene.geometry.dot(0.125).fill(ACCENT).move_to(-2.5, 0)
 system = scene.geometry.group([orbit, radius, point])
 
 scene.render()

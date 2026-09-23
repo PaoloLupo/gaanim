@@ -38,10 +38,10 @@ relación entre ellos. Una columna expresa que forman un panel:
 ```python
 panel = scene.layout.column(
     [formula, explanation],
-    gap=18,
+    gap=0.225,
     align="start",
 )
-panel.move_to(280, 150)
+panel.move_to(3.5, 1.875)
 ```
 
 Layout posee la posición de sus hijos. Después de crear la columna no llames

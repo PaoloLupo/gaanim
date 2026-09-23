@@ -46,7 +46,7 @@ from gaanim import Easing, BLACK, BLUE, GOLD, Scene
 
 scene = Scene(frame=(16, 9), background=BLACK)
 
-circle = scene.geometry.circle(80).fill(BLUE).stroke(GOLD, 4)
+circle = scene.geometry.circle(1).fill(BLUE).stroke(GOLD, 0.05)
 text = scene.text("Hello World", role="title")
 
 scene.play([
@@ -56,7 +56,7 @@ scene.play([
 
 scene.wait(1.0)
 scene.play([
-    circle.animate.shift_by(200, 0).duration(1.5).easing(Easing.SMOOTH),
+    circle.animate.shift_by(2.5, 0).duration(1.5).easing(Easing.SMOOTH),
     text.animate.fade_out().duration(0.5),
 ])
 

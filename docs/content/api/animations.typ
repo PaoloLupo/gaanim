@@ -17,8 +17,8 @@ cursor actual sin avanzar el tiempo; la misma llamada bajo la propiedad
 `Scene.play([...])`.
 
 ```python
-dot.move_to(100, 80).fill(BLUE)
-scene.play([dot.animate.move_to(400, 80).fill(RED)])
+dot.move_to(1.25, 1).fill(BLUE)
+scene.play([dot.animate.move_to(5, 1).fill(RED)])
 ```
 
 “Inmediato” no significa modificar globalmente un objeto ya compilado: registra
@@ -35,10 +35,10 @@ se muestrean simultáneamente desde la línea temporal:
 ```python
 scene.play([
   circle.animate
-    .move_to(160, 40)
+    .move_to(2, 0.5)
     .scale_by(1.4)
     .fill(BLUE)
-    .stroke(WHITE, 5)
+    .stroke(WHITE, 0.06)
     .opacity(0.8)
     .duration(1.5)
     .easing(Easing.SMOOTH)
@@ -193,8 +193,8 @@ raises `TypeError` with guidance to use `create()`.
 # show-code: true
 from gaanim import Easing, BLUE, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-circle = scene.geometry.circle(40).fill(BLUE).move_to(-80, 0)
-scene.play([circle.animate.shift_by(160, 0).duration(1.0).easing(Easing.spring(stiffness=90, damping=12))])
+circle = scene.geometry.circle(0.5).fill(BLUE).move_to(-1, 0)
+scene.play([circle.animate.shift_by(2, 0).duration(1.0).easing(Easing.spring(stiffness=90, damping=12))])
 # output: preview.webp
 scene.render()
 ```
@@ -212,8 +212,8 @@ scene.render()
 # show-code: true
 from gaanim import Easing, Anchor, BLUE, WHITE, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-rect = scene.geometry.rect(100, 60).fill(BLUE).stroke(WHITE, 2).move_to(-120, 0)
-scene.play([rect.animate.move_to(80, 0, anchor=Anchor.TOP_RIGHT).duration(0.9).easing(Easing.SMOOTH)])
+rect = scene.geometry.rect(1.25, 0.75).fill(BLUE).stroke(WHITE, 0.025).move_to(-1.5, 0)
+scene.play([rect.animate.move_to(1, 0, anchor=Anchor.TOP_RIGHT).duration(0.9).easing(Easing.SMOOTH)])
 # output: preview.webp
 scene.render()
 ```
@@ -244,8 +244,8 @@ scene.play([frame.retarget(equation["result"]).duration(0.9).easing(Easing.sprin
 # show-code: true
 from gaanim import BLUE, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-label = scene.text("Glide").move_to(-100, 0)
-scene.play([label.animate.move_to(80, 0).duration(1.1)])
+label = scene.text("Glide").move_to(-1.25, 0)
+scene.play([label.animate.move_to(1, 0).duration(1.1)])
 # output: preview.webp
 scene.render()
 ```
@@ -263,7 +263,7 @@ scene.render()
 # show-code: true
 from gaanim import Easing, BLUE, WHITE, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-icon = scene.geometry.circle(36).fill(BLUE).stroke(WHITE, 2).move_to(0, 0)
+icon = scene.geometry.circle(0.45).fill(BLUE).stroke(WHITE, 0.025).move_to(0, 0)
 scene.play([icon.animate.scale_by(1.8).duration(0.7).easing(Easing.spring(stiffness=90, damping=12))])
 # output: preview.webp
 scene.render()
@@ -283,7 +283,7 @@ scene.render()
 from gaanim import BLUE, Scene
 from math import pi
 scene = Scene(frame=(16, 9), background="#0f172a")
-arm = scene.geometry.rect(80, 14).fill(BLUE).move_to(40, 0).with_pivot(0, 0)
+arm = scene.geometry.rect(1, 0.175).fill(BLUE).move_to(0.5, 0).with_pivot(0, 0)
 scene.play([arm.animate.rotate_by(pi/2).duration(0.9)])
 # output: preview.webp
 scene.render()
@@ -302,8 +302,8 @@ scene.render()
 # show-code: true
 from gaanim import Easing, BLACK, BLUE, WHITE, Scene
 scene = Scene(frame=(16, 9), background=BLACK)
-circle = scene.geometry.circle(60).stroke(BLUE, 3).no_fill().move_to(0, 0)
-dot = scene.geometry.dot(8).fill(WHITE).move_to(60, 0)
+circle = scene.geometry.circle(0.75).stroke(BLUE, 0.04).no_fill().move_to(0, 0)
+dot = scene.geometry.dot(0.1).fill(WHITE).move_to(0.75, 0)
 scene.play([dot.animate.move_along(circle).duration(2.0).easing(Easing.LINEAR)])
 # output: preview.webp
 scene.render()
@@ -314,7 +314,7 @@ scene.render()
   name: "Anim.pivot / about_point",
   kind: "method",
   signature: ".pivot(x: float, y: float) -> Anim / .about_point(x: float, y: float) -> Anim",
-  params: ((name: "x", type: "float", default: none, desc: [Pivot x in scene pixels.]), (name: "y", type: "float", default: none, desc: [Pivot y in scene pixels.]),),
+  params: ((name: "x", type: "float", default: none, desc: [Pivot x in scene units.]), (name: "y", type: "float", default: none, desc: [Pivot y in scene units.]),),
   returns: (type: "Anim", desc: [Same Anim with orbital pivot.]),
   desc: [Only valid on `RotateBy` anims (`Drawable.rotate`). Replaces hinge with scene-space point; the engine builds an orbital `Arc` for translation plus a slerped `Rotation` (splits `>π`).],
 )[
@@ -322,7 +322,7 @@ scene.render()
 import math
 from gaanim import Easing, BLACK, WHITE, Scene
 scene = Scene(frame=(16, 9), background=BLACK)
-dot = scene.geometry.dot(10).fill(WHITE).move_to(60, 0)
+dot = scene.geometry.dot(0.125).fill(WHITE).move_to(0.75, 0)
 scene.play([dot.pivot(0, 0).animate.rotate_by(math.tau).duration(1.5).easing(Easing.LINEAR)])
 # output: preview.webp
 scene.render()
@@ -343,8 +343,8 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-title = scene.text("Fade").fill(WHITE).move_to(0, 40)
-box = scene.geometry.rect(120, 50).fill(BLUE).move_to(0, -40)
+title = scene.text("Fade").fill(WHITE).move_to(0, 0.5)
+box = scene.geometry.rect(1.5, 0.625).fill(BLUE).move_to(0, -0.5)
 scene.play([title.animate.fade_in().duration(0.5)])
 scene.play([box.animate.opacity(0.35).duration(0.6)])
 scene.play([title.animate.fade_out().duration(0.4)])
@@ -356,8 +356,8 @@ scene.render()
 #api-entry(
   name: "Drawable.fade_in_from",
   kind: "method",
-  signature: ".animate.fade_in_from(direction: Direction, distance=48) -> Anim",
-  params: ((name: "direction", type: "Direction", default: none, desc: [UP/DOWN/LEFT/RIGHT]), (name: "distance", type: "float", default: "48.0", desc: [Offset before entrance.]),),
+  signature: ".animate.fade_in_from(direction: Direction, distance=0.48) -> Anim",
+  params: ((name: "direction", type: "Direction", default: none, desc: [UP/DOWN/LEFT/RIGHT]), (name: "distance", type: "float", default: "0.48", desc: [Offset before entrance.]),),
   returns: (type: "Anim", desc: [Entrance from offset.]),
   desc: [Starts invisible at the requested offset, then fades and moves into place.],
 )[
@@ -366,7 +366,7 @@ scene.render()
 from gaanim import Direction, WHITE, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
 caption = scene.text("Enters from below").fill(WHITE).move_to(0, 0)
-scene.play([caption.animate.fade_in_from(Direction.DOWN, distance=48).duration(0.8)])
+scene.play([caption.animate.fade_in_from(Direction.DOWN, distance=0.6).duration(0.8)])
 # output: preview.webp
 scene.render()
 ```
@@ -475,7 +475,7 @@ scene.render()
 # show-code: true
 from gaanim import Easing, GOLD, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-star = scene.geometry.star(5, 55, 26).fill(GOLD).move_to(0, 0)
+star = scene.geometry.star(5, 0.69, 0.325).fill(GOLD).move_to(0, 0)
 scene.play([star.animate.spin_in_from_nothing().duration(0.9).easing(Easing.spring(stiffness=90, damping=12))])
 # output: preview.webp
 scene.render()
@@ -494,7 +494,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, WHITE, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-rect = scene.geometry.rect(140, 80).fill(BLUE).stroke(WHITE, 3).move_to(0, 0)
+rect = scene.geometry.rect(1.75, 1).fill(BLUE).stroke(WHITE, 0.04).move_to(0, 0)
 scene.play([rect.animate.draw_border_then_fill().duration(1.3)])
 # output: preview.webp
 scene.render()
@@ -513,8 +513,8 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, WHITE, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-key = scene.geometry.circle(32).fill(BLUE).stroke(WHITE, 2).move_to(-50, 0)
-wrong = scene.geometry.cross(28).stroke(WHITE, 3).move_to(60, 0)
+key = scene.geometry.circle(0.4).fill(BLUE).stroke(WHITE, 0.025).move_to(-0.625, 0)
+wrong = scene.geometry.cross(0.35).stroke(WHITE, 0.04).move_to(0.75, 0)
 scene.play([key.animate.indicate().duration(0.7)])
 scene.play([wrong.animate.wiggle().duration(0.5)])
 # output: preview.webp
@@ -619,8 +619,8 @@ scene.play([energy["mass"].animate.copy_to(momentum["mass"]).duration(0.8)])
 # show-code: true
 from gaanim import Easing, BLUE, GOLD, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-circle = scene.geometry.circle(42).fill(BLUE).move_to(-90, 0)
-target = scene.geometry.rect(90, 60).fill(GOLD).move_to(80, 0)
+circle = scene.geometry.circle(0.525).fill(BLUE).move_to(-1.125, 0)
+target = scene.geometry.rect(1.125, 0.75).fill(GOLD).move_to(1, 0)
 scene.play([circle.animate.create().duration(0.6)])
 scene.play([circle.animate.transform_to(target).duration(1.0).easing(Easing.spring(stiffness=90, damping=12))])
 # output: preview.webp
@@ -643,8 +643,8 @@ scene.render()
 ```python
 from gaanim import BLACK, GOLD, WHITE, Scene
 scene = Scene(frame=(16, 9), background=BLACK)
-e1 = scene.text("$E = m c$").fill(WHITE).move_to(0, 80).scale_to(1.3)
-e2 = scene.text("$p = m v$").fill(GOLD).move_to(0, 80).scale_to(1.3)
+e1 = scene.text("$E = m c$").fill(WHITE).move_to(0, 1).scale_to(1.3)
+e2 = scene.text("$p = m v$").fill(GOLD).move_to(0, 1).scale_to(1.3)
 scene.play([e1.animate.transform_to(e2).duration(1.6)])
 ```
 ]
@@ -668,7 +668,7 @@ scene.play([e1.animate.transform_to(e2).duration(1.6)])
 from gaanim import BLACK, GOLD, Scene
 
 scene = Scene(frame=(16, 9), background=BLACK)
-ball = scene.geometry.dot(12).fill(GOLD).move_to(0, 90)
+ball = scene.geometry.dot(0.15).fill(GOLD).move_to(0, 1.125)
 state = {"velocity": 0.0}
 
 def reset():
@@ -676,10 +676,10 @@ def reset():
 
 def step(pos, dt, elapsed):
     x, y, z = pos
-    state["velocity"] -= 240.0 * dt
+    state["velocity"] -= 3.0 * dt
     y += state["velocity"] * dt
-    if y < -90:
-        y = -90
+    if y < -1.125:
+        y = -1.125
         state["velocity"] *= -0.8
     return (x, y, z)
 
@@ -698,9 +698,9 @@ Their endpoints may continue moving during the reveal because regeneration
 updates the full path source and reapplies the current draw progress:
 
 ```python
-rod = scene.geometry.tracking_line(anchor, mass).no_fill().stroke(WHITE, 4)
-scene.play([rod.animate.create().duration(0.8), mass.animate.shift_by(120, 0).duration(0.8)])
-scene.play([rod.animate.write().duration(0.8), mass.animate.shift_by(-80, 40).duration(0.8)])
+rod = scene.geometry.tracking_line(anchor, mass).no_fill().stroke(WHITE, 0.05)
+scene.play([rod.animate.create().duration(0.8), mass.animate.shift_by(1.5, 0).duration(0.8)])
+scene.play([rod.animate.write().duration(0.8), mass.animate.shift_by(-1, 0.5).duration(0.8)])
 ```
 
 == Series muestreadas nativas
@@ -723,9 +723,9 @@ from gaanim import CYAN, Scene
 
 scene = Scene()
 times = [i * 0.02 for i in range(len(accel))]
-building = scene.geometry.rounded_rect(160, 360, 10).fill(CYAN).move_to(-200, -120)
+building = scene.geometry.rounded_rect(2, 4.5, 0.125).fill(CYAN).move_to(-2.5, -1.5)
 # El edificio oscila con el registro medido; el seek es determinista.
-building.drive_from_samples(times, accel, "x", scale=520.0)
+building.drive_from_samples(times, accel, "x", scale=6.5)
 scene.play([building.animate.grow_from_center()])
 scene.wait(4.0)
 ```
@@ -787,7 +787,7 @@ Configure any `Anim` fluently before passing to `play`:
 from gaanim import Easing, EasingCurve
 
 scene.play([
-    circle.animate.shift_by(240, 0).duration(1.0).easing(Easing.LINEAR),
+    circle.animate.shift_by(3, 0).duration(1.0).easing(Easing.LINEAR),
     label.animate.opacity(0.5).duration(1.0).easing(Easing.SMOOTH),
     icon.animate.rotate_by(1.5).duration(0.8).easing(Easing.spring(stiffness=90, damping=12)),
 ])
@@ -823,7 +823,7 @@ nombres de easing ni existe un fallback silencioso a `SMOOTH`.
 # show-code: true
 from gaanim import BLUE, WHITE, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-g = scene.geometry.group([scene.geometry.circle(18).fill(BLUE).move_to(-50,0), scene.geometry.circle(18).fill(BLUE).move_to(0,0), scene.geometry.circle(18).fill(BLUE).move_to(50,0)])
+g = scene.geometry.group([scene.geometry.circle(0.225).fill(BLUE).move_to(-0.625,0), scene.geometry.circle(0.225).fill(BLUE).move_to(0,0), scene.geometry.circle(0.225).fill(BLUE).move_to(0.625,0)])
 scene.play([g.animate.create().duration(1.0).lag_ratio(0.25)])
 # output: preview.webp
 scene.render()
@@ -842,9 +842,9 @@ scene.render()
 # show-code: true
 from gaanim import Easing, BLUE, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-dot = scene.geometry.dot(10).fill(BLUE).move_to(-110, 0)
-scene.play([dot.animate.shift_by(220, 0).duration(0.9).easing(Easing.spring(stiffness=90, damping=12))])
-scene.play([dot.animate.shift_by(-220, 0).duration(0.9).easing(Easing.SMOOTH)])
+dot = scene.geometry.dot(0.125).fill(BLUE).move_to(-1.375, 0)
+scene.play([dot.animate.shift_by(2.75, 0).duration(0.9).easing(Easing.spring(stiffness=90, damping=12))])
+scene.play([dot.animate.shift_by(-2.75, 0).duration(0.9).easing(Easing.SMOOTH)])
 # output: preview.webp
 scene.render()
 ```
@@ -862,7 +862,7 @@ scene.render()
 # show-code: true
 from gaanim import WHITE, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-path = scene.geometry.path([(-120, 0), (0, 40), (120, 0)]).no_fill().stroke(WHITE, 3)
+path = scene.geometry.path([(-1.5, 0), (0, 0.5), (1.5, 0)]).no_fill().stroke(WHITE, 0.04)
 scene.play([path.animate.write().with_pen_tip().duration(1.4)])
 # output: preview.webp
 scene.render()

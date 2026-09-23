@@ -24,7 +24,7 @@ Después de crear `point`, registra el movimiento:
 
 ```python
 point.add_updater(
-    Updater.orbit(cx=-320, cy=0, radius=120, speed=1.2)
+    Updater.orbit(cx=-4, cy=0, radius=1.5, speed=1.2)
 )
 ```
 
@@ -37,8 +37,8 @@ La línea estática del capítulo anterior ya no sirve: su extremo se quedaría 
 la posición inicial. Sustituye su creación por:
 
 ```python
-radius = scene.geometry.tracking_line((-320, 0), point)
-radius.stroke(MUTED, 2).no_fill()
+radius = scene.geometry.tracking_line((-4, 0), point)
+radius.stroke(MUTED, 0.025).no_fill()
 ```
 
 `tracking_line` resuelve sus extremos en el mismo frame. El origen permanece

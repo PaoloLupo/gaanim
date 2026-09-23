@@ -18,7 +18,7 @@ desarmar el layout.
 #api-entry(
   name: "Visualization.matrix",
   kind: "factory",
-  signature: "matrix(data, *, row_gap=24, column_gap=24, delimiter_gap=12, delimiters=\"brackets\", delimiter_size=None, delimiter_weight=300, row_labels=None, column_labels=None, label_mode=\"math\", cell_mode=\"math\", entry_style=None, label_style=None, cell_factory=None, numeric_format=\"g\") -> Matrix",
+  signature: "matrix(data, *, row_gap=0.24, column_gap=0.24, delimiter_gap=0.12, delimiters=\"brackets\", delimiter_size=None, delimiter_weight=300, row_labels=None, column_labels=None, label_mode=\"math\", cell_mode=\"math\", entry_style=None, label_style=None, cell_factory=None, numeric_format=\"g\") -> Matrix",
   params: (
     (name: "data", type: "Sequence[Sequence[value]] | sympy.MatrixBase", default: none, desc: [Datos rectangulares no vacíos.]),
     (name: "delimiters", type: "str", default: "\"brackets\"", desc: [brackets, parentheses, braces, bars, double_bars o none.]),
@@ -74,6 +74,6 @@ scene = Scene(frame=(16, 9))
 a = scene.viz.matrix([[1, 2], [3, 4]])
 b = scene.viz.matrix([[2, 0], [1, 2]])
 derivation = a.matmul(b)
-derivation.result.move_to(180, 0)
+derivation.result.move_to(2.25, 0)
 scene.play(derivation.animations().duration(0.7))
 ```

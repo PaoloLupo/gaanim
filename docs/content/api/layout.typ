@@ -33,14 +33,14 @@ page = scene.layout.column(
         scene.layout.row([
             scene.layout.item(copy, grow=2),
             scene.layout.item(diagram, grow=3, fit="contain"),
-        ], gap=40, align="center"),
+        ], gap=0.5, align="center"),
         footer,
     ],
     within="safe",
     width="fill",
     height="fill",
-    padding=48,
-    gap=32,
+    padding=0.6,
+    gap=0.4,
     align="stretch",
     justify="between",
 )
@@ -54,9 +54,9 @@ también admite `between`, `around` y `evenly`.
 Los constructores públicos son:
 
 ```python
-scene.layout.row(children, *, gap=24, padding=0, width="hug", height="hug",
+scene.layout.row(children, *, gap=0.3, padding=0, width="hug", height="hug",
           align="center", justify="start", wrap=False, within=None)
-scene.layout.column(children, *, gap=24, padding=0, width="hug", height="hug",
+scene.layout.column(children, *, gap=0.3, padding=0, width="hug", height="hug",
              align="start", justify="start", wrap=False, within=None)
 scene.layout.grid(children, *, rows=1, columns=1, gap=0, row_gap=None,
            column_gap=None, padding=0, width="hug", height="hug",
@@ -117,9 +117,9 @@ opcional pertenece al espacio local de la referencia.
 ```python
 from gaanim import Anchor
 
-card = scene.geometry.rect(240, 120).move_to(80, 20).rotate_to(0.15)
+card = scene.geometry.rect(3, 1.5).move_to(1, 0.25).rotate_to(0.15)
 label = scene.text("Detalle").move_to(
-    card.anchor_point(Anchor.TOP_RIGHT, offset=(-12, -12))
+    card.anchor_point(Anchor.TOP_RIGHT, offset=(-0.15, -0.15))
 )
 ```
 
@@ -171,7 +171,7 @@ vuelve a medir con el ancho de la tarjeta que lo contiene.
 ```python
 from gaanim import BLUE, GOLD, WHITE, Scene, TextFlow
 
-scene = Scene(frame=(16, 9), background="#0b1020", margin=48)
+scene = Scene(frame=(16, 9), background="#0b1020", margin=0.6)
 
 copy = scene.text(
     "El mismo árbol puede componer una diapositiva, un panel o un video vertical.",
@@ -182,7 +182,7 @@ copy = scene.text(
 
 card = scene.layout.stack(
     [
-        scene.layout.item(scene.geometry.rounded_rect(360, 220, 18).fill(BLUE), fit="stretch"),
+        scene.layout.item(scene.geometry.rounded_rect(4.5, 2.75, 0.225).fill(BLUE), fit="stretch"),
         scene.layout.column(
             [
                 scene.text("Contenido medido", role="heading", color=GOLD),
@@ -190,24 +190,24 @@ card = scene.layout.stack(
             ],
             width="fill",
             height="fill",
-            padding=28,
-            gap=18,
+            padding=0.35,
+            gap=0.225,
             align="stretch",
             justify="center",
         ),
     ],
-    width=360,
-    height=220,
+    width=4.5,
+    height=2.75,
     align="stretch",
 )
 
 body = scene.layout.row(
     [
         scene.layout.item(card, grow=2),
-        scene.layout.item(scene.geometry.circle(96).fill(GOLD), grow=1, align="center"),
+        scene.layout.item(scene.geometry.circle(1.2).fill(GOLD), grow=1, align="center"),
     ],
     width="fill",
-    gap=40,
+    gap=0.5,
     align="center",
 )
 
@@ -220,8 +220,8 @@ page = scene.layout.column(
     within="safe",
     width="fill",
     height="fill",
-    padding=(24, 40),
-    gap=32,
+    padding=(0.3, 0.5),
+    gap=0.4,
     align="stretch",
     justify="between",
 )
@@ -244,7 +244,7 @@ sobrante entre hermanos. Demasiados `fill` anidados suelen indicar que no está
 claro qué contenedor debe controlar el tamaño.
 
 ```python
-badge = scene.layout.row([icon, label], width="hug", padding=(8, 14), gap=8)
+badge = scene.layout.row([icon, label], width="hug", padding=(0.1, 0.175), gap=0.1)
 
 workspace = scene.layout.row(
     [
@@ -254,15 +254,15 @@ workspace = scene.layout.row(
     ],
     width="fill",
     height="fill",
-    padding=(24, 40),       # vertical, horizontal
-    gap=32,
+    padding=(0.3, 0.5),       # vertical, horizontal
+    gap=0.4,
     align="stretch",
 )
 
 workspace.configure(
-    min_width=640,
-    max_width=1180,
-    min_height=360,
+    min_width=8,
+    max_width=14.75,
+    min_height=4.5,
     aspect_ratio=16 / 9,
 )
 ```
@@ -298,7 +298,7 @@ steps = scene.layout.column(
     justify="evenly",
 )
 
-chips = scene.layout.row(tags, width=620, gap=12, wrap=True, align="center")
+chips = scene.layout.row(tags, width=7.75, gap=0.15, wrap=True, align="center")
 ```
 
 Con `wrap=True`, una fila comienza otra fila cuando el siguiente hijo supera el
@@ -331,7 +331,7 @@ page.configure_item(
     grow=2,
     shrink=1,
     align="stretch",
-    offset=(12, 0),
+    offset=(0.15, 0),
     fit="contain",
 )
 ```
@@ -387,13 +387,13 @@ cards = scene.layout.grid(
     [hero, scene.layout.item(chart, column_span=2), notes],
     columns=[240, "1fr", "2fr"],
     rows=["auto", "1fr"],
-    gap=24,
+    gap=0.3,
     width="fill",
 )
 
 overlay = scene.layout.stack([
     scene.layout.item(photo, fit="cover"),
-    scene.layout.item(caption, absolute=True, offset=(0, -180)),
+    scene.layout.item(caption, absolute=True, offset=(0, -2.25)),
 ], within="frame", width="fill", height="fill")
 ```
 
@@ -419,8 +419,8 @@ transforman el árbol completo. La restricción anterior corresponde únicamente
 a los hijos cuya traslación pertenece al contenedor.
 
 ```python
-panel = scene.layout.column([formula, explanation], gap=50, align="center")
-panel.move_to(400, 200)
+panel = scene.layout.column([formula, explanation], gap=0.625, align="center")
+panel.move_to(5, 2.5)
 ```
 
 Este error no es una limitación accidental: protege la búsqueda temporal. Si
@@ -431,10 +431,10 @@ tiempo podría resolver resultados diferentes según el orden de evaluación.
 page.add(extra, at=1)
 page.replace(old, new)
 page.detach(title)
-scene.play([title.animate.move_to(0, 200)])
-page.configure(gap=40, padding=56)
-page.configure(min_width=480, max_width=960, aspect_ratio=16 / 9)
-page.configure_item(chart, grow=2, offset=(12, 0))
+scene.play([title.animate.move_to(0, 2.5)])
+page.configure(gap=0.5, padding=0.7)
+page.configure(min_width=6, max_width=12, aspect_ratio=16 / 9)
+page.configure_item(chart, grow=2, offset=(0.15, 0))
 page.reflow()
 ```
 
@@ -453,7 +453,7 @@ segmento nuevo:
 scene.segment("detail", Transition.cross_fade(0.4))
 scene.reuse(title)
 page.detach(title)
-scene.play([title.animate.move_to(0, 200).duration(0.35)])
+scene.play([title.animate.move_to(0, 2.5).duration(0.35)])
 ```
 
 El valor `animate` de estas operaciones, así como el de `configure`,
@@ -474,7 +474,7 @@ alinear una etiqueta externa con el centro de un gráfico.
 
 ```python
 relations = scene.layout.constrain(
-    (label.left == chart.right + 24).strong(),
+    (label.left == chart.right + 0.3).strong(),
     label.center_y == chart.center_y,
     (label.width <= page.width * 0.30).weak(),
 )
@@ -510,7 +510,7 @@ copy = scene.text(
 page = scene.layout.row([
     scene.layout.item(copy, grow=2),
     scene.layout.item(diagram, grow=3, fit="contain"),
-], width="fill", gap=32)
+], width="fill", gap=0.4)
 ```
 
 El adaptador `CompiledTextMeasure` reutiliza la medición intrínseca, la

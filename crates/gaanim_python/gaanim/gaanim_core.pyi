@@ -1550,12 +1550,12 @@ class TextStyle:
     ) -> None:
         """Create a reusable typography overlay.
 
-        Sizes and spacing use canvas/Typst points. Invalid non-positive sizes
+        Sizes and spacing use scene units. Invalid non-positive sizes
         raise ``ValueError``. Outer width, height, padding, fit, and growth are
         intentionally controlled by Layout v2.
 
         Example:
-            body = TextStyle(font="Inter", size=32, color=WHITE)
+            body = TextStyle(font="Inter", size=0.32, color=WHITE)
         """
         ...
 
@@ -2473,7 +2473,7 @@ class VectorField:
         min_length: float = 0.0,
         max_length: Optional[float] = None,
         length_scale: float = 1.0,
-        width: float = 2.0,
+        width: float = 0.02,
         tip_length: Optional[float] = None,
         tip_width: Optional[float] = None,
         color: Optional[ColorLike] = None,
@@ -3453,9 +3453,9 @@ class Typography:
         names, and invalid metrics raise ``ValueError``. Direct keywords
         override reusable style/flow objects. Responsive wrapping consumes the
         Layout-v2 width offer or the scene safe frame; outer box dimensions
-        remain Layout properties. Default theme sizes are 64 for title, 48 for
-        subtitle/heading, 40 for body, 32 for caption, 36 for label/code, and
-        44 for math.
+        remain Layout properties. Default theme sizes, in scene units, are
+        0.64 for title, 0.48 for subtitle/heading, 0.40 for body, 0.32 for
+        caption, 0.36 for label/code, and 0.44 for math.
 
         Example:
             formula = part("formula", "$E = ", part("mass", "m", color=GOLD), " c^2$")
@@ -4464,14 +4464,14 @@ class Mechanics:
         ``visual_scale`` converts physical units into scene units and must be
         positive. The optional readout reports the physical magnitude, and
         ``color`` also applies to that changing number. Its complete annotation
-        row defaults to 48 scene units.
+        row defaults to 0.48 scene units.
         """
         ...
     def force_from_components(self, origin: Endpoint, fx: _ReactiveScalar, fy: _ReactiveScalar, *, visual_scale: float = 1.0, label: Optional[str] = None, show_value: bool = False, format: str = ".1f", unit: str = "N", label_gap: float = 0.14, font_size: Optional[float] = None, color: Optional[Color] = None) -> ForceVector:
         """Create a reactive force from physical X/Y components relative to a moving origin.
 
         ``color`` applies to the force and the complete reactive readout, whose
-        terms default to 48 scene units.
+        terms default to 0.48 scene units.
         """
         ...
     def support_at(self, point: Endpoint, *, kind: Literal["fixed", "pin", "roller", "simple", "guided", "prismatic", "cable", "spring"] = "pin", direction: Optional[Direction] = None, size: float = 0.48, ground_length: float = 0.70, color: Optional[Color] = None) -> Support:
