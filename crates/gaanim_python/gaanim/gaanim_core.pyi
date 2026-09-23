@@ -2522,8 +2522,15 @@ class CoordinateSpaceAnimation:
         The plot area keeps its position; axes, grids, ticks and numbers are
         clipped to it, and axis titles stay in place. Numbers and
         ``scatter_data`` markers keep their size and proportions.
-        Axes, grids and plotted paths keep their stroke widths throughout the zoom. Returns an unscheduled
-        animation; once played, ``data_to_local`` follows the new window.
+        Axes, grids and plotted paths keep their stroke widths throughout the zoom.
+        Axes with automatic ticks (``Axis.linear(a, b)`` without ``.ticks``)
+        regenerate their grid lines, ticks and numbers for the target window:
+        the new step cross-fades in while the old one fades out, and a
+        zoom-out extends the axis and grid beyond the original domain. Axes
+        with a fixed ``.ticks(step)`` keep that step. Style layers before the
+        first ``view_to``: regenerated ticks copy the style they find then.
+        Returns an unscheduled animation; once played, ``data_to_local``
+        follows the new window.
         Raises ValueError for invalid domains or non-linear/time axes.
         """
         ...
@@ -2543,6 +2550,8 @@ class CoordinateSpace:
         ``scatter_data`` markers keep their size and proportions while
         following the view positions.
         Axes, grids and plotted paths retain their authored stroke widths.
+        Axes with automatic ticks regenerate their grid lines, ticks and
+        numbers for the new window; axes with a fixed ``.ticks(step)`` keep it.
         Raises ValueError unless domains are finite and increasing on linear/time axes.
         """
         ...

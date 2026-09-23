@@ -935,6 +935,10 @@ pub struct ObjectSpec {
     /// If true, this object should billboard (face camera) in 3D.
     pub billboard: bool,
     pub(crate) coordinate_view_role: Option<gaanim_scene::CoordinateViewRole>,
+    /// Unzoomed offset of a coordinate-view label from its data anchor.
+    pub(crate) coordinate_label_offset: Option<gaanim_core::glam::DVec2>,
+    /// Axis, generation and shared view anchors of a fading tick generation.
+    pub(crate) coordinate_tick_level: Option<(u8, u32, super::view_ticks::TickAnchors)>,
     /// Fill overrides applied to matching glyph fragments after textual objects
     /// have been compiled into their vector hierarchy.
     pub fragment_fills: Vec<(String, Color)>,
@@ -978,6 +982,8 @@ impl ObjectSpec {
             z_index: 0,
             billboard: false,
             coordinate_view_role: None,
+            coordinate_label_offset: None,
+            coordinate_tick_level: None,
             hud: false,
             exclude_from_parent_draw: false,
             fragment_fills: Vec::new(),

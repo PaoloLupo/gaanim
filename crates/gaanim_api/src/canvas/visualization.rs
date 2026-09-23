@@ -127,6 +127,8 @@ pub struct CoordinateSpaceHandle {
     pub(crate) view: DrawableHandle,
     pub(crate) map: CoordinateMap2D,
     pub(crate) layers: HashMap<SpaceLayer, DrawableHandle>,
+    /// Automatic tick regeneration for `SceneModel::coordinate_view_to`.
+    pub(crate) ticks: Option<Arc<Mutex<super::view_ticks::CartesianTicks>>>,
 }
 
 /// Typed 3D coordinate space with immediate data/local conversions.
@@ -1366,7 +1368,7 @@ impl SceneModel {
         Ok((marks, labels))
     }
 
-    fn visualization_path(
+    pub(crate) fn visualization_path(
         &mut self,
         path: BezPath,
         bounds: gaanim_math::Bounds3D,
@@ -1475,7 +1477,7 @@ impl SceneModel {
         )
     }
 
-    fn x_tick_label_extra_offset(&self, text: &str, scale: f64) -> f64 {
+    pub(crate) fn x_tick_label_extra_offset(&self, text: &str, scale: f64) -> f64 {
         const SINGLE_LINE_EXTRA: f64 = 0.04;
         let font_size =
             self.themed_text_config().roles[&gaanim_text::prelude::TextRole::Body].size * scale;
@@ -1532,16 +1534,66 @@ impl SceneModel {
         .filter(|path| !path.elements().is_empty())
         .fold(plot, |extent, path| extent.union(path.bounding_box()))
         .inflate(stroke_margin, stroke_margin);
-        let (mut half_width, mut half_height) = (0.0_f64, 0.0_f64);
-        let numbers_extent = geometry.numbers.iter().fold(plot, |extent, label| {
+        // Numbers are masked per axis: x numbers in a row under the window,
+        // y numbers in a column beside it, so regenerated ticks just outside
+        // the window stay hidden along either axis.
+        let x_number_count = space
+            .map
+            .x
+            .ticks_values(super::view_ticks::TICK_COUNT)
+            .unwrap_or_default()
+            .iter()
+            .filter(|tick| space.visibility.x_numbers && tick.major && !tick.label.is_empty())
+            .count();
+        let number_rect = |label: &gaanim_visualization::LabelGeometry| {
             let (width, height) = self.axis_text_size(&label.text, number_scale);
-            half_width = half_width.max(width * 0.5);
-            half_height = half_height.max(height * 0.5);
-            extent.union(Rect::from_center_size(
-                (label.position.x, label.position.y),
-                (width, height),
-            ))
-        });
+            Rect::from_center_size((label.position.x, label.position.y), (width, height))
+        };
+        let (x_numbers, y_numbers) = geometry.numbers.split_at(x_number_count);
+        let x_row = x_numbers.iter().map(number_rect).reduce(|a, b| a.union(b));
+        let y_column = y_numbers.iter().map(number_rect).reduce(|a, b| a.union(b));
+        // Regenerated labels such as "0.25" may be wider than the originals.
+        let (wide, tall) = self.axis_text_size("-0.000", number_scale);
+        let widest = x_numbers
+            .iter()
+            .map(|label| number_rect(label).width())
+            .reduce(f64::max)
+            .unwrap_or(wide);
+        let mut number_mask_path = BezPath::new();
+        if let Some(extent) = match (x_row, y_column) {
+            (Some(row), Some(column)) => Some(row.union(column)),
+            (row, column) => row.or(column),
+        } {
+            // Inside the window's columns every number shows; half a label of
+            // slack keeps the numbers at its edges whole.
+            let half = widest * 0.5 + stroke_margin;
+            number_mask_path.extend(
+                Rect::new(plot.x0 - half, extent.y0, plot.x1 + half, extent.y1).to_path(0.1),
+            );
+        }
+        if let Some(column) = y_column {
+            // Beside the window only y numbers show, never the x-number row,
+            // so x ticks just outside the window stay hidden.
+            let half = tall * 0.5 + stroke_margin;
+            let band = Rect::new(
+                column.x0.min(column.x1 - wide) - stroke_margin,
+                plot.y0 - half,
+                column.x1,
+                plot.y1 + half,
+            );
+            let pieces = match x_row {
+                Some(row) => vec![
+                    Rect::new(band.x0, band.y0.max(row.y1), band.x1, band.y1),
+                    Rect::new(band.x0, band.y0, band.x1, band.y1.min(row.y0)),
+                ],
+                None => vec![band],
+            };
+            for piece in pieces {
+                if piece.width() > 0.0 && piece.height() > 0.0 {
+                    number_mask_path.extend(piece.to_path(0.1));
+                }
+            }
+        }
         let cross = |extent: Rect, dx: f64, dy: f64| {
             let window = plot.inflate(dx, dy);
             let mut path = Rect::new(window.x0, extent.y0, window.x1, extent.y1)
@@ -1568,15 +1620,7 @@ impl SceneModel {
             cross(lines_extent, stroke_margin, stroke_margin),
             "CoordinateLineMask",
         );
-        let number_mask = mask(
-            self,
-            cross(
-                numbers_extent,
-                half_width + stroke_margin,
-                half_height + stroke_margin,
-            ),
-            "CoordinateNumberMask",
-        );
+        let number_mask = mask(self, number_mask_path, "CoordinateNumberMask");
         (line_mask, number_mask)
     }
 
@@ -2157,7 +2201,6 @@ impl SceneModel {
             .lock()
             .expect("grid spec poisoned")
             .theme_selector = Some("axes/grid".into());
-        layers.insert(SpaceLayer::MajorGrid, grid_major.clone());
         let grid_minor = self.visualization_path(
             geometry.minor_grid,
             geometry.bounds,
@@ -2170,7 +2213,6 @@ impl SceneModel {
             .lock()
             .expect("minor grid spec poisoned")
             .theme_selector = Some("axes/minor_grid".into());
-        layers.insert(SpaceLayer::MinorGrid, grid_minor.clone());
         let axis_color = space.map.x.style_value().color;
         let axes = self.themed_axis_path(
             geometry.axes,
@@ -2187,21 +2229,77 @@ impl SceneModel {
             space.map.x.style_value().tick_width,
             "CoordinateTicks",
         );
-        layers.insert(SpaceLayer::Ticks, ticks.clone());
 
-        let number_handles: Vec<DrawableHandle> = geometry
-            .numbers
-            .iter()
-            .map(|label| {
-                self.text(&label.text)
-                    .fill(label.color)
-                    .scale_to(number_scale)
-                    .move_to(label.position.x, label.position.y)
-            })
-            .collect();
-        let number_refs: Vec<&DrawableHandle> = number_handles.iter().collect();
+        // Numbers sit at an unzoomed offset from their tick on the axis, so a
+        // zoom along the other axis cannot push them off the plot.
+        let axis_origin = space
+            .map
+            .data_to_local(space.map.x.crossing_value(), space.map.y.crossing_value())
+            .unwrap_or(Point::ZERO);
+        let tick_numbers = |axis: &Axis, visible: bool, skip: Option<f64>| -> Vec<f64> {
+            axis.ticks_values(super::view_ticks::TICK_COUNT)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|tick| {
+                    visible
+                        && tick.major
+                        && !tick.label.is_empty()
+                        && skip.is_none_or(|value| tick.value != value)
+                })
+                .map(|tick| tick.value)
+                .collect()
+        };
+        let number_values = [
+            tick_numbers(&space.map.x, space.visibility.x_numbers, None),
+            tick_numbers(
+                &space.map.y,
+                space.visibility.y_numbers,
+                Some(space.map.x.crossing_value()),
+            ),
+        ];
+        let x_number_count = number_values[0].len();
+        let mut number_groups = [Vec::new(), Vec::new()];
+        for (index, label) in geometry.numbers.iter().enumerate() {
+            let handle = self
+                .text(&label.text)
+                .fill(label.color)
+                .scale_to(number_scale)
+                .move_to(label.position.x, label.position.y);
+            let (axis, offset) = if index < x_number_count {
+                (
+                    0,
+                    gaanim_core::glam::DVec2::new(0.0, label.position.y - axis_origin.y),
+                )
+            } else {
+                (
+                    1,
+                    gaanim_core::glam::DVec2::new(label.position.x - axis_origin.x, 0.0),
+                )
+            };
+            {
+                let mut spec = handle.spec.lock().expect("label spec poisoned");
+                spec.coordinate_view_role = Some(gaanim_scene::CoordinateViewRole::Label);
+                spec.coordinate_label_offset = Some(offset);
+            }
+            number_groups[axis].push(handle);
+        }
+        let number_refs: Vec<&DrawableHandle> = number_groups.iter().flatten().collect();
         let numbers = self.group(&number_refs);
         layers.insert(SpaceLayer::Numbers, numbers.clone());
+
+        // Grid and tick layers are groups of fading generations; generation 0
+        // keeps both axes in one path until `view_to` needs them apart.
+        let joint_wrappers = [
+            self.group_no_center(&[&grid_major]),
+            self.group_no_center(&[&grid_minor]),
+            self.group_no_center(&[&ticks]),
+        ];
+        let major_layer = self.group_no_center(&[&joint_wrappers[0]]);
+        let minor_layer = self.group_no_center(&[&joint_wrappers[1]]);
+        let ticks_layer = self.group_no_center(&[&joint_wrappers[2]]);
+        layers.insert(SpaceLayer::MajorGrid, major_layer.clone());
+        layers.insert(SpaceLayer::MinorGrid, minor_layer.clone());
+        layers.insert(SpaceLayer::Ticks, ticks_layer.clone());
 
         let mut label_handles = Vec::with_capacity(geometry.labels.len());
         let mut label_index = 0;
@@ -2255,13 +2353,13 @@ impl SceneModel {
 
         // Axis titles describe the plot frame rather than a data position, so
         // they stay outside the view that `view_to` rescales.
-        let members = [&grid_major, &grid_minor, &axes, &ticks, &numbers];
+        let members = [&major_layer, &minor_layer, &axes, &ticks_layer, &numbers];
         let view = self.group_no_center(&members);
         view.spec
             .lock()
             .expect("view spec poisoned")
             .coordinate_view_role = Some(gaanim_scene::CoordinateViewRole::View);
-        for label in number_handles.iter().chain(&label_handles) {
+        for label in &label_handles {
             label
                 .spec
                 .lock()
@@ -2270,12 +2368,25 @@ impl SceneModel {
         }
         let frame = self.group_no_center(&[&view, &labels]);
         let root = self.group_no_center(&[&frame, &line_mask, &number_mask]);
+        let ticks_state = super::view_ticks::CartesianTicks::new(
+            space.clone(),
+            number_scale,
+            [major_layer, minor_layer, ticks_layer, numbers],
+            [grid_major, grid_minor, ticks],
+            joint_wrappers,
+            line_mask.clone(),
+            number_mask.clone(),
+            axes.clone(),
+            number_groups,
+            number_values,
+        );
         Ok(CoordinateSpaceHandle {
             root,
             frame,
             view,
             map: space.map,
             layers,
+            ticks: Some(Arc::new(Mutex::new(ticks_state))),
         })
     }
 
@@ -4071,14 +4182,48 @@ mod tests {
         }
     }
 
-    fn layer_is_empty(handle: &DrawableHandle) -> bool {
-        let spec = handle.spec.lock().expect("layer spec poisoned");
-        match &spec.kind {
-            SpawnKind::SvgPath(path) => path.path.elements().is_empty(),
-            SpawnKind::LineSegments3D { points, .. } => points.is_empty(),
-            SpawnKind::Group(children) | SpawnKind::GroupNoCenter(children) => children.is_empty(),
-            other => panic!("unexpected semantic layer kind: {other:?}"),
+    /// Whether a semantic layer draws nothing; groups are empty when every
+    /// member is, as Cartesian grid and tick layers wrap their paths.
+    fn layer_is_empty(canvas: &SceneModel, handle: &DrawableHandle) -> bool {
+        use super::super::ops::SharedObjectSpec;
+
+        fn spec_is_empty(canvas: &SceneModel, spec: &SharedObjectSpec) -> bool {
+            let children = {
+                let spec = spec.lock().expect("layer spec poisoned");
+                match &spec.kind {
+                    SpawnKind::SvgPath(path) => return path.path.elements().is_empty(),
+                    SpawnKind::LineSegments3D { points, .. } => return points.is_empty(),
+                    SpawnKind::Group(children) | SpawnKind::GroupNoCenter(children) => {
+                        children.clone()
+                    }
+                    // Text and other members always draw something.
+                    _ => return false,
+                }
+            };
+            let members: Vec<SharedObjectSpec> = {
+                let state = canvas.state.lock().expect("canvas state poisoned");
+                children
+                    .iter()
+                    .map(|id| {
+                        state
+                            .segments
+                            .iter()
+                            .flat_map(|segment| &segment.ops)
+                            .find_map(|op| match op {
+                                Op::Spawn(spec)
+                                    if spec.lock().expect("object spec poisoned").id == *id =>
+                                {
+                                    Some(spec.clone())
+                                }
+                                _ => None,
+                            })
+                            .expect("layer member must have a spawn spec")
+                    })
+                    .collect()
+            };
+            members.iter().all(|member| spec_is_empty(canvas, member))
         }
+        spec_is_empty(canvas, &handle.spec)
     }
 
     fn group_child_translations(canvas: &SceneModel, group: &DrawableHandle) -> Vec<DVec3> {
@@ -4155,15 +4300,21 @@ mod tests {
             .unwrap();
 
         assert_eq!(space.data_to_local(1.0, 0.5).unwrap(), (100.0, 50.0));
-        assert!(!layer_is_empty(space.layer(SpaceLayer::MajorGrid).unwrap()));
-        assert!(!layer_is_empty(space.layer(SpaceLayer::MinorGrid).unwrap()));
+        assert!(!layer_is_empty(
+            &canvas,
+            space.layer(SpaceLayer::MajorGrid).unwrap()
+        ));
+        assert!(!layer_is_empty(
+            &canvas,
+            space.layer(SpaceLayer::MinorGrid).unwrap()
+        ));
         for layer in [
             SpaceLayer::Axes,
             SpaceLayer::Ticks,
             SpaceLayer::Numbers,
             SpaceLayer::Labels,
         ] {
-            assert!(layer_is_empty(space.layer(layer).unwrap()));
+            assert!(layer_is_empty(&canvas, space.layer(layer).unwrap()));
         }
     }
 
@@ -4226,7 +4377,7 @@ mod tests {
             SpaceLayer::Numbers,
             SpaceLayer::Labels,
         ] {
-            assert!(layer_is_empty(space.layer(layer).unwrap()));
+            assert!(layer_is_empty(&canvas, space.layer(layer).unwrap()));
         }
     }
 
@@ -4257,7 +4408,7 @@ mod tests {
             SpaceLayer::Numbers,
             SpaceLayer::Labels,
         ] {
-            assert!(layer_is_empty(polar.layer(layer).unwrap()));
+            assert!(layer_is_empty(&canvas, polar.layer(layer).unwrap()));
         }
 
         let spokes_only = canvas
@@ -4286,6 +4437,7 @@ mod tests {
         assert_eq!(path.path.elements().len(), 16);
         drop(spec);
         assert!(!layer_is_empty(
+            &canvas,
             spokes_only.layer(SpaceLayer::Labels).unwrap()
         ));
 
@@ -4311,7 +4463,7 @@ mod tests {
             SpaceLayer::Numbers,
             SpaceLayer::Labels,
         ] {
-            assert!(layer_is_empty(line.layer(layer).unwrap()));
+            assert!(layer_is_empty(&canvas, line.layer(layer).unwrap()));
         }
     }
 
@@ -4813,6 +4965,120 @@ mod tests {
                         .unwrap()
                         .to_mat4();
                 assert!(current.abs_diff_eq(expected, 1e-9));
+            }
+        }
+    }
+
+    #[test]
+    fn automatic_ticks_regenerate_for_the_view_and_keep_glyph_shape() {
+        use bevy::prelude::Schedule;
+        use gaanim_math::GlobalSpatialTransform;
+        use gaanim_scene::prelude::World;
+
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        let space = canvas
+            .coordinate_axes(
+                Axis::linear(0.0, 0.4).unwrap(),
+                Axis::linear(0.0, 4.0).unwrap().ticks(1.0).unwrap(),
+                Some(9.0),
+                Some(6.0),
+                true,
+            )
+            .unwrap();
+        // Regenerated ticks must follow the space wherever it was placed.
+        space.drawable().clone().move_to(0.5, -0.4);
+        canvas.wait(0.2);
+        let zoom = canvas
+            .coordinate_view_to_animation(&space, (0.0, 0.2), (0.0, 2.0))
+            .unwrap()
+            .duration(1.0);
+        canvas.play(vec![zoom]);
+
+        let mut world = World::new();
+        world.insert_resource(gaanim_timeline::timeline::Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        let mut timeline = world
+            .remove_resource::<gaanim_timeline::timeline::Timeline>()
+            .unwrap();
+        timeline.add_keyframe(
+            0.0,
+            gaanim_timeline::snapshot::WorldSnapshot::capture(&mut world),
+        );
+        let mut levels_schedule = Schedule::default();
+        levels_schedule.add_systems(gaanim_scene::systems::coordinate_tick_level_system);
+        let mut propagation = Schedule::default();
+        propagation.add_systems(gaanim_scene::transform_propagation_system);
+        let mut run = |world: &mut World| {
+            levels_schedule.run(world);
+            propagation.run(world);
+        };
+        let levels = |world: &mut World| {
+            let mut levels: Vec<_> = world
+                .query::<(&gaanim_scene::CoordinateTickLevel, &gaanim_scene::Opacity)>()
+                .iter(world)
+                .map(|(level, opacity)| (level.axis, level.generation, opacity.0))
+                .collect();
+            levels.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            levels.dedup();
+            levels
+        };
+
+        timeline.seek(&mut world, 0.0);
+        run(&mut world);
+        let glyphs: Vec<_> = world
+            .query::<(
+                gaanim_scene::prelude::Entity,
+                &gaanim_scene::components::TextSpan,
+                &GlobalSpatialTransform,
+            )>()
+            .iter(&world)
+            .map(|(entity, _, global)| (entity, global.mat4))
+            .collect();
+        let start = levels(&mut world);
+        // x regenerates (auto step); y keeps its fixed step and one generation.
+        assert!(
+            start.contains(&(0, 0, 1.0)) && start.contains(&(0, 1, 0.0)),
+            "{start:?}"
+        );
+        assert!(
+            start.iter().all(|level| level.0 == 0 || level.1 == 0),
+            "{start:?}"
+        );
+
+        timeline.seek(&mut world, 1.2);
+        run(&mut world);
+        let end = levels(&mut world);
+        assert!(
+            end.contains(&(0, 0, 0.0)) && end.contains(&(0, 1, 1.0)),
+            "{end:?}"
+        );
+        assert!(end.contains(&(1, 0, 1.0)), "{end:?}");
+        let mut level_frames: Vec<_> = world
+            .query_filtered::<(&gaanim_scene::CoordinateTickLevel, &GlobalSpatialTransform), bevy::prelude::Without<gaanim_scene::CoordinateViewRole>>()
+            .iter(&world)
+            .filter(|(level, _)| level.axis == 0)
+            .map(|(level, global)| (level.generation, global.mat4))
+            .collect();
+        level_frames.sort_by_key(|(generation, _)| *generation);
+        let (_, first) = level_frames[0];
+        for (generation, frame) in &level_frames {
+            assert!(
+                frame.abs_diff_eq(first, 1e-9),
+                "x tick generation {generation} is offset from generation 0"
+            );
+        }
+        for (entity, initial) in &glyphs {
+            let current = world.get::<GlobalSpatialTransform>(*entity).unwrap().mat4;
+            for direction in [DVec3::X, DVec3::Y] {
+                assert!(
+                    (current.transform_vector3(direction) - initial.transform_vector3(direction))
+                        .length()
+                        < 1e-9,
+                    "the zoom deformed a tick-number glyph"
+                );
             }
         }
     }

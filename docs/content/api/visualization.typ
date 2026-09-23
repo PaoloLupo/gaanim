@@ -345,6 +345,15 @@ los guiones en trazos discontinuos. El escalado general con `plane.scale_to(...)
 y el zoom de cámara siguen afectando al conjunto, incluido el texto y los trazos.
 Los dominios deben ser finitos y crecientes y los ejes, lineales o temporales.
 
+Los ejes con ticks automáticos (`Axis.linear(a, b)` sin `.ticks(...)`) regeneran
+grillas, ticks y números para la ventana destino: el paso nuevo aparece con un
+fundido cruzado mientras el anterior se desvanece, y al alejarse el eje y la
+grilla se extienden más allá del dominio original. Un eje con paso fijo
+(`.ticks(1.0)`) lo conserva en cualquier vista. Los ticks regenerados copian el
+estilo de las capas vigente al declarar el `view_to`; aplica los estilos de
+`plane.layer(...)` antes del primer cambio de vista. Para ubicar un objeto en
+una coordenada de datos que siga la vista usa `obj.at_coordinate(plane.coord(x, y))`.
+
 ```python
 scene.play([plane.animate.view_to((-2, 2), (-3, 3)).duration(1.0)])
 ```

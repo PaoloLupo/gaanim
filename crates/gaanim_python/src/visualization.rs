@@ -1189,6 +1189,7 @@ pub struct PyCoordinateSpace {
 #[derive(Clone)]
 pub struct PyCoordinateSpaceAnimation {
     inner: CoordinateSpaceHandle,
+    canvas: Arc<Mutex<ApiCanvas>>,
 }
 
 #[pymethods]
@@ -1244,8 +1245,10 @@ impl PyCoordinateSpaceAnimation {
 
     fn view_to(&self, x_domain: (f64, f64), y_domain: (f64, f64)) -> PyResult<PyCanvasAnim> {
         crate::custom::ensure_authoring_allowed()?;
-        self.inner
-            .view_to_animation(x_domain, y_domain)
+        self.canvas
+            .lock()
+            .expect("scene canvas poisoned")
+            .coordinate_view_to_animation(&self.inner, x_domain, y_domain)
             .map(|inner| PyCanvasAnim { inner })
             .map_err(value_error)
     }
@@ -2101,6 +2104,7 @@ impl PyCoordinateSpace {
     fn animate(&self) -> PyResult<PyCoordinateSpaceAnimation> {
         crate::custom::ensure_authoring_allowed()?;
         Ok(PyCoordinateSpaceAnimation {
+            canvas: self.canvas.clone(),
             inner: self.inner.clone(),
         })
     }
@@ -2131,8 +2135,10 @@ impl PyCoordinateSpace {
 
     fn view_to(&self, x_domain: (f64, f64), y_domain: (f64, f64)) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
-        self.inner
-            .view_to(x_domain, y_domain)
+        self.canvas
+            .lock()
+            .expect("scene canvas poisoned")
+            .coordinate_view_to(&self.inner, x_domain, y_domain)
             .map_err(value_error)?;
         Ok(self.clone())
     }

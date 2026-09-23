@@ -35,6 +35,7 @@ pub use editorial::{
     EditorialError, EditorialStyle, EditorialVariant, LowerThirdSide, LowerThirdSpec,
     QuoteCardSpec, SectionHeaderSpec, StatCardSpec,
 };
+mod view_ticks;
 mod visualization;
 pub use gaanim_visualization::{
     Cartesian3DVisibility, CartesianVisibility, NumberLineVisibility, PolarVisibility,

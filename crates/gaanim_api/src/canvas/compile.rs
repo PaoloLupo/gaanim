@@ -4301,6 +4301,16 @@ impl SceneModel {
                         builder.add_to_group(MobjectRef { id: group }, MobjectRef { id: child });
                     }
                 }
+                Op::AttachToGroupLocal { group, child } => {
+                    if let (Some(group), Some(child)) =
+                        (id_map.get(group).copied(), id_map.get(child).copied())
+                        && builder.states.get(group).is_some()
+                        && builder.states.get(child).is_some()
+                    {
+                        builder
+                            .add_to_group_local(MobjectRef { id: group }, MobjectRef { id: child });
+                    }
+                }
                 Op::PlaceAtCoordinate {
                     space,
                     target,
@@ -7710,6 +7720,26 @@ impl SceneModel {
             && let Some(state) = builder.states.get(mref.id)
         {
             builder.commands.entity(state.entity).insert(role);
+        }
+        if let Some(state) = builder.states.get(mref.id) {
+            let entity = state.entity;
+            if let Some(offset) = spec.coordinate_label_offset {
+                builder
+                    .commands
+                    .entity(entity)
+                    .insert(gaanim_scene::CoordinateLabelOffset(offset));
+            }
+            if let Some((axis, generation, anchors)) = &spec.coordinate_tick_level {
+                let anchors = anchors.lock().expect("tick anchors poisoned").clone();
+                builder
+                    .commands
+                    .entity(entity)
+                    .insert(gaanim_scene::CoordinateTickLevel {
+                        axis: *axis,
+                        generation: *generation,
+                        anchors,
+                    });
+            }
         }
         mref
     }

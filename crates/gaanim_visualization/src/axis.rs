@@ -239,6 +239,29 @@ impl Axis {
         self
     }
 
+    /// Whether the major step is chosen from the domain span (no fixed `ticks`).
+    pub fn has_auto_ticks(&self) -> bool {
+        self.major_step.is_none()
+    }
+
+    /// The major step `ticks_values(target_count)` uses for this domain.
+    pub fn resolved_tick_step(&self, target_count: usize) -> f64 {
+        self.major_step
+            .unwrap_or_else(|| nice_step(self.max - self.min, target_count.max(2)))
+    }
+
+    /// This axis over another domain, keeping scale, step mode, format and style.
+    pub fn with_domain(&self, min: f64, max: f64) -> Result<Self, AxisError> {
+        if !min.is_finite() || !max.is_finite() || min >= max {
+            return Err(AxisError::InvalidDomain);
+        }
+        Ok(Self {
+            min,
+            max,
+            ..self.clone()
+        })
+    }
+
     pub fn minor_ticks(mut self, subdivisions: usize) -> Self {
         self.minor_subdivisions = subdivisions;
         self
@@ -598,6 +621,24 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["A", "B", "C"]
         );
+    }
+
+    #[test]
+    fn with_domain_keeps_the_step_mode_and_resolves_a_finer_auto_step() {
+        let auto = Axis::linear(0.0, 0.4).unwrap().minor_ticks(2);
+        assert!(auto.has_auto_ticks());
+        let zoomed = auto.with_domain(0.0, 0.2).unwrap();
+        assert!(zoomed.resolved_tick_step(7) < auto.resolved_tick_step(7));
+        assert_eq!(zoomed.domain(), (0.0, 0.2));
+        assert_eq!(zoomed.ticks_values(7).unwrap()[0].label, "0");
+
+        let fixed = Axis::linear(0.0, 0.4).unwrap().ticks(0.1).unwrap();
+        assert!(!fixed.has_auto_ticks());
+        assert_eq!(
+            fixed.with_domain(0.0, 0.2).unwrap().resolved_tick_step(7),
+            0.1
+        );
+        assert!(fixed.with_domain(1.0, 1.0).is_err());
     }
 
     #[test]
