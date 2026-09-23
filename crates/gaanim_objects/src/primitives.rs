@@ -1166,11 +1166,45 @@ pub fn curved_arrow(
     end: kurbo::Point,
     angle: f64,
 ) -> MobjectBundle {
+    curved_arrow_with_dimensions(
+        id,
+        start,
+        end,
+        angle,
+        DEFAULT_ARROW_HEAD_LENGTH,
+        DEFAULT_ARROW_HEAD_WIDTH,
+        DEFAULT_ARROW_BODY_WIDTH,
+    )
+}
+
+/// Length along the path of [`curved_arrow`]: the arc length for a signed
+/// deflection, or the chord when the deflection is negligible.
+pub fn curved_arrow_length(start: kurbo::Point, end: kurbo::Point, angle: f64) -> f64 {
+    let chord = start.distance(end);
+    if chord <= f64::EPSILON || angle.abs() <= 1e-6 {
+        return chord;
+    }
+    let radius = (chord * 0.5) / (angle * 0.5).sin().abs();
+    radius * angle.abs()
+}
+
+/// Build a curved arrow between two points with absolute head length, head
+/// width and body width in scene units, as [`arrow_with_dimensions`] does for
+/// straight arrows. Callers must supply positive finite dimensions.
+pub fn curved_arrow_with_dimensions(
+    id: ObjectId,
+    start: kurbo::Point,
+    end: kurbo::Point,
+    angle: f64,
+    head_length: f64,
+    head_width: f64,
+    body_width: f64,
+) -> MobjectBundle {
     let dx = end.x - start.x;
     let dy = end.y - start.y;
     let chord = (dx * dx + dy * dy).sqrt();
     if chord <= f64::EPSILON || angle.abs() <= 1e-6 {
-        return arrow(id, start, end);
+        return arrow_with_dimensions(id, start, end, head_length, head_width, body_width);
     }
 
     let radius = (chord * 0.5) / (angle * 0.5).sin().abs();
@@ -1190,7 +1224,16 @@ pub fn curved_arrow(
         sweep -= 2.0 * std::f64::consts::PI;
     }
 
-    curved_arrow_arc(id, center, radius, sa, sweep)
+    curved_arrow_arc_with_dimensions(
+        id,
+        center,
+        radius,
+        sa,
+        sweep,
+        head_length,
+        head_width,
+        body_width,
+    )
 }
 
 /// Creates a curved arrow from an explicit circular arc.
@@ -1204,6 +1247,34 @@ pub fn curved_arrow_arc(
     radius: f64,
     start_angle: f64,
     sweep_angle: f64,
+) -> MobjectBundle {
+    curved_arrow_arc_with_dimensions(
+        id,
+        center,
+        radius,
+        start_angle,
+        sweep_angle,
+        DEFAULT_ARROW_HEAD_LENGTH,
+        DEFAULT_ARROW_HEAD_WIDTH,
+        DEFAULT_ARROW_BODY_WIDTH,
+    )
+}
+
+/// Build a curved arrow along an explicit circular arc with absolute head
+/// length, head width and body width in scene units. On arcs shorter than
+/// twice the head length the head shortens to half the sweep, and on small
+/// radii its width stays inside the circle. Callers must supply positive
+/// finite dimensions.
+#[allow(clippy::too_many_arguments)]
+pub fn curved_arrow_arc_with_dimensions(
+    id: ObjectId,
+    center: kurbo::Point,
+    radius: f64,
+    start_angle: f64,
+    sweep_angle: f64,
+    head_length: f64,
+    head_width: f64,
+    body_width: f64,
 ) -> MobjectBundle {
     let radius = radius.abs();
     let sa = start_angle;
@@ -1221,11 +1292,11 @@ pub fn curved_arrow_arc(
         return bundle;
     }
 
-    let head_len = DEFAULT_ARROW_HEAD_LENGTH;
-    let body_half_t = DEFAULT_ARROW_BODY_WIDTH * 0.5;
+    let head_len = head_length;
+    let body_half_t = body_width * 0.5;
     // Keep the inner shoulder on the same side of the center as the shaft;
     // this avoids an oversized/inverted fill for small-radius arcs.
-    let head_half_width = (DEFAULT_ARROW_HEAD_WIDTH * 0.5).min((radius * 0.45).max(body_half_t));
+    let head_half_width = (head_width * 0.5).min((radius * 0.45).max(body_half_t));
 
     let sweep = sweep_angle;
     let sweep_sign = sweep.signum();
@@ -1697,5 +1768,78 @@ mod arrow_tests {
         assert!(bounds.x0 > -5.4 && bounds.x1 < 4.6, "{bounds:?}");
         assert!(bounds.height() < 0.7, "{bounds:?}");
         assert_eq!(count_subpaths(&b.path.0), 1);
+    }
+
+    #[test]
+    fn curved_arrow_dimensions_set_head_and_body_like_arrow() {
+        let center = kurbo::Point::ZERO;
+        let radius = 3.0;
+        let sweep = std::f64::consts::FRAC_PI_2;
+        let width_at = |bundle: &MobjectBundle, angle: f64| {
+            // Radial extent of the silhouette along the ray at `angle`.
+            let direction = kurbo::Vec2::new(angle.cos(), angle.sin());
+            let mut radii: Vec<f64> = Vec::new();
+            for element in bundle.path.0.elements() {
+                if let kurbo::PathEl::LineTo(point) | kurbo::PathEl::MoveTo(point) = element {
+                    let offset = *point - center;
+                    if offset.normalize().dot(direction) > 1.0 - 1e-9 {
+                        radii.push(offset.hypot());
+                    }
+                }
+            }
+            let min = radii.iter().copied().fold(f64::INFINITY, f64::min);
+            let max = radii.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            max - min
+        };
+        let default = curved_arrow_arc(ObjectId::from_raw(0), center, radius, 0.0, sweep);
+        let thick = curved_arrow_arc_with_dimensions(
+            ObjectId::from_raw(0),
+            center,
+            radius,
+            0.0,
+            sweep,
+            0.4,
+            0.3,
+            0.08,
+        );
+        assert!((width_at(&default, 0.0) - DEFAULT_ARROW_BODY_WIDTH).abs() < 1e-9);
+        assert!((width_at(&thick, 0.0) - 0.08).abs() < 1e-9);
+        // The head shoulder sits one head length (as arc) before the tip.
+        let shoulder = sweep - 0.4 / radius;
+        let head = width_at(&thick, shoulder);
+        assert!((head - 0.3).abs() < 1e-9, "{head}");
+
+        let straight = curved_arrow_with_dimensions(
+            ObjectId::from_raw(0),
+            kurbo::Point::ZERO,
+            kurbo::Point::new(2.0, 0.0),
+            0.0,
+            0.4,
+            0.3,
+            0.08,
+        );
+        assert_eq!(
+            straight.path.0,
+            arrow_with_dimensions(
+                ObjectId::from_raw(0),
+                kurbo::Point::ZERO,
+                kurbo::Point::new(2.0, 0.0),
+                0.4,
+                0.3,
+                0.08
+            )
+            .path
+            .0
+        );
+    }
+
+    #[test]
+    fn curved_arrow_length_follows_the_arc() {
+        let start = kurbo::Point::new(-1.0, 0.0);
+        let end = kurbo::Point::new(1.0, 0.0);
+        assert!((curved_arrow_length(start, end, 0.0) - 2.0).abs() < 1e-12);
+        // A half-turn deflection draws a semicircle of radius 1.
+        let half_turn = curved_arrow_length(start, end, std::f64::consts::PI);
+        assert!((half_turn - std::f64::consts::PI).abs() < 1e-12);
     }
 }

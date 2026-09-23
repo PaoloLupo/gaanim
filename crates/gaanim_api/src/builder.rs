@@ -5983,6 +5983,67 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
+    /// Spawns a curved arrow between two points with absolute head length,
+    /// head width and body width in scene units.
+    pub fn curved_arrow_with_dimensions(
+        &mut self,
+        start: kurbo::Point,
+        end: kurbo::Point,
+        angle: f64,
+        head_length: f64,
+        head_width: f64,
+        body_width: f64,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        let id = self.next_id();
+        let bundle = gaanim_objects::primitives::curved_arrow_with_dimensions(
+            id,
+            start,
+            end,
+            angle,
+            head_length,
+            head_width,
+            body_width,
+        );
+        MobjectSpawnBuilder {
+            builder: self,
+            id,
+            bundle,
+            parent_entity: None,
+        }
+    }
+
+    /// Spawns a curved arrow along an explicit circular arc with absolute
+    /// head length, head width and body width in scene units.
+    #[allow(clippy::too_many_arguments)]
+    pub fn curved_arrow_arc_with_dimensions(
+        &mut self,
+        center: kurbo::Point,
+        radius: f64,
+        start_angle: f64,
+        sweep_angle: f64,
+        head_length: f64,
+        head_width: f64,
+        body_width: f64,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        let id = self.next_id();
+        let bundle = gaanim_objects::primitives::curved_arrow_arc_with_dimensions(
+            id,
+            center,
+            radius,
+            start_angle,
+            sweep_angle,
+            head_length,
+            head_width,
+            body_width,
+        );
+        MobjectSpawnBuilder {
+            builder: self,
+            id,
+            bundle,
+            parent_entity: None,
+        }
+    }
+
     /// Spawns a curved arrow from an explicit circular arc.
     ///
     /// The arrow tip is placed at `start_angle + sweep_angle`, allowing the

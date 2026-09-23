@@ -907,7 +907,7 @@ fn spawn_family(kind: &SpawnKind) -> &'static str {
         | SpawnKind::DoubleArrow { .. }
         | SpawnKind::Brace { .. }
         | SpawnKind::Arc { .. }
-        | SpawnKind::CurvedArrow(_, _, _, _, _)
+        | SpawnKind::CurvedArrow { .. }
         | SpawnKind::CurvedArrowArc { .. }
         | SpawnKind::Dimension { .. }
         | SpawnKind::Polyline(_)
@@ -957,7 +957,7 @@ fn spawn_name(kind: &SpawnKind) -> &'static str {
         SpawnKind::Cross(_) => "cross",
         SpawnKind::RightAngle(_) => "right_angle",
         SpawnKind::Arc { .. } => "arc",
-        SpawnKind::CurvedArrow(_, _, _, _, _) | SpawnKind::CurvedArrowArc { .. } => "curved_arrow",
+        SpawnKind::CurvedArrow { .. } | SpawnKind::CurvedArrowArc { .. } => "curved_arrow",
         SpawnKind::Dimension { .. } => "dimension",
         SpawnKind::Polyline(_) => "polyline",
         SpawnKind::Bezier { .. } => "bezier",

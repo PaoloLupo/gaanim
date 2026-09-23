@@ -6586,8 +6586,22 @@ impl SceneModel {
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
-            SpawnKind::CurvedArrow(x1, y1, x2, y2, angle) => {
-                let b = builder.curved_arrow(Point::new(*x1, *y1), Point::new(*x2, *y2), *angle);
+            SpawnKind::CurvedArrow {
+                start,
+                end,
+                angle,
+                head_length,
+                head_width,
+                body_width,
+            } => {
+                let b = builder.curved_arrow_with_dimensions(
+                    Point::new(start.0, start.1),
+                    Point::new(end.0, end.1),
+                    *angle,
+                    *head_length,
+                    *head_width,
+                    *body_width,
+                );
                 let mr = Self::finish_spawn_builder(b, spec);
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
                 mr
@@ -6597,12 +6611,18 @@ impl SceneModel {
                 radius,
                 start_angle,
                 sweep_angle,
+                head_length,
+                head_width,
+                body_width,
             } => {
-                let b = builder.curved_arrow_arc(
+                let b = builder.curved_arrow_arc_with_dimensions(
                     Point::new(center.0, center.1),
                     *radius,
                     *start_angle,
                     *sweep_angle,
+                    *head_length,
+                    *head_width,
+                    *body_width,
                 );
                 let mr = Self::finish_spawn_builder(b, spec);
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);

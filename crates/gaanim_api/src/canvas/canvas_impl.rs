@@ -12,6 +12,9 @@ use gaanim_core::kurbo::{Cap, Shape, Stroke};
 use gaanim_core::peniko::{Brush, Color};
 use gaanim_math::RateFunc;
 use gaanim_objects::prelude::{GltfDocument, GltfLoadError, GltfSceneSelector, SvgLoadError};
+use gaanim_objects::primitives::{
+    DEFAULT_ARROW_BODY_WIDTH, DEFAULT_ARROW_HEAD_LENGTH, DEFAULT_ARROW_HEAD_WIDTH,
+};
 use gaanim_objects::primitives3d;
 use gaanim_text::prelude::TextRole;
 use gaanim_timeline::transition::TransitionType;
@@ -577,6 +580,31 @@ impl Composition {
                 .collect(),
         })
     }
+}
+
+/// Validate solid-arrow dimensions and scale the head, keeping its
+/// proportions, so its length is at most `max_head_ratio` of `length`.
+fn capped_arrow_head(
+    length: f64,
+    head_length: f64,
+    head_width: f64,
+    body_width: f64,
+    max_head_ratio: Option<f64>,
+) -> Result<(f64, f64), &'static str> {
+    if ![head_length, head_width, body_width]
+        .iter()
+        .all(|v| v.is_finite() && *v > 0.0)
+    {
+        return Err("arrow dimensions must be finite and positive");
+    }
+    if max_head_ratio.is_some_and(|v| !v.is_finite() || v <= 0.0 || v > 1.0) {
+        return Err("max_head_ratio must be in (0, 1]");
+    }
+    if !length.is_finite() {
+        return Err("arrow length must be finite");
+    }
+    let factor = max_head_ratio.map_or(1.0, |ratio| (length * ratio / head_length).min(1.0));
+    Ok((head_length * factor, head_width * factor))
 }
 
 fn play_item_kind(item: &PlayItem) -> &'static str {
@@ -2211,25 +2239,14 @@ impl SceneModel {
         {
             return Err("arrow endpoints must be finite");
         }
-        if ![head_length, head_width, body_width]
-            .iter()
-            .all(|v| v.is_finite() && *v > 0.0)
-        {
-            return Err("arrow dimensions must be finite and positive");
-        }
-        if max_head_ratio.is_some_and(|v| !v.is_finite() || v <= 0.0 || v > 1.0) {
-            return Err("max_head_ratio must be in (0, 1]");
-        }
         let length = (end.0 - start.0).hypot(end.1 - start.1);
-        if !length.is_finite() {
-            return Err("arrow length must be finite");
-        }
-        let factor = max_head_ratio.map_or(1.0, |ratio| (length * ratio / head_length).min(1.0));
+        let (head_length, head_width) =
+            capped_arrow_head(length, head_length, head_width, body_width, max_head_ratio)?;
         Ok(self.spawn(SpawnKind::SizedArrow {
             start,
             end,
-            head_length: head_length * factor,
-            head_width: head_width * factor,
+            head_length,
+            head_width,
             body_width,
         }))
     }
@@ -2340,7 +2357,50 @@ impl SceneModel {
         y2: f64,
         angle: f64,
     ) -> DrawableHandle {
-        self.spawn(SpawnKind::CurvedArrow(x1, y1, x2, y2, angle))
+        self.spawn(SpawnKind::CurvedArrow {
+            start: (x1, y1),
+            end: (x2, y2),
+            angle,
+            head_length: DEFAULT_ARROW_HEAD_LENGTH,
+            head_width: DEFAULT_ARROW_HEAD_WIDTH,
+            body_width: DEFAULT_ARROW_BODY_WIDTH,
+        })
+    }
+    /// Spawn a dimensioned curved arrow between two points, with the same
+    /// units and validation as [`Self::arrow_with_dimensions`]. The optional
+    /// ratio caps head length relative to the arc length.
+    #[allow(clippy::too_many_arguments)]
+    pub fn curved_arrow_with_dimensions(
+        &mut self,
+        start: (f64, f64),
+        end: (f64, f64),
+        angle: f64,
+        head_length: f64,
+        head_width: f64,
+        body_width: f64,
+        max_head_ratio: Option<f64>,
+    ) -> Result<DrawableHandle, &'static str> {
+        if ![start.0, start.1, end.0, end.1, angle]
+            .iter()
+            .all(|v| v.is_finite())
+        {
+            return Err("curved arrow endpoints and angle must be finite");
+        }
+        let length = gaanim_objects::primitives::curved_arrow_length(
+            gaanim_core::kurbo::Point::new(start.0, start.1),
+            gaanim_core::kurbo::Point::new(end.0, end.1),
+            angle,
+        );
+        let (head_length, head_width) =
+            capped_arrow_head(length, head_length, head_width, body_width, max_head_ratio)?;
+        Ok(self.spawn(SpawnKind::CurvedArrow {
+            start,
+            end,
+            angle,
+            head_length,
+            head_width,
+            body_width,
+        }))
     }
     /// Creates a curved arrow along an explicit circular arc. Angles are in radians.
     pub fn curved_arrow_arc(
@@ -2356,7 +2416,47 @@ impl SceneModel {
             radius,
             start_angle,
             sweep_angle,
+            head_length: DEFAULT_ARROW_HEAD_LENGTH,
+            head_width: DEFAULT_ARROW_HEAD_WIDTH,
+            body_width: DEFAULT_ARROW_BODY_WIDTH,
         })
+    }
+    /// Spawn a dimensioned curved arrow along an explicit circular arc, with
+    /// the same units and validation as [`Self::curved_arrow_with_dimensions`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn curved_arrow_arc_with_dimensions(
+        &mut self,
+        center: (f64, f64),
+        radius: f64,
+        start_angle: f64,
+        sweep_angle: f64,
+        head_length: f64,
+        head_width: f64,
+        body_width: f64,
+        max_head_ratio: Option<f64>,
+    ) -> Result<DrawableHandle, &'static str> {
+        if ![center.0, center.1, radius, start_angle, sweep_angle]
+            .iter()
+            .all(|v| v.is_finite())
+        {
+            return Err("curved arrow center, radius and angles must be finite");
+        }
+        let (head_length, head_width) = capped_arrow_head(
+            radius.abs() * sweep_angle.abs(),
+            head_length,
+            head_width,
+            body_width,
+            max_head_ratio,
+        )?;
+        Ok(self.spawn(SpawnKind::CurvedArrowArc {
+            center,
+            radius,
+            start_angle,
+            sweep_angle,
+            head_length,
+            head_width,
+            body_width,
+        }))
     }
     /// Creates a dimension line offset perpendicularly from the measured segment.
     pub fn dimension(&mut self, x1: f64, y1: f64, x2: f64, y2: f64, offset: f64) -> DrawableHandle {
@@ -6071,6 +6171,90 @@ mod tests {
         assert!(
             canvas
                 .arrow_with_dimensions((0.0, 0.0), (1.0, 0.0), 0.18, 0.15, 0.036, Some(1.1))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn curved_arrows_accept_arrow_dimensions_capped_by_arc_length() {
+        let mut canvas = SceneModel::new(16, 9);
+        let dimensions = |handle: &DrawableHandle| match handle.spec.lock().unwrap().kind {
+            SpawnKind::CurvedArrow {
+                head_length,
+                head_width,
+                body_width,
+                ..
+            }
+            | SpawnKind::CurvedArrowArc {
+                head_length,
+                head_width,
+                body_width,
+                ..
+            } => (head_length, head_width, body_width),
+            _ => panic!("expected a curved arrow"),
+        };
+        let default = canvas.curved_arrow(-1.0, 0.0, 1.0, 0.0, 0.9);
+        assert_eq!(
+            dimensions(&default),
+            (
+                DEFAULT_ARROW_HEAD_LENGTH,
+                DEFAULT_ARROW_HEAD_WIDTH,
+                DEFAULT_ARROW_BODY_WIDTH
+            )
+        );
+        let bold = canvas
+            .curved_arrow_with_dimensions((-1.0, 0.0), (1.0, 0.0), 0.9, 0.3, 0.24, 0.06, None)
+            .unwrap();
+        assert_eq!(dimensions(&bold), (0.3, 0.24, 0.06));
+        // A quarter turn of radius 0.4 is about 0.63 long; 30 % of it is 0.19.
+        let arc_length = 0.4 * std::f64::consts::FRAC_PI_2;
+        let capped = canvas
+            .curved_arrow_arc_with_dimensions(
+                (0.0, 0.0),
+                0.4,
+                0.0,
+                std::f64::consts::FRAC_PI_2,
+                0.4,
+                0.2,
+                0.05,
+                Some(0.3),
+            )
+            .unwrap();
+        let (head_length, head_width, body_width) = dimensions(&capped);
+        assert!((head_length - arc_length * 0.3).abs() < 1e-12);
+        assert!((head_width - 0.2 * arc_length * 0.3 / 0.4).abs() < 1e-12);
+        assert_eq!(body_width, 0.05);
+
+        assert!(
+            canvas
+                .curved_arrow_with_dimensions((0.0, 0.0), (1.0, 0.0), 0.5, 0.0, 0.2, 0.05, None)
+                .is_err()
+        );
+        assert!(
+            canvas
+                .curved_arrow_with_dimensions(
+                    (0.0, 0.0),
+                    (1.0, 0.0),
+                    f64::NAN,
+                    0.3,
+                    0.2,
+                    0.05,
+                    None
+                )
+                .is_err()
+        );
+        assert!(
+            canvas
+                .curved_arrow_arc_with_dimensions(
+                    (0.0, 0.0),
+                    1.0,
+                    0.0,
+                    1.0,
+                    0.3,
+                    0.2,
+                    0.05,
+                    Some(0.0)
+                )
                 .is_err()
         );
     }
