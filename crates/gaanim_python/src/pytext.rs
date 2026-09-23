@@ -2,7 +2,7 @@
 
 use pyo3::exceptions::{PyIndexError, PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PySlice, PyTuple};
+use pyo3::types::{PyAny, PyDict, PyMapping, PySlice, PyTuple};
 
 use gaanim_text::prelude::{
     flatten_content, TextAlign, TextAnchor, TextContent, TextDirection, TextFlow, TextOverflow,
@@ -344,19 +344,51 @@ pub fn text_part(
 }
 
 #[pyfunction(name = "parts")]
-#[pyo3(signature = (**entries))]
-/// Build an ordered group of plain semantic text parts from keyword entries.
-pub fn text_parts(entries: Option<&Bound<'_, PyDict>>) -> PyResult<PyTextParts> {
-    let entries = entries
-        .ok_or_else(|| PyValueError::new_err("parts() requires at least one named text part"))?;
-    if entries.is_empty() {
+#[pyo3(signature = (mapping=None, /, **entries))]
+/// Build an ordered group of plain semantic text parts from a mapping or
+/// keyword entries.
+pub fn text_parts(
+    mapping: Option<&Bound<'_, PyAny>>,
+    entries: Option<&Bound<'_, PyDict>>,
+) -> PyResult<PyTextParts> {
+    let entries = entries.filter(|entries| !entries.is_empty());
+    let items: Vec<(Bound<'_, PyAny>, Bound<'_, PyAny>)> = match (mapping, entries) {
+        (Some(_), Some(_)) => {
+            return Err(PyValueError::new_err(
+                "parts() accepts either a mapping or keyword entries, not both",
+            ));
+        }
+        (Some(mapping), None) => {
+            let mapping = mapping.cast::<PyMapping>().map_err(|_| {
+                PyTypeError::new_err(
+                    "parts() positional argument must be a mapping of names to strings",
+                )
+            })?;
+            mapping
+                .items()?
+                .iter()
+                .map(|item| item.extract())
+                .collect::<PyResult<_>>()?
+        }
+        (None, Some(entries)) => entries.iter().collect(),
+        (None, None) => Vec::new(),
+    };
+    if items.is_empty() {
         return Err(PyValueError::new_err(
             "parts() requires at least one named text part",
         ));
     }
-    let mut result = Vec::with_capacity(entries.len());
-    for (name, value) in entries.iter() {
-        let name = name.extract::<String>()?;
+    let mut result = Vec::with_capacity(items.len());
+    let mut seen = std::collections::HashSet::with_capacity(items.len());
+    for (name, value) in items {
+        let name = name
+            .extract::<String>()
+            .map_err(|_| PyTypeError::new_err("parts() names must be strings"))?;
+        if !seen.insert(name.clone()) {
+            return Err(PyValueError::new_err(format!(
+                "parts() received the name {name:?} more than once"
+            )));
+        }
         let text = value
             .extract::<String>()
             .map_err(|_| PyTypeError::new_err("parts() values must be strings"))?;
@@ -743,6 +775,57 @@ mod tests {
                 );
                 styled.call_method1("move_to", (0.0, 0.0))?;
             }
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn parts_accepts_an_ordered_mapping_with_arbitrary_names() {
+        Python::initialize();
+        Python::attach(|py| -> PyResult<()> {
+            let module = PyModule::new(py, "gaanim_core")?;
+            crate::gaanim_core(py, &module)?;
+            let parts = module.getattr("parts")?;
+
+            let mapping = PyDict::new(py);
+            mapping.set_item("tb:dist", "d")?;
+            mapping.set_item("x-1", "x")?;
+            mapping.set_item("label", "texto")?;
+            let group = parts.call1((&mapping,))?;
+            let names: Vec<String> = group
+                .extract::<PyTextParts>()?
+                .0
+                .iter()
+                .map(|part| part.name.clone())
+                .collect();
+            assert_eq!(names, ["tb:dist", "x-1", "label"]);
+            let scene = module.getattr("Scene")?.call0()?;
+            let text = scene.call_method1("text", (&group,))?;
+            text.get_item("tb:dist")?;
+            text.get_item("x-1")?;
+
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("label", "texto")?;
+            let keyword = parts.call((), Some(&kwargs))?.extract::<PyTextParts>()?;
+            assert_eq!(keyword.0[0].name, "label");
+
+            let mixed = parts.call((&mapping,), Some(&kwargs)).unwrap_err();
+            assert!(mixed.is_instance_of::<PyValueError>(py));
+            assert!(parts
+                .call1((PyDict::new(py),))
+                .unwrap_err()
+                .is_instance_of::<PyValueError>(py));
+            assert!(parts
+                .call1((vec![("a", "b")],))
+                .unwrap_err()
+                .is_instance_of::<PyTypeError>(py));
+            let bad_name = PyDict::new(py);
+            bad_name.set_item(1, "b")?;
+            assert!(parts
+                .call1((&bad_name,))
+                .unwrap_err()
+                .is_instance_of::<PyTypeError>(py));
             Ok(())
         })
         .unwrap();
