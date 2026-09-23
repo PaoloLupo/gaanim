@@ -1740,11 +1740,12 @@ class Text(Drawable):
         linked; direct animation or relative writes to this channel error.
         """
         ...
-    def become(self, *content: TextContent, role: Optional[TextRole] = None, style: Optional[TextStyle] = None, flow: Optional[TextFlow] = None) -> None:
+    def become(self, *content: TextContent, role: Optional[TextRole] = None, style: Optional[TextStyle] = None, flow: Optional[TextFlow] = None, markup: Optional[bool] = None) -> None:
         """Replace structured content while retaining Text identity and reflowing owners.
 
-        The text version and all owning Layout snapshots are incremented. An
-        invalid delimiter or content tree raises ``ValueError``.
+        The text version and all owning Layout snapshots are incremented.
+        ``markup=None`` keeps the current markup mode. An invalid delimiter or
+        content tree raises ``ValueError``.
 
         Example:
             copy.become("Resultado: ", part("value", "$42$", color=GOLD))
@@ -3311,6 +3312,7 @@ class Typography:
         overflow: Optional[TextOverflow] = None,
         direction: Optional[TextDirection] = None,
         hyphenate: Optional[bool] = None,
+        markup: bool = True,
     ) -> Text:
         """Create structured vector text, paragraphs, mathematics, or mixed content.
 
@@ -3320,6 +3322,9 @@ class Typography:
         ``*strong*`` selects bold text and ``_emphasis_`` selects italic text;
         escape literal markers as ``\\*`` and ``\\_``. Markers inside
         ``$...$`` remain math syntax, and ``\\$`` emits a literal dollar.
+        ``markup=False`` keeps every ``*`` and ``_`` literal (and their
+        backslashes), for technical labels such as ``tb:dist_comp`` or
+        ``X1_2``; ``$...$`` math still applies.
         Unbalanced or crossed markup, unbalanced math, duplicate sibling part
         names, and invalid metrics raise ``ValueError``. Direct keywords
         override reusable style/flow objects. Responsive wrapping consumes the

@@ -331,11 +331,13 @@ pub fn text_part(
         baseline,
     );
     let part = TextPart::new(name, content_from_tuple(content)?, style);
-    TextSpec::new(
+    // Markup delimiters may span parts; the enclosing text validates them.
+    TextSpec::new_with_markup(
         vec![part.clone().into()],
         None,
         TextStyle::default(),
         TextFlow::default(),
+        false,
     )
     .map_err(|error| PyValueError::new_err(error.to_string()))?;
     Ok(PyTextPart(part))
@@ -364,11 +366,12 @@ pub fn text_parts(entries: Option<&Bound<'_, PyDict>>) -> PyResult<PyTextParts> 
             TextStyle::default(),
         ));
     }
-    TextSpec::new(
+    TextSpec::new_with_markup(
         result.iter().cloned().map(TextContent::Part).collect(),
         None,
         TextStyle::default(),
         TextFlow::default(),
+        false,
     )
     .map_err(|error| PyValueError::new_err(error.to_string()))?;
     Ok(PyTextParts(result))
@@ -451,7 +454,7 @@ impl PyTextQuery {
             .map(|(value, _, _)| value.as_str())
             .collect::<Vec<_>>()
             .join(separator);
-        let rendered = gaanim_text::prelude::rendered_text(&self.spec.plain_text());
+        let rendered = self.spec.rendered_text();
         let occurrence = rendered
             .match_indices(&fragment)
             .position(|_| true)
@@ -1193,15 +1196,16 @@ impl PyText {
         })
     }
 
-    #[pyo3(signature = (*content, role=None, style=None, flow=None))]
+    #[pyo3(signature = (*content, role=None, style=None, flow=None, markup=None))]
     fn r#become(
         &mut self,
         content: &Bound<'_, PyTuple>,
         role: Option<&str>,
         style: Option<PyTextStyle>,
         flow: Option<PyTextFlow>,
+        markup: Option<bool>,
     ) -> PyResult<()> {
-        let mut spec = TextSpec::new(
+        let mut spec = TextSpec::new_with_markup(
             content_from_tuple(content)?,
             parse_role(role)?,
             style
@@ -1209,6 +1213,7 @@ impl PyText {
                 .unwrap_or_else(|| self.spec.style.clone()),
             flow.map(|flow| flow.0)
                 .unwrap_or_else(|| self.spec.flow.clone()),
+            markup.unwrap_or(self.spec.markup),
         )
         .map_err(|error| PyValueError::new_err(error.to_string()))?;
         spec.version = self.spec.version.saturating_add(1);
@@ -1242,6 +1247,7 @@ pub(crate) fn build_text_spec(
     overflow: Option<&str>,
     direction: Option<&str>,
     hyphenate: Option<bool>,
+    markup: bool,
 ) -> PyResult<TextSpec> {
     let style = overlay_style(
         style.map(|style| style.0).unwrap_or_default(),
@@ -1286,6 +1292,6 @@ pub(crate) fn build_text_spec(
         content.insert(0, TextContent::Literal("$ ".to_owned()));
         content.push(TextContent::Literal(" $".to_owned()));
     }
-    TextSpec::new(content, parse_role(role_name)?, style, flow)
+    TextSpec::new_with_markup(content, parse_role(role_name)?, style, flow, markup)
         .map_err(|error| PyValueError::new_err(error.to_string()))
 }

@@ -55,7 +55,7 @@ Esta separación evita tener un segundo solucionador de cajas de texto. Consulta
 #api-entry(
   name: "Scene.text",
   kind: "factory",
-  signature: "text(*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None) -> Text",
+  signature: "text(*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None, markup=True) -> Text",
   params: (
     (name: "content", type: "str | TextPart | TextParts", default: none, desc: [One or more composable strings, semantic parts, or compact ordered part groups. The flattened result must not be empty.]),
     (name: "role", type: "TextRole | None", default: "None", desc: [Semantic role. Fully mathematical content infers `math`; everything else infers `body`.]),
@@ -63,6 +63,7 @@ Esta separación evita tener un segundo solucionador de cajas de texto. Consulta
     (name: "flow", type: "TextFlow | None", default: "None", desc: [Reusable internal line-composition options.]),
     (name: "style overrides", type: "keyword arguments", default: "None", desc: [Direct font, metric, color, opacity, spacing, and baseline values.]),
     (name: "flow overrides", type: "keyword arguments", default: "None", desc: [Direct wrap, alignment, line limit, overflow, direction, and hyphenation values.]),
+    (name: "markup", type: "bool", default: "True", desc: [Interpret `*strong*` and `_emphasis_`. `False` keeps `*` and `_` literal while `$...$` math still applies.]),
   ),
   returns: (type: "Text", desc: [Structured vector text measured by the same intrinsic Layout v2 pass in every context.]),
   desc: [Direct keywords override `TextStyle` and `TextFlow`. The `color` argument
@@ -205,6 +206,14 @@ scene.render()
 - A valid opening delimiter without its matching close, or crossed nesting,
   raises `ValueError`. Escape a literal adjacent marker when it could be read
   as an opener.
+- For technical content full of `_` or `*` (labels such as `tb:dist_comp`,
+  identifiers such as `X1_2`), pass `markup=False`: every `*` and `_` stays
+  literal, backslashes included, while `$...$` math still applies.
+  `text.become(...)` keeps the current mode unless `markup=` is given.
+
+```python
+label = scene.text("Valores: V_e del piso 1 (tb:agriet_xy)", markup=False)
+```
 
 #api-entry(
   name: "parts",
