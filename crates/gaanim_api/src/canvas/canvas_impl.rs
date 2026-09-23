@@ -756,7 +756,7 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
         GrowFromPoint { .. } | GrowFromEdge { .. } => &["translation", "scale"],
         SpinInFromNothing => &["scale", "rotation"],
         Create3D => &["scale", "opacity"],
-        Indicate { .. } => &["translation", "scale", "fill"],
+        Indicate { .. } => &["scale", "fill"],
         Transform { .. } | ReplacementTransform { .. } => &[
             "translation",
             "rotation",

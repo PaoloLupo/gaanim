@@ -3485,7 +3485,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         let half = anim.duration * 0.5;
 
-        // 1. Hop upward and pulse the target around its visual center.
+        // 1. Pulse the target around its visual center.
         let root_state = match self.states.get_mut(anim.target) {
             Some(s) => s,
             None => return,
@@ -3510,44 +3510,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 .entity(root_state.entity)
                 .insert(root_state.transform);
         }
+        // Grow in place around the pivot; translating here would make the
+        // target drift away from its baseline instead of pulsing.
         let scale_from = root_state.transform.scale;
         let scale_to = scale_from * scale_factor;
-        let translation_from = root_state.transform.translation;
-        let jump_height = (root_state.bounds.height().abs() * 0.1).clamp(4.0, 10.0);
-        let translation_peak = translation_from + DVec3::new(0.0, jump_height, 0.0);
         let ease_up = gaanim_math::RateFunc::EaseOut(EasingCurve::Quadratic);
         let ease_down = gaanim_math::RateFunc::EaseIn(EasingCurve::Quadratic);
-
-        self.timeline.add_clip(
-            parent_track,
-            self.current_time,
-            half,
-            ClipPayload::Animation(AnimationSpec {
-                target: anim.target,
-                lens: PropertyLensSpec::Translation {
-                    from: translation_from,
-                    to: translation_peak,
-                },
-                rate_func: ease_up.clone(),
-                delay: 0.0,
-                label: self.current_label.clone(),
-            }),
-        );
-        self.timeline.add_clip(
-            parent_track,
-            self.current_time + half,
-            half,
-            ClipPayload::Animation(AnimationSpec {
-                target: anim.target,
-                lens: PropertyLensSpec::Translation {
-                    from: translation_peak,
-                    to: translation_from,
-                },
-                rate_func: ease_down.clone(),
-                delay: 0.0,
-                label: self.current_label.clone(),
-            }),
-        );
 
         self.timeline.add_clip(
             parent_track,
@@ -7255,7 +7223,7 @@ mod tests {
     }
 
     #[test]
-    fn indicate_hops_up_from_visual_center_without_diagonal_drift() {
+    fn indicate_scales_in_place_around_visual_center() {
         let world = World::new();
         let mut queue = CommandQueue::default();
         let mut commands = Commands::new(&mut queue, &world);
@@ -7301,24 +7269,17 @@ mod tests {
         let state = builder.states.get(target_id).unwrap();
         assert_eq!(state.transform.anchor, DVec3::new(45.0, 5.0, 0.0));
 
-        let translations: Vec<_> = builder
-            .timeline
-            .clips
-            .values()
-            .filter_map(|clip| match &clip.payload {
+        let translates = builder.timeline.clips.values().any(|clip| {
+            matches!(
+                &clip.payload,
                 ClipPayload::Animation(AnimationSpec {
                     target,
-                    lens: PropertyLensSpec::Translation { from, to },
+                    lens: PropertyLensSpec::Translation { .. },
                     ..
-                }) if *target == target_id => Some((*from, *to)),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(translations.len(), 2);
-        assert_eq!(translations[0].0.x, translations[0].1.x);
-        assert!(translations[0].1.y > translations[0].0.y);
-        assert_eq!(translations[1].0, translations[0].1);
-        assert_eq!(translations[1].1, translations[0].0);
+                }) if *target == target_id
+            )
+        });
+        assert!(!translates, "Indicate must not move the target");
 
         let scales: Vec<_> = builder
             .timeline
