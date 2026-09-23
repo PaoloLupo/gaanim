@@ -4318,6 +4318,10 @@ class Mechanics:
         extension_style: Literal["solid", "dashed"] = "solid",
         dash_length: float = 0.12,
         gap_length: float = 0.08,
+        side: Optional[Literal["left", "right", "above", "below"]] = None,
+        font: Optional[str] = None,
+        weight: Optional[int] = None,
+        label_style: Optional[TextStyle] = None,
     ) -> Dimension:
         """Create a reactive technical dimension and optional annotation.
 
@@ -4336,12 +4340,29 @@ class Mechanics:
         reactive value. Math labels and reactive values share one 0.48-unit typographic baseline by default, including
         subscripted formulas. ``line_width`` controls the filled line geometry
         and sizes the arrowheads (six line widths long, capped for short spans);
-        dashed extensions use ``dash_length`` and ``gap_length``. Invalid
-        metrics, extension styles, or orientation raise ``ValueError``.
+        dashed extensions use ``dash_length`` and ``gap_length``.
+
+        Without ``side``, the sign of ``offset`` picks the side relative to
+        the ``from_`` → ``to`` direction (positive is to its left).
+        ``side`` fixes it in scene terms instead, and ``offset`` becomes
+        only the distance: the dimension stays on that side even when the
+        endpoints swap or move past each other. When the line runs along the
+        requested direction (``"above"`` on a vertical dimension), the
+        offset is used as a positive distance.
+
+        ``label_style`` overlays a ``TextStyle`` on the label, the value and
+        the unit; ``font`` and ``weight`` override it, and ``font_size``
+        overrides its size. Its color, when set, overrides ``color`` for the
+        text only. Unset fields use the theme's body text. Invalid metrics,
+        extension styles, orientation, side, or weight raise ``ValueError``.
 
         Example:
             width = scene.dimension_between(
                 left, right, 0.45, label="$W_f$", show_value=True, unit="mm"
+            )
+            height = scene.mechanics.dimension_between(
+                base, top, 0.45, side="right", show_value=True,
+                font="Cascadia Mono", weight=600,
             )
         """
         ...

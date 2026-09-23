@@ -1112,6 +1112,47 @@ pub enum DimensionLabelOrientation {
     Aligned,
 }
 
+/// Scene-space side on which a dimension is drawn, independent of the
+/// `from` → `to` direction that decides the sign of a raw offset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DimensionSide {
+    Left,
+    Right,
+    Above,
+    Below,
+}
+
+impl DimensionSide {
+    /// Signed offset along the dimension normal `(-dy, dx)` that places a
+    /// dimension `distance` away on this side of the `from` → `to` segment.
+    ///
+    /// When the segment runs along the requested direction (for example
+    /// `Above` on a vertical dimension) no side is preferred and the offset
+    /// stays positive.
+    pub fn signed_offset(self, distance: f64, from: DVec2, to: DVec2) -> f64 {
+        let delta = to - from;
+        let normal = DVec2::new(-delta.y, delta.x);
+        let wanted = match self {
+            Self::Left => DVec2::NEG_X,
+            Self::Right => DVec2::X,
+            Self::Above => DVec2::Y,
+            Self::Below => DVec2::NEG_Y,
+        };
+        let alignment = normal.dot(wanted);
+        let distance = distance.abs();
+        if alignment < -1e-9 * delta.length() {
+            -distance
+        } else {
+            distance
+        }
+    }
+
+    /// Resolve an authored offset: with a side, only its magnitude matters.
+    pub fn resolve(side: Option<Self>, offset: f64, from: DVec2, to: DVec2) -> f64 {
+        side.map_or(offset, |side| side.signed_offset(offset, from, to))
+    }
+}
+
 /// Places a dimension annotation at the midpoint of its displaced baseline.
 #[derive(Component, Debug, Clone)]
 pub struct DimensionLabelPlacement {
@@ -1119,6 +1160,8 @@ pub struct DimensionLabelPlacement {
     pub from: TrackingEndpoint,
     pub to: TrackingEndpoint,
     pub offset: f64,
+    /// Scene side that overrides the sign of `offset` every frame.
+    pub side: Option<DimensionSide>,
     pub gap: f64,
     pub orientation: DimensionLabelOrientation,
     /// Keep upright labels clear of steep lines by their width, not only their height.
@@ -1717,7 +1760,13 @@ pub fn dimension_label_placement_system(world: &mut World) {
         }
         let direction = delta.truncate() / length;
         let normal = gaanim_core::glam::DVec2::new(-direction.y, direction.x);
-        let side = if placement.offset < 0.0 { -1.0 } else { 1.0 };
+        let offset = DimensionSide::resolve(
+            placement.side,
+            placement.offset,
+            from.truncate(),
+            to.truncate(),
+        );
+        let side = if offset < 0.0 { -1.0 } else { 1.0 };
         // `gap` is measured to the label center across the label height. An
         // upright label on a steep line is wider across the line than it is
         // tall, so push it out by that excess to keep the same clearance.
@@ -1734,7 +1783,7 @@ pub fn dimension_label_placement_system(world: &mut World) {
             }
             _ => 0.0,
         };
-        let displacement = placement.offset + side * (placement.gap + upright_clearance);
+        let displacement = offset + side * (placement.gap + upright_clearance);
         let midpoint =
             (from + to) * 0.5 + DVec3::new(normal.x * displacement, normal.y * displacement, 0.0);
         let mut angle = match placement.orientation {
@@ -2601,6 +2650,62 @@ mod tests {
     }
 
     #[test]
+    fn dimension_side_ignores_the_direction_of_the_measured_segment() {
+        let (bottom, top) = (DVec2::new(0.0, 0.0), DVec2::new(0.0, 4.0));
+        let (left, right) = (DVec2::new(-2.0, 1.0), DVec2::new(2.0, 1.0));
+        for (from, to) in [(bottom, top), (top, bottom)] {
+            // The normal is (-dy, dx): a positive offset leaves from->to on its left.
+            let normal_x = -(to - from).y.signum();
+            let left_offset = DimensionSide::Left.signed_offset(0.5, from, to);
+            let right_offset = DimensionSide::Right.signed_offset(-0.5, from, to);
+            assert_eq!(left_offset * normal_x, -0.5);
+            assert_eq!(right_offset * normal_x, 0.5);
+        }
+        for (from, to) in [(left, right), (right, left)] {
+            let normal_y = (to - from).x.signum();
+            assert_eq!(
+                DimensionSide::Above.signed_offset(0.5, from, to) * normal_y,
+                0.5
+            );
+            assert_eq!(
+                DimensionSide::Below.signed_offset(0.5, from, to) * normal_y,
+                -0.5
+            );
+        }
+        // Along the requested direction no side is preferred.
+        assert_eq!(DimensionSide::Above.signed_offset(-0.5, bottom, top), 0.5);
+        assert_eq!(DimensionSide::resolve(None, -0.5, bottom, top), -0.5);
+    }
+
+    #[test]
+    fn dimension_label_follows_its_side_when_endpoints_swap() {
+        let mut world = World::new();
+        let label = world.spawn(SpatialTransform::default()).id();
+        let placement = world
+            .spawn(DimensionLabelPlacement {
+                label,
+                from: TrackingEndpoint::Static(DVec3::new(0.0, 0.0, 0.0)),
+                to: TrackingEndpoint::Static(DVec3::new(0.0, 4.0, 0.0)),
+                offset: 1.0,
+                side: Some(DimensionSide::Right),
+                gap: 0.5,
+                orientation: DimensionLabelOrientation::Aligned,
+                clear_label_width: false,
+            })
+            .id();
+        dimension_label_placement_system(&mut world);
+        let first = world.get::<SpatialTransform>(label).unwrap().translation;
+        assert!((first.x - 1.5).abs() < 1e-12, "{first:?}");
+
+        let mut placement = world.get_mut::<DimensionLabelPlacement>(placement).unwrap();
+        let placement = &mut *placement;
+        std::mem::swap(&mut placement.from, &mut placement.to);
+        dimension_label_placement_system(&mut world);
+        let swapped = world.get::<SpatialTransform>(label).unwrap().translation;
+        assert!((swapped.x - 1.5).abs() < 1e-12, "{swapped:?}");
+    }
+
+    #[test]
     fn zero_distance_and_negative_dimension_offset_are_stable() {
         let mut world = World::new();
         let point = DVec3::new(7.0, -3.0, 11.0);
@@ -2629,6 +2734,7 @@ mod tests {
             from: TrackingEndpoint::Static(DVec3::new(0.0, 0.0, 0.0)),
             to: TrackingEndpoint::Static(DVec3::new(10.0, 0.0, 0.0)),
             offset: -20.0,
+            side: None,
             gap: 5.0,
             orientation: DimensionLabelOrientation::Upright,
             clear_label_width: true,
@@ -2665,6 +2771,7 @@ mod tests {
                 from: TrackingEndpoint::Static(DVec3::ZERO),
                 to: TrackingEndpoint::Static(to),
                 offset: 0.35,
+                side: None,
                 gap: 0.1,
                 orientation: DimensionLabelOrientation::Upright,
                 clear_label_width,
@@ -2698,6 +2805,7 @@ mod tests {
             from: TrackingEndpoint::Static(DVec3::new(10.0, 0.0, 0.0)),
             to: TrackingEndpoint::Static(DVec3::new(-10.0, 0.0, 0.0)),
             offset: 20.0,
+            side: None,
             gap: 5.0,
             orientation: DimensionLabelOrientation::Aligned,
             clear_label_width: true,

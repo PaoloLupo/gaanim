@@ -527,6 +527,7 @@ mod tests {
                     suffix: String::new(),
                     invalid: "—".into(),
                     font_family: "sans-serif".into(),
+                    font_weight: None,
                     font_size: 0.75,
                     last_text: String::new(),
                     last_path: empty.clone(),

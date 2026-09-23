@@ -877,11 +877,19 @@ def validate_reactive_connector_contract(module: object) -> list[str]:
     else:
         failures.append("Scene.dimension_between accepted an invalid semantic value")
 
+    for side in ("left", "right", "above", "below"):
+        scene.mechanics.dimension_between(
+            (0.0, 0.0), (0.0, 1.0), -0.5, side=side, show_value=True,
+            font="Cascadia Mono", weight=600,
+            label_style=module.TextStyle(italic=True),
+        )
     for invalid in (
         {"line_width": 0.0},
         {"extension_style": "dots"},
         {"dash_length": 0.0},
         {"gap_length": float("nan")},
+        {"side": "up"},
+        {"weight": 0},
     ):
         try:
             scene.mechanics.dimension_between((0.0, 0.0), (1.0, 0.0), 10.0, **invalid)
