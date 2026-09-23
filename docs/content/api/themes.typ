@@ -243,6 +243,32 @@ theme = Theme(
 scene = Scene(frame=(16, 9), theme=theme)
 ```
 
+=== Directorio de fuentes y markup global
+
+`font_dir` registra todos los archivos `.ttf`, `.otf`, `.ttc` y `.otc` que están
+directamente en un directorio (sin subdirectorios). Cada cara se resuelve por la
+familia, el peso y el estilo que declara su archivo, así que no hace falta
+nombrarlas una por una: con `fonts={"text": "Inter"}`, `weight=700` encuentra el
+archivo en negrita. `font_files` sigue sirviendo para registrar archivos sueltos.
+Un directorio sin fuentes o un archivo ilegible producen `ValueError`, y un
+directorio inexistente, `OSError`.
+
+`text_markup=False` hace que `*` y `_` sean literales por defecto en
+`scene.text`, `scene.text.measure`, `badge` y `chip`. Es útil en proyectos con
+muchas etiquetas técnicas. Una llamada que pasa `markup=` conserva su elección.
+
+```python
+theme = Theme(
+    "paper",
+    font_dir="assets/fonts",
+    fonts={"text": "Inter", "code": "JetBrains Mono"},
+    text_markup=False,
+)
+scene = Scene(theme=theme)
+scene.text("tb:dist_comp")          # Literal, sin cursiva.
+scene.text("*Nota*", markup=True)   # Negrita.
+```
+
 El diccionario `text` reutiliza el mismo `TextStyle` que aceptan `Text`
 estructurado y `part(...)`. Funciona como una capa: las propiedades omitidas
 siguen viniendo del rol semántico. Los estilos de `TextPart` y los métodos

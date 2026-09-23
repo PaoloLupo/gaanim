@@ -29,7 +29,7 @@ pub use signals::{
     format_reactive_number, normal_on_curve_system, point_on_curve_system, position_binding_system,
     reactive_3d_regen_system, reactive_readout_layout_system, reactive_readout_update_system,
     right_align_readout_path, right_aligned_readout_baseline, shape_readout_text,
-    signal_binding_system, tangent_on_curve_system,
+    shape_readout_text_with_weight, signal_binding_system, tangent_on_curve_system,
 };
 pub use tween::{
     AnimatableLens, CameraStateSource, DeltaTime, MorphTable, PropertyLens, Tween, TweenState,
@@ -38,8 +38,8 @@ pub use tween::{
 };
 pub use updaters::{
     AngleArrowheads, AngleLabelPlacement, AngleSweep, DimensionLabelOrientation,
-    DimensionLabelPlacement, EndpointAngle, EndpointDistance, EndpointFollow, FollowOffsetSpace,
-    InvalidFixedStep, InvalidSampledSeries, PlaybackState, RotationBinding,
+    DimensionLabelPlacement, DimensionSide, EndpointAngle, EndpointDistance, EndpointFollow,
+    FollowOffsetSpace, InvalidFixedStep, InvalidSampledSeries, PlaybackState, RotationBinding,
     RotationTranslationBinding, SampledInterpolation, SampledProperty, SampledSeriesDriver,
     SurroundingRect, TracedPath, TracedPath3D, TrackingAngle, TrackingAnglePart, TrackingEndpoint,
     TrackingLine, TrackingRay, TrackingScalar, TrackingVectorHead, Updater, advance_updaters_by,

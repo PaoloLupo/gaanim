@@ -3040,6 +3040,25 @@ impl SceneModel {
         invalid: impl Into<String>,
         font_size: Option<f64>,
     ) -> DrawableHandle {
+        self.reactive_readout_with_font(
+            source, format, prefix, suffix, invalid, font_size, None, None,
+        )
+    }
+
+    /// [`Self::reactive_readout`] with an explicit digit family and weight.
+    #[doc(hidden)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn reactive_readout_with_font(
+        &mut self,
+        source: ScalarSource,
+        format: impl Into<String>,
+        prefix: impl Into<String>,
+        suffix: impl Into<String>,
+        invalid: impl Into<String>,
+        font_size: Option<f64>,
+        font_family: Option<String>,
+        font_weight: Option<u16>,
+    ) -> DrawableHandle {
         self.spawn(SpawnKind::ReactiveReadout {
             source,
             format: format.into(),
@@ -3047,6 +3066,8 @@ impl SceneModel {
             suffix: suffix.into(),
             invalid: invalid.into(),
             font_size,
+            font_family,
+            font_weight,
             rolling: None,
         })
     }
@@ -3084,6 +3105,8 @@ impl SceneModel {
             suffix: String::new(),
             invalid: "—".into(),
             font_size: Some(options.font_size),
+            font_family: None,
+            font_weight: None,
             rolling: Some(options),
         }))
     }

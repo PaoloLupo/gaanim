@@ -215,6 +215,9 @@ pub struct CanvasTheme {
     pub heatmap: Vec<Color>,
     pub fonts: Vec<ThemeFont>,
     pub layout: LayoutTokens,
+    /// Default markup mode for text created while this theme is active: with
+    /// `false`, `*` and `_` stay literal unless a call passes `markup=True`.
+    pub text_markup: bool,
 }
 
 impl CanvasTheme {
@@ -401,6 +404,7 @@ impl CanvasTheme {
             heatmap: vec![palette.background, palette.chart, palette.accent],
             fonts: Vec::new(),
             layout: LayoutTokens::default(),
+            text_markup: true,
         };
         result.sync_text_colors();
         result.sync_color_tokens();
@@ -763,6 +767,32 @@ impl CanvasTheme {
         warnings
     }
 
+    /// Embed every font file directly inside `dir` (`.ttf`, `.otf`, `.ttc`,
+    /// `.otc`), each under the family, weight and style it declares, and
+    /// return how many were added. A directory without font files is an
+    /// `InvalidInput` error so a mistyped path does not pass silently.
+    pub fn add_font_dir(&mut self, dir: impl AsRef<std::path::Path>) -> std::io::Result<usize> {
+        let dir = dir.as_ref();
+        let fonts = gaanim_text::prelude::scan_font_dir(dir)?;
+        if fonts.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "font_dir '{}' contains no .ttf, .otf, .ttc or .otc files",
+                    dir.display()
+                ),
+            ));
+        }
+        let regular = gaanim_text::prelude::regular_faces(&fonts);
+        for (font, regular) in fonts.iter().zip(regular) {
+            self.fonts.push(ThemeFont {
+                family: font.registry_key(regular),
+                bytes: font.bytes.clone(),
+            });
+        }
+        Ok(fonts.len())
+    }
+
     pub fn set_fonts(&mut self, fonts: &HashMap<String, String>) -> Result<(), String> {
         for (role, family) in fonts {
             let roles: &[TextRole] = match role.as_str() {
@@ -907,7 +937,7 @@ fn spawn_family(kind: &SpawnKind) -> &'static str {
         | SpawnKind::DoubleArrow { .. }
         | SpawnKind::Brace { .. }
         | SpawnKind::Arc { .. }
-        | SpawnKind::CurvedArrow(_, _, _, _, _)
+        | SpawnKind::CurvedArrow { .. }
         | SpawnKind::CurvedArrowArc { .. }
         | SpawnKind::Dimension { .. }
         | SpawnKind::Polyline(_)
@@ -957,7 +987,7 @@ fn spawn_name(kind: &SpawnKind) -> &'static str {
         SpawnKind::Cross(_) => "cross",
         SpawnKind::RightAngle(_) => "right_angle",
         SpawnKind::Arc { .. } => "arc",
-        SpawnKind::CurvedArrow(_, _, _, _, _) | SpawnKind::CurvedArrowArc { .. } => "curved_arrow",
+        SpawnKind::CurvedArrow { .. } | SpawnKind::CurvedArrowArc { .. } => "curved_arrow",
         SpawnKind::Dimension { .. } => "dimension",
         SpawnKind::Polyline(_) => "polyline",
         SpawnKind::Bezier { .. } => "bezier",
@@ -1033,6 +1063,35 @@ fn relative_luminance(color: Color) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn font_dir_embeds_each_face_and_rejects_directories_without_fonts() {
+        let dir =
+            std::env::temp_dir().join(format!("gaanim_theme_font_dir_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut theme = CanvasTheme::custom("fonts");
+        let error = theme.add_font_dir(&dir).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(theme.add_font_dir(dir.join("missing")).is_err());
+
+        let bytes = gaanim_text::font::FontRegistry::new()
+            .get_font("New Computer Modern")
+            .unwrap();
+        std::fs::write(dir.join("NewCM-Regular.otf"), &*bytes).unwrap();
+        assert_eq!(theme.add_font_dir(&dir).unwrap(), 1);
+        assert_eq!(theme.fonts.len(), 1);
+        // The only face of its family is keyed by the bare declared family.
+        let family = &theme.fonts[0].family;
+        assert!(!family.is_empty() && !family.ends_with(" italic"), "{family}");
+        assert!(
+            family.rsplit(' ').next().unwrap().parse::<u16>().is_err(),
+            "{family}"
+        );
+        assert_eq!(&*theme.fonts[0].bytes, &*bytes);
+        assert!(theme.text_markup, "new themes keep markup on");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn deck_remains_generic_but_thesis_alias_is_removed() {

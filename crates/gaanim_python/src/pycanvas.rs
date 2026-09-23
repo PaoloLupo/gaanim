@@ -692,6 +692,8 @@ impl PyTheme {
         heatmap=None,
         layout=None,
         font_files=None,
+        font_dir=None,
+        text_markup=None,
     ))]
     fn new(
         base: Option<&Bound<'_, PyAny>>,
@@ -705,6 +707,8 @@ impl PyTheme {
         heatmap: Option<Vec<PyColor>>,
         layout: Option<HashMap<String, f64>>,
         font_files: Option<HashMap<String, String>>,
+        font_dir: Option<std::path::PathBuf>,
+        text_markup: Option<bool>,
     ) -> PyResult<Self> {
         let mut theme = match base {
             Some(base) => {
@@ -825,12 +829,32 @@ impl PyTheme {
                 });
             }
         }
+        if let Some(font_dir) = font_dir {
+            theme.add_font_dir(&font_dir).map_err(|error| {
+                let message = format!("could not load font_dir '{}': {error}", font_dir.display());
+                match error.kind() {
+                    std::io::ErrorKind::InvalidData | std::io::ErrorKind::InvalidInput => {
+                        pyo3::exceptions::PyValueError::new_err(message)
+                    }
+                    _ => pyo3::exceptions::PyIOError::new_err(message),
+                }
+            })?;
+        }
+        if let Some(text_markup) = text_markup {
+            theme.text_markup = text_markup;
+        }
         Ok(Self { inner: theme })
     }
 
     #[getter]
     fn name(&self) -> &str {
         &self.inner.name
+    }
+
+    /// Default markup mode for text that does not pass ``markup=``.
+    #[getter]
+    fn text_markup(&self) -> bool {
+        self.inner.text_markup
     }
 
     /// Names accepted by `Theme(name)` and `scene.canvas.set_theme(name)`.
@@ -2689,6 +2713,22 @@ impl PyMediaLibrary {
     }
 }
 
+/// Fill omitted solid-arrow dimensions with the scene-unit defaults.
+fn arrow_dimensions(
+    head_length: Option<f64>,
+    head_width: Option<f64>,
+    body_width: Option<f64>,
+) -> (f64, f64, f64) {
+    use gaanim_objects::primitives::{
+        DEFAULT_ARROW_BODY_WIDTH, DEFAULT_ARROW_HEAD_LENGTH, DEFAULT_ARROW_HEAD_WIDTH,
+    };
+    (
+        head_length.unwrap_or(DEFAULT_ARROW_HEAD_LENGTH),
+        head_width.unwrap_or(DEFAULT_ARROW_HEAD_WIDTH),
+        body_width.unwrap_or(DEFAULT_ARROW_BODY_WIDTH),
+    )
+}
+
 #[pymethods]
 impl PyGeometry {
     fn circle(&self, radius: f64) -> PyResult<PyDrawable> {
@@ -2854,14 +2894,16 @@ impl PyGeometry {
         max_head_ratio: Option<f64>,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
+        let (head_length, head_width, body_width) =
+            arrow_dimensions(head_length, head_width, body_width);
         let mut canvas = self.inner.lock().expect("scene canvas poisoned");
         canvas
             .arrow_with_dimensions(
                 (x1, y1),
                 (x2, y2),
-                head_length.unwrap_or(gaanim_objects::primitives::DEFAULT_ARROW_HEAD_LENGTH),
-                head_width.unwrap_or(gaanim_objects::primitives::DEFAULT_ARROW_HEAD_WIDTH),
-                body_width.unwrap_or(gaanim_objects::primitives::DEFAULT_ARROW_BODY_WIDTH),
+                head_length,
+                head_width,
+                body_width,
                 max_head_ratio,
             )
             .map(PyDrawable)
@@ -3154,17 +3196,40 @@ impl PyGeometry {
             ))
         })
     }
-    fn curved_arrow(&self, x1: f64, y1: f64, x2: f64, y2: f64, angle: f64) -> PyResult<PyDrawable> {
+    #[pyo3(signature = (x1, y1, x2, y2, angle, *, head_length=None, head_width=None, body_width=None, max_head_ratio=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn curved_arrow(
+        &self,
+        x1: f64,
+        y1: f64,
+        x2: f64,
+        y2: f64,
+        angle: f64,
+        head_length: Option<f64>,
+        head_width: Option<f64>,
+        body_width: Option<f64>,
+        max_head_ratio: Option<f64>,
+    ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            PyDrawable(
-                self.inner
-                    .lock()
-                    .expect("scene canvas poisoned")
-                    .curved_arrow(x1, y1, x2, y2, angle),
+        let (head_length, head_width, body_width) =
+            arrow_dimensions(head_length, head_width, body_width);
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .curved_arrow_with_dimensions(
+                (x1, y1),
+                (x2, y2),
+                angle,
+                head_length,
+                head_width,
+                body_width,
+                max_head_ratio,
             )
-        })
+            .map(PyDrawable)
+            .map_err(pyo3::exceptions::PyValueError::new_err)
     }
+    #[pyo3(signature = (cx, cy, radius, start_angle, sweep_angle, *, head_length=None, head_width=None, body_width=None, max_head_ratio=None))]
+    #[allow(clippy::too_many_arguments)]
     fn curved_arrow_arc(
         &self,
         cx: f64,
@@ -3172,16 +3237,29 @@ impl PyGeometry {
         radius: f64,
         start_angle: f64,
         sweep_angle: f64,
+        head_length: Option<f64>,
+        head_width: Option<f64>,
+        body_width: Option<f64>,
+        max_head_ratio: Option<f64>,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            PyDrawable(
-                self.inner
-                    .lock()
-                    .expect("scene canvas poisoned")
-                    .curved_arrow_arc(cx, cy, radius, start_angle, sweep_angle),
+        let (head_length, head_width, body_width) =
+            arrow_dimensions(head_length, head_width, body_width);
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .curved_arrow_arc_with_dimensions(
+                (cx, cy),
+                radius,
+                start_angle,
+                sweep_angle,
+                head_length,
+                head_width,
+                body_width,
+                max_head_ratio,
             )
-        })
+            .map(PyDrawable)
+            .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 }
 
@@ -3288,9 +3366,29 @@ impl PyGeometry {
     }
 }
 
+impl PyTypography {
+    /// Markup mode used when a call does not pass ``markup=``.
+    fn default_markup(&self) -> bool {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .default_text_markup()
+    }
+}
+
+impl PySlideKit {
+    /// Markup mode used when a call does not pass ``markup=``.
+    fn default_markup(&self) -> bool {
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .default_text_markup()
+    }
+}
+
 #[pymethods]
 impl PyTypography {
-    #[pyo3(signature = (*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None, markup=true))]
+    #[pyo3(signature = (*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None, markup=None))]
     #[allow(clippy::too_many_arguments)]
     fn __call__<'py>(
         &self,
@@ -3316,9 +3414,12 @@ impl PyTypography {
         overflow: Option<&str>,
         direction: Option<&str>,
         hyphenate: Option<bool>,
-        markup: bool,
+        markup: Option<bool>,
     ) -> PyResult<Py<PyText>> {
         crate::custom::ensure_authoring_allowed()?;
+        let markup = markup.unwrap_or_else(|| self.default_markup());
+        // Without an explicit alignment, an anchored move_to decides it.
+        let derive_align = flow.is_none() && text_align.is_none();
         let spec = build_text_spec(
             content,
             false,
@@ -3349,7 +3450,10 @@ impl PyTypography {
             .lock()
             .expect("scene canvas poisoned")
             .text_spec(spec.clone());
-        Py::new(py, PyText::initializer(handle, spec))
+        Py::new(
+            py,
+            PyText::initializer_with_derived_align(handle, spec, derive_align),
+        )
     }
 
     #[pyo3(signature = (*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None))]
@@ -4225,7 +4329,7 @@ impl PyTypography {
     /// w, h = scene.text.measure("PGA = 0.35 g", role="label")
     /// box = scene.geometry.rounded_rect(w + 0.56, h + 0.32, 0.14)
     /// ```
-    #[pyo3(signature = (content, *, role=None, size=None, font=None, color=None, wrap=None, weight=None, style=None, markup=true))]
+    #[pyo3(signature = (content, *, role=None, size=None, font=None, color=None, wrap=None, weight=None, style=None, markup=None))]
     #[pyo3(name = "measure")]
     #[allow(clippy::too_many_arguments)]
     fn measure_text_py(
@@ -4238,11 +4342,12 @@ impl PyTypography {
         wrap: Option<f64>,
         weight: Option<u16>,
         style: Option<PyTextStyle>,
-        markup: bool,
+        markup: Option<bool>,
     ) -> PyResult<(f64, f64)> {
         use gaanim_text::prelude::{TextFlow, TextRole, TextSpec, TextWrap};
 
         crate::custom::ensure_authoring_allowed()?;
+        let markup = markup.unwrap_or_else(|| self.default_markup());
         if content.is_empty() {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "measure_text content must not be empty",
@@ -4276,7 +4381,7 @@ impl PyTypography {
 #[pymethods]
 impl PySlideKit {
     /// Create an auto-sized editorial badge.
-    #[pyo3(signature = (text, *, variant="neutral", appearance="soft", padding=(0.18, 0.10), radius=None, font_size=None, min_width=None, color=None, background=None, border=None, font=None, weight=None, style=None, markup=true))]
+    #[pyo3(signature = (text, *, variant="neutral", appearance="soft", padding=(0.18, 0.10), radius=None, font_size=None, min_width=None, color=None, background=None, border=None, font=None, weight=None, style=None, markup=None))]
     #[pyo3(name = "badge")]
     #[allow(clippy::too_many_arguments)]
     fn badge_py(
@@ -4294,9 +4399,10 @@ impl PySlideKit {
         font: Option<String>,
         weight: Option<u16>,
         style: Option<PyTextStyle>,
-        markup: bool,
+        markup: Option<bool>,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
+        let markup = markup.unwrap_or_else(|| self.default_markup());
         let text_style = label_text_style(style, font, weight, None, None);
         let style = editorial_style(variant, appearance, color, background, border)?;
         let mut spec = BadgeSpec::new(text)
@@ -4312,7 +4418,7 @@ impl PySlideKit {
     }
 
     /// Create a compact chip with an optional semantic dot.
-    #[pyo3(signature = (text, *, dot=true, variant="neutral", appearance="soft", padding=(0.14, 0.08), radius=None, font_size=None, color=None, background=None, border=None, font=None, weight=None, style=None, markup=true))]
+    #[pyo3(signature = (text, *, dot=true, variant="neutral", appearance="soft", padding=(0.14, 0.08), radius=None, font_size=None, color=None, background=None, border=None, font=None, weight=None, style=None, markup=None))]
     #[allow(clippy::too_many_arguments)]
     fn chip(
         &self,
@@ -4329,9 +4435,10 @@ impl PySlideKit {
         font: Option<String>,
         weight: Option<u16>,
         style: Option<PyTextStyle>,
-        markup: bool,
+        markup: Option<bool>,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
+        let markup = markup.unwrap_or_else(|| self.default_markup());
         let text_style = label_text_style(style, font, weight, None, None);
         let style = editorial_style(variant, appearance, color, background, border)?;
         let mut spec = ChipSpec::new(text)
@@ -5566,7 +5673,7 @@ impl PyMechanics {
         ))
     }
 
-    #[pyo3(signature = (from, to, offset, *, label=None, show_value=false, value=None, format=".2f", unit=None, scale=1.0, label_gap=0.10, label_orientation="upright", font_size=None, color=None, line_width=0.03, extension_style="solid", dash_length=0.12, gap_length=0.08))]
+    #[pyo3(signature = (from, to, offset, *, label=None, show_value=false, value=None, format=".2f", unit=None, scale=1.0, label_gap=0.10, label_orientation="upright", font_size=None, color=None, line_width=0.03, extension_style="solid", dash_length=0.12, gap_length=0.08, side=None, font=None, weight=None, label_style=None))]
     #[allow(clippy::too_many_arguments)]
     fn dimension_between<'py>(
         &self,
@@ -5588,6 +5695,10 @@ impl PyMechanics {
         extension_style: &str,
         dash_length: f64,
         gap_length: f64,
+        side: Option<&str>,
+        font: Option<String>,
+        weight: Option<u16>,
+        label_style: Option<PyTextStyle>,
     ) -> PyResult<Py<PyDimension>> {
         crate::custom::ensure_authoring_allowed()?;
         if !offset.is_finite() {
@@ -5642,6 +5753,23 @@ impl PyMechanics {
                 ));
             }
         };
+        let side = side
+            .map(|side| match side {
+                "left" => Ok(gaanim_animation::DimensionSide::Left),
+                "right" => Ok(gaanim_animation::DimensionSide::Right),
+                "above" => Ok(gaanim_animation::DimensionSide::Above),
+                "below" => Ok(gaanim_animation::DimensionSide::Below),
+                _ => Err(pyo3::exceptions::PyValueError::new_err(
+                    "side must be 'left', 'right', 'above' or 'below'",
+                )),
+            })
+            .transpose()?;
+        if weight.is_some_and(|weight| !(1..=1000).contains(&weight)) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "weight must be between 1 and 1000",
+            ));
+        }
+        let label_style = label_text_style(label_style, font, weight, None, None);
         let from = resolve_endpoint(&from)?;
         let to = resolve_endpoint(&to)?;
         let value = value
@@ -5664,7 +5792,9 @@ impl PyMechanics {
                     scale,
                     label_gap,
                     label_orientation: orientation,
+                    side,
                     font_size,
+                    label_style,
                     color: color.map(|value| value.0),
                     line_width,
                     extension_style,
