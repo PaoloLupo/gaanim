@@ -2574,6 +2574,17 @@ class CoordinateSpace:
     def data_to_local(self, x: float, y: float) -> tuple[float, float]:
         """Map data to this space's local coordinates through the view at the cursor."""
         ...
+    def data_to_scene(self, x: float, y: float) -> PointRef:
+        """Return a scene-space point at data ``(x, y)`` for objects outside the space.
+
+        The point is resolved every frame through the live ``view_to`` window
+        and the space's own move, scale and rotation, so labels, arrows and
+        connectors that are not children of the space keep pointing at the
+        data. Use it wherever an ``Endpoint`` is accepted, for example
+        ``label.follow(plane.data_to_scene(2, 4), offset=(0, 0.3))``.
+        Non-finite or out-of-scale data raises ``ValueError``.
+        """
+        ...
     def local_to_data(self, x: float, y: float) -> tuple[float, float]:
         """Map local coordinates to data through the view at the cursor."""
         ...

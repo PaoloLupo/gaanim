@@ -697,6 +697,20 @@ impl CoordinateSpaceHandle {
         })
     }
 
+    /// A scene-space point at the data coordinate `(x, y)`, resolved every
+    /// frame through the live view and the space's own transform. It keeps
+    /// following `view_to` animations and later moves of the space, so an
+    /// annotation that is not a child of the space can still point at data.
+    pub fn data_to_scene(&self, x: f64, y: f64) -> Result<PointRef, VisualizationError> {
+        let point = self.map.data_to_local(x, y)?;
+        Ok(PointRef(CanvasEndpoint::LocalExpression {
+            space: self.view.id,
+            x: ScalarSource::constant(point.x),
+            y: ScalarSource::constant(point.y),
+            z: ScalarSource::constant(0.0),
+        }))
+    }
+
     /// Convert data to space-local coordinates through the view at the authoring cursor.
     pub fn data_to_local(&self, x: f64, y: f64) -> Result<(f64, f64), VisualizationError> {
         let point = self.map.data_to_local(x, y)?;
@@ -4989,6 +5003,93 @@ mod tests {
                 assert!(current.abs_diff_eq(expected, 1e-9));
             }
         }
+    }
+
+    #[test]
+    fn data_to_scene_follows_the_view_and_the_space_transform() {
+        use bevy::prelude::Schedule;
+        use gaanim_math::GlobalSpatialTransform;
+        use gaanim_scene::prelude::World;
+
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        let space = canvas
+            .coordinate_axes(
+                Axis::linear(-4.0, 4.0).unwrap(),
+                Axis::linear(-3.0, 3.0).unwrap(),
+                Some(10.0),
+                Some(5.0),
+                true,
+            )
+            .unwrap()
+            .scale_to(1.2)
+            .rotate_to(0.2)
+            .move_to(1.0, -0.5);
+        let pinned = canvas
+            .circle(0.05)
+            .at_coordinate(space.coord(2.0, 1.5).unwrap());
+        let follower = canvas.circle(0.07).follow_endpoint(
+            space.data_to_scene(2.0, 1.5).unwrap().0,
+            DVec3::ZERO,
+            gaanim_animation::FollowOffsetSpace::World,
+        );
+        assert!(space.data_to_scene(f64::NAN, 0.0).is_err());
+        canvas.play(vec![
+            space
+                .view_to_animation((0.0, 4.0), (0.0, 3.0))
+                .unwrap()
+                .duration(1.0),
+        ]);
+        canvas.wait(0.2);
+
+        let mut world = World::new();
+        world.insert_resource(gaanim_timeline::timeline::Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        let mut timeline = world
+            .remove_resource::<gaanim_timeline::timeline::Timeline>()
+            .unwrap();
+        timeline.add_keyframe(
+            0.0,
+            gaanim_timeline::snapshot::WorldSnapshot::capture(&mut world),
+        );
+        // Identify the two markers by their distinct radii.
+        let mut by_radius = |radius: f64| {
+            world
+                .query::<(gaanim_scene::prelude::Entity, &gaanim_scene::LocalBounds)>()
+                .iter(&world)
+                .find(|(_, bounds)| (bounds.0.width() - 2.0 * radius).abs() < 1e-9)
+                .map(|(entity, _)| entity)
+                .expect("compiled marker")
+        };
+        let (pinned, follower) = (by_radius(0.05), by_radius(0.07));
+        let mut propagation = Schedule::default();
+        propagation.add_systems(gaanim_scene::transform_propagation_system);
+        let mut positions = Vec::new();
+        for time in [0.0, 0.5, 1.0, 1.2, 0.3] {
+            timeline.seek(&mut world, time);
+            propagation.run(&mut world);
+            gaanim_animation::endpoint_follow_system(&mut world);
+            propagation.run(&mut world);
+            let at = |entity| {
+                world
+                    .get::<GlobalSpatialTransform>(entity)
+                    .unwrap()
+                    .mat4
+                    .transform_point3(DVec3::ZERO)
+            };
+            let (expected, actual) = (at(pinned), at(follower));
+            assert!(
+                (expected - actual).length() < 1e-9,
+                "t={time}: {actual:?} != {expected:?}"
+            );
+            positions.push(actual);
+        }
+        assert!(
+            (positions[0] - positions[2]).length() > 0.1,
+            "the view change must move the data point in the scene"
+        );
     }
 
     #[test]
