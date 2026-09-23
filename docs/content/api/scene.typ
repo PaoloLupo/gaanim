@@ -798,3 +798,59 @@ still apply, including a transition on the scene's first segment. Exceptions
 propagate without rolling back already authored content; a failed build
 consumes its visit number. See `examples/section_composition.py` for an animated
 progress rail and configurable arrows in a 16×9 frame.
+
+`Section(key, steps, title=...)` adds a display name for navigation; without
+it the key is shown.
+
+== Section navigation
+
+`scene.sections` builds the two recurring pieces of a talk: an agenda of
+sections and a progress rail. Both supply structure, state and transitions on
+a neutral base of theme colors; every visual value is an argument, a style or
+a builder you provide, and every part is an ordinary drawable you can restyle,
+animate or hide. Sections may be `Section` instances, plain keys, or
+`(key, title)` pairs.
+
+```python
+agenda = scene.sections.agenda(sections, pitch=0.66)
+agenda.root.move_to(-2, 1.4, Anchor.TOP_LEFT)
+rail = scene.sections.progress_rail(sections, segmented=True, captions=True)
+rail.root.move_to(0, -4.3).hud()
+scene.persist(rail.root)
+
+for section in sections:
+    scene.play([agenda.animate.focus(section), rail.animate.enter(section)])
+    section.build(scene, on_enter=lambda scene, p: scene.play(rail.animate.to(p)))
+```
+
+*Agenda.* Every entry is `done`, `current` or `upcoming`. Entries sit
+`pitch` apart (`direction="column"` or `"row"`), placed by their left-center
+point. Each entry holds one drawable per state stacked in place and only the
+one for its state is visible, so a state may change weight, color or content:
+`focus` cross-fades them. Defaults use the theme (`done` in `foreground`,
+`current` in `accent` weight 700, `upcoming` in `muted`); `styles={"current":
+TextStyle(...)}` replaces any of them, and `item=lambda scene, entry, state:
+...` replaces the text with any drawable, for example a number and a title in
+a group. `marker=lambda scene: ...` adds a drawable `marker_gap` before the
+current entry that slides with `focus`.
+
+- `agenda.item(key)` is the group of an entry, `agenda.items("done")` the
+  entries in a state, and `agenda.variant(key, "current")` the drawable shown
+  in that state.
+- `agenda.focus(key)` and `agenda.advance(steps)` change state immediately;
+  `agenda.animate.focus(key)` and `agenda.animate.advance()` return
+  compositions for `scene.play`. Targets accept a key, a 0-based index, a
+  `Section` or a `SectionProgress`.
+
+*Progress rail.* A continuous rail is one track with a mark at every section
+boundary; `segmented=True` gives each section its own track, `gap` apart.
+`rail.animate.to(progress)` fills the sections before a `SectionProgress` and
+its share of steps; numbers in `[0, 1]` set the whole-rail fraction.
+`rail.animate.enter(section)` makes a section current with nothing of it
+filled yet, as on a divider slide. `captions=True` names each section above
+its span on a shared baseline and colors it by state (`caption_colors`
+overrides `muted`/`accent`/`muted`). `track`, `fills`, `marks`, `captions` and
+`label` are the parts; `track=`, `mark=` and `caption=` builders replace
+their shapes. Rails fill left to right, or upward with
+`orientation="vertical"`. See `examples/section_navigation.py` for divider
+slides with a numbered agenda, a sliding marker and a segmented HUD rail.

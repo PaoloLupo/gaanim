@@ -1390,7 +1390,7 @@ def validate_scene_capability_surface(module) -> list[str]:
     expected = {
         "assets", "camera", "canvas", "geometry", "layout", "mechanics",
         "media", "slides", "text", "viz", "fade_out_all", "link", "persist",
-        "play", "release", "render", "reuse", "segment", "snapshots", "stop",
+        "play", "release", "render", "reuse", "sections", "segment", "snapshots", "stop",
         "wait", "time", "cursor", "stops",
     }
     actual = {name for name in dir(module.Scene) if not name.startswith("_")}
@@ -1462,6 +1462,64 @@ def validate_section_and_arrow_contract(module) -> list[str]:
                        ("curved_arrow_arc", (0, 0, 1, 0, 1.2))):
         getattr(scene.geometry, name)(*args, head_length=0.3, head_width=0.24,
                                       body_width=0.06, max_head_ratio=0.3)
+    return failures
+
+
+def validate_section_navigation_contract(module) -> list[str]:
+    from gaanim import Agenda, ProgressRail, Section, SectionStep
+
+    failures = []
+    scene = module.Scene(frame=(16, 9))
+    step = SectionStep(name="one", build=lambda scene: scene.wait(0.1))
+    sections = [Section("intro", [step], title="Introducción"), Section("method", [step, step])]
+
+    def row(scene, entry, state):
+        number = scene.text(f"{entry.index + 1:02d}").move_to(0, 0)
+        return scene.geometry.group([number, scene.text(entry.title).move_to(0.6, 0)])
+
+    agenda = scene.sections.agenda(sections, item=row, pitch=0.6,
+                                   marker=lambda scene: scene.geometry.rect(0.05, 0.4))
+    if not isinstance(agenda, Agenda) or not isinstance(agenda.root, module.Drawable):
+        failures.append("scene.sections.agenda did not return an Agenda with a root drawable")
+    if agenda.current is not None or agenda.items("upcoming") != tuple(
+            agenda.item(i) for i in range(2)):
+        failures.append("an agenda without current did not start upcoming")
+    rail = scene.sections.progress_rail(sections, segmented=True, captions=True)
+    if not isinstance(rail, ProgressRail) or len(rail.fills) != 2 or len(rail.captions) != 2:
+        failures.append("a segmented rail did not build one fill and caption per section")
+    seen = []
+
+    def enter(scene, progress):
+        seen.append(rail.fraction(progress))
+        scene.play(rail.animate.to(progress), duration=0.1)
+
+    for section in sections:
+        scene.play([agenda.animate.focus(section), rail.animate.enter(section)], duration=0.1)
+        section.build(scene, on_enter=enter)
+    if agenda.state("intro") != "done" or agenda.current.key != "method":
+        failures.append("agenda focus did not move the current entry")
+    if seen != [0.5, 0.75, 1.0]:
+        failures.append(f"rail fractions did not follow section progress: {seen}")
+    agenda.advance(-5)
+    if agenda.current.key != "intro":
+        failures.append("agenda.advance did not clamp to the first entry")
+    for build in (lambda: scene.sections.agenda([]),
+                  lambda: scene.sections.agenda(["a", "a"]),
+                  lambda: scene.sections.agenda(["a"], styles={"active": None}),
+                  lambda: scene.sections.progress_rail(segmented=True),
+                  lambda: scene.sections.progress_rail(["a"], length=0)):
+        try:
+            build()
+        except ValueError:
+            pass
+        else:
+            failures.append("section navigation accepted invalid options")
+    try:
+        agenda.focus("missing")
+    except KeyError:
+        pass
+    else:
+        failures.append("agenda.focus accepted an unknown key")
     return failures
 
 
@@ -1628,6 +1686,7 @@ def main() -> int:
     missing.extend(validate_easing_contract(module))
     missing.extend(validate_scene_capability_surface(module))
     missing.extend(validate_section_and_arrow_contract(module))
+    missing.extend(validate_section_navigation_contract(module))
     missing.extend(validate_reactive_fill_level_contract(module))
     missing.extend(validate_polyline_connector_contract(module))
     missing.extend(validate_layout_card_ports_contract(module))

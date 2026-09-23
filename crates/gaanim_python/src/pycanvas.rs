@@ -2197,6 +2197,16 @@ impl PyScene {
         })
     }
 
+    /// Section navigation: agendas and progress rails from `gaanim.sections`.
+    #[getter]
+    fn sections<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
+        crate::custom::ensure_authoring_allowed()?;
+        slf.py()
+            .import("gaanim.sections")?
+            .getattr("SceneSections")?
+            .call1((slf,))
+    }
+
     #[getter]
     fn media(slf: &Bound<'_, Self>) -> PyResult<PyMediaLibrary> {
         crate::custom::ensure_authoring_allowed()?;
