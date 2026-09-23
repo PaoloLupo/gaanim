@@ -11,6 +11,22 @@
   else { rgb("#88c0d0") }
 }
 
+// Plain text of rich content, for the search index.
+#let plain-text(it) = {
+  if it == none { "" }
+  else if type(it) == str { it }
+  else if type(it) != content { "" }
+  else if it.has("text") { plain-text(it.text) }
+  else if it.has("children") { it.children.map(plain-text).join("") }
+  else if it.has("body") { plain-text(it.body) }
+  else if it.has("child") { plain-text(it.child) }
+  else if repr(it.func()) == "space" { " " }
+  else { "" }
+}
+
+// Stable anchor for an entry name, e.g. `Drawable.move_to` -> `api-drawable-move-to`.
+#let api-anchor(name) = "api-" + lower(name).replace(regex("[^a-z0-9]+"), "-").trim("-")
+
 #let api-entry(
   name: none,
   kind: "function",
@@ -28,7 +44,7 @@
     else if kind == "function" { "función" }
     else { kind })
 
-  if target() != "bundle" {
+  if target() not in ("bundle", "html") {
     block(
       width: 100%,
       stroke: 0.5pt + rgb("#e2e8f0"),
@@ -95,7 +111,17 @@
       ]
     )
   } else {
-    html.div(class: "api-entry", {
+    let anchor = api-anchor(name)
+    let page = query(selector(<blog-post>).before(here())).at(-1, default: none)
+    [#metadata((
+      name: name,
+      kind: kind,
+      signature: if signature == none { "" } else { signature },
+      summary: plain-text(desc).replace(regex("\s+"), " ").trim(),
+      route: if page == none { "/" } else { page.value.route },
+      anchor: anchor,
+    )) <api-entry-meta>]
+    html.div(class: "api-entry", id: anchor, {
       // header: badge + name + signature
       html.div(class: "api-entry-header", {
         html.span(class: "api-badge badge-" + kind, kind-label)

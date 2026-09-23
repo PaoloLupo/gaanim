@@ -9,8 +9,8 @@ use typst::{
     diag::{FileError, FileResult, StrResult, eco_format},
     ecow::EcoString,
     foundations::{
-        Bytes, Datetime, Duration, IntoValue, Label, Module, NativeElement, Scope, ShowFn, Target,
-        array, elem, func,
+        Bytes, Datetime, Duration, IntoValue, Label, Module, NativeElement, Scope, ShowFn, Str,
+        Target, array, elem, func,
     },
     introspection::MetadataElem,
     syntax::{FileId, RootedPath, Source, VirtualPath, VirtualRoot},
@@ -193,7 +193,17 @@ fn stdx_module() -> Module {
     scope.define_elem::<ConfigElem>();
     scope.define_func::<compile_code_cell>();
     scope.define_func::<read_font>();
+    scope.define_func::<python_api>();
     Module::new("stdx", scope)
+}
+
+/// JSON search index of the public Python API, parsed from the typed stub.
+#[func]
+fn python_api() -> StrResult<Str> {
+    let path = docs_root().join("../crates/gaanim_python/gaanim/gaanim_core.pyi");
+    let source = std::fs::read_to_string(&path)
+        .map_err(|error| eco_format!("cannot read {}: {error}", path.display()))?;
+    Ok(crate::pyapi::index_json(&source).into())
 }
 
 #[func]

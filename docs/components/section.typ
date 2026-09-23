@@ -7,7 +7,7 @@
   description: none,
   body,
 ) = context {
-  if target() != "bundle" {
+  if target() not in ("bundle", "html") {
     let book-body(content) = {
       set heading(offset: 1)
       show heading.where(level: 2): it => if repr(it.body) == "[" + title + "]" {
@@ -160,29 +160,45 @@
             ),
         )
 
+        // Section of the current page, for the breadcrumb.
+        let section-name = site-map
+          .pairs()
+          .find(((key, val)) => type(val) == dictionary and val.values().contains(route))
+        let section-name = if section-name == none { none } else { section-name.at(0) }
+
+        html.header(class: "site-header", {
+          html.elem("button", attrs: (
+            id: "nav-toggle-btn",
+            class: "icon-btn nav-toggle-btn",
+            type: "button",
+            "aria-label": "Mostrar u ocultar la navegación",
+          ), "☰")
+          html.a(href: if prefix == "" { "./" } else { prefix }, class: "brand", {
+            html.span(class: "brand-mark", "g")
+            html.span(class: "brand-name", "Gaanim")
+            html.span(class: "brand-tag", "docs")
+          })
+          html.elem("button", attrs: (id: "search-trigger", class: "search-trigger", type: "button", "aria-label": "Buscar"), {
+            html.span(class: "search-trigger-icon", "⌕")
+            html.span(class: "search-trigger-text", "Buscar en la API y las guías…")
+            html.elem("kbd", attrs: (class: "search-trigger-kbd"), "Ctrl K")
+          })
+          html.nav(class: "header-links", {
+            html.a(href: prefix + "manual/guia-rapida/", "Guía")
+            html.a(href: prefix + "api/", "API")
+            html.a(href: prefix + "examples/basic/", "Ejemplos")
+            html.a(href: "https://github.com/PaoloLupo/gaanim", class: "header-github", "GitHub")
+          })
+          html.elem("button", attrs: (id: "theme-toggle-btn", class: "icon-btn theme-toggle-btn", type: "button", "aria-label": "Cambiar tema"), "")
+        })
+
         html.div(class: "layout-container", {
           html.aside(class: "nav-sidebar", id: "global-nav-sidebar", {
-            html.h3("GaanIm")
-            html.div(class: "docs-search", {
-              html.div(class: "docs-search-label", "BUSCAR EN LA DOCUMENTACIÓN")
-              html.elem(
-                "input",
-                attrs: (
-                  id: "docs-search-input",
-                  type: "search",
-                  placeholder: "Buscar en la documentación",
-                  autocomplete: "off",
-                  spellcheck: "false",
-                ),
-              )
-              html.div(class: "docs-search-hint", "Escribe para buscar · / para enfocar")
-              html.div(id: "docs-search-results", class: "docs-search-results", [])
-            })
-            html.ul({
+            html.elem("nav", attrs: ("aria-label": "Documentación"), html.ul({
               for (key, val) in site-map.pairs() {
                 if type(val) == str {
                   let active-class = if val == route { "nav-active" } else { "" }
-                  html.li(html.a(href: prefix + val, class: active-class, key))
+                  html.li(html.a(href: if prefix + val == "" { "./" } else { prefix + val }, class: active-class, key))
                 } else if type(val) == dictionary {
                   let is-active = val.values().contains(route)
                   let details-content = {
@@ -204,22 +220,50 @@
                   )
                 }
               }
-            })
+            }))
           })
+          html.div(class: "nav-backdrop", id: "nav-backdrop", [])
 
           html.div(class: "main-grid", {
-            html.button(id: "nav-toggle-btn", class: "nav-toggle-btn", "☰")
-            html.button(id: "theme-toggle-btn", class: "theme-toggle-btn", "")
+            if route != "/" {
+              html.elem("nav", attrs: (class: "breadcrumb", "aria-label": "Ruta"), {
+                html.a(href: prefix, "Inicio")
+                if section-name != none {
+                  html.span(class: "breadcrumb-sep", "/")
+                  html.span(section-name)
+                }
+                html.span(class: "breadcrumb-sep", "/")
+                html.span(class: "breadcrumb-current", title)
+              })
+            }
             context {
-              [#html.main({
+              [#html.main(class: if route == "/" { "page-home" } else { "page" }, {
+                  // Book numbering ("53.9.1.") belongs to the PDF, not the web.
+                  set heading(numbering: none)
+                  // The page header already shows the title; drop a first
+                  // section heading that merely repeats it.
+                  show heading.where(level: 1): it => {
+                    if it.body.has("text") and it.body.text == title { none } else { it }
+                  }
+                  if route != "/" {
+                    html.header(class: "page-header", {
+                      html.h1(title)
+                      if description != none { html.p(class: "page-lead", description) }
+                    })
+                  }
                   body
                 }) #chapter-label]
             }
+            html.footer(class: "site-footer", {
+              html.span([Gaanim · Documentación generada con Typst])
+              html.a(href: prefix + "documentation.pdf", "Descargar PDF")
+              html.a(href: "https://github.com/PaoloLupo/gaanim/issues", "Reportar un problema")
+            })
           })
 
-          if kind == "Chapter" {
+          if kind == "Chapter" and route != "/" {
             html.aside(class: "toc-sidebar", {
-              html.h3("CONTENIDO")
+              html.div(class: "toc-title", "En esta página")
 
               outline(
                 title: none,
@@ -259,7 +303,7 @@
   show heading: it => context {
     let content = it
     if it.level == 1 and updated != none {
-      if target() == "bundle" {
+      if target() in ("bundle", "html") {
         content = [#it #html.div(class: "last-updated", [Última actualización: #updated])]
       } else {
         content = [#it #text(fill: rgb("#64748b"), size: 8.5pt, [ (Última actualización: #updated)])]
@@ -317,13 +361,13 @@
       let error-text = text(fill: rgb("c53030"), weight: 500, size: 9pt, result.stderr.trim())
       // The class lets CI detect examples that failed to run.
       result-items.push(
-        if target() == "bundle" { html.div(class: "docs-example-error", error-text) } else { error-text },
+        if target() in ("bundle", "html") { html.div(class: "docs-example-error", error-text) } else { error-text },
       )
     }
 
     // Header
     let header-element = if result.caption.len() > 0 {
-      if target() == "bundle" {
+      if target() in ("bundle", "html") {
         html.div(class: "code-header", [
           #html.span(style: "color: var(--accent-purple); font-weight: bold;", "Code:")
           _ #result.caption _
@@ -336,7 +380,7 @@
     }
 
     // Layout: side-by-side if WebP exists, otherwise stacked
-    let layout-content = if target() != "bundle" {
+    let layout-content = if target() not in ("bundle", "html") {
       block(
         width: 100%,
         stroke: 0.5pt + rgb("#cbd5e1"),
@@ -410,7 +454,7 @@
 
   // Mantener el salto fuera del contexto diferido de html-section evita que
   // algunas aperturas queden desplazadas por encima del area imprimible.
-  context if target() != "bundle" {
+  context if target() not in ("bundle", "html") {
     pagebreak(to: "odd")
   }
 

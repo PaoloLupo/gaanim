@@ -24,14 +24,18 @@
       attrs: (
         id: "home-search-input",
         type: "search",
-        placeholder: "Buscar: grow_arrow, cámara, exportar MP4…",
+        placeholder: "Buscar: move_to, cámara, exportar MP4…",
         autocomplete: "off",
         spellcheck: "false",
         "aria-label": "Buscar en la documentación",
       ),
     )
-    html.div(class: "home-search-hint", [Pulsa / para buscar desde cualquier parte de la página])
-    html.div(id: "home-search-results", class: "docs-search-results home-search-results", [])
+    html.div(class: "home-search-hint", {
+      [Busca por nombre o por tarea, en español o en inglés. Atajo: ]
+      html.elem("kbd", "Ctrl K")
+      [ o ]
+      html.elem("kbd", "/")
+    })
   })
   #html.div(class: "home-hero-cta", [
     #html.a(href: "manual/guia-rapida/", class: "primary", [Guía rápida →])
@@ -81,7 +85,7 @@ square = scene.geometry.rect(2.4, 2.4).fill(GOLD).move_to(3, -0.5)
 scene.play([title.animate.write().duration(1.0)])
 scene.play([
     circle.animate.create().duration(1.0),
-    arrow.animate.grow_arrow().duration(1.0),
+    arrow.animate.create().duration(1.0),
     square.animate.grow_from_center().duration(1.0).easing(Easing.SMOOTH),
 ])
 scene.play([circle.animate.shift_by(0, 1).duration(0.6)])
@@ -93,7 +97,7 @@ scene.render()
 
 #html.div(class: "home-cards", {
   card("api/mobjects/", "Objetos", "Dibujar formas", [Círculos, flechas, polígonos, curvas, imágenes y SVG.])
-  card("manual/animaciones/", "Animaciones", "Animar objetos", [`create`, `write`, `fade_in`, `grow_arrow`, transformaciones y easings.])
+  card("manual/animaciones/", "Animaciones", "Animar objetos", [`create`, `write`, `fade_in`, `indicate`, transformaciones y easings.])
   card("api/text/", "Texto", "Texto y ecuaciones", [Tipografía y matemáticas con Typst, selección de glifos y `write`.])
   card("api/visualization/", "Datos", "Gráficas y ejes", [Ejes, funciones, `ChartSpec`, campos vectoriales y estadística.])
   card("guides/layout/", "Layout", "Organizar la escena", [Anclas, grids, regiones y flujos que se adaptan al contenido.])
@@ -117,7 +121,7 @@ Las llamadas más usadas. Cada fila enlaza a su página de referencia.
   [Escribir una ecuación], [`scene.text.equation("e^(i pi) + 1 = 0")`], link("/api/text/")[Texto],
   [Animar una propiedad], [`obj.animate.move_to(2, 0).duration(1.0)`], link("/api/animations/")[Animaciones],
   [Hacer aparecer un objeto], [`obj.animate.create()` · `write()` · `fade_in()`], link("/api/animations/")[Animaciones],
-  [Hacer crecer una flecha], [`arrow.animate.grow_arrow()`], link("/api/animations/")[Animaciones],
+  [Resaltar un objeto], [`obj.animate.indicate()`], link("/api/animations/")[Animaciones],
   [Reproducir y esperar], [`scene.play([...])` · `scene.wait(1.0)`], link("/api/scene/")[Escena],
   [Mover la cámara], [`scene.camera.animate.zoom_to(1.5)`], link("/api/scene/")[Escena],
   [Pausar en una presentación], [`scene.stop("paso")`], link("/guides/slides/")[Presentaciones],

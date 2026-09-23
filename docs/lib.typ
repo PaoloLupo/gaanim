@@ -10,7 +10,7 @@
     asset-base: asset-base,
   )
 
-  context if target() == "bundle" {
+  context if target() in ("bundle", "html") {
     include "assets/index.typ"
   } else {
     set page(

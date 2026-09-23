@@ -1,6 +1,6 @@
 #import "../components/book.typ": book-part
 
-#context if target() == "bundle" {
+#context if target() in ("bundle", "html") {
   include "home.typ"
 }
 
