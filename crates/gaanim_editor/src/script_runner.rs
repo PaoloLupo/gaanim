@@ -285,7 +285,9 @@ pub fn validate_python_api(script_path: &Path) -> Result<(), String> {
         let code = format!(
             "import runpy\ntry:\n    runpy.run_path(r'{path}', run_name='__main__')\nexcept SystemExit as exc:\n    if exc.code not in (None, 0):\n        raise\n"
         );
-        py.run(&std::ffi::CString::new(code).unwrap(), None, None)
+        let result = py.run(&std::ffi::CString::new(code).unwrap(), None, None);
+        flush_python_output(py);
+        result
     })
     .map_err(|error| Python::attach(|py| format_py_traceback(py, &error)))
 }
@@ -307,8 +309,24 @@ fn run_script_file(py: Python<'_>, path: &Path) -> PyResult<()> {
          sys.argv = [r'{path_str}']\n\
          runpy.run_path(r'{path_str}', run_name='__main__')\n"
     );
-    py.run(&std::ffi::CString::new(code).unwrap(), None, None)?;
-    Ok(())
+    let result = py.run(&std::ffi::CString::new(code).unwrap(), None, None);
+    flush_python_output(py);
+    result
+}
+
+/// Piped stdout is block-buffered and the embedded interpreter is never
+/// finalized, so script output would be lost at process exit without this.
+fn flush_python_output(py: Python<'_>) {
+    let Ok(sys) = py.import("sys") else {
+        return;
+    };
+    for name in ["stdout", "stderr"] {
+        if let Ok(stream) = sys.getattr(name)
+            && !stream.is_none()
+        {
+            let _ = stream.call_method0("flush");
+        }
+    }
 }
 
 fn prepare_script_execution(py: Python<'_>, path: &Path) -> PyResult<()> {
@@ -402,6 +420,13 @@ fn is_reloadable_project_module(path: &Path, root: &Path) -> bool {
 mod tests {
     use super::*;
 
+    /// Scripts share one interpreter and its global `sys` state (modules,
+    /// path caches, streams); run them one at a time.
+    fn python_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn write_project_manifest(root: &Path) {
         std::fs::write(
             root.join("gaanim.toml"),
@@ -412,6 +437,7 @@ mod tests {
 
     #[test]
     fn project_src_is_available_without_entrypoint_path_hacks() {
+        let _python = python_lock();
         Python::initialize();
         let temp = tempfile::tempdir().unwrap();
         let source = temp.path().join("src/reload_src_case");
@@ -435,6 +461,7 @@ mod tests {
 
     #[test]
     fn rerun_reimports_changed_project_modules() {
+        let _python = python_lock();
         Python::initialize();
         let temp = tempfile::tempdir().unwrap();
         let source_root = temp.path().join("src");
@@ -458,5 +485,43 @@ mod tests {
         Python::attach(|py| run_script_file(py, &entry)).unwrap();
 
         assert_eq!(std::fs::read_to_string(output).unwrap(), "second-value");
+    }
+
+    #[test]
+    fn script_output_is_flushed_after_success_and_failure() {
+        let _python = python_lock();
+        Python::initialize();
+        let temp = tempfile::tempdir().unwrap();
+        write_project_manifest(temp.path());
+        for (name, tail) in [("ok", ""), ("error", "raise RuntimeError('boom')\n")] {
+            let output = temp.path().join(format!("{name}.txt"));
+            let entry = temp.path().join(format!("{name}.py"));
+            // A buffered stream only publishes its text when flushed. It binds
+            // its writer eagerly because runpy may clear the script globals.
+            std::fs::write(
+                &entry,
+                format!(
+                    "import sys\nfrom pathlib import Path\n\
+                     class Buffered:\n    parts = []\n\
+                     \x20   def write(self, text):\n        self.parts.append(text)\n        return len(text)\n\
+                     \x20   def flush(self, publish=Path({output:?}).write_text):\n        publish(''.join(self.parts))\n\
+                     sys.stdout = Buffered()\nprint('{name}-output')\n{tail}"
+                ),
+            )
+            .unwrap();
+
+            let result = Python::attach(|py| {
+                let result = run_script_file(py, &entry);
+                let sys = py.import("sys").unwrap();
+                sys.setattr("stdout", sys.getattr("__stdout__").unwrap())
+                    .unwrap();
+                result
+            });
+            assert_eq!(result.is_ok(), tail.is_empty());
+            assert_eq!(
+                std::fs::read_to_string(output).unwrap().trim_end(),
+                format!("{name}-output")
+            );
+        }
     }
 }
