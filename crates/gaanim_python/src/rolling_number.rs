@@ -130,7 +130,7 @@ impl PyRollingNumber {
 
 #[pymethods]
 impl PyVisualization {
-    #[pyo3(signature = (value=0.0, *, decimals=0, min_digits=1, group_separator="", decimal_separator=".", prefix="", suffix="", show_plus=false, font_family=None, font_size=0.75, digit_spacing=0.02, line_height=1.25, mode="odometer", direction="up", color=None))]
+    #[pyo3(signature = (value=0.0, *, decimals=0, min_digits=1, group_separator="", decimal_separator=".", prefix="", suffix="", show_plus=false, font_family=None, weight=None, font_size=0.75, digit_spacing=0.02, line_height=1.25, mode="odometer", direction="up", color=None))]
     fn rolling_number(
         &self,
         py: Python<'_>,
@@ -143,6 +143,7 @@ impl PyVisualization {
         suffix: &str,
         show_plus: bool,
         font_family: Option<String>,
+        weight: Option<u16>,
         font_size: f64,
         digit_spacing: f64,
         line_height: f64,
@@ -162,6 +163,7 @@ impl PyVisualization {
             suffix: suffix.into(),
             show_plus,
             font_family,
+            weight,
             font_size,
             digit_spacing,
             line_height,

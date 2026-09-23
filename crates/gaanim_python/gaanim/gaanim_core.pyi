@@ -3634,8 +3634,8 @@ class Visualization:
         self, value: float = 0.0, *, decimals: int = 0, min_digits: int = 1,
         group_separator: str = "", decimal_separator: str = ".",
         prefix: str = "", suffix: str = "", show_plus: bool = False,
-        font_family: Optional[str] = None, font_size: float = 0.75,
-        digit_spacing: float = 0.02, line_height: float = 1.25,
+        font_family: Optional[str] = None, weight: Optional[int] = None,
+        font_size: float = 0.75, digit_spacing: float = 0.02, line_height: float = 1.25,
         mode: str = "odometer", direction: str = "up", color: Optional[Color] = None,
     ) -> RollingNumber:
         """Create a right-anchored rolling counter with fixed-width digit cells.
@@ -3656,7 +3656,9 @@ class Visualization:
         In continuous mode, higher wheels can remain between digits at endpoints.
         font_family=None inherits the scene's body font when compiled, including
         theme typography; an explicit family overrides it with normal font fallback.
-        Sources driven outside the
+        Families and weight (1..1000) resolve exactly like ``scene.text``: by the
+        family stored in each font, including ``Theme(font_files=...)`` and variable
+        fonts. Sources driven outside the
         finite abs(value)*10**decimals < 1e15 range display an em dash.
         """
         ...

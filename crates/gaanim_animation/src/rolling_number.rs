@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use bevy::prelude::Component;
 use gaanim_core::kurbo::{Affine, BezPath, PathEl, Point, Shape};
 use gaanim_math::Bounds3D;
-use gaanim_text::{font::FontRegistry, shaper::compile_text_to_path};
+use gaanim_text::{font::FontRegistry, typst_compiler::compile_typst_text_to_path};
 
 /// How higher decimal places turn as the numeric value increases.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -28,6 +28,8 @@ pub struct RollingNumberOptions {
     pub show_plus: bool,
     /// None inherits the scene's body font when the display is compiled.
     pub font_family: Option<String>,
+    /// Font weight (1..=1000) resolved like scene text; None keeps the regular face.
+    pub weight: Option<u16>,
     pub font_size: f64,
     /// Extra horizontal space between cells, in scene units.
     pub digit_spacing: f64,
@@ -49,6 +51,7 @@ impl Default for RollingNumberOptions {
             suffix: String::new(),
             show_plus: false,
             font_family: None,
+            weight: None,
             font_size: 0.75,
             digit_spacing: 0.02,
             line_height: 1.25,
@@ -74,6 +77,12 @@ impl RollingNumberOptions {
             || self.line_height < 1.0
         {
             return Err("font_size must be positive, digit_spacing non-negative, and line_height at least 1; all must be finite".into());
+        }
+        if self
+            .weight
+            .is_some_and(|weight| !(1..=1000).contains(&weight))
+        {
+            return Err("weight must be between 1 and 1000".into());
         }
         if self
             .font_family
@@ -144,13 +153,21 @@ impl RollingNumber {
         options.validate()?;
         let mut glyphs = HashMap::new();
         let mut digit_width: f64 = 0.0;
-        let (digits, _) = compile_text_to_path(
-            registry,
-            "0123456789",
-            options.font_family.as_deref().unwrap_or("sans-serif"),
-            options.font_size,
-        )
-        .map_err(|error| error.to_string())?;
+        // Shape through Typst so families and weights resolve exactly like text.
+        let shape = |text: &str| {
+            compile_typst_text_to_path(
+                registry,
+                text,
+                options
+                    .font_family
+                    .as_deref()
+                    .unwrap_or("New Computer Modern"),
+                options.weight,
+                options.font_size,
+            )
+            .map_err(|errors| errors.join("; "))
+        };
+        let digits = shape("0123456789")?;
         let digit_bounds = digits.bounding_box();
         let digit_height = digit_bounds.height();
         let center_y = (digit_bounds.y0 + digit_bounds.y1) * 0.5;
@@ -163,13 +180,7 @@ impl RollingNumber {
             if glyphs.contains_key(&ch) {
                 continue;
             }
-            let (mut path, _) = compile_text_to_path(
-                registry,
-                &ch.to_string(),
-                options.font_family.as_deref().unwrap_or("sans-serif"),
-                options.font_size,
-            )
-            .map_err(|error| error.to_string())?;
+            let mut path = shape(&ch.to_string())?;
             let rect = path.bounding_box();
             let width = if ch.is_whitespace() {
                 options.font_size * 0.33
@@ -477,6 +488,53 @@ mod tests {
         app.update();
         assert_eq!(*app.world().get::<Path2D>(entity).unwrap().0, *cached);
     }
+    #[test]
+    fn rolling_glyphs_resolve_family_and_weight_like_text() {
+        let registry = FontRegistry::new();
+        let rolling = |family: &str, weight: Option<u16>| {
+            RollingNumber::new(
+                &registry,
+                RollingNumberOptions {
+                    font_family: Some(family.into()),
+                    weight,
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+        };
+        // Apply the same single placement RollingNumber uses to text's outline.
+        let text_zero = |rolling: &RollingNumber, family: &str, weight: Option<u16>| {
+            let mut path =
+                compile_typst_text_to_path(&registry, "0", family, weight, 0.75).unwrap();
+            let rect = path.bounding_box();
+            path.apply_affine(Affine::translate((-rect.x0, rolling.baseline())));
+            path
+        };
+        let zero = |rolling: &RollingNumber| rolling.glyphs[&'0'].path.clone();
+        // Libertinus is known to Typst but not by name to the legacy registry,
+        // which silently fell back to a system sans face.
+        let libertinus = rolling("Libertinus Serif", None);
+        assert_eq!(
+            zero(&libertinus),
+            text_zero(&libertinus, "Libertinus Serif", None)
+        );
+        assert_ne!(
+            zero(&libertinus).bounding_box(),
+            zero(&rolling("New Computer Modern", None)).bounding_box()
+        );
+        let bold = rolling("Libertinus Serif", Some(700));
+        assert_eq!(zero(&bold), text_zero(&bold, "Libertinus Serif", Some(700)));
+        assert_ne!(zero(&bold).bounding_box(), zero(&libertinus).bounding_box());
+        assert!(
+            RollingNumberOptions {
+                weight: Some(0),
+                ..Default::default()
+            }
+            .validate()
+            .is_err()
+        );
+    }
+
     #[test]
     fn rolling_clip_preserves_window_and_hole_winding() {
         let mut source = BezPath::new();
