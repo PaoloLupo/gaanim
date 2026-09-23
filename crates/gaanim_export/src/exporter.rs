@@ -740,9 +740,11 @@ where
         render_gpu_time += render_started_at.elapsed();
 
         let encoder_wait_started_at = Instant::now();
-        encoder
-            .push_frame(frame_data)
-            .map_err(|e| ExportError::Capture(format!("Encoder push error: {}", e)))?;
+        encoder.push_frame(frame_data).map_err(|e| match e {
+            // FFmpeg failures already explain the cause and the fix.
+            ExportError::FFmpeg(_) => e,
+            other => ExportError::Capture(format!("Encoder push error: {}", other)),
+        })?;
         encoder_wait_time += encoder_wait_started_at.elapsed();
 
         if frame_idx.is_multiple_of(10) || frame_idx == total_frames - 1 {
