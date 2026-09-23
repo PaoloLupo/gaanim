@@ -920,7 +920,7 @@ fn structured_typst_content(spec: &StructuredTextSpec, _font_size: f64) -> Strin
         &StructuredTextStyle::default(),
         &mut raw_leaves,
     );
-    let mut markup = gaanim_text::structured::InlineMarkupParser::new();
+    let mut markup = gaanim_text::structured::InlineMarkupParser::with_markup(spec.markup);
     let mut marked_leaves = Vec::new();
     for leaf in raw_leaves {
         let mut first_segment = true;
@@ -9083,6 +9083,24 @@ mod tests {
         assert!(source.contains("$x_1 * 5$"));
         assert!(!source.contains("_emphasis_"));
         assert!(!source.contains("*strong*"));
+    }
+
+    #[test]
+    fn disabled_inline_markup_emits_literal_delimiters() {
+        let spec = StructuredTextSpec::new_with_markup(
+            vec!["tb:agriet_xy, *nota y $x_1$".into()],
+            None,
+            StructuredTextStyle::default(),
+            gaanim_text::prelude::TextFlow::default(),
+            false,
+        )
+        .expect("markup-free text accepts lone delimiters");
+
+        let source = structured_typst_content(&spec, 32.0);
+        assert!(source.contains("tb:agriet_xy, *nota y "));
+        assert!(source.contains("$x_1$"));
+        assert!(!source.contains("weight: 700"));
+        assert!(!source.contains("italic"));
     }
 
     #[test]

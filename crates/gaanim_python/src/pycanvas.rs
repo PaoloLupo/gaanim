@@ -3229,7 +3229,7 @@ impl PyGeometry {
 
 #[pymethods]
 impl PyTypography {
-    #[pyo3(signature = (*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None))]
+    #[pyo3(signature = (*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None, markup=true))]
     #[allow(clippy::too_many_arguments)]
     fn __call__<'py>(
         &self,
@@ -3255,6 +3255,7 @@ impl PyTypography {
         overflow: Option<&str>,
         direction: Option<&str>,
         hyphenate: Option<bool>,
+        markup: bool,
     ) -> PyResult<Py<PyText>> {
         crate::custom::ensure_authoring_allowed()?;
         let spec = build_text_spec(
@@ -3280,6 +3281,7 @@ impl PyTypography {
             overflow,
             direction,
             hyphenate,
+            markup,
         )?;
         let handle = self
             .inner
@@ -3340,6 +3342,7 @@ impl PyTypography {
             overflow,
             direction,
             hyphenate,
+            true,
         )?;
         let handle = self
             .inner

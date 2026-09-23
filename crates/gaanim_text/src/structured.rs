@@ -166,6 +166,15 @@ pub struct TextSpec {
     pub style: TextStyle,
     pub flow: TextFlow,
     pub version: u64,
+    /// Interpret `*strong*` and `_emphasis_` delimiters. When false they are
+    /// literal characters; `$...$` math is recognized either way.
+    #[cfg_attr(feature = "serde", serde(default = "markup_default"))]
+    pub markup: bool,
+}
+
+#[cfg(feature = "serde")]
+fn markup_default() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -213,6 +222,17 @@ impl TextSpec {
         style: TextStyle,
         flow: TextFlow,
     ) -> Result<Self, TextSpecError> {
+        Self::new_with_markup(content, role, style, flow, true)
+    }
+
+    /// Like [`TextSpec::new`], optionally treating `*` and `_` as literals.
+    pub fn new_with_markup(
+        content: Vec<TextContent>,
+        role: Option<TextRole>,
+        style: TextStyle,
+        flow: TextFlow,
+        markup: bool,
+    ) -> Result<Self, TextSpecError> {
         validate_content(&content, "<root>")?;
         validate_style(&style)?;
         validate_flow(&flow)?;
@@ -221,9 +241,9 @@ impl TextSpec {
             return Err(TextSpecError::Empty);
         }
         let parsed = parse_inline_math(&plain)?;
-        let mut markup = InlineMarkupParser::new();
-        markup.push(&plain)?;
-        markup.finish()?;
+        let mut parser = InlineMarkupParser::with_markup(markup);
+        parser.push(&plain)?;
+        parser.finish()?;
         let inferred = if parsed
             .iter()
             .all(|segment| segment.math || segment.text.trim().is_empty())
@@ -241,6 +261,7 @@ impl TextSpec {
             style,
             flow,
             version: 0,
+            markup,
         })
     }
 
@@ -248,22 +269,27 @@ impl TextSpec {
         flatten_content(&self.content)
     }
 
+    /// Visible text after removing markup delimiters and math dollars.
+    pub fn rendered_text(&self) -> String {
+        rendered_text_with_markup(&self.plain_text(), self.markup)
+    }
+
     pub fn graphemes(&self) -> Vec<String> {
-        rendered_text(&self.plain_text())
+        self.rendered_text()
             .graphemes(true)
             .map(str::to_string)
             .collect()
     }
 
     pub fn words(&self) -> Vec<String> {
-        rendered_text(&self.plain_text())
+        self.rendered_text()
             .unicode_words()
             .map(str::to_string)
             .collect()
     }
 
     pub fn explicit_lines(&self) -> Vec<String> {
-        rendered_text(&self.plain_text())
+        self.rendered_text()
             .split('\n')
             .map(str::to_string)
             .collect()
@@ -272,11 +298,11 @@ impl TextSpec {
     pub fn parts(&self) -> Vec<TextPartInfo> {
         let mut raw = Vec::new();
         collect_parts(&self.content, &mut Vec::new(), &mut raw);
-        let rendered = rendered_text(&self.plain_text());
+        let rendered = self.rendered_text();
         let mut seen: HashMap<String, usize> = HashMap::new();
         raw.into_iter()
             .map(|(path, text, style)| {
-                let text = rendered_text(&text);
+                let text = rendered_text_with_markup(&text, self.markup);
                 let occurrence = *seen.entry(text.clone()).or_insert(0);
                 *seen.get_mut(&text).expect("part occurrence inserted") += 1;
                 // Keep occurrence deterministic even if the part's exact text is
@@ -430,16 +456,33 @@ pub struct InlineMarkupSegment {
 ///
 /// The parser is incremental so delimiters and `$...$` math may span semantic
 /// `TextPart` boundaries without turning those boundaries into shaping breaks.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct InlineMarkupParser {
     stack: Vec<InlineMarkupKind>,
     in_math: bool,
     previous: Option<char>,
+    markup: bool,
+}
+
+impl Default for InlineMarkupParser {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl InlineMarkupParser {
     pub fn new() -> Self {
-        Self::default()
+        Self::with_markup(true)
+    }
+
+    /// A parser whose `*` and `_` are literal when `markup` is false.
+    pub fn with_markup(markup: bool) -> Self {
+        Self {
+            stack: Vec::new(),
+            in_math: false,
+            previous: None,
+            markup,
+        }
     }
 
     pub fn push(&mut self, text: &str) -> Result<Vec<InlineMarkupSegment>, TextSpecError> {
@@ -450,7 +493,8 @@ impl InlineMarkupParser {
             let character = chars[index];
             let next = chars.get(index + 1).copied();
 
-            if character == '\\' && !self.in_math && matches!(next, Some('*' | '_')) {
+            if self.markup && character == '\\' && !self.in_math && matches!(next, Some('*' | '_'))
+            {
                 let literal = next.expect("escaped markup delimiter");
                 self.push_literal(&mut segments, literal);
                 self.previous = Some(literal);
@@ -471,7 +515,7 @@ impl InlineMarkupParser {
                 index += 1;
                 continue;
             }
-            if !self.in_math && matches!(character, '*' | '_') {
+            if self.markup && !self.in_math && matches!(character, '*' | '_') {
                 let kind = if character == '*' {
                     InlineMarkupKind::Strong
                 } else {
@@ -579,7 +623,12 @@ pub fn parse_inline_math(text: &str) -> Result<Vec<InlineSegment>, TextSpecError
 }
 
 pub fn rendered_text(text: &str) -> String {
-    let mut markup = InlineMarkupParser::new();
+    rendered_text_with_markup(text, true)
+}
+
+/// [`rendered_text`] for text whose `*`/`_` markup may be disabled.
+pub fn rendered_text_with_markup(text: &str, markup: bool) -> String {
+    let mut markup = InlineMarkupParser::with_markup(markup);
     let Ok(markup_segments) = markup.push(text) else {
         return text.to_string();
     };
@@ -685,6 +734,39 @@ mod tests {
             "fuerte enfatizado y *literal*"
         );
         assert_eq!(spec.parts()[0].text, "enfatizado");
+    }
+
+    #[test]
+    fn disabled_markup_keeps_delimiters_literal_and_math_active() {
+        let source = "Valores: V_e piso_ 1 (tb:agriet_xy) *nota $x_1$";
+        assert!(matches!(
+            TextSpec::new(
+                vec![source.into()],
+                None,
+                TextStyle::default(),
+                TextFlow::default(),
+            ),
+            Err(TextSpecError::UnbalancedMarkup { .. })
+        ));
+        let spec = TextSpec::new_with_markup(
+            vec![source.into()],
+            None,
+            TextStyle::default(),
+            TextFlow::default(),
+            false,
+        )
+        .unwrap();
+        assert!(!spec.markup);
+        assert_eq!(
+            spec.rendered_text(),
+            "Valores: V_e piso_ 1 (tb:agriet_xy) *nota x_1"
+        );
+        let mut parser = InlineMarkupParser::with_markup(false);
+        let segments = parser.push("\\_a_ *b*").unwrap();
+        parser.finish().unwrap();
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].text, "\\_a_ *b*");
+        assert!(!segments[0].strong && !segments[0].emphasis);
     }
 
     #[test]
