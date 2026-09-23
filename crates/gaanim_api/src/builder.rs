@@ -5391,6 +5391,16 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     /// Adds a child mobject to an existing group, adjusting its local transform.
     pub fn add_to_group(&mut self, group: MobjectRef, child: MobjectRef) {
+        self.add_to_group_with(group, child, false);
+    }
+
+    /// Adds a child whose transform is already relative to `group`, so it is
+    /// kept as the local transform whatever the group's world placement.
+    pub fn add_to_group_local(&mut self, group: MobjectRef, child: MobjectRef) {
+        self.add_to_group_with(group, child, true);
+    }
+
+    fn add_to_group_with(&mut self, group: MobjectRef, child: MobjectRef, keep_local: bool) {
         let group_entity = match self.states.get(group.id) {
             Some(state) => state.entity,
             None => return,
@@ -5407,7 +5417,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             .get(child.id)
             .map(|state| state.exclude_from_parent_draw)
             .unwrap_or(false);
-        let child_local = if child_exclude {
+        let child_local = if keep_local || child_exclude {
             self.states
                 .get(child.id)
                 .map(|state| state.transform)

@@ -445,6 +445,8 @@ pub(crate) enum Op {
     Remove(ObjectId),
     /// Reparent a drawable into an existing group while retaining its local transform.
     AttachToGroup { group: ObjectId, child: ObjectId },
+    /// Reparent a drawable whose transform is already relative to the group.
+    AttachToGroupLocal { group: ObjectId, child: ObjectId },
     /// Reparent and place a drawable at a coordinate-space local point.
     PlaceAtCoordinate {
         space: ObjectId,

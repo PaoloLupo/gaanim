@@ -1,7 +1,7 @@
 use crate::components::{
-    CoordinateViewRole, FillBrush, GlobalOpacity, GroupMarker, LineListData, LocalBounds,
-    Material3D, Material3DBaseline, Mesh3DMarker, Opacity, StrokeBrush, TriangleMeshData,
-    WorldBounds,
+    CoordinateLabelOffset, CoordinateTickLevel, CoordinateViewRole, FillBrush, GlobalOpacity,
+    GroupMarker, LineListData, LocalBounds, Material3D, Material3DBaseline, Mesh3DMarker, Opacity,
+    StrokeBrush, TriangleMeshData, WorldBounds,
 };
 use bevy::animation::AnimationPlayer;
 use bevy::animation::graph::{AnimationGraph, AnimationGraphHandle};
@@ -63,6 +63,7 @@ pub fn transform_propagation_system(
     children_query: Query<&Children>,
     mut transforms: Query<(&SpatialTransform, &mut GlobalSpatialTransform)>,
     view_roles: Query<&CoordinateViewRole>,
+    label_offsets: Query<&CoordinateLabelOffset>,
     parents: Query<&ChildOf>,
 ) {
     for root in &roots {
@@ -72,6 +73,7 @@ pub fn transform_propagation_system(
             &children_query,
             &mut transforms,
             &view_roles,
+            &label_offsets,
             &parents,
         );
     }
@@ -83,6 +85,7 @@ fn propagate_transforms_recursive(
     children_query: &Query<&Children>,
     transforms: &mut Query<(&SpatialTransform, &mut GlobalSpatialTransform)>,
     view_roles: &Query<&CoordinateViewRole>,
+    label_offsets: &Query<&CoordinateLabelOffset>,
     parents: &Query<&ChildOf>,
 ) {
     let Ok((local, mut global)) = transforms.get_mut(entity) else {
@@ -101,6 +104,8 @@ fn propagate_transforms_recursive(
         // Apply before descending so every glyph gets the correction this frame.
         // Recompose from locals rather than inverting a possibly singular scale.
         let mut basis = GlobalSpatialTransform::default();
+        // The same product without the label's own local transform.
+        let mut parent_basis = gaanim_core::kurbo::Affine::IDENTITY;
         let mut ancestor = entity;
         let mut needs_compensation = false;
         loop {
@@ -114,6 +119,9 @@ fn propagate_transforms_recursive(
             }
             basis.affine_2d = local.to_affine_2d() * basis.affine_2d;
             basis.mat4 = local.to_mat4() * basis.mat4;
+            if ancestor != entity {
+                parent_basis = local.to_affine_2d() * parent_basis;
+            }
             let Ok(parent) = parents.get(ancestor) else {
                 break;
             };
@@ -123,8 +131,22 @@ fn propagate_transforms_recursive(
         if needs_compensation {
             let [a, b, c, d, _, _] = basis.affine_2d.as_coeffs();
             let [_, _, _, _, tx, ty] = current_global.affine_2d.as_coeffs();
-            current_global.affine_2d = gaanim_core::kurbo::Affine::new([a, b, c, d, tx, ty]);
+            // Place the label at its zoomed data point plus an unzoomed offset:
+            // swap the parent's zoomed linear map for its unzoomed one on the offset.
+            let (mut dx, mut dy) = (0.0, 0.0);
+            if let (Ok(offset), Some(parent)) = (label_offsets.get(entity), parent_global.as_ref())
+            {
+                let [pa, pb, pc, pd, _, _] = parent.affine_2d.as_coeffs();
+                let [ua, ub, uc, ud, _, _] = parent_basis.as_coeffs();
+                let (ox, oy) = (offset.0.x, offset.0.y);
+                dx = (ua - pa) * ox + (uc - pc) * oy;
+                dy = (ub - pb) * ox + (ud - pd) * oy;
+            }
+            current_global.affine_2d =
+                gaanim_core::kurbo::Affine::new([a, b, c, d, tx + dx, ty + dy]);
             basis.mat4.w_axis = current_global.mat4.w_axis;
+            basis.mat4.w_axis.x += dx;
+            basis.mat4.w_axis.y += dy;
             current_global.mat4 = basis.mat4;
             if let Ok((_, mut global)) = transforms.get_mut(entity) {
                 *global = current_global;
@@ -140,6 +162,7 @@ fn propagate_transforms_recursive(
                 children_query,
                 transforms,
                 view_roles,
+                label_offsets,
                 parents,
             );
         }
@@ -203,6 +226,76 @@ fn propagate_opacities_recursive(
     if let Ok(children) = children_query.get(entity) {
         for child in children.iter() {
             propagate_opacities_recursive(*child, current_opacity, children_query, opacities);
+        }
+    }
+}
+
+/// Visibility of tick `generation` at `ln_scale`, given `(ln scale, generation)`
+/// anchors sorted by scale. Beyond the outermost anchors the nearest
+/// generation is fully visible; between anchors of different generations the
+/// incoming set fades in before the outgoing one fades out, so shared lines
+/// never dip and the weights of all generations stay close to one.
+pub fn coordinate_tick_level_weight(anchors: &[(f64, u32)], ln_scale: f64, generation: u32) -> f64 {
+    let smoothstep = |edge0: f64, edge1: f64, x: f64| {
+        let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    };
+    let (Some(first), Some(last)) = (anchors.first(), anchors.last()) else {
+        return 1.0;
+    };
+    if ln_scale <= first.0 {
+        return f64::from(u8::from(first.1 == generation));
+    }
+    if ln_scale >= last.0 {
+        return f64::from(u8::from(last.1 == generation));
+    }
+    let Some(pair) = anchors
+        .windows(2)
+        .find(|pair| pair[0].0 <= ln_scale && ln_scale <= pair[1].0)
+    else {
+        return 0.0;
+    };
+    let ((low, low_generation), (high, high_generation)) = (pair[0], pair[1]);
+    if low_generation == high_generation || high - low <= f64::EPSILON {
+        return f64::from(u8::from(low_generation == generation));
+    }
+    let t = (ln_scale - low) / (high - low);
+    if generation == low_generation {
+        1.0 - smoothstep(0.35, 0.8, t)
+    } else if generation == high_generation {
+        smoothstep(0.2, 0.65, t)
+    } else {
+        0.0
+    }
+}
+
+/// System: fade coordinate tick generations from the scale of their view.
+pub fn coordinate_tick_level_system(
+    mut levels: Query<(Entity, &CoordinateTickLevel, &mut Opacity)>,
+    parents: Query<&ChildOf>,
+    views: Query<(&CoordinateViewRole, &SpatialTransform)>,
+) {
+    for (entity, level, mut opacity) in &mut levels {
+        let mut ancestor = entity;
+        let mut view_scale = None;
+        while let Ok(parent) = parents.get(ancestor) {
+            ancestor = parent.parent();
+            if let Ok((CoordinateViewRole::View, transform)) = views.get(ancestor) {
+                view_scale = Some(transform.scale);
+                break;
+            }
+        }
+        let Some(scale) = view_scale else {
+            continue;
+        };
+        let scale = if level.axis == 0 { scale.x } else { scale.y };
+        let weight = coordinate_tick_level_weight(
+            &level.anchors,
+            scale.abs().max(1e-12).ln(),
+            level.generation,
+        ) as f32;
+        if opacity.0 != weight {
+            opacity.0 = weight;
         }
     }
 }
@@ -1261,6 +1354,93 @@ pub fn update_3d_triangle_meshes_system(
 mod tests {
     use super::*;
     use bevy::prelude::{App, BuildChildrenTransformExt, Schedule, Update, World};
+
+    #[test]
+    fn label_offsets_stay_unzoomed_while_their_anchor_follows_the_view() {
+        use gaanim_core::glam::DVec2;
+        let mut world = World::new();
+        let root_local = SpatialTransform::new_2d(1.0, 2.0).scale_uniform(2.0);
+        let root = world
+            .spawn((root_local, GlobalSpatialTransform::default()))
+            .id();
+        let view = world
+            .spawn((
+                SpatialTransform::default(),
+                GlobalSpatialTransform::default(),
+                CoordinateViewRole::View,
+                ChildOf(root),
+            ))
+            .id();
+        // A tick number anchored at data point (3, 0), drawn 0.4 below it.
+        let label = world
+            .spawn((
+                SpatialTransform::new_2d(3.0, -0.4),
+                GlobalSpatialTransform::default(),
+                CoordinateViewRole::Label,
+                CoordinateLabelOffset(DVec2::new(0.0, -0.4)),
+                ChildOf(view),
+            ))
+            .id();
+        let mut schedule = Schedule::default();
+        schedule.add_systems(transform_propagation_system);
+        let origin = |world: &World| {
+            let [_, _, _, _, x, y] = world
+                .get::<GlobalSpatialTransform>(label)
+                .unwrap()
+                .affine_2d
+                .as_coeffs();
+            let w = world
+                .get::<GlobalSpatialTransform>(label)
+                .unwrap()
+                .mat4
+                .w_axis;
+            assert!((w.x - x).abs() < 1e-12 && (w.y - y).abs() < 1e-12);
+            (x, y)
+        };
+
+        schedule.run(&mut world);
+        assert_eq!(
+            origin(&world),
+            (1.0 + 6.0, 2.0 - 0.8),
+            "unzoomed is unchanged"
+        );
+
+        // Zoom y by 5 around the axis: the anchor (y = 0) stays, the offset
+        // stays 0.4 (x2 root) instead of growing to 2.0.
+        let zoom = SpatialTransform::default().with_scale_2d(3.0, 5.0);
+        world.entity_mut(view).insert(zoom);
+        schedule.run(&mut world);
+        let (x, y) = origin(&world);
+        assert!((x - (1.0 + 2.0 * 9.0)).abs() < 1e-12, "{x}");
+        assert!((y - (2.0 - 0.8)).abs() < 1e-12, "{y}");
+    }
+
+    #[test]
+    fn tick_levels_cross_fade_between_neighbouring_anchors() {
+        let anchors = [(-1.0, 2), (0.0, 0), (0.5, 0), (1.5, 1)];
+        let weight = |value, generation| coordinate_tick_level_weight(&anchors, value, generation);
+        // At and beyond anchors exactly one generation is visible.
+        assert_eq!((weight(-3.0, 2), weight(-3.0, 0)), (1.0, 0.0));
+        assert_eq!((weight(0.0, 0), weight(0.0, 1)), (1.0, 0.0));
+        assert_eq!(
+            (weight(0.25, 0), weight(0.25, 1)),
+            (1.0, 0.0),
+            "same generation"
+        );
+        assert_eq!(
+            (weight(1.5, 1), weight(9.0, 1), weight(9.0, 0)),
+            (1.0, 1.0, 0.0)
+        );
+        // Between generations the incoming set appears before the outgoing fades.
+        let early = 0.5 + 0.1;
+        assert!(weight(early, 0) == 1.0 && weight(early, 1) == 0.0);
+        let middle = 1.0;
+        assert!(weight(middle, 0) > 0.5 && weight(middle, 1) > 0.5);
+        let late = 1.5 - 0.1;
+        assert!(weight(late, 0) == 0.0 && weight(late, 1) == 1.0);
+        assert_eq!(weight(middle, 2), 0.0);
+        assert_eq!(coordinate_tick_level_weight(&[], 3.0, 7), 1.0);
+    }
 
     #[test]
     fn coordinate_view_scales_positions_but_keeps_label_basis_and_glyph_offsets() {

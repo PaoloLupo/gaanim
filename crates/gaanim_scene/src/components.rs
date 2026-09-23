@@ -233,6 +233,29 @@ pub enum CoordinateViewRole {
     Label,
 }
 
+/// Internal: offset of a coordinate-view label from the data point it annotates,
+/// in its parent's coordinates. The offset stays unzoomed, so zooming the view
+/// along the other axis does not push a tick number away from its axis.
+#[doc(hidden)]
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct CoordinateLabelOffset(pub gaanim_core::glam::DVec2);
+
+/// Internal: one set of axis ticks, grid lines and numbers built for a view
+/// scale. Its opacity follows the scale of its `CoordinateViewRole::View`
+/// ancestor, cross-fading between the generations of neighbouring anchors.
+#[doc(hidden)]
+#[derive(Component, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct CoordinateTickLevel {
+    /// 0 follows the view's x scale, 1 its y scale.
+    pub axis: u8,
+    pub generation: u32,
+    /// `(ln view scale, generation)` for every authored view of this axis,
+    /// sorted by scale.
+    pub anchors: Vec<(f64, u32)>,
+}
+
 /// A metadata component attached to individual glyph and shape entities of text or equations,
 /// tracking their character value, sequence index, and source range.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]

@@ -69,7 +69,11 @@ impl Plugin for GaanimScenePlugin {
 
         app.add_systems(
             Update,
-            crate::media_frame::update_media_frames.in_set(SceneSet::Visualization),
+            (
+                crate::media_frame::update_media_frames,
+                crate::systems::coordinate_tick_level_system,
+            )
+                .in_set(SceneSet::Visualization),
         );
 
         // Register default propagation systems in the Propagation SystemSet.
