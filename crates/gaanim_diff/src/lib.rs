@@ -1,11 +1,15 @@
 //! Exact seek capture and deterministic visual regression reporting for gaanim.
 
 mod model;
+mod stops;
 #[cfg(feature = "gui")]
 pub mod viewer;
 
 pub use model::{
     DiffReport, FrameDiff, FrameStatus, MANIFEST_FILE, REPORT_FILE, SnapshotEntry, SnapshotManifest,
+};
+pub use stops::{
+    STOPS_FILE, StopCapture, StopEntry, StopsManifest, capture_stops, parse_stop_selection,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -59,6 +63,22 @@ pub fn capture_canvas(
     output_dir: impl AsRef<Path>,
     times: &[f64],
 ) -> Result<SnapshotManifest> {
+    let ids: Vec<String> = times
+        .iter()
+        .enumerate()
+        .map(|(index, time)| format!("seek_{index:04}_t_{}", time_slug(*time)))
+        .collect();
+    capture_canvas_as(canvas, output_dir, times, &ids)
+}
+
+/// Capture `times[i]` as the snapshot `ids[i]`; ids name files and manifest entries.
+pub(crate) fn capture_canvas_as(
+    canvas: SceneModel,
+    output_dir: impl AsRef<Path>,
+    times: &[f64],
+    ids: &[String],
+) -> Result<SnapshotManifest> {
+    debug_assert_eq!(times.len(), ids.len());
     if times.is_empty() {
         return Err(DiffError::InvalidInput(
             "at least one seek timestamp is required".to_string(),
@@ -87,8 +107,8 @@ pub fn capture_canvas(
 
     let png_started = Instant::now();
     let mut snapshots = Vec::with_capacity(frames.len());
-    for (index, frame) in frames.into_iter().enumerate() {
-        let id = format!("seek_{index:04}_t_{}", time_slug(frame.time));
+    for (frame, id) in frames.into_iter().zip(ids) {
+        let id = id.clone();
         let file = format!("{id}.png");
         let path = output_dir.join(&file);
         let encoder = image::codecs::png::PngEncoder::new(fs::File::create(path)?);

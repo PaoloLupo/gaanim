@@ -161,6 +161,7 @@ all use the application host, which owns the native runtime.
   - `baseline/` is the approved fixture and should be versioned when intentionally changed.
   - `current/` and `report/` are generated local artifacts and are gitignored.
 - Examples intended for visual regression must conditionally call `scene.snapshots(os.environ["GAANIM_SNAPSHOTS"], seeks)` when `GAANIM_SNAPSHOTS` is set. The diff CLI injects that environment variable and runs this capture headlessly.
+- `--capture-stops [--stops 3-7,12]` instead captures the frame shown at every `scene.stop()` (as `stop_NNNN.png`, 1-based) plus `stops.json`, without script cooperation; the script only needs `scene.render()`.
 - Windows workflow (activate `.venv` first so the editor binary can load Python):
 
   ```powershell
