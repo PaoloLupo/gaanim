@@ -112,7 +112,7 @@ from gaanim import Easing, Scene, BLACK
 
 scene = Scene(frame=(16, 9), background=BLACK)
 scene.assets.load_project("gaanim.toml")  # opcional: resuelve assets relativo al proyecto
-circle = scene.geometry.circle(80).fill(BLUE)
+circle = scene.geometry.circle(1).fill(BLUE)
 scene.play([circle.animate.create().duration(1).easing(Easing.spring(stiffness=90, damping=12))])
 scene.render()  # para preview
 # luego: gaanim export . --output exports/demo.mp4

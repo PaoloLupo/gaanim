@@ -26,8 +26,8 @@ axis = (
   .ticks(math.pi)
   .numbers("pi", denominator=1)
 )
-timeline = scene.viz.number_line(axis, length=600)
-timeline.drawable().move_to(180, -20)
+timeline = scene.viz.number_line(axis, length=7.5)
+timeline.drawable().move_to(2.25, -0.25)
 ```
 
 La primera coordenada está exactamente al inicio de la recta. Las marcas se
@@ -42,14 +42,14 @@ perpendicular. Un valor de uno ocupa `normal_scale` unidades locales.
 import math
 from gaanim import computed
 
-radius = 120
+radius = 1.5
 theta = scene.viz.parameter(0.0)
 sine_curve = timeline.function(
   lambda value: math.sin(value),
   normal_scale=radius,
   reveal=theta,
 )
-sine_curve.stroke(PRIMARY, 3).no_fill()
+sine_curve.stroke(PRIMARY, 0.04).no_fill()
 ```
 
 La función usa Python normal. Rust resuelve sus entradas y cachea cada snapshot
@@ -59,13 +59,13 @@ numérico exacto para que reproducción y seek produzcan la misma geometría.
 
 ```python
 circle_ref = scene.geometry.polar_point(circle_center, radius, theta)
-circle_dot = scene.geometry.dot(10).fill(ACCENT).follow(circle_ref)
+circle_dot = scene.geometry.dot(0.125).fill(ACCENT).follow(circle_ref)
 
 wave_ref = timeline.point_ref(
   theta,
   normal_offset=computed(lambda angle: radius * math.sin(angle), inputs=[theta]),
 )
-wave_dot = scene.geometry.dot(8).fill(ACCENT).follow(wave_ref)
+wave_dot = scene.geometry.dot(0.1).fill(ACCENT).follow(wave_ref)
 ```
 
 `point_ref` devuelve un punto lógico, no una entidad visible adicional. Sus
@@ -91,7 +91,7 @@ scene.play([
 
 Ahora el radio, el punto circular, la posición horizontal y la altura de la
 onda proceden del mismo valor. No existe deriva entre una velocidad angular y
-otra medida en píxeles por segundo. `reveal=theta` usa el ángulo como extremo
+otra medida en unidades de la escena por segundo. `reveal=theta` usa el ángulo como extremo
 exacto del dominio visible: la onda se forma delante del espectador y su último
 punto coincide con el punto proyectado, sin aproximar por longitud de arco.
 

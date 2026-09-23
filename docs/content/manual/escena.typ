@@ -17,7 +17,7 @@ escena habitual se lee de arriba abajo en cinco zonas.
 == Configuración
 
 ```python
-scene = Scene(frame=(16, 9), background="#0f172a", margin=64)
+scene = Scene(frame=(16, 9), background="#0f172a", margin=0.8)
 ```
 
 El viewport establece el sistema de coordenadas. `margin` define un área
@@ -29,8 +29,8 @@ Las fábricas `scene.geometry.circle`, `scene.text`, `scene.geometry.arrow` y si
 objetos en la escena. Guarda sus handles con nombres que expresen su función:
 
 ```python
-orbit = scene.geometry.circle(140)
-moving_point = scene.geometry.dot(12)
+orbit = scene.geometry.circle(1.75)
+moving_point = scene.geometry.dot(0.15)
 explanation = scene.text("Radio constante", role="body")
 ```
 

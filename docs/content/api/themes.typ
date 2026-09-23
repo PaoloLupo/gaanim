@@ -25,7 +25,7 @@ incluidas siguen de forma predeterminada este lenguaje más sobrio.
 from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
 
 scene = Scene(frame=(16, 9), background=BLACK)
-circle = scene.geometry.circle(80).fill(BLUE).stroke(GOLD, 4)
+circle = scene.geometry.circle(1).fill(BLUE).stroke(GOLD, 0.05)
 label = scene.text("Colorful scene", role="title").fill(WHITE)
 ```
 
@@ -60,17 +60,17 @@ sus restricciones de colores sólidos.
 == Fondos con gradientes y WGSL
 
 `Scene.background` y `scene.canvas.background` aceptan los mismos gradientes
-`Brush` que los objetos dibujables. Sus coordenadas pertenecen a la escena: en
-una escena de 1280×720, un gradiente lineal de ancho completo va de `x=-640` a
-`x=640`:
+`Brush` que los objetos dibujables. Sus coordenadas pertenecen a la escena: con
+el frame predeterminado de 16 × 9 unidades, un gradiente lineal de ancho
+completo va de `x=-8` a `x=8`:
 
 ```python
 from gaanim import Brush, Scene
 
 sky = Brush.linear(
     ["#071022", "#164E8A", "#7DD3FC"],
-    start=(-640, 0),
-    end=(640, 0),
+    start=(-8, 0),
+    end=(8, 0),
 )
 scene = Scene(frame=(16, 9), background=sky)
 ```
@@ -218,10 +218,10 @@ theme = Theme(
         "text": "Inter",
         "code": "JetBrains Mono",
     },
-    sizes={"title": 72, "body": 34},
+    sizes={"title": 0.72, "body": 0.34},
     text={
-        "body": TextStyle(size=32, letter_spacing=0.1),
-        "label": TextStyle(size=24, weight=600),
+        "body": TextStyle(size=0.32, letter_spacing=0.1),
+        "label": TextStyle(size=0.24, weight=600),
     },
     styles={
         "shape": Style(fill="accent"),
@@ -229,11 +229,11 @@ theme = Theme(
         ".warning": Style(fill=colors.tailwind.rose[600]),
         "axes": AxesStyle(
             grid=StrokeStyle("rule", 1),
-            labels=TextStyle(size=24),
+            labels=TextStyle(size=0.24),
         ),
     },
     series=[colors.tailwind.blue[600], colors.tailwind.amber[500]],
-    layout={"page_padding": 56, "column_gap": 48},
+    layout={"page_padding": 0.7, "column_gap": 0.6},
     font_files={
         "Inter": "assets/Inter-Regular.ttf",
         "JetBrains Mono": "assets/JetBrainsMono-Regular.ttf",
@@ -293,9 +293,9 @@ theme = Theme(
     },
 )
 scene = Scene(theme=theme)
-ordinary = scene.geometry.circle(60)
-warning = scene.geometry.square(100).style_class("danger")
-explicit = scene.geometry.circle(40).fill("gold")
+ordinary = scene.geometry.circle(0.75)
+warning = scene.geometry.square(1.25).style_class("danger")
+explicit = scene.geometry.circle(0.5).fill("gold")
 ```
 
 La precedencia es: tema base, familia, tipo exacto o parte semántica, clases del
@@ -423,12 +423,12 @@ Los objetos vectoriales manuales pueden consumir los mismos tokens semánticos
 que los componentes:
 
 ```python
-scene.geometry.rounded_rect(420, 180, 24) \
+scene.geometry.rounded_rect(5.25, 2.25, 0.3) \
     .fill(scene.canvas.color("panel")) \
-    .stroke(scene.canvas.color("accent"), 3)
+    .stroke(scene.canvas.color("accent"), 0.04)
 
-divider = scene.geometry.line(-400, 0, 400, 0) \
-    .stroke(theme.color("rule"), 2)
+divider = scene.geometry.line(-5, 0, 5, 0) \
+    .stroke(theme.color("rule"), 0.025)
 
 page = scene.layout.column(
     [title, body],
@@ -462,31 +462,31 @@ from gaanim import Brush
 
 gradient = Brush.linear(
     ["#7AA2F7", "#BB9AF7", "#F7768E"],
-    start=(-240, 0),
-    end=(240, 0),
+    start=(-3, 0),
+    end=(3, 0),
 )
 
-card = scene.geometry.rounded_rect(480, 220, 28).fill(gradient)
+card = scene.geometry.rounded_rect(6, 2.75, 0.35).fill(gradient)
 ```
 
 Los gradientes radiales y angulares usan la misma convención de lista de colores.
 Los colores se distribuyen uniformemente y se requieren dos paradas como mínimo:
 
 ```python
-orb = scene.geometry.circle(120).fill(
+orb = scene.geometry.circle(1.5).fill(
     Brush.radial(
         ["white", scene.canvas.color("accent"), "#0000"],
-        center=(-30, 35),
-        radius=150,
+        center=(-0.375, 0.44),
+        radius=1.875,
     )
 )
 
-ring = scene.geometry.circle(110).no_fill().stroke(
+ring = scene.geometry.circle(1.375).no_fill().stroke(
     Brush.sweep(
         ["#7DCFFF", "#9ECE6A", "#E0AF68", "#F7768E", "#7DCFFF"],
         center=(0, 0),
     ),
-    20,
+    0.25,
 )
 ```
 
@@ -502,8 +502,8 @@ intensidad, desplazamiento y desenfoque siguen siendo configurables:
 
 ```python
 title.glow("#38BDF8")
-background_blob.blur(12)
-card.shadow("#00000080", x=10, y=-10, blur=8)
+background_blob.blur(0.15)
+card.shadow("#00000080", x=0.12, y=-0.12, blur=0.1)
 ```
 
 `glow`, `blur` y `shadow` se compilan como fragmentos vectoriales retenidos, por
@@ -543,5 +543,5 @@ posterior a `at()`.
 from gaanim import Color
 
 custom = Color(128, 51, 204, 255)
-circle = scene.geometry.circle(80).fill(custom)
+circle = scene.geometry.circle(1).fill(custom)
 ```

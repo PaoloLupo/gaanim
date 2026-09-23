@@ -39,7 +39,7 @@ independiente. `keep_outline=True` añade una copia reactiva que usa únicamente
 su stroke; oculta el original si su fill no debe cubrir el nivel.
 
 ```python
-drop = scene.media.svg("drop.svg").no_fill().stroke("#dbeafe", 4).opacity(0)
+drop = scene.media.svg("drop.svg").no_fill().stroke("#dbeafe", 0.05).opacity(0)
 water = scene.geometry.fill_level(drop, "#38bdf8", 0.0)
 scene.play([water.animate.fill_level(0.72).duration(1.4)])
 ```
@@ -80,7 +80,7 @@ Los saltos temporales restauran tanto el vínculo como sus valores y cortes.
 from gaanim import Scene, Style, Theme
 theme = Theme("paper", styles={".warning": Style(fill="#e11d48")})
 scene = Scene(frame=(16, 9), theme=theme)
-warning = scene.geometry.square(90).style_class("warning")
+warning = scene.geometry.square(1.125).style_class("warning")
 scene.wait(0.1)
 # output: preview.webp
 scene.render()
@@ -99,10 +99,10 @@ scene.render()
 # show-code: true
 from gaanim import GOLD, WHITE, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-tip = scene.geometry.dot(9).fill(GOLD).move_to(100, 30)
-rod = scene.geometry.tracking_line((-100, -30), tip).no_fill().stroke(WHITE, 4)
-scene.play([rod.animate.create().duration(0.8), tip.animate.shift_by(-40, 80).duration(0.8)])
-scene.play([rod.animate.write().duration(0.8), tip.animate.shift_by(80, -50).duration(0.8)])
+tip = scene.geometry.dot(0.11).fill(GOLD).move_to(1.25, 0.375)
+rod = scene.geometry.tracking_line((-1.25, -0.375), tip).no_fill().stroke(WHITE, 0.05)
+scene.play([rod.animate.create().duration(0.8), tip.animate.shift_by(-0.5, 1).duration(0.8)])
+scene.play([rod.animate.write().duration(0.8), tip.animate.shift_by(1, -0.625).duration(0.8)])
 # output: preview.webp
 scene.render()
 ```
@@ -120,7 +120,7 @@ scene.render()
 # show-code: true
 from gaanim import Scene, StrokeStyle
 scene = Scene(frame=(16, 9))
-guide = scene.geometry.line(-160, 0, 160, 0).stroke_style(
+guide = scene.geometry.line(-2, 0, 2, 0).stroke_style(
     StrokeStyle("#2563eb", 5, cap="round", dashes=[18, 10])
 )
 scene.wait(0.1)
@@ -193,7 +193,7 @@ while fading it in; vector-only `write()` is rejected explicitly.
 # show-code: true
 from gaanim import BLUE, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-node = scene.geometry.circle(50).fill(BLUE).move_to(0, 0)
+node = scene.geometry.circle(0.625).fill(BLUE).move_to(0, 0)
 scene.play([node.animate.create().duration(1.0)])
 # output: preview.webp
 scene.render()
@@ -212,7 +212,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene, part
 scene = Scene(frame=(16, 9), background="#0f172a")
-card = scene.geometry.rect(160, 90).fill(BLUE).stroke(WHITE, 2).move_to(0, 0)
+card = scene.geometry.rect(2, 1.125).fill(BLUE).stroke(WHITE, 0.025).move_to(0, 0)
 scene.play([card.animate.grow_from_center().duration(0.9)])
 # output: preview.webp
 scene.render()
@@ -231,7 +231,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene, part
 scene = Scene(frame=(16, 9), background="#0f172a")
-btn = scene.geometry.rounded_rect(160, 50, 12).fill(GOLD).move_to(0, 0)
+btn = scene.geometry.rounded_rect(2, 0.625, 0.15).fill(GOLD).move_to(0, 0)
 label = scene.text("CLICK").move_to(0, 0)
 scene.play([scene.geometry.group([btn, label]).animate.fade_in().duration(0.6)])
 # output: preview.webp
@@ -242,8 +242,8 @@ scene.render()
 #api-entry(
   name: "Geometry.surrounding_rect",
   kind: "factory",
-  signature: "surrounding_rect(targets, *, padding=12, corner_radius=8) -> SurroundingRect",
-  params: ((name: "targets", type: "Drawable | TextSelection | Sequence", default: none, desc: [One or more live object, text-part, or equation-part bounds.]), (name: "padding", type: "float | (v,h) | (t,r,b,l)", default: "12", desc: [Finite non-negative scene-unit inset around the union.]), (name: "corner_radius", type: "float", default: "8", desc: [Non-negative radius, clamped to the current frame size.])),
+  signature: "surrounding_rect(targets, *, padding=12, corner_radius=0.08) -> SurroundingRect",
+  params: ((name: "targets", type: "Drawable | TextSelection | Sequence", default: none, desc: [One or more live object, text-part, or equation-part bounds.]), (name: "padding", type: "float | (v,h) | (t,r,b,l)", default: "12", desc: [Finite non-negative scene-unit inset around the union.]), (name: "corner_radius", type: "float", default: "0.08", desc: [Non-negative radius, clamped to the current frame size.])),
   returns: (type: "SurroundingRect", desc: [Theme-stroked, unfilled live frame.]),
   desc: [Uses the targets' world-space AABB and follows movement, scaling, rotation, and layout in the same frame. Empty, foreign-scene, or invalid targets and dimensions raise `TypeError` or `ValueError`. Position, scale, rotation, and Layout ownership belong to the binding; animate the target or call `retarget`.],
 )[
@@ -252,7 +252,7 @@ scene.render()
 from gaanim import GOLD, Scene, part
 scene = Scene(frame=(16, 9), background="#0f172a")
 eq = scene.text.equation("E =", part("mass", "m"), part("light", "c^2"))
-frame = scene.geometry.surrounding_rect(eq["mass"]).stroke(GOLD, 3)
+frame = scene.geometry.surrounding_rect(eq["mass"]).stroke(GOLD, 0.04)
 scene.play([eq.animate.fade_in(), frame.animate.create()])
 scene.play([frame.retarget(eq["light"]).duration(0.8)])
 # output: preview.webp
@@ -272,7 +272,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-cell = scene.geometry.square(80).fill(BLUE).move_to(0, 0)
+cell = scene.geometry.square(1).fill(BLUE).move_to(0, 0)
 scene.play([cell.animate.grow_from_center().duration(0.7)])
 # output: preview.webp
 scene.render()
@@ -291,7 +291,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-dot = scene.geometry.dot(8).fill(RED).move_to(0, 0)
+dot = scene.geometry.dot(0.1).fill(RED).move_to(0, 0)
 scene.play([dot.animate.grow_from_center().duration(0.5)])
 # output: preview.webp
 scene.render()
@@ -310,7 +310,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-orbit = scene.geometry.ellipse(90, 50).no_fill().stroke(GOLD, 2).move_to(0, 0)
+orbit = scene.geometry.ellipse(1.125, 0.625).no_fill().stroke(GOLD, 0.025).move_to(0, 0)
 scene.play([orbit.animate.create().duration(1.0)])
 # output: preview.webp
 scene.render()
@@ -353,13 +353,13 @@ scene.render()
 # show-code: true
 from gaanim import Anchor, GOLD, WHITE, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-left = scene.geometry.dot(9).fill(GOLD).move_to(-120, -30)
-card = scene.geometry.rect(120, 70).move_to(90, 35)
+left = scene.geometry.dot(0.11).fill(GOLD).move_to(-1.5, -0.375)
+card = scene.geometry.rect(1.5, 0.875).move_to(1.125, 0.44)
 connector = scene.geometry.line(
     left.anchor_point(Anchor.RIGHT),
     card.anchor_point(Anchor.LEFT),
-).stroke(WHITE, 3)
-scene.play([left.animate.shift_by(30, 60).duration(0.7)])
+).stroke(WHITE, 0.04)
+scene.play([left.animate.shift_by(0.375, 0.75).duration(0.7)])
 # output: preview.webp
 scene.render()
 ```
@@ -421,8 +421,8 @@ scene.render()
 #api-entry(
   name: "Geometry.dashed_line",
   kind: "factory",
-  signature: "dashed_line(x1, y1, x2, y2, *, dash_length=16, gap_length=10) -> Drawable",
-  params: ((name: "x1", type: "float", default: none, desc: [Start x.]), (name: "y1", type: "float", default: none, desc: [Start y.]), (name: "x2", type: "float", default: none, desc: [End x.]), (name: "y2", type: "float", default: none, desc: [End y.]), (name: "dash_length", type: "float", default: "16.0", desc: [Dash length.]), (name: "gap_length", type: "float", default: "10.0", desc: [Gap length.]),),
+  signature: "dashed_line(x1, y1, x2, y2, *, dash_length=0.16, gap_length=0.10) -> Drawable",
+  params: ((name: "x1", type: "float", default: none, desc: [Start x.]), (name: "y1", type: "float", default: none, desc: [Start y.]), (name: "x2", type: "float", default: none, desc: [End x.]), (name: "y2", type: "float", default: none, desc: [End y.]), (name: "dash_length", type: "float", default: "0.16", desc: [Dash length.]), (name: "gap_length", type: "float", default: "0.10", desc: [Gap length.]),),
   returns: (type: "Drawable", desc: [Dashed line.]),
   desc: [Guides, hidden edges, construction lines.],
 )[
@@ -430,7 +430,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-guide = scene.geometry.dashed_line(-140, 0, 140, 0, dash_length=12, gap_length=8).stroke(WHITE, 2)
+guide = scene.geometry.dashed_line(-1.75, 0, 1.75, 0, dash_length=0.15, gap_length=0.1).stroke(WHITE, 0.025)
 scene.play([guide.animate.create().duration(0.8)])
 # output: preview.webp
 scene.render()
@@ -468,7 +468,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-arc = scene.geometry.arc(0, 0, 60, 0.0, 2.0).no_fill().stroke(GOLD, 4)
+arc = scene.geometry.arc(0, 0, 0.75, 0.0, 2.0).no_fill().stroke(GOLD, 0.05)
 scene.play([arc.animate.create().duration(0.8)])
 # output: preview.webp
 scene.render()
@@ -549,7 +549,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-tri = scene.geometry.polygon([(0, 70), (-65, -50), (65, -50)]).fill(BLUE).stroke(WHITE, 2)
+tri = scene.geometry.polygon([(0, 0.875), (-0.81, -0.625), (0.81, -0.625)]).fill(BLUE).stroke(WHITE, 0.025)
 scene.play([tri.animate.grow_from_center().duration(0.8)])
 # output: preview.webp
 scene.render()
@@ -568,7 +568,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-star = scene.geometry.star(5, 70, 32).fill(GOLD).move_to(0, 0)
+star = scene.geometry.star(5, 0.875, 0.4).fill(GOLD).move_to(0, 0)
 scene.play([star.animate.spin_in_from_nothing().duration(1.0)])
 # output: preview.webp
 scene.render()
@@ -587,7 +587,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-hexa = scene.geometry.regular_polygon(6, 60).fill(BLUE).stroke(WHITE, 2)
+hexa = scene.geometry.regular_polygon(6, 0.75).fill(BLUE).stroke(WHITE, 0.025)
 scene.play([hexa.animate.spin_in_from_nothing().duration(0.9)])
 # output: preview.webp
 scene.render()
@@ -606,7 +606,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-slice_ = scene.geometry.sector(0, 0, 70, 0.0, 2.0).fill(GOLD)
+slice_ = scene.geometry.sector(0, 0, 0.875, 0.0, 2.0).fill(GOLD)
 scene.play([slice_.animate.grow_from_center().duration(0.7)])
 # output: preview.webp
 scene.render()
@@ -625,7 +625,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-ring = scene.geometry.annulus(60, 34).fill(BLUE).stroke(WHITE, 2)
+ring = scene.geometry.annulus(0.75, 0.425).fill(BLUE).stroke(WHITE, 0.025)
 scene.play([ring.animate.grow_from_center().duration(0.7)])
 # output: preview.webp
 scene.render()
@@ -644,8 +644,8 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-brace = scene.geometry.brace(-80, -20, 80, -20, 24).stroke(WHITE, 3).no_fill()
-label = scene.text("interval").move_to(0, -55)
+brace = scene.geometry.brace(-1, -0.25, 1, -0.25, 0.3).stroke(WHITE, 0.04).no_fill()
+label = scene.text("interval").move_to(0, -0.69)
 scene.play([brace.animate.create().duration(0.7), label.animate.fade_in().duration(0.4)])
 # output: preview.webp
 scene.render()
@@ -664,7 +664,7 @@ scene.render()
 # show-code: true
 from gaanim import GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-ok = scene.geometry.checkmark(34).fill(GREEN).move_to(0, 0)
+ok = scene.geometry.checkmark(0.425).fill(GREEN).move_to(0, 0)
 scene.play([ok.animate.grow_from_center().duration(0.6)])
 # output: preview.webp
 scene.render()
@@ -683,7 +683,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-no = scene.geometry.cross(34).stroke(WHITE, 4).move_to(0, 0)
+no = scene.geometry.cross(0.425).stroke(WHITE, 0.05).move_to(0, 0)
 scene.play([no.animate.create().duration(0.5)])
 # output: preview.webp
 scene.render()
@@ -702,8 +702,8 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-corner = scene.geometry.right_angle(24).stroke(WHITE, 3).move_to(0, 0)
-axis = scene.geometry.line(-80, 0, 80, 0).stroke(WHITE, 2)
+corner = scene.geometry.right_angle(0.3).stroke(WHITE, 0.04).move_to(0, 0)
+axis = scene.geometry.line(-1, 0, 1, 0).stroke(WHITE, 0.025)
 scene.play([scene.geometry.group([axis, corner]).animate.create().duration(0.7)])
 # output: preview.webp
 scene.render()
@@ -724,7 +724,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-rail = scene.geometry.path([(-140, 0), (0, 60), (140, 0)]).no_fill().stroke(WHITE, 4)
+rail = scene.geometry.path([(-1.75, 0), (0, 0.75), (1.75, 0)]).no_fill().stroke(WHITE, 0.05)
 scene.play([rail.animate.create().duration(1.0)])
 # output: preview.webp
 scene.render()
@@ -743,7 +743,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-zig = scene.geometry.polyline([(-100, -30), (0, 30), (100, -30)]).no_fill().stroke(GOLD, 3)
+zig = scene.geometry.polyline([(-1.25, -0.375), (0, 0.375), (1.25, -0.375)]).no_fill().stroke(GOLD, 0.04)
 scene.play([zig.animate.create().duration(0.9)])
 # output: preview.webp
 scene.render()
@@ -762,7 +762,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-curve = scene.geometry.bezier((-140, 0), [(-50, 90), (50, -90)], (140, 0)).no_fill().stroke(WHITE, 3)
+curve = scene.geometry.bezier((-1.75, 0), [(-0.625, 1.125), (0.625, -1.125)], (1.75, 0)).no_fill().stroke(WHITE, 0.04)
 scene.play([curve.animate.create().duration(1.0)])
 # output: preview.webp
 scene.render()
@@ -781,7 +781,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-shape = scene.geometry.curve([("move", [(0, 0)]), ("cubic", [(50, 60), (110, -60), (160, 0)]), ("close", [])]).no_fill().stroke(WHITE, 3).move_to(-80, 0)
+shape = scene.geometry.curve([("move", [(0, 0)]), ("cubic", [(0.625, 0.75), (1.375, -0.75), (2, 0)]), ("close", [])]).no_fill().stroke(WHITE, 0.04).move_to(-1, 0)
 scene.play([shape.animate.create().duration(1.0)])
 # output: preview.webp
 scene.render()
@@ -807,7 +807,7 @@ axes = scene.viz.cartesian_3d(
     size=(6, 6, 4),
 )
 path = scene.geometry.polyline_3d([(-2, -1, -1), (0, 1, 0), (2, -1, 1)], color=RED)
-dot = scene.geometry.dot(8).fill(GOLD).move_to_3d(1, 0, 0).billboard()
+dot = scene.geometry.dot(0.1).fill(GOLD).move_to_3d(1, 0, 0).billboard()
 dot.add_updater(Updater.orbit(0, 0, 1, 1.2))
 trail = scene.geometry.traced_path_3d(dot, colormap="viridis", max_points=120)
 
@@ -880,8 +880,8 @@ label = scene.text("origin").move_to_3d(0, 0, 0.5).billboard()
 ```python
 from gaanim import RED
 
-dot = scene.geometry.dot(7).move_to(120, 0)
-trail = scene.geometry.traced_path(dot, dissipating_time=2.0).stroke(RED, 3).no_fill()
+dot = scene.geometry.dot(0.09).move_to(1.5, 0)
+trail = scene.geometry.traced_path(dot, dissipating_time=2.0).stroke(RED, 0.04).no_fill()
 scene.play([trail.animate.fade_in()])
 ```
 ]
@@ -895,7 +895,7 @@ scene.play([trail.animate.fade_in()])
   desc: [The trail updates while `source` moves, so it works with `Updater` or `add_updater_fn`. Sampling starts where the trail is declared. Add `trail.animate.fade_in()` or `trail.animate.create()` to `scene.play(...)` to reveal it. `dissipating_time` expires the old tail, `max_points` limits memory, and `min_distance` filters nearly identical samples.],
 )[
 ```python
-dot = scene.geometry.dot(7).move_to_3d(1, 0, 0)
+dot = scene.geometry.dot(0.09).move_to_3d(1, 0, 0)
 dot.add_updater(Updater.orbit(0, 0, 1, 1.5))
 trail = scene.geometry.traced_path_3d(
     dot, colormap="viridis", dissipating_time=2.0, max_points=600
@@ -918,7 +918,7 @@ from gaanim import Axis, BLUE, Scene
 
 scene = Scene(frame=(16, 9), background="#0f172a")
 space = scene.viz.cartesian_2d(Axis.linear(-4, 4), Axis.linear(-2, 2))
-curve = space.plot(lambda x: math.sin(x)).stroke(BLUE, 3)
+curve = space.plot(lambda x: math.sin(x)).stroke(BLUE, 0.04)
 scene.play([space.animate.create(), curve.animate.create()])
 ```
 
@@ -952,7 +952,7 @@ scene.render()
   signature: "equation(*content, role=None, style=None, flow=None, **overrides) -> Text",
   params: ((name: "content", type: "str | TextPart | TextParts", default: none, desc: [Equation content without surrounding `$` delimiters.]),),
   returns: (type: "Text", desc: [Standalone display equation with the complete structured-text API.]),
-  desc: [Adds and preserves `$ ... $` internally so Typst composes a block equation. It otherwise shares `Scene.text` styling, flow, selections, and animations; content boundaries use ordinary Typst whitespace. Without an explicit role or size it uses the 44-unit math default.],
+  desc: [Adds and preserves `$ ... $` internally so Typst composes a block equation. It otherwise shares `Scene.text` styling, flow, selections, and animations; content boundaries use ordinary Typst whitespace. Without an explicit role or size it uses the 0.44-unit math default.],
 )[
 ```python
 # show-code: true
@@ -978,7 +978,7 @@ scene.render()
 # show-code: true
 from gaanim import Scene, TextFlow
 scene = Scene(frame=(16, 9), background="#0f172a")
-body = scene.text("Una explicación larga que se ajusta al ancho.", flow=TextFlow(wrap=320, align="left", line_spacing=1.25)).move_to(0, 0)
+body = scene.text("Una explicación larga que se ajusta al ancho.", flow=TextFlow(wrap=4, align="left", line_spacing=1.25)).move_to(0, 0)
 scene.play([body.animate.fade_in().duration(0.6)])
 # output: preview.webp
 scene.render()
@@ -997,8 +997,8 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-t = scene.text("Fourier Transform", role="title").move_to(0, 30)
-s = scene.text("A visual proof", role="subtitle").move_to(0, -20)
+t = scene.text("Fourier Transform", role="title").move_to(0, 0.375)
+s = scene.text("A visual proof", role="subtitle").move_to(0, -0.25)
 scene.play([t.animate.write().duration(0.7), s.animate.fade_in().duration(0.5)])
 # output: preview.webp
 scene.render()
@@ -1049,7 +1049,7 @@ scene.render()
   name: "Typography.code",
   kind: "factory",
   signature: "code(source: str, *, language=\"text\", width, height) -> Drawable",
-  params: ((name: "source", type: "str", default: none, desc: [Code string.]), (name: "language", type: "str", default: "\"text\"", desc: [For future highlighting.]), (name: "width", type: "float", default: "760.0", desc: [Block width.]),),
+  params: ((name: "source", type: "str", default: none, desc: [Code string.]), (name: "language", type: "str", default: "\"text\"", desc: [For future highlighting.]), (name: "width", type: "float", default: "7.6", desc: [Block width.]),),
   returns: (type: "Drawable", desc: [Monospaced code block.]),
   desc: [Framed code for reveals. Token highlighting planned.],
 )[
@@ -1079,8 +1079,8 @@ scene.render()
 from gaanim import BLACK, BLUE, GOLD, GREEN, RED, WHITE, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
 # Usa cualquier PNG/JPG/WebP local — se comparte textura si repites path
-logo = scene.geometry.rect(120, 70).fill(WHITE).move_to(0, 0) # placeholder de imagen
-caption = scene.text("scene.media.image(\"assets/logo.webp\")").move_to(0, -70)
+logo = scene.geometry.rect(1.5, 0.875).fill(WHITE).move_to(0, 0) # placeholder de imagen
+caption = scene.text("scene.media.image(\"assets/logo.webp\")").move_to(0, -0.875)
 scene.play([scene.geometry.group([logo, caption]).animate.fade_in().duration(0.6)])
 # output: preview.webp
 scene.render()
@@ -1099,8 +1099,8 @@ scene.render()
 # show-code: true
 from gaanim import Scene
 scene = Scene(frame=(16, 9))
-# Con un MP4 local: clip = scene.media.video("assets/clip.mp4", width=720, duration=4, loop=True, volume=0.8); scene.play([clip])
-clip = scene.geometry.rect(720, 405) # placeholder ejecutable para la documentación
+# Con un MP4 local: clip = scene.media.video("assets/clip.mp4", width=9, duration=4, loop=True, volume=0.8); scene.play([clip])
+clip = scene.geometry.rect(9, 5.06) # placeholder ejecutable para la documentación
 scene.play([clip.animate.fade_in().duration(0.4)])
 scene.wait(7.6)
 # output: preview.webp
@@ -1120,8 +1120,8 @@ scene.render()
 # show-code: true
 from gaanim import Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-# Con un JSON local: clip = scene.media.lottie("assets/pulse.json", width=180); scene.play([clip])
-clip = scene.geometry.circle(70) # placeholder ejecutable para la documentación
+# Con un JSON local: clip = scene.media.lottie("assets/pulse.json", width=2.25); scene.play([clip])
+clip = scene.geometry.circle(0.875) # placeholder ejecutable para la documentación
 scene.play([clip.animate.fade_in().duration(0.4)])
 # output: preview.webp
 scene.render()
@@ -1141,8 +1141,8 @@ scene.render()
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
 # Importa SVG real con scene.media.svg("assets/robot.svg") y accede con .part("id")
-placeholder = scene.geometry.regular_polygon(6, 50).fill(BLUE).move_to(0, 0)
-label = scene.text("scene.media.svg(\"assets/robot.svg\")").move_to(0, -80)
+placeholder = scene.geometry.regular_polygon(6, 0.625).fill(BLUE).move_to(0, 0)
+label = scene.text("scene.media.svg(\"assets/robot.svg\")").move_to(0, -1)
 scene.play([scene.geometry.group([placeholder, label]).animate.fade_in().duration(0.6)])
 # output: preview.webp
 scene.render()
@@ -1161,7 +1161,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-robot = scene.geometry.regular_polygon(5, 60).fill(BLUE).move_to(0, 0)
+robot = scene.geometry.regular_polygon(5, 0.75).fill(BLUE).move_to(0, 0)
 arm = robot # en SVG real: robot.part("arm")
 scene.play([arm.animate.rotate_by(0.4).duration(0.7)])
 # output: preview.webp
@@ -1182,8 +1182,8 @@ scene.render()
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, BLACK, Scene
 from gaanim import Direction
 scene = Scene(frame=(16, 9), background="#0f172a")
-row = scene.geometry.group([scene.geometry.dot(10).fill(BLUE), scene.text("Label").move_to(20, 0)]).move_to(0, 0)
-scene.play([row.animate.fade_in_from(Direction.DOWN, distance=24).duration(0.6)])
+row = scene.geometry.group([scene.geometry.dot(0.125).fill(BLUE), scene.text("Label").move_to(0.25, 0)]).move_to(0, 0)
+scene.play([row.animate.fade_in_from(Direction.DOWN, distance=0.3).duration(0.6)])
 # output: preview.webp
 scene.render()
 ```
@@ -1194,7 +1194,7 @@ scene.render()
 #api-entry(
   name: "SlideKit.callout",
   kind: "factory",
-  signature: "callout(text, target, *, offset=(160,96), width=240, height=72) -> Drawable",
+  signature: "callout(text, target, *, offset=(1.6,0.96), width=2.4, height=0.72) -> Drawable",
   params: ((name: "text", type: "str", default: none, desc: [Label text.]), (name: "target", type: "Drawable", default: none, desc: [Drawable to point at.]), (name: "offset", type: "(float,float)", default: "(160,96)", desc: [Card offset from target.]),),
   returns: (type: "Drawable", desc: [Group: card + text + connector, all follow target natively.]),
   desc: [Reusable editorial label without Python callback each frame.],
@@ -1203,9 +1203,9 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-mass = scene.geometry.dot(12).fill(GOLD).move_to(-40, 0)
-note = scene.slides.callout("Moving mass", mass, offset=(130, 70))
-scene.play([mass.animate.shift_by(80, 0).duration(1.0), note.animate.fade_in().duration(0.4)])
+mass = scene.geometry.dot(0.15).fill(GOLD).move_to(-0.5, 0)
+note = scene.slides.callout("Moving mass", mass, offset=(1.625, 0.875))
+scene.play([mass.animate.shift_by(1, 0).duration(1.0), note.animate.fade_in().duration(0.4)])
 # output: preview.webp
 scene.render()
 ```
@@ -1242,7 +1242,7 @@ live = scene.slides.chip("Live", variant="danger", appearance="outline")
 #api-entry(
   name: "SlideKit.card",
   kind: "factory",
-  signature: "card(title, body=None, footer=None, *, width=420, min_height=180, padding=(28,24), gap=14, radius=18, variant=\"neutral\", appearance=\"soft\", color=None, background=None, border=None) -> Drawable",
+  signature: "card(title, body=None, footer=None, *, width=4.2, min_height=1.8, padding=(0.28,0.24), gap=0.14, radius=0.18, variant=\"neutral\", appearance=\"soft\", color=None, background=None, border=None) -> Drawable",
   params: ((name: "title", type: "str", default: none, desc: [Heading slot.]), (name: "body", type: "str | None", default: "None", desc: [Wrapped body slot.]), (name: "footer", type: "str | None", default: "None", desc: [Caption slot.])),
   returns: (type: "Drawable", desc: [Auto-height panel group.]),
   desc: [Semantic text roles are measured at construction. Empty supplied slots or invalid dimensions raise `ValueError`.],
@@ -1281,7 +1281,7 @@ speaker = scene.slides.lower_third("Ada Lovelace", "Mathematician", kicker="SPEA
 #api-entry(
   name: "SlideKit.stat_card",
   kind: "factory",
-  signature: "stat_card(value, label, *, delta=None, width=280, min_height=170, padding=(24,20), gap=8, radius=18, variant=\"neutral\", appearance=\"soft\", color=None, background=None, border=None) -> Drawable",
+  signature: "stat_card(value, label, *, delta=None, width=2.8, min_height=1.7, padding=(0.24,0.20), gap=0.08, radius=0.18, variant=\"neutral\", appearance=\"soft\", color=None, background=None, border=None) -> Drawable",
   params: ((name: "value", type: "str", default: none, desc: [Formatted primary value.]), (name: "label", type: "str", default: none, desc: [Metric label.]), (name: "delta", type: "str | None", default: "None", desc: [Optional comparison text.])),
   returns: (type: "Drawable", desc: [Auto-height metric panel.]),
   desc: [Value and delta use the semantic tone; no numeric sign or formatting is inferred.],
@@ -1294,7 +1294,7 @@ metric = scene.slides.stat_card("98%", "Accuracy", delta="+4.2%", variant="succe
 #api-entry(
   name: "SlideKit.quote_card",
   kind: "factory",
-  signature: "quote_card(quote, attribution=None, *, width=620, padding=(32,28), gap=16, radius=18, variant=\"neutral\", appearance=\"soft\", color=None, background=None, border=None) -> Drawable",
+  signature: "quote_card(quote, attribution=None, *, width=6.2, padding=(0.32,0.28), gap=0.16, radius=0.18, variant=\"neutral\", appearance=\"soft\", color=None, background=None, border=None) -> Drawable",
   params: ((name: "quote", type: "str", default: none, desc: [Wrapped quotation.]), (name: "attribution", type: "str | None", default: "None", desc: [Optional right-aligned credit.])),
   returns: (type: "Drawable", desc: [Auto-height quotation panel.]),
   desc: [Adds typographic quotation marks and a semantic attribution treatment.],
@@ -1307,7 +1307,7 @@ quote = scene.slides.quote_card("Clarity matters.", "Gaanim", appearance="outlin
 #api-entry(
   name: "SlideKit.section_header",
   kind: "factory",
-  signature: "section_header(title, *, kicker=None, subtitle=None, width=720, align=\"left\", rule=False, padding=(24,18), gap=10, radius=12, variant=\"neutral\", appearance=\"soft\", color=None, background=None, border=None) -> Drawable",
+  signature: "section_header(title, *, kicker=None, subtitle=None, width=7.2, align=\"left\", rule=False, padding=(0.24,0.18), gap=0.10, radius=0.12, variant=\"neutral\", appearance=\"soft\", color=None, background=None, border=None) -> Drawable",
   params: ((name: "title", type: "str", default: none, desc: [Section heading.]), (name: "align", type: "str", default: "\"left\"", desc: [left, center, or right.]), (name: "rule", type: "bool", default: "False", desc: [Opt in to the horizontal semantic accent rule.])),
   returns: (type: "Drawable", desc: [Measured section heading group.]),
   desc: [Kicker, title, and subtitle share alignment and Theme roles.],
@@ -1340,7 +1340,7 @@ scene.render()
   name: "SlideKit.bullets",
   kind: "factory",
   signature: "bullets(items: list[str], *, width, gap, bullet_radius, bullet_color) -> Drawable",
-  params: ((name: "items", type: "list[str]", default: none, desc: [Bullet strings, ≥1 non-empty.]), (name: "gap", type: "float", default: "68.0", desc: [Vertical gap.]),),
+  params: ((name: "items", type: "list[str]", default: none, desc: [Bullet strings, ≥1 non-empty.]), (name: "gap", type: "float", default: "0.68", desc: [Vertical gap.]),),
   returns: (type: "Drawable", desc: [Bulleted list as one drawable.]),
   desc: [Presentation agenda. Tune `width`, `bullet_radius`, `bullet_color`.],
 )[
@@ -1348,7 +1348,7 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-agenda = scene.slides.bullets(["Setup", "Motion", "Export"], gap=48, bullet_color=GOLD).move_to(0, 40)
+agenda = scene.slides.bullets(["Setup", "Motion", "Export"], gap=0.6, bullet_color=GOLD).move_to(0, 0.5)
 scene.play([agenda.animate.fade_in().duration(0.6)])
 # output: preview.webp
 scene.render()
@@ -1469,7 +1469,7 @@ scene.play([axes.animate.create(), curve.animate.write(), amplitude.animate.set(
   signature: "variable(initial, *, label, format='.2f', prefix='', suffix='', unit=None, font_size=None, color=None, invalid='invalid') -> Variable",
   params: ((name: "label", type: "str", default: none, desc: [Etiqueta visible colocada antes del signo igual.]), (name: "format", type: "str", default: "'.2f'", desc: [Formato numérico: ancho, signo, agrupación, precisión y `f`, `e`, `g` o `%`.]), (name: "unit", type: "str | None", default: none, desc: [Unidad visible opcional.]),),
   returns: (type: "Variable", desc: [Objeto dibujable y escalar reactivo al mismo tiempo.]),
-  desc: [Variables accept the same scalar operations and animation methods as `Parameter`. Their `label`, `equals`, `number`, and `unit` properties expose stylable `Drawable` parts. All terms use `font_size`, defaulting together to the 48-unit reactive annotation size. The parts keep equal equation-style spacing; the label, number, and unit share a visual baseline while the equality sign stays centered on the numeric axis. `color` paints every visible term, including the value after updates and seeks. The returned group retains normal create, write, fade, layout, and style operations.],
+  desc: [Variables accept the same scalar operations and animation methods as `Parameter`. Their `label`, `equals`, `number`, and `unit` properties expose stylable `Drawable` parts. All terms use `font_size`, defaulting together to the 0.48-unit reactive annotation size. The parts keep equal equation-style spacing; the label, number, and unit share a visual baseline while the equality sign stays centered on the numeric axis. `color` paints every visible term, including the value after updates and seeks. The returned group retains normal create, write, fade, layout, and style operations.],
 )[
 ```python
 from gaanim import RED, Scene
@@ -1612,8 +1612,8 @@ el objeto que lo conduce.
 ```python
 from gaanim import Anchor, Scene
 scene = Scene(frame=(16, 9))
-frame = scene.geometry.rect(180, 90)
-corner = frame.anchor_point(Anchor.TOP_RIGHT, offset=(8, 0))
+frame = scene.geometry.rect(2.25, 1.125)
+corner = frame.anchor_point(Anchor.TOP_RIGHT, offset=(0.1, 0))
 ```
 ]
 
@@ -1630,7 +1630,7 @@ corner = frame.anchor_point(Anchor.TOP_RIGHT, offset=(8, 0))
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
 theta = scene.viz.parameter(0.2)
-arc = scene.geometry.always_redraw_arc(theta, 0, 0, 55, 0.0).fill(WHITE)
+arc = scene.geometry.always_redraw_arc(theta, 0, 0, 0.69, 0.0).fill(WHITE)
 scene.play([arc.animate.fade_in().duration(0.3), theta.animate.set(4.5).duration(1.6)])
 # output: preview.webp
 scene.render()
@@ -1651,7 +1651,7 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 from math import cos, sin, pi
 scene = Scene(frame=(16, 9), background="#0f172a")
 t = scene.viz.parameter(0.0)
-curve = scene.geometry.polyline([(110*cos(u), 60*sin(2*u)) for u in (2*pi*i/240 for i in range(241))]).no_fill().stroke(WHITE, 2)
+curve = scene.geometry.polyline([(1.375*cos(u), 0.75*sin(2*u)) for u in (2*pi*i/240 for i in range(241))]).no_fill().stroke(WHITE, 0.025)
 dot = scene.geometry.point_on_curve(curve, t).fill(GOLD)
 scene.play([dot.animate.fade_in().duration(0.3), t.animate.set(1.0).duration(1.6)])
 # output: preview.webp
@@ -1662,7 +1662,7 @@ scene.render()
 #api-entry(
   name: "Geometry.tangent_on_curve / normal_on_curve",
   kind: "factory",
-  signature: "tangent_on_curve(curve, tracker, length=80) / normal_on_curve(...) -> Drawable",
+  signature: "tangent_on_curve(curve, tracker, length=0.8) / normal_on_curve(...) -> Drawable",
   params: ((name: "curve", type: "Drawable", default: none, desc: [Curve.]), (name: "tracker", type: "Parameter", default: none, desc: [0..1.] ), (name: "length", type: "float", default: "80", desc: [Line length.]),),
   returns: (type: "Drawable", desc: [Line centered on curve point, rotated to tangent/normal.]),
   desc: [Normal is 90° CCW from tangent. Same arc-length sampling.],
@@ -1673,8 +1673,8 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, BLACK, Scene
 from math import cos, sin, pi
 scene = Scene(frame=(16, 9), background="#0f172a")
 t = scene.viz.parameter(0.35)
-curve = scene.geometry.polyline([(110*cos(u), 60*sin(u)) for u in (2*pi*i/240 for i in range(241))]).no_fill().stroke(WHITE, 2)
-tangent = scene.geometry.tangent_on_curve(curve, t, length=70).stroke(GOLD, 3)
+curve = scene.geometry.polyline([(1.375*cos(u), 0.75*sin(u)) for u in (2*pi*i/240 for i in range(241))]).no_fill().stroke(WHITE, 0.025)
+tangent = scene.geometry.tangent_on_curve(curve, t, length=0.875).stroke(GOLD, 0.04)
 scene.play([tangent.animate.fade_in().duration(0.3), t.animate.set(0.9).duration(1.4)])
 # output: preview.webp
 scene.render()
@@ -1695,8 +1695,8 @@ from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 from math import cos, sin, pi
 scene = Scene(frame=(16, 9), background="#0f172a")
 t = scene.viz.parameter(0.25)
-curve = scene.geometry.polyline([(110*cos(u), 60*sin(u)) for u in (2*pi*i/240 for i in range(241))]).no_fill().stroke(WHITE, 2)
-circle = scene.geometry.curvature_on_curve(curve, t).no_fill().stroke(RED, 2)
+curve = scene.geometry.polyline([(1.375*cos(u), 0.75*sin(u)) for u in (2*pi*i/240 for i in range(241))]).no_fill().stroke(WHITE, 0.025)
+circle = scene.geometry.curvature_on_curve(curve, t).no_fill().stroke(RED, 0.025)
 scene.play([circle.animate.fade_in().duration(0.3), t.animate.set(0.7).duration(1.4)])
 # output: preview.webp
 scene.render()
@@ -1716,7 +1716,7 @@ scene.render()
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
 theta = scene.viz.parameter(0.3)
-rot = scene.geometry.always_redraw_arc(theta, 0, 0, 55, 0.0).fill(WHITE)
+rot = scene.geometry.always_redraw_arc(theta, 0, 0, 0.69, 0.0).fill(WHITE)
 scene.play([rot.animate.fade_in().duration(0.3), theta.animate.set(5.0).duration(1.6)])
 # output: preview.webp
 scene.render()
@@ -1726,8 +1726,8 @@ scene.render()
 #api-entry(
   name: "Mechanics.bar_between",
   kind: "factory",
-  signature: "bar_between(from, to, *, width=8) -> Drawable",
-  params: ((name: "from", type: "Endpoint", default: none, desc: [First fixed, drawable-origin, or anchored endpoint.]), (name: "to", type: "Endpoint", default: none, desc: [Second endpoint.]), (name: "width", type: "float", default: "8", desc: [Positive scene-unit thickness.]),),
+  signature: "bar_between(from, to, *, width=0.08) -> Drawable",
+  params: ((name: "from", type: "Endpoint", default: none, desc: [First fixed, drawable-origin, or anchored endpoint.]), (name: "to", type: "Endpoint", default: none, desc: [Second endpoint.]), (name: "width", type: "float", default: "0.08", desc: [Positive scene-unit thickness.]),),
   returns: (type: "Drawable", desc: [Round-capped bar with reactive length and angle.]),
   desc: [The bar is regenerated in the same frame as endpoint animation or updaters. Draw articulation circles separately when required.],
 )[
@@ -1735,9 +1735,9 @@ scene.render()
 # show-code: true
 from gaanim import Anchor, BLACK, Scene
 scene = Scene(frame=(16, 9))
-body = scene.geometry.rect(150, 70).move_to(40, -20)
-bar = scene.mechanics.bar_between((-150, 100), body.anchor_point(Anchor.TOP_LEFT), width=9).stroke(BLACK, 9)
-scene.play([bar.animate.fade_in(), body.animate.shift_by(80, 0).duration(1.0)])
+body = scene.geometry.rect(1.875, 0.875).move_to(0.5, -0.25)
+bar = scene.mechanics.bar_between((-1.875, 1.25), body.anchor_point(Anchor.TOP_LEFT), width=0.11).stroke(BLACK, 0.11)
+scene.play([bar.animate.fade_in(), body.animate.shift_by(1, 0).duration(1.0)])
 # output: preview.webp
 scene.render()
 ```
@@ -1746,8 +1746,8 @@ scene.render()
 #api-entry(
   name: "Mechanics.spring_between",
   kind: "factory",
-  signature: "spring_between(from, to, coils=8, amplitude=12, crossing=0, start_straight=12, end_straight=12) -> Drawable",
-  params: ((name: "from", type: "Endpoint", default: none, desc: [Endpoint A.]), (name: "to", type: "Endpoint", default: none, desc: [Endpoint B.]), (name: "coils", type: "int", default: "8", desc: [Number of turns.]), (name: "amplitude", type: "float", default: "12", desc: [Radius perpendicular to the endpoint axis, in scene units.]), (name: "crossing", type: "float", default: "0", desc: [Normalized e-like interlacing amount from 0 to 1.]), (name: "start_straight", type: "float", default: "12", desc: [Non-negative straight length before the first coil.]), (name: "end_straight", type: "float", default: "12", desc: [Non-negative straight length after the final coil.]),),
+  signature: "spring_between(from, to, coils=8, amplitude=0.12, crossing=0, start_straight=0.12, end_straight=0.12) -> Drawable",
+  params: ((name: "from", type: "Endpoint", default: none, desc: [Endpoint A.]), (name: "to", type: "Endpoint", default: none, desc: [Endpoint B.]), (name: "coils", type: "int", default: "8", desc: [Number of turns.]), (name: "amplitude", type: "float", default: "0.12", desc: [Radius perpendicular to the endpoint axis, in scene units.]), (name: "crossing", type: "float", default: "0", desc: [Normalized e-like interlacing amount from 0 to 1.]), (name: "start_straight", type: "float", default: "0.12", desc: [Non-negative straight length before the first coil.]), (name: "end_straight", type: "float", default: "0.12", desc: [Non-negative straight length after the final coil.]),),
   returns: (type: "Drawable", desc: [Reactive helical spring path.]),
   desc: [Endpoints can be fixed tuples, drawable origins, or AnchorPoint references inside transformed groups. By default, it has 12 scene-unit straight segments at both ends, as in a mechanical spring. The helix radius stays stable while its pitch deforms automatically as an endpoint moves. Set either straight length to `0` to coil directly from that endpoint; close endpoints shorten both segments proportionally. Negative or non-finite straight lengths raise `ValueError`. Set `crossing` above 0 to fold parts of each turn back and create e-like crossings.],
 )[
@@ -1755,9 +1755,9 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-mass = scene.geometry.dot(10).fill(GOLD).move_to(70, 0)
-spring = scene.mechanics.spring_between(( -70, 0), mass, coils=6, amplitude=14, crossing=1.0, start_straight=18, end_straight=18).no_fill().stroke(WHITE, 3)
-scene.play([spring.animate.fade_in().duration(0.3), mass.animate.shift_by(40, 0).duration(1.0)])
+mass = scene.geometry.dot(0.125).fill(GOLD).move_to(0.875, 0)
+spring = scene.mechanics.spring_between(( -0.875, 0), mass, coils=6, amplitude=0.175, crossing=1.0, start_straight=0.225, end_straight=0.225).no_fill().stroke(WHITE, 0.04)
+scene.play([spring.animate.fade_in().duration(0.3), mass.animate.shift_by(0.5, 0).duration(1.0)])
 # output: preview.webp
 scene.render()
 ```
@@ -1811,9 +1811,9 @@ scene.render()
 from gaanim import BLACK, GOLD, Scene
 scene = Scene(frame=(16, 9))
 theta = scene.viz.parameter(0.2)
-tip = scene.geometry.polar_point((0, 0), 85, theta)
-bar = scene.mechanics.bar_between((0, 0), tip).stroke(BLACK, 7)
-label = scene.text("tip").fill(GOLD).follow(tip, offset=(0, 18))
+tip = scene.geometry.polar_point((0, 0), 1.06, theta)
+bar = scene.mechanics.bar_between((0, 0), tip).stroke(BLACK, 0.09)
+label = scene.text("tip").fill(GOLD).follow(tip, offset=(0, 0.225))
 scene.play([bar.animate.fade_in(), label.animate.write(), theta.animate.set(2.2).duration(1.4)])
 # output: preview.webp
 scene.render()
@@ -1823,17 +1823,17 @@ scene.render()
 #api-entry(
   name: "Mechanics.angle_between",
   kind: "factory",
-  signature: "angle_between(vertex, from, to, *, radius=64, label=None, show_value=False, format=\".1f\", unit=\"deg\", sweep=\"minor\", arrowheads=\"both\", label_gap=12, label_orientation=\"upright\", show_extensions=True, font_size=None, color=None) -> AngleDimension",
+  signature: "angle_between(vertex, from, to, *, radius=0.64, label=None, show_value=False, format=\".1f\", unit=\"deg\", sweep=\"minor\", arrowheads=\"both\", label_gap=12, label_orientation=\"upright\", show_extensions=True, font_size=None, color=None) -> AngleDimension",
   returns: (type: "AngleDimension", desc: [Reactive `arc`, `arrows`, `extensions`, `label`, `number`, and `unit`.]),
-  desc: [`from` and `to` accept fixed `Direction` values or endpoints. Sweep is `minor`, `major`, `cw`, or `ccw`; arrowheads are solid triangles. The label, value, and unit share a 48-unit default. `color` paints the arc, arrows, label, reactive value, and unit, including after updates and seeks. Zero-length rays hide the affected geometry rather than emitting invalid paths.],
+  desc: [`from` and `to` accept fixed `Direction` values or endpoints. Sweep is `minor`, `major`, `cw`, or `ccw`; arrowheads are solid triangles. The label, value, and unit share a 0.48-unit default. `color` paints the arc, arrows, label, reactive value, and unit, including after updates and seeks. Zero-length rays hide the affected geometry rather than emitting invalid paths.],
 )[
 ```python
 # show-code: true
 from gaanim import Direction, GOLD, Scene
 scene = Scene(frame=(16, 9))
-bob = scene.geometry.dot(10).move_to(80, -90)
+bob = scene.geometry.dot(0.125).move_to(1, -1.125)
 theta = scene.mechanics.angle_between((0,0), Direction.DOWN, bob, label="$theta$", show_value=True, color=GOLD)
-scene.play([theta.animate.fade_in(), bob.animate.shift_by(90, 35).duration(1.2)])
+scene.play([theta.animate.fade_in(), bob.animate.shift_by(1.125, 0.44).duration(1.2)])
 # output: preview.webp
 scene.render()
 ```
@@ -1844,15 +1844,15 @@ scene.render()
   kind: "factories",
   signature: "vector_between(...) / moment_about(...) / coordinate_frame_at(...) / contact_on_curve(...) ",
   returns: (type: "Drawable", desc: [Composable reactive technical annotations.]),
-  desc: [`vector_between` provides a solid head and optional formatted magnitude; `moment_about` follows a center; `coordinate_frame_at` builds orthogonal labeled axes; `contact_on_curve` groups the existing point, tangent, and normal helpers. Technical annotation text uses a uniform 48-unit default unless `font_size` is supplied.],
+  desc: [`vector_between` provides a solid head and optional formatted magnitude; `moment_about` follows a center; `coordinate_frame_at` builds orthogonal labeled axes; `contact_on_curve` groups the existing point, tangent, and normal helpers. Technical annotation text uses a uniform 0.48-unit default unless `font_size` is supplied.],
 )[
 ```python
 # show-code: true
 from gaanim import Direction, GOLD, Scene
 scene = Scene(frame=(16, 9))
-force = scene.mechanics.vector_between((-100, 0), (70, 45), label="$F$", color=GOLD)
-moment = scene.mechanics.moment_about((120, -40), radius=42, label="$M$")
-frame = scene.mechanics.coordinate_frame_at((0, -80), Direction.RIGHT, labels=("$e_1$", "$e_2$"))
+force = scene.mechanics.vector_between((-1.25, 0), (0.875, 0.56), label="$F$", color=GOLD)
+moment = scene.mechanics.moment_about((1.5, -0.5), radius=0.525, label="$M$")
+frame = scene.mechanics.coordinate_frame_at((0, -1), Direction.RIGHT, labels=("$e_1$", "$e_2$"))
 scene.play([force.animate.fade_in(), moment.animate.fade_in(), frame.animate.fade_in()])
 # output: preview.webp
 scene.render()
@@ -1864,16 +1864,16 @@ scene.render()
   kind: "factories",
   signature: "offset_point(origin, dx, dy) / force_at(origin, magnitude, direction=0, visual_scale=1, ...) / force_from_components(origin, fx, fy, visual_scale=1, ...) -> ForceVector",
   returns: (type: "PointRef | ForceVector", desc: [Reactive relative geometry or a drawable exposing `shaft`, `head`, `label`, `number`, and `unit`.]),
-  desc: [`force_at` accepts physical magnitude and a radian direction; `force_from_components` accepts physical X/Y components. `visual_scale` converts physical units to scene units while the optional readout remains in physical units. Its label, value, and unit share a 48-unit default. `color` paints the force, label, changing numeric value, and unit. All scalar inputs accept floats, Parameters, Variables, and Computed values. `Parameter.add_updater_fn(callback)` drives a scalar directly as `callback(current, dt, elapsed) -> value`; pair `reset` with `fixed_dt` for deterministic stateful simulations. Fixed-step drawable simulations are rebuilt before ordinary parameter callbacks, so a force magnitude or direction derived from the simulated body observes the same-frame state during playback, seeks, and export. Non-positive scales, invalid label metrics, non-finite callback results, or incomplete deterministic-updater pairs raise `ValueError`.],
+  desc: [`force_at` accepts physical magnitude and a radian direction; `force_from_components` accepts physical X/Y components. `visual_scale` converts physical units to scene units while the optional readout remains in physical units. Its label, value, and unit share a 0.48-unit default. `color` paints the force, label, changing numeric value, and unit. All scalar inputs accept floats, Parameters, Variables, and Computed values. `Parameter.add_updater_fn(callback)` drives a scalar directly as `callback(current, dt, elapsed) -> value`; pair `reset` with `fixed_dt` for deterministic stateful simulations. Fixed-step drawable simulations are rebuilt before ordinary parameter callbacks, so a force magnitude or direction derived from the simulated body observes the same-frame state during playback, seeks, and export. Non-positive scales, invalid label metrics, non-finite callback results, or incomplete deterministic-updater pairs raise `ValueError`.],
 )[
 ```python
 # show-code: true
 from gaanim import GREEN, Scene
 scene = Scene(frame=(16, 9))
-body = scene.geometry.circle(24)
+body = scene.geometry.circle(0.3)
 magnitude = scene.viz.parameter(30)
 force = scene.mechanics.force_at(
-  body.anchor_point(), magnitude, direction=0.5, visual_scale=2,
+  body.anchor_point(), magnitude, direction=0.5, visual_scale=0.025,
   label="$F$", show_value=True, unit="N", color=GREEN,
 )
 scene.play([body.animate.fade_in(), force.animate.fade_in(), magnitude.animate.set(80).duration(1.5)])
@@ -1885,7 +1885,7 @@ scene.render()
 #api-entry(
   name: "Mechanical supports and joints",
   kind: "factories",
-  signature: "support_at(point,kind=\"pin\",direction=UP,size=48,ground_length=70,color=None) -> Support",
+  signature: "support_at(point,kind=\"pin\",direction=UP,size=0.48,ground_length=0.70,color=None) -> Support",
   returns: (type: "Support", desc: [Theme-aware vector symbol exposing `joint`, `body`, `ground`, `rollers`, `guides`, and `hatching`.]),
   desc: [Kinds are `fixed`, `pin`, `roller`, `simple`, `guided`, `prismatic`, `cable`, and `spring`. Direction runs from base toward connection, so `UP` places ground below and `DOWN` creates ceiling supports. Convenience methods are `fixed_support`, `pin_support`, `roller_support`, and `guided_support`; `joint_at` creates standalone revolute/prismatic joints.],
 )[
@@ -1893,8 +1893,8 @@ scene.render()
 # show-code: true
 from gaanim import Direction, Scene
 scene = Scene(frame=(16, 9))
-pin = scene.mechanics.pin_support((-100, 0), direction=Direction.UP)
-roller = scene.mechanics.roller_support((100, 0), direction=Direction.UP)
+pin = scene.mechanics.pin_support((-1.25, 0), direction=Direction.UP)
+roller = scene.mechanics.roller_support((1.25, 0), direction=Direction.UP)
 scene.play([pin.animate.fade_in(), roller.animate.fade_in()])
 # output: preview.webp
 scene.render()
@@ -1904,7 +1904,7 @@ scene.render()
 #api-entry(
   name: "Transmission primitives",
   kind: "factories and bindings",
-  signature: "gear(radius,teeth,bore_radius=8) / rack(length,teeth) / cam_profile(samples,bore_radius=8)",
+  signature: "gear(radius,teeth,bore_radius=0.08) / rack(length,teeth) / cam_profile(samples,bore_radius=0.08)",
   returns: (type: "Drawable", desc: [Editorial, styleable mechanism geometry.]),
   desc: [Use `bind_rotation_from(source,ratio,phase)` for gear coupling and `bind_translation_from_rotation(source,axis,scale)` for rack motion. These are visual relationships, not a kinematic/contact solver. Gear teeth are schematic rather than manufacturing involutes.],
 )[
@@ -1912,10 +1912,10 @@ scene.render()
 # show-code: true
 from gaanim import Direction, Scene
 scene = Scene(frame=(16, 9))
-driver = scene.mechanics.gear(55, 20).move_to(-55, 20)
-driven = scene.mechanics.gear(33, 12).move_to(33, 20).bind_rotation_from(driver, ratio=-5/3)
-rack = scene.mechanics.rack(220, 18).move_to(0, -65).bind_translation_from_rotation(
-  driver, axis=Direction.RIGHT, scale=55,
+driver = scene.mechanics.gear(0.69, 20).move_to(-0.69, 0.25)
+driven = scene.mechanics.gear(0.41, 12).move_to(0.41, 0.25).bind_rotation_from(driver, ratio=-5/3)
+rack = scene.mechanics.rack(2.75, 18).move_to(0, -0.81).bind_translation_from_rotation(
+  driver, axis=Direction.RIGHT, scale=0.69,
 )
 scene.play([driver.animate.fade_in(), driven.animate.fade_in(), rack.animate.fade_in(), driver.animate.rotate_by(2.0)])
 # output: preview.webp
@@ -1939,8 +1939,8 @@ Reference for the fluent handle returned by every factory. All return `Drawable`
 # show-code: true
 from gaanim import BLACK, BLUE, GOLD, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-obj = scene.geometry.circle(45).fill(BLUE).stroke(GOLD, 3).move_to(0, 0)
-obj.glow(GOLD, radius=18)
+obj = scene.geometry.circle(0.56).fill(BLUE).stroke(GOLD, 0.04).move_to(0, 0)
+obj.glow(GOLD, radius=0.225)
 scene.play([obj.animate.grow_from_center().duration(0.8)])
 # output: preview.webp
 scene.render()
@@ -1960,8 +1960,8 @@ scene.render()
 from gaanim import Anchor, BLUE, GOLD, WHITE, RED, GREEN, Scene
 from math import pi
 scene = Scene(frame=(16, 9), background="#0f172a")
-hinge = scene.geometry.dot(7).fill(GOLD).move_to(-200, 100)
-arm = scene.geometry.rect(90, 18).fill(BLUE).move_to(hinge).with_pivot(-200, 100)
+hinge = scene.geometry.dot(0.09).fill(GOLD).move_to(-2.5, 1.25)
+arm = scene.geometry.rect(1.125, 0.225).fill(BLUE).move_to(hinge).with_pivot(-2.5, 1.25)
 scene.play([arm.animate.rotate_by(pi/2.5).duration(1.0)])
 # output: preview.webp
 scene.render()
@@ -1981,10 +1981,10 @@ scene.render()
 from gaanim import BLUE, WHITE, Scene
 from gaanim import Anchor, Direction
 scene = Scene(frame=(16, 9), background="#0f172a")
-a = scene.geometry.circle(18).fill(BLUE)
-b = scene.geometry.circle(18).fill(WHITE)
-c = scene.geometry.circle(18).fill(BLUE)
-row = scene.layout.row([a, b, c], gap=18, within="safe")
+a = scene.geometry.circle(0.225).fill(BLUE)
+b = scene.geometry.circle(0.225).fill(WHITE)
+c = scene.geometry.circle(0.225).fill(BLUE)
+row = scene.layout.row([a, b, c], gap=0.225, within="safe")
 scene.play([row.animate.fade_in().duration(0.6)])
 # output: preview.webp
 scene.render()
@@ -2003,10 +2003,10 @@ scene.render()
 # show-code: true
 from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-mass = scene.geometry.dot(12).fill(GOLD).move_to(-60, 0)
-label = scene.text("follower").move_to(0, 45)
+mass = scene.geometry.dot(0.15).fill(GOLD).move_to(-0.75, 0)
+label = scene.text("follower").move_to(0, 0.56)
 label.attach_to(mass)
-scene.play([label.animate.fade_in().duration(0.3), mass.animate.shift_by(120, 0).duration(1.2)])
+scene.play([label.animate.fade_in().duration(0.3), mass.animate.shift_by(1.5, 0).duration(1.2)])
 # output: preview.webp
 scene.render()
 ```

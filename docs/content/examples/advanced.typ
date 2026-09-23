@@ -21,14 +21,14 @@ from gaanim import Easing, BLACK, BLUE, GOLD, GREEN, WHITE, Scene, Transition
 
 scene = Scene(frame=(16, 9), background=BLACK)
 scene.segment("shapes")
-circle = scene.geometry.circle(80).fill(BLUE).stroke(WHITE, 4).move_to(-180, 0)
+circle = scene.geometry.circle(1).fill(BLUE).stroke(WHITE, 0.05).move_to(-2.25, 0)
 scene.play([circle.animate.create().duration(0.8)])
 
 scene.segment("text", Transition.cross_fade(0.4))
 headline = scene.text("A stable transform", role="title").fill(GOLD)
 scene.play([circle.animate.replacement_transform_to(headline).duration(1.4).easing(Easing.spring(stiffness=90, damping=12))])
 
-formula = scene.text.equation("E = m c^2").fill(GREEN).move_to(0, -150)
+formula = scene.text.equation("E = m c^2").fill(GREEN).move_to(0, -1.875)
 scene.play([headline.animate.transform_to(formula).duration(1.4).easing(Easing.SMOOTH)])
 # Ejecuta este archivo con: gaanim transforms.py
 ```
@@ -39,13 +39,13 @@ scene.play([headline.animate.transform_to(formula).duration(1.4).easing(Easing.S
 from gaanim import Easing, BLACK, BLUE, GREEN, RED, Scene
 
 scene = Scene(frame=(16, 9), background=BLACK)
-left = scene.geometry.circle(40).fill(BLUE).move_to(-80, 0)
-middle = scene.geometry.circle(40).fill(RED).move_to(0, 0)
-right = scene.geometry.circle(40).fill(GREEN).move_to(80, 0)
+left = scene.geometry.circle(0.5).fill(BLUE).move_to(-1, 0)
+middle = scene.geometry.circle(0.5).fill(RED).move_to(0, 0)
+right = scene.geometry.circle(0.5).fill(GREEN).move_to(1, 0)
 group = scene.geometry.group([left, middle, right])
 
 scene.play([group.animate.grow_from_center().duration(1.0).easing(Easing.spring(stiffness=90, damping=12))])
-scene.play([group.animate.shift_by(0, 120).duration(1.0), group.animate.rotate_by(3.14159).duration(1.0)])
+scene.play([group.animate.shift_by(0, 1.5).duration(1.0), group.animate.rotate_by(3.14159).duration(1.0)])
 # Ejecuta este archivo con: gaanim groups.py
 ```
 
@@ -55,9 +55,9 @@ scene.play([group.animate.shift_by(0, 120).duration(1.0), group.animate.rotate_b
 from gaanim import BLACK, Color, Scene, Updater
 
 scene = Scene(frame=(16, 9), background=BLACK)
-dot = scene.geometry.dot(10).fill(Color(255, 180, 70)).move_to(200, 0)
-dot.add_updater(Updater.orbit(0, 0, 200, 1.5))
-trail = scene.geometry.traced_path(dot).stroke(Color(80, 220, 220), 3).no_fill()
+dot = scene.geometry.dot(0.125).fill(Color(255, 180, 70)).move_to(2.5, 0)
+dot.add_updater(Updater.orbit(0, 0, 2.5, 1.5))
+trail = scene.geometry.traced_path(dot).stroke(Color(80, 220, 220), 0.04).no_fill()
 
 scene.play([dot.animate.fade_in().duration(0.3), trail.animate.fade_in().duration(0.3)])
 scene.wait(4.0)
@@ -109,7 +109,7 @@ heading = scene.slides.section_header(
     variant="accent",
 )
 chart = scene.viz.chart(spec)
-page = scene.layout.column([heading, scene.layout.item(chart, grow=1)], within="safe", gap=24)
+page = scene.layout.column([heading, scene.layout.item(chart, grow=1)], within="safe", gap=0.3)
 scene.play([page.animate.fade_in().duration(0.7), chart.layer("marks").animate.grow_from_center().duration(0.8)])
 scene.render()
 ```
@@ -141,7 +141,7 @@ page = scene.layout.column(
     within="safe",
     width="fill",
     height="fill",
-    gap=32,
+    gap=0.4,
 )
 scene.play([page.animate.fade_in().duration(0.8)])
 scene.render()
@@ -159,11 +159,11 @@ from math import cos, pi, sin
 scene = Scene(frame=(16, 9), background="#0f172a")
 t = scene.viz.parameter(0.0)
 curve = scene.geometry.polyline([
-    (260 * cos(u), 150 * sin(2 * u))
+    (3.25 * cos(u), 1.875 * sin(2 * u))
     for u in (2 * pi * i / 240 for i in range(241))
-]).no_fill().stroke(WHITE, 3)
+]).no_fill().stroke(WHITE, 0.04)
 point = scene.geometry.point_on_curve(curve, t).fill(GOLD)
-tangent = scene.geometry.tangent_on_curve(curve, t, length=110).stroke(GOLD, 4)
+tangent = scene.geometry.tangent_on_curve(curve, t, length=1.375).stroke(GOLD, 0.05)
 
 scene.play([curve.animate.create().duration(0.7), point.animate.fade_in().duration(0.2), tangent.animate.fade_in().duration(0.2)])
 scene.play([t.animate.set(1.0).duration(4.0)])

@@ -32,10 +32,10 @@ from gaanim import GOLD, Scene
 
 scene = Scene(frame=(16, 9))
 theta = scene.viz.parameter(0.0)
-tip = scene.geometry.polar_point((0, 0), 180, theta)
-radius = scene.mechanics.bar_between((0, 0), tip).stroke(GOLD, 6)
+tip = scene.geometry.polar_point((0, 0), 2.25, theta)
+radius = scene.mechanics.bar_between((0, 0), tip).stroke(GOLD, 0.075)
 label = scene.viz.readout(lambda value: value, inputs=[theta], label="$theta$", format=".2f")
-label.follow(tip, offset=(0, 28))
+label.follow(tip, offset=(0, 0.35))
 
 scene.play([radius.animate.create().duration(0.5), label.animate.fade_in().duration(0.3)])
 scene.play([theta.animate.set(2 * pi).duration(4.0)])
