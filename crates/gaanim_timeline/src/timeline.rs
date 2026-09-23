@@ -275,6 +275,10 @@ pub struct Timeline {
     pub ignore_input: bool,
     /// Active loop range (start_time, end_time) if loop playback is enabled.
     pub loop_range: Option<(f64, f64)>,
+    /// Ordered time ranges that playback and stop navigation are limited to,
+    /// from a rehearsal selection; empty plays the whole timeline.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub play_ranges: Vec<(f64, f64)>,
     /// Pending seek request, processed at the end of the frame using exclusive world access.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub seek_request: Option<f64>,
@@ -312,6 +316,7 @@ impl Default for Timeline {
             segment_position: None,
             ignore_input: false,
             loop_range: None,
+            play_ranges: Vec::new(),
             seek_request: None,
             last_restore_kf_time: None,
             replay_baseline: None,
@@ -429,6 +434,55 @@ impl Timeline {
             })
     }
 
+    /// First playable time: the start of the selection, or zero.
+    pub fn playback_start(&self) -> f64 {
+        self.play_ranges.first().map_or(0.0, |range| range.0)
+    }
+
+    /// Last playable time: the end of the selection, or the timeline end.
+    pub fn playback_end(&self) -> f64 {
+        self.play_ranges
+            .last()
+            .map_or(self.cached_duration, |range| range.1)
+    }
+
+    /// Whether `time` lies in the selection; always true without one.
+    pub fn is_playable(&self, time: f64) -> bool {
+        const EPSILON: f64 = 1e-5;
+        self.play_ranges.is_empty()
+            || self
+                .play_ranges
+                .iter()
+                .any(|(start, end)| time >= start - EPSILON && time <= end + EPSILON)
+    }
+
+    /// Next playback target within the selection and whether to keep playing.
+    ///
+    /// Playback outside the selection jumps to the next selected range; the
+    /// end of a range continues at the start of the next one, and the end of
+    /// the last range pauses there.
+    pub fn selected_playback_step(&self, current: f64, next: f64) -> (f64, bool) {
+        const EPSILON: f64 = 1e-5;
+        let Some(index) = self
+            .play_ranges
+            .iter()
+            .position(|(_, end)| *end > current + EPSILON)
+        else {
+            return (self.playback_end(), false);
+        };
+        let (start, end) = self.play_ranges[index];
+        if current < start - EPSILON {
+            return (start, true);
+        }
+        if next < end {
+            return (next, true);
+        }
+        match self.play_ranges.get(index + 1) {
+            Some((next_start, _)) => (*next_start, true),
+            None => (end, false),
+        }
+    }
+
     /// Return the previous explicit interactive stop before `time`.
     pub fn previous_stop(&self, time: f64) -> Option<f64> {
         self.interactive_stops()
@@ -485,6 +539,7 @@ impl Timeline {
             .iter()
             .flat_map(|segment| segment.stops.iter().map(|stop| stop.time))
             .collect::<Vec<_>>();
+        stops.retain(|stop| self.is_playable(*stop));
         stops.sort_by(|left, right| left.total_cmp(right));
         stops.dedup_by(|left, right| (*left - *right).abs() < 1e-5);
         stops

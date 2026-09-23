@@ -60,6 +60,28 @@ gaanim check mi-charla --strict
 gaanim --present --monitor 1 mi-charla
 ```
 
+== Ensayar una parte
+
+```powershell
+gaanim mi-charla --sections resultados,conclusiones
+gaanim --present mi-charla --from resultados
+```
+
+`--sections` reproduce solo los segmentos indicados y `--from` empieza en uno y
+sigue hasta el final; combinados, `--from` recorta la lista. Cada nombre
+selecciona el segmento con ese nombre exacto o todos los segmentos de una
+`Section` con esa clave, sin distinguir mayúsculas. Un nombre desconocido se
+muestra como error con las opciones disponibles, y entonces se reproduce todo.
+
+El script se ejecuta completo: objetos persistentes, cámara y tema llegan al
+primer segmento elegido exactamente como en la ejecución entera, porque la
+selección *salta* a ese segmento en lugar de omitir código. La reproducción,
+`Home`/`End`, `Advance`/`Previous` y los steps solo visitan lo elegido; al
+terminar un tramo se salta al siguiente. Con `gaanim --diff ... --capture-stops`
+las mismas opciones limitan las pausas capturadas, que conservan su numeración
+global; sin `--capture-stops` no aplican, porque `scene.snapshots` elige sus
+tiempos desde el script.
+
 Los índices de monitor empiezan en cero. Presenter View utiliza los nombres y
 notas de `scene.segment(...)`, y solo espera input en los puntos marcados con
 `scene.stop(...)`. La exportación ignora esas paradas y genera un video continuo.

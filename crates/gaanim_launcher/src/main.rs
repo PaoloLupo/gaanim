@@ -138,8 +138,16 @@ fn find_script_hint(args: &[String]) -> Option<PathBuf> {
     if matches!(args.get(1).map(String::as_str), Some("check" | "export")) {
         return args.get(2).map(PathBuf::from);
     }
-    args.iter().rev().find_map(|arg| {
-        if arg.starts_with('-') || matches!(arg.as_str(), "check" | "init") {
+    // Values of these options are names or numbers, never the script.
+    let takes_value = |index: usize| {
+        index > 0
+            && matches!(
+                args[index - 1].as_str(),
+                "--monitor" | "--sections" | "--from"
+            )
+    };
+    args.iter().enumerate().rev().find_map(|(index, arg)| {
+        if arg.starts_with('-') || matches!(arg.as_str(), "check" | "init") || takes_value(index) {
             return None;
         }
         let path = PathBuf::from(arg);
@@ -161,7 +169,9 @@ fn print_general_help() {
     println!();
     println!("usage:");
     println!("  gaanim");
-    println!("  gaanim [--present] [--monitor <INDEX>] <SCRIPT_OR_PROJECT>");
+    println!(
+        "  gaanim [--present] [--monitor <INDEX>] [--sections <LIST>] [--from <NAME>] <SCRIPT_OR_PROJECT>"
+    );
     println!("  gaanim init <video|slides> [DIRECTORY] [--force]");
     println!(
         "  gaanim export <SCRIPT_OR_PROJECT> --output <FILE> [--quality <PRESET>] [--encoder <ENCODER>] [--transparent]"
@@ -218,6 +228,10 @@ OPTIONS:
     -b, --baseline <DIR>               Known-good snapshot directory
     -c, --current <DIR>                Candidate snapshot directory
     -o, --output <DIR>                 Override report directory
+        --capture-stops                Capture the frame at every scene.stop()
+        --stops <LIST>                 With --capture-stops, only these stops
+        --sections <LIST>              With --capture-stops, only these sections
+        --from <NAME>                  With --capture-stops, from this section on
         --pixel-threshold <0..255>      Ignored per-channel difference
         --max-changed-ratio <0..1>      Allowed changed-pixel fraction
         --no-gui                        Generate reports without egui
@@ -228,6 +242,21 @@ OPTIONS:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn script_hint_skips_option_values() {
+        let args: Vec<String> = [
+            "gaanim",
+            "talk",
+            "--from",
+            "Resultados",
+            "--sections",
+            "a,b",
+        ]
+        .map(str::to_string)
+        .into();
+        assert_eq!(find_script_hint(&args), Some(PathBuf::from("talk")));
+    }
 
     #[test]
     fn accepts_only_video_and_slides_init_kinds() {
