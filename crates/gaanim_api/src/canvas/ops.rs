@@ -572,6 +572,7 @@ pub(crate) enum Op {
         offset: f64,
         gap: f64,
         orientation: DimensionLabelOrientation,
+        clear_label_width: bool,
     },
     /// Regenerate all visible parts of an angular dimension.
     AttachTrackingAngle {

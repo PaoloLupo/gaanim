@@ -395,7 +395,7 @@ fn build_readout_parts(
         equals_part.as_ref().map(|part| &part.0),
         &number_part.0,
         unit_part.as_ref().map(|part| &part.0),
-        10.0,
+        0.1,
     );
     (group, label_part, equals_part, number_part, unit_part)
 }
@@ -2177,7 +2177,7 @@ impl PyCoordinateSpace {
             .ok_or_else(|| value_error("layer is not available on this space"))
     }
 
-    #[pyo3(signature = (function, domain=None, *, samples=None, tolerance=0.75, derivative=None, inputs=Vec::new()))]
+    #[pyo3(signature = (function, domain=None, *, samples=None, tolerance=0.0075, derivative=None, inputs=Vec::new()))]
     fn plot(
         &self,
         py: Python<'_>,
@@ -2200,7 +2200,7 @@ impl PyCoordinateSpace {
             .map_err(value_error)
     }
 
-    #[pyo3(signature = (function, domain, *, samples=None, tolerance=0.75, inputs=Vec::new()))]
+    #[pyo3(signature = (function, domain, *, samples=None, tolerance=0.0075, inputs=Vec::new()))]
     fn parametric(
         &self,
         py: Python<'_>,

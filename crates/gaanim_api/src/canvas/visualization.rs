@@ -122,6 +122,8 @@ impl Parameter {
 #[derive(Debug, Clone)]
 pub struct CoordinateSpaceHandle {
     pub(crate) root: DrawableHandle,
+    /// Visible axes: the rescaled view plus the fixed axis titles.
+    pub(crate) frame: DrawableHandle,
     pub(crate) view: DrawableHandle,
     pub(crate) map: CoordinateMap2D,
     pub(crate) layers: HashMap<SpaceLayer, DrawableHandle>,
@@ -691,13 +693,33 @@ impl CoordinateSpaceHandle {
         })
     }
 
+    /// Convert data to space-local coordinates through the view at the authoring cursor.
     pub fn data_to_local(&self, x: f64, y: f64) -> Result<(f64, f64), VisualizationError> {
         let point = self.map.data_to_local(x, y)?;
-        Ok((point.x, point.y))
+        let (scale, translation) = self.view_cursor();
+        Ok((
+            point.x * scale.x + translation.x,
+            point.y * scale.y + translation.y,
+        ))
     }
 
+    /// Convert space-local coordinates to data through the view at the authoring cursor.
     pub fn local_to_data(&self, x: f64, y: f64) -> Result<(f64, f64), VisualizationError> {
-        Ok(self.map.local_to_data(Point::new(x, y))?)
+        let (scale, translation) = self.view_cursor();
+        Ok(self.map.local_to_data(Point::new(
+            (x - translation.x) / scale.x,
+            (y - translation.y) / scale.y,
+        ))?)
+    }
+
+    /// View scale and translation after every view change queued so far.
+    fn view_cursor(&self) -> (DVec3, DVec3) {
+        self.view
+            .spec
+            .lock()
+            .expect("view spec poisoned")
+            .coordinate_view_cursor
+            .unwrap_or((DVec3::ONE, DVec3::ZERO))
     }
 
     pub fn layer(&self, layer: SpaceLayer) -> Option<&DrawableHandle> {
@@ -764,6 +786,11 @@ impl CoordinateSpaceHandle {
         let (scale_x, scale_y, center) = self.view_transform(x_domain, y_domain)?;
         self.view.clone().scale_to_3d(scale_x, scale_y, 1.0);
         self.view.clone().move_to(center.x, center.y);
+        self.view
+            .spec
+            .lock()
+            .expect("view spec poisoned")
+            .coordinate_view_cursor = Some((DVec3::new(scale_x, scale_y, 1.0), center));
         Ok(())
     }
 
@@ -776,11 +803,13 @@ impl CoordinateSpaceHandle {
         y_domain: (f64, f64),
     ) -> Result<super::types::Anim, VisualizationError> {
         let (scale_x, scale_y, center) = self.view_transform(x_domain, y_domain)?;
+        // Target the view origin, not its bounds center: axis text makes the
+        // view bounds asymmetric around the plot area.
         Ok(self
             .view
             .animate()
             .scale_to_3d(scale_x, scale_y, 1.0)
-            .move_to(center.x, center.y))
+            .move_to_3d(center.x, center.y, 0.0))
     }
 }
 
@@ -909,7 +938,7 @@ impl SceneModel {
                 }
                 // Layer z_index values inherit from the view; keep the view itself at
                 // the scene level so the chart does not rise above unrelated content.
-                let axes_layer = space.view.clone();
+                let axes_layer = space.frame.clone();
                 let grid = space
                     .layer(SpaceLayer::MajorGrid)
                     .cloned()
@@ -1066,7 +1095,7 @@ impl SceneModel {
             }
             // Layer z_index values inherit from the view; keep the view itself at
             // the scene level so the chart does not rise above unrelated content.
-            let axes_layer = space.view.clone();
+            let axes_layer = space.frame.clone();
             let grid = space
                 .layer(SpaceLayer::MajorGrid)
                 .cloned()
@@ -1455,6 +1484,100 @@ impl SceneModel {
         // added line so that a multiline label grows away from the axis while
         // its closest line keeps the same gap as a single-line label.
         SINGLE_LINE_EXTRA + additional_lines * font_size * 0.6
+    }
+
+    /// Invisible root-frame masks limiting axis layers to the plot window.
+    ///
+    /// Each mask is the union of a vertical band over the plot's x range and a
+    /// horizontal band over its y range, limited to the unzoomed layer extent.
+    /// Everything authored is inside, while content that `view_to` pushes past
+    /// the window is clipped. Numbers get half a label of slack so labels at
+    /// the window edges stay whole.
+    fn cartesian_view_masks(
+        &mut self,
+        space: &CartesianSpace,
+        geometry: &SpaceGeometry2D,
+        number_scale: f64,
+    ) -> (DrawableHandle, DrawableHandle) {
+        let (x0, x1) = space.map.x.domain();
+        let (y0, y1) = space.map.y.domain();
+        let plot = match (
+            space.map.data_to_local(x0, y0),
+            space.map.data_to_local(x1, y1),
+        ) {
+            (Ok(a), Ok(b)) => Rect::from_points(a, b),
+            _ => Rect::new(
+                geometry.bounds.min.x,
+                geometry.bounds.min.y,
+                geometry.bounds.max.x,
+                geometry.bounds.max.y,
+            ),
+        };
+        let stroke_margin = space
+            .map
+            .x
+            .style_value()
+            .width
+            .max(space.map.x.style_value().tick_width)
+            .max(space.map.y.style_value().width)
+            .max(space.map.y.style_value().tick_width)
+            .max(0.01);
+        let lines_extent = [
+            &geometry.major_grid,
+            &geometry.minor_grid,
+            &geometry.axes,
+            &geometry.ticks,
+        ]
+        .into_iter()
+        .filter(|path| !path.elements().is_empty())
+        .fold(plot, |extent, path| extent.union(path.bounding_box()))
+        .inflate(stroke_margin, stroke_margin);
+        let (mut half_width, mut half_height) = (0.0_f64, 0.0_f64);
+        let numbers_extent = geometry.numbers.iter().fold(plot, |extent, label| {
+            let (width, height) = self.axis_text_size(&label.text, number_scale);
+            half_width = half_width.max(width * 0.5);
+            half_height = half_height.max(height * 0.5);
+            extent.union(Rect::from_center_size(
+                (label.position.x, label.position.y),
+                (width, height),
+            ))
+        });
+        let cross = |extent: Rect, dx: f64, dy: f64| {
+            let window = plot.inflate(dx, dy);
+            let mut path = Rect::new(window.x0, extent.y0, window.x1, extent.y1)
+                .intersect(extent)
+                .to_path(0.1);
+            path.extend(
+                Rect::new(extent.x0, window.y0, extent.x1, window.y1)
+                    .intersect(extent)
+                    .to_path(0.1),
+            );
+            path
+        };
+        let mask = |canvas: &mut Self, path: BezPath, name: &str| {
+            let handle =
+                canvas.visualization_path(path, geometry.bounds, Color::TRANSPARENT, 0.0, name);
+            let mut spec = handle.spec.lock().expect("mask spec poisoned");
+            spec.theme_selector = None;
+            spec.exclude_from_parent_draw = true;
+            drop(spec);
+            handle.no_fill().no_stroke()
+        };
+        let line_mask = mask(
+            self,
+            cross(lines_extent, stroke_margin, stroke_margin),
+            "CoordinateLineMask",
+        );
+        let number_mask = mask(
+            self,
+            cross(
+                numbers_extent,
+                half_width + stroke_margin,
+                half_height + stroke_margin,
+            ),
+            "CoordinateNumberMask",
+        );
+        (line_mask, number_mask)
     }
 
     fn lay_out_cartesian_axis_labels(
@@ -2020,6 +2143,7 @@ impl SceneModel {
             })
             .unwrap_or(1.125);
         self.lay_out_cartesian_axis_labels(&space, &mut geometry, number_scale, label_scale);
+        let (line_mask, number_mask) = self.cartesian_view_masks(&space, &geometry, number_scale);
         let mut layers = HashMap::new();
         let grid_major = self.visualization_path(
             geometry.major_grid,
@@ -2120,7 +2244,18 @@ impl SceneModel {
         let labels = self.group(&label_refs);
         layers.insert(SpaceLayer::Labels, labels.clone());
 
-        let members = [&grid_major, &grid_minor, &axes, &ticks, &numbers, &labels];
+        for layer in [&grid_major, &grid_minor, &axes, &ticks] {
+            layer
+                .clone()
+                .clip(&line_mask, gaanim_core::peniko::Fill::NonZero);
+        }
+        numbers
+            .clone()
+            .clip(&number_mask, gaanim_core::peniko::Fill::NonZero);
+
+        // Axis titles describe the plot frame rather than a data position, so
+        // they stay outside the view that `view_to` rescales.
+        let members = [&grid_major, &grid_minor, &axes, &ticks, &numbers];
         let view = self.group_no_center(&members);
         view.spec
             .lock()
@@ -2133,9 +2268,11 @@ impl SceneModel {
                 .expect("label spec poisoned")
                 .coordinate_view_role = Some(gaanim_scene::CoordinateViewRole::Label);
         }
-        let root = self.group_no_center(&[&view]);
+        let frame = self.group_no_center(&[&view, &labels]);
+        let root = self.group_no_center(&[&frame, &line_mask, &number_mask]);
         Ok(CoordinateSpaceHandle {
             root,
+            frame,
             view,
             map: space.map,
             layers,
@@ -4773,6 +4910,151 @@ mod tests {
                 assert!((current.w_axis.truncate() - expected).length() < 1e-9);
             }
         }
+    }
+
+    #[test]
+    fn animated_view_keeps_plot_area_clips_axes_and_updates_local_mapping() {
+        use bevy::prelude::Schedule;
+        use gaanim_math::GlobalSpatialTransform;
+        use gaanim_scene::prelude::{ChildOf, World};
+
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        let space = canvas
+            .coordinate_axes_with_visibility(
+                Axis::linear(0.0, 0.55)
+                    .unwrap()
+                    .ticks(0.1)
+                    .unwrap()
+                    .label("x"),
+                Axis::linear(0.5, 4.5).unwrap().ticks(1.0).unwrap(),
+                Some(5.6),
+                Some(3.3),
+                CartesianVisibility {
+                    x_grid: false,
+                    y_grid: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .move_to(-3.6, 0.0);
+        let before = space.data_to_local(0.2, 0.5).unwrap();
+        let animation = space.view_to_animation((0.0, 0.2), (0.5, 4.5)).unwrap();
+        // Describing the animation must not move the authoring cursor.
+        assert_eq!(space.data_to_local(0.2, 0.5).unwrap(), before);
+        canvas.play(vec![animation.duration(1.0)]);
+        let (x, y) = space.data_to_local(0.2, 0.5).unwrap();
+        assert!((x - 2.8).abs() < 1e-9 && (y + 1.65).abs() < 1e-9);
+        let (x, y) = space.local_to_data(2.8, -1.65).unwrap();
+        assert!((x - 0.2).abs() < 1e-9 && (y - 0.5).abs() < 1e-9);
+
+        let mut world = World::new();
+        world.insert_resource(gaanim_timeline::timeline::Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        let mut timeline = world
+            .remove_resource::<gaanim_timeline::timeline::Timeline>()
+            .unwrap();
+        timeline.add_keyframe(
+            0.0,
+            gaanim_timeline::snapshot::WorldSnapshot::capture(&mut world),
+        );
+        let mut propagation = Schedule::default();
+        propagation.add_systems(gaanim_scene::transform_propagation_system);
+        use gaanim_scene::CoordinateViewRole;
+        let roles: Vec<_> = world
+            .query::<(gaanim_scene::prelude::Entity, &CoordinateViewRole)>()
+            .iter(&world)
+            .map(|(entity, role)| (entity, *role))
+            .collect();
+        let views: Vec<_> = roles
+            .iter()
+            .filter(|(_, role)| *role == CoordinateViewRole::View)
+            .map(|(entity, _)| *entity)
+            .collect();
+        assert_eq!(views.len(), 1);
+        let view = views[0];
+        let in_view = |world: &World, mut entity| {
+            while let Some(parent) = world.get::<ChildOf>(entity) {
+                entity = parent.parent();
+                if entity == view {
+                    return true;
+                }
+            }
+            false
+        };
+        // Axis titles stay outside the rescaled view; numbers stay inside it.
+        let labels: Vec<_> = roles
+            .iter()
+            .filter(|(_, role)| *role == CoordinateViewRole::Label)
+            .map(|(entity, _)| in_view(&world, *entity))
+            .collect();
+        assert!(labels.contains(&true) && labels.contains(&false));
+
+        timeline.seek(&mut world, 1.0);
+        propagation.run(&mut world);
+        // The zoomed window keeps the authored plot rectangle.
+        let origin = world
+            .get::<GlobalSpatialTransform>(view)
+            .unwrap()
+            .mat4
+            .transform_point3(DVec3::new(-2.8, -1.65, 0.0));
+        assert!((origin - DVec3::new(-6.4, -1.65, 0.0)).length() < 1e-9);
+
+        // Clipped view paths use masks outside the view that end at the window.
+        let clipped: Vec<_> = world
+            .query::<(
+                gaanim_scene::prelude::Entity,
+                &gaanim_renderer::effects::ClipMask,
+                &gaanim_scene::prelude::Path2D,
+                &GlobalSpatialTransform,
+            )>()
+            .iter(&world)
+            .map(|(entity, mask, path, global)| {
+                let mut path = (*path.0).clone();
+                path.apply_affine(global.affine_2d);
+                (entity, mask.sources.clone(), path.bounding_box())
+            })
+            .collect();
+        let (axes, sources, axes_world) = clipped
+            .into_iter()
+            .max_by(|a, b| a.2.x1.total_cmp(&b.2.x1))
+            .expect("axis layers are clipped");
+        assert!(in_view(&world, axes));
+        assert!(axes_world.x1 > 8.0, "the zoom overflows the x axis");
+        let mut mask_world = BezPath::new();
+        for source in sources {
+            assert!(!in_view(&world, source));
+            let mut path = (*world
+                .get::<gaanim_scene::prelude::Path2D>(source)
+                .unwrap()
+                .0)
+                .clone();
+            path.apply_affine(
+                world
+                    .get::<GlobalSpatialTransform>(source)
+                    .unwrap()
+                    .affine_2d,
+            );
+            mask_world.extend(path);
+        }
+        assert!(
+            mask_world.bounding_box().x1 < -0.8 + 0.1,
+            "the mask ends at the plot edge"
+        );
+        let numbers = space.layer(SpaceLayer::Numbers).unwrap();
+        assert!(
+            canvas
+                .state
+                .lock()
+                .unwrap()
+                .active()
+                .ops
+                .iter()
+                .any(|op| matches!(op, Op::SetClip { target, mask: Some(_), .. } if *target == numbers.id)),
+            "axis numbers are clipped"
+        );
     }
 
     #[test]
