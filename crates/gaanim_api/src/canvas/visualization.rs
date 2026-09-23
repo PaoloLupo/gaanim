@@ -129,6 +129,8 @@ pub struct CoordinateSpaceHandle {
     pub(crate) layers: HashMap<SpaceLayer, DrawableHandle>,
     /// Automatic tick regeneration for `SceneModel::coordinate_view_to`.
     pub(crate) ticks: Option<Arc<Mutex<super::view_ticks::CartesianTicks>>>,
+    /// Plot-window clip for data marks, fixed while `view_to` rescales them.
+    pub(crate) data_mask: Option<DrawableHandle>,
 }
 
 /// Typed 3D coordinate space with immediate data/local conversions.
@@ -924,7 +926,10 @@ impl SceneModel {
                 .get(&Channel::Y)
                 .cloned()
                 .unwrap_or(Axis::linear(0.0, 1.0)?);
-            let space = self.coordinate_axes(x, y, Some(width), Some(height), true)?;
+            let mut space = self.coordinate_axes(x, y, Some(width), Some(height), true)?;
+            // Chart domains are inferred to fit their data and never change
+            // view, so chart marks keep drawing past edge-touching data.
+            space.data_mask = None;
             if spec.mark_spec().kind == MarkKind::Bar {
                 let (marks, labels) =
                     self.materialize_bar_chart(&space, &spec, chart_series_color(self))?;
@@ -1355,7 +1360,7 @@ impl SceneModel {
         }
         let mark_refs: Vec<_> = mark_paths.iter().collect();
         let marks = self.group_no_center(&mark_refs);
-        self.attach_to_space(space, &marks);
+        self.attach_mark_to_space(space, &marks);
 
         let labels = if labels.is_empty() {
             None
@@ -1500,7 +1505,7 @@ impl SceneModel {
         space: &CartesianSpace,
         geometry: &SpaceGeometry2D,
         number_scale: f64,
-    ) -> (DrawableHandle, DrawableHandle) {
+    ) -> (DrawableHandle, DrawableHandle, DrawableHandle) {
         let (x0, x1) = space.map.x.domain();
         let (y0, y1) = space.map.y.domain();
         let plot = match (
@@ -1621,7 +1626,14 @@ impl SceneModel {
             "CoordinateLineMask",
         );
         let number_mask = mask(self, number_mask_path, "CoordinateNumberMask");
-        (line_mask, number_mask)
+        // Data marks end where the axes do; the stroke margin keeps a stroke
+        // lying on the plot edge whole.
+        let data_mask = mask(
+            self,
+            plot.inflate(stroke_margin, stroke_margin).to_path(0.1),
+            "CoordinateDataMask",
+        );
+        (line_mask, number_mask, data_mask)
     }
 
     fn lay_out_cartesian_axis_labels(
@@ -1752,6 +1764,15 @@ impl SceneModel {
                 group: space.view.id,
                 child: child.id,
             });
+    }
+
+    /// Attach a data mark and clip it to the plot window; `no_clip()` on the
+    /// returned drawable lets it overflow again.
+    fn attach_mark_to_space(&mut self, space: &CoordinateSpaceHandle, mark: &DrawableHandle) {
+        self.attach_to_space(space, mark);
+        if let Some(mask) = &space.data_mask {
+            mark.clone().clip(mask, gaanim_core::peniko::Fill::NonZero);
+        }
     }
 
     fn attach_to_space_3d(&mut self, space: &CoordinateSpace3DHandle, child: &DrawableHandle) {
@@ -2187,7 +2208,8 @@ impl SceneModel {
             })
             .unwrap_or(1.125);
         self.lay_out_cartesian_axis_labels(&space, &mut geometry, number_scale, label_scale);
-        let (line_mask, number_mask) = self.cartesian_view_masks(&space, &geometry, number_scale);
+        let (line_mask, number_mask, data_mask) =
+            self.cartesian_view_masks(&space, &geometry, number_scale);
         let mut layers = HashMap::new();
         let grid_major = self.visualization_path(
             geometry.major_grid,
@@ -2367,7 +2389,7 @@ impl SceneModel {
                 .coordinate_view_role = Some(gaanim_scene::CoordinateViewRole::Label);
         }
         let frame = self.group_no_center(&[&view, &labels]);
-        let root = self.group_no_center(&[&frame, &line_mask, &number_mask]);
+        let root = self.group_no_center(&[&frame, &line_mask, &number_mask, &data_mask]);
         let ticks_state = super::view_ticks::CartesianTicks::new(
             space.clone(),
             number_scale,
@@ -2387,6 +2409,7 @@ impl SceneModel {
             map: space.map,
             layers,
             ticks: Some(Arc::new(Mutex::new(ticks_state))),
+            data_mask: Some(data_mask),
         })
     }
 
@@ -2715,7 +2738,7 @@ impl SceneModel {
             reveal: None,
             sampling,
         });
-        self.attach_to_space(space, &handle);
+        self.attach_mark_to_space(space, &handle);
         Ok(handle)
     }
 
@@ -2740,7 +2763,7 @@ impl SceneModel {
             domain,
             sampling,
         });
-        self.attach_to_space(space, &handle);
+        self.attach_mark_to_space(space, &handle);
         Ok(handle)
     }
 
@@ -2904,7 +2927,7 @@ impl SceneModel {
             3.0,
             "FunctionPlot",
         );
-        self.attach_to_space(space, &handle);
+        self.attach_mark_to_space(space, &handle);
         Ok(handle)
     }
 
@@ -2923,7 +2946,7 @@ impl SceneModel {
             3.0,
             "ParametricPlot",
         );
-        self.attach_to_space(space, &handle);
+        self.attach_mark_to_space(space, &handle);
         Ok(handle)
     }
 
@@ -2941,7 +2964,7 @@ impl SceneModel {
             3.0,
             "ImplicitPlot",
         );
-        self.attach_to_space(space, &handle);
+        self.attach_mark_to_space(space, &handle);
         Ok(handle)
     }
 
@@ -2969,7 +2992,7 @@ impl SceneModel {
             2.0,
             "ContourPlot",
         );
-        self.attach_to_space(space, &handle);
+        self.attach_mark_to_space(space, &handle);
         Ok(handle)
     }
 
@@ -2992,7 +3015,7 @@ impl SceneModel {
             2.5,
             "CoordinateSegment",
         );
-        self.attach_to_space(space, &handle);
+        self.attach_mark_to_space(space, &handle);
         Ok(handle)
     }
 
@@ -3185,7 +3208,7 @@ impl SceneModel {
         }
         let members: Vec<_> = arrows.iter().collect();
         let drawable = self.group_no_center(&members);
-        self.attach_to_space(&field.space, &drawable);
+        self.attach_mark_to_space(&field.space, &drawable);
         Ok(ArrowVectorFieldHandle { drawable })
     }
 
@@ -3368,10 +3391,10 @@ impl SceneModel {
         }
         let members: Vec<_> = lines.iter().collect();
         let drawable = self.group_no_center(&members);
-        self.attach_to_space(&field.space, &drawable);
+        self.attach_mark_to_space(&field.space, &drawable);
         let flow_members: Vec<_> = flow_lines.iter().collect();
         let flow_drawable = self.group_no_center(&flow_members);
-        self.attach_to_space(&field.space, &flow_drawable);
+        self.attach_mark_to_space(&field.space, &flow_drawable);
         Ok(StreamLinesHandle {
             drawable,
             lines,
@@ -3594,7 +3617,7 @@ impl SceneModel {
         }
         let members = particles.iter().collect::<Vec<_>>();
         let drawable = self.group_no_center(&members);
-        self.attach_to_space(&field.space, &drawable);
+        self.attach_mark_to_space(&field.space, &drawable);
         Ok(FlowParticlesHandle {
             drawable,
             animations,
@@ -3711,7 +3734,7 @@ impl SceneModel {
             3.0,
             "DataLine",
         );
-        self.attach_to_space(space, &handle);
+        self.attach_mark_to_space(space, &handle);
         Ok(handle)
     }
 
@@ -3733,7 +3756,7 @@ impl SceneModel {
             source,
             kind,
         });
-        self.attach_to_space(space, &handle);
+        self.attach_mark_to_space(space, &handle);
         Ok(handle)
     }
 
@@ -3816,7 +3839,7 @@ impl SceneModel {
         }
         let refs: Vec<&DrawableHandle> = handles.iter().collect();
         let handle = self.group(&refs);
-        self.attach_to_space(space, &handle);
+        self.attach_mark_to_space(space, &handle);
         Ok(handle)
     }
 
@@ -3857,7 +3880,7 @@ impl SceneModel {
             .collect();
         let refs: Vec<&DrawableHandle> = marks.iter().collect();
         let handle = self.group(&refs);
-        self.attach_to_space(space, &handle);
+        self.attach_mark_to_space(space, &handle);
         Ok(handle)
     }
 
@@ -3895,7 +3918,7 @@ impl SceneModel {
             .collect();
         let refs: Vec<&DrawableHandle> = marks.iter().collect();
         let handle = self.group(&refs);
-        self.attach_to_space(space, &handle);
+        self.attach_mark_to_space(space, &handle);
         Ok(handle)
     }
 
@@ -3919,7 +3942,7 @@ impl SceneModel {
             2.0,
             "ErrorBars",
         );
-        self.attach_to_space(space, &handle);
+        self.attach_mark_to_space(space, &handle);
         Ok(handle)
     }
 
@@ -3961,7 +3984,7 @@ impl SceneModel {
         marks.push(self.line(median.x, minimum.y, median.x, maximum.y));
         let refs: Vec<&DrawableHandle> = marks.iter().collect();
         let handle = self.group(&refs);
-        self.attach_to_space(space, &handle);
+        self.attach_mark_to_space(space, &handle);
         Ok(handle)
     }
 
@@ -3981,7 +4004,7 @@ impl SceneModel {
             2.0,
             "Violin",
         );
-        self.attach_to_space(space, &handle);
+        self.attach_mark_to_space(space, &handle);
         Ok(handle)
     }
 }
@@ -4967,6 +4990,44 @@ mod tests {
                 assert!(current.abs_diff_eq(expected, 1e-9));
             }
         }
+    }
+
+    #[test]
+    fn data_marks_clip_to_the_plot_window_unless_opted_out() {
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        let space = canvas
+            .coordinate_axes(
+                Axis::linear(0.0, 1.0).unwrap(),
+                Axis::linear(0.0, 1.0).unwrap(),
+                Some(4.0),
+                Some(4.0),
+                true,
+            )
+            .unwrap();
+        let mask = space.data_mask.clone().expect("Cartesian spaces clip data");
+        let plot = canvas
+            .function_plot(&space, (0.0, 1.0), Sampling::default(), |x| Some(3.0 * x))
+            .unwrap();
+        let free = canvas
+            .function_plot(&space, (0.0, 1.0), Sampling::default(), Some)
+            .unwrap()
+            .no_clip();
+        let clips = |target: ObjectId| {
+            let state = canvas.state.lock().unwrap();
+            state
+                .active()
+                .ops
+                .iter()
+                .filter_map(|op| match op {
+                    Op::SetClip {
+                        target: id, mask, ..
+                    } if *id == target => Some(*mask),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(clips(plot.id), vec![Some(mask.id)]);
+        assert_eq!(clips(free.id), vec![Some(mask.id), None]);
     }
 
     #[test]

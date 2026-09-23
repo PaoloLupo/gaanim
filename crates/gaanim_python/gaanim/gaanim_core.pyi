@@ -2519,8 +2519,8 @@ class CoordinateSpaceAnimation:
     def view_to(self, x_domain: tuple[float, float], y_domain: tuple[float, float]) -> Anim:
         """Animate the data-domain window, keeping axis text and stroke widths.
 
-        The plot area keeps its position; axes, grids, ticks and numbers are
-        clipped to it, and axis titles stay in place. Numbers and
+        The plot area keeps its position; axes, grids, ticks, numbers and
+        data marks are clipped to it, and axis titles stay in place. Numbers and
         ``scatter_data`` markers keep their size and proportions.
         Axes, grids and plotted paths keep their stroke widths throughout the zoom.
         Axes with automatic ticks (``Axis.linear(a, b)`` without ``.ticks``)
@@ -2536,6 +2536,15 @@ class CoordinateSpaceAnimation:
         ...
 
 class CoordinateSpace:
+    """A Cartesian space (``Cartesian2D``) with addressable layers.
+
+    Data marks built from it (``plot``, ``parametric``, ``scatter_data``,
+    fields, bars and other statistical marks) are clipped to the plot area,
+    also while ``view_to`` changes the window; call ``.no_clip()`` on a mark
+    to let it overflow. Objects placed with ``at_coordinate`` are not
+    clipped, nor are ``scene.viz.chart`` marks, whose inferred domains
+    already fit their data.
+    """
     def drawable(self) -> Drawable: ...
     @property
     def animate(self) -> CoordinateSpaceAnimation: ...
@@ -2545,8 +2554,8 @@ class CoordinateSpace:
     def view_to(self, x_domain: tuple[float, float], y_domain: tuple[float, float]) -> CoordinateSpace:
         """Set the data-domain window at the cursor and return this space.
 
-        The plot area keeps its position; axes, grids, ticks and numbers are
-        clipped to it, and axis titles stay in place. Numbers and
+        The plot area keeps its position; axes, grids, ticks, numbers and
+        data marks are clipped to it, and axis titles stay in place. Numbers and
         ``scatter_data`` markers keep their size and proportions while
         following the view positions.
         Axes, grids and plotted paths retain their authored stroke widths.

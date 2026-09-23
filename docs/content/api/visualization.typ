@@ -334,8 +334,8 @@ scene.play([plane.animate.write().duration(1.2)])
 `plane.view_to(x_domain, y_domain)` cambia la ventana de datos en el cursor
 actual; `plane.animate.view_to(x_domain, y_domain)` devuelve la animación para
 `scene.play`. El área de trazado conserva su posición: los ejes, las grillas,
-los ticks y los números se recortan a ella y los títulos de los ejes quedan
-fijos. Los números siguen sus posiciones en la vista y conservan su tamaño y
+los ticks, los números y las marcas de datos se recortan a ella y los títulos
+de los ejes quedan fijos. Los números siguen sus posiciones en la vista y conservan su tamaño y
 proporciones, incluso cuando el acercamiento en X es distinto del de Y; los
 marcadores de `scatter_data` también siguen sus posiciones sin deformarse.
 Tras reproducir la animación, `plane.data_to_local(...)` y
@@ -353,6 +353,13 @@ grilla se extienden más allá del dominio original. Un eje con paso fijo
 estilo de las capas vigente al declarar el `view_to`; aplica los estilos de
 `plane.layer(...)` antes del primer cambio de vista. Para ubicar un objeto en
 una coordenada de datos que siga la vista usa `obj.at_coordinate(plane.coord(x, y))`.
+
+Las marcas de datos de un espacio cartesiano (`plot`, `parametric`,
+`scatter_data`, campos, barras y demás marcas estadísticas) se recortan
+siempre al área de trazado, haya o no `view_to`, como en las bibliotecas de
+gráficos habituales. `mark.no_clip()` deja que una marca concreta sobresalga.
+No se recortan los objetos colocados con `at_coordinate` ni las marcas de
+`scene.viz.chart`, cuyo dominio se infiere de los datos y no admite `view_to`.
 
 ```python
 scene.play([plane.animate.view_to((-2, 2), (-3, 3)).duration(1.0)])

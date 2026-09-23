@@ -290,6 +290,30 @@ fn opacity_run_end(elements: &[ExtractedElement], start: usize) -> usize {
     end
 }
 
+/// End of the run of elements clipped by the same non-inverted mask sources.
+/// Such a mask has the same world outline for every element, so the run can
+/// share one clip layer instead of one per element.
+fn shared_clip_run_end(elements: &[ExtractedElement], start: usize) -> usize {
+    let Some(clip) = elements[start]
+        .clip_mask
+        .as_ref()
+        .filter(|clip| !clip.invert && !clip.sources.is_empty())
+    else {
+        return start + 1;
+    };
+    let mut end = start + 1;
+    while let Some(element) = elements.get(end) {
+        let shares = element.clip_mask.as_ref().is_some_and(|other| {
+            !other.invert && other.rule == clip.rule && other.sources == clip.sources
+        });
+        if !shares {
+            break;
+        }
+        end += 1;
+    }
+    end
+}
+
 fn append_extracted_elements(
     main_scene: &mut vello::Scene,
     elements: &[ExtractedElement],
@@ -319,7 +343,7 @@ fn append_extracted_elements(
             continue;
         }
 
-        let mut layers_to_pop = 0;
+        let end = shared_clip_run_end(elements, index);
         if let Some(clip) = &elem.clip_mask {
             main_scene.push_layer(
                 clip.rule,
@@ -328,23 +352,29 @@ fn append_extracted_elements(
                 elem.transform,
                 &clip.path,
             );
-            layers_to_pop += 1;
         }
-        if elem.opacity < 1.0 {
-            main_scene.push_layer(
-                peniko::Fill::NonZero,
-                peniko::BlendMode::default(),
-                elem.opacity.clamp(0.0, 1.0),
-                kurbo::Affine::IDENTITY,
-                &elem.opacity_bounds,
-            );
-            layers_to_pop += 1;
+        for clipped in &elements[index..end] {
+            if !clipped.opacity.is_finite() || clipped.opacity <= 0.0 {
+                continue;
+            }
+            if clipped.opacity < 1.0 {
+                main_scene.push_layer(
+                    peniko::Fill::NonZero,
+                    peniko::BlendMode::default(),
+                    clipped.opacity.clamp(0.0, 1.0),
+                    kurbo::Affine::IDENTITY,
+                    &clipped.opacity_bounds,
+                );
+            }
+            main_scene.append(&clipped.scene, Some(clipped.transform));
+            if clipped.opacity < 1.0 {
+                main_scene.pop_layer();
+            }
         }
-        main_scene.append(&elem.scene, Some(elem.transform));
-        for _ in 0..layers_to_pop {
+        if elem.clip_mask.is_some() {
             main_scene.pop_layer();
         }
-        index += 1;
+        index = end;
     }
 }
 
@@ -2395,6 +2425,38 @@ mod tests {
 
         assert_eq!(opacity_run_end(&elements, 0), 3);
         assert_eq!(opacity_run_end(&elements, 3), 4);
+    }
+
+    #[test]
+    fn elements_clipped_by_the_same_mask_share_one_clip_layer() {
+        let mask = |source: u32, invert: bool| ClipMask {
+            sources: vec![Entity::from_raw_u32(source).unwrap()],
+            invert,
+            ..ClipMask::default()
+        };
+        let element = |clip_mask| ExtractedElement {
+            transform: kurbo::Affine::IDENTITY,
+            opacity: 1.0,
+            opacity_bounds: kurbo::Rect::new(0.0, 0.0, 10.0, 10.0),
+            opacity_group: Entity::PLACEHOLDER,
+            render_order: RenderOrder::default(),
+            scene: Arc::new(vello::Scene::new()),
+            clip_mask,
+        };
+        let elements = vec![
+            element(Some(mask(1, false))),
+            element(Some(mask(1, false))),
+            element(Some(mask(2, false))),
+            element(Some(mask(2, true))),
+            element(Some(mask(2, true))),
+            element(None),
+        ];
+
+        assert_eq!(shared_clip_run_end(&elements, 0), 2);
+        assert_eq!(shared_clip_run_end(&elements, 2), 3);
+        // Inverted masks depend on each element's bounds and stay separate.
+        assert_eq!(shared_clip_run_end(&elements, 3), 4);
+        assert_eq!(shared_clip_run_end(&elements, 5), 6);
     }
 
     #[test]
