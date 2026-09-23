@@ -10,6 +10,7 @@ pub use model::{
 };
 pub use stops::{
     STOPS_FILE, StopCapture, StopEntry, StopsManifest, capture_stops, parse_stop_selection,
+    stops_in_selection,
 };
 
 use std::collections::{BTreeMap, BTreeSet};

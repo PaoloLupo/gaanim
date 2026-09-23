@@ -94,6 +94,7 @@ fn main() {
     .insert_resource(gaanim_editor::PresentationMode {
         active: launch.present,
     })
+    .insert_resource(launch.selection.clone())
     .insert_resource(ReloadStatus::default())
     .insert_resource(ScriptError::default())
     .add_systems(
@@ -876,6 +877,8 @@ struct DiffModeArgs {
     capture_stops: bool,
     /// 1-based stops to capture; `None` captures all of them.
     stops: Option<Vec<usize>>,
+    /// With `--capture-stops`, only stops inside these segments or sections.
+    selection: gaanim_timeline::selection::SegmentSelection,
 }
 
 /// Handle `gaanim --diff ...` before Python, Bevy, or the editor are initialized.
@@ -927,7 +930,12 @@ fn dispatch_diff_mode() -> bool {
             python_home::inject_venv_site_packages(venv);
         }
         if parsed.capture_stops {
-            capture_stop_snapshots(&script, capture_dir, parsed.stops.as_deref());
+            capture_stop_snapshots(
+                &script,
+                capture_dir,
+                parsed.stops.as_deref(),
+                &parsed.selection,
+            );
         } else if let Err(error) = script_runner::capture_script_snapshots(&script, capture_dir) {
             eprintln!("gaanim --diff: snapshot capture failed: {error}");
             std::process::exit(2);
@@ -991,11 +999,27 @@ fn dispatch_diff_mode() -> bool {
 }
 
 /// Run the script like `gaanim check` and capture the frame shown at each stop.
-fn capture_stop_snapshots(script: &Path, capture_dir: &Path, stops: Option<&[usize]>) {
+fn capture_stop_snapshots(
+    script: &Path,
+    capture_dir: &Path,
+    stops: Option<&[usize]>,
+    selection: &gaanim_timeline::selection::SegmentSelection,
+) {
     let canvas = script_runner::load_script_canvas(script).unwrap_or_else(|error| {
         eprintln!("gaanim --diff: {error}");
         std::process::exit(2);
     });
+    let selected;
+    let stops = if selection.is_empty() {
+        stops
+    } else {
+        selected = gaanim_diff::stops_in_selection(&canvas.segment_manifest(), selection, stops)
+            .unwrap_or_else(|error| {
+                eprintln!("gaanim --diff: {error}");
+                std::process::exit(2);
+            });
+        Some(selected.as_slice())
+    };
     let capture = gaanim_diff::capture_stops(canvas, capture_dir, stops).unwrap_or_else(|error| {
         eprintln!("gaanim --diff: stop capture failed: {error}");
         std::process::exit(2);
@@ -1030,6 +1054,7 @@ fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String>
     let mut bless = false;
     let mut capture_stops = false;
     let mut stops = None;
+    let mut selection = gaanim_timeline::selection::SegmentSelection::default();
     let mut index = 0;
 
     while index < args.len() {
@@ -1070,6 +1095,11 @@ fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String>
                         .map_err(|error| format!("--stops: {error}"))?,
                 );
             }
+            "--sections" => {
+                selection.sections =
+                    gaanim_timeline::selection::SegmentSelection::parse_list(value(&mut index)?)?;
+            }
+            "--from" => selection.from = Some(value(&mut index)?.to_string()),
             "--help" | "-h" => return Ok(None),
             _ => return Err(format!("unknown option `{flag}`")),
         }
@@ -1083,6 +1113,12 @@ fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String>
     }
     if stops.is_some() && !capture_stops {
         return Err("--stops requires --capture-stops".to_string());
+    }
+    if !selection.is_empty() && !capture_stops {
+        return Err(
+            "--sections and --from require --capture-stops; scene.snapshots times are chosen by the script"
+                .to_string(),
+        );
     }
     if capture_stops && capture == Some(false) {
         return Err("--capture-stops cannot be combined with --no-capture".to_string());
@@ -1102,6 +1138,7 @@ fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String>
             bless,
             capture_stops,
             stops,
+            selection,
         }));
     }
 
@@ -1131,6 +1168,7 @@ fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String>
         bless: false,
         capture_stops: false,
         stops: None,
+        selection,
     }))
 }
 
@@ -1187,6 +1225,10 @@ OPTIONS:
                                      scene.snapshots
         --stops <LIST>               With --capture-stops, only these 1-based stops,
                                      e.g. 12,30 or 3-7
+        --sections <LIST>            With --capture-stops, only stops in these
+                                     segments or Section keys, e.g. results,close
+        --from <NAME>                With --capture-stops, only stops from this
+                                     segment or Section key to the end
     -b, --baseline <DIR>            Known-good snapshot directory
     -c, --current <DIR>             Candidate snapshot directory
     -o, --output <DIR>              Override the generated report directory
@@ -1204,6 +1246,8 @@ struct LaunchArgs {
     present: bool,
     /// Zero-based monitor index used only with `--present`.
     monitor: Option<usize>,
+    /// Segments to rehearse with `--sections` / `--from`.
+    selection: gaanim_timeline::selection::SegmentSelection,
 }
 
 fn resolve_project_paths(
@@ -1244,6 +1288,7 @@ fn parse_args() -> LaunchArgs {
             project: None,
             present: false,
             monitor: None,
+            selection: Default::default(),
         };
     }
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
@@ -1251,11 +1296,22 @@ fn parse_args() -> LaunchArgs {
         eprintln!();
         eprintln!("usage:");
         eprintln!("  gaanim");
-        eprintln!("  gaanim [--present] [--monitor <INDEX>] <SCRIPT_OR_PROJECT>");
+        eprintln!(
+            "  gaanim [--present] [--monitor <INDEX>] [--sections <LIST>] [--from <NAME>] <SCRIPT_OR_PROJECT>"
+        );
         eprintln!("  gaanim init <video|slides> [DIRECTORY] [--force]");
         eprintln!("  gaanim export <SCRIPT_OR_PROJECT> --output <FILE> [--encoder <ENCODER>]");
         eprintln!("  gaanim check <SCRIPT_OR_PROJECT> [--strict]");
         eprintln!("  gaanim --diff --example <SCRIPT_OR_PROJECT> [OPTIONS]");
+        eprintln!();
+        eprintln!("rehearsal:");
+        eprintln!(
+            "  --sections <LIST>   Play only these segments or Section keys, e.g. results,close"
+        );
+        eprintln!("  --from <NAME>       Start at this segment or Section key and play to the end");
+        eprintln!(
+            "                      The whole scene is still built, so earlier state is kept."
+        );
         std::process::exit(0);
     }
     let parsed = parse_launch_args(&args).unwrap_or_else(|error| {
@@ -1290,6 +1346,7 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
     let mut script_path = None;
     let mut present = false;
     let mut monitor = None;
+    let mut selection = gaanim_timeline::selection::SegmentSelection::default();
     let mut index = 0;
 
     while index < args.len() {
@@ -1297,6 +1354,18 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
         index += 1;
         match arg.as_str() {
             "--present" => present = true,
+            "--sections" | "--from" => {
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| format!("{arg} requires a segment or section name"))?;
+                index += 1;
+                if arg == "--from" {
+                    selection.from = Some(value.clone());
+                } else {
+                    selection.sections =
+                        gaanim_timeline::selection::SegmentSelection::parse_list(value)?;
+                }
+            }
             "--monitor" => {
                 let value = args
                     .get(index)
@@ -1320,11 +1389,15 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
     if present && script_path.is_none() {
         return Err("--present requires <SCRIPT_OR_PROJECT>".to_string());
     }
+    if !selection.is_empty() && script_path.is_none() {
+        return Err("--sections and --from require <SCRIPT_OR_PROJECT>".to_string());
+    }
     Ok(LaunchArgs {
         script_path,
         project: None,
         present,
         monitor,
+        selection,
     })
 }
 
@@ -1487,8 +1560,26 @@ mod tests {
                 project: None,
                 present: true,
                 monitor: Some(1),
+                selection: Default::default(),
             }
         );
+    }
+
+    #[test]
+    fn parses_rehearsal_sections_and_start() {
+        let args = [".", "--sections", "results, close", "--from", "Results"].map(str::to_string);
+        let parsed = parse_launch_args(&args).unwrap();
+        assert_eq!(parsed.script_path, Some(PathBuf::from(".")));
+        assert_eq!(parsed.selection.sections, vec!["results", "close"]);
+        assert_eq!(parsed.selection.from.as_deref(), Some("Results"));
+        for args in [
+            &["--from", "x"][..],
+            &[".", "--sections"],
+            &[".", "--sections", "a,,b"],
+        ] {
+            let args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
+            assert!(parse_launch_args(&args).is_err(), "{args:?}");
+        }
     }
 
     #[test]
@@ -1520,6 +1611,7 @@ mod tests {
                 project: None,
                 present: false,
                 monitor: None,
+                selection: Default::default(),
             }
         );
     }

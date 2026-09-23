@@ -130,6 +130,61 @@ fn select_stops(
     Ok((total, selected))
 }
 
+/// Global 1-based numbers of the stops inside the segments chosen by
+/// `selection`, intersected with an explicit `--stops` list when given.
+pub fn stops_in_selection(
+    manifest: &SegmentManifest,
+    selection: &gaanim_timeline::selection::SegmentSelection,
+    stops: Option<&[usize]>,
+) -> Result<Vec<usize>> {
+    let segments: Vec<(&str, f64, f64, usize)> = manifest
+        .segments
+        .iter()
+        .map(|segment| {
+            (
+                segment.name.as_str(),
+                segment.start_time,
+                segment.end_time,
+                segment.stops.len(),
+            )
+        })
+        .collect();
+    select_stop_numbers(&segments, selection, stops)
+}
+
+/// `stops_in_selection` over `(name, start, end, stop count)` segments.
+fn select_stop_numbers(
+    segments: &[(&str, f64, f64, usize)],
+    selection: &gaanim_timeline::selection::SegmentSelection,
+    stops: Option<&[usize]>,
+) -> Result<Vec<usize>> {
+    let resolved = selection
+        .resolve(
+            segments
+                .iter()
+                .map(|(name, start, end, _)| (*name, *start, *end)),
+        )
+        .map_err(DiffError::InvalidInput)?;
+    let mut number = 0;
+    let mut selected = Vec::new();
+    for (index, (_, _, _, count)) in segments.iter().enumerate() {
+        for _ in 0..*count {
+            number += 1;
+            if resolved.segments.contains(&index)
+                && stops.is_none_or(|stops| stops.contains(&number))
+            {
+                selected.push(number);
+            }
+        }
+    }
+    if selected.is_empty() {
+        return Err(DiffError::InvalidInput(
+            "the selected segments have no stops to capture".to_string(),
+        ));
+    }
+    Ok(selected)
+}
+
 /// Capture the frame shown at each selected stop and write `stops.json`.
 ///
 /// Each stop is captured at its exact time, the frame the presenter shows
@@ -170,6 +225,36 @@ mod tests {
         .into_iter()
         .map(|(segment, name, time)| (segment.to_string(), name.map(str::to_string), time))
         .collect()
+    }
+
+    #[test]
+    fn section_selection_keeps_global_stop_numbers() {
+        let segments = [
+            ("intro", 0.0, 1.0, 1),
+            ("results · 1 · 1 · A", 1.0, 2.0, 2),
+            ("close", 2.0, 3.0, 1),
+        ];
+        let selection = gaanim_timeline::selection::SegmentSelection {
+            sections: vec!["results".into()],
+            from: None,
+        };
+        assert_eq!(
+            select_stop_numbers(&segments, &selection, None).unwrap(),
+            vec![2, 3]
+        );
+        assert_eq!(
+            select_stop_numbers(&segments, &selection, Some(&[3, 4])).unwrap(),
+            vec![3]
+        );
+        let from = gaanim_timeline::selection::SegmentSelection {
+            sections: Vec::new(),
+            from: Some("RESULTS".into()),
+        };
+        assert_eq!(
+            select_stop_numbers(&segments, &from, None).unwrap(),
+            vec![2, 3, 4]
+        );
+        assert!(select_stop_numbers(&segments, &selection, Some(&[1])).is_err());
     }
 
     #[test]

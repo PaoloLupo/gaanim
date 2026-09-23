@@ -530,7 +530,7 @@ fn apply_presentation_action(
                 timeline.seek_request = Some(
                     timeline
                         .next_stop(timeline.current_time)
-                        .unwrap_or(timeline.cached_duration),
+                        .unwrap_or_else(|| timeline.playback_end()),
                 );
                 timeline.is_playing = false;
             } else {
@@ -539,17 +539,20 @@ fn apply_presentation_action(
         }
         PresentationAction::Previous => {
             timeline.is_playing = false;
-            timeline.seek_request =
-                Some(timeline.previous_stop(timeline.current_time).unwrap_or(0.0));
+            timeline.seek_request = Some(
+                timeline
+                    .previous_stop(timeline.current_time)
+                    .unwrap_or_else(|| timeline.playback_start()),
+            );
         }
         PresentationAction::TogglePlayback => timeline.is_playing = !timeline.is_playing,
         PresentationAction::Home => {
             timeline.is_playing = false;
-            timeline.seek_request = Some(0.0);
+            timeline.seek_request = Some(timeline.playback_start());
         }
         PresentationAction::End => {
             timeline.is_playing = false;
-            timeline.seek_request = Some(timeline.cached_duration);
+            timeline.seek_request = Some(timeline.playback_end());
         }
         PresentationAction::ToggleOverview => {
             overview.open = !overview.open;

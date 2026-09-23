@@ -3,6 +3,7 @@ use bevy::prelude::*;
 pub mod clip;
 pub mod prelude;
 pub mod scene;
+pub mod selection;
 pub mod snapshot;
 pub mod timeline;
 pub mod transition;
@@ -137,6 +138,10 @@ pub fn timeline_playback_system(
             } else {
                 timeline.seek_request = Some(next_time);
             }
+        } else if !timeline.play_ranges.is_empty() {
+            let (target, keep_playing) = timeline.selected_playback_step(current, next_time);
+            timeline.seek_request = Some(target);
+            timeline.is_playing = keep_playing;
         } else {
             if next_time >= timeline.cached_duration {
                 timeline.seek_request = Some(timeline.cached_duration);
@@ -176,12 +181,12 @@ pub fn interactive_stop_input_system(
     };
 
     if key_pressed(KeyCode::Home) {
-        timeline.seek_request = Some(0.0);
+        timeline.seek_request = Some(timeline.playback_start());
         timeline.is_playing = false;
         return;
     }
     if key_pressed(KeyCode::End) {
-        timeline.seek_request = Some(timeline.cached_duration);
+        timeline.seek_request = Some(timeline.playback_end());
         timeline.is_playing = false;
         return;
     }
@@ -207,12 +212,14 @@ pub fn interactive_stop_input_system(
                 timeline.seek_request = Some(stop);
                 timeline.is_playing = false;
             } else {
-                timeline.seek_request = Some(timeline.cached_duration);
+                timeline.seek_request = Some(timeline.playback_end());
                 timeline.is_playing = false;
             }
         }
     } else if should_go_back {
-        let target = timeline.previous_stop(timeline.current_time).unwrap_or(0.0);
+        let target = timeline
+            .previous_stop(timeline.current_time)
+            .unwrap_or_else(|| timeline.playback_start());
         timeline.seek_request = Some(target);
         timeline.is_playing = false;
     }
@@ -755,6 +762,64 @@ mod tests {
 
         let timeline = app.world().resource::<Timeline>();
         assert!((timeline.seek_request.unwrap() - 1.2).abs() < 1e-9);
+        assert!(timeline.is_playing);
+    }
+
+    fn selected_deck() -> Timeline {
+        let mut timeline = Timeline::new();
+        timeline.cached_duration = 6.0;
+        let segment = |id, start, end, stop| timeline::SegmentMetadata {
+            id,
+            name: format!("s{id}"),
+            notes: None,
+            start_time: start,
+            end_time: end,
+            stops: vec![timeline::SegmentStop {
+                name: None,
+                time: stop,
+            }],
+        };
+        timeline.set_segments(vec![
+            segment(1, 0.0, 2.0, 1.0),
+            segment(2, 2.0, 4.0, 3.0),
+            segment(3, 4.0, 6.0, 5.0),
+        ]);
+        timeline.play_ranges = vec![(0.0, 2.0), (4.0, 6.0)];
+        timeline
+    }
+
+    #[test]
+    fn selected_playback_skips_unselected_ranges_and_pauses_at_the_end() {
+        let timeline = selected_deck();
+        assert_eq!(timeline.selected_playback_step(1.0, 1.5), (1.5, true));
+        assert_eq!(timeline.selected_playback_step(1.9, 2.1), (4.0, true));
+        assert_eq!(timeline.selected_playback_step(3.0, 3.1), (4.0, true));
+        assert_eq!(timeline.selected_playback_step(5.9, 6.2), (6.0, false));
+        assert_eq!(timeline.selected_playback_step(6.0, 6.1), (6.0, false));
+        assert_eq!(
+            (timeline.playback_start(), timeline.playback_end()),
+            (0.0, 6.0)
+        );
+    }
+
+    #[test]
+    fn stop_navigation_only_visits_selected_ranges() {
+        let timeline = selected_deck();
+        assert_eq!(timeline.next_stop(1.0), Some(5.0));
+        assert_eq!(timeline.previous_stop(5.0), Some(1.0));
+        assert_eq!(timeline.next_playback_stop(2.5, 3.5), None);
+
+        let mut app = App::new();
+        let mut playing = selected_deck();
+        playing.current_time = 1.8;
+        playing.is_playing = true;
+        app.insert_resource(playing)
+            .insert_resource(PlaybackStopPolicy::Respect)
+            .insert_resource(gaanim_animation::DeltaTime { dt: 0.5 })
+            .add_systems(Update, timeline_playback_system);
+        app.update();
+        let timeline = app.world().resource::<Timeline>();
+        assert_eq!(timeline.seek_request, Some(4.0));
         assert!(timeline.is_playing);
     }
 }

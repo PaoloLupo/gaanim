@@ -55,6 +55,7 @@ gaanim --diff --example mi-charla --capture-stops --stops 12,30 --capture-only
 - Cada pausa se captura en su instante exacto: las animaciones anteriores ya terminaron y una pausa al final de un segmento conserva ese segmento en pantalla, sin desfases manuales.
 - Los archivos se llaman `stop_0001.png`, `stop_0002.png`, … según la numeración global (desde 1) de las pausas, así que el baseline y la captura actual se emparejan por pausa aunque cambien los tiempos.
 - `--stops` acepta números y rangos (`12,30`, `3-7`); los números siguen siendo los de la numeración completa.
+- `--sections resultados,cierre` y `--from resultados` capturan solo las pausas de esos segmentos o claves de `Section` (ver la guía de diapositivas); se combinan con `--stops` y conservan la numeración global.
 - Además de `manifest.json`, escribe `stops.json` con número, tiempo, segmento, nombre de la pausa y archivo de cada captura.
 - Funciona con `--bless`, `--capture-only` y `--no-gui`; no con `--no-capture`.
 

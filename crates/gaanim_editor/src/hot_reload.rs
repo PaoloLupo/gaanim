@@ -9,6 +9,7 @@ use std::time::Instant;
 
 use gaanim_editor::{EditorState, export::StashedReplay};
 use gaanim_scene::MobjectId;
+use gaanim_timeline::selection::SegmentSelection;
 use gaanim_timeline::timeline::Timeline;
 
 /// Bevy resource holding the receiver end of the host channel.
@@ -187,10 +188,17 @@ pub fn reload_listener_system(world: &mut World) {
     reload_with(world, payload.canvas);
     let replay_duration = replay_started_at.elapsed().as_secs_f64();
 
+    let selection_error = apply_segment_selection(world);
+
     // Restore playback position after rebuild.
     let mut reload_target = None;
     if let Some(mut tl) = world.get_resource_mut::<Timeline>() {
-        let target = reload_target_time(saved_time, &tl);
+        let mut target = reload_target_time(saved_time, &tl);
+        // A rehearsal selection opens at its first segment and keeps a
+        // reloaded position only while it stays inside the selection.
+        if !tl.play_ranges.is_empty() && (!had_previous_timeline || !tl.is_playable(target)) {
+            target = tl.playback_start();
+        }
         tl.seek_request = Some(target);
         tl.is_playing = if had_previous_timeline {
             was_playing
@@ -220,8 +228,36 @@ pub fn reload_listener_system(world: &mut World) {
     }
     // Éxito limpia el error previo
     if let Some(mut err) = world.get_resource_mut::<ScriptError>() {
-        err.message = None;
-        err.updated_at = None;
+        err.message = selection_error;
+        err.updated_at = err.message.as_ref().map(|_| now);
+    }
+}
+
+/// Limit playback to the `--sections` / `--from` selection, resolved against
+/// the freshly compiled segments. Returns a message when a name is unknown;
+/// the whole timeline then stays playable.
+fn apply_segment_selection(world: &mut World) -> Option<String> {
+    let selection = world
+        .get_resource::<SegmentSelection>()
+        .filter(|selection| !selection.is_empty())?
+        .clone();
+    let mut timeline = world.get_resource_mut::<Timeline>()?;
+    let resolved = selection.resolve(
+        timeline
+            .segments
+            .iter()
+            .map(|segment| (segment.name.as_str(), segment.start_time, segment.end_time)),
+    );
+    match resolved {
+        Ok(resolved) => {
+            timeline.play_ranges = resolved.ranges;
+            None
+        }
+        Err(error) => {
+            let message = format!("--sections/--from: {error}");
+            eprintln!("[gaanim] {message}");
+            Some(message)
+        }
     }
 }
 
