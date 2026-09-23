@@ -2798,9 +2798,9 @@ impl PyGeometry {
             .arrow_with_dimensions(
                 (x1, y1),
                 (x2, y2),
-                head_length.unwrap_or(18.0),
-                head_width.unwrap_or(18.0),
-                body_width.unwrap_or(6.0),
+                head_length.unwrap_or(gaanim_objects::primitives::DEFAULT_ARROW_HEAD_LENGTH),
+                head_width.unwrap_or(gaanim_objects::primitives::DEFAULT_ARROW_HEAD_WIDTH),
+                body_width.unwrap_or(gaanim_objects::primitives::DEFAULT_ARROW_BODY_WIDTH),
                 max_head_ratio,
             )
             .map(PyDrawable)

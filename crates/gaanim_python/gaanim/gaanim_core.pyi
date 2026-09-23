@@ -2930,8 +2930,8 @@ class Geometry:
     def arrow(self, x1: float, y1: float, x2: float, y2: float, *, head_length: Optional[float] = None, head_width: Optional[float] = None, body_width: Optional[float] = None, max_head_ratio: Optional[float] = None) -> Drawable:
         """Create a solid arrow with optional dimensions in scene units.
 
-        Omitted dimensions preserve head length 18, head width 18 and body
-        width 6. max_head_ratio in (0, 1] caps head length relative to arrow
+        Omitted dimensions use head length 0.18, head width 0.15 and body
+        width 0.036. max_head_ratio in (0, 1] caps head length relative to arrow
         length and scales head width proportionally; None leaves it uncapped.
         Nonfinite endpoints or nonpositive/nonfinite dimensions raise
         ValueError. Coincident endpoints produce an empty path.
@@ -2953,10 +2953,13 @@ class Geometry:
     def double_arrow(
         self, x1: float, y1: float, x2: float, y2: float, *, head_length: Optional[float] = None, head_width: Optional[float] = None
     ) -> Drawable:
-        """Create a double arrow drawable in the scene.
+        """Create a filled double-headed arrow in scene units.
+
+        Omitted head metrics use 0.18 by 0.15 with a 0.036 body; heads shrink
+        so they never overlap.
 
         Example:
-            result = scene.double_arrow(1.0, 1.0, 1.0, 1.0)
+            result = scene.geometry.double_arrow(-3, 0, 3, 0)
         """
         ...
     def polygon(self, points: Sequence[tuple[float, float]]) -> Drawable:
@@ -3030,17 +3033,23 @@ class Geometry:
         """
         ...
     def curved_arrow(self, x1: float, y1: float, x2: float, y2: float, angle: float) -> Drawable:
-        """Create a curved arrow drawable in the scene.
+        """Create a curved arrow between two points deflected by ``angle`` radians.
+
+        The sign of ``angle`` selects the bulge side. The filled silhouette uses
+        a 0.18 x 0.15 head and a 0.036 shaft in scene units, shrinking the head
+        to fit short or tight arcs.
 
         Example:
-            result = scene.curved_arrow(1.0, 1.0, 1.0, 1.0, 1.0)
+            result = scene.geometry.curved_arrow(-3, 0, 3, 0, 0.9)
         """
         ...
     def curved_arrow_arc(self, cx: float, cy: float, radius: float, start_angle: float, sweep_angle: float) -> Drawable:
-        """Create a curved arrow arc drawable in the scene.
+        """Create a curved arrow along a circular arc; angles are in radians.
+
+        Uses the same scene-unit head and shaft metrics as ``curved_arrow``.
 
         Example:
-            result = scene.curved_arrow_arc(1.0, 1.0, 40.0, 1.0, 1.0)
+            result = scene.geometry.curved_arrow_arc(0, 0, 2.5, 0.2, 1.8)
         """
         ...
     @overload
@@ -4129,10 +4138,13 @@ class SlideKit:
 class Mechanics:
     """Scene-owned technical drawing and mechanism toolkit."""
     def dimension(self, x1: float, y1: float, x2: float, y2: float, offset: float) -> Drawable:
-        """Create a dimension drawable in the scene.
+        """Create a static technical dimension offset perpendicularly by ``offset``.
+
+        Uses 0.02-unit extension lines and the default ``double_arrow`` heads
+        in scene units.
 
         Example:
-            result = scene.dimension(1.0, 1.0, 1.0, 1.0, 1.0)
+            result = scene.mechanics.dimension(-3, 0, 3, 0, 0.6)
         """
         ...
     def bar_between(
@@ -4208,7 +4220,8 @@ class Mechanics:
         upside-down labels. ``color`` initializes the extension lines,
         solid triangular arrowheads and the complete annotation, including its
         reactive value. Math labels and reactive values share one 0.48-unit typographic baseline by default, including
-        subscripted formulas. ``line_width`` controls the filled line geometry;
+        subscripted formulas. ``line_width`` controls the filled line geometry
+        and sizes the arrowheads (six line widths long, capped for short spans);
         dashed extensions use ``dash_length`` and ``gap_length``. Invalid
         metrics, extension styles, or orientation raise ``ValueError``.
 

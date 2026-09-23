@@ -6586,18 +6586,20 @@ impl SceneModel {
                     let dimension_end =
                         Point::new(end.0 + normal.0 * *offset, end.1 + normal.1 * *offset);
                     let color = PenikoColor::from_rgb8(0x80, 0x80, 0x80);
+                    // Scene-unit extension lines; the measurement uses the
+                    // default arrow metrics.
                     let extension_a = builder
                         .line(Point::new(start.0, start.1), dimension_start)
                         .no_fill()
-                        .stroke(color, 2.0)
+                        .stroke(color, 0.02)
                         .spawn();
                     let extension_b = builder
                         .line(Point::new(end.0, end.1), dimension_end)
                         .no_fill()
-                        .stroke(color, 2.0)
+                        .stroke(color, 0.02)
                         .spawn();
                     let measurement = builder
-                        .double_arrow(dimension_start, dimension_end, Some(12.0), Some(10.0))
+                        .double_arrow(dimension_start, dimension_end, None, None)
                         .fill(color)
                         .no_stroke()
                         .spawn();
