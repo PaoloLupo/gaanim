@@ -1080,6 +1080,17 @@ fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String>
 }
 
 fn visual_test_case_dir(tests_root: &Path, example: &Path) -> Result<PathBuf, String> {
+    // `.` or `project/..` name a project directory without a final component;
+    // resolve them like `gaanim .` does so the case is named after the folder.
+    let resolved;
+    let example = if example.file_stem().is_none() {
+        resolved = example
+            .canonicalize()
+            .map_err(|error| format!("cannot resolve example {}: {error}", example.display()))?;
+        resolved.as_path()
+    } else {
+        example
+    };
     let stem = example
         .file_stem()
         .ok_or_else(|| format!("example has no file stem: {}", example.display()))?;
@@ -1260,6 +1271,27 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn visual_case_dir_resolves_current_and_parent_directories() {
+        // Regression for #20: `--example .` used to fail with "no file stem".
+        let root = Path::new("tests/visual");
+        let cwd = std::env::current_dir().unwrap();
+        let name = cwd.file_name().unwrap();
+        assert_eq!(
+            visual_test_case_dir(root, Path::new(".")).unwrap(),
+            root.join(name)
+        );
+        let parent = cwd.join("src").join("..");
+        assert_eq!(
+            visual_test_case_dir(root, &parent).unwrap(),
+            root.join(name)
+        );
+        assert_eq!(
+            visual_test_case_dir(root, Path::new("examples/nested/demo.py")).unwrap(),
+            root.join("nested").join("demo")
+        );
+    }
 
     #[test]
     fn parses_isolated_export_worker_arguments() {
