@@ -382,6 +382,18 @@ grilla se extienden más allá del dominio original. Un eje con paso fijo
 estilo de las capas vigente al declarar el `view_to`; aplica los estilos de
 `plane.layer(...)` antes del primer cambio de vista. Para ubicar un objeto en
 una coordenada de datos que siga la vista usa `obj.at_coordinate(plane.coord(x, y))`.
+Si el objeto no debe ser hijo del espacio (una anotación, una flecha o un
+conector entre elementos de la escena), usa `plane.data_to_scene(x, y)`. Devuelve
+un `PointRef` en coordenadas de escena que se resuelve en cada fotograma con la
+ventana vigente y con la posición, escala y rotación del plano. Se acepta
+en cualquier lugar donde se admite un `Endpoint`:
+
+```python
+peak = plane.data_to_scene(2, 4)
+note = scene.text("máximo").follow(peak, offset=(0.6, 0.4))
+arrow = scene.geometry.connector(note, peak)
+scene.play([plane.animate.view_to((0, 4), (0, 6)).duration(1.2)])
+```
 
 Las marcas de datos de un espacio cartesiano (`plot`, `parametric`,
 `scatter_data`, campos, barras y demás marcas estadísticas) se recortan

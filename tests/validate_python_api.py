@@ -447,6 +447,16 @@ def validate_visualization_contract(module: object) -> list[str]:
     round_trip = space.local_to_data(*local)
     if abs(round_trip[0] - 1.0) > 1e-9 or abs(round_trip[1] - 2.0) > 1e-9:
         failures.append("CoordinateSpace data/local round trip failed")
+    scene_point = space.data_to_scene(1.0, 2.0)
+    if not isinstance(scene_point, module.PointRef):
+        failures.append("CoordinateSpace.data_to_scene did not return a PointRef")
+    scene.geometry.dot(3.0).follow(scene_point, offset=(0.0, 0.3))
+    try:
+        space.data_to_scene(float("nan"), 0.0)
+    except ValueError:
+        pass
+    else:
+        failures.append("CoordinateSpace.data_to_scene accepted non-finite data")
 
     linear_space = scene.viz.cartesian_2d(
         module.Axis.linear(-4.0, 4.0),
