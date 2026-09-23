@@ -2323,9 +2323,13 @@ class RollingNumber(Drawable):
     def current(self) -> float:
         """Return the underlying Parameter's authoring-side current value."""
         ...
-    def set(self, value: float) -> RollingNumber:
+    def set(self, value: float, *, snap: bool = False) -> RollingNumber:
         """Set the numeric value immediately and return self; after declaration this is a reversible cut.
 
+        The value is used exactly: a fraction of the smallest display unit
+        leaves a wheel between two digits. ``snap=True`` first rounds it to
+        the nearest value shown with ``decimals`` (61.7956 → 61.8 with
+        ``decimals=1``), so ``current`` matches the display.
         Raise ValueError for non-finite values or abs(value)*10**decimals >= 1e15.
         """
         ...
@@ -2333,9 +2337,13 @@ class RollingNumber(Drawable):
     def animate(self) -> Anim:
         """Scalar animation proxy: animate.set(value).duration(seconds).easing(...)."""
         ...
-    def count_to(self, value: float, *, duration: float = 1.0) -> Anim:
+    def count_to(self, value: float, *, duration: float = 1.0, snap: bool = False) -> Anim:
         """Build a count animation for scene.play; accepts Anim easing and delay modifiers.
 
+        The target is used exactly, with no implicit rounding. ``snap=True``
+        rounds it to the nearest value shown with ``decimals`` so the wheels
+        settle on clean digits and ``current`` matches the display at the end,
+        e.g. ``count_to(61.7956, snap=True)`` ends on 61.8 with ``decimals=1``.
         Raise ValueError for an out-of-range value or non-finite/negative duration.
         """
         ...

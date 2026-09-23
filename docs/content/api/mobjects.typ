@@ -1528,7 +1528,7 @@ scene.wait(0.5)
 scene.render()
 ```
 
-`count_to(value, *, duration=1.0)` crea un `Anim` compatible con easing, delay y
+`count_to(value, *, duration=1.0, snap=False)` crea un `Anim` compatible con easing, delay y
 las composiciones de `scene.play`. `animate.set(value)` utiliza el mismo proxy
 escalar que un `Parameter`. Para animar posición, opacidad o aparición, usa
 `counter.visual.animate`. `move_to`, `fill`, `opacity` y `set` conservan el
@@ -1566,7 +1566,16 @@ el contador muestra un guion largo.
 
 Una fracción de la unidad mínima deja la rueda entre dos cifras: no se redondea
 implícitamente. Para que termine asentado, usa valores representables con los
-decimales elegidos, por ejemplo `12.34` con `decimals=2`. En modo `continuous`,
+decimales elegidos, por ejemplo `12.34` con `decimals=2`, o pasa `snap=True` a
+`count_to` o a `set`. Con `snap=True`, el destino se redondea al valor más
+cercano que se puede mostrar, y `current` coincide con lo que se ve al terminar:
+
+```python
+mean = scene.viz.rolling_number(0, decimals=1)
+scene.play([mean.count_to(61.7956, snap=True)])  # Termina en 61.8.
+```
+
+ En modo `continuous`,
 las ruedas giran libremente mientras `count_to` o `animate.set` animan el
 parámetro, y se asientan durante el primer y el último 15 % de cada animación:
 al terminar, el valor final se lee limpio, como en `odometer`. Las fuentes que no
