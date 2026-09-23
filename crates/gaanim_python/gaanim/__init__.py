@@ -137,7 +137,7 @@ from .templates import (
     title_slide,
     vertical_short,
 )
-from .animation_types import AnimationChannel, CustomAnimationValues, ScalarSource
+from .animation_types import AnimationChannel, CustomAnimationValues, Playable, ScalarSource
 from .matrix import (
     Matrix,
     MatrixAlgebraError,
@@ -166,6 +166,7 @@ __all__ = [
     "SectionProgress",
     "AnimationChannel",
     "CustomAnimationValues",
+    "Playable",
     "ScalarSource",
     "Scene",
     "Geometry",

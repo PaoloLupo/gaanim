@@ -154,6 +154,22 @@ def documented_editorial_api_failures(tree: ast.Module) -> list[str]:
     return failures
 
 
+def validate_runtime_type_aliases(module: object) -> list[str]:
+    """Public aliases documented for annotations must resolve at runtime."""
+    failures: list[str] = []
+    package = importlib.import_module("gaanim")
+    playable = getattr(package, "Playable", None)
+    if playable is None or "Playable" not in package.__all__:
+        return ["gaanim.Playable is not exported at runtime"]
+    scene = module.Scene(frame=(16, 9))
+    anim = scene.geometry.dot(0.1).animate.fade_in()
+    if not isinstance(anim, playable) or not isinstance(module.parallel(anim), playable):
+        failures.append("gaanim.Playable does not match Anim and Composition")
+    if isinstance(1.0, playable):
+        failures.append("gaanim.Playable accepted a non-playable value")
+    return failures
+
+
 def validate_timeline_cursor_contract(module: object) -> list[str]:
     """Expose the authoring cursor and absolute stop times to scripts."""
     failures: list[str] = []
@@ -1519,6 +1535,7 @@ def main() -> int:
     missing.extend(validate_layout_card_ports_contract(module))
     missing.extend(validate_editorial_contract(module))
     missing.extend(validate_timeline_cursor_contract(module))
+    missing.extend(validate_runtime_type_aliases(module))
     missing.extend(documented_text_api_failures(tree))
     missing.extend(documented_editorial_api_failures(tree))
 

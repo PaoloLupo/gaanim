@@ -1,13 +1,29 @@
-"""Public typing helpers for reactive properties and pure animation callbacks."""
+"""Public typing helpers for reactive properties, playback, and pure animation callbacks."""
 
 from __future__ import annotations
 
 from typing import Literal, TypeAlias, TypedDict
 
-from .gaanim_core import Brush, Color, Computed, Parameter, TimeInput, Variable
+from .gaanim_core import (
+    Anim,
+    Audio,
+    Brush,
+    Color,
+    Composition,
+    Computed,
+    Lottie,
+    Parameter,
+    TimeInput,
+    Variable,
+    Video,
+    VideoSegment,
+)
 
 ScalarSource: TypeAlias = float | Parameter | Variable | Computed | TimeInput
 """A fixed scalar or an explicitly owned, deterministic reactive source."""
+
+Playable: TypeAlias = Anim | Audio | Video | VideoSegment | Lottie | Composition
+"""Anything ``Scene.play`` and ``parallel``/``sequence``/``stagger`` accept."""
 
 AnimationChannel: TypeAlias = Literal[
     "position", "rotation", "scale", "opacity", "fill", "stroke", "stroke_width"
