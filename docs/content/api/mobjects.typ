@@ -1211,13 +1211,14 @@ scene.render()
 #api-entry(
   name: "SlideKit.badge",
   kind: "factory",
-  signature: "badge(text, *, variant=\"neutral\", appearance=\"soft\", padding=(18,10), radius=None, font_size=None, min_width=None, color=None, background=None, border=None) -> Drawable",
-  params: ((name: "text", type: "str", default: none, desc: [Non-empty label.]), (name: "variant", type: "str", default: "\"neutral\"", desc: [neutral, accent, success, warning, or danger.]), (name: "appearance", type: "str", default: "\"soft\"", desc: [soft, solid, or outline.])),
+  signature: "badge(text, *, variant=\"neutral\", appearance=\"soft\", padding=(0.18, 0.10), radius=None, font_size=None, min_width=None, color=None, background=None, border=None, font=None, weight=None, style=None, markup=True) -> Drawable",
+  params: ((name: "text", type: "str", default: none, desc: [Non-empty label.]), (name: "variant", type: "str", default: "\"neutral\"", desc: [neutral, accent, success, warning, or danger.]), (name: "appearance", type: "str", default: "\"soft\"", desc: [soft, solid, or outline.]), (name: "font, weight", type: "str | int | None", default: "None", desc: [Label family and weight; override `style`.]), (name: "style", type: "TextStyle | None", default: "None", desc: [Typography overlaid on the theme `label` role (italic, spacing, …). Its color, if set, overrides the variant text color; `font_size` overrides its size.]), (name: "markup", type: "bool", default: "True", desc: [`False` keeps `*` and `_` literal, as in `scene.text`.])),
   returns: (type: "Drawable", desc: [Auto-sized pill group at the origin.]),
-  desc: [`radius=None` derives a pill radius from measured height. Invalid text or finite geometry raises `ValueError`; position with `.move_to(...)`.],
+  desc: [`radius=None` derives a pill radius from measured height. The panel is sized from the same styled text that is drawn. Invalid text, finite geometry, weight or unbalanced markup raises `ValueError`; position with `.move_to(...)`.],
 )[
 ```python
-tag = scene.slides.badge("READY", variant="success", appearance="solid").move_to(-240, 120)
+tag = scene.slides.badge("READY", variant="success", appearance="solid").move_to(-2.4, 1.2)
+code = scene.slides.badge("_vel_max", font="Cascadia Mono", weight=600, markup=False)
 scene.play([tag.animate.grow_from_center()])
 ```
 ]
@@ -1225,10 +1226,10 @@ scene.play([tag.animate.grow_from_center()])
 #api-entry(
   name: "SlideKit.chip",
   kind: "factory",
-  signature: "chip(text, *, dot=True, variant=\"neutral\", appearance=\"soft\", padding=(14,8), radius=None, font_size=None, color=None, background=None, border=None) -> Drawable",
-  params: ((name: "text", type: "str", default: none, desc: [Non-empty label.]), (name: "dot", type: "bool", default: "True", desc: [Show the semantic tone dot.])),
+  signature: "chip(text, *, dot=True, variant=\"neutral\", appearance=\"soft\", padding=(0.14, 0.08), radius=None, font_size=None, color=None, background=None, border=None, font=None, weight=None, style=None, markup=True) -> Drawable",
+  params: ((name: "text", type: "str", default: none, desc: [Non-empty label.]), (name: "dot", type: "bool", default: "True", desc: [Show the semantic tone dot.]), (name: "font, weight", type: "str | int | None", default: "None", desc: [Label family and weight; override `style`.]), (name: "style", type: "TextStyle | None", default: "None", desc: [Typography overlaid on the theme `label` role (italic, spacing, …). Its color, if set, overrides the variant text color; `font_size` overrides its size.]), (name: "markup", type: "bool", default: "True", desc: [`False` keeps `*` and `_` literal, as in `scene.text`.])),
   returns: (type: "Drawable", desc: [Compact auto-sized group.]),
-  desc: [A smaller badge for filters, states, and metadata. Theme and validation behavior matches `badge`.],
+  desc: [A smaller badge for filters, states, and metadata. Theme, label typography and validation behavior match `badge`.],
 )[
 ```python
 live = scene.slides.chip("Live", variant="danger", appearance="outline")

@@ -150,19 +150,22 @@ role/theme -> TextStyle/TextFlow -> direct scene.text keywords
 #api-entry(
   name: "Typography.measure",
   kind: "method",
-  signature: "measure_text(content, *, role=None, size=None, font=None, color=None, wrap=None) -> tuple[float, float]",
+  signature: "measure(content, *, role=None, size=None, font=None, color=None, wrap=None, weight=None, style=None, markup=True) -> tuple[float, float]",
   params: (
     (name: "content", type: "str", default: none, desc: [Text to measure; must not be empty.]),
     (name: "role", type: "TextRole | None", default: "None", desc: [Role whose theme defaults resolve size, family, and color (`body` when omitted).]),
     (name: "size, font, color", type: "float | str | Color | None", default: "None", desc: [Explicit overrides, resolved exactly as on the spawned text object.]),
     (name: "wrap", type: "float | None", default: "None", desc: [Fixed composition width; `None` measures a single unwrapped block.]),
+    (name: "weight", type: "int | None", default: "None", desc: [Font weight override.]),
+    (name: "style", type: "TextStyle | None", default: "None", desc: [Reusable typography (italic, spacing, …); `size`, `font`, `weight` and `color` override it.]),
+    (name: "markup", type: "bool", default: "True", desc: [Same as `scene.text`: `False` measures `*` and `_` as literal characters.]),
   ),
   returns: (type: "tuple[float, float]", desc: [Laid-out `(width, height)` in scene units.]),
   desc: [Runs the same Typst pipeline that renders `scene.text` and shares its cache, so a later spawn of the same text reuses the measurement. Use it to size boxes to their content instead of guessing widths.],
 )[
 ```python
 width, height = scene.text.measure("PGA = 0.35 g", role="label")
-box = scene.geometry.rounded_rect(width + 56, height + 32, 14).move_to(0, -414)
+box = scene.geometry.rounded_rect(width + 0.56, height + 0.32, 0.14).move_to(0, -4.14)
 ```
 ]
 

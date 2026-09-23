@@ -3430,17 +3430,25 @@ class Typography:
         font: Optional[str] = None,
         color: Optional[Color] = None,
         wrap: Optional[float] = None,
+        weight: Optional[int] = None,
+        style: Optional[TextStyle] = None,
+        markup: bool = True,
     ) -> tuple[float, float]:
         """Measure laid-out text without spawning it.
 
         Uses the same pipeline that renders ``scene.text`` (role defaults from
         the active theme and Typst shaping) and returns ``(width, height)`` in
         scene units. ``wrap`` composes at a fixed line width; ``None``
-        measures a single unwrapped block.
+        measures a single unwrapped block. ``style`` overlays a ``TextStyle``
+        (weight, italic, spacing, …); ``size``, ``font``, ``weight`` and
+        ``color`` override it. ``markup`` matches ``scene.text``: with the
+        default ``True``, ``*`` and ``_`` are markup and are not measured as
+        characters. Empty content, an invalid weight or unbalanced markup
+        raise ``ValueError``.
 
         Example:
-            width, height = scene.measure_text("PGA = 0.35 g", role="label")
-            box = scene.rounded_rect(width + 0.56, height + 0.32, 0.14)
+            width, height = scene.text.measure("PGA = 0.35 g", role="label")
+            box = scene.geometry.rounded_rect(width + 0.56, height + 0.32, 0.14)
         """
         ...
     def code(
@@ -3915,6 +3923,10 @@ class SlideKit:
         color: Optional[Color] = None,
         background: Optional[Color] = None,
         border: Optional[Color] = None,
+        font: Optional[str] = None,
+        weight: Optional[int] = None,
+        style: Optional[TextStyle] = None,
+        markup: bool = True,
     ) -> Drawable:
         """Create an auto-sized editorial badge at the scene origin.
 
@@ -3923,8 +3935,16 @@ class SlideKit:
         geometry raises ``ValueError``. Position the returned group with
         ``.move_to(...)`` and animate it like any other ``Drawable``.
 
+        The label uses the theme's ``label`` role. ``style`` overlays any
+        ``TextStyle`` on it; ``font``, ``weight`` and ``font_size`` override
+        that style, and a ``style`` color overrides the variant text color.
+        ``markup=False`` keeps ``*`` and ``_`` literal, as in ``scene.text``.
+        The panel is sized from the same text that is drawn. An invalid
+        ``weight`` or unbalanced markup raises ``ValueError``.
+
         Example:
             tag = scene.badge("READY", variant="success").move_to(-3, 1.8)
+            code = scene.badge("_vel_max", font="Cascadia Mono", weight=600, markup=False)
             scene.play(tag.animate.grow_from_center())
         """
         ...
@@ -3941,12 +3961,17 @@ class SlideKit:
         color: Optional[Color] = None,
         background: Optional[Color] = None,
         border: Optional[Color] = None,
+        font: Optional[str] = None,
+        weight: Optional[int] = None,
+        style: Optional[TextStyle] = None,
+        markup: bool = True,
     ) -> Drawable:
         """Create a compact auto-sized chip with an optional semantic dot.
 
         The result starts at the origin and is a normal animatable group.
         Unknown variants/appearances, empty text, or invalid geometry raise
-        ``ValueError``.
+        ``ValueError``. ``font``, ``weight``, ``style`` and ``markup`` style
+        the label exactly as in :meth:`badge`.
 
         Example:
             chip = scene.chip("Live", variant="danger", appearance="solid")
