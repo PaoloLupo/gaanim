@@ -13,9 +13,10 @@ pub use axis::{
     Tick,
 };
 pub use chart::{
-    BatchDatum, Channel, ChartError, ChartSpec, ConstantValue, DEFAULT_POINT_RADIUS, DatumKey,
-    DatumMatch, Encoding, GuideSpec, MarkBatch, MarkKind, MarkSpec, MarkTransition, MatchPolicy,
-    POINT_RADIUS_RANGE, ScaleKind, ScaleSpec, TransitionFallback, TransitionKind,
+    BatchDatum, Channel, ChartError, ChartSpec, ColorRowGroups, ConstantValue,
+    DEFAULT_POINT_RADIUS, DatumKey, DatumMatch, Encoding, GuideSpec, MarkBatch, MarkKind, MarkSpec,
+    MarkTransition, MatchPolicy, POINT_RADIUS_RANGE, ScaleKind, ScaleSpec, TransitionFallback,
+    TransitionKind,
 };
 pub use data::{Column, DataError, DataSource, DataTable, DataValue};
 pub use sampling::{

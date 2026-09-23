@@ -413,6 +413,43 @@ fn chart_encoding_number(spec: &ChartSpec, channel: Channel, default: f64) -> f6
     }
 }
 
+use gaanim_visualization::ColorRowGroups;
+
+/// Rows of a 2D chart grouped by the color they are drawn with, or `None`
+/// when one mark in one color is enough. Points and error bars follow any
+/// per-row color or opacity field; lines, steps and areas split into one
+/// series per category of a text color field.
+fn chart_row_groups(
+    spec: &ChartSpec,
+    default_color: Color,
+) -> Result<Option<ColorRowGroups>, VisualizationError> {
+    let is_field = |channel| matches!(spec.encodings().get(&channel), Some(Encoding::Field { .. }));
+    match spec.mark_spec().kind {
+        MarkKind::Point | MarkKind::ErrorBar
+            if is_field(Channel::Color) || is_field(Channel::Opacity) =>
+        {
+            let per_row_opacity = is_field(Channel::Opacity);
+            let mut groups: Vec<(Color, Vec<usize>)> = Vec::new();
+            for datum in spec.batch()?.data {
+                let opacity = if per_row_opacity { datum.opacity } else { 1.0 };
+                let color = color_with_opacity(datum.color.unwrap_or(default_color), opacity);
+                match groups
+                    .iter_mut()
+                    .find(|(existing, _)| existing.to_rgba8().to_u32() == color.to_rgba8().to_u32())
+                {
+                    Some((_, rows)) => rows.push(datum.source_row),
+                    None => groups.push((color, vec![datum.source_row])),
+                }
+            }
+            Ok((!groups.is_empty()).then_some(groups))
+        }
+        MarkKind::Line | MarkKind::Step | MarkKind::Area => Ok(spec
+            .rows_by_color_category()?
+            .filter(|groups| !groups.is_empty())),
+        _ => Ok(None),
+    }
+}
+
 fn chart_encoding_color(spec: &ChartSpec) -> Option<Color> {
     match spec.encodings().get(&Channel::Color) {
         Some(Encoding::Value(ConstantValue::Color(color))) => Some(*color),
@@ -889,33 +926,7 @@ impl SceneModel {
         let dimensions = spec.batch()?.dimensions;
         let width = (self.frame.width * 0.72).max(4.0);
         let height = (self.frame.height * 0.62).max(3.0);
-        let guides = if spec.guides_specs().is_empty() {
-            None
-        } else {
-            let titles: Vec<String> = spec
-                .guides_specs()
-                .values()
-                .filter_map(|guide| match guide {
-                    gaanim_visualization::GuideSpec::None => None,
-                    gaanim_visualization::GuideSpec::Legend { title }
-                    | gaanim_visualization::GuideSpec::ColorBar { title } => title.clone(),
-                })
-                .collect();
-            if titles.is_empty() {
-                None
-            } else {
-                let labels: Vec<_> = titles
-                    .iter()
-                    .enumerate()
-                    .map(|(index, title)| {
-                        self.text(title)
-                            .move_to(width * 0.5 + 0.7, height * 0.5 - index as f64 * 0.34)
-                    })
-                    .collect();
-                let refs: Vec<_> = labels.iter().collect();
-                Some(self.group_no_center(&refs))
-            }
-        };
+        let guides = self.chart_guides(&spec, width, height)?;
 
         if dimensions == 2 {
             let x = axes
@@ -963,7 +974,110 @@ impl SceneModel {
                     spec,
                 });
             }
-            let source = gaanim_visualization::DataSource::new(spec.data().clone());
+            let default_color =
+                chart_encoding_color(&spec).unwrap_or_else(|| chart_series_color(self));
+            let mark = if let Some(groups) = chart_row_groups(&spec, default_color)? {
+                self.materialize_grouped_chart_marks(&space, &spec, groups)?
+                    .z_index(0)
+            } else {
+                self.chart_single_mark(&space, &spec, default_color)?
+            };
+            for layer in [
+                SpaceLayer::Axes,
+                SpaceLayer::Ticks,
+                SpaceLayer::Numbers,
+                SpaceLayer::Labels,
+            ] {
+                if let Some(handle) = space.layer(layer) {
+                    handle.clone().z_index(20);
+                }
+            }
+            // Layer z_index values inherit from the view; keep the view itself at
+            // the scene level so the chart does not rise above unrelated content.
+            let axes_layer = space.frame.clone();
+            let grid = space
+                .layer(SpaceLayer::MajorGrid)
+                .cloned()
+                .map(|layer| layer.z_index(-20));
+            if let Some(guide) = &guides {
+                self.attach_to_space(&space, guide);
+            }
+            Ok(ChartHandle {
+                root: space.drawable().clone(),
+                marks: mark,
+                axes: axes_layer,
+                grid,
+                guides,
+                spec,
+                labels: None,
+            })
+        } else {
+            self.materialize_chart_3d(spec, axes, guides)
+        }
+    }
+
+    /// Guide titles, and for a color legend over a text field one entry per
+    /// category: a swatch in the category's color followed by its name.
+    fn chart_guides(
+        &mut self,
+        spec: &ChartSpec,
+        width: f64,
+        height: f64,
+    ) -> Result<Option<DrawableHandle>, VisualizationError> {
+        const ROW: f64 = 0.46;
+        const SWATCH_RADIUS: f64 = 0.08;
+        let left = width * 0.5 + 0.7;
+        let mut row = 0.0;
+        let mut items = Vec::new();
+        for (channel, guide) in spec.guides_specs() {
+            let title = match guide {
+                gaanim_visualization::GuideSpec::None => continue,
+                gaanim_visualization::GuideSpec::Legend { title }
+                | gaanim_visualization::GuideSpec::ColorBar { title } => title.clone(),
+            };
+            if let Some(title) = title {
+                items.push(self.text(&title).move_to(left, height * 0.5 - row * ROW));
+                row += 1.0;
+            }
+            if *channel != Channel::Color
+                || !matches!(guide, gaanim_visualization::GuideSpec::Legend { .. })
+            {
+                continue;
+            }
+            for (category, color) in spec.color_categories()?.unwrap_or_default() {
+                let y = height * 0.5 - row * ROW;
+                items.push(
+                    self.circle(SWATCH_RADIUS)
+                        .fill(color)
+                        .no_stroke()
+                        .move_to(left - 0.3, y),
+                );
+                items.push(self.text(&category).at_anchor(
+                    left - 0.12,
+                    y,
+                    crate::canvas::Anchor::Left,
+                ));
+                row += 1.0;
+            }
+        }
+        if items.is_empty() {
+            return Ok(None);
+        }
+        let refs: Vec<_> = items.iter().collect();
+        Ok(Some(self.group_no_center(&refs)))
+    }
+
+    /// One data mark for every row of a 2D chart, in a single fill or stroke.
+    fn chart_single_mark(
+        &mut self,
+        space: &CoordinateSpaceHandle,
+        spec: &ChartSpec,
+        default_color: Color,
+    ) -> Result<DrawableHandle, VisualizationError> {
+        let spec = spec.clone();
+        let space = space.clone();
+        let source = gaanim_visualization::DataSource::new(spec.data().clone());
+        {
             let mark = match spec.mark_spec().kind {
                 MarkKind::Point => self.data_mark(
                     &space,
@@ -1079,46 +1193,109 @@ impl SceneModel {
                 // visible semantic series color. Heatmap owns one fill per
                 // quantized band, so its derived gradient must remain intact.
                 MarkKind::Heatmap => mark,
-                MarkKind::Line | MarkKind::Step | MarkKind::ErrorBar => mark.stroke(
-                    chart_encoding_color(&spec).unwrap_or_else(|| chart_series_color(self)),
-                    0.03,
-                ),
-                _ => mark
-                    .fill(chart_encoding_color(&spec).unwrap_or_else(|| chart_series_color(self))),
-            };
-            let mark = mark
-                .opacity(chart_encoding_number(&spec, Channel::Opacity, 1.0).clamp(0.0, 1.0) as f32)
-                .z_index(0);
-            for layer in [
-                SpaceLayer::Axes,
-                SpaceLayer::Ticks,
-                SpaceLayer::Numbers,
-                SpaceLayer::Labels,
-            ] {
-                if let Some(handle) = space.layer(layer) {
-                    handle.clone().z_index(20);
+                MarkKind::Line | MarkKind::Step | MarkKind::ErrorBar => {
+                    mark.stroke(default_color, 0.03)
                 }
-            }
-            // Layer z_index values inherit from the view; keep the view itself at
-            // the scene level so the chart does not rise above unrelated content.
-            let axes_layer = space.frame.clone();
-            let grid = space
-                .layer(SpaceLayer::MajorGrid)
-                .cloned()
-                .map(|layer| layer.z_index(-20));
-            if let Some(guide) = &guides {
-                self.attach_to_space(&space, guide);
-            }
-            Ok(ChartHandle {
-                root: space.drawable().clone(),
-                marks: mark,
-                axes: axes_layer,
-                grid,
-                guides,
-                spec,
-                labels: None,
-            })
+                _ => mark.fill(default_color),
+            };
+            Ok(mark
+                .opacity(chart_encoding_number(&spec, Channel::Opacity, 1.0).clamp(0.0, 1.0) as f32)
+                .z_index(0))
+        }
+    }
+
+    /// One data mark per group of rows sharing a resolved color, collected in
+    /// one group attached to the plot. Points and error bars group by their
+    /// per-row color and opacity; lines, steps and areas draw one series per
+    /// category of a text `color` field.
+    fn materialize_grouped_chart_marks(
+        &mut self,
+        space: &CoordinateSpaceHandle,
+        spec: &ChartSpec,
+        groups: ColorRowGroups,
+    ) -> Result<DrawableHandle, VisualizationError> {
+        let kind = spec.mark_spec().kind;
+        let radii: Vec<f64> = if kind == MarkKind::Point {
+            spec.batch()?.data.iter().map(|datum| datum.size).collect()
         } else {
+            Vec::new()
+        };
+        // A per-row opacity field lives in each group color; a constant one
+        // applies to every group, as it does to a single mark.
+        let opacity = if matches!(
+            spec.encodings().get(&Channel::Opacity),
+            Some(Encoding::Field { .. })
+        ) {
+            1.0
+        } else {
+            chart_encoding_number(spec, Channel::Opacity, 1.0).clamp(0.0, 1.0)
+        };
+        let mut children = Vec::with_capacity(groups.len());
+        for (color, rows) in groups {
+            let table = spec.data().select_rows(&rows);
+            let source = gaanim_visualization::DataSource::new(table);
+            let mark_kind = match kind {
+                MarkKind::Point => DataMarkKind::Scatter {
+                    x: chart_field(spec, Channel::X)?,
+                    y: chart_field(spec, Channel::Y)?,
+                    radius: gaanim_visualization::DEFAULT_POINT_RADIUS,
+                    radii: rows.iter().map(|row| radii[*row]).collect(),
+                    policy: NonFinitePolicy::Gap,
+                },
+                MarkKind::Line => DataMarkKind::Line {
+                    x: chart_field(spec, Channel::X)?,
+                    y: chart_field(spec, Channel::Y)?,
+                    policy: NonFinitePolicy::Gap,
+                },
+                MarkKind::Step => DataMarkKind::Step {
+                    x: chart_field(spec, Channel::X)?,
+                    y: chart_field(spec, Channel::Y)?,
+                    policy: NonFinitePolicy::Gap,
+                },
+                MarkKind::Area => DataMarkKind::Area {
+                    x: chart_field(spec, Channel::X)?,
+                    y: chart_field(spec, Channel::Y)?,
+                    baseline: chart_option_number(spec, "baseline", 0.0),
+                },
+                MarkKind::ErrorBar => DataMarkKind::ErrorBars {
+                    x: chart_field(spec, Channel::X)?,
+                    y: chart_field(spec, Channel::Y)?,
+                    low: chart_option_field(spec, "low")?,
+                    high: chart_option_field(spec, "high")?,
+                    cap_width: chart_option_number(spec, "cap_width", 0.12),
+                },
+                other => return Err(VisualizationError::UnsupportedChartMark3D(other)),
+            };
+            gaanim_visualization::data_mark_path(&space.map, &source.snapshot(), &mark_kind)
+                .map_err(|error| match error {
+                    gaanim_visualization::MarkError::Axis(error) => VisualizationError::Axis(error),
+                    gaanim_visualization::MarkError::Data(_) => VisualizationError::LengthMismatch,
+                    gaanim_visualization::MarkError::Empty => VisualizationError::EmptyData,
+                })?;
+            let child = self.spawn(SpawnKind::DataMark {
+                map: space.map.clone(),
+                source,
+                kind: mark_kind,
+            });
+            let child = match kind {
+                MarkKind::Line | MarkKind::Step | MarkKind::ErrorBar => child.stroke(color, 0.03),
+                _ => child.fill(color),
+            };
+            children.push(child.opacity(opacity as f32).z_index(0));
+        }
+        let refs: Vec<_> = children.iter().collect();
+        let marks = self.group_no_center(&refs);
+        self.attach_mark_to_space(space, &marks);
+        Ok(marks)
+    }
+
+    fn materialize_chart_3d(
+        &mut self,
+        spec: ChartSpec,
+        axes: BTreeMap<Channel, Axis>,
+        guides: Option<DrawableHandle>,
+    ) -> Result<ChartHandle, VisualizationError> {
+        {
             let x = axes
                 .get(&Channel::X)
                 .cloned()
@@ -5782,6 +5959,210 @@ mod tests {
                 SpawnKind::GroupNoCenter(_)
             ),
             "the chart axes layer must include grid, axes, ticks, numbers, and labels",
+        );
+    }
+
+    use gaanim_core::peniko::Brush;
+
+    fn grouped_chart_fills(
+        canvas: &SceneModel,
+        chart: &ChartHandle,
+    ) -> Vec<(Option<Brush>, Option<Brush>, usize)> {
+        let SpawnKind::GroupNoCenter(children) = chart.marks.spec.lock().unwrap().kind.clone()
+        else {
+            panic!("per-row colours must produce a group of marks");
+        };
+        let state = canvas.state.lock().unwrap();
+        children
+            .iter()
+            .map(|id| {
+                let spec = state.object_specs[id].lock().unwrap();
+                let SpawnKind::DataMark { source, .. } = &spec.kind else {
+                    panic!("every group child is a data mark");
+                };
+                (
+                    spec.fill.clone(),
+                    spec.stroke.as_ref().map(|(brush, _)| brush.clone()),
+                    source.snapshot().len(),
+                )
+            })
+            .collect()
+    }
+
+    fn grouped_table() -> gaanim_visualization::DataTable {
+        gaanim_visualization::DataTable::new([
+            (
+                "x".to_owned(),
+                gaanim_visualization::Column::Numeric(vec![
+                    Some(0.0),
+                    Some(1.0),
+                    Some(2.0),
+                    Some(3.0),
+                ]),
+            ),
+            (
+                "y".to_owned(),
+                gaanim_visualization::Column::Numeric(vec![
+                    Some(1.0),
+                    Some(3.0),
+                    Some(2.0),
+                    Some(4.0),
+                ]),
+            ),
+            (
+                "group".to_owned(),
+                gaanim_visualization::Column::Text(vec![
+                    Some("A".into()),
+                    Some("B".into()),
+                    Some("A".into()),
+                    Some("C".into()),
+                ]),
+            ),
+            (
+                "weight".to_owned(),
+                gaanim_visualization::Column::Numeric(vec![
+                    Some(0.2),
+                    Some(0.2),
+                    Some(1.0),
+                    Some(1.0),
+                ]),
+            ),
+        ])
+        .unwrap()
+    }
+
+    fn grouped_colors() -> [Color; 3] {
+        [
+            Color::from_rgb8(0xE1, 0x1D, 0x48),
+            Color::from_rgb8(0x25, 0x63, 0xEB),
+            Color::from_rgb8(0x16, 0xA3, 0x4A),
+        ]
+    }
+
+    fn grouped_spec(kind: MarkKind) -> ChartSpec {
+        ChartSpec::new(grouped_table(), None)
+            .unwrap()
+            .mark(kind, BTreeMap::new())
+            .encode(Channel::X, Encoding::field("x"))
+            .unwrap()
+            .encode(Channel::Y, Encoding::field("y"))
+            .unwrap()
+            .encode(
+                Channel::Color,
+                Encoding::scaled_field(
+                    "group",
+                    gaanim_visualization::ScaleSpec::category(["A".into(), "B".into(), "C".into()])
+                        .unwrap()
+                        .colors(grouped_colors()),
+                ),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn two_dimensional_points_take_each_row_colour_like_three_dimensional_ones() {
+        let mut canvas = SceneModel::new(640, 360);
+        let chart = canvas.chart(grouped_spec(MarkKind::Point)).unwrap();
+        let fills = grouped_chart_fills(&canvas, &chart);
+        let solid = |color: Color| Some(Brush::Solid(color));
+        let [a, b, c] = grouped_colors();
+        assert_eq!(
+            fills,
+            vec![
+                (solid(a), None, 2),
+                (solid(b), None, 1),
+                (solid(c), None, 1)
+            ],
+            "one batch per resolved colour, in first-row order"
+        );
+        let batch = grouped_spec(MarkKind::Point).batch().unwrap();
+        let colors: Vec<_> = batch.data.iter().map(|datum| datum.color).collect();
+        assert_eq!(colors, vec![Some(a), Some(b), Some(a), Some(c)]);
+    }
+
+    #[test]
+    fn point_opacity_fields_become_per_row_alpha() {
+        let spec = grouped_spec(MarkKind::Point)
+            .encode(Channel::Opacity, Encoding::field("weight"))
+            .unwrap();
+        let mut canvas = SceneModel::new(640, 360);
+        let chart = canvas.chart(spec).unwrap();
+        let alphas: Vec<(u8, usize)> = grouped_chart_fills(&canvas, &chart)
+            .into_iter()
+            .map(|(fill, _, rows)| match fill {
+                Some(Brush::Solid(color)) => (color.to_rgba8().a, rows),
+                other => panic!("unexpected fill {other:?}"),
+            })
+            .collect();
+        // A appears at 0.2 and 1.0 opacity, B at 0.2, C at 1.0.
+        assert_eq!(alphas, vec![(51, 1), (51, 1), (255, 1), (255, 1)]);
+    }
+
+    #[test]
+    fn categorical_lines_draw_one_series_per_category() {
+        for kind in [MarkKind::Line, MarkKind::Step, MarkKind::Area] {
+            let mut canvas = SceneModel::new(640, 360);
+            let chart = canvas.chart(grouped_spec(kind)).unwrap();
+            let groups = grouped_chart_fills(&canvas, &chart);
+            let rows: Vec<usize> = groups.iter().map(|(_, _, rows)| *rows).collect();
+            assert_eq!(rows, vec![2, 1, 1], "{kind:?}: series A has two rows");
+            let [a, ..] = grouped_colors();
+            let painted = if kind == MarkKind::Area {
+                &groups[0].0
+            } else {
+                &groups[0].1
+            };
+            assert_eq!(painted, &Some(Brush::Solid(a)), "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn uniform_colour_charts_keep_a_single_mark() {
+        let spec = ChartSpec::new(grouped_table(), None)
+            .unwrap()
+            .mark(MarkKind::Point, BTreeMap::new())
+            .encode(Channel::X, Encoding::field("x"))
+            .unwrap()
+            .encode(Channel::Y, Encoding::field("y"))
+            .unwrap();
+        let mut canvas = SceneModel::new(640, 360);
+        let chart = canvas.chart(spec).unwrap();
+        assert!(matches!(
+            chart.marks.spec.lock().unwrap().kind,
+            SpawnKind::DataMark { .. }
+        ));
+    }
+
+    #[test]
+    fn colour_legends_list_each_category_with_its_colour() {
+        let spec = grouped_spec(MarkKind::Point).guide(
+            Channel::Color,
+            gaanim_visualization::GuideSpec::Legend {
+                title: Some("Grupo".into()),
+            },
+        );
+        let mut canvas = SceneModel::new(640, 360);
+        let chart = canvas.chart(spec).unwrap();
+        let guides = chart.guides.expect("legend guide");
+        let SpawnKind::GroupNoCenter(items) = guides.spec.lock().unwrap().kind.clone() else {
+            panic!("legend is a group");
+        };
+        // Title, then a swatch and a name per category.
+        assert_eq!(items.len(), 1 + 2 * 3);
+        let state = canvas.state.lock().unwrap();
+        let swatches: Vec<_> = items[1..]
+            .iter()
+            .step_by(2)
+            .map(|id| state.object_specs[id].lock().unwrap().fill.clone())
+            .collect();
+        let [a, b, c] = grouped_colors();
+        assert_eq!(
+            swatches,
+            vec![
+                Some(Brush::Solid(a)),
+                Some(Brush::Solid(b)),
+                Some(Brush::Solid(c))
+            ]
         );
     }
 
