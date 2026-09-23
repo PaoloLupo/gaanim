@@ -95,6 +95,9 @@ gaanim check mi-video --strict  # falla también con warnings
 gaanim --present --monitor 1 mi-video  # presentación en proyector 1
 ```
 
+`gaanim check` ejecuta el script: lo que imprima con `print()` aparece antes del
+informe, también cuando la salida se redirige a un archivo o a otra herramienta.
+
 Desde dentro:
 
 ```powershell
