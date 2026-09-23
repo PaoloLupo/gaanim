@@ -9411,6 +9411,61 @@ mod tests {
         );
     }
 
+    fn leaf_opacities_at(canvas: &SceneModel, time: f64) -> Vec<f32> {
+        let mut app = bevy::prelude::App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin);
+        canvas.compile(app.world_mut());
+        app.finish();
+        app.cleanup();
+        app.update();
+        app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
+        app.update();
+        app.update();
+        let mut opacities: Vec<f32> = app
+            .world_mut()
+            .query::<(&gaanim_scene::FillBrush, &gaanim_scene::GlobalOpacity)>()
+            .iter(app.world())
+            .filter(|(fill, _)| fill.0.is_some())
+            .map(|(_, opacity)| opacity.0)
+            .collect();
+        opacities.sort_by(f32::total_cmp);
+        opacities
+    }
+
+    #[test]
+    fn group_opacity_is_one_multiplier_for_setters_and_animations() {
+        // A group hidden immediately must reappear when its opacity animates.
+        let mut canvas = SceneModel::new(320, 180);
+        let dot = canvas.circle(20.0).fill(Color::WHITE);
+        let group = canvas.group(&[&dot]).opacity(0.0);
+        canvas.play(vec![group.animate().opacity(1.0).duration(1.0)]);
+        assert_eq!(leaf_opacities_at(&canvas, 0.0), vec![0.0]);
+        assert_eq!(leaf_opacities_at(&canvas, 1.0), vec![1.0]);
+
+        // A nested group applies its opacity once, not once per level.
+        let mut canvas = SceneModel::new(320, 180);
+        let dot = canvas.circle(20.0).fill(Color::WHITE);
+        let inner = canvas.group(&[&dot]);
+        canvas.group(&[&inner]).opacity(0.5);
+        canvas.wait(0.5);
+        assert_eq!(leaf_opacities_at(&canvas, 0.5), vec![0.5]);
+
+        // Immediate cuts after the declaration freezes follow the same rule.
+        let mut canvas = SceneModel::new(320, 180);
+        let dot = canvas.circle(20.0).fill(Color::WHITE);
+        let group = canvas.group(&[&dot]);
+        canvas.wait(0.5);
+        let group = group.opacity(0.0);
+        canvas.play(vec![group.animate().opacity(0.4).duration(0.5)]);
+        assert_eq!(leaf_opacities_at(&canvas, 0.5), vec![0.0]);
+        let opacity = leaf_opacities_at(&canvas, 1.0)[0];
+        assert!((opacity - 0.4).abs() < 1e-5, "{opacity}");
+    }
+
     #[test]
     fn headless_derived_geometry_resolves_fill_level_and_outline() {
         let mut canvas = SceneModel::new(320, 180);

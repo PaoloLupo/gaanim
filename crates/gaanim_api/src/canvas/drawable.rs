@@ -570,8 +570,21 @@ impl DrawableHandle {
         self.clone()
     }
 
+    /// Apply a paint or style change to this drawable and, for groups, to
+    /// every member leaf, since paint lives on the leaves.
     fn update_style(&self, f: impl Fn(&mut ObjectSpec)) -> Self {
-        for target in std::iter::once(&self.spec).chain(self.style_targets.iter()) {
+        self.restyle(
+            std::iter::once(&self.spec).chain(self.style_targets.iter()),
+            f,
+        )
+    }
+
+    fn restyle<'a>(
+        &self,
+        targets: impl Iterator<Item = &'a SharedObjectSpec>,
+        f: impl Fn(&mut ObjectSpec),
+    ) -> Self {
+        for target in targets {
             let (before, after) = {
                 let mut spec = target.lock().expect("object spec poisoned");
                 let before = spec.clone();
@@ -1219,7 +1232,11 @@ impl DrawableHandle {
         };
         let op = op as f32;
         self.clear_property_binding(gaanim_animation::PropertyChannel::Opacity);
-        self.update_style(|spec| {
+        // Opacity multiplies down the hierarchy, so a group's opacity is its
+        // own value, like `animate().opacity(...)`. Writing it into member
+        // leaves too would square it, and a later animation of the group
+        // could never undo a zero.
+        self.restyle(std::iter::once(&self.spec), |spec| {
             spec.opacity = op;
             spec.opacity_overridden = true;
         })
