@@ -368,8 +368,22 @@ pub fn checkmark(id: ObjectId, size: f64) -> MobjectBundle {
 /// the path as a continuous pen stroke: top of body, top of head, tip,
 /// bottom of head, bottom of body, then closes around the tail.
 pub fn arrow(id: ObjectId, start: kurbo::Point, end: kurbo::Point) -> MobjectBundle {
-    arrow_with_dimensions(id, start, end, 18.0, 18.0, 6.0)
+    arrow_with_dimensions(
+        id,
+        start,
+        end,
+        DEFAULT_ARROW_HEAD_LENGTH,
+        DEFAULT_ARROW_HEAD_WIDTH,
+        DEFAULT_ARROW_BODY_WIDTH,
+    )
 }
+
+/// Default solid-arrow head length in scene units.
+pub const DEFAULT_ARROW_HEAD_LENGTH: f64 = 0.18;
+/// Default solid-arrow head width in scene units.
+pub const DEFAULT_ARROW_HEAD_WIDTH: f64 = 0.15;
+/// Default solid-arrow body width in scene units.
+pub const DEFAULT_ARROW_BODY_WIDTH: f64 = 0.036;
 
 /// Build a solid arrow with absolute head length, head width and body width.
 /// Callers must supply finite endpoints and positive finite dimensions.
@@ -543,9 +557,9 @@ pub fn double_arrow(
     head_len: Option<f64>,
     head_width: Option<f64>,
 ) -> MobjectBundle {
-    let mut head_len = head_len.unwrap_or(18.0);
-    let head_half_width = head_width.unwrap_or(18.0) * 0.5;
-    let body_half_t: f64 = 3.0;
+    let mut head_len = head_len.unwrap_or(DEFAULT_ARROW_HEAD_LENGTH);
+    let head_half_width = head_width.unwrap_or(DEFAULT_ARROW_HEAD_WIDTH) * 0.5;
+    let body_half_t: f64 = DEFAULT_ARROW_BODY_WIDTH * 0.5;
 
     let dx = end.x - start.x;
     let dy = end.y - start.y;
@@ -634,6 +648,14 @@ pub fn double_arrow(
     bundle
 }
 
+/// Polyline segment count for a circular sweep, sampled by angle so the
+/// facet error stays below a pixel at any scene scale.
+fn arc_steps(sweep_angle: f64, min_steps: u32) -> u32 {
+    ((sweep_angle.abs() / ARC_STEP_ANGLE).ceil() as u32).max(min_steps)
+}
+
+const ARC_STEP_ANGLE: f64 = 0.035;
+
 pub fn sector(
     id: ObjectId,
     center: kurbo::Point,
@@ -643,9 +665,7 @@ pub fn sector(
 ) -> MobjectBundle {
     let mut path = kurbo::BezPath::new();
     path.move_to(center);
-    let perimeter = radius * sweep_angle.abs();
-    let max_chord = 4.0_f64;
-    let steps = ((perimeter / max_chord).ceil() as u32).max(8);
+    let steps = arc_steps(sweep_angle, 8);
     for i in 0..=steps {
         let a = start_angle + sweep_angle * (i as f64 / steps as f64);
         let x = center.x + radius * a.cos();
@@ -666,9 +686,7 @@ pub fn sector(
 
 pub fn annulus(id: ObjectId, outer_radius: f64, inner_radius: f64) -> MobjectBundle {
     let mut path = kurbo::BezPath::new();
-    let perimeter = 2.0 * std::f64::consts::PI * outer_radius;
-    let max_chord = 4.0_f64;
-    let steps = ((perimeter / max_chord).ceil() as u32).max(16);
+    let steps = arc_steps(2.0 * std::f64::consts::PI, 16);
     for i in 0..=steps {
         let a = i as f64 * 2.0 * std::f64::consts::PI / steps as f64;
         let x = outer_radius * a.cos();
@@ -680,8 +698,10 @@ pub fn annulus(id: ObjectId, outer_radius: f64, inner_radius: f64) -> MobjectBun
         }
     }
     path.close_path();
+    // Trace the inner ring in the opposite direction so it cuts a hole under
+    // the nonzero fill rule as well as even-odd.
     for i in 0..=steps {
-        let a = i as f64 * 2.0 * std::f64::consts::PI / steps as f64;
+        let a = -(i as f64) * 2.0 * std::f64::consts::PI / steps as f64;
         let x = inner_radius * a.cos();
         let y = inner_radius * a.sin();
         if i == 0 {
@@ -1047,7 +1067,9 @@ pub fn dimension_measure_path(
     let dimension_start =
         kurbo::Point::new(start.x + normal.0 * offset, start.y + normal.1 * offset);
     let dimension_end = kurbo::Point::new(end.x + normal.0 * offset, end.y + normal.1 * offset);
-    let head = (length * 0.12).clamp(6.0, 12.0).min(length * 0.45);
+    // Heads follow the line weight so thin dimensions keep proportional tips
+    // in any unit system; short dimensions still leave room for the baseline.
+    let head = (line_width * 6.0).min(length * 0.45);
     let wing = head * 0.55;
     add_filled_segment(
         &mut path,
@@ -1199,13 +1221,11 @@ pub fn curved_arrow_arc(
         return bundle;
     }
 
-    let head_len: f64 = 18.0;
-    // Match the default 2.5px stroke so applying a fill does not make the
-    // shaft visibly wider than its outline.
-    let body_half_t: f64 = 1.25;
+    let head_len = DEFAULT_ARROW_HEAD_LENGTH;
+    let body_half_t = DEFAULT_ARROW_BODY_WIDTH * 0.5;
     // Keep the inner shoulder on the same side of the center as the shaft;
     // this avoids an oversized/inverted fill for small-radius arcs.
-    let head_half_width: f64 = 9.0_f64.min((radius * 0.45).max(body_half_t));
+    let head_half_width = (DEFAULT_ARROW_HEAD_WIDTH * 0.5).min((radius * 0.45).max(body_half_t));
 
     let sweep = sweep_angle;
     let sweep_sign = sweep.signum();
@@ -1223,7 +1243,7 @@ pub fn curved_arrow_arc(
     let r_inner = (radius - body_half_t).max(0.0);
     path.move_to(center + kurbo::Vec2::new(r_outer * sa.cos(), r_outer * sa.sin()));
 
-    let steps = ((radius * shaft_sweep / 4.0).ceil() as u32).max(8);
+    let steps = arc_steps(shaft_sweep, 8);
     for i in 0..=steps {
         let a = sa + sweep_sign * shaft_sweep * (i as f64 / steps as f64);
         path.line_to(center + kurbo::Vec2::new(r_outer * a.cos(), r_outer * a.sin()));
@@ -1346,16 +1366,19 @@ mod arrow_tests {
     use kurbo::Shape;
 
     #[test]
-    fn dimensioned_arrow_preserves_legacy_and_rotates_scene_unit_geometry() {
+    fn dimensioned_arrow_uses_scene_unit_defaults_and_rotates_geometry() {
         let id = ObjectId::from_raw(0);
         let origin = kurbo::Point::ZERO;
-        let end = kurbo::Point::new(100.0, 0.0);
+        let end = kurbo::Point::new(4.0, 0.0);
+        let default = arrow(id, origin, end);
         assert_eq!(
-            arrow(id, origin, end).path.0,
-            arrow_with_dimensions(id, origin, end, 18.0, 18.0, 6.0)
+            default.path.0,
+            arrow_with_dimensions(id, origin, end, 0.18, 0.15, 0.036)
                 .path
                 .0
         );
+        // Regression for pixel-scale defaults: a 4-unit arrow must stay slim.
+        assert!(default.path.0.bounding_box().height() <= 0.15 + 1e-9);
         for end in [
             kurbo::Point::new(2.0, 0.0),
             kurbo::Point::new(0.0, 2.0),
@@ -1418,17 +1441,18 @@ mod arrow_tests {
     #[test]
     fn double_arrow_body_has_non_zero_area() {
         // A horizontal double-arrow: the body rectangle (centered on y=0)
-        // must contain interior points well within the silhouette. We
-        // sample a point 30% along the body and 0.5px above the axis;
+        // must contain interior points within the silhouette. We sample the
+        // body midpoint slightly above the axis (half body width is 0.018);
         // a proper filled arrow contains it.
         let b = double_arrow(
             ObjectId::from_raw(0),
-            kurbo::Point::new(-50.0, 0.0),
-            kurbo::Point::new(50.0, 0.0),
-            Some(15.0),
-            Some(15.0),
+            kurbo::Point::new(-2.0, 0.0),
+            kurbo::Point::new(2.0, 0.0),
+            None,
+            None,
         );
-        let sample = kurbo::Point::new(0.0, 0.5);
+        assert!(b.path.0.bounding_box().height() <= 0.15 + 1e-9);
+        let sample = kurbo::Point::new(0.0, 0.01);
         assert!(
             b.path.0.winding(sample) != 0,
             "sample point inside the body must be inside the closed silhouette (winding != 0)"
@@ -1628,5 +1652,50 @@ mod arrow_tests {
         let diagonal = dimension_measure_path(start, kurbo::Point::new(80.0, 60.0), 25.0, 3.0);
         assert_eq!(close_count(&vertical), 3);
         assert_eq!(close_count(&diagonal), 3);
+    }
+
+    #[test]
+    fn dimension_heads_scale_with_line_width_in_scene_units() {
+        // Regression for #21: a 6-unit dimension with a thin line used to get
+        // ~3-unit tall heads from a pixel-scale minimum.
+        let start = kurbo::Point::new(0.0, 0.0);
+        let end = kurbo::Point::new(6.0, 0.0);
+        let height = |line_width: f64| {
+            kurbo::Shape::bounding_box(&dimension_measure_path(start, end, -0.55, line_width))
+                .height()
+        };
+        assert!(height(0.008) < 0.06, "thin heads: {}", height(0.008));
+        assert!(height(0.03) < 0.25, "default heads: {}", height(0.03));
+        assert!(height(0.03) > height(0.008));
+    }
+
+    #[test]
+    fn sector_and_annulus_are_smooth_and_annulus_has_a_hole() {
+        let sector = sector(ObjectId::from_raw(0), kurbo::Point::ZERO, 1.125, 0.2, 1.9);
+        // A scene-unit sector used to collapse to its 8-segment minimum.
+        assert!(sector.path.0.elements().len() > 50);
+
+        let ring = annulus(ObjectId::from_raw(0), 1.125, 0.65);
+        assert!(ring.path.0.elements().len() > 300);
+        assert_eq!(
+            ring.path.0.winding(kurbo::Point::ZERO),
+            0,
+            "hole must be empty"
+        );
+        assert_ne!(ring.path.0.winding(kurbo::Point::new(0.9, 0.0)), 0);
+    }
+
+    #[test]
+    fn curved_arrow_stays_near_its_arc_in_scene_units() {
+        // Regression for #22: pixel-scale head metrics turned a shallow scene
+        // arc into long strokes that crossed the whole frame.
+        let start = kurbo::Point::new(4.4, -0.75);
+        let end = kurbo::Point::new(-5.15, -0.75);
+        let b = curved_arrow(ObjectId::from_raw(0), start, end, -0.35);
+        let bounds = b.path.0.bounding_box();
+        // Chord 9.55 with a -0.35 rad deflection: sagitta is about 0.42.
+        assert!(bounds.x0 > -5.4 && bounds.x1 < 4.6, "{bounds:?}");
+        assert!(bounds.height() < 0.7, "{bounds:?}");
+        assert_eq!(count_subpaths(&b.path.0), 1);
     }
 }
