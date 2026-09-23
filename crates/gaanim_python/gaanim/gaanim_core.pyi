@@ -3653,7 +3653,10 @@ class Visualization:
         Negative values roll their magnitude with a static minus sign.
         Fractional smallest units intentionally show a wheel between digits;
         use representable endpoints for settled digits (no implicit rounding).
-        In continuous mode, higher wheels can remain between digits at endpoints.
+        In continuous mode, wheels spin freely while count_to/animate.set tweens
+        the parameter and settle over the first and last 15% of each tween, so the
+        final value reads cleanly; untweened sources (computed values, time, sample
+        drivers) keep free continuous wheels.
         font_family=None inherits the scene's body font when compiled, including
         theme typography; an explicit family overrides it with normal font fallback.
         Families and weight (1..1000) resolve exactly like ``scene.text``: by the

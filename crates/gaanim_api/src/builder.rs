@@ -540,6 +540,8 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub states: MobjectStateMap,
     /// Typographic metrics retained for text-specific baseline positioning.
     pub text_metrics: HashMap<ObjectId, gaanim_text::prelude::TextMetrics>,
+    /// Continuous rolling displays and the parameter signals whose tweens settle them.
+    pub rolling_tween_sources: Vec<(Entity, Vec<ObjectId>)>,
     pub default_track: TrackId,
     mobject_tracks: HashMap<ObjectId, TrackId>,
     mobject_names: HashMap<ObjectId, String>,
@@ -841,6 +843,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             current_time: 0.0,
             states: MobjectStateMap::new(),
             text_metrics: HashMap::new(),
+            rolling_tween_sources: Vec::new(),
             default_track,
             mobject_tracks: HashMap::new(),
             mobject_names: HashMap::new(),

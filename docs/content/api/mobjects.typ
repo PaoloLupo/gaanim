@@ -1505,7 +1505,7 @@ scene.play([area.animate.create(), radius.animate.set(3.0).duration(1.5)])
     (name: "font_family / weight", type: "str | None / int | None", default: "None / None", desc: [Familia y peso (1 a 1000) de las cifras, resueltos igual que en `scene.text`.]),
     (name: "value", type: "float", default: "0.0", desc: [Valor inicial finito; su magnitud multiplicada por `10**decimals` debe ser menor que `1e15`.]),
     (name: "decimals / min_digits", type: "int", default: "0 / 1", desc: [De 0 a 6 decimales y de 1 a 15 posiciones enteras, con ceros iniciales. La suma no debe superar 15.]),
-    (name: "mode", type: "str", default: "'odometer'", desc: [`odometer` arrastra las ruedas superiores durante la última unidad mínima antes del acarreo. `continuous` gira cada rueda continuamente a la velocidad de su posición decimal.]),
+    (name: "mode", type: "str", default: "'odometer'", desc: [`odometer` arrastra las ruedas superiores durante la última unidad mínima antes del acarreo. `continuous` gira cada rueda continuamente a la velocidad de su posición decimal y se asienta al final de cada animación del parámetro.]),
     (name: "direction", type: "str", default: "'up'", desc: [`up` o `down` para magnitudes crecientes. Al disminuir la magnitud se invierte el movimiento.]),
     (name: "font_size / digit_spacing", type: "float", default: "0.75 / 0.02", desc: [Tamaño de fuente y espacio adicional entre celdas, en unidades de escena. Positivo y no negativo, respectivamente.]),
     (name: "line_height", type: "float", default: "1.25", desc: [Altura de la ventana y distancia entre dígitos, como múltiplo de la altura visible de las cifras; al menos 1.]),
@@ -1566,7 +1566,11 @@ el contador muestra un guion largo.
 Una fracción de la unidad mínima deja la rueda entre dos cifras: no se redondea
 implícitamente. Para que termine asentado, usa valores representables con los
 decimales elegidos, por ejemplo `12.34` con `decimals=2`. En modo `continuous`,
-las ruedas superiores pueden quedar entre cifras incluso al terminar en un entero.
+las ruedas giran libremente mientras `count_to` o `animate.set` animan el
+parámetro, y se asientan durante el primer y el último 15 % de cada animación:
+al terminar, el valor final se lee limpio, como en `odometer`. Las fuentes que no
+se animan con tweens (valores calculados, tiempo o drivers de muestras) mantienen
+el giro continuo libre.
 Los símbolos no giran.
 Consulta `examples/rolling_number_demo.py` para dinero, ceros iniciales, cuenta
 regresiva y movimiento continuo.

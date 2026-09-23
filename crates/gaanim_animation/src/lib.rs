@@ -19,7 +19,7 @@ pub use reactive::{
     ReactiveError, ReactiveFunction, ReactiveInput, ResolvedScalarSource, ScalarMap, ScalarSource,
 };
 pub mod rolling_number;
-pub use rolling_number::{RollingMode, RollingNumber, RollingNumberOptions};
+pub use rolling_number::{RollingMode, RollingNumber, RollingNumberOptions, RollingTweens};
 
 pub use signals::{
     AlwaysRedraw, AlwaysRedrawRegen, AxisMask, ColorSignal, CurvatureOnCurve, FloatSignal,
