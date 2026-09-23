@@ -601,6 +601,30 @@ fn component_palette(scene: &ApiCanvas) -> ComponentPalette {
     }
 }
 
+/// Overlay direct typography keywords on an optional reusable `TextStyle`.
+fn label_text_style(
+    style: Option<PyTextStyle>,
+    font: Option<String>,
+    weight: Option<u16>,
+    size: Option<f64>,
+    color: Option<PyColor>,
+) -> gaanim_text::prelude::TextStyle {
+    let mut style = style.map(|style| style.0).unwrap_or_default();
+    if font.is_some() {
+        style.font = font;
+    }
+    if weight.is_some() {
+        style.weight = weight;
+    }
+    if size.is_some() {
+        style.size = size;
+    }
+    if let Some(color) = color {
+        style.color = Some(color.0);
+    }
+    style
+}
+
 fn editorial_style(
     variant: &str,
     appearance: &str,
@@ -4198,11 +4222,12 @@ impl PyTypography {
     /// Typst shaping). Returns ``(width, height)`` in scene units.
     ///
     /// ```python
-    /// w, h = scene.measure_text("PGA = 0.35 g", role="label")
-    /// box = scene.rounded_rect(w + 56, h + 32, 14)
+    /// w, h = scene.text.measure("PGA = 0.35 g", role="label")
+    /// box = scene.geometry.rounded_rect(w + 0.56, h + 0.32, 0.14)
     /// ```
-    #[pyo3(signature = (content, *, role=None, size=None, font=None, color=None, wrap=None))]
+    #[pyo3(signature = (content, *, role=None, size=None, font=None, color=None, wrap=None, weight=None, style=None, markup=true))]
     #[pyo3(name = "measure")]
+    #[allow(clippy::too_many_arguments)]
     fn measure_text_py(
         &self,
         content: &str,
@@ -4211,25 +4236,39 @@ impl PyTypography {
         font: Option<String>,
         color: Option<PyColor>,
         wrap: Option<f64>,
+        weight: Option<u16>,
+        style: Option<PyTextStyle>,
+        markup: bool,
     ) -> PyResult<(f64, f64)> {
+        use gaanim_text::prelude::{TextFlow, TextRole, TextSpec, TextWrap};
+
         crate::custom::ensure_authoring_allowed()?;
         if content.is_empty() {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "measure_text content must not be empty",
             ));
         }
-        let role = crate::pytext::parse_role(role)?.unwrap_or(gaanim_text::prelude::TextRole::Body);
+        let role = crate::pytext::parse_role(role)?.unwrap_or(TextRole::Body);
+        let style = label_text_style(style, font, weight, size, color);
+        let flow = TextFlow {
+            wrap: match wrap {
+                Some(width) => TextWrap::Width(width.max(1.0e-6)),
+                None => TextWrap::NoWrap,
+            },
+            ..TextFlow::default()
+        };
+        let spec = TextSpec::new_with_markup(
+            vec![content.to_owned().into()],
+            Some(role),
+            style,
+            flow,
+            markup,
+        )
+        .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
         self.inner
             .lock()
             .expect("scene canvas poisoned")
-            .measure_text(
-                content,
-                Some(role),
-                size,
-                font,
-                color.map(|color| color.0),
-                wrap,
-            )
+            .measure_text_spec(&spec)
             .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 }
@@ -4237,7 +4276,7 @@ impl PyTypography {
 #[pymethods]
 impl PySlideKit {
     /// Create an auto-sized editorial badge.
-    #[pyo3(signature = (text, *, variant="neutral", appearance="soft", padding=(0.18, 0.10), radius=None, font_size=None, min_width=None, color=None, background=None, border=None))]
+    #[pyo3(signature = (text, *, variant="neutral", appearance="soft", padding=(0.18, 0.10), radius=None, font_size=None, min_width=None, color=None, background=None, border=None, font=None, weight=None, style=None, markup=true))]
     #[pyo3(name = "badge")]
     #[allow(clippy::too_many_arguments)]
     fn badge_py(
@@ -4252,10 +4291,18 @@ impl PySlideKit {
         color: Option<PyColor>,
         background: Option<PyColor>,
         border: Option<PyColor>,
+        font: Option<String>,
+        weight: Option<u16>,
+        style: Option<PyTextStyle>,
+        markup: bool,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
+        let text_style = label_text_style(style, font, weight, None, None);
         let style = editorial_style(variant, appearance, color, background, border)?;
-        let mut spec = BadgeSpec::new(text).style(style);
+        let mut spec = BadgeSpec::new(text)
+            .style(style)
+            .text_style(text_style)
+            .markup(markup);
         spec.padding = padding;
         spec.radius = radius;
         spec.font_size = font_size;
@@ -4265,7 +4312,7 @@ impl PySlideKit {
     }
 
     /// Create a compact chip with an optional semantic dot.
-    #[pyo3(signature = (text, *, dot=true, variant="neutral", appearance="soft", padding=(0.14, 0.08), radius=None, font_size=None, color=None, background=None, border=None))]
+    #[pyo3(signature = (text, *, dot=true, variant="neutral", appearance="soft", padding=(0.14, 0.08), radius=None, font_size=None, color=None, background=None, border=None, font=None, weight=None, style=None, markup=true))]
     #[allow(clippy::too_many_arguments)]
     fn chip(
         &self,
@@ -4279,10 +4326,18 @@ impl PySlideKit {
         color: Option<PyColor>,
         background: Option<PyColor>,
         border: Option<PyColor>,
+        font: Option<String>,
+        weight: Option<u16>,
+        style: Option<PyTextStyle>,
+        markup: bool,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
+        let text_style = label_text_style(style, font, weight, None, None);
         let style = editorial_style(variant, appearance, color, background, border)?;
-        let mut spec = ChipSpec::new(text).style(style);
+        let mut spec = ChipSpec::new(text)
+            .style(style)
+            .text_style(text_style)
+            .markup(markup);
         spec.dot = dot;
         spec.padding = padding;
         spec.radius = radius;

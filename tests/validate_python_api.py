@@ -235,6 +235,35 @@ def validate_editorial_contract(module: object) -> list[str]:
             pass
         else:
             failures.append("an editorial factory accepted invalid authored input")
+    styled = (
+        scene.slides.badge("_vel_max", font="Libertinus Serif", weight=700, markup=False),
+        scene.slides.chip(
+            "*draft", style=module.TextStyle(italic=True, letter_spacing=0.02), markup=False
+        ),
+    )
+    if not all(isinstance(component, module.Drawable) for component in styled):
+        failures.append("styled badge/chip labels did not return Drawable")
+    for call in (
+        lambda: scene.slides.badge("_offset"),
+        lambda: scene.slides.chip("x", weight=0),
+    ):
+        try:
+            call()
+        except ValueError:
+            pass
+        else:
+            failures.append("badge/chip accepted unbalanced markup or an invalid weight")
+    plain = scene.text.measure("Ready", role="label")
+    bold = scene.text.measure("Ready", role="label", weight=700)
+    tracked = scene.text.measure(
+        "Ready", role="label", style=module.TextStyle(letter_spacing=0.1)
+    )
+    literal = scene.text.measure("*Ready*", role="label", markup=False)
+    if not (tracked[0] > plain[0] and literal[0] > bold[0] > 0.0):
+        failures.append(
+            f"Typography.measure ignored weight, style or markup: "
+            f"{plain} {bold} {tracked} {literal}"
+        )
     if hasattr(module.Scene, "caption"):
         failures.append("removed Scene.caption remains public")
     try:

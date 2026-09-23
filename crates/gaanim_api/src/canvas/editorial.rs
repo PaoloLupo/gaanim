@@ -131,6 +131,11 @@ pub struct BadgeSpec {
     pub font_size: Option<f64>,
     pub min_width: Option<f64>,
     pub style: EditorialStyle,
+    /// Label typography overlaid on the theme's label role. `font_size`
+    /// overrides its size and a set color overrides the variant text color.
+    pub text_style: TextStyle,
+    /// Interpret `*strong*` and `_emphasis_` in the label.
+    pub markup: bool,
 }
 
 impl BadgeSpec {
@@ -142,11 +147,23 @@ impl BadgeSpec {
             font_size: None,
             min_width: None,
             style: EditorialStyle::default(),
+            text_style: TextStyle::default(),
+            markup: true,
         }
     }
 
     pub fn style(mut self, style: EditorialStyle) -> Self {
         self.style = style;
+        self
+    }
+
+    pub fn text_style(mut self, text_style: TextStyle) -> Self {
+        self.text_style = text_style;
+        self
+    }
+
+    pub fn markup(mut self, markup: bool) -> Self {
+        self.markup = markup;
         self
     }
 }
@@ -159,6 +176,11 @@ pub struct ChipSpec {
     pub radius: Option<f64>,
     pub font_size: Option<f64>,
     pub style: EditorialStyle,
+    /// Label typography overlaid on the theme's label role. `font_size`
+    /// overrides its size and a set color overrides the variant text color.
+    pub text_style: TextStyle,
+    /// Interpret `*strong*` and `_emphasis_` in the label.
+    pub markup: bool,
 }
 
 impl ChipSpec {
@@ -170,11 +192,23 @@ impl ChipSpec {
             radius: None,
             font_size: None,
             style: EditorialStyle::default(),
+            text_style: TextStyle::default(),
+            markup: true,
         }
     }
 
     pub fn style(mut self, style: EditorialStyle) -> Self {
         self.style = style;
+        self
+    }
+
+    pub fn text_style(mut self, text_style: TextStyle) -> Self {
+        self.text_style = text_style;
+        self
+    }
+
+    pub fn markup(mut self, markup: bool) -> Self {
+        self.markup = markup;
         self
     }
 }
@@ -456,27 +490,21 @@ impl SceneModel {
         validate_optional_positive("font_size", spec.font_size)?;
         validate_optional_non_negative("min_width", spec.min_width)?;
         let style = self.resolve_editorial_style(spec.style);
-        let (label_width, label_height) = self.measure_editorial_text(
+        let label = label_spec(
             &spec.text,
-            TextRole::Label,
+            spec.text_style,
             spec.font_size,
             style.compact_text,
-            None,
+            spec.markup,
         )?;
+        let (label_width, label_height) = self
+            .measure_text_spec(&label)
+            .map_err(EditorialError::Text)?;
         let width = (label_width + spec.padding.0 * 2.0).max(spec.min_width.unwrap_or(0.0));
         let height = label_height + spec.padding.1 * 2.0;
         let radius = spec.radius.unwrap_or(height * 0.5);
         let panel = self.editorial_panel(width, height, radius, style);
-        let label = self
-            .editorial_text(
-                &spec.text,
-                TextRole::Label,
-                spec.font_size,
-                style.compact_text,
-                None,
-                EditorialAlign::Center,
-            )?
-            .at_anchor(0.0, 0.0, Anchor::Center);
+        let label = self.text_spec(label).at_anchor(0.0, 0.0, Anchor::Center);
         Ok(self.group(&[&panel, &label]))
     }
 
@@ -486,13 +514,16 @@ impl SceneModel {
         validate_optional_non_negative("radius", spec.radius)?;
         validate_optional_positive("font_size", spec.font_size)?;
         let style = self.resolve_editorial_style(spec.style);
-        let (label_width, label_height) = self.measure_editorial_text(
+        let label = label_spec(
             &spec.text,
-            TextRole::Label,
+            spec.text_style,
             spec.font_size,
             style.compact_text,
-            None,
+            spec.markup,
         )?;
+        let (label_width, label_height) = self
+            .measure_text_spec(&label)
+            .map_err(EditorialError::Text)?;
         let dot_diameter = if spec.dot { 0.10 } else { 0.0 };
         let dot_gap = if spec.dot { 0.08 } else { 0.0 };
         let content_width = label_width + dot_diameter + dot_gap;
@@ -503,14 +534,7 @@ impl SceneModel {
         let start_x = -content_width * 0.5;
         let label_x = start_x + dot_diameter + dot_gap + label_width * 0.5;
         let label = self
-            .editorial_text(
-                &spec.text,
-                TextRole::Label,
-                spec.font_size,
-                style.compact_text,
-                None,
-                EditorialAlign::Center,
-            )?
+            .text_spec(label)
             .at_anchor(label_x, 0.0, Anchor::Center);
         let mut members = vec![panel];
         if spec.dot {
@@ -993,6 +1017,33 @@ impl SceneModel {
     }
 }
 
+/// One spec drives both the measurement and the rendering of a compact
+/// label, so the panel always fits the text that is drawn.
+fn label_spec(
+    content: &str,
+    mut style: TextStyle,
+    font_size: Option<f64>,
+    variant_color: Color,
+    markup: bool,
+) -> Result<TextSpec, EditorialError> {
+    if font_size.is_some() {
+        style.size = font_size;
+    }
+    style.color = style.color.or(Some(variant_color));
+    TextSpec::new_with_markup(
+        vec![content.to_owned().into()],
+        Some(TextRole::Label),
+        style,
+        TextFlow {
+            wrap: TextWrap::NoWrap,
+            align: EditorialAlign::Center.text_align(),
+            ..Default::default()
+        },
+        markup,
+    )
+    .map_err(|error| EditorialError::Text(error.to_string()))
+}
+
 fn contrasting_text(color: Color) -> Color {
     let rgba = color.to_rgba8();
     let linear = |channel: u8| {
@@ -1210,6 +1261,78 @@ mod tests {
             handle.spec.lock().unwrap().kind,
             super::super::SpawnKind::Group(_)
         )));
+    }
+
+    #[test]
+    fn label_spec_layers_font_size_and_color_over_the_text_style() {
+        let style = TextStyle {
+            font: Some("Cascadia Mono".to_owned()),
+            size: Some(0.5),
+            weight: Some(700),
+            ..Default::default()
+        };
+        let spec = label_spec("Ready", style.clone(), Some(0.3), Color::WHITE, true).unwrap();
+        assert_eq!(spec.role, TextRole::Label);
+        assert_eq!(spec.style.size, Some(0.3));
+        assert_eq!(spec.style.font.as_deref(), Some("Cascadia Mono"));
+        assert_eq!(spec.style.weight, Some(700));
+        assert_eq!(spec.style.color, Some(Color::WHITE));
+
+        let colored = TextStyle {
+            color: Some(Color::BLACK),
+            ..style
+        };
+        let spec = label_spec("Ready", colored, None, Color::WHITE, true).unwrap();
+        assert_eq!(spec.style.size, Some(0.5));
+        assert_eq!(spec.style.color, Some(Color::BLACK));
+    }
+
+    #[test]
+    fn markup_false_keeps_label_delimiters_literal() {
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        assert!(canvas.badge(BadgeSpec::new("*draft")).is_err());
+        assert!(canvas.chip(ChipSpec::new("_x1 ref")).is_err());
+        canvas
+            .badge(BadgeSpec::new("*draft").markup(false))
+            .unwrap();
+        canvas.chip(ChipSpec::new("_x1 ref").markup(false)).unwrap();
+    }
+
+    #[test]
+    fn measure_text_spec_follows_the_label_style() {
+        let canvas = SceneModel::new(16.0, 9.0);
+        let plain = label_spec("Ready", TextStyle::default(), None, Color::WHITE, true).unwrap();
+        let tracked = label_spec(
+            "Ready",
+            TextStyle {
+                letter_spacing: Some(0.1),
+                ..Default::default()
+            },
+            None,
+            Color::WHITE,
+            true,
+        )
+        .unwrap();
+        let (plain_width, plain_height) = canvas.measure_text_spec(&plain).unwrap();
+        let (tracked_width, _) = canvas.measure_text_spec(&tracked).unwrap();
+        assert!(plain_width > 0.0 && plain_height > 0.0);
+        assert!(
+            tracked_width > plain_width + 0.3,
+            "{plain_width} -> {tracked_width}"
+        );
+        assert_eq!(
+            canvas
+                .measure_text(
+                    "Ready",
+                    Some(TextRole::Label),
+                    None,
+                    None,
+                    Some(Color::WHITE),
+                    None
+                )
+                .unwrap(),
+            (plain_width, plain_height)
+        );
     }
 
     #[test]

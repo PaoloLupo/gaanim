@@ -1566,18 +1566,6 @@ impl SceneModel {
             TextContent, TextFlow, TextRole, TextSpec, TextStyle, TextWrap,
         };
 
-        let config = self.themed_text_config();
-        let role = role.unwrap_or(TextRole::Body);
-        let role_style = config
-            .roles
-            .get(&role)
-            .ok_or_else(|| format!("no style configured for text role {role:?}"))?;
-        let math_font = config
-            .roles
-            .get(&TextRole::Math)
-            .map(|style| style.font_family.clone())
-            .unwrap_or_else(|| "New Computer Modern Math".to_string());
-
         let style = TextStyle {
             size,
             font,
@@ -1593,11 +1581,36 @@ impl SceneModel {
         };
         let spec = TextSpec::new(
             vec![TextContent::Literal(content.to_string())],
-            Some(role),
+            Some(role.unwrap_or(TextRole::Body)),
             style,
             flow,
         )
         .map_err(|error| error.to_string())?;
+        self.measure_text_spec(&spec)
+    }
+
+    /// Measure a complete text spec (role, style, flow and markup mode) as it
+    /// would render, without spawning it. Returns `(width, height)` in scene
+    /// units; `TextWrap::Auto` measures unwrapped because no layout width is
+    /// offered.
+    pub fn measure_text_spec(
+        &self,
+        spec: &gaanim_text::prelude::TextSpec,
+    ) -> Result<(f64, f64), String> {
+        use gaanim_text::prelude::TextRole;
+
+        let config = self.themed_text_config();
+        let role_style = config
+            .roles
+            .get(&spec.role)
+            .ok_or_else(|| format!("no style configured for text role {:?}", spec.role))?;
+        let math_font = spec.style.math_font.clone().unwrap_or_else(|| {
+            config
+                .roles
+                .get(&TextRole::Math)
+                .map(|style| style.font_family.clone())
+                .unwrap_or_else(|| "New Computer Modern Math".to_string())
+        });
 
         let font_size = spec.style.size.unwrap_or(role_style.size).max(1.0e-6);
         let font_family = spec
@@ -1608,7 +1621,7 @@ impl SceneModel {
         let color = spec.style.color.unwrap_or(role_style.fill_color);
 
         let source = crate::canvas::compile::structured_text_typst_source(
-            &spec,
+            spec,
             None,
             font_size,
             &font_family,
