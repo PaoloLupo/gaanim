@@ -462,6 +462,20 @@ scene.stop("result-ready")
 ]
 
 #api-entry(
+  name: "Scene.cursor / stops",
+  kind: "property",
+  signature: "cursor -> float / stops -> list[SceneStop]",
+  params: (),
+  returns: (type: "float / list[SceneStop]", desc: [The authoring cursor, and every stop authored so far with `name`, `time`, and `segment`.]),
+  desc: [Both use absolute timeline seconds across segments and are read-only. `stops` lists stops in timeline order; read it at the end of the script, before `render()`, to request one snapshot per pause.],
+)[
+```python
+if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
+    scene.snapshots(snapshots, [stop.time for stop in scene.stops])
+```
+]
+
+#api-entry(
   name: "Scene.reuse / persist / release",
   kind: "method",
   signature: "reuse(object, *others) / persist(object, *others) / release(object, *others) -> None",

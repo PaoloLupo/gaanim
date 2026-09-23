@@ -154,6 +154,28 @@ def documented_editorial_api_failures(tree: ast.Module) -> list[str]:
     return failures
 
 
+def validate_timeline_cursor_contract(module: object) -> list[str]:
+    """Expose the authoring cursor and absolute stop times to scripts."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    if scene.cursor != 0.0 or scene.stops != []:
+        failures.append("a new Scene must start at cursor 0 without stops")
+    scene.wait(1.5)
+    scene.stop("reveal")
+    scene.segment("details")
+    scene.wait(0.5)
+    scene.stop()
+    stops = scene.stops
+    if abs(scene.cursor - 2.0) > 1e-9:
+        failures.append("Scene.cursor did not follow waits across segments")
+    if [(stop.name, stop.time, stop.segment) for stop in stops] != [
+        ("reveal", 1.5, stops[0].segment if stops else None),
+        (None, 2.0, "details"),
+    ] or not all(isinstance(stop, module.SceneStop) for stop in stops):
+        failures.append("Scene.stops did not report named/anonymous stops in absolute time")
+    return failures
+
+
 def validate_editorial_contract(module: object) -> list[str]:
     """Exercise the editorial kit without starting the renderer."""
     failures: list[str] = []
@@ -1267,7 +1289,7 @@ def validate_scene_capability_surface(module) -> list[str]:
         "assets", "camera", "canvas", "geometry", "layout", "mechanics",
         "media", "slides", "text", "viz", "fade_out_all", "link", "persist",
         "play", "release", "render", "reuse", "segment", "snapshots", "stop",
-        "wait", "time",
+        "wait", "time", "cursor", "stops",
     }
     actual = {name for name in dir(module.Scene) if not name.startswith("_")}
     failures = []
@@ -1496,6 +1518,7 @@ def main() -> int:
     missing.extend(validate_polyline_connector_contract(module))
     missing.extend(validate_layout_card_ports_contract(module))
     missing.extend(validate_editorial_contract(module))
+    missing.extend(validate_timeline_cursor_contract(module))
     missing.extend(documented_text_api_failures(tree))
     missing.extend(documented_editorial_api_failures(tree))
 

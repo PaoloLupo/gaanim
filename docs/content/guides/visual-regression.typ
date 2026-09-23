@@ -43,6 +43,13 @@ if os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(os.environ["GAANIM_SNAPSHOTS"], [0.0, 0.5, 1.0])
 ```
 
+Para revisar una presentación, captura cada pausa: `scene.stops` devuelve los `scene.stop()` con su tiempo absoluto, y `scene.cursor` el instante actual de autoría.
+
+```python
+if os.environ.get("GAANIM_SNAPSHOTS"):
+    scene.snapshots(os.environ["GAANIM_SNAPSHOTS"], [stop.time for stop in scene.stops])
+```
+
 = CI y tolerancias
 
 ```powershell

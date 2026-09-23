@@ -1850,6 +1850,19 @@ class Segment:
         """
         ...
 
+class SceneStop:
+    """An interactive stop authored with ``scene.stop``."""
+    @property
+    def name(self) -> Optional[str]: ...
+    @property
+    def time(self) -> float:
+        """Absolute timeline time in seconds."""
+        ...
+    @property
+    def segment(self) -> str:
+        """Name of the segment containing the stop."""
+        ...
+
 class CameraState:
     """Opaque reusable authored camera state owned by one Scene.
 
@@ -4515,6 +4528,27 @@ class Scene:
         At a segment boundary, the completed outgoing segment remains visible
         until playback advances; no trailing ``wait`` is required.
         Export ignores stops and renders the timeline continuously.
+        """
+        ...
+    @property
+    def cursor(self) -> float:
+        """Current authoring cursor in absolute timeline seconds.
+
+        Example:
+            scene.play([title.animate.write()])
+            reveal_time = scene.cursor
+        """
+        ...
+    @property
+    def stops(self) -> list[SceneStop]:
+        """Stops authored so far, in timeline order, with absolute times.
+
+        Read it at the end of the script, before ``render()``, to capture a
+        snapshot at every pause.
+
+        Example:
+            if "GAANIM_SNAPSHOTS" in os.environ:
+                scene.snapshots(os.environ["GAANIM_SNAPSHOTS"], [s.time for s in scene.stops])
         """
         ...
     def play(
