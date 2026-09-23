@@ -5566,7 +5566,7 @@ impl PyMechanics {
         ))
     }
 
-    #[pyo3(signature = (from, to, offset, *, label=None, show_value=false, value=None, format=".2f", unit=None, scale=1.0, label_gap=0.10, label_orientation="upright", font_size=None, color=None, line_width=0.03, extension_style="solid", dash_length=0.12, gap_length=0.08))]
+    #[pyo3(signature = (from, to, offset, *, label=None, show_value=false, value=None, format=".2f", unit=None, scale=1.0, label_gap=0.10, label_orientation="upright", font_size=None, color=None, line_width=0.03, extension_style="solid", dash_length=0.12, gap_length=0.08, side=None, font=None, weight=None, label_style=None))]
     #[allow(clippy::too_many_arguments)]
     fn dimension_between<'py>(
         &self,
@@ -5588,6 +5588,10 @@ impl PyMechanics {
         extension_style: &str,
         dash_length: f64,
         gap_length: f64,
+        side: Option<&str>,
+        font: Option<String>,
+        weight: Option<u16>,
+        label_style: Option<PyTextStyle>,
     ) -> PyResult<Py<PyDimension>> {
         crate::custom::ensure_authoring_allowed()?;
         if !offset.is_finite() {
@@ -5642,6 +5646,23 @@ impl PyMechanics {
                 ));
             }
         };
+        let side = side
+            .map(|side| match side {
+                "left" => Ok(gaanim_animation::DimensionSide::Left),
+                "right" => Ok(gaanim_animation::DimensionSide::Right),
+                "above" => Ok(gaanim_animation::DimensionSide::Above),
+                "below" => Ok(gaanim_animation::DimensionSide::Below),
+                _ => Err(pyo3::exceptions::PyValueError::new_err(
+                    "side must be 'left', 'right', 'above' or 'below'",
+                )),
+            })
+            .transpose()?;
+        if weight.is_some_and(|weight| !(1..=1000).contains(&weight)) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "weight must be between 1 and 1000",
+            ));
+        }
+        let label_style = label_text_style(label_style, font, weight, None, None);
         let from = resolve_endpoint(&from)?;
         let to = resolve_endpoint(&to)?;
         let value = value
@@ -5664,7 +5685,9 @@ impl PyMechanics {
                     scale,
                     label_gap,
                     label_orientation: orientation,
+                    side,
                     font_size,
+                    label_style,
                     color: color.map(|value| value.0),
                     line_width,
                     extension_style,

@@ -42,6 +42,9 @@ pub struct ReactiveReadout {
     pub suffix: String,
     pub invalid: String,
     pub font_family: String,
+    /// Font weight (1..=1000) resolved like `scene.text`; `None` keeps the
+    /// family's regular face.
+    pub font_weight: Option<u16>,
     pub font_size: f64,
     pub last_text: String,
     pub last_path: Arc<BezPath>,
@@ -161,6 +164,27 @@ pub fn shape_readout_text(
     font_family: &str,
     font_size: f64,
 ) -> Result<(BezPath, Bounds3D), String> {
+    shape_readout_text_with_weight(
+        registry,
+        prefix,
+        number,
+        suffix,
+        font_family,
+        None,
+        font_size,
+    )
+}
+
+/// [`shape_readout_text`] with an explicit font weight.
+pub fn shape_readout_text_with_weight(
+    registry: &gaanim_text::font::FontRegistry,
+    prefix: &str,
+    number: &str,
+    suffix: &str,
+    font_family: &str,
+    weight: Option<u16>,
+    font_size: f64,
+) -> Result<(BezPath, Bounds3D), String> {
     let mut path = BezPath::new();
     let mut pen = 0.0;
     let mut place = |run: &str| -> Result<(), String> {
@@ -171,7 +195,7 @@ pub fn shape_readout_text(
             registry,
             run,
             font_family,
-            None,
+            weight,
             font_size,
         )
         .map_err(|errors| errors.join("; "))?;
@@ -266,12 +290,13 @@ pub fn reactive_readout_update_system(
             bounds.0 = readout.last_bounds;
             continue;
         }
-        if let Ok((new_path, new_bounds)) = shape_readout_text(
+        if let Ok((new_path, new_bounds)) = shape_readout_text_with_weight(
             &registry,
             &readout.prefix,
             &number,
             &readout.suffix,
             &readout.font_family,
+            readout.font_weight,
             readout.font_size,
         ) {
             baseline.0 = right_aligned_readout_baseline(new_bounds);
@@ -910,6 +935,7 @@ mod tests {
                     suffix: String::new(),
                     invalid: "—".to_owned(),
                     font_family: "sans-serif".to_owned(),
+                    font_weight: None,
                     font_size: 40.0,
                     last_text: "—".to_owned(),
                     last_path: empty.clone(),
@@ -955,6 +981,7 @@ mod tests {
                     suffix: String::new(),
                     invalid: "—".to_owned(),
                     font_family: "sans-serif".to_owned(),
+                    font_weight: None,
                     font_size: 40.0,
                     last_text: "1.0".to_owned(),
                     last_path: initial_path.clone(),
@@ -1061,6 +1088,7 @@ mod tests {
                     suffix: String::new(),
                     invalid: "—".to_owned(),
                     font_family: "Libertinus Serif".to_owned(),
+                    font_weight: None,
                     font_size: 0.75,
                     last_text: String::new(),
                     last_path: empty.clone(),

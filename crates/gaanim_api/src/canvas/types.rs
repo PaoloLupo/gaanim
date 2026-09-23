@@ -676,6 +676,9 @@ pub enum SpawnKind {
         suffix: String,
         invalid: String,
         font_size: Option<f64>,
+        /// Family and weight of the digits; `None` uses the theme's body font.
+        font_family: Option<String>,
+        font_weight: Option<u16>,
         rolling: Option<gaanim_animation::RollingNumberOptions>,
     },
     /// One table-backed mark regenerated natively when its DataSource changes.

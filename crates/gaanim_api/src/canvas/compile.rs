@@ -4634,12 +4634,14 @@ impl SceneModel {
                     from,
                     to,
                     offset,
+                    side,
                     line_width,
                     extension_dash,
                 } => {
                     let from = compile_tracking_endpoint(from, &id_map, &builder.states);
                     let to = compile_tracking_endpoint(to, &id_map, &builder.states);
-                    let offset = *offset;
+                    let authored_offset = *offset;
+                    let side = *side;
                     let line_width = *line_width;
                     let extension_dash = *extension_dash;
                     for (target, is_extensions) in [(line, false), (extensions, true)] {
@@ -4658,14 +4660,23 @@ impl SceneModel {
                                             .unwrap_or(DVec3::ZERO)
                                     }
                                 };
+                                let (from, to) = (endpoint_position(&from), endpoint_position(&to));
+                                // The side is a scene direction, so resolve it before
+                                // moving the endpoints into the target's local space.
+                                let offset = gaanim_animation::DimensionSide::resolve(
+                                    side,
+                                    authored_offset,
+                                    from.truncate(),
+                                    to.truncate(),
+                                );
                                 let from = gaanim_animation::tracking_world_to_local(
                                     target_entity,
-                                    endpoint_position(&from),
+                                    from,
                                     world,
                                 );
                                 let to = gaanim_animation::tracking_world_to_local(
                                     target_entity,
-                                    endpoint_position(&to),
+                                    to,
                                     world,
                                 );
                                 let start = Point::new(from.x, from.y);
@@ -4712,6 +4723,7 @@ impl SceneModel {
                     from,
                     to,
                     offset,
+                    side,
                     gap,
                     orientation,
                     clear_label_width,
@@ -4727,6 +4739,7 @@ impl SceneModel {
                                 from: compile_tracking_endpoint(from, &id_map, &builder.states),
                                 to: compile_tracking_endpoint(to, &id_map, &builder.states),
                                 offset: *offset,
+                                side: *side,
                                 gap: *gap,
                                 orientation: *orientation,
                                 clear_label_width: *clear_label_width,
@@ -7039,6 +7052,8 @@ impl SceneModel {
                 suffix,
                 invalid,
                 font_size,
+                font_family,
+                font_weight,
                 rolling,
             } => {
                 let parameter_entities: Vec<(gaanim_core::ObjectId, bevy::prelude::Entity)> =
@@ -7063,6 +7078,7 @@ impl SceneModel {
                     .collect::<Vec<_>>();
                 let body = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
                 let size = font_size.unwrap_or(body.size);
+                let digit_family = font_family.as_ref().unwrap_or(&body.font_family);
                 let number = gaanim_animation::format_reactive_number(
                     source
                         .evaluate(builder.current_time, |logical| {
@@ -7075,12 +7091,13 @@ impl SceneModel {
                     invalid,
                 );
                 let text = format!("{prefix}{number}{suffix}");
-                let (path, bounds) = gaanim_animation::shape_readout_text(
+                let (path, bounds) = gaanim_animation::shape_readout_text_with_weight(
                     builder.font_registry,
                     prefix,
                     &number,
                     suffix,
-                    &body.font_family,
+                    digit_family,
+                    *font_weight,
                     size,
                 )
                 .unwrap_or_else(|_| (gaanim_core::kurbo::BezPath::new(), Bounds3D::default()));
@@ -7155,7 +7172,8 @@ impl SceneModel {
                             prefix: prefix.clone(),
                             suffix: suffix.clone(),
                             invalid: invalid.clone(),
-                            font_family: body.font_family.clone(),
+                            font_family: digit_family.clone(),
+                            font_weight: *font_weight,
                             font_size: size,
                             last_text: text,
                             last_path: source_path,

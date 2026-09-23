@@ -1075,7 +1075,14 @@ pub struct DimensionOptions {
     pub scale: f64,
     pub label_gap: f64,
     pub label_orientation: gaanim_animation::DimensionLabelOrientation,
+    /// Scene side of the dimension. When set, only the magnitude of the
+    /// offset is used, whatever the `from` → `to` direction.
+    pub side: Option<gaanim_animation::DimensionSide>,
     pub font_size: Option<f64>,
+    /// Typography of the annotation (label, value and unit). Unset fields use
+    /// the theme's body text; `font_size` overrides its size and its color
+    /// overrides `color` for the text.
+    pub label_style: gaanim_text::prelude::TextStyle,
     pub color: Option<Color>,
     pub line_width: f64,
     pub extension_style: DimensionExtensionStyle,
@@ -1094,7 +1101,9 @@ impl Default for DimensionOptions {
             scale: 1.0,
             label_gap: 10.0,
             label_orientation: gaanim_animation::DimensionLabelOrientation::Upright,
+            side: None,
             font_size: Some(DEFAULT_REACTIVE_TEXT_SIZE),
+            label_style: gaanim_text::prelude::TextStyle::default(),
             color: None,
             line_width: 3.0,
             extension_style: DimensionExtensionStyle::Solid,
@@ -4964,6 +4973,7 @@ impl SceneModel {
                     from,
                     to,
                     offset: 0.0,
+                    side: None,
                     gap: label_gap,
                     orientation: gaanim_animation::DimensionLabelOrientation::Upright,
                     clear_label_width: false,
@@ -5834,16 +5844,18 @@ impl SceneModel {
         offset: f64,
     ) -> DrawableHandle {
         let (line, extensions, drawable) =
-            self.dimension_between_parts(from, to, offset, 3.0, None, Color::WHITE);
+            self.dimension_between_parts(from, to, offset, None, 3.0, None, Color::WHITE);
         let _ = (line, extensions);
         drawable
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn dimension_between_parts(
         &mut self,
         from: CanvasEndpoint,
         to: CanvasEndpoint,
         offset: f64,
+        side: Option<gaanim_animation::DimensionSide>,
         line_width: f64,
         extension_dash: Option<(f64, f64)>,
         color: Color,
@@ -5863,6 +5875,7 @@ impl SceneModel {
                 from,
                 to,
                 offset,
+                side,
                 line_width,
                 extension_dash,
             });
@@ -5885,6 +5898,7 @@ impl SceneModel {
             from.clone(),
             to.clone(),
             offset,
+            options.side,
             options.line_width,
             extension_dash,
             color,
@@ -5901,10 +5915,15 @@ impl SceneModel {
             });
         }
 
+        let text_size = options
+            .font_size
+            .or(options.label_style.size)
+            .unwrap_or(DEFAULT_REACTIVE_TEXT_SIZE);
+        let text_color = options.label_style.color.or(options.color);
         let text_part = |canvas: &mut SceneModel, text: &str| {
-            let mut style = gaanim_text::prelude::TextStyle::default();
-            style.size = Some(options.font_size.unwrap_or(DEFAULT_REACTIVE_TEXT_SIZE));
-            style.color = options.color;
+            let mut style = options.label_style.clone();
+            style.size = Some(text_size);
+            style.color = text_color;
             gaanim_text::prelude::TextSpec::new(
                 vec![text.into()],
                 None,
@@ -5939,15 +5958,17 @@ impl SceneModel {
                     });
                 ScalarSource::signal(tracker.id)
             };
-            let mut number_handle = self.reactive_readout(
+            let mut number_handle = self.reactive_readout_with_font(
                 value_expr,
                 options.format.clone(),
                 "",
                 "",
                 "—",
-                Some(options.font_size.unwrap_or(DEFAULT_REACTIVE_TEXT_SIZE)),
+                Some(text_size),
+                options.label_style.font.clone(),
+                options.label_style.weight,
             );
-            if let Some(color) = options.color {
+            if let Some(color) = text_color {
                 number_handle = number_handle.fill(color);
             }
             let equals = label.as_ref().map(|_| text_part(self, "=")).transpose()?;
@@ -5985,6 +6006,7 @@ impl SceneModel {
                 from,
                 to,
                 offset,
+                side: options.side,
                 gap: options.label_gap,
                 orientation: options.label_orientation,
                 clear_label_width: true,
@@ -6020,6 +6042,71 @@ impl SceneModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dimension_label_style_reaches_label_value_and_unit() {
+        let mut canvas = SceneModel::new(16, 9);
+        let style = gaanim_text::prelude::TextStyle {
+            font: Some("Cascadia Mono".into()),
+            weight: Some(700),
+            color: Some(Color::from_rgb8(200, 30, 30)),
+            ..Default::default()
+        };
+        let dimension = canvas
+            .dimension_between_with_options(
+                CanvasEndpoint::Static(DVec3::ZERO),
+                CanvasEndpoint::Static(DVec3::new(0.0, 2.0, 0.0)),
+                0.5,
+                DimensionOptions {
+                    label: Some("h".into()),
+                    show_value: true,
+                    unit: Some("m".into()),
+                    side: Some(gaanim_animation::DimensionSide::Right),
+                    font_size: Some(0.4),
+                    label_style: style,
+                    color: Some(Color::BLACK),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        for part in [&dimension.label, &dimension.unit] {
+            let spec = part.as_ref().unwrap().spec.lock().unwrap();
+            let SpawnKind::Text(text) = &spec.kind else {
+                panic!("expected a text part");
+            };
+            assert_eq!(text.style.font.as_deref(), Some("Cascadia Mono"));
+            assert_eq!(text.style.weight, Some(700));
+            assert_eq!(text.style.size, Some(0.4));
+            assert_eq!(text.style.color, Some(Color::from_rgb8(200, 30, 30)));
+        }
+        let number = dimension.number.unwrap();
+        let spec = number.spec.lock().unwrap();
+        let SpawnKind::ReactiveReadout {
+            font_family,
+            font_weight,
+            font_size,
+            ..
+        } = &spec.kind
+        else {
+            panic!("expected a reactive readout");
+        };
+        assert_eq!(font_family.as_deref(), Some("Cascadia Mono"));
+        assert_eq!(*font_weight, Some(700));
+        assert_eq!(*font_size, Some(0.4));
+        drop(spec);
+        let state = canvas.state.lock().unwrap();
+        let sides: Vec<_> = state
+            .active()
+            .ops
+            .iter()
+            .filter_map(|op| match op {
+                Op::AttachTrackingDimension { side, .. }
+                | Op::AttachDimensionLabelPlacement { side, .. } => Some(*side),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sides, [Some(gaanim_animation::DimensionSide::Right); 2]);
+    }
 
     #[test]
     fn dimensioned_arrow_caps_head_and_rejects_invalid_inputs() {
