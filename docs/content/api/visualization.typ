@@ -170,9 +170,22 @@ entrada en `scene.play`.
 
 La opacidad del gráfico se propaga por las capas vectoriales y las mallas 3D
 nativas. Por eso `fade_in`, `fade_out` y la opacidad de un padre mantienen el
-mismo comportamiento en escenas mixtas. Si Gaanim infiere los ejes de un gráfico
-de barras, incluye automáticamente la línea base numérica y reserva espacio en
-los extremos. Un dominio definido explícitamente nunca se modifica.
+mismo comportamiento en escenas mixtas.
+
+Cuando Gaanim infiere los ejes de un gráfico 2D, amplía el dominio lo necesario
+para que las marcas quepan en el área de trazado:
+
+- *bar*: incluye la línea base y reserva media barra más un margen en los
+  extremos.
+- *heatmap*: añade media celda (`cell_width / 2`, `cell_height / 2`) por lado.
+- *area*: incluye la línea base (`baseline`, 0 por defecto).
+- *error_bar*: el eje y cubre `y - low` a `y + high`, más un margen del 5 %.
+- *point*, *line* y *step*: un margen del 5 % del rango de datos a cada lado,
+  para que los extremos no se solapen con los ejes.
+
+Un eje que cruzaba al otro en un borde del dominio sigue en ese borde. Un
+dominio definido explícitamente (`axes(...)` o `scale.domain`) nunca se
+modifica, y los gráficos 3D conservan el dominio de los datos.
 
 ```python
 target = spec.encode(z="height").axes(z=Axis.linear(-2, 2))

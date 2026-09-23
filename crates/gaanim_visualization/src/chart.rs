@@ -85,6 +85,10 @@ pub enum ScaleKind {
     Category,
 }
 
+/// Fraction of the data span added on each side of an inferred point, line,
+/// step or error-bar domain so edge marks do not overlap the axes.
+pub const INFERRED_DOMAIN_MARGIN: f64 = 0.05;
+
 /// Point radius, in scene units, of a chart without a `size` encoding.
 pub const DEFAULT_POINT_RADIUS: f64 = 0.06;
 /// Radii, in scene units, that a numeric `size` field maps its domain onto.
@@ -497,15 +501,31 @@ impl ChartSpec {
             let axis = infer_axis(&self.data, encoding)?;
             result.insert(channel, axis);
         }
-        if self.mark.kind == MarkKind::Bar && !self.encodings.contains_key(&Channel::Z) {
-            self.pad_inferred_bar_axes(&mut result)?;
+        if !self.encodings.contains_key(&Channel::Z) {
+            match self.mark.kind {
+                MarkKind::Bar => self.pad_inferred_bar_axes(&mut result)?,
+                MarkKind::Heatmap => self.pad_inferred_heatmap_axes(&mut result)?,
+                MarkKind::Area => self.pad_inferred_area_axes(&mut result)?,
+                MarkKind::ErrorBar => self.pad_inferred_error_bar_axes(&mut result)?,
+                MarkKind::Point | MarkKind::Line | MarkKind::Step => {
+                    for channel in [Channel::X, Channel::Y] {
+                        self.widen_inferred_axis(&mut result, channel, |min, max| {
+                            let margin = (max - min) * INFERRED_DOMAIN_MARGIN;
+                            (min - margin, max + margin)
+                        })?;
+                    }
+                }
+                _ => {}
+            }
         }
         Ok(result)
     }
 
-    fn pad_inferred_bar_axes(&self, axes: &mut BTreeMap<Channel, Axis>) -> Result<(), ChartError> {
-        let has_authored_domain = |channel| {
-            matches!(
+    /// True when neither an explicit axis nor a `scale.domain` fixes the
+    /// channel's domain, so it may grow to fit the extent of the marks.
+    fn is_inferred_domain(&self, channel: Channel) -> bool {
+        !self.axes.contains_key(&channel)
+            && !matches!(
                 self.encodings.get(&channel),
                 Some(Encoding::Field {
                     scale: Some(ScaleSpec {
@@ -515,8 +535,115 @@ impl ChartSpec {
                     ..
                 })
             )
+    }
+
+    /// Replace an inferred linear or time domain with `widen(min, max)`. An
+    /// axis that crossed the other at an edge of the old domain keeps
+    /// crossing at the same edge of the new one, so the frame stays closed.
+    fn widen_inferred_axis(
+        &self,
+        axes: &mut BTreeMap<Channel, Axis>,
+        channel: Channel,
+        widen: impl FnOnce(f64, f64) -> (f64, f64),
+    ) -> Result<(), ChartError> {
+        if !self.is_inferred_domain(channel) {
+            return Ok(());
+        }
+        let Some(axis) = axes.get(&channel) else {
+            return Ok(());
         };
-        if !self.axes.contains_key(&Channel::X) && !has_authored_domain(Channel::X) {
+        let (min, max) = axis.domain();
+        let (new_min, new_max) = widen(min, max);
+        if !new_min.is_finite() || !new_max.is_finite() || new_min >= new_max {
+            return Ok(());
+        }
+        let crossing = axis.crossing_value();
+        let crossing = if crossing <= min {
+            Crossing::Minimum
+        } else if crossing >= max {
+            Crossing::Maximum
+        } else {
+            Crossing::Value(crossing)
+        };
+        let widened = match axis.scale() {
+            Scale::Linear => Axis::linear(new_min, new_max)?,
+            Scale::Time => Axis::time(new_min, new_max)?,
+            _ => return Ok(()),
+        };
+        axes.insert(channel, widened.crossing(crossing));
+        Ok(())
+    }
+
+    /// Heatmap cells are centered on their data values: widen by half a cell
+    /// so the outer cells stay inside the plot.
+    fn pad_inferred_heatmap_axes(
+        &self,
+        axes: &mut BTreeMap<Channel, Axis>,
+    ) -> Result<(), ChartError> {
+        for (channel, option) in [(Channel::X, "cell_width"), (Channel::Y, "cell_height")] {
+            let half = match self.mark.options.get(option) {
+                Some(ConstantValue::Number(size)) if size.is_finite() && *size > 0.0 => size * 0.5,
+                _ => 0.5,
+            };
+            self.widen_inferred_axis(axes, channel, |min, max| (min - half, max + half))?;
+        }
+        Ok(())
+    }
+
+    /// An area is filled down to its baseline, which the Y domain must include.
+    fn pad_inferred_area_axes(&self, axes: &mut BTreeMap<Channel, Axis>) -> Result<(), ChartError> {
+        let baseline = match self.mark.options.get("baseline") {
+            Some(ConstantValue::Number(baseline)) if baseline.is_finite() => *baseline,
+            _ => 0.0,
+        };
+        self.widen_inferred_axis(axes, Channel::Y, |min, max| {
+            (min.min(baseline), max.max(baseline))
+        })
+    }
+
+    /// Error bars reach `y - low` and `y + high`: the Y domain spans those
+    /// ends, and both axes keep the usual margin for their caps.
+    fn pad_inferred_error_bar_axes(
+        &self,
+        axes: &mut BTreeMap<Channel, Axis>,
+    ) -> Result<(), ChartError> {
+        let column = |name: &str| match self.mark.options.get(name) {
+            Some(ConstantValue::Text(column)) => self.data.numeric_column(column).ok(),
+            _ => None,
+        };
+        let y = match self.encodings.get(&Channel::Y) {
+            Some(Encoding::Field { column, .. }) => self.data.numeric_column(column).ok(),
+            _ => None,
+        };
+        let mut extent = None::<(f64, f64)>;
+        if let (Some(y), Some(low), Some(high)) = (y, column("low"), column("high")) {
+            for ((y, low), high) in y.iter().zip(low).zip(high) {
+                let (Some(y), Some(low), Some(high)) = (y, low, high) else {
+                    continue;
+                };
+                for end in [y - low, y + high] {
+                    if end.is_finite() {
+                        extent = Some(
+                            extent.map_or((end, end), |(min, max)| (min.min(end), max.max(end))),
+                        );
+                    }
+                }
+            }
+        }
+        self.widen_inferred_axis(axes, Channel::Y, |min, max| {
+            let (min, max) = extent.map_or((min, max), |(low, high)| (min.min(low), max.max(high)));
+            let margin = (max - min) * INFERRED_DOMAIN_MARGIN;
+            (min - margin, max + margin)
+        })?;
+        self.widen_inferred_axis(axes, Channel::X, |min, max| {
+            let margin = (max - min) * INFERRED_DOMAIN_MARGIN;
+            (min - margin, max + margin)
+        })
+    }
+
+    fn pad_inferred_bar_axes(&self, axes: &mut BTreeMap<Channel, Axis>) -> Result<(), ChartError> {
+        let has_authored_domain = |channel| !self.is_inferred_domain(channel);
+        if !has_authored_domain(Channel::X) {
             let width = match self.mark.options.get("width") {
                 Some(ConstantValue::Number(width)) if width.is_finite() && *width > 0.0 => *width,
                 _ => 0.8,
@@ -540,7 +667,7 @@ impl ChartSpec {
                 }
             }
         }
-        if !self.axes.contains_key(&Channel::Y) && !has_authored_domain(Channel::Y) {
+        if !has_authored_domain(Channel::Y) {
             let baseline = match self.mark.options.get("baseline") {
                 Some(ConstantValue::Number(baseline)) if baseline.is_finite() => *baseline,
                 _ => 0.0,
@@ -1131,6 +1258,134 @@ mod tests {
         assert!(x_max > 2.4, "the last bar needs symmetric outer padding");
         assert_eq!(x.crossing_value(), x_min);
         assert_eq!(y.domain(), (0.0, 3.0));
+    }
+
+    fn xy_spec(kind: MarkKind, options: BTreeMap<String, ConstantValue>) -> ChartSpec {
+        let data = DataTable::numeric([
+            ("x".to_owned(), vec![0.0, 1.0, 2.0]),
+            ("y".to_owned(), vec![2.0, 4.0, 3.0]),
+            ("value".to_owned(), vec![1.0, 2.0, 3.0]),
+            ("err".to_owned(), vec![0.5, 1.0, 2.0]),
+        ])
+        .unwrap();
+        ChartSpec::new(data, None)
+            .unwrap()
+            .mark(kind, options)
+            .encode(Channel::X, Encoding::field("x"))
+            .unwrap()
+            .encode(Channel::Y, Encoding::field("y"))
+            .unwrap()
+    }
+
+    fn assert_domain(axis: &Axis, expected: (f64, f64)) {
+        let (min, max) = axis.domain();
+        assert!(
+            (min - expected.0).abs() < 1e-12 && (max - expected.1).abs() < 1e-12,
+            "{:?} != {expected:?}",
+            axis.domain()
+        );
+    }
+
+    #[test]
+    fn inferred_point_line_and_step_domains_get_a_margin_and_keep_edge_axes() {
+        for kind in [MarkKind::Point, MarkKind::Line, MarkKind::Step] {
+            let axes = xy_spec(kind, BTreeMap::new()).resolved_axes().unwrap();
+            // x spans 0..2 and y spans 2..4: 5 % of each span on both sides.
+            assert_domain(&axes[&Channel::X], (-0.1, 2.1));
+            assert_domain(&axes[&Channel::Y], (1.9, 4.1));
+            // Both axes crossed at their minimum edge before padding.
+            assert_eq!(axes[&Channel::X].crossing_value(), -0.1);
+            assert_eq!(axes[&Channel::Y].crossing_value(), 1.9);
+        }
+    }
+
+    #[test]
+    fn padding_keeps_an_interior_zero_crossing() {
+        let data = DataTable::numeric([
+            ("x".to_owned(), vec![-2.0, 2.0]),
+            ("y".to_owned(), vec![1.0, 3.0]),
+        ])
+        .unwrap();
+        let spec = ChartSpec::new(data, None)
+            .unwrap()
+            .mark(MarkKind::Point, BTreeMap::new())
+            .encode(Channel::X, Encoding::field("x"))
+            .unwrap()
+            .encode(Channel::Y, Encoding::field("y"))
+            .unwrap();
+        let axes = spec.resolved_axes().unwrap();
+        assert_domain(&axes[&Channel::X], (-2.2, 2.2));
+        assert_eq!(axes[&Channel::X].crossing_value(), 0.0);
+    }
+
+    #[test]
+    fn inferred_heatmap_domains_include_the_outer_half_cells() {
+        let options = BTreeMap::from([
+            ("cell_width".to_owned(), ConstantValue::Number(1.0)),
+            ("cell_height".to_owned(), ConstantValue::Number(0.5)),
+        ]);
+        let spec = xy_spec(MarkKind::Heatmap, options)
+            .encode(Channel::Color, Encoding::field("value"))
+            .unwrap();
+        let axes = spec.resolved_axes().unwrap();
+        assert_domain(&axes[&Channel::X], (-0.5, 2.5));
+        assert_domain(&axes[&Channel::Y], (1.75, 4.25));
+    }
+
+    #[test]
+    fn inferred_area_domain_includes_its_baseline() {
+        let axes = xy_spec(MarkKind::Area, BTreeMap::new())
+            .resolved_axes()
+            .unwrap();
+        assert_domain(&axes[&Channel::X], (0.0, 2.0));
+        assert_domain(&axes[&Channel::Y], (0.0, 4.0));
+        let lifted = BTreeMap::from([("baseline".to_owned(), ConstantValue::Number(5.0))]);
+        let axes = xy_spec(MarkKind::Area, lifted).resolved_axes().unwrap();
+        assert_domain(&axes[&Channel::Y], (2.0, 5.0));
+    }
+
+    #[test]
+    fn inferred_error_bar_domain_spans_both_error_ends() {
+        let options = BTreeMap::from([
+            ("low".to_owned(), ConstantValue::Text("err".into())),
+            ("high".to_owned(), ConstantValue::Text("err".into())),
+        ]);
+        let axes = xy_spec(MarkKind::ErrorBar, options)
+            .resolved_axes()
+            .unwrap();
+        // Ends: 1.5..2.5, 3..5, 1..5 -> 1..5, then a 5 % margin of 4.
+        assert_domain(&axes[&Channel::Y], (0.8, 5.2));
+        assert_domain(&axes[&Channel::X], (-0.1, 2.1));
+    }
+
+    #[test]
+    fn authored_domains_of_every_mark_are_not_padded() {
+        let authored = Axis::linear(-1.0, 4.0).unwrap();
+        for kind in [MarkKind::Point, MarkKind::Line, MarkKind::Area] {
+            let spec = xy_spec(kind, BTreeMap::new())
+                .axis(Channel::X, authored.clone())
+                .unwrap();
+            assert_eq!(spec.resolved_axes().unwrap()[&Channel::X], authored);
+        }
+        let scaled = xy_spec(MarkKind::Point, BTreeMap::new())
+            .encode(
+                Channel::Y,
+                Encoding::Field {
+                    column: "y".into(),
+                    scale: Some(ScaleSpec::linear(Some((0.0, 10.0))).unwrap()),
+                },
+            )
+            .unwrap();
+        assert_domain(&scaled.resolved_axes().unwrap()[&Channel::Y], (0.0, 10.0));
+    }
+
+    #[test]
+    fn three_dimensional_point_domains_are_not_padded() {
+        let spec = xy_spec(MarkKind::Point, BTreeMap::new())
+            .encode(Channel::Z, Encoding::field("value"))
+            .unwrap();
+        let axes = spec.resolved_axes().unwrap();
+        assert_domain(&axes[&Channel::X], (0.0, 2.0));
     }
 
     #[test]
