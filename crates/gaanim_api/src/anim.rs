@@ -420,9 +420,9 @@ pub enum AnimationType {
     MoveAlongPath3D {
         points: Vec<DVec3>,
     },
-    /// Specialized Create animation for `Arrow` mobjects. Draws the
-    /// outline first, then finishes with a brief scale "punch" that
-    /// emphasizes the arrowhead's appearance at the end.
+    /// Grow a solid arrow from its tail. The tip travels along the straight
+    /// or curved spine while the head keeps its authored proportions and the
+    /// stroke width stays constant. Non-arrow targets fall back to `Create`.
     GrowArrow,
     /// Interpolate a float signal value to a target.
     SignalFloat {
@@ -1030,8 +1030,7 @@ impl MobjectRef {
         }
     }
 
-    /// Specialized arrow draw: traces the outline and finishes with a
-    /// scale "punch" that emphasizes the arrowhead's arrival.
+    /// Grow an arrow from its tail with an undistorted, travelling head.
     pub fn grow_arrow(self) -> AnimationBuilder {
         AnimationBuilder {
             target: self.id,

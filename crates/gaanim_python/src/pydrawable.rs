@@ -623,6 +623,19 @@ impl PyCanvasAnim {
         })
     }
 
+    fn grow_arrow(&self) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "grow_arrow() requires a Drawable animation proxy",
+            ));
+        }
+        Ok(Self {
+            inner: self.inner.clone().grow_arrow(),
+        })
+    }
+
     fn shrink_to_center(&self) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
