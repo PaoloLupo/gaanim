@@ -524,11 +524,16 @@ text.animate.fade_out() -> Anim
 
 `by` accepts `grapheme`, `word`, `line`, or `part`; `order` accepts `forward`,
 `reverse`, `center`, or `random`; `stagger` must be finite and non-negative.
+The glyphs of one word, line, or part start together, with the segmentation of
+`text.words`, `text.lines` (explicit `\n` lines), and `text.parts`; a glyph
+belongs to its innermost part. Punctuation and text outside every group join the
+neighboring group. Groups start in `order`: `center` starts the middle group
+first and then those equally far from it, and `random` is a fixed pseudo-random
+permutation, so previews, seeks, and exports agree. `stagger` is the lag ratio
+between consecutive groups; `None` adapts it to the number of groups.
 Timing is configured uniformly after choosing the effect, so
 `text.animate.write().duration(0.8)` and
-`text.animate.write(by="word").duration(0.8)` are the intended forms. In the current
-renderer, `by="part"` has a dedicated semantic schedule; the other grouping,
-order, and stagger values are validated but share the vector write schedule.
+`text.animate.write(by="word").duration(0.8)` are the intended forms.
 
 === Énfasis y anotación
 

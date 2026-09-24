@@ -26,6 +26,16 @@ un corte reversible en el cursor. Los seeks anteriores conservan el estado
 anterior. Construir, configurar o abandonar un `Anim` no cambia visibilidad,
 estado autoral, operaciones ni cursor.
 
+Cada `Anim` contiene un solo efecto (`fade_in`, `write`, `indicate`…) o una
+combinación de destinos de propiedad (`move_to`, `fill`, `opacity`…). Encadenar
+un efecto después de un destino de propiedad o de otro efecto, como
+`dot.animate.move_to(1, 0).fade_in()`, o un destino de propiedad después de un
+efecto, como `dot.animate.fade_in().move_to(1, 0)`, lanza `ValueError`; combina
+animaciones separadas con `parallel()`. Los modificadores de tiempo y de trazo
+(`duration`, `easing`, `stroke_width`…) siguen configurando el efecto. `pulse`, `wave`, `highlight`, `focus` y `cancel`
+solo existen en selecciones de texto (`text["part"].animate.pulse()`); sobre el
+`animate` de un `Drawable` lanzan `TypeError`.
+
 == Animaciones de propiedades compuestas
 
 `Drawable.animate -> Anim` inicia una animación tipada de propiedades. Encadena
@@ -399,11 +409,12 @@ scene.render()
   kind: "method",
   signature: ".animate.write(*, by=\"grapheme\", order=\"forward\", stagger=None) -> Anim",
   params: (
-    (name: "by", type: "str", default: "\"grapheme\"", desc: [Grouping: grapheme, word, line, or semantic part.]),
-    (name: "stagger", type: "float | None", default: "None", desc: [Uses adaptive sequential staggering by default; pass a non-negative ratio to override it.]),
+    (name: "by", type: "str", default: "\"grapheme\"", desc: [Grouping: grapheme, word, explicit line, or innermost semantic part. Glyphs of one group start together.]),
+    (name: "order", type: "str", default: "\"forward\"", desc: [Group order: forward, reverse, center (middle first, then outward), or random (a fixed permutation).]),
+    (name: "stagger", type: "float | None", default: "None", desc: [Lag ratio between consecutive groups. #raw("None") adapts it to the number of groups; pass a non-negative ratio to override it.]),
   ),
   returns: (type: "Anim", desc: [Animation descriptor accepted by #raw("scene.play()") .]),
-  desc: [Writes graphemes, words, rendered lines, or semantic parts in deterministic order. Configure time afterward with #raw("text.animate.write(by=\"word\").duration(0.8)").],
+  desc: [Writes graphemes, words, explicit lines, or semantic parts in a deterministic order, with the segmentation of #raw("text.words"), #raw("text.lines"), and #raw("text.parts"). Configure time afterward with #raw("text.animate.write(by=\"word\").duration(0.8)").],
 )[
 ```python
 # show-code: true

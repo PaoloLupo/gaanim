@@ -6,8 +6,8 @@ pub use crate::shaper::{
 };
 pub use crate::structured::{
     InlineSegment, TextAlign, TextAnchor, TextContent, TextDirection, TextFlow, TextOverflow,
-    TextPart, TextPartInfo, TextSpec, TextSpecError, TextStyle, TextWrap, flatten_content,
-    parse_inline_math, rendered_text,
+    TextPart, TextPartInfo, TextRevealUnit, TextSpec, TextSpecError, TextStyle, TextWrap,
+    flatten_content, parse_inline_math, rendered_text,
 };
 pub use crate::typst_compiler::{
     GaanimTypstWorld, TextMetrics, TypstTextRun, compile_scaled_typst_to_hierarchy,

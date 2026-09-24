@@ -267,6 +267,113 @@ fn adaptive_lag_ratio(item_count: usize) -> f64 {
     (4.0 / item_count.max(1) as f64).min(0.2)
 }
 
+fn draw_config(anim_type: &AnimationType) -> Option<&crate::anim::DrawAnimationConfig> {
+    match anim_type {
+        AnimationType::Write { config }
+        | AnimationType::Create { config }
+        | AnimationType::Uncreate { config }
+        | AnimationType::Unwrite { config }
+        | AnimationType::DrawBorderThenFill { config } => Some(config),
+        _ => None,
+    }
+}
+
+/// Groups drawn items and returns them in start order with the stagger slot of
+/// each. Without resolved groups every item forms its own group; drawn items
+/// missing from the groups follow them one by one.
+fn draw_item_slots(
+    items: Vec<ObjectId>,
+    config: Option<&crate::anim::DrawAnimationConfig>,
+) -> (Vec<ObjectId>, Vec<usize>) {
+    let order = config.map_or(crate::anim::DrawOrder::Forward, |config| config.order);
+    let groups: Vec<Vec<ObjectId>> = match config.and_then(|config| config.groups.as_ref()) {
+        Some(groups) => {
+            let drawn: HashSet<ObjectId> = items.iter().copied().collect();
+            let mut seen = HashSet::new();
+            let mut grouped: Vec<Vec<ObjectId>> = groups
+                .iter()
+                .map(|group| {
+                    group
+                        .iter()
+                        .copied()
+                        .filter(|id| drawn.contains(id) && seen.insert(*id))
+                        .collect::<Vec<_>>()
+                })
+                .filter(|group| !group.is_empty())
+                .collect();
+            grouped.extend(
+                items
+                    .iter()
+                    .filter(|id| !seen.contains(id))
+                    .map(|id| vec![*id]),
+            );
+            grouped
+        }
+        None => items.into_iter().map(|id| vec![id]).collect(),
+    };
+    let group_slots = draw_group_slots(groups.len(), order);
+    let mut by_slot: Vec<(usize, usize)> = group_slots
+        .iter()
+        .enumerate()
+        .map(|(group, slot)| (*slot, group))
+        .collect();
+    by_slot.sort_unstable();
+    let mut ordered = Vec::new();
+    let mut slots = Vec::new();
+    for (slot, group) in by_slot {
+        for id in &groups[group] {
+            ordered.push(*id);
+            slots.push(slot);
+        }
+    }
+    (ordered, slots)
+}
+
+/// Stagger slot of each of `count` groups for `order`.
+fn draw_group_slots(count: usize, order: crate::anim::DrawOrder) -> Vec<usize> {
+    use crate::anim::DrawOrder;
+    match order {
+        DrawOrder::Forward => (0..count).collect(),
+        DrawOrder::Reverse => (0..count).rev().collect(),
+        DrawOrder::Center => {
+            // Doubled distances keep the two middle groups of an even count
+            // equally far from the center.
+            let middle = count.saturating_sub(1);
+            let distances: Vec<usize> = (0..count)
+                .map(|index| (2 * index).abs_diff(middle))
+                .collect();
+            let mut unique = distances.clone();
+            unique.sort_unstable();
+            unique.dedup();
+            distances
+                .iter()
+                .map(|distance| unique.partition_point(|value| value < distance))
+                .collect()
+        }
+        DrawOrder::Random => {
+            // Fisher-Yates driven by SplitMix64 seeded from the count only.
+            let mut state = 0x9E37_79B9_7F4A_7C15_u64 ^ count as u64;
+            let mut next = || {
+                state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+                let mut value = state;
+                value = (value ^ (value >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+                value = (value ^ (value >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+                value ^ (value >> 31)
+            };
+            let mut groups: Vec<usize> = (0..count).collect();
+            for index in (1..count).rev() {
+                let other = (next() % (index as u64 + 1)) as usize;
+                groups.swap(index, other);
+            }
+            let mut slots = vec![0; count];
+            for (slot, group) in groups.into_iter().enumerate() {
+                slots[group] = slot;
+            }
+            slots
+        }
+    }
+}
+
 /// Extracts a representative `Color` from a `peniko::Brush` for use as a
 /// stroke color in the `Write` animation's auto-stroke fallback.
 ///
@@ -3105,7 +3212,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         const DRAW_RATIO: f64 = 0.7;
         let start_time = self.current_time + anim.delay.max(0.0);
 
-        let mut items: Vec<ObjectId> = {
+        let items: Vec<ObjectId> = {
             let state = match self.states.get(anim.target) {
                 Some(s) => s,
                 None => {
@@ -3177,17 +3284,25 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }
         };
 
-        let n = items.len();
-        if n == 0 {
+        if items.is_empty() {
             return;
         }
 
-        let Some(schedule) = self.draw_schedule_for(&anim, n) else {
+        // Items that share a slot start together: the glyphs of one text
+        // unit, or groups equally far from the middle in center order.
+        let (mut items, mut slots) = draw_item_slots(items, draw_config(&anim.anim_type));
+        let slot_count = slots.iter().max().map_or(0, |slot| slot + 1);
+
+        let Some(schedule) = self.draw_schedule_for(&anim, slot_count) else {
             return;
         };
 
         if schedule.staggered && schedule.reversed {
             items.reverse();
+            slots.reverse();
+            for slot in &mut slots {
+                *slot = slot_count - 1 - *slot;
+            }
         }
 
         let mut temporary_strokes = HashMap::new();
@@ -3244,7 +3359,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             0.0
         };
         let item_duration = if schedule.staggered {
-            anim.duration / (1.0 + (n as f64 - 1.0) * lag_ratio)
+            anim.duration / (1.0 + (slot_count as f64 - 1.0) * lag_ratio)
         } else {
             anim.duration
         };
@@ -3289,8 +3404,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }
         }
 
-        for (i, item_id) in items.iter().enumerate() {
-            let item_start = start_time + i as f64 * lag_step;
+        for (item_id, slot) in items.iter().zip(&slots) {
+            let item_start = start_time + *slot as f64 * lag_step;
             let item_mode = if matches!(schedule.mode, DrawMode::BorderThenFill)
                 && self
                     .states
@@ -7337,6 +7452,43 @@ mod tests {
             state.path.elements().len() > centerline_element_count,
             "flattened transform proxy kept only the fraction centerline"
         );
+    }
+
+    #[test]
+    fn draw_group_slots_follow_order() {
+        use crate::anim::DrawOrder;
+        assert_eq!(draw_group_slots(4, DrawOrder::Forward), [0, 1, 2, 3]);
+        assert_eq!(draw_group_slots(4, DrawOrder::Reverse), [3, 2, 1, 0]);
+        assert_eq!(draw_group_slots(5, DrawOrder::Center), [2, 1, 0, 1, 2]);
+        assert_eq!(draw_group_slots(4, DrawOrder::Center), [1, 0, 0, 1]);
+        assert_eq!(draw_group_slots(1, DrawOrder::Center), [0]);
+        assert!(draw_group_slots(0, DrawOrder::Random).is_empty());
+
+        let random = draw_group_slots(12, DrawOrder::Random);
+        assert_eq!(random, draw_group_slots(12, DrawOrder::Random));
+        let mut sorted = random.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, (0..12).collect::<Vec<_>>());
+        assert_ne!(random, (0..12).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn draw_item_slots_start_group_members_together() {
+        use crate::anim::{DrawAnimationConfig, DrawOrder};
+        let [a, b, c, d, e] = [1, 2, 3, 4, 5].map(ObjectId::from_raw);
+
+        let (items, slots) = draw_item_slots(vec![a, b, c], None);
+        assert_eq!((items, slots), (vec![a, b, c], vec![0, 1, 2]));
+
+        let config = DrawAnimationConfig {
+            groups: Some(vec![vec![c, a], vec![b, ObjectId::from_raw(99)]]),
+            order: DrawOrder::Reverse,
+            ..Default::default()
+        };
+        // `d` and `e` are drawn but ungrouped; the unknown id is ignored.
+        let (items, slots) = draw_item_slots(vec![a, b, c, d, e], Some(&config));
+        assert_eq!(items, [e, d, b, c, a]);
+        assert_eq!(slots, [0, 1, 2, 3, 3]);
     }
 
     #[test]

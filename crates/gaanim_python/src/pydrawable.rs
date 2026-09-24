@@ -101,6 +101,48 @@ impl PyCanvasAnim {
             Ok(())
         }
     }
+
+    /// An effect replaces the proxy's animation, so it needs a proxy without
+    /// property targets or an earlier effect; the builder asserts the same.
+    fn require_effect_slot(&self, effect: &str) -> PyResult<()> {
+        if self.inner.inner.anim_type.is_empty_properties() {
+            Ok(())
+        } else {
+            Err(PyValueError::new_err(format!(
+                "{effect}() cannot be combined with property targets or another effect in one Anim; combine separate animations with parallel()"
+            )))
+        }
+    }
+
+    /// Property targets extend a compound property animation, so they cannot
+    /// follow an effect; the builder asserts the same.
+    fn require_property_slot(&self, setter: &str) -> PyResult<()> {
+        use gaanim_api::anim::AnimationType;
+        if matches!(
+            self.inner.inner.anim_type,
+            AnimationType::Properties(_) | AnimationType::TextSelectionProperties { .. }
+        ) {
+            Ok(())
+        } else {
+            Err(PyValueError::new_err(format!(
+                "{setter}() cannot follow an effect in one Anim; combine separate animations with parallel()"
+            )))
+        }
+    }
+
+    /// Emphasis effects that exist only for `text[...]` selections.
+    fn require_selection_effect_slot(&self, effect: &str) -> PyResult<()> {
+        use gaanim_api::anim::AnimationType;
+        if !matches!(
+            self.inner.inner.anim_type,
+            AnimationType::TextSelectionProperties { .. } | AnimationType::TextSelection { .. }
+        ) {
+            return Err(PyTypeError::new_err(format!(
+                "{effect}() is only available on text selections, e.g. text[\"part\"].animate.{effect}()"
+            )));
+        }
+        self.require_effect_slot(effect)
+    }
 }
 
 #[pymethods]
@@ -108,6 +150,7 @@ impl PyCanvasAnim {
     #[pyo3(signature = (x, y, width, height, *, normalized=false))]
     fn crop(&self, x: f64, y: f64, width: f64, height: f64, normalized: bool) -> PyResult<Self> {
         self.require_native_animation()?;
+        self.require_property_slot("crop")?;
         self.inner
             .clone()
             .crop(x, y, width, height, normalized)
@@ -150,6 +193,7 @@ impl PyCanvasAnim {
                 "fill level must be finite and between zero and one",
             ));
         }
+        self.require_property_slot("fill_level")?;
         self.inner
             .clone()
             .try_fill_level(level)
@@ -159,6 +203,7 @@ impl PyCanvasAnim {
     fn fill(&self, color: PyPaint) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
+        self.require_property_slot("fill")?;
         self.inner
             .clone()
             .try_fill_paint(color.0)
@@ -179,6 +224,7 @@ impl PyCanvasAnim {
                 "stroke() is only available for vector drawables; animate fill() or material() on Primitive3D",
             ));
         }
+        self.require_property_slot("stroke")?;
         self.inner
             .clone()
             .try_stroke_paint(color.0, width)
@@ -199,6 +245,7 @@ impl PyCanvasAnim {
                 "material() is only available for native Primitive3D drawables",
             ));
         }
+        self.require_property_slot("material")?;
         Ok(Self {
             inner: self.inner.clone().material(material.0),
         })
@@ -207,6 +254,7 @@ impl PyCanvasAnim {
     fn opacity(&self, value: &Bound<'_, PyAny>) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
+        self.require_property_slot("opacity")?;
         if let Ok(value) = value.extract::<f32>() {
             return Ok(Self {
                 inner: self.inner.clone().opacity(value),
@@ -224,6 +272,7 @@ impl PyCanvasAnim {
         if !value.is_finite() {
             return Err(PyValueError::new_err("parameter values must be finite"));
         }
+        self.require_effect_slot("set")?;
         Ok(Self {
             inner: self.inner.clone().set(value),
         })
@@ -232,6 +281,7 @@ impl PyCanvasAnim {
     fn transform_to(&self, target: &PyDrawable) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
+        self.require_effect_slot("transform_to")?;
         self.inner
             .clone()
             .transform_to(&target.0)
@@ -252,6 +302,7 @@ impl PyCanvasAnim {
                 "layout owns this drawable's translation; animate the LayoutItem offset instead",
             ));
         }
+        self.require_property_slot("shift_by")?;
         Ok(Self {
             inner: self.inner.clone().shift_by(dx, dy),
         })
@@ -267,6 +318,7 @@ impl PyCanvasAnim {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
         self.require_transformable()?;
+        self.require_property_slot("move_to")?;
         if let Some(y) = y {
             let sx = scalar_for_anim(x, self)?;
             let sy = scalar_for_anim(y, self)?;
@@ -313,6 +365,7 @@ impl PyCanvasAnim {
                 "layout owns this drawable's translation; animate the LayoutItem offset instead",
             ));
         }
+        self.require_property_slot("shift_by_3d")?;
         Ok(Self {
             inner: self.inner.clone().shift_by_3d(dx, dy, dz),
         })
@@ -327,6 +380,7 @@ impl PyCanvasAnim {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
         self.require_transformable()?;
+        self.require_property_slot("move_to_3d")?;
         let values = [
             scalar_for_anim(x, self)?,
             scalar_for_anim(y, self)?,
@@ -359,6 +413,7 @@ impl PyCanvasAnim {
             ));
         }
         self.require_transformable()?;
+        self.require_property_slot("scale_by")?;
         Ok(Self {
             inner: self.inner.clone().scale_by(factor),
         })
@@ -368,6 +423,7 @@ impl PyCanvasAnim {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
         self.require_transformable()?;
+        self.require_property_slot("scale_to")?;
         let source = scalar_for_anim(factor, self)?;
         if let Some(value) = source.constant_value() {
             return Ok(Self {
@@ -389,6 +445,7 @@ impl PyCanvasAnim {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
         self.require_transformable()?;
+        self.require_property_slot("scale_to_3d")?;
         let values = [
             scalar_for_anim(x, self)?,
             scalar_for_anim(y, self)?,
@@ -415,6 +472,7 @@ impl PyCanvasAnim {
             ));
         }
         self.require_transformable()?;
+        self.require_property_slot("scale_by_3d")?;
         Ok(Self {
             inner: self.inner.clone().scale_by_3d(x, y, z),
         })
@@ -429,6 +487,7 @@ impl PyCanvasAnim {
             ));
         }
         self.require_transformable()?;
+        self.require_property_slot("rotate_by")?;
         Ok(Self {
             inner: self.inner.clone().rotate_by(radians),
         })
@@ -438,6 +497,7 @@ impl PyCanvasAnim {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
         self.require_transformable()?;
+        self.require_property_slot("rotate_to")?;
         let source = scalar_for_anim(radians, self)?;
         if let Some(value) = source.constant_value() {
             return Ok(Self {
@@ -459,6 +519,7 @@ impl PyCanvasAnim {
             ));
         }
         self.require_transformable()?;
+        self.require_property_slot("rotate_by_3d")?;
         self.inner
             .clone()
             .rotate_by_3d(axis, radians)
@@ -475,6 +536,7 @@ impl PyCanvasAnim {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
         self.require_transformable()?;
+        self.require_property_slot("rotate_to_3d")?;
         let values = [
             scalar_for_anim(x, self)?,
             scalar_for_anim(y, self)?,
@@ -500,6 +562,7 @@ impl PyCanvasAnim {
                 "fade_in() requires a Drawable animation proxy",
             ));
         }
+        self.require_effect_slot("fade_in")?;
         Ok(Self {
             inner: self.inner.clone().fade_in(),
         })
@@ -520,6 +583,7 @@ impl PyCanvasAnim {
                 "distance must be a finite non-negative number",
             ));
         }
+        self.require_effect_slot("fade_in_from")?;
         Ok(Self {
             inner: self
                 .inner
@@ -536,6 +600,7 @@ impl PyCanvasAnim {
                 "fade_out() requires a Drawable animation proxy",
             ));
         }
+        self.require_effect_slot("fade_out")?;
         Ok(Self {
             inner: self.inner.clone().fade_out(),
         })
@@ -567,7 +632,27 @@ impl PyCanvasAnim {
                 ));
             }
         }
-        let mut inner = self.inner.clone().write();
+        self.require_effect_slot("write")?;
+        use gaanim_api::anim::DrawOrder;
+        use gaanim_text::prelude::TextRevealUnit;
+        let unit = match by {
+            "word" => TextRevealUnit::Word,
+            "line" => TextRevealUnit::Line,
+            "part" => TextRevealUnit::Part,
+            _ => TextRevealUnit::Grapheme,
+        };
+        let order = match order {
+            "reverse" => DrawOrder::Reverse,
+            "center" => DrawOrder::Center,
+            "random" => DrawOrder::Random,
+            _ => DrawOrder::Forward,
+        };
+        let mut inner = self
+            .inner
+            .clone()
+            .write()
+            .reveal_unit(unit)
+            .draw_order(order);
         if let Some(stagger) = stagger {
             inner = inner.lag_ratio(stagger);
         }
@@ -582,6 +667,7 @@ impl PyCanvasAnim {
                 "create() requires a Drawable animation proxy",
             ));
         }
+        self.require_effect_slot("create")?;
         Ok(Self {
             inner: self.inner.clone().create(),
         })
@@ -595,6 +681,7 @@ impl PyCanvasAnim {
                 "unwrite() requires a Drawable animation proxy",
             ));
         }
+        self.require_effect_slot("unwrite")?;
         Ok(Self {
             inner: self.inner.clone().unwrite(),
         })
@@ -608,6 +695,7 @@ impl PyCanvasAnim {
                 "uncreate() requires a Drawable animation proxy",
             ));
         }
+        self.require_effect_slot("uncreate")?;
         Ok(Self {
             inner: self.inner.clone().uncreate(),
         })
@@ -616,6 +704,7 @@ impl PyCanvasAnim {
     fn grow_from_center(&self) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
+        self.require_effect_slot("grow_from_center")?;
         Ok({
             Self {
                 inner: self.inner.clone().grow_from_center(),
@@ -631,6 +720,7 @@ impl PyCanvasAnim {
                 "grow_arrow() requires a Drawable animation proxy",
             ));
         }
+        self.require_effect_slot("grow_arrow")?;
         Ok(Self {
             inner: self.inner.clone().grow_arrow(),
         })
@@ -639,6 +729,7 @@ impl PyCanvasAnim {
     fn shrink_to_center(&self) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
+        self.require_effect_slot("shrink_to_center")?;
         Ok({
             Self {
                 inner: self.inner.clone().shrink_to_center(),
@@ -650,6 +741,7 @@ impl PyCanvasAnim {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
         self.require_transformable()?;
+        self.require_effect_slot("spin_in_from_nothing")?;
         Ok(Self {
             inner: self.inner.clone().spin_in_from_nothing(),
         })
@@ -658,6 +750,7 @@ impl PyCanvasAnim {
     fn draw_border_then_fill(&self) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
+        self.require_effect_slot("draw_border_then_fill")?;
         Ok({
             Self {
                 inner: self.inner.clone().draw_border_then_fill(),
@@ -668,6 +761,7 @@ impl PyCanvasAnim {
     fn circumscribe(&self) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
+        self.require_effect_slot("circumscribe")?;
         Ok({
             Self {
                 inner: self.inner.clone().circumscribe(),
@@ -678,6 +772,7 @@ impl PyCanvasAnim {
     fn flash(&self) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
+        self.require_effect_slot("flash")?;
         Ok({
             Self {
                 inner: self.inner.clone().flash(),
@@ -694,6 +789,7 @@ impl PyCanvasAnim {
                 "time_width must be finite and in (0, 1]",
             ));
         }
+        self.require_effect_slot("show_passing_flash")?;
         Ok(Self {
             inner: self.inner.clone().show_passing_flash(time_width),
         })
@@ -703,6 +799,7 @@ impl PyCanvasAnim {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
         self.require_transformable()?;
+        self.require_effect_slot("move_along")?;
         self.inner
             .clone()
             .move_along(&target.0)
@@ -713,6 +810,7 @@ impl PyCanvasAnim {
     fn fade_transform_to(&self, target: &PyDrawable) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
+        self.require_effect_slot("fade_transform_to")?;
         self.inner
             .clone()
             .fade_transform_to(&target.0)
@@ -723,6 +821,7 @@ impl PyCanvasAnim {
     fn replacement_transform_to(&self, target: &PyDrawable) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
+        self.require_effect_slot("replacement_transform_to")?;
         self.inner
             .clone()
             .replacement_transform_to(&target.0)
@@ -733,6 +832,7 @@ impl PyCanvasAnim {
     fn indicate(&self) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
+        self.require_effect_slot("indicate")?;
         Ok(Self {
             inner: self.inner.clone().indicate(),
         })
@@ -741,6 +841,7 @@ impl PyCanvasAnim {
     fn wiggle(&self) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
+        self.require_effect_slot("wiggle")?;
         Ok(Self {
             inner: self.inner.clone().wiggle(),
         })
@@ -749,50 +850,45 @@ impl PyCanvasAnim {
     fn pulse(&self) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
-        Ok({
-            Self {
-                inner: self.inner.clone().pulse(),
-            }
+        self.require_selection_effect_slot("pulse")?;
+        Ok(Self {
+            inner: self.inner.clone().pulse(),
         })
     }
 
     fn wave(&self) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
-        Ok({
-            Self {
-                inner: self.inner.clone().wave(),
-            }
+        self.require_selection_effect_slot("wave")?;
+        Ok(Self {
+            inner: self.inner.clone().wave(),
         })
     }
 
     fn highlight(&self) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
-        Ok({
-            Self {
-                inner: self.inner.clone().highlight(),
-            }
+        self.require_selection_effect_slot("highlight")?;
+        Ok(Self {
+            inner: self.inner.clone().highlight(),
         })
     }
 
     fn focus(&self) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
-        Ok({
-            Self {
-                inner: self.inner.clone().focus(),
-            }
+        self.require_selection_effect_slot("focus")?;
+        Ok(Self {
+            inner: self.inner.clone().focus(),
         })
     }
 
     fn cancel(&self) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
-        Ok({
-            Self {
-                inner: self.inner.clone().cancel(),
-            }
+        self.require_selection_effect_slot("cancel")?;
+        Ok(Self {
+            inner: self.inner.clone().cancel(),
         })
     }
 
@@ -894,6 +990,129 @@ mod tests {
             panic!("write() should produce a Write animation");
         };
         assert_eq!(config.lag_ratio, None);
+    }
+
+    #[test]
+    fn write_forwards_grouping_and_order() {
+        let mut scene = SceneModel::new(640, 360);
+        let text = scene.text("uno dos");
+        let animation = PyCanvasAnim {
+            inner: text.animate(),
+        }
+        .write("word", "center", Some(0.3))
+        .expect("grouped write should be valid");
+
+        let AnimationType::Write { config } = animation.inner.inner.anim_type else {
+            panic!("write() should produce a Write animation");
+        };
+        assert_eq!(
+            config.reveal_unit,
+            gaanim_text::prelude::TextRevealUnit::Word
+        );
+        assert_eq!(config.order, gaanim_api::anim::DrawOrder::Center);
+        assert_eq!(config.lag_ratio, Some(0.3));
+    }
+
+    fn error_is<T: pyo3::PyTypeInfo>(result: PyResult<PyCanvasAnim>) -> bool {
+        Python::initialize();
+        let error = result.expect_err("the chain should be rejected");
+        Python::attach(|py| error.is_instance_of::<T>(py))
+    }
+
+    #[test]
+    fn selection_only_effects_reject_drawable_proxies_without_panicking() {
+        let mut scene = SceneModel::new(640, 360);
+        let circle = PyCanvasAnim {
+            inner: scene.circle(1.0).animate(),
+        };
+        let effects: [fn(&PyCanvasAnim) -> PyResult<PyCanvasAnim>; 5] = [
+            PyCanvasAnim::pulse,
+            PyCanvasAnim::wave,
+            PyCanvasAnim::highlight,
+            PyCanvasAnim::focus,
+            PyCanvasAnim::cancel,
+        ];
+        for effect in effects {
+            assert!(error_is::<PyTypeError>(effect(&circle)));
+        }
+
+        let text = scene.text("uno dos");
+        let selection = PyCanvasAnim {
+            inner: text.select("uno").animate_properties(),
+        };
+        assert!(selection.pulse().is_ok());
+        let colored = PyCanvasAnim {
+            inner: selection.inner.clone().opacity(0.5),
+        };
+        assert!(error_is::<PyValueError>(colored.pulse()));
+        assert!(error_is::<PyValueError>(colored.indicate()));
+        let pulsed = selection.pulse().unwrap();
+        assert!(error_is::<PyValueError>(pulsed.wave()));
+    }
+
+    #[test]
+    fn effects_reject_property_targets_and_earlier_effects() {
+        let mut scene = SceneModel::new(640, 360);
+        let circle = scene.circle(1.0);
+        let moved = PyCanvasAnim {
+            inner: circle.animate().opacity(0.5),
+        };
+        assert!(error_is::<PyValueError>(moved.fade_in()));
+        assert!(error_is::<PyValueError>(moved.indicate()));
+        let faded = PyCanvasAnim {
+            inner: circle.animate(),
+        }
+        .fade_in()
+        .unwrap();
+        assert!(error_is::<PyValueError>(faded.fade_out()));
+        assert!(error_is::<PyValueError>(
+            faded.write("grapheme", "forward", None)
+        ));
+    }
+
+    #[test]
+    fn property_targets_reject_earlier_effects_without_panicking() {
+        let mut scene = SceneModel::new(640, 360);
+        let circle = scene.circle(1.0);
+        let faded = PyCanvasAnim {
+            inner: circle.animate(),
+        }
+        .fade_in()
+        .unwrap();
+        let white = || {
+            PyPaint(gaanim_core::peniko::Brush::Solid(
+                gaanim_core::peniko::Color::WHITE,
+            ))
+        };
+        assert!(error_is::<PyValueError>(faded.scale_by(2.0)));
+        assert!(error_is::<PyValueError>(faded.rotate_by(0.5)));
+        assert!(error_is::<PyValueError>(faded.fill(white())));
+        assert!(error_is::<PyValueError>(faded.stroke(white(), 0.1)));
+        Python::attach(|py| {
+            let one = pyo3::types::PyFloat::new(py, 1.0).into_any();
+            let half = pyo3::types::PyFloat::new(py, 0.5).into_any();
+            let is_value_error = |result: PyResult<PyCanvasAnim>| {
+                result.is_err_and(|error| error.is_instance_of::<PyValueError>(py))
+            };
+            assert!(is_value_error(faded.move_to(&one, Some(&one), None)));
+            assert!(is_value_error(faded.opacity(&half)));
+            let indicated = PyCanvasAnim {
+                inner: circle.animate(),
+            }
+            .indicate()
+            .unwrap();
+            assert!(is_value_error(indicated.opacity(&half)));
+        });
+
+        let text = scene.text("uno dos");
+        let written = PyCanvasAnim {
+            inner: text.animate(),
+        }
+        .write("grapheme", "forward", None)
+        .unwrap();
+        assert!(error_is::<PyValueError>(written.fill(white())));
+        // Draw modifiers still configure the effect itself.
+        assert!(written.stroke_width(0.05).is_ok());
     }
 }
 

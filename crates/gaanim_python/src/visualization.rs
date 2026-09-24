@@ -3155,6 +3155,7 @@ mod tests {
                 (expected != DEFAULT_REACTIVE_TEXT_SIZE).then_some(expected),
                 None,
                 "—".to_owned(),
+                '.',
             );
 
             for part in [label.as_ref(), equals.as_ref(), unit.as_ref()] {
