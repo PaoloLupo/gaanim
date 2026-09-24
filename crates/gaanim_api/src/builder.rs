@@ -6437,6 +6437,22 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
+    /// Spawns one drawable holding a circle of `radius` at each position.
+    pub fn points(
+        &mut self,
+        positions: &[kurbo::Point],
+        radius: f64,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        let id = self.next_id();
+        let bundle = gaanim_objects::primitives::points(id, positions, radius);
+        MobjectSpawnBuilder {
+            builder: self,
+            id,
+            bundle,
+            parent_entity: None,
+        }
+    }
+
     /// Spawns a square primitive.
     pub fn square(&mut self, side_length: f64) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
         let id = self.next_id();

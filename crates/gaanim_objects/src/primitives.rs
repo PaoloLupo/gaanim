@@ -292,6 +292,35 @@ pub fn dot(id: ObjectId, radius: f64) -> MobjectBundle {
     bundle
 }
 
+/// Creates one Mobject whose path holds a circle of `radius` at every
+/// position, so a large point cloud renders, styles, and animates as a single
+/// object instead of one entity per point.
+pub fn points(id: ObjectId, positions: &[kurbo::Point], radius: f64) -> MobjectBundle {
+    let mut path = kurbo::BezPath::new();
+    let (mut min, mut max) = (
+        kurbo::Point::new(f64::INFINITY, f64::INFINITY),
+        kurbo::Point::new(f64::NEG_INFINITY, f64::NEG_INFINITY),
+    );
+    for &center in positions {
+        path.extend(kurbo::Circle::new(center, radius).path_elements(0.1));
+        min = kurbo::Point::new(min.x.min(center.x), min.y.min(center.y));
+        max = kurbo::Point::new(max.x.max(center.x), max.y.max(center.y));
+    }
+    let bounds = if positions.is_empty() {
+        Bounds3D::default()
+    } else {
+        Bounds3D::new_2d(
+            min.x - radius,
+            min.y - radius,
+            max.x + radius,
+            max.y + radius,
+        )
+    };
+    let mut bundle = MobjectBundle::new(id, path, bounds);
+    bundle.tag = ObjectTag("Points".into());
+    bundle
+}
+
 /// Creates a square Mobject bundle.
 pub fn square(id: ObjectId, side_length: f64) -> MobjectBundle {
     let mut bundle = rectangle(id, side_length, side_length);

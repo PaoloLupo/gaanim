@@ -6703,6 +6703,14 @@ impl SceneModel {
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
+            SpawnKind::Points { positions, radius } => {
+                let positions: Vec<Point> =
+                    positions.iter().map(|&(x, y)| Point::new(x, y)).collect();
+                let b = builder.points(&positions, *radius);
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                mr
+            }
             SpawnKind::Polygon(points) => {
                 let points: Vec<Point> = points.iter().map(|&(x, y)| Point::new(x, y)).collect();
                 let b = builder.polygon(&points);
@@ -12174,6 +12182,43 @@ mod tests {
                 }
             ) if *from == 0.0 && *to == 1.0
         )));
+    }
+
+    #[test]
+    fn points_compile_to_one_path_with_a_circle_per_position() {
+        let mut canvas = SceneModel::new(640, 360);
+        assert!(canvas.points(Vec::new(), 0.1).is_err());
+        assert!(canvas.points(vec![(0.0, f64::NAN)], 0.1).is_err());
+        assert!(canvas.points(vec![(0.0, 0.0)], 0.0).is_err());
+        canvas
+            .points(vec![(-1.0, 0.0), (2.0, 1.0), (0.5, -3.0)], 0.25)
+            .expect("valid point cloud");
+
+        let mut world = compile_canvas_for_layout(canvas);
+        let mut query = world.query::<(
+            &gaanim_scene::ObjectTag,
+            &gaanim_scene::Path2D,
+            &gaanim_scene::LocalBounds,
+        )>();
+        let (_, path, bounds) = query
+            .iter(&world)
+            .find(|(tag, _, _)| tag.0 == "Points")
+            .expect("one Points object");
+        let subpaths = path
+            .0
+            .elements()
+            .iter()
+            .filter(|element| matches!(element, gaanim_core::kurbo::PathEl::MoveTo(_)))
+            .count();
+        assert_eq!(subpaths, 3);
+        assert_eq!(
+            bounds.0.min.truncate(),
+            gaanim_core::glam::DVec2::new(-1.25, -3.25)
+        );
+        assert_eq!(
+            bounds.0.max.truncate(),
+            gaanim_core::glam::DVec2::new(2.25, 1.25)
+        );
     }
 
     #[test]
