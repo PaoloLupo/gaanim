@@ -477,7 +477,7 @@ scene.play(streams.flow(3.0, time_width=0.12))
 #api-entry(
   name: "VectorField.streamlines",
   kind: "method",
-  signature: "streamlines(*, seeds=None, direction=\"both\", tolerance=1e-4, min_step=1e-5, max_step=.1, max_time=3, max_length=None, max_steps=10000, stagnation=1e-10, padding=.05, separation=.035, width=2, opacity=1, color=None, colormap=None, color_range=None) -> StreamLines",
+  signature: "streamlines(*, seeds=None, direction=\"both\", tolerance=1e-4, min_step=1e-5, max_step=.1, max_time=3, max_length=None, max_steps=10000, stagnation=1e-10, padding=.05, separation=.035, width=.02, opacity=1, color=None, colormap=None, color_range=None) -> StreamLines",
   params: (
     (name: "seeds", type: "(int,int) | (int,int,int) | None", default: "None", desc: [Resolución determinista de candidatos de semilla.]),
     (name: "direction", type: "forward | backward | both", default: "both", desc: [Sentido temporal de integración desde cada semilla.]),

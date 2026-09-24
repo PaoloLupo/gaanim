@@ -1777,7 +1777,7 @@ impl DrawableHandle {
             AnimationType::Flash {
                 color: None,
                 n_lines: 16,
-                radius: 100.0,
+                radius: 1.0,
             },
             dur.into_opt(),
         )

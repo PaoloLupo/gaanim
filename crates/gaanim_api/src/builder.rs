@@ -6175,7 +6175,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         // Number labels are centered on their local origin. Place the
                         // whole bounding box to the left of the tick, rather than
                         // applying a fixed shift that lets wide values cross the axis.
-                        let x = -tick_len * 0.5 - 8.0 - state.bounds.width() * 0.5;
+                        let x = -tick_len * 0.5 - 0.08 - state.bounds.width() * 0.5;
                         state.transform = state.transform.shift_2d(x, val);
                     } else {
                         state.transform = state.transform.shift_2d(val, -18.0);
@@ -6731,7 +6731,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             .cloned()
             .unwrap_or_else(|| gaanim_text::prelude::RoleStyle {
                 font_family: "New Computer Modern".to_string(),
-                size: 32.0,
+                size: 0.32,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             });
 

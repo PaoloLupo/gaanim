@@ -1898,9 +1898,11 @@ pub fn tracking_angle_system(world: &mut World) {
                     let inward = if at_start { tangent } else { -tangent };
                     let normal = DVec2::new(-inward.y, inward.x);
                     let tip = local(tip_world);
-                    let base_world = tip_world + DVec3::new(inward.x * 11.0, inward.y * 11.0, 0.0);
-                    let left = local(base_world + DVec3::new(normal.x * 5.5, normal.y * 5.5, 0.0));
-                    let right = local(base_world - DVec3::new(normal.x * 5.5, normal.y * 5.5, 0.0));
+                    let base_world = tip_world + DVec3::new(inward.x * 0.11, inward.y * 0.11, 0.0);
+                    let left =
+                        local(base_world + DVec3::new(normal.x * 0.055, normal.y * 0.055, 0.0));
+                    let right =
+                        local(base_world - DVec3::new(normal.x * 0.055, normal.y * 0.055, 0.0));
                     path.move_to((tip.x, tip.y));
                     path.line_to((left.x, left.y));
                     path.line_to((right.x, right.y));

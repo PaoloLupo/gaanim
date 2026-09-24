@@ -56,7 +56,7 @@ pub struct PyStrokeStyle(pub ThemeStrokeStyle);
 #[pymethods]
 impl PyStrokeStyle {
     #[new]
-    #[pyo3(signature = (paint, width=2.0, *, cap="round", join="round", miter_limit=4.0, dashes=Vec::new(), dash_offset=0.0))]
+    #[pyo3(signature = (paint, width=0.02, *, cap="round", join="round", miter_limit=4.0, dashes=Vec::new(), dash_offset=0.0))]
     fn new(
         paint: &Bound<'_, PyAny>,
         width: f64,

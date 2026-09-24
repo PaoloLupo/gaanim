@@ -215,7 +215,7 @@ class StrokeStyle:
     def __init__(
         self,
         paint: Paint,
-        width: float = 2.0,
+        width: float = 0.02,
         *,
         cap: Literal["butt", "round", "square"] = "round",
         join: Literal["bevel", "miter", "round"] = "round",
@@ -1707,7 +1707,7 @@ class Text(Drawable):
         """Apply blur while preserving Text chaining and typographic placement.
 
         Example:
-            label.blur(4.0).move_to(0.0, 0.0)
+            label.blur(0.04).move_to(0.0, 0.0)
         """
         ...
     def shadow(
@@ -2494,7 +2494,7 @@ class VectorField:
         stagnation: float = 1e-10,
         padding: float = 0.05,
         separation: float = 0.035,
-        width: float = 2.0,
+        width: float = 0.02,
         opacity: float = 1.0,
         color: Optional[ColorLike] = None,
         colormap: Optional[ColorMapLike] = None,
@@ -2684,7 +2684,7 @@ class CoordinateSpace:
 
         Example:
             plane = scene.cartesian_2d(Axis.linear(0, 30), Axis.linear(-0.4, 0.4))
-            curve = plane.plot_data(times, accel, color=CYAN, width=4)
+            curve = plane.plot_data(times, accel, color=CYAN, width=0.04)
             scene.play(curve.animate.create().duration(2.0))
         """
         ...
@@ -2975,7 +2975,7 @@ class Geometry:
         self,
         targets: Drawable | TextSelection | Sequence[Drawable | TextSelection],
         *,
-        padding: Padding = 12.0,
+        padding: Padding = 0.12,
         corner_radius: float = 0.08,
     ) -> SurroundingRect:
         """Create a live outline around objects, text parts, or equation parts.

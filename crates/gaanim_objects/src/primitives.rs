@@ -1153,8 +1153,8 @@ pub fn dimension_extensions_path(
 
 /// Builds the complete default technical-dimension silhouette.
 pub fn dimension_path(start: kurbo::Point, end: kurbo::Point, offset: f64) -> kurbo::BezPath {
-    let mut path = dimension_extensions_path(start, end, offset, 2.0, None);
-    path.extend(dimension_measure_path(start, end, offset, 2.0));
+    let mut path = dimension_extensions_path(start, end, offset, 0.02, None);
+    path.extend(dimension_measure_path(start, end, offset, 0.02));
     path
 }
 

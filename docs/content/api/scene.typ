@@ -367,7 +367,7 @@ snippet = scene.text.code("result = mass * acceleration", language="python")
 scene.play([snippet.animate.fade_in().duration(0.4)])
 ```
 
-`point_on_curve(curve, tracker)` creates a dot whose position follows the
+`point_on_curve(curve, tracker)` creates a 0.08-unit dot whose position follows the
 normalized value of a `Parameter` along a sampled `polyline` or Bézier
 path. The value is clamped to
 `[0, 1]` and measured by arc length, with no Python callback during playback.

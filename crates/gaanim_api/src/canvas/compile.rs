@@ -320,7 +320,7 @@ fn reactive_arrow_path_2d(
     let end = start + direction * length;
     let tip_length = options
         .tip_length
-        .unwrap_or((length * 0.3).clamp(5.0, 12.0));
+        .unwrap_or((length * 0.3).clamp(0.05, 0.12));
     let tip_width = options.tip_width.unwrap_or(tip_length * 0.8);
     let perpendicular = Vec2::new(-direction.y, direction.x);
     let shoulder = end - direction * tip_length;
@@ -420,7 +420,7 @@ fn reactive_arrow_lines_3d(
         let end = start + direction * length;
         let tip_length = options
             .tip_length
-            .unwrap_or((length * 0.3).clamp(4.0, 10.0));
+            .unwrap_or((length * 0.3).clamp(0.04, 0.10));
         let tip_width = options.tip_width.unwrap_or(tip_length * 0.75);
         let reference = if direction.cross(DVec3::Z).length_squared() > 1e-8 {
             DVec3::Z
@@ -1495,8 +1495,8 @@ impl SceneModel {
         }
         // Manim-like arrow tips at positive ends
         if config.tips {
-            let tip_len: f64 = 10.0;
-            let tip_half_w: f64 = 5.0;
+            let tip_len: f64 = 0.10;
+            let tip_half_w: f64 = 0.05;
             if config.x_axis && x_axis_in_range {
                 let mut tip = gaanim_core::kurbo::BezPath::new();
                 let tx = sx(x_max);
@@ -1584,11 +1584,11 @@ impl SceneModel {
                 if y.abs() > 1e-9 || !config.x_numbers {
                     let value = if y.abs() < 1e-9 { 0.0 } else { y };
                     let text = format!("{value}");
-                    let estimated_width = text.chars().count() as f64 * 9.0;
+                    let estimated_width = text.chars().count() as f64 * 0.09;
                     children.push(Self::axis_text(
                         builder,
                         &text,
-                        sx(0.0) - tick_half - 8.0 - estimated_width * 0.5,
+                        sx(0.0) - tick_half - 0.08 - estimated_width * 0.5,
                         sy(y),
                         config.number_color,
                         config.number_size,
@@ -2744,7 +2744,7 @@ impl SceneModel {
                                 Point::new(bounds.max.x + pad, bounds.max.y + pad * 0.25),
                             )
                             .no_fill()
-                            .stroke(strike_color, 3.0)
+                            .stroke(strike_color, 0.03)
                             .spawn();
                         cancellation_marks
                             .entry(*target)
@@ -2800,16 +2800,16 @@ impl SceneModel {
                         let y = if *above {
                             bounds.max.y + 0.12
                         } else {
-                            bounds.min.y - 12.0
+                            bounds.min.y - 0.12
                         };
                         let brace = builder
                             .brace(
                                 Point::new(bounds.min.x, y),
                                 Point::new(bounds.max.x, y),
-                                -side * 10.0,
+                                -side * 0.10,
                             )
                             .no_fill()
-                            .stroke(color, 2.0)
+                            .stroke(color, 0.02)
                             .spawn();
                         let style = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
                         let label_ref = builder.text(label, &style.font_family, style.size);
@@ -2896,7 +2896,7 @@ impl SceneModel {
                                 Point::new(label_anchor.x, label_anchor.y),
                             )
                             .no_fill()
-                            .stroke(PenikoColor::WHITE, 2.0)
+                            .stroke(PenikoColor::WHITE, 0.02)
                             .spawn();
                         // Text glyph transforms are local to their equation.
                         // Use an invisible scene-space proxy so the leader

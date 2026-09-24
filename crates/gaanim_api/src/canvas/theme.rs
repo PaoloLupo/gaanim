@@ -1083,7 +1083,10 @@ mod tests {
         assert_eq!(theme.fonts.len(), 1);
         // The only face of its family is keyed by the bare declared family.
         let family = &theme.fonts[0].family;
-        assert!(!family.is_empty() && !family.ends_with(" italic"), "{family}");
+        assert!(
+            !family.is_empty() && !family.ends_with(" italic"),
+            "{family}"
+        );
         assert!(
             family.rsplit(' ').next().unwrap().parse::<u16>().is_err(),
             "{family}"
