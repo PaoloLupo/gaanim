@@ -295,9 +295,9 @@ impl Default for Axes3DConfig {
             tick_color: Color::from_rgb8(0x20, 0x20, 0x20),
             number_color: Color::from_rgb8(0x20, 0x20, 0x20),
             label_color: Color::from_rgb8(0x20, 0x20, 0x20),
-            axis_width: 3.0,
-            grid_width: 1.0,
-            tick_width: 2.0,
+            axis_width: 0.03,
+            grid_width: 0.01,
+            tick_width: 0.02,
             tick_length: 0.2,
             auto_fit: true,
             x_length: None,
@@ -1996,7 +1996,7 @@ impl Anim {
         self.effect(AnimationType::Flash {
             color: None,
             n_lines: 16,
-            radius: 100.0,
+            radius: 1.0,
         })
     }
 

@@ -466,7 +466,7 @@ scene.play(streams.flow(3.0, time_width=0.12))
   signature: "arrows(*, resolution=None, min_length=0, max_length=None, length_scale=1, width=0.02, tip_length=None, tip_width=None, color=None, colormap=None, color_range=None) -> ArrowVectorField",
   params: (
     (name: "resolution", type: "(int,int) | (int,int,int) | None", default: "None", desc: [Muestras regulares por eje; los valores predeterminados dependen de la dimensión.]),
-    (name: "min_length / max_length", type: "float", default: "0 / automático", desc: [Límites en unidades locales después de transformar el vector desde coordenadas de datos.]),
+    (name: "min_length / max_length", type: "float", default: "0 / 0.28 (0.24 en 3D)", desc: [Límites en unidades locales después de transformar el vector desde coordenadas de datos.]),
     (name: "color / colormap", type: "ColorLike | ColorMapLike | None", default: "None / viridis", desc: [Opciones mutuamente excluyentes. El mapa usa la magnitud del campo.]),
     (name: "color_range", type: "(float,float) | None", default: "None", desc: [Dominio explícito de magnitudes; si se omite se obtiene de las muestras finitas.]),
   ),
@@ -477,7 +477,7 @@ scene.play(streams.flow(3.0, time_width=0.12))
 #api-entry(
   name: "VectorField.streamlines",
   kind: "method",
-  signature: "streamlines(*, seeds=None, direction=\"both\", tolerance=1e-4, min_step=1e-5, max_step=.1, max_time=3, max_length=None, max_steps=10000, stagnation=1e-10, padding=.05, separation=.035, width=2, opacity=1, color=None, colormap=None, color_range=None) -> StreamLines",
+  signature: "streamlines(*, seeds=None, direction=\"both\", tolerance=1e-4, min_step=1e-5, max_step=.1, max_time=3, max_length=None, max_steps=10000, stagnation=1e-10, padding=.05, separation=.035, width=.02, opacity=1, color=None, colormap=None, color_range=None) -> StreamLines",
   params: (
     (name: "seeds", type: "(int,int) | (int,int,int) | None", default: "None", desc: [Resolución determinista de candidatos de semilla.]),
     (name: "direction", type: "forward | backward | both", default: "both", desc: [Sentido temporal de integración desde cada semilla.]),

@@ -16,8 +16,8 @@ pub struct DropShadow {
 impl Default for DropShadow {
     fn default() -> Self {
         Self {
-            offset: gaanim_core::glam::DVec2::new(5.0, -5.0),
-            blur_radius: 5.0,
+            offset: gaanim_core::glam::DVec2::new(0.08, -0.08),
+            blur_radius: 0.06,
             color: Color::from_rgba8(0, 0, 0, 128),
         }
     }
@@ -38,7 +38,7 @@ pub struct Glow {
 impl Default for Glow {
     fn default() -> Self {
         Self {
-            radius: 8.0,
+            radius: 0.16,
             intensity: 1.0,
             color: Color::from_rgba8(255, 255, 255, 255),
         }

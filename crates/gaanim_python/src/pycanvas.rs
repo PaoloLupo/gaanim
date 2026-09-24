@@ -173,7 +173,7 @@ fn surrounding_padding(value: Option<Bound<'_, PyAny>>) -> PyResult<[f64; 4]> {
             ));
         }
     } else {
-        [12.0; 4]
+        [0.12; 4]
     };
     if padding
         .iter()

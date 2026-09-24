@@ -963,7 +963,7 @@ impl Default for AngleDimensionOptions {
             unit: "deg".to_owned(),
             sweep: gaanim_animation::AngleSweep::Minor,
             arrowheads: gaanim_animation::AngleArrowheads::Both,
-            label_gap: 12.0,
+            label_gap: 0.12,
             label_orientation: gaanim_animation::DimensionLabelOrientation::Upright,
             show_extensions: true,
             font_size: None,
@@ -1127,16 +1127,16 @@ impl Default for DimensionOptions {
             format: ".2f".to_owned(),
             unit: None,
             scale: 1.0,
-            label_gap: 10.0,
+            label_gap: 0.10,
             label_orientation: gaanim_animation::DimensionLabelOrientation::Upright,
             side: None,
             font_size: Some(DEFAULT_REACTIVE_TEXT_SIZE),
             label_style: gaanim_text::prelude::TextStyle::default(),
             color: None,
-            line_width: 3.0,
+            line_width: 0.03,
             extension_style: DimensionExtensionStyle::Solid,
-            dash_length: 12.0,
-            gap_length: 8.0,
+            dash_length: 0.12,
+            gap_length: 0.08,
         }
     }
 }
@@ -4544,7 +4544,7 @@ impl SceneModel {
         curve: &DrawableHandle,
         tracker: &DrawableHandle,
     ) -> DrawableHandle {
-        let handle = self.dot(8.0);
+        let handle = self.dot(0.08);
         handle.defer_visibility_until_play();
         self.state
             .lock()
@@ -4864,12 +4864,12 @@ impl SceneModel {
         let arc = self
             .spawn(SpawnKind::TrackingLine)
             .no_fill()
-            .stroke(color, 3.0);
+            .stroke(color, 0.03);
         let arrows = self.spawn(SpawnKind::TrackingLine).fill(color).no_stroke();
         let mut extensions = self
             .spawn(SpawnKind::TrackingLine)
             .no_fill()
-            .stroke(color, 2.0);
+            .stroke(color, 0.02);
         if !options.show_extensions {
             extensions = extensions.opacity(0.0);
         }
@@ -5004,7 +5004,7 @@ impl SceneModel {
         let shaft = self
             .tracking_line(from.clone(), to.clone())
             .no_fill()
-            .stroke(color, 4.0);
+            .stroke(color, 0.04);
         let head = self.spawn(SpawnKind::TrackingLine).fill(color).no_stroke();
         head.defer_visibility_until_play();
         self.state
@@ -5016,8 +5016,8 @@ impl SceneModel {
                 target: head.id,
                 from: from.clone(),
                 to: to.clone(),
-                length: 16.0,
-                width: 12.0,
+                length: 0.16,
+                width: 0.12,
             });
         let label = label_text
             .as_deref()
@@ -5542,11 +5542,11 @@ impl SceneModel {
         let rim = self
             .polygon(points)
             .fill(background)
-            .stroke(foreground, (radius * 0.06).clamp(2.0, 6.0));
+            .stroke(foreground, (radius * 0.06).clamp(0.02, 0.06));
         let bore = self
             .dot(bore_radius)
             .fill(background)
-            .stroke(foreground, (radius * 0.05).clamp(2.0, 5.0));
+            .stroke(foreground, (radius * 0.05).clamp(0.02, 0.05));
         self.group_no_center(&[&rim, &bore])
     }
 
@@ -5573,7 +5573,7 @@ impl SceneModel {
         points.push((length * 0.5, -height));
         self.polygon(points)
             .fill(background)
-            .stroke(foreground, (pitch * 0.18).clamp(2.0, 5.0))
+            .stroke(foreground, (pitch * 0.18).clamp(0.02, 0.05))
     }
 
     /// Create a closed radial cam profile from `(angle, radius)` samples.
@@ -5591,11 +5591,11 @@ impl SceneModel {
         let profile = self
             .polygon(points)
             .fill(background)
-            .stroke(foreground, 4.0);
+            .stroke(foreground, 0.04);
         let bore = self
             .dot(bore_radius)
             .fill(background)
-            .stroke(foreground, 3.0);
+            .stroke(foreground, 0.03);
         self.group_no_center(&[&profile, &bore])
     }
 
@@ -5952,7 +5952,7 @@ impl SceneModel {
         offset: f64,
     ) -> DrawableHandle {
         let (line, extensions, drawable) =
-            self.dimension_between_parts(from, to, offset, None, 3.0, None, Color::WHITE);
+            self.dimension_between_parts(from, to, offset, None, 0.03, None, Color::WHITE);
         let _ = (line, extensions);
         drawable
     }
@@ -9864,6 +9864,107 @@ mod tests {
         assert_eq!(schedule.entries[0].duration, Some(1.5));
         assert_eq!(schedule.entries[1].start, 1.0);
         assert_eq!(schedule.entries[1].duration, Some(4.0));
+    }
+}
+
+#[cfg(test)]
+mod scene_unit_default_tests {
+    //! Defaults once authored in pixels must stay proportional to the 16 x 9
+    //! logical frame (pixel values / 100, like the migrated text roles).
+    use super::*;
+    use crate::canvas::ops::Op;
+    use crate::canvas::visualization::{ArrowFieldOptions, FlowParticleOptions, StreamLinesStyle};
+    use gaanim_core::glam::DVec3;
+
+    fn stroke_width(handle: &DrawableHandle) -> f64 {
+        handle
+            .spec
+            .lock()
+            .expect("object spec poisoned")
+            .stroke
+            .as_ref()
+            .map(|(_, width)| *width)
+            .expect("stroke")
+    }
+
+    fn fixed(x: f64, y: f64) -> CanvasEndpoint {
+        CanvasEndpoint::Static(DVec3::new(x, y, 0.0))
+    }
+
+    #[test]
+    fn point_on_curve_marker_is_a_small_dot() {
+        let mut canvas = SceneModel::new(320, 180);
+        let curve = canvas.line(-2.0, 0.0, 2.0, 0.0);
+        let tracker = canvas.value_tracker(0.0);
+        let marker = canvas.point_on_curve(&curve, &tracker);
+        let spec = marker.spec.lock().expect("object spec poisoned");
+        assert!(matches!(spec.kind, SpawnKind::Dot(radius) if radius == 0.08));
+    }
+
+    #[test]
+    fn mechanics_annotations_use_scene_unit_strokes_and_heads() {
+        let mut canvas = SceneModel::new(320, 180);
+        let vector = canvas
+            .vector_between_with_parts(
+                fixed(-1.0, 0.0),
+                fixed(1.0, 0.5),
+                None,
+                false,
+                ".1f".to_owned(),
+                None,
+                1.0,
+                0.14,
+                None,
+                None,
+            )
+            .expect("vector");
+        assert_eq!(stroke_width(&vector.shaft), 0.04);
+        let state = canvas.state.lock().expect("canvas state poisoned");
+        let head = state.active().ops.iter().find_map(|op| match op {
+            Op::AttachTrackingVectorHead { length, width, .. } => Some((*length, *width)),
+            _ => None,
+        });
+        assert_eq!(head, Some((0.16, 0.12)));
+        drop(state);
+
+        let angle = canvas
+            .angle_between_with_options(
+                fixed(0.0, 0.0),
+                CanvasRay::Direction(DVec3::X),
+                CanvasRay::Direction(DVec3::Y),
+                0.64,
+                AngleDimensionOptions::default(),
+            )
+            .expect("angle");
+        assert_eq!(stroke_width(&angle.arc), 0.03);
+        assert_eq!(stroke_width(&angle.extensions), 0.02);
+
+        let rack = canvas.rack(2.75, 18, None);
+        assert!(stroke_width(&rack) <= 0.05, "{}", stroke_width(&rack));
+    }
+
+    #[test]
+    fn option_defaults_are_in_scene_units() {
+        assert_eq!(AngleDimensionOptions::default().label_gap, 0.12);
+        let dimension = DimensionOptions::default();
+        assert_eq!(
+            (
+                dimension.label_gap,
+                dimension.line_width,
+                dimension.dash_length,
+                dimension.gap_length
+            ),
+            (0.10, 0.03, 0.12, 0.08)
+        );
+        let axes = crate::canvas::Axes3DConfig::default();
+        assert_eq!(
+            (axes.axis_width, axes.grid_width, axes.tick_width),
+            (0.03, 0.01, 0.02)
+        );
+        assert_eq!(ArrowFieldOptions::default().width, 0.02);
+        assert_eq!(ArrowFieldOptions::default().max_length, 0.28);
+        assert_eq!(StreamLinesStyle::default().width, 0.02);
+        assert_eq!(FlowParticleOptions::default().radius, 0.05);
     }
 }
 

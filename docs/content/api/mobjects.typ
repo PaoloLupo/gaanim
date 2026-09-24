@@ -242,8 +242,8 @@ scene.render()
 #api-entry(
   name: "Geometry.surrounding_rect",
   kind: "factory",
-  signature: "surrounding_rect(targets, *, padding=12, corner_radius=0.08) -> SurroundingRect",
-  params: ((name: "targets", type: "Drawable | TextSelection | Sequence", default: none, desc: [One or more live object, text-part, or equation-part bounds.]), (name: "padding", type: "float | (v,h) | (t,r,b,l)", default: "12", desc: [Finite non-negative scene-unit inset around the union.]), (name: "corner_radius", type: "float", default: "0.08", desc: [Non-negative radius, clamped to the current frame size.])),
+  signature: "surrounding_rect(targets, *, padding=0.12, corner_radius=0.08) -> SurroundingRect",
+  params: ((name: "targets", type: "Drawable | TextSelection | Sequence", default: none, desc: [One or more live object, text-part, or equation-part bounds.]), (name: "padding", type: "float | (v,h) | (t,r,b,l)", default: "0.12", desc: [Finite non-negative scene-unit inset around the union.]), (name: "corner_radius", type: "float", default: "0.08", desc: [Non-negative radius, clamped to the current frame size.])),
   returns: (type: "SurroundingRect", desc: [Theme-stroked, unfilled live frame.]),
   desc: [Uses the targets' world-space AABB and follows movement, scaling, rotation, and layout in the same frame. Empty, foreign-scene, or invalid targets and dimensions raise `TypeError` or `ValueError`. Position, scale, rotation, and Layout ownership belong to the binding; animate the target or call `retarget`.],
 )[

@@ -1353,8 +1353,8 @@ impl PyVectorField {
         let options = ArrowFieldOptions {
             min_length,
             max_length: max_length.unwrap_or(match self.inner {
-                PyVectorFieldInner::Two(_) => 28.0,
-                PyVectorFieldInner::Three(_) => 24.0,
+                PyVectorFieldInner::Two(_) => 0.28,
+                PyVectorFieldInner::Three(_) => 0.24,
             }),
             length_scale,
             width,
@@ -1554,7 +1554,7 @@ impl PyVectorField {
             integration,
             duration,
             radius: radius.unwrap_or(match self.inner {
-                PyVectorFieldInner::Two(_) => 5.0,
+                PyVectorFieldInner::Two(_) => 0.05,
                 PyVectorFieldInner::Three(_) => 0.06,
             }),
             color,
@@ -2436,10 +2436,10 @@ impl PyCoordinateSpace {
             .data_line(&self.inner, &xs, &ys, step, baseline, policy)
             .map_err(value_error)?;
         let handle = match color {
-            Some(color) => handle.stroke(color.0, width.unwrap_or(3.0)),
+            Some(color) => handle.stroke(color.0, width.unwrap_or(0.03)),
             None if width.is_some() => handle.stroke(
                 gaanim_core::peniko::Color::from_rgb8(0x19, 0x32, 0x64),
-                width.unwrap_or(3.0),
+                width.unwrap_or(0.03),
             ),
             None => handle,
         };

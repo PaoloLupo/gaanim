@@ -354,9 +354,9 @@ impl Default for ArrowFieldOptions {
     fn default() -> Self {
         Self {
             min_length: 0.0,
-            max_length: 28.0,
+            max_length: 0.28,
             length_scale: 1.0,
-            width: 2.0,
+            width: 0.02,
             tip_length: None,
             tip_width: None,
             color: None,
@@ -394,7 +394,7 @@ impl Default for FlowParticleOptions {
         Self {
             integration,
             duration: 3.0,
-            radius: 5.0,
+            radius: 0.05,
             color: None,
             colormap: ColorMap::named("viridis").ok(),
             color_range: None,
@@ -407,7 +407,7 @@ impl Default for StreamLinesStyle {
     fn default() -> Self {
         Self {
             integration: StreamlineOptions::default(),
-            width: 2.0,
+            width: 0.02,
             opacity: 1.0,
             color: None,
             colormap: ColorMap::named("viridis").ok(),
@@ -2911,7 +2911,7 @@ impl SceneModel {
                         self.text(&tick.label)
                             .fill(style.number_color)
                             .scale_to(number_scale)
-                            .move_to(ring_radius, -20.0),
+                            .move_to(ring_radius, -0.2),
                     );
                 }
             }
@@ -3546,7 +3546,7 @@ impl SceneModel {
             let end = start + direction * length;
             let tip_length = options
                 .tip_length
-                .unwrap_or((length * 0.3).clamp(5.0, 12.0));
+                .unwrap_or((length * 0.3).clamp(0.05, 0.12));
             let tip_width = options.tip_width.unwrap_or(tip_length * 0.8);
             let perpendicular = gaanim_core::kurbo::Vec2::new(-direction.y, direction.x);
             let shoulder = end - direction * tip_length;
@@ -3607,7 +3607,7 @@ impl SceneModel {
         mut options: ArrowFieldOptions,
     ) -> Result<ArrowVectorFieldHandle, VisualizationError> {
         if (options.max_length - ArrowFieldOptions::default().max_length).abs() < f64::EPSILON {
-            options.max_length = 24.0;
+            options.max_length = 0.24;
         }
         if !options.max_length.is_finite() || options.max_length <= 0.0 {
             return Err(VisualizationError::InvalidSize);
@@ -3642,7 +3642,7 @@ impl SceneModel {
             let end = start + direction * length;
             let tip_length = options
                 .tip_length
-                .unwrap_or((length * 0.3).clamp(4.0, 10.0));
+                .unwrap_or((length * 0.3).clamp(0.04, 0.10));
             let tip_width = options.tip_width.unwrap_or(tip_length * 0.75);
             let reference = if direction.cross(DVec3::Z).length_squared() > 1e-8 {
                 DVec3::Z
