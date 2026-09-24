@@ -1,4 +1,9 @@
-# Gaanim
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/gaanim-logo-dark.svg">
+    <img src="docs/assets/brand/gaanim-logo.svg" alt="Gaanim" width="284" height="64">
+  </picture>
+</h1>
 
 Motor de animación vectorial 2D acelerado por GPU, escrito en Rust y diseñado
 para crear escenas programáticas desde Python. El flujo actual ejecuta los
