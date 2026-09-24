@@ -41,7 +41,7 @@ scene.wait(0.8)
 scene.link(bars_segment, equation_segment, Transition.morph(0.8, pairs=[(bars[1], card)]))
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
-    # Mid-growth, grown, mid-morph, and the annotated equation.
-    scene.snapshots(snapshots, [0.8, 2.2, 2.8, 6.0])
+    # Mid-growth, grown, mid-morph, mid-reveal, and the annotated equation.
+    scene.snapshots(snapshots, [0.8, 2.2, 2.8, 3.5, 6.0])
 else:
     scene.render()

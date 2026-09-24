@@ -901,7 +901,7 @@ impl PyCanvasAnim {
     }
 
     #[pyo3(signature = (style="fade"))]
-    fn reveal(&self, style: &str) -> PyResult<Self> {
+    pub(crate) fn reveal(&self, style: &str) -> PyResult<Self> {
         use gaanim_api::canvas::FragmentRevealStyle;
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
@@ -922,7 +922,7 @@ impl PyCanvasAnim {
     }
 
     #[pyo3(signature = (label="", *, above=false))]
-    fn brace(&self, label: &str, above: bool) -> PyResult<Self> {
+    pub(crate) fn brace(&self, label: &str, above: bool) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
         self.require_selection_effect_slot("brace")?;
@@ -932,7 +932,7 @@ impl PyCanvasAnim {
     }
 
     #[pyo3(signature = (label, offset=(0.0, 0.6)))]
-    fn annotate(&self, label: &str, offset: (f64, f64)) -> PyResult<Self> {
+    pub(crate) fn annotate(&self, label: &str, offset: (f64, f64)) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
         if !offset.0.is_finite() || !offset.1.is_finite() {

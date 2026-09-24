@@ -636,6 +636,21 @@ impl PyTextSelectionAnimation {
         })
     }
 
+    #[pyo3(signature = (style="fade"))]
+    fn reveal(&self, style: &str) -> PyResult<PyCanvasAnim> {
+        self.proxy().reveal(style)
+    }
+
+    #[pyo3(signature = (label="", *, above=false))]
+    fn brace(&self, label: &str, above: bool) -> PyResult<PyCanvasAnim> {
+        self.proxy().brace(label, above)
+    }
+
+    #[pyo3(signature = (label, offset=(0.0, 0.6)))]
+    fn annotate(&self, label: &str, offset: (f64, f64)) -> PyResult<PyCanvasAnim> {
+        self.proxy().annotate(label, offset)
+    }
+
     fn morph_to(&self, target: &PyTextSelection) -> PyResult<PyCanvasAnim> {
         crate::custom::ensure_authoring_allowed()?;
         self.source
@@ -652,6 +667,14 @@ impl PyTextSelectionAnimation {
             .copy_to(&target.inner(), None)
             .map(|inner| PyCanvasAnim { inner })
             .map_err(|error| crate::LayoutOwnershipError::new_err(error.to_string()))
+    }
+}
+
+impl PyTextSelectionAnimation {
+    fn proxy(&self) -> PyCanvasAnim {
+        PyCanvasAnim {
+            inner: self.source.clone().animate_properties(),
+        }
     }
 }
 

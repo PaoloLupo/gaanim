@@ -329,10 +329,10 @@ fn draw_item_slots(
     (ordered, slots)
 }
 
-/// World point of `bounds` that `grow_from_edge` keeps fixed: the edge
+/// Point of `bounds` in `direction`, as pinned by `grow_from_edge`: the edge
 /// midpoint for axis directions, the corner for diagonals, and the matching
 /// boundary point for any other 2D direction.
-fn grow_edge_anchor(
+fn bounds_edge_point(
     bounds: Bounds3D,
     direction: gaanim_core::glam::DVec3,
 ) -> gaanim_core::glam::DVec3 {
@@ -2161,15 +2161,22 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         };
         let position = bounds.center() + offset;
         let label_ref = self.text(&label, "Inter", 0.28);
+        let mut label_bounds = Bounds3D::new(position, position);
         if let Some(state) = self.states.get_mut(label_ref.id) {
             state.transform.translation = position;
             self.commands.entity(state.entity).insert(state.transform);
+            label_bounds = gaanim_layout::transform_bounds(state.bounds, &state.transform);
         }
         let color = self.text_selection_color(selected);
+        // The leader runs between the facing edges of the term and the label,
+        // with a small gap, so it never crosses either.
+        let gap = offset.normalize_or_zero() * 0.08;
+        let start = bounds_edge_point(bounds, offset) + gap;
+        let end = bounds_edge_point(label_bounds, -offset) - gap;
         let line = self
             .line(
-                kurbo::Point::new(bounds.center().x, bounds.center().y),
-                kurbo::Point::new(position.x, position.y),
+                kurbo::Point::new(start.x, start.y),
+                kurbo::Point::new(end.x, end.y),
             )
             .no_fill()
             .stroke(color, 0.02)
@@ -4935,7 +4942,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         let target_scale = state.transform.scale;
         let target_pos = state.transform.translation;
-        let edge_world = grow_edge_anchor(
+        let edge_world = bounds_edge_point(
             gaanim_layout::transform_bounds(state.bounds, &state.transform),
             direction,
         );
@@ -7482,11 +7489,11 @@ mod tests {
     }
 
     #[test]
-    fn grow_edge_anchor_pins_edges_and_corners() {
+    fn bounds_edge_point_pins_edges_and_corners() {
         use gaanim_core::glam::DVec3;
         use gaanim_layout::Direction;
         let bounds = Bounds3D::new_2d(-1.0, -2.0, 3.0, 4.0);
-        let anchor = |direction: Direction| grow_edge_anchor(bounds, direction.to_vector());
+        let anchor = |direction: Direction| bounds_edge_point(bounds, direction.to_vector());
         assert_eq!(anchor(Direction::Down), DVec3::new(1.0, -2.0, 0.0));
         assert_eq!(anchor(Direction::Right), DVec3::new(3.0, 1.0, 0.0));
         assert!(anchor(Direction::UpLeft).abs_diff_eq(DVec3::new(-1.0, 4.0, 0.0), 1e-12));
