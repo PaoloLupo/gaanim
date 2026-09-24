@@ -273,7 +273,9 @@ switch global correspondiente. Por ejemplo, `grid=False, x_grid=True` conserva
 se seleccionan geométricamente mediante `xy_grid`, `xz_grid` y `yz_grid`.
 
 `numbers` controla el texto de los ticks; `labels` controla exclusivamente los
-títulos definidos con `Axis.label(...)`. Ocultar una capa no altera dominios ni
+títulos definidos con `Axis.label(...)`. Los números negativos usan el signo
+menos tipográfico U+2212 (`−2`, no `-2`), igual que la tipografía matemática, y un
+valor que redondea a cero nunca muestra signo. Ocultar una capa no altera dominios ni
 conversiones de coordenadas. `space.layer(...)` sigue devolviendo un `Drawable`
 vacío, de modo que el conjunto de capas permanece estable para composición y
 animación.

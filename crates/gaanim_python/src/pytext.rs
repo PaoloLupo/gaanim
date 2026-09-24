@@ -197,7 +197,8 @@ pub struct PyTextFlow(pub TextFlow);
 #[pymethods]
 impl PyTextFlow {
     #[new]
-    #[pyo3(signature = (*, wrap=None, align="left", line_spacing=1.2, max_lines=None, overflow="clip", direction="auto", hyphenate=false))]
+    #[pyo3(signature = (*, wrap=None, align="left", line_spacing=1.2, max_lines=None, overflow="clip", direction="auto", hyphenate=false, lang=None))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         wrap: Option<&Bound<'_, PyAny>>,
         align: &str,
@@ -206,6 +207,7 @@ impl PyTextFlow {
         overflow: &str,
         direction: &str,
         hyphenate: bool,
+        lang: Option<String>,
     ) -> PyResult<Self> {
         let flow = TextFlow {
             wrap: wrap.map(parse_wrap).transpose()?.unwrap_or(TextWrap::Auto),
@@ -215,6 +217,7 @@ impl PyTextFlow {
             overflow: parse_overflow(overflow)?,
             direction: parse_direction(direction)?,
             hyphenate,
+            lang,
         };
         TextSpec::new(
             vec!["x".into()],
@@ -1436,6 +1439,7 @@ pub(crate) fn build_text_spec(
     overflow: Option<&str>,
     direction: Option<&str>,
     hyphenate: Option<bool>,
+    lang: Option<String>,
     markup: bool,
 ) -> PyResult<TextSpec> {
     let style = overlay_style(
@@ -1472,6 +1476,9 @@ pub(crate) fn build_text_spec(
     }
     if let Some(value) = hyphenate {
         flow.hyphenate = value;
+    }
+    if lang.is_some() {
+        flow.lang = lang;
     }
     let mut content = content_from_tuple(content)?;
     if equation {

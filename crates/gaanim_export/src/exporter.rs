@@ -483,6 +483,7 @@ where
         .unwrap_or(timeline_duration)
         .min(timeline_duration);
     let render_length = render_end - render_start;
+    validate_render_range(render_start, render_end, timeline_duration)?;
 
     let encoder = ParallelEncoder::new(EncoderConfig {
         output_path: config.output_path.clone(),
@@ -630,6 +631,7 @@ where
         .unwrap_or(timeline_duration)
         .min(timeline_duration);
     let render_length = render_end - render_start;
+    validate_render_range(render_start, render_end, timeline_duration)?;
 
     let mut encoder = ParallelEncoder::new(EncoderConfig {
         output_path: config.output_path.clone(),
@@ -806,6 +808,16 @@ where
         "------------------------------------------------------------",
     );
 
+    Ok(())
+}
+
+/// Reject a time range that selects no frames, naming the scene duration.
+fn validate_render_range(start: f64, end: f64, duration: f64) -> Result<()> {
+    if end - start <= 0.0 {
+        return Err(ExportError::General(format!(
+            "export range {start:.3}s to {end:.3}s selects no frames; the scene lasts {duration:.3}s"
+        )));
+    }
     Ok(())
 }
 
@@ -1460,6 +1472,16 @@ mod tests {
 
         let error = result_rx.recv().unwrap().unwrap_err();
         assert!(error.to_string().contains("encoder failed"));
+    }
+
+    #[test]
+    fn empty_render_ranges_are_rejected() {
+        assert!(validate_render_range(2.0, 4.0, 10.0).is_ok());
+        let error = validate_render_range(12.0, 10.0, 10.0)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("selects no frames"), "{error}");
+        assert!(error.contains("10.000s"), "{error}");
     }
 
     #[test]

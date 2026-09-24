@@ -123,6 +123,15 @@ mod tests {
     }
 
     #[test]
+    fn readout_decimal_separator_localizes_digits_and_grouping() {
+        use gaanim_animation::localize_decimal_separator;
+        assert_eq!(localize_decimal_separator("3.14", ','), "3,14");
+        assert_eq!(localize_decimal_separator("1,234.50", ','), "1.234,50");
+        assert_eq!(localize_decimal_separator("-0.5", '.'), "-0.5");
+        assert_eq!(localize_decimal_separator("2.5e-3", ','), "2,5e-3");
+    }
+
+    #[test]
     fn decimal_number_resolves_family_like_scene_text() {
         let mut app = App::new();
         app.insert_resource(FontRegistry::new());

@@ -3435,7 +3435,7 @@ impl PySlideKit {
 
 #[pymethods]
 impl PyTypography {
-    #[pyo3(signature = (*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None, markup=None))]
+    #[pyo3(signature = (*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None, lang=None, markup=None))]
     #[allow(clippy::too_many_arguments)]
     fn __call__<'py>(
         &self,
@@ -3461,6 +3461,7 @@ impl PyTypography {
         overflow: Option<&str>,
         direction: Option<&str>,
         hyphenate: Option<bool>,
+        lang: Option<String>,
         markup: Option<bool>,
     ) -> PyResult<Py<PyText>> {
         crate::custom::ensure_authoring_allowed()?;
@@ -3490,6 +3491,7 @@ impl PyTypography {
             overflow,
             direction,
             hyphenate,
+            lang,
             markup,
         )?;
         let handle = self
@@ -3554,6 +3556,7 @@ impl PyTypography {
             overflow,
             direction,
             hyphenate,
+            None,
             true,
         )?;
         let handle = self
@@ -4376,7 +4379,7 @@ impl PyTypography {
     /// w, h = scene.text.measure("PGA = 0.35 g", role="label")
     /// box = scene.geometry.rounded_rect(w + 0.56, h + 0.32, 0.14)
     /// ```
-    #[pyo3(signature = (content, *, role=None, size=None, font=None, color=None, wrap=None, weight=None, style=None, markup=None))]
+    #[pyo3(signature = (content, *, role=None, size=None, font=None, color=None, wrap=None, weight=None, style=None, markup=None, flow=None, line_spacing=None))]
     #[pyo3(name = "measure")]
     #[allow(clippy::too_many_arguments)]
     fn measure_text_py(
@@ -4390,6 +4393,8 @@ impl PyTypography {
         weight: Option<u16>,
         style: Option<PyTextStyle>,
         markup: Option<bool>,
+        flow: Option<crate::pytext::PyTextFlow>,
+        line_spacing: Option<f64>,
     ) -> PyResult<(f64, f64)> {
         use gaanim_text::prelude::{TextFlow, TextRole, TextSpec, TextWrap};
 
@@ -4402,13 +4407,17 @@ impl PyTypography {
         }
         let role = crate::pytext::parse_role(role)?.unwrap_or(TextRole::Body);
         let style = label_text_style(style, font, weight, size, color);
-        let flow = TextFlow {
-            wrap: match wrap {
-                Some(width) => TextWrap::Width(width.max(1.0e-6)),
-                None => TextWrap::NoWrap,
-            },
+        // Without an explicit flow, measure one unwrapped block as before.
+        let mut flow = flow.map(|flow| flow.0).unwrap_or(TextFlow {
+            wrap: TextWrap::NoWrap,
             ..TextFlow::default()
-        };
+        });
+        if let Some(width) = wrap {
+            flow.wrap = TextWrap::Width(width.max(1.0e-6));
+        }
+        if let Some(value) = line_spacing {
+            flow.line_spacing = value;
+        }
         let spec = TextSpec::new_with_markup(
             vec![content.to_owned().into()],
             Some(role),

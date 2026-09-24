@@ -146,9 +146,23 @@ fn dispatch_export_mode() -> bool {
     let mut width = 1920_u32;
     let mut height = 1080_u32;
     let mut fit = gaanim_export::prelude::OutputFit::Error;
+    let mut from = None;
+    let mut to = None;
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
+            flag @ ("--from" | "--to") => {
+                index += 1;
+                let seconds = parse_export_seconds(flag, args.get(index)).unwrap_or_else(|error| {
+                    eprintln!("gaanim export: {error}");
+                    std::process::exit(2);
+                });
+                if flag == "--from" {
+                    from = Some(seconds);
+                } else {
+                    to = Some(seconds);
+                }
+            }
             "--output" | "-o" => {
                 index += 1;
                 output = args.get(index).cloned();
@@ -220,7 +234,7 @@ fn dispatch_export_mode() -> bool {
     let script = script
         .and_then(|path| gaanim_project::resolve_entry(&path).ok())
         .unwrap_or_else(|| {
-            eprintln!("usage: gaanim export <SCRIPT_OR_PROJECT> --output <FILE> [--quality draft|standard|production] [--encoder auto|libx264|nvenc|amf|qsv|vaapi] [--transparent]");
+            eprintln!("usage: gaanim export <SCRIPT_OR_PROJECT> --output <FILE> [OPTIONS]; run `gaanim export --help` for the options");
             std::process::exit(2);
         });
     let output = output.unwrap_or_else(|| {
@@ -248,6 +262,10 @@ fn dispatch_export_mode() -> bool {
         eprintln!("gaanim export: --encoder requires MP4 output");
         std::process::exit(2);
     }
+    if let Err(error) = validate_export_range(from, to) {
+        eprintln!("gaanim export: {error}");
+        std::process::exit(2);
+    }
     if let Err(error) = run_export_worker(ExportWorkerArgs {
         script,
         output,
@@ -258,6 +276,8 @@ fn dispatch_export_mode() -> bool {
         width,
         height,
         fit,
+        from,
+        to,
     }) {
         eprintln!("gaanim export: {error}");
         std::process::exit(1);
@@ -283,7 +303,24 @@ fn dispatch_python_api_validation_mode() -> bool {
     true
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Seconds for `--from` / `--to`: finite and non-negative.
+fn parse_export_seconds(flag: &str, value: Option<&String>) -> Result<f64, String> {
+    value
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
+        .ok_or_else(|| format!("{flag} requires a non-negative number of seconds"))
+}
+
+fn validate_export_range(from: Option<f64>, to: Option<f64>) -> Result<(), String> {
+    match (from, to) {
+        (Some(from), Some(to)) if to <= from => {
+            Err(format!("--to ({to}) must be greater than --from ({from})"))
+        }
+        _ => Ok(()),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 struct ExportWorkerArgs {
     script: PathBuf,
     output: String,
@@ -294,6 +331,9 @@ struct ExportWorkerArgs {
     width: u32,
     height: u32,
     fit: gaanim_export::prelude::OutputFit,
+    /// Exported time range in seconds; `None` means the scene start/end.
+    from: Option<f64>,
+    to: Option<f64>,
 }
 
 fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String> {
@@ -314,10 +354,20 @@ fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String>
     let mut width = 1920_u32;
     let mut height = 1080_u32;
     let mut fit = gaanim_export::prelude::OutputFit::Error;
+    let mut from = None;
+    let mut to = None;
     let mut index = 4;
     while index < args.len() {
         match args[index].as_str() {
             "--transparent" => transparent = true,
+            "--from" => {
+                index += 1;
+                from = Some(parse_export_seconds("--from", args.get(index))?);
+            }
+            "--to" => {
+                index += 1;
+                to = Some(parse_export_seconds("--to", args.get(index))?);
+            }
             "--encoder" => {
                 index += 1;
                 let value = args
@@ -358,6 +408,7 @@ fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String>
     if args[3] != "mp4" && encoder != VideoEncoder::Auto {
         return Err("--encoder requires MP4 output".to_string());
     }
+    validate_export_range(from, to)?;
     Ok(ExportWorkerArgs {
         script: PathBuf::from(&args[0]),
         output: args[1].clone(),
@@ -368,6 +419,8 @@ fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String>
         width,
         height,
         fit,
+        from,
+        to,
     })
 }
 
@@ -416,6 +469,8 @@ fn run_export_worker(worker: ExportWorkerArgs) -> Result<(), String> {
     config.width = worker.width;
     config.height = worker.height;
     config.fit = worker.fit;
+    config.start_time = worker.from;
+    config.end_time = worker.to;
     config.aspect_ratio = gaanim_export::prelude::AspectRatioPreset::Custom;
     config.format = format;
     config.video_encoder = worker.encoder;
@@ -1442,8 +1497,29 @@ mod tests {
                 width: 1920,
                 height: 1080,
                 fit: gaanim_export::prelude::OutputFit::Error,
+                from: None,
+                to: None,
             }
         );
+        let range = [
+            "scene.py", "clip.mp4", "draft", "mp4", "--from", "12.5", "--to", "15",
+        ]
+        .map(str::to_string);
+        let range = parse_export_worker_args(&range).unwrap();
+        assert_eq!((range.from, range.to), (Some(12.5), Some(15.0)));
+        for invalid in [
+            [
+                "scene.py", "clip.mp4", "draft", "mp4", "--from", "3", "--to", "3",
+            ],
+            [
+                "scene.py", "clip.mp4", "draft", "mp4", "--from", "-1", "--to", "3",
+            ],
+            [
+                "scene.py", "clip.mp4", "draft", "mp4", "--from", "nan", "--to", "3",
+            ],
+        ] {
+            assert!(parse_export_worker_args(&invalid.map(str::to_string)).is_err());
+        }
 
         let transparent =
             ["scene.py", "overlay.webm", "draft", "webm", "--transparent"].map(str::to_string);

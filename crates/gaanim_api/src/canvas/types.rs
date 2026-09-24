@@ -690,6 +690,8 @@ pub enum SpawnKind {
         prefix: String,
         suffix: String,
         invalid: String,
+        /// Character between integer and fractional digits (`.` by default).
+        decimal_separator: char,
         font_size: Option<f64>,
         /// Family and weight of the digits; `None` uses the theme's body font.
         font_family: Option<String>,

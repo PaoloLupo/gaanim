@@ -524,7 +524,14 @@ impl Axis {
         Ok(ticks)
     }
 
+    /// Tick label for `value`. Negative signs use the typographic minus
+    /// U+2212 so labels match math typesetting, and a value that rounds to
+    /// zero never shows a sign.
     pub fn format_value(&self, value: f64) -> String {
+        typographic_minus(self.format_ascii(value))
+    }
+
+    fn format_ascii(&self, value: f64) -> String {
         match &self.format {
             NumberFormat::Auto => {
                 if value.abs() >= 1e6 || (value != 0.0 && value.abs() < 1e-4) {
@@ -567,6 +574,18 @@ impl Axis {
             NumberFormat::DateTime { pattern } => format!("{value:.0} {pattern}"),
         }
     }
+}
+
+fn typographic_minus(label: String) -> String {
+    let unsigned = label.strip_prefix('-').unwrap_or(&label);
+    let rounds_to_zero = unsigned
+        .split(['e', 'E'])
+        .next()
+        .is_some_and(|mantissa| mantissa.chars().all(|c| matches!(c, '0' | '.' | '%')));
+    if rounds_to_zero && label.starts_with('-') {
+        return unsigned.to_owned();
+    }
+    label.replace('-', "\u{2212}")
 }
 
 fn nice_step(span: f64, target_count: usize) -> f64 {
@@ -677,6 +696,25 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["0", "\u{03c0}", "2\u{03c0}", "3\u{03c0}"]
         );
+    }
+
+    #[test]
+    fn negative_labels_use_the_typographic_minus() {
+        let axis = Axis::linear(-3.0, 3.0).unwrap();
+        assert_eq!(axis.format_value(-2.0), "\u{2212}2");
+        assert_eq!(axis.format_value(-0.5), "\u{2212}0.5");
+        assert_eq!(axis.format_value(-0.0), "0");
+        assert_eq!(axis.format_value(2.0), "2");
+        let fixed = axis.clone().numbers(NumberFormat::Fixed(1));
+        assert_eq!(fixed.format_value(-0.01), "0.0");
+        let scientific = Axis::linear(-3.0, 3.0)
+            .unwrap()
+            .numbers(NumberFormat::Scientific(1));
+        assert_eq!(scientific.format_value(-0.00012), "\u{2212}1.2e\u{2212}4");
+        let pi = Axis::linear(-4.0, 4.0)
+            .unwrap()
+            .numbers(NumberFormat::Pi { denominator: 1 });
+        assert_eq!(pi.format_value(-std::f64::consts::PI), "\u{2212}π");
     }
 
     #[test]

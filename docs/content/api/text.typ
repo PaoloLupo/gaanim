@@ -55,14 +55,14 @@ Esta separación evita tener un segundo solucionador de cajas de texto. Consulta
 #api-entry(
   name: "Scene.text",
   kind: "factory",
-  signature: "text(*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None, markup=None) -> Text",
+  signature: "text(*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None, lang=None, markup=None) -> Text",
   params: (
     (name: "content", type: "str | TextPart | TextParts", default: none, desc: [One or more composable strings, semantic parts, or compact ordered part groups. The flattened result must not be empty.]),
     (name: "role", type: "TextRole | None", default: "None", desc: [Semantic role. Fully mathematical content infers `math`; everything else infers `body`.]),
     (name: "style", type: "TextStyle | None", default: "None", desc: [Reusable visual and metric overlay.]),
     (name: "flow", type: "TextFlow | None", default: "None", desc: [Reusable internal line-composition options.]),
     (name: "style overrides", type: "keyword arguments", default: "None", desc: [Direct font, metric, color, opacity, spacing, and baseline values.]),
-    (name: "flow overrides", type: "keyword arguments", default: "None", desc: [Direct wrap, alignment, line limit, overflow, direction, and hyphenation values.]),
+    (name: "flow overrides", type: "keyword arguments", default: "None", desc: [Direct wrap, alignment, line limit, overflow, direction, hyphenation, and `lang` values.]),
     (name: "markup", type: "bool | None", default: "None", desc: [Interpret `*strong*` and `_emphasis_`. `False` keeps `*` and `_` literal while `$...$` math still applies. `None` uses the theme's `text_markup`, which is `True` by default.]),
   ),
   returns: (type: "Text", desc: [Structured vector text measured by the same intrinsic Layout v2 pass in every context.]),
@@ -125,9 +125,9 @@ The accepted roles are:
 "caption" | "label" | "code" | "math"
 ```
 
-The default text configuration uses these sizes in Typst/canvas points:
-`title=64`, `subtitle=48`, `kicker=32`, `heading=48`, `body=40`,
-`caption=32`, `label=36`, `code=36`, and `math=44`. Prose uses New Computer
+The default text configuration uses these sizes in scene units:
+`title=0.64`, `subtitle=0.48`, `kicker=0.32`, `heading=0.48`, `body=0.40`,
+`caption=0.32`, `label=0.36`, `code=0.36`, and `math=0.44`. Prose uses New Computer
 Modern by default, code uses Consolas, and math uses New Computer Modern Math.
 The active theme and explicit style may replace the resolved color and
 typography. Under a theme, `kicker` resolves to the palette's `accent` color,
@@ -150,7 +150,7 @@ role/theme -> TextStyle/TextFlow -> direct scene.text keywords
 #api-entry(
   name: "Typography.measure",
   kind: "method",
-  signature: "measure(content, *, role=None, size=None, font=None, color=None, wrap=None, weight=None, style=None, markup=None) -> tuple[float, float]",
+  signature: "measure(content, *, role=None, size=None, font=None, color=None, wrap=None, weight=None, style=None, markup=None, flow=None, line_spacing=None) -> tuple[float, float]",
   params: (
     (name: "content", type: "str", default: none, desc: [Text to measure; must not be empty.]),
     (name: "role", type: "TextRole | None", default: "None", desc: [Role whose theme defaults resolve size, family, and color (`body` when omitted).]),
@@ -159,12 +159,16 @@ role/theme -> TextStyle/TextFlow -> direct scene.text keywords
     (name: "weight", type: "int | None", default: "None", desc: [Font weight override.]),
     (name: "style", type: "TextStyle | None", default: "None", desc: [Reusable typography (italic, spacing, …); `size`, `font`, `weight` and `color` override it.]),
     (name: "markup", type: "bool | None", default: "None", desc: [Same as `scene.text`: `False` measures `*` and `_` as literal characters; `None` follows the theme.]),
+    (name: "flow", type: "TextFlow | None", default: "None", desc: [Paragraph settings (alignment, line spacing, hyphenation, …). Its `"auto"` wrap measures unwrapped because no layout width is offered.]),
+    (name: "line_spacing", type: "float | None", default: "None", desc: [Line-height multiplier, as in `scene.text`; overrides `flow`.]),
   ),
   returns: (type: "tuple[float, float]", desc: [Laid-out `(width, height)` in scene units.]),
   desc: [Runs the same Typst pipeline that renders `scene.text` and shares its cache, so a later spawn of the same text reuses the measurement. Use it to size boxes to their content instead of guessing widths.],
 )[
 ```python
 width, height = scene.text.measure("PGA = 0.35 g", role="label")
+_, paragraph_height = scene.text.measure("Primera línea
+Segunda línea", line_spacing=1.6)
 box = scene.geometry.rounded_rect(width + 0.56, height + 0.32, 0.14).move_to(0, -4.14)
 ```
 ]
@@ -322,13 +326,13 @@ scene.render()
   params: (
     (name: "font / math_font", type: "str | None", default: "None", desc: [Primary prose and mathematical font families.]),
     (name: "fallbacks", type: "Sequence[str]", default: "()", desc: [Ordered fallback font families for prose shaping.]),
-    (name: "size", type: "float | None", default: "None", desc: [Positive finite size in Typst/canvas points.]),
+    (name: "size", type: "float | None", default: "None", desc: [Positive finite size in scene units.]),
     (name: "weight", type: "int | None", default: "None", desc: [Numeric weight from 1 through 1000.]),
     (name: "color / stroke", type: "Color | None", default: "None", desc: [Glyph fill and optional outline color.]),
     (name: "opacity", type: "float | None", default: "None", desc: [Whole-Text alpha from 0 through 1.]),
-    (name: "spacing", type: "float | None", default: "None", desc: [Non-negative letter and word spacing in points.]),
+    (name: "spacing", type: "float | None", default: "None", desc: [Non-negative letter and word spacing in scene units.]),
     (name: "decorations", type: "Sequence[str]", default: "()", desc: [`underline`, `strike`, or `strikethrough`.]),
-    (name: "baseline", type: "float | None", default: "None", desc: [Finite baseline offset in points; positive values move glyphs upward.]),
+    (name: "baseline", type: "float | None", default: "None", desc: [Finite baseline offset in scene units; positive values move glyphs upward.]),
   ),
   returns: (type: "TextStyle", desc: [Reusable immutable typography overlay.]),
   desc: [It intentionally has no box width, height, padding, fit, growth, columns, or vertical alignment. Invalid values raise `ValueError`.],
@@ -363,7 +367,7 @@ baseline through the structured Typst tree. A later fluent `text.fill(...)`,
 #api-entry(
   name: "TextFlow",
   kind: "value",
-  signature: "TextFlow(*, wrap=\"auto\", align=\"left\", line_spacing=1.2, max_lines=None, overflow=\"clip\", direction=\"auto\", hyphenate=False)",
+  signature: "TextFlow(*, wrap=\"auto\", align=\"left\", line_spacing=1.2, max_lines=None, overflow=\"clip\", direction=\"auto\", hyphenate=False, lang=None)",
   params: (
     (name: "wrap", type: "\"auto\" | False | float", default: "\"auto\"", desc: [Use the offered width, preserve a line except explicit newlines, or cap typographic width. Numeric widths must be positive and finite.]),
     (name: "align", type: "left | center | right | justify", default: "\"left\"", desc: [Internal paragraph alignment.]),
@@ -372,6 +376,7 @@ baseline through the structured Typst tree. A later fluent `text.fill(...)`,
     (name: "overflow", type: "visible | clip | ellipsis", default: "\"clip\"", desc: [Behavior beyond `max_lines`.]),
     (name: "direction", type: "auto | ltr | rtl", default: "\"auto\"", desc: [Text direction passed to the compositor.]),
     (name: "hyphenate", type: "bool", default: "False", desc: [Enable Typst hyphenation.]),
+    (name: "lang", type: "str | None", default: "None", desc: [Lowercase ISO 639 code (`"es"`, `"en"`, …) choosing hyphenation patterns and language typography. `None` keeps the English default; other values raise `ValueError`. `scene.text(..., lang="es")` sets it directly.]),
   ),
   returns: (type: "TextFlow", desc: [Reusable immutable internal composition options.]),
   desc: [`wrap="auto"` uses Layout v2's offered width or the free scene's safe-frame offer. Direct `scene.text` flow keywords override this object.],
@@ -593,13 +598,13 @@ copy.become("Resultado: ", part("value", "$42$", color=GOLD), duration=0.8)
 #api-entry(
   name: "Text.move_to",
   kind: "method",
-  signature: ".move_to(x, y, *, anchor: Anchor | TextAnchor = None) -> Text",
+  signature: ".move_to(x, y, anchor: Anchor | TextAnchor = None) -> Text",
   params: (
-    (name: "x / y", type: "float", default: none, desc: [Target point in canvas units.]),
-    (name: "anchor", type: "Anchor | TextAnchor | None", default: "None", desc: [Geometric bounds anchor or baseline-left/center/right text anchor.]),
+    (name: "x / y", type: "float", default: none, desc: [Target point in scene units.]),
+    (name: "anchor", type: "Anchor | TextAnchor | None", default: "None", desc: [Geometric bounds anchor or baseline-left/center/right text anchor; positional or keyword.]),
   ),
   returns: (type: "Text", desc: [The same specialized fluent handle.]),
-  desc: [A single line defaults to `TextAnchor.BASELINE_CENTER`; a multiline block without an explicit anchor keeps visual-center placement. Explicit `TextAnchor` values use the first visual line. Layout-owned text raises `LayoutOwnershipError`, and non-anchor values raise `TypeError`.],
+  desc: [A single line defaults to `TextAnchor.BASELINE_CENTER`; a multiline block without an explicit anchor keeps visual-center placement. Explicit `TextAnchor` values use the first visual line. A single `Drawable` or `AnchorPoint` argument aligns the visual center to that reference without creating a reactive follow. Layout-owned text raises `LayoutOwnershipError`, and non-anchor values raise `TypeError`.],
 )[
 ```python
 # show-code: true
