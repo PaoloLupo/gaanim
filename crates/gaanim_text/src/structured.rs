@@ -11,6 +11,20 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::config::TextRole;
 
+/// Text unit whose glyphs start together in a staggered reveal such as
+/// `write(by=...)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TextRevealUnit {
+    #[default]
+    Grapheme,
+    /// Unicode words, as in [`TextSpec::words`].
+    Word,
+    /// Explicit `\n`-separated lines, as in [`TextSpec::explicit_lines`].
+    Line,
+    /// The innermost semantic part containing each character.
+    Part,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TextWrap {
@@ -325,6 +339,65 @@ impl TextSpec {
                     occurrence,
                     style,
                 }
+            })
+            .collect()
+    }
+
+    /// Non-whitespace characters of [`Self::rendered_text`] in order, each with
+    /// the index of the `unit` containing it.
+    ///
+    /// Characters outside every unit, such as punctuation between words or
+    /// text outside semantic parts, have no index.
+    pub fn visible_char_units(&self, unit: TextRevealUnit) -> Vec<(char, Option<usize>)> {
+        let rendered = self.rendered_text();
+        let ranges: Vec<Option<std::ops::Range<usize>>> = match unit {
+            TextRevealUnit::Grapheme => rendered
+                .grapheme_indices(true)
+                .map(|(start, grapheme)| Some(start..start + grapheme.len()))
+                .collect(),
+            TextRevealUnit::Word => rendered
+                .unicode_word_indices()
+                .map(|(start, word)| Some(start..start + word.len()))
+                .collect(),
+            TextRevealUnit::Line => {
+                let mut start = 0;
+                rendered
+                    .split('\n')
+                    .map(|line| {
+                        let range = start..start + line.len();
+                        start = range.end + 1;
+                        Some(range)
+                    })
+                    .collect()
+            }
+            TextRevealUnit::Part => self
+                .parts()
+                .into_iter()
+                .map(|part| {
+                    rendered
+                        .match_indices(&part.text)
+                        .nth(part.occurrence)
+                        .map(|(start, text)| start..start + text.len())
+                })
+                .collect(),
+        };
+        rendered
+            .char_indices()
+            .filter(|(_, character)| !character.is_whitespace())
+            .map(|(offset, character)| {
+                // Nested parts overlap; the shortest range is the innermost.
+                let unit = ranges
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, range)| {
+                        range
+                            .as_ref()
+                            .filter(|range| range.contains(&offset))
+                            .map(|range| (index, range.len()))
+                    })
+                    .min_by_key(|(_, len)| *len)
+                    .map(|(index, _)| index);
+                (character, unit)
             })
             .collect()
     }
@@ -685,6 +758,82 @@ mod tests {
         assert_eq!(
             spec.graphemes(),
             ["E", " ", "=", " ", "m", " ", "c", "^", "2"]
+        );
+    }
+
+    #[test]
+    fn visible_char_units_follow_text_selection_segmentation() {
+        let plain = |text: &str| {
+            TextSpec::new(
+                vec![text.into()],
+                None,
+                TextStyle::default(),
+                TextFlow::default(),
+            )
+            .unwrap()
+        };
+        let units = |spec: &TextSpec, unit| {
+            spec.visible_char_units(unit)
+                .into_iter()
+                .map(|(_, unit)| unit)
+                .collect::<Vec<_>>()
+        };
+
+        let words = plain("Hola, mundo!");
+        assert_eq!(
+            words
+                .visible_char_units(TextRevealUnit::Word)
+                .iter()
+                .map(|(character, _)| *character)
+                .collect::<String>(),
+            "Hola,mundo!"
+        );
+        assert_eq!(
+            units(&words, TextRevealUnit::Word),
+            [
+                Some(0),
+                Some(0),
+                Some(0),
+                Some(0),
+                None,
+                Some(1),
+                Some(1),
+                Some(1),
+                Some(1),
+                Some(1),
+                None
+            ]
+        );
+        assert_eq!(
+            units(&plain("ab\n\ncd"), TextRevealUnit::Line),
+            [Some(0), Some(0), Some(2), Some(2)]
+        );
+        assert_eq!(
+            units(&plain("a b"), TextRevealUnit::Grapheme),
+            [Some(0), Some(2)]
+        );
+
+        let parts = TextSpec::new(
+            vec![
+                "x ".into(),
+                TextPart::new(
+                    "outer",
+                    vec![
+                        "ab".into(),
+                        TextPart::new("inner", vec!["c".into()], TextStyle::default()).into(),
+                    ],
+                    TextStyle::default(),
+                )
+                .into(),
+            ],
+            None,
+            TextStyle::default(),
+            TextFlow::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            units(&parts, TextRevealUnit::Part),
+            [None, Some(0), Some(0), Some(1)]
         );
     }
 

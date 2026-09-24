@@ -31,7 +31,7 @@ use crate::canvas::types::{
 };
 use gaanim_text::prelude::{
     TextContent as StructuredTextContent, TextDirection as StructuredTextDirection,
-    TextOverflow as StructuredTextOverflow, TextSpec as StructuredTextSpec,
+    TextOverflow as StructuredTextOverflow, TextRevealUnit, TextSpec as StructuredTextSpec,
     TextStyle as StructuredTextStyle, TextWrap as StructuredTextWrap,
 };
 
@@ -2707,7 +2707,14 @@ impl SceneModel {
                             anim,
                             id_map,
                         );
-                        if let Some(anim) = Self::remap_anim(anim, id_map, object_specs) {
+                        if let Some(mut remapped) = Self::remap_anim(anim, id_map, object_specs) {
+                            Self::resolve_reveal_groups(
+                                builder,
+                                object_specs,
+                                anim.target,
+                                &mut remapped,
+                            );
+                            let anim = remapped;
                             if anim.anim_type.is_camera() {
                                 let start = builder.current_time;
                                 Self::schedule_camera_animation(
@@ -2749,7 +2756,16 @@ impl SceneModel {
                     }
                     let remapped: Vec<AnimationBuilder> = anims
                         .iter()
-                        .filter_map(|anim| Self::remap_anim(anim, id_map, object_specs))
+                        .filter_map(|anim| {
+                            let mut remapped = Self::remap_anim(anim, id_map, object_specs)?;
+                            Self::resolve_reveal_groups(
+                                builder,
+                                object_specs,
+                                anim.target,
+                                &mut remapped,
+                            );
+                            Some(remapped)
+                        })
                         .collect();
                     let start = builder.current_time;
                     let max_duration = remapped
@@ -6417,6 +6433,35 @@ impl SceneModel {
         })
     }
 
+    /// Resolve `write(by=...)` into glyph groups that follow the segmentation
+    /// of `text.words`, `text.lines`, and `text.parts`.
+    fn resolve_reveal_groups(
+        builder: &SceneBuilder,
+        object_specs: &HashMap<ObjectId, ObjectSpec>,
+        authored_target: ObjectId,
+        anim: &mut AnimationBuilder,
+    ) {
+        let AnimationType::Write { config } = &mut anim.anim_type else {
+            return;
+        };
+        if config.reveal_unit == TextRevealUnit::Grapheme {
+            return;
+        }
+        let Some(SpawnKind::Text(text)) = object_specs.get(&authored_target).map(|spec| &spec.kind)
+        else {
+            return;
+        };
+        let Some(state) = builder.states.get(anim.target) else {
+            return;
+        };
+        let glyphs: Vec<(ObjectId, char)> = state
+            .child_spans
+            .iter()
+            .map(|child| (child.id, child.span.character))
+            .collect();
+        config.groups = reveal_groups(&glyphs, &text.visible_char_units(config.reveal_unit));
+    }
+
     fn fragment_child_ids(
         builder: &mut SceneBuilder,
         id_map: &HashMap<ObjectId, ObjectId>,
@@ -8525,6 +8570,56 @@ impl SceneModel {
             builder.commands.entity(entity).insert(transform);
         }
     }
+}
+
+/// Groups glyph children by the text unit of the visible character each one
+/// draws, in reading order.
+///
+/// Glyphs are aligned with `visible` greedily with a short lookahead, so a
+/// ligature that consumes several characters or a glyph with no source
+/// character (math, smart quotes, hyphenation) does not derail the alignment.
+/// Such glyphs, and punctuation outside every unit, join the preceding unit,
+/// or the following one at the start. Returns `None` when no glyph matches a
+/// unit.
+fn reveal_groups(
+    glyphs: &[(ObjectId, char)],
+    visible: &[(char, Option<usize>)],
+) -> Option<Vec<Vec<ObjectId>>> {
+    const LOOKAHEAD: usize = 4;
+    let mut cursor = 0;
+    let mut units: Vec<Option<usize>> = glyphs
+        .iter()
+        .map(|(_, character)| {
+            let offset = visible
+                .get(cursor..)?
+                .iter()
+                .take(LOOKAHEAD)
+                .position(|(visible, _)| visible == character)?;
+            cursor += offset + 1;
+            visible[cursor - 1].1
+        })
+        .collect();
+    let mut previous = None;
+    for unit in &mut units {
+        *unit = unit.or(previous);
+        previous = *unit;
+    }
+    let mut next = None;
+    for unit in units.iter_mut().rev() {
+        *unit = unit.or(next);
+        next = *unit;
+    }
+
+    let mut groups: Vec<Vec<ObjectId>> = Vec::new();
+    let mut group_of_unit = HashMap::new();
+    for ((id, _), unit) in glyphs.iter().zip(units) {
+        let group = *group_of_unit.entry(unit?).or_insert_with(|| {
+            groups.push(Vec::new());
+            groups.len() - 1
+        });
+        groups[group].push(*id);
+    }
+    (!groups.is_empty()).then_some(groups)
 }
 
 #[cfg(test)]
@@ -11032,6 +11127,94 @@ mod tests {
                 ) if from.y > to.y
             )
         }));
+    }
+
+    #[test]
+    fn reveal_groups_align_ligatures_and_attach_punctuation() {
+        let ids: Vec<ObjectId> = (1..=6).map(ObjectId::from_raw).collect();
+        // "¡fire, ok": the "fi" ligature draws one glyph for two characters.
+        let glyphs: Vec<(ObjectId, char)> = ids.iter().copied().zip("¡fre,o".chars()).collect();
+        let visible = [
+            ('¡', None),
+            ('f', Some(0)),
+            ('i', Some(0)),
+            ('r', Some(0)),
+            ('e', Some(0)),
+            (',', None),
+            ('o', Some(1)),
+        ];
+        assert_eq!(
+            reveal_groups(&glyphs, &visible),
+            Some(vec![ids[..5].to_vec(), vec![ids[5]]])
+        );
+        assert_eq!(reveal_groups(&glyphs, &[('x', None)]), None);
+    }
+
+    fn write_start_times(anim: impl FnOnce(&DrawableHandle) -> crate::canvas::Anim) -> Vec<f64> {
+        let mut canvas = SceneModel::new(640, 360);
+        let text = canvas.text("uno bb dos");
+        canvas.play(vec![anim(&text).duration(1.0)]);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+
+        let mut starts: Vec<f64> = timeline
+            .clips
+            .values()
+            .filter(|clip| {
+                matches!(
+                    &clip.payload,
+                    gaanim_timeline::clip::ClipPayload::Animation(
+                        gaanim_timeline::clip::AnimationSpec {
+                            lens: gaanim_timeline::clip::PropertyLensSpec::PathCompletion {
+                                from,
+                                to,
+                            },
+                            ..
+                        }
+                    ) if *from == 0.0 && *to == 1.0
+                )
+            })
+            .map(|clip| clip.start)
+            .collect();
+        starts.sort_by(f64::total_cmp);
+        starts
+    }
+
+    fn distinct_counts(starts: &[f64]) -> Vec<usize> {
+        let mut counts: Vec<usize> = Vec::new();
+        for (index, start) in starts.iter().enumerate() {
+            if index > 0 && (start - starts[index - 1]).abs() < 1e-9 {
+                *counts.last_mut().unwrap() += 1;
+            } else {
+                counts.push(1);
+            }
+        }
+        counts
+    }
+
+    #[test]
+    fn write_by_word_starts_each_word_together() {
+        let by_glyph = write_start_times(|text| text.animate().write());
+        assert_eq!(distinct_counts(&by_glyph), [1; 8]);
+
+        let by_word =
+            write_start_times(|text| text.animate().write().reveal_unit(TextRevealUnit::Word));
+        assert_eq!(distinct_counts(&by_word), [3, 2, 3]);
+
+        // Center order starts the middle word "bb" first, then both sides.
+        let centered = write_start_times(|text| {
+            text.animate()
+                .write()
+                .reveal_unit(TextRevealUnit::Word)
+                .draw_order(crate::anim::DrawOrder::Center)
+        });
+        assert_eq!(distinct_counts(&centered), [2, 6]);
     }
 
     #[test]

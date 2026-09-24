@@ -42,11 +42,31 @@ pub enum BoundsTarget {
     },
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+/// Order in which the items or groups of a staggered draw animation start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DrawOrder {
+    #[default]
+    Forward,
+    Reverse,
+    /// Middle first, then outward; groups equally far from the middle start
+    /// together.
+    Center,
+    /// A pseudo-random permutation fixed by the number of groups, so seeks,
+    /// snapshots, and exports agree.
+    Random,
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct DrawAnimationConfig {
     pub stroke_width: Option<f64>,
     pub lag_ratio: Option<f64>,
     pub pen_tip: bool,
+    /// Text unit whose glyphs start together (`write(by=...)`).
+    pub reveal_unit: gaanim_text::prelude::TextRevealUnit,
+    pub order: DrawOrder,
+    /// Glyph groups in reading order, resolved from `reveal_unit` when the
+    /// scene is compiled. `None` staggers every drawn item on its own.
+    pub groups: Option<Vec<Vec<ObjectId>>>,
 }
 
 /// Typed targets collected by `DrawableHandle::animate()`.
@@ -502,6 +522,28 @@ impl AnimationBuilder {
             | AnimationType::Unwrite { config }
             | AnimationType::DrawBorderThenFill { config } => {
                 config.lag_ratio = Some(lag_ratio);
+            }
+            _ => {}
+        }
+        self
+    }
+
+    /// Starts the glyphs of each text unit together in a `Write`.
+    pub fn reveal_unit(mut self, unit: gaanim_text::prelude::TextRevealUnit) -> Self {
+        if let AnimationType::Write { config } = &mut self.anim_type {
+            config.reveal_unit = unit;
+        }
+        self
+    }
+
+    pub fn draw_order(mut self, order: DrawOrder) -> Self {
+        match &mut self.anim_type {
+            AnimationType::Write { config }
+            | AnimationType::Create { config }
+            | AnimationType::Uncreate { config }
+            | AnimationType::Unwrite { config }
+            | AnimationType::DrawBorderThenFill { config } => {
+                config.order = order;
             }
             _ => {}
         }

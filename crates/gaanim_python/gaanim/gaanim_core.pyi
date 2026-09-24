@@ -749,9 +749,15 @@ class Anim:
     def write(self, *, by: Literal["grapheme", "word", "line", "part"] = "grapheme", order: Literal["forward", "reverse", "center", "random"] = "forward", stagger: Optional[float] = None) -> Anim:
         """Trace paths with a constant logical stroke, then smoothly fade their fills.
 
-        ``None`` uses adaptive sequential staggering and a number overrides it.
-        A missing outline is synthesized at 0.03 logical units and removed as
-        the authored fill appears.
+        On text, ``by`` starts the glyphs of each grapheme, word, explicit line,
+        or innermost semantic part together, with the segmentation of
+        ``text.words``, ``text.lines``, and ``text.parts``; punctuation joins the
+        neighboring group. ``order`` starts groups ``"forward"``, ``"reverse"``,
+        from the ``"center"`` outward, or in a fixed ``"random"`` permutation.
+        ``stagger`` is the lag ratio between groups: ``None`` uses adaptive
+        sequential staggering and a number overrides it. A missing outline is
+        synthesized at 0.03 logical units and removed as the authored fill
+        appears. Raises ``ValueError`` after a property target or another effect.
         """
         ...
     def create(self) -> Anim:

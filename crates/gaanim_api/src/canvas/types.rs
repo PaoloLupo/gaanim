@@ -2134,6 +2134,17 @@ impl Anim {
         self
     }
 
+    /// Starts the glyphs of each word, line, or part together in a `write()`.
+    pub fn reveal_unit(mut self, unit: gaanim_text::prelude::TextRevealUnit) -> Self {
+        self.inner = self.inner.reveal_unit(unit);
+        self
+    }
+
+    pub fn draw_order(mut self, order: crate::anim::DrawOrder) -> Self {
+        self.inner = self.inner.draw_order(order);
+        self
+    }
+
     pub fn stroke_width(mut self, stroke_width: f64) -> Self {
         if matches!(self.inner.anim_type, AnimationType::Properties(_)) {
             assert!(
