@@ -908,6 +908,189 @@ mod tests {
         canvas
     }
 
+    /// Slides whose objects appear with draw animations (write/create) in a
+    /// stagger, like a card of equations, behind cross-fade transitions.
+    fn drawn_cards_deck(slides: usize, revision: usize) -> SceneModel {
+        let mut canvas = SceneModel::new(1920, 1080);
+        for index in 0..slides {
+            let transition =
+                (index > 0).then_some(gaanim_timeline::transition::TransitionType::CrossFade {
+                    duration: 0.45,
+                });
+            canvas
+                .segment(format!("Cards {index}"), transition)
+                .unwrap();
+            // Only the last slide changes between revisions.
+            let revision = if index + 1 == slides { revision } else { 0 };
+            let title = canvas.text(&format!("Card {index} revision {revision}"));
+            canvas.play(vec![title.animate().fade_in().duration(0.3)]);
+            for card in 0..3 {
+                let x = -5.0 + 5.0 * card as f64;
+                let frame = canvas.square(3.0).move_to(x, 0.0);
+                let equation = canvas
+                    .text(&format!("$V_{card} <= 0.55 V_m$"))
+                    .move_to(x, 0.5);
+                let divider = canvas.line(x - 1.2, -0.5, x + 1.2, -0.5);
+                let value = canvas.text(&format!("{card}.00 tonf")).move_to(x, -1.0);
+                let plan = crate::canvas::Composition::stagger(
+                    vec![
+                        crate::canvas::Composition::leaf(frame.fade_in(0.3)),
+                        crate::canvas::Composition::leaf(equation.write(0.6)),
+                        crate::canvas::Composition::leaf(divider.create(0.3)),
+                        crate::canvas::Composition::leaf(value.fade_in(0.3)),
+                    ],
+                    0.12,
+                )
+                .unwrap();
+                canvas
+                    .play_composition_configured(plan, None, None)
+                    .unwrap();
+            }
+            canvas.stop(Some(format!("end {index}"))).unwrap();
+        }
+        canvas
+    }
+
+    /// Every entity's observable state at `time`, sorted by ObjectId.
+    fn state_at(world: &mut World, time: f64) -> String {
+        seek(world, time);
+        let snapshot = gaanim_timeline::snapshot::WorldSnapshot::capture(world);
+        let mut entities = snapshot.entities.into_iter().collect::<Vec<_>>();
+        entities.sort_by_key(|(id, _)| id.as_raw());
+        format!("{entities:?}")
+    }
+
+    /// Real-time playback at 60 fps from `from` to `to`, as the editor ticks it.
+    fn play(world: &mut World, from: f64, to: f64) {
+        const DT: f64 = 1.0 / 60.0;
+        world.insert_resource(gaanim_animation::PlaybackState {
+            is_playing: true,
+            scaled_dt: DT,
+            current_time: from,
+        });
+        let mut time = from;
+        while time < to {
+            time = (time + DT).min(to);
+            seek(world, time);
+            world
+                .resource_mut::<gaanim_animation::PlaybackState>()
+                .current_time = time;
+        }
+        world.insert_resource(gaanim_animation::PlaybackState {
+            is_playing: false,
+            scaled_dt: 0.0,
+            current_time: to,
+        });
+    }
+
+    /// The state at each time must not depend on what was shown before it.
+    fn assert_seek_history_independent(world: &mut World) {
+        let duration = world.resource::<Timeline>().cached_duration;
+        let steps = 60;
+        let times: Vec<f64> = (0..=steps)
+            .map(|step| duration * f64::from(step) / f64::from(steps))
+            .collect();
+        // Reference: every time reached by one jump from the end.
+        let reference: Vec<String> = times
+            .iter()
+            .map(|&time| {
+                state_at(world, duration);
+                state_at(world, time)
+            })
+            .collect();
+        // Real-time playback from the start must show the same frames.
+        state_at(world, 0.0);
+        let mut previous = 0.0;
+        for (index, &time) in times.iter().enumerate() {
+            play(world, previous, time);
+            previous = time;
+            assert_eq!(
+                state_at(world, time),
+                reference[index],
+                "state at {time:.3}s during playback differs from a direct seek"
+            );
+        }
+    }
+
+    /// A world that renders every update with the retained fragment cache.
+    fn render_app() -> App {
+        let mut app = App::new();
+        app.insert_resource(Timeline::new())
+            .insert_resource(gaanim_text::font::FontRegistry::new())
+            .insert_resource(gaanim_text::prelude::TextConfig::default())
+            .init_resource::<gaanim_renderer::pipeline::GaanimRenderCache>()
+            .add_systems(
+                Update,
+                (
+                    gaanim_scene::transform_propagation_system,
+                    gaanim_renderer::pipeline::gaanim_render_system,
+                )
+                    .chain(),
+            );
+        app
+    }
+
+    /// Render the frame at `time` and compare the retained scene with a
+    /// scene compiled from scratch.
+    fn assert_retained_frame_matches(app: &mut App, time: f64, label: &str) {
+        seek(app.world_mut(), time);
+        app.world_mut()
+            .resource_mut::<gaanim_animation::PlaybackState>()
+            .current_time = time;
+        app.update();
+        let fresh = gaanim_renderer::pipeline::compile_scene_from_world(app.world_mut(), None);
+        let live = app
+            .world_mut()
+            .query::<&gaanim_renderer::prelude::VelloScene2d>()
+            .single(app.world())
+            .unwrap();
+        assert!(
+            live.encoding().path_data == fresh.encoding().path_data
+                && live.encoding().draw_data == fresh.encoding().draw_data,
+            "{label}: retained frame at {time:.3}s differs from a fresh compile"
+        );
+    }
+
+    #[test]
+    fn retained_fragments_match_a_fresh_compile_during_playback() {
+        let mut app = render_app();
+        app.insert_resource(gaanim_animation::PlaybackState {
+            is_playing: true,
+            scaled_dt: 1.0 / 60.0,
+            current_time: 0.0,
+        });
+        hot_reload(app.world_mut(), drawn_cards_deck(3, 0));
+        let duration = app.world().resource::<Timeline>().cached_duration;
+        let frames = (duration * 60.0).ceil() as usize;
+        for pass in ["first playback", "replay after rewind"] {
+            for frame in 0..=frames {
+                assert_retained_frame_matches(&mut app, frame as f64 / 60.0, pass);
+            }
+        }
+        // Scrub backwards across the cards, then play again after a reload.
+        for step in (0..=20).rev() {
+            assert_retained_frame_matches(&mut app, duration * f64::from(step) / 20.0, "scrub");
+        }
+        hot_reload(app.world_mut(), drawn_cards_deck(3, 1));
+        for frame in 0..=frames {
+            assert_retained_frame_matches(&mut app, frame as f64 / 60.0, "after reload");
+        }
+    }
+
+    #[test]
+    fn drawn_objects_stay_hidden_until_their_animation_after_any_seek() {
+        let mut world = incremental_world();
+        hot_reload(&mut world, drawn_cards_deck(3, 0));
+        assert_seek_history_independent(&mut world);
+
+        // Playback before an edit, then an incremental reload of the last slide.
+        play(&mut world, 0.0, 2.0);
+        hot_reload(&mut world, drawn_cards_deck(3, 0));
+        play(&mut world, 2.0, 9.0);
+        hot_reload(&mut world, drawn_cards_deck(3, 1));
+        assert_seek_history_independent(&mut world);
+    }
+
     #[test]
     fn themed_presentation_reloads_incrementally_like_a_full_replay() {
         let slides = 4;
