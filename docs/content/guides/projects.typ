@@ -86,6 +86,15 @@ callbacks de Python (animaciones personalizadas, updaters, funciones reactivas o
 curvas de easing propias). El resultado siempre es idéntico al de una recarga
 completa; para forzar esta última, inicia Gaanim con `GAANIM_INCREMENTAL=0`.
 
+Los assets del proyecto también recargan la escena. Guardar cualquier archivo
+que no sea Python dentro del proyecto (imágenes, SVG, Lottie, glTF, WGSL,
+fuentes Typst, datos) vacía las cachés de imágenes, Lottie, glTF y Typst,
+vuelve a ejecutar el script y recompila todos los segmentos, porque un segmento
+cuyo código no cambió puede dibujar el archivo modificado. Se ignoran los
+archivos y carpetas ocultos (`.git`, `.venv`, archivos de intercambio del
+editor), `venv`, `env`, `__pycache__`, `exports`, `snapshots`, `target`, los
+temporales (`~`, `.swp`, `.tmp`, `.bak`) y los `.lock`.
+
 Puedes crear el `.venv` dentro del proyecto con `uv`:
 
 ```powershell

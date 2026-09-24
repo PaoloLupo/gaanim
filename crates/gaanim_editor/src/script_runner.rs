@@ -19,8 +19,8 @@ use gaanim_api::host::{self, ReloadPayload};
 
 /// Handle to the script-running thread.
 pub struct ScriptRunner {
-    /// Send `true` here to ask the thread to re-run the script.
-    rerun_tx: Sender<bool>,
+    /// Ask the thread to re-run the script.
+    rerun_tx: Sender<Rerun>,
     /// Set when the thread has exited (e.g. after a fatal error).
     _exited: Arc<AtomicBool>,
 }
@@ -46,7 +46,7 @@ impl ScriptRunner {
         payload_tx: Sender<ReloadPayload>,
         error_tx: Sender<String>,
     ) -> Self {
-        let (rerun_tx, rerun_rx) = crossbeam_channel::unbounded::<bool>();
+        let (rerun_tx, rerun_rx) = crossbeam_channel::unbounded::<Rerun>();
         let exited = Arc::new(AtomicBool::new(false));
         let exited_clone = exited.clone();
 
@@ -65,8 +65,22 @@ impl ScriptRunner {
 
     /// Request a re-run of the script (used by the file watcher and the `R` key).
     pub fn request_rerun(&self) {
-        let _ = self.rerun_tx.send(true);
+        let _ = self.rerun_tx.send(Rerun::Source);
     }
+
+    /// Re-run the script after project assets changed: cached images,
+    /// Lottie, glTF, and Typst layouts are read again and the scene is
+    /// replayed in full.
+    pub fn request_asset_reload(&self) {
+        let _ = self.rerun_tx.send(Rerun::Assets);
+    }
+}
+
+/// Why the script runs again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Rerun {
+    Source,
+    Assets,
 }
 
 fn format_py_traceback(py: Python<'_>, err: &PyErr) -> String {
@@ -102,7 +116,7 @@ fn run_script_thread(
     script_path: PathBuf,
     payload_tx: Sender<ReloadPayload>,
     error_tx: Sender<String>,
-    rerun_rx: Receiver<bool>,
+    rerun_rx: Receiver<Rerun>,
     exited: Arc<AtomicBool>,
 ) {
     // Install the host channel so `Canvas.render()` inside the script can push
@@ -145,8 +159,17 @@ fn run_script_thread(
 
         // Block until the next re-run request (or channel closed).
         match rerun_rx.recv() {
-            Ok(true) => continue,
-            _ => break,
+            Ok(first) => {
+                // Coalesce requests queued while the script ran.
+                let reason = rerun_rx.try_iter().fold(first, |reason, next| {
+                    if next == Rerun::Assets { next } else { reason }
+                });
+                if reason == Rerun::Assets {
+                    gaanim_api::canvas::clear_asset_caches();
+                    gaanim_api::host::mark_assets_changed();
+                }
+            }
+            Err(_) => break,
         }
     }
 

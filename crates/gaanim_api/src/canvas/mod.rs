@@ -49,6 +49,7 @@ pub use visualization::{
 };
 mod canvas_impl;
 pub use crate::export::{AudioTrack, AudioTrackError};
+pub use canvas_impl::clear_asset_caches;
 pub use canvas_impl::{
     AngleDimensionHandle, AngleDimensionOptions, AssetPreloadError, AssetRootError, AudioClip,
     BooleanError, CameraBindingError, CameraConstraintHandle, CameraStateError, CameraStateHandle,

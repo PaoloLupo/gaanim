@@ -4,6 +4,7 @@
 //! [`SceneModel`](crate::canvas::SceneModel)) and submit them here. The editor/hot-reload
 //! host listens for these payloads and replays them into Bevy.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -17,12 +18,16 @@ pub struct ReloadPayload {
     pub canvas: SceneModel,
     /// Time spent executing the Python script before it submitted the scene.
     pub compile_duration: Duration,
+    /// The script re-ran because project assets changed, so no compiled
+    /// segment of the previous scene may be reused.
+    pub assets_changed: bool,
 }
 
 static HOST_TX: OnceLock<Mutex<Option<Sender<ReloadPayload>>>> = OnceLock::new();
 static HOST_COMPILE_STARTED_AT: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
 type SnapshotHandler = dyn Fn(SceneModel, &str, &[f64]) -> Result<usize, String> + Send + Sync;
 static SNAPSHOT_HANDLER: OnceLock<Mutex<Option<Arc<SnapshotHandler>>>> = OnceLock::new();
+static ASSETS_CHANGED: AtomicBool = AtomicBool::new(false);
 
 fn tx_slot() -> &'static Mutex<Option<Sender<ReloadPayload>>> {
     HOST_TX.get_or_init(|| Mutex::new(None))
@@ -75,6 +80,12 @@ pub fn set_compile_started_at(started_at: Option<Instant>) {
         .expect("host compile timer poisoned") = started_at;
 }
 
+/// Record that asset caches were cleared for the next run, so the next
+/// submitted scene is replayed in full.
+pub fn mark_assets_changed() {
+    ASSETS_CHANGED.store(true, Ordering::SeqCst);
+}
+
 /// Submit a canvas to the embedded host. Returns `false` when no host is
 /// attached, e.g. when a script is run directly with plain Python.
 pub fn send_to_host(canvas: SceneModel) -> bool {
@@ -89,6 +100,7 @@ pub fn send_to_host(canvas: SceneModel) -> bool {
             .send(ReloadPayload {
                 canvas,
                 compile_duration,
+                assets_changed: ASSETS_CHANGED.swap(false, Ordering::SeqCst),
             })
             .is_ok(),
         None => false,
@@ -111,5 +123,20 @@ mod tests {
         set_snapshot_handler(None);
         assert_eq!(result, Ok(2));
         assert!(request_snapshots(SceneModel::new(1, 1), "x", &[]).is_err());
+    }
+
+    #[test]
+    fn only_the_first_scene_after_an_asset_change_is_marked() {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        set_host_sender(Some(tx));
+        mark_assets_changed();
+        assert!(send_to_host(SceneModel::new(16, 9)));
+        assert!(send_to_host(SceneModel::new(16, 9)));
+        set_host_sender(None);
+        let flags: Vec<bool> = rx
+            .try_iter()
+            .map(|payload| payload.assets_changed)
+            .collect();
+        assert_eq!(flags, [true, false]);
     }
 }

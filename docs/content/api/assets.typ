@@ -103,8 +103,10 @@ exportación.
 
 == Actualización de archivos modificados
 
-Cuando un recurso ráster o Lottie cambia en disco sin reiniciar el proceso,
-limpia las cachés antes de reconstruir los objetos afectados:
+En el editor no hace falta: guardar un asset del proyecto vacía las cachés y
+recarga la escena completa. Fuera del editor, cuando un recurso ráster o Lottie
+cambia en disco sin reiniciar el proceso, limpia las cachés antes de reconstruir
+los objetos afectados:
 
 ```python
 scene.assets.reload_assets()

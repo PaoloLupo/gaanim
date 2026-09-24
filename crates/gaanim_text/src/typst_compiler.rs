@@ -179,6 +179,14 @@ fn typst_hierarchy_cache() -> &'static Mutex<HashMap<TypstCacheKey, Arc<CachedTy
     TYPST_HIERARCHY_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Drop compiled Typst layouts so files they read (images, `#include`d
+/// sources) are loaded again after they change on disk.
+pub fn clear_typst_layout_cache() {
+    if let Some(cache) = TYPST_HIERARCHY_CACHE.get() {
+        cache.lock().expect("Typst layout cache poisoned").clear();
+    }
+}
+
 fn shared_typst_resources() -> &'static SharedTypstResources {
     SHARED_TYPST_RESOURCES.get_or_init(|| {
         let mut fonts = typst_kit::fonts::FontStore::new();
