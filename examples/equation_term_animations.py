@@ -1,5 +1,7 @@
 """Four semantic equation animations: terms, reveal, indication, and focus."""
 
+import os
+
 from gaanim import BLACK, CORAL, GOLD, GRAY, WHITE, Scene, part
 
 
@@ -43,4 +45,8 @@ scene.play([formula["mass"].animate.focus().duration(0.35)])
 scene.play([formula["light_speed"].animate.focus().duration(0.35)])
 scene.wait(1.0)
 
-scene.render()
+if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
+    # Mid-write seeks show each semantic term starting as one group.
+    scene.snapshots(snapshots, [1.5, 2.0, 3.0])
+else:
+    scene.render()
