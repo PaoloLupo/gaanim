@@ -363,6 +363,14 @@ pub enum PropertyLensSpec {
         from: f64,
         to: f64,
     },
+    /// Grow a solid arrow from its tail: the tip travels along the spine
+    /// while the head keeps its authored proportions. Writes `Path2D` and
+    /// `PathSource`; progress `1.0` is exactly the complete arrow.
+    ArrowGrow {
+        shape: gaanim_math::ArrowShape,
+        from: f64,
+        to: f64,
+    },
     /// Trims the path in a sliding range window.
     PathRange {
         from: f64,
@@ -599,6 +607,11 @@ impl PropertyLensSpec {
                 points: std::sync::Arc::new(points.clone()),
             },
             Self::SignalFloat { from, to } => PropertyLens::SignalFloat {
+                from: *from,
+                to: *to,
+            },
+            Self::ArrowGrow { shape, from, to } => PropertyLens::ArrowGrow {
+                shape: shape.clone(),
                 from: *from,
                 to: *to,
             },

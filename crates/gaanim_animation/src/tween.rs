@@ -150,6 +150,12 @@ pub enum PropertyLens {
         from: f64,
         to: f64,
     },
+    /// Grow a solid arrow from its tail with an undistorted head.
+    ArrowGrow {
+        shape: gaanim_math::ArrowShape,
+        from: f64,
+        to: f64,
+    },
     /// Cross-fade the fill alpha during a Write animation.
     /// The renderer multiplies the fill brush's color alpha by
     /// `from + (to - from) * t`. Inserted into the entity as
@@ -319,6 +325,7 @@ impl std::fmt::Debug for PropertyLens {
             Self::Material3D { from, to } => write!(f, "Material3D({from:?} -> {to:?})"),
             Self::PathMorph { .. } => write!(f, "PathMorph"),
             Self::PathCompletion { from, to } => write!(f, "PathCompletion({} -> {})", from, to),
+            Self::ArrowGrow { from, to, .. } => write!(f, "ArrowGrow({from} -> {to})"),
             Self::FillDrawProgress { from, to } => {
                 write!(f, "FillDrawProgress({} -> {})", from, to)
             }
@@ -584,6 +591,18 @@ pub fn evaluate_tweens_system(
                 // leaves a flashing circular halo behind.
                 if let Ok(mut source) = sources.get_mut(tween.target) {
                     source.0 = morphed;
+                }
+            }
+            PropertyLens::ArrowGrow { shape, from, to } => {
+                let grown = std::sync::Arc::new(shape.grown_path(*from + (*to - *from) * t));
+                if let Ok(mut path) = paths.get_mut(tween.target) {
+                    path.0 = grown.clone();
+                }
+                // Stroke clipping reads `PathSource`; keep it on the grown
+                // silhouette so the travelling head is not clipped to the
+                // full arrow's thin shaft.
+                if let Ok(mut source) = sources.get_mut(tween.target) {
+                    source.0 = grown;
                 }
             }
             PropertyLens::PathFollow { path } => {

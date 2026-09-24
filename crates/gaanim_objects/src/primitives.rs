@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use gaanim_core::ObjectId;
 use gaanim_core::kurbo::{self, Shape};
+use gaanim_math::arrow::arc_steps;
 use gaanim_math::{Bounds3D, GlobalSpatialTransform, SpatialTransform};
 use gaanim_scene::{
     FillBrush, GlobalOpacity, LocalBounds, MobjectId, ObjectTag, Opacity, Path2D, PathSource,
@@ -395,51 +396,10 @@ pub fn arrow_with_dimensions(
     head_width: f64,
     body_width: f64,
 ) -> MobjectBundle {
-    let dx = end.x - start.x;
-    let dy = end.y - start.y;
-    let len = (dx * dx + dy * dy).sqrt();
-
-    let head_len = head_length;
+    let path =
+        gaanim_math::arrow::straight_arrow_path(start, end, head_length, head_width, body_width);
     let head_half_width = head_width / 2.0;
     let body_half_t = body_width / 2.0;
-
-    let mut path = kurbo::BezPath::new();
-    if len > 0.0 {
-        let ux = dx / len;
-        let uy = dy / len;
-        let perp_x = -uy;
-        let perp_y = ux;
-
-        let base_x = end.x - ux * head_len;
-        let base_y = end.y - uy * head_len;
-
-        let start_top_x = start.x - perp_x * body_half_t;
-        let start_top_y = start.y - perp_y * body_half_t;
-        let start_bot_x = start.x + perp_x * body_half_t;
-        let start_bot_y = start.y + perp_y * body_half_t;
-
-        let shoulder_top_x = base_x - perp_x * body_half_t;
-        let shoulder_top_y = base_y - perp_y * body_half_t;
-        let shoulder_bot_x = base_x + perp_x * body_half_t;
-        let shoulder_bot_y = base_y + perp_y * body_half_t;
-
-        let h1_x = base_x - perp_x * head_half_width;
-        let h1_y = base_y - perp_y * head_half_width;
-        let h2_x = base_x + perp_x * head_half_width;
-        let h2_y = base_y + perp_y * head_half_width;
-
-        // Single closed subpath: pentagonal arrow silhouette.
-        // The fill covers the whole shape so the body is just as
-        // visible as the head after PathCompletion reaches 1.0.
-        path.move_to(kurbo::Point::new(start_top_x, start_top_y));
-        path.line_to(kurbo::Point::new(shoulder_top_x, shoulder_top_y));
-        path.line_to(kurbo::Point::new(h1_x, h1_y));
-        path.line_to(end);
-        path.line_to(kurbo::Point::new(h2_x, h2_y));
-        path.line_to(kurbo::Point::new(shoulder_bot_x, shoulder_bot_y));
-        path.line_to(kurbo::Point::new(start_bot_x, start_bot_y));
-        path.close_path();
-    }
 
     let pad = head_half_width.max(body_half_t);
     let min_x = start.x.min(end.x) - pad;
@@ -647,14 +607,6 @@ pub fn double_arrow(
     bundle.tag = ObjectTag("DoubleArrow".into());
     bundle
 }
-
-/// Polyline segment count for a circular sweep, sampled by angle so the
-/// facet error stays below a pixel at any scene scale.
-fn arc_steps(sweep_angle: f64, min_steps: u32) -> u32 {
-    ((sweep_angle.abs() / ARC_STEP_ANGLE).ceil() as u32).max(min_steps)
-}
-
-const ARC_STEP_ANGLE: f64 = 0.035;
 
 pub fn sector(
     id: ObjectId,
@@ -1200,40 +1152,27 @@ pub fn curved_arrow_with_dimensions(
     head_width: f64,
     body_width: f64,
 ) -> MobjectBundle {
-    let dx = end.x - start.x;
-    let dy = end.y - start.y;
-    let chord = (dx * dx + dy * dy).sqrt();
-    if chord <= f64::EPSILON || angle.abs() <= 1e-6 {
-        return arrow_with_dimensions(id, start, end, head_length, head_width, body_width);
+    match gaanim_math::ArrowShape::curved(start, end, angle, head_length, head_width, body_width) {
+        gaanim_math::ArrowShape::Arc {
+            center,
+            radius,
+            start_angle,
+            sweep_angle,
+            ..
+        } => curved_arrow_arc_with_dimensions(
+            id,
+            center,
+            radius,
+            start_angle,
+            sweep_angle,
+            head_length,
+            head_width,
+            body_width,
+        ),
+        gaanim_math::ArrowShape::Straight { .. } => {
+            arrow_with_dimensions(id, start, end, head_length, head_width, body_width)
+        }
     }
-
-    let radius = (chord * 0.5) / (angle * 0.5).sin().abs();
-    let r_sign = angle.signum();
-    let h = (radius * radius - chord * chord * 0.25).max(0.0).sqrt();
-    let center = kurbo::Point::new(
-        (start.x + end.x) * 0.5 + (-dy / chord) * h * r_sign,
-        (start.y + end.y) * 0.5 + (dx / chord) * h * r_sign,
-    );
-
-    let sa = (start.y - center.y).atan2(start.x - center.x);
-    let ea = (end.y - center.y).atan2(end.x - center.x);
-    let mut sweep = ea - sa;
-    if angle > 0.0 && sweep < 0.0 {
-        sweep += 2.0 * std::f64::consts::PI;
-    } else if angle < 0.0 && sweep > 0.0 {
-        sweep -= 2.0 * std::f64::consts::PI;
-    }
-
-    curved_arrow_arc_with_dimensions(
-        id,
-        center,
-        radius,
-        sa,
-        sweep,
-        head_length,
-        head_width,
-        body_width,
-    )
 }
 
 /// Creates a curved arrow from an explicit circular arc.
@@ -1277,10 +1216,7 @@ pub fn curved_arrow_arc_with_dimensions(
     body_width: f64,
 ) -> MobjectBundle {
     let radius = radius.abs();
-    let sa = start_angle;
     let start = center + kurbo::Vec2::new(radius * start_angle.cos(), radius * start_angle.sin());
-    let end_angle = start_angle + sweep_angle;
-    let end = center + kurbo::Vec2::new(radius * end_angle.cos(), radius * end_angle.sin());
 
     if radius <= f64::EPSILON || sweep_angle.abs() <= f64::EPSILON {
         let mut bundle = MobjectBundle::new(
@@ -1292,61 +1228,16 @@ pub fn curved_arrow_arc_with_dimensions(
         return bundle;
     }
 
-    let head_len = head_length;
     let body_half_t = body_width * 0.5;
-    // Keep the inner shoulder on the same side of the center as the shaft;
-    // this avoids an oversized/inverted fill for small-radius arcs.
-    let head_half_width = (head_width * 0.5).min((radius * 0.45).max(body_half_t));
-
-    let sweep = sweep_angle;
-    let sweep_sign = sweep.signum();
-    let sweep_abs = sweep.abs();
-    let head_angle = (head_len / radius).min(sweep_abs * 0.5);
-    let shaft_sweep = (sweep_abs - head_angle).max(0.0);
-    let sa_shoulder = end_angle - sweep_sign * head_angle;
-
-    let mut path = kurbo::BezPath::new();
-
-    // The shaft is a thin closed ribbon. Vector renderers implicitly close
-    // open subpaths for filling, which would otherwise turn a large arc into
-    // a filled circular sector.
-    let r_outer = radius + body_half_t;
-    let r_inner = (radius - body_half_t).max(0.0);
-    path.move_to(center + kurbo::Vec2::new(r_outer * sa.cos(), r_outer * sa.sin()));
-
-    let steps = arc_steps(shaft_sweep, 8);
-    for i in 0..=steps {
-        let a = sa + sweep_sign * shaft_sweep * (i as f64 / steps as f64);
-        path.line_to(center + kurbo::Vec2::new(r_outer * a.cos(), r_outer * a.sin()));
-    }
-
-    // The arrowhead tip lies exactly on the requested arc.
-    let p_shoulder_outer = center
-        + kurbo::Vec2::new(
-            (radius + head_half_width) * sa_shoulder.cos(),
-            (radius + head_half_width) * sa_shoulder.sin(),
-        );
-    path.line_to(p_shoulder_outer);
-
-    // Tip
-    path.line_to(end);
-
-    // Inner shoulder of the arrow head
-    let p_shoulder_inner = center
-        + kurbo::Vec2::new(
-            (radius - head_half_width) * sa_shoulder.cos(),
-            (radius - head_half_width) * sa_shoulder.sin(),
-        );
-    path.line_to(p_shoulder_inner);
-    path.line_to(
-        center + kurbo::Vec2::new(r_inner * sa_shoulder.cos(), r_inner * sa_shoulder.sin()),
+    let path = gaanim_math::arrow::arc_arrow_path(
+        center,
+        radius,
+        start_angle,
+        sweep_angle,
+        head_length,
+        head_width,
+        body_width,
     );
-
-    for i in 0..=steps {
-        let a = sa_shoulder - sweep_sign * shaft_sweep * (i as f64 / steps as f64);
-        path.line_to(center + kurbo::Vec2::new(r_inner * a.cos(), r_inner * a.sin()));
-    }
-    path.close_path();
 
     let bounds_rect = path.bounding_box();
     let bounds = Bounds3D::new_2d(

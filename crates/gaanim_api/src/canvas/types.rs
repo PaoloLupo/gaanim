@@ -1973,6 +1973,11 @@ impl Anim {
         self.effect(AnimationType::ShrinkToCenter)
     }
 
+    /// Grow an arrow from its tail with an undistorted, travelling head.
+    pub fn grow_arrow(self) -> Self {
+        self.effect(AnimationType::GrowArrow)
+    }
+
     pub fn spin_in_from_nothing(self) -> Self {
         self.effect(AnimationType::SpinInFromNothing)
     }

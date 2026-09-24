@@ -35,6 +35,34 @@ pub enum ExportFormat {
     PngSequence,
 }
 
+impl ExportFormat {
+    /// Human-readable format name for messages.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Mp4 => "MP4",
+            Self::Webm => "WebM",
+            Self::Webp => "WebP",
+            Self::Gif => "GIF",
+            Self::PngSequence => "PNG sequence",
+        }
+    }
+}
+
+/// Explain why FFmpeg could not start and how to recover.
+fn ffmpeg_spawn_error(format: ExportFormat, program: &str, error: &std::io::Error) -> ExportError {
+    let reason = if error.kind() == std::io::ErrorKind::NotFound {
+        format!("`{program}` was not found on PATH")
+    } else {
+        format!("`{program}` could not be started: {error}")
+    };
+    ExportError::FFmpeg(format!(
+        "{reason}. {} export encodes frames with FFmpeg: install FFmpeg \
+         (https://ffmpeg.org/download.html) and make sure it is on PATH, or export a PNG \
+         sequence instead (for example `--output frames/frame.png`).",
+        format.display_name()
+    ))
+}
+
 /// Hardware / software video encoder selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum VideoEncoder {
@@ -392,13 +420,24 @@ fn validate_transparency(format: ExportFormat, transparent: bool) -> Result<()> 
 }
 
 impl ParallelEncoder {
-    pub fn new(mut config: EncoderConfig) -> Result<Self> {
+    pub fn new(config: EncoderConfig) -> Result<Self> {
+        Self::with_ffmpeg_program(config, "ffmpeg")
+    }
+
+    pub(crate) fn with_ffmpeg_program(mut config: EncoderConfig, program: &str) -> Result<Self> {
         validate_transparency(config.format, config.transparent)?;
         config.video_encoder = resolve_video_encoder(config.format, config.video_encoder);
+        // Start FFmpeg before any frame is rendered, so a missing or broken
+        // installation fails the export immediately with an actionable error.
+        let child = match config.format {
+            ExportFormat::PngSequence => None,
+            _ => Some(Self::spawn_ffmpeg(&config, program)?),
+        };
         let depth = adaptive_buffer_depth(config.width, config.height);
         let (sender, receiver) = sync_channel::<Option<Vec<u8>>>(depth);
 
-        let thread_handle = std::thread::spawn(move || Self::encoder_worker(config, receiver));
+        let thread_handle =
+            std::thread::spawn(move || Self::encoder_worker(config, receiver, child));
 
         Ok(Self {
             sender,
@@ -406,10 +445,24 @@ impl ParallelEncoder {
         })
     }
 
-    pub fn push_frame(&self, frame: Vec<u8>) -> Result<()> {
-        self.sender
-            .send(Some(frame))
-            .map_err(|e| ExportError::Capture(format!("Failed to send frame to encoder: {}", e)))
+    pub fn push_frame(&mut self, frame: Vec<u8>) -> Result<()> {
+        if self.sender.send(Some(frame)).is_err() {
+            // The worker only drops its receiver after it stopped; report why
+            // (for example FFmpeg exiting) instead of the closed channel.
+            return Err(self.worker_error());
+        }
+        Ok(())
+    }
+
+    fn worker_error(&mut self) -> ExportError {
+        match self.thread_handle.take().map(JoinHandle::join) {
+            Some(Ok(Err(error))) => error,
+            Some(Ok(Ok(_))) => {
+                ExportError::Capture("Encoder stopped before receiving every frame".to_string())
+            }
+            Some(Err(_)) => ExportError::General("Encoder thread panicked".to_string()),
+            None => ExportError::Capture("Encoder is no longer running".to_string()),
+        }
     }
 
     pub fn finalize(&mut self) -> Result<()> {
@@ -547,9 +600,168 @@ impl ParallelEncoder {
         Ok(Some("[audio_out]".to_string()))
     }
 
+    /// Build and start the FFmpeg process that encodes this export.
+    fn spawn_ffmpeg(config: &EncoderConfig, program: &str) -> Result<Child> {
+        let mut cmd = Command::new(program);
+        cmd.args(["-y", "-hide_banner", "-loglevel", "error", "-nostats"]);
+
+        if matches!(config.video_encoder, VideoEncoder::H264Vaapi) {
+            cmd.arg("-vaapi_device").arg("/dev/dri/renderD128");
+        }
+
+        cmd.arg("-f")
+            .arg("rawvideo")
+            .arg("-pix_fmt")
+            .arg("rgba")
+            .arg("-s")
+            .arg(format!("{}x{}", config.width, config.height))
+            .arg("-r")
+            .arg(config.fps.to_string())
+            .arg("-i")
+            .arg("-");
+
+        let audio_output = Self::add_audio_inputs(&mut cmd, config)?;
+
+        match config.format {
+            ExportFormat::Mp4 => {
+                match config.video_encoder {
+                    VideoEncoder::Auto => {
+                        unreachable!("automatic video encoder must be resolved before use")
+                    }
+                    VideoEncoder::Libx264 => {
+                        cmd.arg("-c:v")
+                            .arg("libx264")
+                            .arg("-crf")
+                            .arg(config.crf.to_string())
+                            .arg("-preset")
+                            .arg(Self::x264_preset(config.encoding_speed))
+                            .arg("-threads")
+                            .arg("0");
+                    }
+                    VideoEncoder::H264Nvenc => {
+                        let p = match config.encoding_speed {
+                            EncodingSpeed::Fast => "p1",
+                            EncodingSpeed::Balanced => "p4",
+                            EncodingSpeed::Best => "p7",
+                        };
+                        cmd.arg("-c:v")
+                            .arg("h264_nvenc")
+                            .arg("-preset")
+                            .arg(p)
+                            .arg("-rc")
+                            .arg("vbr")
+                            .arg("-cq")
+                            .arg(config.crf.to_string());
+                    }
+                    VideoEncoder::H264Amf => {
+                        let quality = match config.encoding_speed {
+                            EncodingSpeed::Fast => "speed",
+                            EncodingSpeed::Balanced => "balanced",
+                            EncodingSpeed::Best => "quality",
+                        };
+                        cmd.arg("-vf")
+                            .arg("format=yuv420p")
+                            .arg("-c:v")
+                            .arg("h264_amf")
+                            .arg("-quality")
+                            .arg(quality)
+                            .arg("-rc")
+                            .arg("vbr_latency");
+                    }
+                    VideoEncoder::H264Qsv => {
+                        cmd.arg("-c:v")
+                            .arg("h264_qsv")
+                            .arg("-global_quality")
+                            .arg(config.crf.to_string());
+                    }
+                    VideoEncoder::H264Vaapi => {
+                        cmd.arg("-vf")
+                            .arg("format=nv12,hwupload")
+                            .arg("-c:v")
+                            .arg("h264_vaapi")
+                            .arg("-qp")
+                            .arg(config.crf.to_string());
+                    }
+                }
+
+                if !matches!(config.video_encoder, VideoEncoder::H264Vaapi) {
+                    cmd.arg("-pix_fmt").arg("yuv420p");
+                }
+            }
+            ExportFormat::Webm => {
+                cmd.arg("-c:v")
+                    .arg("libvpx-vp9")
+                    .arg("-crf")
+                    .arg(config.crf.to_string())
+                    .arg("-b:v")
+                    .arg("0")
+                    .arg("-threads")
+                    .arg("0");
+
+                if config.transparent {
+                    cmd.arg("-pix_fmt").arg("yuva420p");
+                } else {
+                    cmd.arg("-pix_fmt").arg("yuv420p");
+                }
+            }
+            ExportFormat::Webp => {
+                let quality = Self::webp_quality(config.crf);
+                let compression = Self::webp_compression(config.encoding_speed);
+
+                cmd.arg("-c:v")
+                    .arg("libwebp")
+                    .arg("-lossless")
+                    .arg("0")
+                    .arg("-compression_level")
+                    .arg(compression.to_string())
+                    .arg("-quality")
+                    .arg(quality.to_string())
+                    .arg("-loop")
+                    .arg("0")
+                    .arg("-threads")
+                    .arg("0");
+
+                if config.transparent {
+                    cmd.arg("-pix_fmt").arg("yuva420p");
+                } else {
+                    cmd.arg("-pix_fmt").arg("yuv420p");
+                }
+            }
+            ExportFormat::Gif => {
+                cmd.arg("-filter_complex")
+                   .arg("[0:v] split [a][b];[a] palettegen=stats_mode=single [p];[b][p] paletteuse=new=1");
+            }
+            _ => unreachable!(),
+        }
+
+        if let Some(audio_output) = audio_output {
+            cmd.arg("-map").arg("0:v:0").arg("-map").arg(audio_output);
+            match config.format {
+                ExportFormat::Mp4 => {
+                    cmd.arg("-c:a").arg("aac").arg("-b:a").arg("192k");
+                }
+                ExportFormat::Webm => {
+                    cmd.arg("-c:a").arg("libopus").arg("-b:a").arg("128k");
+                }
+                _ => unreachable!("validated audio export format"),
+            }
+            cmd.arg("-shortest");
+        }
+
+        cmd.arg(&config.output_path);
+
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+
+        cmd.spawn()
+            .map_err(|error| ffmpeg_spawn_error(config.format, program, &error))
+    }
+
     fn encoder_worker(
         config: EncoderConfig,
         receiver: Receiver<Option<Vec<u8>>>,
+        child: Option<Child>,
     ) -> Result<Duration> {
         let mut encode_time = Duration::ZERO;
         match config.format {
@@ -591,172 +803,17 @@ impl ParallelEncoder {
                 }
             }
             _ => {
-                let mut cmd = Command::new("ffmpeg");
-                cmd.args(["-y", "-hide_banner", "-loglevel", "error", "-nostats"]);
+                let mut child = child.expect("FFmpeg is started for every non-PNG format");
 
-                if matches!(config.video_encoder, VideoEncoder::H264Vaapi) {
-                    cmd.arg("-vaapi_device").arg("/dev/dri/renderD128");
-                }
-
-                cmd.arg("-f")
-                    .arg("rawvideo")
-                    .arg("-pix_fmt")
-                    .arg("rgba")
-                    .arg("-s")
-                    .arg(format!("{}x{}", config.width, config.height))
-                    .arg("-r")
-                    .arg(config.fps.to_string())
-                    .arg("-i")
-                    .arg("-");
-
-                let audio_output = Self::add_audio_inputs(&mut cmd, &config)?;
-
-                match config.format {
-                    ExportFormat::Mp4 => {
-                        match config.video_encoder {
-                            VideoEncoder::Auto => {
-                                unreachable!("automatic video encoder must be resolved before use")
-                            }
-                            VideoEncoder::Libx264 => {
-                                cmd.arg("-c:v")
-                                    .arg("libx264")
-                                    .arg("-crf")
-                                    .arg(config.crf.to_string())
-                                    .arg("-preset")
-                                    .arg(Self::x264_preset(config.encoding_speed))
-                                    .arg("-threads")
-                                    .arg("0");
-                            }
-                            VideoEncoder::H264Nvenc => {
-                                let p = match config.encoding_speed {
-                                    EncodingSpeed::Fast => "p1",
-                                    EncodingSpeed::Balanced => "p4",
-                                    EncodingSpeed::Best => "p7",
-                                };
-                                cmd.arg("-c:v")
-                                    .arg("h264_nvenc")
-                                    .arg("-preset")
-                                    .arg(p)
-                                    .arg("-rc")
-                                    .arg("vbr")
-                                    .arg("-cq")
-                                    .arg(config.crf.to_string());
-                            }
-                            VideoEncoder::H264Amf => {
-                                let quality = match config.encoding_speed {
-                                    EncodingSpeed::Fast => "speed",
-                                    EncodingSpeed::Balanced => "balanced",
-                                    EncodingSpeed::Best => "quality",
-                                };
-                                cmd.arg("-vf")
-                                    .arg("format=yuv420p")
-                                    .arg("-c:v")
-                                    .arg("h264_amf")
-                                    .arg("-quality")
-                                    .arg(quality)
-                                    .arg("-rc")
-                                    .arg("vbr_latency");
-                            }
-                            VideoEncoder::H264Qsv => {
-                                cmd.arg("-c:v")
-                                    .arg("h264_qsv")
-                                    .arg("-global_quality")
-                                    .arg(config.crf.to_string());
-                            }
-                            VideoEncoder::H264Vaapi => {
-                                cmd.arg("-vf")
-                                    .arg("format=nv12,hwupload")
-                                    .arg("-c:v")
-                                    .arg("h264_vaapi")
-                                    .arg("-qp")
-                                    .arg(config.crf.to_string());
-                            }
-                        }
-
-                        if !matches!(config.video_encoder, VideoEncoder::H264Vaapi) {
-                            cmd.arg("-pix_fmt").arg("yuv420p");
-                        }
-                    }
-                    ExportFormat::Webm => {
-                        cmd.arg("-c:v")
-                            .arg("libvpx-vp9")
-                            .arg("-crf")
-                            .arg(config.crf.to_string())
-                            .arg("-b:v")
-                            .arg("0")
-                            .arg("-threads")
-                            .arg("0");
-
-                        if config.transparent {
-                            cmd.arg("-pix_fmt").arg("yuva420p");
-                        } else {
-                            cmd.arg("-pix_fmt").arg("yuv420p");
-                        }
-                    }
-                    ExportFormat::Webp => {
-                        let quality = Self::webp_quality(config.crf);
-                        let compression = Self::webp_compression(config.encoding_speed);
-
-                        cmd.arg("-c:v")
-                            .arg("libwebp")
-                            .arg("-lossless")
-                            .arg("0")
-                            .arg("-compression_level")
-                            .arg(compression.to_string())
-                            .arg("-quality")
-                            .arg(quality.to_string())
-                            .arg("-loop")
-                            .arg("0")
-                            .arg("-threads")
-                            .arg("0");
-
-                        if config.transparent {
-                            cmd.arg("-pix_fmt").arg("yuva420p");
-                        } else {
-                            cmd.arg("-pix_fmt").arg("yuv420p");
-                        }
-                    }
-                    ExportFormat::Gif => {
-                        cmd.arg("-filter_complex")
-                           .arg("[0:v] split [a][b];[a] palettegen=stats_mode=single [p];[b][p] paletteuse=new=1");
-                    }
-                    _ => unreachable!(),
-                }
-
-                if let Some(audio_output) = audio_output {
-                    cmd.arg("-map").arg("0:v:0").arg("-map").arg(audio_output);
-                    match config.format {
-                        ExportFormat::Mp4 => {
-                            cmd.arg("-c:a").arg("aac").arg("-b:a").arg("192k");
-                        }
-                        ExportFormat::Webm => {
-                            cmd.arg("-c:a").arg("libopus").arg("-b:a").arg("128k");
-                        }
-                        _ => unreachable!("validated audio export format"),
-                    }
-                    cmd.arg("-shortest");
-                }
-
-                cmd.arg(&config.output_path);
-
-                cmd.stdin(Stdio::piped())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::piped());
-
-                let mut child = cmd.spawn().map_err(|e| {
-                    ExportError::FFmpeg(format!(
-                        "Failed to spawn FFmpeg. Make sure it is installed and in your PATH. Error: {}",
-                        e
-                    ))
-                })?;
-
-                let mut stdin = child.stdin.take().ok_or_else(|| {
-                    ExportError::FFmpeg("Failed to open stdin pipe to FFmpeg".to_string())
-                })?;
-
-                let stderr = child.stderr.take().ok_or_else(|| {
-                    ExportError::FFmpeg("Failed to open stderr pipe to FFmpeg".to_string())
-                })?;
+                let (Some(mut stdin), Some(stderr)) = (child.stdin.take(), child.stderr.take())
+                else {
+                    // Reap the process so a pipe failure never leaves a zombie.
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(ExportError::FFmpeg(
+                        "Failed to open stdin/stderr pipes to FFmpeg".to_string(),
+                    ));
+                };
 
                 let mut write_error = None;
                 while let Ok(Some(frame)) = receiver.recv() {
@@ -805,8 +862,77 @@ impl ParallelEncoder {
 #[cfg(test)]
 mod tests {
     use super::{
-        ExportFormat, VideoEncoder, png_pixels, select_best_encoder, validate_transparency,
+        EncoderConfig, EncodingSpeed, ExportError, ExportFormat, ParallelEncoder, VideoEncoder,
+        png_pixels, select_best_encoder, validate_transparency,
     };
+
+    fn encoder_config(format: ExportFormat, output: &str) -> EncoderConfig {
+        EncoderConfig {
+            output_path: std::env::temp_dir()
+                .join(output)
+                .to_string_lossy()
+                .into_owned(),
+            width: 16,
+            height: 16,
+            fps: 10,
+            format,
+            transparent: false,
+            crf: 23,
+            encoding_speed: EncodingSpeed::Fast,
+            video_encoder: VideoEncoder::Libx264,
+            audio_tracks: Vec::new(),
+            render_start: 0.0,
+            render_duration: 1.0,
+        }
+    }
+
+    #[test]
+    fn missing_ffmpeg_fails_before_rendering_with_an_actionable_error() {
+        for (format, name) in [(ExportFormat::Webp, "WebP"), (ExportFormat::Mp4, "MP4")] {
+            let error = ParallelEncoder::with_ffmpeg_program(
+                encoder_config(format, "gaanim-missing-ffmpeg-test"),
+                "gaanim-test-missing-ffmpeg",
+            )
+            .err()
+            .expect("a missing FFmpeg must fail when the encoder is created");
+            let message = error.to_string();
+            assert!(matches!(error, ExportError::FFmpeg(_)), "{message}");
+            assert!(message.contains("was not found on PATH"), "{message}");
+            assert!(message.contains(name), "{message}");
+            assert!(message.contains("PNG sequence"), "{message}");
+            assert!(!message.contains("closed channel"), "{message}");
+        }
+    }
+
+    #[test]
+    fn png_sequences_do_not_require_ffmpeg() {
+        let mut encoder = ParallelEncoder::with_ffmpeg_program(
+            encoder_config(ExportFormat::PngSequence, "gaanim-png-seq-test/frame.png"),
+            "gaanim-test-missing-ffmpeg",
+        )
+        .expect("PNG sequences never start FFmpeg");
+        encoder.push_frame(vec![0; 16 * 16 * 4]).unwrap();
+        encoder.finalize().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ffmpeg_exiting_early_reports_its_failure_instead_of_a_closed_channel() {
+        // `false` starts successfully and exits at once, like a broken FFmpeg.
+        let mut encoder = ParallelEncoder::with_ffmpeg_program(
+            encoder_config(ExportFormat::Mp4, "gaanim-early-exit-test.mp4"),
+            "false",
+        )
+        .expect("`false` can be spawned");
+        let frame = vec![0; 16 * 16 * 4];
+        let error = (0..500)
+            .find_map(|_| encoder.push_frame(frame.clone()).err())
+            .or_else(|| encoder.finalize().err())
+            .expect("the encoder must report the early exit");
+        let message = error.to_string();
+        assert!(matches!(error, ExportError::FFmpeg(_)), "{message}");
+        assert!(!message.contains("closed channel"), "{message}");
+    }
 
     #[test]
     fn video_encoder_argument_names_round_trip() {

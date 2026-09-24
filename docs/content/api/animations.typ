@@ -464,6 +464,33 @@ scene.render()
 ]
 
 #api-entry(
+  name: "Drawable.grow_arrow",
+  kind: "method",
+  signature: ".animate.grow_arrow() -> Anim",
+  params: (),
+  returns: (type: "Anim", desc: [Crecimiento de flecha desde la cola.]),
+  desc: [Versión mejorada del `GrowArrow` de Manim. La cola queda fija y la
+    punta recorre la columna de la flecha, siguiendo el arco en
+    `curved_arrow` y `curved_arrow_arc`. La cabeza emerge con sus
+    proporciones durante la primera longitud de cabeza y luego conserva su
+    tamaño mientras el cuerpo se extiende; el grosor del trazo nunca cambia
+    (Manim escala toda la flecha desde el inicio y deforma la cabeza).
+    Cualquier otro drawable, o una flecha remodelada por un transform, usa
+    `create()`. Easing por defecto: `Smooth`.],
+)[
+```python
+# show-code: true
+from gaanim import CYAN, GOLD, Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+straight = scene.geometry.arrow(-5, 1, 0, 1, head_length=0.4, head_width=0.34, body_width=0.08).fill(CYAN).stroke(CYAN, 0.02)
+curved = scene.geometry.curved_arrow(-5, -1.5, 0, -1.5, 1.2, head_length=0.4, head_width=0.34, body_width=0.08).fill(GOLD).stroke(GOLD, 0.02)
+scene.play([straight.animate.grow_arrow().duration(1.2), curved.animate.grow_arrow().duration(1.2)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
   name: "Drawable.spin_in_from_nothing",
   kind: "method",
   signature: ".animate.spin_in_from_nothing() -> Anim",

@@ -151,7 +151,9 @@ fn absolute_lens_channel(lens: &PropertyLensSpec) -> Option<AbsoluteLensChannel>
         PropertyLensSpec::StrokeColor { .. } => AbsoluteLensChannel::StrokeColor,
         PropertyLensSpec::StrokeWidth { .. } => AbsoluteLensChannel::StrokeWidth,
         PropertyLensSpec::PathCompletion { .. } => AbsoluteLensChannel::PathCompletion,
-        PropertyLensSpec::PathMorph { .. } => AbsoluteLensChannel::PathMorph,
+        PropertyLensSpec::PathMorph { .. } | PropertyLensSpec::ArrowGrow { .. } => {
+            AbsoluteLensChannel::PathMorph
+        }
         PropertyLensSpec::FillDrawProgress { .. } => AbsoluteLensChannel::FillDrawProgress,
         PropertyLensSpec::FillLevel { .. } => AbsoluteLensChannel::FillLevel,
         PropertyLensSpec::MediaFrame { .. } => AbsoluteLensChannel::MediaFrame,
@@ -1163,6 +1165,8 @@ impl Timeline {
                         Some(AbsoluteLensChannel::PathCompletion)
                     }
                     PropertyLensSpec::FillLevel { .. } => Some(AbsoluteLensChannel::FillLevel),
+                    // A future grow keeps its arrow hidden until the clip starts.
+                    PropertyLensSpec::ArrowGrow { .. } => Some(AbsoluteLensChannel::PathMorph),
                     _ => None,
                 }
             };
@@ -2379,6 +2383,20 @@ fn apply_lens_spec(
                 source.0 = std::sync::Arc::new(morphed);
             }
         }
+        PropertyLensSpec::ArrowGrow { shape, from, to } => {
+            let grown = std::sync::Arc::new(shape.grown_path(*from + (*to - *from) * t));
+            if let Some(mut path) = world.get_mut::<Path2D>(target)
+                && *path.0 != *grown
+            {
+                path.0 = grown.clone();
+            }
+            // Keep the stroke clipping source in lockstep with `Path2D`.
+            if let Some(mut source) = world.get_mut::<gaanim_animation::PathSource>(target)
+                && *source.0 != *grown
+            {
+                source.0 = grown;
+            }
+        }
         PropertyLensSpec::FillDrawProgress { from, to } => {
             // Insert/update the `FillDrawProgress` component. The
             // renderer reads it to modulate the fill brush's color
@@ -3580,10 +3598,18 @@ mod tests {
             },
         );
         let first_entity = world
-            .spawn((MobjectId(ObjectId::from_raw(700)), SceneMember(first), Visible))
+            .spawn((
+                MobjectId(ObjectId::from_raw(700)),
+                SceneMember(first),
+                Visible,
+            ))
             .id();
         let second_entity = world
-            .spawn((MobjectId(ObjectId::from_raw(701)), SceneMember(second), Visible))
+            .spawn((
+                MobjectId(ObjectId::from_raw(701)),
+                SceneMember(second),
+                Visible,
+            ))
             .id();
         timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
         timeline.seek(&mut world, 0.25);
