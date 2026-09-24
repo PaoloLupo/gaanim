@@ -739,6 +739,12 @@ patrón `%d` o `%0Nd` (por ejemplo `frames/f_%04d.png`), ese patrón se sustituy
 por el número de fotograma empezando en 0 (`f_0000.png`, `f_0001.png`, …); sin
 patrón, el número se añade al nombre como `f_00000.png`.
 
+`--from` y `--to` (en segundos) exportan solo un tramo, por ejemplo
+`gaanim export . --output tramo.mp4 --from 12 --to 15`. El audio se recorta al
+mismo tramo, una secuencia PNG numera sus fotogramas desde 0 y un `--to`
+posterior al final de la escena se limita a su duración; un tramo vacío produce
+un error.
+
 `gaanim export --help` lista todas las opciones y formatos, y
 `gaanim --version` muestra la versión instalada.
 
