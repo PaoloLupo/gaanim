@@ -1584,7 +1584,7 @@ impl SceneModel {
     pub(crate) fn register_theme_fonts(&self, registry: &mut gaanim_text::font::FontRegistry) {
         if let Some(theme) = &self.theme_style {
             for font in &theme.fonts {
-                registry.register_font(font.family.clone(), font.bytes.to_vec());
+                registry.register_font_bytes(font.family.clone(), font.bytes.clone());
             }
         }
     }
@@ -1673,7 +1673,8 @@ impl SceneModel {
             color,
         );
 
-        let mut registry = gaanim_text::font::FontRegistry::new();
+        // Typst measurement reads only registered fonts; skip the system scan.
+        let mut registry = gaanim_text::font::FontRegistry::without_system_fonts();
         self.register_theme_fonts(&mut registry);
 
         let bounds = gaanim_text::prelude::measure_typst(
