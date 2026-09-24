@@ -3132,6 +3132,19 @@ class Geometry:
             result = scene.geometry.double_arrow(-3, 0, 3, 0)
         """
         ...
+    def points(self, positions: Sequence[tuple[float, float]], radius: float = 0.06) -> Drawable:
+        """Create one drawable with a filled circle of ``radius`` at each position.
+
+        Positions are scene coordinates and need no ``Cartesian2D``. Thousands
+        of points stay a single object, so ``fill``, ``opacity``, ``move_to``
+        and ``animate`` apply to the whole cloud; the theme styles it through
+        the ``points`` shape role. An empty list, non-finite positions, or a
+        non-positive radius raise ``ValueError``.
+
+        Example:
+            section = scene.geometry.points(poincare_points, radius=0.02).fill(GOLD)
+        """
+        ...
     def polygon(self, points: Sequence[tuple[float, float]]) -> Drawable:
         """Create a polygon drawable in the scene.
 

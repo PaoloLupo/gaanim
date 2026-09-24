@@ -2341,6 +2341,30 @@ impl SceneModel {
     pub fn polygon(&mut self, points: Vec<(f64, f64)>) -> DrawableHandle {
         self.spawn(SpawnKind::Polygon(points))
     }
+
+    /// One drawable holding a filled circle of `radius` at each position,
+    /// independent of any coordinate space. Positions are in scene units.
+    /// Rejects an empty list, non-finite positions, and a non-positive or
+    /// non-finite radius.
+    pub fn points(
+        &mut self,
+        positions: Vec<(f64, f64)>,
+        radius: f64,
+    ) -> Result<DrawableHandle, String> {
+        if positions.is_empty() {
+            return Err("points requires at least one position".into());
+        }
+        if positions
+            .iter()
+            .any(|(x, y)| !x.is_finite() || !y.is_finite())
+        {
+            return Err("points positions must be finite".into());
+        }
+        if !radius.is_finite() || radius <= 0.0 {
+            return Err("points radius must be finite and greater than zero".into());
+        }
+        Ok(self.spawn(SpawnKind::Points { positions, radius }))
+    }
     pub fn star(&mut self, points: u32, outer_radius: f64, inner_radius: f64) -> DrawableHandle {
         self.spawn(SpawnKind::Star {
             points,

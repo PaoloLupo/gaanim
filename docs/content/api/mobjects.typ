@@ -299,6 +299,27 @@ scene.render()
 ]
 
 #api-entry(
+  name: "Geometry.points",
+  kind: "factory",
+  signature: "points(positions, radius=0.06) -> Drawable",
+  params: ((name: "positions", type: "Sequence[tuple[float, float]]", default: none, desc: [Centers in scene coordinates; at least one, all finite.]), (name: "radius", type: "float", default: "0.06", desc: [Radius of every point, greater than zero.]),),
+  returns: (type: "Drawable", desc: [One drawable holding every point.]),
+  desc: [Point cloud without a `Cartesian2D`: all circles share one path, so thousands of points (a Poincaré section, a scatter of samples) stay a single object for `fill`, `opacity`, layout and animation. Empty lists, non-finite positions or a non-positive radius raise `ValueError`.],
+)[
+```python
+# show-code: true
+import math
+from gaanim import GOLD, Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+spiral = [(0.02 * i * math.cos(0.2 * i), 0.02 * i * math.sin(0.2 * i)) for i in range(200)]
+cloud = scene.geometry.points(spiral, radius=0.04).fill(GOLD)
+scene.play([cloud.animate.fade_in().duration(0.5)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
   name: "Geometry.ellipse",
   kind: "factory",
   signature: "ellipse(rx: float, ry: float) -> Drawable",

@@ -924,6 +924,7 @@ fn spawn_family(kind: &SpawnKind) -> &'static str {
         | SpawnKind::Dot(_)
         | SpawnKind::Ellipse(_, _)
         | SpawnKind::Polygon(_)
+        | SpawnKind::Points { .. }
         | SpawnKind::Star { .. }
         | SpawnKind::RegularPolygon { .. }
         | SpawnKind::Sector { .. }
@@ -979,6 +980,7 @@ fn spawn_name(kind: &SpawnKind) -> &'static str {
         SpawnKind::DashedLine { .. } => "dashed_line",
         SpawnKind::DoubleArrow { .. } => "double_arrow",
         SpawnKind::Polygon(_) => "polygon",
+        SpawnKind::Points { .. } => "points",
         SpawnKind::Star { .. } => "star",
         SpawnKind::RegularPolygon { .. } => "regular_polygon",
         SpawnKind::Sector { .. } => "sector",

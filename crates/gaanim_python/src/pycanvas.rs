@@ -3046,6 +3046,18 @@ impl PyGeometry {
         ))
     }
 
+    /// One drawable holding a filled circle of `radius` at each position.
+    #[pyo3(signature = (positions, radius = 0.06))]
+    fn points(&self, positions: Vec<(f64, f64)>, radius: f64) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .points(positions, radius)
+            .map(PyDrawable)
+            .map_err(pyo3::exceptions::PyValueError::new_err)
+    }
+
     fn polygon(&self, points: Vec<(f64, f64)>) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
         if points.len() < 3 || points.iter().any(|(x, y)| !x.is_finite() || !y.is_finite()) {

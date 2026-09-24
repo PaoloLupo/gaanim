@@ -578,6 +578,11 @@ pub enum SpawnKind {
     },
     /// Closed polygon defined by scene-space vertices.
     Polygon(Vec<(f64, f64)>),
+    /// A point cloud: one circle of `radius` per position, as one path.
+    Points {
+        positions: Vec<(f64, f64)>,
+        radius: f64,
+    },
     /// Symmetric star centered at the origin.
     Star {
         points: u32,
