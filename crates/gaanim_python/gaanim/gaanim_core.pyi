@@ -1393,7 +1393,8 @@ class Drawable:
         and ``rotation`` are relative to the authored pose
         (``base + offset + scale * sample``); ``scale``, ``opacity``, and
         ``signal`` are absolute (``offset + scale * sample``). Samples outside
-        the series clamp to its first/last value. Each property is an
+        the series clamp to its first/last value. ``times`` are relative to
+        the timeline cursor where this call is made. Each property is an
         independent channel: driving ``"x"`` and then ``"y"`` keeps both,
         while driving the same property again replaces it. Detach with
         ``remove_updater()``.
@@ -1781,6 +1782,11 @@ class Text(Drawable):
     @property
     def parts(self) -> TextQuery: ...
     @overload
+    @overload
+    def move_to(self, reference: Drawable, /) -> Self: ...
+    @overload
+    def move_to(self, point: AnchorPoint, /) -> Self: ...
+    @overload
     def move_to(
         self,
         x: ScalarSource,
@@ -1788,6 +1794,8 @@ class Text(Drawable):
         anchor: Optional[Anchor | TextAnchor] = None,
     ) -> Self:
         """Place this Text and preserve its specialized handle.
+
+        ``anchor`` may be passed positionally or by keyword.
 
         A single visual line defaults to ``TextAnchor.BASELINE_CENTER``. A
         multiline block defaults to its visual center. Explicit
@@ -1802,7 +1810,7 @@ class Text(Drawable):
         neither form creates a reactive follow relationship.
 
         Example:
-            label.move_to(0.0, 40.0, TextAnchor.BASELINE_LEFT)
+            label.move_to(0.0, 0.4, TextAnchor.BASELINE_LEFT)
             label.move_to(marker)
             label.move_to(marker.anchor_point(Anchor.TOP))
 
@@ -2354,6 +2362,7 @@ class Parameter:
         The value becomes ``offset + scale * sample`` as a pure function of
         timeline time, so computed values, readouts, and reactive plots
         referencing this parameter follow the series without Python callbacks.
+        ``times`` are relative to the timeline cursor where this call is made.
 
         Example:
             phase = scene.parameter(0.0)
@@ -3391,7 +3400,7 @@ class Geometry:
         *,
         dissipating_time: Optional[float] = None,
         max_points: Optional[int] = None,
-        min_distance: float = 1.0,
+        min_distance: float = 0.01,
     ) -> Drawable:
         """Trace a moving drawable's position; reveal the trail in ``scene.play``.
 

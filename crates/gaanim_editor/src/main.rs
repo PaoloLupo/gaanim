@@ -220,7 +220,7 @@ fn dispatch_export_mode() -> bool {
     let script = script
         .and_then(|path| gaanim_project::resolve_entry(&path).ok())
         .unwrap_or_else(|| {
-            eprintln!("usage: gaanim export <SCRIPT_OR_PROJECT> --output <FILE> [--quality draft|standard|production] [--encoder auto|libx264|nvenc|amf|qsv|vaapi] [--transparent]");
+            eprintln!("usage: gaanim export <SCRIPT_OR_PROJECT> --output <FILE> [OPTIONS]; run `gaanim export --help` for the options");
             std::process::exit(2);
         });
     let output = output.unwrap_or_else(|| {

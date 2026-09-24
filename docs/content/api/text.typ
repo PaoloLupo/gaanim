@@ -125,9 +125,9 @@ The accepted roles are:
 "caption" | "label" | "code" | "math"
 ```
 
-The default text configuration uses these sizes in Typst/canvas points:
-`title=64`, `subtitle=48`, `kicker=32`, `heading=48`, `body=40`,
-`caption=32`, `label=36`, `code=36`, and `math=44`. Prose uses New Computer
+The default text configuration uses these sizes in scene units:
+`title=0.64`, `subtitle=0.48`, `kicker=0.32`, `heading=0.48`, `body=0.40`,
+`caption=0.32`, `label=0.36`, `code=0.36`, and `math=0.44`. Prose uses New Computer
 Modern by default, code uses Consolas, and math uses New Computer Modern Math.
 The active theme and explicit style may replace the resolved color and
 typography. Under a theme, `kicker` resolves to the palette's `accent` color,
@@ -322,13 +322,13 @@ scene.render()
   params: (
     (name: "font / math_font", type: "str | None", default: "None", desc: [Primary prose and mathematical font families.]),
     (name: "fallbacks", type: "Sequence[str]", default: "()", desc: [Ordered fallback font families for prose shaping.]),
-    (name: "size", type: "float | None", default: "None", desc: [Positive finite size in Typst/canvas points.]),
+    (name: "size", type: "float | None", default: "None", desc: [Positive finite size in scene units.]),
     (name: "weight", type: "int | None", default: "None", desc: [Numeric weight from 1 through 1000.]),
     (name: "color / stroke", type: "Color | None", default: "None", desc: [Glyph fill and optional outline color.]),
     (name: "opacity", type: "float | None", default: "None", desc: [Whole-Text alpha from 0 through 1.]),
-    (name: "spacing", type: "float | None", default: "None", desc: [Non-negative letter and word spacing in points.]),
+    (name: "spacing", type: "float | None", default: "None", desc: [Non-negative letter and word spacing in scene units.]),
     (name: "decorations", type: "Sequence[str]", default: "()", desc: [`underline`, `strike`, or `strikethrough`.]),
-    (name: "baseline", type: "float | None", default: "None", desc: [Finite baseline offset in points; positive values move glyphs upward.]),
+    (name: "baseline", type: "float | None", default: "None", desc: [Finite baseline offset in scene units; positive values move glyphs upward.]),
   ),
   returns: (type: "TextStyle", desc: [Reusable immutable typography overlay.]),
   desc: [It intentionally has no box width, height, padding, fit, growth, columns, or vertical alignment. Invalid values raise `ValueError`.],
@@ -593,13 +593,13 @@ copy.become("Resultado: ", part("value", "$42$", color=GOLD), duration=0.8)
 #api-entry(
   name: "Text.move_to",
   kind: "method",
-  signature: ".move_to(x, y, *, anchor: Anchor | TextAnchor = None) -> Text",
+  signature: ".move_to(x, y, anchor: Anchor | TextAnchor = None) -> Text",
   params: (
-    (name: "x / y", type: "float", default: none, desc: [Target point in canvas units.]),
-    (name: "anchor", type: "Anchor | TextAnchor | None", default: "None", desc: [Geometric bounds anchor or baseline-left/center/right text anchor.]),
+    (name: "x / y", type: "float", default: none, desc: [Target point in scene units.]),
+    (name: "anchor", type: "Anchor | TextAnchor | None", default: "None", desc: [Geometric bounds anchor or baseline-left/center/right text anchor; positional or keyword.]),
   ),
   returns: (type: "Text", desc: [The same specialized fluent handle.]),
-  desc: [A single line defaults to `TextAnchor.BASELINE_CENTER`; a multiline block without an explicit anchor keeps visual-center placement. Explicit `TextAnchor` values use the first visual line. Layout-owned text raises `LayoutOwnershipError`, and non-anchor values raise `TypeError`.],
+  desc: [A single line defaults to `TextAnchor.BASELINE_CENTER`; a multiline block without an explicit anchor keeps visual-center placement. Explicit `TextAnchor` values use the first visual line. A single `Drawable` or `AnchorPoint` argument aligns the visual center to that reference without creating a reactive follow. Layout-owned text raises `LayoutOwnershipError`, and non-anchor values raise `TypeError`.],
 )[
 ```python
 # show-code: true

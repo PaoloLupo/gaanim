@@ -68,11 +68,17 @@ fn main() {
 }
 
 fn handle_no_python_commands(args: &[String]) -> bool {
+    if matches!(args.get(1).map(String::as_str), Some("--version" | "-V")) {
+        println!("gaanim {}", env!("CARGO_PKG_VERSION"));
+        return true;
+    }
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         if args.iter().any(|arg| arg == "init") {
             print_init_help();
         } else if args.iter().any(|arg| arg == "check") {
             print_check_help();
+        } else if args.get(1).map(String::as_str) == Some("export") {
+            print_export_help();
         } else if args.iter().any(|arg| arg == "--diff") {
             print_diff_help();
         } else {
@@ -184,6 +190,44 @@ fn print_general_help() {
     );
     println!("  gaanim check <SCRIPT_OR_PROJECT> [--strict]");
     println!("  gaanim --diff --example <SCRIPT_OR_PROJECT> [OPTIONS]");
+    println!("  gaanim --version");
+    println!();
+    println!("Run `gaanim <COMMAND> --help` for the options of init, export, check, or --diff.");
+}
+
+fn print_export_help() {
+    println!(
+        r#"gaanim export - render a script or project to a file
+
+USAGE:
+    gaanim export <SCRIPT_OR_PROJECT> --output <FILE> [OPTIONS]
+
+FORMATS (chosen by the --output extension):
+    .mp4                MP4 (H.264; needs FFmpeg)
+    .webm               WebM (VP9; needs FFmpeg; supports --transparent)
+    .webp               Animated WebP (needs FFmpeg; supports --transparent)
+    .gif                GIF (needs FFmpeg)
+    .png                PNG sequence, one file per frame (no FFmpeg; supports
+                        --transparent). A %d or %0Nd in the name is replaced by
+                        the frame number (frames/f_%04d.png -> f_0000.png, ...);
+                        otherwise the number is appended (frame.png -> frame_00000.png)
+
+OPTIONS:
+    -o, --output <FILE>          Output file (required)
+        --quality <PRESET>       draft (30 fps, fast encode), standard (60 fps,
+                                 default), or production (60 fps, best encode)
+        --width <PX>             Output width in pixels (default 1920)
+        --height <PX>            Output height in pixels (default 1080)
+        --fit <MODE>             When the output aspect differs from the scene
+                                 frame: error (default), contain (letterbox),
+                                 or cover (crop)
+        --encoder <ENCODER>      MP4 only: auto (default), libx264, nvenc, amf,
+                                 qsv, or vaapi. auto probes hardware encoders and
+                                 falls back to libx264; others never fall back
+        --transparent            Keep the alpha channel (WebM, WebP, PNG); the
+                                 scene needs a transparent background
+    -h, --help                   Print this help"#
+    );
 }
 
 fn print_init_help() {
@@ -276,6 +320,19 @@ mod tests {
         );
         assert!(parse_init_args(&["presentation".into()]).is_err());
         assert!(parse_init_args(&["thesis".into()]).is_err());
+    }
+
+    #[test]
+    fn version_and_export_help_need_no_python() {
+        assert!(handle_no_python_commands(&[
+            "gaanim".into(),
+            "--version".into()
+        ]));
+        assert!(handle_no_python_commands(&[
+            "gaanim".into(),
+            "export".into(),
+            "--help".into()
+        ]));
     }
 
     #[test]

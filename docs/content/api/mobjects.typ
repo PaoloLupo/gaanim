@@ -283,7 +283,7 @@ scene.render()
   name: "Geometry.dot",
   kind: "factory",
   signature: "dot(radius: float) -> Drawable",
-  params: ((name: "radius", type: "float", default: none, desc: [Radius, typically 4–16.]),),
+  params: ((name: "radius", type: "float", default: none, desc: [Radius in scene units, typically 0.06–0.15.]),),
   returns: (type: "Drawable", desc: [Small filled circle.]),
   desc: [Markers, bullet points, particles. Optimized for many instances.],
 )[
@@ -872,8 +872,8 @@ label = scene.text("origin").move_to_3d(0, 0, 0.5).billboard()
 #api-entry(
   name: "Geometry.traced_path",
   kind: "factory",
-  signature: "traced_path(source, *, dissipating_time=None, max_points=None, min_distance=1.0) -> Drawable",
-  params: ((name: "source", type: "Drawable", default: none, desc: [Drawable whose position is sampled.]), (name: "dissipating_time", type: "float", default: "None", desc: [Seconds each sample remains in the trail; must be positive.]), (name: "max_points", type: "int", default: "None", desc: [Positive cap for retained samples.]), (name: "min_distance", type: "float", default: "1.0", desc: [Minimum scene-space distance between samples.]),),
+  signature: "traced_path(source, *, dissipating_time=None, max_points=None, min_distance=0.01) -> Drawable",
+  params: ((name: "source", type: "Drawable", default: none, desc: [Drawable whose position is sampled.]), (name: "dissipating_time", type: "float", default: "None", desc: [Seconds each sample remains in the trail; must be positive.]), (name: "max_points", type: "int", default: "None", desc: [Positive cap for retained samples.]), (name: "min_distance", type: "float", default: "0.01", desc: [Minimum scene-space distance between samples.]),),
   returns: (type: "Drawable", desc: [Reactive 2D trail, hidden until `fade_in` reveals it.]),
   desc: [Sampling begins at the timeline cursor where the trail is declared, so earlier segments and seeks cannot pre-fill it. Add `trail.animate.fade_in()` to `scene.play(...)` to reveal it. With `dissipating_time`, samples expire from the tail in editor playback, random seeks, snapshots, and exports. After a seek the trail is rebuilt by resampling sources moved by updaters, `drive_from_samples`, reactive bindings, and `follow`; a source moved only by `.animate` starts a fresh trail at the seek target.],
 )[
@@ -1195,7 +1195,7 @@ scene.render()
   name: "SlideKit.callout",
   kind: "factory",
   signature: "callout(text, target, *, offset=(1.6,0.96), width=2.4, height=0.72) -> Drawable",
-  params: ((name: "text", type: "str", default: none, desc: [Label text.]), (name: "target", type: "Drawable", default: none, desc: [Drawable to point at.]), (name: "offset", type: "(float,float)", default: "(160,96)", desc: [Card offset from target.]),),
+  params: ((name: "text", type: "str", default: none, desc: [Label text.]), (name: "target", type: "Drawable", default: none, desc: [Drawable to point at.]), (name: "offset", type: "(float,float)", default: "(1.6, 0.96)", desc: [Card offset from target in scene units.]),),
   returns: (type: "Drawable", desc: [Group: card + text + connector, all follow target natively.]),
   desc: [Reusable editorial label without Python callback each frame.],
 )[
@@ -1486,7 +1486,7 @@ scene.play([k.animate.create(), k.animate.set(100).duration(1.5)])
   signature: "readout(source, *, inputs=(), label=None, format='.2f', prefix='', suffix='', unit=None, font_size=None, color=None, invalid='invalid') -> Readout",
   params: ((name: "source", type: "number | Parameter | Variable | Computed | callable", default: none, desc: [Escalar o función Python pura cuyos argumentos corresponden a `inputs`.]), (name: "inputs", type: "Sequence[Parameter | Variable | Computed | TimeInput]", default: "()", desc: [Dependencias explícitas en orden.]), (name: "invalid", type: "str", default: "'invalid'", desc: [Texto usado cuando la evaluación es inválida o no finita.]),),
   returns: (type: "Readout", desc: [Grupo dibujable reactivo.]),
-  desc: [The numeric path is regenerated only if the formatted text changes, avoiding work for sub-precision animation steps. `label`, `equals`, `number`, and `unit` are available as drawable parts; every part uses `font_size`, defaulting together to 48 scene units. They keep equal equation-style spacing and a shared visual baseline for textual terms. `color` paints the complete row and remains applied to regenerated numeric glyphs and timeline seeks.],
+  desc: [The numeric path is regenerated only if the formatted text changes, avoiding work for sub-precision animation steps. `label`, `equals`, `number`, and `unit` are available as drawable parts; every part uses `font_size`, defaulting together to 0.48 scene units. They keep equal equation-style spacing and a shared visual baseline for textual terms. `color` paints the complete row and remains applied to regenerated numeric glyphs and timeline seeks.],
 )[
 ```python
 import math
@@ -1663,7 +1663,7 @@ scene.render()
   name: "Geometry.tangent_on_curve / normal_on_curve",
   kind: "factory",
   signature: "tangent_on_curve(curve, tracker, length=0.8) / normal_on_curve(...) -> Drawable",
-  params: ((name: "curve", type: "Drawable", default: none, desc: [Curve.]), (name: "tracker", type: "Parameter", default: none, desc: [0..1.] ), (name: "length", type: "float", default: "80", desc: [Line length.]),),
+  params: ((name: "curve", type: "Drawable", default: none, desc: [Curve.]), (name: "tracker", type: "Parameter", default: none, desc: [0..1.] ), (name: "length", type: "float", default: "0.8", desc: [Line length in scene units.]),),
   returns: (type: "Drawable", desc: [Line centered on curve point, rotated to tangent/normal.]),
   desc: [Normal is 90° CCW from tangent. Same arc-length sampling.],
 )[
@@ -1823,7 +1823,7 @@ scene.render()
 #api-entry(
   name: "Mechanics.angle_between",
   kind: "factory",
-  signature: "angle_between(vertex, from, to, *, radius=0.64, label=None, show_value=False, format=\".1f\", unit=\"deg\", sweep=\"minor\", arrowheads=\"both\", label_gap=12, label_orientation=\"upright\", show_extensions=True, font_size=None, color=None) -> AngleDimension",
+  signature: "angle_between(vertex, from, to, *, radius=0.64, label=None, show_value=False, format=\".1f\", unit=\"deg\", sweep=\"minor\", arrowheads=\"both\", label_gap=0.12, label_orientation=\"upright\", show_extensions=True, font_size=None, color=None) -> AngleDimension",
   returns: (type: "AngleDimension", desc: [Reactive `arc`, `arrows`, `extensions`, `label`, `number`, and `unit`.]),
   desc: [`from` and `to` accept fixed `Direction` values or endpoints. Sweep is `minor`, `major`, `cw`, or `ccw`; arrowheads are solid triangles. The label, value, and unit share a 0.48-unit default. `color` paints the arc, arrows, label, reactive value, and unit, including after updates and seeks. Zero-length rays hide the affected geometry rather than emitting invalid paths.],
 )[

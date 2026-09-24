@@ -32,7 +32,7 @@ from gaanim import BLACK, Color, Scene, Updater
 
 scene = Scene(frame=(16, 9), background=BLACK)
 dot = scene.geometry.dot(0.125).fill(Color(255, 180, 70)).move_to(2.5, 0)
-dot.add_updater(Updater.orbit(0, 0, 200, 1.5))
+dot.add_updater(Updater.orbit(0, 0, 2.5, 1.5))
 trail = scene.geometry.traced_path(dot).stroke(Color(80, 220, 220), 0.0375).no_fill()
 
 scene.play([dot.animate.fade_in().duration(0.3), trail.animate.fade_in().duration(0.3)])
