@@ -11,14 +11,6 @@ pub fn inject_venv_site_packages(venv_root: &Path) {
         venv_root.join("Lib").join("site-packages"),
         venv_root
             .join("lib")
-            .join("python3.12")
-            .join("site-packages"),
-        venv_root
-            .join("lib")
-            .join("python3.13")
-            .join("site-packages"),
-        venv_root
-            .join("lib")
             .join("python3.14")
             .join("site-packages"),
         venv_root

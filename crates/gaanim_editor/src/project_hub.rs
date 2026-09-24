@@ -317,7 +317,7 @@ fn review_page(
     if !probe.has_supported_python() && probe.uv.is_none() {
         ui.colored_label(
             egui::Color32::from_rgb(255, 170, 90),
-            "Instala uv para que Gaanim prepare Python 3.12 y el autocompletado.",
+            "Instala uv para que Gaanim prepare Python 3.14 y el autocompletado.",
         );
     }
     stay
