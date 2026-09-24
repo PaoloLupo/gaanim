@@ -4,8 +4,8 @@ use gaanim_core::kurbo::{self, Shape};
 use gaanim_math::arrow::arc_steps;
 use gaanim_math::{Bounds3D, GlobalSpatialTransform, SpatialTransform};
 use gaanim_scene::{
-    FillBrush, GlobalOpacity, LocalBounds, MobjectId, ObjectTag, Opacity, Path2D, PathSource,
-    RasterImage, RenderLayer, RenderOrder, StrokeBrush, Visible,
+    FillBrush, GlobalOpacity, LocalBounds, MobjectId, ObjectTag, Opacity, Path2D, PathRevealOrder,
+    PathSource, RasterImage, RenderLayer, RenderOrder, StrokeBrush, Visible,
 };
 
 /// The source pixels and destination geometry for an image mobject.
@@ -36,6 +36,7 @@ pub struct MobjectBundle {
     pub id: MobjectId,
     pub path: Path2D,
     pub path_source: PathSource,
+    pub reveal_order: PathRevealOrder,
     pub bounds: LocalBounds,
     pub transform: SpatialTransform,
     pub global_transform: GlobalSpatialTransform,
@@ -63,6 +64,7 @@ impl MobjectBundle {
             id: MobjectId(id),
             path: Path2D(arc_path.clone()),
             path_source: PathSource(arc_path),
+            reveal_order: PathRevealOrder::Parallel,
             bounds: LocalBounds(bounds),
             transform: SpatialTransform::identity(),
             global_transform: GlobalSpatialTransform::default(),
@@ -463,6 +465,8 @@ pub fn dashed_line(
     let mut bundle = MobjectBundle::new(id, path, bounds);
     bundle.fill = FillBrush(None);
     bundle.tag = ObjectTag("DashedLine".into());
+    // Dashes are pieces of one stroke: draw them along the line, not all at once.
+    bundle.reveal_order = PathRevealOrder::Sequential;
     bundle
 }
 
@@ -1578,6 +1582,25 @@ mod arrow_tests {
         assert!(path.elements().iter().any(|element| {
             matches!(element, kurbo::PathEl::LineTo(point) if (point.y - 30.0).abs() < 1e-6)
         }));
+    }
+
+    #[test]
+    fn dashed_line_draws_its_dashes_in_sequence() {
+        let bundle = dashed_line(
+            ObjectId::from_raw(1),
+            kurbo::Point::ZERO,
+            kurbo::Point::new(10.0, 0.0),
+            1.0,
+            1.0,
+        );
+        assert_eq!(bundle.reveal_order, PathRevealOrder::Sequential);
+        let early = bundle.reveal_order.trim(&bundle.path_source.0, 0.1);
+        assert!(
+            early.bounding_box().x1 <= 2.0 + 1e-6,
+            "early Create frames must only show the first dashes"
+        );
+        let line = super::line(ObjectId::from_raw(2), kurbo::Point::ZERO, (1.0, 0.0).into());
+        assert_eq!(line.reveal_order, PathRevealOrder::Parallel);
     }
 
     #[test]

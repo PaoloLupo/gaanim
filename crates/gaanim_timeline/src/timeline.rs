@@ -2326,7 +2326,11 @@ fn apply_lens_spec(
                     }
                 }
             } else if let Some(source) = world.get::<gaanim_animation::PathSource>(target) {
-                let trimmed = gaanim_math::get_subpath(&source.0, completion);
+                let order = world
+                    .get::<gaanim_scene::PathRevealOrder>(target)
+                    .copied()
+                    .unwrap_or_default();
+                let trimmed = order.trim(&source.0, completion);
                 if let Some(mut path) = world.get_mut::<Path2D>(target)
                     && path.0.elements() != trimmed.elements()
                 {
