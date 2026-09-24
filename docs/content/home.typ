@@ -12,37 +12,62 @@
   html.span(class: "home-card-body", body)
 })
 
+#let feature(title, body) = html.div(class: "home-feature", {
+  html.span(class: "home-feature-title", title)
+  html.span(class: "home-feature-body", body)
+})
+
+// The hero scene is drawn by assets/hero.js on the canvas behind the copy; the
+// empty stage marks where the animation plays.
 #html.div(class: "home-hero", [
-  #html.div(class: "home-hero-kicker", [Documentación · Python · GPU])
-  #html.h1(style: "margin: 0;", [Ayuda de Gaanim])
-  #html.div(class: "home-hero-desc", [Escribe escenas en Python y anímalas con un
-    renderer vectorial acelerado por GPU. Busca una función, sigue una receta o
-    aprende desde cero.])
-  #html.div(class: "home-search", {
-    html.elem(
-      "input",
-      attrs: (
-        id: "home-search-input",
-        type: "search",
-        placeholder: "Buscar: move_to, cámara, exportar MP4…",
-        autocomplete: "off",
-        spellcheck: "false",
-        "aria-label": "Buscar en la documentación",
-      ),
-    )
-    html.div(class: "home-search-hint", {
-      [Busca por nombre o por tarea, en español o en inglés. Atajo: ]
-      html.elem("kbd", "Ctrl K")
-      [ o ]
-      html.elem("kbd", "/")
-    })
-  })
-  #html.div(class: "home-hero-cta", [
-    #html.a(href: "manual/guia-rapida/", class: "primary", [Guía rápida →])
-    #html.a(href: "getting-started/", class: "secondary", [Instalar])
-    #html.a(href: "api/", class: "secondary", [Referencia de la API])
+  #html.elem("canvas", attrs: (class: "home-hero-canvas", "aria-hidden": "true"))
+  #html.div(class: "home-hero-grid", [
+    #html.div(class: "home-hero-copy", [
+      #html.div(class: "home-hero-kicker", [Animación vectorial · Python · GPU])
+      #html.h1([Anima ideas con #html.span(class: "home-hero-accent", [código])])
+      #html.div(class: "home-hero-desc", [Gaanim describe escenas en Python, las
+        muestra en vivo mientras escribes y las renderiza con trazos vectoriales en la
+        GPU, listas para exportar a video.])
+      #html.div(class: "home-hero-cta", [
+        #html.a(href: "manual/guia-rapida/", class: "primary", [Guía rápida →])
+        #html.a(href: "getting-started/", class: "secondary", [Instalar])
+        #html.a(href: "api/", class: "secondary", [Referencia])
+      ])
+      #html.div(class: "home-search", {
+        html.elem(
+          "input",
+          attrs: (
+            id: "home-search-input",
+            type: "search",
+            placeholder: "Buscar: move_to, cámara, exportar MP4…",
+            autocomplete: "off",
+            spellcheck: "false",
+            "aria-label": "Buscar en la documentación",
+          ),
+        )
+        html.div(class: "home-search-hint", {
+          [Busca por nombre o por tarea, en español o en inglés. Atajo: ]
+          html.elem("kbd", "Ctrl K")
+          [ o ]
+          html.elem("kbd", "/")
+        })
+      })
+    ])
+    #html.elem("div", attrs: (class: "home-hero-stage", "aria-hidden": "true"))
   ])
 ])
+#html.elem("script", attrs: (type: "module", src: "assets/hero.js"))
+
+#html.div(class: "home-features", {
+  feature("Escenas en Python", [Una API fluida: setters inmediatos para el estado y
+    `.animate` para describir el tiempo.])
+  feature("Vectores en la GPU", [Vello sobre Bevy: trazos nítidos a cualquier
+    resolución y vista previa con recarga al guardar.])
+  feature("Texto y matemáticas", [Tipografía y ecuaciones con Typst, animables glifo
+    a glifo con `write`.])
+  feature("Exporta a video", [MP4, WebM con transparencia, WebP, GIF y secuencias
+    PNG desde la misma escena.])
+})
 
 == Empieza en tres pasos
 

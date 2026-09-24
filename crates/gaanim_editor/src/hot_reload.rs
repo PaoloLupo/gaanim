@@ -679,7 +679,6 @@ pub fn script_error_overlay_system(
             egui::Frame::new()
                 .fill(egui::Color32::from_rgba_premultiplied(28, 14, 14, 245))
                 .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 60, 60)))
-                .corner_radius(10.0)
                 .shadow(egui::Shadow {
                     offset: [0, 8],
                     blur: 24,

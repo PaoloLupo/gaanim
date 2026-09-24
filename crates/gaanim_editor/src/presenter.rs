@@ -380,8 +380,6 @@ fn apply_presenter_style(ctx: &egui::Context) {
     style.visuals.panel_fill = palette::BACKGROUND;
     style.visuals.window_fill = palette::PANEL;
     style.visuals.window_stroke = egui::Stroke::new(1.0, palette::BORDER);
-    style.visuals.window_corner_radius = egui::CornerRadius::same(12);
-    style.visuals.menu_corner_radius = egui::CornerRadius::same(12);
     style.visuals.extreme_bg_color = Color32::from_rgb(8, 9, 12);
     style.visuals.faint_bg_color = palette::SURFACE;
     style.visuals.widgets.noninteractive.fg_stroke.color = palette::TEXT;
@@ -419,6 +417,7 @@ fn apply_presenter_style(ctx: &egui::Context) {
         TextStyle::Monospace,
         FontId::new(16.0, FontFamily::Monospace),
     );
+    crate::ui_kit::square_corners(&mut style);
     ctx.set_global_style(style);
 }
 
@@ -674,13 +673,12 @@ fn status_pill(ui: &mut egui::Ui, status: PlaybackStatus) {
     let color = status.color();
     egui::Frame::new()
         .fill(color.gamma_multiply(0.12))
-        .corner_radius(12.0)
         .inner_margin(egui::Margin::symmetric(10, 5))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 7.0;
                 let (dot, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
-                ui.painter().circle_filled(dot.center(), 4.0, color);
+                ui.painter().rect_filled(dot, 0.0, color);
                 ui.label(
                     egui::RichText::new(status.label())
                         .strong()
@@ -721,9 +719,16 @@ fn paint_badge(
         anchor
     };
     let rect = egui::Rect::from_min_size(min, size);
-    painter.rect_filled(rect, size.y / 2.0, fill);
+    painter.rect_filled(rect, 0.0, fill);
     if let Some(dot) = dot {
-        painter.circle_filled(egui::pos2(rect.min.x + 14.0, rect.center().y), 3.5, dot);
+        painter.rect_filled(
+            egui::Rect::from_center_size(
+                egui::pos2(rect.min.x + 14.0, rect.center().y),
+                egui::Vec2::splat(7.0),
+            ),
+            0.0,
+            dot,
+        );
     }
     painter.galley(rect.min + egui::vec2(10.0 + dot_w, 5.0), galley, color);
 }
@@ -746,7 +751,6 @@ fn paint_slide_progress(
     let width = ui.available_width().max(40.0);
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), sense);
     let painter = ui.painter_at(rect.expand(2.0));
-    let radius = height * 0.5;
     let track = egui::Color32::from_white_alpha(24);
     let segments = &timeline.segments;
     if segments.is_empty() {
@@ -756,10 +760,10 @@ fn paint_slide_progress(
         } else {
             0.0
         };
-        painter.rect_filled(rect, radius, track);
+        painter.rect_filled(rect, 0.0, track);
         let mut filled = rect;
         filled.set_width(rect.width() * fraction);
-        painter.rect_filled(filled, radius, palette::ACCENT);
+        painter.rect_filled(filled, 0.0, palette::ACCENT);
         return None;
     }
 
@@ -793,7 +797,7 @@ fn paint_slide_progress(
         } else {
             track
         };
-        painter.rect_filled(block_rect, radius.min(block / 2.0), base);
+        painter.rect_filled(block_rect, 0.0, base);
         if fill > 0.0 {
             let clip = egui::Rect::from_min_max(
                 block_rect.min,
@@ -801,7 +805,7 @@ fn paint_slide_progress(
             );
             painter
                 .with_clip_rect(clip.intersect(painter.clip_rect()))
-                .rect_filled(block_rect, radius.min(block / 2.0), color);
+                .rect_filled(block_rect, 0.0, color);
         }
         if block >= 8.0 {
             for stop in &segment.stops {
@@ -883,15 +887,13 @@ fn show_preview(
 ) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(size.max(egui::vec2(1.0, 1.0)), sense);
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 12.0, palette::PREVIEW);
+    painter.rect_filled(rect, 0.0, palette::PREVIEW);
     let image_rect = match &preview.texture {
         Some(texture) => {
             let texture_size = texture.size_vec2();
             let scale = (rect.width() / texture_size.x).min(rect.height() / texture_size.y);
             let image_rect = egui::Rect::from_center_size(rect.center(), texture_size * scale);
-            egui::Image::new(texture)
-                .corner_radius(8.0)
-                .paint_at(ui, image_rect);
+            egui::Image::new(texture).paint_at(ui, image_rect);
             image_rect
         }
         None => {
@@ -910,7 +912,7 @@ fn show_preview(
     } else {
         egui::Stroke::new(1.0, egui::Color32::from_white_alpha(16))
     };
-    painter.rect_stroke(rect, 12.0, hover_stroke, egui::StrokeKind::Inside);
+    painter.rect_stroke(rect, 0.0, hover_stroke, egui::StrokeKind::Inside);
 
     let badge_fill = egui::Color32::from_rgba_premultiplied(6, 7, 10, 225);
     if overlay.playing {
@@ -962,7 +964,7 @@ fn show_preview(
         AudienceBlank::None => None,
     };
     if let Some((fill, color, title, hint)) = blank {
-        painter.rect_filled(image_rect, 8.0, fill);
+        painter.rect_filled(image_rect, 0.0, fill);
         painter.text(
             image_rect.center() - egui::vec2(0.0, 12.0),
             egui::Align2::CENTER_CENTER,
@@ -1004,7 +1006,6 @@ fn show_shortcuts(ui: &mut egui::Ui) {
             for (keys, action) in SHORTCUTS {
                 egui::Frame::new()
                     .fill(egui::Color32::from_white_alpha(12))
-                    .corner_radius(6.0)
                     .inner_margin(egui::Margin::symmetric(8, 3))
                     .show(ui, |ui| {
                         ui.label(
@@ -1093,7 +1094,6 @@ pub(crate) fn audience_playback_controls_system(
         .show(ctx, |ui| {
             egui::Frame::new()
                 .fill(kit_palette::PANEL)
-                .corner_radius(14.0)
                 .inner_margin(egui::Margin::symmetric(16, 12))
                 .stroke(egui::Stroke::new(1.0, kit_palette::PANEL_STROKE))
                 .shadow(egui::Shadow {
@@ -1350,7 +1350,7 @@ fn step_chip(ui: &mut egui::Ui, label: &str, state: StepChipState) -> egui::Resp
             palette::TEXT,
         ),
     };
-    painter.rect_filled(rect, 16.0, fill);
+    painter.rect_filled(rect, 0.0, fill);
     let mut x = rect.min.x + 14.0;
     if state == StepChipState::Passed {
         paint_icon(
@@ -1537,7 +1537,6 @@ fn show_speaker_column(
         .filter(|notes| !notes.is_empty());
     egui::Frame::new()
         .fill(palette::SURFACE)
-        .corner_radius(12.0)
         .inner_margin(egui::Margin::same(16))
         .show(ui, |ui| {
             let height = ui.available_height().max(notes_min_height);
@@ -1732,7 +1731,6 @@ fn show_overview(
             egui::Frame::new()
                 .fill(palette::PANEL)
                 .stroke(egui::Stroke::new(1.0, palette::BORDER))
-                .corner_radius(16.0)
                 .inner_margin(egui::Margin::same(20))
                 .shadow(egui::Shadow {
                     offset: [0, 12],
@@ -1778,7 +1776,6 @@ fn show_overview(
                     .frame(
                         egui::Frame::new()
                             .fill(egui::Color32::from_white_alpha(10))
-                            .corner_radius(10.0)
                             .inner_margin(egui::Margin::symmetric(14, 10))
                             .stroke(egui::Stroke::new(1.0, palette::BORDER)),
                     )
@@ -1870,7 +1867,6 @@ fn show_overview_card(
     egui::Frame::new()
         .fill(palette::SURFACE)
         .stroke(stroke)
-        .corner_radius(12.0)
         .inner_margin(egui::Margin::same(10))
         .show(ui, |ui| {
             ui.set_width(inner_width);

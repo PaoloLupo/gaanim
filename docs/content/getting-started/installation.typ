@@ -2,258 +2,195 @@
 
 #show: docs-chapter.with(
   title: "Instalación",
-  description: "Instalación nativa para Windows y Ubuntu, y desarrollo local",
+  description: "Instala Gaanim desde las releases de GitHub en Windows y Ubuntu",
   route: "/getting-started/installation/",
   updated: datetime.today().display(),
   code-langs: (),
 )
 
-= Usuario final — Windows
+= Descarga
 
-Gaanim `0.1.0` se distribuye como un zip de GitHub Releases. No necesitas `just`, ni compilar Rust, ni tocar `PATH`/`VIRTUAL_ENV` manualmente. El ejecutable detecta solo el Python.
+Cada versión de Gaanim se publica en las
+#link("https://github.com/PaoloLupo/gaanim/releases/latest")[releases de GitHub]
+con un paquete por sistema y su suma SHA-256. No necesitas Rust, `just` ni
+compilar nada.
 
-== Requisitos <reqs-user>
+#table(
+  columns: 3,
+  table.header[*Sistema*][*Archivo*][*Contenido*],
+  [Windows 10/11 x64], [`gaanim-v<versión>-windows-x64.zip`], [`gaanim.exe`, `gaanim-core.exe`, wheel de autoría],
+  [Ubuntu 24.04 x64], [`gaanim-v<versión>-linux-x64.tar.gz`], [`gaanim`, `gaanim-core`, wheel de autoría],
+)
 
-- *Windows 10/11 x64*
-- *Python >=3.12* — 3.12 es el mínimo, 3.13 y 3.14 también funcionan. Instala desde #link("https://www.python.org/downloads/")[python.org] o `winget install Python.Python.3.12` / `winget install Python.Python.3.14`.
-- *uv recomendado* — #link("https://docs.astral.sh/uv/")[docs.astral.sh/uv] para crear entornos. También funciona `python -m venv`.
-- *FFmpeg opcional* — necesario para exportar `mp4`/`webm` y para usar `scene.media.video()`. Si no está, exporta `png` y evita videos embebidos.
+macOS todavía no tiene paquete.
 
-El binario es `gaanim.exe` (launcher, 300KB) + `gaanim-core.exe` (motor, ~140MB). El launcher no depende de `python3.dll`, por eso puede arrancar sin tener Python en `PATH` antes de ejecutarlo: detecta el venv, añade su directorio al `PATH` y luego lanza el core.
+El paquete trae dos ejecutables. `gaanim` es un lanzador ligero: encuentra un
+Python compatible y arranca `gaanim-core`, el motor, que contiene la vista
+previa, el renderer y el exportador. Deja siempre los dos en la misma carpeta.
 
-El zip también incluye un wheel universal `py3-none-any`. Ese wheel solo aporta
-helpers, stubs y `py.typed` al entorno del proyecto: no contiene el binding
-nativo, renderer ni exportador. Importarlo con Python plano falla de forma
-intencional. Preview, validación y exportación siempre se ejecutan mediante
-`gaanim`; no existe ni está previsto un runtime autónomo instalable con `pip`.
+El wheel `py3-none-any` es el paquete de autoría: helpers, stubs y `py.typed`
+para que tu editor autocomplete la API. No contiene el renderer; importarlo con
+Python plano falla a propósito. Las escenas siempre se ejecutan con `gaanim`.
 
-== Descargar y poner en PATH
+== Verifica la descarga
 
-1. Ve a *Releases* en GitHub y descarga `gaanim-v0.1.0-windows-x64.zip` (y su `.sha256` si quieres verificar).
-2. Extrae a `C:\Tools\gaanim\` (o donde prefieras).
-3. Añade esa carpeta a `PATH`: Panel de control #sym.arrow Sistema #sym.arrow Variables de entorno #sym.arrow `Path` #sym.arrow Nuevo #sym.arrow `C:\Tools\gaanim`.
-4. Verifica sin activar nada:
+Descarga también el archivo `.sha256` y compara:
 
 ```powershell
+# Windows (PowerShell)
+Get-FileHash .\gaanim-v*-windows-x64.zip -Algorithm SHA256
+Get-Content .\gaanim-v*-windows-x64.zip.sha256
+```
+
+```bash
+# Ubuntu
+sha256sum -c gaanim-v*-linux-x64.tar.gz.sha256
+```
+
+= Windows 10/11
+
+== Requisitos <reqs-windows>
+
+- *Python 3.14 o posterior*: desde #link("https://www.python.org/downloads/")[python.org],
+  con `winget install Python.Python.3.14` o con `uv python install 3.14`.
+- *#link("https://docs.astral.sh/uv/")[uv]*: `gaanim init` lo usa para crear el
+  entorno de cada proyecto.
+- Una GPU con controladores actualizados (Vulkan o DirectX 12).
+- *FFmpeg*, opcional: necesario para exportar `mp4`/`webm` y para
+  `scene.media.video()`. Sin él puedes exportar `webp`, `gif` o `png`.
+
+== Instala
+
+1. Extrae el zip en una carpeta, por ejemplo `C:\Tools\gaanim`.
+2. Añade esa carpeta al `PATH` de tu usuario, desde _Configuración_ #sym.arrow
+   _Variables de entorno_ #sym.arrow `Path`, o con PowerShell:
+
+```powershell
+Expand-Archive .\gaanim-v*-windows-x64.zip -DestinationPath C:\Tools\gaanim
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+[Environment]::SetEnvironmentVariable("Path", "$userPath;C:\Tools\gaanim", "User")
+```
+
+3. Abre una terminal nueva y comprueba:
+
+```powershell
+gaanim --version
 gaanim --help
-gaanim check --help
 ```
 
-Debe imprimir la ayuda sin error `python3.dll` ni pedir variables.
+`gaanim.exe` no depende de `python3.dll`, así que arranca aunque Python no esté
+en el `PATH`; busca el intérprete al abrir una escena.
 
-== Crear un proyecto con uv <uv>
+= Ubuntu 24.04
 
-Crea tus proyectos manualmente, donde quieras. Ejemplo:
+== Requisitos <reqs-ubuntu>
 
-```powershell
-mkdir mi-proyecto; cd mi-proyecto
-uv venv --python 3.12
-.\.venv\Scripts\Activate.ps1   # opcional: activa el entorno
+- *Python 3.14 exactamente*: `gaanim-core` enlaza `libpython3.14.so`. Con uv:
+  `uv python install 3.14`.
+- *#link("https://docs.astral.sh/uv/")[uv]* para los entornos de proyecto.
+- Las bibliotecas de sistema de Ubuntu 24.04 y una GPU con Vulkan.
+- *FFmpeg*, opcional: `sudo apt install ffmpeg` para video y audio.
+
+== Instala
+
+Copia los ejecutables a `~/.local/bin` y el wheel a `~/.local/share/gaanim`,
+donde el lanzador lo busca:
+
+```bash
+tar -xzf gaanim-v*-linux-x64.tar.gz
+install -Dm755 -t ~/.local/bin gaanim gaanim-core
+install -Dm644 -t ~/.local/share/gaanim gaanim-*-py3-none-any.whl
+gaanim --version
 ```
 
-Alternativa sin `uv`:
+Ubuntu ya incluye `~/.local/bin` en el `PATH` cuando la carpeta existe al
+iniciar sesión; si `gaanim` no aparece, abre una sesión nueva.
 
-```powershell
-py -3.14 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-```
+= Crea un proyecto
 
-Ahora crea el scaffold:
+`gaanim` sin argumentos abre el Inicio: crea o abre proyectos, revisa el
+diagnóstico de Python y uv y muestra los recientes. Desde la terminal:
 
 ```powershell
 gaanim init video mi-video      # video 16:9
-gaanim init slides mi-charla    # slides semánticos
-# o dentro de una carpeta vacía:
-gaanim init video .
+gaanim init slides mi-charla    # presentación con pasos
+gaanim init video .             # en la carpeta actual, si está vacía
 ```
 
 Cada `init` genera:
 
 ```text
 mi-video/
-  gaanim.toml   # name/kind/entry/assets_dir/output_dir
-  pyproject.toml # proyecto uv --bare (Python >=3.14)
-  .python-version # 3.14
-  main.py       # Scene de ejemplo
-  assets/       # imágenes, svg, fuentes
-  exports/      # mp4/webm/png (gitignore)
+  gaanim.toml       # nombre, tipo, entrada y carpetas del proyecto
+  pyproject.toml    # proyecto uv con Python 3.14
+  .python-version
+  main.py           # escena de ejemplo
+  assets/           # imágenes, SVG, fuentes
+  exports/          # videos exportados
   README.md
+  AGENTS.md         # guía para asistentes de código
+  .gitignore
+  .venv/            # entorno creado con uv, con el wheel de autoría
 ```
 
-Cada scaffold crea el equivalente a `uv init --bare --python 3.14`, añade
-`gaanim` a las dependencias de `pyproject.toml` y prepara `.venv` con Python
-3.14. `--force` solo actualiza los archivos del scaffold, no borra tus assets.
+`--force` solo actualiza los archivos del scaffold y no borra tus assets.
 
-== Usar el proyecto
-
-Sin necesidad de escribir `main.py`:
+== Usa el proyecto
 
 ```powershell
-gaanim mi-video          # preview con hot reload (guardar recarga)
-gaanim check mi-video    # preflight 16:9, notas, stops, placeholders
-gaanim check mi-video --strict  # falla también con warnings
-gaanim --present --monitor 1 mi-video  # presentación en proyector 1
+gaanim mi-video                            # vista previa; guardar recarga
+gaanim check mi-video                      # revisa la escena sin abrir ventana
+gaanim check mi-video --strict             # falla también con avisos
+gaanim export mi-video --output mi-video/exports/demo.mp4
+gaanim --present --monitor 1 mi-video      # presentación en el monitor 1
 ```
 
-`gaanim check` ejecuta el script: lo que imprima con `print()` aparece antes del
-informe, también cuando la salida se redirige a un archivo o a otra herramienta.
+Dentro de la carpeta del proyecto, `gaanim .` equivale a abrir su `main.py`.
+`gaanim check` ejecuta el script: lo que imprimas con `print()` aparece antes
+del informe.
 
-Desde dentro:
-
-```powershell
-cd mi-video
-gaanim .                 # equivale a gaanim main.py
-```
-
-Dentro de `main.py` la forma canónica es:
+Un `main.py` mínimo:
 
 ```python
-from gaanim import Easing, Scene, BLACK
+from gaanim import BLACK, BLUE, Easing, Scene
 
 scene = Scene(frame=(16, 9), background=BLACK)
-scene.assets.load_project("gaanim.toml")  # opcional: resuelve assets relativo al proyecto
 circle = scene.geometry.circle(1).fill(BLUE)
-scene.play([circle.animate.create().duration(1).easing(Easing.spring(stiffness=90, damping=12))])
-scene.render()  # para preview
-# luego: gaanim export . --output exports/demo.mp4
+scene.play([circle.animate.create().duration(1).easing(Easing.SMOOTH)])
+scene.render()
 ```
 
-== Cómo detecta Python sin variables
+= Cómo encuentra Python
 
-Cuando ejecutas `gaanim` desde cualquier terminal (activada o no), el launcher hace:
+No necesitas activar el entorno ni tocar variables. Al abrir una escena, el
+lanzador usa el primer intérprete que encuentre:
 
-1. Si `VIRTUAL_ENV` existe (hiciste `Activate.ps1`), usa ese `.venv` y su `home` de `pyvenv.cfg`.
-2. Si no, hace *walk-up* desde `script`, `cwd` y `exe` buscando `.venv/pyvenv.cfg`, `venv/pyvenv.cfg`, `env/pyvenv.cfg` hasta 4 niveles arriba. Así `gaanim .\mi-video` encuentra `.\mi-video\.venv` sin activar.
-3. Si no hay venv cercano, prueba `py -3.14`, `py -3.13`, `py -3.12`, `py -3`, `python`, `where python` y lee `sys.base_prefix`.
+1. El entorno activo (`VIRTUAL_ENV`).
+2. Una carpeta `.venv`, `venv` o `env` junto al proyecto o al directorio
+   actual, subiendo hasta cuatro niveles.
+3. El Python del sistema: `py -3.14`, `python` o `python3` en Windows;
+   `python3.14`, `python3` o `python` en Ubuntu.
+4. Un Python 3.14 instalado con uv.
 
-Luego antepone `home` y `home\Scripts` al `PATH` del proceso hijo (`gaanim-core.exe`), que sí está linkeado a `python3.dll`/`python3xx.dll`. Por eso no necesitas ` $env:PATH = ...` manualmente.
+Después prepara las rutas de ese Python para `gaanim-core` y lo arranca.
 
-Tip: `gaanim --help` también funciona sin proyecto, usando el fallback del sistema.
+= Actualiza
 
-= Usuario final — Ubuntu 24.04 x64
+Descarga la release nueva y reemplaza los dos ejecutables y el wheel. Al abrir
+un proyecto, Gaanim reinstala su paquete de autoría si la versión no coincide
+con la del ejecutable, así que no hace falta recrear los entornos.
 
-Descarga `gaanim-v0.1.0-linux-x64.tar.gz` desde GitHub Releases. El paquete
-contiene `gaanim`, `gaanim-core` y el mismo wheel universal de autoría que la
-distribución Windows.
+= Solución de problemas
 
-```bash
-tar -xzf gaanim-v0.1.0-linux-x64.tar.gz
-mkdir -p ~/.local/bin ~/.local/share/gaanim
-install -m 755 gaanim gaanim-core ~/.local/bin/
-install -m 644 gaanim-*-py3-none-any.whl ~/.local/share/gaanim/
-gaanim --help
-```
+- *`python3.dll` no encontrado o salida `-1073741515`*: el lanzador no encontró
+  Python 3.14. Comprueba `py -3.14 --version` o crea el entorno con
+  `uv venv --python 3.14`. Ejecuta siempre `gaanim`, no `gaanim-core` directamente.
+- *`authoring environment not ready`*: falta uv o el wheel no está junto al
+  ejecutable (Windows) ni en `~/.local/share/gaanim` (Ubuntu).
+- *`gaanim check: could not load project`*: revisa que `entry` en `gaanim.toml`
+  sea una ruta relativa que exista.
+- *`FFmpeg not found` al exportar `mp4`*: instala FFmpeg y añádelo al `PATH`, o
+  exporta `webp`, `gif` o `png`.
 
-Requiere Python 3.12 y las bibliotecas base de Ubuntu 24.04. Instala FFmpeg para
-exportar MP4/WebM o usar video embebido. Mantén ambos ejecutables en la misma
-carpeta: el launcher localiza `gaanim-core` junto a sí mismo.
-
-= Ejemplo completo — de cero a proyecto nuevo usando el PATH
-
-Este es el flujo que yo uso en local y el que usará cualquier usuario con el zip en `PATH`. No requiere activar el venv para que `gaanim` funcione:
-
-```powershell
-# 1. Requisitos ya instalados: Python >=3.12, uv, Rust (solo si compilas)
-
-# 2a. Si compilas en local (dev):
-git clone https://github.com/<tu-org>/gaanim; cd gaanim
-just build-release        # genera target/release/gaanim.exe + gaanim-core.exe
-#   o descarga el release:
-#   Expand-Archive gaanim-v0.1.0-windows-x64.zip -DestinationPath C:\Tools\gaanim
-
-# 2b. Poner en PATH (una sola vez)
-#    Copia los dos exe a una carpeta en PATH, por ejemplo:
-Copy-Item target/release/gaanim.exe C:\Tools\gaanim\ -Force
-Copy-Item target/release/gaanim-core.exe C:\Tools\gaanim\ -Force
-#    Verifica que C:\Tools\gaanim está en $env:PATH:
-$env:PATH -split ';' | Select-String gaanim
-gaanim --help             # debe funcionar incluso sin .venv
-
-# 3. Crear un proyecto nuevo en cualquier lugar, con su propio entorno
-mkdir C:\proyectos\demo-hello; cd C:\proyectos\demo-hello
-uv venv --python 3.12
-# no hace falta Activate.ps1: el launcher encuentra .venv por walk-up
-# El ejecutable aporta el runtime; el wheel del proyecto solo aporta autoría y tipos.
-
-# 4. Generar el scaffold (yo lo hago así)
-gaanim init video .       # crea gaanim.toml, main.py, assets/, exports/
-# o: gaanim init slides mi-charla
-
-# 5. Verificar y previsualizar
-gaanim check .            # 2.2 seconds · 1920x1080 · PASS
-gaanim .                  # abre preview con hot reload; guarda main.py y recarga
-
-# 6. Con venv activado también funciona (misma detección vía VIRTUAL_ENV)
-.\.venv\Scripts\Activate.ps1
-gaanim --present --monitor 1 .  # presentación en proyector
-deactivate
-```
-
-Notas de este flujo:
-
-- El `gaanim.exe` que está en `PATH` es el *launcher* (sin `python3.dll`). Él encuentra `C:\proyectos\demo-hello\.venv\pyvenv.cfg` → `home = C:\...\Python314` → antepone `home` y `.venv\Scripts` al `PATH` del hijo `gaanim-core.exe`.
-- Si mueves el proyecto, el walk-up sigue funcionando mientras `.venv` esté dentro o hasta 4 niveles arriba.
-- Para otro proyecto no necesitas reinstalar `gaanim`: basta `uv venv` + `gaanim init` de nuevo. El binario en `PATH` es único y reutilizable.
-
-= Desarrollo local — clonar y compilar
-
-Para contribuir o compilar desde fuente:
-
-== Requisitos dev
-
-- Rust estable (`rustup`), Python >=3.12, `just` (#link("https://just.systems")[just.systems]), Git.
-- En Windows, PowerShell. En Linux/macOS, bash.
-
-== Preparación y compilación
-
-```powershell
-git clone https://github.com/<tu-org>/gaanim
-cd gaanim
-just bootstrap        # crea .venv e instala build + hatchling
-just build            # debug: gaanim_launcher + gaanim_editor
-just doctor           # check + compila y prueba gaanim --help via launcher
-```
-
-Comandos habituales:
-
-```powershell
-just check            # cargo check --workspace
-just clippy           # clippy
-cargo test --workspace
-just run quickstart   # via launcher en Windows, directo en Unix
-just python-develop   # instala el paquete de autoría editable
-just wheel            # wheel universal en target/wheels/
-just validate-python-api  # compara el stub con el módulo embebido
-just docs             # compila el site Typst
-```
-
-Estructura relevante:
-
-```text
-crates/gaanim_launcher  # exe sin pyo3: detecta Python y lanza gaanim-core
-crates/gaanim_editor    # lib + bin gaanim / gaanim-core (Bevy + PyO3 abi3-py312)
-crates/gaanim_python    # módulo PyO3 embebido + paquete de autoría
-target/debug/gaanim.exe       # launcher (Windows)
-target/debug/gaanim-core.exe  # motor
-target/wheels/gaanim-0.1.0-py3-none-any.whl
-```
-
-En dev, `cargo run -p gaanim_editor -- examples/quickstart.py` requiere `PATH` con Python. Por eso `just run` en Windows usa el launcher (`cargo run -p gaanim_launcher`). Para debug directo del core, el `just` anterior ya no inyecta `$env:PATH`.
-
-== Versión local de distribución
-
-```powershell
-cargo build -p gaanim_launcher --release
-cargo build -p gaanim_editor --release --bin gaanim-core
-# zip:
-# target/release/gaanim.exe + target/release/gaanim-core.exe + README.md -> dist/gaanim-v0.1.0-windows-x64.zip
-```
-
-El workflow `.github/workflows/release.yml` hace lo mismo en `windows-latest` al pushear `v0.1.0`.
-
-== Solución de problemas
-
-- `exit -1073741515 / python3.dll not found`: el launcher no encontró Python. Verifica `py --version` o crea `.venv` con `uv venv --python 3.12`. El core solo (`gaanim-core.exe`) siempre fallará sin launcher si `PATH` no contiene Python.
-- `gaanim check: could not load project`: revisa `gaanim.toml` `entry` sea relativo y exista, y que `assets/` exista si `scene.assets.load_project` lo usa.
-- `FFmpeg not found` al exportar `mp4`: instala FFmpeg y añádelo a `PATH`, o exporta `png`/`webp`.
-- `just bootstrap` crea `.venv` con 3.14 pero el zip release exige >=3.12: es compatible, no necesitas recrear el venv.
+Para compilar Gaanim desde el código y contribuir, sigue el
+#link("https://github.com/PaoloLupo/gaanim#readme")[README del repositorio].

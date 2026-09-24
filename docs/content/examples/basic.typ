@@ -10,7 +10,8 @@
 = Ejemplos básicos
 
 Cada ejemplo comienza con `Scene`. Las animaciones se construyen sobre objetos
-dibujables y se entregan a `scene.play` como una lista.
+dibujables, se entregan a `scene.play` como una lista y el script termina con
+`scene.render()`.
 
 == Círculo y rectángulo
 
@@ -27,7 +28,9 @@ scene.play([
 ])
 scene.wait(0.5)
 scene.play([circle.animate.shift_by(2.25, 0).duration(1.0), rect.animate.fade_out().duration(0.5)])
+scene.render()
 # Ejecuta este archivo con: gaanim basic_circle.py
+# output: preview.webp
 ```
 
 == Texto y matemáticas
@@ -43,7 +46,9 @@ caption = scene.text("Energy and mass are related", role="subtitle").fill(BLUE).
 scene.play([title.animate.write().duration(1.0), equation.animate.write().duration(1.5)])
 scene.play([caption.animate.fade_in().duration(0.8)])
 scene.wait(1.0)
+scene.render()
 # Ejecuta este archivo con: gaanim text_and_math.py
+# output: preview.webp
 ```
 
 == Galería de figuras
@@ -67,5 +72,7 @@ scene.play(stagger(
     each=0.1,
 ))
 scene.wait(1.0)
+scene.render()
 # Ejecuta este archivo con: gaanim shapes_gallery.py
+# output: preview.webp
 ```

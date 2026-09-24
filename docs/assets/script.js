@@ -27,6 +27,30 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 // ============================================================================
+// Reading progress: the header's timeline playhead follows the scroll
+// ============================================================================
+document.addEventListener("DOMContentLoaded", () => {
+    const root = document.documentElement;
+    let queued = false;
+    const update = () => {
+        queued = false;
+        const range = root.scrollHeight - window.innerHeight;
+        const progress = range > 0 ? Math.min(1, Math.max(0, window.scrollY / range)) : 0;
+        root.style.setProperty("--page-progress", progress.toFixed(4));
+        root.style.setProperty("--page-progress-on", progress > 0 ? "1" : "0");
+    };
+    const schedule = () => {
+        if (!queued) {
+            queued = true;
+            requestAnimationFrame(update);
+        }
+    };
+    window.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
+    update();
+});
+
+// ============================================================================
 // Copy buttons on code blocks
 // ============================================================================
 document.addEventListener("DOMContentLoaded", () => {

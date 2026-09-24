@@ -44,17 +44,16 @@
     // Portada independiente.
     block(height: 100%)[
       #align(center + horizon)[
-        #rect(width: 42pt, height: 5pt, fill: rgb("#4f46e5"), radius: 2.5pt)
+        // 1 mm per logo unit (tools/generate_brand.py).
+        #image("assets/brand/gaanim-logo.svg", width: 71mm, alt: "Gaanim")
         #v(1.1cm)
-        #text(size: 38pt, weight: "bold", fill: rgb("#4338ca"))[Gaanim]
-        #v(0.75em)
         #text(size: 17pt, weight: "medium", fill: rgb("#334155"))[Libro de animación vectorial]
         #v(0.55em)
         #text(size: 11pt, fill: rgb("#64748b"))[Aprende construyendo escenas; consulta la API al final]
         #v(2.1cm)
-        #line(length: 58%, stroke: 0.8pt + rgb("#c7d2fe"))
+        #line(length: 58%, stroke: 0.8pt + rgb("#cbc6ff"))
         #v(0.7cm)
-        #text(size: 9pt, tracking: 0.08em, weight: "bold", fill: rgb("#6366f1"))[PYTHON · VELLO · BEVY · GPU]
+        #text(size: 9pt, tracking: 0.08em, weight: "bold", fill: rgb("#5b4af0"))[PYTHON · VELLO · BEVY · GPU]
       ]
     ]
     pagebreak()

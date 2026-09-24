@@ -217,7 +217,6 @@ pub fn export_dialog_system(
                 if !state.completed_successfully && !cancelled {
                     egui::Frame::new()
                         .fill(palette::DANGER.gamma_multiply(0.08))
-                        .corner_radius(8.0)
                         .inner_margin(egui::Margin::symmetric(12, 10))
                         .show(ui, |ui| {
                             ui.set_width(ui.available_width());
