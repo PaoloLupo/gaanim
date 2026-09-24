@@ -2424,9 +2424,11 @@ impl SceneModel {
                 && prev < scene_ids.len()
                 && let Some(tr) = &seg.transition
             {
-                builder
-                    .timeline
-                    .connect(scene_ids[prev], scene_ids[i], tr.clone());
+                builder.timeline.connect(
+                    scene_ids[prev],
+                    scene_ids[i],
+                    Self::runtime_transition(tr, &id_map),
+                );
             }
         }
 
@@ -5600,6 +5602,31 @@ impl SceneModel {
                     }
                 }
             }
+        }
+    }
+
+    /// Rewrites authored morph pairs to runtime object ids, dropping pairs
+    /// whose drawables were never compiled.
+    fn runtime_transition(
+        transition: &gaanim_timeline::transition::TransitionType,
+        id_map: &HashMap<ObjectId, ObjectId>,
+    ) -> gaanim_timeline::transition::TransitionType {
+        use gaanim_timeline::transition::{MorphMapping, TransitionType};
+        let TransitionType::Morph { duration, mappings } = transition else {
+            return transition.clone();
+        };
+        TransitionType::Morph {
+            duration: *duration,
+            mappings: mappings
+                .iter()
+                .filter_map(|mapping| {
+                    Some(MorphMapping {
+                        source: *id_map.get(&mapping.source)?,
+                        target: *id_map.get(&mapping.target)?,
+                        property: mapping.property.clone(),
+                    })
+                })
+                .collect(),
         }
     }
 

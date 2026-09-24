@@ -1,5 +1,5 @@
 use gaanim_core::glam::DVec2;
-use gaanim_timeline::transition::{SlideDirection, TransitionType};
+use gaanim_timeline::transition::{MorphMapping, MorphProperty, SlideDirection, TransitionType};
 use pyo3::prelude::*;
 
 /// Python wrapper for scene transition types.
@@ -77,6 +77,45 @@ impl PyTransitionType {
         }))
     }
 
+    /// Morph paired drawables of the outgoing segment into the incoming one.
+    #[staticmethod]
+    #[pyo3(signature = (duration, *, pairs=Vec::new()))]
+    fn morph(
+        duration: f64,
+        pairs: Vec<(
+            PyRef<'_, crate::pydrawable::PyDrawable>,
+            PyRef<'_, crate::pydrawable::PyDrawable>,
+        )>,
+    ) -> PyResult<Self> {
+        if !duration.is_finite() || duration <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "duration must be a finite positive number",
+            ));
+        }
+        let mut sources = std::collections::HashSet::new();
+        let mut targets = std::collections::HashSet::new();
+        let mut mappings = Vec::with_capacity(pairs.len());
+        for (source, target) in &pairs {
+            let (source, target) = (source.0.id, target.0.id);
+            if source == target {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "a morph pair needs two different drawables",
+                ));
+            }
+            if !sources.insert(source) || !targets.insert(target) {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "each drawable can appear in at most one morph pair per side",
+                ));
+            }
+            mappings.push(MorphMapping {
+                source,
+                target,
+                property: MorphProperty::All,
+            });
+        }
+        Ok(Self(TransitionType::Morph { duration, mappings }))
+    }
+
     fn __repr__(&self) -> String {
         match &self.0 {
             TransitionType::Cut => "Transition.cut()".to_string(),
@@ -93,7 +132,11 @@ impl PyTransitionType {
             TransitionType::ZoomThrough { duration, .. } => {
                 format!("Transition.zoom_through({})", duration)
             }
-            TransitionType::Morph { duration, .. } => format!("Transition.morph({})", duration),
+            TransitionType::Morph { duration, mappings } => format!(
+                "Transition.morph({}, pairs=<{} pairs>)",
+                duration,
+                mappings.len()
+            ),
         }
     }
 }

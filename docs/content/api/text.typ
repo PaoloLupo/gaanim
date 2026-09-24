@@ -499,6 +499,9 @@ selection.animate.wave() -> Anim
 selection.animate.highlight() -> Anim
 selection.animate.focus() -> Anim
 selection.animate.cancel() -> Anim
+selection.animate.reveal(style="fade") -> Anim
+selection.animate.brace(label="", *, above=False) -> Anim
+selection.animate.annotate(label, offset=(0, 0.6)) -> Anim
 
 selection.animate.morph_to(target_selection).duration(seconds) -> Anim
 selection.animate.copy_to(target_selection).duration(seconds) -> Anim
@@ -507,7 +510,13 @@ selection.animate.copy_to(target_selection).duration(seconds) -> Anim
 The `animate` proxy is deliberately local: it accepts fill
 and opacity, while transform, scale, rotation, material, and stroke targets
 raise `TypeError`. `cancel` draws a diagonal mark and dims the glyphs; the next
-replacing text transition retires both.
+replacing text transition retires both. `reveal` makes only the selected glyphs
+appear with `"fade"`, `"wipe"` (stroke trace, then fill) or `"from_below"` (fade
+with a short rise), so a term can enter an equation that is already visible.
+`brace` draws a brace under the selection, or over it with `above=True`, and
+fades in `label`; `annotate` places `label` at `offset` from the selection
+center with a leader line. The brace, line, and labels are new objects in the
+selection's color and remain on screen.
 Every animation descriptor above can be placed directly in `scene.play([...])`.
 
 == Animaciones de texto completo
@@ -543,7 +552,8 @@ text.animate.wiggle() -> Anim
 ```
 
 These operate on the complete `Text`; the typed selection proxy adds `pulse`,
-`wave`, `highlight`, `focus`, and `cancel` for local subsets.
+`wave`, `highlight`, `focus`, `cancel`, `reveal`, `brace`, and `annotate` for
+local subsets.
 
 == Transiciones estructurales
 

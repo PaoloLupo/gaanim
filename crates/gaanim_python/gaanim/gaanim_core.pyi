@@ -73,6 +73,20 @@ class Easing:
     def cubic_bezier(x1: float, y1: float, x2: float, y2: float) -> Easing:
         """Create a finite CSS-style cubic Bézier; both X controls must be in ``[0, 1]``."""
         ...
+    @staticmethod
+    def custom(function: Callable[[float], float], samples: int = 256) -> Easing:
+        """Sample ``function`` once into a lookup table interpolated linearly.
+
+        ``function`` is called ``samples`` times, at evenly spaced ``t`` from
+        0 to 1, when the easing is created; rendering never calls back into
+        Python, so previews, seeks and exports agree. Values must be finite
+        and within ``[-1, 2]`` (overshoot is allowed); otherwise, or when
+        ``samples`` is outside ``[2, 65536]``, ``ValueError`` is raised.
+
+        Example:
+            Easing.custom(lambda t: 1 - (1 - t) ** 4, samples=256)
+        """
+        ...
 
 class Color:
     @overload
@@ -586,6 +600,23 @@ class Transition:
             result = Transition.zoom_through(1.0)
         """
         ...
+    @staticmethod
+    def morph(duration: float, *, pairs: Sequence[tuple[Drawable, Drawable]] = ()) -> Transition:
+        """Carry paired drawables from the outgoing segment into the incoming one.
+
+        Each ``(source, target)`` pair shares one bounding box that travels
+        from the source's box to the target's while the target fades in over
+        the first half and the source fades out over the second, so the pair
+        reads as one object changing place, size, color and shape. Unpaired
+        content cross-fades. Pairs are resolved when the scene compiles, so
+        pass them to ``scene.link`` once both segments are declared. Raises
+        ``ValueError`` for a non-positive duration, a drawable paired with
+        itself, or a drawable repeated on one side.
+
+        Example:
+            scene.link(overview, detail, Transition.morph(0.8, pairs=[(card, panel)]))
+        """
+        ...
 
 class Anim:
     def crop(self, x: float, y: float, width: float, height: float, *, normalized: bool = False) -> Anim:
@@ -773,6 +804,27 @@ class Anim:
     def unwrite(self) -> Anim: ...
     def uncreate(self) -> Anim: ...
     def grow_from_center(self) -> Anim: ...
+    def grow_from_point(self, x: float, y: float) -> Anim:
+        """Grow from zero scale while the scene point ``(x, y)`` stays fixed.
+
+        The drawable scales up about that point and ends at its declared
+        position and size. Raises ``ValueError`` for non-finite coordinates.
+
+        Example:
+            scene.play(badge.animate.grow_from_point(2, 1))
+        """
+        ...
+    def grow_from_edge(self, direction: Direction) -> Anim:
+        """Grow from zero scale while one side of the bounds stays fixed.
+
+        ``Direction.DOWN`` keeps the bottom edge midpoint in place, so a bar
+        rises from its baseline; diagonal directions pin a corner, and
+        ``Direction.custom`` pins the matching point on the bounding box.
+
+        Example:
+            scene.play(bar.animate.grow_from_edge(Direction.DOWN))
+        """
+        ...
     def grow_arrow(self) -> Anim:
         """Grow an arrow from its tail, like Manim's ``GrowArrow`` but undistorted.
 
@@ -1709,6 +1761,37 @@ class TextSelectionAnimation:
     def highlight(self) -> Anim: ...
     def focus(self) -> Anim: ...
     def cancel(self) -> Anim: ...
+    def reveal(self, style: Literal["fade", "wipe", "from_below"] = "fade") -> Anim:
+        """Reveal the selected glyphs with a fade, a stroke wipe, or a short rise.
+
+        The rest of the text is unaffected, so a term can appear inside an
+        equation that is already on screen. Raises ``ValueError`` for an
+        unknown ``style``.
+
+        Example:
+            scene.play(eq["rhs"].animate.reveal("from_below"))
+        """
+        ...
+    def brace(self, label: str = "", *, above: bool = False) -> Anim:
+        """Draw a brace under the selection (over it with ``above=True``) and fade in ``label``.
+
+        The brace and label are new scene objects that stay after the
+        animation, colored like the selected glyphs.
+
+        Example:
+            scene.play(eq["mass"].animate.brace("masa"))
+        """
+        ...
+    def annotate(self, label: str, offset: tuple[float, float] = (0.0, 0.6)) -> Anim:
+        """Place ``label`` at ``offset`` from the selection with a leader line.
+
+        The line and label stay after the animation. Raises ``ValueError``
+        for a non-finite offset.
+
+        Example:
+            scene.play(eq["c"].animate.annotate("velocidad de la luz", offset=(0, 0.6)))
+        """
+        ...
     def morph_to(self, target: TextSelection) -> Anim: ...
     def copy_to(self, target: TextSelection) -> Anim: ...
 
