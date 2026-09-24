@@ -844,6 +844,9 @@ pub enum UpdaterPreset {
         max_scale: f64,
         frequency: f64,
     },
+    /// Additive procedural layer evaluated from timeline time (wiggle,
+    /// oscillators); see [`gaanim_animation::ProceduralMotion`].
+    Procedural(gaanim_animation::ProceduralLayer),
 }
 
 impl UpdaterPreset {
@@ -867,6 +870,8 @@ impl UpdaterPreset {
                 max_scale,
                 frequency,
             } => gaanim_animation::pulse_updater(min_scale, max_scale, frequency),
+            // Procedural layers compile to `ProceduralMotion`, not an updater.
+            UpdaterPreset::Procedural(_) => gaanim_animation::Updater::new(|_, _, _, _| false),
         }
     }
 }

@@ -4589,6 +4589,30 @@ impl SceneModel {
                     }
                 }
                 // -- Reactive ops --
+                Op::AttachUpdater {
+                    target,
+                    preset: crate::canvas::UpdaterPreset::Procedural(layer),
+                } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(st) = builder.states.get(target_id)
+                    {
+                        let layer = layer.clone();
+                        let start = builder.current_time;
+                        builder.commands.entity(st.entity).queue(
+                            move |mut entity: bevy::prelude::EntityWorldMut| {
+                                if let Some(mut motion) =
+                                    entity.get_mut::<gaanim_animation::ProceduralMotion>()
+                                {
+                                    motion.push(layer, start);
+                                } else {
+                                    let mut motion = gaanim_animation::ProceduralMotion::default();
+                                    motion.push(layer, start);
+                                    entity.insert(motion);
+                                }
+                            },
+                        );
+                    }
+                }
                 Op::AttachUpdater { target, preset } => {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(st) = builder.states.get(target_id)
@@ -4604,6 +4628,18 @@ impl SceneModel {
                 Op::RemoveUpdater(target) => {
                     if let Some(target_id) = id_map.get(target).copied() {
                         builder.schedule_remove_updater(target_id);
+                        if let Some(st) = builder.states.get(target_id) {
+                            let end = builder.current_time;
+                            builder.commands.entity(st.entity).queue(
+                                move |mut entity: bevy::prelude::EntityWorldMut| {
+                                    if let Some(mut motion) =
+                                        entity.get_mut::<gaanim_animation::ProceduralMotion>()
+                                    {
+                                        motion.stop_at(end);
+                                    }
+                                },
+                            );
+                        }
                     }
                 }
 

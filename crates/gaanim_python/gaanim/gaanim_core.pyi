@@ -49,6 +49,16 @@ class Easing:
     RUNNING_START: ClassVar[Easing]
     EXPONENTIAL_DECAY: ClassVar[Easing]
     NOT_QUITE_THERE: ClassVar[Easing]
+    SMOOTH_SPRING: ClassVar[Easing]
+    """Critically damped spring: fastest settle without overshoot."""
+    GENTLE: ClassVar[Easing]
+    """Soft spring with a barely visible overshoot that settles late."""
+    QUICK: ClassVar[Easing]
+    """Brisk spring that settles by about 60% of the clip."""
+    SNAPPY: ClassVar[Easing]
+    """Fast spring with a crisp 20% overshoot."""
+    BOUNCY: ClassVar[Easing]
+    """Playful spring with a 45% overshoot and visible rebounds."""
     @staticmethod
     def ease_in(curve: EasingCurve) -> Easing: ...
     @staticmethod
@@ -56,12 +66,68 @@ class Easing:
     @staticmethod
     def ease_in_out(curve: EasingCurve) -> Easing: ...
     @staticmethod
-    def spring(stiffness: float = 90.0, damping: float = 12.0) -> Easing:
-        """Create a finite spring; stiffness must be positive and damping non-negative."""
+    def spring(
+        stiffness: Optional[float] = None,
+        damping: Optional[float] = None,
+        *,
+        mass: float = 1.0,
+        velocity: float = 0.0,
+        bounce: Optional[float] = None,
+    ) -> Easing:
+        """Create a spring, physically or perceptually.
+
+        With ``bounce`` in ``[0, 1)`` the spring is perceptual: its peak
+        overshoot is ``bounce`` of the distance travelled (0 is critically
+        damped) and it settles within the animation's duration, so
+        ``duration`` alone sets the pace. Otherwise ``stiffness`` (default 90)
+        must be positive, ``damping`` (default 12) non-negative, and ``mass``
+        positive; the clip spans five physical seconds as before.
+        ``velocity`` is the initial speed in distances per clip duration.
+        Every spring ends exactly on its target. Invalid values, or
+        ``bounce`` combined with physical parameters, raise ``ValueError``.
+
+        Example:
+            logo.animate.scale_to(1.0).duration(0.6).easing(Easing.spring(bounce=0.35))
+        """
         ...
     @staticmethod
-    def steps(count: int) -> Easing:
-        """Create a discrete easing with at least one step."""
+    def back(overshoot: float = 1.70158, *, mode: Literal["in", "out", "in_out"] = "out") -> Easing:
+        """Pull back (``in``) or overshoot (``out``) by a non-negative ``overshoot``."""
+        ...
+    @staticmethod
+    def elastic(amplitude: float = 1.0, period: float = 0.3, *, mode: Literal["in", "out", "in_out"] = "out") -> Easing:
+        """Oscillate like a plucked band; ``amplitude >= 1``, ``period > 0`` in clip fractions."""
+        ...
+    @staticmethod
+    def bounce(strength: float = 1.0, *, mode: Literal["in", "out", "in_out"] = "out") -> Easing:
+        """Bounce on arrival; ``strength`` blends from a cubic ease (0) to the classic bounce (1)."""
+        ...
+    @staticmethod
+    def slow_mo(linear_ratio: float = 0.7, power: float = 0.7) -> Easing:
+        """Rush in, glide through a slow linear middle, rush out (both arguments in ``[0, 1]``)."""
+        ...
+    @staticmethod
+    def rough(strength: float = 1.0, points: int = 20, seed: int = 0) -> Easing:
+        """Deterministic jittery ramp through ``points`` random knots, for flicker and glitches."""
+        ...
+    @staticmethod
+    def squish(easing: Easing, start: float, end: float) -> Easing:
+        """Run ``easing`` only between ``start`` and ``end`` (``0 <= start < end <= 1``), holding its ends outside."""
+        ...
+    @staticmethod
+    def from_svg(path: str, samples: int = 256) -> Easing:
+        """Sample an SVG path drawn in the unit square (x = time, y = progress).
+
+        The path must run from x = 0 to x = 1 without moving backwards in x
+        and stay within y in ``[-1, 2]``; otherwise ``ValueError`` is raised.
+
+        Example:
+            Easing.from_svg("M0,0 C0.3,0 0.2,1.2 1,1")
+        """
+        ...
+    @staticmethod
+    def steps(count: int, jump: Literal["start", "end", "none", "both"] = "end") -> Easing:
+        """Create a discrete easing with CSS ``steps()`` jump positions."""
         ...
     @staticmethod
     def mirror(easing: Easing) -> Easing: ...
@@ -988,6 +1054,51 @@ class Updater:
 
         Example:
             result = Updater.rotate(1.0)
+        """
+        ...
+    @staticmethod
+    def wiggle(
+        *,
+        position: float = 0.08,
+        rotation: float = 0.0,
+        scale: float = 0.0,
+        frequency: float = 2.0,
+        octaves: int = 2,
+        seed: int = 0,
+    ) -> Updater:
+        """Layer organic, seeded jitter over the drawable's own animation.
+
+        ``position`` (scene units), ``rotation`` (radians) and ``scale``
+        (fraction) are the noise amplitudes; ``frequency`` sets how fast the
+        jitter changes and ``octaves`` (1 to 8) adds finer detail. The offset
+        starts at zero, is a pure function of timeline time, and adds to
+        ``animate.move_to`` and other clips instead of replacing them.
+        ``remove_updater()`` ends it. Invalid values raise ``ValueError``.
+
+        Example:
+            logo.add_updater(Updater.wiggle(position=0.08, rotation=0.03, frequency=2.0, seed=1))
+        """
+        ...
+    @staticmethod
+    def oscillate(
+        channel: Literal["x", "y", "rotation", "scale", "opacity"],
+        *,
+        waveform: Literal["sine", "square", "triangle", "saw"] = "sine",
+        frequency: float = 1.0,
+        low: float = 0.0,
+        high: float = 1.0,
+        phase: float = 0.0,
+    ) -> Updater:
+        """Layer a periodic value between ``low`` and ``high`` on one channel.
+
+        ``x``, ``y`` and ``rotation`` values are added to the animated value;
+        ``scale`` and ``opacity`` values multiply it (opacity factors must lie
+        in ``[0, 1]``). Every waveform starts at ``low``; ``phase`` shifts it
+        in cycles. Like ``wiggle`` it is a pure function of timeline time and
+        combines with animations. Invalid values raise ``ValueError``.
+
+        Example:
+            light.add_updater(Updater.oscillate("opacity", waveform="triangle", frequency=0.5, low=0.4, high=1.0))
         """
         ...
     @staticmethod
@@ -2412,6 +2523,26 @@ class ChartSpec:
         """Return the stable identity column used for semantic transitions."""
         ...
     def __len__(self) -> int: ...
+
+class Random:
+    """Seeded, platform-independent random stream created by ``scene.random``."""
+    @property
+    def seed(self) -> int: ...
+    def uniform(self, low: float = 0.0, high: float = 1.0) -> float:
+        """Draw a float in ``[low, high)``; ``high < low`` raises ``ValueError``."""
+        ...
+    def gauss(self, mean: float = 0.0, std: float = 1.0) -> float:
+        """Draw a normal deviate; a negative ``std`` raises ``ValueError``."""
+        ...
+    def integer(self, low: int, high: int) -> int:
+        """Draw an integer in ``[low, high)``; an empty range raises ``ValueError``."""
+        ...
+    def choice(self, items: Sequence[Any]) -> Any:
+        """Pick one element; an empty sequence raises ``IndexError``."""
+        ...
+    def shuffle(self, items: list[Any]) -> None:
+        """Shuffle ``items`` in place."""
+        ...
 
 class Computed:
     """Opaque deterministic scalar computed from explicit reactive inputs."""
@@ -4778,6 +4909,39 @@ class Scene:
 
         This is the same source as ``scene.viz.time``. Pass it to ``computed``
         or an absolute property setter; it follows exact seeks and export.
+        """
+        ...
+    def random(self, seed: int = 0) -> Random:
+        """Return a seeded random stream for placing and varying objects.
+
+        The same seed always yields the same values on every platform, so
+        scenes stay reproducible across previews and exports.
+
+        Example:
+            rng = scene.random(seed=42)
+            dots = [scene.geometry.dot().move_to(rng.uniform(-6, 6), rng.uniform(-3, 3)) for _ in range(40)]
+        """
+        ...
+    def noise(
+        self,
+        *,
+        frequency: float = 1.0,
+        amplitude: float = 1.0,
+        octaves: int = 1,
+        seed: int = 0,
+        center: float = 0.0,
+    ) -> Computed:
+        """Return smooth seeded noise over timeline time as a reactive scalar.
+
+        The value is ``center`` plus fractal simplex noise within
+        ``[-amplitude, amplitude]``; ``frequency`` sets how fast it changes
+        and ``octaves`` (1 to 8) adds finer detail. It is evaluated natively
+        each frame without calling Python, and playback, seeks and export
+        agree. Invalid values raise ``ValueError``.
+
+        Example:
+            drift = scene.noise(frequency=0.6, amplitude=0.3, octaves=3, seed=5)
+            logo.rotate_to(computed(lambda v: 0.1 * v, inputs=[drift]))
         """
         ...
     def __init__(

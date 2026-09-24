@@ -875,10 +875,37 @@ El IDE puede navegar el catálogo sin recordar strings:
 
 - Presets: `LINEAR`, `SMOOTH`, `DOUBLE_SMOOTH`, `THERE_AND_BACK`,
   `LINGERING`, `RUNNING_START`, `EXPONENTIAL_DECAY` y `NOT_QUITE_THERE`.
+- Springs con nombre: `SMOOTH_SPRING` (sin rebote), `GENTLE`, `QUICK`, `SNAPPY` y
+  `BOUNCY`.
 - Familias de `EasingCurve`: `QUADRATIC`, `CUBIC`, `QUARTIC`, `QUINTIC`,
   `EXPONENTIAL`, `SINE`, `CIRCULAR`, `BACK`, `ELASTIC` y `BOUNCE`.
 - Fábricas: `ease_in`, `ease_out`, `ease_in_out`, `spring`, `steps`,
-  `mirror`, `there_and_back`, `cubic_bezier` y `custom`.
+  `mirror`, `there_and_back`, `cubic_bezier`, `custom`, `back`, `elastic`,
+  `bounce`, `slow_mo`, `rough`, `squish` y `from_svg`.
+
+`Easing.spring(bounce=0.35)` describe el resorte por cómo se ve, no por su
+física: `bounce` es el sobrepaso máximo (0 = amortiguamiento crítico, sin
+rebote) y el resorte se asienta dentro de la duración de la animación, así que
+`duration` controla el ritmo. La forma física `spring(stiffness, damping,
+mass=1, velocity=0)` sigue disponible; `velocity` es la velocidad inicial en
+distancias por duración del clip. Todos los resortes terminan exactamente en el
+destino.
+
+#table(
+  columns: (1.4fr, 2fr),
+  inset: 7pt,
+  [*Fábrica*], [*Carácter*],
+  [`back(overshoot=1.70158, mode="out")`], [Retrocede o se pasa del destino],
+  [`elastic(amplitude=1, period=0.3, mode="out")`], [Oscila como una banda elástica],
+  [`bounce(strength=1, mode="out")`], [Rebota al llegar; `strength=0` es un cúbico],
+  [`slow_mo(linear_ratio=0.7, power=0.7)`], [Rápido, cámara lenta, rápido],
+  [`rough(strength=1, points=20, seed=0)`], [Parpadeo y jitter deterministas],
+  [`squish(easing, start, end)`], [Aplica `easing` solo entre `start` y `end`],
+  [`from_svg("M0,0 C0.3,0 0.2,1.2 1,1")`], [Curva dibujada en cualquier editor],
+  [`steps(n, jump="end")`], [Saltos discretos con los modos de CSS],
+)
+
+`mode` acepta `"in"`, `"out"` e `"in_out"`.
 
 Las fábricas rechazan números no finitos y dominios inválidos. No se aceptan
 nombres de easing ni existe un fallback silencioso a `SMOOTH`.

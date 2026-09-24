@@ -2,8 +2,13 @@ pub mod camera;
 pub mod custom;
 pub mod paint;
 pub mod prelude;
+pub mod procedural;
 pub mod property_bindings;
 pub mod reactive;
+pub use procedural::{
+    OscillatedChannel, ProceduralLayer, ProceduralMotion, ProceduralOffset, ScheduledLayer,
+    Waveform,
+};
 pub use property_bindings::*;
 pub mod signals;
 pub mod tween;
@@ -138,6 +143,21 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
                 curvature_on_curve_system.after(normal_on_curve_system),
             )
                 .in_set(SceneSet::Updaters),
+        );
+        // Procedural motion wraps propagation: it is added to the local
+        // state just before and removed just after, so only world state
+        // carries it and authored values stay untouched.
+        app.add_systems(
+            Update,
+            (
+                procedural::apply_procedural_motion_system
+                    .before(gaanim_scene::transform_propagation_system)
+                    .before(gaanim_scene::sync_new_opacities),
+                procedural::restore_procedural_motion_system
+                    .after(gaanim_scene::transform_propagation_system)
+                    .after(gaanim_scene::opacity_propagation_system),
+            )
+                .in_set(SceneSet::Propagation),
         );
         app.add_systems(
             Update,

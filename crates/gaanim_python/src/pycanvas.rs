@@ -2126,6 +2126,55 @@ impl PySegment {
 
 #[pymethods]
 impl PyScene {
+    /// Seeded random stream for authoring (same generator as the runtime).
+    #[pyo3(signature = (seed=0))]
+    fn random(&self, seed: u64) -> PyResult<crate::procedural::PyRandom> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(crate::procedural::PyRandom::new(seed))
+    }
+
+    /// Coherent fBm noise over timeline time, evaluated natively per frame.
+    #[pyo3(signature = (*, frequency=1.0, amplitude=1.0, octaves=1, seed=0, center=0.0))]
+    fn noise(
+        &self,
+        frequency: f64,
+        amplitude: f64,
+        octaves: u32,
+        seed: u64,
+        center: f64,
+    ) -> PyResult<crate::visualization::PyComputed> {
+        crate::custom::ensure_authoring_allowed()?;
+        for (name, value) in [
+            ("frequency", frequency),
+            ("amplitude", amplitude),
+            ("center", center),
+        ] {
+            if !value.is_finite() {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "{name} must be finite"
+                )));
+            }
+        }
+        if frequency <= 0.0 || amplitude < 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "frequency must be positive and amplitude non-negative",
+            ));
+        }
+        if !(1..=8).contains(&octaves) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "octaves must be between 1 and 8",
+            ));
+        }
+        let noise = gaanim_math::Noise::new(seed, frequency, amplitude, octaves);
+        crate::visualization::PyComputed::native_time_source(
+            &self.inner,
+            format!(
+                "noise(frequency={frequency}, amplitude={amplitude}, octaves={octaves}, seed={seed}, center={center})"
+            ),
+            move |time| center + noise.at_time(time, 0),
+        )
+    }
+
     /// Absolute timeline time as a pure reactive input.
     #[getter]
     fn time(&self) -> PyResult<crate::visualization::PyTimeInput> {
