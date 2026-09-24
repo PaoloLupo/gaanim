@@ -1,0 +1,20 @@
+{
+  "name": "gaanim",
+  "version": "0.1.0",
+  "description": "Version-matched Gaanim documentation for agents",
+  "author": {
+    "name": "Gaanim contributors"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Gaanim",
+    "shortDescription": "Consulta la documentación de Gaanim del proyecto.",
+    "longDescription": "Localiza la documentación Typst incluida en el paquete gaanim instalado en el proyecto, con la misma versión que su API, y guía la escritura de escenas.",
+    "developerName": "Gaanim contributors",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read"
+    ],
+    "defaultPrompt": "Consulta la documentación de Gaanim para escribir esta escena."
+  }
+}

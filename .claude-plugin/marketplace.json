@@ -1,10 +1,16 @@
 {
   "name": "gaanim",
-  "description": "Repository-local Claude Code plugins for developing Gaanim.",
+  "description": "Claude Code plugins for Gaanim: documentation for projects that use it and workflows for developing it.",
   "owner": {
     "name": "Gaanim contributors"
   },
   "plugins": [
+    {
+      "name": "gaanim",
+      "source": "./plugins/gaanim",
+      "description": "Version-matched Gaanim documentation for agents working in any project that uses Gaanim.",
+      "category": "development"
+    },
     {
       "name": "gaanim-dev",
       "source": "./plugins/gaanim-dev",

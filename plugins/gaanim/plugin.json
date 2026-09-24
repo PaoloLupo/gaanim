@@ -1,0 +1,15 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "gaanim",
+  "version": "0.1.0",
+  "description": "Version-matched Gaanim documentation for agents working in any project that uses Gaanim.",
+  "author": {
+    "name": "Gaanim contributors"
+  },
+  "keywords": [
+    "gaanim",
+    "animation",
+    "documentation",
+    "typst"
+  ]
+}

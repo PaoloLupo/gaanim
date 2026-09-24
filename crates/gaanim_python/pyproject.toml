@@ -21,3 +21,6 @@ exclude = [
   "gaanim/**/*.pyd",
   "gaanim/**/*.dylib",
 ]
+
+# Copies docs/content/**/*.{typ,py} into gaanim/_docs for agents.
+[tool.hatch.build.targets.wheel.hooks.custom]

@@ -30,6 +30,7 @@ mi-proyecto/
   .python-version # 3.14
   main.py
   README.md
+  AGENTS.md
   assets/
   exports/
 ```
@@ -37,6 +38,11 @@ mi-proyecto/
 El `pyproject.toml` declara `gaanim` como dependencia del proyecto. El entorno
 que prepara la aplicación instala el wheel de autoría incluido, y comandos
 posteriores como `uv sync` conservan a Gaanim como parte del entorno.
+
+`AGENTS.md` orienta a agentes de código: apunta a la documentación Typst que
+incluye el paquete instalado (`gaanim/_docs`, de la misma versión que la API),
+a los stubs `.pyi` y a `gaanim check .`, porque Python sin la aplicación no
+puede ejecutar escenas.
 
 - `video` — escena animada 16:9 y flujo de exportación.
 - `slides` — segmentos semánticos, notas y paradas para Presenter View.

@@ -146,6 +146,10 @@ all use the application host, which owns the native runtime.
 
 - `plugins/gaanim-dev` packages repository-aware skills for adding features,
   synchronizing Typst docs, fixing bugs, testing changes, and maintenance.
+- `plugins/gaanim` is the user-facing plugin for external Gaanim projects. Its
+  `gaanim-docs` skill reads the `docs/content` sources that the wheel bundles
+  as `gaanim/_docs` (see `crates/gaanim_python/hatch_build.py`), and
+  `templates/project_agents.md` becomes the `AGENTS.md` of `gaanim init` projects.
 - Inspect change impact with
   `python plugins/gaanim-dev/scripts/impact.py --format json`.
 - Audit objective contracts with `python plugins/gaanim-dev/scripts/audit.py`.
