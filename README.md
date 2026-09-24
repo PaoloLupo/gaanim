@@ -312,7 +312,7 @@ Consulte también las escenas de referencia en [`examples/`](examples/).
 
 ## Estado
 
-Gaanim está en fase alfa (`0.2.1`). La base de render, timeline, texto y
+Gaanim está en fase alfa (`0.2.2`). La base de render, timeline, texto y
 ecuaciones es funcional; la cobertura de API, pruebas de exportación y
 capacidades multimedia continúan en desarrollo. El plan de evolución se
 encuentra en [`engine_improvements.md`](engine_improvements.md).
