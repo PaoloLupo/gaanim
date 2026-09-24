@@ -66,7 +66,9 @@ jobs:
           $pythonHome | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Build headless snapshot runner
-        run: cargo build -p gaanim_editor --bin gaanim
+        run: |
+          cargo build -p gaanim_launcher --bin gaanim
+          cargo build -p gaanim_editor --bin gaanim-core
 
       - name: Validate public Scene examples
         shell: pwsh
@@ -176,6 +178,11 @@ jobs:
           python-version: "3.12"
 
       - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends             pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
 
       - name: Build release runtime
         run: cargo build -p gaanim_editor --bin gaanim-core --release
