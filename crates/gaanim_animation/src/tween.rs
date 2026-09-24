@@ -5,7 +5,8 @@ use gaanim_core::kurbo::BezPath;
 use gaanim_core::peniko::Color;
 use gaanim_math::{RateFunc, SpatialTransform, get_point_at_alpha};
 use gaanim_scene::{
-    FillBrush, LineListData, LineListSource, Opacity, Path2D, PathSource, StrokeBrush,
+    FillBrush, LineListData, LineListSource, Opacity, Path2D, PathRevealOrder, PathSource,
+    StrokeBrush,
 };
 
 use crate::writing::{FillDrawProgress, PathReveal, WriteTipGlow};
@@ -408,7 +409,7 @@ pub fn evaluate_tweens_system(
     mut fills: Query<&mut FillBrush>,
     mut strokes: Query<&mut StrokeBrush>,
     mut materials3d: Query<&mut gaanim_scene::Material3D>,
-    mut sources: Query<&mut PathSource>,
+    mut sources: Query<(&mut PathSource, Option<&PathRevealOrder>)>,
     mut paths: Query<&mut Path2D>,
     mut fill_progress: Query<&mut FillDrawProgress>,
     mut fill_levels: Query<&mut gaanim_scene::FillLevel>,
@@ -506,10 +507,11 @@ pub fn evaluate_tweens_system(
                 // `from`/`to`; the source of truth is the `PathSource`
                 // mirror seeded once at spawn.
                 let completion = *from + (*to - *from) * t;
-                if let Ok(source) = sources.get_mut(tween.target)
+                if let Ok((source, order)) = sources.get(tween.target)
                     && let Ok(mut path) = paths.get_mut(tween.target)
                 {
-                    path.0 = std::sync::Arc::new(gaanim_math::get_subpath(&source.0, completion));
+                    let order = order.copied().unwrap_or_default();
+                    path.0 = std::sync::Arc::new(order.trim(&source.0, completion));
                 }
                 // Update the pen-tip glow position if the entity has one.
                 if let Ok(mut tip) = tip_glows.get_mut(tween.target) {
@@ -589,7 +591,7 @@ pub fn evaluate_tweens_system(
                 // it synchronized with the visible morph path; otherwise a
                 // circle's old source path clips the stroke of a diamond and
                 // leaves a flashing circular halo behind.
-                if let Ok(mut source) = sources.get_mut(tween.target) {
+                if let Ok((mut source, _)) = sources.get_mut(tween.target) {
                     source.0 = morphed;
                 }
             }
@@ -601,7 +603,7 @@ pub fn evaluate_tweens_system(
                 // Stroke clipping reads `PathSource`; keep it on the grown
                 // silhouette so the travelling head is not clipped to the
                 // full arrow's thin shaft.
-                if let Ok(mut source) = sources.get_mut(tween.target) {
+                if let Ok((mut source, _)) = sources.get_mut(tween.target) {
                     source.0 = grown;
                 }
             }
@@ -631,7 +633,7 @@ pub fn evaluate_tweens_system(
                 let p = *from + (*to - *from) * t;
                 let start = (p - *time_width).max(0.0);
                 let end = p.min(1.0);
-                if let Ok(source) = sources.get(tween.target)
+                if let Ok((source, _)) = sources.get(tween.target)
                     && let Ok(mut path) = paths.get_mut(tween.target)
                 {
                     path.0 =

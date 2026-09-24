@@ -424,7 +424,7 @@ scene.render()
   signature: "dashed_line(x1, y1, x2, y2, *, dash_length=0.16, gap_length=0.10) -> Drawable",
   params: ((name: "x1", type: "float", default: none, desc: [Start x.]), (name: "y1", type: "float", default: none, desc: [Start y.]), (name: "x2", type: "float", default: none, desc: [End x.]), (name: "y2", type: "float", default: none, desc: [End y.]), (name: "dash_length", type: "float", default: "0.16", desc: [Dash length.]), (name: "gap_length", type: "float", default: "0.10", desc: [Gap length.]),),
   returns: (type: "Drawable", desc: [Dashed line.]),
-  desc: [Guides, hidden edges, construction lines.],
+  desc: [Guides, hidden edges, construction lines. `create()` draws the dashes one after another from the start point.],
 )[
 ```python
 # show-code: true

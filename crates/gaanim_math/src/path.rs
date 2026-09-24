@@ -81,6 +81,46 @@ pub fn get_subpath(path: &BezPath, alpha: f64) -> BezPath {
     result
 }
 
+/// A trimmed prefix of `path` covering `alpha` of its **total** arc length.
+///
+/// Unlike [`get_subpath`], sub-paths are revealed one after another in path
+/// order. This is the correct pen for geometry whose sub-paths are pieces of
+/// one stroke, such as the dashes of a dashed line: revealing every dash in
+/// parallel makes the whole line flash in at once.
+pub fn get_subpath_sequential(path: &BezPath, alpha: f64) -> BezPath {
+    if alpha >= 1.0 {
+        return path.clone();
+    }
+    if alpha <= 0.0 {
+        return BezPath::new();
+    }
+
+    let mut subpaths: Vec<BezPath> = Vec::new();
+    for el in path.elements() {
+        match (el, subpaths.last_mut()) {
+            (PathEl::MoveTo(_), _) | (_, None) => subpaths.push(BezPath::from_vec(vec![*el])),
+            (_, Some(current)) => current.push(*el),
+        }
+    }
+    let lengths: Vec<f64> = subpaths.iter().map(get_path_length).collect();
+    let mut remaining = lengths.iter().sum::<f64>() * alpha;
+
+    let mut result = BezPath::new();
+    for (sub, length) in subpaths.iter().zip(lengths) {
+        if remaining <= 0.0 {
+            break;
+        }
+        let partial = if remaining >= length {
+            sub.clone()
+        } else {
+            get_subpath_proportional(sub, remaining / length)
+        };
+        result.extend(partial.elements().iter().copied());
+        remaining -= length;
+    }
+    result
+}
+
 /// Trims a single contiguous sub-path (no `MoveTo` boundary) to `alpha`
 /// of its own arc length. This is the building block of the
 /// per-subpath proportional trimming used by `get_subpath`.
@@ -941,6 +981,40 @@ mod morph_tests {
             (p100.x - 100.0).abs() < 1e-3 && p100.y.abs() < 1e-3,
             "p100 should be (100,0), got {p100:?}"
         );
+    }
+
+    #[test]
+    fn sequential_subpath_reveals_dashes_in_order() {
+        // Four unit dashes with unit gaps along the x axis.
+        let mut dashes = BezPath::new();
+        for i in 0..4 {
+            let x = 2.0 * i as f64;
+            dashes.move_to((x, 0.0));
+            dashes.line_to((x + 1.0, 0.0));
+        }
+        let right_edge = |path: &BezPath| path.bounding_box().x1;
+        let dash_count = |path: &BezPath| {
+            path.elements()
+                .iter()
+                .filter(|el| matches!(el, PathEl::MoveTo(_)))
+                .count()
+        };
+
+        let partial = get_subpath_sequential(&dashes, 0.375);
+        assert_eq!(
+            dash_count(&partial),
+            2,
+            "one full dash plus half of the next"
+        );
+        assert!((right_edge(&partial) - 2.5).abs() < 1e-6);
+        assert!(get_subpath_sequential(&dashes, 0.0).is_empty());
+        assert_eq!(get_subpath_sequential(&dashes, 1.0), dashes);
+
+        // The parallel pen grows every dash at once, so the full extent of the
+        // line is visible from the first frame.
+        let parallel = get_subpath(&dashes, 0.05);
+        assert_eq!(dash_count(&parallel), 4);
+        assert!(right_edge(&parallel) > 6.0);
     }
 
     #[test]

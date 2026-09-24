@@ -128,6 +128,28 @@ pub struct Path2D(pub Arc<BezPath>);
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PathSource(pub Arc<BezPath>);
 
+/// How draw animations (`PathCompletion`) reveal a path with several sub-paths.
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum PathRevealOrder {
+    /// Every sub-path grows at once, like a pen tracing each glyph contour.
+    #[default]
+    Parallel,
+    /// Sub-paths are traced one after another along the total arc length,
+    /// for pieces of a single stroke such as the dashes of a dashed line.
+    Sequential,
+}
+
+impl PathRevealOrder {
+    /// The visible part of `path` at draw progress `alpha` in `[0, 1]`.
+    pub fn trim(self, path: &BezPath, alpha: f64) -> BezPath {
+        match self {
+            Self::Parallel => gaanim_math::get_subpath(path, alpha),
+            Self::Sequential => gaanim_math::get_subpath_sequential(path, alpha),
+        }
+    }
+}
+
 /// Normalized amount used by a derived vector fill. Timeline lenses update it
 /// deterministically, including during seek.
 #[derive(Component, Debug, Clone, Copy, PartialEq)]

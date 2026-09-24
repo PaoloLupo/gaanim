@@ -3078,6 +3078,8 @@ class Geometry:
     ) -> Drawable:
         """Create a dashed line drawable in the scene.
 
+        ``create()`` draws the dashes one after another from the start point.
+
         Example:
             result = scene.dashed_line(1.0, 1.0, 1.0, 1.0)
         """
