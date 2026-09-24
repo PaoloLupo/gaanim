@@ -107,7 +107,8 @@ La exportación ignora los stops. Para exportar un segmento concreto use
 `gaanim export . --output intro.mp4`.
 
 El editor usa un único playback flotante en lugar de una timeline detallada.
-`Space` alterna play/pausa, las flechas navegan entre segmentos y `L` activa el
+`Space` alterna play/pausa (nunca salta al siguiente stop), las flechas navegan
+entre segmentos y `L` activa el
 loop del segmento actual, salta a su inicio e ignora sus `stop()` hasta apagar
 el loop. Los tiradores de la barra permiten refinar el rango dentro de ese
 segmento. **Continuous** reproduce la escena completa sin detenerse en
@@ -120,7 +121,8 @@ cambiar el playback ni activar Presenter Mode. **Present** sigue siendo un modo
 independiente, pensado para audiencia y con su propio dock seguro.
 
 Presenter Mode siempre respeta los stops. Durante una presentación,
-`Right`, `Space`, `Enter` o un clic en la pantalla de audiencia avanzan;
+`Right`, `Enter` o un clic en la pantalla de audiencia avanzan; `Space` solo
+pausa o reanuda la animación, sin saltar al siguiente step;
 `Left`/`Backspace` retroceden, `O` abre el overview y `B`/`W` controlan el
 blanking. Cerrar Presenter View mantiene la audiencia activa y `P` vuelve a
 abrir el cockpit sin regenerar sus previews; `Esc` sale del modo presentación.

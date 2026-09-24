@@ -49,6 +49,10 @@ pub(crate) enum Icon {
     Close,
     Check,
     Warning,
+    Grid,
+    BlackScreen,
+    WhiteScreen,
+    Keyboard,
 }
 
 /// How an icon button presents its state.
@@ -89,6 +93,17 @@ pub(crate) fn icon_button(ui: &mut Ui, icon: Icon, tone: ButtonTone, enabled: bo
     } else {
         BUTTON_SIZE
     };
+    icon_button_sized(ui, icon, tone, enabled, side)
+}
+
+/// [`icon_button`] at an explicit size, for surfaces read from a distance.
+pub(crate) fn icon_button_sized(
+    ui: &mut Ui,
+    icon: Icon,
+    tone: ButtonTone,
+    enabled: bool,
+    side: f32,
+) -> Response {
     let sense = if enabled {
         Sense::click()
     } else {
@@ -147,9 +162,9 @@ pub(crate) fn icon_button(ui: &mut Ui, icon: Icon, tone: ButtonTone, enabled: bo
     };
 
     let icon_side = if tone == ButtonTone::Primary {
-        15.0
+        side * 0.42
     } else {
-        16.0
+        (side * 0.53).min(20.0)
     };
     paint_icon(
         painter,
@@ -297,6 +312,48 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color:
         Icon::Warning => {
             painter.line_segment([p(0.0, -0.36), p(0.0, 0.10)], stroke);
             painter.circle_filled(p(0.0, 0.34), s * 0.07, color);
+        }
+        Icon::Grid => {
+            for (x, y) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+                painter.rect_stroke(
+                    Rect::from_center_size(p(x * 0.2, y * 0.2), Vec2::splat(s * 0.3)),
+                    s * 0.05,
+                    stroke,
+                    egui::StrokeKind::Middle,
+                );
+            }
+        }
+        Icon::BlackScreen => {
+            painter.rect_filled(
+                Rect::from_min_max(p(-0.42, -0.30), p(0.42, 0.30)),
+                s * 0.08,
+                color,
+            );
+        }
+        Icon::WhiteScreen => {
+            painter.rect_stroke(
+                Rect::from_min_max(p(-0.42, -0.30), p(0.42, 0.30)),
+                s * 0.08,
+                stroke,
+                egui::StrokeKind::Middle,
+            );
+        }
+        Icon::Keyboard => {
+            painter.rect_stroke(
+                Rect::from_min_max(p(-0.46, -0.28), p(0.46, 0.28)),
+                s * 0.08,
+                stroke,
+                egui::StrokeKind::Middle,
+            );
+            for row in [-0.1, 0.06] {
+                for column in [-0.24, -0.08, 0.08, 0.24] {
+                    painter.circle_filled(p(column, row), s * 0.04, color);
+                }
+            }
+            painter.line_segment(
+                [p(-0.16, 0.18), p(0.16, 0.18)],
+                Stroke::new(stroke.width * 0.8, color),
+            );
         }
         Icon::More => {
             for x in [-0.30, 0.0, 0.30] {
@@ -559,4 +616,87 @@ pub(crate) fn status_badge(ui: &mut Ui, icon: Icon, color: Color32) {
         icon,
         color,
     );
+}
+
+/// Rounded mode toggle with an icon and an optional label. `color` tints it
+/// while active (e.g. amber for modes that hide the audience screen).
+pub(crate) fn pill_toggle(
+    ui: &mut Ui,
+    icon: Icon,
+    label: Option<&str>,
+    active: bool,
+    color: Color32,
+    height: f32,
+) -> Response {
+    let font = FontId::proportional(14.0);
+    let galley = label.map(|label| {
+        ui.painter()
+            .layout_no_wrap(label.to_owned(), font.clone(), palette::TEXT)
+    });
+    let icon_side = 16.0;
+    let text_w = galley.as_ref().map_or(0.0, |galley| galley.size().x + 8.0);
+    let width = (icon_side + text_w + 28.0).max(height);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::click());
+    let painter = ui.painter();
+    let hovered = response.hovered();
+    let fill = if active {
+        color.gamma_multiply(if hovered { 0.3 } else { 0.22 })
+    } else if hovered {
+        palette::HOVER
+    } else {
+        palette::FIELD
+    };
+    painter.rect_filled(rect, height / 2.0, fill);
+    let tint = if active {
+        color
+    } else if hovered {
+        palette::TEXT
+    } else {
+        palette::TEXT_MUTED
+    };
+    let start = rect.center().x - (icon_side + text_w) / 2.0;
+    paint_icon(
+        painter,
+        Rect::from_center_size(
+            pos2(start + icon_side / 2.0, rect.center().y),
+            Vec2::splat(icon_side),
+        ),
+        icon,
+        tint,
+    );
+    if let Some(label) = label {
+        painter.text(
+            pos2(start + icon_side + 8.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            label,
+            font,
+            tint,
+        );
+    }
+    response
+}
+
+/// Compact text button for secondary, in-panel actions (e.g. `A+`).
+pub(crate) fn small_button(ui: &mut Ui, label: &str, enabled: bool) -> Response {
+    ui.add_enabled(
+        enabled,
+        egui::Button::new(egui::RichText::new(label).size(13.0).color(if enabled {
+            palette::TEXT
+        } else {
+            palette::TEXT_FAINT
+        }))
+        .fill(palette::FIELD)
+        .stroke(Stroke::NONE)
+        .corner_radius(7.0)
+        .min_size(vec2(34.0, 26.0)),
+    )
+}
+
+/// Letter-spaced caption used as a section heading.
+pub(crate) fn caption(text: &str) -> egui::RichText {
+    egui::RichText::new(text)
+        .size(11.0)
+        .strong()
+        .extra_letter_spacing(1.2)
+        .color(palette::TEXT_FAINT)
 }
