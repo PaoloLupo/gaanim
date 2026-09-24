@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 use ttf_parser::OutlineBuilder;
 
 /// A custom builder that collects OpenType glyph outline instructions
@@ -87,10 +87,31 @@ impl FontRegistry {
         Self::default()
     }
 
+    /// Creates a registry with Gaanim's embedded fonts but no system catalog.
+    ///
+    /// Typst resolves system fonts through its own shared store and reads only
+    /// the `registered` fonts from a registry, so text measurement can skip
+    /// the system font scan that [`FontRegistry::new`] performs.
+    pub fn without_system_fonts() -> Self {
+        let mut registry = Self {
+            registered: HashMap::new(),
+            db: fontdb::Database::new(),
+            cache: RwLock::new(HashMap::new()),
+            aliases: HashMap::new(),
+        };
+        registry.register_embedded_scientific_font();
+        registry
+    }
+
     /// Registers font data under a specific family name (eagerly loaded).
     pub fn register_font(&mut self, family_name: impl Into<String>, bytes: Vec<u8>) {
+        self.register_font_bytes(family_name, bytes.into());
+    }
+
+    /// Registers shared font data without copying it.
+    pub fn register_font_bytes(&mut self, family_name: impl Into<String>, bytes: Arc<[u8]>) {
         let name = family_name.into().to_lowercase();
-        self.registered.insert(name, bytes.into());
+        self.registered.insert(name, bytes);
     }
 
     /// Registers a font file from a local filesystem path (eagerly loaded).
@@ -209,22 +230,29 @@ impl FontRegistry {
     /// stable family name. This keeps ordinary vector text consistent with
     /// equations on machines that do not have TeX fonts installed.
     fn register_embedded_scientific_font(&mut self) {
-        let Some(bytes) = typst_assets::fonts().find(|bytes| {
-            let Ok(face) = ttf_parser::Face::parse(bytes, 0) else {
-                return false;
-            };
-            face.is_regular()
-                && face.names().into_iter().any(|name| {
-                    name.is_unicode()
-                        && name.to_string().is_some_and(|value| {
-                            let value = value.to_ascii_lowercase();
-                            value.contains("new computer modern") || value.contains("newcm10")
+        // Located once per process; every registry shares the same bytes.
+        static EMBEDDED: OnceLock<Option<Arc<[u8]>>> = OnceLock::new();
+        let embedded = EMBEDDED.get_or_init(|| {
+            typst_assets::fonts()
+                .find(|bytes| {
+                    let Ok(face) = ttf_parser::Face::parse(bytes, 0) else {
+                        return false;
+                    };
+                    face.is_regular()
+                        && face.names().into_iter().any(|name| {
+                            name.is_unicode()
+                                && name.to_string().is_some_and(|value| {
+                                    let value = value.to_ascii_lowercase();
+                                    value.contains("new computer modern")
+                                        || value.contains("newcm10")
+                                })
                         })
                 })
-        }) else {
-            return;
-        };
-        self.register_font("New Computer Modern", bytes.to_vec());
+                .map(Arc::from)
+        });
+        if let Some(bytes) = embedded {
+            self.register_font_bytes("New Computer Modern", bytes.clone());
+        }
     }
 
     /// Resolve an alias (e.g. "sans-serif") to a concrete family name.
@@ -450,6 +478,21 @@ mod tests {
         let error = scan_font_dir(&dir).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn registry_without_system_fonts_keeps_the_embedded_default() {
+        let full = FontRegistry::new();
+        let light = FontRegistry::without_system_fonts();
+        assert_eq!(
+            full.registered.keys().collect::<Vec<_>>(),
+            light.registered.keys().collect::<Vec<_>>(),
+            "measurement and rendering registries must describe the same Typst fonts"
+        );
+        assert!(std::sync::Arc::ptr_eq(
+            &full.registered["new computer modern"],
+            &light.registered["new computer modern"]
+        ));
     }
 
     #[test]

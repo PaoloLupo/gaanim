@@ -5,7 +5,7 @@ use gaanim_objects::prelude::MobjectBundle;
 use gaanim_scene::{FillBrush, ObjectTag, StrokeBrush, TextBaseline};
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock, Weak},
 };
 use typst_kit::{
     downloader::SystemDownloader,
@@ -92,19 +92,56 @@ struct TypstCacheKey {
     font_universe: FontUniverseKey,
 }
 
+/// Registered fonts identified by family and a 128-bit content hash.
+///
+/// Every text lookup builds this key, so it must not hash or compare the
+/// font bytes themselves; see [`font_fingerprint`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct FontUniverseKey(Vec<(String, Arc<[u8]>)>);
+struct FontUniverseKey(Vec<(String, u128)>);
 
 impl FontUniverseKey {
-    fn from_registry(font_registry: &FontRegistry) -> Self {
-        let mut fonts = font_registry
-            .registered
-            .iter()
-            .map(|(family, bytes)| (family.clone(), bytes.clone()))
-            .collect::<Vec<_>>();
-        fonts.sort_by(|left, right| left.0.cmp(&right.0));
-        Self(fonts)
+    fn from_fonts(fonts: &[(String, Arc<[u8]>)]) -> Self {
+        Self(
+            fonts
+                .iter()
+                .map(|(family, bytes)| (family.clone(), font_fingerprint(bytes)))
+                .collect(),
+        )
     }
+}
+
+fn sorted_registered_fonts(font_registry: &FontRegistry) -> Vec<(String, Arc<[u8]>)> {
+    let mut fonts = font_registry
+        .registered
+        .iter()
+        .map(|(family, bytes)| (family.clone(), bytes.clone()))
+        .collect::<Vec<_>>();
+    fonts.sort_by(|left, right| left.0.cmp(&right.0));
+    fonts
+}
+
+/// Content hash of font bytes, computed once per allocation.
+fn font_fingerprint(bytes: &Arc<[u8]>) -> u128 {
+    static FINGERPRINTS: OnceLock<Mutex<HashMap<usize, (Weak<[u8]>, u128)>>> = OnceLock::new();
+    let mut fingerprints = FINGERPRINTS
+        .get_or_init(Default::default)
+        .lock()
+        .expect("font fingerprint cache poisoned");
+    // A `Weak` keeps its allocation alive, so a matching address with a
+    // successful upgrade always denotes these same bytes.
+    let address = bytes.as_ptr() as usize;
+    if let Some((known, fingerprint)) = fingerprints.get(&address)
+        && known
+            .upgrade()
+            .is_some_and(|known| Arc::ptr_eq(&known, bytes))
+    {
+        return *fingerprint;
+    }
+    // Dropping dead entries releases the allocations their `Weak`s still pin.
+    fingerprints.retain(|_, (known, _)| known.strong_count() > 0);
+    let fingerprint = typst::utils::hash128(&**bytes);
+    fingerprints.insert(address, (Arc::downgrade(bytes), fingerprint));
+    fingerprint
 }
 
 struct SharedTypstResources {
@@ -156,7 +193,8 @@ fn typst_resources_cache() -> &'static Mutex<HashMap<FontUniverseKey, Arc<TypstR
 }
 
 fn typst_resources_for(font_registry: &FontRegistry) -> (FontUniverseKey, Arc<TypstResources>) {
-    let key = FontUniverseKey::from_registry(font_registry);
+    let fonts = sorted_registered_fonts(font_registry);
+    let key = FontUniverseKey::from_fonts(&fonts);
     if let Some(resources) = typst_resources_cache()
         .lock()
         .expect("Typst resources cache poisoned")
@@ -175,7 +213,7 @@ fn typst_resources_for(font_registry: &FontRegistry) -> (FontUniverseKey, Arc<Ty
         .sum();
     let mut font_book = shared.fonts.book().clone();
     let mut extra_fonts = Vec::new();
-    for (_, bytes) in &key.0 {
+    for (_, bytes) in &fonts {
         if let Some(font) = Font::new(Bytes::new(bytes.clone()), 0) {
             font_book.push(font.info().clone());
             extra_fonts.push(font);
@@ -1106,6 +1144,23 @@ mod tests {
             "each text should reuse the same Typst resources"
         );
         assert!(std::ptr::eq(first.shared, second.shared));
+    }
+
+    #[test]
+    fn font_keys_follow_contents_not_allocations() {
+        let first: Arc<[u8]> = Arc::from(vec![7_u8; 64]);
+        let copy: Arc<[u8]> = Arc::from(vec![7_u8; 64]);
+        let other: Arc<[u8]> = Arc::from(vec![8_u8; 64]);
+
+        assert_eq!(font_fingerprint(&first), font_fingerprint(&first));
+        assert_eq!(font_fingerprint(&first), font_fingerprint(&copy));
+        assert_ne!(font_fingerprint(&first), font_fingerprint(&other));
+
+        // Dropped bytes must never lend their fingerprint to new contents.
+        let replaced = font_fingerprint(&other);
+        drop(other);
+        let reused: Arc<[u8]> = Arc::from(vec![9_u8; 64]);
+        assert_ne!(font_fingerprint(&reused), replaced);
     }
 
     #[test]
