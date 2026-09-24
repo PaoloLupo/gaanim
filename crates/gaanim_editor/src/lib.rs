@@ -1219,9 +1219,13 @@ fn paint_seek_bar(
     let hovered_scene_idx = hover_frac.and_then(scene_at);
 
     // ── Chapter lane ────────────────────────────────────────────────────
+    let label_font = egui::FontId::proportional(11.5);
+    let mut chips = Vec::with_capacity(scenes.len());
+    let mut labeled = vec![false; scenes.len()];
     for (i, seg) in scenes.iter().enumerate() {
         let (sx, ex) = (x_at(seg.start_frac), x_at(seg.end_frac));
         if ex - sx < 1.0 {
+            chips.push(None);
             continue;
         }
         let inset = if ex - sx > 4.0 * CHAPTER_GAP {
@@ -1233,6 +1237,7 @@ fn paint_seek_bar(
             egui::pos2(sx + inset, lane_rect.min.y),
             egui::pos2(ex - inset, lane_rect.max.y),
         );
+        chips.push(Some(chip));
         let is_active = active_scene_idx == Some(i);
         let is_hovered = hovered_scene_idx == Some(i);
         let base = if is_active {
@@ -1252,7 +1257,8 @@ fn paint_seek_bar(
                 .rect_filled(chip, 6.0, palette::ACCENT.gamma_multiply(0.22));
         }
 
-        if seg.name.is_empty() || chip.width() < 24.0 {
+        let name = scene_display_name(&seg.name);
+        if name.is_empty() || chip.width() < 24.0 {
             continue;
         }
         let color = if is_active || is_hovered {
@@ -1260,27 +1266,70 @@ fn paint_seek_bar(
         } else {
             palette::TEXT_MUTED
         };
-        let font = egui::FontId::proportional(11.5);
-        let max_w = chip.width() - 14.0;
-        let mut galley = painter.layout_no_wrap(seg.name.clone(), font.clone(), color);
-        if galley.size().x > max_w {
-            // Only the active chapter keeps a truncated label; the rest rely
-            // on the tooltip so short chapters stay quiet.
-            if !is_active {
-                continue;
-            }
-            let char_w = galley.size().x / seg.name.chars().count().max(1) as f32;
-            let max_chars = (max_w / char_w).floor() as usize;
-            if max_chars < 4 {
-                continue;
-            }
-            galley = painter.layout_no_wrap(
-                truncate_with_ellipsis(&seg.name, max_chars - 1),
-                font,
-                color,
-            );
+        let galley = painter.layout_no_wrap(name.to_owned(), label_font.clone(), color);
+        if galley.size().x <= chip.width() - 14.0 {
+            painter.galley(chip.center() - galley.size() / 2.0, galley, color);
+            labeled[i] = true;
         }
-        painter.galley(chip.center() - galley.size() / 2.0, galley, color);
+    }
+
+    // Dense timelines: chapters too short for their own names are labeled
+    // by the group they share a leading name with ("Fundamentos · …").
+    for group in scene_groups(scenes) {
+        if group.members.clone().any(|i| labeled[i]) {
+            continue;
+        }
+        let spans: Vec<egui::Rect> = group.members.clone().filter_map(|i| chips[i]).collect();
+        let (Some(first), Some(last)) = (spans.first(), spans.last()) else {
+            continue;
+        };
+        let span = first.union(*last);
+        let contains_active = active_scene_idx.is_some_and(|i| group.members.contains(&i));
+        let color = if contains_active {
+            palette::TEXT
+        } else {
+            palette::TEXT_MUTED
+        };
+        let galley = painter.layout_no_wrap(group.label.to_owned(), label_font.clone(), color);
+        if galley.size().x <= span.width() - 10.0 {
+            painter.galley(span.center() - galley.size() / 2.0, galley, color);
+        }
+    }
+
+    // The current chapter always shows its full name: when it does not fit
+    // its chip, it floats over the neighbouring chips inside the lane.
+    if let Some(i) = active_scene_idx
+        && !labeled[i]
+        && let Some(chip) = chips[i]
+    {
+        let name = scene_display_name(&scenes[i].name);
+        if !name.is_empty() {
+            let pad = 8.0;
+            let max_chars = ((lane_rect.width() - 2.0 * pad) / 6.0).max(4.0) as usize;
+            let galley = painter.layout_no_wrap(
+                truncate_with_ellipsis(name, max_chars),
+                label_font.clone(),
+                palette::TEXT,
+            );
+            let width = (galley.size().x + 2.0 * pad).min(lane_rect.width());
+            let x = (chip.center().x - width / 2.0).clamp(
+                lane_rect.min.x,
+                (lane_rect.max.x - width).max(lane_rect.min.x),
+            );
+            let pill = egui::Rect::from_min_size(
+                egui::pos2(x, lane_rect.min.y),
+                egui::vec2(width, lane_rect.height()),
+            );
+            painter.rect_filled(pill, 6.0, palette::SURFACE);
+            painter.rect_filled(pill, 6.0, palette::ACCENT.gamma_multiply(0.22));
+            painter.rect_stroke(
+                pill,
+                6.0,
+                egui::Stroke::new(1.0, palette::ACCENT.gamma_multiply(0.55)),
+                egui::StrokeKind::Inside,
+            );
+            painter.galley(pill.center() - galley.size() / 2.0, galley, palette::TEXT);
+        }
     }
 
     // ── Track, split at chapter boundaries ──────────────────────────────
@@ -1400,7 +1449,7 @@ fn paint_seek_bar(
 
         // Tooltip: "Scene · 0:12.34", kept inside the bar horizontally.
         let name = hovered_scene_idx
-            .map(|i| scenes[i].name.as_str())
+            .map(|i| scene_display_name(&scenes[i].name))
             .unwrap_or("");
         let mut job = egui::text::LayoutJob::default();
         if !name.is_empty() {
@@ -1541,6 +1590,50 @@ fn paint_seek_bar(
 }
 
 /// Truncate text to `max_chars` characters, appending "…" if truncated.
+/// Name shown for a scene: `gaanim.sections` prefixes its segments with
+/// `"{key} · {visit} · {step} · "`, which is dropped for display.
+fn scene_display_name(name: &str) -> &str {
+    let mut parts = name.splitn(4, " · ");
+    match (parts.next(), parts.next(), parts.next(), parts.next()) {
+        (Some(_), Some(visit), Some(step), Some(rest))
+            if visit.parse::<u32>().is_ok() && step.parse::<u32>().is_ok() =>
+        {
+            rest
+        }
+        _ => name,
+    }
+}
+
+/// Consecutive scenes whose display names share a leading `"Name · "`.
+struct SceneGroup<'a> {
+    label: &'a str,
+    members: std::ops::Range<usize>,
+}
+
+fn scene_groups(scenes: &[SceneSegment]) -> Vec<SceneGroup<'_>> {
+    fn lead(scene: &SceneSegment) -> Option<&str> {
+        scene_display_name(&scene.name)
+            .split_once(" · ")
+            .map(|(lead, _)| lead)
+    }
+    let mut groups: Vec<SceneGroup<'_>> = Vec::new();
+    for (index, scene) in scenes.iter().enumerate() {
+        let Some(label) = lead(scene) else {
+            continue;
+        };
+        match groups.last_mut() {
+            Some(group) if group.label == label && group.members.end == index => {
+                group.members.end = index + 1;
+            }
+            _ => groups.push(SceneGroup {
+                label,
+                members: index..index + 1,
+            }),
+        }
+    }
+    groups
+}
+
 fn truncate_with_ellipsis(text: &str, max_chars: usize) -> String {
     let chars: Vec<char> = text.chars().collect();
     if chars.len() <= max_chars {
@@ -2781,6 +2874,40 @@ mod tests {
             .single(app.world())
             .expect("primary window");
         assert!(matches!(window.mode, bevy::window::WindowMode::Windowed));
+    }
+
+    #[test]
+    fn section_segments_display_their_step_name() {
+        assert_eq!(
+            scene_display_name("fundamentos · 1 · 3 · Fundamentos · resistencia"),
+            "Fundamentos · resistencia"
+        );
+        assert_eq!(scene_display_name("Portada"), "Portada");
+        // Only the numeric visit/step prefix of gaanim.sections is dropped.
+        assert_eq!(scene_display_name("A · b · c · d"), "A · b · c · d");
+    }
+
+    #[test]
+    fn dense_chapters_are_grouped_by_their_leading_name() {
+        let scene = |name: &str| SceneSegment {
+            name: name.into(),
+            start_frac: 0.0,
+            end_frac: 0.0,
+        };
+        let scenes = [
+            scene("Portada"),
+            scene("problematica · 1 · 1 · Problemática · contexto"),
+            scene("problematica · 1 · 2 · Problemática · datos"),
+            scene("fundamentos · 1 · 1 · Fundamentos · densidad"),
+            scene("fundamentos · 1 · 2 · Fundamentos · resistencia"),
+            scene("fundamentos · 1 · 3 · Fundamentos · deriva"),
+            scene("Cierre"),
+        ];
+        let groups: Vec<_> = scene_groups(&scenes)
+            .into_iter()
+            .map(|group| (group.label, group.members))
+            .collect();
+        assert_eq!(groups, vec![("Problemática", 1..3), ("Fundamentos", 3..6)]);
     }
 
     #[test]
