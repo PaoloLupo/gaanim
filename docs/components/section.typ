@@ -101,8 +101,13 @@
         )
 
         html.meta(name: "description", content: description)
-        html.meta(name: "theme-color", content: "#6366f1")
+        html.elem("meta", attrs: (name: "theme-color", content: "#ffffff", media: "(prefers-color-scheme: light)"))
+        html.elem("meta", attrs: (name: "theme-color", content: "#121212", media: "(prefers-color-scheme: dark)"))
         html.meta(name: "view-transition", content: "same-origin")
+        // ICO first with an explicit size so browsers that read SVG prefer the SVG.
+        html.elem("link", attrs: (rel: "icon", href: prefix + "assets/brand/favicon.ico", sizes: "32x32"))
+        html.elem("link", attrs: (rel: "icon", href: prefix + "assets/brand/gaanim-icon.svg", type: "image/svg+xml"))
+        html.elem("link", attrs: (rel: "apple-touch-icon", href: prefix + "assets/brand/apple-touch-icon.png"))
         html.link(href: prefix + "assets/base.css", rel: "stylesheet")
         html.title(title + " — Gaanim")
         // Inline script to prevent FOUC — runs before first paint
@@ -174,8 +179,16 @@
             "aria-label": "Mostrar u ocultar la navegación",
           ), "☰")
           html.a(href: if prefix == "" { "./" } else { prefix }, class: "brand", {
-            html.span(class: "brand-mark", "g")
-            html.span(class: "brand-name", "Gaanim")
+            // 2 px per logo unit keeps the pixel symbol on whole device pixels.
+            for (variant, file) in (("light", "gaanim-logo.svg"), ("dark", "gaanim-logo-dark.svg")) {
+              html.elem("img", attrs: (
+                class: "brand-logo only-" + variant,
+                src: prefix + "assets/brand/" + file,
+                width: "142",
+                height: "32",
+                alt: "Gaanim",
+              ))
+            }
             html.span(class: "brand-tag", "docs")
           })
           html.elem("button", attrs: (id: "search-trigger", class: "search-trigger", type: "button", "aria-label": "Buscar"), {
@@ -402,8 +415,9 @@
           ]
         ]
       )
-    } else if not result.show_code and not has-webp {
-      // Result only (code hidden, no webp)
+    } else if not result.show_code and not has-webp and result-items.len() > 0 {
+      // Result only: the cell hides its code and shows what it printed. A cell
+      // with nothing to show falls through to the code, as in the PDF.
       html.div(class: "code-result-only", result-items.join())
     } else if has-webp {
       // Side-by-side: code left, WebP right

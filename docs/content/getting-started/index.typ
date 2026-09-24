@@ -9,33 +9,63 @@
 
 = Instalación — resumen
 
-Para la guía completa (usuario final con zip + `uv`, y desarrollo local desde fuente) ver #link("/getting-started/installation/")[Instalación].
+Gaanim se instala desde las
+#link("https://github.com/PaoloLupo/gaanim/releases/latest")[releases de GitHub]:
+cada versión publica un paquete listo para usar, sin compilar nada. La
+#link("/getting-started/installation/")[instalación detallada] explica cómo
+verificar la descarga, cómo encuentra Python y cómo actualizar.
 
-== Requisitos previos
+== Requisitos
 
-- *Rust* (edition 2024) — via #link("https://rustup.rs", "rustup")
-- *Python >=3.12* — 3.12 mínimo, 3.14 también soportado
-- *uv recomendado* — #link("https://docs.astral.sh/uv/")[uv] para venvs
-- *GPU con Vulkan* — para Vello/Bevy
+- *Windows 10/11 x64* o *Ubuntu 24.04 x64*. macOS todavía no tiene paquete.
+- *Python 3.14*. En Windows también sirve una versión posterior.
+- *#link("https://docs.astral.sh/uv/")[uv]*, que crea el entorno de cada proyecto.
+- Una GPU con controladores actualizados (Vulkan o DirectX 12).
+- *FFmpeg*, opcional: solo para exportar MP4/WebM o usar video y audio.
 
-== Preparación rápida para desarrollo
+== Descarga e instala
 
-```bash
-git clone https://github.com/user/gaanim
-cd gaanim
-just bootstrap        # .venv + build/hatchling
-just build            # debug: gaanim_launcher + gaanim-core
-just doctor           # verifica build y gaanim --help via launcher
+En la #link("https://github.com/PaoloLupo/gaanim/releases/latest")[última release]
+descarga el paquete de tu sistema:
+
+#table(
+  columns: 2,
+  table.header[*Sistema*][*Archivo*],
+  [Windows 10/11 x64], [`gaanim-v<versión>-windows-x64.zip`],
+  [Ubuntu 24.04 x64], [`gaanim-v<versión>-linux-x64.tar.gz`],
+)
+
+En Windows, extrae el zip en una carpeta y añádela al `PATH` de tu usuario:
+
+```powershell
+Expand-Archive .\gaanim-v*-windows-x64.zip -DestinationPath C:\Tools\gaanim
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+[Environment]::SetEnvironmentVariable("Path", "$userPath;C:\Tools\gaanim", "User")
 ```
 
-El zip de usuario final (`gaanim-v0.1.0-windows-x64.zip`) ya contiene `gaanim.exe` (launcher) + `gaanim-core.exe` y no requiere compilar. Ver detalle en #link("/getting-started/installation/")[Instalación / Usuario final].
+En Ubuntu, copia los ejecutables a `~/.local/bin` y el wheel de autoría a
+`~/.local/share/gaanim`:
+
+```bash
+tar -xzf gaanim-v*-linux-x64.tar.gz
+install -Dm755 -t ~/.local/bin gaanim gaanim-core
+install -Dm644 -t ~/.local/share/gaanim gaanim-*-py3-none-any.whl
+```
 
 == Verifica la instalación
 
+Abre una terminal nueva para que tome el `PATH` actualizado:
+
 ```bash
-just doctor           # compila y prueba launcher
-gaanim --help         # si tienes el zip en PATH
+gaanim --version
+gaanim init video mi-video   # crea el proyecto y su entorno con uv
+gaanim mi-video              # abre la vista previa con recarga al guardar
 ```
+
+`gaanim` sin argumentos abre el Inicio, desde donde también puedes crear y
+abrir proyectos. Si quieres contribuir al propio Gaanim y compilarlo desde el
+código, sigue el #link("https://github.com/PaoloLupo/gaanim#readme")[README del
+repositorio].
 
 = Tu primera animación
 
@@ -59,8 +89,10 @@ scene.play([
     circle.animate.shift_by(2.5, 0).duration(1.5).easing(Easing.SMOOTH),
     text.animate.fade_out().duration(0.5),
 ])
+scene.render()
 
 # Run with: gaanim my_animation.py
+# output: preview.webp
 ```
 
 Ejecútalo:
@@ -75,19 +107,15 @@ Se abrirá la ventana de previsualización de Gaanim. Pulsa `Escape` para cerrar
 
 Para exportar en lugar de abrir la previsualización:
 
-```python
-<<< # MP4
-<<< scene.render()  # luego: gaanim export . --output output.mp4
-<<<
-<<< # WebM
-<<< scene.render()  # luego: gaanim export . --output overlay.webm
-<<<
-<<< # Animated WebP
-<<< scene.render()  # luego: gaanim export . --output preview.webp
-<<<
-<<< # Any supported video extension
-<<< scene.render()  # luego: gaanim export . --output tiktok.mp4
+```bash
+gaanim export my_animation.py --output output.mp4    # MP4
+gaanim export my_animation.py --output overlay.webm  # WebM
+gaanim export my_animation.py --output preview.webp  # WebP animado
+gaanim export my_animation.py --output preview.gif   # GIF
 ```
+
+La extensión de `--output` elige el formato: `mp4`, `webm`, `webp`, `gif` o
+`png` (secuencia de imágenes).
 
 = Siguientes pasos
 

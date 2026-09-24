@@ -164,6 +164,18 @@ fn find_companion_file_by_cell(root: &Path, cell_name: &str, ext: &str) -> Optio
     scan_dir(root, cell_name, ext)
 }
 
+/// A cell whose process fails without printing anything (for example a host
+/// that cannot load its DLLs on Windows) must not pass for a cell that simply
+/// has no output: report the exit status as the cell's error instead.
+fn silent_failure(program: &str, success: bool, status: &str, stderr: &str) -> Option<String> {
+    (!success && stderr.trim().is_empty()).then(|| {
+        format!(
+            "{program} exited with {status} and printed no error. Check that it starts \
+             outside the docs build (on Windows, the Python base directory must be on PATH)."
+        )
+    })
+}
+
 fn requires_gaanim_host(code: &str) -> bool {
     code.contains(".render(")
         || code.lines().any(|line| {
@@ -558,6 +570,19 @@ pub fn compile_code_cell(
                     &temp_file.to_string_lossy(),
                     prelude_lines,
                 );
+                let program = if uses_gaanim_host {
+                    "gaanim-core"
+                } else {
+                    "python"
+                };
+                if let Some(message) = silent_failure(
+                    program,
+                    output.status.success(),
+                    &output.status.to_string(),
+                    &stderr,
+                ) {
+                    stderr = message;
+                }
             }
             Ok(Err(e)) => {
                 bail!(span, "Error executing Python: {}", e);
@@ -675,7 +700,28 @@ pub fn compile_code_cell(
 
 #[cfg(test)]
 mod tests {
-    use super::{adjust_stderr_line_numbers, has_valid_webp_signature, requires_gaanim_host};
+    use super::{
+        adjust_stderr_line_numbers, has_valid_webp_signature, requires_gaanim_host, silent_failure,
+    };
+
+    #[test]
+    fn a_process_that_fails_silently_reports_its_exit_status() {
+        let message = silent_failure("gaanim-core", false, "exit code: 0xc0000135", "").unwrap();
+        assert!(message.starts_with("gaanim-core exited with exit code: 0xc0000135"));
+        assert_eq!(
+            silent_failure("gaanim-core", true, "exit code: 0", ""),
+            None
+        );
+        assert_eq!(
+            silent_failure(
+                "python",
+                false,
+                "exit code: 1",
+                "Traceback (most recent call last)"
+            ),
+            None
+        );
+    }
 
     #[test]
     fn authoring_cells_use_the_native_host_without_requiring_render() {
