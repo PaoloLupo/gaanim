@@ -20,6 +20,10 @@ use thumbnails::{
     PreviewStatus, ThumbnailKey, ThumbnailMoment, desired_thumbnail_edge, entry_segment_time,
 };
 
+use crate::ui_kit::{
+    ButtonTone, Icon, PRIMARY_SIZE, caption, chip, divider, icon_button, icon_button_sized,
+    paint_icon, palette as kit_palette, pill_toggle, small_button,
+};
 use crate::{AudienceBlank, PresentationMode, export::StashedReplay, truncate_with_ellipsis};
 
 /// Dedicated egui schedule for the presenter window.
@@ -129,26 +133,27 @@ fn format_timeline_time(seconds: f64) -> String {
     format!("{:02}:{:02}", seconds / 60, seconds % 60)
 }
 
-/// Presenter View colors. Text is bright by default: the speaker reads it
-/// at a glance from a distance, often on a dimmed laptop screen.
+/// Presenter View colors, aligned with the editor's `ui_kit` palette. Text
+/// stays brighter than in the editor: the speaker reads it at a glance from
+/// a distance, often on a dimmed laptop screen.
 mod palette {
+    use crate::ui_kit::palette as kit;
     use bevy_egui::egui::Color32;
 
-    pub(super) const BACKGROUND: Color32 = Color32::from_rgb(7, 11, 22);
-    pub(super) const PANEL: Color32 = Color32::from_rgb(10, 16, 30);
-    pub(super) const SURFACE: Color32 = Color32::from_rgb(16, 25, 44);
-    pub(super) const RAISED: Color32 = Color32::from_rgb(25, 37, 63);
-    pub(super) const BORDER: Color32 = Color32::from_rgb(38, 54, 84);
-    pub(super) const PREVIEW: Color32 = Color32::from_rgb(3, 6, 13);
-    pub(super) const TEXT: Color32 = Color32::from_rgb(236, 241, 250);
-    pub(super) const MUTED: Color32 = Color32::from_rgb(160, 174, 198);
-    pub(super) const FAINT: Color32 = Color32::from_rgb(110, 125, 150);
-    pub(super) const ACCENT: Color32 = Color32::from_rgb(125, 175, 255);
-    pub(super) const ACCENT_FILL: Color32 = Color32::from_rgb(62, 108, 214);
-    pub(super) const ACCENT_DIM: Color32 = Color32::from_rgb(50, 78, 136);
-    pub(super) const LIVE: Color32 = Color32::from_rgb(105, 220, 155);
-    pub(super) const WARN: Color32 = Color32::from_rgb(255, 209, 102);
-    pub(super) const DANGER: Color32 = Color32::from_rgb(255, 146, 146);
+    pub(super) const BACKGROUND: Color32 = Color32::from_rgb(11, 12, 16);
+    pub(super) const PANEL: Color32 = Color32::from_rgb(16, 17, 22);
+    pub(super) const SURFACE: Color32 = kit::SURFACE;
+    pub(super) const RAISED: Color32 = Color32::from_rgb(31, 33, 41);
+    pub(super) const BORDER: Color32 = Color32::from_rgb(38, 40, 50);
+    pub(super) const PREVIEW: Color32 = Color32::from_rgb(5, 6, 9);
+    pub(super) const TEXT: Color32 = kit::TEXT;
+    pub(super) const MUTED: Color32 = Color32::from_rgb(162, 167, 180);
+    pub(super) const FAINT: Color32 = Color32::from_rgb(112, 117, 130);
+    pub(super) const ACCENT: Color32 = kit::ACCENT;
+    pub(super) const ACCENT_FILL: Color32 = Color32::from_rgb(66, 116, 222);
+    pub(super) const LIVE: Color32 = kit::LOOP;
+    pub(super) const WARN: Color32 = kit::STOP;
+    pub(super) const DANGER: Color32 = kit::DANGER;
 }
 
 // ---------------------------------------------------------------------------
@@ -374,19 +379,24 @@ fn apply_presenter_style(ctx: &egui::Context) {
     style.visuals = egui::Visuals::dark();
     style.visuals.panel_fill = palette::BACKGROUND;
     style.visuals.window_fill = palette::PANEL;
-    style.visuals.extreme_bg_color = Color32::from_rgb(5, 8, 16);
+    style.visuals.window_stroke = egui::Stroke::new(1.0, palette::BORDER);
+    style.visuals.window_corner_radius = egui::CornerRadius::same(12);
+    style.visuals.menu_corner_radius = egui::CornerRadius::same(12);
+    style.visuals.extreme_bg_color = Color32::from_rgb(8, 9, 12);
     style.visuals.faint_bg_color = palette::SURFACE;
     style.visuals.widgets.noninteractive.fg_stroke.color = palette::TEXT;
     style.visuals.widgets.noninteractive.bg_stroke.color = palette::BORDER;
     style.visuals.widgets.inactive.fg_stroke.color = palette::TEXT;
     style.visuals.widgets.inactive.bg_fill = palette::RAISED;
     style.visuals.widgets.inactive.weak_bg_fill = palette::RAISED;
+    style.visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
     style.visuals.widgets.hovered.fg_stroke.color = Color32::WHITE;
-    style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(39, 58, 92);
-    style.visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(39, 58, 92);
+    style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(42, 45, 56);
+    style.visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(42, 45, 56);
+    style.visuals.widgets.hovered.bg_stroke = egui::Stroke::NONE;
     style.visuals.widgets.active.fg_stroke.color = Color32::WHITE;
-    style.visuals.widgets.active.bg_fill = Color32::from_rgb(56, 83, 132);
-    style.visuals.widgets.active.weak_bg_fill = Color32::from_rgb(56, 83, 132);
+    style.visuals.widgets.active.bg_fill = Color32::from_rgb(52, 56, 70);
+    style.visuals.widgets.active.weak_bg_fill = Color32::from_rgb(52, 56, 70);
     style.visuals.selection.bg_fill = palette::ACCENT_FILL;
     style.visuals.selection.stroke.color = Color32::WHITE;
     style.visuals.hyperlink_color = palette::ACCENT;
@@ -610,11 +620,12 @@ pub(crate) fn presentation_input_system(
     let mut actions = Vec::new();
 
     if !keyboard_captured {
-        if keys.just_pressed(KeyCode::ArrowRight)
-            || keys.just_pressed(KeyCode::Space)
-            || keys.just_pressed(KeyCode::Enter)
-        {
+        if keys.just_pressed(KeyCode::ArrowRight) || keys.just_pressed(KeyCode::Enter) {
             actions.push(PresentationAction::Advance);
+        }
+        // Space plays or pauses; it never skips ahead to the next step.
+        if keys.just_pressed(KeyCode::Space) {
+            actions.push(PresentationAction::TogglePlayback);
         }
         if keys.just_pressed(KeyCode::ArrowLeft) || keys.just_pressed(KeyCode::Backspace) {
             actions.push(PresentationAction::Previous);
@@ -655,64 +666,26 @@ pub(crate) fn presentation_input_system(
 // Shared widgets.
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ButtonStyle {
-    /// The single action the speaker performs most: advance.
-    Primary,
-    Secondary,
-    /// A mode such as the overview; highlighted while active.
-    Toggle(bool),
-    /// A mode that hides the slides from the audience; loud while active.
-    Alert(bool),
-}
-
-fn styled_button(
-    ui: &mut egui::Ui,
-    label: &str,
-    size: egui::Vec2,
-    style: ButtonStyle,
-) -> egui::Response {
-    let (fill, stroke, text_color) = match style {
-        ButtonStyle::Primary => (palette::ACCENT_FILL, palette::ACCENT, egui::Color32::WHITE),
-        ButtonStyle::Toggle(true) => (palette::ACCENT_DIM, palette::ACCENT, egui::Color32::WHITE),
-        ButtonStyle::Alert(true) => (palette::WARN, palette::WARN, palette::BACKGROUND),
-        ButtonStyle::Secondary | ButtonStyle::Toggle(false) | ButtonStyle::Alert(false) => {
-            (palette::RAISED, palette::BORDER, palette::TEXT)
-        }
-    };
-    let mut text = egui::RichText::new(label).size(16.0).color(text_color);
-    if matches!(style, ButtonStyle::Primary | ButtonStyle::Alert(true)) {
-        text = text.strong();
-    }
-    ui.add_sized(
-        size,
-        egui::Button::new(text)
-            .fill(fill)
-            .stroke(egui::Stroke::new(1.0, stroke))
-            .corner_radius(9.0),
-    )
-}
-
-fn section_label(ui: &mut egui::Ui, text: &str, color: egui::Color32) {
-    ui.label(egui::RichText::new(text).strong().size(11.0).color(color));
+fn section_label(ui: &mut egui::Ui, text: &str) {
+    ui.label(caption(text));
 }
 
 fn status_pill(ui: &mut egui::Ui, status: PlaybackStatus) {
     let color = status.color();
     egui::Frame::new()
-        .fill(palette::SURFACE)
-        .stroke(egui::Stroke::new(1.0, color.gamma_multiply(0.55)))
+        .fill(color.gamma_multiply(0.12))
         .corner_radius(12.0)
-        .inner_margin(egui::Margin::symmetric(10, 4))
+        .inner_margin(egui::Margin::symmetric(10, 5))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
+                ui.spacing_mut().item_spacing.x = 7.0;
                 let (dot, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
                 ui.painter().circle_filled(dot.center(), 4.0, color);
                 ui.label(
                     egui::RichText::new(status.label())
                         .strong()
-                        .size(12.0)
+                        .size(11.5)
+                        .extra_letter_spacing(1.0)
                         .color(color),
                 );
             });
@@ -724,16 +697,10 @@ fn readout_rtl(ui: &mut egui::Ui, label: &str, value: &str, color: egui::Color32
     ui.label(
         egui::RichText::new(value)
             .monospace()
-            .strong()
             .size(22.0)
             .color(color),
     );
-    ui.label(
-        egui::RichText::new(label)
-            .strong()
-            .size(10.0)
-            .color(palette::FAINT),
-    );
+    ui.label(caption(label));
 }
 
 fn paint_badge(
@@ -743,17 +710,22 @@ fn paint_badge(
     text: &str,
     fill: egui::Color32,
     color: egui::Color32,
+    dot: Option<egui::Color32>,
 ) {
     let galley = painter.layout_no_wrap(text.to_owned(), egui::FontId::proportional(12.0), color);
-    let size = galley.size() + egui::vec2(16.0, 8.0);
+    let dot_w = if dot.is_some() { 14.0 } else { 0.0 };
+    let size = galley.size() + egui::vec2(20.0 + dot_w, 10.0);
     let min = if align_right {
         egui::pos2(anchor.x - size.x, anchor.y)
     } else {
         anchor
     };
     let rect = egui::Rect::from_min_size(min, size);
-    painter.rect_filled(rect, 8.0, fill);
-    painter.galley(rect.min + egui::vec2(8.0, 4.0), galley, color);
+    painter.rect_filled(rect, size.y / 2.0, fill);
+    if let Some(dot) = dot {
+        painter.circle_filled(egui::pos2(rect.min.x + 14.0, rect.center().y), 3.5, dot);
+    }
+    painter.galley(rect.min + egui::vec2(10.0 + dot_w, 5.0), galley, color);
 }
 
 /// Slide-by-slide progress: one block per slide, the current block filled up
@@ -774,7 +746,8 @@ fn paint_slide_progress(
     let width = ui.available_width().max(40.0);
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), sense);
     let painter = ui.painter_at(rect.expand(2.0));
-    let radius = (height * 0.5).min(3.0);
+    let radius = height * 0.5;
+    let track = egui::Color32::from_white_alpha(24);
     let segments = &timeline.segments;
     if segments.is_empty() {
         let total = timeline.cached_duration;
@@ -783,7 +756,7 @@ fn paint_slide_progress(
         } else {
             0.0
         };
-        painter.rect_filled(rect, radius, palette::RAISED);
+        painter.rect_filled(rect, radius, track);
         let mut filled = rect;
         filled.set_width(rect.width() * fraction);
         painter.rect_filled(filled, radius, palette::ACCENT);
@@ -791,7 +764,7 @@ fn paint_slide_progress(
     }
 
     let count = segments.len();
-    let gap = if count > 60 { 1.0 } else { 3.0 };
+    let gap = if count > 60 { 1.0 } else { 2.0 };
     let block = ((rect.width() - gap * (count - 1) as f32) / count as f32).max(1.0);
     let current_index = SlideView::at(timeline, current_time).map(|slide| slide.index);
     let hover_x = response.hover_pos().map(|pos| pos.x);
@@ -808,16 +781,27 @@ fn paint_slide_progress(
                 1.0
             }
         };
+        let is_hovered =
+            hover_x.is_some_and(|x| x >= left - gap * 0.5 && x < left + block + gap * 0.5);
         let (fill, color) = match current_index {
-            Some(current) if index < current => (1.0, palette::ACCENT_DIM),
+            Some(current) if index < current => (1.0, palette::ACCENT.gamma_multiply(0.45)),
             Some(current) if index == current => (fraction_of(current_time), palette::ACCENT),
             _ => (0.0, palette::ACCENT),
         };
-        painter.rect_filled(block_rect, radius, palette::RAISED);
+        let base = if is_hovered && interactive {
+            egui::Color32::from_white_alpha(44)
+        } else {
+            track
+        };
+        painter.rect_filled(block_rect, radius.min(block / 2.0), base);
         if fill > 0.0 {
-            let mut filled = block_rect;
-            filled.set_width((block * fill).max(radius * 2.0).min(block));
-            painter.rect_filled(filled, radius, color);
+            let clip = egui::Rect::from_min_max(
+                block_rect.min,
+                egui::pos2(block_rect.left() + block * fill, block_rect.bottom()),
+            );
+            painter
+                .with_clip_rect(clip.intersect(painter.clip_rect()))
+                .rect_filled(block_rect, radius.min(block / 2.0), color);
         }
         if block >= 8.0 {
             for stop in &segment.stops {
@@ -826,23 +810,15 @@ fn paint_slide_progress(
                     let x = block_rect.left() + block * fraction;
                     painter.line_segment(
                         [
-                            egui::pos2(x, block_rect.top() + 1.0),
-                            egui::pos2(x, block_rect.bottom() - 1.0),
+                            egui::pos2(x, block_rect.top()),
+                            egui::pos2(x, block_rect.bottom()),
                         ],
-                        egui::Stroke::new(1.5, palette::BACKGROUND),
+                        egui::Stroke::new(1.5, palette::PANEL),
                     );
                 }
             }
         }
-        if Some(index) == current_index {
-            painter.rect_stroke(
-                block_rect.expand(1.0),
-                radius + 1.0,
-                egui::Stroke::new(1.0, palette::TEXT.gamma_multiply(0.7)),
-                egui::StrokeKind::Outside,
-            );
-        }
-        if hover_x.is_some_and(|x| x >= left - gap * 0.5 && x < left + block + gap * 0.5) {
+        if is_hovered {
             hovered = Some(index);
         }
     }
@@ -907,14 +883,14 @@ fn show_preview(
 ) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(size.max(egui::vec2(1.0, 1.0)), sense);
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 10.0, palette::PREVIEW);
+    painter.rect_filled(rect, 12.0, palette::PREVIEW);
     let image_rect = match &preview.texture {
         Some(texture) => {
             let texture_size = texture.size_vec2();
             let scale = (rect.width() / texture_size.x).min(rect.height() / texture_size.y);
             let image_rect = egui::Rect::from_center_size(rect.center(), texture_size * scale);
             egui::Image::new(texture)
-                .corner_radius(6.0)
+                .corner_radius(8.0)
                 .paint_at(ui, image_rect);
             image_rect
         }
@@ -930,45 +906,43 @@ fn show_preview(
         }
     };
     let hover_stroke = if response.hovered() && sense.senses_click() {
-        palette::ACCENT
+        egui::Stroke::new(1.5, palette::ACCENT)
     } else {
-        palette::BORDER
+        egui::Stroke::new(1.0, egui::Color32::from_white_alpha(16))
     };
-    painter.rect_stroke(
-        rect,
-        10.0,
-        egui::Stroke::new(1.0, hover_stroke),
-        egui::StrokeKind::Inside,
-    );
+    painter.rect_stroke(rect, 12.0, hover_stroke, egui::StrokeKind::Inside);
 
-    let badge_fill = egui::Color32::from_rgba_premultiplied(5, 9, 18, 225);
+    let badge_fill = egui::Color32::from_rgba_premultiplied(6, 7, 10, 225);
     if overlay.playing {
         paint_badge(
             &painter,
-            rect.left_top() + egui::vec2(10.0, 10.0),
+            rect.left_top() + egui::vec2(12.0, 12.0),
             false,
-            "⏵ Playing to the next step",
+            "Playing to the next step",
             badge_fill,
-            palette::LIVE,
+            palette::TEXT,
+            Some(palette::LIVE),
         );
     }
     if let Some(badge) = overlay.badge {
         paint_badge(
             &painter,
-            rect.right_top() + egui::vec2(-10.0, 10.0),
+            rect.right_top() + egui::vec2(-12.0, 12.0),
             true,
             badge,
             palette::ACCENT_FILL,
             egui::Color32::WHITE,
+            None,
         );
     } else if preview.stale {
         paint_badge(
             &painter,
-            rect.right_top() + egui::vec2(-10.0, 10.0),
+            rect.right_top() + egui::vec2(-12.0, 12.0),
             true,
             "Updating preview…",
             badge_fill,
             palette::MUTED,
+            None,
         );
     }
 
@@ -988,7 +962,7 @@ fn show_preview(
         AudienceBlank::None => None,
     };
     if let Some((fill, color, title, hint)) = blank {
-        painter.rect_filled(image_rect, 6.0, fill);
+        painter.rect_filled(image_rect, 8.0, fill);
         painter.text(
             image_rect.center() - egui::vec2(0.0, 12.0),
             egui::Align2::CENTER_CENTER,
@@ -1008,7 +982,8 @@ fn show_preview(
 }
 
 const SHORTCUTS: &[(&str, &str)] = &[
-    ("Space  Enter  →", "Advance to the next step"),
+    ("→  Enter", "Advance to the next step"),
+    ("Space", "Play / pause (never skips a step)"),
     ("←  Backspace", "Back to the previous step"),
     ("Home  End", "First / last step"),
     ("O", "Open or close the overview"),
@@ -1019,21 +994,31 @@ const SHORTCUTS: &[(&str, &str)] = &[
 ];
 
 fn show_shortcuts(ui: &mut egui::Ui) {
-    ui.set_min_width(360.0);
-    section_label(ui, "KEYBOARD SHORTCUTS", palette::ACCENT);
-    ui.add_space(4.0);
+    ui.set_min_width(380.0);
+    section_label(ui, "KEYBOARD SHORTCUTS");
+    ui.add_space(6.0);
     egui::Grid::new("presenter-shortcuts")
         .num_columns(2)
-        .spacing([18.0, 6.0])
+        .spacing([18.0, 8.0])
         .show(ui, |ui| {
             for (keys, action) in SHORTCUTS {
+                egui::Frame::new()
+                    .fill(egui::Color32::from_white_alpha(12))
+                    .corner_radius(6.0)
+                    .inner_margin(egui::Margin::symmetric(8, 3))
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new(*keys)
+                                .monospace()
+                                .size(13.0)
+                                .color(palette::TEXT),
+                        );
+                    });
                 ui.label(
-                    egui::RichText::new(*keys)
-                        .monospace()
+                    egui::RichText::new(*action)
                         .size(14.0)
-                        .color(palette::ACCENT),
+                        .color(palette::MUTED),
                 );
-                ui.label(egui::RichText::new(*action).size(14.0));
                 ui.end_row();
             }
         });
@@ -1091,20 +1076,14 @@ pub(crate) fn audience_playback_controls_system(
         .as_ref()
         .map(|slide| slide.segment.name.clone())
         .unwrap_or_else(|| "Presentation".to_string());
-    let counter = match &slide {
-        Some(slide) => format!(
-            "{} / {}   {} / {}",
-            slide.index + 1,
-            timeline.segments.len(),
-            format_timeline_time(current),
-            format_timeline_time(total)
-        ),
-        None => format!(
-            "{} / {}",
-            format_timeline_time(current),
-            format_timeline_time(total)
-        ),
-    };
+    let position = slide
+        .as_ref()
+        .map(|slide| format!("{} / {}", slide.index + 1, timeline.segments.len()));
+    let time = format!(
+        "{} / {}",
+        format_timeline_time(current),
+        format_timeline_time(total)
+    );
     let mut actions = Vec::new();
 
     let response = egui::Area::new("audience-playback-controls".into())
@@ -1113,74 +1092,97 @@ pub(crate) fn audience_playback_controls_system(
         .interactable(true)
         .show(ctx, |ui| {
             egui::Frame::new()
-                .fill(egui::Color32::from_rgba_premultiplied(8, 14, 27, 238))
-                .corner_radius(16.0)
+                .fill(kit_palette::PANEL)
+                .corner_radius(14.0)
                 .inner_margin(egui::Margin::symmetric(16, 12))
-                .stroke(egui::Stroke::new(
-                    1.0,
-                    egui::Color32::from_rgba_premultiplied(91, 143, 255, 150),
-                ))
+                .stroke(egui::Stroke::new(1.0, kit_palette::PANEL_STROKE))
+                .shadow(egui::Shadow {
+                    offset: [0, 8],
+                    blur: 28,
+                    spread: 0,
+                    color: egui::Color32::from_black_alpha(110),
+                })
                 .show(ui, |ui| {
+                    // Must match `cursor_in_audience_dock_zone`.
                     let width = (ctx.viewport_rect().width() - 48.0).clamp(280.0, 920.0);
                     ui.set_width(width);
-                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 6.0);
-                    ui.horizontal(|ui| {
-                        if styled_button(ui, "⏮", egui::vec2(40.0, 36.0), ButtonStyle::Secondary)
-                            .on_hover_text("First step  ·  Home")
-                            .clicked()
-                        {
-                            actions.push(PresentationAction::Home);
-                        }
-                        if styled_button(ui, "⏴", egui::vec2(44.0, 36.0), ButtonStyle::Secondary)
-                            .on_hover_text("Previous step  ·  Left arrow")
-                            .clicked()
-                        {
-                            actions.push(PresentationAction::Previous);
-                        }
-                        let (label, action) = if status == PlaybackStatus::Playing {
-                            ("⏸  Pause", PresentationAction::TogglePlayback)
-                        } else {
-                            ("⏵  Advance", PresentationAction::Advance)
-                        };
-                        if styled_button(ui, label, egui::vec2(124.0, 38.0), ButtonStyle::Primary)
-                            .on_hover_text("Space, Enter or Right arrow")
-                            .clicked()
-                        {
-                            actions.push(action);
-                        }
-                        if styled_button(ui, "⏭", egui::vec2(40.0, 36.0), ButtonStyle::Secondary)
-                            .on_hover_text("Last step  ·  End")
-                            .clicked()
-                        {
-                            actions.push(PresentationAction::End);
-                        }
-                        ui.separator();
-                        ui.vertical(|ui| {
-                            ui.horizontal(|ui| {
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        ui.label(
-                                            egui::RichText::new(&counter)
-                                                .monospace()
-                                                .size(13.0)
-                                                .color(palette::MUTED),
-                                        );
-                                        ui.add(
-                                            egui::Label::new(
-                                                egui::RichText::new(&title)
-                                                    .strong()
-                                                    .size(15.0)
-                                                    .color(palette::TEXT),
-                                            )
-                                            .truncate(),
-                                        );
-                                    },
+                    ui.spacing_mut().item_spacing = egui::vec2(2.0, 10.0);
+                    egui::Sides::new()
+                        .height(PRIMARY_SIZE)
+                        .spacing(12.0)
+                        .shrink_left()
+                        .truncate()
+                        .show(
+                            ui,
+                            |ui| {
+                                ui.spacing_mut().item_spacing.x = 2.0;
+                                if icon_button(ui, Icon::SkipStart, ButtonTone::Ghost, true)
+                                    .on_hover_text("First step · Home")
+                                    .clicked()
+                                {
+                                    actions.push(PresentationAction::Home);
+                                }
+                                if icon_button(ui, Icon::PrevScene, ButtonTone::Ghost, true)
+                                    .on_hover_text("Previous step · ← or Backspace")
+                                    .clicked()
+                                {
+                                    actions.push(PresentationAction::Previous);
+                                }
+                                ui.add_space(2.0);
+                                let play_icon = if status == PlaybackStatus::Playing {
+                                    Icon::Pause
+                                } else {
+                                    Icon::Play
+                                };
+                                if icon_button(ui, play_icon, ButtonTone::Primary, true)
+                                    .on_hover_text("Play / pause · Space")
+                                    .clicked()
+                                {
+                                    actions.push(PresentationAction::TogglePlayback);
+                                }
+                                ui.add_space(2.0);
+                                if icon_button(ui, Icon::NextScene, ButtonTone::Ghost, true)
+                                    .on_hover_text("Next step · → or Enter")
+                                    .clicked()
+                                {
+                                    actions.push(PresentationAction::Advance);
+                                }
+                                if icon_button(ui, Icon::SkipEnd, ButtonTone::Ghost, true)
+                                    .on_hover_text("Last step · End")
+                                    .clicked()
+                                {
+                                    actions.push(PresentationAction::End);
+                                }
+                                ui.add_space(10.0);
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(&title)
+                                            .size(14.0)
+                                            .color(kit_palette::TEXT),
+                                    )
+                                    .selectable(false)
+                                    .truncate(),
                                 );
-                            });
-                            paint_slide_progress(ui, &timeline, current, 6.0, false);
-                        });
-                    });
+                            },
+                            |ui| {
+                                ui.spacing_mut().item_spacing.x = 10.0;
+                                ui.label(
+                                    egui::RichText::new(&time)
+                                        .monospace()
+                                        .size(12.5)
+                                        .color(kit_palette::TEXT_FAINT),
+                                );
+                                if let Some(position) = &position {
+                                    ui.label(
+                                        egui::RichText::new(position)
+                                            .monospace()
+                                            .size(12.5)
+                                            .color(kit_palette::TEXT_MUTED),
+                                    );
+                                }
+                            },
+                        );
+                    paint_slide_progress(ui, &timeline, current, 5.0, false);
                 });
         });
     audience_controls.pointer_over = response.response.contains_pointer();
@@ -1260,20 +1262,13 @@ fn show_header(
     let timers = |ui: &mut egui::Ui, timer: &mut PresentationTimer| {
         ui.spacing_mut().item_spacing.x = 6.0;
         readout_rtl(ui, "CLOCK", &frame.clock, palette::TEXT);
-        ui.add_space(18.0);
-        if ui
-            .add(
-                egui::Button::new(egui::RichText::new("↺").size(16.0).color(palette::MUTED))
-                    .fill(palette::SURFACE)
-                    .corner_radius(8.0)
-                    .min_size(egui::vec2(32.0, 32.0)),
-            )
+        ui.add_space(14.0);
+        if icon_button(ui, Icon::Loop, ButtonTone::Ghost, true)
             .on_hover_text("Restart the session timer")
             .clicked()
         {
             timer.reset();
         }
-        ui.add_space(4.0);
         readout_rtl(ui, "ELAPSED", &frame.elapsed, palette::ACCENT);
     };
 
@@ -1304,7 +1299,7 @@ fn show_header(
             .allocate_ui_with_layout(
                 egui::vec2(bar_width, 12.0),
                 egui::Layout::left_to_right(egui::Align::Center),
-                |ui| paint_slide_progress(ui, timeline, frame.current_time, 10.0, true),
+                |ui| paint_slide_progress(ui, timeline, frame.current_time, 8.0, true),
             )
             .inner;
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1323,6 +1318,62 @@ fn show_header(
 /// Height reserved below the current preview for the step strip.
 const STEP_STRIP_HEIGHT: f32 = 58.0;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StepChipState {
+    Current,
+    Passed,
+    Upcoming,
+}
+
+fn step_chip(ui: &mut egui::Ui, label: &str, state: StepChipState) -> egui::Response {
+    let font = egui::FontId::proportional(14.0);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), font.clone(), palette::TEXT);
+    let check_w = if state == StepChipState::Passed {
+        20.0
+    } else {
+        0.0
+    };
+    let size = egui::vec2(galley.size().x + check_w + 28.0, 32.0);
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    let painter = ui.painter();
+    let hovered = response.hovered();
+    let (fill, color) = match state {
+        StepChipState::Current => (palette::ACCENT.gamma_multiply(0.24), palette::ACCENT),
+        StepChipState::Passed => (
+            egui::Color32::from_white_alpha(if hovered { 22 } else { 8 }),
+            palette::MUTED,
+        ),
+        StepChipState::Upcoming => (
+            egui::Color32::from_white_alpha(if hovered { 30 } else { 16 }),
+            palette::TEXT,
+        ),
+    };
+    painter.rect_filled(rect, 16.0, fill);
+    let mut x = rect.min.x + 14.0;
+    if state == StepChipState::Passed {
+        paint_icon(
+            painter,
+            egui::Rect::from_center_size(
+                egui::pos2(x + 7.0, rect.center().y),
+                egui::vec2(13.0, 13.0),
+            ),
+            Icon::Check,
+            palette::LIVE,
+        );
+        x += check_w;
+    }
+    painter.text(
+        egui::pos2(x, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        font,
+        color,
+    );
+    response
+}
+
 fn show_step_strip(
     ui: &mut egui::Ui,
     timeline: &Timeline,
@@ -1336,35 +1387,23 @@ fn show_step_strip(
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
-                let chip = |ui: &mut egui::Ui, label: String, active: bool, passed: bool| {
-                    let (fill, stroke, color) = if active {
-                        (palette::ACCENT_FILL, palette::ACCENT, egui::Color32::WHITE)
-                    } else if passed {
-                        (palette::SURFACE, palette::BORDER, palette::MUTED)
-                    } else {
-                        (palette::RAISED, palette::BORDER, palette::TEXT)
-                    };
-                    ui.add(
-                        egui::Button::new(egui::RichText::new(label).size(14.0).color(color))
-                            .fill(fill)
-                            .stroke(egui::Stroke::new(1.0, stroke))
-                            .corner_radius(16.0)
-                            .min_size(egui::vec2(0.0, 32.0)),
-                    )
+                let start_state = if slide.stop_index.is_none() {
+                    StepChipState::Current
+                } else {
+                    StepChipState::Passed
                 };
-                if chip(
-                    ui,
-                    "↺  Slide start".to_string(),
-                    slide.stop_index.is_none(),
-                    slide.stop_index.is_some(),
-                )
-                .on_hover_text("Jump to the beginning of this slide")
-                .clicked()
+                if step_chip(ui, "Slide start", start_state)
+                    .on_hover_text("Jump to the beginning of this slide")
+                    .clicked()
                 {
                     *requested_seek = Some(segment_entry_time(timeline, segment));
                 }
                 for (index, stop) in segment.stops.iter().enumerate() {
-                    let passed = slide.stop_index.is_some_and(|current| index < current);
+                    let state = match slide.stop_index {
+                        Some(current) if index == current => StepChipState::Current,
+                        Some(current) if index < current => StepChipState::Passed,
+                        _ => StepChipState::Upcoming,
+                    };
                     let name = step_name(segment, index);
                     let label = match authored_step_name(segment, index) {
                         Some(name) => {
@@ -1372,12 +1411,7 @@ fn show_step_strip(
                         }
                         None => name.clone(),
                     };
-                    let label = if passed {
-                        format!("✔ {label}")
-                    } else {
-                        label
-                    };
-                    if chip(ui, label, slide.stop_index == Some(index), passed)
+                    if step_chip(ui, &label, state)
                         .on_hover_text(format!("Jump to step {} · {name}", index + 1))
                         .clicked()
                     {
@@ -1396,7 +1430,7 @@ fn show_now_panel(
     preview_height: Option<f32>,
     requested_seek: &mut Option<f64>,
 ) {
-    section_label(ui, "NOW ON SCREEN", palette::ACCENT);
+    section_label(ui, "NOW ON SCREEN");
     ui.add(
         egui::Label::new(
             egui::RichText::new(&slide.segment.name)
@@ -1441,7 +1475,7 @@ fn show_speaker_column(
     preferences: &mut PresenterPreferences,
     notes_min_height: f32,
 ) {
-    section_label(ui, "UP NEXT", palette::ACCENT);
+    section_label(ui, "UP NEXT");
     let (title, detail) = match &frame.next {
         Some(next) => (next.title.as_str(), next.detail.as_str()),
         None => ("End of presentation", "Nothing left to advance"),
@@ -1477,18 +1511,17 @@ fn show_speaker_column(
 
     ui.add_space(14.0);
     ui.horizontal(|ui| {
-        section_label(ui, "SPEAKER NOTES", palette::WARN);
+        section_label(ui, "SPEAKER NOTES");
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
             let size = preferences.notes_size;
-            if ui
-                .add_enabled(size < NOTES_SIZE_MAX, egui::Button::new("A+").small())
+            if small_button(ui, "A+", size < NOTES_SIZE_MAX)
                 .on_hover_text("Larger notes")
                 .clicked()
             {
                 preferences.adjust_notes_size(2.0);
             }
-            if ui
-                .add_enabled(size > NOTES_SIZE_MIN, egui::Button::new("A−").small())
+            if small_button(ui, "A−", size > NOTES_SIZE_MIN)
                 .on_hover_text("Smaller notes")
                 .clicked()
             {
@@ -1504,8 +1537,8 @@ fn show_speaker_column(
         .filter(|notes| !notes.is_empty());
     egui::Frame::new()
         .fill(palette::SURFACE)
-        .corner_radius(10.0)
-        .inner_margin(egui::Margin::same(14))
+        .corner_radius(12.0)
+        .inner_margin(egui::Margin::same(16))
         .show(ui, |ui| {
             let height = ui.available_height().max(notes_min_height);
             egui::ScrollArea::vertical()
@@ -1534,6 +1567,19 @@ fn show_speaker_column(
         });
 }
 
+/// Icon plus short text, for status readouts inside a right-to-left row.
+fn inline_status_rtl(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    text: &str,
+    color: egui::Color32,
+) -> egui::Response {
+    let label = ui.label(egui::RichText::new(text).size(13.0).color(color));
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
+    paint_icon(ui.painter(), rect, icon, color);
+    label
+}
+
 fn show_preview_status(ui: &mut egui::Ui, frame: &PresenterFrame, retry: &mut bool) {
     match &frame.preview_status {
         PreviewStatus::Rendering { done, total } => {
@@ -1545,19 +1591,14 @@ fn show_preview_status(ui: &mut egui::Ui, frame: &PresenterFrame, retry: &mut bo
             ui.spinner();
         }
         PreviewStatus::Failed(error) => {
-            if ui
-                .add(egui::Button::new("Retry").small())
+            if small_button(ui, "Retry", true)
                 .on_hover_text("Render the cue previews again")
                 .clicked()
             {
                 *retry = true;
             }
-            ui.label(
-                egui::RichText::new("⚠ Previews failed")
-                    .size(13.0)
-                    .color(palette::DANGER),
-            )
-            .on_hover_text(error.as_str());
+            inline_status_rtl(ui, Icon::Warning, "Previews failed", palette::DANGER)
+                .on_hover_text(error.as_str());
         }
         PreviewStatus::Waiting if frame.slide.is_some() => {
             ui.spinner();
@@ -1565,15 +1606,20 @@ fn show_preview_status(ui: &mut egui::Ui, frame: &PresenterFrame, retry: &mut bo
         PreviewStatus::Waiting | PreviewStatus::Ready => {}
     }
     if frame.omits_native_3d {
-        ui.label(
-            egui::RichText::new("⚠ 3D not in previews")
-                .size(13.0)
-                .color(palette::WARN),
-        )
-        .on_hover_text(
+        inline_status_rtl(ui, Icon::Warning, "3D not in previews", palette::WARN).on_hover_text(
             "Cue previews draw the 2D layers only. Native 3D objects still appear on the audience screen.",
         );
     }
+}
+
+/// Presenter View dock button sizes: large targets for a live talk.
+const DOCK_BUTTON: f32 = 40.0;
+const DOCK_PRIMARY: f32 = 48.0;
+
+fn dock_button(ui: &mut egui::Ui, icon: Icon, hint: &str) -> bool {
+    icon_button_sized(ui, icon, ButtonTone::Ghost, true, DOCK_BUTTON)
+        .on_hover_text(hint)
+        .clicked()
 }
 
 fn show_dock(
@@ -1584,98 +1630,82 @@ fn show_dock(
     retry: &mut bool,
 ) {
     ui.horizontal_centered(|ui| {
-        ui.spacing_mut().item_spacing.x = 8.0;
-        let height = 42.0;
-        let label = |icon: &'static str, text: &'static str| {
-            if compact {
-                icon.to_string()
-            } else {
-                format!("{icon}  {text}")
-            }
-        };
-        if styled_button(ui, "⏮", egui::vec2(44.0, height), ButtonStyle::Secondary)
-            .on_hover_text("First step  ·  Home")
-            .clicked()
-        {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        if dock_button(ui, Icon::SkipStart, "First step · Home") {
             actions.push(PresentationAction::Home);
         }
-        let previous_width = if compact { 48.0 } else { 122.0 };
-        if styled_button(
-            ui,
-            &label("⏴", "Previous"),
-            egui::vec2(previous_width, height),
-            ButtonStyle::Secondary,
-        )
-        .on_hover_text("Previous step  ·  Left arrow or Backspace")
-        .clicked()
-        {
+        if dock_button(ui, Icon::PrevScene, "Previous step · ← or Backspace") {
             actions.push(PresentationAction::Previous);
         }
-        let (primary, action) = if frame.status == PlaybackStatus::Playing {
-            (label("⏸", "Pause"), PresentationAction::TogglePlayback)
+        let play_icon = if frame.status == PlaybackStatus::Playing {
+            Icon::Pause
         } else {
-            (label("⏵", "Advance"), PresentationAction::Advance)
+            Icon::Play
         };
-        let primary_width = if compact { 64.0 } else { 170.0 };
-        if styled_button(
-            ui,
-            &primary,
-            egui::vec2(primary_width, height),
-            ButtonStyle::Primary,
-        )
-        .on_hover_text("Space, Enter or Right arrow")
-        .clicked()
-        {
-            actions.push(action);
-        }
-        if styled_button(ui, "⏭", egui::vec2(44.0, height), ButtonStyle::Secondary)
-            .on_hover_text("Last step  ·  End")
+        ui.add_space(4.0);
+        if icon_button_sized(ui, play_icon, ButtonTone::Primary, true, DOCK_PRIMARY)
+            .on_hover_text("Play / pause · Space")
             .clicked()
         {
-            actions.push(PresentationAction::End);
+            actions.push(PresentationAction::TogglePlayback);
         }
         ui.add_space(4.0);
-        ui.separator();
-        ui.add_space(4.0);
-        let mode_width = if compact { 48.0 } else { 118.0 };
-        if styled_button(
+        if dock_button(ui, Icon::NextScene, "Next step · → or Enter") {
+            actions.push(PresentationAction::Advance);
+        }
+        if dock_button(ui, Icon::SkipEnd, "Last step · End") {
+            actions.push(PresentationAction::End);
+        }
+
+        ui.add_space(8.0);
+        divider(ui);
+        ui.add_space(8.0);
+        ui.spacing_mut().item_spacing.x = 8.0;
+        let label = |text: &'static str| (!compact).then_some(text);
+        if pill_toggle(
             ui,
-            &label("⊞", "Overview"),
-            egui::vec2(mode_width, height),
-            ButtonStyle::Toggle(frame.overview_open),
+            Icon::Grid,
+            label("Overview"),
+            frame.overview_open,
+            palette::ACCENT,
+            36.0,
         )
-        .on_hover_text("Find and jump to any slide  ·  O")
+        .on_hover_text("Find and jump to any slide · O")
         .clicked()
         {
             actions.push(PresentationAction::ToggleOverview);
         }
-        let blank_width = if compact { 48.0 } else { 100.0 };
-        if styled_button(
+        if pill_toggle(
             ui,
-            &label("⬛", "Black"),
-            egui::vec2(blank_width, height),
-            ButtonStyle::Alert(frame.blank == AudienceBlank::Black),
+            Icon::BlackScreen,
+            label("Black"),
+            frame.blank == AudienceBlank::Black,
+            palette::WARN,
+            36.0,
         )
-        .on_hover_text("Black out the audience screen  ·  B")
+        .on_hover_text("Black out the audience screen · B")
         .clicked()
         {
             actions.push(PresentationAction::ToggleBlack);
         }
-        if styled_button(
+        if pill_toggle(
             ui,
-            &label("⬜", "White"),
-            egui::vec2(blank_width, height),
-            ButtonStyle::Alert(frame.blank == AudienceBlank::White),
+            Icon::WhiteScreen,
+            label("White"),
+            frame.blank == AudienceBlank::White,
+            palette::WARN,
+            36.0,
         )
-        .on_hover_text("White out the audience screen  ·  W")
+        .on_hover_text("White out the audience screen · W")
         .clicked()
         {
             actions.push(PresentationAction::ToggleWhite);
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.menu_button(egui::RichText::new("⌨").size(18.0), show_shortcuts)
-                .response
-                .on_hover_text("Keyboard shortcuts");
+            let keyboard =
+                icon_button_sized(ui, Icon::Keyboard, ButtonTone::Ghost, true, DOCK_BUTTON)
+                    .on_hover_text("Keyboard shortcuts");
+            egui::Popup::menu(&keyboard).show(show_shortcuts);
             show_preview_status(ui, frame, retry);
         });
     });
@@ -1702,8 +1732,14 @@ fn show_overview(
             egui::Frame::new()
                 .fill(palette::PANEL)
                 .stroke(egui::Stroke::new(1.0, palette::BORDER))
-                .corner_radius(12.0)
-                .inner_margin(egui::Margin::same(18)),
+                .corner_radius(16.0)
+                .inner_margin(egui::Margin::same(20))
+                .shadow(egui::Shadow {
+                    offset: [0, 12],
+                    blur: 40,
+                    spread: 0,
+                    color: egui::Color32::from_black_alpha(140),
+                }),
         )
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -1724,23 +1760,29 @@ fn show_overview(
                     );
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if styled_button(
-                        ui,
-                        "Close  Esc",
-                        egui::vec2(110.0, 34.0),
-                        ButtonStyle::Secondary,
-                    )
-                    .clicked()
+                    if icon_button(ui, Icon::Close, ButtonTone::Ghost, true)
+                        .on_hover_text("Close · Esc")
+                        .clicked()
                     {
                         actions.push(PresentationAction::ToggleOverview);
                     }
                 });
             });
-            ui.add_space(6.0);
+            ui.add_space(8.0);
             let search = ui.add(
                 egui::TextEdit::singleline(&mut overview.query)
-                    .hint_text("🔍  Search slides, steps or notes · Enter jumps to the first match")
-                    .desired_width(f32::INFINITY),
+                    .hint_text("Search slides, steps or notes · Enter jumps to the first match")
+                    .desired_width(f32::INFINITY)
+                    .font(egui::FontId::proportional(16.0))
+                    .text_color(palette::TEXT)
+                    .frame(
+                        egui::Frame::new()
+                            .fill(egui::Color32::from_white_alpha(10))
+                            .corner_radius(10.0)
+                            .inner_margin(egui::Margin::symmetric(14, 10))
+                            .stroke(egui::Stroke::new(1.0, palette::BORDER)),
+                    )
+                    .margin(egui::Margin::ZERO),
             );
             if overview.focus_search {
                 search.request_focus();
@@ -1760,7 +1802,7 @@ fn show_overview(
             {
                 *requested_seek = Some(segment_entry_time(timeline, &timeline.segments[first]));
             }
-            ui.add_space(10.0);
+            ui.add_space(12.0);
             if matches.is_empty() {
                 ui.label(
                     egui::RichText::new("No slides match this search.")
@@ -1822,13 +1864,13 @@ fn show_overview_card(
     let stroke = if is_current {
         egui::Stroke::new(2.0, palette::ACCENT)
     } else {
-        egui::Stroke::new(1.0, palette::BORDER)
+        egui::Stroke::new(1.0, egui::Color32::from_white_alpha(12))
     };
     let inner_width = (card_width - 24.0).max(80.0);
     egui::Frame::new()
         .fill(palette::SURFACE)
         .stroke(stroke)
-        .corner_radius(10.0)
+        .corner_radius(12.0)
         .inner_margin(egui::Margin::same(10))
         .show(ui, |ui| {
             ui.set_width(inner_width);
@@ -1883,14 +1925,7 @@ fn show_overview_card(
                                 stop_index + 1,
                                 truncate_with_ellipsis(&name, 16)
                             );
-                            if ui
-                                .add(
-                                    egui::Button::new(
-                                        egui::RichText::new(label).size(12.0).color(palette::MUTED),
-                                    )
-                                    .fill(palette::RAISED)
-                                    .corner_radius(10.0),
-                                )
+                            if chip(ui, &label, false)
                                 .on_hover_text(format!("Jump to step {} · {name}", stop_index + 1))
                                 .clicked()
                             {
@@ -2000,7 +2035,7 @@ pub(crate) fn presenter_view_system(
         });
 
     egui::Panel::bottom("presenter-dock")
-        .exact_size(68.0)
+        .exact_size(72.0)
         .frame(
             egui::Frame::new()
                 .fill(palette::PANEL)
@@ -2436,11 +2471,39 @@ mod tests {
         ));
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::Space);
+            .press(KeyCode::Enter);
 
         app.update();
 
         assert!(app.world().resource::<Timeline>().is_playing);
+    }
+
+    #[test]
+    fn space_pauses_the_presentation_without_skipping_to_the_next_step() {
+        let mut app = input_app();
+        let mut timeline = deck();
+        timeline.current_time = 0.4;
+        timeline.is_playing = true;
+        app.insert_resource(timeline);
+        app.world_mut().spawn((
+            Window {
+                focused: true,
+                ..default()
+            },
+            PrimaryWindow,
+        ));
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Space);
+
+        app.update();
+
+        let timeline = app.world().resource::<Timeline>();
+        assert!(!timeline.is_playing);
+        assert_eq!(
+            timeline.seek_request, None,
+            "Advance would have jumped to the stop at 1.0"
+        );
     }
 
     #[test]

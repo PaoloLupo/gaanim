@@ -12,8 +12,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::ui_kit::{
+    ButtonTone, Icon, card_frame, chip, field_frame, icon_button, paint_icon, palette,
+    primary_button, progress_track, secondary_button, section_label, segmented, status_badge,
+};
+
 const EXPORT_WORKER_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const EXPORT_WORKER_STALL_TIMEOUT: Duration = Duration::from_secs(120);
+const EXPORT_SUCCESS_MESSAGE: &str = "Export completed successfully";
 
 #[derive(Resource, Clone, Debug)]
 pub struct ProjectPaths {
@@ -88,13 +94,6 @@ impl ExportQuality {
             _ => 60,
         }
     }
-    fn label(self) -> &'static str {
-        match self {
-            Self::Draft => "Draft",
-            Self::Standard => "Standard",
-            Self::Production => "Production",
-        }
-    }
     fn crf(self) -> u32 {
         match self {
             Self::Draft => 24,
@@ -165,44 +164,104 @@ pub fn export_dialog_system(
     let mut trigger_open = false;
 
     if state.show_complete {
-        let mut complete_open = true;
-        egui::Window::new("Export Complete")
-            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-            .open(&mut complete_open)
-            .collapsible(false)
-            .resizable(false)
-            .default_width(480.0)
+        let cancelled = state.message.starts_with("export cancelled");
+        let (icon, color, title) = if state.completed_successfully {
+            (Icon::Check, palette::LOOP, "Exportación completada")
+        } else if cancelled {
+            (Icon::Close, palette::TEXT_MUTED, "Exportación cancelada")
+        } else {
+            (Icon::Warning, palette::DANGER, "La exportación falló")
+        };
+        let summary = [
+            state.elapsed_seconds.map(short_duration),
+            state.encoder_label.clone(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ");
+        let displayed_path = state
+            .completed_output_path
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_else(|| state.output_path.clone());
+        let can_open = state.completed_successfully && state.completed_output_path.is_some();
+
+        let modal = egui::Modal::new(egui::Id::new("export_complete"))
+            .frame(card_frame())
+            .backdrop_color(egui::Color32::from_black_alpha(150))
             .show(ctx, |ui| {
-                ui.label(egui::RichText::new(&state.message).size(16.0).strong());
-                if let Some(elapsed) = state.elapsed_seconds {
-                    ui.label(format!("Elapsed: {:.2}s", elapsed));
-                }
-                if let Some(encoder) = &state.encoder_label {
-                    ui.label(format!("Encoder: {encoder}"));
-                }
-                let displayed_path = state
-                    .completed_output_path
-                    .as_ref()
-                    .map(|path| path.to_string_lossy())
-                    .unwrap_or_else(|| state.output_path.as_str().into());
-                ui.add(
-                    egui::Label::new(format!("Output: {displayed_path}"))
-                        .wrap_mode(egui::TextWrapMode::Truncate),
-                );
-                ui.add_space(8.0);
+                ui.set_width(420.0);
+                ui.spacing_mut().item_spacing.y = 10.0;
                 ui.horizontal(|ui| {
-                    if state.completed_successfully
-                        && state.completed_output_path.is_some()
-                        && ui.button("Open exported file").clicked()
-                    {
-                        trigger_open = true;
+                    status_badge(ui, icon, color);
+                    ui.add_space(6.0);
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 2.0;
+                        ui.add_space(2.0);
+                        ui.label(
+                            egui::RichText::new(title)
+                                .size(16.0)
+                                .strong()
+                                .color(palette::TEXT),
+                        );
+                        if !summary.is_empty() {
+                            ui.label(
+                                egui::RichText::new(&summary)
+                                    .size(12.0)
+                                    .color(palette::TEXT_MUTED),
+                            );
+                        }
+                    });
+                });
+                if !state.completed_successfully && !cancelled {
+                    egui::Frame::new()
+                        .fill(palette::DANGER.gamma_multiply(0.08))
+                        .corner_radius(8.0)
+                        .inner_margin(egui::Margin::symmetric(12, 10))
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.label(
+                                egui::RichText::new(&state.message)
+                                    .size(12.0)
+                                    .color(palette::TEXT_MUTED),
+                            );
+                        });
+                } else if state.completed_successfully {
+                    field_frame().show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(&displayed_path)
+                                    .monospace()
+                                    .size(11.5)
+                                    .color(palette::TEXT_MUTED),
+                            )
+                            .truncate(),
+                        )
+                        .on_hover_text(&displayed_path);
+                    });
+                    // e.g. the file was written but could not be opened.
+                    if state.message != EXPORT_SUCCESS_MESSAGE {
+                        notice(ui, palette::STOP, &state.message);
                     }
-                    if ui.button(egui::RichText::new("OK").size(14.0)).clicked() {
+                }
+                ui.add_space(4.0);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    if can_open {
+                        if primary_button(ui, "Abrir archivo", None, true).clicked() {
+                            trigger_open = true;
+                        }
+                        if secondary_button(ui, "Cerrar", true).clicked() {
+                            trigger_ok = true;
+                        }
+                    } else if primary_button(ui, "Cerrar", None, true).clicked() {
                         trigger_ok = true;
                     }
                 });
             });
-        if !complete_open {
+        if modal.should_close() {
             trigger_ok = true;
         }
     }
@@ -247,7 +306,7 @@ pub fn export_dialog_system(
                 if let Some(progress) = lock.as_ref() {
                     let succeeded = matches!(progress.result.as_ref(), Some(Ok(())));
                     let message = match progress.result.as_ref() {
-                        Some(Ok(())) => "Export completed successfully".to_string(),
+                        Some(Ok(())) => EXPORT_SUCCESS_MESSAGE.to_string(),
                         Some(Err(error)) if error.starts_with("export cancelled") => error.clone(),
                         Some(Err(error)) => format!("Export failed: {error}"),
                         None => "Export finished without a result".to_string(),
@@ -289,52 +348,93 @@ pub fn export_dialog_system(
             } else {
                 0.0
             };
-            let mut active_open = true;
-            egui::Window::new("Exporting...")
-                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-                .open(&mut active_open)
-                .collapsible(false)
-                .resizable(false)
-                .default_width(480.0)
+            let cancelling = state.cancel_requested.load(Ordering::Acquire);
+            let file_name = Path::new(&state.output_path)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| state.output_path.clone());
+            // Closing by the backdrop or Escape must not cancel a long export
+            // by accident; only the explicit button does.
+            egui::Modal::new(egui::Id::new("export_progress"))
+                .frame(card_frame())
+                .backdrop_color(egui::Color32::from_black_alpha(150))
                 .show(ctx, |ui| {
-                    ui.label(egui::RichText::new("Exporting video").size(16.0).strong());
-                    ui.label(
-                        egui::RichText::new(format!("Frame {}/{}", prog_frame, prog_total))
-                            .size(16.0)
-                            .strong(),
+                    ui.set_width(420.0);
+                    ui.spacing_mut().item_spacing.y = 12.0;
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 2.0;
+                            ui.label(
+                                egui::RichText::new(if cancelling {
+                                    "Deteniendo…"
+                                } else {
+                                    "Exportando"
+                                })
+                                .size(16.0)
+                                .strong()
+                                .color(palette::TEXT),
+                            );
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(&file_name)
+                                        .size(12.0)
+                                        .color(palette::TEXT_MUTED),
+                                )
+                                .truncate(),
+                            );
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(
+                                egui::RichText::new(format!("{:.0}%", progress * 100.0))
+                                    .monospace()
+                                    .size(24.0)
+                                    .color(palette::TEXT),
+                            );
+                        });
+                    });
+                    progress_track(
+                        ui,
+                        progress,
+                        if cancelling {
+                            palette::TEXT_FAINT
+                        } else {
+                            palette::ACCENT
+                        },
                     );
-                    ui.label(format!(
-                        "Encoder: {}",
-                        encoder_label.as_deref().unwrap_or("detecting...")
-                    ));
-                    ui.add(
-                        egui::Label::new(format!("Output: {}", state.output_path))
-                            .wrap_mode(egui::TextWrapMode::Truncate),
-                    );
-                    ui.add_space(8.0);
-                    ui.add(
-                        egui::ProgressBar::new(progress)
-                            .desired_width(420.0)
-                            .desired_height(24.0)
-                            .text(format!("{:.1}%", progress * 100.0)),
-                    );
-                    ui.label(format!(
-                        "Elapsed: {:.1}s · ETA: {:.1}s",
-                        elapsed_seconds, eta_seconds
-                    ));
-                    ui.add_space(8.0);
-                    let cancelling = state.cancel_requested.load(Ordering::Acquire);
-                    if cancelling {
-                        ui.label("Stopping export...");
-                    }
-                    if ui
-                        .add_enabled(!cancelling, egui::Button::new("Cancel"))
-                        .clicked()
-                    {
-                        trigger_cancel = true;
-                    }
+                    ui.columns(4, |columns| {
+                        stat(
+                            &mut columns[0],
+                            "Frames",
+                            &format!("{prog_frame} / {prog_total}"),
+                        );
+                        stat(
+                            &mut columns[1],
+                            "Transcurrido",
+                            &short_duration(elapsed_seconds),
+                        );
+                        stat(
+                            &mut columns[2],
+                            "Restante",
+                            &if prog_frame > 0 {
+                                format!("~{}", short_duration(eta_seconds))
+                            } else {
+                                "—".to_string()
+                            },
+                        );
+                        stat(
+                            &mut columns[3],
+                            "Codificador",
+                            encoder_label.as_deref().unwrap_or("detectando…"),
+                        );
+                    });
+                    ui.add_space(2.0);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if secondary_button(ui, "Cancelar exportación", !cancelling).clicked() {
+                            trigger_cancel = true;
+                        }
+                    });
                 });
-            if trigger_cancel || !active_open {
+            if trigger_cancel {
                 state.cancel_requested.store(true, Ordering::Release);
             }
             return;
@@ -362,118 +462,228 @@ pub fn export_dialog_system(
     let fps = current_quality.fps();
     let total = (dur * fps as f64).ceil() as u64;
 
-    egui::Window::new("Export Scene")
-        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-        .collapsible(false)
-        .resizable(false)
+    let previous_format = current_format;
+    // Enter submits unless a field is using it (text or number entry).
+    let enter_submits = ctx.input(|input| input.key_pressed(egui::Key::Enter))
+        && ctx.memory(|memory| memory.focused().is_none());
+    let modal = egui::Modal::new(egui::Id::new("export_config"))
+        .frame(card_frame())
+        .backdrop_color(egui::Color32::from_black_alpha(150))
         .show(ctx, |ui| {
+            ui.set_width(460.0);
+            ui.spacing_mut().item_spacing.y = 8.0;
+
             ui.horizontal(|ui| {
-                ui.label("Format:");
-                egui::ComboBox::from_id_salt("export_fmt")
-                    .selected_text(export_format_label(current_format))
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut current_format, ExportFormat::Mp4, "MP4");
-                        ui.selectable_value(&mut current_format, ExportFormat::Webm, "WebM");
-                        ui.selectable_value(&mut current_format, ExportFormat::Webp, "WebP");
-                        ui.selectable_value(&mut current_format, ExportFormat::Gif, "GIF");
-                    });
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    ui.label(
+                        egui::RichText::new("Exportar")
+                            .size(17.0)
+                            .strong()
+                            .color(palette::TEXT),
+                    );
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{} · {} frames a {} fps",
+                            crate::format_time(dur),
+                            total,
+                            current_quality.fps(),
+                        ))
+                        .size(12.0)
+                        .color(palette::TEXT_MUTED),
+                    );
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                    if icon_button(ui, Icon::Close, ButtonTone::Ghost, true)
+                        .on_hover_text("Cerrar · Esc")
+                        .clicked()
+                    {
+                        trigger_cancel = true;
+                    }
+                });
             });
-            ui.horizontal(|ui| {
-                ui.label("Quality:");
-                egui::ComboBox::from_id_salt("export_qual")
-                    .selected_text(current_quality.label())
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut current_quality,
-                            ExportQuality::Draft,
-                            "Draft (fast, 30 fps)",
-                        );
-                        ui.selectable_value(
-                            &mut current_quality,
-                            ExportQuality::Standard,
-                            "Standard (balanced, 60 fps)",
-                        );
-                        ui.selectable_value(
-                            &mut current_quality,
-                            ExportQuality::Production,
-                            "Production (best, 60 fps)",
-                        );
-                    });
-            });
+            ui.add_space(8.0);
+
+            section_label(ui, "Formato");
+            segmented(
+                ui,
+                "export_format",
+                &mut current_format,
+                &[
+                    (ExportFormat::Mp4, "MP4", "Video H.264"),
+                    (ExportFormat::Webm, "WebM", "Video VP9"),
+                    (ExportFormat::Webp, "WebP", "Imagen animada"),
+                    (ExportFormat::Gif, "GIF", "Imagen animada"),
+                ],
+            );
+            ui.add_space(6.0);
+
+            section_label(ui, "Calidad");
+            segmented(
+                ui,
+                "export_quality",
+                &mut current_quality,
+                &[
+                    (ExportQuality::Draft, "Borrador", "30 fps · rápida"),
+                    (ExportQuality::Standard, "Estándar", "60 fps · equilibrada"),
+                    (ExportQuality::Production, "Producción", "60 fps · máxima"),
+                ],
+            );
+
             if current_format == ExportFormat::Mp4 {
+                ui.add_space(6.0);
                 ui.horizontal(|ui| {
-                    ui.label("Encoder:");
-                    egui::ComboBox::from_id_salt("export_encoder")
-                        .selected_text(current_encoder.display_name())
-                        .show_ui(ui, |ui| {
-                            for encoder in [
-                                VideoEncoder::Auto,
-                                VideoEncoder::Libx264,
-                                VideoEncoder::H264Nvenc,
-                                VideoEncoder::H264Amf,
-                                VideoEncoder::H264Qsv,
-                                VideoEncoder::H264Vaapi,
-                            ] {
-                                ui.selectable_value(
-                                    &mut current_encoder,
-                                    encoder,
-                                    encoder.display_name(),
-                                );
-                            }
-                        });
+                    section_label(ui, "Codificador");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        egui::ComboBox::from_id_salt("export_encoder")
+                            .width(200.0)
+                            .selected_text(current_encoder.display_name())
+                            .show_ui(ui, |ui| {
+                                for encoder in [
+                                    VideoEncoder::Auto,
+                                    VideoEncoder::Libx264,
+                                    VideoEncoder::H264Nvenc,
+                                    VideoEncoder::H264Amf,
+                                    VideoEncoder::H264Qsv,
+                                    VideoEncoder::H264Vaapi,
+                                ] {
+                                    ui.selectable_value(
+                                        &mut current_encoder,
+                                        encoder,
+                                        encoder.display_name(),
+                                    );
+                                }
+                            });
+                    });
                 });
                 if current_encoder == VideoEncoder::H264Vaapi {
-                    ui.colored_label(
-                        egui::Color32::YELLOW,
-                        "VAAPI is explicit-only: a driver failure can reset the GPU.",
+                    notice(
+                        ui,
+                        palette::STOP,
+                        "VAAPI solo se usa si lo eliges: un fallo del driver puede reiniciar la GPU.",
                     );
                 }
             }
+            ui.add_space(6.0);
+
+            section_label(ui, "Resolución");
             ui.horizontal(|ui| {
-                ui.label("Output:");
-                ui.text_edit_singleline(&mut current_output);
-            });
-            ui.horizontal(|ui| {
-                ui.label("Resolution:");
-                ui.add(egui::DragValue::new(&mut current_width).range(1..=16384));
-                ui.label("×");
-                ui.add(egui::DragValue::new(&mut current_height).range(1..=16384));
-            });
-            ui.horizontal(|ui| {
-                ui.label("Aspect fit:");
-                egui::ComboBox::from_id_salt("export_fit")
-                    .selected_text(match current_fit {
-                        OutputFit::Error => "Error on mismatch",
-                        OutputFit::Contain => "Contain",
-                        OutputFit::Cover => "Cover",
-                    })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut current_fit,
-                            OutputFit::Error,
-                            "Error on mismatch",
-                        );
-                        ui.selectable_value(&mut current_fit, OutputFit::Contain, "Contain");
-                        ui.selectable_value(&mut current_fit, OutputFit::Cover, "Cover");
+                ui.spacing_mut().item_spacing.x = 6.0;
+                for (label, width, height) in RESOLUTION_PRESETS {
+                    if chip(
+                        ui,
+                        label,
+                        current_width == width && current_height == height,
+                    )
+                    .clicked()
+                    {
+                        current_width = width;
+                        current_height = height;
+                    }
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    field_frame().inner_margin(egui::Margin::symmetric(6, 4)).show(ui, |ui| {
+                        ui.add(
+                            egui::DragValue::new(&mut current_height)
+                                .range(1..=16384)
+                                .speed(4.0),
+                        )
+                        .on_hover_text("Alto (px)");
                     });
+                    ui.label(egui::RichText::new("×").color(palette::TEXT_FAINT));
+                    field_frame().inner_margin(egui::Margin::symmetric(6, 4)).show(ui, |ui| {
+                        ui.add(
+                            egui::DragValue::new(&mut current_width)
+                                .range(1..=16384)
+                                .speed(4.0),
+                        )
+                        .on_hover_text("Ancho (px)");
+                    });
+                });
             });
-            ui.label(format!(
-                "Duration: {:.1}s → {} frames at {}fps",
-                dur, total, fps
-            ));
-            if let Some((width, height)) = scene_resolution {
-                ui.label(format!("Logical frame: {width}×{height}"));
+            ui.add_space(6.0);
+
+            section_label(ui, "Si la proporción no coincide con la escena");
+            segmented(
+                ui,
+                "export_fit",
+                &mut current_fit,
+                &[
+                    (OutputFit::Error, "Avisar con error", ""),
+                    (OutputFit::Contain, "Contener", ""),
+                    (OutputFit::Cover, "Cubrir", ""),
+                ],
+            );
+            if let Some((scene_w, scene_h)) = scene_resolution
+                && aspect_differs((scene_w, scene_h), (current_width, current_height))
+            {
+                let scene_aspect = aspect_label(scene_w, scene_h);
+                match current_fit {
+                    OutputFit::Error => notice(
+                        ui,
+                        palette::DANGER,
+                        &format!(
+                            "La escena es {scene_aspect} y la salida no: la exportación fallará. Elige Contener o Cubrir."
+                        ),
+                    ),
+                    OutputFit::Contain => notice(
+                        ui,
+                        palette::TEXT_MUTED,
+                        &format!("La escena ({scene_aspect}) se verá completa, con bandas."),
+                    ),
+                    OutputFit::Cover => notice(
+                        ui,
+                        palette::TEXT_MUTED,
+                        &format!("La escena ({scene_aspect}) llenará el cuadro y se recortará."),
+                    ),
+                }
             }
-            ui.add_space(8.0);
+            ui.add_space(6.0);
+
+            section_label(ui, "Archivo");
+            ui.add(
+                egui::TextEdit::singleline(&mut current_output)
+                    .desired_width(f32::INFINITY)
+                    .font(egui::FontId::monospace(12.0))
+                    .text_color(palette::TEXT)
+                    .frame(field_frame())
+                    .margin(egui::Margin::ZERO),
+            );
+            ui.add_space(14.0);
+
             ui.horizontal(|ui| {
-                if ui.button("Export").clicked() {
-                    trigger_export = true;
-                }
-                if ui.button("Cancel").clicked() {
-                    trigger_cancel = true;
-                }
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{current_width}×{current_height} · {} fps",
+                        current_quality.fps()
+                    ))
+                    .size(12.0)
+                    .color(palette::TEXT_FAINT),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    if primary_button(ui, "Exportar", Some(Icon::Export), true)
+                        .on_hover_text("Enter")
+                        .clicked()
+                    {
+                        trigger_export = true;
+                    }
+                    if secondary_button(ui, "Cancelar", true).clicked() {
+                        trigger_cancel = true;
+                    }
+                });
             });
         });
+    if modal.should_close() {
+        trigger_cancel = true;
+    }
+    if enter_submits && !trigger_cancel {
+        trigger_export = true;
+    }
+    if current_format != previous_format {
+        current_output = with_format_extension(&current_output, current_format);
+    }
 
     // Apply state changes AFTER the egui closures (no borrow conflicts)
     state.format = current_format;
@@ -832,14 +1042,96 @@ fn run_export_worker(
     }
 }
 
-fn export_format_label(f: ExportFormat) -> &'static str {
-    match f {
-        ExportFormat::Mp4 => "MP4",
-        ExportFormat::Webm => "WebM",
-        ExportFormat::Webp => "WebP",
-        ExportFormat::Gif => "GIF",
-        ExportFormat::PngSequence => "PNG",
+const RESOLUTION_PRESETS: [(&str, u32, u32); 4] = [
+    ("720p", 1280, 720),
+    ("1080p", 1920, 1080),
+    ("1440p", 2560, 1440),
+    ("4K", 3840, 2160),
+];
+
+/// Same rule as `export_canvas`: a mismatch is more than one raster pixel
+/// along both axes.
+fn aspect_differs(scene: (f64, f64), output: (u32, u32)) -> bool {
+    let (scene_w, scene_h) = scene;
+    if scene_w <= 0.0 || scene_h <= 0.0 {
+        return false;
     }
+    let aspect = scene_w / scene_h;
+    let (width, height) = (output.0 as f64, output.1 as f64);
+    (width / aspect - height).abs() > 1.0 && (height * aspect - width).abs() > 1.0
+}
+
+/// `16:9` for integral frames, `1.78:1` otherwise.
+fn aspect_label(width: f64, height: f64) -> String {
+    fn gcd(a: u64, b: u64) -> u64 {
+        if b == 0 { a } else { gcd(b, a % b) }
+    }
+    let integral = |value: f64| value.fract() == 0.0 && value > 0.0 && value < 1e9;
+    if integral(width) && integral(height) {
+        let (w, h) = (width as u64, height as u64);
+        let divisor = gcd(w, h).max(1);
+        format!("{}:{}", w / divisor, h / divisor)
+    } else if height > 0.0 {
+        format!("{:.2}:1", width / height)
+    } else {
+        "?".to_string()
+    }
+}
+
+/// Keep the output extension in step with the chosen format, leaving custom
+/// extensions alone.
+fn with_format_extension(path: &str, format: ExportFormat) -> String {
+    const KNOWN: [&str; 4] = ["mp4", "webm", "webp", "gif"];
+    let as_path = Path::new(path);
+    match as_path.extension().and_then(|ext| ext.to_str()) {
+        Some(ext) if KNOWN.contains(&ext.to_ascii_lowercase().as_str()) => as_path
+            .with_extension(export_format_arg(format))
+            .to_string_lossy()
+            .into_owned(),
+        _ => path.to_string(),
+    }
+}
+
+fn short_duration(seconds: f64) -> String {
+    let seconds = seconds.max(0.0);
+    if seconds < 60.0 {
+        format!("{seconds:.1} s")
+    } else {
+        let whole = seconds.round() as u64;
+        format!("{}:{:02} min", whole / 60, whole % 60)
+    }
+}
+
+fn stat(ui: &mut egui::Ui, label: &str, value: &str) {
+    ui.spacing_mut().item_spacing.y = 2.0;
+    ui.label(
+        egui::RichText::new(label)
+            .size(11.0)
+            .color(palette::TEXT_FAINT),
+    );
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(value)
+                .monospace()
+                .size(12.5)
+                .color(palette::TEXT),
+        )
+        .truncate(),
+    );
+}
+
+fn notice(ui: &mut egui::Ui, color: egui::Color32, text: &str) {
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(14.0, 16.0), egui::Sense::hover());
+        paint_icon(
+            ui.painter(),
+            egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(12.0)),
+            Icon::Warning,
+            color,
+        );
+        ui.add(egui::Label::new(egui::RichText::new(text).size(12.0).color(color)).wrap());
+    });
 }
 
 fn export_format_arg(format: ExportFormat) -> &'static str {
@@ -857,8 +1149,9 @@ pub fn export_per_frame_system() {}
 #[cfg(test)]
 mod tests {
     use super::{
-        ExportTelemetry, WorkerStopReason, forward_worker_line, open_exported_file_with,
-        resolve_output_path, worker_stop_reason,
+        ExportFormat, ExportTelemetry, WorkerStopReason, aspect_differs, aspect_label,
+        forward_worker_line, open_exported_file_with, resolve_output_path, short_duration,
+        with_format_extension, worker_stop_reason,
     };
     use std::path::Path;
     use std::time::{Duration, Instant};
@@ -951,5 +1244,42 @@ mod tests {
 
         assert!(error.contains("missing.mp4"));
         assert!(error.contains("no default application"));
+    }
+
+    #[test]
+    fn output_extension_follows_the_selected_format() {
+        assert_eq!(
+            with_format_extension("exports/output.mp4", ExportFormat::Gif),
+            "exports/output.gif"
+        );
+        assert_eq!(
+            with_format_extension("clip.WEBM", ExportFormat::Mp4),
+            "clip.mp4"
+        );
+        // Custom or missing extensions are the user's choice.
+        assert_eq!(
+            with_format_extension("clip.mov", ExportFormat::Webm),
+            "clip.mov"
+        );
+        assert_eq!(with_format_extension("clip", ExportFormat::Webm), "clip");
+    }
+
+    #[test]
+    fn aspect_warning_matches_the_exporter_tolerance() {
+        assert!(!aspect_differs((16.0, 9.0), (1920, 1080)));
+        assert!(!aspect_differs((16.0, 9.0), (1921, 1080)));
+        assert!(aspect_differs((16.0, 9.0), (1080, 1080)));
+        assert!(aspect_differs((4.0, 3.0), (1920, 1080)));
+        assert!(!aspect_differs((0.0, 9.0), (1920, 1080)));
+        assert_eq!(aspect_label(16.0, 9.0), "16:9");
+        assert_eq!(aspect_label(1920.0, 1080.0), "16:9");
+        assert_eq!(aspect_label(14.2, 8.0), "1.77:1");
+    }
+
+    #[test]
+    fn short_durations_switch_to_minutes() {
+        assert_eq!(short_duration(12.34), "12.3 s");
+        assert_eq!(short_duration(125.0), "2:05 min");
+        assert_eq!(short_duration(-1.0), "0.0 s");
     }
 }

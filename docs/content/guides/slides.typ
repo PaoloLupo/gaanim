@@ -100,10 +100,12 @@ donde la reproducción espera al orador. El cockpit se lee de arriba abajo:
 - *Up Next:* el siguiente punto de pausa, indicando si es otro step de la misma
   diapositiva o la siguiente diapositiva.
 - *Speaker notes:* texto claro con tamaño ajustable mediante `A−`/`A+`.
-- *Dock:* inicio, `Previous`, `Advance`/`Pause`, fin, `Overview`, `Black` y
-  `White`, el progreso de las previews y la lista de atajos (`⌨`).
+- *Dock:* primer step, step anterior, reproducir/pausa, step siguiente, último
+  step, `Overview`, `Black` y `White`, el progreso de las previews y la lista de
+  atajos (icono de teclado).
 
-Usa `Right`, `Space`, `Enter` o clic en la pantalla de audiencia para avanzar;
+Usa `Right`, `Enter` o clic en la pantalla de audiencia para avanzar; `Space`
+solo pausa o reanuda la animación en curso y nunca salta al siguiente step;
 `Left`/`Backspace` para volver; `Home`/`End` para ir al primer o último step;
 `O` para el overview, que busca por nombre de diapositiva, step o notas y salta
 a la primera coincidencia con `Enter`; y `B`/`W` para apagar la audiencia en
@@ -112,9 +114,9 @@ anterior termine con un stop en el mismo instante. Si cierras Presenter View, la
 presentación sigue en fullscreen y `P` vuelve a abrir el cockpit. `Esc` cierra
 primero el overview o blanking activo y después sale del modo presentación.
 
-La pantalla fullscreen muestra un dock compacto con inicio, anterior, avance o
-pausa, fin, el nombre de la diapositiva y la barra de progreso al llevar el
-cursor a su zona inferior. El dock se oculta al retirar el cursor o cambiar el
+La pantalla fullscreen muestra un dock compacto con primer step, step anterior,
+reproducir/pausa, step siguiente, último step, el nombre y número de la
+diapositiva y la barra de progreso al llevar el cursor a su zona inferior. El dock se oculta al retirar el cursor o cambiar el
 foco al cockpit. Sus botones y los atajos pasan por las mismas acciones, por lo
 que un clic en el dock no avanza dos veces.
 

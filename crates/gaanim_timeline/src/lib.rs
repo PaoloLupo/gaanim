@@ -222,8 +222,14 @@ pub fn interactive_stop_input_system(
         return;
     }
 
-    if key_pressed(KeyCode::Space)
-        || key_pressed(KeyCode::Enter)
+    // Space only plays or pauses; it never skips to the next stop, so a
+    // speaker can hold an animation mid-way without losing their place.
+    if key_pressed(KeyCode::Space) {
+        timeline.is_playing = !timeline.is_playing;
+        return;
+    }
+
+    if key_pressed(KeyCode::Enter)
         || key_pressed(KeyCode::ArrowRight)
         || mouse_pressed(MouseButton::Left)
     {
@@ -693,6 +699,44 @@ mod tests {
         assert!(!app.world().contains_resource::<ButtonInput<KeyCode>>());
         assert!(!app.world().contains_resource::<ButtonInput<MouseButton>>());
         app.update();
+    }
+
+    #[test]
+    fn space_pauses_between_stops_instead_of_skipping_ahead() {
+        let mut timeline = Timeline::new();
+        timeline.cached_duration = 2.0;
+        timeline.current_time = 0.3;
+        timeline.is_playing = true;
+        timeline.set_segments(vec![timeline::SegmentMetadata {
+            id: 1,
+            name: "slide".to_owned(),
+            notes: None,
+            start_time: 0.0,
+            end_time: 2.0,
+            stops: vec![timeline::SegmentStop {
+                name: None,
+                time: 1.0,
+            }],
+        }]);
+        let mut app = App::new();
+        app.insert_resource(timeline)
+            .init_resource::<ButtonInput<KeyCode>>()
+            .add_systems(Update, interactive_stop_input_system);
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Space);
+        app.update();
+        let timeline = app.world().resource::<Timeline>();
+        assert!(!timeline.is_playing, "Space pauses mid-animation");
+        assert_eq!(timeline.seek_request, None, "Space never jumps to a stop");
+
+        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keys.release(KeyCode::Space);
+        keys.clear();
+        keys.press(KeyCode::Space);
+        app.update();
+        assert!(app.world().resource::<Timeline>().is_playing, "and resumes");
     }
     #[test]
     fn playback_crosses_segment_boundaries_and_pauses_only_at_explicit_stops() {
