@@ -9,6 +9,7 @@ use std::process::{Command, Output};
 
 const VIDEO_PROJECT_TEMPLATE: &str = include_str!("../../../templates/video_project.py");
 const SLIDES_PROJECT_TEMPLATE: &str = include_str!("../../../templates/slides_project.py");
+const PROJECT_AGENTS: &str = include_str!("../../../templates/project_agents.md");
 const PROJECT_GITIGNORE: &str = r#"exports/*
 !exports/.gitkeep
 snapshots/
@@ -128,6 +129,7 @@ pub fn create_project(options: &CreateProjectOptions) -> Result<ResolvedProject,
         (options.directory.join(".python-version"), PYTHON_VERSION),
         (options.directory.join(".gitignore"), PROJECT_GITIGNORE),
         (options.directory.join("README.md"), readme.as_str()),
+        (options.directory.join("AGENTS.md"), PROJECT_AGENTS),
         (options.directory.join("assets").join(".gitkeep"), ""),
         (options.directory.join("exports").join(".gitkeep"), ""),
     ];
@@ -742,6 +744,9 @@ mod tests {
             assert!(source.contains("scene.render()"));
             assert!(!source.contains("scene.export("));
             let readme = std::fs::read_to_string(directory.join("README.md")).unwrap();
+            let agents = std::fs::read_to_string(directory.join("AGENTS.md")).unwrap();
+            assert!(agents.contains("gaanim/_docs"));
+            assert!(agents.contains("gaanim check ."));
             if kind == ProjectKind::Video {
                 assert!(readme.contains("gaanim export"));
             }

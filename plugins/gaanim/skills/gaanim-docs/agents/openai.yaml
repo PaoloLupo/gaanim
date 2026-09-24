@@ -1,0 +1,4 @@
+interface:
+  display_name: "Documentacion de Gaanim"
+  short_description: "Consulta la documentacion de la version instalada"
+  default_prompt: "Usa $gaanim-docs para consultar la documentacion de Gaanim antes de escribir esta escena."

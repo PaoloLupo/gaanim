@@ -44,6 +44,8 @@ def validate_archive(wheel: Path) -> list[str]:
         "gaanim/matrix.py",
         "gaanim/matrix.pyi",
         "gaanim/py.typed",
+        "gaanim/_docs/index.typ",
+        "gaanim/_docs/api/scene.typ",
     }
     missing = sorted(required.difference(names))
 

@@ -46,7 +46,7 @@ def _fast_commands(repo: Path, change: impact_tool.Impact) -> list[list[str]]:
     non_docs_changes = [
         path
         for path in change.changed_files
-        if not path.startswith("docs/") and not path.startswith("plugins/gaanim-dev/")
+        if not path.startswith(("docs/", *impact_tool.PLUGIN_PREFIXES))
     ]
     if docs_changed and not non_docs_changes:
         _append_unique(commands, ["just", "docs"])
@@ -63,10 +63,11 @@ def _fast_commands(repo: Path, change: impact_tool.Impact) -> list[list[str]]:
                 arg for crate in crates for arg in ("-p", crate)
             ]])
     if plugin_changed:
-        _append_unique(
-            commands,
-            [sys.executable, "-m", "unittest", "discover", "-s", "plugins/gaanim-dev/tests"],
-        )
+        for prefix in impact_tool.PLUGIN_PREFIXES:
+            _append_unique(
+                commands,
+                [sys.executable, "-m", "unittest", "discover", "-s", f"{prefix}tests"],
+            )
         _append_unique(commands, [sys.executable, "plugins/gaanim-dev/scripts/audit.py"])
     return commands
 
@@ -102,6 +103,7 @@ def _profile_commands(
             ["just", "docs"],
             ["just", "benchmark", "smoke"],
             [sys.executable, "-m", "unittest", "discover", "-s", "plugins/gaanim-dev/tests"],
+            [sys.executable, "-m", "unittest", "discover", "-s", "plugins/gaanim/tests"],
             [sys.executable, "plugins/gaanim-dev/scripts/audit.py"],
         ]
     return []

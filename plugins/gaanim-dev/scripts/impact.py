@@ -46,6 +46,7 @@ PERFORMANCE_CRATES = {
     "gaanim_timeline",
 }
 
+PLUGIN_PREFIXES = ("plugins/gaanim-dev/", "plugins/gaanim/")
 PERFORMANCE_PATHS = {
     "examples/performance_benchmark.py",
     "tests/benchmark_runtime.py",
@@ -154,7 +155,7 @@ def analyze_paths(repo: Path, paths: Iterable[str]) -> Impact:
     performance = bool(set(crates) & PERFORMANCE_CRATES) or any(
         path in PERFORMANCE_PATHS for path in normalized
     )
-    plugin = any(path.startswith("plugins/gaanim-dev/") for path in normalized)
+    plugin = any(path.startswith(PLUGIN_PREFIXES) for path in normalized)
     repo_config = any(
         path in {"Cargo.toml", "justfile", "AGENTS.md", "README.md"}
         or path.startswith(".github/")
@@ -189,7 +190,7 @@ def analyze_paths(repo: Path, paths: Iterable[str]) -> Impact:
 
     commands: list[str] = []
     docs_only = bool(normalized) and all(
-        path.startswith("docs/") or path.startswith("plugins/gaanim-dev/")
+        path.startswith(("docs/", *PLUGIN_PREFIXES))
         for path in normalized
     ) and bool(docs_files)
     if docs_only:
@@ -206,7 +207,7 @@ def analyze_paths(repo: Path, paths: Iterable[str]) -> Impact:
     if public_api:
         commands.append("just docs")
     if plugin:
-        commands.append("python -m unittest discover -s plugins/gaanim-dev/tests")
+        commands.extend(f"python -m unittest discover -s {prefix}tests" for prefix in PLUGIN_PREFIXES)
     if performance:
         commands.append("just benchmark smoke")
     for example in visual_examples:

@@ -9,8 +9,8 @@ Gaanim se distribuye en dos piezas complementarias:
 
 - El ejecutable `gaanim`, que es el único runtime y proporciona ejecución,
   previsualización, hot reload, render y exportación.
-- El wheel de autoría, que solo instala helpers Python, stubs y `py.typed` para
-  el entorno del proyecto. No contiene renderer, extensión nativa ni un modo
+- El wheel de autoría, que solo instala helpers Python, stubs, `py.typed` y las
+  fuentes Typst de la documentación (`gaanim/_docs`) para el entorno del proyecto. No contiene renderer, extensión nativa ni un modo
   headless independiente. Requiere Python 3.12 o superior.
 
 ## Inicio rápido
@@ -172,6 +172,18 @@ para obtener la experiencia de autoría, pero siempre se ejecutan con
 Después de `just python-develop`, ejecute `just validate-python-api` para
 comprobar que el stub tipado público sigue coincidiendo con el módulo PyO3
 embebido por el ejecutable.
+
+## Agentes de código
+
+El wheel incluye `docs/content` como `gaanim/_docs`, así que cada proyecto tiene
+la documentación de su versión instalada. `gaanim init` genera un `AGENTS.md`
+que apunta a ella. Para Claude Code, el plugin `gaanim` añade la skill
+`gaanim-docs`, que localiza, indexa y busca esas docs en cualquier proyecto:
+
+```text
+/plugin marketplace add PaoloLupo/gaanim
+/plugin install gaanim@gaanim
+```
 
 ## Exportar
 
