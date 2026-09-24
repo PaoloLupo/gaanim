@@ -129,27 +129,27 @@ impl PyEasing {
 
     #[classattr]
     fn SMOOTH_SPRING() -> Self {
-        Self::spring_preset(0.0, 1.0, "Easing.SMOOTH_SPRING")
+        Self::spring_preset(0.0, 1.2, "Easing.SMOOTH_SPRING")
     }
 
     #[classattr]
     fn GENTLE() -> Self {
-        Self::spring_preset(0.05, 0.8, "Easing.GENTLE")
+        Self::spring_preset(0.05, 0.5, "Easing.GENTLE")
     }
 
     #[classattr]
     fn QUICK() -> Self {
-        Self::spring_preset(0.1, 1.6, "Easing.QUICK")
+        Self::spring_preset(0.1, 1.4, "Easing.QUICK")
     }
 
     #[classattr]
     fn SNAPPY() -> Self {
-        Self::spring_preset(0.2, 2.0, "Easing.SNAPPY")
+        Self::spring_preset(0.2, 1.4, "Easing.SNAPPY")
     }
 
     #[classattr]
     fn BOUNCY() -> Self {
-        Self::spring_preset(0.45, 1.0, "Easing.BOUNCY")
+        Self::spring_preset(0.45, 0.6, "Easing.BOUNCY")
     }
 
     #[staticmethod]

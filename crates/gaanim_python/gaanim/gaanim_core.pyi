@@ -52,9 +52,9 @@ class Easing:
     SMOOTH_SPRING: ClassVar[Easing]
     """Critically damped spring: fastest settle without overshoot."""
     GENTLE: ClassVar[Easing]
-    """Soft spring with a barely visible overshoot that settles late."""
+    """Soft, unhurried spring with a barely visible overshoot."""
     QUICK: ClassVar[Easing]
-    """Brisk spring that settles by about 60% of the clip."""
+    """Brisk spring with a small overshoot that settles early."""
     SNAPPY: ClassVar[Easing]
     """Fast spring with a crisp 20% overshoot."""
     BOUNCY: ClassVar[Easing]
