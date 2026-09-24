@@ -1393,7 +1393,9 @@ class Drawable:
         and ``rotation`` are relative to the authored pose
         (``base + offset + scale * sample``); ``scale``, ``opacity``, and
         ``signal`` are absolute (``offset + scale * sample``). Samples outside
-        the series clamp to its first/last value. Detach with
+        the series clamp to its first/last value. Each property is an
+        independent channel: driving ``"x"`` and then ``"y"`` keeps both,
+        while driving the same property again replaces it. Detach with
         ``remove_updater()``.
 
         Example:

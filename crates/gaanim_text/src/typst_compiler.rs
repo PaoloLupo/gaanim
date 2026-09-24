@@ -228,6 +228,12 @@ pub fn clear_typst_layout_cache() {
     }
 }
 
+/// Combining accent that Typst lays out for a math symbol called as a
+/// function, such as `⋅` in `dot(x)`, using Typst's own accent table.
+pub fn math_accent_for_symbol(symbol: &str) -> Option<char> {
+    typst::math::Accent::combining(symbol).map(|accent| accent.0)
+}
+
 fn shared_typst_resources() -> &'static SharedTypstResources {
     SHARED_TYPST_RESOURCES.get_or_init(|| {
         let mut fonts = typst_kit::fonts::FontStore::new();

@@ -743,7 +743,7 @@ scene.play([rod.animate.write().duration(0.8), mass.animate.shift_by(-1, 0.5).du
     (name: "scale, offset", type: "float", default: "1.0, 0.0", desc: [Output transform applied to each sample.]),
   ),
   returns: (type: "Drawable", desc: [The same drawable for fluent chaining.]),
-  desc: [Drives the property as a pure function of timeline time, evaluated in Rust — no per-frame Python callbacks. Translation axes and `rotation` are relative to the authored pose (`base + offset + scale * sample`); `scale`, `opacity`, and `signal` are absolute. Samples outside the series clamp to its first/last value. Seeks and paused scrubbing are exact because the driver keeps no accumulated state. Detach with `remove_updater()`.],
+  desc: [Drives the property as a pure function of timeline time, evaluated in Rust — no per-frame Python callbacks. Translation axes and `rotation` are relative to the authored pose (`base + offset + scale * sample`); `scale`, `opacity`, and `signal` are absolute. Samples outside the series clamp to its first/last value. Seeks and paused scrubbing are exact because the driver keeps no accumulated state. Each property is an independent channel: driving `"x"` and then `"y"` keeps both, while driving the same property again replaces it. Detach with `remove_updater()`.],
 )[
 ```python
 from gaanim import CYAN, Scene

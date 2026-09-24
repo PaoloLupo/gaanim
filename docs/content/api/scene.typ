@@ -734,6 +734,11 @@ VAAPI es explícito porque un driver defectuoso puede bloquear la GPU completa.
 el canal alpha en WebM, WebP y secuencias PNG; MP4 y GIF lo rechazan. La escena
 debe usar un fondo con alpha, por ejemplo `background="#00000000"`.
 
+Una secuencia PNG escribe un archivo por fotograma. Si `--output` contiene un
+patrón `%d` o `%0Nd` (por ejemplo `frames/f_%04d.png`), ese patrón se sustituye
+por el número de fotograma empezando en 0 (`f_0000.png`, `f_0001.png`, …); sin
+patrón, el número se añade al nombre como `f_00000.png`.
+
 Run a script through the Gaanim application:
 
 ```bash
