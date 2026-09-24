@@ -41,6 +41,8 @@ pub struct ReactiveReadout {
     pub prefix: String,
     pub suffix: String,
     pub invalid: String,
+    /// Character shown between the integer and fractional digits.
+    pub decimal_separator: char,
     pub font_family: String,
     /// Font weight (1..=1000) resolved like `scene.text`; `None` keeps the
     /// family's regular face.
@@ -60,6 +62,22 @@ pub struct ReactiveReadoutLayout {
     pub number: gaanim_core::ObjectId,
     pub unit: Option<gaanim_core::ObjectId>,
     pub spacing: f64,
+}
+
+/// Replace the `.` of a formatted number with `separator`. With a comma
+/// separator, `,` grouping becomes `.` so `1,234.5` reads `1.234,5`.
+pub fn localize_decimal_separator(number: &str, separator: char) -> String {
+    if separator == '.' {
+        return number.to_owned();
+    }
+    number
+        .chars()
+        .map(|c| match c {
+            '.' => separator,
+            ',' if separator == ',' => '.',
+            c => c,
+        })
+        .collect()
 }
 
 pub fn format_reactive_number(value: f64, specification: &str, invalid: &str) -> String {
@@ -267,7 +285,10 @@ pub fn reactive_readout_update_system(
             baseline.0 = rolling.baseline();
             continue;
         }
-        let number = format_reactive_number(value, &readout.format, &readout.invalid);
+        let number = localize_decimal_separator(
+            &format_reactive_number(value, &readout.format, &readout.invalid),
+            readout.decimal_separator,
+        );
         let text = format!("{}{}{}", readout.prefix, number, readout.suffix);
         if text == readout.last_text {
             let cached_geometry_is_current = path_source
@@ -934,6 +955,7 @@ mod tests {
                     prefix: String::new(),
                     suffix: String::new(),
                     invalid: "—".to_owned(),
+                    decimal_separator: '.',
                     font_family: "sans-serif".to_owned(),
                     font_weight: None,
                     font_size: 40.0,
@@ -980,6 +1002,7 @@ mod tests {
                     prefix: String::new(),
                     suffix: String::new(),
                     invalid: "—".to_owned(),
+                    decimal_separator: '.',
                     font_family: "sans-serif".to_owned(),
                     font_weight: None,
                     font_size: 40.0,
@@ -1087,6 +1110,7 @@ mod tests {
                     prefix: String::new(),
                     suffix: String::new(),
                     invalid: "—".to_owned(),
+                    decimal_separator: '.',
                     font_family: "Libertinus Serif".to_owned(),
                     font_weight: None,
                     font_size: 0.75,

@@ -565,6 +565,33 @@ impl DrawableHandle {
         }
     }
 
+    /// Show `separator` between the integer and fractional digits of a
+    /// reactive readout (`,` also turns `,` grouping into `.`). Digits,
+    /// signs, whitespace, and non-readout drawables are rejected.
+    pub fn readout_decimal_separator(&self, separator: char) -> Result<Self, String> {
+        if separator.is_ascii_digit()
+            || separator.is_whitespace()
+            || matches!(separator, '+' | '-' | 'e' | 'E' | '%')
+        {
+            return Err(format!("invalid decimal separator {separator:?}"));
+        }
+        let mut is_readout = false;
+        self.update_spec(|spec| {
+            if let SpawnKind::ReactiveReadout {
+                decimal_separator, ..
+            } = &mut spec.kind
+            {
+                *decimal_separator = separator;
+                is_readout = true;
+            }
+        });
+        if is_readout {
+            Ok(self.clone())
+        } else {
+            Err("decimal separators apply only to reactive readouts".into())
+        }
+    }
+
     fn update_spec(&self, f: impl FnOnce(&mut ObjectSpec)) -> Self {
         f(&mut self.spec.lock().expect("object spec poisoned"));
         self.clone()

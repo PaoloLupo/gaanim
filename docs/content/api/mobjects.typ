@@ -1466,8 +1466,8 @@ scene.play([axes.animate.create(), curve.animate.write(), amplitude.animate.set(
 #api-entry(
   name: "Visualization.variable",
   kind: "factory",
-  signature: "variable(initial, *, label, format='.2f', prefix='', suffix='', unit=None, font_size=None, color=None, invalid='invalid') -> Variable",
-  params: ((name: "label", type: "str", default: none, desc: [Etiqueta visible colocada antes del signo igual.]), (name: "format", type: "str", default: "'.2f'", desc: [Formato numérico: ancho, signo, agrupación, precisión y `f`, `e`, `g` o `%`.]), (name: "unit", type: "str | None", default: none, desc: [Unidad visible opcional.]),),
+  signature: "variable(initial, *, label, format='.2f', prefix='', suffix='', unit=None, font_size=None, color=None, invalid='invalid', decimal_separator='.') -> Variable",
+  params: ((name: "label", type: "str", default: none, desc: [Etiqueta visible colocada antes del signo igual.]), (name: "format", type: "str", default: "'.2f'", desc: [Formato numérico: ancho, signo, agrupación, precisión y `f`, `e`, `g` o `%`.]), (name: "unit", type: "str | None", default: none, desc: [Unidad visible opcional.]), (name: "decimal_separator", type: "str", default: "'.'", desc: [Carácter entre la parte entera y la decimal; `','` muestra `3,14` y convierte la agrupación `,` en `.` (`1.234,50`).]),),
   returns: (type: "Variable", desc: [Objeto dibujable y escalar reactivo al mismo tiempo.]),
   desc: [Variables accept the same scalar operations and animation methods as `Parameter`. Their `label`, `equals`, `number`, and `unit` properties expose stylable `Drawable` parts. All terms use `font_size`, defaulting together to the 0.48-unit reactive annotation size. The parts keep equal equation-style spacing; the label, number, and unit share a visual baseline while the equality sign stays centered on the numeric axis. `color` paints every visible term, including the value after updates and seeks. The returned group retains normal create, write, fade, layout, and style operations.],
 )[
@@ -1483,8 +1483,8 @@ scene.play([k.animate.create(), k.animate.set(100).duration(1.5)])
 #api-entry(
   name: "Visualization.readout",
   kind: "factory",
-  signature: "readout(source, *, inputs=(), label=None, format='.2f', prefix='', suffix='', unit=None, font_size=None, color=None, invalid='invalid') -> Readout",
-  params: ((name: "source", type: "number | Parameter | Variable | Computed | callable", default: none, desc: [Escalar o función Python pura cuyos argumentos corresponden a `inputs`.]), (name: "inputs", type: "Sequence[Parameter | Variable | Computed | TimeInput]", default: "()", desc: [Dependencias explícitas en orden.]), (name: "invalid", type: "str", default: "'invalid'", desc: [Texto usado cuando la evaluación es inválida o no finita.]),),
+  signature: "readout(source, *, inputs=(), label=None, format='.2f', prefix='', suffix='', unit=None, font_size=None, color=None, invalid='invalid', decimal_separator='.') -> Readout",
+  params: ((name: "source", type: "number | Parameter | Variable | Computed | callable", default: none, desc: [Escalar o función Python pura cuyos argumentos corresponden a `inputs`.]), (name: "inputs", type: "Sequence[Parameter | Variable | Computed | TimeInput]", default: "()", desc: [Dependencias explícitas en orden.]), (name: "invalid", type: "str", default: "'invalid'", desc: [Texto usado cuando la evaluación es inválida o no finita.]), (name: "decimal_separator", type: "str", default: "'.'", desc: [Separador decimal, como en `variable`. Un dígito, signo, espacio, `e` o `%` produce `ValueError`.]),),
   returns: (type: "Readout", desc: [Grupo dibujable reactivo.]),
   desc: [The numeric path is regenerated only if the formatted text changes, avoiding work for sub-precision animation steps. `label`, `equals`, `number`, and `unit` are available as drawable parts; every part uses `font_size`, defaulting together to 48 scene units. They keep equal equation-style spacing and a shared visual baseline for textual terms. `color` paints the complete row and remains applied to regenerated numeric glyphs and timeline seeks.],
 )[

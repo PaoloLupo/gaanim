@@ -339,6 +339,23 @@ fn field_evaluator_3d(
     Ok((field, "python"))
 }
 
+/// One visible character that cannot be read as part of the number.
+fn parse_decimal_separator(value: &str) -> PyResult<char> {
+    let mut chars = value.chars();
+    match (chars.next(), chars.next()) {
+        (Some(separator), None)
+            if !separator.is_ascii_digit()
+                && !separator.is_whitespace()
+                && !matches!(separator, '+' | '-' | 'e' | 'E' | '%') =>
+        {
+            Ok(separator)
+        }
+        _ => Err(PyValueError::new_err(
+            "decimal_separator must be one character that is not a digit, sign, space, 'e' or '%'",
+        )),
+    }
+}
+
 fn build_readout_parts(
     canvas: &mut ApiCanvas,
     source: ScalarSource,
@@ -350,6 +367,7 @@ fn build_readout_parts(
     font_size: Option<f64>,
     color: Option<PyColor>,
     invalid: String,
+    decimal_separator: char,
 ) -> (
     gaanim_api::canvas::DrawableHandle,
     Option<PyDrawable>,
@@ -360,6 +378,11 @@ fn build_readout_parts(
     let font_size = font_size.unwrap_or(DEFAULT_REACTIVE_TEXT_SIZE);
     let mut number =
         canvas.reactive_readout(source, format, prefix, suffix, invalid, Some(font_size));
+    if decimal_separator != '.' {
+        number = number
+            .readout_decimal_separator(decimal_separator)
+            .expect("decimal separator validated by the public binding");
+    }
     if let Some(color) = color.clone() {
         number = number.fill(color.0);
     }
@@ -2729,7 +2752,7 @@ impl PyVisualization {
         Ok(PyParameter { inner })
     }
 
-    #[pyo3(signature = (source, *, inputs=Vec::new(), label=None, format=".2f", prefix="", suffix="", unit=None, font_size=None, color=None, invalid="invalid"))]
+    #[pyo3(signature = (source, *, inputs=Vec::new(), label=None, format=".2f", prefix="", suffix="", unit=None, font_size=None, color=None, invalid="invalid", decimal_separator="."))]
     #[allow(clippy::too_many_arguments)]
     fn readout<'py>(
         &self,
@@ -2744,8 +2767,10 @@ impl PyVisualization {
         font_size: Option<f64>,
         color: Option<PyColor>,
         invalid: &str,
+        decimal_separator: &str,
     ) -> PyResult<Py<PyReadout>> {
         crate::custom::ensure_authoring_allowed()?;
+        let decimal_separator = parse_decimal_separator(decimal_separator)?;
         let source = if source.is_callable() {
             callable_source(py, source.unbind(), inputs, &self.inner)?
         } else {
@@ -2767,6 +2792,7 @@ impl PyVisualization {
             font_size,
             color,
             invalid.to_owned(),
+            decimal_separator,
         );
         Py::new(
             py,
@@ -2774,7 +2800,7 @@ impl PyVisualization {
         )
     }
 
-    #[pyo3(signature = (initial, *, label, format=".2f", prefix="", suffix="", unit=None, font_size=None, color=None, invalid="invalid"))]
+    #[pyo3(signature = (initial, *, label, format=".2f", prefix="", suffix="", unit=None, font_size=None, color=None, invalid="invalid", decimal_separator="."))]
     #[allow(clippy::too_many_arguments)]
     fn variable<'py>(
         &self,
@@ -2788,8 +2814,10 @@ impl PyVisualization {
         font_size: Option<f64>,
         color: Option<PyColor>,
         invalid: &str,
+        decimal_separator: &str,
     ) -> PyResult<Py<PyVariable>> {
         crate::custom::ensure_authoring_allowed()?;
+        let decimal_separator = parse_decimal_separator(decimal_separator)?;
         let mut canvas = self.inner.lock().expect("scene canvas poisoned");
         let parameter = PyParameter {
             inner: canvas.parameter(initial).map_err(value_error)?,
@@ -2805,6 +2833,7 @@ impl PyVisualization {
             font_size,
             color,
             invalid.to_owned(),
+            decimal_separator,
         );
         Py::new(
             py,

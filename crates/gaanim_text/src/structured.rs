@@ -99,6 +99,10 @@ pub struct TextFlow {
     pub overflow: TextOverflow,
     pub direction: TextDirection,
     pub hyphenate: bool,
+    /// ISO 639 language code (`"es"`, `"en"`, …) selecting hyphenation
+    /// patterns and language-specific typography; `None` keeps Typst's default.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub lang: Option<String>,
 }
 
 impl Default for TextFlow {
@@ -111,6 +115,7 @@ impl Default for TextFlow {
             overflow: TextOverflow::Clip,
             direction: TextDirection::Auto,
             hyphenate: false,
+            lang: None,
         }
     }
 }
@@ -205,6 +210,8 @@ pub enum TextSpecError {
     InvalidLineSpacing,
     #[error("max_lines must be at least one")]
     InvalidMaxLines,
+    #[error("lang must be a two- or three-letter lowercase ISO 639 code such as \"es\"")]
+    InvalidLang,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -369,6 +376,11 @@ fn validate_flow(flow: &TextFlow) -> Result<(), TextSpecError> {
     }
     if flow.max_lines == Some(0) {
         return Err(TextSpecError::InvalidMaxLines);
+    }
+    if flow.lang.as_deref().is_some_and(|lang| {
+        !(2..=3).contains(&lang.len()) || !lang.bytes().all(|b| b.is_ascii_lowercase())
+    }) {
+        return Err(TextSpecError::InvalidLang);
     }
     Ok(())
 }
