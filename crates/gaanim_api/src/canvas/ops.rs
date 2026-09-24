@@ -13,6 +13,7 @@ use gaanim_core::glam::{DQuat, DVec3};
 use gaanim_core::peniko::Color;
 use gaanim_layout::LayoutConstraint;
 use gaanim_renderer::background::BackgroundPaint;
+use gaanim_renderer::post_process::PostProcessOverride;
 use gaanim_timeline::transition::TransitionType;
 
 use crate::anim::{AnimationBuilder, AnimationType};
@@ -890,6 +891,8 @@ pub struct Segment {
     pub template: Option<String>,
     /// Optional full-canvas paint used while this segment is active.
     pub background: Option<BackgroundPaint>,
+    /// Post-processing while this segment is active; inherits the scene's by default.
+    pub post_process: PostProcessOverride,
     pub(crate) stops: Vec<LocalSegmentStop>,
     pub explicit: bool,
     pub(crate) cursor: f64,
@@ -910,6 +913,7 @@ impl Segment {
             notes: None,
             template: None,
             background: None,
+            post_process: PostProcessOverride::Inherit,
             stops: Vec::new(),
             explicit: false,
             cursor: 0.0,
@@ -933,6 +937,7 @@ impl Segment {
             notes,
             template,
             background,
+            post_process: PostProcessOverride::Inherit,
             stops: Vec::new(),
             explicit: true,
             cursor: 0.0,

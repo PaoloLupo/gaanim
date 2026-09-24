@@ -52,23 +52,34 @@ pub struct SegmentBackgroundPaint {
 impl CanvasBackground {
     /// Resolve the segment paint at an exact timeline position.
     pub fn paint_at(&self, time_seconds: f64) -> &BackgroundPaint {
-        const EPSILON: f64 = 1e-5;
-        let segment = self
-            .segment_paints
-            .iter()
-            .find(|segment| {
-                segment.hold_at_end && (segment.end_time - time_seconds).abs() <= EPSILON
-            })
-            .or_else(|| {
-                self.segment_paints.iter().rev().find(|segment| {
-                    segment.start_time <= time_seconds + EPSILON
-                        && time_seconds <= segment.end_time + EPSILON
-                })
-            });
-        segment
-            .and_then(|segment| segment.paint.as_ref())
-            .unwrap_or(&self.paint)
+        active_segment(&self.segment_paints, time_seconds, |segment| {
+            (segment.start_time, segment.end_time, segment.hold_at_end)
+        })
+        .and_then(|segment| segment.paint.as_ref())
+        .unwrap_or(&self.paint)
     }
+}
+
+/// Authored segment active at an exact timeline position. `span` returns a
+/// segment's start, end and whether a terminal stop holds it at its end.
+pub(crate) fn active_segment<T>(
+    segments: &[T],
+    time_seconds: f64,
+    span: impl Fn(&T) -> (f64, f64, bool),
+) -> Option<&T> {
+    const EPSILON: f64 = 1e-5;
+    segments
+        .iter()
+        .find(|segment| {
+            let (_, end, hold_at_end) = span(segment);
+            hold_at_end && (end - time_seconds).abs() <= EPSILON
+        })
+        .or_else(|| {
+            segments.iter().rev().find(|segment| {
+                let (start, end, _) = span(segment);
+                start <= time_seconds + EPSILON && time_seconds <= end + EPSILON
+            })
+        })
 }
 
 /// Resolve the background brush. With `gpu`, a shader paint draws a texture
@@ -839,7 +850,7 @@ pub fn sync_gaanim_camera_to_bevy_system(
 /// Used for the hybrid 2D/3D pipeline where 3D meshes are rendered with Bevy's PBR
 /// while Vello continues to handle 2D vector content. When the camera is orthographic
 /// the 3D camera is still updated with the same position/rotation for consistency.
-fn fitted_canvas_viewport(
+pub(crate) fn fitted_canvas_viewport(
     cam: &gaanim_math::Camera,
     viewport: gaanim_math::CameraViewport,
     window: &Window,

@@ -71,6 +71,67 @@ impl PyBackground {
     }
 }
 
+/// Custom WGSL post-processing of the rendered 2D scene inside the camera frame.
+#[pyclass(name = "PostProcess", module = "gaanim_core", skip_from_py_object)]
+#[derive(Clone, Debug)]
+pub struct PyPostProcess(pub gaanim_api::canvas::PostProcessShader);
+
+#[pymethods]
+impl PyPostProcess {
+    /// Build a post-process from inline WGSL or an os.PathLike asset.
+    #[staticmethod]
+    fn shader(source: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let shader = if let Ok(source) = source.extract::<String>() {
+            gaanim_api::canvas::PostProcessShader::new(source)
+        } else {
+            let path = source.extract::<PathBuf>().map_err(|_| {
+                pyo3::exceptions::PyTypeError::new_err(
+                    "source must be inline WGSL text or an os.PathLike .wgsl asset",
+                )
+            })?;
+            gaanim_api::canvas::PostProcessShader::from_file(path)
+        };
+        shader.map(Self).map_err(|error| match error {
+            gaanim_api::canvas::PostProcessError::ReadSource { .. } => {
+                pyo3::exceptions::PyRuntimeError::new_err(error.to_string())
+            }
+            gaanim_api::canvas::PostProcessError::InvalidWgsl(_) => {
+                PyValueError::new_err(error.to_string())
+            }
+        })
+    }
+
+    /// Complete WGSL source of the post-process function.
+    #[getter]
+    fn source(&self) -> &str {
+        self.0.source()
+    }
+
+    fn __repr__(&self) -> &'static str {
+        "PostProcess.shader(...)"
+    }
+}
+
+/// Accept `None` (inherit), `False` (disable), or a PostProcess for a segment.
+pub fn segment_post_process(
+    post: Option<&Bound<'_, PyAny>>,
+) -> PyResult<gaanim_api::canvas::PostProcessOverride> {
+    let Some(post) = post else {
+        return Ok(gaanim_api::canvas::PostProcessOverride::Inherit);
+    };
+    if let Ok(post) = post.cast::<PyPostProcess>() {
+        return Ok(gaanim_api::canvas::PostProcessOverride::Shader(
+            post.borrow().0.clone(),
+        ));
+    }
+    if matches!(post.extract::<bool>(), Ok(false)) {
+        return Ok(gaanim_api::canvas::PostProcessOverride::Disabled);
+    }
+    Err(pyo3::exceptions::PyTypeError::new_err(
+        "segment post must be a PostProcess, False to disable it, or None to inherit",
+    ))
+}
+
 /// A reusable solid or gradient paint accepted by drawables and scene backgrounds.
 #[pyclass(name = "Brush", module = "gaanim_core", skip_from_py_object)]
 #[derive(Clone, Debug)]

@@ -2358,6 +2358,21 @@ impl SceneModel {
                 },
             )
             .collect();
+        let segment_post_processes = segments
+            .iter()
+            .zip(&segment_metadata)
+            .map(
+                |(segment, metadata)| gaanim_renderer::post_process::SegmentPostProcess {
+                    start_time: metadata.start_time,
+                    end_time: metadata.end_time,
+                    hold_at_end: metadata
+                        .stops
+                        .iter()
+                        .any(|stop| (stop.time - metadata.end_time).abs() <= 1e-5),
+                    post: segment.post_process.clone(),
+                },
+            )
+            .collect();
         builder.timeline.set_segments(segment_metadata);
 
         // Every tween is scheduled now: continuous rolling displays settle
@@ -2415,6 +2430,12 @@ impl SceneModel {
                 segment_paints,
                 pixel_size: self.frame.preview_pixel_size(),
                 bounds: raw_bounds,
+            });
+        builder
+            .commands
+            .insert_resource(gaanim_renderer::post_process::CanvasPostProcess {
+                shader: self.post_process.clone(),
+                segments: segment_post_processes,
             });
 
         // Clear with the canvas color as well. The drawable background is

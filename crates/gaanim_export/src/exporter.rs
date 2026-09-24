@@ -668,7 +668,7 @@ where
         app.update();
         check_custom_animation_errors(app.world())?;
 
-        let vello_scene = {
+        let (vello_scene, post_process) = {
             let camera = app.world().get_resource::<gaanim_math::Camera>().cloned();
             let raw_scene = gaanim_renderer::pipeline::compile_scene_from_world(
                 app.world_mut(),
@@ -718,7 +718,20 @@ where
                     )
                     * kurbo::Affine::translate((-cam_x, -cam_y));
             scene.append(&raw_scene, Some(camera_to_vello));
-            scene
+            let frame = centered_frame(
+                config.width,
+                config.height,
+                viewport_width as f64 * fit_scale,
+                viewport_height as f64 * fit_scale,
+                0.0,
+            );
+            let perspective = camera.as_ref().is_some_and(|camera| {
+                matches!(
+                    camera.projection,
+                    gaanim_math::Projection::Perspective { .. }
+                )
+            });
+            (scene, export_post_process(app.world(), perspective, frame))
         };
 
         let bg_color = app
@@ -736,7 +749,7 @@ where
             .unwrap_or(bevy_vello::vello::peniko::Color::BLACK);
 
         let render_started_at = Instant::now();
-        let frame_data = gpu.render_frame(&vello_scene, bg_color)?;
+        let frame_data = gpu.render_frame(&vello_scene, bg_color, post_process.as_ref())?;
         render_gpu_time += render_started_at.elapsed();
 
         let encoder_wait_started_at = Instant::now();
@@ -936,6 +949,22 @@ where
             config.fit,
         );
         scene.append(&raw_scene, Some(camera_to_vello));
+        let perspective = resolved_camera.as_ref().is_some_and(|resolved| {
+            matches!(
+                resolved.camera.projection,
+                gaanim_math::Projection::Perspective { .. }
+            )
+        });
+        let post_process = export_post_process(
+            app.world(),
+            perspective,
+            capture_camera_frame(
+                resolved_camera.as_ref(),
+                config.width,
+                config.height,
+                config.fit,
+            ),
+        );
         scene_compile += phase_started.elapsed();
 
         let background = app
@@ -953,7 +982,7 @@ where
             .unwrap_or(bevy_vello::vello::peniko::Color::BLACK);
 
         let phase_started = Instant::now();
-        let rgba = gpu.render_frame(&scene, background)?;
+        let rgba = gpu.render_frame(&scene, background, post_process.as_ref())?;
         render_readback += phase_started.elapsed();
         let flow = on_frame(CapturedFrame {
             time,
@@ -977,6 +1006,86 @@ where
     }
 
     Ok(())
+}
+
+/// Post-process of the frame just updated in `world`, with the camera frame
+/// in output pixels. Perspective scenes are not post-processed.
+fn export_post_process(
+    world: &World,
+    perspective: bool,
+    frame: kurbo::Rect,
+) -> Option<gaanim_renderer::post_process::PostProcessRequest> {
+    if perspective {
+        return None;
+    }
+    let post = world.get_resource::<gaanim_renderer::post_process::CanvasPostProcess>()?;
+    let time = world
+        .get_resource::<gaanim_animation::PlaybackState>()
+        .map_or(0.0, |state| state.current_time);
+    post.request(time, frame)
+}
+
+/// A `frame_width`x`frame_height` rectangle centered in the output and moved
+/// down by `offset_y` pixels.
+fn centered_frame(
+    output_width: u32,
+    output_height: u32,
+    frame_width: f64,
+    frame_height: f64,
+    offset_y: f64,
+) -> kurbo::Rect {
+    let center = kurbo::Point::new(
+        f64::from(output_width) / 2.0,
+        f64::from(output_height) / 2.0 + offset_y,
+    );
+    kurbo::Rect::from_center_size(center, (frame_width, frame_height))
+}
+
+fn output_fit_scale(
+    viewport_width: u32,
+    viewport_height: u32,
+    output_width: u32,
+    output_height: u32,
+    fit: crate::config::OutputFit,
+) -> f64 {
+    let fit_x = output_width as f64 / viewport_width as f64;
+    let fit_y = output_height as f64 / viewport_height as f64;
+    match fit {
+        crate::config::OutputFit::Cover => fit_x.max(fit_y),
+        crate::config::OutputFit::Error | crate::config::OutputFit::Contain => fit_x.min(fit_y),
+    }
+}
+
+/// Camera frame of a capture in output pixels, matching
+/// [`capture_camera_to_vello_transform`].
+fn capture_camera_frame(
+    resolved: Option<&gaanim_math::ResolvedCamera>,
+    output_width: u32,
+    output_height: u32,
+    fit: crate::config::OutputFit,
+) -> kurbo::Rect {
+    let Some(resolved) = resolved else {
+        return centered_frame(
+            output_width,
+            output_height,
+            f64::from(output_width),
+            f64::from(output_height),
+            0.0,
+        );
+    };
+    let (width, height) = (
+        resolved.camera.viewport_width.max(1),
+        resolved.camera.viewport_height.max(1),
+    );
+    let fit_scale = output_fit_scale(width, height, output_width, output_height, fit);
+    let scale = fit_scale * resolved.viewport.scale;
+    centered_frame(
+        output_width,
+        output_height,
+        f64::from(width) * scale,
+        f64::from(height) * scale,
+        resolved.viewport.offset_y * fit_scale,
+    )
 }
 
 /// Map a canvas-sized scene into a capture target while preserving its aspect
@@ -1017,12 +1126,13 @@ fn capture_camera_to_vello_transform(
                 0.0,
                 gaanim_math::CameraViewport::default(),
             ));
-    let fit_x = output_width as f64 / viewport_width as f64;
-    let fit_y = output_height as f64 / viewport_height as f64;
-    let fit_scale = match fit {
-        crate::config::OutputFit::Cover => fit_x.max(fit_y),
-        crate::config::OutputFit::Error | crate::config::OutputFit::Contain => fit_x.min(fit_y),
-    };
+    let fit_scale = output_fit_scale(
+        viewport_width,
+        viewport_height,
+        output_width,
+        output_height,
+        fit,
+    );
     let scale = pixels_per_unit * zoom * fit_scale * viewport.scale;
     let offset_y = viewport.offset_y * fit_scale;
 
@@ -1419,6 +1529,30 @@ mod tests {
         assert!((cover_top_left.y - 0.0).abs() < 1e-9);
         assert!((cover_bottom_right.x - 1388.888888888889).abs() < 1e-9);
         assert!((cover_bottom_right.y - 1000.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn capture_post_process_frame_matches_the_camera_transform() {
+        let camera = gaanim_math::Camera::ortho_2d_frame(16.0, 9.0, 1280, 720);
+        let viewport = gaanim_math::CameraViewport {
+            scale: 0.8,
+            offset_y: -30.0,
+        };
+        let resolved = gaanim_math::ResolvedCamera::new(camera, viewport);
+        for fit in [
+            crate::config::OutputFit::Contain,
+            crate::config::OutputFit::Cover,
+        ] {
+            let transform = capture_camera_to_vello_transform(Some(&resolved), 1000, 800, fit);
+            let frame = capture_camera_frame(Some(&resolved), 1000, 800, fit);
+            let top_left = transform * kurbo::Point::new(-8.0, 4.5);
+            let bottom_right = transform * kurbo::Point::new(8.0, -4.5);
+            assert!((frame.origin() - top_left).hypot() < 1e-9, "{fit:?}");
+            assert!(
+                (kurbo::Point::new(frame.x1, frame.y1) - bottom_right).hypot() < 1e-9,
+                "{fit:?}"
+            );
+        }
     }
 
     #[test]

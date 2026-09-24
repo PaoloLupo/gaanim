@@ -4,6 +4,7 @@ use bevy_vello::vello::wgpu::{
     InstanceDescriptor, MapMode, PowerPreference, RequestAdapterOptions, TexelCopyBufferInfo,
     TexelCopyBufferLayout, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
 };
+use gaanim_renderer::post_process::{GpuPostProcess, PostProcessRequest};
 use std::sync::{Arc, Mutex, mpsc};
 use thiserror::Error;
 
@@ -55,6 +56,7 @@ pub struct GpuContext {
     height: u32,
     padded_width: u32,
     pending_error: Arc<Mutex<Option<GpuContextError>>>,
+    post: GpuPostProcess,
 }
 
 impl GpuContext {
@@ -138,6 +140,7 @@ impl GpuContext {
             format,
             usage: TextureUsages::STORAGE_BINDING
                 | TextureUsages::COPY_SRC
+                | TextureUsages::COPY_DST
                 | TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
@@ -163,6 +166,7 @@ impl GpuContext {
             height,
             padded_width,
             pending_error,
+            post: GpuPostProcess::default(),
         })
     }
 
@@ -178,10 +182,13 @@ impl GpuContext {
         }
     }
 
+    /// Render `scene`, apply `post` inside its camera frame, and read the
+    /// frame back as tightly packed RGBA8 rows.
     pub fn render_frame(
         &mut self,
         scene: &bevy_vello::vello::Scene,
         base_color: bevy_vello::vello::peniko::Color,
+        post: Option<&PostProcessRequest>,
     ) -> Result<Vec<u8>, GpuContextError> {
         self.check_error()?;
         self.renderer
@@ -205,6 +212,12 @@ impl GpuContext {
             .create_command_encoder(&CommandEncoderDescriptor {
                 label: Some("gaanim-export-copy"),
             });
+        if self
+            .post
+            .prepare(&self.device, &self.queue, &self.texture, post)
+        {
+            self.post.encode(&mut encoder);
+        }
 
         encoder.copy_texture_to_buffer(
             self.texture.as_image_copy(),
@@ -297,16 +310,16 @@ mod tests {
         );
 
         let first = gpu
-            .render_frame(&image_scene, peniko::Color::BLACK)
+            .render_frame(&image_scene, peniko::Color::BLACK, None)
             .unwrap();
         assert_eq!(&first[(16 * 32 + 16) * 4..][..4], &[255, 0, 0, 255]);
         for pass in 1..=3 {
             let vectors = gpu
-                .render_frame(&vector_scene, peniko::Color::BLACK)
+                .render_frame(&vector_scene, peniko::Color::BLACK, None)
                 .unwrap();
             assert_eq!(&vectors[(16 * 32 + 16) * 4..][..4], &[0, 0, 255, 255]);
             let replay = gpu
-                .render_frame(&image_scene, peniko::Color::BLACK)
+                .render_frame(&image_scene, peniko::Color::BLACK, None)
                 .unwrap();
             assert_eq!(
                 &replay[(16 * 32 + 16) * 4..][..4],
@@ -315,6 +328,58 @@ mod tests {
             );
             assert_eq!(replay, first, "replay must reproduce the complete image");
         }
+    }
+
+    #[test]
+    fn post_process_changes_only_the_camera_frame() {
+        use bevy_vello::vello::{Scene, kurbo, peniko};
+        use gaanim_renderer::post_process::{CanvasPostProcess, PostProcessShader};
+
+        let Ok(mut gpu) = GpuContext::new(32, 16) else {
+            eprintln!("skipped: no GPU adapter");
+            return;
+        };
+        let mut scene = Scene::new();
+        scene.fill(
+            peniko::Fill::NonZero,
+            kurbo::Affine::IDENTITY,
+            peniko::Color::from_rgb8(255, 0, 0),
+            None,
+            &kurbo::Rect::new(0.0, 0.0, 32.0, 16.0),
+        );
+        let shader = PostProcessShader::new(
+            "fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {\n\
+             let color = gaanim_scene(uv);\n\
+             return vec4<f32>(color.g, color.r, color.b, color.a);\n}",
+        )
+        .unwrap();
+        let request = CanvasPostProcess {
+            shader: Some(shader),
+            segments: Vec::new(),
+        }
+        .request(0.0, kurbo::Rect::new(8.0, 4.0, 24.0, 12.0))
+        .unwrap();
+
+        let plain = gpu
+            .render_frame(&scene, peniko::Color::BLACK, None)
+            .unwrap();
+        let processed = gpu
+            .render_frame(&scene, peniko::Color::BLACK, Some(&request))
+            .unwrap();
+        let at = |pixels: &[u8], x: usize, y: usize| pixels[(y * 32 + x) * 4..][..4].to_vec();
+        assert_eq!(at(&plain, 16, 8), [255, 0, 0, 255]);
+        assert_eq!(at(&processed, 16, 8), [0, 255, 0, 255], "inside the frame");
+        assert_eq!(
+            at(&processed, 8, 4),
+            [0, 255, 0, 255],
+            "top-left frame pixel"
+        );
+        assert_eq!(at(&processed, 2, 2), [255, 0, 0, 255], "outside the frame");
+        assert_eq!(at(&processed, 24, 12), [255, 0, 0, 255], "past the frame");
+        let again = gpu
+            .render_frame(&scene, peniko::Color::BLACK, None)
+            .unwrap();
+        assert_eq!(again, plain, "a frame without post is untouched");
     }
 
     #[test]

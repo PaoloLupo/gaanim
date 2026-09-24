@@ -1103,6 +1103,29 @@ impl PyCanvas {
         })
     }
 
+    /// WGSL post-processing applied to the rendered 2D scene, or None.
+    #[getter]
+    fn post(&self) -> PyResult<Option<crate::brush::PyPostProcess>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .post_process
+            .clone()
+            .map(crate::brush::PyPostProcess))
+    }
+
+    #[setter]
+    fn set_post(&self, post: Option<PyRef<'_, crate::brush::PyPostProcess>>) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .set_post_process(post.map(|post| post.0.clone()));
+        Ok(())
+    }
+
     /// Name of the selected built-in or custom visual theme, if any.
     #[getter]
     fn theme(&self) -> PyResult<Option<String>> {
@@ -2113,12 +2136,13 @@ impl PyScene {
     }
 
     #[new]
-    #[pyo3(signature = (*, frame=(16.0, 9.0), background=None, margin=None, theme=None))]
+    #[pyo3(signature = (*, frame=(16.0, 9.0), background=None, margin=None, theme=None, post=None))]
     fn new(
         frame: (f64, f64),
         background: Option<crate::brush::PyBackgroundInput>,
         margin: Option<f64>,
         theme: Option<&Bound<'_, PyAny>>,
+        post: Option<PyRef<'_, crate::brush::PyPostProcess>>,
     ) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         let frame = gaanim_api::canvas::SceneFrame::new(frame.0, frame.1)
@@ -2144,6 +2168,7 @@ impl PyScene {
         if let Some(margin) = margin {
             canvas.margin = gaanim_api::canvas::Margin::all(margin);
         }
+        canvas.set_post_process(post.map(|post| post.0.clone()));
         Ok(Self {
             inner: Arc::new(Mutex::new(canvas)),
         })
@@ -5145,7 +5170,8 @@ impl PyTypography {
 
 #[pymethods]
 impl PyScene {
-    #[pyo3(signature = (name, transition=None, *, notes=None, template=None, background=None))]
+    #[pyo3(signature = (name, transition=None, *, notes=None, template=None, background=None, post=None))]
+    #[allow(clippy::too_many_arguments)]
     fn segment<'py>(
         slf: &Bound<'py, Self>,
         name: String,
@@ -5153,8 +5179,10 @@ impl PyScene {
         notes: Option<String>,
         template: Option<&Bound<'py, PyAny>>,
         background: Option<crate::brush::PyBackgroundInput>,
+        post: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<PySegment> {
         crate::custom::ensure_authoring_allowed()?;
+        let post = crate::brush::segment_post_process(post)?;
         let template_name = template.and_then(|template| {
             template
                 .getattr("__name__")
@@ -5162,18 +5190,22 @@ impl PyScene {
                 .and_then(|name| name.extract::<String>().ok())
         });
         let scene = slf.borrow();
-        let handle = scene
-            .inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .segment_with_background(
-                name,
-                transition.map(|transition| transition.0.clone()),
-                notes,
-                template_name,
-                background.map(|background| background.0),
-            )
-            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        let handle = {
+            let mut canvas = scene.inner.lock().expect("scene canvas poisoned");
+            let handle = canvas
+                .segment_with_background(
+                    name,
+                    transition.map(|transition| transition.0.clone()),
+                    notes,
+                    template_name,
+                    background.map(|background| background.0),
+                )
+                .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+            canvas
+                .set_segment_post_process(&handle, post)
+                .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+            handle
+        };
         drop(scene);
         Ok(PySegment {
             scene: slf.clone().unbind(),
