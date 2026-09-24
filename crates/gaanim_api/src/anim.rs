@@ -69,6 +69,26 @@ pub struct DrawAnimationConfig {
     pub groups: Option<Vec<Vec<ObjectId>>>,
 }
 
+/// How `move_along` travels its path.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PathFollowOptions {
+    /// Turn the object along the path tangent, plus this offset in radians.
+    pub orient: Option<f64>,
+    /// Portion of the path to travel, as arc-length fractions.
+    pub start: f64,
+    pub end: f64,
+}
+
+impl Default for PathFollowOptions {
+    fn default() -> Self {
+        Self {
+            orient: None,
+            start: 0.0,
+            end: 1.0,
+        }
+    }
+}
+
 /// Typed targets collected by `DrawableHandle::animate()`.
 ///
 /// Each populated channel is expanded into an ordinary timeline animation at
@@ -88,6 +108,8 @@ pub struct PropertyAnimation {
     pub material: Option<(gaanim_scene::Material3D, gaanim_scene::Material3D)>,
     pub fill_level: Option<(f64, f64)>,
     pub media_frame: Option<(gaanim_scene::MediaFrame, gaanim_scene::MediaFrame)>,
+    /// Travel the translation along a circular arc turning by this angle.
+    pub path_arc: Option<f64>,
 }
 
 impl PropertyAnimation {
@@ -436,6 +458,7 @@ pub enum AnimationType {
     MoveAlongPath {
         path: gaanim_core::kurbo::BezPath,
         path_target: Option<ObjectId>,
+        follow: PathFollowOptions,
     },
     /// Move the target along a retained 3D polyline at normalized arc length.
     MoveAlongPath3D {
@@ -1056,6 +1079,7 @@ impl MobjectRef {
             anim_type: AnimationType::MoveAlongPath {
                 path,
                 path_target: None,
+                follow: PathFollowOptions::default(),
             },
             duration: 2.0,
             rate_func: RateFunc::Linear,

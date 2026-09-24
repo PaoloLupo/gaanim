@@ -1828,6 +1828,7 @@ impl DrawableHandle {
         self.anim(AnimationType::MoveAlongPath {
             path,
             path_target: None,
+            follow: Default::default(),
         })
     }
 
@@ -1839,6 +1840,7 @@ impl DrawableHandle {
         self.anim(AnimationType::MoveAlongPath {
             path: BezPath::new(),
             path_target: Some(target.id),
+            follow: Default::default(),
         })
     }
 

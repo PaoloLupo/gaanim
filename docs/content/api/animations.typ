@@ -303,10 +303,15 @@ scene.render()
 #api-entry(
   name: "Drawable.move_along_path",
   kind: "method",
-  signature: ".animate.move_along(target: Drawable) -> Anim",
-  params: ((name: "target", type: "Drawable", default: none, desc: [Path drawable to follow — circle, rect, curve, polyline, etc. Its world geometry (after `at`, groups) is sampled.]),),
+  signature: ".animate.move_along(target, *, orient=False, rotate_offset=0, start=0, end=1) -> Anim",
+  params: (
+    (name: "target", type: "Drawable", default: none, desc: [Path drawable to follow — circle, rect, curve, polyline, etc. Its world geometry (after `at`, groups) is sampled.]),
+    (name: "orient", type: "bool", default: "False", desc: [Turn along the path tangent.]),
+    (name: "rotate_offset", type: "float", default: "0", desc: [Radians added to the tangent angle when orienting.]),
+    (name: "start, end", type: "float", default: "0, 1", desc: [Travelled portion of the path as arc-length fractions.]),
+  ),
   returns: (type: "Anim", desc: [Follow-path translation.]),
-  desc: [Samples the target's Bézier outline by true arc-length and sets the caller's translation to the point at eased `t` (`get_point_at_alpha`). Combine with `.easing(Easing.LINEAR)` for uniform speed, or `.easing(Easing.SMOOTH)` for ease. Rotation/scale unaffected.],
+  desc: [Samples the target's Bézier outline by true arc-length and sets the caller's translation to the point at eased `t` (`get_point_at_alpha`). Combine with `.easing(Easing.LINEAR)` for uniform speed, or `.easing(Easing.SMOOTH)` for ease. With `orient=True` the rotation follows the tangent (plus `rotate_offset`), so a plane points where it flies; otherwise rotation and scale are unaffected. `.move_to(x, y).path_arc(angle)` instead bends an ordinary move into a circular arc that turns by `angle` radians.],
 )[
 ```python
 # show-code: true
@@ -941,6 +946,27 @@ scene.play([g.animate.create().duration(1.0).lag_ratio(0.25)])
 scene.render()
 ```
 ]
+
+=== Repetición
+
+`anim.repeat(count, yoyo=False, delay=0)` reproduce la animación `count` veces:
+`duration` y `easing` describen un ciclo y `delay` separa los ciclos. Con
+`yoyo=True` los ciclos alternan de sentido; un número par de ciclos termina
+donde empezó y las animaciones siguientes continúan desde ahí.
+`anim.loop(mode="cycle", until=segundos, delay=0)` repite tantos ciclos
+completos como quepan en `until`: `"cycle"` reinicia, `"pingpong"` alterna y
+`"offset"` continúa desde el final del ciclo anterior, así `rotate_by` o
+`shift_by` se acumulan. `Composition.repeat(count, delay=0)` repite un árbol
+completo de animaciones. La duración total entra en `play` y en
+`Composition.schedule()`, y el timeline sigue siendo finito y exacto al hacer
+seek.
+
+```python
+scene.play(spinner.animate.rotate_by(TAU).duration(1.2).repeat(3))
+scene.play(badge.animate.scale_to(1.08).duration(0.4).repeat(4, yoyo=True, delay=0.1))
+scene.play(arrow.animate.shift_by(0.3, 0).duration(0.5).loop("pingpong", until=4.0))
+scene.play(parallel(a.animate.rotate_by(TAU), b.animate.shift_by(1, 0)).repeat(2))
+```
 
 #api-entry(
   name: "Anim easing",

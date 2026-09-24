@@ -2641,12 +2641,17 @@ fn apply_lens_spec(
                 };
             }
         }
-        PropertyLensSpec::PathFollow { path } => {
+        PropertyLensSpec::PathFollow { path, orient } => {
             // Sample the Bézier path at the eased `t` and set the
             // entity's translation to the sampled world point.
             let p = gaanim_math::get_point_at_alpha(path, t);
             if let Some(mut transform) = world.get_mut::<SpatialTransform>(target) {
                 transform.translation = gaanim_core::glam::DVec3::new(p.x, p.y, 0.0);
+                if let Some(offset) = orient {
+                    transform.rotation = gaanim_core::glam::DQuat::from_rotation_z(
+                        gaanim_math::path_tangent_angle(path, t) + offset,
+                    );
+                }
             }
         }
         PropertyLensSpec::PathFollow3D { points } => {

@@ -320,6 +320,8 @@ pub struct Composition {
     default_duration: Option<f64>,
     default_rate: Option<RateFunc>,
     stretch: Option<f64>,
+    /// Whole-composition repetitions and the gap between them, in seconds.
+    repeat: Option<(u32, f64)>,
 }
 
 #[derive(Debug, Clone)]
@@ -369,6 +371,7 @@ impl Composition {
             default_duration: None,
             default_rate: None,
             stretch: None,
+            repeat: None,
         }
     }
 
@@ -388,6 +391,7 @@ impl Composition {
             default_duration: None,
             default_rate: None,
             stretch: None,
+            repeat: None,
         })
     }
 
@@ -430,6 +434,21 @@ impl Composition {
         Ok(self)
     }
 
+    /// Plays the whole composition `count` times, `gap` seconds apart.
+    pub fn repeat(mut self, count: u32, gap: f64) -> Result<Self, PlayError> {
+        if count == 0 {
+            return Err(PlayError::InvalidCompositionTiming("count"));
+        }
+        if !gap.is_finite() || gap < 0.0 {
+            return Err(PlayError::InvalidCompositionTiming("gap"));
+        }
+        if self.contains_media() {
+            return Err(PlayError::RepeatContainsMedia);
+        }
+        self.repeat = Some((count, gap));
+        Ok(self)
+    }
+
     pub fn stretch(mut self, seconds: f64) -> Result<Self, PlayError> {
         if !seconds.is_finite() || seconds < 0.0 {
             return Err(PlayError::InvalidCompositionTiming("stretch"));
@@ -465,6 +484,7 @@ impl Composition {
                 let mut item = item.as_ref().clone();
                 if let PlayItem::Animation(anim) = &mut item {
                     anim.apply_play_defaults(duration, rate);
+                    anim.apply_repeat();
                 }
                 let (start, item_duration) = match &mut item {
                     PlayItem::Animation(anim) => {
@@ -548,6 +568,23 @@ impl Composition {
                         item.duration = Some(anim.inner.duration);
                     }
                 }
+            }
+        }
+        if let Some((count, gap)) = self.repeat
+            && count > 1
+        {
+            let span = resolved_span(&resolved);
+            let first = resolved.clone();
+            for cycle in 1..count {
+                let offset = cycle as f64 * (span + gap);
+                resolved.extend(first.iter().map(|item| {
+                    let mut copy = item.clone();
+                    copy.start += offset;
+                    if let PlayItem::Animation(anim) = &copy.item {
+                        copy.item = PlayItem::Animation(anim.replica());
+                    }
+                    copy
+                }));
             }
         }
         resolved
@@ -677,6 +714,8 @@ pub enum PlayError {
     CustomAnimation(String),
     #[error("animations can only be played by their owning Scene")]
     ForeignAnimation,
+    #[error("repeat() applies to animations only; repeat media by scheduling it again")]
+    RepeatContainsMedia,
     #[error("an Anim can only be played once")]
     AnimationAlreadyConsumed,
     #[error("the same Anim cannot appear twice in one play call")]

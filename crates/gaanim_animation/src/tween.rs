@@ -286,6 +286,8 @@ pub enum PropertyLens {
     /// are not affected.
     PathFollow {
         path: Arc<BezPath>,
+        /// Rotate along the tangent, plus this offset in radians.
+        orient: Option<f64>,
     },
     /// Move the entity along a 3D polyline at normalized arc length.
     PathFollow3D {
@@ -607,12 +609,17 @@ pub fn evaluate_tweens_system(
                     source.0 = grown;
                 }
             }
-            PropertyLens::PathFollow { path } => {
+            PropertyLens::PathFollow { path, orient } => {
                 // Sample the Bézier path at the eased `t` and set
                 // the entity's translation to the sampled point.
                 let p = get_point_at_alpha(path, t);
                 if let Ok(mut transform) = transforms.get_mut(tween.target) {
                     transform.translation = gaanim_core::glam::DVec3::new(p.x, p.y, 0.0);
+                    if let Some(offset) = orient {
+                        transform.rotation = gaanim_core::glam::DQuat::from_rotation_z(
+                            gaanim_math::path_tangent_angle(path, t) + offset,
+                        );
+                    }
                 }
             }
             PropertyLens::PathFollow3D { points } => {

@@ -58,6 +58,21 @@ pub enum StepJump {
     Both,
 }
 
+/// How [`RateFunc::Repeat`] chains its cycles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum RepeatMode {
+    /// Restart each cycle from the beginning.
+    #[default]
+    Cycle,
+    /// Alternate forward and backward cycles (yoyo).
+    PingPong,
+    /// Continue each cycle from where the previous one ended. Scene builders
+    /// expand this into sequential copies so relative animations accumulate;
+    /// evaluated directly it extrapolates past 1.
+    Offset,
+}
+
 /// Extensible time-interpolation rate functions (easing functions).
 ///
 /// Fully cloneable and supports conditional serialization via `serde`
@@ -135,6 +150,14 @@ pub enum RateFunc {
     },
     /// Discrete steps with CSS jump positions.
     SteppedJump { count: u32, jump: StepJump },
+    /// Repeats `inner` `count` times, holding `gap` (a fraction of one cycle)
+    /// between cycles. The clip's duration covers all cycles and gaps.
+    Repeat {
+        inner: Box<RateFunc>,
+        count: u32,
+        gap: f64,
+        mode: RepeatMode,
+    },
     /// Lookup table of progress values at evenly spaced times from 0 to 1,
     /// linearly interpolated. Built once from an authored curve, so
     /// evaluation needs no callback and serializes.
@@ -198,6 +221,12 @@ impl std::fmt::Debug for RateFunc {
             } => write!(f, "SlowMo({linear_ratio}, {power})"),
             Self::Squish { inner, start, end } => write!(f, "Squish({inner:?}, {start}, {end})"),
             Self::SteppedJump { count, jump } => write!(f, "SteppedJump({count}, {jump:?})"),
+            Self::Repeat {
+                inner,
+                count,
+                gap,
+                mode,
+            } => write!(f, "Repeat({inner:?}, {count}, {gap}, {mode:?})"),
             Self::Sampled(samples) => {
                 // Hash the table so equal-length curves stay distinguishable
                 // in debug fingerprints.
@@ -309,6 +338,19 @@ impl serde::Serialize for RateFunc {
                 state.serialize_field("end", end)?;
                 state.end()
             }
+            Self::Repeat {
+                inner,
+                count,
+                gap,
+                mode,
+            } => {
+                let mut state = serializer.serialize_struct("Repeat", 4)?;
+                state.serialize_field("repeat_inner", inner)?;
+                state.serialize_field("count", count)?;
+                state.serialize_field("gap", gap)?;
+                state.serialize_field("mode", mode)?;
+                state.end()
+            }
             Self::SteppedJump { count, jump } => {
                 let mut state = serializer.serialize_struct("SteppedJump", 2)?;
                 state.serialize_field("count", count)?;
@@ -334,6 +376,12 @@ impl<'de> serde::Deserialize<'de> for RateFunc {
         #[derive(serde::Deserialize)]
         #[serde(untagged)]
         enum RawRateFunc {
+            Repeat {
+                repeat_inner: Box<RateFunc>,
+                count: u32,
+                gap: f64,
+                mode: RepeatMode,
+            },
             DampedSpring {
                 omega: f64,
                 zeta: f64,
@@ -437,6 +485,17 @@ impl<'de> serde::Deserialize<'de> for RateFunc {
                 power,
             }),
             RawRateFunc::SteppedJump { count, jump } => Ok(Self::SteppedJump { count, jump }),
+            RawRateFunc::Repeat {
+                repeat_inner,
+                count,
+                gap,
+                mode,
+            } => Ok(Self::Repeat {
+                inner: repeat_inner,
+                count,
+                gap,
+                mode,
+            }),
         }
     }
 }
@@ -628,6 +687,20 @@ impl RateFunc {
                     StepJump::Both => (((t * n).floor() + 1.0) / (n + 1.0)).min(1.0),
                 }
             }
+            Self::Repeat {
+                inner,
+                count,
+                gap,
+                mode,
+            } => {
+                let (cycle, progress) = Self::repeat_position(*count, *gap, t);
+                match mode {
+                    RepeatMode::Cycle => inner.evaluate(progress),
+                    RepeatMode::PingPong if cycle % 2 == 1 => inner.evaluate(1.0 - progress),
+                    RepeatMode::PingPong => inner.evaluate(progress),
+                    RepeatMode::Offset => cycle as f64 + inner.evaluate(progress),
+                }
+            }
             Self::Sampled(samples) => match samples.len() {
                 0 => t,
                 1 => samples[0],
@@ -639,6 +712,32 @@ impl RateFunc {
                 }
             },
         }
+    }
+
+    /// Cycle index and progress within it for [`RateFunc::Repeat`] at `t`.
+    /// During a gap the progress holds at 1.
+    fn repeat_position(count: u32, gap: f64, t: f64) -> (u32, f64) {
+        let count = count.max(1);
+        let gap = gap.max(0.0);
+        let total = count as f64 + (count - 1) as f64 * gap;
+        let elapsed = t * total;
+        let period = 1.0 + gap;
+        let cycle = ((elapsed / period).floor() as u32).min(count - 1);
+        let progress = ((elapsed - cycle as f64 * period).min(1.0)).max(0.0);
+        (cycle, progress)
+    }
+
+    /// Whether this rate function finishes where it started (an even number
+    /// of ping-pong cycles), so the animated property returns to its start.
+    pub fn ends_at_start(&self) -> bool {
+        matches!(
+            self,
+            Self::Repeat {
+                count,
+                mode: RepeatMode::PingPong,
+                ..
+            } if count % 2 == 0
+        )
     }
 
     /// Position of a unit step response `x(0) = 0`, `x'(0) = velocity`.
@@ -850,6 +949,37 @@ impl RateFunc {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeat_cycles_ping_pongs_and_holds_gaps() {
+        let repeat = |count, gap, mode| RateFunc::Repeat {
+            inner: Box::new(RateFunc::Linear),
+            count,
+            gap,
+            mode,
+        };
+        let cycle = repeat(3, 0.0, RepeatMode::Cycle);
+        assert_eq!(cycle.evaluate(0.0), 0.0);
+        assert!((cycle.evaluate(1.0 / 6.0) - 0.5).abs() < 1e-12);
+        assert!((cycle.evaluate(0.5) - 0.5).abs() < 1e-12);
+        assert_eq!(cycle.evaluate(1.0), 1.0);
+
+        let yoyo = repeat(2, 0.0, RepeatMode::PingPong);
+        assert!((yoyo.evaluate(0.25) - 0.5).abs() < 1e-12);
+        assert!((yoyo.evaluate(0.5) - 1.0).abs() < 1e-12);
+        assert!((yoyo.evaluate(0.75) - 0.5).abs() < 1e-12);
+        assert_eq!(yoyo.evaluate(1.0), 0.0);
+        assert!(yoyo.ends_at_start());
+        assert!(!repeat(3, 0.0, RepeatMode::PingPong).ends_at_start());
+
+        // Two cycles with a half-cycle gap span 2.5 cycle lengths.
+        let gapped = repeat(2, 0.5, RepeatMode::Cycle);
+        assert_eq!(gapped.evaluate(1.2 / 2.5), 1.0);
+        assert!((gapped.evaluate(2.0 / 2.5) - 0.5).abs() < 1e-12);
+
+        let offset = repeat(3, 0.0, RepeatMode::Offset);
+        assert!((offset.evaluate(1.0) - 3.0).abs() < 1e-12);
+    }
 
     #[test]
     fn perceptual_spring_overshoots_by_bounce_and_ends_on_target() {

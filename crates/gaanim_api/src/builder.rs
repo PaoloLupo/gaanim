@@ -702,6 +702,9 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub current_scene: Option<SceneId>,
     /// Tracks the current value of each float signal / value tracker
     pub float_signals: HashMap<ObjectId, f64>,
+    /// Arc angle for the translation channel being expanded from a property
+    /// animation with `path_arc`; consumed by the lens that follows.
+    path_arc: Option<f64>,
     pub(crate) media_frames: HashMap<ObjectId, gaanim_scene::MediaFrame>,
     /// Authored local geometry of solid arrows, used by `GrowArrow`.
     pub(crate) arrow_shapes: HashMap<ObjectId, gaanim_math::ArrowShape>,
@@ -830,6 +833,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             stop_times,
             current_scene,
             float_signals,
+            path_arc: None,
             media_frames,
             arrow_shapes,
             persistent_objects,
@@ -1124,6 +1128,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             stop_times: Vec::new(),
             current_scene: None,
             float_signals: HashMap::new(),
+            path_arc: None,
             media_frames: HashMap::new(),
             arrow_shapes: HashMap::new(),
             property_bindings: HashMap::new(),
@@ -2310,8 +2315,56 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
-    /// Internal method to resolve and schedule a single animation clip.
+    /// Schedules `anim`, first resolving repetition that the clip's rate
+    /// function cannot express on its own.
     fn play_internal(&mut self, anim: AnimationBuilder) {
+        if let RateFunc::Repeat {
+            inner,
+            count,
+            gap,
+            mode: gaanim_math::RepeatMode::Offset,
+        } = &anim.rate_func
+        {
+            // Sequential copies: relative animations (rotate_by, shift_by)
+            // continue from where the previous cycle ended.
+            let count = (*count).max(1);
+            let cycle = anim.duration / (count as f64 + (count - 1) as f64 * gap.max(0.0));
+            for index in 0..count {
+                self.play_clip(AnimationBuilder {
+                    target: anim.target,
+                    anim_type: anim.anim_type.clone(),
+                    duration: cycle,
+                    delay: anim.delay + index as f64 * cycle * (1.0 + gap.max(0.0)),
+                    rate_func: (**inner).clone(),
+                });
+            }
+            return;
+        }
+        if anim.rate_func.ends_at_start() {
+            // An even yoyo returns to where it started, so later animations
+            // must continue from the state before it, not from its target.
+            let target = anim.target;
+            let saved: Vec<_> = self
+                .hierarchy_ids(target)
+                .into_iter()
+                .filter_map(|id| Some((id, self.states.get(id)?.clone())))
+                .collect();
+            let signal = self.float_signals.get(&target).copied();
+            self.play_clip(anim);
+            for (id, state) in saved {
+                self.states.insert(id, state);
+            }
+            match signal {
+                Some(value) => self.float_signals.insert(target, value),
+                None => self.float_signals.remove(&target),
+            };
+            return;
+        }
+        self.play_clip(anim);
+    }
+
+    /// Internal method to resolve and schedule a single animation clip.
+    fn play_clip(&mut self, anim: AnimationBuilder) {
         if let AnimationType::CustomProperties(animation) = &anim.anim_type {
             // One root clip owns transforms/opacity. Descendant clips receive
             // paint only, matching the visible paint behavior of native setters.
@@ -2484,6 +2537,16 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }
 
             for anim_type in channels {
+                let is_translation = matches!(
+                    anim_type,
+                    AnimationType::TranslateTo { .. }
+                        | AnimationType::TranslateAnchorTo { .. }
+                        | AnimationType::TranslateToAnchorPoint { .. }
+                        | AnimationType::TranslateBy { .. }
+                );
+                if is_translation {
+                    self.path_arc = properties.path_arc;
+                }
                 self.play_internal(AnimationBuilder {
                     target: anim.target,
                     anim_type,
@@ -2491,6 +2554,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     delay: anim.delay,
                     rate_func: anim.rate_func.clone(),
                 });
+                self.path_arc = None;
             }
             return;
         }
@@ -3133,6 +3197,20 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 to: 1.0 + time_width,
                 time_width,
             },
+        };
+
+        let lens_spec = match (self.path_arc.take(), lens_spec) {
+            (Some(angle), PropertyLensSpec::Translation { from, to }) if from.z == to.z => {
+                PropertyLensSpec::PathFollow {
+                    path: gaanim_math::arc_between(
+                        kurbo::Point::new(from.x, from.y),
+                        kurbo::Point::new(to.x, to.y),
+                        angle,
+                    ),
+                    orient: None,
+                }
+            }
+            (_, lens) => lens,
         };
 
         // Add the resolved clip to the Timeline resource.
@@ -5175,8 +5253,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// (parametric, not arc-length uniform). Updates the tracked state
     /// so the final translation equals `path(1.0)`.
     fn play_move_along_path_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
-        let (path_arg, path_target) = match &anim.anim_type {
-            AnimationType::MoveAlongPath { path, path_target } => (path.clone(), *path_target),
+        let (path_arg, path_target, follow) = match &anim.anim_type {
+            AnimationType::MoveAlongPath {
+                path,
+                path_target,
+                follow,
+            } => (path.clone(), *path_target, *follow),
             _ => unreachable!(),
         };
 
@@ -5192,6 +5274,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         } else {
             path_arg
         };
+        let path = if follow.start <= 0.0 && follow.end >= 1.0 {
+            path
+        } else {
+            gaanim_math::get_subpath_range(&path, follow.start, follow.end)
+        };
 
         // Resolve and persist the final translation so subsequent
         // animations build on top of the new position.
@@ -5201,6 +5288,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         if let Some(state) = self.states.get_mut(anim.target) {
             state.transform.translation = end_translation;
             state.transform.anchor = gaanim_core::glam::DVec3::ZERO;
+            if let Some(offset) = follow.orient {
+                state.transform.rotation = gaanim_core::glam::DQuat::from_rotation_z(
+                    gaanim_math::path_tangent_angle(&path, 1.0) + offset,
+                );
+            }
             self.commands.entity(state.entity).insert(state.transform);
         }
 
@@ -5211,7 +5303,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             anim.duration,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
-                lens: PropertyLensSpec::PathFollow { path },
+                lens: PropertyLensSpec::PathFollow {
+                    path,
+                    orient: follow.orient,
+                },
                 rate_func: anim.rate_func.clone(),
                 delay: 0.0,
                 label: self.current_label.clone(),
@@ -5300,7 +5395,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     anim.duration,
                     ClipPayload::Animation(AnimationSpec {
                         target: anim.target,
-                        lens: PropertyLensSpec::PathFollow { path: arc_path },
+                        lens: PropertyLensSpec::PathFollow {
+                            path: arc_path,
+                            orient: None,
+                        },
                         rate_func: anim.rate_func.clone(),
                         delay: 0.0,
                         label: self.current_label.clone(),

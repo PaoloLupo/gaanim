@@ -257,6 +257,47 @@ pub fn get_point_at_alpha(path: &BezPath, alpha: f64) -> Point {
     last_point
 }
 
+/// Direction of travel (radians from +x) along `path` at `alpha`, estimated
+/// from nearby arc-length samples; 0 when the path has no extent.
+pub fn path_tangent_angle(path: &BezPath, alpha: f64) -> f64 {
+    const STEP: f64 = 1e-3;
+    let alpha = alpha.clamp(0.0, 1.0);
+    let (before, after) = if alpha + STEP <= 1.0 {
+        (alpha, alpha + STEP)
+    } else {
+        ((alpha - STEP).max(0.0), alpha)
+    };
+    let delta = get_point_at_alpha(path, after) - get_point_at_alpha(path, before);
+    if delta.hypot2() <= 1e-18 {
+        0.0
+    } else {
+        delta.y.atan2(delta.x)
+    }
+}
+
+/// A circular arc from `from` to `to` that turns by `angle` radians
+/// (positive is counterclockwise); a straight segment when `angle` is ~0.
+pub fn arc_between(from: Point, to: Point, angle: f64) -> BezPath {
+    let chord = to - from;
+    let length = chord.hypot();
+    if angle.abs() < 1e-6 || length < 1e-12 {
+        let mut line = BezPath::new();
+        line.move_to(from);
+        line.line_to(to);
+        return line;
+    }
+    let angle = angle.clamp(-std::f64::consts::TAU + 1e-6, std::f64::consts::TAU - 1e-6);
+    let half = angle / 2.0;
+    let radius = length / 2.0 / half.sin().abs();
+    // The center lies on the chord's bisector, left of the chord for
+    // counterclockwise turns.
+    let normal = kurbo::Vec2::new(-chord.y, chord.x) / length;
+    let midpoint = from.midpoint(to);
+    let center = midpoint + normal * (length / 2.0 / half.tan());
+    let start = (from - center).atan2();
+    kurbo::Arc::new(center, (radius, radius), start, angle, 0.0).into_path(1e-4)
+}
+
 /// Sample a 3D polyline at normalized arc length.
 pub fn get_point_on_polyline(points: &[DVec3], alpha: f64) -> DVec3 {
     let Some(first) = points.first().copied() else {
@@ -1030,5 +1071,38 @@ mod morph_tests {
             DVec3::new(2.0, 3.0, 0.0)
         );
         assert_eq!(get_point_on_polyline(&points, 1.0), points[2]);
+    }
+}
+
+#[cfg(test)]
+mod motion_tests {
+    use super::*;
+
+    #[test]
+    fn arcs_join_their_endpoints_and_turn_the_requested_way() {
+        let from = Point::new(0.0, 0.0);
+        let to = Point::new(2.0, 0.0);
+        let arc = arc_between(from, to, std::f64::consts::FRAC_PI_2);
+        let start = get_point_at_alpha(&arc, 0.0);
+        let end = get_point_at_alpha(&arc, 1.0);
+        assert!((start - from).hypot() < 1e-9 && (end - to).hypot() < 1e-6);
+        // Counterclockwise from left to right passes below the chord.
+        assert!(get_point_at_alpha(&arc, 0.5).y < -0.3);
+        assert!(get_point_at_alpha(&arc_between(from, to, -1.0), 0.5).y > 0.2);
+        let straight = arc_between(from, to, 0.0);
+        assert!(get_point_at_alpha(&straight, 0.5).y.abs() < 1e-12);
+    }
+
+    #[test]
+    fn tangent_angle_follows_the_direction_of_travel() {
+        let mut path = BezPath::new();
+        path.move_to((0.0, 0.0));
+        path.line_to((1.0, 0.0));
+        path.line_to((1.0, 1.0));
+        assert!(path_tangent_angle(&path, 0.2).abs() < 1e-9);
+        let up = path_tangent_angle(&path, 0.8);
+        assert!((up - std::f64::consts::FRAC_PI_2).abs() < 1e-6);
+        assert!((path_tangent_angle(&path, 1.0) - up).abs() < 1e-6);
+        assert_eq!(path_tangent_angle(&BezPath::new(), 0.5), 0.0);
     }
 }

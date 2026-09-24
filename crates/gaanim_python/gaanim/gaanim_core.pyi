@@ -910,7 +910,37 @@ class Anim:
     def circumscribe(self) -> Anim: ...
     def flash(self) -> Anim: ...
     def show_passing_flash(self, *, time_width: float = 0.2) -> Anim: ...
-    def move_along(self, target: Drawable) -> Anim: ...
+    def move_along(
+        self,
+        target: Drawable,
+        *,
+        orient: bool = False,
+        rotate_offset: float = 0.0,
+        start: float = 0.0,
+        end: float = 1.0,
+    ) -> Anim:
+        """Travel along ``target``'s outline, optionally turning with it.
+
+        With ``orient=True`` the drawable's rotation follows the path tangent
+        plus ``rotate_offset`` radians, so a plane or arrow points where it
+        goes. ``start`` and ``end`` select the travelled portion as arc-length
+        fractions (``0 <= start < end <= 1``); otherwise ``ValueError``.
+
+        Example:
+            scene.play(plane.animate.move_along(route, orient=True).duration(3))
+        """
+        ...
+    def path_arc(self, angle: float) -> Anim:
+        """Travel this animation's ``move_to``/``shift_by`` along a circular arc.
+
+        The arc turns by ``angle`` radians (positive is counterclockwise)
+        between the start and end positions instead of the straight line.
+        Without a translation target it raises ``ValueError``.
+
+        Example:
+            scene.play(ball.animate.move_to(4, 0).path_arc(math.pi / 3))
+        """
+        ...
     def fade_transform_to(self, target: Drawable) -> Anim:
         """Cross-fade to a same-scene target at the animation's composed start time."""
         ...
@@ -927,6 +957,32 @@ class Anim:
         ...
     def delay(self, seconds: float) -> Anim:
         """Return a copy delayed by finite, non-negative ``seconds``."""
+        ...
+    def repeat(self, count: int, *, yoyo: bool = False, delay: float = 0.0) -> Anim:
+        """Play this animation ``count`` times; ``duration`` and ``easing`` describe one cycle.
+
+        With ``yoyo=True`` every other cycle plays backwards, so an even
+        ``count`` ends where it started and later animations continue from
+        there. ``delay`` seconds separate cycles. The total duration is
+        ``count * duration + (count - 1) * delay``, which ``play`` and
+        ``Composition.schedule`` use. ``count`` outside ``[1, 10000]`` or a
+        negative ``delay`` raises ``ValueError``.
+
+        Example:
+            badge.animate.scale_to(1.08).duration(0.4).repeat(4, yoyo=True, delay=0.1)
+        """
+        ...
+    def loop(self, mode: Literal["cycle", "pingpong", "offset"] = "cycle", *, until: float, delay: float = 0.0) -> Anim:
+        """Repeat for as many whole cycles as fit in ``until`` seconds (at least one).
+
+        ``cycle`` restarts each cycle, ``pingpong`` alternates direction, and
+        ``offset`` continues from where the previous cycle ended, so
+        ``rotate_by`` or ``shift_by`` keep accumulating. The loop stays finite,
+        so seeks and exports are exact. Invalid values raise ``ValueError``.
+
+        Example:
+            arrow.animate.shift_by(0.3, 0).duration(0.5).loop("pingpong", until=4.0)
+        """
         ...
     def lag_ratio(self, value: float) -> Anim:
         """Configure this animation with lag ratio.
@@ -994,6 +1050,17 @@ class Composition:
         ...
     def stretch(self, seconds: float) -> Composition:
         """Rescale an animation-only subtree to an exact finite span; media are rejected."""
+        ...
+    def repeat(self, count: int, *, delay: float = 0.0) -> Composition:
+        """Play the whole animation-only subtree ``count`` times, ``delay`` seconds apart.
+
+        Each repetition starts from the state the previous one left, so
+        relative animations accumulate. Media, ``count < 1`` or a negative
+        ``delay`` raise ``ValueError``.
+
+        Example:
+            scene.play(parallel(a.animate.rotate_by(TAU), b.animate.shift_by(1, 0)).repeat(2))
+        """
         ...
     def schedule(self, *, duration: Optional[float] = None) -> Schedule:
         """Resolve local offsets using the supplied outer defaults without scheduling."""

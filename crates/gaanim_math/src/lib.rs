@@ -14,10 +14,11 @@ pub use camera::{
     Camera, CameraPose, CameraRigCamera, CameraValidationError, CameraViewOverride, CameraViewport,
     Projection, ResolvedCamera,
 };
-pub use easing::{EaseMode, EasingCurve, RateFunc, StepJump};
+pub use easing::{EaseMode, EasingCurve, RateFunc, RepeatMode, StepJump};
 pub use path::{
-    get_path_length, get_point_at_alpha, get_point_on_polyline, get_subpath, get_subpath_range,
-    get_subpath_sequential, interpolate_paths, interpolate_paths_continuous,
+    arc_between, get_path_length, get_point_at_alpha, get_point_on_polyline, get_subpath,
+    get_subpath_range, get_subpath_sequential, interpolate_paths, interpolate_paths_continuous,
+    path_tangent_angle,
 };
 pub use random::{Noise, SeededRng};
 pub use spatial::{GlobalSpatialTransform, SpatialTransform};

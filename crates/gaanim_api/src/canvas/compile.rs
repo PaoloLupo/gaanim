@@ -6453,9 +6453,14 @@ impl SceneModel {
                     to: to.iter().filter_map(remap_target).collect(),
                 }
             }
-            AnimationType::MoveAlongPath { path, path_target } => AnimationType::MoveAlongPath {
+            AnimationType::MoveAlongPath {
+                path,
+                path_target,
+                follow,
+            } => AnimationType::MoveAlongPath {
                 path: path.clone(),
                 path_target: path_target.map(|id| *id_map.get(&id).unwrap_or(&id)),
+                follow: *follow,
             },
             AnimationType::TranslateToAnchorPoint { point } => {
                 let mut point = *point;
@@ -11211,6 +11216,151 @@ mod tests {
             Some(vec![ids[..5].to_vec(), vec![ids[5]]])
         );
         assert_eq!(reveal_groups(&glyphs, &[('x', None)]), None);
+    }
+
+    fn compiled_timeline(canvas: &SceneModel) -> Timeline {
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        timeline
+    }
+
+    fn translation_clips(timeline: &Timeline) -> Vec<(f64, f64, DVec3, DVec3, RateFunc)> {
+        let mut clips: Vec<_> = timeline
+            .clips
+            .values()
+            .filter_map(|clip| match &clip.payload {
+                gaanim_timeline::clip::ClipPayload::Animation(
+                    gaanim_timeline::clip::AnimationSpec {
+                        lens: gaanim_timeline::clip::PropertyLensSpec::Translation { from, to },
+                        rate_func,
+                        ..
+                    },
+                ) => Some((clip.start, clip.duration, *from, *to, rate_func.clone())),
+                _ => None,
+            })
+            .collect();
+        clips.sort_by(|a, b| a.0.total_cmp(&b.0));
+        clips
+    }
+
+    #[test]
+    fn even_yoyo_returns_to_start_and_offset_loops_accumulate() {
+        use gaanim_math::RepeatMode;
+        let mut canvas = SceneModel::new(640, 360);
+        let dot = canvas.circle(0.2);
+        canvas.play(vec![dot.animate().shift_by(1.0, 0.0).duration(0.5).repeat(
+            2,
+            RepeatMode::PingPong,
+            0.25,
+        )]);
+        canvas.play(vec![dot.animate().shift_by(0.0, 1.0).duration(1.0)]);
+        let clips = translation_clips(&compiled_timeline(&canvas));
+        assert_eq!(clips.len(), 2);
+        let (start, duration, from, to, rate) = &clips[0];
+        assert_eq!((*start, *duration), (0.0, 1.25));
+        assert_eq!(*to, DVec3::new(1.0, 0.0, 0.0));
+        assert!(rate.evaluate(1.0).abs() < 1e-12);
+        // The next animation starts from where the yoyo came back to.
+        assert_eq!(clips[1].0, 1.25);
+        assert_eq!(clips[1].2, *from);
+        assert_eq!(clips[1].3, *from + DVec3::Y);
+
+        let mut canvas = SceneModel::new(640, 360);
+        let dot = canvas.circle(0.2);
+        canvas.play(vec![
+            dot.animate()
+                .shift_by(1.0, 0.0)
+                .duration(0.5)
+                .loop_for(1.6, RepeatMode::Offset, 0.0),
+        ]);
+        let clips = translation_clips(&compiled_timeline(&canvas));
+        let starts: Vec<f64> = clips.iter().map(|clip| clip.0).collect();
+        assert_eq!(starts, [0.0, 0.5, 1.0]);
+        assert_eq!(clips[2].3, clips[0].2 + DVec3::new(3.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn oriented_paths_and_arcs_compile_to_path_follow() {
+        let mut canvas = SceneModel::new(640, 360);
+        let route = canvas.polyline(&[(0.0, 0.0), (4.0, 0.0), (4.0, 3.0)]);
+        let plane = canvas.circle(0.2);
+        canvas.play(vec![
+            plane
+                .animate()
+                .move_along_with(
+                    &route,
+                    crate::anim::PathFollowOptions {
+                        orient: Some(0.5),
+                        start: 0.0,
+                        end: 0.5,
+                    },
+                )
+                .unwrap(),
+        ]);
+        let ball = canvas.circle(0.2);
+        canvas.play(vec![ball.animate().shift_by(2.0, 0.0).path_arc(1.0)]);
+        let timeline = compiled_timeline(&canvas);
+        let follows: Vec<_> = timeline
+            .clips
+            .values()
+            .filter_map(|clip| match &clip.payload {
+                gaanim_timeline::clip::ClipPayload::Animation(
+                    gaanim_timeline::clip::AnimationSpec {
+                        lens: gaanim_timeline::clip::PropertyLensSpec::PathFollow { path, orient },
+                        ..
+                    },
+                ) => Some((clip.start, path.clone(), *orient)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(follows.len(), 2);
+        let (_, route_part, orient) = follows.iter().find(|entry| entry.0 == 0.0).unwrap();
+        assert_eq!(*orient, Some(0.5));
+        // Half of the 7-unit route ends 3.5 units along it.
+        let end = gaanim_math::get_point_at_alpha(route_part, 1.0);
+        assert!((end.x - 3.5).abs() < 1e-3 && end.y.abs() < 1e-3, "{end:?}");
+        let (_, arc, orient) = follows.iter().find(|entry| entry.0 > 0.0).unwrap();
+        assert_eq!(*orient, None);
+        let middle = gaanim_math::get_point_at_alpha(arc, 0.5);
+        assert!(
+            middle.y < -0.2,
+            "arc should bow below the chord: {middle:?}"
+        );
+    }
+
+    #[test]
+    fn repeated_compositions_report_their_expanded_schedule() {
+        use crate::canvas::Composition;
+        let mut canvas = SceneModel::new(640, 360);
+        let dot = canvas.circle(0.2);
+        let spin = Composition::leaf(dot.animate().rotate_by(1.0).duration(1.0).repeat(
+            3,
+            gaanim_math::RepeatMode::Cycle,
+            0.5,
+        ));
+        assert_eq!(spin.schedule(None).unwrap().span, 4.0);
+        let pair = Composition::parallel(vec![
+            Composition::leaf(dot.animate().shift_by(1.0, 0.0).duration(1.0)),
+            Composition::leaf(canvas.circle(0.1).animate().rotate_by(1.0).duration(0.5)),
+        ])
+        .unwrap()
+        .repeat(2, 0.5)
+        .unwrap();
+        let schedule = pair.schedule(None).unwrap();
+        assert_eq!(schedule.span, 2.5);
+        assert_eq!(schedule.entries.len(), 4);
+        canvas
+            .play_composition_configured(pair, None, None)
+            .unwrap();
+        let clips = translation_clips(&compiled_timeline(&canvas));
+        assert_eq!(clips.len(), 2);
+        assert_eq!(clips[1].0, 1.5);
+        assert_eq!(clips[1].2, clips[0].3);
     }
 
     fn write_start_times(anim: impl FnOnce(&DrawableHandle) -> crate::canvas::Anim) -> Vec<f64> {

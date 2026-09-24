@@ -830,16 +830,61 @@ impl PyCanvasAnim {
         })
     }
 
-    fn move_along(&self, target: &PyDrawable) -> PyResult<Self> {
+    #[pyo3(signature = (target, *, orient=false, rotate_offset=0.0, start=0.0, end=1.0))]
+    fn move_along(
+        &self,
+        target: &PyDrawable,
+        orient: bool,
+        rotate_offset: f64,
+        start: f64,
+        end: f64,
+    ) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
         self.require_transformable()?;
+        if !rotate_offset.is_finite() || !start.is_finite() || !end.is_finite() {
+            return Err(PyValueError::new_err(
+                "rotate_offset, start and end must be finite",
+            ));
+        }
+        if !(0.0 <= start && start < end && end <= 1.0) {
+            return Err(PyValueError::new_err(
+                "move_along requires 0 <= start < end <= 1",
+            ));
+        }
         self.require_effect_slot("move_along")?;
         self.inner
             .clone()
-            .move_along(&target.0)
+            .move_along_with(
+                &target.0,
+                gaanim_api::anim::PathFollowOptions {
+                    orient: orient.then_some(rotate_offset),
+                    start,
+                    end,
+                },
+            )
             .map(|inner| Self { inner })
             .map_err(PyValueError::new_err)
+    }
+
+    fn path_arc(&self, angle: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        if !angle.is_finite() {
+            return Err(PyValueError::new_err("path_arc angle must be finite"));
+        }
+        let has_translation = matches!(
+            &self.inner.inner.anim_type,
+            gaanim_api::anim::AnimationType::Properties(properties) if properties.translation.is_some()
+        );
+        if !has_translation {
+            return Err(PyValueError::new_err(
+                "path_arc() follows a move_to or shift_by target; add one first, e.g. .move_to(4, 0).path_arc(1.0)",
+            ));
+        }
+        Ok(Self {
+            inner: self.inner.clone().path_arc(angle),
+        })
     }
 
     fn fade_transform_to(&self, target: &PyDrawable) -> PyResult<Self> {
@@ -1002,6 +1047,57 @@ impl PyCanvasAnim {
         }
         Ok(Self {
             inner: self.inner.clone().delay(seconds),
+        })
+    }
+
+    #[pyo3(signature = (count, *, yoyo=false, delay=0.0))]
+    fn repeat(&self, count: i64, yoyo: bool, delay: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        if !(1..=10_000).contains(&count) {
+            return Err(PyValueError::new_err("count must be between 1 and 10000"));
+        }
+        if !delay.is_finite() || delay < 0.0 {
+            return Err(PyValueError::new_err(
+                "delay must be a finite non-negative number",
+            ));
+        }
+        let mode = if yoyo {
+            gaanim_math::RepeatMode::PingPong
+        } else {
+            gaanim_math::RepeatMode::Cycle
+        };
+        Ok(Self {
+            inner: self.inner.clone().repeat(count as u32, mode, delay),
+        })
+    }
+
+    #[pyo3(name = "loop", signature = (mode="cycle", *, until, delay=0.0))]
+    fn loop_for(&self, mode: &str, until: f64, delay: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        let mode = match mode {
+            "cycle" => gaanim_math::RepeatMode::Cycle,
+            "pingpong" => gaanim_math::RepeatMode::PingPong,
+            "offset" => gaanim_math::RepeatMode::Offset,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "unknown loop mode {other:?}; expected \"cycle\", \"pingpong\" or \"offset\""
+                )))
+            }
+        };
+        if !until.is_finite() || until <= 0.0 {
+            return Err(PyValueError::new_err(
+                "until must be a finite positive number of seconds",
+            ));
+        }
+        if !delay.is_finite() || delay < 0.0 {
+            return Err(PyValueError::new_err(
+                "delay must be a finite non-negative number",
+            ));
+        }
+        Ok(Self {
+            inner: self.inner.clone().loop_for(until, mode, delay),
         })
     }
 

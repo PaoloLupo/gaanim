@@ -354,6 +354,8 @@ pub enum PropertyLensSpec {
     /// world-space translation.
     PathFollow {
         path: BezPath,
+        /// Rotate along the tangent, plus this offset in radians.
+        orient: Option<f64>,
     },
     PathFollow3D {
         points: Vec<gaanim_core::glam::DVec3>,
@@ -600,8 +602,9 @@ impl PropertyLensSpec {
                 from_far: *from_far,
                 to_far: *to_far,
             },
-            Self::PathFollow { path } => PropertyLens::PathFollow {
+            Self::PathFollow { path, orient } => PropertyLens::PathFollow {
                 path: std::sync::Arc::new(path.clone()),
+                orient: *orient,
             },
             Self::PathFollow3D { points } => PropertyLens::PathFollow3D {
                 points: std::sync::Arc::new(points.clone()),

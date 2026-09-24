@@ -1037,6 +1037,25 @@ pub struct Anim {
     rate_explicit: bool,
     property_spec: Option<std::sync::Arc<std::sync::Mutex<ObjectSpec>>>,
     camera_capture_before_play: Option<u64>,
+    repeat: Option<AnimRepeat>,
+}
+
+/// Repetition requested on an [`Anim`], expanded once its duration and
+/// easing are final (see [`Anim::apply_repeat`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AnimRepeat {
+    /// Exactly `count` cycles.
+    Count {
+        count: u32,
+        mode: gaanim_math::RepeatMode,
+        gap: f64,
+    },
+    /// As many whole cycles as fit in `until` seconds (at least one).
+    Until {
+        until: f64,
+        mode: gaanim_math::RepeatMode,
+        gap: f64,
+    },
 }
 
 pub(crate) fn media_view(frame: gaanim_scene::MediaFrame) -> ImageView {
@@ -1137,6 +1156,7 @@ impl Anim {
             rate_explicit: false,
             property_spec: None,
             camera_capture_before_play: None,
+            repeat: None,
         }
     }
 
@@ -2113,13 +2133,29 @@ impl Anim {
         self,
         target: &super::drawable::DrawableHandle,
     ) -> Result<Self, &'static str> {
+        self.move_along_with(target, crate::anim::PathFollowOptions::default())
+    }
+
+    /// `move_along` with orientation and a travelled portion of the path.
+    pub fn move_along_with(
+        self,
+        target: &super::drawable::DrawableHandle,
+        follow: crate::anim::PathFollowOptions,
+    ) -> Result<Self, &'static str> {
         if !self.belongs_to(&target.state) {
             return Err("path targets must belong to the same Scene");
         }
         Ok(self.effect(AnimationType::MoveAlongPath {
             path: gaanim_core::kurbo::BezPath::new(),
             path_target: Some(target.id),
+            follow,
         }))
+    }
+
+    /// Moves the translation of this property animation along a circular arc
+    /// that turns by `angle` radians (positive is counterclockwise).
+    pub fn path_arc(self, angle: f64) -> Self {
+        self.update_properties(|properties| properties.path_arc = Some(angle))
     }
 
     pub fn fade_transform_to(
@@ -2217,6 +2253,67 @@ impl Anim {
         let delay = sec.max(0.0);
         self.inner.delay = delay;
         self
+    }
+
+    /// Repeats this animation; `duration` and `easing` describe one cycle
+    /// and `gap` seconds separate cycles.
+    pub fn repeat(mut self, count: u32, mode: gaanim_math::RepeatMode, gap: f64) -> Self {
+        self.repeat = Some(AnimRepeat::Count {
+            count: count.max(1),
+            mode,
+            gap: gap.max(0.0),
+        });
+        self
+    }
+
+    /// Repeats this animation for as many whole cycles as fit in `until`.
+    pub fn loop_for(mut self, until: f64, mode: gaanim_math::RepeatMode, gap: f64) -> Self {
+        self.repeat = Some(AnimRepeat::Until {
+            until: until.max(0.0),
+            mode,
+            gap: gap.max(0.0),
+        });
+        self
+    }
+
+    /// Folds the requested repetition into the duration and rate function.
+    /// Called once the play defaults are applied, so one cycle keeps the
+    /// final duration and easing.
+    pub(crate) fn apply_repeat(&mut self) {
+        let Some(repeat) = self.repeat.take() else {
+            return;
+        };
+        let cycle = self.inner.duration.max(0.0);
+        let (count, mode, gap) = match repeat {
+            AnimRepeat::Count { count, mode, gap } => (count, mode, gap),
+            AnimRepeat::Until { until, mode, gap } => {
+                let fits = if cycle > 0.0 {
+                    ((until + gap) / (cycle + gap)).floor()
+                } else {
+                    1.0
+                };
+                (fits.clamp(1.0, u32::MAX as f64) as u32, mode, gap)
+            }
+        };
+        if count <= 1 {
+            return;
+        }
+        let gap_ratio = if cycle > 0.0 { gap / cycle } else { 0.0 };
+        self.inner.duration = count as f64 * cycle + (count - 1) as f64 * gap;
+        self.inner.rate_func = RateFunc::Repeat {
+            inner: Box::new(self.inner.rate_func.clone()),
+            count,
+            gap: gap_ratio,
+            mode,
+        };
+    }
+
+    /// A copy scheduled independently of this one, as used by repeated
+    /// compositions.
+    pub(crate) fn replica(&self) -> Self {
+        let mut copy = self.clone();
+        copy.consumed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        copy
     }
 }
 

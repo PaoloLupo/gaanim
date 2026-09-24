@@ -103,6 +103,20 @@ impl PyComposition {
             .map_err(play_error)
     }
 
+    #[pyo3(signature = (count, *, delay=0.0))]
+    fn repeat(&self, count: i64, delay: f64) -> PyResult<Self> {
+        if !(1..=u32::MAX as i64).contains(&count) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "count must be at least 1",
+            ));
+        }
+        self.inner
+            .clone()
+            .repeat(count as u32, delay)
+            .map(|inner| Self { inner })
+            .map_err(play_error)
+    }
+
     fn stretch(&self, seconds: f64) -> PyResult<Self> {
         self.inner
             .clone()
