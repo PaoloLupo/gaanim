@@ -5161,7 +5161,7 @@ impl PyTypography {
         // Typst hierarchies are centered on their visual bounds. Shift the
         // resulting raw block into the panel's reading column.
         let body = scene
-            .typst(&typst_source)
+            .typst_in_scene_units(&typst_source)
             .fill(color)
             .move_to(-width * 0.25, -0.18);
         Ok(PyDrawable(scene.group(&[&panel, &rule, &label, &body])))

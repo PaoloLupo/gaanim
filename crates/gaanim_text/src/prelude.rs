@@ -10,6 +10,6 @@ pub use crate::structured::{
     parse_inline_math, rendered_text,
 };
 pub use crate::typst_compiler::{
-    GaanimTypstWorld, TextMetrics, TypstTextRun, compile_typst_text_to_path,
-    compile_typst_to_hierarchy, measure_typst, shape_typst_text_run,
+    GaanimTypstWorld, TextMetrics, TypstTextRun, compile_scaled_typst_to_hierarchy,
+    compile_typst_text_to_path, compile_typst_to_hierarchy, measure_typst, shape_typst_text_run,
 };

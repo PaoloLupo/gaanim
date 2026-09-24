@@ -17,7 +17,7 @@ table = scene.text.typst('''
     #plot(
       xmin: -2.0 * calc.pi, xmax: 2.0 * calc.pi,
       ymin: -1.5, ymax: 1.5,
-      width: 10, height: 5,
+      width: 6, height: 3,
       xlabel: $x$,
       ylabel: $y$,
       show-grid: "major",
@@ -27,7 +27,7 @@ table = scene.text.typst('''
       (fn: x => calc.sin(x), stroke: blue + 1.2pt, samples: 200, label: $sin(x)$, label-pos: 0.625, label-side: "above"),
       (fn: x => calc.cos(x), stroke: red + 1.2pt, samples: 200, label: $cos(x)$, label-pos: 1.0, label-side: "above-left"),
     )
-''').scale_to(2).move_to(-2.75, -0.4375)
+''').move_to(-2.75, -0.4375)
 matrix = scene.text.equation("sum_(k=1)^n k = (n(n+1)) / 2").fill(BLACK).move_to(3.5625, -0.4375, anchor=Anchor.CENTER)
 
 scene.play([
