@@ -19,10 +19,23 @@ Cada ítem tiene un ID estable para convertirlo en issue o PR. La tabla de resum
 propone un orden de integración por **olas**. Las fichas de cada área detallan la API
 propuesta, cómo encaja en la arquitectura y cuándo se considera terminado.
 
+**Seguimiento en GitHub:** cada ítem tiene un issue, y todos son sub-issues de la épica
+[#113](https://github.com/PaoloLupo/gaanim/issues/113). Las etiquetas son:
+
+| Etiqueta | Significado |
+|---|---|
+| `priority: P0` | Bugs encontrados durante la investigación: van primero |
+| `priority: P1` | Olas 0–1 |
+| `priority: P2` | Olas 2–3 |
+| `priority: P3` | Olas 4–6 |
+| `size: S` / `size: M` / `size: L` | Coste estimado |
+| `area: …` | Subsistema: tiempo, procedural, trazos, texto, efectos, transiciones, camara, anotacion, audio, assets o api-python |
+| `motion-design` | Pertenece a este backlog |
+
 ## Cómo usar este backlog
 
-1. Toma el siguiente ítem pendiente de la ola más baja. Sus dependencias deben estar
-   cerradas.
+1. Empieza por los bugs (`priority: P0`: QW-01 y QW-05). Después toma el siguiente
+   ítem pendiente de la ola más baja. Sus dependencias deben estar cerradas.
 2. Impleméntalo como una rebanada vertical completa con la skill
    `plugins/gaanim-dev/skills/gaanim-add-feature`: crate dueño, `gaanim_api`, PyO3,
    docstring en `gaanim_core.pyi`, export en `__init__.py`, página Typst según
@@ -77,108 +90,108 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
 
 ### Ola 0: quick wins (el código ya existe en Rust o a medias)
 
-| ☐ | ID | Ítem | Coste | Impacto | Depende |
-|---|---|---|---|---|---|
-| ☐ | [QW-01](#qw-01--honrar-writeby-order-stagger) | Honrar `write(by=, order=, stagger=)` | S | ★★★ | — |
-| ☐ | [QW-02](#qw-02--exponer-grow_from_point-y-grow_from_edge) | Exponer `grow_from_point` / `grow_from_edge` | S | ★ | — |
-| ☐ | [QW-03](#qw-03--exponer-reveal-brace-y-annotate-en-selecciones-de-texto) | Exponer `reveal`/`brace`/`annotate` en selecciones de texto | S | ★★ | — |
-| ☐ | [QW-04](#qw-04--exponer-transitionmorph) | Exponer `Transition.morph` | S | ★★ | — |
-| ☐ | [QW-05](#qw-05--contrato-de-animpulsewavehighlightfocuscancel) | Contrato de `Anim.pulse/wave/highlight/focus/cancel` | S | ★ | — |
-| ☐ | [QW-06](#qw-06--easingcustomcallable-muestreado) | `Easing.custom(callable)` muestreado | S | ★★ | — |
+| ☐ | ID | Ítem | Coste | Impacto | Depende | Issue |
+|---|---|---|---|---|---|---|
+| ☐ | [QW-01](#qw-01--honrar-writeby-order-stagger) | **Bug:** honrar `write(by=, order=, stagger=)` | S | ★★★ | — | [#114](https://github.com/PaoloLupo/gaanim/issues/114) |
+| ☐ | [QW-02](#qw-02--exponer-grow_from_point-y-grow_from_edge) | Exponer `grow_from_point` / `grow_from_edge` | S | ★ | — | [#116](https://github.com/PaoloLupo/gaanim/issues/116) |
+| ☐ | [QW-03](#qw-03--exponer-reveal-brace-y-annotate-en-selecciones-de-texto) | Exponer `reveal`/`brace`/`annotate` en selecciones de texto | S | ★★ | — | [#117](https://github.com/PaoloLupo/gaanim/issues/117) |
+| ☐ | [QW-04](#qw-04--exponer-transitionmorph) | Exponer `Transition.morph` | S | ★★ | — | [#118](https://github.com/PaoloLupo/gaanim/issues/118) |
+| ☐ | [QW-05](#qw-05--contrato-de-animpulsewavehighlightfocuscancel) | **Bug:** `Anim.pulse/wave/highlight/focus/cancel` sin guarda (panic) ni stub | S | ★ | — | [#115](https://github.com/PaoloLupo/gaanim/issues/115) |
+| ☐ | [QW-06](#qw-06--easingcustomcallable-muestreado) | `Easing.custom(callable)` muestreado | S | ★★ | — | [#119](https://github.com/PaoloLupo/gaanim/issues/119) |
 
 ### Ola 1: cimientos de ritmo y movimiento
 
-| ☐ | ID | Ítem | Coste | Impacto | Depende |
-|---|---|---|---|---|---|
-| ☐ | [TM-01](#tm-01--springs-perceptuales-y-presets) | Springs perceptuales (`bounce`) y presets | S | ★★★ | — |
-| ☐ | [TM-02](#tm-02--easings-paramétricos-y-expresivos) | Easings paramétricos y expresivos | S | ★★ | QW-06 |
-| ☐ | [TM-03](#tm-03--repeat-yoyo-y-loop) | `repeat` / `yoyo` / `loop` para `Anim` y `Composition` | S | ★★★ | — |
-| ☐ | [PR-01](#pr-01--stagger-con-origen-rejilla-y-distribución) | Stagger con origen, rejilla y distribución | M | ★★★ | — |
-| ☐ | [PR-02](#pr-02--aleatoriedad-con-semilla-y-ruido-coherente) | Aleatoriedad con semilla y ruido coherente | S | ★★★ | — |
-| ☐ | [PR-03](#pr-03--updaters-procedurales-wiggle-y-osciladores) | `Updater.wiggle` y `Updater.oscillate` | S | ★★ | PR-02 |
-| ☐ | [FX-01](#fx-01--efectos-animables-glow-blur-shadow) | `glow`/`blur`/`shadow` animables | S | ★★★ | — |
-| ☐ | [TR-01](#tr-01--trim-paths-animable) | Trim paths animable (`start`/`end`/`offset`) | S | ★★★ | — |
-| ☐ | [TR-03](#tr-03--movimiento-orientado-sobre-trayectoria-y-en-arco) | `move_along` orientado y `path_arc` | S | ★★ | — |
+| ☐ | ID | Ítem | Coste | Impacto | Depende | Issue |
+|---|---|---|---|---|---|---|
+| ☐ | [TM-01](#tm-01--springs-perceptuales-y-presets) | Springs perceptuales (`bounce`) y presets | S | ★★★ | — | [#120](https://github.com/PaoloLupo/gaanim/issues/120) |
+| ☐ | [TM-02](#tm-02--easings-paramétricos-y-expresivos) | Easings paramétricos y expresivos | S | ★★ | QW-06 | [#121](https://github.com/PaoloLupo/gaanim/issues/121) |
+| ☐ | [TM-03](#tm-03--repeat-yoyo-y-loop) | `repeat` / `yoyo` / `loop` para `Anim` y `Composition` | S | ★★★ | — | [#122](https://github.com/PaoloLupo/gaanim/issues/122) |
+| ☐ | [PR-01](#pr-01--stagger-con-origen-rejilla-y-distribución) | Stagger con origen, rejilla y distribución | M | ★★★ | — | [#123](https://github.com/PaoloLupo/gaanim/issues/123) |
+| ☐ | [PR-02](#pr-02--aleatoriedad-con-semilla-y-ruido-coherente) | Aleatoriedad con semilla y ruido coherente | S | ★★★ | — | [#124](https://github.com/PaoloLupo/gaanim/issues/124) |
+| ☐ | [PR-03](#pr-03--updaters-procedurales-wiggle-y-osciladores) | `Updater.wiggle` y `Updater.oscillate` | S | ★★ | PR-02 | [#125](https://github.com/PaoloLupo/gaanim/issues/125) |
+| ☐ | [FX-01](#fx-01--efectos-animables-glow-blur-shadow) | `glow`/`blur`/`shadow` animables | S | ★★★ | — | [#126](https://github.com/PaoloLupo/gaanim/issues/126) |
+| ☐ | [TR-01](#tr-01--trim-paths-animable) | Trim paths animable (`start`/`end`/`offset`) | S | ★★★ | — | [#127](https://github.com/PaoloLupo/gaanim/issues/127) |
+| ☐ | [TR-03](#tr-03--movimiento-orientado-sobre-trayectoria-y-en-arco) | `move_along` orientado y `path_arc` | S | ★★ | — | [#128](https://github.com/PaoloLupo/gaanim/issues/128) |
 
 ### Ola 2: tipografía cinética, transiciones y cámara
 
-| ☐ | ID | Ítem | Coste | Impacto | Depende |
-|---|---|---|---|---|---|
-| ☐ | [TX-02](#tx-02--animador-de-rango-de-texto) | Animador de rango de texto (motor por glifo) | M | ★★★ | QW-01 |
-| ☐ | [TX-01](#tx-01--revelados-con-máscara-por-línea-palabra-o-carácter) | Revelados con máscara por línea, palabra o carácter | M | ★★★ | TX-02 |
-| ☐ | [TX-03](#tx-03--máquina-de-escribir-con-cursor) | Máquina de escribir con cursor | S | ★★ | — |
-| ☐ | [TX-04](#tx-04--scramble--decode) | Scramble / decode | M | ★★ | PR-02 |
-| ☐ | [TX-05](#tx-05--blur-in-y-tracking) | Blur-in y tracking | S | ★★ | FX-01, TX-02 |
-| ☐ | [TS-01](#ts-01--wipes-iris-push-y-blinds-con-easing) | Wipes, iris, push y blinds, con easing | M | ★★★ | — |
-| ☐ | [TS-04](#ts-04--overlays-sobre-el-corte) | Overlays sobre el corte (flash, light leak) | S | ★ | — |
-| ☐ | [TM-05](#tm-05--etiquetas-posiciones-relativas-y-marcadores) | Etiquetas, posiciones relativas y marcadores | M | ★★★ | — |
-| ☐ | [CA-01](#ca-01--shake-por-trauma-con-ruido) | Shake por trauma con ruido | S | ★★ | PR-02 |
-| ☐ | [CA-02](#ca-02--zoom-perceptualmente-uniforme) | Zoom perceptualmente uniforme | S | ★★ | — |
-| ☐ | [AN-02](#an-02--resaltador-tipo-marcador) | Resaltador tipo marcador | S | ★★ | — |
+| ☐ | ID | Ítem | Coste | Impacto | Depende | Issue |
+|---|---|---|---|---|---|---|
+| ☐ | [TX-02](#tx-02--animador-de-rango-de-texto) | Animador de rango de texto (motor por glifo) | M | ★★★ | QW-01 | [#129](https://github.com/PaoloLupo/gaanim/issues/129) |
+| ☐ | [TX-01](#tx-01--revelados-con-máscara-por-línea-palabra-o-carácter) | Revelados con máscara por línea, palabra o carácter | M | ★★★ | TX-02 | [#130](https://github.com/PaoloLupo/gaanim/issues/130) |
+| ☐ | [TX-03](#tx-03--máquina-de-escribir-con-cursor) | Máquina de escribir con cursor | S | ★★ | — | [#131](https://github.com/PaoloLupo/gaanim/issues/131) |
+| ☐ | [TX-04](#tx-04--scramble--decode) | Scramble / decode | M | ★★ | PR-02 | [#132](https://github.com/PaoloLupo/gaanim/issues/132) |
+| ☐ | [TX-05](#tx-05--blur-in-y-tracking) | Blur-in y tracking | S | ★★ | FX-01, TX-02 | [#133](https://github.com/PaoloLupo/gaanim/issues/133) |
+| ☐ | [TS-01](#ts-01--wipes-iris-push-y-blinds-con-easing) | Wipes, iris, push y blinds, con easing | M | ★★★ | — | [#134](https://github.com/PaoloLupo/gaanim/issues/134) |
+| ☐ | [TS-04](#ts-04--overlays-sobre-el-corte) | Overlays sobre el corte (flash, light leak) | S | ★ | — | [#135](https://github.com/PaoloLupo/gaanim/issues/135) |
+| ☐ | [TM-05](#tm-05--etiquetas-posiciones-relativas-y-marcadores) | Etiquetas, posiciones relativas y marcadores | M | ★★★ | — | [#136](https://github.com/PaoloLupo/gaanim/issues/136) |
+| ☐ | [CA-01](#ca-01--shake-por-trauma-con-ruido) | Shake por trauma con ruido | S | ★★ | PR-02 | [#137](https://github.com/PaoloLupo/gaanim/issues/137) |
+| ☐ | [CA-02](#ca-02--zoom-perceptualmente-uniforme) | Zoom perceptualmente uniforme | S | ★★ | — | [#138](https://github.com/PaoloLupo/gaanim/issues/138) |
+| ☐ | [AN-02](#an-02--resaltador-tipo-marcador) | Resaltador tipo marcador | S | ★★ | — | [#139](https://github.com/PaoloLupo/gaanim/issues/139) |
 
 ### Ola 3: acabado visual (shaders y composición)
 
-| ☐ | ID | Ítem | Coste | Impacto | Depende |
-|---|---|---|---|---|---|
-| ☐ | [FX-02](#fx-02--uniforms-enlazables-y-cadena-de-post-procesos) | Uniforms enlazables y cadena de post-procesos | M | ★★★ | — |
-| ☐ | [FX-03](#fx-03--presets-de-acabado) | Presets de acabado: grain, viñeta, aberración, grading, LUT | S | ★★★ | FX-02 |
-| ☐ | [FX-09](#fx-09--fondos-vivos) | Fondos vivos (mesh/noise gradient, aurora, rejilla) | S | ★★ | — |
-| ☐ | [FX-07](#fx-07--modos-de-fusión-por-objeto) | Modos de fusión por objeto | S | ★★ | — |
-| ☐ | [FX-04](#fx-04--bloom-multipaso) | Bloom multipaso | M | ★★★ | FX-02 |
-| ☐ | [FX-05](#fx-05--motion-blur-por-sub-frames) | Motion blur por sub-frames | M | ★★★ | — |
-| ☐ | [FX-06](#fx-06--echo-y-estelas) | Echo y estelas | M | ★★ | — |
-| ☐ | [TS-02](#ts-02--transiciones-por-shader) | Transiciones por shader (estilo gl-transitions) | L | ★★ | FX-02 |
+| ☐ | ID | Ítem | Coste | Impacto | Depende | Issue |
+|---|---|---|---|---|---|---|
+| ☐ | [FX-02](#fx-02--uniforms-enlazables-y-cadena-de-post-procesos) | Uniforms enlazables y cadena de post-procesos | M | ★★★ | — | [#140](https://github.com/PaoloLupo/gaanim/issues/140) |
+| ☐ | [FX-03](#fx-03--presets-de-acabado) | Presets de acabado: grain, viñeta, aberración, grading, LUT | S | ★★★ | FX-02 | [#141](https://github.com/PaoloLupo/gaanim/issues/141) |
+| ☐ | [FX-09](#fx-09--fondos-vivos) | Fondos vivos (mesh/noise gradient, aurora, rejilla) | S | ★★ | — | [#142](https://github.com/PaoloLupo/gaanim/issues/142) |
+| ☐ | [FX-07](#fx-07--modos-de-fusión-por-objeto) | Modos de fusión por objeto | S | ★★ | — | [#143](https://github.com/PaoloLupo/gaanim/issues/143) |
+| ☐ | [FX-04](#fx-04--bloom-multipaso) | Bloom multipaso | M | ★★★ | FX-02 | [#144](https://github.com/PaoloLupo/gaanim/issues/144) |
+| ☐ | [FX-05](#fx-05--motion-blur-por-sub-frames) | Motion blur por sub-frames | M | ★★★ | — | [#145](https://github.com/PaoloLupo/gaanim/issues/145) |
+| ☐ | [FX-06](#fx-06--echo-y-estelas) | Echo y estelas | M | ★★ | — | [#146](https://github.com/PaoloLupo/gaanim/issues/146) |
+| ☐ | [TS-02](#ts-02--transiciones-por-shader) | Transiciones por shader (estilo gl-transitions) | L | ★★ | FX-02 | [#147](https://github.com/PaoloLupo/gaanim/issues/147) |
 
 ### Ola 4: sistemas procedurales, formas y tiempo avanzado
 
-| ☐ | ID | Ítem | Coste | Impacto | Depende |
-|---|---|---|---|---|---|
-| ☐ | [PR-04](#pr-04--duplicador-y-repeater-con-distribuciones) | Duplicador/Repeater con distribuciones | M | ★★★ | — |
-| ☐ | [PR-05](#pr-05--campos-y-falloffs) | Campos y falloffs estilo Cavalry | M | ★★★ | PR-02, PR-04 |
-| ☐ | [PR-06](#pr-06--conexiones-tipo-plexus) | Conexiones tipo plexus | S | ★ | PR-04 |
-| ☐ | [PR-07](#pr-07--emisor-de-partículas-determinista) | Emisor de partículas determinista | M | ★★★ | PR-02 |
-| ☐ | [PR-08](#pr-08--física-analítica-ligera) | Física analítica ligera (`throw`, `inertia`) | M | ★★ | — |
-| ☐ | [TR-02](#tr-02--dash-offset-animado) | Dash offset animado | S | ★★ | — |
-| ☐ | [TR-04](#tr-04--modificadores-de-path) | Modificadores de path no destructivos | M | ★★ | — |
-| ☐ | [TR-05](#tr-05--trazo-con-grosor-variable) | Trazo con grosor variable (taper) | M | ★★ | — |
-| ☐ | [TM-04](#tm-04--keyframes-multicanal) | Keyframes multicanal | M | ★★ | — |
-| ☐ | [TM-06](#tm-06--rampas-de-velocidad-y-time-remap) | Rampas de velocidad y time remap | M | ★★ | — |
-| ☐ | [TM-07](#tm-07--follow-through-settle-y-cadenas-con-retardo) | Follow-through: `settle` y `follow(delay=)` | M | ★★ | — |
-| ☐ | [TM-08](#tm-08--squash-and-stretch-por-velocidad) | Squash & stretch por velocidad | S | ★ | — |
+| ☐ | ID | Ítem | Coste | Impacto | Depende | Issue |
+|---|---|---|---|---|---|---|
+| ☐ | [PR-04](#pr-04--duplicador-y-repeater-con-distribuciones) | Duplicador/Repeater con distribuciones | M | ★★★ | — | [#148](https://github.com/PaoloLupo/gaanim/issues/148) |
+| ☐ | [PR-05](#pr-05--campos-y-falloffs) | Campos y falloffs estilo Cavalry | M | ★★★ | PR-02, PR-04 | [#149](https://github.com/PaoloLupo/gaanim/issues/149) |
+| ☐ | [PR-06](#pr-06--conexiones-tipo-plexus) | Conexiones tipo plexus | S | ★ | PR-04 | [#150](https://github.com/PaoloLupo/gaanim/issues/150) |
+| ☐ | [PR-07](#pr-07--emisor-de-partículas-determinista) | Emisor de partículas determinista | M | ★★★ | PR-02 | [#151](https://github.com/PaoloLupo/gaanim/issues/151) |
+| ☐ | [PR-08](#pr-08--física-analítica-ligera) | Física analítica ligera (`throw`, `inertia`) | M | ★★ | — | [#152](https://github.com/PaoloLupo/gaanim/issues/152) |
+| ☐ | [TR-02](#tr-02--dash-offset-animado) | Dash offset animado | S | ★★ | — | [#153](https://github.com/PaoloLupo/gaanim/issues/153) |
+| ☐ | [TR-04](#tr-04--modificadores-de-path) | Modificadores de path no destructivos | M | ★★ | — | [#154](https://github.com/PaoloLupo/gaanim/issues/154) |
+| ☐ | [TR-05](#tr-05--trazo-con-grosor-variable) | Trazo con grosor variable (taper) | M | ★★ | — | [#155](https://github.com/PaoloLupo/gaanim/issues/155) |
+| ☐ | [TM-04](#tm-04--keyframes-multicanal) | Keyframes multicanal | M | ★★ | — | [#156](https://github.com/PaoloLupo/gaanim/issues/156) |
+| ☐ | [TM-06](#tm-06--rampas-de-velocidad-y-time-remap) | Rampas de velocidad y time remap | M | ★★ | — | [#157](https://github.com/PaoloLupo/gaanim/issues/157) |
+| ☐ | [TM-07](#tm-07--follow-through-settle-y-cadenas-con-retardo) | Follow-through: `settle` y `follow(delay=)` | M | ★★ | — | [#158](https://github.com/PaoloLupo/gaanim/issues/158) |
+| ☐ | [TM-08](#tm-08--squash-and-stretch-por-velocidad) | Squash & stretch por velocidad | S | ★ | — | [#159](https://github.com/PaoloLupo/gaanim/issues/159) |
 
 ### Ola 5: narrativa, audio y explicación
 
-| ☐ | ID | Ítem | Coste | Impacto | Depende |
-|---|---|---|---|---|---|
-| ☐ | [AU-01](#au-01--marcadores-para-voz-en-off) | Marcadores para voz en off (`wait_until` + sidecar) | M | ★★★ | TM-05 |
-| ☐ | [AU-02](#au-02--análisis-de-audio-como-señales-reactivas) | Análisis de audio como señales reactivas | M | ★★★ | — |
-| ☐ | [AU-03](#au-03--waveform-y-espectro-como-drawables) | Waveform y espectro como drawables | S | ★★ | AU-02 |
-| ☐ | [AU-04](#au-04--efectos-de-sonido-anclados) | Efectos de sonido anclados | S | ★★ | — |
-| ☐ | [TX-07](#tx-07--subtítulos-karaoke) | Subtítulos karaoke (SRT/VTT/Whisper) | M | ★★★ | TX-02 |
-| ☐ | [TX-09](#tx-09--animación-de-código-por-diff) | Animación de código por diff | M | ★★★ | — |
-| ☐ | [TX-06](#tx-06--texto-sobre-trayectoria) | Texto sobre trayectoria | M | ★★ | TR-03 |
-| ☐ | [TS-03](#ts-03--magic-move-por-claves) | Magic move por claves | M | ★★★ | QW-04 |
-| ☐ | [AN-01](#an-01--anotaciones-a-mano-alzada) | Anotaciones a mano alzada | M | ★★★ | TR-01, PR-02 |
-| ☐ | [AN-03](#an-03--puntas-de-flecha-en-cualquier-trazo) | Puntas de flecha en cualquier trazo | S | ★ | TR-01 |
-| ☐ | [AN-04](#an-04--énfasis-adicionales) | Énfasis adicionales (broadcast, spotlight…) | S | ★★ | — |
-| ☐ | [AN-05](#an-05--carrera-de-barras) | Carrera de barras (bar chart race) | M | ★★ | — |
-| ☐ | [AN-07](#an-07--anillos-de-progreso-y-temporizadores) | Anillos de progreso y temporizadores | S | ★ | TR-01 |
+| ☐ | ID | Ítem | Coste | Impacto | Depende | Issue |
+|---|---|---|---|---|---|---|
+| ☐ | [AU-01](#au-01--marcadores-para-voz-en-off) | Marcadores para voz en off (`wait_until` + sidecar) | M | ★★★ | TM-05 | [#160](https://github.com/PaoloLupo/gaanim/issues/160) |
+| ☐ | [AU-02](#au-02--análisis-de-audio-como-señales-reactivas) | Análisis de audio como señales reactivas | M | ★★★ | — | [#161](https://github.com/PaoloLupo/gaanim/issues/161) |
+| ☐ | [AU-03](#au-03--waveform-y-espectro-como-drawables) | Waveform y espectro como drawables | S | ★★ | AU-02 | [#162](https://github.com/PaoloLupo/gaanim/issues/162) |
+| ☐ | [AU-04](#au-04--efectos-de-sonido-anclados) | Efectos de sonido anclados | S | ★★ | — | [#163](https://github.com/PaoloLupo/gaanim/issues/163) |
+| ☐ | [TX-07](#tx-07--subtítulos-karaoke) | Subtítulos karaoke (SRT/VTT/Whisper) | M | ★★★ | TX-02 | [#164](https://github.com/PaoloLupo/gaanim/issues/164) |
+| ☐ | [TX-09](#tx-09--animación-de-código-por-diff) | Animación de código por diff | M | ★★★ | — | [#165](https://github.com/PaoloLupo/gaanim/issues/165) |
+| ☐ | [TX-06](#tx-06--texto-sobre-trayectoria) | Texto sobre trayectoria | M | ★★ | TR-03 | [#166](https://github.com/PaoloLupo/gaanim/issues/166) |
+| ☐ | [TS-03](#ts-03--magic-move-por-claves) | Magic move por claves | M | ★★★ | QW-04 | [#167](https://github.com/PaoloLupo/gaanim/issues/167) |
+| ☐ | [AN-01](#an-01--anotaciones-a-mano-alzada) | Anotaciones a mano alzada | M | ★★★ | TR-01, PR-02 | [#168](https://github.com/PaoloLupo/gaanim/issues/168) |
+| ☐ | [AN-03](#an-03--puntas-de-flecha-en-cualquier-trazo) | Puntas de flecha en cualquier trazo | S | ★ | TR-01 | [#169](https://github.com/PaoloLupo/gaanim/issues/169) |
+| ☐ | [AN-04](#an-04--énfasis-adicionales) | Énfasis adicionales (broadcast, spotlight…) | S | ★★ | — | [#170](https://github.com/PaoloLupo/gaanim/issues/170) |
+| ☐ | [AN-05](#an-05--carrera-de-barras) | Carrera de barras (bar chart race) | M | ★★ | — | [#171](https://github.com/PaoloLupo/gaanim/issues/171) |
+| ☐ | [AN-07](#an-07--anillos-de-progreso-y-temporizadores) | Anillos de progreso y temporizadores | S | ★ | TR-01 | [#172](https://github.com/PaoloLupo/gaanim/issues/172) |
 
 ### Ola 6: apuestas grandes
 
-| ☐ | ID | Ítem | Coste | Impacto | Depende |
-|---|---|---|---|---|---|
-| ☐ | [FX-10](#fx-10--capas-offscreen-por-objeto) | Capas offscreen por objeto (infraestructura) | L | ★★★ | FX-02 |
-| ☐ | [FX-08](#fx-08--mates-alpha-y-luma) | Mates alpha y luma | M | ★★ | FX-10 |
-| ☐ | [FX-11](#fx-11--metaballs--gooey) | Metaballs / gooey | M | ★★ | — |
-| ☐ | [FX-12](#fx-12--vidrio-y-backdrop-blur) | Vidrio y backdrop blur | L | ★★ | FX-10 |
-| ☐ | [CA-03](#ca-03--cámara-sobre-trayectoria-y-whip-pan) | Cámara sobre trayectoria y whip pan | M | ★★ | TR-03, FX-05 |
-| ☐ | [CA-04](#ca-04--capas-de-parallax-25d) | Capas de parallax 2.5D | M | ★★ | — |
-| ☐ | [CA-05](#ca-05--profundidad-de-campo) | Profundidad de campo | L | ★ | CA-04, FX-10 |
-| ☐ | [CA-06](#ca-06--extrusión-3d-de-formas-y-texto) | Extrusión 3D de formas y texto | L | ★★ | — |
-| ☐ | [TX-08](#tx-08--fuentes-variables-animadas) | Fuentes variables animadas | L | ★ | TX-02 |
-| ☐ | [AN-06](#an-06--rutas-y-mapas) | Rutas y mapas | L | ★ | TR-01, CA-03 |
-| ☐ | [AS-01](#as-01--lottie-segmentos-slots-y-reverse) | Lottie: segmentos por marker, slots y reverse | M | ★ | — |
+| ☐ | ID | Ítem | Coste | Impacto | Depende | Issue |
+|---|---|---|---|---|---|---|
+| ☐ | [FX-10](#fx-10--capas-offscreen-por-objeto) | Capas offscreen por objeto (infraestructura) | L | ★★★ | FX-02 | [#173](https://github.com/PaoloLupo/gaanim/issues/173) |
+| ☐ | [FX-08](#fx-08--mates-alpha-y-luma) | Mates alpha y luma | M | ★★ | FX-10 | [#174](https://github.com/PaoloLupo/gaanim/issues/174) |
+| ☐ | [FX-11](#fx-11--metaballs--gooey) | Metaballs / gooey | M | ★★ | — | [#175](https://github.com/PaoloLupo/gaanim/issues/175) |
+| ☐ | [FX-12](#fx-12--vidrio-y-backdrop-blur) | Vidrio y backdrop blur | L | ★★ | FX-10 | [#176](https://github.com/PaoloLupo/gaanim/issues/176) |
+| ☐ | [CA-03](#ca-03--cámara-sobre-trayectoria-y-whip-pan) | Cámara sobre trayectoria y whip pan | M | ★★ | TR-03, FX-05 | [#177](https://github.com/PaoloLupo/gaanim/issues/177) |
+| ☐ | [CA-04](#ca-04--capas-de-parallax-25d) | Capas de parallax 2.5D | M | ★★ | — | [#178](https://github.com/PaoloLupo/gaanim/issues/178) |
+| ☐ | [CA-05](#ca-05--profundidad-de-campo) | Profundidad de campo | L | ★ | CA-04, FX-10 | [#179](https://github.com/PaoloLupo/gaanim/issues/179) |
+| ☐ | [CA-06](#ca-06--extrusión-3d-de-formas-y-texto) | Extrusión 3D de formas y texto | L | ★★ | — | [#180](https://github.com/PaoloLupo/gaanim/issues/180) |
+| ☐ | [TX-08](#tx-08--fuentes-variables-animadas) | Fuentes variables animadas | L | ★ | TX-02 | [#181](https://github.com/PaoloLupo/gaanim/issues/181) |
+| ☐ | [AN-06](#an-06--rutas-y-mapas) | Rutas y mapas | L | ★ | TR-01, CA-03 | [#182](https://github.com/PaoloLupo/gaanim/issues/182) |
+| ☐ | [AS-01](#as-01--lottie-segmentos-slots-y-reverse) | Lottie: segmentos por marker, slots y reverse | M | ★ | — | [#183](https://github.com/PaoloLupo/gaanim/issues/183) |
 
 ---
 
@@ -188,10 +201,10 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
 
 `S` · ★★★
 
-- **Qué:** El binding valida `by="grapheme"|"word"|"line"|"part"` y
-  `order="forward"|"reverse"|"center"|"random"`, pero solo `by="part"` y `stagger`
-  (convertido a `lag_ratio`) cambian el resultado. Los demás valores comparten el
-  schedule vectorial (`crates/gaanim_python/src/pydrawable.rs:544`,
+- **Qué (bug):** El binding valida `by="grapheme"|"word"|"line"|"part"` y
+  `order="forward"|"reverse"|"center"|"random"`, pero salvo `by="part"` todos los
+  valores comparten el schedule vectorial. `by` y `order` se descartan, y `stagger`
+  solo se reenvía como `lag_ratio` (`crates/gaanim_python/src/pydrawable.rs:544`,
   `docs/content/api/text.typ:525`). Honrarlos da escritura por palabra o línea y
   órdenes desde el centro o aleatorios.
 - **Referencias:** Manim `AddTextLetterByLetter`/`LaggedStart`, Jitter "animate by
@@ -262,9 +275,12 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
 
 `S` · ★
 
-- **Hoy:** Estos métodos están ligados en `PyCanvasAnim`
-  (`crates/gaanim_python/src/pydrawable.rs:749-790`), pero el stub solo los declara en
-  `TextSelectionAnimation`.
+- **Hoy (bug):** Estos métodos están ligados en `PyCanvasAnim`
+  (`crates/gaanim_python/src/pydrawable.rs:749-797`), pero el stub solo los declara en
+  `TextSelectionAnimation`. Además, no comprueban que el proxy sea una selección de
+  texto: sobre un `Drawable` normal llegan al `panic!` de `selection_effect`
+  (`crates/gaanim_api/src/canvas/types.rs:1288`), que en Python aparece como
+  `PanicException` en vez de `TypeError`.
 - **Qué:** Hay que decidir si son API pública de cualquier `Drawable`. Si lo son, se
   documentan en el stub `Anim` y en `animations.typ`. Si no, se restringen a
   selecciones de texto con un error claro.
