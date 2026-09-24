@@ -354,7 +354,7 @@ impl Default for ArrowFieldOptions {
     fn default() -> Self {
         Self {
             min_length: 0.0,
-            max_length: 28.0,
+            max_length: 0.28,
             length_scale: 1.0,
             width: 0.02,
             tip_length: None,
@@ -3607,7 +3607,7 @@ impl SceneModel {
         mut options: ArrowFieldOptions,
     ) -> Result<ArrowVectorFieldHandle, VisualizationError> {
         if (options.max_length - ArrowFieldOptions::default().max_length).abs() < f64::EPSILON {
-            options.max_length = 24.0;
+            options.max_length = 0.24;
         }
         if !options.max_length.is_finite() || options.max_length <= 0.0 {
             return Err(VisualizationError::InvalidSize);

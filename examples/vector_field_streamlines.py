@@ -20,7 +20,7 @@ vortex = plane.field(lambda x, y: (-y - 0.12 * x, x - 0.12 * y))
 
 arrows = vortex.arrows(
     resolution=(19, 13),
-    max_length=34,
+    max_length=0.34,
     width=0.0275,
     colormap=ColorMap("batlow"),
 )

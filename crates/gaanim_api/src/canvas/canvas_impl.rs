@@ -9962,6 +9962,7 @@ mod scene_unit_default_tests {
             (0.03, 0.01, 0.02)
         );
         assert_eq!(ArrowFieldOptions::default().width, 0.02);
+        assert_eq!(ArrowFieldOptions::default().max_length, 0.28);
         assert_eq!(StreamLinesStyle::default().width, 0.02);
         assert_eq!(FlowParticleOptions::default().radius, 0.05);
     }

@@ -1353,8 +1353,8 @@ impl PyVectorField {
         let options = ArrowFieldOptions {
             min_length,
             max_length: max_length.unwrap_or(match self.inner {
-                PyVectorFieldInner::Two(_) => 28.0,
-                PyVectorFieldInner::Three(_) => 24.0,
+                PyVectorFieldInner::Two(_) => 0.28,
+                PyVectorFieldInner::Three(_) => 0.24,
             }),
             length_scale,
             width,
