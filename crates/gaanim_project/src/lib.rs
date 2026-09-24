@@ -20,6 +20,8 @@ __pycache__/
 *.gif
 "#;
 const PYTHON_VERSION: &str = "3.14";
+/// Minor version of the Python 3 runtime `gaanim-core` is built against.
+pub const PYTHON_MINOR: u16 = 14;
 const RECENTS_LIMIT: usize = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -377,8 +379,24 @@ pub struct PythonVersion {
 }
 
 impl PythonVersion {
+    /// On Windows the core links the version-independent `python3.dll`, so any
+    /// newer runtime works. Elsewhere it links `libpython3.<minor>.so`, which
+    /// only the exact minor version the core was built against provides.
     pub const fn is_supported(self) -> bool {
-        self.major > 3 || (self.major == 3 && self.minor >= 12)
+        if cfg!(windows) {
+            self.major > 3 || (self.major == 3 && self.minor >= PYTHON_MINOR)
+        } else {
+            self.major == 3 && self.minor == PYTHON_MINOR
+        }
+    }
+}
+
+/// Human-readable requirement used in diagnostics.
+pub fn python_requirement() -> String {
+    if cfg!(windows) {
+        format!("Python >=3.{PYTHON_MINOR}")
+    } else {
+        format!("Python 3.{PYTHON_MINOR}")
     }
 }
 
@@ -436,7 +454,7 @@ struct SystemRunner;
 
 impl CommandRunner for SystemRunner {
     fn output(&self, program: &OsStr, args: &[OsString]) -> Option<Output> {
-        Command::new(program).args(args).output().ok()
+        python_command(program).args(args).output().ok()
     }
 }
 
@@ -532,21 +550,63 @@ fn probe_venv(
 fn probe_system_python(runner: &impl CommandRunner) -> Option<DetectedPython> {
     #[cfg(windows)]
     let candidates: Vec<(&OsStr, Vec<OsString>)> = vec![
-        (OsStr::new("py"), vec![OsString::from("-3.14")]),
-        (OsStr::new("py"), vec![OsString::from("-3.13")]),
-        (OsStr::new("py"), vec![OsString::from("-3.12")]),
+        (
+            OsStr::new("py"),
+            vec![OsString::from(format!("-{PYTHON_VERSION}"))],
+        ),
         (OsStr::new("python"), vec![]),
         (OsStr::new("python3"), vec![]),
     ];
     #[cfg(not(windows))]
+    let versioned = format!("python{PYTHON_VERSION}");
+    #[cfg(not(windows))]
     let candidates: Vec<(&OsStr, Vec<OsString>)> = vec![
+        (OsStr::new(&versioned), vec![]),
         (OsStr::new("python3"), vec![]),
         (OsStr::new("python"), vec![]),
     ];
-    candidates.into_iter().find_map(|(program, args)| {
-        probe_python_command(program, &args, PythonSource::System, None, runner)
-            .filter(|python| python.version.is_supported())
-    })
+    candidates
+        .into_iter()
+        .find_map(|(program, args)| {
+            probe_python_command(program, &args, PythonSource::System, None, runner)
+                .filter(|python| python.version.is_supported())
+        })
+        .or_else(|| probe_uv_managed_python(runner))
+}
+
+/// Fall back to a uv-managed interpreter, which is not on `PATH` by default.
+fn probe_uv_managed_python(runner: &impl CommandRunner) -> Option<DetectedPython> {
+    let output = runner
+        .output(
+            OsStr::new("uv"),
+            &[
+                OsString::from("python"),
+                OsString::from("find"),
+                OsString::from(PYTHON_VERSION),
+            ],
+        )
+        .filter(|output| output.status.success())?;
+    let executable = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if executable.is_empty() {
+        return None;
+    }
+    probe_python_command(
+        OsStr::new(&executable),
+        &[],
+        PythonSource::System,
+        None,
+        runner,
+    )
+    .filter(|python| python.version.is_supported())
+}
+
+/// Build a command for an external Python or uv process. The core runs with
+/// `PYTHONHOME` pointing at its embedded runtime, which must not leak into
+/// other interpreters (it would override their own prefix and venv).
+fn python_command(program: impl AsRef<OsStr>) -> Command {
+    let mut command = Command::new(program);
+    command.env_remove("PYTHONHOME");
+    command
 }
 
 fn probe_python_command(
@@ -587,11 +647,21 @@ fn parse_python_version(value: &str) -> Option<PythonVersion> {
 }
 
 pub fn activate_environment(probe: &EnvironmentProbe) -> Result<Option<PathBuf>, String> {
-    let python = probe
-        .python
-        .as_ref()
-        .filter(|python| python.version.is_supported())
-        .ok_or_else(|| "Python >=3.12 was not found".to_string())?;
+    let python = match &probe.python {
+        Some(python) if python.version.is_supported() => python,
+        Some(python) => {
+            let version = python.version;
+            return Err(format!(
+                "Gaanim requires {}, but found Python {}.{}.{} at {}",
+                python_requirement(),
+                version.major,
+                version.minor,
+                version.patch,
+                python.executable.display()
+            ));
+        }
+        None => return Err(format!("{} was not found", python_requirement())),
+    };
     #[cfg(windows)]
     {
         prepend_to_path(&python.home);
@@ -600,6 +670,37 @@ pub fn activate_environment(probe: &EnvironmentProbe) -> Result<Option<PathBuf>,
         }
     }
     Ok(python.venv_root.clone())
+}
+
+/// Environment variables `gaanim-core` needs to load and initialise the
+/// selected runtime. On Windows `activate_environment` already makes
+/// `python3.dll` resolvable through `PATH`. On Linux the dynamic loader must
+/// find `libpython3.<minor>.so` under `<base_prefix>/lib` (uv, pyenv and other
+/// non-system installs are not on the default search path), and the embedded
+/// interpreter needs `PYTHONHOME` because it cannot derive its prefix from the
+/// core executable, and relocated builds such as uv's report a stale
+/// compile-time prefix.
+pub fn core_environment(probe: &EnvironmentProbe) -> Vec<(&'static str, OsString)> {
+    let Some(python) = probe
+        .python
+        .as_ref()
+        .filter(|python| python.version.is_supported())
+    else {
+        return Vec::new();
+    };
+    if !cfg!(target_os = "linux") {
+        return Vec::new();
+    }
+    let lib_dir = python.home.join("lib");
+    let mut paths = vec![lib_dir.clone()];
+    if let Some(current) = std::env::var_os("LD_LIBRARY_PATH") {
+        paths.extend(std::env::split_paths(&current).filter(|path| path != &lib_dir));
+    }
+    let mut env = vec![("PYTHONHOME", python.home.clone().into_os_string())];
+    if let Ok(joined) = std::env::join_paths(paths) {
+        env.push(("LD_LIBRARY_PATH", joined));
+    }
+    env
 }
 
 /// Create a project virtual environment with uv and install the bundled
@@ -613,7 +714,7 @@ pub fn provision_authoring_package(project_root: &Path) -> Result<PathBuf, Strin
     })?;
     let venv = project_root.join(".venv");
     if venv_python(&venv).is_none() {
-        let status = Command::new("uv")
+        let status = python_command("uv")
             .current_dir(project_root)
             .args(["venv", "--python", PYTHON_VERSION, ".venv"])
             .status()
@@ -628,7 +729,7 @@ pub fn provision_authoring_package(project_root: &Path) -> Result<PathBuf, Strin
             venv.display()
         )
     })?;
-    let installed = Command::new(&python)
+    let installed = python_command(&python)
         .args([
             "-c",
             "import importlib.metadata as m; print(m.version('gaanim'))",
@@ -638,7 +739,7 @@ pub fn provision_authoring_package(project_root: &Path) -> Result<PathBuf, Strin
         .filter(|output| output.status.success())
         .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string());
     if installed.as_deref() != Some(env!("CARGO_PKG_VERSION")) {
-        let status = Command::new("uv")
+        let status = python_command("uv")
             .args([
                 OsStr::new("pip"),
                 OsStr::new("install"),
@@ -801,10 +902,16 @@ mod tests {
     }
 
     #[test]
-    fn supported_python_version_starts_at_3_12() {
-        assert!(!parse_python_version("3.11.9").unwrap().is_supported());
-        assert!(parse_python_version("3.12.0").unwrap().is_supported());
+    fn supported_python_version_starts_at_3_14() {
+        assert!(!parse_python_version("3.12.8").unwrap().is_supported());
+        assert!(!parse_python_version("3.13.5").unwrap().is_supported());
+        assert!(parse_python_version("3.14.0").unwrap().is_supported());
         assert!(parse_python_version("3.14.1").unwrap().is_supported());
+        // Only Windows links the version-independent `python3.dll`.
+        assert_eq!(
+            parse_python_version("3.15.0").unwrap().is_supported(),
+            cfg!(windows)
+        );
     }
 
     #[test]
@@ -813,6 +920,31 @@ mod tests {
         assert!(pyproject.contains("name = \"mi-video-2026\""));
         assert!(pyproject.contains("requires-python = \">=3.14\""));
         assert!(pyproject.contains("dependencies = [\"gaanim\"]"));
+    }
+
+    #[test]
+    fn core_environment_points_linux_loader_at_the_selected_runtime() {
+        let home = PathBuf::from("/opt/python-3.14");
+        let supported = EnvironmentProbe {
+            python: Some(DetectedPython {
+                executable: home.join("bin").join("python3"),
+                home: home.clone(),
+                version: parse_python_version("3.14.2").unwrap(),
+                source: PythonSource::System,
+                venv_root: None,
+            }),
+            uv: None,
+        };
+        let env = core_environment(&supported);
+        if cfg!(target_os = "linux") {
+            let value = |key| env.iter().find(|(name, _)| *name == key).map(|(_, v)| v);
+            assert_eq!(value("PYTHONHOME"), Some(&home.clone().into_os_string()));
+            let loader = value("LD_LIBRARY_PATH").unwrap();
+            assert_eq!(std::env::split_paths(loader).next(), Some(home.join("lib")));
+        } else {
+            assert!(env.is_empty());
+        }
+        assert!(core_environment(&EnvironmentProbe::default()).is_empty());
     }
 
     struct FakeRunner {
@@ -832,7 +964,7 @@ mod tests {
                 stdout: if program == OsStr::new("uv") {
                     b"uv 0.8.0\n".to_vec()
                 } else {
-                    b"C:\\Python312\\python.exe\nC:\\Python312\n3.12.8\n".to_vec()
+                    b"C:\\Python314\\python.exe\nC:\\Python314\n3.14.2\n".to_vec()
                 },
                 stderr: Vec::new(),
             })
@@ -869,8 +1001,8 @@ mod tests {
             python.version,
             PythonVersion {
                 major: 3,
-                minor: 12,
-                patch: 8
+                minor: 14,
+                patch: 2
             }
         );
         assert_eq!(probe_uv(&runner).unwrap().version, "uv 0.8.0");

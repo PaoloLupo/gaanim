@@ -18,7 +18,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -62,7 +62,7 @@ jobs:
           @"
           Gaanim $ver — Windows x64
           
-          Requisitos: Python >=3.12 (3.12 minimo, 3.14 tambien soportado) instalado via python.org / winget install Python.Python.3.12
+          Requisitos: Python >=3.14 instalado via python.org / winget install Python.Python.3.14 (o uv python install 3.14)
           Instalacion:
             1. Extrae el zip a C:\Tools\gaanim\ o donde prefieras.
             2. Añade esa carpeta a PATH (Panel > Sistema > Variables de entorno).
@@ -70,7 +70,7 @@ jobs:
           
           Contenido: gaanim.exe + gaanim-core.exe + wheel ligero para autocompletado
           Uso con uv (recomendado, creas proyectos manualmente):
-            uv venv --python 3.12
+            uv venv --python 3.14
             .\.venv\Scripts\Activate.ps1
             # Gaanim crea .venv e instala automáticamente el wheel de autocompletado.
             gaanim                    # Inicio: crear, abrir y ver recientes
@@ -103,7 +103,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -135,6 +135,16 @@ jobs:
             test "v$cargo_ver" = "${{ github.ref_name }}"
           fi
           target/release/gaanim --help
+
+      - name: Verify core links against Python 3.14
+        run: |
+          ldd target/release/gaanim-core | tee ldd.txt
+          grep -q 'libpython3\.14\.so' ldd.txt
+
+      - name: Smoke test core through the launcher
+        # Drop the loader path setup-python exports so the launcher's own
+        # runtime discovery (LD_LIBRARY_PATH + PYTHONHOME) is what gets tested.
+        run: env -u LD_LIBRARY_PATH -u PYTHONHOME target/release/gaanim check examples/theme_demo.py
 
       - name: Package tarball
         run: |

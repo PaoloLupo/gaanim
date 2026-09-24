@@ -4,7 +4,8 @@
 //! for project/script launches, and then starts the `gaanim-core` binary.
 
 use gaanim_project::{
-    CreateProjectOptions, EnvironmentProbe, ProjectKind, activate_environment, create_project,
+    CreateProjectOptions, EnvironmentProbe, ProjectKind, activate_environment, core_environment,
+    create_project, python_requirement,
 };
 use std::path::PathBuf;
 use std::process::Command;
@@ -15,15 +16,19 @@ fn main() {
         return;
     }
 
-    // The core is linked against Python on Windows, including for the Home
-    // screen, so prepare the runtime before spawning it even when no script
-    // argument was supplied. This keeps `python3.dll` resolvable while the
-    // editor can still show its environment review before opening a project.
+    // The core is linked against Python, including for the Home screen, so
+    // prepare the runtime before spawning it even when no script argument was
+    // supplied. This keeps `python3.dll` (Windows) or `libpython3.<minor>.so`
+    // (Linux) resolvable while the editor can still show its environment
+    // review before opening a project.
     let hint = find_script_hint(&args);
     let probe = EnvironmentProbe::detect(hint.as_deref());
     if let Err(error) = activate_environment(&probe) {
         eprintln!("gaanim: {error}");
-        eprintln!("Run `gaanim --help` for usage, or install Python >=3.12 and retry.");
+        eprintln!(
+            "Run `gaanim --help` for usage, or install {} (for example `uv python install 3.14`) and retry.",
+            python_requirement()
+        );
         std::process::exit(2);
     }
 
@@ -53,6 +58,7 @@ fn main() {
     }
     let status = Command::new(&core_exe)
         .args(&args[1..])
+        .envs(core_environment(&probe))
         .status()
         .unwrap_or_else(|error| {
             eprintln!("gaanim: failed to spawn {}: {error}", core_exe.display());

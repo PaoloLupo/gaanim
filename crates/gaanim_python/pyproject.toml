@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "gaanim"
 version = "0.2.2"
 description = "Authoring helpers and type information for the Gaanim application"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = []
 
 [project.optional-dependencies]

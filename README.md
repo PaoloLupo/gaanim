@@ -11,7 +11,7 @@ Gaanim se distribuye en dos piezas complementarias:
   previsualización, hot reload, render y exportación.
 - El wheel de autoría, que solo instala helpers Python, stubs, `py.typed` y las
   fuentes Typst de la documentación (`gaanim/_docs`) para el entorno del proyecto. No contiene renderer, extensión nativa ni un modo
-  headless independiente. Requiere Python 3.12 o superior.
+  headless independiente. Requiere Python 3.14 o superior.
 
 La documentación (guía, recetas y referencia de la API) se publica en
 <https://paololupo.github.io/gaanim/>. El workflow `Docs` la reconstruye en
@@ -66,8 +66,10 @@ exportar una escena.
 
 En Ubuntu, descargue `gaanim-v<versión>-linux-x64.tar.gz`, extráigalo y copie
 `gaanim` y `gaanim-core` juntos a una carpeta de `PATH`, por ejemplo
-`~/.local/bin`. Requiere Python 3.12 y las bibliotecas de sistema de Ubuntu
-24.04; FFmpeg sigue siendo opcional salvo para video y audio.
+`~/.local/bin`. Requiere exactamente Python 3.14 (el core de Linux enlaza
+`libpython3.14.so`; por ejemplo `uv python install 3.14`) y las bibliotecas de
+sistema de Ubuntu 24.04; FFmpeg sigue siendo opcional salvo para video y audio.
+En Windows sirve cualquier Python 3.14 o superior.
 
 El binario de usuario también administra proyectos. `gaanim` sin argumentos
 abre el Inicio con creación, apertura, diagnóstico de Python/uv y hasta diez
