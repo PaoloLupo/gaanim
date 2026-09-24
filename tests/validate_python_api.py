@@ -8,6 +8,7 @@ import inspect
 import math
 from pathlib import Path
 import sys
+import typing
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -167,6 +168,11 @@ def validate_runtime_type_aliases(module: object) -> list[str]:
         failures.append("gaanim.Playable does not match Anim and Composition")
     if isinstance(1.0, playable):
         failures.append("gaanim.Playable accepted a non-playable value")
+    for name in ("NavigationState", "SectionLike", "SectionTarget"):
+        if getattr(package, name, None) is None or name not in package.__all__:
+            failures.append(f"gaanim.{name} is not exported at runtime")
+    if typing.get_args(getattr(package, "NavigationState", None)) != ("done", "current", "upcoming"):
+        failures.append("gaanim.NavigationState does not list done, current and upcoming")
     return failures
 
 

@@ -831,7 +831,8 @@ one for its state is visible, so a state may change weight, color or content:
 `current` in `accent` weight 700, `upcoming` in `muted`); `styles={"current":
 TextStyle(...)}` replaces any of them, and `item=lambda scene, entry, state:
 ...` replaces the text with any drawable, for example a number and a title in
-a group. `marker=lambda scene: ...` adds a drawable `marker_gap` before the
+a group; annotate such builders with `NavigationEntry` and `NavigationState`
+(the `Literal` of the three states), both importable from `gaanim`. `marker=lambda scene: ...` adds a drawable `marker_gap` before the
 current entry that slides with `focus`.
 
 - `agenda.item(key)` is the group of an entry, `agenda.items("done")` the
@@ -840,7 +841,8 @@ current entry that slides with `focus`.
 - `agenda.focus(key)` and `agenda.advance(steps)` change state immediately;
   `agenda.animate.focus(key)` and `agenda.animate.advance()` return
   compositions for `scene.play`. Targets accept a key, a 0-based index, a
-  `Section` or a `SectionProgress`.
+  `Section` or a `SectionProgress` (the `SectionTarget` alias; sections
+  accept `SectionLike`).
 
 *Progress rail.* A continuous rail is one track with a mark at every section
 boundary; `segmented=True` gives each section its own track, `gap` apart.

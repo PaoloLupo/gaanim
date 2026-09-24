@@ -128,10 +128,13 @@ ComplexSpace = CoordinateSpace
 from .sections import (
     Agenda,
     NavigationEntry,
+    NavigationState,
     ProgressRail,
     Section,
+    SectionLike,
     SectionProgress,
     SectionStep,
+    SectionTarget,
 )
 from .templates import (
     LayoutTemplate,
@@ -171,8 +174,11 @@ __all__ = [
     "Section",
     "SectionStep",
     "SectionProgress",
+    "SectionLike",
+    "SectionTarget",
     "Agenda",
     "NavigationEntry",
+    "NavigationState",
     "ProgressRail",
     "AnimationChannel",
     "CustomAnimationValues",

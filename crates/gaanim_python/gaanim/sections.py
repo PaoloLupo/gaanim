@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, TypeAlias, get_args
 
 if TYPE_CHECKING:
     from .gaanim_core import (
@@ -135,7 +135,8 @@ class Section:
         return tuple(segments)
 
 
-NAVIGATION_STATES = ("done", "current", "upcoming")
+NavigationState: TypeAlias = Literal["done", "current", "upcoming"]
+NAVIGATION_STATES: tuple[NavigationState, ...] = get_args(NavigationState)
 
 
 @dataclass(frozen=True)
@@ -145,6 +146,12 @@ class NavigationEntry:
     key: str
     title: str
     index: int
+
+
+SectionLike: TypeAlias = Section | str | tuple[str, str]
+"""A Section (key and title), a key used as its own title, or a (key, title) pair."""
+SectionTarget: TypeAlias = NavigationEntry | Section | SectionProgress | str | int
+"""An entry, its key, its Section or SectionProgress, or its 0-based index."""
 
 
 def _navigation_entries(sections: Sequence[object]) -> tuple[NavigationEntry, ...]:
@@ -190,13 +197,13 @@ def _entry_index(entries: tuple[NavigationEntry, ...], target: object) -> int:
     raise TypeError("section target must be a key, index, Section or SectionProgress")
 
 
-def _check_state(state: str) -> str:
+def _check_state(state: str) -> NavigationState:
     if state not in NAVIGATION_STATES:
         raise ValueError(f"unknown state {state!r}; expected one of {NAVIGATION_STATES}")
     return state
 
 
-def _state(index: int, current: int | None) -> str:
+def _state(index: int, current: int | None) -> NavigationState:
     if current is None or index > current:
         return "upcoming"
     return "current" if index == current else "done"
@@ -320,7 +327,7 @@ class Agenda:
         """Current entry at the authoring cursor, or None before the first section."""
         return None if self._current is None else self._entries[self._current]
 
-    def state(self, target: object) -> str:
+    def state(self, target: SectionTarget) -> NavigationState:
         """State of an entry at the authoring cursor: done, current or upcoming."""
         return _state(_entry_index(self._entries, target), self._current)
 
@@ -328,13 +335,13 @@ class Agenda:
         """Group holding every state drawable of an entry."""
         return self._items[_entry_index(self._entries, target)]
 
-    def items(self, state: str) -> tuple[Drawable, ...]:
+    def items(self, state: NavigationState) -> tuple[Drawable, ...]:
         """Entry groups in state at the authoring cursor, in display order."""
         _check_state(state)
         return tuple(group for index, group in enumerate(self._items)
                      if _state(index, self._current) == state)
 
-    def variant(self, target: object, state: str) -> Drawable:
+    def variant(self, target: SectionTarget, state: NavigationState) -> Drawable:
         """Drawable shown for an entry while it is in state; style it freely."""
         return self._variants[_entry_index(self._entries, target)][_check_state(state)]
 
