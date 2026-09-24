@@ -17,6 +17,17 @@ use timeline::{PlaybackStopPolicy, Timeline};
 #[derive(Resource)]
 pub struct NeedsKeyframeCapture;
 
+/// The previous t=0 keyframe of the Mobjects an incremental reload kept.
+///
+/// Kept Mobjects have since been changed by playback, so the deferred capture
+/// reuses their original baseline and captures only the Mobjects spawned
+/// after `spawned_after`.
+#[derive(Resource)]
+pub struct KeyframeCaptureBase {
+    pub base: snapshot::WorldSnapshot,
+    pub spawned_after: gaanim_scene::prelude::Tick,
+}
+
 /// The Bevy plugin that registers the `Timeline` resource and its scheduling systems.
 pub struct GaanimTimelinePlugin;
 
@@ -62,15 +73,35 @@ pub fn capture_initial_keyframe_system(world: &mut World) {
 /// would clobber the playback position that `reload_listener_system` restored.
 fn deferred_keyframe_capture_system(world: &mut World) {
     if world.remove_resource::<NeedsKeyframeCapture>().is_some() {
-        let timeline = world.remove_resource::<Timeline>();
-        if let Some(mut tl) = timeline {
-            if !tl.keyframes.contains_key(&ordered_float::OrderedFloat(0.0)) {
-                let snapshot = snapshot::WorldSnapshot::capture(world);
-                tl.add_keyframe(0.0, snapshot);
-            }
-            world.insert_resource(tl);
-        }
+        capture_reload_keyframe(world);
     }
+}
+
+/// Capture the t=0 keyframe of a freshly replayed scene without seeking,
+/// reusing a pending [`KeyframeCaptureBase`] for the Mobjects a reload kept.
+pub fn capture_reload_keyframe(world: &mut World) {
+    let base = world.remove_resource::<KeyframeCaptureBase>();
+    let Some(mut tl) = world.remove_resource::<Timeline>() else {
+        return;
+    };
+    if !tl.keyframes.contains_key(&ordered_float::OrderedFloat(0.0)) {
+        let snapshot = match base {
+            Some(KeyframeCaptureBase {
+                mut base,
+                spawned_after,
+            }) => {
+                let fresh =
+                    snapshot::WorldSnapshot::capture_spawned_after(world, Some(spawned_after));
+                base.entities.extend(fresh.entities);
+                base.camera = fresh.camera;
+                base.camera_states = fresh.camera_states;
+                base
+            }
+            None => snapshot::WorldSnapshot::capture(world),
+        };
+        tl.add_keyframe(0.0, snapshot);
+    }
+    world.insert_resource(tl);
 }
 
 /// Captures the current world state at t=0.0 as a keyframe (if not already

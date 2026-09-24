@@ -7,4 +7,5 @@ pub use crate::components::{
     Visible, WorldBounds,
 };
 pub use crate::hierarchy::{GaanimScenePlugin, SceneSet};
+pub use bevy::ecs::{archetype::ArchetypeId, change_detection::Tick};
 pub use bevy::prelude::{ChildOf, Entity, World};

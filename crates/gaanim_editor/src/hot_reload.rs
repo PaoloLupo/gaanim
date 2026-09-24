@@ -8,7 +8,6 @@ use gaanim_api::runtime;
 use std::time::Instant;
 
 use gaanim_editor::{EditorState, export::StashedReplay};
-use gaanim_scene::MobjectId;
 use gaanim_timeline::selection::SegmentSelection;
 use gaanim_timeline::timeline::Timeline;
 
@@ -73,12 +72,11 @@ pub fn clear_scene_entities(world: &mut World) {
     world.remove_resource::<PropertyErrorsShown>();
     world.remove_resource::<gaanim_animation::PropertySignalTimeline>();
     world.remove_resource::<gaanim_animation::PropertySignalStops>();
+    // Retained compilation state describes the entities removed below.
+    world.remove_resource::<runtime::RetainedReplay>();
+    world.remove_resource::<gaanim_timeline::KeyframeCaptureBase>();
     let to_despawn: Vec<Entity> = {
-        let mut q = world.query_filtered::<Entity, Or<(
-            With<MobjectId>,
-            With<gaanim_animation::PropertyBinding>,
-            With<gaanim_animation::CameraBinding>,
-        )>>();
+        let mut q = world.query_filtered::<Entity, runtime::SceneOwned>();
         q.iter(world).collect()
     };
     for e in to_despawn {
@@ -185,7 +183,7 @@ pub fn reload_listener_system(world: &mut World) {
     let (width, height) = payload.canvas.frame.preview_pixel_size();
     let compile_duration = payload.compile_duration.as_secs_f64();
     let replay_started_at = Instant::now();
-    reload_with(world, payload.canvas);
+    let replay_kind = reload_with(world, payload.canvas);
     let replay_duration = replay_started_at.elapsed().as_secs_f64();
 
     let selection_error = apply_segment_selection(world);
@@ -221,8 +219,13 @@ pub fn reload_listener_system(world: &mut World) {
     if let Some(mut status) = world.get_resource_mut::<ReloadStatus>() {
         status.compile_duration_seconds = Some(compile_duration);
         status.replay_duration_seconds = Some(replay_duration);
-        status.last_message =
-            reload_status_message(compile_duration, replay_duration, width, height);
+        status.last_message = reload_status_message(
+            compile_duration,
+            replay_duration,
+            replay_kind,
+            width,
+            height,
+        );
         eprintln!("[gaanim] {}", status.last_message);
         status.shown_at = Some(now);
     }
@@ -264,13 +267,21 @@ fn apply_segment_selection(world: &mut World) -> Option<String> {
 fn reload_status_message(
     python_duration: f64,
     replay_duration: f64,
+    replay_kind: runtime::ReplayKind,
     width: u32,
     height: u32,
 ) -> String {
+    let reuse = match replay_kind {
+        runtime::ReplayKind::Full => String::new(),
+        runtime::ReplayKind::Incremental { reused, segments } => {
+            format!(" (reused {reused}/{segments} segments)")
+        }
+    };
     format!(
-        "Scene ready · Python {:.2}s · replay {:.2}s · total {:.2}s · {}x{}",
+        "Scene ready · Python {:.2}s · replay {:.2}s{} · total {:.2}s · {}x{}",
         python_duration,
         replay_duration,
+        reuse,
         python_duration + replay_duration,
         width,
         height
@@ -283,8 +294,13 @@ fn reload_target_time(saved_time: f64, timeline: &Timeline) -> f64 {
 
 /// Rebuild the scene in `world` from a fresh set of ops, then schedule the
 /// t=0 keyframe capture for the next frame (after deferred Commands flush).
-pub fn reload_with(world: &mut World, canvas: gaanim_api::canvas::SceneModel) {
-    clear_scene_entities(world);
+///
+/// Segments before the first change keep their entities when that provably
+/// matches a full rebuild; `GAANIM_INCREMENTAL=0` always rebuilds everything.
+pub fn reload_with(
+    world: &mut World,
+    canvas: gaanim_api::canvas::SceneModel,
+) -> runtime::ReplayKind {
     let revision = world
         .get_resource::<StashedReplay>()
         .map_or(1, |stash| stash.revision.wrapping_add(1).max(1));
@@ -292,7 +308,13 @@ pub fn reload_with(world: &mut World, canvas: gaanim_api::canvas::SceneModel) {
         canvas: Some(canvas.clone()),
         revision,
     });
-    runtime::replay_canvas_into(world, canvas);
+    let allow_reuse = std::env::var_os("GAANIM_INCREMENTAL").is_none_or(|value| value != "0");
+    let kind = runtime::replay_canvas_incremental(world, canvas, allow_reuse, clear_scene_entities);
+    if kind != runtime::ReplayKind::Full {
+        // The replay dropped the runtime diagnostics these counters index.
+        world.remove_resource::<CustomErrorsShown>();
+        world.remove_resource::<PropertyErrorsShown>();
+    }
     // `replay_canvas_into` records entity spawns and component inserts in the
     // World's internal command queue.  Materialize them now: the deferred
     // keyframe capture runs in the Animation phase of this same update, after
@@ -300,13 +322,14 @@ pub fn reload_with(world: &mut World, canvas: gaanim_api::canvas::SceneModel) {
     world.flush();
     // Capture the fresh t=0 baseline later in this update, before timeline seek.
     world.insert_resource(gaanim_timeline::NeedsKeyframeCapture);
+    kind
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use gaanim_core::ObjectId;
-    use gaanim_scene::ObjectTag;
+    use gaanim_scene::{MobjectId, ObjectTag};
     use gaanim_timeline::timeline::SegmentMetadata;
 
     #[test]
@@ -387,8 +410,21 @@ mod tests {
     #[test]
     fn reload_status_separates_python_from_scene_replay() {
         assert_eq!(
-            reload_status_message(0.125, 1.5, 1920, 1080),
+            reload_status_message(0.125, 1.5, runtime::ReplayKind::Full, 1920, 1080),
             "Scene ready · Python 0.12s · replay 1.50s · total 1.62s · 1920x1080"
+        );
+        assert_eq!(
+            reload_status_message(
+                0.125,
+                0.25,
+                runtime::ReplayKind::Incremental {
+                    reused: 37,
+                    segments: 40
+                },
+                1920,
+                1080
+            ),
+            "Scene ready · Python 0.12s · replay 0.25s (reused 37/40 segments) · total 0.38s · 1920x1080"
         );
     }
 

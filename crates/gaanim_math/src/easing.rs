@@ -92,6 +92,13 @@ impl std::fmt::Debug for RateFunc {
             }
             Self::ExponentialDecay => write!(f, "ExponentialDecay"),
             Self::NotQuiteThere => write!(f, "NotQuiteThere"),
+            Self::Custom(function) if gaanim_core::fingerprint::identity_debug() => {
+                write!(
+                    f,
+                    "Custom({:?})",
+                    gaanim_core::fingerprint::identity(&**function)
+                )
+            }
             Self::Custom(_) => write!(f, "Custom(<closure>)"),
         }
     }

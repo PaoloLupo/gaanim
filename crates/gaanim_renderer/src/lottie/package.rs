@@ -61,7 +61,6 @@ fn safe_path(path: &str) -> Result<String, LottieError> {
     Ok(parts.join("/"))
 }
 
-#[derive(Debug)]
 pub struct Package {
     path: PathBuf,
     entries: HashMap<String, Vec<u8>>,
@@ -71,6 +70,23 @@ pub struct Package {
     pub theme_ids: Vec<String>,
     pub state_machine_ids: Vec<String>,
     variants: Mutex<HashMap<VariantKey, Arc<LottieAsset>>>,
+}
+
+impl std::fmt::Debug for Package {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug = f.debug_struct("Package");
+        debug
+            .field("path", &self.path)
+            .field("animation_ids", &self.animation_ids)
+            .field("theme_ids", &self.theme_ids)
+            .field("state_machine_ids", &self.state_machine_ids);
+        // Loaded packages are cached per path and immutable apart from their
+        // variant cache, so the allocation identifies the content.
+        if gaanim_core::fingerprint::identity_debug() {
+            debug.field("identity", &gaanim_core::fingerprint::identity(self));
+        }
+        debug.finish_non_exhaustive()
+    }
 }
 
 impl Package {
@@ -422,7 +438,7 @@ pub struct PackagePlayback {
     animation: String,
     machine: Option<Machine>,
     initial_theme: Option<String>,
-    initial_inputs: HashMap<String, LottieInput>,
+    initial_inputs: std::collections::BTreeMap<String, LottieInput>,
     commands: Vec<(f64, LottieCommand)>,
 }
 
@@ -476,7 +492,7 @@ impl PackagePlayback {
             animation,
             machine,
             initial_theme,
-            initial_inputs: HashMap::new(),
+            initial_inputs: std::collections::BTreeMap::new(),
             commands: Vec::new(),
         };
         session.prepare_theme(session.initial_theme.as_deref())?;

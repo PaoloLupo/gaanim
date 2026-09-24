@@ -49,7 +49,11 @@ pub struct ScalarMap(Arc<dyn Fn(f64) -> Option<f64> + Send + Sync + 'static>);
 
 impl fmt::Debug for ScalarMap {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.debug_tuple("ScalarMap").finish_non_exhaustive()
+        let mut debug = formatter.debug_tuple("ScalarMap");
+        if gaanim_core::fingerprint::identity_debug() {
+            debug.field(&gaanim_core::fingerprint::identity(&*self.0));
+        }
+        debug.finish_non_exhaustive()
     }
 }
 
@@ -78,17 +82,28 @@ pub struct ReactiveFunction {
     inputs: Arc<[ReactiveInput]>,
     scene_owners: Arc<[u64]>,
     callback: ReactiveCallback,
+    /// Complete description of a deterministic callback; see [`Self::with_recipe`].
+    recipe: Option<Arc<str>>,
     cache: Arc<Mutex<FunctionCache>>,
 }
 
 impl fmt::Debug for ReactiveFunction {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("ReactiveFunction")
+        let mut debug = formatter.debug_struct("ReactiveFunction");
+        debug
             .field("coordinate_arity", &self.coordinate_arity)
             .field("output_arity", &self.output_arity)
-            .field("inputs", &self.inputs)
-            .finish_non_exhaustive()
+            .field("inputs", &self.inputs);
+        if gaanim_core::fingerprint::identity_debug() {
+            match &self.recipe {
+                Some(recipe) => debug.field("recipe", recipe),
+                None => debug.field(
+                    "callback",
+                    &gaanim_core::fingerprint::identity(&*self.callback),
+                ),
+            };
+        }
+        debug.finish_non_exhaustive()
     }
 }
 
@@ -108,8 +123,20 @@ impl ReactiveFunction {
             inputs: inputs.into(),
             scene_owners: Arc::from([]),
             callback: Arc::new(callback),
+            recipe: None,
             cache: Arc::new(Mutex::new(FunctionCache::default())),
         }
+    }
+
+    /// Declare that `recipe`, together with the inputs and arities, fully
+    /// describes the callback. Hot reload then compares equal recipes as equal
+    /// content instead of treating every new callback as a change.
+    ///
+    /// Only for deterministic callbacks without hidden captured state.
+    #[doc(hidden)]
+    pub fn with_recipe(mut self, recipe: impl Into<Arc<str>>) -> Self {
+        self.recipe = Some(recipe.into());
+        self
     }
 
     pub fn coordinate_arity(&self) -> usize {
@@ -372,24 +399,31 @@ impl ScalarSource {
             Self::Constant(value) => Self::Constant(*value * factor),
             Self::Signal(id) => {
                 let id = *id;
-                Self::Function(ReactiveFunction::new(
-                    0,
-                    1,
-                    vec![ReactiveInput::Signal(id)],
-                    move |arguments| Ok(vec![arguments[0] * factor]),
-                ))
+                Self::Function(
+                    ReactiveFunction::new(
+                        0,
+                        1,
+                        vec![ReactiveInput::Signal(id)],
+                        move |arguments| Ok(vec![arguments[0] * factor]),
+                    )
+                    .with_recipe(format!("scale {factor:?}")),
+                )
             }
-            Self::Time => Self::Function(ReactiveFunction::new(
-                0,
-                1,
-                vec![ReactiveInput::Time],
-                move |arguments| Ok(vec![arguments[0] * factor]),
-            )),
-            Self::Function(function) => Self::Function(
-                function
-                    .map_scalar(move |value| value * factor)
-                    .expect("ScalarSource functions always have scalar arity"),
+            Self::Time => Self::Function(
+                ReactiveFunction::new(0, 1, vec![ReactiveInput::Time], move |arguments| {
+                    Ok(vec![arguments[0] * factor])
+                })
+                .with_recipe(format!("scale {factor:?}")),
             ),
+            Self::Function(function) => {
+                let scaled = function
+                    .map_scalar(move |value| value * factor)
+                    .expect("ScalarSource functions always have scalar arity");
+                Self::Function(match &function.recipe {
+                    Some(inner) => scaled.with_recipe(format!("scale {factor:?} of ({inner})")),
+                    None => scaled,
+                })
+            }
         }
     }
 
@@ -452,6 +486,50 @@ impl ResolvedScalarSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fingerprint(source: &ScalarSource) -> Option<u64> {
+        let mut fingerprint = gaanim_core::fingerprint::DebugFingerprint::new();
+        fingerprint.add(source);
+        fingerprint.finish()
+    }
+
+    #[test]
+    fn recipes_make_equal_deterministic_functions_fingerprint_equally() {
+        let identity = || {
+            ScalarSource::Function(
+                ReactiveFunction::new(
+                    0,
+                    1,
+                    vec![ReactiveInput::Signal(ObjectId::from_raw(7))],
+                    |v| Ok(vec![v[0]]),
+                )
+                .with_recipe("identity"),
+            )
+        };
+        assert_eq!(fingerprint(&identity()), fingerprint(&identity()));
+        assert_eq!(
+            fingerprint(&identity().scaled(2.0)),
+            fingerprint(&identity().scaled(2.0))
+        );
+        assert_ne!(
+            fingerprint(&identity().scaled(2.0)),
+            fingerprint(&identity().scaled(3.0))
+        );
+        let signal = ScalarSource::signal(ObjectId::from_raw(7));
+        assert_eq!(
+            fingerprint(&signal.scaled(0.5)),
+            fingerprint(&signal.scaled(0.5))
+        );
+
+        let opaque =
+            || ScalarSource::Function(ReactiveFunction::new(0, 1, Vec::new(), |_| Ok(vec![1.0])));
+        let (first, second) = (opaque(), opaque());
+        assert_ne!(
+            fingerprint(&first),
+            fingerprint(&second),
+            "callbacks without a recipe must never compare equal"
+        );
+    }
 
     #[test]
     fn composed_sources_share_diamond_cache_and_preserve_argument_order() {

@@ -72,7 +72,21 @@ gaanim .
 gaanim check .
 ```
 
-El visor conserva hot reload sobre el entry point resuelto. Las rutas de assets se resuelven respecto de `gaanim.toml`, por lo que no dependen del directorio desde el que se inició Gaanim. Puedes crear el `.venv` dentro del proyecto con `uv`:
+El visor conserva hot reload sobre el entry point resuelto. Las rutas de assets se resuelven respecto de `gaanim.toml`, por lo que no dependen del directorio desde el que se inició Gaanim.
+
+El hot reload es incremental: al guardar, el script se vuelve a ejecutar, pero
+los segmentos anteriores al primero que cambió conservan su escena compilada y
+solo se recompila desde ahí. El aviso de recarga lo indica, por ejemplo
+`replay 0.12s (reused 37/40 segments)`. La primera edición en una zona nueva
+recompila todo una vez para ubicarla; las siguientes ediciones en esa zona ya
+son incrementales. Se recompila todo cuando cambia algo global (tema, fuentes,
+tamaño del lienzo), cuando un segmento posterior modifica objetos creados antes
+—por ejemplo, agrupar el logo persistente— y desde cualquier segmento que use
+callbacks de Python (animaciones personalizadas, updaters, funciones reactivas o
+curvas de easing propias). El resultado siempre es idéntico al de una recarga
+completa; para forzar esta última, inicia Gaanim con `GAANIM_INCREMENTAL=0`.
+
+Puedes crear el `.venv` dentro del proyecto con `uv`:
 
 ```powershell
 uv venv --python 3.14

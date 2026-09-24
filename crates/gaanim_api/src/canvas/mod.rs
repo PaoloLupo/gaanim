@@ -63,7 +63,11 @@ pub use theme::{
     CanvasTheme, LayoutTokens, ThemeFont, ThemePaint, ThemePalette, ThemeStrokeStyle, ThemeStyle,
 };
 mod compile;
-pub(crate) use compile::{split_text_math, text_inline_typst_source};
+pub(crate) use compile::{
+    CompileCheckpoint, SegmentMarker, split_text_math, text_inline_typst_source,
+};
+mod incremental;
+pub(crate) use incremental::SceneFingerprints;
 
 /// dotLottie selectors and typed inputs.
 pub use gaanim_renderer::lottie::{LottieInput, LottiePackageOptions};
