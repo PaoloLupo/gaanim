@@ -757,6 +757,10 @@ scene.play([building.animate.grow_from_center()])
 scene.wait(4.0)
 ```
 
+`times` are relative to the timeline cursor where `drive_from_samples` is
+called: a series declared after `scene.wait(2.0)` plays its `t = 0` sample at
+two seconds, and seeks before that point hold the first sample.
+
 `Parameter.drive_from_samples(times, values, *, ...)` drives a parameter's
 float signal the same way, so computed values, readouts, and reactive plots
 that reference the parameter follow the measured series for free.

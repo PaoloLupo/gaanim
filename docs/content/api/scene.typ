@@ -399,7 +399,7 @@ rotated 90 degrees counter-clockwise from the tangent.
 circle estimated from neighboring arc-length samples. Style it as a regular
 circle, usually with `no_fill().stroke(...)`.
 
-Use `label.follow_to(mass, offset=(0, 48))` for annotations that accompany an
+Use `label.follow_to(mass, offset=(0, 0.48))` for annotations that accompany an
 object without covering it. `dimension_between(from, to, offset)` similarly
 keeps a technical measurement synchronized with moving endpoints. These
 generated visuals, including `attach_to`, `bind_*`, curve markers, tracking
@@ -738,6 +738,9 @@ Una secuencia PNG escribe un archivo por fotograma. Si `--output` contiene un
 patrón `%d` o `%0Nd` (por ejemplo `frames/f_%04d.png`), ese patrón se sustituye
 por el número de fotograma empezando en 0 (`f_0000.png`, `f_0001.png`, …); sin
 patrón, el número se añade al nombre como `f_00000.png`.
+
+`gaanim export --help` lista todas las opciones y formatos, y
+`gaanim --version` muestra la versión instalada.
 
 Run a script through the Gaanim application:
 
