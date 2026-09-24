@@ -202,7 +202,8 @@ impl ResolvedPropertySources {
             && self.parameters.iter().any(|parameter| {
                 world.get::<crate::Updater>(parameter.entity).is_some()
                     && world
-                        .get::<crate::SampledSeriesDriver>(parameter.entity)
+                        .get::<crate::SampledSeriesDrivers>(parameter.entity)
+                        .and_then(|drivers| drivers.get(crate::SampledProperty::Signal))
                         .is_none()
             })
         {
@@ -215,8 +216,8 @@ impl ResolvedPropertySources {
                 .find(|parameter| parameter.logical == logical)?;
             if frozen {
                 if let Some(driver) = world
-                    .get::<crate::SampledSeriesDriver>(parameter.entity)
-                    .filter(|driver| driver.property == crate::SampledProperty::Signal)
+                    .get::<crate::SampledSeriesDrivers>(parameter.entity)
+                    .and_then(|drivers| drivers.get(crate::SampledProperty::Signal))
                 {
                     let mut driver = driver.clone();
                     driver.stop_at = world
@@ -232,8 +233,8 @@ impl ResolvedPropertySources {
                 )
             } else {
                 if let Some(driver) = world
-                    .get::<crate::SampledSeriesDriver>(parameter.entity)
-                    .filter(|driver| driver.property == crate::SampledProperty::Signal)
+                    .get::<crate::SampledSeriesDrivers>(parameter.entity)
+                    .and_then(|drivers| drivers.get(crate::SampledProperty::Signal))
                 {
                     let mut driver = driver.clone();
                     if let Some(stops) = world.get_resource::<PropertySignalStops>() {
@@ -577,7 +578,12 @@ mod tests {
             0.0,
         )
         .unwrap();
-        let signal = world.spawn((FloatSignal::new(99.0), driver)).id();
+        let signal = world
+            .spawn((
+                FloatSignal::new(99.0),
+                crate::SampledSeriesDrivers::from(driver),
+            ))
+            .id();
         let sampled = ResolvedPropertySources {
             sources: PropertySources::Opacity(ScalarSource::signal(id)),
             parameters: vec![PropertyParameter {

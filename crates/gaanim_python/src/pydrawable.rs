@@ -1705,7 +1705,8 @@ impl PyDrawable {
     /// Translation axes and rotation are relative to the authored pose:
     /// `base + offset + scale * sample`. Scale, opacity, and signal are
     /// absolute: `offset + scale * sample`. Samples outside the series are
-    /// clamped to its first/last value.
+    /// clamped to its first/last value. Each property is an independent
+    /// channel; driving the same property again replaces it.
     ///
     /// ```python
     /// times = [i * 0.02 for i in range(len(accel))]

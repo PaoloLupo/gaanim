@@ -875,7 +875,7 @@ label = scene.text("origin").move_to_3d(0, 0, 0.5).billboard()
   signature: "traced_path(source, *, dissipating_time=None, max_points=None, min_distance=1.0) -> Drawable",
   params: ((name: "source", type: "Drawable", default: none, desc: [Drawable whose position is sampled.]), (name: "dissipating_time", type: "float", default: "None", desc: [Seconds each sample remains in the trail; must be positive.]), (name: "max_points", type: "int", default: "None", desc: [Positive cap for retained samples.]), (name: "min_distance", type: "float", default: "1.0", desc: [Minimum scene-space distance between samples.]),),
   returns: (type: "Drawable", desc: [Reactive 2D trail, hidden until `fade_in` reveals it.]),
-  desc: [Sampling begins at the timeline cursor where the trail is declared, so earlier segments and seeks cannot pre-fill it. Add `trail.animate.fade_in()` to `scene.play(...)` to reveal it. With `dissipating_time`, samples expire from the tail in editor playback, random seeks, snapshots, and exports.],
+  desc: [Sampling begins at the timeline cursor where the trail is declared, so earlier segments and seeks cannot pre-fill it. Add `trail.animate.fade_in()` to `scene.play(...)` to reveal it. With `dissipating_time`, samples expire from the tail in editor playback, random seeks, snapshots, and exports. After a seek the trail is rebuilt by resampling sources moved by updaters, `drive_from_samples`, reactive bindings, and `follow`; a source moved only by `.animate` starts a fresh trail at the seek target.],
 )[
 ```python
 from gaanim import RED

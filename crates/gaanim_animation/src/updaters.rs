@@ -545,6 +545,29 @@ fn expire_samples(
     true
 }
 
+/// Posición del origen de `source` en el espacio local del rastro 2D. La usan
+/// tanto la reproducción como la reconstrucción tras un seek.
+pub fn traced_source_position(trace: Entity, source: Entity, world: &World) -> Option<DVec3> {
+    entity_world_matrix(source, world)
+        .map(|matrix| matrix.transform_point3(DVec3::ZERO))
+        .map(|position| tracking_world_to_local(trace, position, world))
+}
+
+/// Evalúa en `time` los sistemas que posicionan entidades de forma reactiva,
+/// en el mismo orden que la fase `Updaters`, sin avanzar los updaters. La
+/// reconstrucción de rastros tras un seek lo usa para muestrear las fuentes
+/// tal como se mueven en reproducción (series muestreadas, bindings, `follow`).
+pub fn evaluate_reactive_positions(world: &mut World, time: f64) {
+    if let Some(mut playback) = world.get_resource_mut::<PlaybackState>() {
+        playback.current_time = time;
+    }
+    sampled_series_system(world);
+    crate::apply_property_bindings(world, time);
+    crate::signals::position_binding_system(world);
+    mechanism_binding_system(world);
+    endpoint_follow_system(world);
+}
+
 /// Sistema exclusivo que lee la posición del source de cada TracedPath y regenera su Path2D.
 pub fn traced_path_system(world: &mut World) {
     let current_time = world
@@ -571,9 +594,7 @@ pub fn traced_path_system(world: &mut World) {
     for (trace_entity, source_entity, min_distance, max_points, start_at, dissipating_time) in
         trace_jobs
     {
-        let source_pos = entity_world_matrix(source_entity, world)
-            .map(|matrix| matrix.transform_point3(DVec3::ZERO))
-            .map(|position| tracking_world_to_local(trace_entity, position, world));
+        let source_pos = traced_source_position(trace_entity, source_entity, world);
 
         // Obtenemos acceso mutable al TracedPath específico de forma aislada
         if let Some(mut traced_path) = world.get_mut::<TracedPath>(trace_entity) {
@@ -1000,7 +1021,10 @@ pub struct InvalidSampledSeries;
 /// relativa al valor autorizado, capturado de forma lazy en la primera
 /// evaluación: `base + offset + scale * muestra`. Para `UniformScale`,
 /// `Opacity` y `Signal` la salida es absoluta: `offset + scale * muestra`.
-#[derive(Component, Clone)]
+///
+/// Una entidad guarda sus drivers en `SampledSeriesDrivers`, un canal por
+/// propiedad, de modo que conducir `x` e `y` por separado no se pisa.
+#[derive(Clone)]
 pub struct SampledSeriesDriver {
     pub times: Arc<[f64]>,
     pub values: Arc<[f64]>,
@@ -1111,6 +1135,45 @@ impl SampledSeriesDriver {
                     self.values[index] * (1.0 - alpha) + self.values[index + 1] * alpha
                 }
             }
+        }
+    }
+}
+
+/// Drivers de series muestreadas de una entidad, como mucho uno por
+/// `SampledProperty`. Canales distintos (por ejemplo `TranslateX` y
+/// `TranslateY`) son independientes y conviven.
+#[derive(Component, Debug, Clone, Default)]
+pub struct SampledSeriesDrivers(pub Vec<SampledSeriesDriver>);
+
+impl From<SampledSeriesDriver> for SampledSeriesDrivers {
+    fn from(driver: SampledSeriesDriver) -> Self {
+        Self(vec![driver])
+    }
+}
+
+impl SampledSeriesDrivers {
+    /// Añade el driver o reemplaza el que ya conducía la misma propiedad.
+    pub fn attach(&mut self, driver: SampledSeriesDriver) {
+        match self
+            .0
+            .iter_mut()
+            .find(|existing| existing.property == driver.property)
+        {
+            Some(existing) => *existing = driver,
+            None => self.0.push(driver),
+        }
+    }
+
+    /// Driver del canal `property`, si existe.
+    pub fn get(&self, property: SampledProperty) -> Option<&SampledSeriesDriver> {
+        self.0.iter().find(|driver| driver.property == property)
+    }
+
+    /// Congela en `time` los canales que ya corrían en ese instante
+    /// (semántica de `RemoveUpdater`); los adjuntados después no se tocan.
+    pub fn stop_at(&mut self, time: f64) {
+        for driver in self.0.iter_mut().filter(|driver| driver.start_at <= time) {
+            driver.stop_at = Some(driver.stop_at.map_or(time, |stop| stop.min(time)));
         }
     }
 }
@@ -2147,62 +2210,66 @@ pub fn sampled_series_system(world: &mut World) {
         .unwrap_or(0.0);
 
     let mut updates: Vec<(Entity, SampledProperty, f64)> = Vec::new();
-    let mut new_bases: Vec<(Entity, f64)> = Vec::new();
+    let mut new_bases: Vec<(Entity, usize, f64)> = Vec::new();
     {
-        let mut query = world.query::<(Entity, &SampledSeriesDriver)>();
-        for (entity, driver) in query.iter(world) {
-            if driver.times.is_empty() || driver.values.len() != driver.times.len() {
-                continue;
-            }
-            let relative = matches!(
-                driver.property,
-                SampledProperty::TranslateX
-                    | SampledProperty::TranslateY
-                    | SampledProperty::TranslateZ
-                    | SampledProperty::RotateZ
-            );
-            let base = if relative {
-                driver.base.unwrap_or_else(|| {
-                    let captured = match driver.property {
-                        SampledProperty::TranslateX => world
-                            .get::<SpatialTransform>(entity)
-                            .map(|transform| transform.translation.x),
-                        SampledProperty::TranslateY => world
-                            .get::<SpatialTransform>(entity)
-                            .map(|transform| transform.translation.y),
-                        SampledProperty::TranslateZ => world
-                            .get::<SpatialTransform>(entity)
-                            .map(|transform| transform.translation.z),
-                        SampledProperty::RotateZ => world
-                            .get::<SpatialTransform>(entity)
-                            .map(|transform| transform.rotation.to_scaled_axis().z),
-                        _ => None,
-                    };
-                    let value = captured.unwrap_or(0.0);
-                    new_bases.push((entity, value));
-                    value
-                })
-            } else {
-                0.0
-            };
+        let mut query = world.query::<(Entity, &SampledSeriesDrivers)>();
+        for (entity, drivers) in query.iter(world) {
+            for (channel, driver) in drivers.0.iter().enumerate() {
+                if driver.times.is_empty() || driver.values.len() != driver.times.len() {
+                    continue;
+                }
+                let relative = matches!(
+                    driver.property,
+                    SampledProperty::TranslateX
+                        | SampledProperty::TranslateY
+                        | SampledProperty::TranslateZ
+                        | SampledProperty::RotateZ
+                );
+                let base = if relative {
+                    driver.base.unwrap_or_else(|| {
+                        let captured = match driver.property {
+                            SampledProperty::TranslateX => world
+                                .get::<SpatialTransform>(entity)
+                                .map(|transform| transform.translation.x),
+                            SampledProperty::TranslateY => world
+                                .get::<SpatialTransform>(entity)
+                                .map(|transform| transform.translation.y),
+                            SampledProperty::TranslateZ => world
+                                .get::<SpatialTransform>(entity)
+                                .map(|transform| transform.translation.z),
+                            SampledProperty::RotateZ => world
+                                .get::<SpatialTransform>(entity)
+                                .map(|transform| transform.rotation.to_scaled_axis().z),
+                            _ => None,
+                        };
+                        let value = captured.unwrap_or(0.0);
+                        new_bases.push((entity, channel, value));
+                        value
+                    })
+                } else {
+                    0.0
+                };
 
-            let effective_time = match driver.stop_at {
-                Some(stop_at) => current_time.min(stop_at),
-                None => current_time,
-            };
-            let elapsed = (effective_time - driver.start_at).max(0.0);
-            let sampled = driver.sample(elapsed);
-            let output = if relative {
-                base + driver.offset + driver.scale * sampled
-            } else {
-                driver.offset + driver.scale * sampled
-            };
-            updates.push((entity, driver.property, output));
+                let effective_time = match driver.stop_at {
+                    Some(stop_at) => current_time.min(stop_at),
+                    None => current_time,
+                };
+                let elapsed = (effective_time - driver.start_at).max(0.0);
+                let sampled = driver.sample(elapsed);
+                let output = if relative {
+                    base + driver.offset + driver.scale * sampled
+                } else {
+                    driver.offset + driver.scale * sampled
+                };
+                updates.push((entity, driver.property, output));
+            }
         }
     }
 
-    for (entity, base) in new_bases {
-        if let Some(mut driver) = world.get_mut::<SampledSeriesDriver>(entity) {
+    for (entity, channel, base) in new_bases {
+        if let Some(mut drivers) = world.get_mut::<SampledSeriesDrivers>(entity)
+            && let Some(driver) = drivers.0.get_mut(channel)
+        {
             driver.base = Some(base);
         }
     }
@@ -3068,7 +3135,7 @@ mod tests {
         let mut world = sampled_world();
         let entity = world
             .spawn(SpatialTransform::new_2d(-40.0, 10.0))
-            .insert(
+            .insert(SampledSeriesDrivers::from(
                 SampledSeriesDriver::new(
                     vec![0.0, 1.0, 2.0],
                     vec![0.0, 4.0, -2.0],
@@ -3079,7 +3146,7 @@ mod tests {
                 )
                 .unwrap()
                 .starting_at(1.0),
-            )
+            ))
             .id();
 
         // Antes de start_at la serie corre desde elapsed = 0 → muestra values[0].
@@ -3108,11 +3175,60 @@ mod tests {
     }
 
     #[test]
+    fn sampled_series_channels_on_different_axes_coexist() {
+        let series = |property| {
+            SampledSeriesDriver::new(
+                vec![0.0, 1.0],
+                vec![0.0, 1.0],
+                property,
+                SampledInterpolation::Linear,
+                10.0,
+                0.0,
+            )
+            .unwrap()
+        };
+        let mut drivers = SampledSeriesDrivers::from(series(SampledProperty::TranslateX));
+        drivers.attach(series(SampledProperty::TranslateY).starting_at(2.0));
+        drivers.attach(series(SampledProperty::TranslateX));
+        assert_eq!(
+            drivers.0.len(),
+            2,
+            "same property replaces, new property adds"
+        );
+
+        // Un RemoveUpdater a t=1 solo congela los canales que ya corrían.
+        drivers.stop_at(1.0);
+        assert_eq!(
+            drivers.get(SampledProperty::TranslateX).unwrap().stop_at,
+            Some(1.0)
+        );
+        assert_eq!(
+            drivers.get(SampledProperty::TranslateY).unwrap().stop_at,
+            None
+        );
+        drivers
+            .0
+            .iter_mut()
+            .for_each(|driver| driver.stop_at = None);
+
+        let mut world = sampled_world();
+        let entity = world
+            .spawn((SpatialTransform::new_2d(1.0, 2.0), drivers))
+            .id();
+        world.resource_mut::<PlaybackState>().current_time = 2.5;
+        sampled_series_system(&mut world);
+        assert_eq!(
+            world.get::<SpatialTransform>(entity).unwrap().translation,
+            DVec3::new(11.0, 7.0, 0.0)
+        );
+    }
+
+    #[test]
     fn sampled_series_step_interpolation_holds_previous_value() {
         let mut world = sampled_world();
         let entity = world
             .spawn(SpatialTransform::default())
-            .insert(
+            .insert(SampledSeriesDrivers::from(
                 SampledSeriesDriver::new(
                     vec![0.0, 1.0],
                     vec![1.0, 3.0],
@@ -3122,7 +3238,7 @@ mod tests {
                     0.0,
                 )
                 .unwrap(),
-            )
+            ))
             .id();
 
         world.resource_mut::<PlaybackState>().current_time = 0.999;
@@ -3145,7 +3261,7 @@ mod tests {
         let mut world = sampled_world();
         let scaled = world
             .spawn(SpatialTransform::default())
-            .insert(
+            .insert(SampledSeriesDrivers::from(
                 SampledSeriesDriver::new(
                     vec![0.0, 1.0],
                     vec![1.0, 3.0],
@@ -3155,11 +3271,11 @@ mod tests {
                     0.0,
                 )
                 .unwrap(),
-            )
+            ))
             .id();
         let signalled = world
             .spawn(crate::signals::FloatSignal::new(0.0))
-            .insert(
+            .insert(SampledSeriesDrivers::from(
                 SampledSeriesDriver::new(
                     vec![0.0, 2.0],
                     vec![-1.0, 1.0],
@@ -3169,7 +3285,7 @@ mod tests {
                     5.0,
                 )
                 .unwrap(),
-            )
+            ))
             .id();
 
         let evaluate = |world: &mut World, time: f64| {
@@ -3201,7 +3317,7 @@ mod tests {
         let mut world = sampled_world();
         let rotated = world
             .spawn(SpatialTransform::default().with_rotation_2d(0.5))
-            .insert(
+            .insert(SampledSeriesDrivers::from(
                 SampledSeriesDriver::new(
                     vec![0.0, 1.0],
                     vec![0.0, 1.0],
@@ -3211,12 +3327,12 @@ mod tests {
                     0.0,
                 )
                 .unwrap(),
-            )
+            ))
             .id();
         let faded = world
             .spawn(SpatialTransform::default())
             .insert(gaanim_scene::Opacity(1.0))
-            .insert(
+            .insert(SampledSeriesDrivers::from(
                 SampledSeriesDriver::new(
                     vec![0.0, 1.0],
                     vec![1.0, -1.0],
@@ -3226,7 +3342,7 @@ mod tests {
                     0.0,
                 )
                 .unwrap(),
-            )
+            ))
             .id();
 
         world.resource_mut::<PlaybackState>().current_time = 1.0;

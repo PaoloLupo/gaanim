@@ -5091,7 +5091,20 @@ impl SceneModel {
                         && let Some(target_st) = builder.states.get(target_id)
                     {
                         let driver = driver.clone().starting_at(builder.current_time);
-                        builder.commands.entity(target_st.entity).insert(driver);
+                        let entity = target_st.entity;
+                        builder.commands.queue(move |world: &mut World| {
+                            let Ok(mut target) = world.get_entity_mut(entity) else {
+                                return;
+                            };
+                            match target.get_mut::<gaanim_animation::SampledSeriesDrivers>() {
+                                Some(mut drivers) => drivers.attach(driver),
+                                None => {
+                                    target.insert(gaanim_animation::SampledSeriesDrivers::from(
+                                        driver,
+                                    ));
+                                }
+                            }
+                        });
                     }
                 }
 
@@ -12130,9 +12143,23 @@ mod tests {
         )
         .expect("valid sampled series");
 
+        dot.drive_from_samples(
+            vec![0.0, 1.0],
+            vec![3.0, 4.0],
+            SampledProperty::TranslateY,
+            SampledInterpolation::Step,
+            1.0,
+            0.0,
+        )
+        .expect("valid sampled series");
+
         let mut world = compile_canvas_for_layout(canvas);
-        let mut query = world.query::<&gaanim_animation::SampledSeriesDriver>();
-        let driver = query.single(&world).expect("exactly one compiled driver");
+        let mut query = world.query::<&gaanim_animation::SampledSeriesDrivers>();
+        let drivers = query.single(&world).expect("exactly one driven entity");
+        assert_eq!(drivers.0.len(), 2, "x and y channels are independent");
+        let y = drivers.get(SampledProperty::TranslateY).expect("y channel");
+        assert_eq!(y.values.to_vec(), vec![3.0, 4.0]);
+        let driver = drivers.get(SampledProperty::TranslateX).expect("x channel");
         assert_eq!(driver.property, SampledProperty::TranslateX);
         assert_eq!(driver.interpolation, SampledInterpolation::Linear);
         assert_eq!(driver.times.to_vec(), vec![0.0, 1.0]);

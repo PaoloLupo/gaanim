@@ -405,6 +405,33 @@ fn png_pixels(
     Ok((rgb, image::ExtendedColorType::Rgb8))
 }
 
+/// Names one PNG sequence frame. A printf-style `%d` or `%0Nd` in the output
+/// file name numbers the frames in place, as FFmpeg does; otherwise the frame
+/// index is appended to the stem as `_NNNNN`.
+fn png_sequence_frame_name(file_name: &str, frame_idx: usize) -> String {
+    if let Some((prefix, width, suffix)) = frame_number_pattern(file_name) {
+        return format!("{prefix}{frame_idx:0width$}{suffix}");
+    }
+    let stem = std::path::Path::new(file_name)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("frame");
+    format!("{stem}_{frame_idx:05}.png")
+}
+
+/// Splits `name` around its first `%d` / `%0Nd` placeholder.
+fn frame_number_pattern(name: &str) -> Option<(&str, usize, &str)> {
+    let start = name.find('%')?;
+    let rest = &name[start + 1..];
+    let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+    let spec = &rest[..digits];
+    if rest.as_bytes().get(digits) != Some(&b'd') || (!spec.is_empty() && !spec.starts_with('0')) {
+        return None;
+    }
+    let width = spec.parse().unwrap_or(0);
+    Some((&name[..start], width, &rest[digits + 1..]))
+}
+
 fn validate_transparency(format: ExportFormat, transparent: bool) -> Result<()> {
     if transparent
         && !matches!(
@@ -771,17 +798,14 @@ impl ParallelEncoder {
                     std::fs::create_dir_all(parent)?;
                 }
 
+                let file_name = base_path
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("frame.png");
                 let mut frame_idx = 0;
                 while let Ok(Some(frame)) = receiver.recv() {
                     let encode_started_at = Instant::now();
-                    let filename = format!(
-                        "{}_{:05}.png",
-                        base_path
-                            .file_stem()
-                            .and_then(|s| s.to_str())
-                            .unwrap_or("frame"),
-                        frame_idx
-                    );
+                    let filename = png_sequence_frame_name(file_name, frame_idx);
                     let dest_path = base_path
                         .parent()
                         .unwrap_or(std::path::Path::new(""))
@@ -863,7 +887,7 @@ impl ParallelEncoder {
 mod tests {
     use super::{
         EncoderConfig, EncodingSpeed, ExportError, ExportFormat, ParallelEncoder, VideoEncoder,
-        png_pixels, select_best_encoder, validate_transparency,
+        png_pixels, png_sequence_frame_name, select_best_encoder, validate_transparency,
     };
 
     fn encoder_config(format: ExportFormat, output: &str) -> EncoderConfig {
@@ -902,6 +926,16 @@ mod tests {
             assert!(message.contains("PNG sequence"), "{message}");
             assert!(!message.contains("closed channel"), "{message}");
         }
+    }
+
+    #[test]
+    fn png_sequence_names_expand_printf_frame_patterns() {
+        assert_eq!(png_sequence_frame_name("f_%04d.png", 7), "f_0007.png");
+        assert_eq!(png_sequence_frame_name("f_%d.png", 12), "f_12.png");
+        assert_eq!(png_sequence_frame_name("%03d_shot.png", 5), "005_shot.png");
+        assert_eq!(png_sequence_frame_name("frame.png", 3), "frame_00003.png");
+        assert_eq!(png_sequence_frame_name("100%.png", 3), "100%_00003.png");
+        assert_eq!(png_sequence_frame_name("f_%4d.png", 3), "f_%4d_00003.png");
     }
 
     #[test]

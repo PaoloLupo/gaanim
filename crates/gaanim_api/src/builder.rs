@@ -17,7 +17,7 @@ use gaanim_scene::{
 };
 use gaanim_text::font::FontRegistry;
 use gaanim_text::shaper::{HierarchyChild, compile_text_to_hierarchy};
-use gaanim_text::typst_compiler::compile_scaled_typst_to_hierarchy;
+use gaanim_text::typst_compiler::{compile_scaled_typst_to_hierarchy, math_accent_for_symbol};
 use gaanim_timeline::{
     clip::{AnimationSpec, ClipPayload, GltfAnimationSpec, PropertyLensSpec, SceneId, TrackId},
     scene::SceneMember,
@@ -26,7 +26,9 @@ use gaanim_timeline::{
 };
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::OnceLock;
-use typst_syntax::ast::{MathFieldAccess, MathIdent, MathPrimes, MathShorthand};
+use typst_syntax::ast::{
+    Arg, AstNode, MathCall, MathFieldAccess, MathIdent, MathPrimes, MathShorthand,
+};
 use typst_syntax::{SyntaxNode, parse_math};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -106,6 +108,31 @@ fn typst_math_selection_source(source: &str) -> String {
         if let Some(shorthand) = node.cast::<MathShorthand>() {
             output.push(shorthand.get());
             return;
+        }
+        // `dot(x)`, `hat(x)`, … lay out the argument followed by a combining
+        // accent glyph rather than the symbol and its parentheses.
+        if let Some(call) = node.cast::<MathCall>() {
+            let callee = call.callee().to_untyped();
+            let symbol = if callee.cast::<MathFieldAccess>().is_some() {
+                Some(callee.full_text().to_string())
+            } else {
+                callee
+                    .cast::<MathIdent>()
+                    .map(|identifier| identifier.as_str().to_string())
+            };
+            if let Some(accent) = symbol
+                .as_deref()
+                .and_then(codex_math_symbol)
+                .and_then(math_accent_for_symbol)
+            {
+                for item in call.args().arg_items() {
+                    if let Arg::Pos(expr) = item.arg {
+                        append_node(expr.to_untyped(), output);
+                    }
+                }
+                output.push(accent);
+                return;
+            }
         }
         if let Some(primes) = node.cast::<MathPrimes>() {
             if let Some(value) = codex_math_primes(primes.count()) {
@@ -7327,6 +7354,8 @@ mod tests {
         assert_eq!(typst_math_selection_source("arrow.r.long"), "⟶");
         assert_eq!(typst_math_selection_source("a <= b"), "a ≤ b");
         assert_eq!(typst_math_selection_source("sin(x)"), "sin(x)");
+        assert_eq!(typst_math_selection_source("dot(theta)"), "θ\u{307}");
+        assert_eq!(typst_math_selection_source("hat(x)^2"), "x\u{302}^2");
     }
 
     #[test]
@@ -7394,6 +7423,50 @@ mod tests {
                 .child_ids
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn typst_selection_resolves_math_accents() {
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        let mut builder = SceneBuilder::new(&mut commands, &mut timeline, &fonts, &text_config);
+        let equation = builder.typst(
+            "$m_2 ell_2 dot(theta)_2^2 sin(theta_1 - theta_2) = 0$",
+            false,
+            None,
+            None,
+            Some(32.0),
+            None,
+        );
+        let rendered = builder
+            .states
+            .get(equation.id)
+            .expect("compiled equation state")
+            .child_spans
+            .iter()
+            .map(|child| child.span.character)
+            .collect::<String>();
+        let whole = builder
+            .select_occurrence(equation, "dot(theta)_2^2 sin(theta_1 - theta_2)", None)
+            .child_ids;
+        let accent = builder
+            .select_occurrence(equation, "dot(theta)_2^2", None)
+            .child_ids;
+        let sine = builder
+            .select_occurrence(equation, "sin(theta_1 - theta_2)", None)
+            .child_ids;
+        assert!(!accent.is_empty(), "rendered={rendered:?}");
+        assert!(!sine.is_empty(), "rendered={rendered:?}");
+        assert_eq!(
+            whole.len(),
+            accent.len() + sine.len(),
+            "rendered={rendered:?}"
+        );
+        assert!(accent.iter().all(|id| whole.contains(id)));
     }
 
     #[test]

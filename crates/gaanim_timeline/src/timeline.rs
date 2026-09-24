@@ -821,7 +821,7 @@ impl Timeline {
 
         let mut reactive = world.query_filtered::<Entity, Or<(
             With<gaanim_animation::Updater>,
-            With<gaanim_animation::SampledSeriesDriver>,
+            With<gaanim_animation::SampledSeriesDrivers>,
             With<gaanim_animation::TracedPath>,
             With<gaanim_animation::TracedPath3D>,
             With<gaanim_animation::FloatSignal>,
@@ -1246,10 +1246,10 @@ impl Timeline {
                                 updater.elapsed = clip.start;
                             }
                         }
-                        if let Some(mut driver) =
-                            entity_mut.get_mut::<gaanim_animation::SampledSeriesDriver>()
+                        if let Some(mut drivers) =
+                            entity_mut.get_mut::<gaanim_animation::SampledSeriesDrivers>()
                         {
-                            driver.stop_at = Some(clip.start);
+                            drivers.stop_at(clip.start);
                         }
                     }
                 }
@@ -1870,7 +1870,9 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
     for sample_time in sample_times {
         gaanim_animation::advance_updaters_by(world, sample_time - previous_sample_time);
         previous_sample_time = sample_time;
-        gaanim_animation::position_binding_system(world);
+        // Sample sources exactly as playback moves them; stale reactive
+        // positions would otherwise join old points to the live trail.
+        gaanim_animation::evaluate_reactive_positions(world, sample_time);
 
         for (trace_entity, source_entity, min_distance, max_points, start_at, dissipating_time) in
             &traces
@@ -1878,9 +1880,8 @@ fn rebuild_traced_paths(world: &mut World, target_time: f64) {
             if sample_time + f64::EPSILON < *start_at {
                 continue;
             }
-            let Some(source_pos) = world
-                .get::<SpatialTransform>(*source_entity)
-                .map(|t| t.translation)
+            let Some(source_pos) =
+                gaanim_animation::traced_source_position(*trace_entity, *source_entity, world)
             else {
                 continue;
             };
@@ -3459,6 +3460,72 @@ mod tests {
         timeline.seek(&mut world, 0.1);
         let rewound = world.get::<SpatialTransform>(entity).unwrap().translation.x;
         assert!((rewound - first).abs() < 1e-12);
+    }
+
+    #[test]
+    fn traced_path_seek_samples_followed_sources_like_playback() {
+        let mut world = World::new();
+        world.insert_resource(gaanim_animation::PlaybackState::default());
+
+        // The leader moves along x through a sampled series; the mass only
+        // reaches it through `follow`, so its authored pose (0, 5) is stale.
+        let series = gaanim_animation::SampledSeriesDriver::new(
+            vec![0.0, 4.0],
+            vec![0.0, 4.0],
+            gaanim_animation::SampledProperty::TranslateX,
+            gaanim_animation::SampledInterpolation::Linear,
+            1.0,
+            0.0,
+        )
+        .unwrap();
+        let leader = world
+            .spawn((
+                MobjectId(ObjectId::from_raw(0)),
+                SpatialTransform::default(),
+                gaanim_animation::SampledSeriesDrivers::from(series),
+            ))
+            .id();
+        let mass = world
+            .spawn((
+                MobjectId(ObjectId::from_raw(1)),
+                SpatialTransform::new_2d(0.0, 5.0),
+                gaanim_animation::EndpointFollow {
+                    endpoint: gaanim_animation::TrackingEndpoint::Entity(leader),
+                    offset: gaanim_core::glam::DVec3::ZERO,
+                    offset_space: gaanim_animation::FollowOffsetSpace::World,
+                },
+            ))
+            .id();
+        let trace = world
+            .spawn((
+                MobjectId(ObjectId::from_raw(2)),
+                SpatialTransform::default(),
+                Path2D(Arc::new(BezPath::new())),
+                gaanim_animation::TracedPath::new(mass, 0.01, None),
+            ))
+            .id();
+
+        let snapshot = WorldSnapshot::capture(&mut world);
+        let mut timeline = Timeline::default();
+        timeline.cached_duration = 4.0;
+        timeline.add_keyframe(0.0, snapshot);
+
+        timeline.seek(&mut world, 2.0);
+        let points = world
+            .get::<gaanim_animation::TracedPath>(trace)
+            .unwrap()
+            .points
+            .clone();
+        assert!(points.len() > 2);
+        assert!(
+            points.iter().all(|point| point.y.abs() < 1e-9),
+            "no sample may use the unresolved authored pose: {points:?}"
+        );
+        let last = points.last().unwrap();
+        assert!(
+            (last.x - 2.0).abs() < 1e-9,
+            "trail ends at the seek target: {last:?}"
+        );
     }
 
     #[test]
