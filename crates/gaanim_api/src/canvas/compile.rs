@@ -11430,6 +11430,56 @@ mod tests {
     }
 
     #[test]
+    fn spatial_stagger_delays_follow_distance_from_the_origin() {
+        use crate::canvas::{Composition, StaggerLayout, StaggerOrigin};
+        let mut canvas = SceneModel::new(640, 360);
+        let dots: Vec<_> = (0..5)
+            .map(|index| canvas.circle(0.1).move_to(index as f64 - 2.0, 0.0))
+            .collect();
+        let starts = |origin, total| {
+            let children = dots
+                .iter()
+                .map(|dot| Composition::leaf(dot.animate().opacity(0.5).duration(1.0)))
+                .collect();
+            let layout = StaggerLayout {
+                origin,
+                grid: None,
+                total,
+                easing: None,
+            };
+            let schedule = Composition::stagger_layout(children, 0.1, layout)
+                .unwrap()
+                .schedule(None)
+                .unwrap();
+            schedule
+                .entries
+                .iter()
+                .map(|entry| (entry.start * 1000.0).round() / 1000.0)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            starts(StaggerOrigin::Start, None),
+            [0.0, 0.1, 0.2, 0.3, 0.4]
+        );
+        assert_eq!(
+            starts(StaggerOrigin::Center, None),
+            [0.2, 0.1, 0.0, 0.1, 0.2]
+        );
+        assert_eq!(
+            starts(StaggerOrigin::Edges, None),
+            [0.0, 0.1, 0.2, 0.1, 0.0]
+        );
+        assert_eq!(
+            starts(StaggerOrigin::Point(-2.0, 0.0), Some(2.0)),
+            [0.0, 0.5, 1.0, 1.5, 2.0]
+        );
+        let mut random = starts(StaggerOrigin::Random(7), None);
+        assert_eq!(random, starts(StaggerOrigin::Random(7), None));
+        random.sort_by(f64::total_cmp);
+        assert_eq!(random, [0.0, 0.1, 0.2, 0.3, 0.4]);
+    }
+
+    #[test]
     fn repeated_compositions_report_their_expanded_schedule() {
         use crate::canvas::Composition;
         let mut canvas = SceneModel::new(640, 360);

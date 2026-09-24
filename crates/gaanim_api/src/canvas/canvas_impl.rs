@@ -335,7 +335,137 @@ enum CompositionNode {
     Stagger {
         children: Vec<Composition>,
         each: f64,
+        layout: Option<StaggerLayout>,
     },
+}
+
+/// Where a spatial stagger starts.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StaggerOrigin {
+    /// The first item.
+    Start,
+    /// The last item.
+    End,
+    /// The center of the items' bounding box.
+    Center,
+    /// The edges of the bounding box, moving inward.
+    Edges,
+    /// A seeded random order.
+    Random(u64),
+    /// A scene point.
+    Point(f64, f64),
+}
+
+/// Distance-based stagger: each child's delay grows with its distance from
+/// `origin`, shaped by `easing`, spanning `total` seconds when given or
+/// `each` seconds per grid step otherwise.
+#[derive(Debug, Clone)]
+pub struct StaggerLayout {
+    pub origin: StaggerOrigin,
+    /// Explicit `(rows, columns)`; `None` uses authored positions.
+    pub grid: Option<(usize, usize)>,
+    pub total: Option<f64>,
+    pub easing: Option<RateFunc>,
+}
+
+/// Authored scene position of a drawable, folded from its declaration-time
+/// placement; `None` when it depends on layout resolved at compile time.
+pub(crate) fn authored_position(spec: &super::types::ObjectSpec) -> Option<DVec2> {
+    use super::types::LayoutOp;
+    let mut position = DVec2::ZERO;
+    for op in &spec.layout_ops {
+        match op {
+            LayoutOp::SetTranslation(to) => position = to.truncate(),
+            LayoutOp::ShiftBy(delta) => position += delta.truncate(),
+            LayoutOp::MoveAnchorTo { target, .. } | LayoutOp::MoveTextAnchorTo { target, .. } => {
+                position = target.truncate()
+            }
+            LayoutOp::SetScale(_)
+            | LayoutOp::SetScale3D(_)
+            | LayoutOp::ScaleBy(_)
+            | LayoutOp::SetRotation(_)
+            | LayoutOp::SetRotation3D(_)
+            | LayoutOp::RotateBy(_)
+            | LayoutOp::SetPivot(_) => {}
+            _ => return None,
+        }
+    }
+    Some(position)
+}
+
+/// Normalized stagger weights in `[0, 1]` (0 starts first) and the number of
+/// unit steps spanned, for items at `positions`.
+pub fn stagger_weights(
+    positions: &[DVec2],
+    origin: StaggerOrigin,
+    easing: Option<&RateFunc>,
+) -> (Vec<f64>, f64) {
+    let count = positions.len();
+    if count <= 1 {
+        return (vec![0.0; count], 0.0);
+    }
+    let distances: Vec<f64> = match origin {
+        StaggerOrigin::Random(seed) => {
+            let mut order: Vec<usize> = (0..count).collect();
+            gaanim_math::SeededRng::new(seed).shuffle(&mut order);
+            let mut ranks = vec![0.0; count];
+            for (rank, index) in order.into_iter().enumerate() {
+                ranks[index] = rank as f64;
+            }
+            ranks
+        }
+        _ => {
+            let (min, max) = positions.iter().fold(
+                (DVec2::splat(f64::INFINITY), DVec2::splat(f64::NEG_INFINITY)),
+                |(min, max), point| (min.min(*point), max.max(*point)),
+            );
+            let center = (min + max) * 0.5;
+            let from = match origin {
+                StaggerOrigin::Start => positions[0],
+                StaggerOrigin::End => positions[count - 1],
+                StaggerOrigin::Point(x, y) => DVec2::new(x, y),
+                _ => center,
+            };
+            let to_center: Vec<f64> = positions.iter().map(|p| p.distance(from)).collect();
+            if matches!(origin, StaggerOrigin::Edges) {
+                let far = to_center.iter().copied().fold(0.0, f64::max);
+                to_center.iter().map(|distance| far - distance).collect()
+            } else {
+                to_center
+            }
+        }
+    };
+    let low = distances.iter().copied().fold(f64::INFINITY, f64::min);
+    let distances: Vec<f64> = distances.iter().map(|distance| distance - low).collect();
+    let far = distances.iter().copied().fold(0.0, f64::max);
+    if far <= 1e-12 {
+        return (vec![0.0; count], 0.0);
+    }
+    // One step is the smallest spacing between items, so a row staggered
+    // from its start spans `count - 1` steps like `index * each`.
+    let mut step = f64::INFINITY;
+    let sample = &positions[..count.min(512)];
+    for (index, a) in sample.iter().enumerate() {
+        for b in &sample[index + 1..] {
+            let gap = a.distance(*b);
+            if gap > 1e-9 {
+                step = step.min(gap);
+            }
+        }
+    }
+    let steps = if matches!(origin, StaggerOrigin::Random(_)) || !step.is_finite() {
+        far
+    } else {
+        far / step
+    };
+    let weights = distances
+        .iter()
+        .map(|distance| {
+            let normalized = distance / far;
+            easing.map_or(normalized, |easing| easing.evaluate(normalized))
+        })
+        .collect();
+    (weights, steps)
 }
 
 /// One resolved leaf returned by [`Composition::schedule`].
@@ -410,7 +540,34 @@ impl Composition {
         if !each.is_finite() || each < 0.0 {
             return Err(PlayError::InvalidCompositionTiming("each"));
         }
-        Self::branch(CompositionNode::Stagger { children, each })
+        Self::branch(CompositionNode::Stagger {
+            children,
+            each,
+            layout: None,
+        })
+    }
+
+    /// Stagger children by their distance from `layout.origin` instead of
+    /// their index.
+    pub fn stagger_layout(
+        children: Vec<Self>,
+        each: f64,
+        layout: StaggerLayout,
+    ) -> Result<Self, PlayError> {
+        if !each.is_finite() || each < 0.0 {
+            return Err(PlayError::InvalidCompositionTiming("each"));
+        }
+        if layout
+            .total
+            .is_some_and(|total| !total.is_finite() || total < 0.0)
+        {
+            return Err(PlayError::InvalidCompositionTiming("total"));
+        }
+        Self::branch(CompositionNode::Stagger {
+            children,
+            each,
+            layout: Some(layout),
+        })
     }
 
     pub fn delay(mut self, seconds: f64) -> Result<Self, PlayError> {
@@ -513,13 +670,29 @@ impl Composition {
                 }
                 items
             }
-            CompositionNode::Stagger { children, each } => {
+            CompositionNode::Stagger {
+                children,
+                each,
+                layout,
+            } => {
+                let offsets: Vec<f64> = match layout {
+                    None => (0..children.len())
+                        .map(|index| index as f64 * *each)
+                        .collect(),
+                    Some(layout) => {
+                        let positions = Self::stagger_positions(children, layout.grid);
+                        let (weights, steps) =
+                            stagger_weights(&positions, layout.origin, layout.easing.as_ref());
+                        let span = layout.total.unwrap_or(steps * *each);
+                        weights.into_iter().map(|weight| weight * span).collect()
+                    }
+                };
                 let mut items = Vec::new();
                 for (index, child) in children.iter().enumerate() {
                     path.push(index);
                     let mut child_items = child.resolve(duration, rate.clone(), path)?;
                     path.pop();
-                    let offset = index as f64 * *each;
+                    let offset = offsets[index];
                     child_items.iter_mut().for_each(|item| item.start += offset);
                     items.extend(child_items);
                 }
@@ -591,6 +764,40 @@ impl Composition {
             .iter_mut()
             .for_each(|item| item.start += self.delay);
         Ok(resolved)
+    }
+
+    /// Positions used by a spatial stagger: grid cells when `grid` is given,
+    /// authored positions when every child has one, else the index on a row.
+    fn stagger_positions(children: &[Self], grid: Option<(usize, usize)>) -> Vec<DVec2> {
+        if let Some((_, columns)) = grid {
+            let columns = columns.max(1);
+            return (0..children.len())
+                .map(|index| DVec2::new((index % columns) as f64, -((index / columns) as f64)))
+                .collect();
+        }
+        let authored: Option<Vec<DVec2>> = children
+            .iter()
+            .map(|child| child.first_animation().and_then(Anim::authored_position))
+            .collect();
+        authored.unwrap_or_else(|| {
+            (0..children.len())
+                .map(|index| DVec2::new(index as f64, 0.0))
+                .collect()
+        })
+    }
+
+    fn first_animation(&self) -> Option<&Anim> {
+        match &self.node {
+            CompositionNode::Leaf(item) => match item.as_ref() {
+                PlayItem::Animation(anim) => Some(anim),
+                _ => None,
+            },
+            CompositionNode::Parallel(children)
+            | CompositionNode::Sequence { children, .. }
+            | CompositionNode::Stagger { children, .. } => {
+                children.iter().find_map(Self::first_animation)
+            }
+        }
     }
 
     fn resolved(

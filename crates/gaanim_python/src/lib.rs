@@ -74,6 +74,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(composition::parallel, m)?)?;
     m.add_function(wrap_pyfunction!(composition::sequence, m)?)?;
     m.add_function(wrap_pyfunction!(composition::stagger, m)?)?;
+    m.add_function(wrap_pyfunction!(composition::distribute, m)?)?;
     m.add_class::<pydrawable::PyCanvasAnim>()?;
     m.add_class::<pydrawable::PyAnchorPoint>()?;
     m.add_class::<pydrawable::PyDrawable>()?;

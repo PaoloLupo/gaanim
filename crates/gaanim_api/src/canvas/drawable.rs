@@ -1044,6 +1044,12 @@ impl DrawableHandle {
         })
     }
 
+    /// Declaration-time scene position (folded from `move_to`/`shift_by`),
+    /// or `None` when it depends on layout resolved at compile time.
+    pub fn authored_position(&self) -> Option<DVec2> {
+        super::canvas_impl::authored_position(&self.spec.lock().expect("object spec poisoned"))
+    }
+
     /// Show only part of the drawn path: the window `[start, end]` shifted
     /// by `offset` (arc-length fractions). `None` keeps the current value;
     /// `sequential` measures the window across all sub-paths.

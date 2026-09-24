@@ -1,10 +1,11 @@
-use gaanim_api::canvas::{Composition, PlayError, Schedule};
+use gaanim_api::canvas::{Composition, PlayError, Schedule, StaggerLayout, StaggerOrigin};
+use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 
 use crate::easing::PyEasing;
 use crate::pycanvas::{PyAudio, PyLottie, PyVideo};
-use crate::pydrawable::PyCanvasAnim;
+use crate::pydrawable::{PyCanvasAnim, PyDrawable};
 
 fn play_error(error: PlayError) -> PyErr {
     pyo3::exceptions::PyValueError::new_err(error.to_string())
@@ -106,9 +107,7 @@ impl PyComposition {
     #[pyo3(signature = (count, *, delay=0.0))]
     fn repeat(&self, count: i64, delay: f64) -> PyResult<Self> {
         if !(1..=u32::MAX as i64).contains(&count) {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "count must be at least 1",
-            ));
+            return Err(PyValueError::new_err("count must be at least 1"));
         }
         self.inner
             .clone()
@@ -189,10 +188,123 @@ pub fn sequence(items: &Bound<'_, PyTuple>, gap: f64) -> PyResult<PyComposition>
         .map_err(play_error)
 }
 
+fn stagger_origin(origin: &Bound<'_, PyAny>, seed: u64) -> PyResult<StaggerOrigin> {
+    if let Ok(name) = origin.extract::<String>() {
+        return match name.as_str() {
+            "start" => Ok(StaggerOrigin::Start),
+            "end" => Ok(StaggerOrigin::End),
+            "center" => Ok(StaggerOrigin::Center),
+            "edges" => Ok(StaggerOrigin::Edges),
+            "random" => Ok(StaggerOrigin::Random(seed)),
+            other => Err(PyValueError::new_err(format!(
+                "unknown origin {other:?}; expected \"start\", \"end\", \"center\", \"edges\", \"random\" or an (x, y) point"
+            ))),
+        };
+    }
+    let (x, y) = origin
+        .extract::<(f64, f64)>()
+        .map_err(|_| PyTypeError::new_err("origin must be a name or an (x, y) point"))?;
+    if !x.is_finite() || !y.is_finite() {
+        return Err(PyValueError::new_err("origin point must be finite"));
+    }
+    Ok(StaggerOrigin::Point(x, y))
+}
+
+fn stagger_grid(grid: Option<&Bound<'_, PyAny>>) -> PyResult<Option<(usize, usize)>> {
+    let Some(grid) = grid else {
+        return Ok(None);
+    };
+    if grid.extract::<String>().is_ok_and(|name| name == "auto") {
+        return Ok(None);
+    }
+    let (rows, columns) = grid
+        .extract::<(usize, usize)>()
+        .map_err(|_| PyTypeError::new_err("grid must be \"auto\" or (rows, columns)"))?;
+    if rows == 0 || columns == 0 {
+        return Err(PyValueError::new_err(
+            "grid needs at least one row and column",
+        ));
+    }
+    Ok(Some((rows, columns)))
+}
+
 #[pyfunction]
-#[pyo3(signature = (*items, each=0.1))]
-pub fn stagger(items: &Bound<'_, PyTuple>, each: f64) -> PyResult<PyComposition> {
-    Composition::stagger(tuple_children(items)?, each)
+#[pyo3(signature = (*items, each=0.1, total=None, origin=None, grid=None, easing=None, seed=0))]
+#[allow(clippy::too_many_arguments)]
+pub fn stagger(
+    items: &Bound<'_, PyTuple>,
+    each: f64,
+    total: Option<f64>,
+    origin: Option<&Bound<'_, PyAny>>,
+    grid: Option<&Bound<'_, PyAny>>,
+    easing: Option<&PyEasing>,
+    seed: u64,
+) -> PyResult<PyComposition> {
+    let children = tuple_children(items)?;
+    let spatial = origin.is_some() || grid.is_some() || total.is_some() || easing.is_some();
+    let composition = if spatial {
+        let origin = match origin {
+            Some(origin) => stagger_origin(origin, seed)?,
+            None => StaggerOrigin::Start,
+        };
+        Composition::stagger_layout(
+            children,
+            each,
+            StaggerLayout {
+                origin,
+                grid: stagger_grid(grid)?,
+                total,
+                easing: easing.map(|easing| easing.inner.clone()),
+            },
+        )
+    } else {
+        Composition::stagger(children, each)
+    };
+    composition
         .map(|inner| PyComposition { inner })
         .map_err(play_error)
+}
+
+/// Spread values from `low` to `high` over drawables by their distance from
+/// `origin`, with the same ordering as a spatial `stagger`.
+#[pyfunction]
+#[pyo3(signature = (items, low, high, *, origin=None, grid=None, easing=None, seed=0))]
+pub fn distribute(
+    items: Vec<PyRef<'_, PyDrawable>>,
+    low: f64,
+    high: f64,
+    origin: Option<&Bound<'_, PyAny>>,
+    grid: Option<&Bound<'_, PyAny>>,
+    easing: Option<&PyEasing>,
+    seed: u64,
+) -> PyResult<Vec<f64>> {
+    if !low.is_finite() || !high.is_finite() {
+        return Err(PyValueError::new_err("low and high must be finite"));
+    }
+    let origin = match origin {
+        Some(origin) => stagger_origin(origin, seed)?,
+        None => StaggerOrigin::Start,
+    };
+    let positions: Vec<gaanim_core::glam::DVec2> = match stagger_grid(grid)? {
+        Some((_, columns)) => (0..items.len())
+            .map(|index| {
+                gaanim_core::glam::DVec2::new((index % columns) as f64, -((index / columns) as f64))
+            })
+            .collect(),
+        None => items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| {
+                item.0
+                    .authored_position()
+                    .unwrap_or(gaanim_core::glam::DVec2::new(index as f64, 0.0))
+            })
+            .collect(),
+    };
+    let easing = easing.map(|easing| easing.inner.clone());
+    let (weights, _) = gaanim_api::canvas::stagger_weights(&positions, origin, easing.as_ref());
+    Ok(weights
+        .into_iter()
+        .map(|weight| low + (high - low) * weight)
+        .collect())
 }

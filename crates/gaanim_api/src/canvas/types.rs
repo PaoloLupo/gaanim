@@ -2334,6 +2334,19 @@ impl Anim {
         };
     }
 
+    /// Declaration-time scene position of this animation's target, if known.
+    pub(crate) fn authored_position(&self) -> Option<gaanim_core::glam::DVec2> {
+        let state = self.owner.as_ref()?;
+        let spec = state
+            .lock()
+            .expect("canvas state poisoned")
+            .object_specs
+            .get(&self.inner.target)?
+            .clone();
+        let spec = spec.lock().expect("object spec poisoned");
+        super::canvas_impl::authored_position(&spec)
+    }
+
     /// A copy scheduled independently of this one, as used by repeated
     /// compositions.
     pub(crate) fn replica(&self) -> Self {

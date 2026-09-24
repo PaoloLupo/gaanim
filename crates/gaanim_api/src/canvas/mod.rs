@@ -56,9 +56,9 @@ pub use canvas_impl::{
     BooleanError, CameraBindingError, CameraConstraintHandle, CameraStateError, CameraStateHandle,
     Composition, DEFAULT_REACTIVE_TEXT_SIZE, DimensionExtensionStyle, DimensionHandle,
     DimensionOptions, ForceVectorHandle, ImageLoadError, LottieClip, LottieLoadError, PlayError,
-    PlayItem, SceneModel, SceneObjectError, Schedule, ScheduleEntry, SupportHandle,
-    SurroundingRectError, SurroundingRectHandle, ThemeError, TypstAssetError, VideoClip,
-    VideoLoadError, VideoSegment,
+    PlayItem, SceneModel, SceneObjectError, Schedule, ScheduleEntry, StaggerLayout, StaggerOrigin,
+    SupportHandle, SurroundingRectError, SurroundingRectHandle, ThemeError, TypstAssetError,
+    VideoClip, VideoLoadError, VideoSegment, stagger_weights,
 };
 mod theme;
 pub use gaanim_objects::prelude::SvgLoadError;

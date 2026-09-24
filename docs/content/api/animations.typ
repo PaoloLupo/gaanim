@@ -947,6 +947,25 @@ scene.render()
 ```
 ]
 
+=== Stagger espacial
+
+`stagger(*items, each=0.1)` escalona por índice. Con `origin`, `grid`, `total` o
+`easing`, el retardo de cada ítem crece con su distancia al origen: `"start"`,
+`"end"`, `"center"`, `"edges"` (de los bordes hacia dentro), `"random"` (orden
+aleatorio con `seed`) o un punto `(x, y)`. Las distancias usan las posiciones
+declaradas (`grid="auto"`) o las celdas de `grid=(filas, columnas)`; `each` es
+el retardo por paso de separación y `total` fija la duración de toda la onda.
+`distribute(items, low, high, origin=...)` usa el mismo orden para repartir
+valores (tamaños, opacidades) en lugar de tiempos.
+
+```python
+scene.play(stagger(*[d.animate.grow_from_center() for d in dots], each=0.03, origin="center"))
+scene.play(stagger(*anims, total=1.2, origin="random", seed=7))
+scene.play(stagger(*anims, each=0.05, origin=(0.0, -3.0)))
+for dot, size in zip(dots, distribute(dots, 0.4, 1.4, origin="edges")):
+    dot.scale_by(size)
+```
+
 === Trim de trazos y efectos animables
 
 `drawable.trim(start=None, end=None, offset=None, mode=None)` muestra solo la

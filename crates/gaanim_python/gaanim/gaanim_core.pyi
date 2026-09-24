@@ -1115,8 +1115,53 @@ def sequence(*items: Playable, gap: float = 0.0) -> Composition:
     """Compose items consecutively; a bounded negative gap creates overlap."""
     ...
 
-def stagger(*items: Playable, each: float = 0.1) -> Composition:
-    """Offset each item by ``index * each`` seconds."""
+StaggerOrigin: TypeAlias = Literal["start", "end", "center", "edges", "random"] | tuple[float, float]
+
+def stagger(
+    *items: Playable,
+    each: float = 0.1,
+    total: Optional[float] = None,
+    origin: Optional[StaggerOrigin] = None,
+    grid: Optional[Literal["auto"] | tuple[int, int]] = None,
+    easing: Optional[Easing] = None,
+    seed: int = 0,
+) -> Composition:
+    """Offset items by ``index * each`` seconds, or by distance from ``origin``.
+
+    With ``origin``, ``grid``, ``total`` or ``easing`` the delay of each item
+    grows with its distance from ``origin``: the first item (``"start"``), the
+    last (``"end"``), the center of the items (``"center"``), the outer edges
+    moving inward (``"edges"``), a seeded random order (``"random"``), or an
+    ``(x, y)`` scene point. Distances use the items' declared positions
+    (``grid="auto"``, the default) or cells of an explicit
+    ``grid=(rows, columns)``. ``each`` is the delay per spacing step and
+    ``total`` instead fixes the whole spread; ``easing`` shapes it. Items
+    whose position depends on a layout fall back to their index.
+
+    Example:
+        scene.play(stagger(*[d.animate.grow_from_center() for d in dots], each=0.03, origin="center"))
+    """
+    ...
+
+def distribute(
+    items: Sequence[Drawable],
+    low: float,
+    high: float,
+    *,
+    origin: Optional[StaggerOrigin] = None,
+    grid: Optional[Literal["auto"] | tuple[int, int]] = None,
+    easing: Optional[Easing] = None,
+    seed: int = 0,
+) -> list[float]:
+    """Spread values from ``low`` to ``high`` over ``items`` by distance from ``origin``.
+
+    Uses the same ordering as ``stagger`` and returns one value per item, so
+    it distributes sizes, colors or opacities instead of start times.
+
+    Example:
+        for dot, size in zip(dots, distribute(dots, 0.4, 1.4, origin="edges")):
+            dot.scale_by(size)
+    """
     ...
 
 class Audio:
