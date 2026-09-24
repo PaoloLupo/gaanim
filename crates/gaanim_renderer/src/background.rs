@@ -783,8 +783,106 @@ fn rasterize_shader(
     })
 }
 
+/// A real GPU for tests; `None` when the machine has no adapter.
+#[cfg(test)]
+pub(crate) mod test_gpu {
+    use super::*;
+
+    pub(crate) struct TestGpu {
+        pub(crate) device: wgpu::Device,
+        pub(crate) queue: wgpu::Queue,
+        pub(crate) renderer: vello::Renderer,
+    }
+
+    pub(crate) fn test_gpu() -> Option<TestGpu> {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::all(),
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        });
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&Default::default())).ok()?;
+        let renderer = vello::Renderer::new(
+            &device,
+            vello::RendererOptions {
+                use_cpu: false,
+                antialiasing_support: vello::AaSupport::area_only(),
+                num_init_threads: None,
+                pipeline_cache: None,
+            },
+        )
+        .ok()?;
+        Some(TestGpu {
+            device,
+            queue,
+            renderer,
+        })
+    }
+
+    impl TestGpu {
+        pub(crate) fn target(&self, width: u32, height: u32) -> wgpu::Texture {
+            shader_output_texture(&self.device, width, height, wgpu::TextureUsages::COPY_SRC)
+        }
+
+        pub(crate) fn render(&mut self, scene: &vello::Scene, target: &wgpu::Texture) {
+            self.renderer
+                .render_to_texture(
+                    &self.device,
+                    &self.queue,
+                    scene,
+                    &target.create_view(&Default::default()),
+                    &vello::RenderParams {
+                        base_color: Color::TRANSPARENT,
+                        width: target.width(),
+                        height: target.height(),
+                        antialiasing_method: vello::AaConfig::Area,
+                    },
+                )
+                .unwrap();
+        }
+
+        pub(crate) fn read(&self, texture: &wgpu::Texture) -> Vec<u8> {
+            let (width, height) = (texture.width(), texture.height());
+            let padded_width = (width + 63) & !63;
+            let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: u64::from(padded_width) * u64::from(height) * 4,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let mut encoder = self.device.create_command_encoder(&Default::default());
+            encoder.copy_texture_to_buffer(
+                texture.as_image_copy(),
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &staging,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(padded_width * 4),
+                        rows_per_image: None,
+                    },
+                },
+                texture.size(),
+            );
+            self.queue.submit(Some(encoder.finish()));
+            let slice = staging.slice(..);
+            slice.map_async(wgpu::MapMode::Read, |result| result.unwrap());
+            self.device
+                .poll(wgpu::PollType::wait_indefinitely())
+                .unwrap();
+            let mapped = slice.get_mapped_range();
+            (0..height)
+                .flat_map(|row| {
+                    let start = (row * padded_width * 4) as usize;
+                    mapped[start..start + (width * 4) as usize].to_vec()
+                })
+                .collect()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::test_gpu::{TestGpu, test_gpu};
     use super::*;
 
     #[test]
@@ -848,37 +946,6 @@ mod tests {
     const ANIMATED_SOURCE: &str = "fn gaanim_background(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {\n\
          return vec4<f32>(uv, fract(time * 0.37) + resolution.x * 0.0, 1.0);\n}";
 
-    struct TestGpu {
-        device: wgpu::Device,
-        queue: wgpu::Queue,
-        renderer: vello::Renderer,
-    }
-
-    fn test_gpu() -> Option<TestGpu> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
-            ..wgpu::InstanceDescriptor::new_without_display_handle()
-        });
-        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
-        let (device, queue) =
-            pollster::block_on(adapter.request_device(&Default::default())).ok()?;
-        let renderer = vello::Renderer::new(
-            &device,
-            vello::RendererOptions {
-                use_cpu: false,
-                antialiasing_support: vello::AaSupport::area_only(),
-                num_init_threads: None,
-                pipeline_cache: None,
-            },
-        )
-        .ok()?;
-        Some(TestGpu {
-            device,
-            queue,
-            renderer,
-        })
-    }
-
     fn background_scene(brush: &Brush, width: u32, height: u32) -> vello::Scene {
         let mut scene = vello::Scene::new();
         scene.fill(
@@ -889,66 +956,6 @@ mod tests {
             &gaanim_core::kurbo::Rect::new(0.0, 0.0, f64::from(width), f64::from(height)),
         );
         scene
-    }
-
-    impl TestGpu {
-        fn target(&self, width: u32, height: u32) -> wgpu::Texture {
-            shader_output_texture(&self.device, width, height, wgpu::TextureUsages::COPY_SRC)
-        }
-
-        fn render(&mut self, scene: &vello::Scene, target: &wgpu::Texture) {
-            self.renderer
-                .render_to_texture(
-                    &self.device,
-                    &self.queue,
-                    scene,
-                    &target.create_view(&Default::default()),
-                    &vello::RenderParams {
-                        base_color: Color::TRANSPARENT,
-                        width: target.width(),
-                        height: target.height(),
-                        antialiasing_method: vello::AaConfig::Area,
-                    },
-                )
-                .unwrap();
-        }
-
-        fn read(&self, texture: &wgpu::Texture) -> Vec<u8> {
-            let (width, height) = (texture.width(), texture.height());
-            let padded_width = (width + 63) & !63;
-            let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: None,
-                size: u64::from(padded_width) * u64::from(height) * 4,
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            let mut encoder = self.device.create_command_encoder(&Default::default());
-            encoder.copy_texture_to_buffer(
-                texture.as_image_copy(),
-                wgpu::TexelCopyBufferInfo {
-                    buffer: &staging,
-                    layout: wgpu::TexelCopyBufferLayout {
-                        offset: 0,
-                        bytes_per_row: Some(padded_width * 4),
-                        rows_per_image: None,
-                    },
-                },
-                texture.size(),
-            );
-            self.queue.submit(Some(encoder.finish()));
-            let slice = staging.slice(..);
-            slice.map_async(wgpu::MapMode::Read, |result| result.unwrap());
-            self.device
-                .poll(wgpu::PollType::wait_indefinitely())
-                .unwrap();
-            let mapped = slice.get_mapped_range();
-            (0..height)
-                .flat_map(|row| {
-                    let start = (row * padded_width * 4) as usize;
-                    mapped[start..start + (width * 4) as usize].to_vec()
-                })
-                .collect()
-        }
     }
 
     #[test]

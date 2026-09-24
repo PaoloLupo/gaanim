@@ -89,7 +89,9 @@ fn gaanim_background(
 }
 ```
 
-`uv=(0, 0)` es la esquina superior izquierda y `uv=(1, 1)` la inferior derecha.
+`uv=(0, 0)` es la esquina superior izquierda y `uv=(1, 1)` la inferior derecha:
+`uv.y` crece hacia abajo, como las filas de píxeles, aunque la escena use `y`
+hacia arriba. Para trabajar con `y` hacia arriba, usa `1.0 - uv.y`.
 `resolution` es el tamaño efectivo en píxeles y `time` la posición absoluta de
 la línea temporal en segundos. Como `time` sigue tanto la reproducción como las
 búsquedas exactas, las capturas y exportaciones son deterministas. El shader
