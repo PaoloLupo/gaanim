@@ -45,6 +45,9 @@ use gaanim_animation::{
 };
 use gaanim_math::{RateFunc, SpatialTransform};
 
+/// Typst's default text size, in points.
+const TYPST_DEFAULT_TEXT_PT: f64 = 11.0;
+
 fn sampled_reactive_path(
     map: &gaanim_visualization::CoordinateMap2D,
     function: &ReactiveFunction,
@@ -7720,7 +7723,11 @@ impl SceneModel {
                 Self::apply_fragment_fills(builder, mr, &styled_spec);
                 mr
             }
-            SpawnKind::Typst { source, page_width } => {
+            SpawnKind::Typst {
+                source,
+                page_width,
+                scene_units,
+            } => {
                 let body = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
                 let foreground = typst_foreground_for_background(scene_background);
                 let page_directive = if let Some(w) = page_width {
@@ -7734,7 +7741,23 @@ impl SceneModel {
                 };
                 let source =
                     format!("{page_directive}#set text(fill: rgb(\"{foreground}\"))\n{source}");
-                let mr = builder.typst(&source, false, Some(&body.font_family), None, None, None);
+                // A document keeps Typst's own proportions (11pt text, table
+                // insets, rule widths) and is scaled so its default text is
+                // as large as the body role.
+                let scale = if *scene_units {
+                    1.0
+                } else {
+                    body.size / TYPST_DEFAULT_TEXT_PT
+                };
+                let mr = builder.scaled_typst(
+                    &source,
+                    false,
+                    Some(&body.font_family),
+                    None,
+                    None,
+                    None,
+                    scale,
+                );
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
                 Self::apply_fragment_fills(builder, mr, spec);
                 mr
@@ -10265,6 +10288,56 @@ mod tests {
             .filter(|bounds| bounds.0.width() > 0.0 && bounds.0.height() > 0.0)
             .count();
         assert!(visible_bounds > 5, "paragraph should produce vector glyphs");
+    }
+
+    /// Height of the tallest compiled drawable in `canvas`.
+    fn tallest_compiled_height(canvas: &SceneModel) -> f64 {
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+        let mut world = world;
+        queue.apply(&mut world);
+        let mut query = world.query::<&LocalBounds>();
+        query
+            .iter(&world)
+            .map(|bounds| bounds.0.height())
+            .fold(0.0, f64::max)
+    }
+
+    #[test]
+    fn typst_documents_default_to_body_text_size() {
+        let mut text = SceneModel::new(16.0, 9.0);
+        text.text("Result table");
+        let mut document = SceneModel::new(16.0, 9.0);
+        document.typst("Result table");
+        let text_height = tallest_compiled_height(&text);
+        let document_height = tallest_compiled_height(&document);
+        assert!(text_height > 0.0 && text_height < 1.0, "{text_height}");
+        let ratio = document_height / text_height;
+        assert!(
+            (0.7..1.4).contains(&ratio),
+            "a Typst document line ({document_height}) should match body text ({text_height})"
+        );
+
+        // Typst's own lengths keep their proportion to the text.
+        let mut table = SceneModel::new(16.0, 9.0);
+        table.typst("#table(columns: 2, [A], [B], [C], [D])");
+        let table_height = tallest_compiled_height(&table);
+        assert!(
+            table_height > 2.0 * document_height && table_height < 8.0 * document_height,
+            "two table rows with 5pt insets: {table_height} vs line {document_height}"
+        );
+
+        // Built-in components size generated markup in scene units.
+        let mut units = SceneModel::new(16.0, 9.0);
+        units.typst_in_scene_units("#set text(size: 0.5pt)\nResult table");
+        let units_height = tallest_compiled_height(&units);
+        assert!((0.3..0.8).contains(&units_height), "{units_height}");
     }
 
     #[test]

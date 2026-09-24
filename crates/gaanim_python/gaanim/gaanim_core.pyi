@@ -3528,7 +3528,12 @@ class Typography:
         """Create a Typst drawable from inline markup or a Typst asset.
 
         A string is compiled as inline Typst. An ``os.PathLike`` value loads a
-        ``.typ`` asset; relative paths use :meth:`assets_dir`. Empty inline
+        ``.typ`` asset; relative paths use :meth:`assets_dir`. The document
+        keeps Typst's own proportions and is scaled so its default 11pt text
+        is as large as the ``body`` text role; ``#set text(size: 22pt)`` is
+        therefore twice the body size, and table insets and rule widths scale
+        with it. ``width`` is a Typst page width (``"16cm"``, ``"800pt"``; a
+        number means points) measured before that scaling. Empty inline
         source raises ``ValueError`` and an unreadable asset raises
         ``RuntimeError``.
 

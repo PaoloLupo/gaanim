@@ -23,7 +23,7 @@ layout = scene.text.typst('''
   [Hello], [world!],
 )
 ```
-''',width=1.666667).scale_to(3).move_to(0, -0.291667)
+''', width="8cm").move_to(0, -0.291667)
 
 scene.play([
     title.animate.write(),

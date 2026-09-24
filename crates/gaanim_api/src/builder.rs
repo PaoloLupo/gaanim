@@ -17,7 +17,7 @@ use gaanim_scene::{
 };
 use gaanim_text::font::FontRegistry;
 use gaanim_text::shaper::{HierarchyChild, compile_text_to_hierarchy};
-use gaanim_text::typst_compiler::compile_typst_to_hierarchy;
+use gaanim_text::typst_compiler::compile_scaled_typst_to_hierarchy;
 use gaanim_timeline::{
     clip::{AnimationSpec, ClipPayload, GltfAnimationSpec, PropertyLensSpec, SceneId, TrackId},
     scene::SceneMember,
@@ -6719,6 +6719,24 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         text_size: Option<f64>,
         math_size: Option<f64>,
     ) -> MobjectRef {
+        self.scaled_typst(
+            source, is_math, text_font, math_font, text_size, math_size, 1.0,
+        )
+    }
+
+    /// [`Self::typst`] with the compiled geometry scaled by `scale` scene
+    /// units per Typst point.
+    #[allow(clippy::too_many_arguments)]
+    pub fn scaled_typst(
+        &mut self,
+        source: &str,
+        is_math: bool,
+        text_font: Option<&str>,
+        math_font: Option<&str>,
+        text_size: Option<f64>,
+        math_size: Option<f64>,
+        scale: f64,
+    ) -> MobjectRef {
         let text_font = text_font.or_else(|| (!is_math).then_some("New Computer Modern"));
         let parent_id = self.next_id();
         let style_color = self
@@ -6739,7 +6757,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         };
 
         let mut child_spans = Vec::new();
-        let (entity, bounds, metrics) = compile_typst_to_hierarchy(
+        let (entity, bounds, metrics) = compile_scaled_typst_to_hierarchy(
             self.commands,
             self.font_registry,
             source,
@@ -6753,6 +6771,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             parent_id,
             next_id_fn,
             &mut child_spans,
+            scale,
         );
         self.register_textual_hierarchy(
             parent_id,

@@ -61,6 +61,47 @@ struct CachedTypstHierarchy {
     children: Vec<CachedTypstChild>,
 }
 
+impl CachedTypstHierarchy {
+    /// The same hierarchy with every length multiplied by `scale`: outlines,
+    /// bounds, child offsets, stroke widths and dashes, and metrics.
+    fn scaled(&self, scale: f64) -> Self {
+        let bounds = |bounds: Bounds3D| Bounds3D {
+            min: bounds.min * scale,
+            max: bounds.max * scale,
+        };
+        Self {
+            parent_bounds: bounds(self.parent_bounds),
+            metrics: TextMetrics {
+                first_baseline: self.metrics.first_baseline * scale,
+                ..self.metrics
+            },
+            advance: self.advance * scale,
+            children: self
+                .children
+                .iter()
+                .map(|child| {
+                    let mut transform = child.transform;
+                    transform.translation *= scale;
+                    transform.anchor *= scale;
+                    let mut stroke = child.stroke.clone();
+                    stroke.style.width *= scale;
+                    stroke.style.dash_offset *= scale;
+                    for dash in stroke.style.dash_pattern.iter_mut() {
+                        *dash *= scale;
+                    }
+                    CachedTypstChild {
+                        path: kurbo::Affine::scale(scale) * &child.path,
+                        bounds: bounds(child.bounds),
+                        transform,
+                        stroke,
+                        ..child.clone()
+                    }
+                })
+                .collect(),
+        }
+    }
+}
+
 /// Typographic metrics retained alongside compiled Typst vector geometry.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TextMetrics {
@@ -1072,6 +1113,7 @@ fn spawn_cached_typst_hierarchy(
 }
 
 /// Compiles a LaTeX-style math formula or Typst markup into a structured hierarchy of visual Mobjects.
+#[allow(clippy::too_many_arguments)]
 pub fn compile_typst_to_hierarchy(
     commands: &mut Commands,
     font_registry: &FontRegistry,
@@ -1086,6 +1128,43 @@ pub fn compile_typst_to_hierarchy(
     parent_id: ObjectId,
     next_id_fn: impl FnMut() -> ObjectId,
     child_spans: &mut Vec<HierarchyChild>,
+) -> (Entity, Bounds3D, TextMetrics) {
+    compile_scaled_typst_to_hierarchy(
+        commands,
+        font_registry,
+        source,
+        is_math,
+        text_font,
+        math_font,
+        text_size,
+        math_size,
+        fill,
+        stroke,
+        parent_id,
+        next_id_fn,
+        child_spans,
+        1.0,
+    )
+}
+
+/// Like [`compile_typst_to_hierarchy`], with the compiled geometry scaled by
+/// `scale` scene units per Typst point.
+#[allow(clippy::too_many_arguments)]
+pub fn compile_scaled_typst_to_hierarchy(
+    commands: &mut Commands,
+    font_registry: &FontRegistry,
+    source: &str,
+    is_math: bool,
+    text_font: Option<&str>,
+    math_font: Option<&str>,
+    text_size: Option<f64>,
+    math_size: Option<f64>,
+    fill: Option<gaanim_core::peniko::Brush>,
+    stroke: gaanim_scene::StrokeBrush,
+    parent_id: ObjectId,
+    next_id_fn: impl FnMut() -> ObjectId,
+    child_spans: &mut Vec<HierarchyChild>,
+    scale: f64,
 ) -> (Entity, Bounds3D, TextMetrics) {
     let cached = match cached_typst_hierarchy(
         font_registry,
@@ -1110,14 +1189,15 @@ pub fn compile_typst_to_hierarchy(
         }
     };
 
-    let (entity, bounds) = spawn_cached_typst_hierarchy(
-        commands,
-        source,
-        parent_id,
-        next_id_fn,
-        child_spans,
-        &cached,
-    );
+    let scaled;
+    let cached = if scale == 1.0 {
+        cached.as_ref()
+    } else {
+        scaled = cached.scaled(scale);
+        &scaled
+    };
+    let (entity, bounds) =
+        spawn_cached_typst_hierarchy(commands, source, parent_id, next_id_fn, child_spans, cached);
     (entity, bounds, cached.metrics)
 }
 

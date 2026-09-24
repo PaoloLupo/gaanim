@@ -1030,9 +1030,9 @@ scene.render()
   name: "Typography.typst",
   kind: "factory",
   signature: "typst(source: str, *, width?) -> Drawable",
-  params: ((name: "source", type: "str", default: none, desc: [Full Typst markup.]), (name: "width", type: "str|float", default: "None", desc: ["Page width, e.g. \"16cm\" or 800."]),),
+  params: ((name: "source", type: "str", default: none, desc: [Full Typst markup.]), (name: "width", type: "str|float", default: "None", desc: [Typst page width before scaling, e.g. `"16cm"` or `800` (points).]),),
   returns: (type: "Drawable", desc: [Compiled Typst drawable.]),
-  desc: [Tables with spans, custom math structures. `@preview/...` imports resolved via Typst Universe cache.],
+  desc: [Tables with spans, custom math structures. The document is scaled so its default 11pt text matches the `body` role. `@preview/...` imports resolved via Typst Universe cache.],
 )[
 ```python
 # show-code: true

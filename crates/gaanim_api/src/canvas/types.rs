@@ -750,6 +750,9 @@ pub enum SpawnKind {
     Typst {
         source: String,
         page_width: Option<String>,
+        /// Typst points are scene units instead of a document scaled so its
+        /// default 11pt text matches the body role.
+        scene_units: bool,
     },
     /// Decoded RGBA texture plus its source and destination mapping.
     Image {

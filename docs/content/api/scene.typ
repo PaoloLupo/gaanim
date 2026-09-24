@@ -340,6 +340,12 @@ structures; `text("$...$")` is the concise API for math-only content. The
 embedded world resolves `@preview/...` imports through the standard Typst
 Universe cache; the first use downloads the requested package.
 
+The document keeps Typst's own proportions and is scaled so its default 11pt
+text is as large as the `body` text role. Other lengths follow: `#set text(size:
+22pt)` is twice the body size, and table insets and rule widths scale with the
+text. `width` is a Typst page width (`"16cm"`, `"800pt"`, or a number of points)
+measured before that scaling.
+
 A string is inline markup. Pass a `pathlib.Path` to load a `.typ` asset instead;
 relative paths use `scene.assets.assets_dir(...)`, and a missing or unreadable asset
 raises `RuntimeError` before the drawable is created.

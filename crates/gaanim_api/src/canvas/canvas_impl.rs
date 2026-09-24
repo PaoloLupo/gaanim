@@ -2756,6 +2756,18 @@ impl SceneModel {
         self.spawn(SpawnKind::Typst {
             source: source.to_string(),
             page_width: page_width.map(|w| w.to_string()),
+            scene_units: false,
+        })
+    }
+
+    /// Compile Typst markup whose point lengths are scene units. Built-in
+    /// components use this to size generated markup directly.
+    #[doc(hidden)]
+    pub fn typst_in_scene_units(&mut self, source: &str) -> DrawableHandle {
+        self.spawn(SpawnKind::Typst {
+            source: source.to_string(),
+            page_width: None,
+            scene_units: true,
         })
     }
 
