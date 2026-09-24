@@ -737,8 +737,8 @@ scene.play([rod.animate.write().duration(0.8), mass.animate.shift_by(-1, 0.5).du
   kind: "method",
   signature: "drive_from_samples(times, values, property=\"x\", *, interpolation=\"linear\", scale=1.0, offset=0.0) -> Drawable",
   params: (
-    (name: "times, values", type: "sequence[float]", default: none, desc: [Matching series; times must be finite and non-decreasing.]),
-    (name: "property", type: "\"x\" | \"y\" | \"z\" | \"rotation\" | \"scale\" | \"opacity\" | \"signal\"", default: "\"x\"", desc: [Driven channel.]),
+    (name: "times, values", type: "sequence[float] | sequence[(float, float)]", default: none, desc: [Matching series; times must be finite and non-decreasing. Values are `(x, y)` pairs for `"xy"`.]),
+    (name: "property", type: "\"x\" | \"y\" | \"xy\" | \"z\" | \"rotation\" | \"scale\" | \"opacity\" | \"signal\"", default: "\"x\"", desc: [Driven channel. `"xy"` takes `(x, y)` pairs and drives both translation axes as the `"x"` and `"y"` channels; `scale` and `offset` apply to both.]),
     (name: "interpolation", type: "\"linear\" | \"step\"", default: "\"linear\"", desc: [Interpolation between consecutive samples.]),
     (name: "scale, offset", type: "float", default: "1.0, 0.0", desc: [Output transform applied to each sample.]),
   ),

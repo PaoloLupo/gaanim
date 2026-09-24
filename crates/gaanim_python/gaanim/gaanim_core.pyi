@@ -1379,8 +1379,8 @@ class Drawable:
     def drive_from_samples(
         self,
         times: Sequence[float],
-        values: Sequence[float],
-        property: Literal["x", "y", "z", "rotation", "scale", "opacity", "signal"] = "x",
+        values: Sequence[float] | Sequence[tuple[float, float]],
+        property: Literal["x", "y", "xy", "z", "rotation", "scale", "opacity", "signal"] = "x",
         *,
         interpolation: Literal["linear", "step"] = "linear",
         scale: float = 1.0,
@@ -1401,6 +1401,15 @@ class Drawable:
         Example:
             times = [i * 0.02 for i in range(len(accel))]
             building.drive_from_samples(times, accel, "x", scale=520.0)
+
+        ``property="xy"`` takes ``(x, y)`` pairs (tuples or two-element lists)
+        and drives both translation axes at once, as the ``"x"`` and ``"y"``
+        channels; ``scale`` and ``offset`` apply to both. Both series are
+        validated before either is attached. Scalars with ``"xy"``, or pairs
+        with another property, raise ``ValueError``::
+
+            path = [(math.cos(t), math.sin(t)) for t in times]
+            probe.drive_from_samples(times, path, "xy", scale=2.0)
         """
         ...
     def bind_y_from(self, source: Drawable) -> None:

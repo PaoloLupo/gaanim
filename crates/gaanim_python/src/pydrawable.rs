@@ -1716,24 +1716,80 @@ impl PyDrawable {
     fn drive_from_samples(
         &self,
         times: Vec<f64>,
-        values: Vec<f64>,
+        values: &Bound<'_, PyAny>,
         property: &str,
         interpolation: &str,
         scale: f64,
         offset: f64,
     ) -> PyResult<Self> {
+        use gaanim_animation::{SampledProperty, SampledSeriesDriver};
+
         crate::custom::ensure_authoring_allowed()?;
-        let property = parse_sampled_property(property)?;
         let interpolation = parse_sampled_interpolation(interpolation)?;
-        self.0
-            .drive_from_samples(times, values, property, interpolation, scale, offset)
-            .map(|_| self.clone())
-            .map_err(|_| {
+        let invalid = || {
+            PyValueError::new_err(
+                "drive_from_samples requires non-empty matching times/values, finite values, \
+                 and non-decreasing times",
+            )
+        };
+        // "xy" drives both translation axes from (x, y) pairs as two
+        // independent channels.
+        let channels = if property == "xy" {
+            // Accept tuples or two-element lists, e.g. `list(zip(xs, ys))`.
+            let points = values
+                .extract::<Vec<(f64, f64)>>()
+                .ok()
+                .or_else(|| {
+                    let rows = values.extract::<Vec<Vec<f64>>>().ok()?;
+                    rows.iter()
+                        .map(|row| match row.as_slice() {
+                            [x, y] => Some((*x, *y)),
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .ok_or_else(|| {
+                    PyValueError::new_err("property 'xy' requires values as (x, y) pairs")
+                })?;
+            let (xs, ys) = points.into_iter().unzip();
+            vec![
+                (SampledProperty::TranslateX, xs),
+                (SampledProperty::TranslateY, ys),
+            ]
+        } else {
+            let property = parse_sampled_property(property)?;
+            let values = values.extract::<Vec<f64>>().map_err(|_| {
                 PyValueError::new_err(
-                    "drive_from_samples requires non-empty matching times/values, finite values, \
-                     and non-decreasing times",
+                    "values must be a sequence of numbers; use property 'xy' for (x, y) pairs",
                 )
-            })
+            })?;
+            vec![(property, values)]
+        };
+        // Validate every channel first so an invalid y never leaves x attached.
+        for (property, values) in &channels {
+            SampledSeriesDriver::new(
+                times.clone(),
+                values.clone(),
+                *property,
+                interpolation,
+                scale,
+                offset,
+            )
+            .map_err(|_| invalid())?;
+        }
+        for (property, values) in channels {
+            self.0
+                .drive_from_samples(
+                    times.clone(),
+                    values,
+                    property,
+                    interpolation,
+                    scale,
+                    offset,
+                )
+                .map_err(|_| invalid())?;
+        }
+        Ok(self.clone())
     }
 
     /// Copy the source entity's Y position each frame.
@@ -2113,12 +2169,12 @@ macro_rules! media_drawable_methods {
     }
     #[pyo3(signature = (times, values, property = "x", *, interpolation = "linear", scale = 1.0, offset = 0.0))]
     fn drive_from_samples<'py>(slf: PyRef<'py, Self>, times: Vec<f64>,
-        values: Vec<f64>,
+        values: Bound<'py, PyAny>,
         property: &str,
         interpolation: &str,
         scale: f64,
         offset: f64,) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).drive_from_samples(times, values, property, interpolation, scale, offset)?;
+        PyDrawable(slf.handle()).drive_from_samples(times, &values, property, interpolation, scale, offset)?;
         Ok(slf)
     }
     #[pyo3(signature = (source, *, offset=(0.0, 0.0), offset_space="world"))]
