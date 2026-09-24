@@ -67,7 +67,7 @@ impl FpsOverlay {
                 let p = ui.painter_at(rect);
 
                 // Background
-                p.rect_filled(rect, 4u8, Color32::from_rgba_premultiplied(0, 0, 0, 180));
+                p.rect_filled(rect, 0.0, Color32::from_rgba_premultiplied(0, 0, 0, 180));
 
                 // Text stats
                 let avg = if self.count > 0 {
@@ -127,7 +127,7 @@ impl FpsOverlay {
                 // Background for graph
                 p.rect_filled(
                     graph_rect,
-                    2u8,
+                    0.0,
                     Color32::from_rgba_premultiplied(0, 0, 0, 100),
                 );
 
@@ -156,7 +156,7 @@ impl FpsOverlay {
                     } else {
                         Color32::from_rgb(220, 60, 60)
                     };
-                    p.rect_filled(bar_rect, 0u8, color);
+                    p.rect_filled(bar_rect, 0.0, color);
                 }
 
                 // 60 fps reference line
@@ -196,7 +196,6 @@ pub fn render_render_health(ctx: &egui::Context, health: Option<&RenderHealth>) 
             egui::Frame::new()
                 .fill(Color32::from_rgba_premultiplied(90, 24, 20, 238))
                 .stroke(egui::Stroke::new(1.0, Color32::from_rgb(255, 145, 115)))
-                .corner_radius(6.0)
                 .inner_margin(egui::Margin::symmetric(10, 6))
                 .show(ui, |ui| {
                     ui.horizontal_wrapped(|ui| {

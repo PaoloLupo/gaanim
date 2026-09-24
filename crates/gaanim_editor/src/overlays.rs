@@ -156,7 +156,6 @@ pub fn overlays_settings_ui_system(
         .show(ctx, |ui| {
             egui::Frame::new()
                 .fill(egui::Color32::from_rgba_premultiplied(18, 18, 24, 220))
-                .corner_radius(8.0)
                 .inner_margin(egui::Margin::symmetric(10, 4))
                 .stroke(egui::Stroke::new(
                     1.0,
@@ -183,7 +182,7 @@ pub fn overlays_settings_ui_system(
                             }),
                         )
                         .min_size(egui::vec2(104.0, 18.0))
-                        .corner_radius(3.0)
+                        .corner_radius(0.0)
                         .fill(egui::Color32::from_rgba_premultiplied(30, 30, 45, 140));
                         if ui.add(interactive_btn).clicked() {
                             interactive.toggle(authored_camera.as_deref().copied());
@@ -203,7 +202,7 @@ pub fn overlays_settings_ui_system(
                             }),
                         )
                         .min_size(egui::vec2(78.0, 18.0))
-                        .corner_radius(3.0)
+                        .corner_radius(0.0)
                         .fill(egui::Color32::from_rgba_premultiplied(30, 30, 45, 140));
                         if ui
                             .add(bounds_btn)
@@ -226,7 +225,7 @@ pub fn overlays_settings_ui_system(
                             }),
                         )
                         .min_size(egui::vec2(78.0, 18.0))
-                        .corner_radius(3.0)
+                        .corner_radius(0.0)
                         .fill(egui::Color32::from_rgba_premultiplied(30, 30, 45, 140));
                         if ui
                             .add(coords_btn)
@@ -249,7 +248,7 @@ pub fn overlays_settings_ui_system(
                             }),
                         )
                         .min_size(egui::vec2(70.0, 18.0))
-                        .corner_radius(3.0)
+                        .corner_radius(0.0)
                         .fill(egui::Color32::from_rgba_premultiplied(30, 30, 45, 140));
                         if ui
                             .add(grid_btn)
@@ -404,7 +403,7 @@ pub fn scene_overlays_system(
                 );
                 painter.rect_filled(
                     bg_rect,
-                    3.0,
+                    0.0,
                     egui::Color32::from_rgba_premultiplied(18, 18, 22, 200),
                 );
                 painter.galley(text_pos, galley, egui::Color32::from_rgb(220, 200, 140));
@@ -457,11 +456,13 @@ pub fn scene_overlays_system(
                     painter.line_segment([y_start, y_end], y_stroke);
                     // Origen
                     let origin = world_to_egui(&cam, window, glam::DVec3::ZERO);
-                    painter.circle_filled(origin, 3.0, egui::Color32::WHITE);
-                    painter.circle_stroke(
-                        origin,
-                        3.0,
+                    let marker = egui::Rect::from_center_size(origin, egui::Vec2::splat(6.0));
+                    painter.rect_filled(marker, 0.0, egui::Color32::WHITE);
+                    painter.rect_stroke(
+                        marker,
+                        0.0,
                         egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 60, 70)),
+                        egui::StrokeKind::Outside,
                     );
                     // Flechas simples en extremos positivos
                     let arrow_len = 8.0;
@@ -580,7 +581,6 @@ pub fn scene_overlays_system(
             .show(ctx, |ui| {
                 egui::Frame::new()
                     .fill(egui::Color32::from_rgba_premultiplied(18, 18, 24, 210))
-                    .corner_radius(6.0)
                     .inner_margin(egui::Margin::symmetric(8, 4))
                     .stroke(egui::Stroke::new(
                         1.0,

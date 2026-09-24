@@ -5,6 +5,7 @@ use gaanim_scene::{GltfModelRoot, Mesh3DMarker, RenderOrder, WorldBounds};
 use gaanim_timeline::timeline::{PlaybackStopPolicy, Timeline};
 use ui_kit::{ButtonTone, Icon, PRIMARY_SIZE, ToggleColor, divider, icon_button, palette};
 
+mod app_icon;
 pub mod export;
 mod fps_overlay;
 pub mod frame_profile;
@@ -144,10 +145,22 @@ impl ViewportFrame {
 
 pub struct GaanimEditorPlugin;
 
+/// Every egui context (main window, presenter) draws square corners, like
+/// the controls painted by [`ui_kit`].
+fn square_egui_corners_system(
+    mut contexts: Query<&mut bevy_egui::EguiContext, Added<bevy_egui::EguiContext>>,
+) {
+    for mut context in &mut contexts {
+        context.get_mut().all_styles_mut(ui_kit::square_corners);
+    }
+}
+
 impl Plugin for GaanimEditorPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(EguiPlugin::default())
+            .add_plugins(app_icon::AppIconPlugin)
             .add_plugins(project_hub::ProjectHubPlugin)
+            .add_systems(PreUpdate, square_egui_corners_system)
             .init_resource::<EditorState>()
             .init_resource::<export::ExportState>()
             .init_resource::<export::StashedReplay>()
@@ -530,7 +543,6 @@ fn editor_ui_system(
                 };
                 egui::Frame::new()
                     .fill(palette::PANEL)
-                    .corner_radius(14.0)
                     .inner_margin(egui::Margin {
                         left: horizontal_margin,
                         right: horizontal_margin,
@@ -776,7 +788,7 @@ fn editor_ui_system(
                                                     .desired_width(84.0)
                                                     .desired_height(6.0)
                                                     .fill(palette::ACCENT)
-                                                    .corner_radius(3.0),
+                                                    .corner_radius(0.0),
                                             );
                                         } else if icon_button(
                                             ui,
@@ -1247,14 +1259,14 @@ fn paint_seek_bar(
         } else {
             egui::Color32::from_white_alpha(10)
         };
-        painter.rect_filled(chip, 6.0, base);
+        painter.rect_filled(chip, 0.0, base);
         if is_active {
             // Progress inside the current chapter.
             let progress_x = playhead_x.clamp(chip.min.x, chip.max.x);
             let clip = egui::Rect::from_min_max(chip.min, egui::pos2(progress_x, chip.max.y));
             painter
                 .with_clip_rect(clip.intersect(painter.clip_rect()))
-                .rect_filled(chip, 6.0, palette::ACCENT.gamma_multiply(0.22));
+                .rect_filled(chip, 0.0, palette::ACCENT.gamma_multiply(0.22));
         }
 
         let name = scene_display_name(&seg.name);
@@ -1320,11 +1332,11 @@ fn paint_seek_bar(
                 egui::pos2(x, lane_rect.min.y),
                 egui::vec2(width, lane_rect.height()),
             );
-            painter.rect_filled(pill, 6.0, palette::SURFACE);
-            painter.rect_filled(pill, 6.0, palette::ACCENT.gamma_multiply(0.22));
+            painter.rect_filled(pill, 0.0, palette::SURFACE);
+            painter.rect_filled(pill, 0.0, palette::ACCENT.gamma_multiply(0.22));
             painter.rect_stroke(
                 pill,
-                6.0,
+                0.0,
                 egui::Stroke::new(1.0, palette::ACCENT.gamma_multiply(0.55)),
                 egui::StrokeKind::Inside,
             );
@@ -1346,7 +1358,6 @@ fn paint_seek_bar(
         .chain(std::iter::once(1.0))
         .collect();
     let track_color = egui::Color32::from_white_alpha(if active { 34 } else { 26 });
-    let radius = track_h / 2.0;
     for piece in bounds.windows(2) {
         let x0 = x_at(piece[0])
             + if piece[0] > 0.0 {
@@ -1367,14 +1378,14 @@ fn paint_seek_bar(
             egui::pos2(x0, bar_rect.min.y),
             egui::pos2(x1, bar_rect.max.y),
         );
-        painter.rect_filled(piece_rect, radius, track_color);
+        painter.rect_filled(piece_rect, 0.0, track_color);
         let fill_x = playhead_x.min(x1);
         if fill_x > x0 {
             let clip =
                 egui::Rect::from_min_max(piece_rect.min, egui::pos2(fill_x, piece_rect.max.y));
             painter
                 .with_clip_rect(clip.intersect(painter.clip_rect()))
-                .rect_filled(piece_rect, radius, palette::ACCENT);
+                .rect_filled(piece_rect, 0.0, palette::ACCENT);
         }
     }
 
@@ -1385,10 +1396,10 @@ fn paint_seek_bar(
             egui::pos2(lx0, bar_y - TRACK_ZONE_H / 2.0 + 1.0),
             egui::pos2(lx1, bar_y + TRACK_ZONE_H / 2.0 - 1.0),
         );
-        painter.rect_filled(band, 4.0, palette::LOOP.gamma_multiply(0.14));
+        painter.rect_filled(band, 0.0, palette::LOOP.gamma_multiply(0.14));
         for hx in [lx0, lx1] {
             let handle = egui::Rect::from_center_size(egui::pos2(hx, bar_y), egui::vec2(5.0, 16.0));
-            painter.rect_filled(handle, 2.5, palette::LOOP);
+            painter.rect_filled(handle, 0.0, palette::LOOP);
             painter.line_segment(
                 [egui::pos2(hx, bar_y - 4.0), egui::pos2(hx, bar_y + 4.0)],
                 egui::Stroke::new(1.0, egui::Color32::from_black_alpha(120)),
@@ -1402,7 +1413,7 @@ fn paint_seek_bar(
         }
     }
 
-    // ── Stops: quiet dots under the track ───────────────────────────────
+    // ── Stops: quiet squares under the track ───────────────────────────────
     let stop_y = bar_y + TRACK_ZONE_H / 2.0 - 2.0;
     for &bp in bp_fracs {
         let bx = x_at(bp);
@@ -1412,9 +1423,12 @@ fn paint_seek_bar(
         } else {
             palette::STOP.gamma_multiply(0.9)
         };
-        painter.circle_filled(
-            egui::pos2(bx, stop_y),
-            if near_pointer { 2.6 } else { 1.7 },
+        painter.rect_filled(
+            egui::Rect::from_center_size(
+                egui::pos2(bx, stop_y),
+                egui::Vec2::splat(if near_pointer { 5.0 } else { 3.0 }),
+            ),
+            0.0,
             color,
         );
     }
@@ -1476,13 +1490,13 @@ fn paint_seek_bar(
         let tip = egui::Rect::from_min_size(egui::pos2(x, rect.min.y - size.y - 10.0), size);
         painter.rect_filled(
             tip.translate(egui::vec2(0.0, 2.0)),
-            7.0,
+            0.0,
             egui::Color32::from_black_alpha(80),
         );
-        painter.rect_filled(tip, 7.0, egui::Color32::from_rgb(30, 32, 40));
+        painter.rect_filled(tip, 0.0, egui::Color32::from_rgb(30, 32, 40));
         painter.rect_stroke(
             tip,
-            7.0,
+            0.0,
             egui::Stroke::new(1.0, egui::Color32::from_white_alpha(18)),
             egui::StrokeKind::Inside,
         );
@@ -1499,19 +1513,21 @@ fn paint_seek_bar(
             egui::Stroke::new(1.5, egui::Color32::from_white_alpha(150)),
         );
     }
-    let knob_r = if active { 7.0 } else { 6.0 };
-    let knob = egui::pos2(playhead_x, bar_y);
-    painter.circle_filled(
-        knob + egui::vec2(0.0, 1.0),
-        knob_r + 1.0,
+    let knob_side = if active { 12.0 } else { 10.0 };
+    let knob =
+        egui::Rect::from_center_size(egui::pos2(playhead_x, bar_y), egui::Vec2::splat(knob_side));
+    painter.rect_filled(
+        knob.translate(egui::vec2(0.0, 1.0)).expand(1.0),
+        0.0,
         egui::Color32::from_black_alpha(90),
     );
-    painter.circle_filled(knob, knob_r, egui::Color32::WHITE);
+    painter.rect_filled(knob, 0.0, egui::Color32::WHITE);
     if is_dragging {
-        painter.circle_stroke(
-            knob,
-            knob_r + 3.0,
+        painter.rect_stroke(
+            knob.expand(3.0),
+            0.0,
             egui::Stroke::new(2.0, palette::ACCENT.gamma_multiply(0.5)),
+            egui::StrokeKind::Outside,
         );
     }
 
@@ -1685,7 +1701,7 @@ fn speed_control(ui: &mut egui::Ui, rate: f64) -> Option<f64> {
             }),
     )
     .min_size(egui::vec2(44.0, 26.0))
-    .corner_radius(7.0)
+    .corner_radius(0.0)
     .stroke(egui::Stroke::NONE)
     .fill(egui::Color32::from_white_alpha(10));
     let response = ui.add(chip).on_hover_text("Velocidad · Alt + rueda");
@@ -1714,7 +1730,7 @@ fn speed_control(ui: &mut egui::Ui, rate: f64) -> Option<f64> {
                             }),
                     )
                     .min_size(egui::vec2(32.0, 24.0))
-                    .corner_radius(6.0)
+                    .corner_radius(0.0)
                     .stroke(egui::Stroke::NONE)
                     .fill(if selected {
                         palette::ACCENT.gamma_multiply(0.35)

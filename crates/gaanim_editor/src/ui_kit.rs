@@ -4,6 +4,10 @@
 //! Icons are painted as shapes instead of font glyphs so they stay crisp,
 //! share one stroke weight, and do not depend on emoji coverage of the
 //! bundled fonts.
+//!
+//! Corners are square everywhere, like the pixel mark: controls, cards,
+//! tracks and knobs are rectangles, and [`square_corners`] does the same for
+//! what egui draws on its own.
 
 use bevy_egui::egui::{
     self, Align2, Color32, FontId, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, pos2, vec2,
@@ -53,6 +57,12 @@ pub(crate) enum Icon {
     BlackScreen,
     WhiteScreen,
     Keyboard,
+    Plus,
+    Folder,
+    Code,
+    Book,
+    ExternalLink,
+    Package,
 }
 
 /// How an icon button presents its state.
@@ -126,30 +136,29 @@ pub(crate) fn icon_button_sized(
             } else {
                 palette::TEXT
             };
-            let radius = if hovered {
-                side / 2.0
-            } else {
-                side / 2.0 - 1.0
-            };
-            painter.circle_filled(
-                rect.center() + vec2(0.0, 1.0),
-                radius,
+            let body = Rect::from_center_size(
+                rect.center(),
+                Vec2::splat(if hovered { side } else { side - 2.0 }),
+            );
+            painter.rect_filled(
+                body.translate(vec2(0.0, 1.0)),
+                0.0,
                 Color32::from_black_alpha(70),
             );
-            painter.circle_filled(rect.center(), radius, fill);
+            painter.rect_filled(body, 0.0, fill);
             Color32::from_rgb(15, 16, 21)
         }
         ButtonTone::On(toggle) => {
             let color = toggle.color();
             let alpha = if hovered { 58 } else { 40 };
-            painter.rect_filled(rect.shrink(1.0), 8.0, color.gamma_multiply_u8(alpha));
+            painter.rect_filled(rect.shrink(1.0), 0.0, color.gamma_multiply_u8(alpha));
             color
         }
         ButtonTone::Ghost => {
             if pressed {
-                painter.rect_filled(rect.shrink(1.0), 8.0, palette::PRESSED);
+                painter.rect_filled(rect.shrink(1.0), 0.0, palette::PRESSED);
             } else if hovered {
-                painter.rect_filled(rect.shrink(1.0), 8.0, palette::HOVER);
+                painter.rect_filled(rect.shrink(1.0), 0.0, palette::HOVER);
             }
             if !enabled {
                 palette::TEXT_FAINT
@@ -196,7 +205,7 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color:
     let bar = |x: f32, half_w: f32, half_h: f32| {
         painter.rect_filled(
             Rect::from_min_max(p(x - half_w, -half_h), p(x + half_w, half_h)),
-            s * 0.05,
+            0.0,
             color,
         );
     };
@@ -272,7 +281,7 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color:
         Icon::Present => {
             painter.rect_stroke(
                 Rect::from_min_max(p(-0.44, -0.32), p(0.44, 0.22)),
-                s * 0.06,
+                0.0,
                 stroke,
                 egui::StrokeKind::Middle,
             );
@@ -311,13 +320,17 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color:
         }
         Icon::Warning => {
             painter.line_segment([p(0.0, -0.36), p(0.0, 0.10)], stroke);
-            painter.circle_filled(p(0.0, 0.34), s * 0.07, color);
+            painter.rect_filled(
+                Rect::from_center_size(p(0.0, 0.34), Vec2::splat(s * 0.14)),
+                0.0,
+                color,
+            );
         }
         Icon::Grid => {
             for (x, y) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
                 painter.rect_stroke(
                     Rect::from_center_size(p(x * 0.2, y * 0.2), Vec2::splat(s * 0.3)),
-                    s * 0.05,
+                    0.0,
                     stroke,
                     egui::StrokeKind::Middle,
                 );
@@ -326,14 +339,14 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color:
         Icon::BlackScreen => {
             painter.rect_filled(
                 Rect::from_min_max(p(-0.42, -0.30), p(0.42, 0.30)),
-                s * 0.08,
+                0.0,
                 color,
             );
         }
         Icon::WhiteScreen => {
             painter.rect_stroke(
                 Rect::from_min_max(p(-0.42, -0.30), p(0.42, 0.30)),
-                s * 0.08,
+                0.0,
                 stroke,
                 egui::StrokeKind::Middle,
             );
@@ -341,13 +354,17 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color:
         Icon::Keyboard => {
             painter.rect_stroke(
                 Rect::from_min_max(p(-0.46, -0.28), p(0.46, 0.28)),
-                s * 0.08,
+                0.0,
                 stroke,
                 egui::StrokeKind::Middle,
             );
             for row in [-0.1, 0.06] {
                 for column in [-0.24, -0.08, 0.08, 0.24] {
-                    painter.circle_filled(p(column, row), s * 0.04, color);
+                    painter.rect_filled(
+                        Rect::from_center_size(p(column, row), Vec2::splat(s * 0.08)),
+                        0.0,
+                        color,
+                    );
                 }
             }
             painter.line_segment(
@@ -357,9 +374,96 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color:
         }
         Icon::More => {
             for x in [-0.30, 0.0, 0.30] {
-                painter.circle_filled(p(x, 0.0), s * 0.075, color);
+                painter.rect_filled(
+                    Rect::from_center_size(p(x, 0.0), Vec2::splat(s * 0.15)),
+                    0.0,
+                    color,
+                );
             }
         }
+        Icon::Plus => {
+            painter.line_segment([p(0.0, -0.36), p(0.0, 0.36)], stroke);
+            painter.line_segment([p(-0.36, 0.0), p(0.36, 0.0)], stroke);
+        }
+        Icon::Folder => {
+            painter.add(egui::Shape::closed_line(
+                vec![
+                    p(-0.44, -0.30),
+                    p(-0.10, -0.30),
+                    p(0.02, -0.18),
+                    p(0.44, -0.18),
+                    p(0.44, 0.34),
+                    p(-0.44, 0.34),
+                ],
+                stroke,
+            ));
+            painter.line_segment([p(-0.44, -0.06), p(0.44, -0.06)], stroke);
+        }
+        Icon::Code => {
+            painter.line(vec![p(-0.16, -0.28), p(-0.42, 0.0), p(-0.16, 0.28)], stroke);
+            painter.line(vec![p(0.16, -0.28), p(0.42, 0.0), p(0.16, 0.28)], stroke);
+            painter.line_segment([p(0.07, -0.36), p(-0.07, 0.36)], stroke);
+        }
+        Icon::Book => {
+            for side in [-1.0, 1.0] {
+                painter.add(egui::Shape::closed_line(
+                    vec![
+                        p(0.0, -0.26),
+                        p(side * 0.44, -0.36),
+                        p(side * 0.44, 0.28),
+                        p(0.0, 0.38),
+                    ],
+                    stroke,
+                ));
+            }
+        }
+        Icon::ExternalLink => {
+            painter.line(
+                vec![
+                    p(-0.06, -0.40),
+                    p(-0.40, -0.40),
+                    p(-0.40, 0.40),
+                    p(0.40, 0.40),
+                    p(0.40, 0.06),
+                ],
+                stroke,
+            );
+            painter.line(vec![p(0.08, -0.40), p(0.40, -0.40), p(0.40, -0.08)], stroke);
+            painter.line_segment([p(0.40, -0.40), p(-0.02, 0.02)], stroke);
+        }
+        Icon::Package => {
+            let top = [p(0.0, -0.42), p(0.40, -0.21), p(0.0, 0.0), p(-0.40, -0.21)];
+            painter.add(egui::Shape::closed_line(top.to_vec(), stroke));
+            painter.line(
+                vec![
+                    p(-0.40, -0.21),
+                    p(-0.40, 0.21),
+                    p(0.0, 0.42),
+                    p(0.40, 0.21),
+                    p(0.40, -0.21),
+                ],
+                stroke,
+            );
+            painter.line_segment([p(0.0, 0.0), p(0.0, 0.42)], stroke);
+        }
+    }
+}
+
+/// Square every corner egui draws on its own (windows, menus, tooltips,
+/// buttons, scroll bars, slider handles) to match the painted controls.
+pub(crate) fn square_corners(style: &mut egui::Style) {
+    let visuals = &mut style.visuals;
+    visuals.window_corner_radius = egui::CornerRadius::ZERO;
+    visuals.menu_corner_radius = egui::CornerRadius::ZERO;
+    visuals.handle_shape = egui::style::HandleShape::Rect { aspect_ratio: 0.5 };
+    for widget in [
+        &mut visuals.widgets.noninteractive,
+        &mut visuals.widgets.inactive,
+        &mut visuals.widgets.hovered,
+        &mut visuals.widgets.active,
+        &mut visuals.widgets.open,
+    ] {
+        widget.corner_radius = egui::CornerRadius::ZERO;
     }
 }
 
@@ -367,7 +471,6 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color:
 pub(crate) fn card_frame() -> egui::Frame {
     egui::Frame::new()
         .fill(palette::SURFACE)
-        .corner_radius(16.0)
         .inner_margin(egui::Margin::same(22))
         .stroke(Stroke::new(1.0, palette::PANEL_STROKE))
         .shadow(egui::Shadow {
@@ -378,11 +481,10 @@ pub(crate) fn card_frame() -> egui::Frame {
         })
 }
 
-/// Rounded input surface for text edits and numeric fields.
+/// Input surface for text edits and numeric fields.
 pub(crate) fn field_frame() -> egui::Frame {
     egui::Frame::new()
         .fill(palette::FIELD)
-        .corner_radius(8.0)
         .inner_margin(egui::Margin::symmetric(10, 7))
         .stroke(Stroke::new(1.0, palette::PANEL_STROKE))
 }
@@ -411,7 +513,7 @@ pub(crate) fn segmented<T: PartialEq + Copy>(
     let height = if two_lines { 48.0 } else { 32.0 };
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     let painter = ui.painter().clone();
-    painter.rect_filled(rect, 10.0, palette::FIELD);
+    painter.rect_filled(rect, 0.0, palette::FIELD);
     let count = options.len().max(1) as f32;
     let segment_w = (rect.width() - 4.0) / count;
     let mut changed = false;
@@ -426,15 +528,15 @@ pub(crate) fn segmented<T: PartialEq + Copy>(
         let response = ui.interact(segment, ui.id().with(id).with(index), Sense::click());
         let selected = *current == *value;
         if selected {
-            painter.rect_filled(segment, 8.0, palette::SELECTED);
+            painter.rect_filled(segment, 0.0, palette::SELECTED);
             painter.rect_stroke(
                 segment,
-                8.0,
+                0.0,
                 Stroke::new(1.0, Color32::from_white_alpha(20)),
                 egui::StrokeKind::Inside,
             );
         } else if response.hovered() {
-            painter.rect_filled(segment, 8.0, palette::HOVER);
+            painter.rect_filled(segment, 0.0, palette::HOVER);
         }
         let title_color = if selected || response.hovered() {
             palette::TEXT
@@ -477,7 +579,7 @@ pub(crate) fn segmented<T: PartialEq + Copy>(
     changed
 }
 
-/// Compact pill used for presets.
+/// Compact tag used for presets.
 pub(crate) fn chip(ui: &mut Ui, label: &str, selected: bool) -> Response {
     let font = FontId::proportional(12.0);
     let galley = ui
@@ -493,7 +595,7 @@ pub(crate) fn chip(ui: &mut Ui, label: &str, selected: bool) -> Response {
     } else {
         palette::FIELD
     };
-    painter.rect_filled(rect, 13.0, fill);
+    painter.rect_filled(rect, 0.0, fill);
     let color = if selected {
         palette::ACCENT
     } else if response.hovered() {
@@ -569,7 +671,7 @@ fn text_button(
             },
         ),
     };
-    painter.rect_filled(rect, 9.0, fill);
+    painter.rect_filled(rect, 0.0, fill);
     let content_w = galley.size().x + icon_w;
     let start_x = rect.center().x - content_w / 2.0;
     if let Some(icon) = icon {
@@ -590,26 +692,26 @@ fn text_button(
     response
 }
 
-/// Slim rounded progress track.
+/// Slim progress track.
 pub(crate) fn progress_track(ui: &mut Ui, fraction: f32, color: Color32) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 6.0), Sense::hover());
     let painter = ui.painter();
-    painter.rect_filled(rect, 3.0, Color32::from_white_alpha(22));
+    painter.rect_filled(rect, 0.0, Color32::from_white_alpha(22));
     let fraction = fraction.clamp(0.0, 1.0);
     if fraction > 0.0 {
         let fill = Rect::from_min_max(
             rect.min,
             pos2(rect.min.x + rect.width() * fraction, rect.max.y),
         );
-        painter.rect_filled(fill, 3.0, color);
+        painter.rect_filled(fill, 0.0, color);
     }
 }
 
-/// Round badge with an icon, used as the headline of result dialogs.
+/// Square badge with an icon, used as the headline of result dialogs.
 pub(crate) fn status_badge(ui: &mut Ui, icon: Icon, color: Color32) {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(40.0), Sense::hover());
     let painter = ui.painter();
-    painter.circle_filled(rect.center(), 20.0, color.gamma_multiply(0.18));
+    painter.rect_filled(rect, 0.0, color.gamma_multiply(0.18));
     paint_icon(
         painter,
         Rect::from_center_size(rect.center(), Vec2::splat(18.0)),
@@ -618,7 +720,7 @@ pub(crate) fn status_badge(ui: &mut Ui, icon: Icon, color: Color32) {
     );
 }
 
-/// Rounded mode toggle with an icon and an optional label. `color` tints it
+/// Mode toggle with an icon and an optional label. `color` tints it
 /// while active (e.g. amber for modes that hide the audience screen).
 pub(crate) fn pill_toggle(
     ui: &mut Ui,
@@ -646,7 +748,7 @@ pub(crate) fn pill_toggle(
     } else {
         palette::FIELD
     };
-    painter.rect_filled(rect, height / 2.0, fill);
+    painter.rect_filled(rect, 0.0, fill);
     let tint = if active {
         color
     } else if hovered {
@@ -687,7 +789,7 @@ pub(crate) fn small_button(ui: &mut Ui, label: &str, enabled: bool) -> Response 
         }))
         .fill(palette::FIELD)
         .stroke(Stroke::NONE)
-        .corner_radius(7.0)
+        .corner_radius(0.0)
         .min_size(vec2(34.0, 26.0)),
     )
 }

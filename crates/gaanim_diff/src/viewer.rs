@@ -405,6 +405,19 @@ fn configure_style(context: &egui::Context) {
     visuals.window_fill = Color32::from_rgb(20, 24, 33);
     visuals.extreme_bg_color = Color32::from_rgb(9, 11, 16);
     visuals.selection.bg_fill = Color32::from_rgb(65, 76, 125);
+    // Square corners, like the editor.
+    visuals.window_corner_radius = egui::CornerRadius::ZERO;
+    visuals.menu_corner_radius = egui::CornerRadius::ZERO;
+    visuals.handle_shape = egui::style::HandleShape::Rect { aspect_ratio: 0.5 };
+    for widget in [
+        &mut visuals.widgets.noninteractive,
+        &mut visuals.widgets.inactive,
+        &mut visuals.widgets.hovered,
+        &mut visuals.widgets.active,
+        &mut visuals.widgets.open,
+    ] {
+        widget.corner_radius = egui::CornerRadius::ZERO;
+    }
     context.set_visuals(visuals);
 }
 
