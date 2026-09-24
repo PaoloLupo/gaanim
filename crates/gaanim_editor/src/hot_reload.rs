@@ -172,6 +172,9 @@ pub fn reload_listener_system(world: &mut World) {
     if payloads.is_empty() {
         return;
     }
+    // Assets changed before any of these runs: nothing compiled from the
+    // previous files may be reused, even if the last run was a source edit.
+    let assets_changed = payloads.iter().any(|payload| payload.assets_changed);
     let payload = payloads.last().expect("checked non-empty").clone();
 
     // Snapshot playback state before tearing down entities.
@@ -183,7 +186,11 @@ pub fn reload_listener_system(world: &mut World) {
     let (width, height) = payload.canvas.frame.preview_pixel_size();
     let compile_duration = payload.compile_duration.as_secs_f64();
     let replay_started_at = Instant::now();
-    let replay_kind = reload_with(world, payload.canvas);
+    let replay_kind = if assets_changed {
+        reload_with_full_replay(world, payload.canvas)
+    } else {
+        reload_with(world, payload.canvas)
+    };
     let replay_duration = replay_started_at.elapsed().as_secs_f64();
 
     let selection_error = apply_segment_selection(world);
@@ -301,6 +308,24 @@ pub fn reload_with(
     world: &mut World,
     canvas: gaanim_api::canvas::SceneModel,
 ) -> runtime::ReplayKind {
+    let allow_reuse = std::env::var_os("GAANIM_INCREMENTAL").is_none_or(|value| value != "0");
+    replay(world, canvas, allow_reuse)
+}
+
+/// Rebuild every segment, e.g. after project assets changed on disk: a
+/// segment whose script is unchanged may still draw a changed file.
+pub fn reload_with_full_replay(
+    world: &mut World,
+    canvas: gaanim_api::canvas::SceneModel,
+) -> runtime::ReplayKind {
+    replay(world, canvas, false)
+}
+
+fn replay(
+    world: &mut World,
+    canvas: gaanim_api::canvas::SceneModel,
+    allow_reuse: bool,
+) -> runtime::ReplayKind {
     let revision = world
         .get_resource::<StashedReplay>()
         .map_or(1, |stash| stash.revision.wrapping_add(1).max(1));
@@ -308,7 +333,6 @@ pub fn reload_with(
         canvas: Some(canvas.clone()),
         revision,
     });
-    let allow_reuse = std::env::var_os("GAANIM_INCREMENTAL").is_none_or(|value| value != "0");
     let kind = runtime::replay_canvas_incremental(world, canvas, allow_reuse, clear_scene_entities);
     if kind != runtime::ReplayKind::Full {
         // The replay dropped the runtime diagnostics these counters index.

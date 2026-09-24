@@ -475,7 +475,8 @@ fn start_script_session(
         .spawn(move || {
             while !stop.load(Ordering::SeqCst) {
                 match changed_rx.recv_timeout(std::time::Duration::from_millis(250)) {
-                    Ok(()) => runner.request_rerun(),
+                    Ok(file_watcher::ProjectChange::Source) => runner.request_rerun(),
+                    Ok(file_watcher::ProjectChange::Assets) => runner.request_asset_reload(),
                     Err(mpsc::RecvTimeoutError::Timeout) => {}
                     Err(_) => break,
                 }

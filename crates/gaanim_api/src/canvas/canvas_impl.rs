@@ -1283,6 +1283,18 @@ pub enum AssetPreloadError {
 static IMAGE_CACHE: OnceLock<Mutex<HashMap<PathBuf, gaanim_core::peniko::ImageData>>> =
     OnceLock::new();
 
+/// Drop every process-local cache of files read by scenes (raster images,
+/// Lottie, glTF metadata, and Typst layouts) so the next compile reads them
+/// from disk again.
+pub fn clear_asset_caches() {
+    if let Some(cache) = IMAGE_CACHE.get() {
+        cache.lock().expect("image cache poisoned").clear();
+    }
+    gaanim_objects::prelude::clear_gltf_cache();
+    gaanim_renderer::lottie::clear_lottie_cache();
+    gaanim_text::typst_compiler::clear_typst_layout_cache();
+}
+
 fn load_image(path: impl AsRef<Path>) -> Result<gaanim_core::peniko::ImageData, ImageLoadError> {
     let requested = path.as_ref();
     let cache_key = requested
@@ -1809,11 +1821,7 @@ impl SceneModel {
     /// Drop cached raster, Lottie, and glTF assets so the next load observes
     /// files changed on disk. SVG documents are resolved anew for every drawable.
     pub fn reload_assets(&mut self) {
-        if let Some(cache) = IMAGE_CACHE.get() {
-            cache.lock().expect("image cache poisoned").clear();
-        }
-        gaanim_objects::prelude::clear_gltf_cache();
-        gaanim_renderer::lottie::clear_lottie_cache();
+        clear_asset_caches();
     }
 
     pub fn safe_frame(&self) -> gaanim_math::Bounds3D {
