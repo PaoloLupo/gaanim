@@ -3,15 +3,15 @@ use bevy_egui::{EguiPlugin, EguiPrimaryContextPass, egui, input::EguiWantsInput}
 use gaanim_math::{Camera, CameraViewOverride, CameraViewport, ResolvedCamera};
 use gaanim_scene::{GltfModelRoot, Mesh3DMarker, RenderOrder, WorldBounds};
 use gaanim_timeline::timeline::{PlaybackStopPolicy, Timeline};
-use playback_ui::{ButtonTone, Icon, PRIMARY_SIZE, ToggleColor, divider, icon_button, palette};
+use ui_kit::{ButtonTone, Icon, PRIMARY_SIZE, ToggleColor, divider, icon_button, palette};
 
 pub mod export;
 mod fps_overlay;
 pub mod frame_profile;
 pub mod overlays;
-mod playback_ui;
 mod presenter;
 pub mod project_hub;
+mod ui_kit;
 
 fn sync_editor_input_ignore_system(
     egui_wants: Res<EguiWantsInput>,
