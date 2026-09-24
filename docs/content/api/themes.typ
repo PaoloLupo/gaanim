@@ -89,14 +89,19 @@ fn gaanim_background(
 }
 ```
 
-`uv=(0, 0)` es la esquina superior izquierda y `uv=(1, 1)` la inferior derecha.
+`uv=(0, 0)` es la esquina superior izquierda y `uv=(1, 1)` la inferior derecha:
+`uv.y` crece hacia abajo, como las filas de píxeles, aunque la escena use `y`
+hacia arriba. Para trabajar con `y` hacia arriba, usa `1.0 - uv.y`.
 `resolution` es el tamaño efectivo en píxeles y `time` la posición absoluta de
 la línea temporal en segundos. Como `time` sigue tanto la reproducción como las
 búsquedas exactas, las capturas y exportaciones son deterministas. El shader
 cubre el mismo rectángulo de escena que muestra el editor; el espacio de bandas
-exterior usa `fallback`. La función se valida al crear `Background` y se guarda
-como textura de Vello para la resolución y el tiempo activos. Redimensionar el
-editor vuelve a rasterizarla. `fallback` vale negro por defecto y también se usa
+exterior usa `fallback`. La función se valida al crear `Background`. En el
+visor, el shader se ejecuta en la misma GPU que dibuja la escena y Vello lee su
+textura directamente, sin copiarla al CPU; solo se vuelve a ejecutar cuando
+cambian el tiempo o el tamaño en píxeles, por ejemplo al redimensionar o hacer
+zoom. Las exportaciones y capturas copian cada frame y producen los mismos
+píxeles. `fallback` vale negro por defecto y también se usa
 para limpiar el fondo 3D, calcular contraste automático o recuperarse de un
 fallo de rasterización en la GPU.
 

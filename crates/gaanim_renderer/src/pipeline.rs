@@ -1,4 +1,5 @@
-use crate::background::BackgroundPaint;
+use crate::background::{BackgroundPaint, ShaderBackgroundRequest};
+use crate::background_gpu::ShaderBackgroundFrame;
 use crate::effects::{
     BooleanBinding, ClipMask, DropShadow, FillLevelBinding, GaussianBlur, Glow,
     VectorOutlineBinding,
@@ -70,26 +71,62 @@ impl CanvasBackground {
     }
 }
 
+/// Resolve the background brush. With `gpu`, a shader paint draws a texture
+/// rendered on the render device and records its request there; otherwise
+/// the shader output is copied through the CPU.
 fn resolve_canvas_background_brush(
     background: &CanvasBackground,
     rect: kurbo::Rect,
     pixel_size: (u32, u32),
     time_seconds: f64,
+    gpu: Option<&mut Option<ShaderBackgroundRequest>>,
 ) -> (peniko::Brush, Option<kurbo::Affine>) {
     let paint = background.paint_at(time_seconds);
-    match paint.resolve_brush(pixel_size.0, pixel_size.1, time_seconds) {
+    let resolved = match (paint, gpu) {
+        (BackgroundPaint::Shader(shader), Some(gpu)) => shader
+            .gpu_request(pixel_size.0, pixel_size.1, time_seconds)
+            .map(|request| {
+                let brush = peniko::Brush::Image(peniko::ImageBrush::new(request.image().clone()));
+                *gpu = Some(request);
+                brush
+            }),
+        _ => paint.resolve_brush(pixel_size.0, pixel_size.1, time_seconds),
+    };
+    match resolved {
         Ok(brush) => {
+            // Shader rows run top to bottom (uv (0, 0) is the top-left
+            // corner) while the world is y-up, so row 0 maps to the top edge.
             let brush_transform = paint.is_shader().then(|| {
-                kurbo::Affine::translate((rect.x0, rect.y0))
+                kurbo::Affine::translate((rect.x0, rect.y1))
                     * kurbo::Affine::scale_non_uniform(
                         rect.width() / f64::from(pixel_size.0),
-                        rect.height() / f64::from(pixel_size.1),
+                        -rect.height() / f64::from(pixel_size.1),
                     )
             });
             (brush, brush_transform)
         }
         Err(_) => (peniko::Brush::Solid(paint.fallback_color()), None),
     }
+}
+
+/// Draw the canvas background into a scene in world coordinates.
+fn fill_canvas_background(
+    scene: &mut vello::Scene,
+    background: &CanvasBackground,
+    pixel_size: (u32, u32),
+    time_seconds: f64,
+    gpu: Option<&mut Option<ShaderBackgroundRequest>>,
+) {
+    let (rect, transform) = canvas_background_geometry(background);
+    let (brush, brush_transform) =
+        resolve_canvas_background_brush(background, rect, pixel_size, time_seconds, gpu);
+    scene.fill(
+        peniko::Fill::NonZero,
+        transform,
+        &brush,
+        brush_transform,
+        &rect,
+    );
 }
 
 /// Keep Bevy's native clear pass aligned with the active segment background.
@@ -1346,19 +1383,12 @@ pub fn compile_scene_from_world(
         .is_some_and(|cam| matches!(cam.projection, gaanim_math::Projection::Perspective { .. }));
     if !is_perspective {
         if let Some(canvas_bg) = world.get_resource::<CanvasBackground>() {
-            let (rect, transform) = canvas_background_geometry(canvas_bg);
-            let (brush, brush_transform) = resolve_canvas_background_brush(
+            fill_canvas_background(
+                &mut main_scene,
                 canvas_bg,
-                rect,
                 canvas_bg.pixel_size,
                 background_time,
-            );
-            main_scene.fill(
-                peniko::Fill::NonZero,
-                transform,
-                &brush,
-                brush_transform,
-                &rect,
+                None,
             );
         }
     }
@@ -1429,6 +1459,7 @@ pub fn gaanim_render_system(
         Option<Ref<WriteTipGlow>>,
     )>,
     mut query_vello_scene: Query<(Entity, &mut VelloScene2d, &mut Transform), With<MainVelloScene>>,
+    mut shader_frame: Option<ResMut<ShaderBackgroundFrame>>,
     mut local_extracted: Local<Vec<ExtractedElement>>,
     mut local_culled: Local<std::collections::HashSet<Entity>>,
 ) {
@@ -1873,23 +1904,25 @@ pub fn gaanim_render_system(
     let is_perspective = gaanim_camera
         .as_ref()
         .is_some_and(|cam| matches!(cam.projection, gaanim_math::Projection::Perspective { .. }));
+    let mut shader_request = None;
     if !is_perspective {
         if let Some(ref canvas_bg) = canvas_bg {
-            let (rect, transform) = canvas_background_geometry(canvas_bg);
             let pixel_size = interactive_background_pixel_size(canvas_bg, gaanim_camera.as_deref());
             let time_seconds = playback_state
                 .as_ref()
                 .map_or(0.0, |state| state.current_time);
-            let (brush, brush_transform) =
-                resolve_canvas_background_brush(canvas_bg, rect, pixel_size, time_seconds);
-            main_scene.fill(
-                peniko::Fill::NonZero,
-                transform,
-                &brush,
-                brush_transform,
-                &rect,
+            fill_canvas_background(
+                &mut main_scene,
+                canvas_bg,
+                pixel_size,
+                time_seconds,
+                shader_frame.is_some().then_some(&mut shader_request),
             );
         }
+    }
+
+    if let Some(frame) = shader_frame.as_mut() {
+        frame.0 = shader_request;
     }
 
     let composition_bounds = local_extracted
@@ -2542,6 +2575,127 @@ mod tests {
         assert_eq!(background.paint_at(1.0).fallback_color(), first);
         assert_eq!(background.paint_at(1.1).fallback_color(), default);
         assert_eq!(background.paint_at(2.0).fallback_color(), third);
+    }
+
+    #[test]
+    fn shader_backgrounds_draw_the_render_device_texture_when_available() {
+        let shader = crate::background::ShaderBackground::new(
+            "fn gaanim_background(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {\n\
+             return vec4<f32>(uv, time + resolution.x * 0.0, 1.0);\n}",
+            peniko::Color::BLACK,
+        )
+        .unwrap();
+        let solid = peniko::Color::from_rgb8(10, 20, 30);
+        let background = CanvasBackground {
+            paint: BackgroundPaint::Shader(shader),
+            segment_paints: vec![SegmentBackgroundPaint {
+                start_time: 2.0,
+                end_time: 3.0,
+                paint: Some(BackgroundPaint::solid(solid)),
+                hold_at_end: false,
+            }],
+            pixel_size: (960, 540),
+            bounds: gaanim_math::Bounds3D::new_2d(-480.0, -270.0, 480.0, 270.0),
+        };
+        let (rect, _) = canvas_background_geometry(&background);
+
+        let mut request = None;
+        let (brush, transform) =
+            resolve_canvas_background_brush(&background, rect, (480, 270), 1.0, Some(&mut request));
+        let request = request.expect("the shader frame is drawn on the render device");
+        let peniko::Brush::Image(image) = brush else {
+            panic!("expected the placeholder image brush, got {brush:?}");
+        };
+        assert_eq!(image.image.data.id(), request.image().data.id());
+        assert_eq!((image.image.width, image.image.height), (480, 270));
+        let transform = transform.unwrap();
+        assert_eq!(
+            transform * kurbo::Point::ZERO,
+            kurbo::Point::new(rect.x0, rect.y1),
+            "the first shader row is the top edge of the y-up world"
+        );
+        assert_eq!(
+            transform * kurbo::Point::new(480.0, 270.0),
+            kurbo::Point::new(rect.x1, rect.y0)
+        );
+
+        let mut request = None;
+        let (brush, _) =
+            resolve_canvas_background_brush(&background, rect, (480, 270), 2.5, Some(&mut request));
+        assert!(request.is_none(), "solid segments need no shader frame");
+        assert!(matches!(brush, peniko::Brush::Solid(color) if color == solid));
+    }
+
+    #[test]
+    fn shader_background_uv_starts_at_the_top_left_of_the_displayed_canvas() {
+        let Some(mut gpu) = crate::background::test_gpu::test_gpu() else {
+            eprintln!("skipped: no GPU adapter");
+            return;
+        };
+        let shader = crate::background::ShaderBackground::new(
+            "fn gaanim_background(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {\n\
+             return vec4<f32>(uv, time * 0.0 + resolution.x * 0.0, 1.0);\n}",
+            peniko::Color::BLACK,
+        )
+        .unwrap();
+        let (width, height) = (64, 36);
+        let background = CanvasBackground {
+            paint: BackgroundPaint::Shader(shader),
+            segment_paints: Vec::new(),
+            pixel_size: (width, height),
+            bounds: gaanim_math::Bounds3D::new_2d(-8.0, -4.5, 8.0, 4.5),
+        };
+        // The editor and exports both display world +y upwards.
+        let world_to_screen = kurbo::Affine::new([4.0, 0.0, 0.0, -4.0, 32.0, 18.0]);
+        let target = gpu.target(width, height);
+        let mut backgrounds = crate::background::GpuShaderBackgrounds::default();
+        for resident in [false, true] {
+            let mut request = None;
+            let mut world = vello::Scene::new();
+            fill_canvas_background(
+                &mut world,
+                &background,
+                (width, height),
+                0.0,
+                resident.then_some(&mut request),
+            );
+            if resident {
+                backgrounds.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, request.as_ref());
+            }
+            let mut screen = vello::Scene::new();
+            screen.append(&world, Some(world_to_screen));
+            gpu.render(&screen, &target);
+            let pixels = gpu.read(&target);
+            // Red and green carry uv at each pixel centre.
+            let uv = |x: u32, y: u32| {
+                let index = ((y * width + x) * 4) as usize;
+                (pixels[index], pixels[index + 1])
+            };
+            let corners = [
+                uv(0, 0),
+                uv(width - 1, 0),
+                uv(0, height - 1),
+                uv(width - 1, height - 1),
+            ];
+            let low = |value: u8| value < 8;
+            let high = |value: u8| value > 247;
+            assert!(
+                low(corners[0].0) && low(corners[0].1),
+                "top-left is uv (0, 0): {corners:?}, resident: {resident}"
+            );
+            assert!(
+                high(corners[1].0) && low(corners[1].1),
+                "top-right: {corners:?}"
+            );
+            assert!(
+                low(corners[2].0) && high(corners[2].1),
+                "bottom-left: {corners:?}"
+            );
+            assert!(
+                high(corners[3].0) && high(corners[3].1),
+                "bottom-right: {corners:?}"
+            );
+        }
     }
 
     fn window(width: u32, height: u32) -> Window {
