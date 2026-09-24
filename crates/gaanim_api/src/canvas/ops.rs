@@ -131,6 +131,7 @@ impl CanvasState {
                 | AnimationType::RotateBy { .. }
                 | AnimationType::RotateBy3D { .. } => "rotation",
                 AnimationType::SignalFloat { .. } => "signal",
+                AnimationType::PathTrim { .. } => "trim",
                 _ => "other",
             }
         }
@@ -181,6 +182,25 @@ impl CanvasState {
                         if incoming.fill_level.is_some() {
                             previous.fill_level = incoming.fill_level;
                         }
+                    } else if let (
+                        AnimationType::PathTrim {
+                            start,
+                            end,
+                            offset,
+                            sequential,
+                        },
+                        AnimationType::PathTrim {
+                            start: new_start,
+                            end: new_end,
+                            offset: new_offset,
+                            sequential: new_sequential,
+                        },
+                    ) = (&mut previous.anim_type, &builder.anim_type)
+                    {
+                        *start = new_start.or(*start);
+                        *end = new_end.or(*end);
+                        *offset = new_offset.or(*offset);
+                        *sequential = new_sequential.or(*sequential);
                     } else {
                         *previous = builder;
                     }

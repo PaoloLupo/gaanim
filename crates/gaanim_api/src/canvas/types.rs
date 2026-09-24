@@ -1742,6 +1742,21 @@ impl Anim {
         Ok(self.update_properties(|properties| properties.fill_level = Some((from, level))))
     }
 
+    /// Animates the glow; `None` fades it out.
+    pub fn glow(self, glow: Option<gaanim_renderer::effects::Glow>) -> Self {
+        self.update_properties(|properties| properties.glow = Some(glow))
+    }
+
+    /// Animates the blur; `None` (or a zero sigma) ends sharp.
+    pub fn blur(self, blur: Option<gaanim_renderer::effects::GaussianBlur>) -> Self {
+        self.update_properties(|properties| properties.blur = Some(blur))
+    }
+
+    /// Animates the drop shadow; `None` fades it out.
+    pub fn shadow(self, shadow: Option<gaanim_renderer::effects::DropShadow>) -> Self {
+        self.update_properties(|properties| properties.shadow = Some(shadow))
+    }
+
     pub fn fill_level(self, level: f64) -> Self {
         self.try_fill_level(level)
             .expect("invalid fill level animation")
@@ -2150,6 +2165,17 @@ impl Anim {
             path_target: Some(target.id),
             follow,
         }))
+    }
+
+    /// Animates the visible window of the drawn path; `None` keeps the
+    /// current value (see [`super::DrawableHandle::trim`]).
+    pub fn trim(self, start: Option<f64>, end: Option<f64>, offset: Option<f64>) -> Self {
+        self.effect(AnimationType::PathTrim {
+            start,
+            end,
+            offset,
+            sequential: None,
+        })
     }
 
     /// Moves the translation of this property animation along a circular arc

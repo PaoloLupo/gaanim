@@ -804,6 +804,9 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
             (properties.material.is_some(), "material"),
             (properties.fill_level.is_some(), "fill_level"),
             (properties.media_frame.is_some(), "media_frame"),
+            (properties.glow.is_some(), "glow"),
+            (properties.blur.is_some(), "blur"),
+            (properties.shadow.is_some(), "shadow"),
         ] {
             if present {
                 channels.push(format!("{prefix}{name}"));

@@ -8292,16 +8292,27 @@ impl SceneModel {
                 builder.commands.entity(child.entity).insert(sb);
             }
         }
-        let effect_targets = if child_spans.is_empty() {
+        let effect_targets: Vec<(ObjectId, bevy::prelude::Entity)> = if child_spans.is_empty() {
             builder
                 .states
                 .get(id)
-                .map(|state| vec![state.entity])
+                .map(|state| vec![(id, state.entity)])
                 .unwrap_or_default()
         } else {
-            child_spans.iter().map(|child| child.entity).collect()
+            child_spans
+                .iter()
+                .map(|child| (child.id, child.entity))
+                .collect()
         };
-        for entity in effect_targets {
+        let effects = crate::effect_lens::EffectState {
+            glow: spec.glow.clone(),
+            blur: spec.blur,
+            shadow: spec.shadow.clone(),
+        };
+        for (target, entity) in effect_targets {
+            if effects != crate::effect_lens::EffectState::default() {
+                builder.effects.insert(target, effects.clone());
+            }
             let mut commands = builder.commands.entity(entity);
             if let Some(glow) = &spec.glow {
                 commands.insert(glow.clone());
@@ -11331,6 +11342,91 @@ mod tests {
             middle.y < -0.2,
             "arc should bow below the chord: {middle:?}"
         );
+    }
+
+    #[test]
+    fn trims_chain_from_the_current_window() {
+        let mut canvas = SceneModel::new(640, 360);
+        let ring = canvas.circle(1.0).trim(Some(0.5), Some(0.5), None, None);
+        canvas.play(vec![ring.animate().trim(Some(0.0), Some(1.0), None)]);
+        canvas.play(vec![ring.animate().trim(None, None, Some(0.25))]);
+        let timeline = compiled_timeline(&canvas);
+        let mut trims: Vec<_> = timeline
+            .clips
+            .values()
+            .filter_map(|clip| match &clip.payload {
+                gaanim_timeline::clip::ClipPayload::Animation(
+                    gaanim_timeline::clip::AnimationSpec {
+                        lens: gaanim_timeline::clip::PropertyLensSpec::PathTrim { from, to, .. },
+                        ..
+                    },
+                ) => Some((clip.start, clip.duration, *from, *to)),
+                _ => None,
+            })
+            .collect();
+        trims.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+        assert_eq!(
+            trims
+                .iter()
+                .map(|trim| (trim.2, trim.3))
+                .collect::<Vec<_>>(),
+            [
+                ([0.0, 1.0, 0.0], [0.5, 0.5, 0.0]),
+                ([0.5, 0.5, 0.0], [0.0, 1.0, 0.0]),
+                ([0.0, 1.0, 0.0], [0.0, 1.0, 0.25]),
+            ]
+        );
+        assert_eq!(trims[0].1, 0.0);
+    }
+
+    #[test]
+    fn effect_animations_continue_from_the_current_effects() {
+        use crate::canvas::{DropShadow, Glow};
+        let mut canvas = SceneModel::new(640, 360);
+        let card = canvas.rect(2.0, 1.0).shadow(
+            PenikoColor::BLACK,
+            gaanim_core::glam::DVec2::new(0.0, -0.05),
+            0.05,
+        );
+        let glow = Glow {
+            radius: 0.5,
+            intensity: 2.0,
+            color: PenikoColor::WHITE,
+        };
+        let lifted = DropShadow {
+            color: PenikoColor::BLACK,
+            offset: gaanim_core::glam::DVec2::new(0.0, -0.25),
+            blur_radius: 0.4,
+        };
+        canvas.play(vec![
+            card.animate()
+                .shadow(Some(lifted.clone()))
+                .glow(Some(glow.clone()))
+                .scale_to(1.04),
+        ]);
+        canvas.play(vec![card.animate().glow(None)]);
+        let timeline = compiled_timeline(&canvas);
+        let mut lenses: Vec<_> = timeline
+            .clips
+            .values()
+            .filter_map(|clip| match &clip.payload {
+                gaanim_timeline::clip::ClipPayload::Animation(
+                    gaanim_timeline::clip::AnimationSpec {
+                        lens: gaanim_timeline::clip::PropertyLensSpec::Dynamic(lens),
+                        ..
+                    },
+                ) => Some((clip.start, format!("{lens:?}"))),
+                _ => None,
+            })
+            .collect();
+        lenses.sort_by(|a, b| a.0.total_cmp(&b.0));
+        assert_eq!(lenses.len(), 2);
+        assert!(lenses[0].1.contains("blur_radius: 0.05"), "{}", lenses[0].1);
+        assert!(lenses[0].1.contains("blur_radius: 0.4"));
+        // The second clip starts from the glow and keeps the lifted shadow.
+        assert!(lenses[1].1.contains("intensity: 2.0"));
+        assert!(lenses[1].1.contains("to: EffectState { glow: None"));
+        assert!(lenses[1].1.matches("blur_radius: 0.4").count() == 2);
     }
 
     #[test]

@@ -151,6 +151,12 @@ pub enum PropertyLens {
         from: f64,
         to: f64,
     },
+    /// Trim window `[start, end, offset]` interpolated between two states.
+    PathTrim {
+        from: [f64; 3],
+        to: [f64; 3],
+        sequential: bool,
+    },
     /// Grow a solid arrow from its tail with an undistorted head.
     ArrowGrow {
         shape: gaanim_math::ArrowShape,
@@ -328,6 +334,7 @@ impl std::fmt::Debug for PropertyLens {
             Self::Material3D { from, to } => write!(f, "Material3D({from:?} -> {to:?})"),
             Self::PathMorph { .. } => write!(f, "PathMorph"),
             Self::PathCompletion { from, to } => write!(f, "PathCompletion({} -> {})", from, to),
+            Self::PathTrim { from, to, .. } => write!(f, "PathTrim({from:?} -> {to:?})"),
             Self::ArrowGrow { from, to, .. } => write!(f, "ArrowGrow({from} -> {to})"),
             Self::FillDrawProgress { from, to } => {
                 write!(f, "FillDrawProgress({} -> {})", from, to)
@@ -389,6 +396,17 @@ pub trait AnimatableLens: Send + Sync + std::fmt::Debug + 'static {
     fn clone_box(&self) -> Box<dyn AnimatableLens>;
     /// Returns the descriptive type name of the custom lens.
     fn type_name(&self) -> &'static str;
+}
+
+/// A shared [`AnimatableLens`] implemented by a crate above the timeline
+/// (for example renderer effects), evaluated identically in playback and seeks.
+#[derive(Clone)]
+pub struct DynamicLens(pub Arc<dyn AnimatableLens>);
+
+impl std::fmt::Debug for DynamicLens {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&*self.0, f)
+    }
 }
 
 impl Clone for Box<dyn AnimatableLens> {
@@ -500,6 +518,24 @@ pub fn evaluate_tweens_system(
             PropertyLens::Material3D { from, to } => {
                 if let Ok(mut material) = materials3d.get_mut(tween.target) {
                     *material = from.lerp(*to, t);
+                }
+            }
+            PropertyLens::PathTrim {
+                from,
+                to,
+                sequential,
+            } => {
+                let [start, end, offset] = lerp_trim(from, to, t);
+                if let Ok((source, _)) = sources.get(tween.target)
+                    && let Ok(mut path) = paths.get_mut(tween.target)
+                {
+                    path.0 = std::sync::Arc::new(gaanim_math::trim_path(
+                        &source.0,
+                        start,
+                        end,
+                        offset,
+                        *sequential,
+                    ));
                 }
             }
             PropertyLens::PathCompletion { from, to } => {
@@ -840,4 +876,9 @@ mod tests {
             assert!(sampled.y.is_finite(), "y at t={t} not finite");
         }
     }
+}
+
+/// Trim window between two `[start, end, offset]` states at `t`.
+pub fn lerp_trim(from: &[f64; 3], to: &[f64; 3], t: f64) -> [f64; 3] {
+    std::array::from_fn(|index| from[index] + (to[index] - from[index]) * t)
 }

@@ -1044,6 +1044,35 @@ impl DrawableHandle {
         })
     }
 
+    /// Show only part of the drawn path: the window `[start, end]` shifted
+    /// by `offset` (arc-length fractions). `None` keeps the current value;
+    /// `sequential` measures the window across all sub-paths.
+    pub fn trim(
+        self,
+        start: Option<f64>,
+        end: Option<f64>,
+        offset: Option<f64>,
+        sequential: Option<bool>,
+    ) -> Self {
+        let rate_func = gaanim_math::RateFunc::Linear;
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .push_immediate(AnimationBuilder {
+                target: self.id,
+                anim_type: AnimationType::PathTrim {
+                    start,
+                    end,
+                    offset,
+                    sequential,
+                },
+                duration: 0.0,
+                delay: 0.0,
+                rate_func,
+            });
+        self
+    }
+
     /// Apply a soft vector blur to this drawable.
     pub fn blur(self, sigma: f64) -> Self {
         self.update_style(|spec| {

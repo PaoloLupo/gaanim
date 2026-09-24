@@ -947,6 +947,37 @@ scene.render()
 ```
 ]
 
+=== Trim de trazos y efectos animables
+
+`drawable.trim(start=None, end=None, offset=None, mode=None)` muestra solo la
+ventana `[start, end]` del trazo (fracciones de longitud de arco), desplazada
+por `offset`, que da la vuelta al final del camino. Los valores omitidos
+conservan el actual (al principio `0`, `1` y `0`). `mode="simultaneous"` recorta
+cada subtrazo y cada descendiente a la vez; `"sequential"` recorta la longitud
+total, así los subtrazos aparecen uno tras otro. `animate.trim(...)` lo anima:
+
+```python
+logo.trim(end=0.0)
+scene.play(logo.animate.trim(end=1.0).duration(1.2))             # dibujar
+ring.trim(start=0.5, end=0.5)
+scene.play(ring.animate.trim(start=0.0, end=1.0))                # desde el centro
+orbit.trim(start=0.0, end=0.15)
+scene.play(orbit.animate.trim(offset=1.0).duration(2))           # segmento viajero
+```
+
+`animate.glow(color, radius, intensity)`, `animate.blur(sigma)` y
+`animate.shadow(color, x, y, blur)` interpolan los efectos estáticos del mismo
+nombre y se combinan con otros destinos de propiedad. Un efecto ausente crece
+desde cero; `glow(None)`, `blur(0)` y `shadow(None)` lo desvanecen.
+
+```python
+card.shadow(BLACK, 0, -0.05, 0.05)
+scene.play(card.animate.shadow(BLACK, 0, -0.25, 0.4).scale_to(1.04))  # levantar
+scene.play(orb.animate.glow(CYAN, radius=0.5, intensity=2.0).repeat(3, yoyo=True))
+hero.blur(0.3)
+scene.play(hero.animate.blur(0.0).duration(0.6))                       # blur-in
+```
+
 === Repetición
 
 `anim.repeat(count, yoyo=False, delay=0)` reproduce la animación `count` veces:

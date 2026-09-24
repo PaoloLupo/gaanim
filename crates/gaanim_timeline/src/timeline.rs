@@ -150,7 +150,9 @@ fn absolute_lens_channel(lens: &PropertyLensSpec) -> Option<AbsoluteLensChannel>
         PropertyLensSpec::StrokePaint { .. } => AbsoluteLensChannel::StrokeColor,
         PropertyLensSpec::StrokeColor { .. } => AbsoluteLensChannel::StrokeColor,
         PropertyLensSpec::StrokeWidth { .. } => AbsoluteLensChannel::StrokeWidth,
-        PropertyLensSpec::PathCompletion { .. } => AbsoluteLensChannel::PathCompletion,
+        PropertyLensSpec::PathCompletion { .. } | PropertyLensSpec::PathTrim { .. } => {
+            AbsoluteLensChannel::PathCompletion
+        }
         PropertyLensSpec::PathMorph { .. } | PropertyLensSpec::ArrowGrow { .. } => {
             AbsoluteLensChannel::PathMorph
         }
@@ -1161,7 +1163,7 @@ impl Timeline {
                 absolute_lens_channel(&anim.lens)
             } else {
                 match anim.lens {
-                    PropertyLensSpec::PathCompletion { .. } => {
+                    PropertyLensSpec::PathCompletion { .. } | PropertyLensSpec::PathTrim { .. } => {
                         Some(AbsoluteLensChannel::PathCompletion)
                     }
                     PropertyLensSpec::FillLevel { .. } => Some(AbsoluteLensChannel::FillLevel),
@@ -2372,6 +2374,29 @@ fn apply_lens_spec(
                 em.insert(reveal);
             }
         }
+        PropertyLensSpec::PathTrim {
+            from,
+            to,
+            sequential,
+        } => {
+            if world.get::<gaanim_animation::PathSource>(target).is_none() {
+                let path_clone = world.get::<Path2D>(target).map(|p| p.0.clone());
+                if let Some(bez) = path_clone
+                    && let Ok(mut em) = world.get_entity_mut(target)
+                {
+                    em.insert(gaanim_animation::PathSource(bez));
+                }
+            }
+            let [start, end, offset] = gaanim_animation::tween::lerp_trim(from, to, t);
+            if let Some(source) = world.get::<gaanim_animation::PathSource>(target) {
+                let trimmed = gaanim_math::trim_path(&source.0, start, end, offset, *sequential);
+                if let Some(mut path) = world.get_mut::<Path2D>(target)
+                    && path.0.elements() != trimmed.elements()
+                {
+                    path.0 = std::sync::Arc::new(trimmed);
+                }
+            }
+        }
         PropertyLensSpec::PathMorph { from, to } => {
             let morphed = if completed {
                 to.clone()
@@ -2710,6 +2735,7 @@ fn apply_lens_spec(
             gaanim_animation::AnimatableLens::interpolate(lens, world, target, t)
         }
         PropertyLensSpec::CustomProperties(lens) => lens.apply(world, target, t),
+        PropertyLensSpec::Dynamic(lens) => lens.0.interpolate(world, target, t),
         PropertyLensSpec::Custom { .. } => {
             // Custom dynamically-registered extensions are evaluated by normal ECS tween systems.
         }

@@ -110,6 +110,18 @@ pub struct PropertyAnimation {
     pub media_frame: Option<(gaanim_scene::MediaFrame, gaanim_scene::MediaFrame)>,
     /// Travel the translation along a circular arc turning by this angle.
     pub path_arc: Option<f64>,
+    /// Target glow (`Some(None)` removes it).
+    pub glow: Option<Option<gaanim_renderer::effects::Glow>>,
+    /// Target blur (`Some(None)` removes it).
+    pub blur: Option<Option<gaanim_renderer::effects::GaussianBlur>>,
+    /// Target drop shadow (`Some(None)` removes it).
+    pub shadow: Option<Option<gaanim_renderer::effects::DropShadow>>,
+}
+
+impl PropertyAnimation {
+    pub(crate) fn has_effects(&self) -> bool {
+        self.glow.is_some() || self.blur.is_some() || self.shadow.is_some()
+    }
 }
 
 impl PropertyAnimation {
@@ -126,6 +138,7 @@ impl PropertyAnimation {
             && self.material.is_none()
             && self.fill_level.is_none()
             && self.media_frame.is_none()
+            && !self.has_effects()
     }
 
     pub(crate) fn is_transform_only(&self) -> bool {
@@ -139,6 +152,7 @@ impl PropertyAnimation {
             && self.material.is_none()
             && self.fill_level.is_none()
             && self.media_frame.is_none()
+            && !self.has_effects()
     }
 }
 
@@ -329,6 +343,22 @@ pub enum AnimationType {
     FillLevelTo {
         from: f64,
         to: f64,
+    },
+    /// Interpolate renderer effects; `None` leaves an effect unchanged and
+    /// `Some(None)` fades it out.
+    EffectsTo {
+        glow: Option<Option<gaanim_renderer::effects::Glow>>,
+        blur: Option<Option<gaanim_renderer::effects::GaussianBlur>>,
+        shadow: Option<Option<gaanim_renderer::effects::DropShadow>>,
+    },
+    /// Trim the drawn path (and its descendants') to `[start, end]` shifted
+    /// by `offset`; `None` keeps the current value. `sequential` measures
+    /// the window over all sub-paths instead of within each.
+    PathTrim {
+        start: Option<f64>,
+        end: Option<f64>,
+        offset: Option<f64>,
+        sequential: Option<bool>,
     },
     /// Move and resize a live surrounding rectangle between object sets.
     SurroundingRectRetarget {

@@ -930,6 +930,44 @@ class Anim:
             scene.play(plane.animate.move_along(route, orient=True).duration(3))
         """
         ...
+    def glow(self, color: Optional[Color] = None, radius: float = 0.16, intensity: float = 1.0) -> Anim:
+        """Animate the glow toward ``color``/``radius``/``intensity``; ``None`` fades it out.
+
+        A drawable without glow grows it from zero intensity. Combines with
+        other property targets such as ``scale_to``. Invalid values raise
+        ``ValueError``; text selections raise ``TypeError``.
+
+        Example:
+            scene.play(orb.animate.glow(CYAN, radius=0.5, intensity=2.0).repeat(3, yoyo=True))
+        """
+        ...
+    def blur(self, sigma: float = 0.04) -> Anim:
+        """Animate the blur to ``sigma``; ``0`` ends sharp, which makes a blur-in.
+
+        Example:
+            hero.blur(0.3)
+            scene.play(hero.animate.blur(0.0).duration(0.6))
+        """
+        ...
+    def shadow(self, color: Optional[Color] = None, x: float = 0.08, y: float = -0.08, blur: float = 0.06) -> Anim:
+        """Animate the drop shadow; ``None`` fades it out and a new one grows from under the drawable.
+
+        Example:
+            scene.play(card.animate.shadow(BLACK, 0, -0.25, 0.4).scale_to(1.04))
+        """
+        ...
+    def trim(self, start: Optional[float] = None, end: Optional[float] = None, offset: Optional[float] = None) -> Anim:
+        """Animate the visible window of the drawn path (see ``Drawable.trim``).
+
+        Omitted values keep their current setting. ``offset`` slides the
+        window and wraps around the path, so animating it makes a segment
+        travel. Values outside ``[0, 1]`` for ``start``/``end`` raise
+        ``ValueError``.
+
+        Example:
+            scene.play(ring.animate.trim(start=0.0, end=1.0))
+        """
+        ...
     def path_arc(self, angle: float) -> Anim:
         """Travel this animation's ``move_to``/``shift_by`` along a circular arc.
 
@@ -1259,6 +1297,27 @@ class Drawable:
 
         Example:
             result = drawable.glow(BLUE)
+        """
+        ...
+    def trim(
+        self,
+        start: Optional[float] = None,
+        end: Optional[float] = None,
+        offset: Optional[float] = None,
+        mode: Optional[Literal["simultaneous", "sequential"]] = None,
+    ) -> Self:
+        """Show only the window ``[start, end]`` of the drawn path, shifted by ``offset``.
+
+        Values are arc-length fractions; omitted ones keep their current
+        setting (initially ``0``, ``1`` and ``0``). ``offset`` wraps around
+        the end of the path. ``"simultaneous"`` (default) trims every
+        sub-path and every drawn descendant at once; ``"sequential"`` trims
+        the total length, so sub-paths appear one after another. Animate it
+        with ``animate.trim(...)``.
+
+        Example:
+            logo.trim(end=0.0)
+            scene.play(logo.animate.trim(end=1.0).duration(1.2))
         """
         ...
     def blur(self, sigma: float = 0.04) -> Drawable:

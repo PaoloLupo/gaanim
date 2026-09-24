@@ -257,6 +257,80 @@ pub fn get_point_at_alpha(path: &BezPath, alpha: f64) -> Point {
     last_point
 }
 
+/// Visible part of `path` for an After Effects–style trim: the window
+/// `[start, end]` shifted by `offset` (all arc-length fractions), wrapping
+/// around the path end. `sequential` measures the window over the whole path
+/// instead of within each sub-path.
+pub fn trim_path(path: &BezPath, start: f64, end: f64, offset: f64, sequential: bool) -> BezPath {
+    let (low, high) = if start <= end {
+        (start, end)
+    } else {
+        (end, start)
+    };
+    let (low, high) = (low.clamp(0.0, 1.0), high.clamp(0.0, 1.0));
+    if high - low >= 1.0 {
+        return path.clone();
+    }
+    if high <= low {
+        return BezPath::new();
+    }
+    let shift = offset.rem_euclid(1.0);
+    let from = low + shift;
+    let to = high + shift;
+    let range = |a: f64, b: f64| {
+        if sequential {
+            sequential_range(path, a, b)
+        } else {
+            get_subpath_range(path, a, b)
+        }
+    };
+    if to <= 1.0 {
+        return range(from, to);
+    }
+    // The window wraps past the end: join its tail and head pieces.
+    let mut result = if from < 1.0 {
+        range(from, 1.0)
+    } else {
+        BezPath::new()
+    };
+    for element in range((from - 1.0).max(0.0), to - 1.0).elements() {
+        result.push(*element);
+    }
+    result
+}
+
+/// `[from_alpha, to_alpha]` of the total arc length across all sub-paths.
+fn sequential_range(path: &BezPath, from_alpha: f64, to_alpha: f64) -> BezPath {
+    let mut subpaths: Vec<BezPath> = Vec::new();
+    for element in path.elements() {
+        if matches!(element, PathEl::MoveTo(_)) || subpaths.is_empty() {
+            subpaths.push(BezPath::new());
+        }
+        subpaths.last_mut().expect("pushed above").push(*element);
+    }
+    let lengths: Vec<f64> = subpaths.iter().map(get_path_length).collect();
+    let total: f64 = lengths.iter().sum();
+    if total <= 0.0 {
+        return BezPath::new();
+    }
+    let (from, to) = (from_alpha * total, to_alpha * total);
+    let mut result = BezPath::new();
+    let mut cursor = 0.0;
+    for (subpath, length) in subpaths.iter().zip(lengths) {
+        let (begin, finish) = (cursor, cursor + length);
+        cursor = finish;
+        if length <= 0.0 || finish <= from || begin >= to {
+            continue;
+        }
+        let local_from = ((from - begin) / length).clamp(0.0, 1.0);
+        let local_to = ((to - begin) / length).clamp(0.0, 1.0);
+        for element in get_subpath_proportional_range(subpath, local_from, local_to).elements() {
+            result.push(*element);
+        }
+    }
+    result
+}
+
 /// Direction of travel (radians from +x) along `path` at `alpha`, estimated
 /// from nearby arc-length samples; 0 when the path has no extent.
 pub fn path_tangent_angle(path: &BezPath, alpha: f64) -> f64 {
@@ -1077,6 +1151,43 @@ mod morph_tests {
 #[cfg(test)]
 mod motion_tests {
     use super::*;
+
+    fn visible_length(path: &BezPath) -> f64 {
+        get_path_length(path)
+    }
+
+    #[test]
+    fn trims_windows_offsets_and_sequences() {
+        let mut line = BezPath::new();
+        line.move_to((0.0, 0.0));
+        line.line_to((10.0, 0.0));
+        assert!((visible_length(&trim_path(&line, 0.2, 0.5, 0.0, false)) - 3.0).abs() < 1e-6);
+        assert!(trim_path(&line, 0.5, 0.5, 0.0, false).elements().len() <= 1);
+        assert_eq!(trim_path(&line, 0.0, 1.0, 0.3, false), line);
+        // A window pushed past the end wraps to the start.
+        let wrapped = trim_path(&line, 0.0, 0.2, 0.9, false);
+        assert!((visible_length(&wrapped) - 2.0).abs() < 1e-6);
+        let pieces = wrapped
+            .elements()
+            .iter()
+            .filter(|element| matches!(element, PathEl::MoveTo(_)))
+            .count();
+        assert_eq!(pieces, 2);
+
+        let mut dashes = BezPath::new();
+        dashes.move_to((0.0, 0.0));
+        dashes.line_to((1.0, 0.0));
+        dashes.move_to((2.0, 0.0));
+        dashes.line_to((3.0, 0.0));
+        // Parallel trims every dash; sequential trims their joint length.
+        assert!((visible_length(&trim_path(&dashes, 0.0, 0.5, 0.0, false)) - 1.0).abs() < 1e-6);
+        let first_only = trim_path(&dashes, 0.0, 0.5, 0.0, true);
+        assert!((visible_length(&first_only) - 1.0).abs() < 1e-6);
+        assert!(first_only.elements().iter().all(|element| match element {
+            PathEl::MoveTo(point) | PathEl::LineTo(point) => point.x <= 1.0 + 1e-9,
+            _ => true,
+        }));
+    }
 
     #[test]
     fn arcs_join_their_endpoints_and_turn_the_requested_way() {
