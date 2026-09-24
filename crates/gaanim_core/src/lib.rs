@@ -10,6 +10,7 @@ pub mod colormap;
 pub use color::{interpolate_color, interpolate_rgba8};
 pub use colormap::{ColorMap, ColorMapError};
 
+pub mod fingerprint;
 pub mod id;
 pub use id::ObjectId;
 

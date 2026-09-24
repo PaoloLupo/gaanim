@@ -568,7 +568,128 @@ pub struct SceneBuilder<'w, 's, 'a> {
     text_canceled_term_children: HashMap<ObjectId, Vec<ObjectId>>,
 }
 
+/// Owned state of a [`SceneBuilder`], detached from its ECS and timeline
+/// borrows so an incremental replay can resume compilation at a segment.
+#[derive(Clone)]
+pub(crate) struct SceneBuilderState {
+    property_source_cursors: HashMap<
+        (ObjectId, gaanim_animation::PropertyChannel),
+        std::sync::Arc<gaanim_animation::PropertySourceLens>,
+    >,
+    property_bindings: HashMap<
+        (ObjectId, gaanim_animation::PropertyChannel),
+        (Entity, gaanim_animation::PropertyBinding),
+    >,
+    id_counter: u32,
+    current_time: f64,
+    states: MobjectStateMap,
+    text_metrics: HashMap<ObjectId, gaanim_text::prelude::TextMetrics>,
+    rolling_tween_sources: Vec<(Entity, Vec<ObjectId>)>,
+    default_track: TrackId,
+    mobject_tracks: HashMap<ObjectId, TrackId>,
+    mobject_names: HashMap<ObjectId, String>,
+    next_track: u32,
+    current_label: Option<String>,
+    stop_times: Vec<f64>,
+    current_scene: Option<SceneId>,
+    float_signals: HashMap<ObjectId, f64>,
+    media_frames: HashMap<ObjectId, gaanim_scene::MediaFrame>,
+    arrow_shapes: HashMap<ObjectId, gaanim_math::ArrowShape>,
+    persistent_objects: HashSet<ObjectId>,
+    membership_managed_objects: HashSet<ObjectId>,
+    text_cancellation_marks: HashMap<ObjectId, Vec<ObjectId>>,
+    text_canceled_term_children: HashMap<ObjectId, Vec<ObjectId>>,
+}
+
 impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
+    /// Copy every piece of compilation state that is not an ECS or timeline borrow.
+    pub(crate) fn state(&self) -> SceneBuilderState {
+        SceneBuilderState {
+            property_source_cursors: self.property_source_cursors.clone(),
+            property_bindings: self.property_bindings.clone(),
+            id_counter: self.id_counter,
+            current_time: self.current_time,
+            states: self.states.clone(),
+            text_metrics: self.text_metrics.clone(),
+            rolling_tween_sources: self.rolling_tween_sources.clone(),
+            default_track: self.default_track,
+            mobject_tracks: self.mobject_tracks.clone(),
+            mobject_names: self.mobject_names.clone(),
+            next_track: self.next_track,
+            current_label: self.current_label.clone(),
+            stop_times: self.stop_times.clone(),
+            current_scene: self.current_scene,
+            float_signals: self.float_signals.clone(),
+            media_frames: self.media_frames.clone(),
+            arrow_shapes: self.arrow_shapes.clone(),
+            persistent_objects: self.persistent_objects.clone(),
+            membership_managed_objects: self.membership_managed_objects.clone(),
+            text_cancellation_marks: self.text_cancellation_marks.clone(),
+            text_canceled_term_children: self.text_canceled_term_children.clone(),
+        }
+    }
+
+    /// Continue compiling from a state captured by [`Self::state`]. The
+    /// timeline must be the one that state was captured against.
+    pub(crate) fn resume(
+        commands: &'a mut Commands<'w, 's>,
+        timeline: &'a mut Timeline,
+        font_registry: &'a FontRegistry,
+        text_config: &'a gaanim_text::prelude::TextConfig,
+        state: SceneBuilderState,
+    ) -> Self {
+        let SceneBuilderState {
+            property_source_cursors,
+            property_bindings,
+            id_counter,
+            current_time,
+            states,
+            text_metrics,
+            rolling_tween_sources,
+            default_track,
+            mobject_tracks,
+            mobject_names,
+            next_track,
+            current_label,
+            stop_times,
+            current_scene,
+            float_signals,
+            media_frames,
+            arrow_shapes,
+            persistent_objects,
+            membership_managed_objects,
+            text_cancellation_marks,
+            text_canceled_term_children,
+        } = state;
+        Self {
+            property_source_cursors,
+            property_bindings,
+            commands,
+            timeline,
+            font_registry,
+            text_config,
+            id_counter,
+            current_time,
+            states,
+            text_metrics,
+            rolling_tween_sources,
+            default_track,
+            mobject_tracks,
+            mobject_names,
+            next_track,
+            current_label,
+            stop_times,
+            current_scene,
+            float_signals,
+            media_frames,
+            arrow_shapes,
+            persistent_objects,
+            membership_managed_objects,
+            text_cancellation_marks,
+            text_canceled_term_children,
+        }
+    }
+
     fn register_textual_hierarchy(
         &mut self,
         parent_id: ObjectId,

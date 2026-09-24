@@ -3,6 +3,7 @@ use bevy::prelude::{
 };
 use gaanim_core::ObjectId;
 use gaanim_math::{GlobalSpatialTransform, SpatialTransform};
+use gaanim_scene::prelude::Tick;
 use gaanim_scene::{
     FillBrush, FillLevel, GlobalOpacity, LocalBounds, MobjectId, ObjectTag, Opacity, Path2D,
     PathSource, RenderLayer, RenderOrder, StrokeBrush, Visible, WorldBounds,
@@ -295,6 +296,14 @@ fn insert_snapshot_components(
 impl WorldSnapshot {
     /// Captures a new `WorldSnapshot` of all Mobjects currently registered in the Bevy `World`.
     pub fn capture(world: &mut World) -> Self {
+        Self::capture_spawned_after(world, None)
+    }
+
+    /// Capture only the Mobjects spawned after `tick`, or all when `None`.
+    ///
+    /// Camera state is always captured in full.
+    pub fn capture_spawned_after(world: &mut World, tick: Option<Tick>) -> Self {
+        let this_run = world.change_tick();
         let mut entities = HashMap::new();
         let camera = world.get_resource::<gaanim_math::Camera>().copied();
         let camera_states = world
@@ -308,6 +317,14 @@ impl WorldSnapshot {
         let mut captured_data = Vec::new();
 
         for (entity, mobj_id) in query.iter(world) {
+            if let Some(tick) = tick
+                && !world
+                    .entity(entity)
+                    .spawn_tick()
+                    .is_newer_than(tick, this_run)
+            {
+                continue;
+            }
             let obj_id = mobj_id.0;
             // Find parent entity's ObjectId if parent is set
             let parent_entity = world

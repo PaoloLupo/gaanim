@@ -120,9 +120,21 @@ fn sorted_registered_fonts(font_registry: &FontRegistry) -> Vec<(String, Arc<[u8
     fonts
 }
 
+/// Content hash of every registered family and its font bytes.
+///
+/// Two registries with the same fingerprint compile identical Typst output.
+pub fn registered_fonts_fingerprint(font_registry: &FontRegistry) -> u128 {
+    typst::utils::hash128(&FontUniverseKey::from_fonts(&sorted_registered_fonts(
+        font_registry,
+    )))
+}
+
+/// Fingerprints by allocation address; see [`font_fingerprint`].
+type FontFingerprints = Mutex<HashMap<usize, (Weak<[u8]>, u128)>>;
+
 /// Content hash of font bytes, computed once per allocation.
 fn font_fingerprint(bytes: &Arc<[u8]>) -> u128 {
-    static FINGERPRINTS: OnceLock<Mutex<HashMap<usize, (Weak<[u8]>, u128)>>> = OnceLock::new();
+    static FINGERPRINTS: OnceLock<FontFingerprints> = OnceLock::new();
     let mut fingerprints = FINGERPRINTS
         .get_or_init(Default::default)
         .lock()

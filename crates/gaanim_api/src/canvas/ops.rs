@@ -791,12 +791,28 @@ pub enum CanvasRay {
 }
 
 /// A non-rendered reactive point attached to a drawable's local bounds.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct AnchorPoint {
     pub(crate) scene_id: u64,
     pub object: ObjectId,
     pub normalized: DVec3,
     pub offset: DVec3,
+}
+
+impl std::fmt::Debug for AnchorPoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug = f.debug_struct("AnchorPoint");
+        // The owning Scene only validates authoring and differs on every
+        // script run, so scene fingerprints leave it out.
+        if !gaanim_core::fingerprint::identity_debug() {
+            debug.field("scene_id", &self.scene_id);
+        }
+        debug
+            .field("object", &self.object)
+            .field("normalized", &self.normalized)
+            .field("offset", &self.offset)
+            .finish()
+    }
 }
 
 impl From<AnchorPoint> for CanvasEndpoint {

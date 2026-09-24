@@ -153,13 +153,14 @@ pub struct ThemeFont {
 /// Named spacing and layout values consumed by reusable templates.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LayoutTokens {
-    values: HashMap<String, f64>,
+    // Ordered so equal token sets also print equally (scene fingerprints).
+    values: std::collections::BTreeMap<String, f64>,
 }
 
 impl Default for LayoutTokens {
     fn default() -> Self {
         Self {
-            values: HashMap::from([
+            values: std::collections::BTreeMap::from([
                 ("space_xs".into(), 0.08),
                 ("space_sm".into(), 0.16),
                 ("space_md".into(), 0.24),

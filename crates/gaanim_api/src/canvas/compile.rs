@@ -631,6 +631,74 @@ impl gaanim_layout::IntrinsicMeasure for CompiledLayoutMeasure<'_> {
     }
 }
 
+/// A world callback queued between segments, applied in command order.
+pub(crate) type SegmentMarker = Box<dyn FnOnce(&mut World) + Send + 'static>;
+
+/// Compilation state carried from one segment to the next.
+#[derive(Clone)]
+pub(crate) struct CompileCursor {
+    /// Index of the next segment to compile.
+    pub(crate) next_segment: usize,
+    builder: Option<crate::builder::SceneBuilderState>,
+    scene_ids: Vec<SceneId>,
+    id_map: HashMap<ObjectId, ObjectId>,
+    object_specs: HashMap<ObjectId, ObjectSpec>,
+    responsive_text_widths: HashMap<ObjectId, f64>,
+    layout_versions: HashMap<ObjectId, u64>,
+    layout_snapshots: HashMap<ObjectId, LayoutTreeSnapshot>,
+    object_scopes: HashMap<ObjectId, CompiledObjectScope>,
+    camera_position: DVec3,
+    camera_zoom: f64,
+    camera_rotation: gaanim_core::glam::DQuat,
+    camera_target: DVec3,
+    camera_up: DVec3,
+    /// `(fov_y, near, far)` when the camera is perspective.
+    camera_fov: Option<(f64, f64, f64)>,
+    cancellation_marks: HashMap<ObjectId, Vec<ObjectId>>,
+    canceled_term_children: HashMap<ObjectId, Vec<ObjectId>>,
+    deferred_visibility: HashSet<ObjectId>,
+    revealed_deferred: HashSet<ObjectId>,
+    /// Metadata of the compiled segments, aligned to the builder clock.
+    compiled_metadata: Vec<SegmentMetadata>,
+    layout_diagnostics: Vec<(Option<ObjectId>, String)>,
+}
+
+impl CompileCursor {
+    fn fresh() -> Self {
+        Self {
+            next_segment: 0,
+            builder: None,
+            scene_ids: Vec::new(),
+            id_map: HashMap::new(),
+            object_specs: HashMap::new(),
+            responsive_text_widths: HashMap::new(),
+            layout_versions: HashMap::new(),
+            layout_snapshots: HashMap::new(),
+            object_scopes: HashMap::new(),
+            camera_position: DVec3::ZERO,
+            camera_zoom: 1.0,
+            camera_rotation: gaanim_core::glam::DQuat::IDENTITY,
+            camera_target: DVec3::ZERO,
+            camera_up: DVec3::Y,
+            camera_fov: None,
+            cancellation_marks: HashMap::new(),
+            canceled_term_children: HashMap::new(),
+            deferred_visibility: HashSet::new(),
+            revealed_deferred: HashSet::new(),
+            compiled_metadata: Vec::new(),
+            layout_diagnostics: Vec::new(),
+        }
+    }
+}
+
+/// A resumable compilation point: the carried state and the timeline exactly
+/// as they were before segment `cursor.next_segment` compiled.
+#[derive(Clone)]
+pub(crate) struct CompileCheckpoint {
+    pub(crate) cursor: CompileCursor,
+    pub(crate) timeline: Timeline,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CompiledObjectScope {
     Segment(SceneId),
@@ -2073,11 +2141,63 @@ impl SceneModel {
         font_registry: &gaanim_text::font::FontRegistry,
         text_config: &gaanim_text::prelude::TextConfig,
     ) {
+        self.compile_resumable(
+            commands,
+            timeline,
+            font_registry,
+            text_config,
+            None,
+            None,
+            Vec::new(),
+        );
+    }
+
+    /// Compile the segments from `resume` (or from the start), optionally
+    /// capturing a checkpoint before segment `checkpoint_at` and queueing
+    /// world markers before chosen segments. An index equal to the segment
+    /// count denotes the point after the last segment.
+    ///
+    /// Resuming is valid only when every segment before the cursor, and every
+    /// scene-wide input, is identical to the compilation that produced it,
+    /// and `timeline` is that checkpoint's timeline.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn compile_resumable<'w, 's>(
+        &self,
+        commands: &mut Commands<'w, 's>,
+        timeline: &mut Timeline,
+        font_registry: &gaanim_text::font::FontRegistry,
+        text_config: &gaanim_text::prelude::TextConfig,
+        resume: Option<CompileCursor>,
+        checkpoint_at: Option<usize>,
+        mut markers: Vec<(usize, SegmentMarker)>,
+    ) -> Option<CompileCheckpoint> {
+        let CompileCursor {
+            next_segment: start,
+            builder: builder_state,
+            mut scene_ids,
+            mut id_map,
+            mut object_specs,
+            mut responsive_text_widths,
+            mut layout_versions,
+            mut layout_snapshots,
+            mut object_scopes,
+            mut camera_position,
+            mut camera_zoom,
+            mut camera_rotation,
+            mut camera_target,
+            mut camera_up,
+            mut camera_fov,
+            mut cancellation_marks,
+            mut canceled_term_children,
+            mut deferred_visibility,
+            mut revealed_deferred,
+            compiled_metadata,
+            layout_diagnostics,
+        } = resume.unwrap_or_else(CompileCursor::fresh);
         self.state
             .lock()
             .expect("canvas state poisoned")
-            .layout_diagnostics
-            .clear();
+            .layout_diagnostics = layout_diagnostics;
         let manifest = self.segment_manifest();
         let mut segment_metadata = manifest
             .segments
@@ -2098,6 +2218,10 @@ impl SceneModel {
                     .collect(),
             })
             .collect::<Vec<_>>();
+        // Segments before a resume point keep the clock they were compiled with.
+        for (metadata, compiled) in segment_metadata.iter_mut().zip(compiled_metadata) {
+            *metadata = compiled;
+        }
         timeline.set_segments(segment_metadata.clone());
         let segments = self
             .state
@@ -2105,24 +2229,13 @@ impl SceneModel {
             .expect("canvas state poisoned")
             .segments
             .clone();
-        let mut builder = SceneBuilder::new(commands, timeline, font_registry, text_config);
-        let mut scene_ids: Vec<SceneId> = Vec::new();
-        let mut id_map: HashMap<ObjectId, ObjectId> = HashMap::new();
-        let mut object_specs: HashMap<ObjectId, ObjectSpec> = HashMap::new();
-        let mut responsive_text_widths: HashMap<ObjectId, f64> = HashMap::new();
-        let mut layout_versions: HashMap<ObjectId, u64> = HashMap::new();
-        let mut layout_snapshots: HashMap<ObjectId, LayoutTreeSnapshot> = HashMap::new();
-        let mut object_scopes: HashMap<ObjectId, CompiledObjectScope> = HashMap::new();
-        let mut camera_position = DVec3::ZERO;
-        let mut camera_zoom = 1.0;
-        let mut camera_rotation = gaanim_core::glam::DQuat::IDENTITY;
-        let mut camera_target = DVec3::ZERO;
-        let mut camera_up = DVec3::Y;
-        let mut camera_fov: Option<(f64, f64, f64)> = None; // (fov_y, near, far) if perspective
-        let mut cancellation_marks: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
-        let mut canceled_term_children: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
-        let mut deferred_visibility: HashSet<ObjectId> = HashSet::new();
-        let mut revealed_deferred: HashSet<ObjectId> = HashSet::new();
+        let mut builder = match builder_state {
+            Some(state) => {
+                SceneBuilder::resume(commands, timeline, font_registry, text_config, state)
+            }
+            None => SceneBuilder::new(commands, timeline, font_registry, text_config),
+        };
+        let mut checkpoint = None;
         // Raw bounds for the canvas background (visual, no margin).
         let raw_bounds = self.frame.bounds();
         // Inset bounds for layout operations (to_edge, to_corner respect margin).
@@ -2138,7 +2251,46 @@ impl SceneModel {
             .background_paint
             .clone()
             .unwrap_or_else(|| gaanim_renderer::background::BackgroundPaint::solid(bg_color));
-        for (index, seg) in segments.iter().enumerate() {
+        for index in start..=segments.len() {
+            if checkpoint_at == Some(index) {
+                checkpoint = Some(CompileCheckpoint {
+                    cursor: CompileCursor {
+                        next_segment: index,
+                        builder: Some(builder.state()),
+                        scene_ids: scene_ids.clone(),
+                        id_map: id_map.clone(),
+                        object_specs: object_specs.clone(),
+                        responsive_text_widths: responsive_text_widths.clone(),
+                        layout_versions: layout_versions.clone(),
+                        layout_snapshots: layout_snapshots.clone(),
+                        object_scopes: object_scopes.clone(),
+                        camera_position,
+                        camera_zoom,
+                        camera_rotation,
+                        camera_target,
+                        camera_up,
+                        camera_fov,
+                        cancellation_marks: cancellation_marks.clone(),
+                        canceled_term_children: canceled_term_children.clone(),
+                        deferred_visibility: deferred_visibility.clone(),
+                        revealed_deferred: revealed_deferred.clone(),
+                        compiled_metadata: segment_metadata[..index].to_vec(),
+                        layout_diagnostics: self
+                            .state
+                            .lock()
+                            .expect("canvas state poisoned")
+                            .layout_diagnostics
+                            .clone(),
+                    },
+                    timeline: builder.timeline.clone(),
+                });
+            }
+            for (_, marker) in markers.extract_if(.., |(at, _)| *at == index) {
+                builder.commands.queue(marker);
+            }
+            let Some(seg) = segments.get(index) else {
+                break;
+            };
             let previous_scene = seg
                 .prev_segment
                 .and_then(|index| scene_ids.get(index).copied());
@@ -2277,6 +2429,7 @@ impl SceneModel {
             .commands
             .insert_resource(gaanim_media::PreviewAudioTracks(self.audio_tracks.clone()));
         builder.commands.insert_resource(self.lighting_3d);
+        checkpoint
     }
 
     pub fn compile(&self, world: &mut World) {

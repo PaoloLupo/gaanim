@@ -1,6 +1,6 @@
 //! Deterministic, event-driven subset of dotLottie v2 state machines.
 use super::{LottieAsset, LottieCommand, LottieError, Package, Value, array, invalid, string};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// A typed input value. Event inputs are fired separately and never persist.
 #[derive(Debug, Clone, PartialEq)]
@@ -138,7 +138,8 @@ pub(super) struct Machine {
     states: Vec<State>,
     initial: usize,
     initial_animation: String,
-    inputs: HashMap<String, Option<LottieInput>>,
+    // Ordered so equal machines print equally (scene fingerprints).
+    inputs: BTreeMap<String, Option<LottieInput>>,
 }
 
 pub(super) struct Runtime {
@@ -169,7 +170,7 @@ fn no_actions(value: &Value) -> Result<(), LottieError> {
 impl Machine {
     pub fn parse(json: &Value, package: &Package) -> Result<Self, LottieError> {
         no_actions(json)?;
-        let mut inputs = HashMap::new();
+        let mut inputs = BTreeMap::new();
         for input in array(json, "inputs")? {
             let name = string(input, "name")?;
             if name.starts_with('$')
@@ -374,7 +375,7 @@ impl Machine {
             initial_animation: String::new(),
             inputs,
         };
-        let runtime = machine.start(&HashMap::new(), 0.0)?;
+        let runtime = machine.start(&BTreeMap::new(), 0.0)?;
         machine.initial_animation = machine.states[runtime.current].animation.clone();
         Ok(machine)
     }
@@ -411,7 +412,7 @@ impl Machine {
 
     pub fn start(
         &self,
-        overrides: &HashMap<String, LottieInput>,
+        overrides: &BTreeMap<String, LottieInput>,
         time: f64,
     ) -> Result<Runtime, LottieError> {
         let mut inputs: HashMap<_, _> = self

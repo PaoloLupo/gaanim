@@ -121,10 +121,16 @@ struct CompiledShader {
 
 impl fmt::Debug for ShaderBackground {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ShaderBackground")
+        let mut debug = f.debug_struct("ShaderBackground");
+        debug
             .field("source_len", &self.source.len())
-            .field("fallback", &self.fallback)
-            .finish_non_exhaustive()
+            .field("fallback", &self.fallback);
+        if gaanim_core::fingerprint::identity_debug() {
+            debug
+                .field("source", &self.source)
+                .field("contract", &self.contract);
+        }
+        debug.finish_non_exhaustive()
     }
 }
 

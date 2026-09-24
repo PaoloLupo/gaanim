@@ -61,7 +61,8 @@ pub struct Updater {
 
 impl std::fmt::Debug for Updater {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Updater")
+        let mut debug = f.debug_struct("Updater");
+        debug
             .field("elapsed", &self.elapsed)
             .field("start_at", &self.start_at)
             .field("stop_at", &self.stop_at)
@@ -70,8 +71,19 @@ impl std::fmt::Debug for Updater {
             .field("simulation_elapsed", &self.simulation_elapsed)
             .field("accumulator", &self.accumulator)
             .field("has_reset", &self.reset.is_some())
-            .field("initial_translation", &self.initial_translation)
-            .finish_non_exhaustive()
+            .field("initial_translation", &self.initial_translation);
+        if gaanim_core::fingerprint::identity_debug() {
+            debug
+                .field("func", &gaanim_core::fingerprint::identity(&*self.func))
+                .field(
+                    "reset",
+                    &self
+                        .reset
+                        .as_ref()
+                        .map(|reset| gaanim_core::fingerprint::identity(&**reset)),
+                );
+        }
+        debug.finish_non_exhaustive()
     }
 }
 
@@ -1007,7 +1019,8 @@ pub struct SampledSeriesDriver {
 
 impl std::fmt::Debug for SampledSeriesDriver {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SampledSeriesDriver")
+        let mut debug = f.debug_struct("SampledSeriesDriver");
+        debug
             .field("samples", &self.times.len())
             .field("interpolation", &self.interpolation)
             .field("property", &self.property)
@@ -1015,8 +1028,13 @@ impl std::fmt::Debug for SampledSeriesDriver {
             .field("offset", &self.offset)
             .field("start_at", &self.start_at)
             .field("stop_at", &self.stop_at)
-            .field("base", &self.base)
-            .finish()
+            .field("base", &self.base);
+        if gaanim_core::fingerprint::identity_debug() {
+            debug
+                .field("times", &self.times)
+                .field("values", &self.values);
+        }
+        debug.finish()
     }
 }
 

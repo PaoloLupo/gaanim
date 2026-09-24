@@ -89,6 +89,7 @@ impl Parameter {
                 vec![gaanim_animation::ReactiveInput::Signal(self.handle.id)],
                 |values| Ok(vec![values[0]]),
             )
+            .with_recipe("identity")
             .with_scene_owner(owner),
         )
     }

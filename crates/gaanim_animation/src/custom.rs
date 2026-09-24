@@ -129,9 +129,15 @@ pub struct CustomAnimation {
 
 impl std::fmt::Debug for CustomAnimation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CustomAnimation")
-            .field("channels", &self.channels)
-            .finish_non_exhaustive()
+        let mut debug = f.debug_struct("CustomAnimation");
+        debug.field("channels", &self.channels);
+        if gaanim_core::fingerprint::identity_debug() {
+            debug.field(
+                "callback",
+                &gaanim_core::fingerprint::identity(&*self.callback),
+            );
+        }
+        debug.finish_non_exhaustive()
     }
 }
 

@@ -916,7 +916,7 @@ pub(crate) struct ReactiveReadoutLayoutSpec {
 #[derive(Debug, Clone)]
 pub struct ObjectSpec {
     pub id: ObjectId,
-    pub(crate) ports: std::collections::HashMap<String, (Anchor, DVec3)>,
+    pub(crate) ports: std::collections::BTreeMap<String, (Anchor, DVec3)>,
     pub(crate) layout_background: Option<ObjectId>,
     pub kind: SpawnKind,
     pub fill: Option<Brush>,
