@@ -1457,6 +1457,7 @@ pub fn gaanim_render_system(
         Option<&WorldBounds>,
         Option<&gaanim_scene::GroupMarker>,
         Option<Ref<WriteTipGlow>>,
+        Option<Ref<Visible>>,
     )>,
     mut query_vello_scene: Query<(Entity, &mut VelloScene2d, &mut Transform), With<MainVelloScene>>,
     mut shader_frame: Option<ResMut<ShaderBackgroundFrame>>,
@@ -1527,9 +1528,10 @@ pub fn gaanim_render_system(
             world_bounds_opt,
             is_group_opt,
             tip_glow_ref,
+            visible_ref,
         ) = query_effects
             .get(entity)
-            .unwrap_or((None, None, None, None, None, None, None, None));
+            .unwrap_or((None, None, None, None, None, None, None, None, None));
 
         // Invalidate before skipping hidden or culled objects. Their new geometry
         // may stop changing before they become visible again (e.g. a rewound Lottie).
@@ -1556,7 +1558,13 @@ pub fn gaanim_render_system(
         // Fill-level geometry is derived later in the frame. Track the source
         // value too, so a retained fragment can never outlive a rewind or a
         // segment replay that changes only this component.
-        let timeline_inputs_touched = path_ref.as_ref().is_some_and(|r| r.is_changed())
+        // This system only visits `Visible` entities, so the change ticks of
+        // components rewritten while an entity was hidden (e.g. rewound
+        // before its write/create clip) are already stale when it reappears.
+        // Compare its inputs again whenever it becomes visible.
+        let revealed = visible_ref.as_ref().is_some_and(|r| r.is_added());
+        let timeline_inputs_touched = revealed
+            || path_ref.as_ref().is_some_and(|r| r.is_changed())
             || path_source_ref.as_ref().is_some_and(|r| r.is_changed())
             || fill_level_ref.as_ref().is_some_and(|r| r.is_changed())
             || fill_ref.as_ref().is_some_and(|r| r.is_changed())
@@ -2082,6 +2090,55 @@ mod tests {
             [1.0, 0.0, 0.0, 1.0],
             "the domain zoom must move the path without widening the stroke pen"
         );
+    }
+
+    #[test]
+    fn fragments_changed_while_hidden_are_rebuilt_when_shown_again() {
+        let mut app = App::new();
+        app.init_resource::<GaanimRenderCache>()
+            .add_systems(Update, gaanim_render_system);
+        let id = ObjectId::from_raw(93);
+        let full = kurbo::BezPath::from_svg("M 0 0 L 4 0 L 4 3").unwrap();
+        let entity = app
+            .world_mut()
+            .spawn((
+                MobjectId(id),
+                GlobalSpatialTransform::default(),
+                GlobalOpacity(1.0),
+                RenderOrder::default(),
+                RenderLayer::Vello2D,
+                Path2D(Arc::new(full)),
+                StrokeBrush {
+                    brush: Some(peniko::Brush::Solid(peniko::Color::BLACK)),
+                    style: kurbo::Stroke::new(0.1),
+                },
+                Visible,
+            ))
+            .id();
+        app.update();
+        let drawn = app.world().resource::<GaanimRenderCache>().fragment_cache[&id].clone();
+
+        // A rewind hides the object and resets it to its undrawn state while
+        // the render system does not visit it, as before a write/create clip.
+        app.world_mut().entity_mut(entity).remove::<Visible>();
+        app.update();
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(Path2D(Arc::new(kurbo::BezPath::new())));
+        app.update();
+        app.update();
+        app.world_mut().entity_mut(entity).insert(Visible);
+        app.update();
+
+        let shown = &app.world().resource::<GaanimRenderCache>().fragment_cache[&id];
+        assert!(!Arc::ptr_eq(&drawn, shown), "the drawn fragment was reused");
+        let fresh = compile_scene_from_world(app.world_mut(), None);
+        let live = app
+            .world_mut()
+            .query::<&VelloScene2d>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(live.encoding().path_data, fresh.encoding().path_data);
     }
 
     #[test]
