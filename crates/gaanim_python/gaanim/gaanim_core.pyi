@@ -211,6 +211,29 @@ class Background:
 
 BackgroundLike: TypeAlias = Paint | Background
 
+class PostProcess:
+    @staticmethod
+    def shader(source: str | os.PathLike[str]) -> PostProcess:
+        """Create a WGSL post-process applied to the rendered 2D scene.
+
+        A string is inline WGSL; an ``os.PathLike`` value loads a WGSL asset
+        immediately. ``source`` must define ``gaanim_post(uv: vec2<f32>,
+        resolution: vec2<f32>, time: f32) -> vec4<f32>`` and may call
+        ``gaanim_scene(uv)`` to sample everything drawn in 2D: background,
+        text, shapes, images, and Lottie. ``uv`` is ``(0, 0)`` at the top-left
+        corner of the camera frame, ``resolution`` is the frame size in output
+        pixels, and ``time`` is absolute timeline seconds. Sampled colors are
+        straight-alpha sRGB values and the result is clamped to ``[0, 1]``.
+        Only the camera frame is processed; perspective 3D scenes and SVG
+        output are drawn without it. Invalid WGSL raises ``ValueError`` and an
+        unreadable asset raises ``RuntimeError``.
+        """
+        ...
+    @property
+    def source(self) -> str:
+        """Return the WGSL source of the post-process function."""
+        ...
+
 class StrokeStyle:
     def __init__(
         self,
@@ -1823,6 +1846,17 @@ class Canvas:
         """Logical height remaining after top and bottom safe-area margins."""
         ...
     background: Optional[BackgroundLike]
+    @property
+    def post(self) -> Optional[PostProcess]:
+        """Return the scene post-process, or ``None`` when the scene has none."""
+        ...
+    @post.setter
+    def post(self, value: Optional[PostProcess]) -> None:
+        """Replace the scene post-process; ``None`` removes it.
+
+        Segments that set their own ``post`` keep their override.
+        """
+        ...
     theme: Optional[str]
     def set_theme(self, theme: str | Theme) -> None:
         """Apply a built-in color scheme or a custom Theme."""
@@ -4598,15 +4632,17 @@ class Scene:
         background: Optional[BackgroundLike] = None,
         margin: Optional[float] = None,
         theme: Optional[str | Theme] = None,
+        post: Optional[PostProcess] = None,
     ) -> None:
         """Create a resolution-independent scene in logical units.
 
         ``frame`` is ``(16, 9)`` by default, centered at the origin. Geometry,
         margins, text sizes, strokes, and effects use the same logical unit;
-        output pixels are selected by the editor or exporter. Non-finite or
-        non-positive frame dimensions, invalid WGSL, and unknown themes raise
-        ``ValueError``. The former ``Scene(width, height)`` pixel API is not
-        accepted.
+        output pixels are selected by the editor or exporter. ``post`` applies
+        a ``PostProcess`` to every segment that does not override it.
+        Non-finite or non-positive frame dimensions, invalid WGSL, and unknown
+        themes raise ``ValueError``. The former ``Scene(width, height)`` pixel
+        API is not accepted.
         """
         ...
     @property
@@ -4633,13 +4669,17 @@ class Scene:
         notes: Optional[str] = None,
         template: Optional[Callable[..., Layout]] = None,
         background: Optional[BackgroundLike] = None,
+        post: Optional[PostProcess | Literal[False]] = None,
     ) -> Segment:
         """Create and activate a named structural segment.
 
         ``background`` accepts the same color, brush, or shader background as
         ``Scene`` and only applies while this segment is active. When omitted,
-        the segment uses the scene background. Empty or duplicate names, and a
-        transition on the first segment, raise ``ValueError``.
+        the segment uses the scene background. ``post`` replaces the scene
+        post-process while this segment is active; ``False`` draws the segment
+        without post-processing and ``None`` inherits ``scene.canvas.post``. Any other
+        value raises ``TypeError``. Empty or duplicate names, and a transition
+        on the first segment, raise ``ValueError``.
 
         Example:
             result = scene.segment("example", background="#0f172a")

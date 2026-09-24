@@ -40,6 +40,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<color::PyColorMap>()?;
     m.add_class::<brush::PyBrush>()?;
     m.add_class::<brush::PyBackground>()?;
+    m.add_class::<brush::PyPostProcess>()?;
     m.add_class::<pylayout::PyAnchor>()?;
     m.add_class::<pylayout::PyDirection>()?;
     m.add_class::<pylayout::PyLayoutExpression>()?;

@@ -6,6 +6,8 @@ pub mod diagnostics;
 pub mod effects;
 pub mod lottie;
 pub mod pipeline;
+pub mod post_process;
+mod post_process_gpu;
 pub mod prelude;
 mod stroke;
 
@@ -50,6 +52,8 @@ impl Plugin for GaanimRendererPlugin {
 
         // Shader backgrounds render on the render device when one exists.
         background_gpu::build(app);
+        // Post-processing runs on the Vello render target after Vello draws it.
+        post_process_gpu::build(app);
 
         // Initialize the fragment retain cache
         app.init_resource::<pipeline::GaanimRenderCache>();

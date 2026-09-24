@@ -129,6 +129,77 @@ from pathlib import Path
 asset_shader = Background.shader(Path("assets/background.wgsl"), fallback="#071022")
 ```
 
+== Postprocesado
+
+Un `PostProcess` aplica una función WGSL sobre todo lo que la escena dibuja en
+2D: fondo, texto, formas, imágenes y Lottie. Se ejecuta en el editor, en el
+Presenter, en las capturas y en la exportación, siempre con el tiempo exacto de
+la línea temporal.
+
+#api-entry(
+  name: "PostProcess.shader",
+  signature: "PostProcess.shader(source) -> PostProcess",
+  params: (
+    (name: "source", type: "str | os.PathLike[str]", default: none, desc: [WGSL inline, o la ruta de un asset `.wgsl` que se lee al crear el objeto.]),
+  ),
+  returns: (type: "PostProcess", desc: [Un postprocesado validado para `Scene(post=...)`, `scene.canvas.post` o `scene.segment(..., post=...)`.]),
+  desc: [WGSL inválido lanza `ValueError` y un asset ilegible lanza `RuntimeError`.],
+)[```python
+from gaanim import PostProcess, Scene
+
+vignette = PostProcess.shader("""
+fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
+    let color = gaanim_scene(uv);
+    let edge = smoothstep(0.9, 0.35, distance(uv, vec2<f32>(0.5)));
+    return vec4<f32>(color.rgb * edge, color.a);
+}
+""")
+scene = Scene(frame=(16, 9), post=vignette)
+```]
+
+`source` debe definir esta función:
+
+```wgsl
+fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32>
+```
+
+- `uv=(0, 0)` es la esquina superior izquierda del cuadro de la cámara y
+  `uv=(1, 1)` la inferior derecha.
+- `resolution` es el tamaño del cuadro en píxeles de salida.
+- `time` es la posición absoluta de la línea temporal en segundos.
+- `gaanim_scene(uv)` devuelve el color ya renderizado en ese punto del cuadro.
+  Los valores son sRGB tal como están en la textura, con alfa sin
+  premultiplicar. Las coordenadas fuera del cuadro devuelven el píxel más
+  cercano del borde.
+- El resultado se limita a `[0, 1]`.
+
+Solo se procesa el cuadro de la cámara. Las bandas exteriores del editor quedan
+intactas.
+
+`scene.canvas.post` lee o reemplaza el postprocesado de la escena; `None` lo
+quita.
+Cada segmento puede cambiarlo mientras está activo: `post=otro` usa otro
+shader, `post=False` dibuja ese segmento sin postprocesado y `post=None` (el
+valor predeterminado) hereda el de la escena.
+
+```python
+from pathlib import Path
+
+scene.canvas.post = PostProcess.shader(Path("assets/grade.wgsl"))
+scene.segment("intro")                 # hereda scene.canvas.post
+scene.segment("datos", post=False)     # sin postprocesado
+scene.segment("final", post=vignette)  # reemplaza el de la escena
+```
+
+El shader recibe píxeles, así que un radio fijo como `1.0 / 1920.0` cambia con
+la resolución de salida. Para desplazamientos de un número de píxeles, usa
+`offset / resolution`. Para que el efecto se vea igual en cualquier
+resolución, expresa el radio como fracción de `uv`.
+
+Limitaciones: con una cámara en perspectiva, la escena se dibuja sin
+postprocesado, porque las mallas 3D no pasan por Vello. Tampoco se aplica a la
+salida SVG ni a otras exportaciones vectoriales.
+
 == Temas incluidos
 
 `technical` es el tema oscuro y sobrio predeterminado para explicaciones

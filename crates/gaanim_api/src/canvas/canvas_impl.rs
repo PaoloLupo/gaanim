@@ -1327,6 +1327,8 @@ pub struct SceneModel {
     /// for theme contrast and native 3D clears.
     pub background_paint: Option<gaanim_renderer::background::BackgroundPaint>,
     pub(crate) background_overridden: bool,
+    /// WGSL post-processing applied to the rendered 2D scene inside the camera frame.
+    pub post_process: Option<gaanim_renderer::post_process::PostProcessShader>,
     /// Canonical name of the selected theme.
     pub theme: Option<String>,
     /// Complete semantic colors and typography for the selected theme.
@@ -1357,6 +1359,7 @@ impl SceneModel {
             background: None,
             background_paint: None,
             background_overridden: false,
+            post_process: None,
             theme: None,
             theme_style: None,
             font_family_override: None,
@@ -1444,6 +1447,33 @@ impl SceneModel {
         self.background = paint.as_ref().map(|paint| paint.fallback_color());
         self.background_paint = paint;
         self.background_overridden = true;
+    }
+
+    /// Replace or remove the scene post-process.
+    pub fn set_post_process(
+        &mut self,
+        shader: Option<gaanim_renderer::post_process::PostProcessShader>,
+    ) {
+        self.post_process = shader;
+    }
+
+    /// Override the post-process of one segment of this scene.
+    pub fn set_segment_post_process(
+        &mut self,
+        segment: &SegmentHandle,
+        post: gaanim_renderer::post_process::PostProcessOverride,
+    ) -> Result<(), SegmentError> {
+        if !segment.belongs_to(&self.state) {
+            return Err(SegmentError::ForeignSegment);
+        }
+        let mut guard = self.state.lock().expect("canvas state poisoned");
+        let target = guard
+            .segments
+            .iter_mut()
+            .find(|candidate| candidate.id == segment.id)
+            .ok_or(SegmentError::UnknownSegment { id: segment.id })?;
+        target.post_process = post;
+        Ok(())
     }
 
     /// Apply one of the built-in visual themes.
@@ -9290,6 +9320,55 @@ mod tests {
         assert_eq!(background.paint_at(0.5).fallback_color(), segment_color);
         assert_eq!(background.paint_at(1.0).fallback_color(), segment_color);
         assert_eq!(background.paint_at(1.1).fallback_color(), scene_color);
+    }
+
+    #[test]
+    fn segment_post_processes_compile_with_scene_inheritance() {
+        use gaanim_renderer::post_process::{PostProcessOverride, PostProcessShader};
+        let shader = |scale: &str| {
+            PostProcessShader::new(format!(
+                "fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {{\n\
+                 return gaanim_scene(uv) * {scale};\n}}"
+            ))
+            .unwrap()
+        };
+        let mut canvas = SceneModel::new(640, 360);
+        canvas.set_post_process(Some(shader("0.5")));
+        canvas.segment("inherits", None).unwrap();
+        canvas.wait(1.0);
+        let plain = canvas.segment("plain", None).unwrap();
+        canvas
+            .set_segment_post_process(&plain, PostProcessOverride::Disabled)
+            .unwrap();
+        canvas.wait(1.0);
+        let custom = canvas.segment("custom", None).unwrap();
+        canvas
+            .set_segment_post_process(&custom, PostProcessOverride::Shader(shader("0.25")))
+            .unwrap();
+        canvas.wait(1.0);
+        let foreign = SceneModel::new(640, 360).segment("other", None).unwrap();
+        assert!(matches!(
+            canvas.set_segment_post_process(&foreign, PostProcessOverride::Disabled),
+            Err(SegmentError::ForeignSegment)
+        ));
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        let post = world
+            .get_resource::<gaanim_renderer::post_process::CanvasPostProcess>()
+            .expect("compiled canvas post-process");
+
+        let source_at = |time| {
+            post.shader_at(time)
+                .map(|shader| shader.source().to_owned())
+        };
+        assert!(source_at(0.5).unwrap().contains("* 0.5"));
+        assert_eq!(source_at(1.5), None);
+        assert!(source_at(2.5).unwrap().contains("* 0.25"));
     }
 
     #[test]
