@@ -62,6 +62,10 @@ pub enum RateFunc {
     NotQuiteThere,
     /// Custom mathematical closure.
     Custom(Arc<dyn Fn(f64) -> f64 + Send + Sync>),
+    /// Lookup table of progress values at evenly spaced times from 0 to 1,
+    /// linearly interpolated. Built once from an authored curve, so
+    /// evaluation needs no callback and serializes.
+    Sampled(Arc<[f64]>),
 }
 
 // Implement standard Debug since closures can't be debugged easily
@@ -100,6 +104,16 @@ impl std::fmt::Debug for RateFunc {
                 )
             }
             Self::Custom(_) => write!(f, "Custom(<closure>)"),
+            Self::Sampled(samples) => {
+                // Hash the table so equal-length curves stay distinguishable
+                // in debug fingerprints.
+                let hash = samples
+                    .iter()
+                    .fold(0xcbf2_9ce4_8422_2325_u64, |hash, value| {
+                        (hash ^ value.to_bits()).wrapping_mul(0x0100_0000_01b3)
+                    });
+                write!(f, "Sampled({} samples, {hash:016x})", samples.len())
+            }
         }
     }
 }
@@ -151,6 +165,11 @@ impl serde::Serialize for RateFunc {
                 serializer.serialize_unit_variant("RateFunc", 14, "NotQuiteThere")
             }
             Self::Custom(_) => serializer.serialize_unit_variant("RateFunc", 12, "Custom"),
+            Self::Sampled(samples) => {
+                let mut state = serializer.serialize_struct("Sampled", 1)?;
+                state.serialize_field("samples", &samples[..])?;
+                state.end()
+            }
         }
     }
 }
@@ -172,6 +191,7 @@ impl<'de> serde::Deserialize<'de> for RateFunc {
             Mirror(Box<RateFunc>),
             ThereAndBackWithPause(f64),
             CubicBezier { x1: f64, y1: f64, x2: f64, y2: f64 },
+            Sampled { samples: Vec<f64> },
         }
 
         match RawRateFunc::deserialize(deserializer)? {
@@ -196,6 +216,7 @@ impl<'de> serde::Deserialize<'de> for RateFunc {
             RawRateFunc::Mirror(inner) => Ok(Self::Mirror(inner)),
             RawRateFunc::ThereAndBackWithPause(p) => Ok(Self::ThereAndBackWithPause(p)),
             RawRateFunc::CubicBezier { x1, y1, x2, y2 } => Ok(Self::CubicBezier(x1, y1, x2, y2)),
+            RawRateFunc::Sampled { samples } => Ok(Self::Sampled(samples.into())),
         }
     }
 }
@@ -311,6 +332,16 @@ impl RateFunc {
                 (p * 0.95).min(0.95)
             }
             Self::Custom(f) => f(t),
+            Self::Sampled(samples) => match samples.len() {
+                0 => t,
+                1 => samples[0],
+                len => {
+                    let position = t * (len - 1) as f64;
+                    let index = (position.floor() as usize).min(len - 2);
+                    let fraction = position - index as f64;
+                    samples[index] + (samples[index + 1] - samples[index]) * fraction
+                }
+            },
         }
     }
 
@@ -412,6 +443,35 @@ impl RateFunc {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sampled_rate_func_interpolates_its_table() {
+        let quartic_out: Arc<[f64]> = (0..=256)
+            .map(|i| 1.0 - (1.0 - i as f64 / 256.0).powi(4))
+            .collect();
+        let sampled = RateFunc::Sampled(quartic_out);
+        assert_eq!(sampled.evaluate(0.0), 0.0);
+        assert_eq!(sampled.evaluate(1.0), 1.0);
+        assert_eq!(sampled.evaluate(-0.5), 0.0);
+        assert_eq!(sampled.evaluate(1.5), 1.0);
+        let mut previous = f64::NEG_INFINITY;
+        for step in 0..=1000 {
+            let t = step as f64 / 1000.0;
+            let value = sampled.evaluate(t);
+            assert!(value >= previous, "not monotone at t={t}");
+            assert!((value - (1.0 - (1.0 - t).powi(4))).abs() < 1e-4);
+            previous = value;
+        }
+
+        let bump = RateFunc::Sampled(Arc::from([0.0, 1.0, 0.0]));
+        assert_eq!(bump.evaluate(0.25), 0.5);
+        assert_eq!(bump.evaluate(0.5), 1.0);
+        assert_eq!(RateFunc::Sampled(Arc::from([0.3])).evaluate(0.7), 0.3);
+        assert_ne!(
+            format!("{bump:?}"),
+            format!("{:?}", RateFunc::Sampled(Arc::from([0.0, 0.5, 0.0])))
+        );
+    }
 
     #[test]
     fn rate_func_linear() {

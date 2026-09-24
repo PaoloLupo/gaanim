@@ -42,6 +42,9 @@ impl From<PyEasingCurve> for EasingCurve {
     }
 }
 
+/// Upper bound for `Easing.custom` lookup tables.
+const MAX_CUSTOM_SAMPLES: i64 = 65_536;
+
 #[pyclass(name = "Easing", module = "gaanim_core", frozen, from_py_object)]
 #[derive(Clone)]
 pub struct PyEasing {
@@ -202,6 +205,39 @@ impl PyEasing {
         ))
     }
 
+    /// Sample `function` at `samples` evenly spaced times once, at authoring.
+    #[staticmethod]
+    #[pyo3(signature = (function, samples=256))]
+    fn custom(function: &Bound<'_, PyAny>, samples: i64) -> PyResult<Self> {
+        if !function.is_callable() {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "Easing.custom() expects a callable taking t in [0, 1]",
+            ));
+        }
+        if !(2..=MAX_CUSTOM_SAMPLES).contains(&samples) {
+            return Err(PyValueError::new_err(format!(
+                "samples must be between 2 and {MAX_CUSTOM_SAMPLES}"
+            )));
+        }
+        let last = (samples - 1) as f64;
+        let table = (0..samples)
+            .map(|index| {
+                let t = index as f64 / last;
+                let value: f64 = function.call1((t,))?.extract()?;
+                if !value.is_finite() || !(-1.0..=2.0).contains(&value) {
+                    return Err(PyValueError::new_err(format!(
+                        "Easing.custom() function returned {value} at t={t}; values must be finite and within [-1, 2]"
+                    )));
+                }
+                Ok(value)
+            })
+            .collect::<PyResult<Vec<f64>>>()?;
+        Ok(Self::new(
+            RateFunc::Sampled(table.into()),
+            format!("Easing.custom(<function>, samples={samples})"),
+        ))
+    }
+
     fn __repr__(&self) -> &str {
         &self.label
     }
@@ -301,5 +337,40 @@ mod tests {
         assert!(PyEasing::cubic_bezier(-0.1, 0.0, 0.5, 1.0).is_err());
         assert!(PyEasing::cubic_bezier(0.1, 0.0, 1.1, 1.0).is_err());
         assert!(PyEasing::cubic_bezier(0.1, f64::NAN, 0.9, 1.0).is_err());
+    }
+
+    #[test]
+    fn custom_samples_the_callable_once_into_a_table() {
+        Python::initialize();
+        Python::attach(|py| {
+            let eval = |source: &str| {
+                py.eval(&std::ffi::CString::new(source).unwrap(), None, None)
+                    .unwrap()
+            };
+            let quartic = PyEasing::custom(&eval("lambda t: 1 - (1 - t) ** 4"), 256).unwrap();
+            let RateFunc::Sampled(table) = &quartic.inner else {
+                panic!("Easing.custom() should build a sampled rate function");
+            };
+            assert_eq!(table.len(), 256);
+            assert_eq!(quartic.inner.evaluate(0.0), 0.0);
+            assert_eq!(quartic.inner.evaluate(1.0), 1.0);
+            assert!((quartic.inner.evaluate(0.5) - 0.9375).abs() < 1e-4);
+
+            let is_value_error = |result: PyResult<PyEasing>| {
+                result.is_err_and(|error| error.is_instance_of::<PyValueError>(py))
+            };
+            assert!(is_value_error(PyEasing::custom(
+                &eval("lambda t: float('nan')"),
+                8
+            )));
+            assert!(is_value_error(PyEasing::custom(
+                &eval("lambda t: 3 * t"),
+                8
+            )));
+            assert!(is_value_error(PyEasing::custom(&eval("lambda t: t"), 1)));
+            assert!(PyEasing::custom(&eval("1.0"), 8)
+                .is_err_and(|error| { error.is_instance_of::<pyo3::exceptions::PyTypeError>(py) }));
+            assert!(PyEasing::custom(&eval("lambda t: 1 / 0"), 8).is_err());
+        });
     }
 }

@@ -2828,9 +2828,145 @@ fn apply_transition(
             }
         }
         TransitionType::Morph { mappings, .. } => {
-            let _ = mappings;
+            apply_morph_transition(world, scene_entities, mappings, t, from, to);
         }
     }
+}
+
+/// Morph transition: each mapped source and target share one bounding box
+/// that travels from the source's box to the target's, while the target fades
+/// in over the first half and the source fades out over the second. Unmapped
+/// scene roots cross-fade.
+fn apply_morph_transition(
+    world: &mut World,
+    scene_entities: &[(Entity, SceneId)],
+    mappings: &[crate::transition::MorphMapping],
+    t: f64,
+    from: SceneId,
+    to: SceneId,
+) {
+    use gaanim_core::kurbo::Rect;
+
+    let entity_of: HashMap<gaanim_core::ObjectId, Entity> = {
+        let mut query = world.query::<(Entity, &MobjectId)>();
+        query
+            .iter(world)
+            .map(|(entity, id)| (id.0, entity))
+            .collect()
+    };
+    let eased = t * t * (3.0 - 2.0 * t);
+    let mut placements = Vec::new();
+    for mapping in mappings {
+        let (Some(&source), Some(&target)) = (
+            entity_of.get(&mapping.source),
+            entity_of.get(&mapping.target),
+        ) else {
+            continue;
+        };
+        if source == target {
+            continue;
+        }
+        let (Some(source_box), Some(target_box)) = (
+            morph_world_box(world, source),
+            morph_world_box(world, target),
+        ) else {
+            continue;
+        };
+        let shared = Rect::new(
+            source_box.x0 + (target_box.x0 - source_box.x0) * eased,
+            source_box.y0 + (target_box.y0 - source_box.y0) * eased,
+            source_box.x1 + (target_box.x1 - source_box.x1) * eased,
+            source_box.y1 + (target_box.y1 - source_box.y1) * eased,
+        );
+        placements.push((source, source_box, shared, (2.0 * (1.0 - t)).min(1.0)));
+        placements.push((target, target_box, shared, (2.0 * t).min(1.0)));
+    }
+
+    let paired: HashSet<Entity> = placements.iter().map(|placement| placement.0).collect();
+    for (entity, scene_id) in scene_entities {
+        if paired.contains(entity) || world.get::<ChildOf>(*entity).is_some() {
+            continue;
+        }
+        let factor = if *scene_id == from {
+            1.0 - t as f32
+        } else if *scene_id == to {
+            t as f32
+        } else {
+            continue;
+        };
+        if let Some(mut opacity) = world.get_mut::<Opacity>(*entity) {
+            opacity.0 *= factor;
+        }
+    }
+
+    for (entity, own_box, shared, opacity) in placements {
+        let parent = morph_parent_affine(world, entity);
+        let Some(local) = world.get::<SpatialTransform>(entity).copied() else {
+            continue;
+        };
+        let fitted =
+            parent.inverse() * morph_fit_affine(own_box, shared) * parent * local.to_affine_2d();
+        let mut placed = SpatialTransform::from_affine_2d(&fitted);
+        placed.translation.z = local.translation.z;
+        if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
+            *transform = placed;
+        }
+        if let Some(mut value) = world.get_mut::<Opacity>(entity) {
+            value.0 *= opacity as f32;
+        }
+    }
+}
+
+/// Composed 2D affine of `entity`'s ancestors.
+fn morph_parent_affine(world: &World, entity: Entity) -> gaanim_core::kurbo::Affine {
+    let mut affine = gaanim_core::kurbo::Affine::IDENTITY;
+    let mut current = world
+        .get::<ChildOf>(entity)
+        .map(|child_of| child_of.parent());
+    while let Some(parent) = current {
+        if let Some(transform) = world.get::<SpatialTransform>(parent) {
+            affine = transform.to_affine_2d() * affine;
+        }
+        current = world
+            .get::<ChildOf>(parent)
+            .map(|child_of| child_of.parent());
+    }
+    affine
+}
+
+/// World-space 2D bounding box of `entity`; objects without local bounds
+/// collapse to their origin.
+fn morph_world_box(world: &World, entity: Entity) -> Option<gaanim_core::kurbo::Rect> {
+    let local = world.get::<SpatialTransform>(entity)?;
+    let bounds = world
+        .get::<gaanim_scene::LocalBounds>(entity)
+        .map(|bounds| bounds.0)
+        .unwrap_or_default();
+    let rect =
+        gaanim_core::kurbo::Rect::new(bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y);
+    let affine = morph_parent_affine(world, entity) * local.to_affine_2d();
+    Some(affine.transform_rect_bbox(rect))
+}
+
+/// Affine mapping `from` onto `to`; a degenerate axis only translates.
+fn morph_fit_affine(
+    from: gaanim_core::kurbo::Rect,
+    to: gaanim_core::kurbo::Rect,
+) -> gaanim_core::kurbo::Affine {
+    use gaanim_core::kurbo::{Affine, Vec2};
+    let axis = |target: f64, source: f64| {
+        if source.abs() > 1e-9 {
+            target / source
+        } else {
+            1.0
+        }
+    };
+    Affine::translate(to.center().to_vec2())
+        * Affine::scale_non_uniform(
+            axis(to.width(), from.width()),
+            axis(to.height(), from.height()),
+        )
+        * Affine::translate(-Vec2::new(from.center().x, from.center().y))
 }
 
 #[cfg(test)]
@@ -2843,6 +2979,57 @@ mod tests {
     use gaanim_math::{RateFunc, SpatialTransform};
     use gaanim_scene::{FillLevel, Material3D, MobjectId, PathSource};
     use std::sync::Arc;
+
+    #[test]
+    fn morph_transition_shares_one_box_between_pairs() {
+        use crate::transition::{MorphMapping, MorphProperty};
+        use gaanim_core::glam::DVec3;
+        use gaanim_math::Bounds3D;
+        use gaanim_scene::LocalBounds;
+
+        let mut timeline = Timeline::default();
+        let (from, to) = (timeline.add_scene("a"), timeline.add_scene("b"));
+        let mut world = World::new();
+        let mut spawn = |raw: u64, scene: SceneId, x: f64, half: f64| {
+            let mut transform = SpatialTransform::default();
+            transform.translation = DVec3::new(x, 0.0, 0.0);
+            let entity = world
+                .spawn((
+                    MobjectId(ObjectId::from_raw(raw)),
+                    transform,
+                    LocalBounds(Bounds3D::new_2d(-half, -half, half, half)),
+                    Opacity(1.0),
+                    SceneMember(scene),
+                ))
+                .id();
+            (entity, scene)
+        };
+        let source = spawn(1, from, -4.0, 1.0);
+        let target = spawn(2, to, 4.0, 3.0);
+        let other = spawn(3, from, 0.0, 1.0);
+        let mappings = [MorphMapping {
+            source: ObjectId::from_raw(1),
+            target: ObjectId::from_raw(2),
+            property: MorphProperty::All,
+        }];
+
+        apply_morph_transition(
+            &mut world,
+            &[source, target, other],
+            &mappings,
+            0.5,
+            from,
+            to,
+        );
+
+        for (entity, _) in [source, target] {
+            let placed = morph_world_box(&world, entity).unwrap();
+            assert!((placed.center().x - 0.0).abs() < 1e-9);
+            assert!((placed.width() - 4.0).abs() < 1e-9);
+            assert_eq!(world.get::<Opacity>(entity).unwrap().0, 1.0);
+        }
+        assert_eq!(world.get::<Opacity>(other.0).unwrap().0, 0.5);
+    }
 
     fn absolute_seek_fixture() -> (World, Timeline, Entity) {
         let object_id = ObjectId::from_raw(404);

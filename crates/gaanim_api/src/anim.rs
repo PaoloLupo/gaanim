@@ -410,9 +410,10 @@ pub enum AnimationType {
         px: f64,
         py: f64,
     },
-    /// Scale from 0 at a specific edge direction.
+    /// Scale from 0 while the bounding-box point in `direction` stays fixed.
+    /// Axis directions pin an edge midpoint, diagonals pin a corner.
     GrowFromEdge {
-        direction: String,
+        direction: gaanim_core::glam::DVec3,
     },
     /// Draw the outline first (like Write) then fill in.
     DrawBorderThenFill {
@@ -995,11 +996,11 @@ impl MobjectRef {
         }
     }
 
-    pub fn grow_from_edge(self, direction: &str) -> AnimationBuilder {
+    pub fn grow_from_edge(self, direction: gaanim_layout::Direction) -> AnimationBuilder {
         AnimationBuilder {
             target: self.id,
             anim_type: AnimationType::GrowFromEdge {
-                direction: direction.to_string(),
+                direction: direction.to_vector(),
             },
             duration: 1.0,
             rate_func: RateFunc::Smooth,

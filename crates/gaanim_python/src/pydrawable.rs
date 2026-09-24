@@ -712,6 +712,41 @@ impl PyCanvasAnim {
         })
     }
 
+    fn grow_from_point(&self, x: f64, y: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "grow_from_point() requires a Drawable animation proxy",
+            ));
+        }
+        self.require_transformable()?;
+        if !x.is_finite() || !y.is_finite() {
+            return Err(PyValueError::new_err(
+                "grow_from_point() coordinates must be finite",
+            ));
+        }
+        self.require_effect_slot("grow_from_point")?;
+        Ok(Self {
+            inner: self.inner.clone().grow_from_point(x, y),
+        })
+    }
+
+    fn grow_from_edge(&self, direction: &PyDirection) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "grow_from_edge() requires a Drawable animation proxy",
+            ));
+        }
+        self.require_transformable()?;
+        self.require_effect_slot("grow_from_edge")?;
+        Ok(Self {
+            inner: self.inner.clone().grow_from_edge(direction.0.clone()),
+        })
+    }
+
     fn grow_arrow(&self) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
@@ -862,6 +897,53 @@ impl PyCanvasAnim {
         self.require_selection_effect_slot("wave")?;
         Ok(Self {
             inner: self.inner.clone().wave(),
+        })
+    }
+
+    #[pyo3(signature = (style="fade"))]
+    fn reveal(&self, style: &str) -> PyResult<Self> {
+        use gaanim_api::canvas::FragmentRevealStyle;
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        let style = match style {
+            "fade" => FragmentRevealStyle::Fade,
+            "wipe" => FragmentRevealStyle::Wipe,
+            "from_below" => FragmentRevealStyle::FromBelow,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "unknown reveal style {other:?}; expected \"fade\", \"wipe\" or \"from_below\""
+                )))
+            }
+        };
+        self.require_selection_effect_slot("reveal")?;
+        Ok(Self {
+            inner: self.inner.clone().reveal(style),
+        })
+    }
+
+    #[pyo3(signature = (label="", *, above=false))]
+    fn brace(&self, label: &str, above: bool) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        self.require_selection_effect_slot("brace")?;
+        Ok(Self {
+            inner: self.inner.clone().brace(label, above),
+        })
+    }
+
+    #[pyo3(signature = (label, offset=(0.0, 0.6)))]
+    fn annotate(&self, label: &str, offset: (f64, f64)) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        if !offset.0.is_finite() || !offset.1.is_finite() {
+            return Err(PyValueError::new_err("annotate() offset must be finite"));
+        }
+        self.require_selection_effect_slot("annotate")?;
+        Ok(Self {
+            inner: self.inner.clone().annotate(
+                label,
+                gaanim_core::glam::DVec3::new(offset.0, offset.1, 0.0),
+            ),
         })
     }
 
@@ -1113,6 +1195,71 @@ mod tests {
         assert!(error_is::<PyValueError>(written.fill(white())));
         // Draw modifiers still configure the effect itself.
         assert!(written.stroke_width(0.05).is_ok());
+    }
+
+    #[test]
+    fn grow_effects_build_their_animation_types() {
+        let mut scene = SceneModel::new(640, 360);
+        let bar = PyCanvasAnim {
+            inner: scene.rect(1.0, 2.0).animate(),
+        };
+        let edge = bar
+            .grow_from_edge(&PyDirection(gaanim_layout::Direction::Down))
+            .unwrap();
+        assert!(matches!(
+            edge.inner.inner.anim_type,
+            AnimationType::GrowFromEdge { direction } if direction == gaanim_core::glam::DVec3::NEG_Y
+        ));
+        let point = bar.grow_from_point(2.0, 1.0).unwrap();
+        assert!(matches!(
+            point.inner.inner.anim_type,
+            AnimationType::GrowFromPoint { px: 2.0, py: 1.0 }
+        ));
+        assert!(error_is::<PyValueError>(bar.grow_from_point(f64::NAN, 0.0)));
+        assert!(error_is::<PyValueError>(point.grow_from_point(0.0, 0.0)));
+
+        let text = scene.text("uno dos");
+        let selection = PyCanvasAnim {
+            inner: text.select("uno").animate_properties(),
+        };
+        assert!(error_is::<PyTypeError>(selection.grow_from_point(0.0, 0.0)));
+    }
+
+    #[test]
+    fn selection_reveal_brace_and_annotate_are_selection_effects() {
+        use gaanim_api::anim::TextSelectionEffect;
+        let mut scene = SceneModel::new(640, 360);
+        let text = scene.text("E = m c^2");
+        let selection = PyCanvasAnim {
+            inner: text.select("m").animate_properties(),
+        };
+        let effect = |anim: PyCanvasAnim| match anim.inner.inner.anim_type {
+            AnimationType::TextSelection { effect, .. } => effect,
+            other => panic!("expected a selection effect, got {other:?}"),
+        };
+        assert!(matches!(
+            effect(selection.reveal("from_below").unwrap()),
+            TextSelectionEffect::RevealFromBelow
+        ));
+        assert!(matches!(
+            effect(selection.brace("masa", true).unwrap()),
+            TextSelectionEffect::Brace { label, above: true } if label == "masa"
+        ));
+        assert!(matches!(
+            effect(selection.annotate("c", (0.0, 0.6)).unwrap()),
+            TextSelectionEffect::Annotate { offset, .. } if offset.y == 0.6
+        ));
+        assert!(error_is::<PyValueError>(selection.reveal("slide")));
+        assert!(error_is::<PyValueError>(
+            selection.annotate("c", (f64::INFINITY, 0.0))
+        ));
+
+        let circle = PyCanvasAnim {
+            inner: scene.circle(1.0).animate(),
+        };
+        assert!(error_is::<PyTypeError>(circle.reveal("fade")));
+        assert!(error_is::<PyTypeError>(circle.brace("", false)));
+        assert!(error_is::<PyTypeError>(circle.annotate("x", (0.0, 0.6))));
     }
 }
 

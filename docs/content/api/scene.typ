@@ -547,6 +547,22 @@ scene.stop("comparison-ready")
 scene-space point before revealing the next segment. It is useful when a detail
 of the outgoing scene introduces the following section.
 
+`Transition.morph(duration, pairs=[(source, target), ...])` carries each pair
+across the cut: source and target share one bounding box that travels from the
+source's box to the target's, while the target fades in over the first half
+and the source fades out over the second, so a card can become the heading of
+the next slide. Unpaired content cross-fades. Declare the pairs with
+`scene.link` once both segments exist, because the target drawables belong to
+the incoming segment:
+
+```python
+overview = scene.segment("Overview")
+card = scene.geometry.rect(3, 2).fill(BLUE).move_to(-4, 0)
+detail = scene.segment("Detail")
+panel = scene.geometry.rect(12, 6).fill(BLUE).move_to(0, 0)
+scene.link(overview, detail, Transition.morph(0.8, pairs=[(card, panel)]))
+```
+
 == Cámara
 
 ```python

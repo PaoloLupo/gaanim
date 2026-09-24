@@ -92,12 +92,12 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
 
 | ☐ | ID | Ítem | Coste | Impacto | Depende | Issue |
 |---|---|---|---|---|---|---|
-| ☐ | [QW-01](#qw-01--honrar-writeby-order-stagger) | **Bug:** honrar `write(by=, order=, stagger=)` | S | ★★★ | — | [#114](https://github.com/PaoloLupo/gaanim/issues/114) |
-| ☐ | [QW-02](#qw-02--exponer-grow_from_point-y-grow_from_edge) | Exponer `grow_from_point` / `grow_from_edge` | S | ★ | — | [#116](https://github.com/PaoloLupo/gaanim/issues/116) |
-| ☐ | [QW-03](#qw-03--exponer-reveal-brace-y-annotate-en-selecciones-de-texto) | Exponer `reveal`/`brace`/`annotate` en selecciones de texto | S | ★★ | — | [#117](https://github.com/PaoloLupo/gaanim/issues/117) |
-| ☐ | [QW-04](#qw-04--exponer-transitionmorph) | Exponer `Transition.morph` | S | ★★ | — | [#118](https://github.com/PaoloLupo/gaanim/issues/118) |
-| ☐ | [QW-05](#qw-05--contrato-de-animpulsewavehighlightfocuscancel) | **Bug:** `Anim.pulse/wave/highlight/focus/cancel` sin guarda (panic) ni stub | S | ★ | — | [#115](https://github.com/PaoloLupo/gaanim/issues/115) |
-| ☐ | [QW-06](#qw-06--easingcustomcallable-muestreado) | `Easing.custom(callable)` muestreado | S | ★★ | — | [#119](https://github.com/PaoloLupo/gaanim/issues/119) |
+| ☑ | [QW-01](#qw-01--honrar-writeby-order-stagger) | **Bug:** honrar `write(by=, order=, stagger=)` | S | ★★★ | — | [#114](https://github.com/PaoloLupo/gaanim/issues/114) |
+| ☑ | [QW-02](#qw-02--exponer-grow_from_point-y-grow_from_edge) | Exponer `grow_from_point` / `grow_from_edge` | S | ★ | — | [#116](https://github.com/PaoloLupo/gaanim/issues/116) |
+| ☑ | [QW-03](#qw-03--exponer-reveal-brace-y-annotate-en-selecciones-de-texto) | Exponer `reveal`/`brace`/`annotate` en selecciones de texto | S | ★★ | — | [#117](https://github.com/PaoloLupo/gaanim/issues/117) |
+| ☑ | [QW-04](#qw-04--exponer-transitionmorph) | Exponer `Transition.morph` | S | ★★ | — | [#118](https://github.com/PaoloLupo/gaanim/issues/118) |
+| ☑ | [QW-05](#qw-05--contrato-de-animpulsewavehighlightfocuscancel) | **Bug:** `Anim.pulse/wave/highlight/focus/cancel` sin guarda (panic) ni stub | S | ★ | — | [#115](https://github.com/PaoloLupo/gaanim/issues/115) |
+| ☑ | [QW-06](#qw-06--easingcustomcallable-muestreado) | `Easing.custom(callable)` muestreado | S | ★★ | — | [#119](https://github.com/PaoloLupo/gaanim/issues/119) |
 
 ### Ola 1: cimientos de ritmo y movimiento
 

@@ -1770,9 +1770,9 @@ impl DrawableHandle {
         self.anim(AnimationType::GrowFromPoint { px, py })
     }
 
-    pub(crate) fn grow_from_edge(&self, dir: &str) -> Anim {
+    pub(crate) fn grow_from_edge(&self, direction: Direction) -> Anim {
         self.anim(AnimationType::GrowFromEdge {
-            direction: dir.to_string(),
+            direction: direction.to_vector(),
         })
     }
 

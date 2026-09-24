@@ -1983,6 +1983,19 @@ impl Anim {
         self.effect(AnimationType::ShrinkToCenter)
     }
 
+    /// Grow from zero scale while the world point `(px, py)` stays fixed.
+    pub fn grow_from_point(self, px: f64, py: f64) -> Self {
+        self.effect(AnimationType::GrowFromPoint { px, py })
+    }
+
+    /// Grow from zero scale while the bounds edge (or corner) in `direction`
+    /// stays fixed.
+    pub fn grow_from_edge(self, direction: Direction) -> Self {
+        self.effect(AnimationType::GrowFromEdge {
+            direction: direction.to_vector(),
+        })
+    }
+
     /// Grow an arrow from its tail with an undistorted, travelling head.
     pub fn grow_arrow(self) -> Self {
         self.effect(AnimationType::GrowArrow)
@@ -2051,6 +2064,33 @@ impl Anim {
 
     pub fn cancel(self) -> Self {
         self.selection_effect(crate::anim::TextSelectionEffect::Cancel)
+    }
+
+    /// Reveal the selected glyphs with a fade, a wipe, or a short rise.
+    pub fn reveal(self, style: crate::canvas::ops::FragmentRevealStyle) -> Self {
+        use crate::anim::TextSelectionEffect;
+        use crate::canvas::ops::FragmentRevealStyle;
+        self.selection_effect(match style {
+            FragmentRevealStyle::Fade => TextSelectionEffect::RevealFade,
+            FragmentRevealStyle::Wipe => TextSelectionEffect::RevealWipe,
+            FragmentRevealStyle::FromBelow => TextSelectionEffect::RevealFromBelow,
+        })
+    }
+
+    /// Draw a brace under (or over) the selection with an optional label.
+    pub fn brace(self, label: impl Into<String>, above: bool) -> Self {
+        self.selection_effect(crate::anim::TextSelectionEffect::Brace {
+            label: label.into(),
+            above,
+        })
+    }
+
+    /// Place `label` at `offset` from the selection center with a leader line.
+    pub fn annotate(self, label: impl Into<String>, offset: DVec3) -> Self {
+        self.selection_effect(crate::anim::TextSelectionEffect::Annotate {
+            label: label.into(),
+            offset,
+        })
     }
 
     /// Target a scalar Parameter/Variable value through the common proxy.

@@ -329,6 +329,21 @@ fn draw_item_slots(
     (ordered, slots)
 }
 
+/// World point of `bounds` that `grow_from_edge` keeps fixed: the edge
+/// midpoint for axis directions, the corner for diagonals, and the matching
+/// boundary point for any other 2D direction.
+fn grow_edge_anchor(
+    bounds: Bounds3D,
+    direction: gaanim_core::glam::DVec3,
+) -> gaanim_core::glam::DVec3 {
+    let reach = direction.x.abs().max(direction.y.abs());
+    if reach <= f64::EPSILON {
+        return bounds.center();
+    }
+    let unit = gaanim_core::glam::DVec3::new(direction.x / reach, direction.y / reach, 0.0);
+    bounds.center() + bounds.size() * 0.5 * unit
+}
+
 /// Stagger slot of each of `count` groups for `order`.
 fn draw_group_slots(count: usize, order: crate::anim::DrawOrder) -> Vec<usize> {
     use crate::anim::DrawOrder;
@@ -4909,7 +4924,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     fn play_grow_from_edge_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         let direction = match &anim.anim_type {
-            AnimationType::GrowFromEdge { direction } => direction.clone(),
+            AnimationType::GrowFromEdge { direction } => *direction,
             _ => return,
         };
 
@@ -4920,16 +4935,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         let target_scale = state.transform.scale;
         let target_pos = state.transform.translation;
-        let bounds = state.bounds;
-
-        let (edge_lx, edge_ly) = match direction.as_str() {
-            "up" | "top" => (0.0, bounds.max.y),
-            "down" | "bottom" => (0.0, bounds.min.y),
-            "left" => (bounds.min.x, 0.0),
-            "right" => (bounds.max.x, 0.0),
-            _ => (0.0, 0.0),
-        };
-        let edge_world = target_pos + gaanim_core::glam::DVec3::new(edge_lx, edge_ly, 0.0);
+        let edge_world = grow_edge_anchor(
+            gaanim_layout::transform_bounds(state.bounds, &state.transform),
+            direction,
+        );
 
         let from = gaanim_core::glam::DVec3::ZERO;
         state.transform.scale = from;
@@ -7470,6 +7479,22 @@ mod tests {
         sorted.sort_unstable();
         assert_eq!(sorted, (0..12).collect::<Vec<_>>());
         assert_ne!(random, (0..12).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn grow_edge_anchor_pins_edges_and_corners() {
+        use gaanim_core::glam::DVec3;
+        use gaanim_layout::Direction;
+        let bounds = Bounds3D::new_2d(-1.0, -2.0, 3.0, 4.0);
+        let anchor = |direction: Direction| grow_edge_anchor(bounds, direction.to_vector());
+        assert_eq!(anchor(Direction::Down), DVec3::new(1.0, -2.0, 0.0));
+        assert_eq!(anchor(Direction::Right), DVec3::new(3.0, 1.0, 0.0));
+        assert!(anchor(Direction::UpLeft).abs_diff_eq(DVec3::new(-1.0, 4.0, 0.0), 1e-12));
+        assert!(
+            anchor(Direction::Custom(DVec3::new(2.0, 1.0, 0.0)))
+                .abs_diff_eq(DVec3::new(3.0, 2.5, 0.0), 1e-12)
+        );
+        assert_eq!(anchor(Direction::Custom(DVec3::ZERO)), bounds.center());
     }
 
     #[test]

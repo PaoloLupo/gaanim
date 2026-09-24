@@ -32,8 +32,8 @@ un efecto después de un destino de propiedad o de otro efecto, como
 `dot.animate.move_to(1, 0).fade_in()`, o un destino de propiedad después de un
 efecto, como `dot.animate.fade_in().move_to(1, 0)`, lanza `ValueError`; combina
 animaciones separadas con `parallel()`. Los modificadores de tiempo y de trazo
-(`duration`, `easing`, `stroke_width`…) siguen configurando el efecto. `pulse`, `wave`, `highlight`, `focus` y `cancel`
-solo existen en selecciones de texto (`text["part"].animate.pulse()`); sobre el
+(`duration`, `easing`, `stroke_width`…) siguen configurando el efecto. `pulse`, `wave`, `highlight`, `focus`, `cancel`,
+`reveal`, `brace` y `annotate` solo existen en selecciones de texto (`text["part"].animate.pulse()`); sobre el
 `animate` de un `Drawable` lanzan `TypeError`.
 
 == Animaciones de propiedades compuestas
@@ -475,6 +475,36 @@ scene.render()
 ]
 
 #api-entry(
+  name: "Drawable.grow_from_edge / grow_from_point",
+  kind: "method",
+  signature: ".animate.grow_from_edge(direction) .animate.grow_from_point(x, y) -> Anim",
+  params: (
+    (name: "direction", type: "Direction", desc: [Lado de la caja que queda fijo. Las diagonales fijan una esquina.]),
+    (name: "x, y", type: "float", desc: [Punto de la escena que queda fijo.]),
+  ),
+  returns: (type: "Anim", desc: [Crecimiento desde escala cero.]),
+  desc: [Como `grow_from_center`, pero con otro punto fijo. `grow_from_edge`
+    usa la caja de límites en su posición final: `Direction.DOWN` fija el
+    punto medio del borde inferior, así una barra sube desde su base, y
+    `Direction.custom(x, y)` fija el punto correspondiente de la caja.
+    `grow_from_point` fija un punto arbitrario de la escena, por ejemplo el
+    origen de un callout. Ambos terminan en la posición y el tamaño
+    declarados. Easing por defecto: `Smooth`.],
+)[
+```python
+# show-code: true
+from gaanim import BLUE, CYAN, GOLD, Direction, Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+bars = [scene.geometry.rect(1.2, h).fill(c).move_to(x, h / 2 - 2) for x, h, c in [(-3, 2.5, BLUE), (-1.4, 4, CYAN), (0.2, 3, BLUE)]]
+badge = scene.geometry.circle(0.9).fill(GOLD).move_to(4, 1.5)
+scene.play([bar.animate.grow_from_edge(Direction.DOWN).duration(0.8) for bar in bars])
+scene.play([badge.animate.grow_from_point(2.5, 0).duration(0.6)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
   name: "Drawable.grow_arrow",
   kind: "method",
   signature: ".animate.grow_arrow() -> Anim",
@@ -848,10 +878,23 @@ El IDE puede navegar el catálogo sin recordar strings:
 - Familias de `EasingCurve`: `QUADRATIC`, `CUBIC`, `QUARTIC`, `QUINTIC`,
   `EXPONENTIAL`, `SINE`, `CIRCULAR`, `BACK`, `ELASTIC` y `BOUNCE`.
 - Fábricas: `ease_in`, `ease_out`, `ease_in_out`, `spring`, `steps`,
-  `mirror`, `there_and_back` y `cubic_bezier`.
+  `mirror`, `there_and_back`, `cubic_bezier` y `custom`.
 
 Las fábricas rechazan números no finitos y dominios inválidos. No se aceptan
 nombres de easing ni existe un fallback silencioso a `SMOOTH`.
+
+`Easing.custom(función, samples=256)` convierte cualquier curva de Python en un
+easing. La función se llama `samples` veces, en tiempos equiespaciados de 0 a 1,
+al crear el easing; el resultado es una tabla interpolada linealmente, así que
+el render nunca vuelve a Python y la vista previa, los seeks y la exportación
+coinciden. Los valores deben ser finitos y estar en `[-1, 2]` (se permite
+sobrepasar el destino); si no, o si `samples` no está en `[2, 65536]`, se lanza
+`ValueError`.
+
+```python
+salto = Easing.custom(lambda t: 1 - abs(math.cos(3 * math.pi * t)) * (1 - t) ** 2)
+scene.play(ball.animate.move_to(0, -2).duration(1.2).easing(salto))
+```
 
 #api-entry(
   name: "Anim timing",
