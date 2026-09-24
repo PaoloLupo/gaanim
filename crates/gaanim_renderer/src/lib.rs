@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 pub mod background;
+mod background_gpu;
 pub mod diagnostics;
 pub mod effects;
 pub mod lottie;
@@ -46,6 +47,9 @@ impl Plugin for GaanimRendererPlugin {
         if !app.is_plugin_added::<bevy_vello::VelloPlugin>() {
             app.add_plugins(bevy_vello::VelloPlugin::default());
         }
+
+        // Shader backgrounds render on the render device when one exists.
+        background_gpu::build(app);
 
         // Initialize the fragment retain cache
         app.init_resource::<pipeline::GaanimRenderCache>();
