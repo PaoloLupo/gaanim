@@ -1211,6 +1211,13 @@ pub(crate) fn structured_text_typst_source(
         format!("font: ({families}), ")
     };
     let hex = color_to_hex(color);
+    // Validated as a lowercase ISO 639 code, so it needs no escaping.
+    let lang = spec
+        .flow
+        .lang
+        .as_deref()
+        .map(|lang| format!(", lang: \"{lang}\""))
+        .unwrap_or_default();
     let content = structured_typst_content(spec, font_size);
     let content = format!("#align({alignment})[{content}]");
     let content = if let Some(max_lines) = spec.flow.max_lines {
@@ -1225,7 +1232,7 @@ pub(crate) fn structured_text_typst_source(
     };
     format!(
         "#set page(width: {page_width}, height: auto, margin: 0pt)\n\
-         #set text({font}fill: rgb(\"{hex}\"), dir: {direction}, hyphenate: {}{weight}{italic}{tracking})\n\
+         #set text({font}fill: rgb(\"{hex}\"), dir: {direction}, hyphenate: {}{lang}{weight}{italic}{tracking})\n\
          #set par(justify: {justify}, leading: {leading}pt)\n\
          {content}",
         spec.flow.hyphenate,
@@ -7261,6 +7268,7 @@ impl SceneModel {
                 prefix,
                 suffix,
                 invalid,
+                decimal_separator,
                 font_size,
                 font_family,
                 font_weight,
@@ -7289,16 +7297,19 @@ impl SceneModel {
                 let body = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
                 let size = font_size.unwrap_or(body.size);
                 let digit_family = font_family.as_ref().unwrap_or(&body.font_family);
-                let number = gaanim_animation::format_reactive_number(
-                    source
-                        .evaluate(builder.current_time, |logical| {
-                            values
-                                .iter()
-                                .find_map(|(id, value)| (*id == logical).then_some(*value))
-                        })
-                        .unwrap_or(f64::NAN),
-                    format,
-                    invalid,
+                let number = gaanim_animation::localize_decimal_separator(
+                    &gaanim_animation::format_reactive_number(
+                        source
+                            .evaluate(builder.current_time, |logical| {
+                                values
+                                    .iter()
+                                    .find_map(|(id, value)| (*id == logical).then_some(*value))
+                            })
+                            .unwrap_or(f64::NAN),
+                        format,
+                        invalid,
+                    ),
+                    *decimal_separator,
                 );
                 let text = format!("{prefix}{number}{suffix}");
                 let (path, bounds) = gaanim_animation::shape_readout_text_with_weight(
@@ -7382,6 +7393,7 @@ impl SceneModel {
                             prefix: prefix.clone(),
                             suffix: suffix.clone(),
                             invalid: invalid.clone(),
+                            decimal_separator: *decimal_separator,
                             font_family: digit_family.clone(),
                             font_weight: *font_weight,
                             font_size: size,
@@ -12045,6 +12057,44 @@ mod tests {
             "paragraph source should embed math, got {para}"
         );
         assert!(para.contains("#text(\"Hola \")"));
+        assert!(!para.contains("lang:"), "no lang unless requested: {para}");
+        let spanish = StructuredTextSpec::new(
+            vec!["Hola".into()],
+            None,
+            gaanim_text::prelude::TextStyle::default(),
+            gaanim_text::prelude::TextFlow {
+                hyphenate: true,
+                lang: Some("es".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let spanish = structured_text_typst_source(
+            &spanish,
+            Some(400.0),
+            32.0,
+            "New Computer Modern",
+            gaanim_core::peniko::Color::WHITE,
+        );
+        assert!(
+            spanish.contains("hyphenate: true, lang: \"es\""),
+            "{spanish}"
+        );
+        for invalid in ["", "e", "espa", "ES", "e\"s"] {
+            assert!(
+                StructuredTextSpec::new(
+                    vec!["Hola".into()],
+                    None,
+                    gaanim_text::prelude::TextStyle::default(),
+                    gaanim_text::prelude::TextFlow {
+                        lang: Some(invalid.into()),
+                        ..Default::default()
+                    },
+                )
+                .is_err(),
+                "{invalid:?} must be rejected"
+            );
+        }
         let txt = text_inline_typst_source("prueba $x^2$ fin", gaanim_core::peniko::Color::WHITE);
         assert!(txt.contains("$x^2$"));
         let txt2 =
@@ -12124,6 +12174,25 @@ mod tests {
                 }
             ) if *from == 0.0 && *to == 1.0
         )));
+    }
+
+    #[test]
+    fn readout_decimal_separator_reaches_the_compiled_text() {
+        let mut canvas = SceneModel::new(640, 360);
+        let number = canvas.reactive_readout(
+            gaanim_animation::ScalarSource::constant(3.14159),
+            ".2f",
+            "",
+            "",
+            "—",
+            None,
+        );
+        assert!(number.readout_decimal_separator('7').is_err());
+        number.readout_decimal_separator(',').unwrap();
+        let mut world = compile_canvas_for_layout(canvas);
+        let mut query = world.query::<&gaanim_animation::ReactiveReadout>();
+        let readout = query.single(&world).expect("exactly one compiled readout");
+        assert_eq!(readout.last_text, "3,14");
     }
 
     #[test]

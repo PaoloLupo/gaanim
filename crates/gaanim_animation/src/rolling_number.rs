@@ -526,6 +526,7 @@ mod tests {
                     prefix: String::new(),
                     suffix: String::new(),
                     invalid: "—".into(),
+                    decimal_separator: '.',
                     font_family: "sans-serif".into(),
                     font_weight: None,
                     font_size: 0.75,

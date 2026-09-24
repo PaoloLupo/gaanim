@@ -1610,16 +1610,20 @@ class TextFlow:
         overflow: TextOverflow = "clip",
         direction: TextDirection = "auto",
         hyphenate: bool = False,
+        lang: Optional[str] = None,
     ) -> None:
         """Configure wrapping and line composition inside a measured Text leaf.
 
         ``"auto"`` consumes the width offered by Layout v2 or the safe frame;
         ``False`` keeps one line except for explicit newlines; a number caps the
-        typographic width. Invalid widths, spacing, or line counts raise
-        ``ValueError``.
+        typographic width. ``lang`` is a lowercase ISO 639 code (``"es"``,
+        ``"en"``, …) that selects the hyphenation patterns used with
+        ``hyphenate=True``; ``None`` keeps Typst's English default. Invalid
+        widths, spacing, line counts, or language codes raise ``ValueError``.
 
         Example:
             flow = TextFlow(wrap="auto", align="justify", line_spacing=1.25)
+            spanish = TextFlow(wrap=4.0, align="justify", hyphenate=True, lang="es")
         """
         ...
 
@@ -2165,7 +2169,14 @@ class Axis:
         precision: int = 2,
         denominator: int = 4,
         pattern: Optional[str] = None,
-    ) -> Axis: ...
+    ) -> Axis:
+        """Return a copy with the given tick-number format.
+
+        ``precision`` applies to ``fixed``, ``scientific`` and ``percent``;
+        ``denominator`` to ``fraction`` and ``pi``. Negative numbers use the
+        typographic minus U+2212, and values that round to zero have no sign.
+        """
+        ...
     def label(
         self,
         text: str,
@@ -3489,9 +3500,14 @@ class Typography:
         overflow: Optional[TextOverflow] = None,
         direction: Optional[TextDirection] = None,
         hyphenate: Optional[bool] = None,
+        lang: Optional[str] = None,
         markup: Optional[bool] = None,
     ) -> Text:
         """Create structured vector text, paragraphs, mathematics, or mixed content.
+
+        ``lang`` (for example ``"es"``) selects language-specific hyphenation
+        and typography, as in ``TextFlow``; combine it with ``hyphenate=True``
+        for justified Spanish paragraphs.
 
         ``color`` accepts Color, CSS/hex strings, RGB/RGBA byte tuples, or
         None to inherit the style/theme color.
@@ -3599,6 +3615,8 @@ class Typography:
         weight: Optional[int] = None,
         style: Optional[TextStyle] = None,
         markup: Optional[bool] = None,
+        flow: Optional[TextFlow] = None,
+        line_spacing: Optional[float] = None,
     ) -> tuple[float, float]:
         """Measure laid-out text without spawning it.
 
@@ -3609,8 +3627,12 @@ class Typography:
         (weight, italic, spacing, …); ``size``, ``font``, ``weight`` and
         ``color`` override it. ``markup`` matches ``scene.text``: with markup
         on, ``*`` and ``_`` are markup and are not measured as characters;
-        ``None`` uses the theme's ``text_markup``. Empty content, an invalid weight or unbalanced markup
-        raise ``ValueError``.
+        ``None`` uses the theme's ``text_markup``. ``flow`` measures with a
+        ``TextFlow`` (alignment, line spacing, hyphenation, …); its ``"auto"``
+        wrap measures unwrapped because no layout width is offered. ``wrap``
+        and ``line_spacing`` override the flow. Empty content, an invalid
+        weight, an invalid line spacing or unbalanced markup raise
+        ``ValueError``.
 
         Example:
             width, height = scene.text.measure("PGA = 0.35 g", role="label")
@@ -3988,20 +4010,26 @@ class Visualization:
         omitted axes retain the default ``Re`` and ``Im`` titles.
         """
         ...
-    def readout(self, source: _ReactiveScalar | Callable[..., float], *, inputs: Sequence[Parameter | Variable | Computed | TimeInput] = (), label: Optional[str] = None, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[Color] = None, invalid: str = "invalid") -> Readout:
+    def readout(self, source: _ReactiveScalar | Callable[..., float], *, inputs: Sequence[Parameter | Variable | Computed | TimeInput] = (), label: Optional[str] = None, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[Color] = None, invalid: str = "invalid", decimal_separator: str = ".") -> Readout:
         """Create a native numeric display with equally spaced, baseline-aligned terms.
 
         The label, equality sign, number, and unit all use ``font_size``;
         omitting it selects the shared 0.48-unit reactive annotation size.
         ``color`` applies to the label, reactive value, and unit and remains in
         effect when the number changes or the timeline seeks.
+        ``decimal_separator`` replaces the ``.`` between integer and fractional
+        digits; ``","`` also turns ``,`` grouping into ``.`` (``1.234,50``).
+        It must be one character that is not a digit, sign, space, ``e`` or
+        ``%``; otherwise ``ValueError`` is raised.
         """
         ...
-    def variable(self, initial: float, *, label: str, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[Color] = None, invalid: str = "invalid") -> Variable:
+    def variable(self, initial: float, *, label: str, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[Color] = None, invalid: str = "invalid", decimal_separator: str = ".") -> Variable:
         """Create an animatable scalar displayed as an aligned equation row.
 
         Every visible term uses ``font_size``, or 0.48 units when omitted.
         ``color`` applies to every visible term, including the changing value.
+        ``decimal_separator`` works as in ``readout`` (for example ``","``
+        shows ``3,14``).
         """
         ...
     def number_line(
