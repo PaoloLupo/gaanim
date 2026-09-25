@@ -919,6 +919,8 @@ pub struct Segment {
     /// Post-processing while this segment is active; inherits the scene's by default.
     pub post_process: PostProcessOverride,
     pub(crate) stops: Vec<LocalSegmentStop>,
+    /// Named timeline markers as `(name, local time)`.
+    pub(crate) markers: Vec<(String, f64)>,
     pub explicit: bool,
     pub(crate) cursor: f64,
     pub(crate) ops: Vec<Op>,
@@ -940,6 +942,7 @@ impl Segment {
             background: None,
             post_process: PostProcessOverride::Inherit,
             stops: Vec::new(),
+            markers: Vec::new(),
             explicit: false,
             cursor: 0.0,
             ops: Vec::new(),
@@ -964,6 +967,7 @@ impl Segment {
             background,
             post_process: PostProcessOverride::Inherit,
             stops: Vec::new(),
+            markers: Vec::new(),
             explicit: true,
             cursor: 0.0,
             ops: Vec::new(),

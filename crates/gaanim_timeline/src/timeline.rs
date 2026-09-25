@@ -300,6 +300,17 @@ pub struct Timeline {
     pub scene_index: BTreeMap<OrderedFloat<f64>, SceneId>,
     /// Ordered list of connections between scenes.
     pub scene_connections: Vec<SceneConnection>,
+    /// Named instants authored with `scene.marker`, in time order.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub markers: Vec<TimelineMarker>,
+}
+
+/// A named instant on the global timeline, authored with `scene.marker`.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct TimelineMarker {
+    pub name: String,
+    pub time: f64,
 }
 
 impl Default for Timeline {
@@ -327,6 +338,7 @@ impl Default for Timeline {
             scenes: SlotMap::with_key(),
             scene_index: BTreeMap::new(),
             scene_connections: Vec::new(),
+            markers: Vec::new(),
         }
     }
 }
@@ -335,6 +347,20 @@ impl Timeline {
     /// Creates a new empty `Timeline`.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Replace the named markers compiled from the current canvas.
+    pub fn set_markers(&mut self, mut markers: Vec<TimelineMarker>) {
+        markers.sort_by(|left, right| left.time.total_cmp(&right.time));
+        self.markers = markers;
+    }
+
+    /// Absolute time of the marker named `name`.
+    pub fn marker_time(&self, name: &str) -> Option<f64> {
+        self.markers
+            .iter()
+            .find(|marker| marker.name == name)
+            .map(|marker| marker.time)
     }
 
     /// Replace the semantic segment metadata compiled from the current canvas.

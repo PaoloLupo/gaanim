@@ -856,6 +856,43 @@ def entrance(*items: Playable) -> Playable:
 ```
 ]
 
+=== Etiquetas y posiciones relativas
+
+#api-entry(
+  name: "label / Composition.insert",
+  kind: "function",
+  signature: "label(name: str) -> Composition | Composition.insert(item, at: str | float) -> Composition",
+  params: (
+    (name: "name", type: "str", default: none, desc: [Unique label name within the composition tree. Empty names, numbers and names starting with `<`, `>`, `+`, `-` or `=` raise `ValueError`.]),
+    (name: "item", type: "Anim | Audio | Video | VideoSegment | Lottie | Composition", default: none, desc: [Item placed at `at`; it may itself be a `label`, which later inserts can reference.]),
+    (name: "at", type: "str | float", default: none, desc: [`"name"`, `"name+0.15"`, `"name-0.2"` or `"name+=0.15"`: a label plus an offset. `"<"` / `">"` (also `"<+0.1"`, `">-0.2"`): start / end of the previous item, i.e. the most recent non-label insert or else the last child. `"+=0.3"` / `"-=0.3"`: relative to the current end. A number: absolute local seconds.]),
+  ),
+  returns: (type: "Composition", desc: [A new immutable tree; the original is unchanged.]),
+  desc: [A `label` is a zero-duration named instant. In a `sequence` it takes no step and no `gap`: it marks where the next step starts, or where the previous step ends when it is last. Positions resolve to absolute local times when the composition is scheduled or played; inserts go after the children and before `stretch`, `repeat` and `delay`. A malformed `at` raises `ValueError` immediately; an unknown label (the error lists the defined ones) or a position before 0 raises `ValueError` from `schedule()` or `scene.play`. An exact label name always wins, so `"part-2"` finds a label called `"part-2"`.],
+)[
+```python
+from gaanim import label, sequence
+
+intro = (
+    sequence(
+        title.animate.write().duration(0.8),
+        label("golpe"),
+        subtitle.animate.fade_in().duration(0.4),
+    )
+    .insert(logo.animate.grow_from_center(), at="golpe+0.15")
+    .insert(glow.animate.flash(), at="<")        # starts with the logo
+    .insert(footer.animate.fade_in(), at="-=0.2")  # overlaps the end
+)
+print(intro.schedule().labels)  # {'golpe': 0.8}
+scene.play(intro)
+```
+
+`Schedule.labels` is a `dict` of resolved label times in local seconds, in time
+order, including nested and inserted labels. A stretched composition scales
+them; a repeated one reports the first repetition. For named instants on the
+global timeline use `scene.marker` (see Escena).
+]
+
 == Tiempo y easing
 
 Configure any `Anim` fluently before passing to `play`:

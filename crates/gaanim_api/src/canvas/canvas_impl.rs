@@ -20,6 +20,7 @@ use gaanim_text::prelude::TextRole;
 use gaanim_timeline::transition::TransitionType;
 
 use crate::anim::{AnimationBuilder, AnimationType, BoundsTarget};
+use crate::canvas::SceneMarker;
 use crate::canvas::drawable::DrawableHandle;
 use crate::canvas::ops::{
     CameraBindingSpec, CameraBindingWindowSpec, CanvasCameraBindingKind, CanvasEndpoint, CanvasRay,
@@ -322,11 +323,15 @@ pub struct Composition {
     stretch: Option<f64>,
     /// Whole-composition repetitions and the gap between them, in seconds.
     repeat: Option<(u32, f64)>,
+    /// Items placed after the children at label-relative or absolute positions.
+    inserts: Vec<(Composition, InsertPosition)>,
 }
 
 #[derive(Debug, Clone)]
 enum CompositionNode {
     Leaf(Box<PlayItem>),
+    /// Zero-duration named instant, see [`Composition::label`].
+    Label(String),
     Parallel(Vec<Composition>),
     Sequence {
         children: Vec<Composition>,
@@ -483,6 +488,8 @@ pub struct ScheduleEntry {
 pub struct Schedule {
     pub entries: Vec<ScheduleEntry>,
     pub span: f64,
+    /// Resolved labels in time order, in the composition's local seconds.
+    pub labels: Vec<ScheduleLabel>,
 }
 
 #[derive(Debug, Clone)]
@@ -502,12 +509,13 @@ impl Composition {
             default_rate: None,
             stretch: None,
             repeat: None,
+            inserts: Vec::new(),
         }
     }
 
     fn branch(node: CompositionNode) -> Result<Self, PlayError> {
         let empty = match &node {
-            CompositionNode::Leaf(_) => false,
+            CompositionNode::Leaf(_) | CompositionNode::Label(_) => false,
             CompositionNode::Parallel(children)
             | CompositionNode::Sequence { children, .. }
             | CompositionNode::Stagger { children, .. } => children.is_empty(),
@@ -522,6 +530,7 @@ impl Composition {
             default_rate: None,
             stretch: None,
             repeat: None,
+            inserts: Vec::new(),
         })
     }
 
@@ -618,14 +627,16 @@ impl Composition {
     }
 
     fn contains_media(&self) -> bool {
-        match &self.node {
+        let node = match &self.node {
             CompositionNode::Leaf(item) => !matches!(item.as_ref(), PlayItem::Animation(_)),
+            CompositionNode::Label(_) => false,
             CompositionNode::Parallel(children)
             | CompositionNode::Sequence { children, .. }
             | CompositionNode::Stagger { children, .. } => {
                 children.iter().any(Self::contains_media)
             }
-        }
+        };
+        node || self.inserts.iter().any(|(item, _)| item.contains_media())
     }
 
     fn resolve(
@@ -633,14 +644,16 @@ impl Composition {
         inherited_duration: Option<f64>,
         inherited_rate: Option<RateFunc>,
         path: &mut Vec<usize>,
-    ) -> Result<Vec<ResolvedPlayItem>, PlayError> {
+    ) -> Result<Resolution, PlayError> {
         let duration = self.default_duration.or(inherited_duration);
         let rate = self.default_rate.clone().or(inherited_rate);
+        // Extent of the last non-label child, the reference of `<` and `>`.
+        let mut previous: Option<(f64, f64)> = None;
         let mut resolved = match &self.node {
             CompositionNode::Leaf(item) => {
                 let mut item = item.as_ref().clone();
                 if let PlayItem::Animation(anim) = &mut item {
-                    anim.apply_play_defaults(duration, rate);
+                    anim.apply_play_defaults(duration, rate.clone());
                     anim.apply_repeat();
                 }
                 let (start, item_duration) = match &mut item {
@@ -654,21 +667,35 @@ impl Composition {
                     PlayItem::VideoSegment(segment) => (0.0, Some(segment.interval.scene_end())),
                     PlayItem::Lottie(lottie) => (0.0, lottie.duration),
                 };
-                vec![ResolvedPlayItem {
-                    item,
-                    start,
-                    path: path.clone(),
-                    duration: item_duration,
-                }]
+                Resolution {
+                    items: vec![ResolvedPlayItem {
+                        item,
+                        start,
+                        path: path.clone(),
+                        duration: item_duration,
+                    }],
+                    labels: Vec::new(),
+                }
             }
+            CompositionNode::Label(name) => Resolution {
+                items: Vec::new(),
+                labels: vec![ScheduleLabel {
+                    name: name.clone(),
+                    time: 0.0,
+                }],
+            },
             CompositionNode::Parallel(children) => {
-                let mut items = Vec::new();
+                let mut tree = Resolution::default();
                 for (index, child) in children.iter().enumerate() {
                     path.push(index);
-                    items.extend(child.resolve(duration, rate.clone(), path)?);
+                    let child_tree = child.resolve(duration, rate.clone(), path)?;
                     path.pop();
+                    if !child.is_label() {
+                        previous = Some(child_tree.extent().unwrap_or((0.0, 0.0)));
+                    }
+                    tree.absorb(child_tree)?;
                 }
-                items
+                tree
             }
             CompositionNode::Stagger {
                 children,
@@ -687,70 +714,119 @@ impl Composition {
                         weights.into_iter().map(|weight| weight * span).collect()
                     }
                 };
-                let mut items = Vec::new();
+                let mut tree = Resolution::default();
                 for (index, child) in children.iter().enumerate() {
                     path.push(index);
-                    let mut child_items = child.resolve(duration, rate.clone(), path)?;
+                    let mut child_tree = child.resolve(duration, rate.clone(), path)?;
                     path.pop();
                     let offset = offsets[index];
-                    child_items.iter_mut().for_each(|item| item.start += offset);
-                    items.extend(child_items);
+                    child_tree.shift(offset);
+                    if !child.is_label() {
+                        previous = Some(child_tree.extent().unwrap_or((offset, offset)));
+                    }
+                    tree.absorb(child_tree)?;
                 }
-                items
+                tree
             }
             CompositionNode::Sequence { children, gap } => {
-                let mut items = Vec::new();
-                let mut cursor = 0.0;
+                let mut tree = Resolution::default();
+                // Labels take no step and no gap: they mark where the next
+                // step starts, or where the last one ends when trailing.
+                let mut pending_labels = Vec::new();
+                let mut last_step: Option<(f64, f64)> = None;
                 for (index, child) in children.iter().enumerate() {
                     path.push(index);
-                    let mut child_items = child.resolve(duration, rate.clone(), path)?;
+                    let mut child_tree = child.resolve(duration, rate.clone(), path)?;
                     path.pop();
-                    let child_span = resolved_span(&child_items);
-                    child_items.iter_mut().for_each(|item| item.start += cursor);
-                    items.extend(child_items);
-                    if index + 1 < children.len() {
-                        let next = cursor + child_span + *gap;
-                        if next + f64::EPSILON < cursor {
-                            return Err(PlayError::SequenceOverlapTooLarge);
-                        }
-                        cursor = next.max(cursor);
+                    if child.is_label() {
+                        pending_labels.push(child_tree);
+                        continue;
                     }
+                    let cursor = match last_step {
+                        None => 0.0,
+                        Some((start, span)) => {
+                            let next = start + span + *gap;
+                            if next + f64::EPSILON < start {
+                                return Err(PlayError::SequenceOverlapTooLarge);
+                            }
+                            next.max(start)
+                        }
+                    };
+                    for mut label in pending_labels.drain(..) {
+                        label.shift(cursor);
+                        tree.absorb(label)?;
+                    }
+                    let child_span = child_tree.span();
+                    child_tree.shift(cursor);
+                    previous = Some(child_tree.extent().unwrap_or((cursor, cursor)));
+                    tree.absorb(child_tree)?;
+                    last_step = Some((cursor, child_span));
                 }
-                items
+                let tail = last_step.map_or(0.0, |(start, span)| start + span);
+                for mut label in pending_labels {
+                    label.shift(tail);
+                    tree.absorb(label)?;
+                }
+                tree
             }
         };
+        if matches!(self.node, CompositionNode::Leaf(_)) {
+            previous = resolved.extent();
+        }
+        let child_count = match &self.node {
+            CompositionNode::Leaf(_) | CompositionNode::Label(_) => 0,
+            CompositionNode::Parallel(children)
+            | CompositionNode::Sequence { children, .. }
+            | CompositionNode::Stagger { children, .. } => children.len(),
+        };
+        for (index, (item, at)) in self.inserts.iter().enumerate() {
+            let time = at.resolve(&resolved.labels, previous, resolved.span())?;
+            path.push(child_count + index);
+            let mut tree = item.resolve(duration, rate.clone(), path)?;
+            path.pop();
+            tree.shift(time);
+            if !item.is_label() {
+                previous = Some(tree.extent().unwrap_or((time, time)));
+            }
+            resolved.absorb(tree)?;
+        }
 
         if let Some(target_span) = self.stretch {
             if resolved
+                .items
                 .iter()
                 .any(|item| !matches!(item.item, PlayItem::Animation(_)))
             {
                 return Err(PlayError::StretchContainsMedia);
             }
-            let current_span = resolved_span(&resolved);
+            let current_span = resolved.span();
             if current_span == 0.0 {
                 if target_span != 0.0 {
                     return Err(PlayError::CannotStretchZeroSpan);
                 }
             } else {
                 let factor = target_span / current_span;
-                for item in &mut resolved {
+                for item in &mut resolved.items {
                     item.start *= factor;
                     if let PlayItem::Animation(anim) = &mut item.item {
                         anim.inner.duration *= factor;
                         item.duration = Some(anim.inner.duration);
                     }
                 }
+                for label in &mut resolved.labels {
+                    label.time *= factor;
+                }
             }
         }
+        // Repetitions replay the items; labels keep their first-cycle time.
         if let Some((count, gap)) = self.repeat
             && count > 1
         {
-            let span = resolved_span(&resolved);
-            let first = resolved.clone();
+            let span = resolved.span();
+            let first = resolved.items.clone();
             for cycle in 1..count {
                 let offset = cycle as f64 * (span + gap);
-                resolved.extend(first.iter().map(|item| {
+                resolved.items.extend(first.iter().map(|item| {
                     let mut copy = item.clone();
                     copy.start += offset;
                     if let PlayItem::Animation(anim) = &copy.item {
@@ -760,9 +836,7 @@ impl Composition {
                 }));
             }
         }
-        resolved
-            .iter_mut()
-            .for_each(|item| item.start += self.delay);
+        resolved.shift(self.delay);
         Ok(resolved)
     }
 
@@ -792,6 +866,7 @@ impl Composition {
                 PlayItem::Animation(anim) => Some(anim),
                 _ => None,
             },
+            CompositionNode::Label(_) => None,
             CompositionNode::Parallel(children)
             | CompositionNode::Sequence { children, .. }
             | CompositionNode::Stagger { children, .. } => {
@@ -806,11 +881,17 @@ impl Composition {
         rate: Option<RateFunc>,
     ) -> Result<Vec<ResolvedPlayItem>, PlayError> {
         self.resolve(duration, rate, &mut Vec::new())
+            .map(|resolution| resolution.items)
     }
 
     pub fn schedule(&self, duration: Option<f64>) -> Result<Schedule, PlayError> {
-        let resolved = self.resolved(duration, None)?;
+        let Resolution {
+            items: resolved,
+            mut labels,
+        } = self.resolve(duration, None, &mut Vec::new())?;
+        labels.sort_by(|left, right| left.time.total_cmp(&right.time));
         Ok(Schedule {
+            labels,
             span: resolved_span(&resolved),
             entries: resolved
                 .into_iter()
@@ -823,6 +904,293 @@ impl Composition {
                 })
                 .collect(),
         })
+    }
+}
+
+// -- Timeline labels and relative positions (TM-05) --
+
+/// A named instant resolved by [`Composition::schedule`], in local seconds.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScheduleLabel {
+    pub name: String,
+    pub time: f64,
+}
+
+/// Where [`Composition::insert`] places an item, GSAP position style.
+#[derive(Debug, Clone, PartialEq)]
+pub enum InsertPosition {
+    /// Absolute local time in seconds (`0.5`).
+    At(f64),
+    /// A label reference with an optional offset: `"name"`, `"name+0.2"`,
+    /// `"name-0.2"`, `"name+=0.2"`. An exact label name always wins, so
+    /// names such as `"part-2"` stay usable.
+    Label(String),
+    /// Start of the previous child or insert plus an offset (`"<"`, `"<+0.1"`).
+    PreviousStart(f64),
+    /// End of the previous child or insert plus an offset (`">"`, `">-0.2"`).
+    PreviousEnd(f64),
+    /// Current composition end plus an offset (`"+=0.3"`, `"-=0.3"`).
+    End(f64),
+}
+
+fn invalid_position(position: &str, reason: &str) -> PlayError {
+    PlayError::InvalidInsertPosition(format!("{position:?}: {reason}"))
+}
+
+/// Signed offset such as `+0.2`, `-0.2`, `+=0.2` or `-=0.2`; empty is zero.
+fn parse_position_offset(text: &str) -> Option<f64> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Some(0.0);
+    }
+    let (sign, rest) = match text.as_bytes()[0] {
+        b'+' => (1.0, &text[1..]),
+        b'-' => (-1.0, &text[1..]),
+        _ => return None,
+    };
+    let rest = rest.strip_prefix('=').unwrap_or(rest).trim();
+    if rest.starts_with(['+', '-']) {
+        return None;
+    }
+    rest.parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .map(|value| sign * value)
+}
+
+impl InsertPosition {
+    /// An absolute local time; it must be finite and non-negative.
+    pub fn at(seconds: f64) -> Result<Self, PlayError> {
+        if !seconds.is_finite() || seconds < 0.0 {
+            return Err(invalid_position(
+                &seconds.to_string(),
+                "an absolute position must be a finite, non-negative number of seconds",
+            ));
+        }
+        Ok(Self::At(seconds))
+    }
+
+    /// Parse a GSAP-style position string. Label names are checked when the
+    /// composition is scheduled.
+    pub fn parse(text: &str) -> Result<Self, PlayError> {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return Err(invalid_position(text, "a position must not be empty"));
+        }
+        if let Some(rest) = trimmed.strip_prefix('<') {
+            return parse_position_offset(rest)
+                .map(Self::PreviousStart)
+                .ok_or_else(|| {
+                    invalid_position(
+                        text,
+                        "expected \"<\" or \"<\" plus an offset such as \"<+0.1\"",
+                    )
+                });
+        }
+        if let Some(rest) = trimmed.strip_prefix('>') {
+            return parse_position_offset(rest)
+                .map(Self::PreviousEnd)
+                .ok_or_else(|| {
+                    invalid_position(
+                        text,
+                        "expected \">\" or \">\" plus an offset such as \">-0.2\"",
+                    )
+                });
+        }
+        if trimmed.starts_with("+=") || trimmed.starts_with("-=") {
+            return parse_position_offset(trimmed)
+                .map(Self::End)
+                .ok_or_else(|| invalid_position(text, "expected \"+=seconds\" or \"-=seconds\""));
+        }
+        if trimmed.starts_with(['+', '-', '=']) {
+            return Err(invalid_position(
+                text,
+                "offsets relative to the end need \"+=seconds\" or \"-=seconds\"; \
+                 expected a label, \"<\", \">\" or seconds otherwise",
+            ));
+        }
+        if let Ok(seconds) = trimmed.parse::<f64>() {
+            if !seconds.is_finite() {
+                return Err(invalid_position(
+                    text,
+                    "an absolute position must be a finite number of seconds",
+                ));
+            }
+            return Ok(Self::At(seconds));
+        }
+        Ok(Self::Label(trimmed.to_owned()))
+    }
+
+    /// Absolute local time given the labels resolved so far, the extent of
+    /// the previous child or insert and the current span.
+    fn resolve(
+        &self,
+        labels: &[ScheduleLabel],
+        previous: Option<(f64, f64)>,
+        span: f64,
+    ) -> Result<f64, PlayError> {
+        let time = match self {
+            Self::At(seconds) => *seconds,
+            Self::PreviousStart(offset) => previous.map_or(0.0, |(start, _)| start) + offset,
+            Self::PreviousEnd(offset) => previous.map_or(0.0, |(_, end)| end) + offset,
+            Self::End(offset) => span + offset,
+            Self::Label(text) => Self::resolve_label(text, labels)?,
+        };
+        if time < -1e-9 {
+            return Err(invalid_position(
+                &self.describe(),
+                &format!("resolves to {time:.3}s, before the composition start"),
+            ));
+        }
+        Ok(time.max(0.0))
+    }
+
+    fn resolve_label(text: &str, labels: &[ScheduleLabel]) -> Result<f64, PlayError> {
+        let find = |name: &str| labels.iter().find(|label| label.name == name);
+        if let Some(label) = find(text) {
+            return Ok(label.time);
+        }
+        let mut name = text;
+        for (index, character) in text.char_indices().skip(1) {
+            if !matches!(character, '+' | '-') {
+                continue;
+            }
+            let (head, tail) = text.split_at(index);
+            if head.trim().is_empty() {
+                continue;
+            }
+            if let Some(offset) = parse_position_offset(tail) {
+                name = head.trim();
+                if let Some(label) = find(name) {
+                    return Ok(label.time + offset);
+                }
+                break;
+            }
+        }
+        let mut known: Vec<&str> = labels.iter().map(|label| label.name.as_str()).collect();
+        known.sort_unstable();
+        Err(PlayError::UnknownLabel {
+            name: name.to_owned(),
+            known: if known.is_empty() {
+                "none".to_owned()
+            } else {
+                known
+                    .iter()
+                    .map(|name| format!("{name:?}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            },
+        })
+    }
+
+    fn describe(&self) -> String {
+        let signed = |offset: f64| {
+            if offset == 0.0 {
+                String::new()
+            } else if offset > 0.0 {
+                format!("+{offset}")
+            } else {
+                offset.to_string()
+            }
+        };
+        match self {
+            Self::At(seconds) => seconds.to_string(),
+            Self::Label(text) => text.clone(),
+            Self::PreviousStart(offset) => format!("<{}", signed(*offset)),
+            Self::PreviousEnd(offset) => format!(">{}", signed(*offset)),
+            Self::End(offset) if *offset < 0.0 => format!("-={}", -offset),
+            Self::End(offset) => format!("+={offset}"),
+        }
+    }
+}
+
+/// Resolved leaves and labels of one composition subtree.
+#[derive(Debug, Clone, Default)]
+struct Resolution {
+    items: Vec<ResolvedPlayItem>,
+    labels: Vec<ScheduleLabel>,
+}
+
+impl Resolution {
+    fn shift(&mut self, offset: f64) {
+        self.items.iter_mut().for_each(|item| item.start += offset);
+        self.labels
+            .iter_mut()
+            .for_each(|label| label.time += offset);
+    }
+
+    fn span(&self) -> f64 {
+        resolved_span(&self.items)
+    }
+
+    /// First start and last end of the resolved leaves.
+    fn extent(&self) -> Option<(f64, f64)> {
+        let start = self
+            .items
+            .iter()
+            .map(|item| item.start)
+            .min_by(f64::total_cmp)?;
+        let end = self
+            .items
+            .iter()
+            .map(|item| item.start + item.duration.unwrap_or(0.0))
+            .fold(start, f64::max);
+        Some((start, end))
+    }
+
+    fn absorb(&mut self, other: Resolution) -> Result<(), PlayError> {
+        for label in &other.labels {
+            if self.labels.iter().any(|known| known.name == label.name) {
+                return Err(PlayError::DuplicateLabel(label.name.clone()));
+            }
+        }
+        self.items.extend(other.items);
+        self.labels.extend(other.labels);
+        Ok(())
+    }
+}
+
+impl Composition {
+    /// A zero-duration named instant for `sequence`/`parallel`/`stagger`.
+    ///
+    /// In a sequence a label takes no step and no gap: it marks where the
+    /// next step starts, or where the last one ends when it is trailing.
+    pub fn label(name: impl Into<String>) -> Result<Self, PlayError> {
+        let name = name.into().trim().to_owned();
+        if name.is_empty() {
+            return Err(PlayError::EmptyLabel);
+        }
+        if name.parse::<f64>().is_ok() || name.starts_with(['<', '>', '+', '-', '=']) {
+            return Err(PlayError::InvalidLabel(name));
+        }
+        Ok(Self {
+            node: CompositionNode::Label(name),
+            delay: 0.0,
+            default_duration: None,
+            default_rate: None,
+            stretch: None,
+            repeat: None,
+            inserts: Vec::new(),
+        })
+    }
+
+    /// Place `item` at `at`, resolved against this composition's labels and
+    /// children when it is scheduled. Inserted labels become referable by
+    /// later inserts; `<`/`>` refer to the most recent non-label insert, or
+    /// the last child before any insert.
+    pub fn insert(mut self, item: Composition, at: InsertPosition) -> Result<Self, PlayError> {
+        if self.repeat.is_some() && item.contains_media() {
+            return Err(PlayError::RepeatContainsMedia);
+        }
+        if self.stretch.is_some() && item.contains_media() {
+            return Err(PlayError::StretchContainsMedia);
+        }
+        self.inserts.push((item, at));
+        Ok(self)
+    }
+
+    fn is_label(&self) -> bool {
+        matches!(self.node, CompositionNode::Label(_)) && self.inserts.is_empty()
     }
 }
 
@@ -954,6 +1322,18 @@ pub enum PlayError {
     StretchContainsMedia,
     #[error("a zero-span composition can only be stretched to zero seconds")]
     CannotStretchZeroSpan,
+    #[error("label names must not be empty")]
+    EmptyLabel,
+    #[error(
+        "invalid label name {0:?}: labels cannot be numbers or start with '<', '>', '+', '-' or '='"
+    )]
+    InvalidLabel(String),
+    #[error("label {0:?} is defined more than once in the same composition")]
+    DuplicateLabel(String),
+    #[error("unknown label {name:?}; defined labels: {known}")]
+    UnknownLabel { name: String, known: String },
+    #[error("invalid insert position {0}")]
+    InvalidInsertPosition(String),
 }
 
 fn animation_channels(anim: &Anim) -> Vec<String> {
@@ -2225,6 +2605,8 @@ impl SceneModel {
         let id = guard.next_segment_id();
         let mut segment = Segment::new(id, name, notes, template.clone(), background);
         if replace_implicit {
+            // Markers authored at t=0 before the first segment belong to it.
+            segment.markers = std::mem::take(&mut guard.segments[0].markers);
             guard.segments[0] = segment;
             guard.active_idx = 0;
         } else {
@@ -4696,6 +5078,61 @@ impl SceneModel {
         segment.stops.push(LocalSegmentStop { name, time });
         segment.ops.push(Op::Stop);
         Ok(())
+    }
+
+    /// Name the current cursor on the global timeline (TM-05).
+    ///
+    /// Markers are pure metadata: they neither pause playback nor move the
+    /// cursor. Names are unique, trimmed and must not parse as a number so
+    /// `gaanim export --from/--to` can accept either seconds or a marker.
+    pub fn marker(&mut self, name: impl Into<String>) -> Result<(), SegmentError> {
+        let name = name.into().trim().to_string();
+        if name.is_empty() {
+            return Err(SegmentError::EmptyMarkerName);
+        }
+        if name.parse::<f64>().is_ok() {
+            return Err(SegmentError::NumericMarkerName { name });
+        }
+        if let Some(existing) = self
+            .markers()
+            .into_iter()
+            .find(|marker| marker.name == name)
+        {
+            return Err(SegmentError::DuplicateMarker {
+                name,
+                time: existing.time,
+            });
+        }
+        let mut state = self.state.lock().expect("canvas state poisoned");
+        let segment = state.active_mut();
+        let time = segment.cursor;
+        segment.markers.push((name, time));
+        Ok(())
+    }
+
+    /// Markers authored so far, in timeline order, with absolute times.
+    pub fn markers(&self) -> Vec<SceneMarker> {
+        let state = self.state.lock().expect("canvas state poisoned");
+        let mut start_time = 0.0;
+        let mut markers = Vec::new();
+        for segment in &state.segments {
+            markers.extend(segment.markers.iter().map(|(name, time)| SceneMarker {
+                name: name.clone(),
+                time: start_time + time,
+                segment: segment.name.clone(),
+            }));
+            start_time += segment.cursor;
+        }
+        markers.sort_by(|left, right| left.time.total_cmp(&right.time));
+        markers
+    }
+
+    /// Absolute time of the marker named `name`, if it exists.
+    pub fn marker_time(&self, name: &str) -> Option<f64> {
+        self.markers()
+            .into_iter()
+            .find(|marker| marker.name == name.trim())
+            .map(|marker| marker.time)
     }
 
     /// Return all segment metadata with local cursors converted to absolute time.
@@ -10199,6 +10636,265 @@ mod tests {
         assert_eq!(schedule.entries[1].start, 0.75);
         assert_eq!(schedule.entries[2].start, 0.75);
         assert_eq!(scene.current_time(), 0.0);
+    }
+
+    // -- TM-05: labels, relative positions and scene markers --
+
+    fn assert_close(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() < 1e-9,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    fn fade(scene: &mut SceneModel, seconds: f64) -> Composition {
+        Composition::leaf(scene.circle(10.0).animate().fade_in().duration(seconds))
+    }
+
+    fn at(position: &str) -> InsertPosition {
+        InsertPosition::parse(position).unwrap()
+    }
+
+    #[test]
+    fn composition_labels_resolve_gsap_style_positions() {
+        let mut scene = SceneModel::new(320, 180);
+        let title = fade(&mut scene, 0.8);
+        let subtitle = fade(&mut scene, 0.4);
+        let plan = Composition::sequence(
+            vec![title, Composition::label("golpe").unwrap(), subtitle],
+            0.1,
+        )
+        .unwrap()
+        .insert(fade(&mut scene, 1.0), at("golpe+0.15"))
+        .unwrap()
+        .insert(fade(&mut scene, 0.5), at("<"))
+        .unwrap()
+        .insert(fade(&mut scene, 0.2), at("-=0.3"))
+        .unwrap()
+        .insert(fade(&mut scene, 0.2), at(">+0.1"))
+        .unwrap()
+        .insert(fade(&mut scene, 0.2), at("<+=0.05"))
+        .unwrap()
+        .insert(fade(&mut scene, 0.2), at("+=0.5"))
+        .unwrap()
+        .insert(fade(&mut scene, 0.2), InsertPosition::at(0.25).unwrap())
+        .unwrap();
+        let schedule = plan.schedule(None).unwrap();
+        // The label takes no gap: it marks where the subtitle starts.
+        assert_eq!(schedule.labels.len(), 1);
+        assert_eq!(schedule.labels[0].name, "golpe");
+        assert_close(schedule.labels[0].time, 0.9);
+        let starts: Vec<f64> = schedule.entries.iter().map(|entry| entry.start).collect();
+        let expected = [0.0, 0.9, 1.05, 1.05, 1.75, 2.05, 2.1, 2.8, 0.25];
+        for (actual, expected) in starts.iter().zip(expected) {
+            assert_close(*actual, expected);
+        }
+        // Inserted items follow the children in path order.
+        assert_eq!(schedule.entries[2].path, vec![3]);
+        assert_close(schedule.span, 3.0);
+        assert_eq!(scene.current_time(), 0.0);
+    }
+
+    #[test]
+    fn composition_labels_nest_shift_and_stretch() {
+        let mut scene = SceneModel::new(320, 180);
+        let inner = Composition::sequence(
+            vec![
+                fade(&mut scene, 1.0),
+                Composition::label("mid").unwrap(),
+                fade(&mut scene, 1.0),
+                Composition::label("tail").unwrap(),
+            ],
+            0.0,
+        )
+        .unwrap();
+        let first = fade(&mut scene, 0.5);
+        let plan = Composition::sequence(
+            vec![Composition::label("start").unwrap(), first, inner],
+            0.0,
+        )
+        .unwrap()
+        .insert(Composition::label("late").unwrap(), at("tail-0.25"))
+        .unwrap()
+        .insert(fade(&mut scene, 0.5), at("late"))
+        .unwrap()
+        .delay(1.0)
+        .unwrap();
+        let labels = plan.schedule(None).unwrap().labels;
+        let times: Vec<(&str, f64)> = labels
+            .iter()
+            .map(|label| (label.name.as_str(), label.time))
+            .collect();
+        assert_eq!(
+            times,
+            vec![("start", 1.0), ("mid", 2.5), ("late", 3.25), ("tail", 3.5)]
+        );
+        let stretched = Composition::parallel(vec![
+            fade(&mut scene, 2.0),
+            Composition::label("half").unwrap().delay(1.0).unwrap(),
+        ])
+        .unwrap()
+        .stretch(4.0)
+        .unwrap()
+        .repeat(2, 0.0)
+        .unwrap();
+        let schedule = stretched.schedule(None).unwrap();
+        assert_eq!(schedule.labels.len(), 1);
+        assert_close(schedule.labels[0].time, 2.0);
+        assert_close(schedule.span, 8.0);
+    }
+
+    #[test]
+    fn composition_label_errors_are_clear() {
+        let mut scene = SceneModel::new(320, 180);
+        assert!(matches!(
+            Composition::label("  "),
+            Err(PlayError::EmptyLabel)
+        ));
+        assert!(matches!(
+            Composition::label("1.5"),
+            Err(PlayError::InvalidLabel(_))
+        ));
+        for malformed in [
+            "", "  ", "<x", ">+", "+=abc", "-=-1", "-1", "=a", "+0.2", "nan",
+        ] {
+            assert!(
+                matches!(
+                    InsertPosition::parse(malformed),
+                    Err(PlayError::InvalidInsertPosition(_))
+                ),
+                "{malformed:?} should be rejected"
+            );
+        }
+        assert!(InsertPosition::at(-0.1).is_err());
+
+        let base = Composition::sequence(
+            vec![fade(&mut scene, 1.0), Composition::label("hit").unwrap()],
+            0.0,
+        )
+        .unwrap();
+        let unknown = base
+            .clone()
+            .insert(fade(&mut scene, 1.0), at("missing+0.2"))
+            .unwrap();
+        let error = unknown.schedule(None).unwrap_err();
+        assert_eq!(
+            error,
+            PlayError::UnknownLabel {
+                name: "missing".into(),
+                known: "\"hit\"".into()
+            }
+        );
+        assert!(error.to_string().contains("unknown label \"missing\""));
+        let before_start = base
+            .clone()
+            .insert(fade(&mut scene, 1.0), at("hit-2"))
+            .unwrap();
+        assert!(matches!(
+            before_start.schedule(None),
+            Err(PlayError::InvalidInsertPosition(message)) if message.contains("before the composition start")
+        ));
+        let duplicate =
+            Composition::parallel(vec![base.clone(), Composition::label("hit").unwrap()]).unwrap();
+        assert_eq!(
+            duplicate.schedule(None).unwrap_err(),
+            PlayError::DuplicateLabel("hit".into())
+        );
+    }
+
+    #[test]
+    fn composition_exact_label_names_win_over_offsets() {
+        let mut scene = SceneModel::new(320, 180);
+        let plan = Composition::sequence(
+            vec![
+                fade(&mut scene, 1.0),
+                Composition::label("part-2").unwrap(),
+                fade(&mut scene, 1.0),
+                Composition::label("intro-end").unwrap(),
+            ],
+            0.0,
+        )
+        .unwrap()
+        .insert(fade(&mut scene, 0.1), at("part-2"))
+        .unwrap()
+        .insert(fade(&mut scene, 0.1), at("part-2+0.5"))
+        .unwrap()
+        .insert(fade(&mut scene, 0.1), at("intro-end-=0.25"))
+        .unwrap();
+        let starts: Vec<f64> = plan
+            .schedule(None)
+            .unwrap()
+            .entries
+            .iter()
+            .map(|entry| entry.start)
+            .collect();
+        for (actual, expected) in starts.iter().zip([0.0, 1.0, 1.0, 1.5, 1.75]) {
+            assert_close(*actual, expected);
+        }
+    }
+
+    #[test]
+    fn composition_labels_play_like_their_resolved_schedule() {
+        let mut scene = SceneModel::new(320, 180);
+        let plan = Composition::sequence(
+            vec![fade(&mut scene, 1.0), Composition::label("hit").unwrap()],
+            0.0,
+        )
+        .unwrap()
+        .insert(fade(&mut scene, 0.5), at("hit+0.5"))
+        .unwrap();
+        let span = plan.schedule(None).unwrap().span;
+        scene.play_composition_configured(plan, None, None).unwrap();
+        assert_close(span, 2.0);
+        assert_close(scene.current_time(), 2.0);
+    }
+
+    #[test]
+    fn scene_markers_are_absolute_unique_and_segment_aware() {
+        let mut scene = SceneModel::new(320, 180);
+        scene.marker("intro").unwrap();
+        scene.segment("first", None).unwrap();
+        scene.wait(1.5);
+        scene.marker(" climax ").unwrap();
+        scene.segment("second", None).unwrap();
+        scene.wait(0.5);
+        scene.marker("fin").unwrap();
+        let markers = scene.markers();
+        let summary: Vec<(&str, f64, &str)> = markers
+            .iter()
+            .map(|marker| (marker.name.as_str(), marker.time, marker.segment.as_str()))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                ("intro", 0.0, "first"),
+                ("climax", 1.5, "first"),
+                ("fin", 2.0, "second")
+            ]
+        );
+        assert_eq!(scene.marker_time("fin"), Some(2.0));
+        assert_eq!(scene.marker_time("missing"), None);
+        assert!(matches!(
+            scene.marker("climax"),
+            Err(SegmentError::DuplicateMarker { .. })
+        ));
+        assert!(matches!(
+            scene.marker("12.5"),
+            Err(SegmentError::NumericMarkerName { .. })
+        ));
+        assert!(matches!(
+            scene.marker(""),
+            Err(SegmentError::EmptyMarkerName)
+        ));
+        // Markers are metadata: they neither move the cursor nor add stops.
+        assert_eq!(scene.current_time(), 2.0);
+        assert!(
+            scene
+                .segment_manifest()
+                .segments
+                .iter()
+                .all(|segment| segment.stops.is_empty())
+        );
     }
 
     #[test]
