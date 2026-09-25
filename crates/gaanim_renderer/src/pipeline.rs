@@ -293,33 +293,90 @@ fn stacked_render_order(
     RenderOrder { z_index, ..own }
 }
 
+/// World rectangle of the opacity layer that composites an element.
+///
+/// Vello records every layer in each tile its clip covers, so frame-sized
+/// clips for hundreds of translucent elements overflow its fixed tile command
+/// buffer and the frame renders black. The layer therefore covers only what
+/// the element draws: `extent` (see [`fragment_extent`]) when known, else its
+/// world bounds, plus an antialiasing `margin`.
 fn opacity_layer_bounds(
+    extent: Option<(kurbo::Rect, f64)>,
     world_bounds: Option<&WorldBounds>,
     fallback: kurbo::Rect,
+    margin: f64,
+) -> kurbo::Rect {
+    let (rect, reach) = extent.unwrap_or_else(|| {
+        let rect = world_bounds
+            .map(|bounds| {
+                kurbo::Rect::new(
+                    bounds.0.min.x,
+                    bounds.0.min.y,
+                    bounds.0.max.x,
+                    bounds.0.max.y,
+                )
+            })
+            .filter(|rect| rect.width().is_finite() && rect.height().is_finite())
+            .unwrap_or(fallback);
+        (rect, 0.0)
+    });
+    let padding = reach + margin;
+    if !padding.is_finite() {
+        return fallback;
+    }
+    rect.inflate(padding, padding)
+}
+
+/// World bounding box of a fragment's visible path, and how far its strokes
+/// and effects can reach beyond it. `None` for an empty path.
+///
+/// Uses the drawn path rather than `WorldBounds`: bounds are not refreshed
+/// while a timeline lens morphs or regenerates the path.
+fn fragment_extent(
+    path: &kurbo::BezPath,
+    transform: kurbo::Affine,
+    stroke: Option<&kurbo::Stroke>,
+    stroke_view: Option<kurbo::Affine>,
     shadow: Option<&DropShadow>,
     glow: Option<&Glow>,
     blur: Option<&GaussianBlur>,
-) -> kurbo::Rect {
-    let mut rect = world_bounds
-        .map(|bounds| {
-            kurbo::Rect::new(
-                bounds.0.min.x,
-                bounds.0.min.y,
-                bounds.0.max.x,
-                bounds.0.max.y,
-            )
-        })
-        .filter(|rect| rect.width().is_finite() && rect.height().is_finite())
-        .unwrap_or(fallback);
-
-    let blur_padding = blur.map_or(0.0, |blur| blur.sigma.max(0.0) * 3.0);
-    let glow_padding = glow.map_or(0.0, |glow| glow.radius.max(0.0));
-    let shadow_padding = shadow.map_or(0.0, |shadow| {
+) -> Option<(kurbo::Rect, f64)> {
+    if path.elements().is_empty() {
+        return None;
+    }
+    let rect = transform.transform_rect_bbox(kurbo::Shape::bounding_box(path));
+    // Square caps reach half the width diagonally; miter joins up to the limit.
+    let stroke_reach = stroke.map_or(0.0, |stroke| {
+        let corner = match stroke.join {
+            kurbo::Join::Miter => stroke.miter_limit.max(std::f64::consts::SQRT_2),
+            _ => std::f64::consts::SQRT_2,
+        };
+        stroke.width.abs() * 0.5 * corner
+    });
+    let glow_reach = glow.map_or(0.0, |glow| glow.radius.max(0.0));
+    let blur_reach = blur.map_or(0.0, |blur| blur.sigma.max(0.0) * 3.0);
+    let shadow_reach = shadow.map_or(0.0, |shadow| {
         shadow.blur_radius.max(0.0) * 3.0 + shadow.offset.abs().max_element()
     });
-    let padding = blur_padding.max(glow_padding).max(shadow_padding) + 1.0;
-    rect = rect.inflate(padding, padding);
-    rect
+    // Frobenius norms bound the largest stretch of the geometry and of a
+    // coordinate view's stroke pen.
+    let norm = |affine: kurbo::Affine| {
+        let [a, b, c, d, _, _] = affine.as_coeffs();
+        (a * a + b * b + c * c + d * d).sqrt()
+    };
+    let scale = stroke_view.map_or(norm(transform), |view| {
+        norm(transform).max(norm(transform * view.inverse()))
+    });
+    let reach = (stroke_reach + glow_reach + blur_reach + shadow_reach) * scale;
+    Some((rect, reach))
+}
+
+/// Two output pixels in world units, the antialiasing margin of opacity
+/// layers. One world unit when the pixel density is unknown.
+fn antialias_margin(pixels_per_unit: Option<f64>) -> f64 {
+    pixels_per_unit
+        .filter(|density| density.is_finite() && *density > 0.0)
+        .map_or(1.0, |density| 2.0 / density)
 }
 
 fn opacity_run_end(elements: &[ExtractedElement], start: usize) -> usize {
@@ -338,6 +395,15 @@ fn opacity_run_end(elements: &[ExtractedElement], start: usize) -> usize {
         end += 1;
     }
     end
+}
+
+/// Clip of the layer shared by an opacity run: the union of what its
+/// elements draw.
+fn opacity_run_bounds(run: &[ExtractedElement]) -> kurbo::Rect {
+    run.iter()
+        .map(|element| element.opacity_bounds)
+        .reduce(|bounds, next| bounds.union(next))
+        .unwrap_or(kurbo::Rect::ZERO)
 }
 
 /// End of the run of elements clipped by the same non-inverted mask sources.
@@ -369,7 +435,6 @@ fn shared_clip_run_end(elements: &[ExtractedElement], start: usize) -> usize {
 fn append_extracted_elements(
     main_scene: &mut vello::Scene,
     elements: &[ExtractedElement],
-    composition_bounds: kurbo::Rect,
     transition: Option<&gaanim_scene::SceneTransitionFrame>,
 ) {
     let mut index = 0;
@@ -386,7 +451,7 @@ fn append_extracted_elements(
         if let Some(mask) = mask {
             push_transition_mask(main_scene, mask);
         }
-        append_element_run(main_scene, &elements[index..end], composition_bounds);
+        append_element_run(main_scene, &elements[index..end]);
         if let Some(mask) = mask {
             pop_transition_mask(main_scene, mask);
         }
@@ -490,11 +555,7 @@ fn fill_transition_background(
     pop_transition_mask(scene, mask);
 }
 
-fn append_element_run(
-    main_scene: &mut vello::Scene,
-    elements: &[ExtractedElement],
-    composition_bounds: kurbo::Rect,
-) {
+fn append_element_run(main_scene: &mut vello::Scene, elements: &[ExtractedElement]) {
     let mut index = 0;
     while let Some(elem) = elements.get(index) {
         if !elem.opacity.is_finite() || elem.opacity <= 0.0 {
@@ -509,7 +570,7 @@ fn append_element_run(
                 peniko::BlendMode::default(),
                 elem.opacity.clamp(0.0, 1.0),
                 kurbo::Affine::IDENTITY,
-                &composition_bounds,
+                &opacity_run_bounds(&elements[index..end]),
             );
             for grouped in &elements[index..end] {
                 main_scene.append(&grouped.scene, Some(grouped.transform));
@@ -1239,6 +1300,15 @@ pub fn compile_scene_from_world(
             )
         })
         .unwrap_or_else(|| kurbo::Rect::new(-4096.0, -4096.0, 4096.0, 4096.0));
+    let output_width = world
+        .get_resource::<CanvasBackground>()
+        .map(|background| f64::from(background.pixel_size.0));
+    let antialias = antialias_margin(camera.and_then(|cam| match cam.projection {
+        gaanim_math::Projection::Orthographic { zoom } => {
+            output_width.map(|width| width * zoom / cam.frame_width)
+        }
+        _ => None,
+    }));
 
     let cam_bounds = camera.and_then(|cam| {
         if let gaanim_math::Projection::Orthographic { zoom } = cam.projection {
@@ -1527,16 +1597,30 @@ pub fn compile_scene_from_world(
         while let Ok(child_of) = child_query.get(world, opacity_group) {
             opacity_group = child_of.parent();
         }
+        // Only translucent elements open a layer; a Lottie draws geometry
+        // that `Path2D` does not describe.
+        let opacity_bounds = if global_opacity.0 >= 1.0 || lottie_opt.is_some() {
+            opacity_fallback
+        } else {
+            opacity_layer_bounds(
+                fragment_extent(
+                    elem_path,
+                    transform.affine_2d,
+                    elem_stroke.and(elem_stroke_style),
+                    stroke_view,
+                    shadow_opt,
+                    glow_opt,
+                    blur_opt,
+                ),
+                world_bounds_opt,
+                opacity_fallback,
+                antialias,
+            )
+        };
         extracted.push(ExtractedElement {
             transform: transform.affine_2d,
             opacity: global_opacity.0,
-            opacity_bounds: opacity_layer_bounds(
-                world_bounds_opt,
-                opacity_fallback,
-                shadow_opt,
-                glow_opt,
-                blur_opt,
-            ),
+            opacity_bounds,
             opacity_group,
             render_order: stacked_render_order(
                 *render_order,
@@ -1594,15 +1678,7 @@ pub fn compile_scene_from_world(
         }
     }
 
-    let composition_bounds = extracted.iter().fold(opacity_fallback, |bounds, elem| {
-        bounds.union(elem.opacity_bounds)
-    });
-    append_extracted_elements(
-        &mut main_scene,
-        &extracted,
-        composition_bounds,
-        transition_frame.as_ref(),
-    );
+    append_extracted_elements(&mut main_scene, &extracted, transition_frame.as_ref());
 
     main_scene
 }
@@ -1676,6 +1752,12 @@ pub fn gaanim_render_system(
     let mut scene_aabb_max = Vec3::splat(f32::NEG_INFINITY);
 
     local_culled.clear();
+
+    // Viewport pixels per world unit, as in the culling bounds below.
+    let antialias = antialias_margin(gaanim_camera.as_ref().and_then(|cam| match cam.projection {
+        gaanim_math::Projection::Orthographic { zoom } => Some(zoom * cam.viewport.scale),
+        _ => None,
+    }));
 
     // 1. Calculate orthographic camera bounds for culling
     let cam_bounds = gaanim_camera.as_ref().and_then(|cam| {
@@ -2041,16 +2123,41 @@ pub fn gaanim_render_system(
         while let Ok(child_of) = child_query.get(opacity_group) {
             opacity_group = child_of.parent();
         }
+        // Only translucent elements open a layer; a Lottie draws geometry
+        // that `Path2D` does not describe.
+        let opacity_bounds = if global_opacity.0 >= 1.0 || lottie_ref.is_some() {
+            opacity_fallback
+        } else {
+            let visible_path = if path_reveal_is_empty(tip_glow_ref.as_deref()) {
+                None
+            } else {
+                path_ref.as_ref().map(|path| path.0.as_ref())
+            };
+            let stroke_style = stroke_ref
+                .as_deref()
+                .filter(|stroke| stroke.brush.is_some())
+                .map(|stroke| &stroke.style);
+            opacity_layer_bounds(
+                visible_path.and_then(|path| {
+                    fragment_extent(
+                        path,
+                        transform.affine_2d,
+                        stroke_style,
+                        stroke_view,
+                        shadow_ref.as_deref(),
+                        glow_ref.as_deref(),
+                        blur_ref.as_deref(),
+                    )
+                }),
+                world_bounds_opt,
+                opacity_fallback,
+                antialias,
+            )
+        };
         local_extracted.push(ExtractedElement {
             transform: transform.affine_2d,
             opacity: global_opacity.0,
-            opacity_bounds: opacity_layer_bounds(
-                world_bounds_opt,
-                opacity_fallback,
-                shadow_ref.as_deref(),
-                glow_ref.as_deref(),
-                blur_ref.as_deref(),
-            ),
+            opacity_bounds,
             opacity_group,
             render_order: stacked_render_order(
                 *render_order,
@@ -2133,15 +2240,9 @@ pub fn gaanim_render_system(
         frame.0 = shader_request;
     }
 
-    let composition_bounds = local_extracted
-        .iter()
-        .fold(opacity_fallback, |bounds, elem| {
-            bounds.union(elem.opacity_bounds)
-        });
     append_extracted_elements(
         &mut main_scene,
         local_extracted.as_slice(),
-        composition_bounds,
         transition_frame
             .as_deref()
             .filter(|frame| !frame.is_empty()),
@@ -2712,12 +2813,69 @@ mod tests {
     fn opacity_layers_use_local_finite_bounds_instead_of_a_full_scene_sentinel() {
         let bounds = WorldBounds(gaanim_math::Bounds3D::new_2d(-12.0, -8.0, 18.0, 14.0));
         let fallback = kurbo::Rect::new(-4096.0, -4096.0, 4096.0, 4096.0);
-        let rect = opacity_layer_bounds(Some(&bounds), fallback, None, None, None);
+        let rect = opacity_layer_bounds(None, Some(&bounds), fallback, 1.0);
 
         assert!(rect.x0 <= -12.0 && rect.y0 <= -8.0);
         assert!(rect.x1 >= 18.0 && rect.y1 >= 14.0);
         assert!(rect.width() < 64.0);
         assert!(rect.height() < 64.0);
+    }
+
+    #[test]
+    fn opacity_layers_cover_the_drawn_stroke_and_effects() {
+        let mut line = kurbo::BezPath::new();
+        line.move_to((0.0, 0.0));
+        line.line_to((3.0, 0.0));
+        let stroke = kurbo::Stroke::new(0.2).with_join(kurbo::Join::Bevel);
+        let transform = kurbo::Affine::translate((-6.0, 1.0)) * kurbo::Affine::scale(2.0);
+        let glow = Glow {
+            radius: 0.05,
+            ..Glow::default()
+        };
+        let extent = fragment_extent(
+            &line,
+            transform,
+            Some(&stroke),
+            None,
+            None,
+            Some(&glow),
+            None,
+        );
+        let (rect, reach) = extent.expect("visible line");
+        assert_eq!(rect, kurbo::Rect::new(-6.0, 1.0, 0.0, 1.0));
+        // Half the width, diagonally at square caps, plus the glow, scaled.
+        let norm = 8.0_f64.sqrt();
+        let expected = (0.1 * std::f64::consts::SQRT_2 + 0.05) * norm;
+        assert!((reach - expected).abs() < 1e-12, "{reach}");
+
+        let fallback = kurbo::Rect::new(-8.0, -4.5, 8.0, 4.5);
+        let layer = opacity_layer_bounds(extent, None, fallback, 0.01);
+        assert!(layer.y0 < 1.0 - 0.2 && layer.y1 > 1.0 + 0.2);
+        assert!(layer.height() < 1.5, "{layer:?}");
+        let empty = kurbo::BezPath::new();
+        assert!(fragment_extent(&empty, transform, None, None, None, None, None).is_none());
+    }
+
+    #[test]
+    fn opacity_runs_clip_to_their_own_elements_not_the_frame() {
+        let element = |rect| ExtractedElement {
+            transform: kurbo::Affine::IDENTITY,
+            opacity: 0.5,
+            opacity_bounds: rect,
+            opacity_group: Entity::PLACEHOLDER,
+            render_order: RenderOrder::default(),
+            scene: Arc::new(vello::Scene::new()),
+            clip_mask: None,
+            transition_side: Default::default(),
+        };
+        let run = [
+            element(kurbo::Rect::new(-6.0, 1.0, -3.0, 1.2)),
+            element(kurbo::Rect::new(-5.0, 1.1, -2.0, 1.4)),
+        ];
+        assert_eq!(
+            opacity_run_bounds(&run),
+            kurbo::Rect::new(-6.0, 1.0, -2.0, 1.4)
+        );
     }
 
     #[test]
