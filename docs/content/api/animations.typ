@@ -289,7 +289,7 @@ scene.render()
     (name: "target", type: "Drawable", default: none, desc: [Path drawable to follow — circle, rect, curve, polyline, etc. Its world geometry (after `at`, groups) is sampled.]),
     (name: "orient", type: "bool", default: "False", desc: [Turn along the path tangent.]),
     (name: "rotate_offset", type: "float", default: "0", desc: [Radians added to the tangent angle when orienting.]),
-    (name: "start, end", type: "float", default: "0, 1", desc: [Travelled portion of the path as arc-length fractions.]),
+    (name: "start, end", type: "float", default: "0, 1", desc: [Travelled portion of the path as arc-length fractions in `[0, 1]`. `start > end` travels it backwards, e.g. `start=0.5, end=0.2`; equal values raise `ValueError`.]),
   ),
   returns: (type: "Anim", desc: [Follow-path translation.]),
   desc: [Samples the target's Bézier outline by true arc-length and sets the caller's translation to the point at eased `t` (`get_point_at_alpha`). Combine with `.easing(Easing.LINEAR)` for uniform speed, or `.easing(Easing.SMOOTH)` for ease. With `orient=True` the rotation follows the tangent (plus `rotate_offset`), so a plane points where it flies; otherwise rotation and scale are unaffected. `.move_to(x, y).path_arc(angle)` instead bends an ordinary move into a circular arc that turns by `angle` radians.],

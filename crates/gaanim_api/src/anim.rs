@@ -74,7 +74,8 @@ pub struct DrawAnimationConfig {
 pub struct PathFollowOptions {
     /// Turn the object along the path tangent, plus this offset in radians.
     pub orient: Option<f64>,
-    /// Portion of the path to travel, as arc-length fractions.
+    /// Portion of the path to travel, as arc-length fractions; `start > end`
+    /// travels it backwards.
     pub start: f64,
     pub end: f64,
 }

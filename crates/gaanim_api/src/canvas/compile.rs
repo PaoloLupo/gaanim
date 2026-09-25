@@ -11591,6 +11591,50 @@ mod tests {
     }
 
     #[test]
+    fn move_along_travels_backwards_when_start_exceeds_end() {
+        let mut canvas = SceneModel::new(640, 360);
+        let route = canvas.polyline(&[(0.0, 0.0), (4.0, 0.0), (4.0, 3.0)]);
+        let dot = canvas.circle(0.2);
+        canvas.play(vec![
+            dot.animate()
+                .move_along_with(
+                    &route,
+                    crate::anim::PathFollowOptions {
+                        orient: None,
+                        start: 5.5 / 7.0,
+                        end: 2.0 / 7.0,
+                    },
+                )
+                .unwrap(),
+        ]);
+        let timeline = compiled_timeline(&canvas);
+        let path = timeline
+            .clips
+            .values()
+            .find_map(|clip| match &clip.payload {
+                gaanim_timeline::clip::ClipPayload::Animation(
+                    gaanim_timeline::clip::AnimationSpec {
+                        lens: gaanim_timeline::clip::PropertyLensSpec::PathFollow { path, .. },
+                        ..
+                    },
+                ) => Some(path.clone()),
+                _ => None,
+            })
+            .unwrap();
+        // 5.5 units along the route is (4, 1.5); 2 units is (2, 0).
+        let first = gaanim_math::get_point_at_alpha(&path, 0.0);
+        let last = gaanim_math::get_point_at_alpha(&path, 1.0);
+        assert!(
+            (first.x - 4.0).abs() < 1e-3 && (first.y - 1.5).abs() < 1e-3,
+            "{first:?}"
+        );
+        assert!(
+            (last.x - 2.0).abs() < 1e-3 && last.y.abs() < 1e-3,
+            "{last:?}"
+        );
+    }
+
+    #[test]
     fn move_along_keeps_the_declared_state_until_it_starts() {
         let mut canvas = SceneModel::new(640, 360);
         let route = canvas.polyline(&[(-6.0, -2.0), (0.0, 2.0), (6.0, -2.0)]);

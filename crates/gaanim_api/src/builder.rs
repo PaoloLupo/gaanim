@@ -294,6 +294,23 @@ pub fn literal_selection_matches(text: &str, fragment: &str) -> Vec<std::ops::Ra
         .collect()
 }
 
+/// Reverses travel along `path`: subpaths run last to first, each backwards.
+fn reverse_path(path: &gaanim_core::kurbo::BezPath) -> gaanim_core::kurbo::BezPath {
+    use gaanim_core::kurbo::{BezPath, PathEl};
+    let mut subpaths: Vec<BezPath> = Vec::new();
+    for el in path.elements() {
+        if matches!(el, PathEl::MoveTo(_)) || subpaths.is_empty() {
+            subpaths.push(BezPath::new());
+        }
+        subpaths.last_mut().unwrap().push(*el);
+    }
+    let mut reversed = BezPath::new();
+    for subpath in subpaths.iter().rev() {
+        reversed.extend(subpath.reverse_subpaths());
+    }
+    reversed
+}
+
 pub(crate) fn adaptive_lag_ratio(item_count: usize) -> f64 {
     (4.0 / item_count.max(1) as f64).min(0.2)
 }
@@ -5482,10 +5499,17 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         } else {
             path_arg
         };
-        let path = if follow.start <= 0.0 && follow.end >= 1.0 {
+        // `start > end` travels the same portion backwards.
+        let (from, to) = (follow.start.min(follow.end), follow.start.max(follow.end));
+        let path = if from <= 0.0 && to >= 1.0 {
             path
         } else {
-            gaanim_math::get_subpath_range(&path, follow.start, follow.end)
+            gaanim_math::get_subpath_range(&path, from, to)
+        };
+        let path = if follow.start > follow.end {
+            reverse_path(&path)
+        } else {
+            path
         };
 
         // Resolve and persist the final translation so subsequent

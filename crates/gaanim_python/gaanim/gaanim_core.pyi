@@ -1207,7 +1207,8 @@ class Anim:
         With ``orient=True`` the drawable's rotation follows the path tangent
         plus ``rotate_offset`` radians, so a plane or arrow points where it
         goes. ``start`` and ``end`` select the travelled portion as arc-length
-        fractions (``0 <= start < end <= 1``); otherwise ``ValueError``.
+        fractions in ``[0, 1]``; ``start > end`` travels it backwards. Equal
+        or out-of-range values raise ``ValueError``.
 
         Example:
             scene.play(plane.animate.move_along(route, orient=True).duration(3))

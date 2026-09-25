@@ -956,9 +956,9 @@ impl PyCanvasAnim {
                 "rotate_offset, start and end must be finite",
             ));
         }
-        if !(0.0 <= start && start < end && end <= 1.0) {
+        if !((0.0..=1.0).contains(&start) && (0.0..=1.0).contains(&end) && start != end) {
             return Err(PyValueError::new_err(
-                "move_along requires 0 <= start < end <= 1",
+                "move_along requires start and end in [0, 1] with start != end",
             ));
         }
         self.require_effect_slot("move_along")?;
