@@ -1,4 +1,33 @@
 #import "book.typ": book-outline
+#import "../content/redirects.typ": moved
+// Internal links (`#link("/guias/layout/")`) must reach a page of the book or
+// a forwarding page of a moved route; the build fails otherwise.
+#let check-internal-links = false
+
+#let known-route(dest) = {
+  let target = dest.trim("/", at: start).split("#").first()
+  if target == "" or target.split("/").last().contains(".") {
+    return true
+  }
+  let target = if target.ends-with("/") { target } else { target + "/" }
+  let pages = book-outline().map(part => part.pages).flatten().map(page => page.route)
+  target in pages or moved.any(((old, new)) => old == target)
+}
+
+// A new GitHub issue about one page, with its title and route filled in.
+#let issue-url(title, route) = {
+  let encode(text) = text
+    .replace("%", "%25")
+    .replace(" ", "%20")
+    .replace("&", "%26")
+    .replace("#", "%23")
+    .replace("?", "%3F")
+    .replace("/", "%2F")
+    .replace(":", "%3A")
+    .replace("\n", "%0A")
+  "https://github.com/PaoloLupo/gaanim/issues/new?title=" + encode("Docs: " + title) + "&body=" + encode("Página: /" + route.trim("/") + "/\n\n")
+}
+
 #let html-section(
   title: none,
   title-content: none,
@@ -86,6 +115,12 @@
     // e.g. GitHub Pages' `/<repo>/`.
     show link: it => {
       if type(it.dest) == str and it.dest.starts-with("/") and not it.dest.starts-with("//") {
+        if check-internal-links {
+          assert(
+            known-route(it.dest),
+            message: "internal link to a page that does not exist: " + it.dest,
+          )
+        }
         let relative = prefix + it.dest.slice(1)
         link(if relative == "" { "./" } else { relative }, it.body)
       } else {
@@ -149,7 +184,7 @@
                 alt: "Gaanim",
               ))
             }
-            html.span(class: "brand-tag", "docs")
+            html.span(class: "brand-tag", "docs " + stdx.version)
           })
           html.elem("button", attrs: (id: "search-trigger", class: "search-trigger", type: "button", "aria-label": "Buscar"), {
             html.span(class: "search-trigger-icon", "⌕")
@@ -236,7 +271,7 @@
             html.footer(class: "site-footer", {
               html.span([Gaanim · Documentación generada con Typst])
               html.a(href: prefix + "documentation.pdf", "Descargar PDF")
-              html.a(href: "https://github.com/PaoloLupo/gaanim/issues", "Reportar un problema")
+              html.a(href: issue-url(title, route), "Reportar un problema en esta página")
             })
           })
 

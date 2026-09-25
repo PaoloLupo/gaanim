@@ -29,9 +29,9 @@
         muestra en vivo mientras escribes y las renderiza con trazos vectoriales en la
         GPU, listas para exportar a video.])
       #html.div(class: "home-hero-cta", [
-        #html.a(href: "empezar/primera-animacion/", class: "primary", [Guía rápida →])
+        #html.a(href: "empezar/primera-animacion/", class: "primary", [Primera animación →])
         #html.a(href: "empezar/instalacion/", class: "secondary", [Instalar])
-        #html.a(href: "referencia/", class: "secondary", [Referencia])
+        #html.a(href: "tutorial/antes-de-empezar/", class: "secondary", [Tutorial])
       ])
       #html.div(class: "home-search", {
         html.elem(
@@ -118,51 +118,48 @@ scene.play([circle.animate.shift_by(0, 1).duration(0.6)])
 scene.render()
 ```
 
-== ¿Qué quieres hacer?
+== Elige por dónde seguir
 
-#html.div(class: "home-cards", {
-  card("referencia/objetos/", "Objetos", "Dibujar formas", [Círculos, flechas, polígonos, curvas, imágenes y SVG.])
-  card("empezar/como-piensa-gaanim/", "Animaciones", "Animar objetos", [`create`, `write`, `fade_in`, `indicate`, transformaciones y easings.])
-  card("referencia/text/", "Texto", "Texto y ecuaciones", [Tipografía y matemáticas con Typst, selección de glifos y `write`.])
-  card("referencia/visualization/", "Datos", "Gráficas y ejes", [Ejes, funciones, `ChartSpec`, campos vectoriales y estadística.])
-  card("guias/layout/", "Layout", "Organizar la escena", [Anclas, grids, regiones y flujos que se adaptan al contenido.])
-  card("referencia/scene/", "Escena", "Tiempo y cámara", [`play`, `wait`, segmentos, `stop()` y movimientos de cámara.])
-  card("guias/presentaciones/", "Presentaciones", "Dar una charla", [Segmentos, pasos con `stop()` y Presenter Mode.])
-  card("referencia/themes/", "Estilo", "Colores y temas", [Paletas, degradados, efectos y temas reutilizables.])
-  card("guias/proyectos/", "Proyectos", "Organizar el código", [Estructura con `src/`, recarga en vivo y exportación.])
+#let door(href, eyebrow, title, body, links) = html.div(class: "home-card home-door", {
+  html.a(href: href, class: "home-door-main", {
+    html.span(class: "home-card-eyebrow", eyebrow)
+    html.span(class: "home-card-title", title)
+    html.span(class: "home-card-body", body)
+  })
+  html.ul(class: "home-door-links", {
+    for (label, target) in links {
+      html.li(html.a(href: target, label))
+    }
+  })
 })
 
-== Referencia rápida
-
-Las llamadas más usadas. Cada fila enlaza a su página de referencia.
-
-#table(
-  columns: 3,
-  table.header[*Quiero…*][*Código*][*Referencia*],
-  [Crear la escena], [`scene = Scene(frame=(16, 9))`], link("/referencia/scene/")[Escena],
-  [Dibujar una forma], [`scene.geometry.circle(1.2).fill(BLUE)`], link("/referencia/objetos/")[Objetos],
-  [Colocar un objeto], [`obj.move_to(x, y)`], link("/referencia/objetos/")[Objetos],
-  [Escribir texto], [`scene.text("Hola", role="title")`], link("/referencia/text/")[Texto],
-  [Escribir una ecuación], [`scene.text.equation("e^(i pi) + 1 = 0")`], link("/referencia/text/")[Texto],
-  [Animar una propiedad], [`obj.animate.move_to(2, 0).duration(1.0)`], link("/referencia/animations/")[Animaciones],
-  [Hacer aparecer un objeto], [`obj.animate.create()` · `write()` · `fade_in()`], link("/referencia/animations/")[Animaciones],
-  [Resaltar un objeto], [`obj.animate.indicate()`], link("/referencia/animations/")[Animaciones],
-  [Reproducir y esperar], [`scene.play([...])` · `scene.wait(1.0)`], link("/referencia/scene/")[Escena],
-  [Mover la cámara], [`scene.camera.animate.zoom_to(1.5)`], link("/referencia/scene/")[Escena],
-  [Pausar en una presentación], [`scene.stop("paso")`], link("/guias/presentaciones/")[Presentaciones],
-  [Exportar video], [`gaanim export . --output video.mp4`], link("/empezar/instalacion/")[Instalación],
-)
-
-== Aprende paso a paso
-
-#html.div(class: "home-cards home-cards-learn", {
-  card("empezar/como-piensa-gaanim/", "Fundamentos", "Manual", [Escena, objetos y animaciones explicados en orden.])
-  card("tutorial/antes-de-empezar/", "Proyecto práctico", "Del círculo al seno", [Ocho capítulos para construir una explicación visual completa.])
-  card("ejemplos/basicos/", "Taller", "Ejemplos", [Escenas listas para copiar, de lo básico a lo avanzado.])
+#html.div(class: "home-cards home-doors", {
+  door("empezar/instalacion/", "Empezar", "Primeros pasos", [Instala Gaanim, anima tu primera escena y entiende cómo piensa.], (
+    ("Instalación", "empezar/instalacion/"),
+    ("Primera animación", "empezar/primera-animacion/"),
+    ("Cómo piensa Gaanim", "empezar/como-piensa-gaanim/"),
+  ))
+  door("tutorial/antes-de-empezar/", "Tutorial", "Del círculo al seno", [Un proyecto completo en ocho capítulos que siempre se puede ejecutar.], (
+    ("Antes de empezar", "tutorial/antes-de-empezar/"),
+    ("Animar el tiempo", "tutorial/animar-tiempo/"),
+    ("Terminar el proyecto", "tutorial/terminar-proyecto/"),
+  ))
+  door("guias/layout/", "Guías", "Resolver una tarea", [Composición, movimiento, texto animado, presentaciones y producción.], (
+    ("Layout", "guias/layout/"),
+    ("Presentaciones", "guias/presentaciones/"),
+    ("Proyectos y exportación", "guias/proyectos/"),
+  ))
+  door("referencia/", "Referencia", "Consultar la API", [Firmas, parámetros y ejemplos de cada objeto y animación.], (
+    ("Escena", "referencia/scene/"),
+    ("Animaciones", "referencia/animations/"),
+    ("Texto y ecuaciones", "referencia/text/"),
+  ))
 })
 
-== Más recursos
-
-- #link("documentation.pdf")[Descargar toda la documentación en PDF]
-- #link("https://github.com/PaoloLupo/gaanim")[Código fuente en GitHub]
-- #link("https://github.com/PaoloLupo/gaanim/issues")[Reportar un problema o proponer una mejora]
+#html.div(class: "home-more", [
+  #link("/ejemplos/basicos/")[Ejemplos] ·
+  #link("/apendices/novedades/")[Novedades] ·
+  #link("documentation.pdf")[Toda la documentación en PDF] ·
+  #link("https://github.com/PaoloLupo/gaanim")[Código fuente] ·
+  #link("https://github.com/PaoloLupo/gaanim/issues")[Reportar un problema]
+])
