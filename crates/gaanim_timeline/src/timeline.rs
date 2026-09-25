@@ -137,6 +137,7 @@ enum AbsoluteLensChannel {
     FillDrawProgress,
     FillLevel,
     MediaFrame,
+    ConnectorGrow,
 }
 
 fn absolute_lens_channel(lens: &PropertyLensSpec) -> Option<AbsoluteLensChannel> {
@@ -1225,6 +1226,9 @@ impl Timeline {
                     PropertyLensSpec::FillLevel { .. } => Some(AbsoluteLensChannel::FillLevel),
                     // A future grow keeps its arrow hidden until the clip starts.
                     PropertyLensSpec::ArrowGrow { .. } => Some(AbsoluteLensChannel::PathMorph),
+                    PropertyLensSpec::ConnectorGrow { .. } => {
+                        Some(AbsoluteLensChannel::ConnectorGrow)
+                    }
                     _ => None,
                 }
             };
@@ -2478,6 +2482,15 @@ fn apply_lens_spec(
             // (notably the circle around a morphing diamond) during seeks.
             if let Some(mut source) = world.get_mut::<gaanim_animation::PathSource>(target) {
                 source.0 = std::sync::Arc::new(morphed);
+            }
+        }
+        PropertyLensSpec::ConnectorGrow { from, to } => {
+            let progress = (*from + (*to - *from) * t).clamp(0.0, 1.0);
+            if let Some(mut connector) =
+                world.get_mut::<gaanim_animation::updaters::TrackingConnector>(target)
+                && connector.progress != progress
+            {
+                connector.progress = progress;
             }
         }
         PropertyLensSpec::ArrowGrow { shape, from, to } => {

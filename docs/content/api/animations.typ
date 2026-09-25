@@ -582,16 +582,21 @@ scene.render()
     proporciones durante la primera longitud de cabeza y luego conserva su
     tamaño mientras el cuerpo se extiende; el grosor del trazo nunca cambia
     (Manim escala toda la flecha desde el inicio y deforma la cabeza).
+    Un `scene.geometry.connector` crece a lo largo de su polilínea viva,
+    pasando por cada punto `via`, mientras sus extremos siguen a sus
+    referencias; la cabeza conserva su tamaño y gira en las esquinas.
     Cualquier otro drawable, o una flecha remodelada por un transform, usa
     `create()`. Easing por defecto: `Smooth`.],
 )[
 ```python
 # show-code: true
-from gaanim import CYAN, GOLD, Scene
+from gaanim import Anchor, CYAN, GOLD, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
 straight = scene.geometry.arrow(-5, 1, 0, 1, head_length=0.4, head_width=0.34, body_width=0.08).fill(CYAN).stroke(CYAN, 0.02)
 curved = scene.geometry.curved_arrow(-5, -1.5, 0, -1.5, 1.2, head_length=0.4, head_width=0.34, body_width=0.08).fill(GOLD).stroke(GOLD, 0.02)
-scene.play([straight.animate.grow_arrow().duration(1.2), curved.animate.grow_arrow().duration(1.2)])
+box = scene.geometry.rect(1.6, 1.0).no_fill().stroke(CYAN, 0.03).move_to(4.5, 2.2)
+link = scene.geometry.connector((1.5, 0.6), box.anchor_point(Anchor.BOTTOM), via=[(4.5, 0.6)]).fill(GOLD)
+scene.play([straight.animate.grow_arrow().duration(1.2), curved.animate.grow_arrow().duration(1.2), link.animate.grow_arrow().duration(1.2)])
 # output: preview.webp
 scene.render()
 ```

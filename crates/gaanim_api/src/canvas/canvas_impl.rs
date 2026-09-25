@@ -11198,6 +11198,57 @@ mod grow_arrow_tests {
     }
 
     #[test]
+    fn grow_arrow_grows_a_connector_along_its_live_polyline() {
+        let mut canvas = SceneModel::new(320, 180);
+        let connector = canvas
+            .connector(
+                CanvasEndpoint::Static(DVec3::new(0.0, 0.0, 0.0)),
+                CanvasEndpoint::Static(DVec3::new(2.0, 2.0, 0.0)),
+                vec![CanvasEndpoint::Static(DVec3::new(2.0, 0.0, 0.0))],
+                0.4,
+                0.3,
+                0.05,
+                None,
+            )
+            .expect("connector");
+        canvas.play(vec![
+            connector
+                .animate()
+                .grow_arrow()
+                .duration(1.0)
+                .rate_func(RateFunc::Linear),
+        ]);
+
+        let (mut world, mut timeline) = compile(&mut canvas);
+        assert!(arrow_grow_targets(&timeline).is_empty());
+        assert!(timeline.clips.values().any(|clip| matches!(
+            &clip.payload,
+            ClipPayload::Animation(animation)
+                if matches!(animation.lens, PropertyLensSpec::ConnectorGrow { .. })
+        )));
+        let entity = world
+            .query_filtered::<Entity, bevy::prelude::With<gaanim_animation::updaters::TrackingConnector>>()
+            .single(&world)
+            .expect("connector entity");
+
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        let mut bounds_at = |time: f64| {
+            timeline.seek(&mut world, time);
+            gaanim_animation::tracking_line_system(&mut world);
+            path_of(&world, entity)
+        };
+        assert!(bounds_at(0.0).elements().is_empty(), "hidden before growing");
+        let half = bounds_at(0.5).bounding_box();
+        assert!((half.x1 - 2.0).abs() < 1e-9 && half.x0.abs() < 1e-9, "{half:?}");
+        assert!((half.height() - 0.3).abs() < 1e-9, "the head keeps its width");
+        let full = bounds_at(1.0).bounding_box();
+        assert!((full.y1 - 2.0).abs() < 1e-9, "the tip reaches the endpoint");
+        // Reverse seeks are exact.
+        assert_eq!(bounds_at(0.5).bounding_box(), half);
+        assert!(bounds_at(0.0).elements().is_empty());
+    }
+
+    #[test]
     fn grow_arrow_on_non_arrow_falls_back_to_create() {
         let mut canvas = SceneModel::new(320, 180);
         let circle = canvas.circle(1.0);
