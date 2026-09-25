@@ -119,6 +119,16 @@ struct ExportPipeline {
     pub result_sent: bool,
 }
 
+/// Name the frame whose scene did not fit the GPU renderer.
+fn frame_render_error(error: crate::gpu::GpuContextError, time: f64) -> ExportError {
+    match error {
+        crate::gpu::GpuContextError::SceneTooComplex { .. } => {
+            ExportError::Capture(format!("frame at {time:.2} s: {error}"))
+        }
+        other => other.into(),
+    }
+}
+
 fn check_custom_animation_errors(world: &World) -> Result<()> {
     match world
         .get_resource::<gaanim_animation::CustomAnimationDiagnostics>()
@@ -715,7 +725,9 @@ where
             .unwrap_or(bevy_vello::vello::peniko::Color::BLACK);
 
         let render_started_at = Instant::now();
-        let frame_data = gpu.render_frame(&vello_scene, bg_color, post_process.as_ref())?;
+        let frame_data = gpu
+            .render_frame(&vello_scene, bg_color, post_process.as_ref())
+            .map_err(|error| frame_render_error(error, current_time))?;
         render_gpu_time += render_started_at.elapsed();
 
         let encoder_wait_started_at = Instant::now();
@@ -944,7 +956,9 @@ where
             .unwrap_or(bevy_vello::vello::peniko::Color::BLACK);
 
         let phase_started = Instant::now();
-        let rgba = gpu.render_frame(&scene, background, post_process.as_ref())?;
+        let rgba = gpu
+            .render_frame(&scene, background, post_process.as_ref())
+            .map_err(|error| frame_render_error(error, time))?;
         render_readback += phase_started.elapsed();
         let flow = on_frame(CapturedFrame {
             time,

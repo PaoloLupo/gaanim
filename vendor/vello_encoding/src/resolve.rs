@@ -192,6 +192,7 @@ impl Resolver {
             // with a 1x1 texture while cached images remain marked as uploaded.
             self.image_cache.begin_resolve();
             let layout = resolve_solid_paths_only(encoding, packed);
+            crate::buffer_budget::record_path_bounds(&layout, packed);
             return (layout, Ramps::default(), self.image_cache.images());
         }
         let patch_sizes = self.resolve_patches(encoding);
@@ -399,6 +400,7 @@ impl Resolver {
         self.glyphs.clear();
         layout.n_draw_objects = layout.n_paths;
         assert_eq!(buffer_size, data.len());
+        crate::buffer_budget::record_path_bounds(&layout, data);
         (layout, self.ramp_cache.ramps(), self.image_cache.images())
     }
 

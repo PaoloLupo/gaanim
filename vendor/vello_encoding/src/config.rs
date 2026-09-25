@@ -173,7 +173,9 @@ impl RenderConfig {
         let n_path_tags = layout.path_tags_size();
         let workgroup_counts =
             WorkgroupCounts::new(layout, width_in_tiles, height_in_tiles, n_path_tags);
-        let buffer_sizes = BufferSizes::new(layout, &workgroup_counts);
+        let mut buffer_sizes = BufferSizes::new(layout, &workgroup_counts);
+        // Gaanim patch: size bump buffers from the scene resolved just before.
+        crate::buffer_budget::fit(&mut buffer_sizes, width_in_tiles, height_in_tiles);
         Self {
             gpu: ConfigUniform {
                 width_in_tiles,

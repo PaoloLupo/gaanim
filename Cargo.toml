@@ -24,8 +24,9 @@ members = [
 ]
 
 [patch.crates-io]
-# Preserve Vello's resident image atlas across vector-only frames and replay.
-# See vendor/vello_encoding/GAANIM-PATCH.md for the upstream source and fix.
+# Preserve Vello's resident image atlas across vector-only frames and replay,
+# and size its GPU buffers from the scene instead of fixed limits.
+# See vendor/vello_encoding/GAANIM-PATCH.md for the upstream source and fixes.
 vello_encoding = { path = "vendor/vello_encoding" }
 
 [profile.dev]

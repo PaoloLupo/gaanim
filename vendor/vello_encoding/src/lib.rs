@@ -30,6 +30,7 @@
 )]
 
 mod binning;
+mod buffer_budget;
 mod clip;
 mod config;
 mod draw;
@@ -47,6 +48,9 @@ mod ramp_cache;
 mod resolve;
 
 pub use binning::BinHeader;
+pub use buffer_budget::{
+    bump_buffer_scale, max_bump_buffer_bytes, set_bump_buffer_scale, set_max_bump_buffer_bytes,
+};
 pub use clip::{Clip, ClipBbox, ClipBic, ClipElement};
 pub use config::{
     BufferSize, BufferSizes, BumpAllocatorMemory, BumpAllocators, ConfigUniform, IndirectCount,
