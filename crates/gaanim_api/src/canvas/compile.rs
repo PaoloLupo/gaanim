@@ -2716,6 +2716,13 @@ impl SceneModel {
                                 anim.target,
                                 &mut remapped,
                             );
+                            super::text_motion::attach_text_motion_context(
+                                object_specs,
+                                frame_bounds,
+                                text_config,
+                                anim.target,
+                                &mut remapped,
+                            );
                             let anim = remapped;
                             if anim.anim_type.is_camera() {
                                 let start = builder.current_time;
@@ -2763,6 +2770,13 @@ impl SceneModel {
                             Self::resolve_reveal_groups(
                                 builder,
                                 object_specs,
+                                anim.target,
+                                &mut remapped,
+                            );
+                            super::text_motion::attach_text_motion_context(
+                                object_specs,
+                                frame_bounds,
+                                text_config,
                                 anim.target,
                                 &mut remapped,
                             );

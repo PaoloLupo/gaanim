@@ -910,6 +910,95 @@ class Anim:
     def circumscribe(self) -> Anim: ...
     def flash(self) -> Anim: ...
     def show_passing_flash(self, *, time_width: float = 0.2) -> Anim: ...
+    def typewriter(
+        self,
+        cps: float = 18.0,
+        cursor: Optional[str] = "▍",
+        blink: float = 2.0,
+        jitter: float = 0.2,
+        seed: int = 0,
+        keep_cursor: bool = True,
+    ) -> Anim:
+        """Clear this Text and type it again, one grapheme per keystroke.
+
+        ``cps`` is keystrokes per second; each interval is scaled by a factor
+        in ``[1 - jitter, 1 + jitter]`` drawn from ``seed`` and the grapheme
+        index, so any frame is reproducible from its time. The layout is the
+        final one: glyphs appear in place and nothing reflows. ``cursor`` is a
+        string drawn after the last typed grapheme (``None`` or ``""`` for
+        none; block characters such as ``"▍"`` and ``"█"`` are exact
+        rectangles). It stays solid while typing, then blinks ``blink``
+        on/off cycles per second (``0`` keeps it solid); ``keep_cursor=False``
+        removes it when typing ends. Without an explicit ``duration`` the
+        animation lasts until the last keystroke (about ``graphemes / cps``)
+        and uses linear timing. Raises ``ValueError`` for ``cps <= 0``,
+        ``blink < 0`` or ``jitter`` outside ``[0, 1)``, and ``TypeError``
+        unless the proxy belongs to a whole Text.
+
+        Example:
+            prompt = scene.text("gaanim render").move_to(-4, 0)
+            scene.play(prompt.animate.typewriter(cps=18, cursor="▍"))
+        """
+        ...
+    def backspace(self, count: Optional[int] = None, cps: float = 24.0) -> Anim:
+        """Delete the last ``count`` visible graphemes (all when ``None``).
+
+        Deletions land at a steady ``cps`` and the typewriter cursor follows
+        them back; a Text without one gets the default blinking cursor.
+        ``count`` is capped at the visible graphemes. The default duration is
+        ``count / cps``. Raises ``ValueError`` for ``cps <= 0``.
+
+        Example:
+            scene.play(prompt.animate.backspace(6))
+        """
+        ...
+    def retype(self, text: str, cps: float = 18.0, jitter: float = 0.2, seed: int = 0) -> Anim:
+        """Delete back to the prefix shared with ``text``, then type the rest.
+
+        ``text`` is plain text laid out with this Text's style and pen origin,
+        so the shared prefix stays in place. Deletions run at ``cps`` without
+        jitter and typing behaves like ``typewriter`` (same ``cps``,
+        ``jitter`` and ``seed``). Afterwards the Text shows ``text`` and
+        later typing motions continue from it; its declared content (layout
+        size, ``text[...]`` selections) is unchanged. Raises ``ValueError``
+        for an empty ``text``,
+        ``cps <= 0`` or ``jitter`` outside ``[0, 1)``.
+
+        Example:
+            scene.play(prompt.animate.retype("gaanim export --from clímax"))
+        """
+        ...
+    def scramble(self, charset: str = "upper", reveal_delay: float = 0.3, speed: float = 20.0, seed: int = 0) -> Anim:
+        """Decode this Text: each grapheme cycles through random glyphs, then settles.
+
+        Every non-space grapheme shows a glyph of ``charset`` chosen by
+        ``hash(seed, index, floor(time * speed))`` (``speed`` changes per
+        second), centered in the final glyph's cell, so the width of the
+        final text is reserved and never jumps. After ``reveal_delay``
+        seconds the graphemes settle from left to right until the end.
+        ``charset`` is ``"upper"``, ``"lower"``, ``"digits"``, ``"hex"``,
+        ``"symbols"`` or a literal string such as ``"01"``; its glyphs are
+        shaped once with the Text's font. The default duration is
+        ``reveal_delay`` plus 0.05 s per grapheme (at least 0.6 s), with
+        linear timing. Raises ``ValueError`` for an empty charset,
+        ``speed <= 0`` or ``reveal_delay < 0``.
+
+        Example:
+            scene.play(label.animate.scramble(charset="upper", reveal_delay=0.3))
+        """
+        ...
+    def scramble_to(self, text: str, charset: str = "upper", reveal_delay: float = 0.3, speed: float = 20.0, seed: int = 0) -> Anim:
+        """Like ``scramble``, decoding into the new plain ``text``.
+
+        The current glyphs disappear at the start and every position of
+        ``text`` scrambles in the layout of ``text`` before settling left to
+        right. Afterwards the Text shows ``text`` (see ``retype``). Raises
+        ``ValueError`` for an empty ``text``.
+
+        Example:
+            scene.play(label.animate.scramble_to("LANZAMIENTO", charset="01"))
+        """
+        ...
     def move_along(
         self,
         target: Drawable,

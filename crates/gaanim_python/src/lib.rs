@@ -21,6 +21,7 @@ mod pymatrix;
 mod pystyle;
 mod pytext;
 mod rolling_number;
+mod text_motion;
 mod transition;
 mod updater;
 mod visualization;

@@ -11,6 +11,7 @@ pub use procedural::{
 };
 pub use property_bindings::*;
 pub mod signals;
+pub mod text_motion;
 pub mod tween;
 pub mod updaters;
 pub mod writing;

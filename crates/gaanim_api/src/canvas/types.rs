@@ -976,6 +976,9 @@ pub struct ObjectSpec {
     pub layout_ops: Vec<LayoutOp>,
     pub(crate) reactive_readout_layout: Option<ReactiveReadoutLayoutSpec>,
     pub fill_level_cursor: Option<f64>,
+    /// Typed state after queued typewriter/scramble motions, keyed by the
+    /// Text spec version it applies to.
+    pub(crate) typed_text: Option<(u64, crate::text_motion::TypedText)>,
     pub media_frame: Option<gaanim_scene::MediaFrame>,
     /// Scale and translation of a coordinate view after its queued view changes.
     pub(crate) coordinate_view_cursor: Option<(DVec3, DVec3)>,
@@ -1017,6 +1020,7 @@ impl ObjectSpec {
             layout_ops: Vec::new(),
             reactive_readout_layout: None,
             fill_level_cursor: None,
+            typed_text: None,
             media_frame: None,
             coordinate_view_cursor: None,
         }
@@ -1445,6 +1449,15 @@ impl Anim {
             AnimationType::FillLevelTo { to, .. } => {
                 if let Some(spec) = &self.property_spec {
                     spec.lock().expect("object spec poisoned").fill_level_cursor = Some(*to);
+                }
+            }
+            AnimationType::TextMotion(motion) => {
+                if let Some(spec) = &self.property_spec {
+                    let mut spec = spec.lock().expect("object spec poisoned");
+                    if let SpawnKind::Text(text) = &spec.kind {
+                        let version = text.version;
+                        spec.typed_text = Some((version, motion.after.clone()));
+                    }
                 }
             }
             AnimationType::SignalFloat { to } => {
@@ -2353,6 +2366,30 @@ impl Anim {
         let mut copy = self.clone();
         copy.consumed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         copy
+    }
+}
+
+/// Authoring hooks for typewriter/scramble text motion (see
+/// `canvas::text_motion`).
+impl Anim {
+    /// The object spec behind a `.animate` proxy.
+    pub(crate) fn text_motion_spec(&self) -> Option<std::sync::Arc<std::sync::Mutex<ObjectSpec>>> {
+        self.property_spec.clone()
+    }
+
+    /// Replace the empty proxy with a text motion lasting `default_duration`
+    /// unless a duration was set explicitly.
+    pub(crate) fn with_text_motion(
+        self,
+        motion: crate::text_motion::TextMotion,
+        default_duration: f64,
+    ) -> Self {
+        let explicit = self.duration_explicit;
+        let mut anim = self.effect(AnimationType::TextMotion(motion));
+        if !explicit {
+            anim.inner.duration = default_duration.max(0.0);
+        }
+        anim
     }
 }
 

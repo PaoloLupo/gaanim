@@ -76,6 +76,7 @@ pub(crate) use compile::{
     CompileCheckpoint, SegmentMarker, split_text_math, text_inline_typst_source,
 };
 mod incremental;
+mod text_motion;
 pub(crate) use incremental::SceneFingerprints;
 
 /// dotLottie selectors and typed inputs.
