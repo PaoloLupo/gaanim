@@ -1651,6 +1651,12 @@ fn validate_force_metrics(
     Ok(())
 }
 
+fn parse_zoom_interpolation(name: &str) -> PyResult<gaanim_math::ZoomInterpolation> {
+    gaanim_math::ZoomInterpolation::parse(name).ok_or_else(|| {
+        pyo3::exceptions::PyValueError::new_err("interpolation must be 'exponential' or 'linear'")
+    })
+}
+
 impl PyCamera {
     fn commit_immediate(&self, animation: PyCanvasAnim) -> PyResult<()> {
         self.inner
@@ -1785,8 +1791,10 @@ impl PyCameraAnimation {
     }
 
     /// Set the orthographic zoom. Values above one zoom in.
-    fn zoom_to(&self, zoom: Bound<'_, PyAny>) -> PyResult<PyCanvasAnim> {
+    #[pyo3(signature = (zoom, *, interpolation="exponential"))]
+    fn zoom_to(&self, zoom: Bound<'_, PyAny>, interpolation: &str) -> PyResult<PyCanvasAnim> {
         crate::custom::ensure_authoring_allowed()?;
+        let interpolation = parse_zoom_interpolation(interpolation)?;
         if let Ok(value) = zoom.extract::<f64>() {
             if !value.is_finite() || value <= 0.0 {
                 return Err(pyo3::exceptions::PyValueError::new_err(
@@ -1799,19 +1807,21 @@ impl PyCameraAnimation {
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .camera_zoom_to_source(zoom, 1.0);
+            .camera_zoom_to_source_with_interpolation(zoom, interpolation, 1.0);
         Ok(PyCanvasAnim { inner })
     }
 
     /// Pan and zoom in parallel so the target fits inside the safe viewport.
-    #[pyo3(signature = (targets, margin=None, *, dynamic=false))]
+    #[pyo3(signature = (targets, margin=None, *, dynamic=false, interpolation="exponential"))]
     fn frame_to(
         &self,
         targets: Bound<'_, PyAny>,
         margin: Option<Bound<'_, PyAny>>,
         dynamic: bool,
+        interpolation: &str,
     ) -> PyResult<PyCanvasAnim> {
         crate::custom::ensure_authoring_allowed()?;
+        let interpolation = parse_zoom_interpolation(interpolation)?;
         let margins = if let Some(margin) = margin {
             if let Ok(value) = margin.extract::<f64>() {
                 [value; 4]
@@ -1864,7 +1874,7 @@ impl PyCameraAnimation {
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .camera_frame_many(&targets, margins, dynamic, 1.0);
+            .camera_frame_many_with_interpolation(&targets, margins, dynamic, interpolation, 1.0);
         Ok(PyCanvasAnim { inner })
     }
 
@@ -1927,24 +1937,59 @@ impl PyCameraAnimation {
     }
 
     /// Apply a deterministic shake that settles at the original position.
-    #[pyo3(signature = (amplitude=0.12, frequency=8.0))]
-    fn shake(&self, amplitude: f64, frequency: f64) -> PyResult<PyCanvasAnim> {
+    ///
+    /// Passing `amplitude` without any trauma keyword keeps the legacy sine
+    /// shake (`frequency` in cycles per clip, 0.5 s). Otherwise the shake uses
+    /// the trauma/coherent-noise model (`frequency` in Hz) and lasts until the
+    /// trauma has decayed.
+    #[pyo3(signature = (amplitude=None, frequency=None, *, trauma=None, decay=None, rotation=None, seed=None))]
+    fn shake(
+        &self,
+        amplitude: Option<f64>,
+        frequency: Option<f64>,
+        trauma: Option<f64>,
+        decay: Option<f64>,
+        rotation: Option<f64>,
+        seed: Option<u64>,
+    ) -> PyResult<PyCanvasAnim> {
         crate::custom::ensure_authoring_allowed()?;
-        if !amplitude.is_finite() || amplitude < 0.0 {
+        let non_negative = |value: f64, name: &str| {
+            if value.is_finite() && value >= 0.0 {
+                Ok(value)
+            } else {
+                Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "{name} must be finite and non-negative"
+                )))
+            }
+        };
+        let legacy = amplitude.is_some()
+            && trauma.is_none()
+            && decay.is_none()
+            && rotation.is_none()
+            && seed.is_none();
+        let mut canvas = self.inner.lock().expect("scene canvas poisoned");
+        if legacy {
+            let amplitude = non_negative(amplitude.unwrap_or(0.12), "amplitude")?;
+            let frequency = non_negative(frequency.unwrap_or(8.0), "frequency")?;
+            let inner = canvas.camera_shake(amplitude, frequency, 0.5);
+            return Ok(PyCanvasAnim { inner });
+        }
+        let defaults = gaanim_math::TraumaShake::default();
+        let trauma = non_negative(trauma.unwrap_or(defaults.trauma), "trauma")?;
+        if trauma > 1.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
-                "amplitude must be finite and non-negative",
+                "trauma must be between 0 and 1",
             ));
         }
-        if !frequency.is_finite() || frequency < 0.0 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "frequency must be finite and non-negative",
-            ));
-        }
-        let inner = self
-            .inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .camera_shake(amplitude, frequency, 0.5);
+        let shake = gaanim_math::TraumaShake {
+            trauma,
+            decay: non_negative(decay.unwrap_or(defaults.decay), "decay")?,
+            frequency: non_negative(frequency.unwrap_or(defaults.frequency), "frequency")?,
+            amplitude: non_negative(amplitude.unwrap_or(defaults.amplitude), "amplitude")?,
+            rotation: non_negative(rotation.unwrap_or(defaults.rotation), "rotation")?,
+            seed: seed.unwrap_or(defaults.seed),
+        };
+        let inner = canvas.camera_trauma_shake(shake, shake.natural_duration());
         Ok(PyCanvasAnim { inner })
     }
 
@@ -2124,7 +2169,7 @@ impl PyCamera {
         let animation = PyCameraAnimation {
             inner: self.inner.clone(),
         }
-        .zoom_to(zoom)?;
+        .zoom_to(zoom, "exponential")?;
         self.commit_immediate(animation)?;
         Ok(self.clone())
     }
@@ -2140,7 +2185,7 @@ impl PyCamera {
         let animation = PyCameraAnimation {
             inner: self.inner.clone(),
         }
-        .frame_to(targets, margin, dynamic)?;
+        .frame_to(targets, margin, dynamic, "exponential")?;
         self.commit_immediate(animation)?;
         Ok(self.clone())
     }

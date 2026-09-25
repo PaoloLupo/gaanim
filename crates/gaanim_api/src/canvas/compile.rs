@@ -4146,6 +4146,7 @@ impl SceneModel {
                                 lens: gaanim_timeline::clip::PropertyLensSpec::CameraZoom {
                                     from: *camera_zoom,
                                     to: *to,
+                                    interpolation: gaanim_math::ZoomInterpolation::Linear,
                                 },
                                 rate_func: gaanim_math::RateFunc::Smooth,
                                 delay: 0.0,
@@ -4205,6 +4206,7 @@ impl SceneModel {
                         gaanim_timeline::clip::PropertyLensSpec::CameraZoom {
                             from: *camera_zoom,
                             to: zoom,
+                            interpolation: gaanim_math::ZoomInterpolation::Linear,
                         },
                     ] {
                         builder.timeline.add_clip(
@@ -4268,6 +4270,7 @@ impl SceneModel {
                                     origin: *camera_position,
                                     amplitude: *amplitude,
                                     frequency: *frequency,
+                                    trauma: None,
                                 },
                                 rate_func: gaanim_math::RateFunc::Linear,
                                 delay: 0.0,
@@ -5885,6 +5888,55 @@ impl SceneModel {
         );
     }
 
+    /// Schedule a static pan+zoom. Linear mode keeps the historical pair of
+    /// independent position/zoom clips; exponential mode couples them so the
+    /// view scales about a fixed point.
+    fn add_camera_pan_zoom(
+        builder: &mut SceneBuilder,
+        start: f64,
+        anim: &AnimationBuilder,
+        (from_position, to_position): (DVec3, DVec3),
+        (from_zoom, to_zoom): (f64, f64),
+        interpolation: gaanim_math::ZoomInterpolation,
+    ) {
+        use gaanim_timeline::clip::PropertyLensSpec;
+        match interpolation {
+            gaanim_math::ZoomInterpolation::Linear => {
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraPosition {
+                        from: from_position,
+                        to: to_position,
+                    },
+                );
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraZoom {
+                        from: from_zoom,
+                        to: to_zoom,
+                        interpolation,
+                    },
+                );
+            }
+            gaanim_math::ZoomInterpolation::Exponential => Self::add_camera_lens(
+                builder,
+                start,
+                anim,
+                PropertyLensSpec::CameraPanZoom {
+                    from_position,
+                    to_position,
+                    from_zoom,
+                    to_zoom,
+                    interpolation,
+                },
+            ),
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn schedule_camera_animation(
         builder: &mut SceneBuilder,
@@ -5959,7 +6011,7 @@ impl SceneModel {
                     },
                 );
             }
-            AnimationType::CameraZoom { to } => {
+            AnimationType::CameraZoom { to, interpolation } => {
                 Self::add_camera_lens(
                     builder,
                     start,
@@ -5967,11 +6019,12 @@ impl SceneModel {
                     PropertyLensSpec::CameraZoom {
                         from: *camera_zoom,
                         to: *to,
+                        interpolation: *interpolation,
                     },
                 );
                 *camera_zoom = *to;
             }
-            AnimationType::CameraZoomSource { to } => {
+            AnimationType::CameraZoomSource { to, interpolation } => {
                 Self::add_camera_lens(
                     builder,
                     start,
@@ -5979,8 +6032,13 @@ impl SceneModel {
                     PropertyLensSpec::CameraZoomSource {
                         from: *camera_zoom,
                         to: compile_tracking_scalar(to, id_map, &builder.states),
+                        interpolation: *interpolation,
                     },
                 );
+                // A constant target is the hand-off zoom for later camera clips.
+                if let Some(zoom) = to.constant_value() {
+                    *camera_zoom = zoom;
+                }
             }
             AnimationType::CameraRotation { to } => {
                 Self::add_camera_lens(
@@ -6005,7 +6063,11 @@ impl SceneModel {
                     },
                 );
             }
-            AnimationType::CameraFrame { target, margin } => {
+            AnimationType::CameraFrame {
+                target,
+                margin,
+                interpolation,
+            } => {
                 let Some(state) = builder.states.get(*target) else {
                     return;
                 };
@@ -6018,23 +6080,13 @@ impl SceneModel {
                     .min(frame_bounds.height() / height)
                     .max(0.01);
                 let center = bounds.center();
-                Self::add_camera_lens(
+                Self::add_camera_pan_zoom(
                     builder,
                     start,
                     anim,
-                    PropertyLensSpec::CameraPosition {
-                        from: *camera_position,
-                        to: center,
-                    },
-                );
-                Self::add_camera_lens(
-                    builder,
-                    start,
-                    anim,
-                    PropertyLensSpec::CameraZoom {
-                        from: *camera_zoom,
-                        to: zoom,
-                    },
+                    (*camera_position, center),
+                    (*camera_zoom, zoom),
+                    *interpolation,
                 );
                 *camera_position = center;
                 *camera_zoom = zoom;
@@ -6043,6 +6095,7 @@ impl SceneModel {
                 targets,
                 margins,
                 dynamic,
+                interpolation,
             } => {
                 let target_states: Vec<_> = targets
                     .iter()
@@ -6063,6 +6116,7 @@ impl SceneModel {
                             margins: *margins,
                             frame_width: frame_bounds.width(),
                             frame_height: frame_bounds.height(),
+                            interpolation: *interpolation,
                         },
                     );
                     // Keep subsequent authored camera animations continuous.
@@ -6112,23 +6166,13 @@ impl SceneModel {
                     let zoom = (frame_bounds.width() / framed.width().max(1.0))
                         .min(frame_bounds.height() / framed.height().max(1.0));
                     let center = framed.center();
-                    Self::add_camera_lens(
+                    Self::add_camera_pan_zoom(
                         builder,
                         start,
                         anim,
-                        PropertyLensSpec::CameraPosition {
-                            from: *camera_position,
-                            to: center,
-                        },
-                    );
-                    Self::add_camera_lens(
-                        builder,
-                        start,
-                        anim,
-                        PropertyLensSpec::CameraZoom {
-                            from: *camera_zoom,
-                            to: zoom,
-                        },
+                        (*camera_position, center),
+                        (*camera_zoom, zoom),
+                        *interpolation,
                     );
                     *camera_position = center;
                     *camera_zoom = zoom;
@@ -6168,6 +6212,7 @@ impl SceneModel {
             AnimationType::CameraShake {
                 amplitude,
                 frequency,
+                trauma,
             } => Self::add_camera_lens(
                 builder,
                 start,
@@ -6176,6 +6221,7 @@ impl SceneModel {
                     origin: *camera_position,
                     amplitude: *amplitude,
                     frequency: *frequency,
+                    trauma: *trauma,
                 },
             ),
             AnimationType::CameraLookAt { eye, target, up } => {
@@ -6378,14 +6424,20 @@ impl SceneModel {
                 }
                 AnimationType::PropertySource(source)
             }
-            AnimationType::CameraFrame { target, margin } => AnimationType::CameraFrame {
+            AnimationType::CameraFrame {
+                target,
+                margin,
+                interpolation,
+            } => AnimationType::CameraFrame {
                 target: *id_map.get(target)?,
                 margin: *margin,
+                interpolation: *interpolation,
             },
             AnimationType::CameraFrameMany {
                 targets,
                 margins,
                 dynamic,
+                interpolation,
             } => AnimationType::CameraFrameMany {
                 targets: targets
                     .iter()
@@ -6393,6 +6445,7 @@ impl SceneModel {
                     .collect(),
                 margins: *margins,
                 dynamic: *dynamic,
+                interpolation: *interpolation,
             },
             AnimationType::CameraFollow { target } => AnimationType::CameraFollow {
                 target: *id_map.get(target)?,
@@ -10813,6 +10866,72 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(colors.contains(&brand));
         assert!(colors.contains(&PenikoColor::BLACK));
+    }
+
+    #[test]
+    fn camera_zoom_and_frame_default_to_exponential_with_zoom_hand_off() {
+        let mut canvas = SceneModel::new(960, 540);
+        let card = canvas.rect(120.0, 80.0).move_to(200.0, -60.0);
+        let zoom_in = canvas.camera_zoom_to_source(ScalarSource::constant(8.0), 1.0);
+        canvas.play(vec![zoom_in]);
+        let frame = canvas.camera_frame_many(&[card.clone()], [20.0; 4], false, 1.0);
+        canvas.play(vec![frame]);
+        let linear = canvas.camera_frame_many_with_interpolation(
+            &[card],
+            [20.0; 4],
+            false,
+            gaanim_math::ZoomInterpolation::Linear,
+            1.0,
+        );
+        canvas.play(vec![linear]);
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        use gaanim_timeline::clip::PropertyLensSpec;
+        let mut lenses: Vec<_> = world
+            .resource::<Timeline>()
+            .clips
+            .values()
+            .filter_map(|clip| match &clip.payload {
+                gaanim_timeline::clip::ClipPayload::Animation(animation) => {
+                    Some((clip.start, animation.lens.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        lenses.sort_by(|left, right| left.0.total_cmp(&right.0));
+        assert!(lenses.iter().any(|(_, lens)| matches!(
+            lens,
+            PropertyLensSpec::CameraZoomSource {
+                interpolation: gaanim_math::ZoomInterpolation::Exponential,
+                ..
+            }
+        )));
+        let pan_zoom = lenses
+            .iter()
+            .find_map(|(_, lens)| match lens {
+                PropertyLensSpec::CameraPanZoom {
+                    from_zoom,
+                    interpolation,
+                    ..
+                } => Some((*from_zoom, *interpolation)),
+                _ => None,
+            })
+            .expect("exponential frame_to emits one coupled pan+zoom clip");
+        // The constant zoom_to target is the hand-off pose for the next frame.
+        assert_eq!(pan_zoom, (8.0, gaanim_math::ZoomInterpolation::Exponential));
+        assert!(lenses.iter().any(|(_, lens)| matches!(
+            lens,
+            PropertyLensSpec::CameraZoom {
+                interpolation: gaanim_math::ZoomInterpolation::Linear,
+                ..
+            }
+        )));
     }
 
     #[test]
