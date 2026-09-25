@@ -3,7 +3,7 @@
 #show: docs-chapter.with(
   title: "Partes de una escena",
   description: "Viewport, objetos, línea de tiempo, cámara y salida",
-  route: "/manual/escena/",
+  route: "/empezar/como-piensa-gaanim/",
 )
 
 = Anatomía de `Scene`
@@ -66,9 +66,9 @@ solo declara tiempos mediante `snapshots(...)` cuando el host inyecta
 
 La cámara cambia la vista, no las coordenadas locales de los objetos. Clipping
 y máscaras limitan qué fragmentos son visibles. Son herramientas de
-composición avanzada; consulta #link("/api/scene/")[la referencia de Scene]
+composición avanzada; consulta #link("/referencia/scene/")[la referencia de Scene]
 para sus firmas exactas.
 
 == Siguiente paso
 
-Continúa con #link("/manual/objetos/")[Objetos, texto y estilos].
+Continúa con #link("/empezar/como-piensa-gaanim/")[Objetos, texto y estilos].

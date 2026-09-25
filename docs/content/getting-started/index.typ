@@ -3,7 +3,7 @@
 #show: docs-chapter.with(
   title: "Instalación y primeros pasos",
   description: "Instala Gaanim y crea tu primera animación",
-  route: "/getting-started/",
+  route: "/empezar/instalacion/",
 )
 
 = Instalación — resumen
@@ -11,7 +11,7 @@
 Gaanim se instala desde las
 #link("https://github.com/PaoloLupo/gaanim/releases/latest")[releases de GitHub]:
 cada versión publica un paquete listo para usar, sin compilar nada. La
-#link("/getting-started/installation/")[instalación detallada] explica cómo
+#link("/empezar/instalacion/")[instalación detallada] explica cómo
 verificar la descarga, cómo encuentra Python y cómo actualizar.
 
 == Requisitos
@@ -118,10 +118,10 @@ La extensión de `--output` elige el formato: `mp4`, `webm`, `webp`, `gif` o
 
 = Siguientes pasos
 
-- #link("/manual/guia-rapida/", "Guía rápida") — crea un proyecto de movimiento circular
-- #link("/guides/slides/", "Presentaciones") — flujo completo para presentaciones en vivo
+- #link("/empezar/primera-animacion/", "Guía rápida") — crea un proyecto de movimiento circular
+- #link("/guias/presentaciones/", "Presentaciones") — flujo completo para presentaciones en vivo
 
-- #link("/api/scene/", "API de Scene") — consulta el contrato técnico de la escena
-- #link("/api/mobjects/", "Objetos") — explora las figuras y objetos disponibles
-- #link("/api/animations/", "Animaciones") — consulta animaciones y funciones de tiempo
-- #link("/examples/basic/", "Ejemplos") — escenas completas y ejecutables
+- #link("/referencia/scene/", "API de Scene") — consulta el contrato técnico de la escena
+- #link("/referencia/objetos/", "Objetos") — explora las figuras y objetos disponibles
+- #link("/referencia/animations/", "Animaciones") — consulta animaciones y funciones de tiempo
+- #link("/ejemplos/basicos/", "Ejemplos") — escenas completas y ejecutables

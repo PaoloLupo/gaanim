@@ -3,7 +3,7 @@
 #show: docs-chapter.with(
   title: "Animaciones y tiempo",
   description: "Entrada, transformación, easing, paralelismo y secuencia",
-  route: "/manual/animaciones/",
+  route: "/empezar/como-piensa-gaanim/",
 )
 
 = Descriptores de animación
@@ -52,5 +52,5 @@ visual permiten inspeccionar instantes exactos sin reproducir todo el video.
 
 == Siguiente paso
 
-Continúa con #link("/guides/layout/")[Layout] para sustituir coordenadas
+Continúa con #link("/guias/layout/")[Layout] para sustituir coordenadas
 manuales por una composición adaptable.

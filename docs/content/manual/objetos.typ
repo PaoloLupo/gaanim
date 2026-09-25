@@ -3,7 +3,7 @@
 #show: docs-chapter.with(
   title: "Objetos, texto y estilos",
   description: "Cómo crear, agrupar y dar apariencia al contenido de una escena",
-  route: "/manual/objetos/",
+  route: "/empezar/como-piensa-gaanim/",
 )
 
 = Objetos dibujables
@@ -36,7 +36,7 @@ formula = scene.text("$x(t) = r cos(t)$", role="subtitle")
 
 Los roles (`title`, `subtitle`, `body`, etc.) conectan el texto con el tema.
 Para documentos complejos usa partes semánticas y selecciones, explicadas en
-#link("/api/text/")[la referencia de Text].
+#link("/referencia/text/")[la referencia de Text].
 
 == Estilo local y temas
 
@@ -52,4 +52,4 @@ del directorio desde el que ejecutaste Gaanim.
 
 == Siguiente paso
 
-Continúa con #link("/manual/animaciones/")[Animaciones y tiempo].
+Continúa con #link("/empezar/como-piensa-gaanim/")[Animaciones y tiempo].

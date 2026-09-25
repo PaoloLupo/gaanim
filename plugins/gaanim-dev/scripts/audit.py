@@ -48,7 +48,7 @@ REQUIRED_DOCS = {
     "audio.typ",
     "index.typ",
     "layout.typ",
-    "mobjects.typ",
+    "objetos.typ",
     "scene.typ",
     "themes.typ",
 }
@@ -262,12 +262,12 @@ def collect_findings(repo: Path, base: str | None = None) -> list[Finding]:
     if missing_recipes:
         findings.append(_error("just-recipes", f"Missing required just recipes: {', '.join(missing_recipes)}"))
 
-    docs_dir = repo / "docs" / "content" / "api"
+    docs_dir = repo / "docs" / "content" / "referencia"
     missing_docs = sorted(name for name in REQUIRED_DOCS if not (docs_dir / name).is_file())
     if missing_docs:
         findings.append(_error("api-doc-pages", f"Missing API documentation pages: {', '.join(missing_docs)}"))
     docs_index = (repo / "docs" / "content" / "index.typ").read_text(encoding="utf-8")
-    unlisted_docs = sorted(name for name in REQUIRED_DOCS - {"index.typ"} if f'api/{name}' not in docs_index)
+    unlisted_docs = sorted(name for name in REQUIRED_DOCS - {"index.typ"} if f'referencia/{name}' not in docs_index)
     if unlisted_docs:
         findings.append(_error("api-doc-index", f"API pages not included from docs/content/index.typ: {', '.join(unlisted_docs)}"))
 

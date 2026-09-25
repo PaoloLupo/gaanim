@@ -141,7 +141,7 @@ blanking y el progreso de las previews. Las previews se generan en segundo
 plano, primero la diapositiva actual y la siguiente. La pantalla fullscreen
 revela un dock compacto con Previous, Advance/Pause, inicio, fin y progreso al
 llevar el cursor a su zona inferior; se oculta al retirar el cursor o perder
-foco. Consulta `docs/content/guides/slides.typ` para el detalle.
+foco. Consulta `docs/content/guias/presentaciones.typ` para el detalle.
 
 ## 3D nativo e inspección
 
@@ -252,7 +252,7 @@ El texto de cada bloque puede vivir fuera del código, en
 guardan en `assets/narration/`, se nivelan a -16 LUFS para video y se mezclan
 al exportar MP4 o WebM. Mientras grabas, el medidor marca la zona de nivel ideal
 y avisa en rojo si te acercas a la saturación. Opcionalmente, whisper.cpp
-detecta las marcas por palabra. Consulte `docs/content/api/audio.typ`.
+detecta las marcas por palabra. Consulte `docs/content/referencia/audio.typ`.
 
 ## Comandos de desarrollo
 
@@ -333,7 +333,7 @@ La API pública de Python comienza en `Scene`, que conserva la orquestación y
 expone las capacidades `geometry`, `text`, `layout`, `media`, `viz`, `slides`,
 `mechanics` y `assets`; `Canvas(...)` es un constructor de compatibilidad
 deprecado. La migración desde la superficie plana 0.1 está documentada en
-[`docs/content/guides/migration-0-2.typ`](docs/content/guides/migration-0-2.typ).
+[`docs/content/apendices/novedades.typ`](docs/content/apendices/novedades.typ).
 Consulte también las escenas de referencia en [`examples/`](examples/).
 
 ## Estado

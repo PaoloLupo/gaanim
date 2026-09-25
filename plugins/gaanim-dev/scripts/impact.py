@@ -122,19 +122,19 @@ def _docs_for(paths: Iterable[str]) -> set[str]:
         if "gaanim_animation" in lower or any(
             token in lower for token in ("anim.rs", "transition.rs", "updater.rs")
         ):
-            docs.add("docs/content/api/animations.typ")
+            docs.add("docs/content/referencia/animations.typ")
         if "gaanim_layout" in lower or "/layout" in lower:
-            docs.add("docs/content/api/layout.typ")
+            docs.add("docs/content/referencia/layout.typ")
         if any(token in lower for token in ("theme", "color", "brush", "effect")):
-            docs.add("docs/content/api/themes.typ")
+            docs.add("docs/content/referencia/themes.typ")
         if any(token in lower for token in ("asset", "svg")):
-            docs.add("docs/content/api/assets.typ")
+            docs.add("docs/content/referencia/assets.typ")
         if "audio" in lower:
-            docs.add("docs/content/api/audio.typ")
+            docs.add("docs/content/referencia/audio.typ")
         if any(token in lower for token in ("pydrawable", "drawable", "objects", "primitive", "text")):
-            docs.add("docs/content/api/mobjects.typ")
+            docs.add("docs/content/referencia/objetos.typ")
         if any(token in lower for token in ("pycanvas", "canvas", "scene", "runtime", "camera", "timeline")):
-            docs.add("docs/content/api/scene.typ")
+            docs.add("docs/content/referencia/scene.typ")
     return docs
 
 

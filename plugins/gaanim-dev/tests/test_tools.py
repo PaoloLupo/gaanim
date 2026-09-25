@@ -163,7 +163,7 @@ class ImpactTests(unittest.TestCase):
                 ["crates/gaanim_python/src/pycanvas.rs"],
             )
         self.assertIn("python-api", result.categories)
-        self.assertIn("docs/content/api/scene.typ", result.documentation)
+        self.assertIn("docs/content/referencia/scene.typ", result.documentation)
         self.assertIn("just validate-python-api", result.commands)
         self.assertIn("transform_demo", result.visual_examples)
 
@@ -180,7 +180,7 @@ class ImpactTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             result = impact.analyze_paths(
                 Path(temp),
-                ["docs/content/api/scene.typ"],
+                ["docs/content/referencia/scene.typ"],
             )
         self.assertEqual(["just docs"], result.commands)
 

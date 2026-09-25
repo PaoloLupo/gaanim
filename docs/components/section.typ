@@ -1,3 +1,4 @@
+#import "book.typ": book-outline
 #let html-section(
   title: none,
   title-content: none,
@@ -80,7 +81,7 @@
       asset-base: prefix + "assets/",
     )
 
-    // Authors write site-absolute routes such as `link("/api/scene/")`. Emit
+    // Authors write site-absolute routes such as `link("/referencia/scene/")`. Emit
     // them relative to this page so the site works under any base path,
     // e.g. GitHub Pages' `/<repo>/`.
     show link: it => {
@@ -121,58 +122,14 @@
       html.body({
         let chapter-label = label("chap-" + route.replace(regex("[^a-zA-Z0-9]"), "-"))
 
-        let site-map = (
-          "Inicio": "",
-          "Fundamentos": (
-            "Introducción": "manual/introduccion/",
-            "Instalación rápida": "getting-started/",
-            "Instalación detallada": "getting-started/installation/",
-            "Guía rápida": "manual/guia-rapida/",
-            "Escena": "manual/escena/",
-            "Objetos": "manual/objetos/",
-            "Animaciones": "manual/animaciones/",
-          ),
-          "Proyecto práctico": (
-            "1. Antes de empezar": "guia/antes-de-empezar/",
-            "2. Primera escena": "guia/primera-escena/",
-            "3. Objetos y estilo": "guia/objetos-estilo/",
-            "4. Animar el tiempo": "guia/animar-tiempo/",
-            "5. Componer y explicar": "guia/componer-explicar/",
-            "6. Dar vida a la escena": "guia/reactividad/",
-            "7. Del círculo al seno": "guia/circulo-al-seno/",
-            "8. Terminar el proyecto": "guia/terminar-proyecto/",
-          ),
-          "Taller de escenas": (
-            "Ejemplos básicos": "examples/basic/",
-            "Ejemplos avanzados": "examples/advanced/",
-            "Temas avanzados": "manual/avanzado/",
-            "Layout": "guides/layout/",
-            "Proyectos": "guides/projects/",
-            "Presentaciones": "guides/slides/",
-            "Regresión visual": "guides/visual-regression/",
-            "Rendimiento": "guides/performance/",
-            "Migración a 0.2": "guides/migration-0-2/",
-          ),
-          "Referencia de la API": (
-            "Índice": "api/",
-            "Escena": "api/scene/",
-            "Texto": "api/text/",
-            "Visualización": "api/visualization/",
-            "Layout": "api/layout/",
-            "Recursos": "api/assets/",
-            "Audio": "api/audio/",
-            "Objetos": "api/mobjects/",
-            "Matrices": "api/matrices/",
-            "Animaciones": "api/animations/",
-            "Colores y temas": "api/themes/",
-          ),
-        )
-
-        // Section of the current page, for the breadcrumb.
-        let section-name = site-map
-          .pairs()
-          .find(((key, val)) => type(val) == dictionary and val.values().contains(route))
-        let section-name = if section-name == none { none } else { section-name.at(0) }
+        // Parts and chapters in reading order, from `index.typ`.
+        let outline-parts = book-outline()
+        let pages = outline-parts.map(part => part.pages).flatten()
+        let current = pages.position(page => page.route == route)
+        let section-name = outline-parts
+          .find(part => part.pages.any(page => page.route == route))
+        let section-name = if section-name == none { none } else { section-name.title }
+        let href(route) = if prefix + route == "" { "./" } else { prefix + route }
 
         html.header(class: "site-header", {
           html.elem("button", attrs: (
@@ -200,9 +157,10 @@
             html.elem("kbd", attrs: (class: "search-trigger-kbd"), "Ctrl K")
           })
           html.nav(class: "header-links", {
-            html.a(href: prefix + "manual/guia-rapida/", "Guía")
-            html.a(href: prefix + "api/", "API")
-            html.a(href: prefix + "examples/basic/", "Ejemplos")
+            html.a(href: prefix + "empezar/instalacion/", "Empezar")
+            html.a(href: prefix + "tutorial/antes-de-empezar/", "Tutorial")
+            html.a(href: prefix + "guias/layout/", "Guías")
+            html.a(href: prefix + "referencia/", "Referencia")
             html.a(href: "https://github.com/PaoloLupo/gaanim", class: "header-github", "GitHub")
           })
           html.elem("button", attrs: (id: "theme-toggle-btn", class: "icon-btn theme-toggle-btn", type: "button", "aria-label": "Cambiar tema"), "")
@@ -211,30 +169,24 @@
         html.div(class: "layout-container", {
           html.aside(class: "nav-sidebar", id: "global-nav-sidebar", {
             html.elem("nav", attrs: ("aria-label": "Documentación"), html.ul({
-              for (key, val) in site-map.pairs() {
-                if type(val) == str {
-                  let active-class = if val == route { "nav-active" } else { "" }
-                  html.li(html.a(href: if prefix + val == "" { "./" } else { prefix + val }, class: active-class, key))
-                } else if type(val) == dictionary {
-                  let is-active = val.values().contains(route)
-                  let details-content = {
-                    html.summary(key)
-                    html.ul({
-                      for (sub-key, sub-val) in val.pairs() {
-                        let active-class = if sub-val == route { "nav-active" } else { "" }
-                        html.li(html.a(href: prefix + sub-val, class: active-class, sub-key))
-                      }
-                    })
-                  }
-
-                  html.li(
-                    if is-active {
-                      html.details(open: true, details-content)
-                    } else {
-                      html.details(details-content)
-                    },
-                  )
+              html.li(html.a(href: href(""), class: if route == "/" { "nav-active" } else { "" }, "Inicio"))
+              for part in outline-parts {
+                let details-content = {
+                  html.summary(part.title)
+                  html.ul({
+                    for page in part.pages {
+                      let active-class = if page.route == route { "nav-active" } else { "" }
+                      html.li(html.a(href: href(page.route), class: active-class, page.title))
+                    }
+                  })
                 }
+                html.li(
+                  if part.pages.any(page => page.route == route) {
+                    html.details(open: true, details-content)
+                  } else {
+                    html.details(details-content)
+                  },
+                )
               }
             }))
           })
@@ -268,6 +220,17 @@
                     })
                   }
                   body
+                  // Reading order: previous and next page of the book.
+                  if current != none {
+                    let link-to(page, direction, label) = html.a(href: href(page.route), class: "page-nav-" + direction, {
+                      html.span(class: "page-nav-label", label)
+                      html.span(class: "page-nav-title", page.title)
+                    })
+                    html.elem("nav", attrs: (class: "page-nav", "aria-label": "Páginas contiguas"), {
+                      if current > 0 { link-to(pages.at(current - 1), "prev", "← Anterior") }
+                      if current + 1 < pages.len() { link-to(pages.at(current + 1), "next", "Siguiente →") }
+                    })
+                  }
                 }) #chapter-label]
             }
             html.footer(class: "site-footer", {
@@ -401,7 +364,7 @@
         fill: rgb("#f8fafc"),
         [
           #if header-element != none [ #header-element #v(4pt) ]
-          #if result.show_code or not has-webp [
+          #if not result.hide_code or not has-webp [
             #source-code
             #v(4pt)
           ]
@@ -414,9 +377,9 @@
           ]
         ]
       )
-    } else if not result.show_code and not has-webp and result-items.len() > 0 {
-      // Result only: the cell hides its code and shows what it printed. A cell
-      // with nothing to show falls through to the code, as in the PDF.
+    } else if result.hide_code and not has-webp and result-items.len() > 0 {
+      // Result only: the cell asked to hide its code (`# hide-code`) and shows
+      // what it printed. A cell with nothing to show falls through to the code.
       html.div(class: "code-result-only", result-items.join())
     } else if has-webp {
       // Side-by-side: code left, WebP right
@@ -474,6 +437,7 @@
   route: none,
   title: none,
   description: none,
+  nav: none,
   code-langs: ("python",),
   ..args,
   body,
@@ -493,6 +457,7 @@
 
   [#metadata((
     title: title,
+    nav: nav,
     route: route,
     description: description,
   )) <blog-post>]

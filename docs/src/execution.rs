@@ -183,6 +183,15 @@ fn silent_failure(program: &str, success: bool, status: &str, stderr: &str) -> O
     })
 }
 
+/// What the cell printed, without the report `gaanim check` appends: readers
+/// care about their `print()` output, not the builder's validation.
+fn without_preflight_report(stdout: &str) -> &str {
+    match stdout.find("Scene preflight:") {
+        Some(start) if start == 0 || stdout[..start].ends_with('\n') => &stdout[..start],
+        _ => stdout,
+    }
+}
+
 /// Drop the runtime's tracing lines (`2026-01-01T00:00:00.000Z  INFO ...`)
 /// and ALSA's complaints about a build machine without a sound card.
 fn without_runtime_logs(stderr: &str) -> String {
@@ -258,6 +267,7 @@ pub fn compile_code_cell(
     let mut code_to_execute = String::new();
     let mut code_to_display = String::new();
     let mut show_code = false;
+    let mut hide_code = false;
     let mut timeout_secs: u64 = 120; // gaanim animations can take longer
     let mut caption = String::new();
     let mut target_cell: Option<String> = None;
@@ -276,6 +286,7 @@ pub fn compile_code_cell(
         }
         if trimmed.starts_with("# show-code: false") || trimmed == "# hide-code" {
             show_code = false;
+            hide_code = true;
             continue;
         }
         if let Some(t) = trimmed.strip_prefix("# timeout:") {
@@ -508,7 +519,11 @@ pub fn compile_code_cell(
     let mut result = Dict::new();
     result.insert("code".into(), Value::Str(code_to_display.trim_end().into()));
     result.insert("show_code".into(), Value::Bool(show_code));
-    result.insert("stdout".into(), Value::Str(outcome.stdout.trim_end().into()));
+    result.insert("hide_code".into(), Value::Bool(hide_code));
+    result.insert(
+        "stdout".into(),
+        Value::Str(without_preflight_report(&outcome.stdout).trim_end().into()),
+    );
     result.insert("stderr".into(), Value::Str(outcome.stderr.trim_end().into()));
     result.insert("caption".into(), Value::Str(caption.as_str().into()));
     result.insert("webp".into(), Value::Str(outcome.webp.as_str().into()));
@@ -917,8 +932,17 @@ fn collect_webp(root: &Path, source: &Path, cell_id: &str) -> Option<String> {
 mod tests {
     use super::{
         adjust_stderr_line_numbers, has_valid_webp_signature, silent_failure,
-        strip_ansi_escape_codes, without_render_calls, without_runtime_logs,
+        strip_ansi_escape_codes, without_preflight_report, without_render_calls,
+        without_runtime_logs,
     };
+
+    #[test]
+    fn the_check_report_is_not_part_of_what_a_cell_printed() {
+        let stdout = "hola\nScene preflight: /tmp/main.py\n  PASS with 1 warning\n";
+        assert_eq!(without_preflight_report(stdout), "hola\n");
+        assert_eq!(without_preflight_report("Scene preflight: x\n"), "");
+        assert_eq!(without_preflight_report("no report"), "no report");
+    }
 
     #[test]
     fn runtime_logs_are_not_errors_but_other_output_is() {

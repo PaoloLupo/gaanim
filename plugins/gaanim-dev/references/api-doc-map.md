@@ -6,13 +6,13 @@ has the correct user-facing concept, then include it from
 
 | API area | Primary Typst page |
 |---|---|
-| `Scene`, viewport, timeline, camera, clipping, output | `docs/content/api/scene.typ` |
-| constructors, `Drawable`, geometry, text, media, reactive objects | `docs/content/api/mobjects.typ` |
-| `Anim`, transitions, updaters, easing, writing | `docs/content/api/animations.typ` |
-| anchors, grids, regions, flow, stacks, tracks | `docs/content/api/layout.typ` |
-| colors, brushes, themes, gradients, effects | `docs/content/api/themes.typ` |
-| manifests, preloading, SVG asset behavior | `docs/content/api/assets.typ` |
-| audio behavior | `docs/content/api/audio.typ` |
+| `Scene`, viewport, timeline, camera, clipping, output | `docs/content/referencia/scene.typ` |
+| constructors, `Drawable`, geometry, text, media, reactive objects | `docs/content/referencia/objetos.typ` |
+| `Anim`, transitions, updaters, easing, writing | `docs/content/referencia/animations.typ` |
+| anchors, grids, regions, flow, stacks, tracks | `docs/content/referencia/layout.typ` |
+| colors, brushes, themes, gradients, effects | `docs/content/referencia/themes.typ` |
+| manifests, preloading, SVG asset behavior | `docs/content/referencia/assets.typ` |
+| audio behavior | `docs/content/referencia/audio.typ` |
 
 Follow `docs/components/api.typ` and neighboring entries. Keep each documented
 signature identical to the callable Python surface, describe units/defaults
@@ -54,5 +54,5 @@ re-rendered, and a failure is always retried by the next build.
 Each `api-entry` name must use real stub symbols (`Class.member`, with bare
 members after `/` inheriting the class). The build fails on a name that
 `gaanim_core.pyi` does not expose. An entry without a `signature` shows the
-stub's. When adding a page, also add it to `site-map` in
-`docs/components/section.typ`.
+stub's. The site menu, previous/next links and the PDF follow `docs/content/index.typ`,
+so a new page only needs its `#include` there.

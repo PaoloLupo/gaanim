@@ -205,7 +205,7 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
   `order="forward"|"reverse"|"center"|"random"`, pero salvo `by="part"` todos los
   valores comparten el schedule vectorial. `by` y `order` se descartan, y `stagger`
   solo se reenvía como `lag_ratio` (`crates/gaanim_python/src/pydrawable.rs:544`,
-  `docs/content/api/text.typ:525`). Honrarlos da escritura por palabra o línea y
+  `docs/content/referencia/text.typ`). Honrarlos da escritura por palabra o línea y
   órdenes desde el centro o aleatorios.
 - **Referencias:** Manim `AddTextLetterByLetter`/`LaggedStart`, Jitter "animate by
   line/word/letter".

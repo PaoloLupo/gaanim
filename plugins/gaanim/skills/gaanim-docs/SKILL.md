@@ -29,13 +29,19 @@ in the Gaanim application) rather than guessing the API.
 
 1. Run `index` once per task to see pages in reading order with titles.
    Choose pages by intent:
-   - `api/*.typ`: exact signatures, parameters, defaults, returns, errors.
-   - `manual/*.typ` and `guia/*.typ`: concepts, the timeline model, idioms.
-   - `examples/*.typ` and `examples/*.py`: complete runnable scenes.
-   - `guides/*.typ`: projects, slides, layout, visual regression, migration.
+   - `referencia/*.typ`: exact signatures, parameters, defaults, returns, errors.
+   - `empezar/*.typ`: installation, a first scene and the mental model.
+   - `tutorial/*.typ`: one project built step by step; idioms in context.
+   - `guias/*.typ`: how to do a task (layout, motion, presentations, projects,
+     visual comparison).
+   - `ejemplos/*.typ` and `ejemplos/*.py`: complete runnable scenes.
+   - `apendices/*.typ`: release notes and migrations.
 2. Read the relevant files directly from `root`, or `search` for a name.
    In Typst sources, `#api-entry(name:, signature:, params:, returns:, desc:)`
-   is one API contract; fenced `python` blocks are runnable examples; `#...`
+   is one API contract; fenced `python` blocks are runnable examples (lines
+   starting with `>>>` are hidden setup that runs first, `<<<` lines are shown
+   but not run, and `# continue` means the block builds on the previous one of
+   the page); `#...`
    calls outside those blocks are presentation markup. Prose is in Spanish.
 3. Confirm every name you use against the `.pyi` stubs in `stubs`
    (`gaanim_core.pyi`, `colors.pyi`, `templates.pyi`, ...). When docs and stubs
@@ -50,5 +56,5 @@ in the Gaanim application) rather than guessing the API.
    `gaanim .` to preview. If the `gaanim` executable is unavailable, say the
    scene was not executed.
 
-Cite the page (`api/scene.typ`, ...) and docs version behind non-obvious API
+Cite the page (`referencia/scene.typ`, ...) and docs version behind non-obvious API
 choices. Never edit files under the installed `_docs` directory.

@@ -39,7 +39,7 @@ introduce a dependency cycle to match this simplified map.
 - Python package exports and compatibility shims:
   `crates/gaanim_python/gaanim/__init__.py`.
 - User documentation: `docs/content/**/*.typ`.
-- Executable examples: `examples/*.py` and `docs/content/examples/*.py`.
+- Executable examples: `examples/*.py` and `docs/content/ejemplos/*.py`.
 - Performance contract: `tests/benchmark_runtime.py`,
   `tests/performance/budgets.json`, `examples/performance_benchmark.py`, and the
   scheduled informational CI job.

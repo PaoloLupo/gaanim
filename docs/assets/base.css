@@ -260,6 +260,32 @@ main h2::before, main.page-home > h3::before {
 }
 h1:hover .heading-anchor, h2:hover .heading-anchor, h3:hover .heading-anchor, h4:hover .heading-anchor { opacity: 1; }
 
+/* Previous / next page at the end of each chapter */
+.page-nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    margin: 3em 0 1em;
+}
+.page-nav a {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    color: inherit !important;
+    text-decoration: none !important;
+}
+.page-nav a:hover { border-color: var(--primary); }
+.page-nav-next { grid-column: 2; text-align: right; }
+.page-nav-label { font-family: var(--font-label); font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+.page-nav-title { font-weight: 650; color: var(--text); }
+@media (max-width: 560px) {
+    .page-nav { grid-template-columns: minmax(0, 1fr); }
+    .page-nav-next { grid-column: 1; }
+}
+
 /* Tutorial callouts: "Idea clave" and "Punto de control" */
 .lesson-box {
     margin: 1.4em 0;
