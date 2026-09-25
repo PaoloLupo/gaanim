@@ -11638,6 +11638,112 @@ mod tests {
         }
     }
 
+    /// Compile `canvas` and return its timeline with a t = 0 keyframe.
+    fn compiled_world(canvas: &SceneModel) -> (World, Timeline) {
+        let mut world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &config);
+        drop(commands);
+        queue.apply(&mut world);
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        (world, timeline)
+    }
+
+    fn transform_of(world: &mut World, handle: &DrawableHandle) -> SpatialTransform {
+        let id = ObjectId::from_raw(handle.id.as_raw() - 1);
+        *world
+            .query::<(&MobjectId, &SpatialTransform)>()
+            .iter(world)
+            .find(|(object, _)| object.0 == id)
+            .unwrap()
+            .1
+    }
+
+    #[test]
+    fn pivot_rotation_keeps_the_declared_pose_until_it_starts() {
+        let mut canvas = SceneModel::new(640, 360);
+        let bar = canvas.rect(3.0, 0.3).move_to(1.5, 0.0).with_pivot(0.0, 0.0);
+        canvas.wait(1.0);
+        canvas.play(vec![
+            bar.animate()
+                .rotate_by(std::f64::consts::FRAC_PI_2)
+                .duration(1.0),
+        ]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+
+        for (time, origin, tip) in [
+            (0.5, Point::new(1.5, 0.0), Point::new(2.5, 0.0)),
+            (3.0, Point::new(0.0, 1.5), Point::new(0.0, 2.5)),
+            (0.5, Point::new(1.5, 0.0), Point::new(2.5, 0.0)),
+        ] {
+            timeline.seek(&mut world, time);
+            let affine = transform_of(&mut world, &bar).to_affine_2d();
+            let center = affine * Point::ORIGIN;
+            let along = affine * Point::new(1.0, 0.0);
+            assert!(center.distance(origin) < 1e-6, "{center:?} at {time}");
+            assert!(along.distance(tip) < 1e-6, "{along:?} at {time}");
+        }
+    }
+
+    #[test]
+    fn scale_entries_keep_the_declared_position_until_they_start() {
+        let mut canvas = SceneModel::new(640, 360);
+        let rows = [2.5, 0.8, -0.8, -2.5];
+        let squares: Vec<_> = rows
+            .iter()
+            .map(|y| canvas.square(0.6).move_to(-5.0, *y))
+            .collect();
+        canvas.play(
+            squares
+                .iter()
+                .map(|square| square.animate().scale_by(1.5).duration(1.0))
+                .collect(),
+        );
+        canvas.play(
+            squares
+                .iter()
+                .zip(rows)
+                .map(|(square, y)| square.animate().move_to(4.0, y).duration(1.0))
+                .collect(),
+        );
+        canvas.play(vec![
+            squares[0].animate().grow_from_center().duration(1.0),
+            squares[1].animate().spin_in_from_nothing().duration(1.0),
+            squares[2].animate().grow_from_point(0.0, 0.0).duration(1.0),
+            squares[3]
+                .animate()
+                .grow_from_edge(gaanim_layout::Direction::Left)
+                .duration(1.0),
+        ]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+
+        // Mid-way through the first scale, before any move or entry.
+        for (time, x, scale) in [(0.5, -5.0, None), (3.5, 4.0, Some(1.5)), (0.5, -5.0, None)] {
+            timeline.seek(&mut world, time);
+            for (square, y) in squares.iter().zip(rows) {
+                let transform = transform_of(&mut world, square);
+                assert!(
+                    transform.translation.distance(DVec3::new(x, y, 0.0)) < 1e-6,
+                    "{:?} at {time}",
+                    transform.translation
+                );
+                if let Some(scale) = scale {
+                    assert!(
+                        (transform.scale.x - scale).abs() < 1e-6,
+                        "{:?}",
+                        transform.scale
+                    );
+                } else {
+                    assert!(transform.scale.x > 1.0, "visible while scaling at {time}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn trims_chain_from_the_current_window() {
         let mut canvas = SceneModel::new(640, 360);

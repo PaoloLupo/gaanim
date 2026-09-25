@@ -360,6 +360,19 @@ fn draw_item_slots(
     (ordered, slots)
 }
 
+/// Hide a drawable before a scale entry (grow, spin in) by zeroing only the
+/// scale it was declared with. Writing the authored transform at the entry's
+/// start instead would show, from t = 0, the pose that earlier clips reach.
+fn zero_declared_scale(commands: &mut Commands<'_, '_>, entity: Entity) {
+    commands
+        .entity(entity)
+        .queue(|mut entity: bevy::prelude::EntityWorldMut<'_>| {
+            if let Some(mut transform) = entity.get_mut::<SpatialTransform>() {
+                transform.scale = DVec3::ZERO;
+            }
+        });
+}
+
 /// Point of `bounds` in `direction`, as pinned by `grow_from_edge`: the edge
 /// midpoint for axis directions, the corner for diagonals, and the matching
 /// boundary point for any other 2D direction.
@@ -3229,10 +3242,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::GrowFromCenter => {
                 let to = state.transform.scale;
                 let from = gaanim_core::glam::DVec3::ZERO;
-                // Pre-set the scale to 0.0 right now via deferred commands to avoid flickers
-                let mut temp_transform = state.transform;
-                temp_transform.scale = from;
-                self.commands.entity(state.entity).insert(temp_transform);
+                zero_declared_scale(self.commands, state.entity);
                 PropertyLensSpec::Scale { from, to }
             }
             AnimationType::ShrinkToCenter => {
@@ -3796,9 +3806,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let Some(state) = self.states.get_mut(anim.target) else {
             return;
         };
+        // The translation clip starts at the offset position; until then the
+        // entity keeps its declared transform, hidden by the fade.
         let final_position = state.transform.translation;
         state.transform.translation = final_position + offset;
-        self.commands.entity(state.entity).insert(state.transform);
 
         // Reuse the well-tested opacity and translation paths. Both are
         // scheduled at the same cursor, so they run in parallel.
@@ -3861,10 +3872,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let end_rotation = initial_rotation
             * gaanim_core::glam::DQuat::from_rotation_z(2.0 * std::f64::consts::PI);
 
-        // Pre-set the scale to 0.0 right now via deferred commands to avoid first-frame flickers
-        let mut temp_transform = state.transform;
-        temp_transform.scale = gaanim_core::glam::DVec3::ZERO;
-        self.commands.entity(state.entity).insert(temp_transform);
+        zero_declared_scale(self.commands, state.entity);
 
         // Update the final expected state at the end of scheduling
         state.transform.rotation = end_rotation;
@@ -5175,10 +5183,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         let from = gaanim_core::glam::DVec3::ZERO;
         state.transform.scale = from;
-        let mut temp_transform = state.transform;
-        temp_transform.scale = from;
-        temp_transform.translation = gaanim_core::glam::DVec3::new(px, py, 0.0);
-        self.commands.entity(state.entity).insert(temp_transform);
+        zero_declared_scale(self.commands, state.entity);
 
         self.timeline.add_clip(
             parent_track,
@@ -5233,10 +5238,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         let from = gaanim_core::glam::DVec3::ZERO;
         state.transform.scale = from;
-        let mut temp_transform = state.transform;
-        temp_transform.scale = from;
-        temp_transform.translation = edge_world;
-        self.commands.entity(state.entity).insert(temp_transform);
+        zero_declared_scale(self.commands, state.entity);
 
         self.timeline.add_clip(
             parent_track,
@@ -5576,43 +5578,56 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         state.transform.rotation = to_rot;
         state.transform.translation = to_trans;
+        let declared_anchor = state.transform.anchor;
 
         if pivot.is_some() {
             state.transform.anchor = gaanim_core::glam::DVec3::ZERO;
-            self.commands.entity(state.entity).insert(state.transform);
         }
 
         let clip_start = self.current_time + anim.delay;
 
-        if let Some(p) = pivot {
+        // The translation swings around the pivot with a cleared anchor. The
+        // entity keeps its declared pose until the clip starts; a pivot at the
+        // origin itself only needs a stationary clip to clear a set anchor.
+        if let Some(path) = pivot.and_then(|p| {
             let r = (from_trans.x - p.x).hypot(from_trans.y - p.y);
             if r > 1e-6 {
                 let theta0 = (from_trans.y - p.y).atan2(from_trans.x - p.x);
-                let arc = gaanim_core::kurbo::Arc::new(
-                    gaanim_core::kurbo::Point::new(p.x, p.y),
-                    gaanim_core::kurbo::Vec2::new(r, r),
-                    theta0,
-                    angle_radians,
-                    0.0,
-                );
-                let arc_path = arc.into_path(0.1);
-                self.timeline.add_clip(
-                    parent_track,
-                    clip_start,
-                    anim.duration,
-                    ClipPayload::Animation(AnimationSpec {
-                        target: anim.target,
-                        lens: PropertyLensSpec::PathFollow {
-                            path: arc_path,
-                            orient: None,
-                            reset_anchor: false,
-                        },
-                        rate_func: anim.rate_func.clone(),
-                        delay: 0.0,
-                        label: self.current_label.clone(),
-                    }),
-                );
+                Some(
+                    gaanim_core::kurbo::Arc::new(
+                        gaanim_core::kurbo::Point::new(p.x, p.y),
+                        gaanim_core::kurbo::Vec2::new(r, r),
+                        theta0,
+                        angle_radians,
+                        0.0,
+                    )
+                    .into_path(0.1),
+                )
+            } else {
+                (declared_anchor != gaanim_core::glam::DVec3::ZERO).then(|| {
+                    let mut still = kurbo::BezPath::new();
+                    still.move_to((from_trans.x, from_trans.y));
+                    still.line_to((from_trans.x, from_trans.y));
+                    still
+                })
             }
+        }) {
+            self.timeline.add_clip(
+                parent_track,
+                clip_start,
+                anim.duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: anim.target,
+                    lens: PropertyLensSpec::PathFollow {
+                        path,
+                        orient: None,
+                        reset_anchor: true,
+                    },
+                    rate_func: anim.rate_func.clone(),
+                    delay: 0.0,
+                    label: self.current_label.clone(),
+                }),
+            );
         }
 
         if angle_radians.abs() > std::f64::consts::PI {
