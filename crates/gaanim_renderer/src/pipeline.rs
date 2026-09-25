@@ -819,21 +819,36 @@ pub fn resolve_vector_outline_system(
         }
     }
 }
-const BLUR_KERNEL: [((f64, f64), f32); 13] = [
-    ((0.0, 0.0), 0.20),
-    ((0.65, 0.0), 0.10),
-    ((-0.65, 0.0), 0.10),
-    ((0.0, 0.65), 0.10),
-    ((0.0, -0.65), 0.10),
-    ((0.65, 0.65), 0.06),
-    ((0.65, -0.65), 0.06),
-    ((-0.65, 0.65), 0.06),
-    ((-0.65, -0.65), 0.06),
-    ((1.4, 0.0), 0.04),
-    ((-1.4, 0.0), 0.04),
-    ((0.0, 1.4), 0.04),
-    ((0.0, -1.4), 0.04),
-];
+/// Local distance between neighbouring blur taps, in scene units (about 4 px
+/// at the default 120 px per unit). Denser taps turn visible copies into a
+/// smooth falloff.
+const BLUR_TAP_SPACING: f64 = 0.03;
+/// Blur taps stop at this many sigmas; the Gaussian tail beyond is negligible.
+const BLUR_TAP_RADIUS: f64 = 2.5;
+/// Opacity reached where every tap overlaps, relative to the element alpha.
+const BLUR_CORE_COVERAGE: f32 = 0.97;
+
+/// Gaussian taps as `(offset, alpha)` pairs for a blur of `sigma` units.
+///
+/// Taps follow a golden-angle (Vogel) spiral whose radii invert the Rayleigh
+/// CDF, so equally weighted taps sample a 2D Gaussian. Their count grows with
+/// the blurred area and is capped to bound the cost per path. Each tap's alpha
+/// is chosen so that `count` overlapping taps composite to
+/// `BLUR_CORE_COVERAGE * alpha`, keeping solid interiors near full opacity.
+fn blur_taps(sigma: f64, alpha: f32) -> impl Iterator<Item = ((f64, f64), f32)> {
+    let extent = BLUR_TAP_RADIUS * sigma / BLUR_TAP_SPACING;
+    let count = (std::f64::consts::PI * extent * extent).ceil().clamp(13.0, 160.0) as u32;
+    let target = (BLUR_CORE_COVERAGE * alpha.clamp(0.0, 1.0)).min(0.999);
+    let tap_alpha = 1.0 - (1.0 - target).powf(1.0 / count as f32);
+    let tail = 1.0 - (-0.5 * BLUR_TAP_RADIUS * BLUR_TAP_RADIUS).exp();
+    let golden = std::f64::consts::PI * (3.0 - 5f64.sqrt());
+    (0..count).map(move |index| {
+        let u = (f64::from(index) + 0.5) / f64::from(count) * tail;
+        let radius = sigma * (-2.0 * (1.0 - u).ln()).sqrt();
+        let angle = f64::from(index) * golden;
+        ((radius * angle.cos(), radius * angle.sin()), tap_alpha)
+    })
+}
 
 fn draw_soft_fill(
     scene: &mut vello::Scene,
@@ -843,9 +858,9 @@ fn draw_soft_fill(
     alpha: f32,
     origin: kurbo::Affine,
 ) {
-    for ((x, y), weight) in BLUR_KERNEL {
-        let sample_brush = brush.clone().multiply_alpha(weight * alpha);
-        let transform = origin * kurbo::Affine::translate((x * sigma, y * sigma));
+    for ((x, y), weight) in blur_taps(sigma, alpha) {
+        let sample_brush = brush.clone().multiply_alpha(weight);
+        let transform = origin * kurbo::Affine::translate((x, y));
         scene.fill(peniko::Fill::NonZero, transform, &sample_brush, None, path);
     }
 }
@@ -858,12 +873,12 @@ fn draw_soft_stroke(
     sigma: f64,
     view: Option<kurbo::Affine>,
 ) {
-    for ((x, y), weight) in BLUR_KERNEL {
+    for ((x, y), weight) in blur_taps(sigma, 1.0) {
         let sample_brush = brush.clone().multiply_alpha(weight);
         draw_stroke(
             scene,
             style,
-            kurbo::Affine::translate((x * sigma, y * sigma)),
+            kurbo::Affine::translate((x, y)),
             &sample_brush,
             view,
             path,
@@ -2212,6 +2227,23 @@ mod tests {
 
     fn rect_path(x0: f64, y0: f64, x1: f64, y1: f64) -> Arc<kurbo::BezPath> {
         Arc::new(kurbo::Rect::new(x0, y0, x1, y1).to_path(0.1))
+    }
+
+    #[test]
+    fn blur_taps_sample_a_bounded_gaussian_with_a_solid_core() {
+        for sigma in [0.001, 0.05, 0.3, 4.0] {
+            let taps: Vec<_> = blur_taps(sigma, 0.8).collect();
+            assert!((13..=160).contains(&taps.len()), "{} taps", taps.len());
+            let max_radius = taps
+                .iter()
+                .map(|((x, y), _)| x.hypot(*y))
+                .fold(0.0, f64::max);
+            assert!(max_radius <= BLUR_TAP_RADIUS * sigma + 1e-9);
+            let core = 1.0 - taps.iter().map(|(_, a)| 1.0 - a).product::<f32>();
+            assert!((core - BLUR_CORE_COVERAGE * 0.8).abs() < 1e-3, "core {core}");
+        }
+        // Wider blurs use more taps so neighbouring copies stay close together.
+        assert!(blur_taps(0.3, 1.0).count() > blur_taps(0.02, 1.0).count());
     }
 
     #[test]

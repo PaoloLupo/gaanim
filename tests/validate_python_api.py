@@ -1497,7 +1497,7 @@ def validate_scene_capability_surface(module) -> list[str]:
         "media", "slides", "text", "viz", "fade_out_all", "link", "persist",
         "play", "release", "render", "reuse", "sections", "segment", "snapshots", "stop",
         "wait", "time", "cursor", "stops", "random", "noise",
-        "voiceover", "live_take", "narration_script",
+        "voiceover", "live_take", "narration_script", "marker", "markers",
     }
     actual = {name for name in dir(module.Scene) if not name.startswith("_")}
     failures = []
@@ -1862,7 +1862,8 @@ def validate_text_animator_contract(module) -> list[str]:
             pass
         else:
             failures.append(f"a text animator call did not raise {error.__name__}")
-    scene.play([title.animate.reveal(by="line"), wave.animate.sweep()])
+    scene.play(title.animate.reveal(by="line"))
+    scene.play(wave.animate.sweep())
     return failures
 
 
