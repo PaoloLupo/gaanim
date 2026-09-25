@@ -4,7 +4,6 @@
   title: "Regresión visual",
   description: "Snapshots deterministas por ejemplo y visor egui",
   route: "/guides/visual-regression/",
-  updated: datetime.today().display(),
   code-langs: (),
 )
 

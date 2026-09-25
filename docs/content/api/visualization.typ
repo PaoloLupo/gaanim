@@ -6,7 +6,6 @@
   description: "Gráficos inmutables y espacios científicos tipados en 2D y 3D",
   route: "/api/visualization/",
   code-langs: (),
-  updated: datetime.today().display(),
 )
 
 = Visualización

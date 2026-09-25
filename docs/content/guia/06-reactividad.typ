@@ -5,7 +5,6 @@
   title: "Dar vida a la escena",
   description: "Updaters, geometría reactiva y movimiento circular uniforme",
   route: "/guia/reactividad/",
-  updated: datetime.today().display(),
   code-langs: (),
 )[
 

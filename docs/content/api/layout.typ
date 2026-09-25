@@ -5,7 +5,6 @@
   description: "Árboles responsive, tracks de grid, constraints relacionales y reflow animado",
   route: "/api/layout/",
   code-langs: (),
-  updated: datetime.today().display(),
 )
 
 = Layout
@@ -23,7 +22,7 @@ El modelo mental tiene tres niveles:
    los medios pueden ajustar su geometría.
 
 Una vez que un objeto pertenece a Layout, deja que el árbol determine su
-posición. Mezclar `at()` o `move()` con Layout introduce dos autoridades sobre
+posición. Mezclar `move_to()` o `shift_by()` con Layout introduce dos autoridades sobre
 la misma coordenada y Gaanim lo rechaza explícitamente.
 
 ```python
@@ -54,9 +53,9 @@ también admite `between`, `around` y `evenly`.
 Los constructores públicos son:
 
 ```python
-scene.layout.row(children, *, gap=0.3, padding=0, width="hug", height="hug",
+scene.layout.row(children, *, gap=0.24, padding=0, width="hug", height="hug",
           align="center", justify="start", wrap=False, within=None)
-scene.layout.column(children, *, gap=0.3, padding=0, width="hug", height="hug",
+scene.layout.column(children, *, gap=0.24, padding=0, width="hug", height="hug",
              align="start", justify="start", wrap=False, within=None)
 scene.layout.grid(children, *, rows=1, columns=1, gap=0, row_gap=None,
            column_gap=None, padding=0, width="hug", height="hug",
@@ -407,13 +406,13 @@ el ID del nodo implicado.
 
 == Propiedad y reflow
 
-Después de adjuntar un objeto, las llamadas posicionales como `at`, `next_to`,
+Después de adjuntar un objeto, las llamadas posicionales como `move_to`, `next_to`,
 `align_to`, `to_edge` o las animaciones manuales de movimiento producen
 `LayoutOwnershipError`. La rotación y la escala siguen siendo válidas. Expresa
 un desplazamiento intencional mediante `offset`.
 
 El contenedor raíz sí es un `Drawable` posicionable. Operaciones como
-`page.move_to(400, 200)`, `at_anchor`, `next_to`, `align_to`, `to_edge`, `to_corner`,
+`page.move_to(4, 2)`, `page.move_to(x, y, Anchor.TOP_LEFT)`, `next_to`, `align_to`, `to_edge`, `to_corner`,
 rotación y escala se reaplican sobre la caja final después de cada reflow y
 transforman el árbol completo. La restricción anterior corresponde únicamente
 a los hijos cuya traslación pertenece al contenedor.
@@ -445,7 +444,7 @@ una búsqueda directa y una reproducción secuencial resuelven la misma geometr�
 `add`, `remove`, `detach` y `replace` actúan sobre hijos directos. `remove`
 realiza una salida visual; `detach` conserva la posición global, la opacidad y
 la pertenencia a la escena mientras libera la propiedad de Layout. Un objeto
-separado puede usar inmediatamente `at`, `move_to`, `next_to` y las demás
+separado puede usar inmediatamente `move_to`, `next_to` y las demás
 operaciones posicionales. Esto es útil al llevar un hijo administrado a un
 segmento nuevo:
 

@@ -6,7 +6,6 @@
   description: "Prosa, matemáticas, partes semánticas, flujo responsive, selecciones y animación estructural",
   route: "/api/text/",
   code-langs: (),
-  updated: datetime.today().display(),
 )
 
 = Texto
@@ -167,8 +166,7 @@ role/theme -> TextStyle/TextFlow -> direct scene.text keywords
 )[
 ```python
 width, height = scene.text.measure("PGA = 0.35 g", role="label")
-_, paragraph_height = scene.text.measure("Primera línea
-Segunda línea", line_spacing=1.6)
+_, paragraph_height = scene.text.measure("Primera línea\nSegunda línea", line_spacing=1.6)
 box = scene.geometry.rounded_rect(width + 0.56, height + 0.32, 0.14).move_to(0, -4.14)
 ```
 ]
@@ -443,7 +441,7 @@ transition targets raise `LayoutOwnershipError`.
   kind: "method",
   signature: "text[name] | text[index_or_slice] | text.graphemes|words|lines|parts[index_or_slice] -> TextSelection",
   params: (
-    (name: "name", type: "str", default: none, desc: [A top-level part; continue indexing to navigate nested semantic paths. A string that names no part selects every literal occurrence of that text instead (case- and whitespace-insensitive, like `color_by`).]),
+    (name: "name", type: "str", default: none, desc: [A top-level part; continue indexing to navigate nested semantic paths. A string that names no part selects every literal occurrence of that text instead (case- and whitespace-insensitive).]),
     (name: "index", type: "int", default: none, desc: [Supports negative indices.]),
     (name: "slice", type: "slice", default: none, desc: [Contiguous non-empty range; step must equal 1.]),
   ),

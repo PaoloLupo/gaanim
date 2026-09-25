@@ -4,7 +4,6 @@
   title: "Objetos, texto y estilos",
   description: "Cómo crear, agrupar y dar apariencia al contenido de una escena",
   route: "/manual/objetos/",
-  updated: datetime.today().display(),
   code-langs: (),
 )
 

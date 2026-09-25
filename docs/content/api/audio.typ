@@ -6,7 +6,6 @@
   description: "Pistas sincronizadas, narración grabada en el editor y mezcla en la exportación de video",
   route: "/api/audio/",
   code-langs: (),
-  updated: datetime.today().display(),
 )
 
 = Audio

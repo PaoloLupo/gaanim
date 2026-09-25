@@ -4,11 +4,10 @@
   title: "Proyectos",
   description: "Estructura, manifiesto y flujo con gaanim init / check / --diff",
   route: "/guides/projects/",
-  updated: datetime.today().display(),
   code-langs: (),
 )
 
-Gaanim puede abrir un script Python suelto, pero para trabajos reales conviene usar un proyecto. Un proyecto mantiene código, assets y exportaciones juntos, y puede ejecutarse desde cualquier directorio. No necesitas tocar `PATH`/`VIRTUAL_ENV` manualmente: `gaanim.exe` (launcher) detecta el `.venv` cercano.
+Gaanim puede abrir un script Python suelto, pero para trabajos reales conviene usar un proyecto. Un proyecto mantiene código, assets y exportaciones juntos, y puede ejecutarse desde cualquier directorio. No necesitas tocar `PATH`/`VIRTUAL_ENV` manualmente: el launcher `gaanim` detecta el `.venv` cercano.
 
 Ejecuta `gaanim` sin argumentos para abrir el Inicio. Desde allí puedes crear
 un proyecto, abrir una carpeta válida o volver a uno de los diez proyectos
@@ -24,7 +23,7 @@ gaanim init slides mi-charla
 Cada comando crea un starter ejecutable:
 
 ```text
-mi-proyecto/
+mi-video/
   gaanim.toml
   pyproject.toml
   .python-version # 3.14
@@ -35,9 +34,10 @@ mi-proyecto/
   exports/
 ```
 
-El `pyproject.toml` declara `gaanim` como dependencia del proyecto. El entorno
-que prepara la aplicación instala el wheel de autoría incluido, y comandos
-posteriores como `uv sync` conservan a Gaanim como parte del entorno.
+El `pyproject.toml` declara `gaanim` como dependencia del proyecto. `gaanim init`
+también prepara el entorno: si falta `.venv`, ejecuta `uv venv --python 3.14` e
+instala en él el wheel de autoría incluido. Comandos posteriores como `uv sync`
+conservan a Gaanim como parte del entorno.
 
 `AGENTS.md` orienta a agentes de código: apunta a la documentación Typst que
 incluye el paquete instalado (`gaanim/_docs`, de la misma versión que la API),
@@ -113,10 +113,10 @@ uv venv --python 3.14
 
 Sin activar, el launcher igual encuentra `mi-charla/.venv` por walk-up.
 
-Si el proyecto no tiene `.venv`, el Inicio muestra el Python compatible que
-usará y permite abrir con *Abrir de todos modos*. También genera instrucciones
-copiables para instalar uv y ejecutar `uv venv --python 3.12`; Gaanim nunca
-ejecuta esos comandos automáticamente.
+Si el proyecto no tiene `.venv` al abrirlo, Gaanim lo prepara igual que
+`gaanim init` cuando encuentra uv. Sin uv, abre el proyecto con el Python 3.14
+del sistema, sin aislamiento; si tampoco hay un Python compatible, el Inicio
+muestra instrucciones copiables para instalar uv.
 
 = Manifiesto
 

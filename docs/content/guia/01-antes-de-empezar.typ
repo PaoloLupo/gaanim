@@ -5,7 +5,6 @@
   title: "Antes de empezar",
   description: "Qué vamos a construir y cómo trabajar con la guía",
   route: "/guia/antes-de-empezar/",
-  updated: datetime.today().display(),
   code-langs: (),
 )[
 
@@ -32,24 +31,18 @@ La guía supone Python básico: imports, variables, funciones, listas y bloques
 `if`. No necesitas conocer Rust, Bevy, Vello ni programación de GPU.
 
 Gaanim usa una API fluida. Una expresión como
-`scene.geometry.circle(100).stroke(WHITE, 3).move_to(-350, 0)` se lee de izquierda a derecha:
-crea un círculo, define su trazo y lo coloca en la escena.
+`scene.geometry.circle(1.5).stroke(WHITE, 0.05).move_to(-4, 0)` se lee de izquierda a
+derecha: crea un círculo, define su trazo y lo coloca en la escena. Todas las
+medidas usan unidades lógicas de un fotograma de 16×9, no píxeles.
 
-== Instalar Gaanim en Windows
+== Instalar Gaanim
 
-El camino de usuario parte del zip de una release. Extrae `gaanim.exe` y
-`gaanim-core.exe` en una carpeta incluida en `PATH`. Necesitas Python 3.12 o
-posterior. FFmpeg es opcional hasta el capítulo de exportación.
-
-Comprueba el launcher:
-
-```powershell
-gaanim --help
-```
+Sigue #link("/getting-started/installation/")[Instalación] para tu sistema.
+Necesitas Python 3.14. FFmpeg es opcional hasta el capítulo de exportación.
 
 Crea el proyecto que utilizaremos durante todo el libro:
 
-```powershell
+```bash
 gaanim init video movimiento-circular
 cd movimiento-circular
 gaanim .

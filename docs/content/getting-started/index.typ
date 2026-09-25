@@ -4,7 +4,6 @@
   title: "Instalación y primeros pasos",
   description: "Instala Gaanim y crea tu primera animación",
   route: "/getting-started/",
-  updated: datetime.today().display(),
 )
 
 = Instalación — resumen

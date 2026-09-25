@@ -5,7 +5,6 @@
   title: "Del círculo a la curva seno",
   description: "Una recta numérica y un parámetro compartido para explicar la periodicidad",
   route: "/guia/circulo-al-seno/",
-  updated: datetime.today().display(),
   code-langs: (),
 )[
 
@@ -14,6 +13,25 @@
 El círculo y la onda no necesitan velocidades independientes. Ambos pueden
 derivarse del mismo parámetro `theta`, de modo que la animación sea exacta y
 reproducible incluso después de mover el cabezal de tiempo.
+
+== Preparar el archivo
+
+Este capítulo sustituye el mecanismo del anterior: el punto y el radio pasarán
+a depender de `theta`. Para que `main.py` conserve un solo punto y un solo
+radio, elimina primero:
+
+- `point`, su `add_updater(...)`, `scene.wait(5.3)`, `point.remove_updater()` y
+  el import de `Updater`;
+- la `tracking_line` llamada `radius` y el `scene.play` del capítulo anterior que
+  revelaba `point` y `radius`;
+- `radius` y `point` dentro de `scene.geometry.group([...])` y en la segunda
+  entrada del capítulo 4, que queda solo con `orbit.animate.create()`.
+
+Después define el centro del círculo junto a la paleta:
+
+```python
+circle_center = (-4, 0)
+```
 
 == Preparar una recta numerada con pi
 
@@ -27,7 +45,7 @@ axis = (
   .numbers("pi", denominator=1)
 )
 timeline = scene.viz.number_line(axis, length=7.5)
-timeline.drawable().move_to(2.25, -0.25)
+timeline.drawable().move_to(2.25, 0)
 ```
 
 La primera coordenada está exactamente al inicio de la recta. Las marcas se
@@ -76,16 +94,20 @@ rota o escala, el punto y la curva la acompañan.
 
 ```python
 radius_line = scene.geometry.tracking_line(circle_center, circle_ref)
+radius_line.stroke(MUTED, 0.025).no_fill()
 projection = scene.geometry.tracking_line(circle_ref, wave_ref)
+projection.stroke(ACCENT, 0.025).no_fill()
 
 scene.play([
+  circle_dot.animate.fade_in().duration(0.3),
+  radius_line.animate.fade_in().duration(0.3),
   timeline.animate.create().duration(0.8),
   sine_curve.animate.fade_in().duration(0.01),
   wave_dot.animate.fade_in().duration(0.3),
   projection.animate.fade_in().duration(0.3),
 ])
 scene.play([
-  theta.animate.set(3 * math.pi).duration(8),
+  theta.animate.set(3 * math.pi).duration(8).easing(Easing.LINEAR),
 ])
 ```
 
@@ -109,5 +131,6 @@ cuartos de vuelta correspondientes.
 
 == El ejemplo canónico
 
-La versión ejecutable completa está en `examples/manual_movimiento_circular.py`.
+El repositorio de Gaanim incluye una versión ejecutable completa, con medidas
+ligeramente distintas, en `examples/manual_movimiento_circular.py`.
 ]

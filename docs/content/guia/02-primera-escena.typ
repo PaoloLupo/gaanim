@@ -5,7 +5,6 @@
   title: "Primera escena",
   description: "El lienzo, las coordenadas y el primer fotograma del proyecto",
   route: "/guia/primera-escena/",
-  updated: datetime.today().display(),
   code-langs: (),
 )[
 

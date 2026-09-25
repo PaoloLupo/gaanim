@@ -6,7 +6,6 @@
   description: "API pública canónica para construir animaciones con Gaanim",
   route: "/api/scene/",
   code-langs: (),
-  updated: datetime.today().display(),
 )
 
 = Capacidades de Scene
@@ -65,8 +64,8 @@ segura que respetan todas las operaciones de layout y colocación en bordes:
 
 ```python
 scene.canvas.set_preset("vertical")  # marco lógico 9×16
-safe = scene.canvas.safe_area()
-title = safe.place(scene.text("Vertical video", role="title"), Anchor.TOP)
+print(scene.canvas.safe_width, scene.canvas.safe_height)  # medidas del área segura
+page = scene.layout.column([scene.text("Video vertical", role="title")], within="safe")
 ```
 
 Los presets disponibles son `"widescreen"` (16×9), `"vertical"` (9×16) y
@@ -159,8 +158,8 @@ Available factories are `circle`, `rect`, `rounded_rect`, `square`, `dot`,
 and WebP files. `contain` preserves aspect ratio inside the target, `cover`
 fills and clips it, and `stretch` fills it without preserving aspect ratio.
 Pass `crop=(x, y, width, height)` in source pixels (top-left origin) to select
-a source rectangle. The regular `Drawable` methods such as `scaled`, `rotated`,
-`opacity`, and `at` remain available. Reusing the same path shares its decoded
+a source rectangle. The regular `Drawable` methods such as `scale_to`, `rotate_to`,
+`opacity`, and `move_to` remain available. Reusing the same path shares its decoded
 texture for the process.
 
 `svg(path)` imports SVG geometry as a real hierarchy of regular vector paths
@@ -736,17 +735,19 @@ clamps.
 
 === Cámara 3D
 
-The 3D camera uses world-space `(x, y, z)` coordinates. Camera operations are
-queued on the scene timeline; use `duration=0.0` for an immediate setup and a
-positive duration for an animated camera move. Angles are in radians.
+La cámara 3D usa coordenadas de mundo `(x, y, z)` y los ángulos se expresan en
+radianes. `scene.camera.look_at(...)` y `scene.camera.perspective(...)` fijan
+la pose de inmediato en el cursor actual y devuelven `Camera` para encadenar.
+Para un movimiento animado usa `scene.camera.animate`: sus métodos devuelven
+un `Anim` cuya duración configuras después con `.duration(seconds)`.
 
 #api-entry(
   name: "Camera.perspective",
   kind: "method",
-  signature: "perspective(fov_y, near=0.1, far=1000.0, duration=1.0) -> Anim",
-  params: ((name: "fov_y", type: "float", default: none, desc: [Vertical field of view in radians.]), (name: "near", type: "float", default: "0.1", desc: [Positive near clipping plane.]), (name: "far", type: "float", default: "1000.0", desc: [Far clipping plane, greater than near.]), (name: "duration", type: "float", default: "1.0", desc: [Animation duration in seconds.]),),
-  returns: (type: "Anim", desc: [A composable perspective projection animation.]),
-  desc: [Switches the scene to perspective projection. Requires `0 < near < far` and `0 < fov_y < pi`.],
+  signature: "perspective(fov_y: float, near: float = 0.1, far: float = 1000.0) -> Camera",
+  params: ((name: "fov_y", type: "float", default: none, desc: [Vertical field of view in radians.]), (name: "near", type: "float", default: "0.1", desc: [Positive near clipping plane.]), (name: "far", type: "float", default: "1000.0", desc: [Far clipping plane, greater than near.]),),
+  returns: (type: "Camera", desc: [The same camera, for chaining.]),
+  desc: [Switches the scene to perspective projection immediately. Requires `0 < near < far` and `0 < fov_y < pi`. `scene.camera.animate.perspective(fov_y, near=0.1, far=1000.0)` returns a composable `Anim` instead.],
 )[
 ```python
 scene.camera.perspective(fov_y=0.785, near=0.1, far=1000.0)
@@ -756,10 +757,10 @@ scene.camera.perspective(fov_y=0.785, near=0.1, far=1000.0)
 #api-entry(
   name: "Camera.look_at",
   kind: "method",
-  signature: "look_at(eye, target, up=None, duration=1.0) -> Anim",
-  params: ((name: "eye", type: "Endpoint", default: none, desc: [Reactive camera position in world space.]), (name: "target", type: "Endpoint", default: none, desc: [Reactive point the camera looks at.]), (name: "up", type: "(float,float,float)", default: "None", desc: [World up direction; defaults to (0,1,0).]), (name: "duration", type: "float", default: "1.0", desc: [Animation duration in seconds.]),),
-  returns: (type: "Anim", desc: [A composable camera orientation and position animation.]),
-  desc: [Positions the camera at `eye` and aims it at `target`. Endpoints resolve after reactive layout; eye and target must differ and up must be non-zero and non-collinear.],
+  signature: "look_at(eye: Endpoint, target: Endpoint, up: tuple[float, float, float] | None = None) -> Camera",
+  params: ((name: "eye", type: "Endpoint", default: none, desc: [Reactive camera position in world space.]), (name: "target", type: "Endpoint", default: none, desc: [Reactive point the camera looks at.]), (name: "up", type: "(float,float,float)", default: "None", desc: [World up direction; defaults to (0,1,0).]),),
+  returns: (type: "Camera", desc: [The same camera, for chaining.]),
+  desc: [Positions the camera at `eye` and aims it at `target` immediately. Endpoints resolve after reactive layout; eye and target must differ and up must be non-zero and non-collinear. `scene.camera.animate.look_at(eye, target, up=None)` returns a composable `Anim` instead.],
 )[
 ```python
 scene.camera.look_at(eye=(7, 5, 6), target=(0, 0, 0))
@@ -767,11 +768,11 @@ scene.camera.look_at(eye=(7, 5, 6), target=(0, 0, 0))
 ]
 
 #api-entry(
-  name: "Camera.orbit",
+  name: "CameraAnimation.orbit",
   kind: "method",
-  signature: "orbit(delta_yaw, delta_pitch, duration=1.0) -> Anim",
-  params: ((name: "delta_yaw", type: "float", default: none, desc: [Horizontal orbit angle in radians.]), (name: "delta_pitch", type: "float", default: none, desc: [Vertical orbit angle in radians.]), (name: "duration", type: "float", default: "1.0", desc: [Animation duration in seconds.]),),
-  returns: (type: "Anim", desc: [A composable orbit around the current look-at target.]),
+  signature: "camera.animate.orbit(delta_yaw: float, delta_pitch: float) -> Anim",
+  params: ((name: "delta_yaw", type: "float", default: none, desc: [Horizontal orbit angle in radians.]), (name: "delta_pitch", type: "float", default: none, desc: [Vertical orbit angle in radians.]),),
+  returns: (type: "Anim", desc: [A composable orbit around the current look-at target; set its timing with `.duration(seconds)`.]),
   desc: [Use small yaw and pitch deltas for a smooth turn around the current target.],
 )[
 ```python
@@ -784,11 +785,11 @@ scene.play([
 ]
 
 #api-entry(
-  name: "Camera.dolly",
+  name: "CameraAnimation.dolly",
   kind: "method",
-  signature: "dolly(factor, duration=1.0) -> Anim",
-  params: ((name: "factor", type: "float", default: none, desc: [Positive distance multiplier.]), (name: "duration", type: "float", default: "1.0", desc: [Animation duration in seconds.]),),
-  returns: (type: "Anim", desc: [A composable camera move toward or away from its target.]),
+  signature: "camera.animate.dolly(factor: float) -> Anim",
+  params: ((name: "factor", type: "float", default: none, desc: [Positive distance multiplier.]),),
+  returns: (type: "Anim", desc: [A composable camera move toward or away from its target; set its timing with `.duration(seconds)`.]),
   desc: [`factor < 1` moves closer; `factor > 1` moves farther. The factor must be finite and positive.],
 )[
 ```python

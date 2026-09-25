@@ -5,7 +5,6 @@
   description: "Rutas portables de imágenes, SVG, Lottie y glTF, manifiestos y precarga",
   route: "/api/assets/",
   code-langs: (),
-  updated: datetime.today().display(),
 )
 
 = Recursos

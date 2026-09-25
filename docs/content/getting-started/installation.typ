@@ -4,7 +4,6 @@
   title: "Instalación",
   description: "Instala Gaanim desde las releases de GitHub en Windows y Ubuntu",
   route: "/getting-started/installation/",
-  updated: datetime.today().display(),
   code-langs: (),
 )
 

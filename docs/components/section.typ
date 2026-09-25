@@ -128,7 +128,7 @@
             "Instalación rápida": "getting-started/",
             "Instalación detallada": "getting-started/installation/",
             "Guía rápida": "manual/guia-rapida/",
-            "Scene": "manual/escena/",
+            "Escena": "manual/escena/",
             "Objetos": "manual/objetos/",
             "Animaciones": "manual/animaciones/",
           ),
@@ -150,19 +150,22 @@
             "Proyectos": "guides/projects/",
             "Presentaciones": "guides/slides/",
             "Regresión visual": "guides/visual-regression/",
+            "Rendimiento": "guides/performance/",
+            "Migración a 0.2": "guides/migration-0-2/",
           ),
-            "Referencia de la API": (
-              "Índice": "api/",
-              "Escena": "api/scene/",
-              "Visualización": "api/visualization/",
-              "Layouts": "api/layout/",
-              "Objetos": "api/mobjects/",
-              "Animaciones": "api/animations/",
-              "Texto": "api/text/",
-              "Colores y temas": "api/themes/",
-              "Recursos": "api/assets/",
-              "Audio": "api/audio/",
-            ),
+          "Referencia de la API": (
+            "Índice": "api/",
+            "Escena": "api/scene/",
+            "Texto": "api/text/",
+            "Visualización": "api/visualization/",
+            "Layout": "api/layout/",
+            "Recursos": "api/assets/",
+            "Audio": "api/audio/",
+            "Objetos": "api/mobjects/",
+            "Matrices": "api/matrices/",
+            "Animaciones": "api/animations/",
+            "Colores y temas": "api/themes/",
+          ),
         )
 
         // Section of the current page, for the breadcrumb.
@@ -241,7 +244,7 @@
             if route != "/" {
               html.elem("nav", attrs: (class: "breadcrumb", "aria-label": "Ruta"), {
                 html.a(href: prefix, "Inicio")
-                if section-name != none {
+                if section-name != none and section-name != title {
                   html.span(class: "breadcrumb-sep", "/")
                   html.span(section-name)
                 }
@@ -303,7 +306,6 @@
   route: none,
   kind: none,
   description: none,
-  updated: none,
   body,
 ) = {
   assert.ne(title, none, message: "title is required")
@@ -311,18 +313,6 @@
 
   if title-fmt == auto {
     title-fmt = title
-  }
-
-  show heading: it => context {
-    let content = it
-    if it.level == 1 and updated != none {
-      if target() in ("bundle", "html") {
-        content = [#it #html.div(class: "last-updated", [Última actualización: #updated])]
-      } else {
-        content = [#it #text(fill: rgb("#64748b"), size: 8.5pt, [ (Última actualización: #updated)])]
-      }
-    }
-    content
   }
 
   html-section(
@@ -382,11 +372,11 @@
     let header-element = if result.caption.len() > 0 {
       if target() in ("bundle", "html") {
         html.div(class: "code-header", [
-          #html.span(style: "color: var(--accent-purple); font-weight: bold;", "Code:")
+          #html.span(style: "color: var(--accent-purple); font-weight: bold;", "Código:")
           _ #result.caption _
         ])
       } else {
-        text(fill: rgb("#4f46e5"), weight: "bold", size: 9pt, [Code: ]) + text(style: "italic", size: 9pt, result.caption)
+        text(fill: rgb("#4f46e5"), weight: "bold", size: 9pt, [Código: ]) + text(style: "italic", size: 9pt, result.caption)
       }
     } else {
       none
@@ -454,7 +444,6 @@
   route: none,
   title: none,
   description: none,
-  updated: none,
   code-langs: ("python",),
   ..args,
   body,
@@ -490,7 +479,6 @@
     route: route,
     title: title,
     description: description,
-    updated: updated,
     ..args,
     kind: "Chapter",
     body,

@@ -4,7 +4,6 @@
   title: "Partes de una escena",
   description: "Viewport, objetos, línea de tiempo, cámara y salida",
   route: "/manual/escena/",
-  updated: datetime.today().display(),
   code-langs: (),
 )
 

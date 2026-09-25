@@ -5,7 +5,6 @@
   title: "Animar el tiempo",
   description: "Timeline, entradas, paralelismo, duración y easing",
   route: "/guia/animar-tiempo/",
-  updated: datetime.today().display(),
   code-langs: (),
 )[
 
@@ -43,8 +42,8 @@ modifican el tiempo. `scene.play([...])` programa esos descriptores en el cursor
 actual de la timeline.
 
 Las animaciones dentro de una misma lista forman un grupo. Las llamadas
-distintas a `play` son secuenciales. `lag` retrasa progresivamente el inicio de
-cada miembro del grupo.
+distintas a `play` son secuenciales. `stagger(..., each=...)` retrasa
+progresivamente el inicio de cada miembro del grupo.
 
 == Duración y ritmo
 
@@ -55,6 +54,7 @@ fundido corto.
 Para mover el sistema completo y devolverlo a su sitio:
 
 ```python
+from gaanim import Easing
 scene.play([system.animate.shift_by(0.5, 0).duration(0.6).easing(Easing.SMOOTH)])
 scene.play([system.animate.shift_by(-0.5, 0).duration(0.6).easing(Easing.SMOOTH)])
 ```

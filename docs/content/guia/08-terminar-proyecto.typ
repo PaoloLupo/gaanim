@@ -5,7 +5,6 @@
   title: "Terminar el proyecto",
   description: "Organizar el archivo, validar, exportar y saber qué aprender después",
   route: "/guia/terminar-proyecto/",
-  updated: datetime.today().display(),
   code-langs: (),
 )[
 
@@ -39,11 +38,10 @@ Durante la edición termina con:
 scene.render()
 ```
 
-Para un video final:
+Para un video final no cambies el script; exporta desde la raíz del proyecto:
 
-```python
-# output: exports/movimiento-circular.mp4
-scene.render()
+```bash
+gaanim export . --output exports/movimiento-circular.mp4
 ```
 
 MP4 y WebM necesitan FFmpeg. Para revisar rápidamente una animación en una web
@@ -58,7 +56,8 @@ import os
 
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")
 if snapshot_dir:
-    scene.snapshots(snapshot_dir, [0.0, 1.0, 3.0, 6.0, 9.0])
+    end = scene.cursor  # duración total de la timeline
+    scene.snapshots(snapshot_dir, [0.0, end * 0.25, end * 0.5, end * 0.75, end])
 else:
     scene.render()
 ```
@@ -70,7 +69,7 @@ archivos distintos.
 
 Desde la raíz del proyecto:
 
-```powershell
+```bash
 gaanim check .
 gaanim .
 ```
@@ -94,8 +93,9 @@ El proyecto recorrió las capas fundamentales de Gaanim:
 - `play`, `wait`, duración y easing construyeron el ritmo.
 - Layout organizó contenido que depende de su medida.
 - Los updaters describieron movimiento continuo.
-- Bindings y geometría reactiva conectaron objetos en el mismo frame.
-- `traced_path` convirtió movimiento en información persistente.
+- `tracking_line`, `polar_point` y `follow` conectaron objetos en el mismo frame.
+- Un `Parameter` compartido y `NumberLine.function(..., reveal=theta)`
+  convirtieron el ángulo en una curva que se forma sin deriva.
 - Render, export y snapshots produjeron salidas distintas desde la misma escena.
 
 == Cómo continuar
@@ -110,9 +110,8 @@ concreta. Para ampliar este proyecto, prueba en este orden:
 5. Convierte la explicación en segmentos de una presentación.
 
 #checkpoint[
-El archivo `examples/manual_movimiento_circular.py` debe ejecutarse con
-`gaanim examples/manual_movimiento_circular.py` o mediante el launcher del
-proyecto. Conserva una copia antes de experimentar con extensiones.
+`gaanim check .` debe terminar sin errores y `gaanim .` debe reproducir
+`main.py` completo. Conserva una copia antes de experimentar con extensiones.
 ]
 
 == Después de la guía

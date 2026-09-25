@@ -5,7 +5,6 @@
   title: "Objetos y estilo",
   description: "Cómo pensar en drawables, rellenos, trazos, grupos y jerarquía visual",
   route: "/guia/objetos-estilo/",
-  updated: datetime.today().display(),
   code-langs: (),
 )[
 

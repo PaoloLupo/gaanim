@@ -6,7 +6,6 @@
   description: "Reglas visuales centralizadas, colores CSS y paletas reutilizables",
   route: "/api/themes/",
   code-langs: (),
-  updated: datetime.today().display(),
 )
 
 = Temas y colores

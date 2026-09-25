@@ -4,7 +4,6 @@
   title: "Rendimiento reproducible",
   description: "Perfiles, presupuestos y reportes p50/p95 del runtime nativo",
   route: "/guides/performance/",
-  updated: datetime.today().display(),
   code-langs: (),
 )
 
@@ -27,7 +26,7 @@ just benchmark standard
 ```
 
 Ambos usan `libx264` por defecto para mantener una referencia determinista. Para
-medir un encoder hardware concreto, páselo como segundo argumento, por ejemplo
+medir un encoder hardware concreto, pásalo como segundo argumento, por ejemplo
 `just benchmark smoke nvenc`. La selección es estricta: si NVENC no está
 disponible, el benchmark falla en vez de cambiar silenciosamente a software.
 

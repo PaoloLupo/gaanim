@@ -6,7 +6,6 @@
   description: "Matrices seleccionables, mutables y conectadas con álgebra simbólica",
   route: "/api/matrices/",
   code-langs: (),
-  updated: datetime.today().display(),
 )
 
 = Matrices
@@ -23,7 +22,7 @@ desarmar el layout.
     (name: "data", type: "Sequence[Sequence[value]] | sympy.MatrixBase", default: none, desc: [Datos rectangulares no vacíos.]),
     (name: "delimiters", type: "str", default: "\"brackets\"", desc: [brackets, parentheses, braces, bars, double_bars o none.]),
     (name: "delimiter_size / delimiter_weight", type: "float / int", default: "auto / 300", desc: [Tamaño y grosor tipográfico (100–900) de los delimitadores.]),
-    (name: "row_gap / column_gap", type: "float", default: "24 / 24", desc: [Separación entre tracks automáticos en unidades de escena.]),
+    (name: "row_gap / column_gap", type: "float", default: "0.24 / 0.24", desc: [Separación entre tracks automáticos en unidades de escena.]),
     (name: "row_labels / column_labels", type: "Sequence | None", default: "None", desc: [Etiquetas externas alineadas con las filas o columnas.]),
     (name: "cell_mode / label_mode", type: "\"math\" | \"text\"", default: "\"math\"", desc: [Render Typst matemático o texto plano.]),
     (name: "entry_style / label_style", type: "TextStyle | None", default: "None", desc: [Estilo de entradas y etiquetas.]),

@@ -5,7 +5,6 @@
   title: "Componer y explicar",
   description: "Texto matemático, Layout y una estructura que guía la mirada",
   route: "/guia/componer-explicar/",
-  updated: datetime.today().display(),
   code-langs: (),
 )[
 
@@ -20,7 +19,7 @@ izquierda ocurre el fenómeno; a la derecha lo nombramos.
 Gaanim compone matemáticas dentro de `scene.text`. Añade dos objetos:
 
 ```python
-formula = scene.text("$x(t) = r cos(omega t)$", role="subtitle").fill(WHITE)
+formula = scene.text("$y(t) = r sin(omega t)$", role="subtitle").fill(WHITE)
 explanation = scene.text(
     "La altura del punto se convertirá en una curva.",
     role="body",
@@ -55,6 +54,8 @@ grupo como una unidad. Para una página completa se puede usar `within="safe"`,
 `width="fill"` y `height="fill"`:
 
 ```python
+# Ilustrativo: no lo añadas a main.py.
+content = scene.text("Contenido de la página", role="body")
 page = scene.layout.stack(
     [content],
     within="safe",

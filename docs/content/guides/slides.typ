@@ -4,7 +4,6 @@
   title: "Presentaciones",
   description: "Crea, previsualiza y presenta diapositivas semánticas reutilizables",
   route: "/guides/slides/",
-  updated: datetime.today().display(),
   code-langs: (),
 )
 
@@ -63,8 +62,8 @@ gaanim --present --monitor 1 mi-charla
 == Ensayar una parte
 
 ```powershell
-gaanim mi-charla --sections resultados,conclusiones
-gaanim --present mi-charla --from resultados
+gaanim mi-charla --sections portada,contenido
+gaanim --present mi-charla --from contenido
 ```
 
 `--sections` reproduce solo los segmentos indicados y `--from` empieza en uno y
@@ -143,13 +142,13 @@ la exportación también continúan ignorando stops como antes.
 
 = Entorno opcional con uv
 
-El visor embebe Gaanim y puede usar un Python compatible del sistema. Si el
-proyecto no contiene `.venv`, el Inicio muestra el runtime detectado y permite
-abrir igualmente. Para aislar dependencias, copia y ejecuta fuera de Gaanim:
+El visor embebe Gaanim y puede usar un Python 3.14 compatible del sistema.
+`gaanim init` y la apertura de un proyecto sin `.venv` ejecutan
+`uv venv --python 3.14` e instalan el wheel de autoría cuando uv está
+disponible. Sin uv, el proyecto se abre con el Python del sistema, sin
+aislamiento. Para crear el entorno a mano:
 
-```powershell
+```bash
 cd mi-charla
-uv venv --python 3.12
+uv venv --python 3.14
 ```
-
-Gaanim nunca ejecuta esas instrucciones ni modifica el entorno por su cuenta.

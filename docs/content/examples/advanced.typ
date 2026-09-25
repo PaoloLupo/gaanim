@@ -4,7 +4,6 @@
   title: "Ejemplos avanzados",
   description: "Recetas modernas de texto, datos, composición, reactividad, 3D y presentaciones",
   route: "/examples/advanced/",
-  updated: datetime.today().display(),
   code-langs: (),
 )
 
@@ -25,11 +24,12 @@ circle = scene.geometry.circle(1).fill(BLUE).stroke(WHITE, 0.05).move_to(-2.25, 
 scene.play([circle.animate.create().duration(0.8)])
 
 scene.segment("text", Transition.cross_fade(0.4))
-headline = scene.text("A stable transform", role="title").fill(GOLD)
+headline = scene.text("Una transformación estable", role="title").fill(GOLD)
 scene.play([circle.animate.replacement_transform_to(headline).duration(1.4).easing(Easing.spring(stiffness=90, damping=12))])
 
 formula = scene.text.equation("E = m c^2").fill(GREEN).move_to(0, -1.875)
 scene.play([headline.animate.transform_to(formula).duration(1.4).easing(Easing.SMOOTH)])
+scene.render()
 # Ejecuta este archivo con: gaanim transforms.py
 ```
 
@@ -46,6 +46,7 @@ group = scene.geometry.group([left, middle, right])
 
 scene.play([group.animate.grow_from_center().duration(1.0).easing(Easing.spring(stiffness=90, damping=12))])
 scene.play([group.animate.shift_by(0, 1.5).duration(1.0), group.animate.rotate_by(3.14159).duration(1.0)])
+scene.render()
 # Ejecuta este archivo con: gaanim groups.py
 ```
 
@@ -62,6 +63,7 @@ trail = scene.geometry.traced_path(dot).stroke(Color(80, 220, 220), 0.04).no_fil
 scene.play([dot.animate.fade_in().duration(0.3), trail.animate.fade_in().duration(0.3)])
 scene.wait(4.0)
 dot.remove_updater()
+scene.render()
 # Ejecuta este archivo con: gaanim reactive_path.py
 ```
 
@@ -109,7 +111,7 @@ heading = scene.slides.section_header(
     variant="accent",
 )
 chart = scene.viz.chart(spec)
-page = scene.layout.column([heading, scene.layout.item(chart, grow=1)], within="safe", gap=0.3)
+page = scene.layout.column([heading, scene.layout.item(chart.drawable(), grow=1)], within="safe", gap=0.3)
 scene.play([page.animate.fade_in().duration(0.7), chart.layer("marks").animate.grow_from_center().duration(0.8)])
 scene.render()
 ```

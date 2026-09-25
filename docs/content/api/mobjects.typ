@@ -6,7 +6,6 @@
   description: "Fábricas de objetos de Scene: primitivas, trayectorias, texto, medios y composición",
   route: "/api/mobjects/",
   code-langs: (),
-  updated: datetime.today().display(),
 )
 
 = Objetos
@@ -90,8 +89,8 @@ scene.render()
 #api-entry(
   name: "Geometry.tracking_line",
   kind: "reactive factory",
-  signature: "tracking_line(from, to) -> Drawable",
-  params: ((name: "from", type: "Endpoint", default: none, desc: [Fixed point, drawable origin, `PointRef`, or `AnchorPoint`.]), (name: "to", type: "Endpoint", default: none, desc: [Second same-frame endpoint.])),
+  signature: "tracking_line(from_, to) -> Drawable",
+  params: ((name: "from_", type: "Endpoint", default: none, desc: [Fixed point, drawable origin, `PointRef`, or `AnchorPoint`.]), (name: "to", type: "Endpoint", default: none, desc: [Second same-frame endpoint.])),
   returns: (type: "Drawable", desc: [Hidden reactive line; reveal it with `create`, `write`, or another entry animation.]),
   desc: [Regenerates its full path whenever either endpoint moves while preserving active path-reveal progress.],
 )[
@@ -160,7 +159,7 @@ Drawable.animations() -> tuple[str, ...]
 ```
 
 The model and every selected node support the complete 3D transform surface:
-`at_3d(x,y,z)`, `scaled_3d(x,y,z)`, `rotated_3d(x,y,z)`, and
+`move_to_3d(x,y,z)`, `scale_to_3d(x,y,z)`, `rotate_to_3d(x,y,z)`, and
 `with_pivot_3d(x,y,z)`. Euler rotations use XYZ order and radians.
 
 == Primitivas PBR nativas
@@ -195,7 +194,7 @@ Geometry.plane(width=2.0, height=2.0, *, subdivisions=(1, 1), material=None) -> 
 emissive_strength=0.0)` validates all surface ranges. Presets
 `Material3D.matte`, `.metal`, and `.emissive` cover common looks. Use
 `Primitive3D.material(...)` for an immediate fluent change and
-`material_to(...)` for interpolation. `create()` grows a mesh from its center
+`.animate.material(...)` for interpolation. `create()` grows a mesh from its center
 while fading it in; vector-only `write()` is rejected explicitly.
 
 #html.div(style: "font-family: var(--font-code); font-size: 0.65rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; background: var(--text-main); color: var(--bg-main); padding: 4px 8px; display: inline-block; margin-bottom: 16px;", [— 40+ FACTORIES · ALL RETURN Drawable —])
@@ -284,10 +283,10 @@ scene.render()
 #api-entry(
   name: "Geometry.square",
   kind: "factory",
-  signature: "square(size: float) -> Drawable",
-  params: ((name: "size", type: "float", default: none, desc: [Side length.]),),
+  signature: "square(s: float) -> Drawable",
+  params: ((name: "s", type: "float", default: none, desc: [Side length.]),),
   returns: (type: "Drawable", desc: [Square.]),
-  desc: [Shorthand for `rect(size, size)`. Useful for grid cells.],
+  desc: [Shorthand for `rect(s, s)`. Useful for grid cells.],
 )[
 ```python
 # show-code: true
@@ -899,7 +898,7 @@ helix = scene.geometry.polyline_3d(points, colormap="inferno")
 ]
 
 #api-entry(
-  name: "Drawable.at_3d",
+  name: "Drawable.move_to_3d",
   kind: "method",
   signature: ".move_to_3d(x, y, z) -> Drawable",
   params: ((name: "x / y / z", type: "float", default: none, desc: [World-space position.]),),
@@ -1114,7 +1113,7 @@ scene.render()
   signature: "image(path: str, *, width?, height?, fit=\"contain\", crop?, quality=\"medium\") -> Image",
   params: ((name: "path", type: "str", default: none, desc: [PNG/JPEG/WebP path.]), (name: "fit", type: "str", default: "\"contain\"", desc: ["contain|cover|stretch"]), (name: "width", type: "float", default: "None", desc: [Target width.]), (name: "crop", type: "(x,y,w,h)", default: "None", desc: [Source crop in pixels, top-left origin.]),),
   returns: (type: "Image", desc: [Textured drawable.]),
-  desc: [Shares decoded texture across same path. Use `scaled`, `at` as usual.],
+  desc: [Shares decoded texture across same path. Use `scale_to`, `move_to` as usual.],
 )[
 ```python
 # show-code: true
@@ -1297,7 +1296,7 @@ result = scene.slides.card("Result", "The solver converged.", "12 ms", variant="
 #api-entry(
   name: "SlideKit.banner",
   kind: "factory",
-  signature: "banner(title, subtitle=None, *, position=\"top\", width=None, margin=32, padding=(28,18), gap=8, radius=14, variant=\"neutral\", appearance=\"soft\", color=None, background=None, border=None) -> Drawable",
+  signature: "banner(title, subtitle=None, *, position=\"top\", width=None, margin=0.32, padding=(0.28, 0.18), gap=0.08, radius=0.14, variant=\"neutral\", appearance=\"soft\", color=None, background=None, border=None) -> Drawable",
   params: ((name: "title", type: "str", default: none, desc: [Heading slot.]), (name: "position", type: "str", default: "\"top\"", desc: [top or bottom.]), (name: "width", type: "float | None", default: "None", desc: [None fills the safe width minus margin.])),
   returns: (type: "Drawable", desc: [Safe-edge anchored group.]),
   desc: [Replacement for the removed `caption` helper. Height follows measured title and subtitle content.],
@@ -1310,7 +1309,7 @@ notice = scene.slides.banner("Simulation complete", position="bottom", variant="
 #api-entry(
   name: "SlideKit.lower_third",
   kind: "factory",
-  signature: "lower_third(title, subtitle=None, *, kicker=None, side=\"left\", width=520, margin=32, padding=(28,20), gap=8, radius=16, variant=\"neutral\", appearance=\"soft\", color=None, background=None, border=None) -> Drawable",
+  signature: "lower_third(title, subtitle=None, *, kicker=None, side=\"left\", width=5.2, margin=0.32, padding=(0.28, 0.20), gap=0.08, radius=0.16, variant=\"neutral\", appearance=\"soft\", color=None, background=None, border=None) -> Drawable",
   params: ((name: "title", type: "str", default: none, desc: [Primary label.]), (name: "subtitle", type: "str | None", default: "None", desc: [Secondary label.]), (name: "side", type: "str", default: "\"left\"", desc: [left or right safe corner.])),
   returns: (type: "Drawable", desc: [Safe-corner anchored group.]),
   desc: [Kicker, title, and subtitle use Theme roles and wrap within the authored width.],
@@ -1491,7 +1490,7 @@ anteriores.
   signature: "parameter(initial: float) -> Parameter",
   params: ((name: "initial", type: "float", default: none, desc: [Valor escalar inicial y finito.]),),
   returns: (type: "Parameter", desc: [Escalar invisible utilizable directamente o como entrada explícita de un callback.]),
-  desc: [`current` lee el espejo autoral, `set(value)` registra un corte inmediato en el cursor y `animate.set(value).duration(...)` construye un `Anim` puro. Los valores no finitos producen `ValueError`.],
+  desc: [`current` lee el espejo autoral, `set(value)` registra un corte inmediato en el cursor y `animate.set(value).duration(...)` construye un `Anim` puro. Conduce objetos reactivos como `always_redraw_arc` o `point_on_curve`; cada uno necesita su propia animación de entrada en `scene.play(...)`. Los valores no finitos producen `ValueError`.],
 )[
 ```python
 import math
@@ -1650,8 +1649,8 @@ el objeto que lo conduce.
 #api-entry(
   name: "Drawable.anchor_point",
   kind: "method",
-  signature: "anchor_point(anchor=Anchor.CENTER, *, offset=(0, 0)) -> AnchorPoint",
-  params: ((name: "anchor", type: "Anchor", default: "Anchor.CENTER", desc: [One of the nine local-bounds anchors.]), (name: "offset", type: "vec2", default: "(0, 0)", desc: [Additional local-space displacement.]),),
+  signature: "anchor_point(anchor=None, *, offset=(0.0, 0.0)) -> AnchorPoint",
+  params: ((name: "anchor", type: "Anchor | None", default: "None", desc: [Uno de los nueve anclajes de los límites locales; `None` equivale a `Anchor.CENTER`.]), (name: "offset", type: "vec2", default: "(0.0, 0.0)", desc: [Additional local-space displacement.]),),
   returns: (type: "AnchorPoint", desc: [Non-rendered endpoint that follows the full transformed hierarchy.]),
   desc: [Use anchored points with tracking lines, bars, springs, and dimensions. The local offset rotates and scales with the drawable; non-finite values raise `ValueError`.],
 )[
@@ -1660,26 +1659,6 @@ from gaanim import Anchor, Scene
 scene = Scene(frame=(16, 9))
 frame = scene.geometry.rect(2.25, 1.125)
 corner = frame.anchor_point(Anchor.TOP_RIGHT, offset=(0.1, 0))
-```
-]
-
-#api-entry(
-  name: "Visualization.parameter",
-  kind: "factory",
-  signature: "parameter(initial: float) -> Parameter",
-  params: ((name: "initial", type: "float", default: none, desc: [Starting value.]),),
-  returns: (type: "Parameter", desc: [Scalar animated independently.]),
-  desc: [Drive `always_redraw_arc`, `point_on_curve`, etc. Use `tracker.animate.set(v).duration(t)`. Reactive visuals need their own entry animation in `scene.play(...)`.],
-)[
-```python
-# show-code: true
-from gaanim import BLUE, GOLD, WHITE, RED, GREEN, Scene
-scene = Scene(frame=(16, 9), background="#0f172a")
-theta = scene.viz.parameter(0.2)
-arc = scene.geometry.always_redraw_arc(theta, 0, 0, 0.69, 0.0).fill(WHITE)
-scene.play([arc.animate.fade_in().duration(0.3), theta.animate.set(4.5).duration(1.6)])
-# output: preview.webp
-scene.render()
 ```
 ]
 
@@ -1772,8 +1751,8 @@ scene.render()
 #api-entry(
   name: "Mechanics.bar_between",
   kind: "factory",
-  signature: "bar_between(from, to, *, width=0.08) -> Drawable",
-  params: ((name: "from", type: "Endpoint", default: none, desc: [First fixed, drawable-origin, or anchored endpoint.]), (name: "to", type: "Endpoint", default: none, desc: [Second endpoint.]), (name: "width", type: "float", default: "0.08", desc: [Positive scene-unit thickness.]),),
+  signature: "bar_between(from_, to, *, width=0.08) -> Drawable",
+  params: ((name: "from_", type: "Endpoint", default: none, desc: [First fixed, drawable-origin, or anchored endpoint.]), (name: "to", type: "Endpoint", default: none, desc: [Second endpoint.]), (name: "width", type: "float", default: "0.08", desc: [Positive scene-unit thickness.]),),
   returns: (type: "Drawable", desc: [Round-capped bar with reactive length and angle.]),
   desc: [The bar is regenerated in the same frame as endpoint animation or updaters. Draw articulation circles separately when required.],
 )[
@@ -1792,8 +1771,8 @@ scene.render()
 #api-entry(
   name: "Mechanics.spring_between",
   kind: "factory",
-  signature: "spring_between(from, to, coils=8, amplitude=0.12, crossing=0, start_straight=0.12, end_straight=0.12) -> Drawable",
-  params: ((name: "from", type: "Endpoint", default: none, desc: [Endpoint A.]), (name: "to", type: "Endpoint", default: none, desc: [Endpoint B.]), (name: "coils", type: "int", default: "8", desc: [Number of turns.]), (name: "amplitude", type: "float", default: "0.12", desc: [Radius perpendicular to the endpoint axis, in scene units.]), (name: "crossing", type: "float", default: "0", desc: [Normalized e-like interlacing amount from 0 to 1.]), (name: "start_straight", type: "float", default: "0.12", desc: [Non-negative straight length before the first coil.]), (name: "end_straight", type: "float", default: "0.12", desc: [Non-negative straight length after the final coil.]),),
+  signature: "spring_between(from_, to, coils=8, amplitude=0.12, crossing=0, start_straight=0.12, end_straight=0.12) -> Drawable",
+  params: ((name: "from_", type: "Endpoint", default: none, desc: [Endpoint A.]), (name: "to", type: "Endpoint", default: none, desc: [Endpoint B.]), (name: "coils", type: "int", default: "8", desc: [Number of turns.]), (name: "amplitude", type: "float", default: "0.12", desc: [Radius perpendicular to the endpoint axis, in scene units.]), (name: "crossing", type: "float", default: "0", desc: [Normalized e-like interlacing amount from 0 to 1.]), (name: "start_straight", type: "float", default: "0.12", desc: [Non-negative straight length before the first coil.]), (name: "end_straight", type: "float", default: "0.12", desc: [Non-negative straight length after the final coil.]),),
   returns: (type: "Drawable", desc: [Reactive helical spring path.]),
   desc: [Endpoints can be fixed tuples, drawable origins, or AnchorPoint references inside transformed groups. By default, it has 12 scene-unit straight segments at both ends, as in a mechanical spring. The helix radius stays stable while its pitch deforms automatically as an endpoint moves. Set either straight length to `0` to coil directly from that endpoint; close endpoints shorten both segments proportionally. Negative or non-finite straight lengths raise `ValueError`. Set `crossing` above 0 to fold parts of each turn back and create e-like crossings.],
 )[
@@ -1812,8 +1791,8 @@ scene.render()
 #api-entry(
   name: "Mechanics.dimension_between",
   kind: "factory",
-  signature: "dimension_between(from, to, offset, *, label=None, show_value=False, value=None, format=\".2f\", unit=None, scale=1, label_gap=0.1, label_orientation=\"upright\", font_size=None, color=None, line_width=0.03, extension_style=\"solid\", dash_length=0.12, gap_length=0.08, side=None, font=None, weight=None, label_style=None) -> Dimension",
-  params: ((name: "from", type: "Endpoint", default: none, desc: [Endpoint A.]), (name: "to", type: "Endpoint", default: none, desc: [Endpoint B.]), (name: "offset", type: "float", default: none, desc: [Perpendicular displacement. Without `side`, positive is to the left of `from` → `to`; with `side`, only its magnitude is used.]), (name: "side", type: "str|None", default: "None", desc: [`left`, `right`, `above` or `below`: keeps the dimension on that scene side whatever the endpoint order. Along the requested direction (for example `above` on a vertical dimension) the offset is used as a positive distance.]), (name: "font / weight", type: "str|None / int|None", default: "None / None", desc: [Family and weight (1 to 1000) of the label, value and unit, resolved as in `scene.text`.]), (name: "label_style", type: "TextStyle|None", default: "None", desc: [Style overlaid on the annotation. `font`, `weight` and `font_size` override it; its color overrides `color` for the text only. Unset fields use the theme's body text.]), (name: "label", type: "str|None", default: "None", desc: [Optional symbolic text or inline math.]), (name: "show_value", type: "bool", default: "False", desc: [Show current XY distance.]), (name: "value", type: "float|Parameter|Variable|Computed|None", default: "None", desc: [Semantic numeric readout. Implies `show_value` and overrides measured distance and `scale`.]), (name: "format", type: "str", default: "\".2f\"", desc: [Reactive number format.]), (name: "unit", type: "str|None", default: "None", desc: [Optional unit text.]), (name: "scale", type: "float", default: "1", desc: [Positive multiplier from scene units to displayed units when `value` is omitted.]), (name: "label_gap", type: "float", default: "0.1", desc: [Non-negative outward annotation gap. Upright labels on steep lines add the part of their width that exceeds their height.]), (name: "label_orientation", type: "str", default: "\"upright\"", desc: [`upright` or readable `aligned`.]), (name: "line_width", type: "float", default: "0.03", desc: [Positive filled-line width. Arrowheads are six line widths long, capped for short dimensions.]), (name: "extension_style", type: "str", default: "\"solid\"", desc: [`solid` or `dashed`.]), (name: "dash_length", type: "float", default: "0.12", desc: [Positive dash length.]), (name: "gap_length", type: "float", default: "0.08", desc: [Positive dash gap.])),
+  signature: "dimension_between(from_, to, offset, *, label=None, show_value=False, value=None, format=\".2f\", unit=None, scale=1, label_gap=0.1, label_orientation=\"upright\", font_size=None, color=None, line_width=0.03, extension_style=\"solid\", dash_length=0.12, gap_length=0.08, side=None, font=None, weight=None, label_style=None) -> Dimension",
+  params: ((name: "from_", type: "Endpoint", default: none, desc: [Endpoint A.]), (name: "to", type: "Endpoint", default: none, desc: [Endpoint B.]), (name: "offset", type: "float", default: none, desc: [Perpendicular displacement. Without `side`, positive is to the left of `from_` → `to`; with `side`, only its magnitude is used.]), (name: "side", type: "str|None", default: "None", desc: [`left`, `right`, `above` or `below`: keeps the dimension on that scene side whatever the endpoint order. Along the requested direction (for example `above` on a vertical dimension) the offset is used as a positive distance.]), (name: "font / weight", type: "str|None / int|None", default: "None / None", desc: [Family and weight (1 to 1000) of the label, value and unit, resolved as in `scene.text`.]), (name: "label_style", type: "TextStyle|None", default: "None", desc: [Style overlaid on the annotation. `font`, `weight` and `font_size` override it; its color overrides `color` for the text only. Unset fields use the theme's body text.]), (name: "label", type: "str|None", default: "None", desc: [Optional symbolic text or inline math.]), (name: "show_value", type: "bool", default: "False", desc: [Show current XY distance.]), (name: "value", type: "float|Parameter|Variable|Computed|None", default: "None", desc: [Semantic numeric readout. Implies `show_value` and overrides measured distance and `scale`.]), (name: "format", type: "str", default: "\".2f\"", desc: [Reactive number format.]), (name: "unit", type: "str|None", default: "None", desc: [Optional unit text.]), (name: "scale", type: "float", default: "1", desc: [Positive multiplier from scene units to displayed units when `value` is omitted.]), (name: "label_gap", type: "float", default: "0.1", desc: [Non-negative outward annotation gap. Upright labels on steep lines add the part of their width that exceeds their height.]), (name: "label_orientation", type: "str", default: "\"upright\"", desc: [`upright` or readable `aligned`.]), (name: "line_width", type: "float", default: "0.03", desc: [Positive filled-line width. Arrowheads are six line widths long, capped for short dimensions.]), (name: "extension_style", type: "str", default: "\"solid\"", desc: [`solid` or `dashed`.]), (name: "dash_length", type: "float", default: "0.12", desc: [Positive dash length.]), (name: "gap_length", type: "float", default: "0.08", desc: [Positive dash gap.])),
   returns: (type: "Dimension", desc: [Reactive drawable exposing compatible `line`, independent `extensions`, `label`, `number`, and `unit`.]),
   desc: [Keeps all geometry and annotations synchronized with moving endpoints. `value` accepts a number, Parameter, Variable, or Computed; it controls only the number, so changing it never changes the line length. Without `value`, `show_value=True` displays endpoint distance multiplied by `scale`. Labels, values, and units default to 0.48 scene units for 1080p readability. `color` initializes the complete silhouette and annotation, including the changing number after updates and seeks; `extensions` remains independently styleable. Invalid scalar types, metrics, extension styles, and orientation raise `TypeError` or `ValueError`; non-finite reactive results display the configured invalid-value marker.],
 )[
@@ -1848,7 +1827,7 @@ scene.render()
 #api-entry(
   name: "PointRef and Drawable.follow",
   kind: "reactive geometry",
-  signature: "point_ref(x,y) · point_between(from,to,alpha=.5,offset=(0,0)) · polar_point(origin,radius,angle) · drawable.follow(endpoint,offset=(0,0),offset_space=\"world\")",
+  signature: "point_ref(x,y) · point_between(from_,to,alpha=.5,offset=(0,0)) · polar_point(origin,radius,angle) · drawable.follow(endpoint,offset=(0,0),offset_space=\"world\")",
   returns: (type: "PointRef | Drawable", desc: [Non-rendered points and a fluent same-frame follower.]),
   desc: [`PointRef` is accepted anywhere an `Endpoint` is accepted. Scalars can be `float`, `Parameter`, `Variable`, or `Computed`. `offset_space="local"` rotates and scales offsets with drawable and anchor sources; invalid values raise `ValueError`.],
 )[
@@ -1869,9 +1848,9 @@ scene.render()
 #api-entry(
   name: "Mechanics.angle_between",
   kind: "factory",
-  signature: "angle_between(vertex, from, to, *, radius=0.64, label=None, show_value=False, format=\".1f\", unit=\"deg\", sweep=\"minor\", arrowheads=\"both\", label_gap=0.12, label_orientation=\"upright\", show_extensions=True, font_size=None, color=None) -> AngleDimension",
+  signature: "angle_between(vertex, from_, to, *, radius=0.64, label=None, show_value=False, format=\".1f\", unit=\"deg\", sweep=\"minor\", arrowheads=\"both\", label_gap=0.12, label_orientation=\"upright\", show_extensions=True, font_size=None, color=None) -> AngleDimension",
   returns: (type: "AngleDimension", desc: [Reactive `arc`, `arrows`, `extensions`, `label`, `number`, and `unit`.]),
-  desc: [`from` and `to` accept fixed `Direction` values or endpoints. Sweep is `minor`, `major`, `cw`, or `ccw`; arrowheads are solid triangles. The label, value, and unit share a 0.48-unit default. `color` paints the arc, arrows, label, reactive value, and unit, including after updates and seeks. Zero-length rays hide the affected geometry rather than emitting invalid paths.],
+  desc: [`from_` and `to` accept fixed `Direction` values or endpoints. Sweep is `minor`, `major`, `cw`, or `ccw`; arrowheads are solid triangles. The label, value, and unit share a 0.48-unit default. `color` paints the arc, arrows, label, reactive value, and unit, including after updates and seeks. Zero-length rays hide the affected geometry rather than emitting invalid paths.],
 )[
 ```python
 # show-code: true
@@ -1994,7 +1973,7 @@ scene.render()
 ]
 
 #api-entry(
-  name: "Drawable.at / scaled / rotated / z_index",
+  name: "Drawable.move_to / scale_to / rotate_to / z_index",
   kind: "method",
   signature: ".move_to(x, y, anchor=None) | .move_to(reference) .scale_to(factor) .rotate_to(radians) .z_index(int) .with_pivot(x,y)",
   params: ((name: "x / y", type: "float", default: none, desc: [Target scene-space position.]), (name: "reference", type: "Drawable", default: none, desc: [Alternative single argument for deferred center-to-center placement.]), (name: "anchor", type: "Anchor", default: "Anchor.CENTER", desc: [Local point placed at `(x, y)`; coordinates only.]),),

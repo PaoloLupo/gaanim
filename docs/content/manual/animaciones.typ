@@ -4,18 +4,18 @@
   title: "Animaciones y tiempo",
   description: "Entrada, transformación, easing, paralelismo y secuencia",
   route: "/manual/animaciones/",
-  updated: datetime.today().display(),
   code-langs: (),
 )
 
 = Descriptores de animación
 
-Los métodos como `create`, `move`, `rotate` y `fade_out` devuelven un `Anim`.
+Los métodos de `.animate` como `create`, `shift_by`, `rotate_by` y `fade_out`
+devuelven un `Anim`.
 Puedes configurar ese descriptor antes de entregarlo a la escena.
 
 ```python
 entrance = orbit.animate.create().duration(1.2).easing(Easing.SMOOTH)
-movement = point.animate.rotate_by(6.28318).about(0, 0).duration(4.0).easing(Easing.LINEAR)
+movement = point.animate.rotate_by(6.28318).about_point(0, 0).duration(4.0).easing(Easing.LINEAR)
 
 scene.play([entrance])
 scene.play([movement])
@@ -24,8 +24,8 @@ scene.play([movement])
 == Paralelo y secuencia
 
 Las animaciones dentro de una misma lista comparten una llamada a `play`. Las
-llamadas distintas son secuenciales. `lag` introduce un retraso progresivo
-entre miembros del grupo.
+llamadas distintas son secuenciales. `stagger(a, b, ..., each=0.1)` introduce un
+retraso progresivo entre los miembros del grupo.
 
 == Duración y easing
 
@@ -44,7 +44,7 @@ objeto importe. Para texto estructurado usa las transiciones específicas de
 == Depuración del tiempo
 
 Cuando algo aparece demasiado pronto, revisa primero el orden de `play` y
-`wait`; después las duraciones y `lag`. Las capturas por seek de regresión
+`wait`; después las duraciones y el `each` de `stagger`. Las capturas por seek de regresión
 visual permiten inspeccionar instantes exactos sin reproducir todo el video.
 
 == Siguiente paso

@@ -258,7 +258,11 @@ ampliarlo para que las fichas tomen del stub todo lo que sea mecánico:
 
 Cada fase es un PR que se puede revisar por separado.
 
-### Fase 0: corregir lo que hoy es falso (S)
+### Fase 0: corregir lo que hoy es falso (S) · hecha
+
+Pendiente para fases posteriores: la parte de contribuidor de
+`guides/visual-regression` (Fase 2) y las descripciones de fichas que siguen en
+inglés (Fase 4).
 
 - Corregir la tabla de errores del §1, los nombres sin definir del tutorial y la
   versión de Python (3.14 en todas partes).

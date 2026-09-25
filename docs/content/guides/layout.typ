@@ -4,7 +4,6 @@
   title: "Layout",
   description: "Composición didáctica de escenas adaptables sin coordenadas manuales",
   route: "/guides/layout/",
-  updated: datetime.today().display(),
   code-langs: (),
 )
 

@@ -4,7 +4,6 @@
   title: "Guía rápida",
   description: "Construye y exporta una primera animación de movimiento circular",
   route: "/manual/guia-rapida/",
-  updated: datetime.today().display(),
   code-langs: (),
 )
 
@@ -33,7 +32,7 @@ orbit = scene.geometry.circle(1.75).stroke(BLUE, 0.05).no_fill()
 point = scene.geometry.dot(0.15).fill(YELLOW).move_to(1.75, 0)
 ```
 
-Cada fábrica devuelve un objeto fluido. `fill`, `stroke`, `no_fill` y `at`
+Cada fábrica devuelve un objeto fluido. `fill`, `stroke`, `no_fill` y `move_to`
 modifican su especificación y devuelven el mismo objeto para seguir
 encadenando llamadas.
 

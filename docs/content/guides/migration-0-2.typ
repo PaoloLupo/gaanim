@@ -4,7 +4,6 @@
   title: "Migrar de 0.1 a 0.2",
   description: "Separación de Scene en capacidades enfocadas",
   route: "/guides/migration-0-2/",
-  updated: datetime.today().display(),
   code-langs: (),
 )
 

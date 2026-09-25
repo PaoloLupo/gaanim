@@ -17,9 +17,9 @@ scene.render()
 from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
 
 scene = Scene(frame=(16, 9), background=BLACK)
-title = scene.text("Mass-energy equivalence", role="title").fill(WHITE).move_to(0, 2.25)
-equation = scene.text("$E = m c^2$").fill(GOLD).move_to(0, 0)
-caption = scene.text("Energy and mass are related", role="subtitle").fill(BLUE).move_to(0, -1.875)
+title = scene.text("Equivalencia entre masa y energía", role="title").fill(WHITE).move_to(0, 2.25)
+equation = scene.text.equation("E = m c^2").fill(GOLD).move_to(0, 0)
+caption = scene.text("La masa y la energía están relacionadas", role="subtitle").fill(BLUE).move_to(0, -1.875)
 
 scene.play([title.animate.write().duration(1.0), equation.animate.write().duration(1.5)])
 scene.play([caption.animate.fade_in().duration(0.8)])

@@ -260,7 +260,24 @@ main h2::before, main.page-home > h3::before {
 }
 h1:hover .heading-anchor, h2:hover .heading-anchor, h3:hover .heading-anchor, h4:hover .heading-anchor { opacity: 1; }
 
-.last-updated { font-size: 0.8rem; color: var(--text-muted); margin: -0.4em 0 1.6em; }
+/* Tutorial callouts: "Idea clave" and "Punto de control" */
+.lesson-box {
+    margin: 1.4em 0;
+    padding: 14px 18px;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--primary);
+    background: var(--primary-soft);
+}
+.lesson-box > p:first-of-type { margin-top: 0; }
+.lesson-box > p:last-child { margin-bottom: 0; }
+.lesson-box-title {
+    margin-bottom: 6px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--primary);
+}
 
 /* Inline and block code */
 code, pre, .typ-raw { font-family: var(--font-code); }
@@ -455,7 +472,7 @@ main > table { display: block; overflow-x: auto; }
 .home-hero-kicker, .home-card-eyebrow, .home-step-number, .toc-title, .nav-sidebar summary,
 table th, .code-header, .code-cell-anim .anim-preview::before, .api-badge, .kind-badge,
 .api-params-title, .api-example-label, .search-group-title, .search-filter, .search-tip,
-.search-footer, .copy-code-btn, .home-hero-cta a, .site-footer, .last-updated {
+.search-footer, .copy-code-btn, .home-hero-cta a, .site-footer, .lesson-box-title {
     font-family: var(--font-label);
 }
 
@@ -1240,4 +1257,4 @@ table th, .code-header, .code-cell-anim .anim-preview::before, .api-badge, .kind
 .page-header { margin-bottom: 28px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
 .page-header h1 { margin-bottom: 8px; }
 .page-lead { margin: 0; font-size: 1.12rem; line-height: 1.6; color: var(--text-muted) !important; }
-.page-header + h2, .page-header + .last-updated + h2 { border-top: none; padding-top: 0; margin-top: 0.6em; }
+.page-header + h2 { border-top: none; padding-top: 0; margin-top: 0.6em; }

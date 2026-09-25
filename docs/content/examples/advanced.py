@@ -7,15 +7,15 @@ circle = scene.geometry.circle(1).fill(BLUE).stroke(WHITE, 0.05).move_to(-2.25, 
 scene.play([circle.animate.create().duration(0.8)])
 
 scene.segment("text", Transition.cross_fade(0.4))
-headline = scene.text("A stable transform", role="title").fill(GOLD).move_to(0, 0)
+headline = scene.text("Una transformación estable", role="title").fill(GOLD).move_to(0, 0)
 scene.play([circle.animate.replacement_transform_to(headline).duration(1.4).easing(Easing.spring(stiffness=90.0, damping=12.0))])
 
-formula = scene.text("$E = m c^2$").fill(GREEN).move_to(0, -1.875)
+formula = scene.text.equation("E = m c^2").fill(GREEN).move_to(0, -1.875)
 scene.play([headline.animate.transform_to(formula).duration(1.4).easing(Easing.SMOOTH)])
 scene.render()
 
 # %% groups
-from gaanim import BLACK, BLUE, GREEN, RED, Scene
+from gaanim import Easing, BLACK, BLUE, GREEN, RED, Scene
 
 scene = Scene(frame=(16, 9), background=BLACK)
 left = scene.geometry.circle(0.5).fill(BLUE).move_to(-1, 0)
