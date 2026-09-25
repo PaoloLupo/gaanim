@@ -763,6 +763,10 @@ impl gaanim_animation::AnimatableLens for UnitMaskLens {
     fn type_name(&self) -> &'static str {
         "TextUnitMask"
     }
+
+    fn holds_before_start(&self) -> bool {
+        true
+    }
 }
 
 /// Glyphs of a Text root in reading order with their geometry in the
@@ -1313,6 +1317,63 @@ mod tests {
             .collect();
         clips.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
         clips
+    }
+
+    #[test]
+    fn backward_seeks_keep_units_hidden_until_their_reveal() {
+        use gaanim_scene::MobjectId;
+        use gaanim_timeline::snapshot::WorldSnapshot;
+        use gaanim_timeline::timeline::Timeline;
+
+        for style in [TextRevealStyle::SlideUp, TextRevealStyle::Blur] {
+            let mut canvas = super::super::SceneModel::new(640, 360);
+            let text = canvas.text("uno dos");
+            canvas.wait(1.0);
+            canvas.play(vec![
+                text.animate()
+                    .text_reveal(TextRevealUnit::Word, style, true, 0.045)
+                    .unwrap()
+                    .duration(0.9),
+            ]);
+            canvas.wait(0.5);
+
+            let mut world = World::new();
+            world.insert_resource(Timeline::new());
+            world.insert_resource(gaanim_text::font::FontRegistry::new());
+            world.insert_resource(gaanim_text::prelude::TextConfig::default());
+            canvas.compile(&mut world);
+            world.flush();
+            let mut timeline = world.remove_resource::<Timeline>().expect("timeline");
+            let glyph = animator_clips(&timeline)[0].0;
+            let entity = world
+                .query::<(Entity, &MobjectId)>()
+                .iter(&world)
+                .find_map(|(entity, id)| (id.0 == glyph).then_some(entity))
+                .expect("glyph entity");
+            timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+            let state = |world: &World| {
+                format!(
+                    "{:?} {:?} {:?} {:?}",
+                    world.get::<ClipMask>(entity),
+                    world.get::<GaussianBlur>(entity),
+                    world.get::<SpatialTransform>(entity),
+                    world.get::<Opacity>(entity),
+                )
+            };
+
+            // Before and at the start of the reveal, as first played.
+            let mut fresh = Vec::new();
+            for time in [0.5, 1.0] {
+                timeline.seek(&mut world, time);
+                fresh.push(state(&world));
+            }
+            // Returning from the revealed text, as slide navigation does.
+            for (time, expected) in [0.5, 1.0].into_iter().zip(&fresh) {
+                timeline.seek(&mut world, 2.4);
+                timeline.seek(&mut world, time);
+                assert_eq!(&state(&world), expected, "{style:?} at {time}");
+            }
+        }
     }
 
     #[test]

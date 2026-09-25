@@ -2,7 +2,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal, TypeAlias
 from .gaanim_core import (
-    Anim, BackgroundLike, Composition, Drawable, Layout, Paint, Scene, Segment,
+    Anim, BackgroundLike, Composition, Drawable, Easing, Layout, Paint, Scene, Segment,
     TextStyle, Transition,
 )
 
@@ -144,10 +144,17 @@ class Agenda:
         ...
 
 class AgendaAnimate:
-    def focus(self, target: SectionTarget | None) -> Composition:
-        """Cross-fade every entry into its state for target and slide the marker."""
+    def focus(self, target: SectionTarget | None, *, easing: Easing | None = None) -> Composition:
+        """Cross-fade every entry into its state for target and slide the marker.
+
+        ``easing`` applies to every cross-fade and to the marker slide;
+        ``None`` keeps the default easing.
+
+        Example:
+            scene.play(agenda.animate.focus("method", easing=Easing.SNAPPY))
+        """
         ...
-    def advance(self, steps: int = 1) -> Composition:
+    def advance(self, steps: int = 1, *, easing: Easing | None = None) -> Composition:
         """Like focus, for the entry steps after the current one, clamped."""
         ...
 

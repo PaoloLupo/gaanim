@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Literal, TypeAlias, get_args
 
 if TYPE_CHECKING:
     from .gaanim_core import (
-        Anim, BackgroundLike, Composition, Drawable, Layout, Paint, Parameter, Scene,
-        Segment,
+        Anim, BackgroundLike, Composition, Drawable, Easing, Layout, Paint, Parameter,
+        Scene, Segment,
         TextStyle, Transition,
     )
 
@@ -419,18 +419,24 @@ class AgendaAnimate:
     def __init__(self, agenda: Agenda) -> None:
         self._agenda = agenda
 
-    def focus(self, target: object | None) -> Composition:
-        """Cross-fade every entry into its state for target and slide the marker."""
-        return self._play(self._agenda._target(target))
+    def focus(self, target: object | None, *, easing: Easing | None = None) -> Composition:
+        """Cross-fade every entry into its state for target and slide the marker.
 
-    def advance(self, steps: int = 1) -> Composition:
+        easing applies to every cross-fade and to the marker slide.
+        """
+        return self._play(self._agenda._target(target), easing)
+
+    def advance(self, steps: int = 1, *, easing: Easing | None = None) -> Composition:
         """Like focus, for the entry steps after the current one, clamped."""
-        return self._play(self._agenda._advanced(steps))
+        return self._play(self._agenda._advanced(steps), easing)
 
-    def _play(self, current: int | None) -> Composition:
+    def _play(self, current: int | None, easing: Easing | None) -> Composition:
         from .gaanim_core import parallel
 
-        return parallel(*[change.animation() for change in self._agenda._changes(current)])
+        animations = [change.animation() for change in self._agenda._changes(current)]
+        if easing is not None:
+            animations = [animation.easing(easing) for animation in animations]
+        return parallel(*animations)
 
 
 class ProgressRail:

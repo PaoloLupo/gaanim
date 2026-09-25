@@ -403,6 +403,12 @@ pub trait AnimatableLens: Send + Sync + std::fmt::Debug + 'static {
     fn clone_box(&self) -> Box<dyn AnimatableLens>;
     /// Returns the descriptive type name of the custom lens.
     fn type_name(&self) -> &'static str;
+    /// Whether this lens owns components that keyframe snapshots do not
+    /// record, so a seek before the clip must apply its initial value, as
+    /// it does for absolute property channels.
+    fn holds_before_start(&self) -> bool {
+        false
+    }
 }
 
 /// A shared [`AnimatableLens`] implemented by a crate above the timeline

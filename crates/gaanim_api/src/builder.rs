@@ -266,6 +266,34 @@ fn normalized_match_spans(
     matches
 }
 
+/// Byte ranges in `text` of the literal matches that
+/// [`SceneBuilder::select_occurrence`] enumerates for `fragment`, in
+/// occurrence order. Comparison ignores case, whitespace, and mathematical
+/// styling exactly like selections do; the Typst/Codex fallback is not tried.
+pub fn literal_selection_matches(text: &str, fragment: &str) -> Vec<std::ops::Range<usize>> {
+    let query = normalize_text_selection(fragment);
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let mut normalized = String::new();
+    let mut source = Vec::new();
+    for (start, raw) in text.char_indices() {
+        if raw.is_whitespace() || raw == '^' || raw == '_' {
+            continue;
+        }
+        let end = start + raw.len_utf8();
+        for lower in standard_math_char(raw).to_lowercase() {
+            let before = normalized.len();
+            normalized.push(lower);
+            source.extend(std::iter::repeat_n(start..end, normalized.len() - before));
+        }
+    }
+    normalized
+        .match_indices(&query)
+        .map(|(at, found)| source[at].start..source[at + found.len() - 1].end)
+        .collect()
+}
+
 pub(crate) fn adaptive_lag_ratio(item_count: usize) -> f64 {
     (4.0 / item_count.max(1) as f64).min(0.2)
 }
@@ -7969,6 +7997,25 @@ mod tests {
             "rendered={rendered:?}"
         );
         assert!(accent.iter().all(|id| whole.contains(id)));
+    }
+
+    #[test]
+    fn literal_selection_matches_follow_selection_normalization() {
+        let text = "La casa, la ca sa";
+        let at = |ranges: Vec<std::ops::Range<usize>>| -> Vec<&str> {
+            ranges.into_iter().map(|range| &text[range]).collect()
+        };
+        assert_eq!(at(literal_selection_matches(text, "la")), ["La", "la"]);
+        assert_eq!(
+            at(literal_selection_matches(text, "casa")),
+            ["casa", "ca sa"]
+        );
+        assert_eq!(
+            at(literal_selection_matches(text, "casa, la")),
+            ["casa, la"]
+        );
+        assert!(literal_selection_matches(text, "casa la").is_empty());
+        assert!(literal_selection_matches(text, " ").is_empty());
     }
 
     #[test]

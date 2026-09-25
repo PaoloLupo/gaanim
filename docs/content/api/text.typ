@@ -443,12 +443,12 @@ transition targets raise `LayoutOwnershipError`.
   kind: "method",
   signature: "text[name] | text[index_or_slice] | text.graphemes|words|lines|parts[index_or_slice] -> TextSelection",
   params: (
-    (name: "name", type: "str", default: none, desc: [A top-level part; continue indexing to navigate nested semantic paths.]),
+    (name: "name", type: "str", default: none, desc: [A top-level part; continue indexing to navigate nested semantic paths. A string that names no part selects every literal occurrence of that text instead (case- and whitespace-insensitive, like `color_by`).]),
     (name: "index", type: "int", default: none, desc: [Supports negative indices.]),
     (name: "slice", type: "slice", default: none, desc: [Contiguous non-empty range; step must equal 1.]),
   ),
   returns: (type: "TextSelection", desc: [Deferred local selection inside its owning `Text`.]),
-  desc: [Direct numeric indexing selects rendered Unicode graphemes. Query views expose graphemes, Unicode words, explicit lines, and semantic parts. Missing names and invalid ranges raise `KeyError`, `IndexError`, `TypeError`, or `ValueError`.],
+  desc: [Direct numeric indexing selects rendered Unicode graphemes. Query views expose graphemes, Unicode words, explicit lines, and semantic parts. A grapheme, word, or line slice selects the rendered text from its first to its last unit, including punctuation between words, at the position where the slice starts. Strings that are neither a part nor text in the `Text`, and invalid ranges, raise `KeyError`, `IndexError`, `TypeError`, or `ValueError`.],
 )[
 ```python
 # show-code: true
@@ -467,6 +467,10 @@ scene.play(copy["formula"]["mass"].animate.focus().duration(0.6))
 scene.render()
 ```
 ]
+
+`text.words` follows Unicode word boundaries, so punctuation such as `,` or
+`:` is not a word: `"uno dos, tres"` has three words and `words[1:3]` selects
+`dos, tres`. `text["dos, tres"]` selects the same literal text by content.
 
 The current `lines` query follows explicit `\n` boundaries in the structured
 source. It does not expose lines created only by responsive wrapping. `parts`
@@ -800,7 +804,8 @@ effects and non-positional transforms, but its owner controls translation.
 - `ValueError`: empty content, unbalanced math, duplicate sibling parts,
   invalid role/style/flow, invalid grouping/order/stagger, invalid direction,
   or non-positive transition duration.
-- `KeyError`: unknown semantic part, no shared automatic expansion anchor.
+- `KeyError`: a string that is neither a semantic part nor text in the
+  `Text`, no shared automatic expansion anchor.
 - `IndexError`: query index out of range or empty slice.
 - `ValueError`: selection slices with a step other than 1.
 - `LayoutOwnershipError`: manual positioning of managed text or a transition
