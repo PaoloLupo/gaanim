@@ -35,6 +35,8 @@ ENCODER_LABELS = {
 }
 WIDTH = 320
 HEIGHT = 180
+# Scenes are authored in logical units; request the small smoke size explicitly.
+SIZE_ARGS = ("--width", str(WIDTH), "--height", str(HEIGHT))
 MIN_DURATION = 0.45
 MAX_DURATION = 1.0
 COMMAND_TIMEOUT_SECONDS = 120
@@ -259,6 +261,7 @@ def export_alpha_format(
             str(artifact),
             "--quality",
             "draft",
+            *SIZE_ARGS,
             "--transparent",
         ],
         cwd=repo,
@@ -302,6 +305,7 @@ def export_format(
         str(artifact),
         "--quality",
         "draft",
+        *SIZE_ARGS,
     ]
     if format_name == "mp4":
         command.extend(("--encoder", encoder))
@@ -365,6 +369,7 @@ def export_three_d_worker(
             "mp4",
             "--encoder",
             encoder,
+            *SIZE_ARGS,
         ],
         cwd=repo,
         env=environment,
