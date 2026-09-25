@@ -120,7 +120,7 @@ Modern Math. Usa `scene.text("$a + b = 2$")` para matemáticas en línea y
 `$ a + b = 2 $`.
 
 ```python
-from gaanim import Axis, BLUE, GOLD, WHITE, Scene
+from gaanim import Axis, BLUE, GOLD, GREEN, WHITE, Scene
 
 scene = Scene(frame=(16, 9))
 
