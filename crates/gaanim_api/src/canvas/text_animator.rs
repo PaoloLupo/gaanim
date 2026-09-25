@@ -128,8 +128,9 @@ pub enum TextAnimatorKind {
     /// Move the range from `from` to `to` (0 is before the first unit, 1
     /// after the last). `stagger` is the delay in seconds between units;
     /// `None` staggers adaptively. `mask` clips each unit to its row box.
-    /// `exit` reverses unit positions so the first unit in `order` leaves
-    /// first when the range runs backward.
+    /// `exit` complements the influence, so the range takes units from
+    /// rest to the out state: an exit that continues the reveal's motion,
+    /// with units leaving in `order`.
     Sweep {
         from: f64,
         to: f64,
@@ -225,6 +226,14 @@ impl TextRevealStyle {
                 ..Default::default()
             },
         }
+    }
+
+    /// Out state of the style as an exit: slides keep travelling the way the
+    /// reveal moves (`SlideUp` leaves upward), the other styles mirror it.
+    pub fn exit_state(self, mask: bool) -> TextAnimatorOut {
+        let mut out = self.out_state(mask);
+        out.relative_offset = -out.relative_offset;
+        out
     }
 
     fn masks(self) -> bool {
@@ -440,8 +449,10 @@ impl Anim {
         )
     }
 
-    /// The exit symmetric to [`Self::text_reveal`]: units leave in reading
-    /// order toward the style's out state and stay hidden.
+    /// The exit matching [`Self::text_reveal`]: units leave in reading
+    /// order, `stagger` seconds apart, and stay hidden. Slides continue the
+    /// reveal's motion, so `SlideUp` exits upward out of each row mask and
+    /// `SlideDown` downward; units accelerate out (ease-in cubic).
     pub fn text_conceal(
         self,
         unit: TextRevealUnit,
@@ -453,15 +464,15 @@ impl Anim {
         self.text_animator(
             "conceal",
             TextAnimatorKind::Sweep {
-                from: 1.0,
-                to: 0.0,
+                from: 0.0,
+                to: 1.0,
                 stagger: Some(stagger),
                 mask,
                 exit: true,
             },
             unit,
-            style.out_state(mask),
-            preset_easing(),
+            style.exit_state(mask),
+            RateFunc::EaseIn(EasingCurve::Cubic),
         )
     }
 
@@ -590,16 +601,21 @@ pub(crate) fn unit_span(duration: f64, slots: usize, stagger: Option<f64>) -> f6
 
 /// Rate function giving the influence of the unit whose window of the range
 /// is `window` while the range runs `from → to` over the clip. `easing`
-/// eases the unit's progress through its window.
+/// eases the unit's progress through its window; `exit` complements the
+/// shape so the unit goes from rest to the out state.
 pub(crate) fn unit_rate(
     shape: SelectorShape,
     easing: &RateFunc,
     window: (f64, f64),
     from: f64,
     to: f64,
+    exit: bool,
 ) -> RateFunc {
     let (low, high) = window;
-    let influence = |progress: f64| shape.influence(easing.evaluate(progress));
+    let influence = |progress: f64| {
+        let influence = shape.influence(easing.evaluate(progress));
+        if exit { 1.0 - influence } else { influence }
+    };
     if (to - from).abs() <= f64::EPSILON || high <= low {
         let progress = if high <= low {
             if from < low { 0.0 } else { 1.0 }
@@ -918,16 +934,20 @@ impl SceneBuilder<'_, '_, '_> {
         let mut end_influences = Vec::with_capacity(layout.units.len());
 
         for (unit, members) in layout.units.iter().enumerate() {
-            let mut position = if slot_count > 1 {
+            let position = if slot_count > 1 {
                 slots[unit] as f64 / (slot_count - 1) as f64
             } else {
                 0.0
             };
-            if exit {
-                position = 1.0 - position;
-            }
             let low = position * (1.0 - span);
-            let rate = unit_rate(spec.shape, &anim.rate_func, (low, low + span), from, to);
+            let rate = unit_rate(
+                spec.shape,
+                &anim.rate_func,
+                (low, low + span),
+                from,
+                to,
+                exit,
+            );
             let initial = rate.evaluate(0.0);
             let final_influence = rate.evaluate(1.0);
             end_influences.push(final_influence);
@@ -1155,7 +1175,7 @@ mod tests {
 
     #[test]
     fn unit_rates_follow_their_window_and_hold_outside() {
-        let rate = unit_rate(SelectorShape::Ramp, &RateFunc::Linear, (0.25, 0.75), 0.0, 1.0);
+        let rate = unit_rate(SelectorShape::Ramp, &RateFunc::Linear, (0.25, 0.75), 0.0, 1.0, false);
         assert!((rate.evaluate(0.0) - 1.0).abs() < 1e-12);
         assert!((rate.evaluate(0.25) - 1.0).abs() < 1e-12);
         assert!((rate.evaluate(0.5) - 0.5).abs() < 1e-9);
@@ -1165,7 +1185,7 @@ mod tests {
         assert_eq!(rate.evaluate(0.4).to_bits(), rate.evaluate(0.4).to_bits());
 
         // A backward range enters the window from its far end.
-        let back = unit_rate(SelectorShape::Ramp, &RateFunc::Linear, (0.25, 0.75), 1.0, 0.0);
+        let back = unit_rate(SelectorShape::Ramp, &RateFunc::Linear, (0.25, 0.75), 1.0, 0.0, false);
         assert!(back.evaluate(0.0).abs() < 1e-12);
         assert!((back.evaluate(0.5) - 0.5).abs() < 1e-9);
         assert!((back.evaluate(1.0) - 1.0).abs() < 1e-12);
@@ -1177,11 +1197,18 @@ mod tests {
             (0.0, 1.0),
             0.0,
             1.0,
+            false,
         );
         assert!(eased.evaluate(0.5) < 0.2);
 
+        // An exit runs forward from rest to the out state.
+        let exit = unit_rate(SelectorShape::Ramp, &RateFunc::Linear, (0.25, 0.75), 0.0, 1.0, true);
+        assert!(exit.evaluate(0.0).abs() < 1e-12);
+        assert!((exit.evaluate(0.5) - 0.5).abs() < 1e-9);
+        assert!((exit.evaluate(1.0) - 1.0).abs() < 1e-12);
+
         // A frozen range holds one influence.
-        let frozen = unit_rate(SelectorShape::Ramp, &RateFunc::Linear, (0.0, 1.0), 0.5, 0.5);
+        let frozen = unit_rate(SelectorShape::Ramp, &RateFunc::Linear, (0.0, 1.0), 0.5, 0.5, false);
         assert!((frozen.evaluate(0.0) - 0.5).abs() < 1e-12);
         assert!((frozen.evaluate(1.0) - 0.5).abs() < 1e-12);
     }
@@ -1363,9 +1390,51 @@ mod tests {
             },
             0.5,
         );
-        // The first word leaves first and every glyph ends hidden.
+        // The first word leaves first, like the reveal's order, and every
+        // glyph ends hidden.
         assert!(conceal[0].1 > conceal[2].1);
         assert!(conceal.iter().all(|clip| (clip.2 - 1.0).abs() < 1e-9));
+    }
+
+    #[test]
+    fn slide_conceal_keeps_moving_the_way_the_reveal_moved() {
+        // Vertical travel (`to.y - from.y`) of every glyph translation.
+        let travel = |anim: fn(Anim) -> Anim| {
+            let mut canvas = super::super::SceneModel::new(640, 360);
+            let text = canvas.text("uno\ndos");
+            canvas.play(vec![anim(text.animate()).duration(1.0)]);
+            animator_clips(&compiled(&canvas))
+                .into_iter()
+                .filter(|clip| clip.2.starts_with("Translation"))
+                .filter_map(|clip| {
+                    let y = |value: &str| value.split(',').nth(1)?.trim().parse::<f64>().ok();
+                    let from = clip.2.split("from: DVec3(").nth(1)?;
+                    let to = clip.2.split("to: DVec3(").nth(1)?;
+                    Some((y(to)? - y(from)?, clip.3, clip.4))
+                })
+                .collect::<Vec<_>>()
+        };
+        let reveal = travel(|anim| {
+            anim.text_reveal(TextRevealUnit::Line, TextRevealStyle::SlideUp, true, 0.2)
+                .unwrap()
+        });
+        let conceal = travel(|anim| {
+            anim.text_conceal(TextRevealUnit::Line, TextRevealStyle::SlideUp, true, 0.2)
+                .unwrap()
+        });
+        assert_eq!(reveal.len(), 6);
+        assert_eq!(conceal.len(), 6);
+        // The reveal rises from below (its out state is lower)...
+        assert!(reveal.iter().all(|clip| clip.0 < 0.0 && clip.1 > 0.99));
+        // ...and the conceal starts at rest and leaves upward.
+        assert!(conceal
+            .iter()
+            .all(|clip| clip.0 > 0.0 && clip.1.abs() < 1e-9 && (clip.2 - 1.0).abs() < 1e-9));
+        let down = travel(|anim| {
+            anim.text_conceal(TextRevealUnit::Line, TextRevealStyle::SlideDown, true, 0.2)
+                .unwrap()
+        });
+        assert!(down.iter().all(|clip| clip.0 < 0.0));
     }
 
     #[test]
