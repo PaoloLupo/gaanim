@@ -1003,6 +1003,13 @@ impl DrawableHandle {
         })
     }
 
+    /// Place the stroke inside, centered on, or outside closed contours,
+    /// including every text glyph. Open paths always center their stroke.
+    /// This is declaration state: it is not animated or cut on the timeline.
+    pub fn stroke_align(self, align: gaanim_renderer::effects::StrokeAlign) -> Self {
+        self.update_style(|spec| spec.stroke_align = Some(align))
+    }
+
     /// Apply a complete native stroke, including cap, join, miter and dashes.
     pub fn stroke_with_style(self, brush: Brush, style: gaanim_core::kurbo::Stroke) -> Self {
         self.update_style(|spec| {

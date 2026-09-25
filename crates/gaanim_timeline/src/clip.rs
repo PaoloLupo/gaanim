@@ -178,6 +178,11 @@ pub enum PropertyLensSpec {
         from: gaanim_core::glam::DQuat,
         to: gaanim_core::glam::DQuat,
     },
+    /// Local Z turn by the full angle; see `PropertyLens::RotationZ`.
+    RotationZ {
+        from: gaanim_core::glam::DQuat,
+        radians: f64,
+    },
     Scale {
         from: gaanim_core::glam::DVec3,
         to: gaanim_core::glam::DVec3,
@@ -438,6 +443,10 @@ impl PropertyLensSpec {
             Self::Rotation { from, to } => PropertyLens::Rotation {
                 from: *from,
                 to: *to,
+            },
+            Self::RotationZ { from, radians } => PropertyLens::RotationZ {
+                from: *from,
+                radians: *radians,
             },
             Self::Scale { from, to } => PropertyLens::Scale {
                 from: *from,

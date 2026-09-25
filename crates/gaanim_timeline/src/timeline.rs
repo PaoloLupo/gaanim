@@ -146,7 +146,9 @@ enum AbsoluteLensChannel {
 fn absolute_lens_channel(lens: &PropertyLensSpec) -> Option<AbsoluteLensChannel> {
     Some(match lens {
         PropertyLensSpec::Translation { .. } => AbsoluteLensChannel::Translation,
-        PropertyLensSpec::Rotation { .. } => AbsoluteLensChannel::Rotation,
+        PropertyLensSpec::Rotation { .. } | PropertyLensSpec::RotationZ { .. } => {
+            AbsoluteLensChannel::Rotation
+        }
         PropertyLensSpec::Scale { .. } => AbsoluteLensChannel::Scale,
         PropertyLensSpec::Opacity { .. } => AbsoluteLensChannel::Opacity,
         PropertyLensSpec::FillColor { .. } => AbsoluteLensChannel::FillColor,
@@ -2329,6 +2331,14 @@ fn apply_lens_spec(
         }
         PropertyLensSpec::Rotation { from, to } => {
             let value = from.slerp(*to, t);
+            if let Some(mut transform) = world.get_mut::<SpatialTransform>(target)
+                && transform.rotation != value
+            {
+                transform.rotation = value;
+            }
+        }
+        PropertyLensSpec::RotationZ { from, radians } => {
+            let value = gaanim_animation::tween::rotation_z_at(*from, *radians, t);
             if let Some(mut transform) = world.get_mut::<SpatialTransform>(target)
                 && transform.rotation != value
             {

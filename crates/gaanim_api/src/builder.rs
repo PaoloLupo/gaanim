@@ -294,6 +294,38 @@ pub fn literal_selection_matches(text: &str, fragment: &str) -> Vec<std::ops::Ra
         .collect()
 }
 
+/// Axis of a solid arrow from tail to tip. Arcs are a fine polyline, which
+/// path following measures exactly at any size.
+fn arrow_spine(shape: &gaanim_math::ArrowShape) -> gaanim_core::kurbo::BezPath {
+    let mut spine = gaanim_core::kurbo::BezPath::new();
+    match *shape {
+        gaanim_math::ArrowShape::Straight { start, end, .. } => {
+            spine.move_to(start);
+            spine.line_to(end);
+        }
+        gaanim_math::ArrowShape::Arc {
+            center,
+            radius,
+            start_angle,
+            sweep_angle,
+            ..
+        } => {
+            let radius = radius.abs();
+            let steps = (sweep_angle.abs() / 1f64.to_radians()).ceil().max(1.0) as usize;
+            for step in 0..=steps {
+                let angle = start_angle + sweep_angle * step as f64 / steps as f64;
+                let point = center + gaanim_core::kurbo::Vec2::from_angle(angle) * radius;
+                if step == 0 {
+                    spine.move_to(point);
+                } else {
+                    spine.line_to(point);
+                }
+            }
+        }
+    }
+    spine
+}
+
 /// Reverses travel along `path`: subpaths run last to first, each backwards.
 fn reverse_path(path: &gaanim_core::kurbo::BezPath) -> gaanim_core::kurbo::BezPath {
     use gaanim_core::kurbo::{BezPath, PathEl};
@@ -5489,7 +5521,14 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         let path = if let Some(target_id) = path_target {
             if let Some(state) = self.states.get(target_id) {
-                let mut p = (*state.path).clone();
+                // A solid arrow is travelled along its axis, not around its
+                // silhouette, unless its geometry changed after spawning.
+                let mut p = self
+                    .arrow_shapes
+                    .get(&target_id)
+                    .filter(|shape| *state.path == shape.path())
+                    .map(arrow_spine)
+                    .unwrap_or_else(|| (*state.path).clone());
                 let world_affine = self.get_world_transform(target_id).to_affine_2d();
                 p.apply_affine(world_affine);
                 p
@@ -5617,16 +5656,22 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             let r = (from_trans.x - p.x).hypot(from_trans.y - p.y);
             if r > 1e-6 {
                 let theta0 = (from_trans.y - p.y).atan2(from_trans.x - p.x);
-                Some(
-                    gaanim_core::kurbo::Arc::new(
-                        gaanim_core::kurbo::Point::new(p.x, p.y),
-                        gaanim_core::kurbo::Vec2::new(r, r),
-                        theta0,
-                        angle_radians,
-                        0.0,
-                    )
-                    .into_path(0.1),
-                )
+                // A fine polyline rather than cubic arcs: path following
+                // measures curves with a coarse absolute arc-length accuracy,
+                // but straight segments exactly, so the swing stays in step
+                // with the rotation at any radius.
+                let steps = (angle_radians.abs() / 1f64.to_radians()).ceil().max(1.0) as usize;
+                let mut swing = kurbo::BezPath::new();
+                for step in 0..=steps {
+                    let theta = theta0 + angle_radians * step as f64 / steps as f64;
+                    let point = (p.x + r * theta.cos(), p.y + r * theta.sin());
+                    if step == 0 {
+                        swing.move_to(point);
+                    } else {
+                        swing.line_to(point);
+                    }
+                }
+                Some(swing)
             } else {
                 (declared_anchor != gaanim_core::glam::DVec3::ZERO).then(|| {
                     let mut still = kurbo::BezPath::new();
@@ -5654,56 +5699,24 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             );
         }
 
-        if angle_radians.abs() > std::f64::consts::PI {
-            let half_dur = anim.duration * 0.5;
-            let mid_rot = from_rot * gaanim_core::glam::DQuat::from_rotation_z(angle_radians * 0.5);
-            self.timeline.add_clip(
-                parent_track,
-                clip_start,
-                half_dur,
-                ClipPayload::Animation(AnimationSpec {
-                    target: anim.target,
-                    lens: PropertyLensSpec::Rotation {
-                        from: from_rot,
-                        to: mid_rot,
-                    },
-                    rate_func: anim.rate_func.clone(),
-                    delay: 0.0,
-                    label: self.current_label.clone(),
-                }),
-            );
-            self.timeline.add_clip(
-                parent_track,
-                clip_start + half_dur,
-                half_dur,
-                ClipPayload::Animation(AnimationSpec {
-                    target: anim.target,
-                    lens: PropertyLensSpec::Rotation {
-                        from: mid_rot,
-                        to: to_rot,
-                    },
-                    rate_func: anim.rate_func.clone(),
-                    delay: 0.0,
-                    label: self.current_label.clone(),
-                }),
-            );
-        } else {
-            self.timeline.add_clip(
-                parent_track,
-                clip_start,
-                anim.duration,
-                ClipPayload::Animation(AnimationSpec {
-                    target: anim.target,
-                    lens: PropertyLensSpec::Rotation {
-                        from: from_rot,
-                        to: to_rot,
-                    },
-                    rate_func: anim.rate_func,
-                    delay: 0.0,
-                    label: self.current_label.clone(),
-                }),
-            );
-        }
+        // One angle-based clip: a slerp cannot turn past half a revolution,
+        // and splitting the turn would ease each part separately and drift
+        // from the pivot path above, which eases over the whole clip.
+        self.timeline.add_clip(
+            parent_track,
+            clip_start,
+            anim.duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::RotationZ {
+                    from: from_rot,
+                    radians: angle_radians,
+                },
+                rate_func: anim.rate_func,
+                delay: 0.0,
+                label: self.current_label.clone(),
+            }),
+        );
     }
 
     /// Internal: schedule a `GrowArrow` animation. Authored solid arrows grow

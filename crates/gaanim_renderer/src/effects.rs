@@ -23,6 +23,21 @@ impl Default for DropShadow {
     }
 }
 
+/// Component: where a stroke sits relative to a closed contour.
+///
+/// Without it a closed contour keeps its stroke inside the shape, so a
+/// `write` draws a constant width, and an open path centers its stroke.
+/// `Outside` draws the whole width beyond the contour, e.g. for a text halo.
+/// Open paths always center their stroke.
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum StrokeAlign {
+    #[default]
+    Inside,
+    Center,
+    Outside,
+}
+
 /// Component: Adds an outer glow outline effect to a 2D Mobject.
 #[derive(Component, Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

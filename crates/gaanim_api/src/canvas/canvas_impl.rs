@@ -2916,8 +2916,18 @@ impl SceneModel {
     }
 
     /// Spawn a visible line between static or reactive endpoints.
+    /// Line between fixed or reactive endpoints. Two fixed 2D points make an
+    /// ordinary line, which moves with its group; reactive endpoints are
+    /// re-resolved in world space every frame.
     pub fn line_between(&mut self, from: CanvasEndpoint, to: CanvasEndpoint) -> DrawableHandle {
-        self.endpoint_line(from, to, false)
+        match (&from, &to) {
+            (CanvasEndpoint::Static(start), CanvasEndpoint::Static(end))
+                if start.z == 0.0 && end.z == 0.0 =>
+            {
+                self.line(start.x, start.y, end.x, end.y)
+            }
+            _ => self.endpoint_line(from, to, false),
+        }
     }
     pub fn arrow(&mut self, x1: f64, y1: f64, x2: f64, y2: f64) -> DrawableHandle {
         self.spawn(SpawnKind::Arrow(x1, y1, x2, y2))
@@ -4779,6 +4789,10 @@ impl SceneModel {
                 .map_err(|error| PlayError::InvalidPaint(error.to_owned()))?;
         }
         let mut occupied: Vec<(gaanim_core::ObjectId, String, f64, f64, &'static str)> = Vec::new();
+        // Starts accumulated through sequences and staggers carry rounding
+        // error, so a clip that begins where another ends may appear to
+        // overlap it by a few ulps.
+        const OVERLAP_EPSILON: f64 = 1e-9;
         let described =
             |label: &str, start: f64, end: f64| format!("{label} ({start:.2}–{end:.2} s)");
         for resolved_item in &resolved {
@@ -4810,13 +4824,22 @@ impl SceneModel {
                         if *target != anim.inner.target || *occupied_channel != channel {
                             return false;
                         }
-                        let left_zero = end == start;
-                        let right_zero = occupied_end == occupied_start;
+                        let left_zero = end - start <= OVERLAP_EPSILON;
+                        let right_zero = occupied_end - occupied_start <= OVERLAP_EPSILON;
                         match (left_zero, right_zero) {
-                            (true, true) => start == *occupied_start,
-                            (true, false) => start >= *occupied_start && start < *occupied_end,
-                            (false, true) => *occupied_start >= start && *occupied_start < end,
-                            (false, false) => start < *occupied_end && *occupied_start < end,
+                            (true, true) => (start - occupied_start).abs() <= OVERLAP_EPSILON,
+                            (true, false) => {
+                                start > occupied_start - OVERLAP_EPSILON
+                                    && start < occupied_end - OVERLAP_EPSILON
+                            }
+                            (false, true) => {
+                                *occupied_start > start - OVERLAP_EPSILON
+                                    && *occupied_start < end - OVERLAP_EPSILON
+                            }
+                            (false, false) => {
+                                start < occupied_end - OVERLAP_EPSILON
+                                    && *occupied_start < end - OVERLAP_EPSILON
+                            }
                         }
                     },
                 );
@@ -7634,6 +7657,55 @@ mod tests {
                     .is_err()
             );
         }
+    }
+
+    #[test]
+    fn line_between_two_fixed_points_moves_with_its_group() {
+        let mut canvas = SceneModel::new(320, 180);
+        let bar = canvas.line_between(
+            CanvasEndpoint::Static(DVec3::new(-3.0, -1.5, 0.0)),
+            CanvasEndpoint::Static(DVec3::new(-3.0, 1.5, 0.0)),
+        );
+        let group = canvas.group(&[&bar]);
+        canvas.play(vec![group.animate().shift_by(4.0, 0.0).duration(1.0)]);
+
+        let mut app = bevy::prelude::App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin);
+        canvas.compile(app.world_mut());
+        app.finish();
+        app.cleanup();
+        app.update();
+        assert!(
+            app.world_mut()
+                .query_filtered::<(), With<gaanim_animation::TrackingLine>>()
+                .iter(app.world())
+                .next()
+                .is_none(),
+            "fixed endpoints need no world-space tracking"
+        );
+
+        app.world_mut().resource_mut::<Timeline>().seek_request = Some(2.0);
+        app.update();
+        app.update();
+        let world_x = app
+            .world_mut()
+            .query::<(&gaanim_scene::Path2D, &gaanim_math::GlobalSpatialTransform)>()
+            .iter(app.world())
+            .find_map(|(path, transform)| match path.0.elements().first() {
+                Some(gaanim_core::kurbo::PathEl::MoveTo(start)) => {
+                    Some((transform.affine_2d * *start).x)
+                }
+                _ => None,
+            })
+            .expect("line leaf");
+        assert!(
+            (world_x - 1.0).abs() < 1e-6,
+            "line followed its group to {world_x}"
+        );
     }
 
     #[test]
@@ -11041,6 +11113,30 @@ mod tests {
                 .iter()
                 .all(|segment| segment.stops.is_empty())
         );
+    }
+
+    #[test]
+    fn staggered_sequences_that_touch_do_not_overlap_by_rounding() {
+        let mut scene = SceneModel::new(320, 180);
+        let trips = (0..18)
+            .map(|_| {
+                let packet = scene.rect(0.3, 0.1).move_to(-5.0, 0.0);
+                Composition::sequence(
+                    vec![
+                        Composition::leaf(packet.animate().opacity(1.0).duration(0.08)),
+                        Composition::leaf(packet.animate().move_to(0.0, 0.0).duration(0.45)),
+                        Composition::leaf(packet.animate().move_to(3.0, 1.0).duration(0.25)),
+                        Composition::leaf(packet.animate().opacity(0.0).duration(0.08)),
+                    ],
+                    0.0,
+                )
+                .unwrap()
+            })
+            .collect();
+        let staggered = Composition::stagger(trips, 0.13).unwrap();
+        scene
+            .play_composition_configured(staggered, None, None)
+            .expect("adjacent sequence steps share the translation channel in turn");
     }
 
     #[test]

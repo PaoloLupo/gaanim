@@ -43,9 +43,10 @@ impl SegmentSelection {
 
     /// Resolve against `(name, start, end)` segments in timeline order.
     ///
-    /// A name selects a segment whose whole name matches, or every segment of
-    /// a `Section` with that key (names `"<key> · <visit> · …"`), ignoring
-    /// case. A name that selects nothing is an error listing the choices.
+    /// A name selects a segment whose whole name matches, every segment of a
+    /// `Section` with that key (names `"<key> · <visit> · <step> · <title>"`),
+    /// or the steps whose title matches, ignoring case. A name that selects
+    /// nothing is an error listing the choices.
     pub fn resolve<'a>(
         &self,
         segments: impl IntoIterator<Item = (&'a str, f64, f64)>,
@@ -101,7 +102,20 @@ impl SegmentSelection {
 fn segment_matches(segment: &str, name: &str) -> bool {
     let segment = segment.to_lowercase();
     let name = name.to_lowercase();
-    segment == name || segment.starts_with(&format!("{name} · "))
+    segment == name
+        || segment.starts_with(&format!("{name} · "))
+        || step_title(&segment) == Some(name.as_str())
+}
+
+/// Title of a generated `Section` step segment (`"<key> · <visit> · <step> ·
+/// <title>"`), which may itself contain ` · `.
+fn step_title(segment: &str) -> Option<&str> {
+    let mut parts = segment.splitn(4, " · ");
+    parts.next()?;
+    let visit = parts.next()?;
+    let step = parts.next()?;
+    let title = parts.next()?;
+    (visit.parse::<usize>().is_ok() && step.parse::<usize>().is_ok()).then_some(title)
 }
 
 fn unknown_segment(name: &str, segments: &[(&str, f64, f64)]) -> String {
@@ -145,6 +159,25 @@ mod tests {
         let resolved = selection.resolve(deck()).unwrap();
         assert_eq!(resolved.segments, vec![2, 3, 4]);
         assert_eq!(resolved.ranges, vec![(2.0, 5.0)]);
+    }
+
+    #[test]
+    fn step_titles_select_their_segments_even_with_separators() {
+        let deck = vec![
+            ("p · 1 · 1 · Problemática · país sísmico", 0.0, 1.0),
+            ("p · 1 · 2 · Problemática · traslado", 1.0, 2.0),
+            ("cierre", 2.0, 3.0),
+        ];
+        let selection = SegmentSelection {
+            sections: vec!["problemática · PAÍS SÍSMICO".into()],
+            from: None,
+        };
+        assert_eq!(selection.resolve(deck.clone()).unwrap().segments, vec![0]);
+        let from = SegmentSelection {
+            sections: Vec::new(),
+            from: Some("Problemática · traslado".into()),
+        };
+        assert_eq!(from.resolve(deck).unwrap().segments, vec![1, 2]);
     }
 
     #[test]

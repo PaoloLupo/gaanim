@@ -14,6 +14,19 @@ use crate::updater::PyUpdater;
 use crate::visualization::extract_scalar_source_for_drawable;
 use gaanim_animation::{PropertyChannel, PropertySources, ScalarSource};
 
+/// Parse the `align` of `stroke(...)`: `inside`, `center`, or `outside`.
+pub(crate) fn parse_stroke_align(value: &str) -> PyResult<gaanim_api::canvas::StrokeAlign> {
+    use gaanim_api::canvas::StrokeAlign;
+    match value {
+        "inside" => Ok(StrokeAlign::Inside),
+        "center" => Ok(StrokeAlign::Center),
+        "outside" => Ok(StrokeAlign::Outside),
+        other => Err(PyValueError::new_err(format!(
+            "stroke align must be 'inside', 'center', or 'outside', got {other:?}"
+        ))),
+    }
+}
+
 fn scalar_for_anim(value: &Bound<'_, PyAny>, anim: &PyCanvasAnim) -> PyResult<ScalarSource> {
     let drawable = anim.inner.property_drawable().ok_or_else(|| {
         PyTypeError::new_err("reactive sources require a Drawable animation proxy")
@@ -1868,9 +1881,15 @@ impl PyDrawable {
         crate::custom::ensure_authoring_allowed()?;
         Ok(Self(self.0.clone().no_fill()))
     }
-    fn stroke(&self, paint: PyPaint, width: f64) -> PyResult<Self> {
+    #[pyo3(signature = (paint, width, *, align=None))]
+    fn stroke(&self, paint: PyPaint, width: f64, align: Option<&str>) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok(Self(self.0.clone().stroke_brush(paint.0, width)))
+        let align = align.map(parse_stroke_align).transpose()?;
+        let handle = self.0.clone().stroke_brush(paint.0, width);
+        Ok(Self(match align {
+            Some(align) => handle.stroke_align(align),
+            None => handle,
+        }))
     }
     /// Apply cap, join, miter, and dash geometry from a reusable StrokeStyle.
     fn stroke_style(&self, style: PyStrokeStyle) -> PyResult<Self> {
@@ -2708,8 +2727,14 @@ macro_rules! media_drawable_methods {
         Ok(slf)
     }
 
-    fn stroke<'py>(slf: PyRef<'py, Self>, paint: PyPaint, width: f64) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).stroke(paint, width)?;
+    #[pyo3(signature = (paint, width, *, align=None))]
+    fn stroke<'py>(
+        slf: PyRef<'py, Self>,
+        paint: PyPaint,
+        width: f64,
+        align: Option<&str>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).stroke(paint, width, align)?;
         Ok(slf)
     }
 

@@ -1,7 +1,7 @@
 use crate::background::{BackgroundPaint, ShaderBackgroundRequest};
 use crate::background_gpu::ShaderBackgroundFrame;
 use crate::effects::{
-    BooleanBinding, ClipMask, DropShadow, FillLevelBinding, GaussianBlur, Glow,
+    BooleanBinding, ClipMask, DropShadow, FillLevelBinding, GaussianBlur, Glow, StrokeAlign,
     VectorOutlineBinding,
 };
 use crate::lottie::LottiePlayer;
@@ -632,6 +632,75 @@ fn stroke_clip_path<'a>(
         .elements()
         .contains(&kurbo::PathEl::ClosePath)
         .then_some(clip_path)
+}
+
+/// Pen drawn for `align`: an outside stroke doubles the width and keeps
+/// only its outer half, so the authored width lies wholly beyond the contour.
+fn aligned_pen(style: &kurbo::Stroke, align: StrokeAlign) -> std::borrow::Cow<'_, kurbo::Stroke> {
+    if align == StrokeAlign::Outside {
+        let mut pen = style.clone();
+        pen.width *= 2.0;
+        std::borrow::Cow::Owned(pen)
+    } else {
+        std::borrow::Cow::Borrowed(style)
+    }
+}
+
+/// Stroke `path` aligned to its closed contour (see [`StrokeAlign`]).
+/// `source_path` is the untrimmed contour while a draw animation reveals
+/// `path`; open contours are always stroked on their centerline.
+fn draw_aligned_stroke(
+    scene: &mut vello::Scene,
+    style: &kurbo::Stroke,
+    brush: &peniko::Brush,
+    view: Option<kurbo::Affine>,
+    path: &kurbo::BezPath,
+    source_path: Option<&kurbo::BezPath>,
+    align: StrokeAlign,
+) {
+    let clip = match align {
+        StrokeAlign::Center => None,
+        StrokeAlign::Inside | StrokeAlign::Outside => stroke_clip_path(path, source_path),
+    };
+    let Some(clip) = clip else {
+        draw_stroke(scene, style, kurbo::Affine::IDENTITY, brush, view, path);
+        return;
+    };
+    let pen = aligned_pen(style, align);
+    if align == StrokeAlign::Outside {
+        // Keep the even-odd region between an enclosing rectangle and the
+        // contour: outside the shape and inside its counters.
+        let corner = pen.miter_limit.max(std::f64::consts::SQRT_2);
+        let pen_scale = view.map_or(1.0, |view| {
+            let [a, b, c, d, _, _] = view.inverse().as_coeffs();
+            (a * a + b * b + c * c + d * d).sqrt()
+        });
+        let reach = pen.width.abs() * corner * pen_scale;
+        let margin = if reach.is_finite() { reach + 1.0 } else { 1.0 };
+        let bounds = clip
+            .bounding_box()
+            .union(path.bounding_box())
+            .inflate(margin, margin);
+        let mut outside = bounds.to_path(0.1);
+        outside.extend(clip.iter());
+        scene.push_layer(
+            peniko::Fill::EvenOdd,
+            peniko::BlendMode::default(),
+            1.0,
+            kurbo::Affine::IDENTITY,
+            &outside,
+        );
+    } else {
+        scene.push_layer(
+            peniko::Fill::NonZero,
+            peniko::BlendMode::default(),
+            1.0,
+            kurbo::Affine::IDENTITY,
+            clip,
+        );
+    }
+    draw_stroke(scene, &pen, kurbo::Affine::IDENTITY, brush, view, path);
+    scene.pop_layer();
 }
 
 fn path_reveal_is_empty(tip: Option<&WriteTipGlow>) -> bool {
@@ -1352,6 +1421,7 @@ pub fn compile_scene_from_world(
         Option<&WorldBounds>,
         Option<&gaanim_scene::GroupMarker>,
         Option<&WriteTipGlow>,
+        Option<&StrokeAlign>,
     )>();
 
     let mut child_query = world.query::<&ChildOf>();
@@ -1389,6 +1459,7 @@ pub fn compile_scene_from_world(
             world_bounds_opt,
             is_group_opt,
             tip_glow_opt,
+            stroke_align_opt,
         )) = query_effects.get(world, entity)
         else {
             continue;
@@ -1563,34 +1634,15 @@ pub fn compile_scene_from_world(
         {
             let (effective_stroke_brush, effective_style) =
                 animated_stroke_paint(stroke_brush, style, anim_wave);
-
-            if let Some(clip_path) = stroke_clip_path(elem_path, source_path) {
-                scene.push_layer(
-                    peniko::Fill::NonZero,
-                    peniko::BlendMode::default(),
-                    1.0,
-                    kurbo::Affine::IDENTITY,
-                    clip_path,
-                );
-                draw_stroke(
-                    &mut scene,
-                    &effective_style,
-                    kurbo::Affine::IDENTITY,
-                    &effective_stroke_brush,
-                    stroke_view,
-                    elem_path,
-                );
-                scene.pop_layer();
-            } else {
-                draw_stroke(
-                    &mut scene,
-                    &effective_style,
-                    kurbo::Affine::IDENTITY,
-                    &effective_stroke_brush,
-                    stroke_view,
-                    elem_path,
-                );
-            }
+            draw_aligned_stroke(
+                &mut scene,
+                &effective_style,
+                &effective_stroke_brush,
+                stroke_view,
+                elem_path,
+                source_path,
+                stroke_align_opt.copied().unwrap_or_default(),
+            );
         }
 
         let mut opacity_group = entity;
@@ -1606,7 +1658,12 @@ pub fn compile_scene_from_world(
                 fragment_extent(
                     elem_path,
                     transform.affine_2d,
-                    elem_stroke.and(elem_stroke_style),
+                    elem_stroke
+                        .and(elem_stroke_style)
+                        .map(|style| {
+                            aligned_pen(style, stroke_align_opt.copied().unwrap_or_default())
+                        })
+                        .as_deref(),
                     stroke_view,
                     shadow_opt,
                     glow_opt,
@@ -1741,6 +1798,7 @@ pub fn gaanim_render_system(
         Option<&gaanim_scene::GroupMarker>,
         Option<Ref<WriteTipGlow>>,
         Option<Ref<Visible>>,
+        Option<Ref<StrokeAlign>>,
     )>,
     mut query_vello_scene: Query<(Entity, &mut VelloScene2d, &mut Transform), With<MainVelloScene>>,
     mut shader_frame: Option<ResMut<ShaderBackgroundFrame>>,
@@ -1818,9 +1876,10 @@ pub fn gaanim_render_system(
             is_group_opt,
             tip_glow_ref,
             visible_ref,
+            stroke_align_ref,
         ) = query_effects
             .get(entity)
-            .unwrap_or((None, None, None, None, None, None, None, None, None));
+            .unwrap_or((None, None, None, None, None, None, None, None, None, None));
 
         // Invalidate before skipping hidden or culled objects. Their new geometry
         // may stop changing before they become visible again (e.g. a rewound Lottie).
@@ -1883,7 +1942,8 @@ pub fn gaanim_render_system(
             || shadow_ref.as_ref().is_some_and(|r| r.is_changed())
             || glow_ref.as_ref().is_some_and(|r| r.is_changed())
             || blur_ref.as_ref().is_some_and(|r| r.is_changed())
-            || clip_ref.as_ref().is_some_and(|r| r.is_changed());
+            || clip_ref.as_ref().is_some_and(|r| r.is_changed())
+            || stroke_align_ref.as_ref().is_some_and(|r| r.is_changed());
 
         if changed {
             cache.fragment_cache.remove(&mobj_id.0);
@@ -2086,34 +2146,15 @@ pub fn gaanim_render_system(
             {
                 let (effective_stroke_brush, effective_style) =
                     animated_stroke_paint(stroke_brush, style, anim_wave);
-
-                if let Some(clip_path) = stroke_clip_path(elem_path, source_path) {
-                    scene.push_layer(
-                        peniko::Fill::NonZero,
-                        peniko::BlendMode::default(),
-                        1.0,
-                        kurbo::Affine::IDENTITY,
-                        clip_path,
-                    );
-                    draw_stroke(
-                        &mut scene,
-                        &effective_style,
-                        kurbo::Affine::IDENTITY,
-                        &effective_stroke_brush,
-                        stroke_view,
-                        elem_path,
-                    );
-                    scene.pop_layer();
-                } else {
-                    draw_stroke(
-                        &mut scene,
-                        &effective_style,
-                        kurbo::Affine::IDENTITY,
-                        &effective_stroke_brush,
-                        stroke_view,
-                        elem_path,
-                    );
-                }
+                draw_aligned_stroke(
+                    &mut scene,
+                    &effective_style,
+                    &effective_stroke_brush,
+                    stroke_view,
+                    elem_path,
+                    source_path,
+                    stroke_align_ref.as_deref().copied().unwrap_or_default(),
+                );
             }
 
             Arc::new(scene)
@@ -2133,16 +2174,17 @@ pub fn gaanim_render_system(
             } else {
                 path_ref.as_ref().map(|path| path.0.as_ref())
             };
+            let stroke_align = stroke_align_ref.as_deref().copied().unwrap_or_default();
             let stroke_style = stroke_ref
                 .as_deref()
                 .filter(|stroke| stroke.brush.is_some())
-                .map(|stroke| &stroke.style);
+                .map(|stroke| aligned_pen(&stroke.style, stroke_align));
             opacity_layer_bounds(
                 visible_path.and_then(|path| {
                     fragment_extent(
                         path,
                         transform.affine_2d,
-                        stroke_style,
+                        stroke_style.as_deref(),
                         stroke_view,
                         shadow_ref.as_deref(),
                         glow_ref.as_deref(),
@@ -2819,6 +2861,29 @@ mod tests {
         assert!(rect.x1 >= 18.0 && rect.y1 >= 14.0);
         assert!(rect.width() < 64.0);
         assert!(rect.height() < 64.0);
+    }
+
+    #[test]
+    fn outside_strokes_double_the_pen_that_keeps_only_its_outer_half() {
+        let stroke = kurbo::Stroke::new(0.3);
+        assert_eq!(aligned_pen(&stroke, StrokeAlign::Inside).width, 0.3);
+        assert_eq!(aligned_pen(&stroke, StrokeAlign::Center).width, 0.3);
+        assert_eq!(aligned_pen(&stroke, StrokeAlign::Outside).width, 0.6);
+
+        // The opacity layer must reach the whole authored width outside.
+        let square = kurbo::Rect::new(0.0, 0.0, 1.0, 1.0).to_path(0.1);
+        let pen = aligned_pen(&stroke, StrokeAlign::Outside);
+        let (_, reach) = fragment_extent(
+            &square,
+            kurbo::Affine::IDENTITY,
+            Some(&pen),
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect("visible square");
+        assert!(reach >= 0.3, "{reach}");
     }
 
     #[test]

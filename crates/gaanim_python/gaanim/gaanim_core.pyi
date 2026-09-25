@@ -1204,6 +1204,9 @@ class Anim:
     ) -> Anim:
         """Travel along ``target``'s outline, optionally turning with it.
 
+        A solid ``arrow`` or ``curved_arrow`` is followed along its axis from
+        tail to tip rather than around its silhouette.
+
         With ``orient=True`` the drawable's rotation follows the path tangent
         plus ``rotate_offset`` radians, so a plane or arrow points where it
         goes. ``start`` and ``end`` select the travelled portion as arc-length
@@ -1807,14 +1810,22 @@ class Drawable:
             result = drawable.no_fill()
         """
         ...
-    def stroke(self, paint: Paint, width: float) -> Self:
+    def stroke(self, paint: Paint, width: float, *, align: Optional[Literal["inside", "center", "outside"]] = None) -> Self:
         """Apply a stroke whose width is measured in logical scene units.
 
         On an imported SVG root, the width remains logical even when the
         source hierarchy is scaled to fit the scene.
 
+        ``align`` places the stroke on closed contours, including every text
+        glyph. By default it stays inside the shape, so ``write`` draws a
+        constant width; ``"center"`` straddles the contour and ``"outside"``
+        draws the whole width beyond it (a text halo). Open paths always
+        center their stroke. The alignment is declaration state and is not
+        animated. Other values raise ``ValueError``.
+
         Example:
             result = drawable.stroke(BLUE, 1.0)
+            halo = scene.text("Lima").fill(WHITE).stroke(WHITE, 0.1, align="outside")
         """
         ...
     def stroke_style(self, style: StrokeStyle) -> Self:
