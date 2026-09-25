@@ -370,4 +370,4 @@ documentación ahora describe tal como son, pero que conviene corregir en códig
 - El stub declara `Canvas.theme` como escribible (es de solo lectura) y omite
   `Color.r/g/b/a`; `load_project()` exige `assets_dir` aunque la CLI lo supone.
 - 3D (experimental): la exportación nativa necesita una ventana (Xvfb en CI),
-  registra errores "use-after-free" de Bevy y un `gaanim.glb` no apareció.
+  registra errores "use-after-free" de Bevy y un modelo `robot.glb` no apareció en la exportación.
