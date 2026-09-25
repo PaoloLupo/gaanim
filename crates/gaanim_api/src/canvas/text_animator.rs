@@ -1378,6 +1378,43 @@ mod tests {
     }
 
     #[test]
+    fn line_reveal_gives_every_glyph_its_own_line() {
+        let mut canvas = super::super::SceneModel::new(640, 360);
+        let text = canvas.text("para la\nautomatizacion\nconfinada");
+        canvas.play(vec![
+            text.animate()
+                .text_reveal(TextRevealUnit::Line, TextRevealStyle::SlideUp, true, 0.3)
+                .unwrap()
+                .duration(1.5),
+        ]);
+        let timeline = compiled(&canvas);
+        // Influence of every glyph halfway through, in glyph order.
+        let mut influence: Vec<(ObjectId, f64)> = timeline
+            .clips
+            .values()
+            .filter_map(|clip| match &clip.payload {
+                ClipPayload::Animation(spec)
+                    if matches!(spec.lens, PropertyLensSpec::Translation { .. }) =>
+                {
+                    Some((spec.target, spec.rate_func.evaluate(0.35)))
+                }
+                _ => None,
+            })
+            .collect();
+        influence.sort_by_key(|(id, _)| *id);
+        // "confinada" draws fi as one ligature glyph.
+        assert_eq!(influence.len(), 28, "{influence:?}");
+        let lines: Vec<Vec<f64>> = [0..6, 6..20, 20..28]
+            .into_iter()
+            .map(|range| influence[range].iter().map(|(_, value)| *value).collect())
+            .collect();
+        for line in &lines {
+            assert!(line.iter().all(|value| value == &line[0]), "{lines:?}");
+        }
+        assert!(lines[0][0] < lines[1][0] && lines[1][0] <= lines[2][0], "{lines:?}");
+    }
+
+    #[test]
     fn line_reveal_masks_each_line_and_lands_at_rest() {
         let mut canvas = super::super::SceneModel::new(640, 360);
         let text = canvas.text("uno dos\ntres");
