@@ -651,6 +651,18 @@ impl PyTextSelectionAnimation {
         self.proxy().annotate(label, offset)
     }
 
+    #[pyo3(signature = (color=None, *, skew=0.05, blend="normal", opacity=0.45, padding=None))]
+    fn marker(
+        &self,
+        color: Option<PyColor>,
+        skew: f64,
+        blend: &str,
+        opacity: f32,
+        padding: Option<f64>,
+    ) -> PyResult<PyCanvasAnim> {
+        self.proxy().marker(color, skew, blend, opacity, padding)
+    }
+
     fn morph_to(&self, target: &PyTextSelection) -> PyResult<PyCanvasAnim> {
         crate::custom::ensure_authoring_allowed()?;
         self.source
@@ -721,6 +733,21 @@ impl PyTextSelection {
             }
             self.clone()
         })
+    }
+
+    #[pyo3(signature = (color=None, *, skew=0.05, blend="normal", opacity=0.45, padding=None))]
+    fn marker(
+        &self,
+        color: Option<PyColor>,
+        skew: f64,
+        blend: &str,
+        opacity: f32,
+        padding: Option<f64>,
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        let style = crate::pydrawable::text_marker_style(color, skew, blend, opacity, padding)?;
+        self.inner().with_marker(style);
+        Ok(self.clone())
     }
 
     /// Start a compound fill/opacity animation scoped to this selection.

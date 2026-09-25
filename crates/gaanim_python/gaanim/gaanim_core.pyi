@@ -2139,6 +2139,36 @@ class TextSelectionAnimation:
             scene.play(eq["c"].animate.annotate("velocidad de la luz", offset=(0, 0.6)))
         """
         ...
+    def marker(
+        self,
+        color: Color | None = None,
+        *,
+        skew: float = 0.05,
+        blend: Literal["normal", "multiply"] = "normal",
+        opacity: float = 0.45,
+        padding: float | None = None,
+    ) -> Anim:
+        """Sweep a highlighter band behind each rendered line of the selection.
+
+        Every line spanned by the selection gets one band that covers the
+        full glyph height of that line plus ``padding`` (world units; ``None``
+        uses 10% of the line height). Bands grow from the left edge, one line
+        after another, sharing the animation duration by band length. They are
+        drawn behind the glyphs but above objects authored before the text,
+        and stay on screen afterwards.
+
+        ``color`` defaults to a highlighter yellow and its alpha is multiplied
+        by ``opacity``. ``skew`` tilts each band in radians (positive rises to
+        the right), capped so long lines stay covered. ``blend="multiply"`` is
+        accepted but currently composited like ``"normal"`` behind the text
+        until per-object blend modes exist. Raises ``ValueError`` for an
+        unknown ``blend``, a non-finite ``skew``, ``opacity`` outside
+        ``[0, 1]``, or a negative ``padding``.
+
+        Example:
+            scene.play(quote.words[3:6].animate.marker(YELLOW, skew=0.05))
+        """
+        ...
     def morph_to(self, target: TextSelection) -> Anim: ...
     def copy_to(self, target: TextSelection) -> Anim: ...
 
@@ -2160,6 +2190,26 @@ class TextSelection:
 
         Example:
             formula["mass"].fill(GOLD)
+        """
+        ...
+    def marker(
+        self,
+        color: Color | None = None,
+        *,
+        skew: float = 0.05,
+        blend: Literal["normal", "multiply"] = "normal",
+        opacity: float = 0.45,
+        padding: float | None = None,
+    ) -> TextSelection:
+        """Place a highlighter band behind each selected line immediately.
+
+        Static form of ``selection.animate.marker(...)`` with the same
+        arguments and errors: the full bands appear at the current timeline
+        cursor (the scene start during declaration) and stay on screen.
+        Returns this selection for chaining.
+
+        Example:
+            quote.words[0:2].marker(opacity=0.35)
         """
         ...
     @property

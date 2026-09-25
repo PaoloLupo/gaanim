@@ -154,6 +154,44 @@ impl PyCanvasAnim {
     }
 }
 
+/// Validates the Python arguments of `marker()` into a native marker style.
+pub(crate) fn text_marker_style(
+    color: Option<PyColor>,
+    skew: f64,
+    blend: &str,
+    opacity: f32,
+    padding: Option<f64>,
+) -> PyResult<gaanim_api::anim::TextMarkerStyle> {
+    use gaanim_api::anim::{MarkerBlend, TextMarkerStyle};
+    if !skew.is_finite() {
+        return Err(PyValueError::new_err("marker() skew must be finite"));
+    }
+    if !opacity.is_finite() || !(0.0..=1.0).contains(&opacity) {
+        return Err(PyValueError::new_err(
+            "marker() opacity must be between 0 and 1",
+        ));
+    }
+    if padding.is_some_and(|padding| !padding.is_finite() || padding < 0.0) {
+        return Err(PyValueError::new_err(
+            "marker() padding must be finite and non-negative",
+        ));
+    }
+    let Some(blend) = MarkerBlend::parse(blend) else {
+        return Err(PyValueError::new_err(format!(
+            "unknown marker blend {blend:?}; expected \"normal\" or \"multiply\""
+        )));
+    };
+    let mut style = TextMarkerStyle::default();
+    if let Some(color) = color {
+        style.color = color.0;
+    }
+    style.skew = skew;
+    style.opacity = opacity;
+    style.padding = padding;
+    style.blend = blend;
+    Ok(style)
+}
+
 #[pymethods]
 impl PyCanvasAnim {
     #[pyo3(signature = (x, y, width, height, *, normalized=false))]
@@ -1084,6 +1122,24 @@ impl PyCanvasAnim {
         })
     }
 
+    #[pyo3(signature = (color=None, *, skew=0.05, blend="normal", opacity=0.45, padding=None))]
+    pub(crate) fn marker(
+        &self,
+        color: Option<PyColor>,
+        skew: f64,
+        blend: &str,
+        opacity: f32,
+        padding: Option<f64>,
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        let style = text_marker_style(color, skew, blend, opacity, padding)?;
+        self.require_selection_effect_slot("marker")?;
+        Ok(Self {
+            inner: self.inner.clone().marker(style),
+        })
+    }
+
     fn highlight(&self) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
@@ -1462,6 +1518,61 @@ mod tests {
         assert!(error_is::<PyTypeError>(circle.reveal("fade")));
         assert!(error_is::<PyTypeError>(circle.brace("", false)));
         assert!(error_is::<PyTypeError>(circle.annotate("x", (0.0, 0.6))));
+    }
+
+    #[test]
+    fn selection_marker_validates_and_builds_its_style() {
+        use gaanim_api::anim::{MarkerBlend, TextSelectionEffect};
+        let mut scene = SceneModel::new(640, 360);
+        let text = scene.text("uno dos tres");
+        let selection = PyCanvasAnim {
+            inner: text.select("dos").animate_properties(),
+        };
+        let marked = selection
+            .marker(None, 0.08, "multiply", 0.6, Some(0.05))
+            .unwrap();
+        let AnimationType::TextSelection {
+            effect: TextSelectionEffect::Marker(style),
+            ..
+        } = marked.inner.inner.anim_type
+        else {
+            panic!("expected a marker selection effect");
+        };
+        assert_eq!(style.blend, MarkerBlend::Multiply);
+        assert_eq!(style.opacity, 0.6);
+        assert_eq!(style.skew, 0.08);
+        assert_eq!(style.padding, Some(0.05));
+        assert_eq!(
+            style.color,
+            gaanim_api::anim::TextMarkerStyle::default().color
+        );
+
+        assert!(error_is::<PyValueError>(
+            selection.marker(None, 0.05, "screen", 0.45, None)
+        ));
+        assert!(error_is::<PyValueError>(selection.marker(
+            None,
+            f64::NAN,
+            "normal",
+            0.45,
+            None
+        )));
+        assert!(error_is::<PyValueError>(
+            selection.marker(None, 0.05, "normal", 1.5, None)
+        ));
+        assert!(error_is::<PyValueError>(selection.marker(
+            None,
+            0.05,
+            "normal",
+            0.45,
+            Some(-0.1)
+        )));
+        let circle = PyCanvasAnim {
+            inner: scene.circle(1.0).animate(),
+        };
+        assert!(error_is::<PyTypeError>(
+            circle.marker(None, 0.05, "normal", 0.45, None)
+        ));
     }
 }
 
