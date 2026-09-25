@@ -1008,10 +1008,15 @@ class Anim:
         mask: bool = True,
         stagger: float = 0.06,
     ) -> Anim:
-        """Exit symmetric to ``reveal``: units leave in reading order and stay hidden.
+        """Exit matching ``reveal``: units leave one by one, first unit first, and stay hidden.
 
-        ``"slide_up"`` sends each unit up behind its row mask. Raises the
-        same errors as ``reveal``.
+        Units leave in reading order, ``stagger`` seconds apart, starting
+        from rest. Slides keep the reveal's direction of motion:
+        ``"slide_up"`` exits upward out of each row mask and
+        ``"slide_down"`` downward; ``"fade"``, ``"scale"`` and ``"blur"``
+        go back to their hidden state. Units accelerate out (ease-in cubic
+        by default; ``easing`` replaces it). Raises the same errors as
+        ``reveal``.
 
         Example:
             scene.play(headline.animate.conceal(by="line", style="slide_up"))

@@ -564,8 +564,13 @@ deslizamientos recorren menos distancia y aparecen con un fundido. `"fade"`,
 `"scale"` y `"blur"` ignoran `mask`. La duración cubre toda la cascada: si el
 `stagger` no cabe, se comprime. `easing` suaviza cada unidad (ease-out cúbico
 por defecto). Los glifos permanecen ocultos hasta que empieza el revelado, como
-con `fade_in`. `conceal` es la salida simétrica: las unidades salen en orden de
-lectura hacia el mismo estado y quedan ocultas.
+con `fade_in`. `conceal` es la salida correspondiente: desde el reposo, las
+unidades salen en orden de lectura, la primera primero, con `stagger` segundos
+entre ellas, y quedan ocultas. Los deslizamientos conservan la dirección del
+revelado: con `"slide_up"` cada unidad sale hacia arriba por el borde de su
+máscara y con `"slide_down"` hacia abajo; `"fade"`, `"scale"` y `"blur"`
+vuelven a su estado oculto. Las unidades aceleran al salir (ease-in cúbico por
+defecto).
 
 `blur_in` hace entrar cada unidad desde un desenfoque gaussiano transparente de
 `sigma` unidades de escena, el mismo efecto que `blur`. `tracking` añade `value`
