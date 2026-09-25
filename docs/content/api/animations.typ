@@ -1062,3 +1062,128 @@ scene.render()
 fuente dentro de un marco fijo, con las unidades descritas en la API de medios.
 `VideoSegment` es una hoja finita de composición: admite `parallel`, `sequence`
 y `stagger`, pero no `stretch`. Su velocidad se configura al crear el fragmento.
+
+== Transiciones entre segmentos
+
+`Transition` describe el paso de un segmento al siguiente en `scene.segment(...)`
+o `scene.link(...)`. Todas las transiciones salvo `cut` aceptan `easing=`, con
+cualquier `Easing`, incluidos los springs que sobrepasan el destino. Todas
+aceptan `overlay=`, un `Overlay` dibujado encima del corte. Ninguna de las dos
+opciones cambia la duración de los segmentos. Sin `easing`, `cross_fade`,
+`fade_through`, `zoom_through` y `morph` avanzan de forma lineal. Los revelados
+vectoriales (`wipe`, `clock_wipe`, `iris`, `blinds`, `push` y `slide`) usan
+`Easing.SMOOTH`.
+
+Los revelados vectoriales recortan ambos segmentos con caminos animados dentro
+del marco visible de la cámara: el entrante se ve dentro de la región revelada
+y el saliente en el resto. Si los segmentos tienen fondos distintos, el fondo
+entrante se revela con la misma forma. Todo es geometría `kurbo`, sin texturas
+intermedias, así que la transición es nítida a cualquier resolución y un seek
+reproduce exactamente el mismo frame. El borde suave de `wipe(feather=...)` es
+una rampa de alfa lineal compuesta vectorialmente (`DestIn`), también sin
+texturas. Los objetos persistentes (`scene.persist`) no se recortan ni se
+desplazan.
+
+#api-entry(
+  name: "Transition.wipe",
+  kind: "factory",
+  signature: "Transition.wipe(duration: float, direction: str = \"left\", feather: float = 0.1, *, easing: Easing | None = None, overlay: Overlay | None = None) -> Transition",
+  params: (
+    (name: "duration", type: "float", default: none, desc: [Segundos, positivo.]),
+    (name: "direction", type: "str", default: "\"left\"", desc: [Sentido en que viaja el borde: `left`, `right`, `up`, `down` o una diagonal como `up_left`. Con `"left"` el revelado empieza en el lado derecho.]),
+    (name: "feather", type: "float", default: "0.1", desc: [Ancho del borde suave como fracción del recorrido, en `[0, 1]`. `0` da un borde duro.]),
+  ),
+  returns: (type: "Transition", desc: [Barrido lineal.]),
+  desc: [Un borde recto cruza el marco y descubre el segmento entrante. Una duración no positiva, una dirección desconocida o un `feather` fuera de `[0, 1]` lanzan `ValueError`.],
+)[
+```python
+scene.segment("detalle", Transition.wipe(0.6, direction="left", feather=0.1))
+```
+]
+
+#api-entry(
+  name: "Transition.clock_wipe",
+  kind: "factory",
+  signature: "Transition.clock_wipe(duration: float, start_angle: float = 90.0, *, easing: Easing | None = None, overlay: Overlay | None = None) -> Transition",
+  params: (
+    (name: "duration", type: "float", default: none, desc: [Segundos, positivo.]),
+    (name: "start_angle", type: "float", default: "90.0", desc: [Grados en sentido antihorario desde +x; `90` empieza a las doce.]),
+  ),
+  returns: (type: "Transition", desc: [Barrido radial.]),
+  desc: [Una aguja gira en sentido horario alrededor del centro del marco y deja ver el segmento entrante en el sector recorrido.],
+)[
+```python
+scene.segment("resumen", Transition.clock_wipe(0.8, start_angle=90))
+```
+]
+
+#api-entry(
+  name: "Transition.iris",
+  kind: "factory",
+  signature: "Transition.iris(duration: float, center: tuple[float, float] = (0.0, 0.0), shape: str | Drawable = \"circle\", *, easing: Easing | None = None, overlay: Overlay | None = None) -> Transition",
+  params: (
+    (name: "duration", type: "float", default: none, desc: [Segundos, positivo.]),
+    (name: "center", type: "tuple[float, float]", default: "(0.0, 0.0)", desc: [Centro del iris en unidades de escena.]),
+    (name: "shape", type: "str | Drawable", default: "\"circle\"", desc: [`circle`, `diamond`, `square`, `star` o un `Drawable` cuyo contorno vectorial se usa como plantilla.]),
+  ),
+  returns: (type: "Transition", desc: [Iris que crece hasta cubrir el marco.]),
+  desc: [La forma crece desde `center` hasta que el segmento entrante ocupa todo el marco. Un `Drawable` se centra en su caja; se sigue dibujando en su propio segmento, así que conviene ocultarlo si solo sirve de plantilla. Uno sin camino vuelve al círculo. Un nombre desconocido lanza `ValueError`.],
+)[
+```python
+scene.segment("zoom", Transition.iris(0.7, center=(2, 1), shape="star"))
+```
+]
+
+#api-entry(
+  name: "Transition.blinds",
+  kind: "factory",
+  signature: "Transition.blinds(duration: float, count: int = 8, angle: float = 0.0, *, easing: Easing | None = None, overlay: Overlay | None = None) -> Transition",
+  params: (
+    (name: "duration", type: "float", default: none, desc: [Segundos, positivo.]),
+    (name: "count", type: "int", default: "8", desc: [Número de lamas, entre 1 y 512.]),
+    (name: "angle", type: "float", default: "0.0", desc: [Inclinación de las lamas en grados; `0` son lamas horizontales que se abren hacia abajo.]),
+  ),
+  returns: (type: "Transition", desc: [Persiana veneciana.]),
+  desc: [Todas las lamas se abren a la vez y en la misma fracción.],
+)[
+```python
+scene.segment("datos", Transition.blinds(0.6, count=8, angle=0))
+```
+]
+
+#api-entry(
+  name: "Transition.push",
+  kind: "factory",
+  signature: "Transition.push(duration: float, direction: str = \"up\", *, easing: Easing | None = None, overlay: Overlay | None = None) -> Transition",
+  params: (
+    (name: "duration", type: "float", default: none, desc: [Segundos, positivo.]),
+    (name: "direction", type: "str", default: "\"up\"", desc: [Movimiento de ambos marcos: `left`, `right`, `up` o `down`.]),
+  ),
+  returns: (type: "Transition", desc: [Empuje.]),
+  desc: [El segmento entrante empuja al saliente fuera del marco: ambos se desplazan un ancho o un alto de marco y cada uno queda recortado a su propio marco. `Transition.slide(duration, direction)` es la variante en la que el saliente queda quieto y el entrante lo cubre al deslizarse encima.],
+)[
+```python
+scene.segment("siguiente", Transition.push(0.5, direction="up"))
+scene.segment("final", Transition.slide(0.5, "left", easing=Easing.spring(bounce=0.2)))
+```
+]
+
+#api-entry(
+  name: "Overlay",
+  kind: "class",
+  signature: "Overlay.flash(color: Color | None = None, duration: float = 0.2) | Overlay.light_leak(seed: int = 0, hue: float = 0.1, duration: float = 0.8, intensity: float = 0.8)",
+  params: (
+    (name: "color", type: "Color | None", default: "None", desc: [Color del destello; blanco si se omite.]),
+    (name: "seed", type: "int", default: "0", desc: [Semilla de la disposición de las manchas de luz.]),
+    (name: "hue", type: "float", default: "0.1", desc: [Tono base en vueltas: `0.1` naranja cálido, `0.6` azul.]),
+    (name: "duration", type: "float", default: "0.2 / 0.8", desc: [Segundos, positivo. La ventana se centra en el punto medio de la transición; en `cut`, en el propio corte.]),
+    (name: "intensity", type: "float", default: "0.8", desc: [Brillo máximo, en `[0, 4]`.]),
+  ),
+  returns: (type: "Overlay", desc: [Capa para `overlay=` de cualquier `Transition`.]),
+  desc: [`flash` cubre el marco con un color que sube durante la primera mitad y se apaga en la segunda. `light_leak` dibuja manchas de luz suaves en modo pantalla (`screen`) que derivan por el marco. Las dos son funciones puras del tiempo y de la semilla, así que preview, seek y export coinciden. Valores fuera de rango lanzan `ValueError`.],
+)[
+```python
+scene.segment("impacto", Transition.cut(overlay=Overlay.flash(WHITE, 0.15)))
+scene.segment("cálido", Transition.cross_fade(0.4, overlay=Overlay.light_leak(seed=2, hue=0.1)))
+```
+]

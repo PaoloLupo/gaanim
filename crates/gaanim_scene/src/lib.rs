@@ -4,6 +4,7 @@ pub mod components;
 pub mod hierarchy;
 pub mod prelude;
 pub mod systems;
+pub mod transition_frame;
 
 pub use components::{
     AuthoritativeCameraView, Billboard, CoordinateLabelOffset, CoordinateTickLevel,
@@ -16,6 +17,9 @@ pub use components::{
 };
 pub use hierarchy::{GaanimScenePlugin, SceneSet};
 pub use systems::{opacity_propagation_system, sync_new_opacities, transform_propagation_system};
+pub use transition_frame::{
+    SceneTransitionFrame, TransitionMask, TransitionOverlayLayer, TransitionSide,
+};
 
 /// Asset configuration used by official Gaanim hosts.
 ///

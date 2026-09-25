@@ -7,6 +7,7 @@ pub mod selection;
 pub mod snapshot;
 pub mod timeline;
 pub mod transition;
+pub mod transition_mask;
 
 use gaanim_scene::hierarchy::SceneSet;
 use timeline::{PlaybackStopPolicy, Timeline};
