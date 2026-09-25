@@ -759,12 +759,21 @@ fn draw_glow(
         return;
     }
     let brush = peniko::Brush::Solid(glow.color);
-    for step in (1..=7).rev() {
-        let spread = glow.radius * f64::from(step) / 7.0;
-        let falloff = 1.0 - (step as f32 - 1.0) / 7.0;
-        let sample = brush
-            .clone()
-            .multiply_alpha((glow.intensity * 0.18 * falloff * falloff).clamp(0.0, 1.0));
+    // Concentric strokes approximate the blur. Their count follows the
+    // radius (one ring per 0.015 scene units, about 2 px at the default
+    // 120 px per unit) so large glows stay smooth, and each ring's alpha is
+    // the 7-ring reference alpha spread over the rings covering the same
+    // distance, keeping the total opacity unchanged.
+    let scale = view.map_or(1.0, |view| view.determinant().abs().sqrt());
+    let steps = ((glow.radius * scale / 0.015).ceil() as u32).clamp(7, 96);
+    let share = 7.0 / steps as f32;
+    for step in (1..=steps).rev() {
+        let fraction = step as f32 / steps as f32;
+        let spread = glow.radius * f64::from(fraction);
+        let falloff = 1.0 - (fraction - 1.0 / steps as f32);
+        let reference = (glow.intensity * 0.18 * falloff * falloff).clamp(0.0, 1.0);
+        let alpha = 1.0 - (1.0 - reference).powf(share);
+        let sample = brush.clone().multiply_alpha(alpha);
         draw_stroke(
             scene,
             &kurbo::Stroke::new(spread * 2.0),

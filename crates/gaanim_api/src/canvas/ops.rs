@@ -131,6 +131,7 @@ impl CanvasState {
                 | AnimationType::RotateBy { .. }
                 | AnimationType::RotateBy3D { .. } => "rotation",
                 AnimationType::SignalFloat { .. } => "signal",
+                AnimationType::PathTrim { .. } => "trim",
                 _ => "other",
             }
         }
@@ -181,6 +182,25 @@ impl CanvasState {
                         if incoming.fill_level.is_some() {
                             previous.fill_level = incoming.fill_level;
                         }
+                    } else if let (
+                        AnimationType::PathTrim {
+                            start,
+                            end,
+                            offset,
+                            sequential,
+                        },
+                        AnimationType::PathTrim {
+                            start: new_start,
+                            end: new_end,
+                            offset: new_offset,
+                            sequential: new_sequential,
+                        },
+                    ) = (&mut previous.anim_type, &builder.anim_type)
+                    {
+                        *start = new_start.or(*start);
+                        *end = new_end.or(*end);
+                        *offset = new_offset.or(*offset);
+                        *sequential = new_sequential.or(*sequential);
                     } else {
                         *previous = builder;
                     }
@@ -844,6 +864,9 @@ pub enum UpdaterPreset {
         max_scale: f64,
         frequency: f64,
     },
+    /// Additive procedural layer evaluated from timeline time (wiggle,
+    /// oscillators); see [`gaanim_animation::ProceduralMotion`].
+    Procedural(gaanim_animation::ProceduralLayer),
 }
 
 impl UpdaterPreset {
@@ -867,6 +890,8 @@ impl UpdaterPreset {
                 max_scale,
                 frequency,
             } => gaanim_animation::pulse_updater(min_scale, max_scale, frequency),
+            // Procedural layers compile to `ProceduralMotion`, not an updater.
+            UpdaterPreset::Procedural(_) => gaanim_animation::Updater::new(|_, _, _, _| false),
         }
     }
 }

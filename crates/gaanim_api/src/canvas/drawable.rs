@@ -1044,6 +1044,41 @@ impl DrawableHandle {
         })
     }
 
+    /// Declaration-time scene position (folded from `move_to`/`shift_by`),
+    /// or `None` when it depends on layout resolved at compile time.
+    pub fn authored_position(&self) -> Option<DVec2> {
+        super::canvas_impl::authored_position(&self.spec.lock().expect("object spec poisoned"))
+    }
+
+    /// Show only part of the drawn path: the window `[start, end]` shifted
+    /// by `offset` (arc-length fractions). `None` keeps the current value;
+    /// `sequential` measures the window across all sub-paths.
+    pub fn trim(
+        self,
+        start: Option<f64>,
+        end: Option<f64>,
+        offset: Option<f64>,
+        sequential: Option<bool>,
+    ) -> Self {
+        let rate_func = gaanim_math::RateFunc::Linear;
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .push_immediate(AnimationBuilder {
+                target: self.id,
+                anim_type: AnimationType::PathTrim {
+                    start,
+                    end,
+                    offset,
+                    sequential,
+                },
+                duration: 0.0,
+                delay: 0.0,
+                rate_func,
+            });
+        self
+    }
+
     /// Apply a soft vector blur to this drawable.
     pub fn blur(self, sigma: f64) -> Self {
         self.update_style(|spec| {
@@ -1828,6 +1863,7 @@ impl DrawableHandle {
         self.anim(AnimationType::MoveAlongPath {
             path,
             path_target: None,
+            follow: Default::default(),
         })
     }
 
@@ -1839,6 +1875,7 @@ impl DrawableHandle {
         self.anim(AnimationType::MoveAlongPath {
             path: BezPath::new(),
             path_target: Some(target.id),
+            follow: Default::default(),
         })
     }
 

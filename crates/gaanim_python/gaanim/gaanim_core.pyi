@@ -49,6 +49,16 @@ class Easing:
     RUNNING_START: ClassVar[Easing]
     EXPONENTIAL_DECAY: ClassVar[Easing]
     NOT_QUITE_THERE: ClassVar[Easing]
+    SMOOTH_SPRING: ClassVar[Easing]
+    """Critically damped spring: fastest settle without overshoot."""
+    GENTLE: ClassVar[Easing]
+    """Soft, unhurried spring with a barely visible overshoot."""
+    QUICK: ClassVar[Easing]
+    """Brisk spring with a small overshoot that settles early."""
+    SNAPPY: ClassVar[Easing]
+    """Fast spring with a crisp 20% overshoot."""
+    BOUNCY: ClassVar[Easing]
+    """Playful spring with a 45% overshoot and visible rebounds."""
     @staticmethod
     def ease_in(curve: EasingCurve) -> Easing: ...
     @staticmethod
@@ -56,12 +66,68 @@ class Easing:
     @staticmethod
     def ease_in_out(curve: EasingCurve) -> Easing: ...
     @staticmethod
-    def spring(stiffness: float = 90.0, damping: float = 12.0) -> Easing:
-        """Create a finite spring; stiffness must be positive and damping non-negative."""
+    def spring(
+        stiffness: Optional[float] = None,
+        damping: Optional[float] = None,
+        *,
+        mass: float = 1.0,
+        velocity: float = 0.0,
+        bounce: Optional[float] = None,
+    ) -> Easing:
+        """Create a spring, physically or perceptually.
+
+        With ``bounce`` in ``[0, 1)`` the spring is perceptual: its peak
+        overshoot is ``bounce`` of the distance travelled (0 is critically
+        damped) and it settles within the animation's duration, so
+        ``duration`` alone sets the pace. Otherwise ``stiffness`` (default 90)
+        must be positive, ``damping`` (default 12) non-negative, and ``mass``
+        positive; the clip spans five physical seconds as before.
+        ``velocity`` is the initial speed in distances per clip duration.
+        Every spring ends exactly on its target. Invalid values, or
+        ``bounce`` combined with physical parameters, raise ``ValueError``.
+
+        Example:
+            logo.animate.scale_to(1.0).duration(0.6).easing(Easing.spring(bounce=0.35))
+        """
         ...
     @staticmethod
-    def steps(count: int) -> Easing:
-        """Create a discrete easing with at least one step."""
+    def back(overshoot: float = 1.70158, *, mode: Literal["in", "out", "in_out"] = "out") -> Easing:
+        """Pull back (``in``) or overshoot (``out``) by a non-negative ``overshoot``."""
+        ...
+    @staticmethod
+    def elastic(amplitude: float = 1.0, period: float = 0.3, *, mode: Literal["in", "out", "in_out"] = "out") -> Easing:
+        """Oscillate like a plucked band; ``amplitude >= 1``, ``period > 0`` in clip fractions."""
+        ...
+    @staticmethod
+    def bounce(strength: float = 1.0, *, mode: Literal["in", "out", "in_out"] = "out") -> Easing:
+        """Bounce on arrival; ``strength`` blends from a cubic ease (0) to the classic bounce (1)."""
+        ...
+    @staticmethod
+    def slow_mo(linear_ratio: float = 0.7, power: float = 0.7) -> Easing:
+        """Rush in, glide through a slow linear middle, rush out (both arguments in ``[0, 1]``)."""
+        ...
+    @staticmethod
+    def rough(strength: float = 1.0, points: int = 20, seed: int = 0) -> Easing:
+        """Deterministic jittery ramp through ``points`` random knots, for flicker and glitches."""
+        ...
+    @staticmethod
+    def squish(easing: Easing, start: float, end: float) -> Easing:
+        """Run ``easing`` only between ``start`` and ``end`` (``0 <= start < end <= 1``), holding its ends outside."""
+        ...
+    @staticmethod
+    def from_svg(path: str, samples: int = 256) -> Easing:
+        """Sample an SVG path drawn in the unit square (x = time, y = progress).
+
+        The path must run from x = 0 to x = 1 without moving backwards in x
+        and stay within y in ``[-1, 2]``; otherwise ``ValueError`` is raised.
+
+        Example:
+            Easing.from_svg("M0,0 C0.3,0 0.2,1.2 1,1")
+        """
+        ...
+    @staticmethod
+    def steps(count: int, jump: Literal["start", "end", "none", "both"] = "end") -> Easing:
+        """Create a discrete easing with CSS ``steps()`` jump positions."""
         ...
     @staticmethod
     def mirror(easing: Easing) -> Easing: ...
@@ -844,7 +910,75 @@ class Anim:
     def circumscribe(self) -> Anim: ...
     def flash(self) -> Anim: ...
     def show_passing_flash(self, *, time_width: float = 0.2) -> Anim: ...
-    def move_along(self, target: Drawable) -> Anim: ...
+    def move_along(
+        self,
+        target: Drawable,
+        *,
+        orient: bool = False,
+        rotate_offset: float = 0.0,
+        start: float = 0.0,
+        end: float = 1.0,
+    ) -> Anim:
+        """Travel along ``target``'s outline, optionally turning with it.
+
+        With ``orient=True`` the drawable's rotation follows the path tangent
+        plus ``rotate_offset`` radians, so a plane or arrow points where it
+        goes. ``start`` and ``end`` select the travelled portion as arc-length
+        fractions (``0 <= start < end <= 1``); otherwise ``ValueError``.
+
+        Example:
+            scene.play(plane.animate.move_along(route, orient=True).duration(3))
+        """
+        ...
+    def glow(self, color: Optional[Color] = None, radius: float = 0.16, intensity: float = 1.0) -> Anim:
+        """Animate the glow toward ``color``/``radius``/``intensity``; ``None`` fades it out.
+
+        A drawable without glow grows it from zero intensity. Combines with
+        other property targets such as ``scale_to``. Invalid values raise
+        ``ValueError``; text selections raise ``TypeError``.
+
+        Example:
+            scene.play(orb.animate.glow(CYAN, radius=0.5, intensity=2.0).repeat(3, yoyo=True))
+        """
+        ...
+    def blur(self, sigma: float = 0.04) -> Anim:
+        """Animate the blur to ``sigma``; ``0`` ends sharp, which makes a blur-in.
+
+        Example:
+            hero.blur(0.3)
+            scene.play(hero.animate.blur(0.0).duration(0.6))
+        """
+        ...
+    def shadow(self, color: Optional[Color] = None, x: float = 0.08, y: float = -0.08, blur: float = 0.06) -> Anim:
+        """Animate the drop shadow; ``None`` fades it out and a new one grows from under the drawable.
+
+        Example:
+            scene.play(card.animate.shadow(BLACK, 0, -0.25, 0.4).scale_to(1.04))
+        """
+        ...
+    def trim(self, start: Optional[float] = None, end: Optional[float] = None, offset: Optional[float] = None) -> Anim:
+        """Animate the visible window of the drawn path (see ``Drawable.trim``).
+
+        Omitted values keep their current setting. ``offset`` slides the
+        window and wraps around the path, so animating it makes a segment
+        travel. Values outside ``[0, 1]`` for ``start``/``end`` raise
+        ``ValueError``.
+
+        Example:
+            scene.play(ring.animate.trim(start=0.0, end=1.0))
+        """
+        ...
+    def path_arc(self, angle: float) -> Anim:
+        """Travel this animation's ``move_to``/``shift_by`` along a circular arc.
+
+        The arc turns by ``angle`` radians (positive is counterclockwise)
+        between the start and end positions instead of the straight line.
+        Without a translation target it raises ``ValueError``.
+
+        Example:
+            scene.play(ball.animate.move_to(4, 0).path_arc(math.pi / 3))
+        """
+        ...
     def fade_transform_to(self, target: Drawable) -> Anim:
         """Cross-fade to a same-scene target at the animation's composed start time."""
         ...
@@ -861,6 +995,32 @@ class Anim:
         ...
     def delay(self, seconds: float) -> Anim:
         """Return a copy delayed by finite, non-negative ``seconds``."""
+        ...
+    def repeat(self, count: int, *, yoyo: bool = False, delay: float = 0.0) -> Anim:
+        """Play this animation ``count`` times; ``duration`` and ``easing`` describe one cycle.
+
+        With ``yoyo=True`` every other cycle plays backwards, so an even
+        ``count`` ends where it started and later animations continue from
+        there. ``delay`` seconds separate cycles. The total duration is
+        ``count * duration + (count - 1) * delay``, which ``play`` and
+        ``Composition.schedule`` use. ``count`` outside ``[1, 10000]`` or a
+        negative ``delay`` raises ``ValueError``.
+
+        Example:
+            badge.animate.scale_to(1.08).duration(0.4).repeat(4, yoyo=True, delay=0.1)
+        """
+        ...
+    def loop(self, mode: Literal["cycle", "pingpong", "offset"] = "cycle", *, until: float, delay: float = 0.0) -> Anim:
+        """Repeat for as many whole cycles as fit in ``until`` seconds (at least one).
+
+        ``cycle`` restarts each cycle, ``pingpong`` alternates direction, and
+        ``offset`` continues from where the previous cycle ended, so
+        ``rotate_by`` or ``shift_by`` keep accumulating. The loop stays finite,
+        so seeks and exports are exact. Invalid values raise ``ValueError``.
+
+        Example:
+            arrow.animate.shift_by(0.3, 0).duration(0.5).loop("pingpong", until=4.0)
+        """
         ...
     def lag_ratio(self, value: float) -> Anim:
         """Configure this animation with lag ratio.
@@ -929,6 +1089,17 @@ class Composition:
     def stretch(self, seconds: float) -> Composition:
         """Rescale an animation-only subtree to an exact finite span; media are rejected."""
         ...
+    def repeat(self, count: int, *, delay: float = 0.0) -> Composition:
+        """Play the whole animation-only subtree ``count`` times, ``delay`` seconds apart.
+
+        Each repetition starts from the state the previous one left, so
+        relative animations accumulate. Media, ``count < 1`` or a negative
+        ``delay`` raise ``ValueError``.
+
+        Example:
+            scene.play(parallel(a.animate.rotate_by(TAU), b.animate.shift_by(1, 0)).repeat(2))
+        """
+        ...
     def schedule(self, *, duration: Optional[float] = None) -> Schedule:
         """Resolve local offsets using the supplied outer defaults without scheduling."""
         ...
@@ -944,8 +1115,53 @@ def sequence(*items: Playable, gap: float = 0.0) -> Composition:
     """Compose items consecutively; a bounded negative gap creates overlap."""
     ...
 
-def stagger(*items: Playable, each: float = 0.1) -> Composition:
-    """Offset each item by ``index * each`` seconds."""
+StaggerOrigin: TypeAlias = Literal["start", "end", "center", "edges", "random"] | tuple[float, float]
+
+def stagger(
+    *items: Playable,
+    each: float = 0.1,
+    total: Optional[float] = None,
+    origin: Optional[StaggerOrigin] = None,
+    grid: Optional[Literal["auto"] | tuple[int, int]] = None,
+    easing: Optional[Easing] = None,
+    seed: int = 0,
+) -> Composition:
+    """Offset items by ``index * each`` seconds, or by distance from ``origin``.
+
+    With ``origin``, ``grid``, ``total`` or ``easing`` the delay of each item
+    grows with its distance from ``origin``: the first item (``"start"``), the
+    last (``"end"``), the center of the items (``"center"``), the outer edges
+    moving inward (``"edges"``), a seeded random order (``"random"``), or an
+    ``(x, y)`` scene point. Distances use the items' declared positions
+    (``grid="auto"``, the default) or cells of an explicit
+    ``grid=(rows, columns)``. ``each`` is the delay per spacing step and
+    ``total`` instead fixes the whole spread; ``easing`` shapes it. Items
+    whose position depends on a layout fall back to their index.
+
+    Example:
+        scene.play(stagger(*[d.animate.grow_from_center() for d in dots], each=0.03, origin="center"))
+    """
+    ...
+
+def distribute(
+    items: Sequence[Drawable],
+    low: float,
+    high: float,
+    *,
+    origin: Optional[StaggerOrigin] = None,
+    grid: Optional[Literal["auto"] | tuple[int, int]] = None,
+    easing: Optional[Easing] = None,
+    seed: int = 0,
+) -> list[float]:
+    """Spread values from ``low`` to ``high`` over ``items`` by distance from ``origin``.
+
+    Uses the same ordering as ``stagger`` and returns one value per item, so
+    it distributes sizes, colors or opacities instead of start times.
+
+    Example:
+        for dot, size in zip(dots, distribute(dots, 0.4, 1.4, origin="edges")):
+            dot.scale_by(size)
+    """
     ...
 
 class Audio:
@@ -988,6 +1204,51 @@ class Updater:
 
         Example:
             result = Updater.rotate(1.0)
+        """
+        ...
+    @staticmethod
+    def wiggle(
+        *,
+        position: float = 0.08,
+        rotation: float = 0.0,
+        scale: float = 0.0,
+        frequency: float = 2.0,
+        octaves: int = 2,
+        seed: int = 0,
+    ) -> Updater:
+        """Layer organic, seeded jitter over the drawable's own animation.
+
+        ``position`` (scene units), ``rotation`` (radians) and ``scale``
+        (fraction) are the noise amplitudes; ``frequency`` sets how fast the
+        jitter changes and ``octaves`` (1 to 8) adds finer detail. The offset
+        starts at zero, is a pure function of timeline time, and adds to
+        ``animate.move_to`` and other clips instead of replacing them.
+        ``remove_updater()`` ends it. Invalid values raise ``ValueError``.
+
+        Example:
+            logo.add_updater(Updater.wiggle(position=0.08, rotation=0.03, frequency=2.0, seed=1))
+        """
+        ...
+    @staticmethod
+    def oscillate(
+        channel: Literal["x", "y", "rotation", "scale", "opacity"],
+        *,
+        waveform: Literal["sine", "square", "triangle", "saw"] = "sine",
+        frequency: float = 1.0,
+        low: float = 0.0,
+        high: float = 1.0,
+        phase: float = 0.0,
+    ) -> Updater:
+        """Layer a periodic value between ``low`` and ``high`` on one channel.
+
+        ``x``, ``y`` and ``rotation`` values are added to the animated value;
+        ``scale`` and ``opacity`` values multiply it (opacity factors must lie
+        in ``[0, 1]``). Every waveform starts at ``low``; ``phase`` shifts it
+        in cycles. Like ``wiggle`` it is a pure function of timeline time and
+        combines with animations. Invalid values raise ``ValueError``.
+
+        Example:
+            light.add_updater(Updater.oscillate("opacity", waveform="triangle", frequency=0.5, low=0.4, high=1.0))
         """
         ...
     @staticmethod
@@ -1081,6 +1342,27 @@ class Drawable:
 
         Example:
             result = drawable.glow(BLUE)
+        """
+        ...
+    def trim(
+        self,
+        start: Optional[float] = None,
+        end: Optional[float] = None,
+        offset: Optional[float] = None,
+        mode: Optional[Literal["simultaneous", "sequential"]] = None,
+    ) -> Self:
+        """Show only the window ``[start, end]`` of the drawn path, shifted by ``offset``.
+
+        Values are arc-length fractions; omitted ones keep their current
+        setting (initially ``0``, ``1`` and ``0``). ``offset`` wraps around
+        the end of the path. ``"simultaneous"`` (default) trims every
+        sub-path and every drawn descendant at once; ``"sequential"`` trims
+        the total length, so sub-paths appear one after another. Animate it
+        with ``animate.trim(...)``.
+
+        Example:
+            logo.trim(end=0.0)
+            scene.play(logo.animate.trim(end=1.0).duration(1.2))
         """
         ...
     def blur(self, sigma: float = 0.04) -> Drawable:
@@ -2412,6 +2694,26 @@ class ChartSpec:
         """Return the stable identity column used for semantic transitions."""
         ...
     def __len__(self) -> int: ...
+
+class Random:
+    """Seeded, platform-independent random stream created by ``scene.random``."""
+    @property
+    def seed(self) -> int: ...
+    def uniform(self, low: float = 0.0, high: float = 1.0) -> float:
+        """Draw a float in ``[low, high)``; ``high < low`` raises ``ValueError``."""
+        ...
+    def gauss(self, mean: float = 0.0, std: float = 1.0) -> float:
+        """Draw a normal deviate; a negative ``std`` raises ``ValueError``."""
+        ...
+    def integer(self, low: int, high: int) -> int:
+        """Draw an integer in ``[low, high)``; an empty range raises ``ValueError``."""
+        ...
+    def choice(self, items: Sequence[Any]) -> Any:
+        """Pick one element; an empty sequence raises ``IndexError``."""
+        ...
+    def shuffle(self, items: list[Any]) -> None:
+        """Shuffle ``items`` in place."""
+        ...
 
 class Computed:
     """Opaque deterministic scalar computed from explicit reactive inputs."""
@@ -4778,6 +5080,39 @@ class Scene:
 
         This is the same source as ``scene.viz.time``. Pass it to ``computed``
         or an absolute property setter; it follows exact seeks and export.
+        """
+        ...
+    def random(self, seed: int = 0) -> Random:
+        """Return a seeded random stream for placing and varying objects.
+
+        The same seed always yields the same values on every platform, so
+        scenes stay reproducible across previews and exports.
+
+        Example:
+            rng = scene.random(seed=42)
+            dots = [scene.geometry.dot().move_to(rng.uniform(-6, 6), rng.uniform(-3, 3)) for _ in range(40)]
+        """
+        ...
+    def noise(
+        self,
+        *,
+        frequency: float = 1.0,
+        amplitude: float = 1.0,
+        octaves: int = 1,
+        seed: int = 0,
+        center: float = 0.0,
+    ) -> Computed:
+        """Return smooth seeded noise over timeline time as a reactive scalar.
+
+        The value is ``center`` plus fractal simplex noise within
+        ``[-amplitude, amplitude]``; ``frequency`` sets how fast it changes
+        and ``octaves`` (1 to 8) adds finer detail. It is evaluated natively
+        each frame without calling Python, and playback, seeks and export
+        agree. Invalid values raise ``ValueError``.
+
+        Example:
+            drift = scene.noise(frequency=0.6, amplitude=0.3, octaves=3, seed=5)
+            logo.rotate_to(computed(lambda v: 0.1 * v, inputs=[drift]))
         """
         ...
     def __init__(

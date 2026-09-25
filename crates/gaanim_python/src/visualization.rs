@@ -62,6 +62,28 @@ pub struct PyComputed {
     owners: Vec<ReactiveOwner>,
 }
 
+impl PyComputed {
+    /// A native, time-driven scalar owned by `canvas`; `recipe` must fully
+    /// describe `sample` so hot reload treats equal recipes as equal content.
+    pub(crate) fn native_time_source(
+        canvas: &Arc<Mutex<ApiCanvas>>,
+        recipe: String,
+        sample: impl Fn(f64) -> f64 + Send + Sync + 'static,
+    ) -> PyResult<Self> {
+        let function = ReactiveFunction::new(
+            0,
+            1,
+            vec![gaanim_animation::ReactiveInput::Time],
+            move |arguments| Ok(vec![sample(arguments[0])]),
+        )
+        .with_recipe(recipe);
+        Ok(Self {
+            source: ScalarSource::function(function).map_err(value_error)?,
+            owners: vec![ReactiveOwner::Time(canvas.clone())],
+        })
+    }
+}
+
 fn validate_owners(owners: &[ReactiveOwner], canvas: &Arc<Mutex<ApiCanvas>>) -> PyResult<()> {
     let locked = canvas.lock().expect("scene canvas poisoned");
     for owner in owners {

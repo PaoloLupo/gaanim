@@ -4,6 +4,7 @@ pub use crate::anim::BoundsTarget;
 pub use gaanim_animation::AxisMask;
 pub use gaanim_animation::{RollingMode, RollingNumberOptions};
 pub use gaanim_renderer::background::{BackgroundPaint, ShaderBackground, ShaderBackgroundError};
+pub use gaanim_renderer::effects::{DropShadow, GaussianBlur, Glow};
 pub use gaanim_renderer::post_process::{PostProcessError, PostProcessOverride, PostProcessShader};
 pub use ops::{
     AnchorPoint, CanvasEndpoint, CanvasRay, FragmentRevealStyle, PointRef, UpdaterPreset,
@@ -55,9 +56,9 @@ pub use canvas_impl::{
     BooleanError, CameraBindingError, CameraConstraintHandle, CameraStateError, CameraStateHandle,
     Composition, DEFAULT_REACTIVE_TEXT_SIZE, DimensionExtensionStyle, DimensionHandle,
     DimensionOptions, ForceVectorHandle, ImageLoadError, LottieClip, LottieLoadError, PlayError,
-    PlayItem, SceneModel, SceneObjectError, Schedule, ScheduleEntry, SupportHandle,
-    SurroundingRectError, SurroundingRectHandle, ThemeError, TypstAssetError, VideoClip,
-    VideoLoadError, VideoSegment,
+    PlayItem, SceneModel, SceneObjectError, Schedule, ScheduleEntry, StaggerLayout, StaggerOrigin,
+    SupportHandle, SurroundingRectError, SurroundingRectHandle, ThemeError, TypstAssetError,
+    VideoClip, VideoLoadError, VideoSegment, stagger_weights,
 };
 mod theme;
 pub use gaanim_objects::prelude::SvgLoadError;

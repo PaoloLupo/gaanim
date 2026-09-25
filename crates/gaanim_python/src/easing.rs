@@ -1,4 +1,4 @@
-use gaanim_math::{EasingCurve, RateFunc};
+use gaanim_math::{EaseMode, EasingCurve, RateFunc, StepJump};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -60,6 +60,21 @@ impl PyEasing {
         }
     }
 
+    fn spring_preset(bounce: f64, speed: f64, label: &str) -> Self {
+        Self::new(RateFunc::spring_bounce(bounce, 0.0, speed), label)
+    }
+
+    fn mode(mode: &str) -> PyResult<EaseMode> {
+        match mode {
+            "in" => Ok(EaseMode::In),
+            "out" => Ok(EaseMode::Out),
+            "in_out" => Ok(EaseMode::InOut),
+            other => Err(PyValueError::new_err(format!(
+                "unknown mode {other:?}; expected \"in\", \"out\" or \"in_out\""
+            ))),
+        }
+    }
+
     fn validate_finite(name: &str, value: f64) -> PyResult<()> {
         if value.is_finite() {
             Ok(())
@@ -112,6 +127,31 @@ impl PyEasing {
         Self::new(RateFunc::NotQuiteThere, "Easing.NOT_QUITE_THERE")
     }
 
+    #[classattr]
+    fn SMOOTH_SPRING() -> Self {
+        Self::spring_preset(0.0, 1.2, "Easing.SMOOTH_SPRING")
+    }
+
+    #[classattr]
+    fn GENTLE() -> Self {
+        Self::spring_preset(0.05, 0.5, "Easing.GENTLE")
+    }
+
+    #[classattr]
+    fn QUICK() -> Self {
+        Self::spring_preset(0.1, 1.4, "Easing.QUICK")
+    }
+
+    #[classattr]
+    fn SNAPPY() -> Self {
+        Self::spring_preset(0.2, 1.4, "Easing.SNAPPY")
+    }
+
+    #[classattr]
+    fn BOUNCY() -> Self {
+        Self::spring_preset(0.45, 0.6, "Easing.BOUNCY")
+    }
+
     #[staticmethod]
     fn ease_in(curve: PyEasingCurve) -> Self {
         Self::new(
@@ -137,8 +177,33 @@ impl PyEasing {
     }
 
     #[staticmethod]
-    #[pyo3(signature = (stiffness=90.0, damping=12.0))]
-    fn spring(stiffness: f64, damping: f64) -> PyResult<Self> {
+    #[pyo3(signature = (stiffness=None, damping=None, *, mass=1.0, velocity=0.0, bounce=None))]
+    fn spring(
+        stiffness: Option<f64>,
+        damping: Option<f64>,
+        mass: f64,
+        velocity: f64,
+        bounce: Option<f64>,
+    ) -> PyResult<Self> {
+        Self::validate_finite("mass", mass)?;
+        Self::validate_finite("velocity", velocity)?;
+        if let Some(bounce) = bounce {
+            if stiffness.is_some() || damping.is_some() || mass != 1.0 {
+                return Err(PyValueError::new_err(
+                    "bounce describes the spring perceptually; do not combine it with stiffness, damping or mass",
+                ));
+            }
+            Self::validate_finite("bounce", bounce)?;
+            if !(0.0..1.0).contains(&bounce) {
+                return Err(PyValueError::new_err("bounce must be in [0, 1)"));
+            }
+            return Ok(Self::new(
+                RateFunc::spring_bounce(bounce, velocity, 1.0),
+                format!("Easing.spring(bounce={bounce}, velocity={velocity})"),
+            ));
+        }
+        let stiffness = stiffness.unwrap_or(90.0);
+        let damping = damping.unwrap_or(12.0);
         Self::validate_finite("stiffness", stiffness)?;
         Self::validate_finite("damping", damping)?;
         if stiffness <= 0.0 {
@@ -147,21 +212,179 @@ impl PyEasing {
         if damping < 0.0 {
             return Err(PyValueError::new_err("damping must be non-negative"));
         }
+        if mass <= 0.0 {
+            return Err(PyValueError::new_err("mass must be positive"));
+        }
+        if mass == 1.0 && velocity == 0.0 {
+            return Ok(Self::new(
+                RateFunc::Spring { stiffness, damping },
+                format!("Easing.spring(stiffness={stiffness}, damping={damping})"),
+            ));
+        }
+        // Same clock as `RateFunc::Spring`: the clip spans 5 physical seconds.
         Ok(Self::new(
-            RateFunc::Spring { stiffness, damping },
-            format!("Easing.spring(stiffness={stiffness}, damping={damping})"),
+            RateFunc::DampedSpring {
+                omega: (stiffness / mass).sqrt() * 5.0,
+                zeta: damping / (2.0 * (stiffness * mass).sqrt()),
+                velocity,
+            },
+            format!(
+                "Easing.spring(stiffness={stiffness}, damping={damping}, mass={mass}, velocity={velocity})"
+            ),
         ))
     }
 
     #[staticmethod]
-    fn steps(count: i64) -> PyResult<Self> {
+    #[pyo3(signature = (overshoot=1.70158, *, mode="out"))]
+    fn back(overshoot: f64, mode: &str) -> PyResult<Self> {
+        Self::validate_finite("overshoot", overshoot)?;
+        if overshoot < 0.0 {
+            return Err(PyValueError::new_err("overshoot must be non-negative"));
+        }
+        Ok(Self::new(
+            RateFunc::Back {
+                overshoot,
+                mode: Self::mode(mode)?,
+            },
+            format!("Easing.back({overshoot}, mode={mode:?})"),
+        ))
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (amplitude=1.0, period=0.3, *, mode="out"))]
+    fn elastic(amplitude: f64, period: f64, mode: &str) -> PyResult<Self> {
+        Self::validate_finite("amplitude", amplitude)?;
+        Self::validate_finite("period", period)?;
+        if amplitude < 1.0 {
+            return Err(PyValueError::new_err("amplitude must be at least 1"));
+        }
+        if period <= 0.0 {
+            return Err(PyValueError::new_err("period must be positive"));
+        }
+        Ok(Self::new(
+            RateFunc::Elastic {
+                amplitude,
+                period,
+                mode: Self::mode(mode)?,
+            },
+            format!("Easing.elastic({amplitude}, {period}, mode={mode:?})"),
+        ))
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (strength=1.0, *, mode="out"))]
+    fn bounce(strength: f64, mode: &str) -> PyResult<Self> {
+        Self::validate_finite("strength", strength)?;
+        if !(0.0..=1.0).contains(&strength) {
+            return Err(PyValueError::new_err("strength must be between 0 and 1"));
+        }
+        Ok(Self::new(
+            RateFunc::Bounce {
+                strength,
+                mode: Self::mode(mode)?,
+            },
+            format!("Easing.bounce({strength}, mode={mode:?})"),
+        ))
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (linear_ratio=0.7, power=0.7))]
+    fn slow_mo(linear_ratio: f64, power: f64) -> PyResult<Self> {
+        Self::validate_finite("linear_ratio", linear_ratio)?;
+        Self::validate_finite("power", power)?;
+        if !(0.0..=1.0).contains(&linear_ratio) || !(0.0..=1.0).contains(&power) {
+            return Err(PyValueError::new_err(
+                "linear_ratio and power must be between 0 and 1",
+            ));
+        }
+        Ok(Self::new(
+            RateFunc::SlowMo {
+                linear_ratio,
+                power,
+            },
+            format!("Easing.slow_mo({linear_ratio}, {power})"),
+        ))
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (strength=1.0, points=20, seed=0))]
+    fn rough(strength: f64, points: i64, seed: u64) -> PyResult<Self> {
+        Self::validate_finite("strength", strength)?;
+        if !(0.0..=2.0).contains(&strength) {
+            return Err(PyValueError::new_err("strength must be between 0 and 2"));
+        }
+        if !(1..=10_000).contains(&points) {
+            return Err(PyValueError::new_err("points must be between 1 and 10000"));
+        }
+        Ok(Self::new(
+            RateFunc::rough(strength, points as u32, seed),
+            format!("Easing.rough({strength}, points={points}, seed={seed})"),
+        ))
+    }
+
+    #[staticmethod]
+    fn squish(easing: &PyEasing, start: f64, end: f64) -> PyResult<Self> {
+        Self::validate_finite("start", start)?;
+        Self::validate_finite("end", end)?;
+        if !(0.0 <= start && start < end && end <= 1.0) {
+            return Err(PyValueError::new_err(
+                "squish requires 0 <= start < end <= 1",
+            ));
+        }
+        Ok(Self::new(
+            RateFunc::Squish {
+                inner: Box::new(easing.inner.clone()),
+                start,
+                end,
+            },
+            format!("Easing.squish({}, {start}, {end})", easing.label),
+        ))
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (path, samples=256))]
+    fn from_svg(path: &str, samples: i64) -> PyResult<Self> {
+        if !(2..=MAX_CUSTOM_SAMPLES).contains(&samples) {
+            return Err(PyValueError::new_err(format!(
+                "samples must be between 2 and {MAX_CUSTOM_SAMPLES}"
+            )));
+        }
+        RateFunc::from_svg_path(path, samples as usize)
+            .map(|inner| Self::new(inner, format!("Easing.from_svg({path:?})")))
+            .map_err(PyValueError::new_err)
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (count, jump="end"))]
+    fn steps(count: i64, jump: &str) -> PyResult<Self> {
         if count < 1 || count > u32::MAX as i64 {
             return Err(PyValueError::new_err("count must be at least 1"));
         }
         let count = count as u32;
+        let jump = match jump {
+            "end" => {
+                return Ok(Self::new(
+                    RateFunc::Steps(count),
+                    format!("Easing.steps({count})"),
+                ))
+            }
+            "start" => StepJump::Start,
+            "none" if count >= 2 => StepJump::None,
+            "none" => {
+                return Err(PyValueError::new_err(
+                    "jump=\"none\" needs at least 2 steps",
+                ))
+            }
+            "both" => StepJump::Both,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "unknown jump {other:?}; expected \"start\", \"end\", \"none\" or \"both\""
+                )))
+            }
+        };
         Ok(Self::new(
-            RateFunc::Steps(count),
-            format!("Easing.steps({count})"),
+            RateFunc::SteppedJump { count, jump },
+            format!("Easing.steps({count}, jump={jump:?})"),
         ))
     }
 
@@ -300,7 +523,7 @@ mod tests {
 
     #[test]
     fn validated_factories_preserve_rate_func_behavior() {
-        let spring = PyEasing::spring(90.0, 12.0).unwrap();
+        let spring = PyEasing::spring(Some(90.0), Some(12.0), 1.0, 0.0, None).unwrap();
         assert_same(
             &spring.inner,
             &RateFunc::Spring {
@@ -310,7 +533,10 @@ mod tests {
         );
         assert!((1..100).any(|step| spring.inner.evaluate(step as f64 / 100.0) > 1.0));
 
-        assert_same(&PyEasing::steps(5).unwrap().inner, &RateFunc::Steps(5));
+        assert_same(
+            &PyEasing::steps(5, "end").unwrap().inner,
+            &RateFunc::Steps(5),
+        );
         assert_same(
             &PyEasing::mirror(&PyEasing::SMOOTH()).inner,
             &RateFunc::Mirror(Box::new(RateFunc::Smooth)),
@@ -326,11 +552,58 @@ mod tests {
     }
 
     #[test]
+    fn spring_presets_and_expressive_factories_build_native_curves() {
+        let bouncy = PyEasing::spring(None, None, 1.0, 0.0, Some(0.35)).unwrap();
+        assert_same(&bouncy.inner, &RateFunc::spring_bounce(0.35, 0.0, 1.0));
+        for preset in [
+            PyEasing::SMOOTH_SPRING(),
+            PyEasing::GENTLE(),
+            PyEasing::QUICK(),
+            PyEasing::SNAPPY(),
+            PyEasing::BOUNCY(),
+        ] {
+            assert_eq!(preset.inner.evaluate(0.0), 0.0);
+            assert!((preset.inner.evaluate(1.0) - 1.0).abs() < 1e-12);
+        }
+        let heavy = PyEasing::spring(Some(90.0), Some(12.0), 2.0, 1.5, None).unwrap();
+        assert!(matches!(heavy.inner, RateFunc::DampedSpring { velocity, .. } if velocity == 1.5));
+        assert!(PyEasing::spring(Some(90.0), None, 1.0, 0.0, Some(0.2)).is_err());
+        assert!(PyEasing::spring(None, None, 1.0, 0.0, Some(1.0)).is_err());
+        assert!(PyEasing::spring(Some(90.0), Some(12.0), 0.0, 1.0, None).is_err());
+
+        assert_same(
+            &PyEasing::back(2.0, "in").unwrap().inner,
+            &RateFunc::Back {
+                overshoot: 2.0,
+                mode: EaseMode::In,
+            },
+        );
+        assert!(PyEasing::back(1.0, "sideways").is_err());
+        assert!(PyEasing::elastic(0.5, 0.3, "out").is_err());
+        assert!(PyEasing::elastic(1.0, 0.0, "out").is_err());
+        assert!(PyEasing::bounce(1.5, "out").is_err());
+        assert!(PyEasing::slow_mo(1.5, 0.7).is_err());
+        assert!(PyEasing::rough(1.0, 0, 1).is_err());
+        assert!(PyEasing::squish(&PyEasing::SMOOTH(), 0.8, 0.2).is_err());
+        assert!(PyEasing::from_svg("M0,0 L0.5,1", 64).is_err());
+        assert!(PyEasing::from_svg("M0,0 C0.3,0 0.2,1.2 1,1", 64).is_ok());
+        assert_same(
+            &PyEasing::steps(4, "both").unwrap().inner,
+            &RateFunc::SteppedJump {
+                count: 4,
+                jump: StepJump::Both,
+            },
+        );
+        assert!(PyEasing::steps(1, "none").is_err());
+        assert!(PyEasing::steps(3, "middle").is_err());
+    }
+
+    #[test]
     fn factories_reject_invalid_numeric_parameters() {
-        assert!(PyEasing::spring(0.0, 12.0).is_err());
-        assert!(PyEasing::spring(90.0, -1.0).is_err());
-        assert!(PyEasing::spring(f64::NAN, 12.0).is_err());
-        assert!(PyEasing::steps(0).is_err());
+        assert!(PyEasing::spring(Some(0.0), Some(12.0), 1.0, 0.0, None).is_err());
+        assert!(PyEasing::spring(Some(90.0), Some(-1.0), 1.0, 0.0, None).is_err());
+        assert!(PyEasing::spring(Some(f64::NAN), Some(12.0), 1.0, 0.0, None).is_err());
+        assert!(PyEasing::steps(0, "end").is_err());
         assert!(PyEasing::there_and_back(-0.1).is_err());
         assert!(PyEasing::there_and_back(1.1).is_err());
         assert!(PyEasing::there_and_back(f64::INFINITY).is_err());

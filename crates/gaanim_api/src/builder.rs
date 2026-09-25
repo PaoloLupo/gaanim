@@ -702,6 +702,13 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub current_scene: Option<SceneId>,
     /// Tracks the current value of each float signal / value tracker
     pub float_signals: HashMap<ObjectId, f64>,
+    /// Current `[start, end, offset]` trim and mode of trimmed paths.
+    pub(crate) path_trims: HashMap<ObjectId, ([f64; 3], bool)>,
+    /// Current renderer effects of objects that carry any.
+    pub(crate) effects: HashMap<ObjectId, crate::effect_lens::EffectState>,
+    /// Arc angle for the translation channel being expanded from a property
+    /// animation with `path_arc`; consumed by the lens that follows.
+    path_arc: Option<f64>,
     pub(crate) media_frames: HashMap<ObjectId, gaanim_scene::MediaFrame>,
     /// Authored local geometry of solid arrows, used by `GrowArrow`.
     pub(crate) arrow_shapes: HashMap<ObjectId, gaanim_math::ArrowShape>,
@@ -742,6 +749,8 @@ pub(crate) struct SceneBuilderState {
     stop_times: Vec<f64>,
     current_scene: Option<SceneId>,
     float_signals: HashMap<ObjectId, f64>,
+    path_trims: HashMap<ObjectId, ([f64; 3], bool)>,
+    effects: HashMap<ObjectId, crate::effect_lens::EffectState>,
     media_frames: HashMap<ObjectId, gaanim_scene::MediaFrame>,
     arrow_shapes: HashMap<ObjectId, gaanim_math::ArrowShape>,
     persistent_objects: HashSet<ObjectId>,
@@ -769,6 +778,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             stop_times: self.stop_times.clone(),
             current_scene: self.current_scene,
             float_signals: self.float_signals.clone(),
+            path_trims: self.path_trims.clone(),
+            effects: self.effects.clone(),
             media_frames: self.media_frames.clone(),
             arrow_shapes: self.arrow_shapes.clone(),
             persistent_objects: self.persistent_objects.clone(),
@@ -803,6 +814,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             stop_times,
             current_scene,
             float_signals,
+            path_trims,
+            effects,
             media_frames,
             arrow_shapes,
             persistent_objects,
@@ -830,6 +843,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             stop_times,
             current_scene,
             float_signals,
+            path_trims,
+            effects,
+            path_arc: None,
             media_frames,
             arrow_shapes,
             persistent_objects,
@@ -1124,6 +1140,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             stop_times: Vec::new(),
             current_scene: None,
             float_signals: HashMap::new(),
+            path_trims: HashMap::new(),
+            effects: HashMap::new(),
+            path_arc: None,
             media_frames: HashMap::new(),
             arrow_shapes: HashMap::new(),
             property_bindings: HashMap::new(),
@@ -1325,6 +1344,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::Material3DTo { .. } => "Material3D",
             AnimationType::MediaFrameTo { .. } => "MediaFrame",
             AnimationType::FillLevelTo { .. } => "FillLevel",
+            AnimationType::PathTrim { .. } => "Trim",
+            AnimationType::EffectsTo { .. } => "Effects",
             AnimationType::SurroundingRectRetarget { .. } => "Retarget",
             AnimationType::StrokeColorTo { .. } => "Stroke",
             AnimationType::StrokeWidthTo { .. } => "StrokeW",
@@ -2310,8 +2331,56 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
-    /// Internal method to resolve and schedule a single animation clip.
+    /// Schedules `anim`, first resolving repetition that the clip's rate
+    /// function cannot express on its own.
     fn play_internal(&mut self, anim: AnimationBuilder) {
+        if let RateFunc::Repeat {
+            inner,
+            count,
+            gap,
+            mode: gaanim_math::RepeatMode::Offset,
+        } = &anim.rate_func
+        {
+            // Sequential copies: relative animations (rotate_by, shift_by)
+            // continue from where the previous cycle ended.
+            let count = (*count).max(1);
+            let cycle = anim.duration / (count as f64 + (count - 1) as f64 * gap.max(0.0));
+            for index in 0..count {
+                self.play_clip(AnimationBuilder {
+                    target: anim.target,
+                    anim_type: anim.anim_type.clone(),
+                    duration: cycle,
+                    delay: anim.delay + index as f64 * cycle * (1.0 + gap.max(0.0)),
+                    rate_func: (**inner).clone(),
+                });
+            }
+            return;
+        }
+        if anim.rate_func.ends_at_start() {
+            // An even yoyo returns to where it started, so later animations
+            // must continue from the state before it, not from its target.
+            let target = anim.target;
+            let saved: Vec<_> = self
+                .hierarchy_ids(target)
+                .into_iter()
+                .filter_map(|id| Some((id, self.states.get(id)?.clone())))
+                .collect();
+            let signal = self.float_signals.get(&target).copied();
+            self.play_clip(anim);
+            for (id, state) in saved {
+                self.states.insert(id, state);
+            }
+            match signal {
+                Some(value) => self.float_signals.insert(target, value),
+                None => self.float_signals.remove(&target),
+            };
+            return;
+        }
+        self.play_clip(anim);
+    }
+
+    /// Internal method to resolve and schedule a single animation clip.
+    fn play_clip(&mut self, anim: AnimationBuilder) {
         if let AnimationType::CustomProperties(animation) = &anim.anim_type {
             // One root clip owns transforms/opacity. Descendant clips receive
             // paint only, matching the visible paint behavior of native setters.
@@ -2482,8 +2551,26 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             if let Some((from, to)) = properties.fill_level {
                 channels.push(AnimationType::FillLevelTo { from, to });
             }
+            if properties.glow.is_some() || properties.blur.is_some() || properties.shadow.is_some()
+            {
+                channels.push(AnimationType::EffectsTo {
+                    glow: properties.glow.clone(),
+                    blur: properties.blur,
+                    shadow: properties.shadow.clone(),
+                });
+            }
 
             for anim_type in channels {
+                let is_translation = matches!(
+                    anim_type,
+                    AnimationType::TranslateTo { .. }
+                        | AnimationType::TranslateAnchorTo { .. }
+                        | AnimationType::TranslateToAnchorPoint { .. }
+                        | AnimationType::TranslateBy { .. }
+                );
+                if is_translation {
+                    self.path_arc = properties.path_arc;
+                }
                 self.play_internal(AnimationBuilder {
                     target: anim.target,
                     anim_type,
@@ -2491,6 +2578,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     delay: anim.delay,
                     rate_func: anim.rate_func.clone(),
                 });
+                self.path_arc = None;
             }
             return;
         }
@@ -2817,6 +2905,14 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_wiggle_internal(anim, track);
             return;
         }
+        if matches!(anim.anim_type, AnimationType::EffectsTo { .. }) {
+            self.play_effects_internal(anim, track);
+            return;
+        }
+        if matches!(anim.anim_type, AnimationType::PathTrim { .. }) {
+            self.play_path_trim_internal(anim, track);
+            return;
+        }
         if matches!(anim.anim_type, AnimationType::GrowFromPoint { .. }) {
             self.play_grow_from_point_internal(anim, track);
             return;
@@ -3113,6 +3209,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::Wiggle
             | AnimationType::GrowFromPoint { .. }
             | AnimationType::GrowFromEdge { .. }
+            | AnimationType::PathTrim { .. }
+            | AnimationType::EffectsTo { .. }
             | AnimationType::DrawBorderThenFill { .. }
             | AnimationType::Flash { .. }
             | AnimationType::Circumscribe { .. }
@@ -3133,6 +3231,20 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 to: 1.0 + time_width,
                 time_width,
             },
+        };
+
+        let lens_spec = match (self.path_arc.take(), lens_spec) {
+            (Some(angle), PropertyLensSpec::Translation { from, to }) if from.z == to.z => {
+                PropertyLensSpec::PathFollow {
+                    path: gaanim_math::arc_between(
+                        kurbo::Point::new(from.x, from.y),
+                        kurbo::Point::new(to.x, to.y),
+                        angle,
+                    ),
+                    orient: None,
+                }
+            }
+            (_, lens) => lens,
         };
 
         // Add the resolved clip to the Timeline resource.
@@ -4875,6 +4987,108 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
+    /// Entities that carry an object's effects: glyphs for text, drawn
+    /// leaves for groups, and the object itself otherwise.
+    fn effect_targets(&self, id: ObjectId) -> Vec<ObjectId> {
+        let Some(state) = self.states.get(id) else {
+            return Vec::new();
+        };
+        if !state.child_spans.is_empty() {
+            return state.child_spans.iter().map(|child| child.id).collect();
+        }
+        let leaves: Vec<ObjectId> = self
+            .hierarchy_ids(id)
+            .into_iter()
+            .filter(|leaf| {
+                self.states
+                    .get(*leaf)
+                    .is_some_and(|state| !state.path.elements().is_empty())
+            })
+            .collect();
+        if leaves.is_empty() { vec![id] } else { leaves }
+    }
+
+    fn play_effects_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
+        let AnimationType::EffectsTo { glow, blur, shadow } = anim.anim_type else {
+            return;
+        };
+        for target in self.effect_targets(anim.target) {
+            let from = self.effects.get(&target).cloned().unwrap_or_default();
+            let to = crate::effect_lens::EffectState {
+                glow: glow.clone().unwrap_or_else(|| from.glow.clone()),
+                blur: blur.unwrap_or(from.blur),
+                shadow: shadow.clone().unwrap_or_else(|| from.shadow.clone()),
+            };
+            self.effects.insert(target, to.clone());
+            self.timeline.add_clip(
+                parent_track,
+                self.current_time + anim.delay,
+                anim.duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target,
+                    lens: PropertyLensSpec::Dynamic(gaanim_animation::tween::DynamicLens(
+                        std::sync::Arc::new(crate::effect_lens::EffectLens { from, to }),
+                    )),
+                    rate_func: anim.rate_func.clone(),
+                    delay: 0.0,
+                    label: self.current_label.clone(),
+                }),
+            );
+        }
+    }
+
+    fn play_path_trim_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
+        let AnimationType::PathTrim {
+            start,
+            end,
+            offset,
+            sequential,
+        } = anim.anim_type
+        else {
+            return;
+        };
+        // Trim every drawn path in the hierarchy, as `create` does.
+        let targets: Vec<ObjectId> = self
+            .hierarchy_ids(anim.target)
+            .into_iter()
+            .filter(|id| {
+                self.states
+                    .get(*id)
+                    .is_some_and(|state| !state.path.elements().is_empty())
+            })
+            .collect();
+        for target in targets {
+            let (from, was_sequential) = self
+                .path_trims
+                .get(&target)
+                .copied()
+                .unwrap_or(([0.0, 1.0, 0.0], false));
+            let to = [
+                start.unwrap_or(from[0]),
+                end.unwrap_or(from[1]),
+                offset.unwrap_or(from[2]),
+            ];
+            let sequential = sequential.unwrap_or(was_sequential);
+            self.path_trims.insert(target, (to, sequential));
+            self.timeline.add_clip(
+                parent_track,
+                self.current_time + anim.delay,
+                anim.duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target,
+                    lens: PropertyLensSpec::PathTrim {
+                        from,
+                        to,
+                        sequential,
+                    },
+                    rate_func: anim.rate_func.clone(),
+                    delay: 0.0,
+                    label: self.current_label.clone(),
+                }),
+            );
+        }
+    }
+
     fn play_grow_from_point_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         let (px, py) = match &anim.anim_type {
             AnimationType::GrowFromPoint { px, py } => (*px, *py),
@@ -5175,8 +5389,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// (parametric, not arc-length uniform). Updates the tracked state
     /// so the final translation equals `path(1.0)`.
     fn play_move_along_path_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
-        let (path_arg, path_target) = match &anim.anim_type {
-            AnimationType::MoveAlongPath { path, path_target } => (path.clone(), *path_target),
+        let (path_arg, path_target, follow) = match &anim.anim_type {
+            AnimationType::MoveAlongPath {
+                path,
+                path_target,
+                follow,
+            } => (path.clone(), *path_target, *follow),
             _ => unreachable!(),
         };
 
@@ -5192,6 +5410,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         } else {
             path_arg
         };
+        let path = if follow.start <= 0.0 && follow.end >= 1.0 {
+            path
+        } else {
+            gaanim_math::get_subpath_range(&path, follow.start, follow.end)
+        };
 
         // Resolve and persist the final translation so subsequent
         // animations build on top of the new position.
@@ -5201,6 +5424,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         if let Some(state) = self.states.get_mut(anim.target) {
             state.transform.translation = end_translation;
             state.transform.anchor = gaanim_core::glam::DVec3::ZERO;
+            if let Some(offset) = follow.orient {
+                state.transform.rotation = gaanim_core::glam::DQuat::from_rotation_z(
+                    gaanim_math::path_tangent_angle(&path, 1.0) + offset,
+                );
+            }
             self.commands.entity(state.entity).insert(state.transform);
         }
 
@@ -5211,7 +5439,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             anim.duration,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
-                lens: PropertyLensSpec::PathFollow { path },
+                lens: PropertyLensSpec::PathFollow {
+                    path,
+                    orient: follow.orient,
+                },
                 rate_func: anim.rate_func.clone(),
                 delay: 0.0,
                 label: self.current_label.clone(),
@@ -5300,7 +5531,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     anim.duration,
                     ClipPayload::Animation(AnimationSpec {
                         target: anim.target,
-                        lens: PropertyLensSpec::PathFollow { path: arc_path },
+                        lens: PropertyLensSpec::PathFollow {
+                            path: arc_path,
+                            orient: None,
+                        },
                         rate_func: anim.rate_func.clone(),
                         delay: 0.0,
                         label: self.current_label.clone(),
@@ -8458,6 +8692,11 @@ impl<'b, 'w, 's, 'a> MobjectSpawnBuilder<'b, 'w, 's, 'a> {
         if let Some(parent) = self.parent_entity {
             entity_cmd.set_parent_in_place(parent);
         }
+        let effects = crate::effect_lens::EffectState {
+            glow: glow.clone(),
+            blur,
+            shadow: shadow.clone(),
+        };
         if let Some(glow) = glow {
             entity_cmd.insert(glow);
         }
@@ -8466,6 +8705,9 @@ impl<'b, 'w, 's, 'a> MobjectSpawnBuilder<'b, 'w, 's, 'a> {
         }
         if let Some(shadow) = shadow {
             entity_cmd.insert(shadow);
+        }
+        if effects != crate::effect_lens::EffectState::default() {
+            self.builder.effects.insert(self.id, effects);
         }
 
         // Tag entity with the current scene if inside a scene scope
