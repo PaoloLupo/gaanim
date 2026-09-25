@@ -714,6 +714,8 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub(crate) arrow_shapes: HashMap<ObjectId, gaanim_math::ArrowShape>,
     /// Extra glyph tracking of Text roots set by `tracking(...)`, in scene units.
     pub(crate) text_tracking: HashMap<ObjectId, f64>,
+    /// Typing state of Texts animated by typewriter/scramble motions.
+    pub(crate) text_motion: crate::text_motion::TextMotionState,
     /// Objects whose scene membership is intentionally global at the current authoring cursor.
     persistent_objects: HashSet<ObjectId>,
     /// Objects whose membership has an explicit reuse/persist/release schedule in this scene.
@@ -756,6 +758,7 @@ pub(crate) struct SceneBuilderState {
     media_frames: HashMap<ObjectId, gaanim_scene::MediaFrame>,
     arrow_shapes: HashMap<ObjectId, gaanim_math::ArrowShape>,
     text_tracking: HashMap<ObjectId, f64>,
+    text_motion: crate::text_motion::TextMotionState,
     persistent_objects: HashSet<ObjectId>,
     membership_managed_objects: HashSet<ObjectId>,
     text_cancellation_marks: HashMap<ObjectId, Vec<ObjectId>>,
@@ -786,6 +789,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             media_frames: self.media_frames.clone(),
             arrow_shapes: self.arrow_shapes.clone(),
             text_tracking: self.text_tracking.clone(),
+            text_motion: self.text_motion.clone(),
             persistent_objects: self.persistent_objects.clone(),
             membership_managed_objects: self.membership_managed_objects.clone(),
             text_cancellation_marks: self.text_cancellation_marks.clone(),
@@ -823,6 +827,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             media_frames,
             arrow_shapes,
             text_tracking,
+            text_motion,
             persistent_objects,
             membership_managed_objects,
             text_cancellation_marks,
@@ -854,6 +859,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             media_frames,
             arrow_shapes,
             text_tracking,
+            text_motion,
             persistent_objects,
             membership_managed_objects,
             text_cancellation_marks,
@@ -1152,6 +1158,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             media_frames: HashMap::new(),
             arrow_shapes: HashMap::new(),
             text_tracking: HashMap::new(),
+            text_motion: Default::default(),
             property_bindings: HashMap::new(),
             property_source_cursors: HashMap::new(),
             persistent_objects: HashSet::new(),
@@ -1324,6 +1331,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::CameraReset
             | AnimationType::CameraDolly { .. } => "Camera",
             AnimationType::GltfAnimation { .. } => "Action",
+            AnimationType::TextMotion(_) => "TextMotion",
             AnimationType::Properties { .. } => "Properties",
             AnimationType::Write { .. } => "Write",
             AnimationType::Create { .. } => "Create",
@@ -2925,6 +2933,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_path_trim_internal(anim, track);
             return;
         }
+        if matches!(anim.anim_type, AnimationType::TextMotion(_)) {
+            self.play_text_motion_internal(anim, track);
+            return;
+        }
         if matches!(anim.anim_type, AnimationType::GrowFromPoint { .. }) {
             self.play_grow_from_point_internal(anim, track);
             return;
@@ -3206,6 +3218,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::CameraReset
             | AnimationType::CameraDolly { .. }
             | AnimationType::GltfAnimation { .. }
+            | AnimationType::TextMotion(_)
             | AnimationType::Write { .. }
             | AnimationType::Create { .. }
             | AnimationType::Create3D

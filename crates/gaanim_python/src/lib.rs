@@ -22,6 +22,7 @@ mod pystyle;
 mod pytext;
 mod pytext_animator;
 mod rolling_number;
+mod text_motion;
 mod transition;
 mod updater;
 mod visualization;

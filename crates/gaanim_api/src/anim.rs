@@ -183,6 +183,9 @@ pub enum PropertyScale {
 #[derive(Debug, Clone)]
 pub enum AnimationType {
     PropertySource(PropertySourceTarget),
+    /// Typewriter, backspace, retype or scramble motion of a Text
+    /// (see [`crate::text_motion`]).
+    TextMotion(crate::text_motion::TextMotion),
     /// Pure extension callback with explicitly owned property channels.
     CustomProperties(gaanim_animation::CustomAnimation),
     /// Several typed property targets evaluated concurrently.
@@ -695,6 +698,7 @@ impl AnimationType {
             | Self::Unwrite { .. }
             | Self::Uncreate { .. }
             | Self::ShowPassingFlash { .. }
+            | Self::TextMotion(_)
             | Self::Wiggle => RateFunc::Linear,
             Self::Create { .. } | Self::DrawBorderThenFill { .. } => RateFunc::DoubleSmooth,
             Self::Indicate { .. } | Self::Flash { .. } | Self::Circumscribe { .. } => {

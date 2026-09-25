@@ -7,6 +7,7 @@ pub mod host;
 pub mod matrix;
 pub mod prelude;
 pub mod runtime;
+pub mod text_motion;
 
 use bevy::prelude::*;
 use gaanim_animation::signals::FloatSignal;

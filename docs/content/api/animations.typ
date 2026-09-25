@@ -453,6 +453,67 @@ scene.render()
 ```
 ]
 
+=== Máquina de escribir y decodificación
+
+#api-entry(
+  name: "Text.animate.typewriter / backspace / retype",
+  kind: "method",
+  signature: ".animate.typewriter(cps=18.0, cursor=\"▍\", blink=2.0, jitter=0.2, seed=0, keep_cursor=True) .animate.backspace(count=None, cps=24.0) .animate.retype(text, cps=18.0, jitter=0.2, seed=0) -> Anim",
+  params: (
+    (name: "cps", type: "float", default: "18.0", desc: [Keystrokes per second (`backspace`: deletions per second, default 24). Must be positive.]),
+    (name: "cursor", type: "str | None", default: "\"▍\"", desc: [String drawn after the last typed grapheme; #raw("None") or #raw("\"\"") for none. Block characters (#raw("▏") to #raw("█")) are exact rectangles, independent of the font.]),
+    (name: "blink", type: "float", default: "2.0", desc: [On/off cycles per second of the idle cursor; #raw("0") keeps it solid. The cursor is solid while typing.]),
+    (name: "jitter", type: "float", default: "0.2", desc: [Each keystroke interval is scaled by a factor in #raw("[1 - jitter, 1 + jitter]"); must be in #raw("[0, 1)").]),
+    (name: "seed", type: "int", default: "0", desc: [Seed of the keystroke rhythm. Timing is a pure function of seed, grapheme index and time.]),
+    (name: "keep_cursor", type: "bool", default: "True", desc: [Keep the (blinking) cursor after typing; #raw("False") removes it at the end.]),
+    (name: "count", type: "int | None", default: "None", desc: [`backspace`: graphemes to delete from the end, capped at the visible ones; #raw("None") deletes all.]),
+    (name: "text", type: "str", default: none, desc: [`retype`: new plain text. The prefix shared with the visible text is kept; the rest is deleted and typed.]),
+  ),
+  returns: (type: "Anim", desc: [Text motion accepted by #raw("scene.play()"), with linear timing.]),
+  desc: [`typewriter` clears the Text and reveals ⌊t·cps⌋ graphemes (with jitter) in their final layout, so nothing reflows; the cursor follows the pen of the last typed grapheme, across lines. `backspace` removes graphemes from the end and `retype` deletes back to the shared prefix, then types the rest of `text`, laid out with the Text's style from the same pen origin. Without an explicit duration each motion lasts until its last keystroke (about `graphemes / cps`); `.duration(...)` rescales the rhythm. Every glyph is evaluated natively from the clip time, so seeks, snapshots and export match continuous playback. Raises `ValueError` for invalid numbers or an empty `text`, and `TypeError` unless the proxy belongs to a whole Text.],
+)[
+```python
+# show-code: true
+from gaanim import CYAN, Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+prompt = scene.text("gaanim render").fill(CYAN).move_to(-3, 0)
+scene.play([prompt.animate.typewriter(cps=18, cursor="▍")])
+scene.wait(0.4)
+scene.play([prompt.animate.backspace(6)])
+scene.play([prompt.animate.retype("gaanim export --from clímax")])
+scene.wait(0.6)
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Text.animate.scramble / scramble_to",
+  kind: "method",
+  signature: ".animate.scramble(charset=\"upper\", reveal_delay=0.3, speed=20.0, seed=0) .animate.scramble_to(text, charset=\"upper\", reveal_delay=0.3, speed=20.0, seed=0) -> Anim",
+  params: (
+    (name: "charset", type: "str", default: "\"upper\"", desc: [#raw("\"upper\""), #raw("\"lower\""), #raw("\"digits\""), #raw("\"hex\""), #raw("\"symbols\"") or a literal string such as #raw("\"01\""). Its glyphs are shaped once with the Text's font.]),
+    (name: "reveal_delay", type: "float", default: "0.3", desc: [Seconds every position scrambles before the first one settles. Non-negative.]),
+    (name: "speed", type: "float", default: "20.0", desc: [Glyph changes per second. Positive.]),
+    (name: "seed", type: "int", default: "0", desc: [Seed of the glyph choice #raw("hash(seed, index, floor(t * speed))").]),
+    (name: "text", type: "str", default: none, desc: [`scramble_to`: new plain text to decode into.]),
+  ),
+  returns: (type: "Anim", desc: [Text motion accepted by #raw("scene.play()"), with linear timing.]),
+  desc: [A decoding reveal: each non-space grapheme shows seeded charset glyphs centered in its final cell, then settles to the real glyph from left to right after `reveal_delay`. The final text's layout is reserved, so the width never jumps; `scramble_to` hides the current glyphs and decodes the new text in its own layout. The default duration is `reveal_delay` plus 0.05 s per grapheme (at least 0.6 s). Frames are exact for any seek.],
+)[
+```python
+# show-code: true
+from gaanim import GOLD, Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+label = scene.text("LAUNCH SEQUENCE", role="title").fill(GOLD).move_to(0, 0)
+scene.play([label.animate.scramble(charset="upper", reveal_delay=0.3, speed=20)])
+scene.wait(0.4)
+scene.play([label.animate.scramble_to("LANZAMIENTO", charset="01")])
+# output: preview.webp
+scene.render()
+```
+]
+
 == Énfasis
 
 #api-entry(
