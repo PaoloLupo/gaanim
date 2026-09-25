@@ -1612,6 +1612,7 @@ impl Timeline {
                         if matches!(
                             anim.lens,
                             PropertyLensSpec::CameraPosition { .. }
+                                | PropertyLensSpec::CameraPanZoom { .. }
                                 | PropertyLensSpec::CameraState { .. }
                                 | PropertyLensSpec::CameraFollow { .. }
                         )
@@ -2497,22 +2498,45 @@ fn apply_lens_spec(
                 camera.rotation = from.slerp(*to, t);
             }
         }
-        PropertyLensSpec::CameraZoom { from, to } => {
+        PropertyLensSpec::CameraZoom {
+            from,
+            to,
+            interpolation,
+        } => {
             if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>()
                 && let gaanim_math::Projection::Orthographic { ref mut zoom } = camera.projection
             {
-                *zoom = *from + (*to - *from) * t;
+                *zoom = interpolation.zoom(*from, *to, t);
             }
         }
-        PropertyLensSpec::CameraZoomSource { from, to } => {
+        PropertyLensSpec::CameraZoomSource {
+            from,
+            to,
+            interpolation,
+        } => {
             if let Some(target) = to.evaluate(world)
                 && target.is_finite()
                 && target > 0.0
                 && let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>()
             {
                 camera.projection = gaanim_math::Projection::Orthographic {
-                    zoom: *from + (target - *from) * t,
+                    zoom: interpolation.zoom(*from, target, t),
                 };
+            }
+        }
+        PropertyLensSpec::CameraPanZoom {
+            from_position,
+            to_position,
+            from_zoom,
+            to_zoom,
+            interpolation,
+        } => {
+            if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
+                let weight = interpolation.pan_weight(*from_zoom, *to_zoom, t);
+                camera.position = from_position.lerp(*to_position, weight);
+                if let gaanim_math::Projection::Orthographic { ref mut zoom } = camera.projection {
+                    *zoom = interpolation.zoom(*from_zoom, *to_zoom, t);
+                }
             }
         }
         PropertyLensSpec::CameraRotationSource { from, to } => {

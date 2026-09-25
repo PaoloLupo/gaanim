@@ -1026,6 +1026,39 @@ def validate_camera_rig_contract(module: object) -> list[str]:
     return failures
 
 
+def validate_camera_motion_contract(module: object) -> list[str]:
+    """Exercise trauma shake and exponential zoom (CA-01, CA-02)."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    marker = scene.geometry.dot(0.2)
+    camera = scene.camera.animate
+    animations = (
+        camera.shake(trauma=0.8, decay=1.5, frequency=12, rotation=0.02, seed=0),
+        camera.shake(0.2, 6),
+        camera.shake(amplitude=0.3, seed=4),
+        camera.zoom_to(8.0, interpolation="exponential"),
+        camera.zoom_to(2.0, interpolation="linear"),
+        camera.frame_to(marker, 0.5, interpolation="linear"),
+    )
+    if not all(isinstance(animation, module.Anim) for animation in animations):
+        failures.append("camera shake/zoom interpolation did not return Anim")
+    invalid_calls = (
+        lambda: camera.shake(trauma=1.5),
+        lambda: camera.shake(decay=-1.0),
+        lambda: camera.shake(-0.1, 4.0),
+        lambda: camera.zoom_to(2.0, interpolation="cubic"),
+        lambda: camera.frame_to(marker, interpolation="log"),
+    )
+    for call in invalid_calls:
+        try:
+            call()
+        except ValueError:
+            pass
+        else:
+            failures.append("camera motion accepted an invalid shake or interpolation")
+    return failures
+
+
 def validate_matrix_contract(module: object) -> list[str]:
     """Exercise matrix construction, selectors, ordering, and mutations."""
     failures: list[str] = []
@@ -1768,6 +1801,7 @@ def main() -> int:
     missing.extend(validate_layout_detach_contract(module))
     missing.extend(validate_reactive_connector_contract(module))
     missing.extend(validate_camera_rig_contract(module))
+    missing.extend(validate_camera_motion_contract(module))
     missing.extend(validate_matrix_contract(module))
     missing.extend(validate_matrix_stub_typing())
     missing.extend(validate_vector_geometry_contract(module))

@@ -3972,15 +3972,38 @@ impl SceneModel {
         self.camera_anim(AnimationType::CameraPositionSource { target }, duration)
     }
 
-    /// Animate orthographic zoom. Values above one zoom in.
+    /// Animate orthographic zoom with perceptually uniform (exponential)
+    /// interpolation. Values above one zoom in.
     pub fn camera_zoom_to(&mut self, zoom: f64, duration: f64) -> Anim {
-        let to = zoom;
-        self.camera_anim(AnimationType::CameraZoom { to }, duration)
+        self.camera_anim(
+            AnimationType::CameraZoom {
+                to: zoom,
+                interpolation: gaanim_math::ZoomInterpolation::Exponential,
+            },
+            duration,
+        )
+    }
+
+    /// Animate orthographic zoom toward a native scalar source, exponentially.
+    pub fn camera_zoom_to_source(&mut self, to: ScalarSource, duration: f64) -> Anim {
+        self.camera_zoom_to_source_with_interpolation(
+            to,
+            gaanim_math::ZoomInterpolation::Exponential,
+            duration,
+        )
     }
 
     /// Animate orthographic zoom toward a native scalar source.
-    pub fn camera_zoom_to_source(&mut self, to: ScalarSource, duration: f64) -> Anim {
-        self.camera_anim(AnimationType::CameraZoomSource { to }, duration)
+    pub fn camera_zoom_to_source_with_interpolation(
+        &mut self,
+        to: ScalarSource,
+        interpolation: gaanim_math::ZoomInterpolation,
+        duration: f64,
+    ) -> Anim {
+        self.camera_anim(
+            AnimationType::CameraZoomSource { to, interpolation },
+            duration,
+        )
     }
 
     /// Pan and zoom to keep `target` inside the viewport with a uniform margin.
@@ -3989,12 +4012,13 @@ impl SceneModel {
             AnimationType::CameraFrame {
                 target: target.id,
                 margin,
+                interpolation: gaanim_math::ZoomInterpolation::Exponential,
             },
             duration,
         )
     }
 
-    /// Frame one or more drawables using CSS-order margins.
+    /// Frame one or more drawables using CSS-order margins, zooming exponentially.
     pub fn camera_frame_many(
         &mut self,
         targets: &[DrawableHandle],
@@ -4002,11 +4026,31 @@ impl SceneModel {
         dynamic: bool,
         duration: f64,
     ) -> Anim {
+        self.camera_frame_many_with_interpolation(
+            targets,
+            margins,
+            dynamic,
+            gaanim_math::ZoomInterpolation::Exponential,
+            duration,
+        )
+    }
+
+    /// Frame one or more drawables using CSS-order margins and an explicit
+    /// zoom interpolation. Exponential mode also pans about a fixed point.
+    pub fn camera_frame_many_with_interpolation(
+        &mut self,
+        targets: &[DrawableHandle],
+        margins: [f64; 4],
+        dynamic: bool,
+        interpolation: gaanim_math::ZoomInterpolation,
+        duration: f64,
+    ) -> Anim {
         self.camera_anim(
             AnimationType::CameraFrameMany {
                 targets: targets.iter().map(|target| target.id).collect(),
                 margins,
                 dynamic,
+                interpolation,
             },
             duration,
         )
@@ -4054,6 +4098,22 @@ impl SceneModel {
             AnimationType::CameraShake {
                 amplitude,
                 frequency,
+                trauma: None,
+            },
+            duration,
+        )
+    }
+
+    /// Apply a trauma-driven coherent-noise shake (translation and roll).
+    ///
+    /// Trauma decays linearly in timeline seconds and the camera returns to
+    /// rest by the end of `duration`; see [`gaanim_math::TraumaShake`].
+    pub fn camera_trauma_shake(&mut self, shake: gaanim_math::TraumaShake, duration: f64) -> Anim {
+        self.camera_anim(
+            AnimationType::CameraShake {
+                amplitude: shake.amplitude,
+                frequency: shake.frequency,
+                trauma: Some(shake),
             },
             duration,
         )

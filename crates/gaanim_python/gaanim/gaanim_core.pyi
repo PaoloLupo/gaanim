@@ -2468,11 +2468,23 @@ class CameraAnimation:
         ...
     @overload
     def pan_to(self, target: Endpoint) -> Anim: ...
-    def zoom_to(self, zoom: ScalarSource) -> Anim:
-        """Configure the camera with zoom to.
+    def zoom_to(
+        self,
+        zoom: ScalarSource,
+        *,
+        interpolation: Literal["exponential", "linear"] = "exponential",
+    ) -> Anim:
+        """Animate the orthographic zoom; values above one zoom in.
+
+        ``interpolation="exponential"`` (the default) evaluates
+        ``z0 * (z1 / z0) ** p`` so the visible area changes by the same ratio
+        every frame and a large zoom reads as constant speed.
+        ``"linear"`` restores ``z0 + (z1 - z0) * p``. ``p`` is the eased
+        progress, so ``.easing(...)`` still shapes the move. A non-positive
+        constant zoom or an unknown interpolation raises ``ValueError``.
 
         Example:
-            scene.camera.zoom_to(1.0)
+            scene.camera.animate.zoom_to(8.0).duration(1.5)
         """
         ...
     def frame_to(
@@ -2481,11 +2493,17 @@ class CameraAnimation:
         margin: float | tuple[float, float] | tuple[float, float, float, float] | None = None,
         *,
         dynamic: bool = False,
+        interpolation: Literal["exponential", "linear"] = "exponential",
     ) -> Anim:
-        """Configure the camera with frame to.
+        """Pan and zoom so ``targets`` fit the viewport with ``margin``.
+
+        With ``interpolation="exponential"`` (the default) the zoom is
+        exponential and the pan follows the change of visible width, so the
+        view scales about a fixed point instead of drifting before it settles.
+        ``"linear"`` interpolates position and zoom independently.
 
         Example:
-            scene.camera.frame_to(target)
+            scene.camera.animate.frame_to([circle, label], margin=0.4).duration(1.0)
         """
         ...
     def rotate_to(self, angle: ScalarSource) -> Anim:
@@ -2511,13 +2529,35 @@ class CameraAnimation:
         ...
     def shake(
         self,
-        amplitude: float = 0.12,
-        frequency: float = 8.0,
+        amplitude: Optional[float] = None,
+        frequency: Optional[float] = None,
+        *,
+        trauma: Optional[float] = None,
+        decay: Optional[float] = None,
+        rotation: Optional[float] = None,
+        seed: Optional[int] = None,
     ) -> Anim:
-        """Configure the camera with shake.
+        """Shake the camera deterministically and return it to rest.
+
+        By default the shake follows the trauma model: ``trauma`` (``0..1``,
+        default ``0.8``) decays by ``decay`` per second (default ``1.5``) and
+        the displacement is proportional to ``trauma ** 2``. Translation (at
+        most ``amplitude`` scene units at trauma 1, default ``0.4``) and roll
+        (at most ``rotation`` radians, default ``0.02``) come from seeded
+        coherent noise sampled at ``frequency`` Hz (default ``12``). The clip
+        lasts ``trauma / decay`` seconds (one second when ``decay`` is zero);
+        a shorter ``.duration()`` still releases smoothly to rest. The shake
+        is a pure function of time, so seeks and exports match playback.
+
+        Passing ``amplitude`` without any of ``trauma``, ``decay``,
+        ``rotation`` or ``seed`` keeps the legacy sine shake: ``amplitude``
+        is the peak offset, ``frequency`` counts oscillations per clip
+        (default ``8``) and the clip lasts 0.5 s, so ``shake(0.2, 6)`` keeps
+        its previous look. Negative values, or ``trauma`` above one, raise
+        ``ValueError``.
 
         Example:
-            scene.camera.shake()
+            scene.camera.animate.shake(trauma=0.8, decay=1.5, frequency=12, rotation=0.02, seed=0)
         """
         ...
     def look_at(

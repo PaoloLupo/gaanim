@@ -644,6 +644,48 @@ as `.duration()`, `.delay()`, `.easing(Easing.SMOOTH)`, and `.easing(Easing.LINE
 old flat `scene.camera_*` methods are removed; `scene.camera.*` is the sole
 public camera surface.
 
+=== Zoom exponencial y shake por trauma
+
+`camera.animate.zoom_to(zoom, *, interpolation="exponential")` and
+`camera.animate.frame_to(..., interpolation="exponential")` interpolate zoom as
+`z0 * (z1 / z0) ** p`, where `p` is the eased progress. The visible area then
+changes by the same ratio every frame, so an 8x zoom reads as constant speed
+instead of accelerating. `frame_to` also pans in proportion to the change of
+visible width, so the view scales about a fixed point and the framed content
+travels in a straight line. `interpolation="linear"` restores the independent
+linear position and zoom of earlier releases; any other value raises
+`ValueError`. The immediate `camera.zoom_to` / `camera.frame_to` cuts are
+unaffected.
+
+```python
+scene.play([scene.camera.animate.zoom_to(8.0).duration(1.5)])
+scene.play([scene.camera.animate.zoom_to(1.0, interpolation="linear").duration(0.8)])
+```
+
+`camera.animate.shake(amplitude=None, frequency=None, *, trauma=None,
+decay=None, rotation=None, seed=None)` follows the trauma model: trauma starts
+at `trauma` (`0..1`, default `0.8`), falls by `decay` per second (default
+`1.5`), and the camera moves by `trauma ** 2`, so light hits barely register
+while heavy ones shake hard. Translation (at most `amplitude` scene units at
+trauma 1, default `0.4`) and roll (at most `rotation` radians, default `0.02`)
+come from seeded coherent noise sampled at `frequency` Hz (default `12`). The
+default duration is `trauma / decay` seconds (one second when `decay=0`); a
+shorter `.duration()` still releases to rest, and easing does not reshape the
+decay. The offset is a pure function of time, so seeks, snapshots and exports
+match playback, and it is added after follow, framing and bindings.
+
+```python
+scene.play([scene.camera.animate.shake(trauma=0.8, decay=1.5, frequency=12, rotation=0.02, seed=0)])
+scene.play([scene.camera.animate.shake(trauma=0.4, seed=3)])  # a lighter hit
+```
+
+Passing `amplitude` without any of `trauma`, `decay`, `rotation` or `seed` keeps
+the previous sine shake for compatibility: `amplitude` is its peak offset,
+`frequency` counts oscillations per clip (default `8`), and it lasts 0.5 s, so
+`shake(0.12, 8)` and `shake(amplitude=0.5, frequency=4)` look as before. A bare
+`shake()` uses the trauma model. Negative values and `trauma` above one raise
+`ValueError`.
+
 === Bindings reactivos persistentes
 
 Bindings are non-rendered ECS constraints with stable creation order. They are

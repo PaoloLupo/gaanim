@@ -205,9 +205,11 @@ pub enum AnimationType {
     },
     CameraZoom {
         to: f64,
+        interpolation: gaanim_math::ZoomInterpolation,
     },
     CameraZoomSource {
         to: gaanim_animation::ScalarSource,
+        interpolation: gaanim_math::ZoomInterpolation,
     },
     CameraRotation {
         to: DQuat,
@@ -218,11 +220,13 @@ pub enum AnimationType {
     CameraFrame {
         target: ObjectId,
         margin: f64,
+        interpolation: gaanim_math::ZoomInterpolation,
     },
     CameraFrameMany {
         targets: Vec<ObjectId>,
         margins: [f64; 4],
         dynamic: bool,
+        interpolation: gaanim_math::ZoomInterpolation,
     },
     CameraFollow {
         target: ObjectId,
@@ -236,6 +240,8 @@ pub enum AnimationType {
     CameraShake {
         amplitude: f64,
         frequency: f64,
+        /// Trauma/noise model; `None` keeps the legacy sine shake.
+        trauma: Option<gaanim_math::TraumaShake>,
     },
     CameraLookAt {
         eye: DVec3,
