@@ -671,65 +671,29 @@ where
         check_custom_animation_errors(app.world())?;
 
         let (vello_scene, post_process) = {
-            let camera = app.world().get_resource::<gaanim_math::Camera>().cloned();
+            let resolved_camera = frame_camera(app.world());
             let raw_scene = gaanim_renderer::pipeline::compile_scene_from_world(
                 app.world_mut(),
-                camera.as_ref(),
+                resolved_camera.as_ref().map(|resolved| &resolved.camera),
             );
-
-            let (zoom, pixels_per_unit, viewport_width, viewport_height, cam_x, cam_y) = camera
-                .as_ref()
-                .map(|c| {
-                    let z = match c.projection {
-                        gaanim_math::Projection::Orthographic { zoom } => zoom,
-                        _ => 1.0,
-                    };
-                    (
-                        z,
-                        c.pixels_per_unit(),
-                        c.viewport_width.max(1),
-                        c.viewport_height.max(1),
-                        c.position.x,
-                        c.position.y,
-                    )
-                })
-                .unwrap_or((
-                    1.0,
-                    1.0,
-                    config.width.max(1),
-                    config.height.max(1),
-                    0.0,
-                    0.0,
-                ));
-
-            let fit_x = config.width as f64 / viewport_width as f64;
-            let fit_y = config.height as f64 / viewport_height as f64;
-            let fit_scale = match config.fit {
-                crate::config::OutputFit::Cover => fit_x.max(fit_y),
-                crate::config::OutputFit::Error | crate::config::OutputFit::Contain => {
-                    fit_x.min(fit_y)
-                }
-            };
 
             let mut scene = bevy_vello::vello::Scene::new();
-            let camera_to_vello =
-                kurbo::Affine::translate((config.width as f64 / 2.0, config.height as f64 / 2.0))
-                    * kurbo::Affine::scale_non_uniform(
-                        pixels_per_unit * zoom * fit_scale,
-                        -pixels_per_unit * zoom * fit_scale,
-                    )
-                    * kurbo::Affine::translate((-cam_x, -cam_y));
-            scene.append(&raw_scene, Some(camera_to_vello));
-            let frame = centered_frame(
+            let camera_to_vello = capture_camera_to_vello_transform(
+                resolved_camera.as_ref(),
                 config.width,
                 config.height,
-                viewport_width as f64 * fit_scale,
-                viewport_height as f64 * fit_scale,
-                0.0,
+                config.fit,
             );
-            let perspective = camera.as_ref().is_some_and(|camera| {
+            scene.append(&raw_scene, Some(camera_to_vello));
+            let frame = capture_camera_frame(
+                resolved_camera.as_ref(),
+                config.width,
+                config.height,
+                config.fit,
+            );
+            let perspective = resolved_camera.as_ref().is_some_and(|resolved| {
                 matches!(
-                    camera.projection,
+                    resolved.camera.projection,
                     gaanim_math::Projection::Perspective { .. }
                 )
             });
@@ -933,21 +897,7 @@ where
         timeline_update += phase_started.elapsed();
 
         let phase_started = Instant::now();
-        let resolved_camera = app
-            .world()
-            .get_resource::<gaanim_math::ResolvedCamera>()
-            .copied()
-            .or_else(|| {
-                app.world()
-                    .get_resource::<gaanim_math::Camera>()
-                    .copied()
-                    .map(|camera| {
-                        gaanim_math::ResolvedCamera::new(
-                            camera,
-                            gaanim_math::CameraViewport::default(),
-                        )
-                    })
-            });
+        let resolved_camera = frame_camera(app.world());
         let raw_scene = gaanim_renderer::pipeline::compile_scene_from_world(
             app.world_mut(),
             resolved_camera.as_ref().map(|resolved| &resolved.camera),
@@ -1070,6 +1020,22 @@ fn output_fit_scale(
 
 /// Camera frame of a capture in output pixels, matching
 /// [`capture_camera_to_vello_transform`].
+/// The camera a frame is rendered through: the resolved camera, which adds
+/// bindings, follow, dynamic framing, and shake to the authored camera.
+fn frame_camera(world: &World) -> Option<gaanim_math::ResolvedCamera> {
+    world
+        .get_resource::<gaanim_math::ResolvedCamera>()
+        .copied()
+        .or_else(|| {
+            world
+                .get_resource::<gaanim_math::Camera>()
+                .copied()
+                .map(|camera| {
+                    gaanim_math::ResolvedCamera::new(camera, gaanim_math::CameraViewport::default())
+                })
+        })
+}
+
 fn capture_camera_frame(
     resolved: Option<&gaanim_math::ResolvedCamera>,
     output_width: u32,
@@ -1575,6 +1541,23 @@ mod tests {
                 "{fit:?}"
             );
         }
+    }
+
+    #[test]
+    fn frames_render_through_the_resolved_camera() {
+        let authored = gaanim_math::Camera::ortho_2d(960, 540);
+        let mut shaken = authored;
+        shaken.position.x += 0.14;
+        let mut world = World::new();
+        world.insert_resource(authored);
+        world.insert_resource(gaanim_math::ResolvedCamera::new(
+            shaken,
+            gaanim_math::CameraViewport::default(),
+        ));
+        assert_eq!(frame_camera(&world).unwrap().camera, shaken);
+
+        world.remove_resource::<gaanim_math::ResolvedCamera>();
+        assert_eq!(frame_camera(&world).unwrap().camera, authored);
     }
 
     #[test]
