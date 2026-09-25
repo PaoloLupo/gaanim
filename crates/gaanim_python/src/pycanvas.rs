@@ -1462,6 +1462,27 @@ pub struct PyScene {
     pub(crate) inner: Arc<Mutex<ApiCanvas>>,
 }
 
+/// A named timeline instant authored with `scene.marker`, in absolute seconds.
+#[pyclass(name = "SceneMarker", module = "gaanim_core", frozen)]
+pub struct PySceneMarker {
+    #[pyo3(get)]
+    name: String,
+    #[pyo3(get)]
+    time: f64,
+    #[pyo3(get)]
+    segment: String,
+}
+
+#[pymethods]
+impl PySceneMarker {
+    fn __repr__(&self) -> String {
+        format!(
+            "SceneMarker(name={:?}, time={}, segment={:?})",
+            self.name, self.time, self.segment
+        )
+    }
+}
+
 /// An interactive stop authored with `scene.stop`, in absolute timeline seconds.
 #[pyclass(name = "SceneStop", module = "gaanim_core", frozen)]
 pub struct PySceneStop {
@@ -5665,6 +5686,34 @@ impl PyScene {
                     time: stop.time,
                     segment: name.clone(),
                 })
+            })
+            .collect())
+    }
+
+    /// Name the current cursor on the global timeline.
+    fn marker(&self, name: &str) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .marker(name)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+    }
+
+    /// Markers authored so far, in timeline order, with absolute times.
+    #[getter]
+    fn markers(&self) -> PyResult<Vec<PySceneMarker>> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .markers()
+            .into_iter()
+            .map(|marker| PySceneMarker {
+                name: marker.name,
+                time: marker.time,
+                segment: marker.segment,
             })
             .collect())
     }

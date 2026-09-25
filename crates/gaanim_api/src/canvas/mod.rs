@@ -12,6 +12,7 @@ pub use ops::{
 mod types;
 pub use gaanim_layout::{Anchor, Direction};
 pub use gaanim_text::prelude::TextAnchor;
+pub use segment::SceneMarker;
 pub use segment::{
     PresentationBrand, SegmentError, SegmentHandle, SegmentId, SegmentManifest, SegmentSpec,
     SegmentStop,
@@ -61,6 +62,7 @@ pub use canvas_impl::{
     SupportHandle, SurroundingRectError, SurroundingRectHandle, ThemeError, TypstAssetError,
     VideoClip, VideoLoadError, VideoSegment, stagger_weights,
 };
+pub use canvas_impl::{InsertPosition, ScheduleLabel};
 pub use gaanim_media::narration::{MarkerSource, ScriptSection, TakeFiles};
 pub use narration::{
     LiveTakeSpec, MarkerSpec, NarrationManifest, ScriptSpec, TextSource, VoiceoverError,

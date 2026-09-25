@@ -47,6 +47,16 @@ pub struct SegmentStop {
     pub time: f64,
 }
 
+/// A named instant on the global timeline authored with `scene.marker`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SceneMarker {
+    pub name: String,
+    /// Absolute time on the compiled canvas timeline.
+    pub time: f64,
+    /// Name of the segment that was active when the marker was authored.
+    pub segment: String,
+}
+
 /// Absolute metadata for one authored segment.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SegmentSpec {
@@ -123,4 +133,10 @@ pub enum SegmentError {
     UnknownSegment { id: SegmentId },
     #[error("could not create segment branding: {message}")]
     BrandAsset { message: String },
+    #[error("marker names must not be empty")]
+    EmptyMarkerName,
+    #[error("marker name {name:?} is a number; marker names must be distinguishable from seconds")]
+    NumericMarkerName { name: String },
+    #[error("a marker named {name:?} already exists at {time:.6}s")]
+    DuplicateMarker { name: String, time: f64 },
 }

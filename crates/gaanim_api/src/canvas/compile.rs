@@ -2233,6 +2233,15 @@ impl SceneModel {
             *metadata = compiled;
         }
         timeline.set_segments(segment_metadata.clone());
+        timeline.set_markers(
+            self.markers()
+                .into_iter()
+                .map(|marker| gaanim_timeline::timeline::TimelineMarker {
+                    name: marker.name,
+                    time: marker.time,
+                })
+                .collect(),
+        );
         let segments = self
             .state
             .lock()

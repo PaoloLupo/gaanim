@@ -1161,6 +1161,15 @@ class Schedule:
     def span(self) -> float: ...
     @property
     def entries(self) -> tuple[ScheduleEntry, ...]: ...
+    @property
+    def labels(self) -> dict[str, float]:
+        """Resolved ``label`` instants as ``{name: seconds}``, in time order.
+
+        Times are local to the composition, like ``ScheduleEntry.start``, and
+        include nested and inserted labels shifted to their final position.
+        A repeated composition reports the first repetition.
+        """
+        ...
 
 class Composition:
     """Pure, immutable tree of animations and timeline-synchronized media."""
@@ -1187,6 +1196,51 @@ class Composition:
     def schedule(self, *, duration: Optional[float] = None) -> Schedule:
         """Resolve local offsets using the supplied outer defaults without scheduling."""
         ...
+    def insert(self, item: Playable, at: str | float) -> Composition:
+        """Return a copy that also plays ``item`` at the local position ``at``.
+
+        ``at`` follows GSAP's position parameter and is resolved when the
+        composition is scheduled or played:
+
+        - ``"name"``, ``"name+0.15"``, ``"name-0.2"`` (or ``"name+=0.15"``):
+          a ``label`` of this composition, including nested and earlier
+          inserted labels, plus an offset. An exact label name always wins,
+          so ``"part-2"`` finds a label called ``"part-2"``.
+        - ``"<"`` / ``">"`` (optionally ``"<+0.1"``, ``">-0.2"``): the start /
+          end of the previous item, which is the most recent non-label
+          insert, or the last child before any insert.
+        - ``"+=0.3"`` / ``"-=0.3"``: relative to the current end of the
+          composition, including earlier inserts.
+        - A number: absolute local seconds.
+
+        Inserts are placed after the children and before ``stretch``,
+        ``repeat`` and ``delay``, which then apply to them as well. A
+        malformed position raises ``ValueError`` immediately; an unknown
+        label or a position that resolves before 0 raises ``ValueError``
+        from ``schedule``/``scene.play`` with the defined labels listed.
+
+        Example:
+            intro = sequence(
+                title.animate.write().duration(0.8),
+                label("hit"),
+                subtitle.animate.fade_in().duration(0.4),
+            ).insert(logo.animate.grow_from_center(), at="hit+0.15") \\
+             .insert(glow.animate.flash(), at="<")
+        """
+        ...
+
+def label(name: str) -> Composition:
+    """A zero-duration named instant for ``sequence``, ``parallel`` or ``stagger``.
+
+    In a ``sequence`` a label takes no step and no ``gap``: it marks where
+    the next step starts, or where the previous step ends when it is last.
+    Reference it from ``Composition.insert(..., at="name+0.1")``; the
+    resolved times are listed by ``Composition.schedule().labels``. Names
+    are trimmed and must be unique within one composition tree; empty
+    names, numbers and names starting with ``<``, ``>``, ``+``, ``-`` or
+    ``=`` raise ``ValueError``.
+    """
+    ...
 
 # Typing-only in this native stub; import it at runtime with ``from gaanim import Playable``.
 Playable: TypeAlias = Anim | Audio | Video | VideoSegment | Lottie | Composition
@@ -2580,6 +2634,19 @@ class SceneStop:
     @property
     def segment(self) -> str:
         """Name of the segment containing the stop."""
+        ...
+
+class SceneMarker:
+    """A named timeline instant authored with ``scene.marker``."""
+    @property
+    def name(self) -> str: ...
+    @property
+    def time(self) -> float:
+        """Absolute timeline time in seconds."""
+        ...
+    @property
+    def segment(self) -> str:
+        """Name of the segment active when the marker was authored."""
         ...
 
 class CameraState:
@@ -5617,6 +5684,24 @@ class Scene:
             if "GAANIM_SNAPSHOTS" in os.environ:
                 scene.snapshots(os.environ["GAANIM_SNAPSHOTS"], [s.time for s in scene.stops])
         """
+        ...
+    def marker(self, name: str) -> None:
+        """Name the current cursor on the global timeline.
+
+        A marker is metadata only: it neither pauses playback nor moves the
+        cursor. The editor draws it on the seek bar (click it to jump there)
+        and ``gaanim export --from <name> --to <name>`` accepts it in place
+        of seconds. Names are trimmed and unique per scene; an empty name, a
+        duplicate or a name that parses as a number raises ``ValueError``.
+
+        Example:
+            scene.play(intro)
+            scene.marker("climax")
+        """
+        ...
+    @property
+    def markers(self) -> list[SceneMarker]:
+        """Markers authored so far, in timeline order, with absolute times."""
         ...
     def play(
         self,

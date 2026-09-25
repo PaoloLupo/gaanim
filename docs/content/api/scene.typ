@@ -509,6 +509,26 @@ if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
 ]
 
 #api-entry(
+  name: "Scene.marker / markers",
+  kind: "method",
+  signature: "marker(name: str) -> None / markers -> list[SceneMarker]",
+  params: ((name: "name", type: "str", default: none, desc: [Unique marker name; it is trimmed.]),),
+  returns: (type: "None / list[SceneMarker]", desc: [`markers` lists every marker authored so far with `name`, absolute `time`, and the active `segment`, in timeline order.]),
+  desc: [Names the current cursor on the global timeline. A marker is metadata only: it adds no duration, does not pause playback and does not move the cursor. The editor draws markers as small triangles above the seek bar; hovering shows the name and clicking one jumps exactly to it. `gaanim export --from <marker> --to <marker>` accepts marker names in place of seconds. Empty names, duplicates, and names that parse as a number raise `ValueError`. For named instants inside a `Composition`, use `label` (see Animaciones).],
+)[
+```python
+scene.play(intro)
+scene.marker("climax")
+scene.play(outro)
+scene.marker("fin")
+```
+
+```bash
+gaanim export escena.py --output climax.mp4 --from climax --to fin
+```
+]
+
+#api-entry(
   name: "Scene.reuse / persist / release",
   kind: "method",
   signature: "reuse(object, *others) / persist(object, *others) / release(object, *others) -> None",
@@ -829,6 +849,11 @@ patrón, el número se añade al nombre como `f_00000.png`.
 mismo tramo, una secuencia PNG numera sus fotogramas desde 0 y un `--to`
 posterior al final de la escena se limita a su duración; un tramo vacío produce
 un error.
+
+`--from` y `--to` también aceptan el nombre de un `scene.marker`, por ejemplo
+`gaanim export . --output tramo.mp4 --from climax --to fin`; los nombres se
+resuelven después de ejecutar el script y un marcador inexistente produce un
+error que lista los definidos. Se pueden combinar segundos y marcadores.
 
 `gaanim export --help` lista todas las opciones y formatos, y
 `gaanim --version` muestra la versión instalada.

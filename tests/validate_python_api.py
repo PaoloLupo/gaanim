@@ -198,6 +198,72 @@ def validate_timeline_cursor_contract(module: object) -> list[str]:
     return failures
 
 
+def validate_timeline_labels_contract(module: object) -> list[str]:
+    """TM-05: composition labels, relative insert positions and scene markers."""
+    failures: list[str] = []
+    if not callable(getattr(module, "label", None)):
+        return ["label"]
+    scene = module.Scene(frame=(16, 9))
+    geometry = scene.geometry
+    title = geometry.dot(4).animate.fade_in().duration(0.8)
+    subtitle = geometry.dot(4).animate.fade_in().duration(0.4)
+    plan = (
+        module.sequence(title, module.label("hit"), subtitle, gap=0.1)
+        .insert(geometry.dot(4).animate.fade_in().duration(1.0), at="hit+0.15")
+        .insert(geometry.dot(4).animate.fade_in().duration(0.5), at="<")
+        .insert(geometry.dot(4).animate.fade_in().duration(0.2), at="-=0.3")
+        .insert(geometry.dot(4).animate.fade_in().duration(0.2), at=0.25)
+    )
+    schedule = plan.schedule()
+    labels = schedule.labels
+    starts = [round(entry.start, 6) for entry in schedule.entries]
+    if not isinstance(labels, dict) or list(labels) != ["hit"] or abs(labels["hit"] - 0.9) > 1e-9:
+        failures.append("Schedule.labels did not resolve the sequence label")
+    if starts != [0.0, 0.9, 1.05, 1.05, 1.75, 0.25]:
+        failures.append(f"Composition.insert positions resolved to {starts}")
+    for position in ("", "<x", "+0.2", "-1", "+=abc"):
+        try:
+            plan.insert(geometry.dot(4).animate.fade_in(), at=position)
+        except ValueError:
+            continue
+        failures.append(f"Composition.insert accepted malformed position {position!r}")
+    unknown = plan.insert(geometry.dot(4).animate.fade_in(), at="missing")
+    try:
+        unknown.schedule()
+    except ValueError as error:
+        if "missing" not in str(error) or "hit" not in str(error):
+            failures.append("unknown label errors must name the label and list defined labels")
+    else:
+        failures.append("Composition.schedule accepted an unknown label")
+    try:
+        module.label("")
+    except ValueError:
+        pass
+    else:
+        failures.append("label('') was accepted")
+    scene.play(plan)
+
+    if scene.markers != []:
+        failures.append("a Scene must start without markers")
+    scene.marker("climax")
+    scene.wait(0.5)
+    scene.marker("end")
+    markers = scene.markers
+    expected_climax = round(plan.schedule().span, 6)
+    if [(marker.name, round(marker.time, 6)) for marker in markers] != [
+        ("climax", expected_climax),
+        ("end", round(expected_climax + 0.5, 6)),
+    ] or not all(isinstance(marker, module.SceneMarker) for marker in markers):
+        failures.append("Scene.markers did not report named markers in absolute time")
+    for bad in ("climax", "", "2.5"):
+        try:
+            scene.marker(bad)
+        except ValueError:
+            continue
+        failures.append(f"Scene.marker accepted {bad!r}")
+    return failures
+
+
 def validate_theme_typography_contract(module: object) -> list[str]:
     """Theme font directories and the theme-wide markup default."""
     failures: list[str] = []
@@ -1863,6 +1929,7 @@ def main() -> int:
     missing.extend(validate_editorial_contract(module))
     missing.extend(validate_theme_typography_contract(module))
     missing.extend(validate_timeline_cursor_contract(module))
+    missing.extend(validate_timeline_labels_contract(module))
     missing.extend(validate_narration_contract(module))
     missing.extend(validate_text_animator_contract(module))
     missing.extend(validate_runtime_type_aliases(module))
