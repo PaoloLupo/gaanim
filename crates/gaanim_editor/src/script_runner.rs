@@ -312,7 +312,8 @@ pub fn load_script_canvas(script_path: &Path) -> Result<gaanim_api::canvas::Scen
 pub fn validate_python_api(script_path: &Path) -> Result<(), String> {
     Python::attach(|py| {
         bootstrap_gaanim_package(py)?;
-        let path = script_path.to_string_lossy();
+        let path = python_path(script_path);
+        let path = path.to_string_lossy();
         let code = format!(
             "import runpy\ntry:\n    runpy.run_path(r'{path}', run_name='__main__')\nexcept SystemExit as exc:\n    if exc.code not in (None, 0):\n        raise\n"
         );
@@ -323,9 +324,35 @@ pub fn validate_python_api(script_path: &Path) -> Result<(), String> {
     .map_err(|error| Python::attach(|py| format_py_traceback(py, &error)))
 }
 
+/// The path Python code should see for a script. Canonical Windows paths carry
+/// the `\\?\` verbatim prefix, which breaks string comparisons and
+/// `Path.relative_to` against ordinary paths in user code (`__file__`,
+/// `sys.path`). The prefix is dropped when the plain form is still valid.
+fn python_path(path: &Path) -> PathBuf {
+    let Some(text) = path.to_str() else {
+        return path.to_path_buf();
+    };
+    let plain = if let Some(share) = text.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{share}")
+    } else if let Some(rest) = text.strip_prefix(r"\\?\")
+        && rest.as_bytes().get(1) == Some(&b':')
+    {
+        rest.to_owned()
+    } else {
+        return path.to_path_buf();
+    };
+    // Without the prefix, Windows limits paths to MAX_PATH (260) characters.
+    if plain.len() < 260 {
+        PathBuf::from(plain)
+    } else {
+        path.to_path_buf()
+    }
+}
+
 /// Execute a Python file by path inside the given interpreter, in a fresh
 /// `__main__` namespace so each re-run is isolated from the previous one.
 fn run_script_file(py: Python<'_>, path: &Path) -> PyResult<()> {
+    let path = &python_path(path);
     let path_str = path
         .to_str()
         .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("script path is not UTF-8"))?;
@@ -456,6 +483,24 @@ mod tests {
     fn python_lock() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    #[test]
+    fn python_sees_script_paths_without_the_windows_verbatim_prefix() {
+        assert_eq!(
+            python_path(Path::new(r"\\?\C:\proj\main.py")),
+            PathBuf::from(r"C:\proj\main.py")
+        );
+        assert_eq!(
+            python_path(Path::new(r"\\?\UNC\server\share\main.py")),
+            PathBuf::from(r"\\server\share\main.py")
+        );
+        assert_eq!(
+            python_path(Path::new(r"C:\proj\main.py")),
+            PathBuf::from(r"C:\proj\main.py")
+        );
+        let long = format!(r"\\?\C:\{}\main.py", "d".repeat(300));
+        assert_eq!(python_path(Path::new(&long)), PathBuf::from(&long));
     }
 
     fn write_project_manifest(root: &Path) {
