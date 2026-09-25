@@ -1604,6 +1604,8 @@ pub struct SceneModel {
     pub asset_root: Option<PathBuf>,
     /// Audio sources synchronized in preview and mixed by FFmpeg during export.
     pub audio_tracks: Vec<AudioTrack>,
+    /// Voiceover blocks and the live take, for timing and the editor recorder.
+    pub(crate) narration: super::narration::NarrationState,
     /// Reusable logo/footer treatment generated for every explicit segment.
     pub branding: Option<PresentationBrand>,
     pub(crate) camera_position: gaanim_core::glam::DVec3,
@@ -1629,6 +1631,7 @@ impl SceneModel {
             margin: Margin::default(),
             asset_root: None,
             audio_tracks: Vec::new(),
+            narration: Default::default(),
             branding: None,
             camera_position: gaanim_core::glam::DVec3::ZERO,
             lighting_3d: gaanim_scene::Lighting3D::default(),
@@ -4663,7 +4666,8 @@ impl SceneModel {
     /// Insert a named or anonymous interactive stop in the active segment.
     ///
     /// A stop at the segment's end keeps that completed segment active at the
-    /// shared boundary until playback advances into the next segment.
+    /// shared boundary until playback advances into the next segment. After a
+    /// recorded live take started, the stop becomes the pause recorded there.
     pub fn stop(&mut self, name: Option<String>) -> Result<(), SegmentError> {
         let name = match name {
             Some(name) => {
@@ -4675,6 +4679,10 @@ impl SceneModel {
             }
             None => None,
         };
+        if let Some(hold) = self.live_take_hold() {
+            self.wait(hold);
+            return Ok(());
+        }
         let mut state = self.state.lock().expect("canvas state poisoned");
         let segment = state.active_mut();
         let time = segment.cursor;
@@ -6456,8 +6464,12 @@ impl SceneModel {
 
     // -- Render / export --
 
+    /// Submit the scene to the host. Narration takes still playing at the
+    /// cursor extend the timeline until they end.
     pub fn render(&self) -> bool {
-        crate::host::send_to_host(self.clone())
+        let mut scene = self.clone();
+        scene.complete_narration();
+        crate::host::send_to_host(scene)
     }
 
     pub fn export(
@@ -6467,7 +6479,9 @@ impl SceneModel {
         _encoder: Option<&str>,
         transparent: Option<bool>,
     ) -> Result<(), gaanim_export::encoder::ExportError> {
-        crate::export::export_canvas_to_path(self.clone(), path, fps, transparent)
+        let mut scene = self.clone();
+        scene.complete_narration();
+        crate::export::export_canvas_to_path(scene, path, fps, transparent)
     }
 }
 

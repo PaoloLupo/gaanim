@@ -1398,6 +1398,7 @@ def validate_scene_capability_surface(module) -> list[str]:
         "media", "slides", "text", "viz", "fade_out_all", "link", "persist",
         "play", "release", "render", "reuse", "sections", "segment", "snapshots", "stop",
         "wait", "time", "cursor", "stops", "random", "noise",
+        "voiceover", "live_take", "narration_script",
     }
     actual = {name for name in dir(module.Scene) if not name.startswith("_")}
     failures = []
@@ -1637,6 +1638,89 @@ def validate_layout_card_ports_contract(module):
     return failures
 
 
+def validate_narration_contract(module: object) -> list[str]:
+    """Voiceover takes set the pace; a live take turns stops into holds."""
+    import json
+    import tempfile
+    import warnings
+    import wave
+
+    failures: list[str] = []
+    with tempfile.TemporaryDirectory() as directory:
+        narration = Path(directory) / "narration"
+        narration.mkdir()
+
+        def record(key: str, seconds: float, sidecar: dict) -> None:
+            with wave.open(str(narration / f"{key}.wav"), "wb") as take:
+                take.setnchannels(1)
+                take.setsampwidth(2)
+                take.setframerate(8000)
+                take.writeframes(b"\0\0" * int(8000 * seconds))
+            (narration / f"{key}.json").write_text(json.dumps(sidecar), encoding="utf-8")
+
+        record("intro", 4.0, {"markers": {"recta": 1.5}})
+        record("clase", 6.0, {"holds": [2.0]})
+
+        scene = module.Scene(frame=(16, 9))
+        scene.assets.assets_dir(directory)
+        scene.wait(0.5)
+        with scene.voiceover("intro", text="la recta y su pendiente") as vo:
+            if not vo.recorded or vo.duration != 4.0 or vo.start != 0.5:
+                failures.append("a recorded voiceover must report its take's start and length")
+            if vo.until("recta") != 1.5:
+                failures.append("Voiceover.until did not use the tapped marker")
+            vo.wait_until("recta")
+            if abs(scene.cursor - 2.0) > 1e-9:
+                failures.append("Voiceover.wait_until did not advance to the marker")
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                vo.wait_until("tangente")
+            if not any(issubclass(w.category, UserWarning) for w in caught):
+                failures.append("a missing marker must emit a UserWarning")
+        if abs(scene.cursor - 4.5) > 1e-9:
+            failures.append("leaving a voiceover block must wait for the rest of the take")
+        try:
+            vo.wait_until("recta")
+        except ValueError:
+            pass
+        else:
+            failures.append("a finished voiceover accepted another marker")
+
+        estimated = scene.voiceover("resumen", text="uno dos tres cuatro cinco")
+        if estimated.recorded or abs(estimated.duration - 2.4) > 1e-9:
+            failures.append("an unrecorded voiceover must be estimated from its text")
+        estimated.finish()
+
+        (Path(directory) / "guion.md").write_text(
+            "# Guion\n\n## desde-guion\nuno dos tres cuatro cinco\n", encoding="utf-8"
+        )
+        scene.narration_script("guion.md")
+        scripted = scene.voiceover("desde-guion")
+        if scripted.text != "uno dos tres cuatro cinco" or abs(scripted.duration - 2.4) > 1e-9:
+            failures.append("a voiceover without text must read its narration script section")
+        scripted.finish()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            scene.voiceover("sin-seccion").finish()
+        if not any(issubclass(w.category, UserWarning) for w in caught):
+            failures.append("a key missing from the narration script must warn")
+
+        scene.live_take("clase")
+        start = scene.cursor
+        scene.wait(1.0)
+        scene.stop()
+        if abs(scene.cursor - (start + 3.0)) > 1e-9 or scene.stops:
+            failures.append("a recorded live take must replace stops with its holds")
+        for invalid in ("a/b", "intro"):
+            try:
+                scene.voiceover(invalid)
+            except ValueError:
+                pass
+            else:
+                failures.append(f"voiceover accepted the key {invalid!r}")
+    return failures
+
+
 def main() -> int:
     tree = ast.parse(STUB.read_text(encoding="utf-8"), filename=str(STUB))
     module = importlib.import_module("gaanim.gaanim_core")
@@ -1699,6 +1783,7 @@ def main() -> int:
     missing.extend(validate_editorial_contract(module))
     missing.extend(validate_theme_typography_contract(module))
     missing.extend(validate_timeline_cursor_contract(module))
+    missing.extend(validate_narration_contract(module))
     missing.extend(validate_runtime_type_aliases(module))
     missing.extend(documented_text_api_failures(tree))
     missing.extend(documented_editorial_api_failures(tree))

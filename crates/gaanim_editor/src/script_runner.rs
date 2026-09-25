@@ -74,6 +74,14 @@ impl ScriptRunner {
     pub fn request_asset_reload(&self) {
         let _ = self.rerun_tx.send(Rerun::Assets);
     }
+
+    /// An asset reload request that other threads and systems can keep.
+    pub fn asset_reload_handle(&self) -> impl Fn() + Send + Sync + 'static {
+        let rerun_tx = self.rerun_tx.clone();
+        move || {
+            let _ = rerun_tx.send(Rerun::Assets);
+        }
+    }
 }
 
 /// Why the script runs again.

@@ -9,6 +9,7 @@ mod app_icon;
 pub mod export;
 mod fps_overlay;
 pub mod frame_profile;
+pub mod narration;
 pub mod overlays;
 mod presenter;
 pub mod project_hub;
@@ -18,9 +19,16 @@ fn sync_editor_input_ignore_system(
     egui_wants: Res<EguiWantsInput>,
     presentation_mode: Res<PresentationMode>,
     editor_state: Res<EditorState>,
+    narration: Option<Res<narration::NarrationSession>>,
     mut timeline: ResMut<Timeline>,
     mut stop_policy: ResMut<PlaybackStopPolicy>,
 ) {
+    // While recording narration, the recorder owns the keyboard and playback.
+    if let Some(policy) = narration.as_ref().and_then(|session| session.stop_policy()) {
+        timeline.ignore_input = true;
+        *stop_policy = policy;
+        return;
+    }
     timeline.ignore_input = presentation_mode.active
         || egui_wants.wants_keyboard_input()
         || egui_wants.wants_any_pointer_input();
@@ -177,11 +185,18 @@ impl Plugin for GaanimEditorPlugin {
             .init_resource::<ViewportFrame>()
             .init_resource::<PreviewInteractive>()
             .init_resource::<overlays::EditorOverlays>()
+            .init_resource::<narration::NarrationPanel>()
+            .init_resource::<narration::NarrationSession>()
+            .init_resource::<gaanim_media::PreviewAudioEnabled>()
             .add_systems(
                 Update,
                 (
                     sync_editor_input_ignore_system
                         .in_set(gaanim_scene::hierarchy::SceneSet::Input)
+                        .before(gaanim_timeline::timeline_playback_system),
+                    narration::narration_session_system
+                        .in_set(gaanim_scene::hierarchy::SceneSet::Input)
+                        .after(sync_editor_input_ignore_system)
                         .before(gaanim_timeline::timeline_playback_system),
                     preview_mode_keys_system
                         .in_set(gaanim_scene::hierarchy::SceneSet::Input)
@@ -234,6 +249,14 @@ impl Plugin for GaanimEditorPlugin {
                     .after(presenter::audience_playback_controls_system),
             )
             .add_systems(EguiPrimaryContextPass, export::export_dialog_system)
+            .add_systems(
+                EguiPrimaryContextPass,
+                (
+                    narration::narration_panel_system,
+                    narration::narration_overlay_system,
+                )
+                    .after(editor_ui_system),
+            )
             .add_systems(
                 EguiPrimaryContextPass,
                 (
@@ -431,7 +454,11 @@ fn editor_ui_system(
     mut ctx: bevy_egui::EguiContexts,
     mut presentation_mode: ResMut<PresentationMode>,
     mut state: ResMut<EditorState>,
-    mut export_state: ResMut<export::ExportState>,
+    (mut export_state, mut narration_panel, narration_session): (
+        ResMut<export::ExportState>,
+        ResMut<narration::NarrationPanel>,
+        Res<narration::NarrationSession>,
+    ),
     mut fullscreen_state: ResMut<EditorFullscreenState>,
     mut timeline: ResMut<Timeline>,
     mut inset: ResMut<ViewportInset>,
@@ -464,6 +491,12 @@ fn editor_ui_system(
     if presentation_mode.active {
         return;
     }
+    // The teleprompter replaces the playback bar while recording narration.
+    if narration_session.capturing() {
+        inset.bottom = 0.0;
+        return;
+    }
+    let narration_open = narration_panel.open;
 
     let is_exporting = export_state.active;
     let (export_progress_pct, export_current, export_total) = if is_exporting {
@@ -772,6 +805,18 @@ fn editor_ui_system(
                                             actions.push(PlaybackAction::TogglePin);
                                         }
 
+                                        let narration_tone = if narration_open {
+                                            ButtonTone::On(ToggleColor::Accent)
+                                        } else {
+                                            ButtonTone::Ghost
+                                        };
+                                        if icon_button(ui, Icon::Mic, narration_tone, true)
+                                            .on_hover_text("Narración: grabar la voz de la escena")
+                                            .clicked()
+                                        {
+                                            actions.push(PlaybackAction::ToggleNarration);
+                                        }
+
                                         if is_exporting {
                                             ui.add(
                                                 egui::Label::new(
@@ -906,6 +951,12 @@ fn editor_ui_system(
                                                 actions.push(PlaybackAction::Present);
                                             }
                                             if ui
+                                                .selectable_label(narration_open, "Narración")
+                                                .clicked()
+                                            {
+                                                actions.push(PlaybackAction::ToggleNarration);
+                                            }
+                                            if ui
                                                 .add_enabled(
                                                     !is_exporting,
                                                     egui::Button::new("Exportar"),
@@ -983,6 +1034,9 @@ fn editor_ui_system(
                                     range,
                                 ),
                                 PlaybackAction::OpenExport => export_state.dialog_open = true,
+                                PlaybackAction::ToggleNarration => {
+                                    narration_panel.open = !narration_panel.open;
+                                }
                                 PlaybackAction::Present => start_presentation(
                                     &mut presentation_mode,
                                     &mut fullscreen_state,
@@ -1671,6 +1725,7 @@ enum PlaybackAction {
     ToggleContinuous,
     ToggleLoop((f64, f64)),
     OpenExport,
+    ToggleNarration,
     Present,
     ToggleFullscreen,
     TogglePin,
@@ -1832,10 +1887,13 @@ fn global_playback_keys_system(
     egui_wants: Res<EguiWantsInput>,
     keys: Res<ButtonInput<KeyCode>>,
     presentation_mode: Res<PresentationMode>,
+    narration: Option<Res<narration::NarrationSession>>,
     mut state: ResMut<EditorState>,
     mut timeline: ResMut<Timeline>,
 ) {
-    if !editor_shortcuts_allowed(presentation_mode.active, egui_wants.wants_keyboard_input()) {
+    if !editor_shortcuts_allowed(presentation_mode.active, egui_wants.wants_keyboard_input())
+        || narration.is_some_and(|session| session.capturing())
+    {
         return;
     }
 

@@ -66,3 +66,4 @@ serde = [
 
 [dev-dependencies]
 gaanim_renderer = { path = "../gaanim_renderer" }
+tempfile = "3"

@@ -16,9 +16,14 @@ bevy = { workspace = true, features = [
     "symphonia-wav", # decodes FFmpeg's streaming in-memory WAV output
 ] }
 crossbeam-channel = { workspace = true }
+# Already built for Bevy's WAV support; reads and writes narration takes.
+hound = "3.5"
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
 
 [features]
 dev-dynamic = [

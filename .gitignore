@@ -48,3 +48,6 @@ tests/visual/**/report/
 # These must come after the parent-directory exceptions above.
 tests/visual/**/current/
 tests/visual/**/report/
+
+# Narration takes recorded while trying the examples.
+/examples/narration/

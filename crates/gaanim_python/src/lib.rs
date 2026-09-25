@@ -65,6 +65,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pycanvas::PyAssetManager>()?;
     m.add_class::<pycanvas::PySegment>()?;
     m.add_class::<pycanvas::PyAudio>()?;
+    m.add_class::<pycanvas::PyVoiceover>()?;
     m.add_class::<composition::PyComposition>()?;
     m.add_class::<composition::PySchedule>()?;
     m.add_class::<composition::PyScheduleEntry>()?;

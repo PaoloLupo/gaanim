@@ -235,6 +235,25 @@ scene.wait(8)
 
 Esta función requiere `ffmpeg` y `ffprobe` disponibles en `PATH`.
 
+Para narrar, el editor graba tu voz sin herramientas externas. Con voz en off,
+la toma marca el ritmo y el script espera a marcas con nombre en lugar de
+duraciones fijas; con `scene.live_take()`, presentas la escena hablando y cada
+`scene.stop()` se convierte en la pausa que hiciste. Abre el panel con el botón
+de micrófono de la barra de reproducción:
+
+```python
+with scene.voiceover("intro", text="Hoy vemos la derivada") as vo:
+    scene.play([title.animate.write()])
+    vo.wait_until("derivada")
+```
+
+El texto de cada bloque puede vivir fuera del código, en
+`assets/narration/script.md` (una sección `## intro` por bloque). Las tomas se
+guardan en `assets/narration/`, se nivelan a -16 LUFS para video y se mezclan
+al exportar MP4 o WebM. Mientras grabas, el medidor marca la zona de nivel ideal
+y avisa en rojo si te acercas a la saturación. Opcionalmente, whisper.cpp
+detecta las marcas por palabra. Consulte `docs/content/api/audio.typ`.
+
 ## Comandos de desarrollo
 
 | Objetivo | Comando |
