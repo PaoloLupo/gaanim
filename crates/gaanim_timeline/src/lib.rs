@@ -7,6 +7,7 @@ pub mod selection;
 pub mod snapshot;
 pub mod timeline;
 pub mod transition;
+pub mod transition_mask;
 
 use gaanim_scene::hierarchy::SceneSet;
 use timeline::{PlaybackStopPolicy, Timeline};
@@ -341,6 +342,7 @@ pub fn camera_rig_system(world: &mut World) {
         })
         .max_by(|(left, ..), (right, ..)| left.total_cmp(right));
     let mut shake_offset = gaanim_core::glam::DVec3::ZERO;
+    let mut shake_roll = 0.0;
     for clip in timeline
         .clips
         .values()
@@ -353,10 +355,18 @@ pub fn camera_rig_system(world: &mut World) {
             origin: _,
             amplitude,
             frequency,
+            trauma,
         } = &anim.lens
         else {
             continue;
         };
+        if let Some(trauma) = trauma {
+            // Trauma decays in timeline seconds; easing does not reshape it.
+            let (offset, roll) = trauma.sample(current_time - clip.start, clip.duration);
+            shake_offset += offset.extend(0.0);
+            shake_roll += roll;
+            continue;
+        }
         let progress = if clip.duration > 0.0 {
             ((current_time - clip.start) / clip.duration).clamp(0.0, 1.0)
         } else {
@@ -412,6 +422,7 @@ pub fn camera_rig_system(world: &mut World) {
             margins,
             frame_width,
             frame_height,
+            interpolation,
         } = lens
         else {
             return None;
@@ -437,8 +448,11 @@ pub fn camera_rig_system(world: &mut World) {
         let influence = rate_func.evaluate(progress);
         Some((
             start,
-            from_position.lerp(framed.center(), influence),
-            from_zoom + (desired_zoom - from_zoom) * influence,
+            from_position.lerp(
+                framed.center(),
+                interpolation.pan_weight(from_zoom, desired_zoom, influence),
+            ),
+            interpolation.zoom(from_zoom, desired_zoom, influence),
         ))
     });
 
@@ -469,6 +483,9 @@ pub fn camera_rig_system(world: &mut World) {
         }
     }
     camera.0.position += shake_offset;
+    if shake_roll != 0.0 {
+        camera.0.rotation *= gaanim_core::glam::DQuat::from_rotation_z(shake_roll);
+    }
 }
 
 #[cfg(test)]
@@ -515,6 +532,7 @@ mod tests {
                     origin: authored.position,
                     amplitude: 12.0,
                     frequency: 1.0,
+                    trauma: None,
                 },
                 rate_func: gaanim_math::RateFunc::Linear,
                 delay: 0.0,
@@ -531,6 +549,51 @@ mod tests {
         let rig = world.resource::<gaanim_math::CameraRigCamera>().0;
         assert!((rig.position.x - 29.0).abs() < 1e-9);
         assert!((rig.position.y - 3.049_028_386_654_035_7).abs() < 1e-9);
+    }
+
+    #[test]
+    fn trauma_shake_is_a_pure_function_of_time_and_rests_at_the_end() {
+        let shake = gaanim_math::TraumaShake::default();
+        let duration = shake.natural_duration();
+        let authored = gaanim_math::Camera::ortho_2d(1280, 720);
+        let rig_at = |time: f64| {
+            let mut world = World::new();
+            world.insert_resource(authored);
+            let mut timeline = Timeline::new();
+            let track = timeline.add_track("Camera", 0);
+            timeline.add_clip(
+                track,
+                1.0,
+                duration,
+                clip::ClipPayload::Animation(clip::AnimationSpec {
+                    target: gaanim_core::ObjectId::from_raw(0),
+                    lens: clip::PropertyLensSpec::CameraShake {
+                        origin: authored.position,
+                        amplitude: shake.amplitude,
+                        frequency: shake.frequency,
+                        trauma: Some(shake),
+                    },
+                    rate_func: gaanim_math::RateFunc::Smooth,
+                    delay: 0.0,
+                    label: Some("Camera".into()),
+                }),
+            );
+            timeline.current_time = time;
+            world.insert_resource(timeline);
+            camera_binding_system(&mut world);
+            camera_rig_system(&mut world);
+            world.resource::<gaanim_math::CameraRigCamera>().0
+        };
+
+        let rig = rig_at(1.1);
+        let (offset, roll) = shake.sample(0.1, duration);
+        assert!(offset.length() > 0.0);
+        assert!((rig.position.truncate() - offset).length() < 1e-12);
+        assert!((rig.rotation.to_euler(gaanim_core::glam::EulerRot::XYZ).2 - roll).abs() < 1e-12);
+        assert_eq!(rig_at(1.1), rig, "evaluation must not depend on history");
+        let rest = rig_at(1.0 + duration);
+        assert_eq!(rest.position, authored.position);
+        assert_eq!(rest.rotation, authored.rotation);
     }
 
     #[test]

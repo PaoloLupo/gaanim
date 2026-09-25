@@ -270,6 +270,8 @@ pub struct ExtractedElement {
     render_order: RenderOrder,
     scene: Arc<vello::Scene>,
     clip_mask: Option<ClipMask>,
+    /// Side of the active scene transition this element belongs to.
+    transition_side: gaanim_scene::TransitionSide,
 }
 
 /// Stack order of a drawn element: its own `z_index` plus every ancestor's,
@@ -362,7 +364,133 @@ fn shared_clip_run_end(elements: &[ExtractedElement], start: usize) -> usize {
     end
 }
 
+/// Composite elements, masking each run of transition scene members with its
+/// side's reveal, then draw the transition overlays above everything.
 fn append_extracted_elements(
+    main_scene: &mut vello::Scene,
+    elements: &[ExtractedElement],
+    composition_bounds: kurbo::Rect,
+    transition: Option<&gaanim_scene::SceneTransitionFrame>,
+) {
+    let mut index = 0;
+    while index < elements.len() {
+        let side = elements[index].transition_side;
+        let mut end = index + 1;
+        while elements
+            .get(end)
+            .is_some_and(|element| element.transition_side == side)
+        {
+            end += 1;
+        }
+        let mask = transition.and_then(|frame| frame.mask_for(side));
+        if let Some(mask) = mask {
+            push_transition_mask(main_scene, mask);
+        }
+        append_element_run(main_scene, &elements[index..end], composition_bounds);
+        if let Some(mask) = mask {
+            pop_transition_mask(main_scene, mask);
+        }
+        index = end;
+    }
+    if let Some(frame) = transition {
+        for layer in &frame.overlays {
+            main_scene.push_layer(
+                peniko::Fill::NonZero,
+                layer.blend,
+                1.0,
+                kurbo::Affine::IDENTITY,
+                &layer.clip,
+            );
+            for (path, brush) in &layer.fills {
+                main_scene.fill(
+                    peniko::Fill::NonZero,
+                    kurbo::Affine::IDENTITY,
+                    brush,
+                    None,
+                    path,
+                );
+            }
+            main_scene.pop_layer();
+        }
+    }
+}
+
+/// Open a world-space layer that keeps only a transition side's visible region.
+///
+/// Always an isolated `push_layer`, never `push_clip_layer`: the masked run
+/// contains fragments with their own blend layers (closed strokes, e.g. text
+/// glyphs, opacity groups, `ClipMask`s), and vello does not yet clip nested
+/// blend layers inside a clip-only layer (linebender/vello#1198), so those
+/// elements escaped the reveal.
+fn push_transition_mask(scene: &mut vello::Scene, mask: &gaanim_scene::TransitionMask) {
+    scene.push_layer(
+        mask.rule,
+        peniko::BlendMode::default(),
+        1.0,
+        kurbo::Affine::IDENTITY,
+        &mask.path,
+    );
+}
+
+/// Close a transition mask. A feathered mask first multiplies the layer by
+/// its linear alpha ramp (a vector `DestIn` composite, no textures).
+fn pop_transition_mask(scene: &mut vello::Scene, mask: &gaanim_scene::TransitionMask) {
+    if let Some((opaque, clear)) = mask.fade {
+        scene.push_layer(
+            mask.rule,
+            peniko::BlendMode::new(peniko::Mix::Normal, peniko::Compose::DestIn),
+            1.0,
+            kurbo::Affine::IDENTITY,
+            &mask.path,
+        );
+        let ramp = peniko::Gradient::new_linear(opaque, clear)
+            .with_stops([peniko::Color::BLACK, peniko::Color::TRANSPARENT]);
+        scene.fill(
+            mask.rule,
+            kurbo::Affine::IDENTITY,
+            &peniko::Brush::Gradient(ramp),
+            None,
+            &mask.path,
+        );
+        scene.pop_layer();
+    }
+    scene.pop_layer();
+}
+
+/// Timeline position whose segment background fills the whole frame. While a
+/// transition splits the frame this is the outgoing segment.
+fn transition_background_time(
+    transition: Option<&gaanim_scene::SceneTransitionFrame>,
+    time_seconds: f64,
+) -> f64 {
+    transition
+        .and_then(|frame| frame.backgrounds)
+        .map_or(time_seconds, |(outgoing, _)| outgoing)
+}
+
+/// Draw the incoming segment's background inside its reveal when it differs
+/// from the outgoing one.
+fn fill_transition_background(
+    scene: &mut vello::Scene,
+    background: &CanvasBackground,
+    pixel_size: (u32, u32),
+    transition: Option<&gaanim_scene::SceneTransitionFrame>,
+) {
+    let Some(frame) = transition else {
+        return;
+    };
+    let (Some((outgoing, incoming)), Some(mask)) = (frame.backgrounds, &frame.incoming_mask) else {
+        return;
+    };
+    if std::ptr::eq(background.paint_at(outgoing), background.paint_at(incoming)) {
+        return;
+    }
+    push_transition_mask(scene, mask);
+    fill_canvas_background(scene, background, pixel_size, incoming, None);
+    pop_transition_mask(scene, mask);
+}
+
+fn append_element_run(
     main_scene: &mut vello::Scene,
     elements: &[ExtractedElement],
     composition_bounds: kurbo::Rect,
@@ -693,21 +821,36 @@ pub fn resolve_vector_outline_system(
         }
     }
 }
-const BLUR_KERNEL: [((f64, f64), f32); 13] = [
-    ((0.0, 0.0), 0.20),
-    ((0.65, 0.0), 0.10),
-    ((-0.65, 0.0), 0.10),
-    ((0.0, 0.65), 0.10),
-    ((0.0, -0.65), 0.10),
-    ((0.65, 0.65), 0.06),
-    ((0.65, -0.65), 0.06),
-    ((-0.65, 0.65), 0.06),
-    ((-0.65, -0.65), 0.06),
-    ((1.4, 0.0), 0.04),
-    ((-1.4, 0.0), 0.04),
-    ((0.0, 1.4), 0.04),
-    ((0.0, -1.4), 0.04),
-];
+/// Local distance between neighbouring blur taps, in scene units (about 4 px
+/// at the default 120 px per unit). Denser taps turn visible copies into a
+/// smooth falloff.
+const BLUR_TAP_SPACING: f64 = 0.03;
+/// Blur taps stop at this many sigmas; the Gaussian tail beyond is negligible.
+const BLUR_TAP_RADIUS: f64 = 2.5;
+/// Opacity reached where every tap overlaps, relative to the element alpha.
+const BLUR_CORE_COVERAGE: f32 = 0.97;
+
+/// Gaussian taps as `(offset, alpha)` pairs for a blur of `sigma` units.
+///
+/// Taps follow a golden-angle (Vogel) spiral whose radii invert the Rayleigh
+/// CDF, so equally weighted taps sample a 2D Gaussian. Their count grows with
+/// the blurred area and is capped to bound the cost per path. Each tap's alpha
+/// is chosen so that `count` overlapping taps composite to
+/// `BLUR_CORE_COVERAGE * alpha`, keeping solid interiors near full opacity.
+fn blur_taps(sigma: f64, alpha: f32) -> impl Iterator<Item = ((f64, f64), f32)> {
+    let extent = BLUR_TAP_RADIUS * sigma / BLUR_TAP_SPACING;
+    let count = (std::f64::consts::PI * extent * extent).ceil().clamp(13.0, 160.0) as u32;
+    let target = (BLUR_CORE_COVERAGE * alpha.clamp(0.0, 1.0)).min(0.999);
+    let tap_alpha = 1.0 - (1.0 - target).powf(1.0 / count as f32);
+    let tail = 1.0 - (-0.5 * BLUR_TAP_RADIUS * BLUR_TAP_RADIUS).exp();
+    let golden = std::f64::consts::PI * (3.0 - 5f64.sqrt());
+    (0..count).map(move |index| {
+        let u = (f64::from(index) + 0.5) / f64::from(count) * tail;
+        let radius = sigma * (-2.0 * (1.0 - u).ln()).sqrt();
+        let angle = f64::from(index) * golden;
+        ((radius * angle.cos(), radius * angle.sin()), tap_alpha)
+    })
+}
 
 fn draw_soft_fill(
     scene: &mut vello::Scene,
@@ -717,9 +860,9 @@ fn draw_soft_fill(
     alpha: f32,
     origin: kurbo::Affine,
 ) {
-    for ((x, y), weight) in BLUR_KERNEL {
-        let sample_brush = brush.clone().multiply_alpha(weight * alpha);
-        let transform = origin * kurbo::Affine::translate((x * sigma, y * sigma));
+    for ((x, y), weight) in blur_taps(sigma, alpha) {
+        let sample_brush = brush.clone().multiply_alpha(weight);
+        let transform = origin * kurbo::Affine::translate((x, y));
         scene.fill(peniko::Fill::NonZero, transform, &sample_brush, None, path);
     }
 }
@@ -732,12 +875,12 @@ fn draw_soft_stroke(
     sigma: f64,
     view: Option<kurbo::Affine>,
 ) {
-    for ((x, y), weight) in BLUR_KERNEL {
+    for ((x, y), weight) in blur_taps(sigma, 1.0) {
         let sample_brush = brush.clone().multiply_alpha(weight);
         draw_stroke(
             scene,
             style,
-            kurbo::Affine::translate((x * sigma, y * sigma)),
+            kurbo::Affine::translate((x, y)),
             &sample_brush,
             view,
             path,
@@ -1041,6 +1184,10 @@ pub fn compile_scene_from_world(
         .map_or(0.0, |state| state.current_time);
     let mut extracted = Vec::new();
     let mut culled_entities = std::collections::HashSet::new();
+    let transition_frame = world
+        .get_resource::<gaanim_scene::SceneTransitionFrame>()
+        .filter(|frame| !frame.is_empty())
+        .cloned();
     let opacity_fallback = world
         .get_resource::<CanvasBackground>()
         .map(|background| {
@@ -1378,6 +1525,13 @@ pub fn compile_scene_from_world(
             ),
             scene: Arc::new(scene),
             clip_mask: clip_opt.cloned(),
+            transition_side: transition_frame
+                .as_ref()
+                .map_or_else(Default::default, |frame| {
+                    frame.side_of(entity, |e| {
+                        child_query.get(world, e).ok().map(ChildOf::parent)
+                    })
+                }),
         });
     }
 
@@ -1407,8 +1561,14 @@ pub fn compile_scene_from_world(
                 &mut main_scene,
                 canvas_bg,
                 canvas_bg.pixel_size,
-                background_time,
+                transition_background_time(transition_frame.as_ref(), background_time),
                 None,
+            );
+            fill_transition_background(
+                &mut main_scene,
+                canvas_bg,
+                canvas_bg.pixel_size,
+                transition_frame.as_ref(),
             );
         }
     }
@@ -1416,7 +1576,12 @@ pub fn compile_scene_from_world(
     let composition_bounds = extracted.iter().fold(opacity_fallback, |bounds, elem| {
         bounds.union(elem.opacity_bounds)
     });
-    append_extracted_elements(&mut main_scene, &extracted, composition_bounds);
+    append_extracted_elements(
+        &mut main_scene,
+        &extracted,
+        composition_bounds,
+        transition_frame.as_ref(),
+    );
 
     main_scene
 }
@@ -1442,6 +1607,7 @@ pub fn gaanim_render_system(
     gaanim_camera: Option<Res<gaanim_math::ResolvedCamera>>,
     playback_state: Option<Res<gaanim_animation::PlaybackState>>,
     canvas_bg: Option<Res<CanvasBackground>>,
+    transition_frame: Option<Res<gaanim_scene::SceneTransitionFrame>>,
     child_query: Query<&ChildOf>,
     order_query: Query<&RenderOrder>,
     view_query: Query<(
@@ -1892,6 +2058,12 @@ pub fn gaanim_render_system(
             ),
             scene: Arc::clone(fragment),
             clip_mask: clip_ref.as_ref().map(|c| (**c).clone()),
+            transition_side: transition_frame
+                .as_deref()
+                .filter(|frame| !frame.is_empty())
+                .map_or_else(Default::default, |frame| {
+                    frame.side_of(entity, |e| child_query.get(e).ok().map(ChildOf::parent))
+                }),
         });
 
         // Accumulate AABB from WorldBounds if available, otherwise approximate from transform
@@ -1943,8 +2115,14 @@ pub fn gaanim_render_system(
                 &mut main_scene,
                 canvas_bg,
                 pixel_size,
-                time_seconds,
+                transition_background_time(transition_frame.as_deref(), time_seconds),
                 shader_frame.is_some().then_some(&mut shader_request),
+            );
+            fill_transition_background(
+                &mut main_scene,
+                canvas_bg,
+                pixel_size,
+                transition_frame.as_deref(),
             );
         }
     }
@@ -1962,6 +2140,9 @@ pub fn gaanim_render_system(
         &mut main_scene,
         local_extracted.as_slice(),
         composition_bounds,
+        transition_frame
+            .as_deref()
+            .filter(|frame| !frame.is_empty()),
     );
     local_extracted.clear();
 
@@ -2048,6 +2229,23 @@ mod tests {
 
     fn rect_path(x0: f64, y0: f64, x1: f64, y1: f64) -> Arc<kurbo::BezPath> {
         Arc::new(kurbo::Rect::new(x0, y0, x1, y1).to_path(0.1))
+    }
+
+    #[test]
+    fn blur_taps_sample_a_bounded_gaussian_with_a_solid_core() {
+        for sigma in [0.001, 0.05, 0.3, 4.0] {
+            let taps: Vec<_> = blur_taps(sigma, 0.8).collect();
+            assert!((13..=160).contains(&taps.len()), "{} taps", taps.len());
+            let max_radius = taps
+                .iter()
+                .map(|((x, y), _)| x.hypot(*y))
+                .fold(0.0, f64::max);
+            assert!(max_radius <= BLUR_TAP_RADIUS * sigma + 1e-9);
+            let core = 1.0 - taps.iter().map(|(_, a)| 1.0 - a).product::<f32>();
+            assert!((core - BLUR_CORE_COVERAGE * 0.8).abs() < 1e-3, "core {core}");
+        }
+        // Wider blurs use more taps so neighbouring copies stay close together.
+        assert!(blur_taps(0.3, 1.0).count() > blur_taps(0.02, 1.0).count());
     }
 
     #[test]
@@ -2530,6 +2728,7 @@ mod tests {
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),
             clip_mask: None,
+            transition_side: Default::default(),
         };
         let elements = vec![element(0.5), element(0.5), element(0.5), element(0.75)];
 
@@ -2552,6 +2751,7 @@ mod tests {
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),
             clip_mask,
+            transition_side: Default::default(),
         };
         let elements = vec![
             element(Some(mask(1, false))),
@@ -2567,6 +2767,30 @@ mod tests {
         // Inverted masks depend on each element's bounds and stay separate.
         assert_eq!(shared_clip_run_end(&elements, 3), 4);
         assert_eq!(shared_clip_run_end(&elements, 5), 6);
+    }
+
+    #[test]
+    fn transition_masks_are_isolated_layers_that_clip_nested_blend_layers() {
+        // vello's clip-only layer (`DrawBeginClip::CLIP_BLEND_MODE`) does not
+        // clip nested blend layers, such as the stroke layer of a text glyph.
+        const CLIP_ONLY: u32 = 0x8003;
+        let rect = kurbo::Rect::new(0.0, 0.0, 1.0, 1.0);
+        for fade in [
+            None,
+            Some((kurbo::Point::ZERO, kurbo::Point::new(1.0, 0.0))),
+        ] {
+            let mask = gaanim_scene::TransitionMask {
+                path: rect.to_path(0.1),
+                rule: peniko::Fill::NonZero,
+                fade,
+            };
+            let mut scene = vello::Scene::new();
+            push_transition_mask(&mut scene, &mask);
+            pop_transition_mask(&mut scene, &mask);
+            let draw_data = &scene.encoding().draw_data;
+            assert_ne!(draw_data.first(), Some(&CLIP_ONLY), "fade: {fade:?}");
+            assert!(!draw_data.contains(&CLIP_ONLY));
+        }
     }
 
     #[test]

@@ -31,6 +31,9 @@ use typst_syntax::ast::{
 };
 use typst_syntax::{SyntaxNode, parse_math};
 
+/// Marker-style highlighter behind text selections (AN-02).
+pub mod text_marker;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DrawMode {
     Grow,
@@ -263,7 +266,7 @@ fn normalized_match_spans(
     matches
 }
 
-fn adaptive_lag_ratio(item_count: usize) -> f64 {
+pub(crate) fn adaptive_lag_ratio(item_count: usize) -> f64 {
     (4.0 / item_count.max(1) as f64).min(0.2)
 }
 
@@ -345,7 +348,7 @@ fn bounds_edge_point(
 }
 
 /// Stagger slot of each of `count` groups for `order`.
-fn draw_group_slots(count: usize, order: crate::anim::DrawOrder) -> Vec<usize> {
+pub(crate) fn draw_group_slots(count: usize, order: crate::anim::DrawOrder) -> Vec<usize> {
     use crate::anim::DrawOrder;
     match order {
         DrawOrder::Forward => (0..count).collect(),
@@ -712,6 +715,10 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub(crate) media_frames: HashMap<ObjectId, gaanim_scene::MediaFrame>,
     /// Authored local geometry of solid arrows, used by `GrowArrow`.
     pub(crate) arrow_shapes: HashMap<ObjectId, gaanim_math::ArrowShape>,
+    /// Extra glyph tracking of Text roots set by `tracking(...)`, in scene units.
+    pub(crate) text_tracking: HashMap<ObjectId, f64>,
+    /// Typing state of Texts animated by typewriter/scramble motions.
+    pub(crate) text_motion: crate::text_motion::TextMotionState,
     /// Objects whose scene membership is intentionally global at the current authoring cursor.
     persistent_objects: HashSet<ObjectId>,
     /// Objects whose membership has an explicit reuse/persist/release schedule in this scene.
@@ -753,6 +760,8 @@ pub(crate) struct SceneBuilderState {
     effects: HashMap<ObjectId, crate::effect_lens::EffectState>,
     media_frames: HashMap<ObjectId, gaanim_scene::MediaFrame>,
     arrow_shapes: HashMap<ObjectId, gaanim_math::ArrowShape>,
+    text_tracking: HashMap<ObjectId, f64>,
+    text_motion: crate::text_motion::TextMotionState,
     persistent_objects: HashSet<ObjectId>,
     membership_managed_objects: HashSet<ObjectId>,
     text_cancellation_marks: HashMap<ObjectId, Vec<ObjectId>>,
@@ -782,6 +791,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             effects: self.effects.clone(),
             media_frames: self.media_frames.clone(),
             arrow_shapes: self.arrow_shapes.clone(),
+            text_tracking: self.text_tracking.clone(),
+            text_motion: self.text_motion.clone(),
             persistent_objects: self.persistent_objects.clone(),
             membership_managed_objects: self.membership_managed_objects.clone(),
             text_cancellation_marks: self.text_cancellation_marks.clone(),
@@ -818,6 +829,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             effects,
             media_frames,
             arrow_shapes,
+            text_tracking,
+            text_motion,
             persistent_objects,
             membership_managed_objects,
             text_cancellation_marks,
@@ -848,6 +861,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             path_arc: None,
             media_frames,
             arrow_shapes,
+            text_tracking,
+            text_motion,
             persistent_objects,
             membership_managed_objects,
             text_cancellation_marks,
@@ -1145,6 +1160,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             path_arc: None,
             media_frames: HashMap::new(),
             arrow_shapes: HashMap::new(),
+            text_tracking: HashMap::new(),
+            text_motion: Default::default(),
             property_bindings: HashMap::new(),
             property_source_cursors: HashMap::new(),
             persistent_objects: HashSet::new(),
@@ -1317,6 +1334,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::CameraReset
             | AnimationType::CameraDolly { .. } => "Camera",
             AnimationType::GltfAnimation { .. } => "Action",
+            AnimationType::TextMotion(_) => "TextMotion",
             AnimationType::Properties { .. } => "Properties",
             AnimationType::Write { .. } => "Write",
             AnimationType::Create { .. } => "Create",
@@ -1362,6 +1380,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 TextSelectionEffect::Cancel => "CancelText",
                 TextSelectionEffect::Brace { .. } => "BraceText",
                 TextSelectionEffect::Annotate { .. } => "AnnotateText",
+                TextSelectionEffect::Marker(_) => "MarkerText",
                 _ => "TextSelection",
             },
             AnimationType::FadeTransform { .. }
@@ -1376,6 +1395,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::GrowArrow => "Arrow",
             AnimationType::SignalFloat { .. } => "Signal",
             AnimationType::ShowPassingFlash { .. } => "ShowPassingFlash",
+            AnimationType::TextAnimator(_) => "TextAnimator",
         }
     }
 
@@ -2250,6 +2270,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             TextSelectionEffect::Annotate { label, offset } => {
                 self.play_text_selection_annotate_internal(anim, &selected, label, offset);
             }
+            TextSelectionEffect::Marker(style) => {
+                self.play_text_selection_marker_internal(anim, &selected, style);
+            }
             effect => {
                 let count = selected.len();
                 for (index, target) in selected.into_iter().enumerate() {
@@ -2317,7 +2340,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         TextSelectionEffect::Focus
                         | TextSelectionEffect::Cancel
                         | TextSelectionEffect::Brace { .. }
-                        | TextSelectionEffect::Annotate { .. } => unreachable!(),
+                        | TextSelectionEffect::Annotate { .. }
+                        | TextSelectionEffect::Marker(_) => unreachable!(),
                     };
                     self.play_internal(AnimationBuilder {
                         target,
@@ -2752,6 +2776,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_text_selection_internal(anim, fragment, occurrence, effect);
             return;
         }
+        if let AnimationType::TextAnimator(spec) = anim.anim_type.clone() {
+            self.play_text_animator_internal(anim, *spec);
+            return;
+        }
         if let AnimationType::TextSelectionProperties {
             fragment,
             occurrence,
@@ -2911,6 +2939,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
         if matches!(anim.anim_type, AnimationType::PathTrim { .. }) {
             self.play_path_trim_internal(anim, track);
+            return;
+        }
+        if matches!(anim.anim_type, AnimationType::TextMotion(_)) {
+            self.play_text_motion_internal(anim, track);
             return;
         }
         if matches!(anim.anim_type, AnimationType::GrowFromPoint { .. }) {
@@ -3194,6 +3226,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::CameraReset
             | AnimationType::CameraDolly { .. }
             | AnimationType::GltfAnimation { .. }
+            | AnimationType::TextMotion(_)
             | AnimationType::Write { .. }
             | AnimationType::Create { .. }
             | AnimationType::Create3D
@@ -3218,7 +3251,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::MoveAlongPath3D { .. }
             | AnimationType::Transform { .. }
             | AnimationType::ReplacementTransform { .. }
-            | AnimationType::GrowArrow => {
+            | AnimationType::GrowArrow
+            | AnimationType::TextAnimator(_) => {
                 unreachable!("Expansion is dispatched in the early branch above")
             }
             AnimationType::SignalFloat { to } => {

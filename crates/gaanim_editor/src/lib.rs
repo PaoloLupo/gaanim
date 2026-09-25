@@ -626,6 +626,21 @@ fn editor_ui_system(
                             })
                             .collect();
 
+                        let seek_markers: Vec<SeekMarker> = timeline
+                            .markers
+                            .iter()
+                            .map(|marker| SeekMarker {
+                                frac: (marker.time as f32 / total_f32).clamp(0.0, 1.0),
+                                time: marker.time,
+                                name: marker.name.clone(),
+                            })
+                            .collect();
+                        let snap_points: Vec<f32> = bp_fracs
+                            .iter()
+                            .copied()
+                            .chain(seek_markers.iter().map(|marker| marker.frac))
+                            .collect();
+
                         let seek_resp = paint_seek_bar(
                             ui,
                             frac,
@@ -635,12 +650,15 @@ fn editor_ui_system(
                             &mut state.seek_bar_drag_target,
                             total,
                             snapping_allowed,
+                            &seek_markers,
                         );
-                        if let Some(new_frac) = seek_resp.seek_to {
+                        if let Some(time) = seek_resp.marker_jump {
+                            timeline.seek_request = Some(time);
+                        } else if let Some(new_frac) = seek_resp.seek_to {
                             let snapped_frac = snap_seek_fraction(
                                 new_frac,
                                 &scene_segs,
-                                &bp_fracs,
+                                &snap_points,
                                 snapping_allowed,
                             );
                             timeline.seek_request = Some(snapped_frac as f64 * total);
@@ -1179,6 +1197,29 @@ struct SeekBarResponse {
     hover_time: Option<f64>,
     /// If Some, the user dragged a loop handle to a new (start_frac, end_frac).
     loop_drag: Option<(f32, f32)>,
+    /// Exact time of a `scene.marker` the user clicked; wins over `seek_to`.
+    marker_jump: Option<f64>,
+}
+
+/// A `scene.marker` drawn on the seek bar.
+struct SeekMarker {
+    frac: f32,
+    time: f64,
+    name: String,
+}
+
+const MARKER_COLOR: egui::Color32 = egui::Color32::from_rgb(214, 140, 255);
+const MARKER_HIT_RADIUS: f32 = 5.0;
+
+/// Index of the marker under `x`, preferring the closest one.
+fn marker_at(markers: &[SeekMarker], x: f32, x_at: impl Fn(f32) -> f32) -> Option<usize> {
+    markers
+        .iter()
+        .enumerate()
+        .map(|(index, marker)| (index, (x - x_at(marker.frac)).abs()))
+        .filter(|(_, distance)| *distance < MARKER_HIT_RADIUS)
+        .min_by(|left, right| left.1.total_cmp(&right.1))
+        .map(|(index, _)| index)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1244,6 +1285,7 @@ fn paint_seek_bar(
     drag_target: &mut Option<SeekBarDragTarget>,
     total: f64,
     snapping_enabled: bool,
+    markers: &[SeekMarker],
 ) -> SeekBarResponse {
     const LANE_H: f32 = 22.0;
     const LANE_GAP: f32 = 6.0;
@@ -1487,6 +1529,44 @@ fn paint_seek_bar(
         );
     }
 
+    // ── Markers: small downward triangles above the track ─────────────────
+    let in_track_zone = |pos: egui::Pos2| pos.y > lane_rect.max.y || !has_scenes;
+    let hovered_marker = pointer
+        .filter(|pos| in_track_zone(*pos))
+        .and_then(|pos| marker_at(markers, pos.x, x_at));
+    let marker_top = bar_y - TRACK_ZONE_H / 2.0;
+    for (index, marker) in markers.iter().enumerate() {
+        let mx = x_at(marker.frac);
+        let half = if hovered_marker == Some(index) {
+            5.0
+        } else {
+            3.5
+        };
+        let color = if marker.frac <= frac + 1e-4 {
+            MARKER_COLOR.gamma_multiply(0.55)
+        } else {
+            MARKER_COLOR
+        };
+        painter.add(egui::Shape::convex_polygon(
+            vec![
+                egui::pos2(mx - half, marker_top),
+                egui::pos2(mx + half, marker_top),
+                egui::pos2(mx, marker_top + half * 1.3),
+            ],
+            color,
+            egui::Stroke::NONE,
+        ));
+    }
+    if hovered_marker.is_some() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    let snap_points: Vec<f32> = bp_fracs
+        .iter()
+        .copied()
+        .chain(markers.iter().map(|marker| marker.frac))
+        .collect();
+    let bp_fracs = snap_points.as_slice();
+
     // ── Hover guide + snap indicator ────────────────────────────────────
     let mut hover_time = None;
     if let (Some(pos), Some(hf)) = (pointer, hover_frac) {
@@ -1516,8 +1596,9 @@ fn paint_seek_bar(
         }
 
         // Tooltip: "Scene · 0:12.34", kept inside the bar horizontally.
-        let name = hovered_scene_idx
-            .map(|i| scene_display_name(&scenes[i].name))
+        let name = hovered_marker
+            .map(|i| markers[i].name.as_str())
+            .or_else(|| hovered_scene_idx.map(|i| scene_display_name(&scenes[i].name)))
             .unwrap_or("");
         let mut job = egui::text::LayoutJob::default();
         if !name.is_empty() {
@@ -1596,13 +1677,19 @@ fn paint_seek_bar(
     // ── Interaction: chapter → scene start, loop handle → range, else seek
     let mut seek_to = None;
     let mut loop_drag = None;
+    let mut marker_jump = None;
     let frac_at = |x: f32| ((x - rect.min.x) / rect.width()).clamp(0.0, 1.0);
 
     if response.clicked() {
         if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
             let on_loop_handle = loop_x
                 .is_some_and(|(lx0, lx1)| (pos.x - lx0).abs() < 10.0 || (pos.x - lx1).abs() < 10.0);
-            if !on_loop_handle {
+            let clicked_marker = in_track_zone(pos)
+                .then(|| marker_at(markers, pos.x, x_at))
+                .flatten();
+            if let Some(index) = clicked_marker {
+                marker_jump = Some(markers[index].time);
+            } else if !on_loop_handle {
                 let chapter = (has_scenes && lane_rect.contains(pos))
                     .then(|| scene_at(frac_at(pos.x)))
                     .flatten();
@@ -1656,6 +1743,7 @@ fn paint_seek_bar(
         seek_to,
         hover_time,
         loop_drag,
+        marker_jump,
     }
 }
 
@@ -2982,6 +3070,19 @@ mod tests {
             .map(|group| (group.label, group.members))
             .collect();
         assert_eq!(groups, vec![("Problemática", 1..3), ("Fundamentos", 3..6)]);
+    }
+
+    #[test]
+    fn seek_bar_hits_the_closest_scene_marker() {
+        let markers = [0.25_f32, 0.3].map(|frac| SeekMarker {
+            frac,
+            time: frac as f64 * 10.0,
+            name: format!("m{frac}"),
+        });
+        let x_at = |frac: f32| frac * 100.0;
+        assert_eq!(marker_at(&markers, 26.0, x_at), Some(0));
+        assert_eq!(marker_at(&markers, 28.5, x_at), Some(1));
+        assert_eq!(marker_at(&markers, 50.0, x_at), None);
     }
 
     #[test]

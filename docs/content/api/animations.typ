@@ -453,6 +453,67 @@ scene.render()
 ```
 ]
 
+=== Máquina de escribir y decodificación
+
+#api-entry(
+  name: "Text.animate.typewriter / backspace / retype",
+  kind: "method",
+  signature: ".animate.typewriter(cps=18.0, cursor=\"▍\", blink=2.0, jitter=0.2, seed=0, keep_cursor=True) .animate.backspace(count=None, cps=24.0) .animate.retype(text, cps=18.0, jitter=0.2, seed=0) -> Anim",
+  params: (
+    (name: "cps", type: "float", default: "18.0", desc: [Keystrokes per second (`backspace`: deletions per second, default 24). Must be positive.]),
+    (name: "cursor", type: "str | None", default: "\"▍\"", desc: [String drawn after the last typed grapheme; #raw("None") or #raw("\"\"") for none. Block characters (#raw("▏") to #raw("█")) are exact rectangles, independent of the font.]),
+    (name: "blink", type: "float", default: "2.0", desc: [On/off cycles per second of the idle cursor; #raw("0") keeps it solid. The cursor is solid while typing.]),
+    (name: "jitter", type: "float", default: "0.2", desc: [Each keystroke interval is scaled by a factor in #raw("[1 - jitter, 1 + jitter]"); must be in #raw("[0, 1)").]),
+    (name: "seed", type: "int", default: "0", desc: [Seed of the keystroke rhythm. Timing is a pure function of seed, grapheme index and time.]),
+    (name: "keep_cursor", type: "bool", default: "True", desc: [Keep the (blinking) cursor after typing; #raw("False") removes it at the end.]),
+    (name: "count", type: "int | None", default: "None", desc: [`backspace`: graphemes to delete from the end, capped at the visible ones; #raw("None") deletes all.]),
+    (name: "text", type: "str", default: none, desc: [`retype`: new plain text. The prefix shared with the visible text is kept; the rest is deleted and typed.]),
+  ),
+  returns: (type: "Anim", desc: [Text motion accepted by #raw("scene.play()"), with linear timing.]),
+  desc: [`typewriter` clears the Text and reveals ⌊t·cps⌋ graphemes (with jitter) in their final layout, so nothing reflows; the cursor follows the pen of the last typed grapheme, across lines. `backspace` removes graphemes from the end and `retype` deletes back to the shared prefix, then types the rest of `text`, laid out with the Text's style from the same pen origin. Without an explicit duration each motion lasts until its last keystroke (about `graphemes / cps`); `.duration(...)` rescales the rhythm. Every glyph is evaluated natively from the clip time, so seeks, snapshots and export match continuous playback. Raises `ValueError` for invalid numbers or an empty `text`, and `TypeError` unless the proxy belongs to a whole Text.],
+)[
+```python
+# show-code: true
+from gaanim import CYAN, Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+prompt = scene.text("gaanim render", role="code").fill(CYAN).move_to(-3, 0)
+scene.play([prompt.animate.typewriter(cps=18, cursor="▍")])
+scene.wait(0.4)
+scene.play([prompt.animate.backspace(6)])
+scene.play([prompt.animate.retype("gaanim export --from clímax")])
+scene.wait(0.6)
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Text.animate.scramble / scramble_to",
+  kind: "method",
+  signature: ".animate.scramble(charset=\"upper\", reveal_delay=0.3, speed=20.0, seed=0) .animate.scramble_to(text, charset=\"upper\", reveal_delay=0.3, speed=20.0, seed=0) -> Anim",
+  params: (
+    (name: "charset", type: "str", default: "\"upper\"", desc: [#raw("\"upper\""), #raw("\"lower\""), #raw("\"digits\""), #raw("\"hex\""), #raw("\"symbols\"") or a literal string such as #raw("\"01\""). Its glyphs are shaped once with the Text's font.]),
+    (name: "reveal_delay", type: "float", default: "0.3", desc: [Seconds every position scrambles before the first one settles. Non-negative.]),
+    (name: "speed", type: "float", default: "20.0", desc: [Glyph changes per second. Positive.]),
+    (name: "seed", type: "int", default: "0", desc: [Seed of the glyph choice #raw("hash(seed, index, floor(t * speed))").]),
+    (name: "text", type: "str", default: none, desc: [`scramble_to`: new plain text to decode into.]),
+  ),
+  returns: (type: "Anim", desc: [Text motion accepted by #raw("scene.play()"), with linear timing.]),
+  desc: [A decoding reveal: each non-space grapheme shows seeded charset glyphs centered in its final cell, then settles to the real glyph from left to right after `reveal_delay`. The final text's layout is reserved, so the width never jumps; `scramble_to` hides the current glyphs and decodes the new text in its own layout. The default duration is `reveal_delay` plus 0.05 s per grapheme (at least 0.6 s). Frames are exact for any seek.],
+)[
+```python
+# show-code: true
+from gaanim import GOLD, Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+label = scene.text("LAUNCH SEQUENCE", role="title").fill(GOLD).move_to(0, 0)
+scene.play([label.animate.scramble(charset="upper", reveal_delay=0.3, speed=20)])
+scene.wait(0.4)
+scene.play([label.animate.scramble_to("LANZAMIENTO", charset="01")])
+# output: preview.webp
+scene.render()
+```
+]
+
 == Énfasis
 
 #api-entry(
@@ -856,6 +917,43 @@ def entrance(*items: Playable) -> Playable:
 ```
 ]
 
+=== Etiquetas y posiciones relativas
+
+#api-entry(
+  name: "label / Composition.insert",
+  kind: "function",
+  signature: "label(name: str) -> Composition | Composition.insert(item, at: str | float) -> Composition",
+  params: (
+    (name: "name", type: "str", default: none, desc: [Unique label name within the composition tree. Empty names, numbers and names starting with `<`, `>`, `+`, `-` or `=` raise `ValueError`.]),
+    (name: "item", type: "Anim | Audio | Video | VideoSegment | Lottie | Composition", default: none, desc: [Item placed at `at`; it may itself be a `label`, which later inserts can reference.]),
+    (name: "at", type: "str | float", default: none, desc: [`"name"`, `"name+0.15"`, `"name-0.2"` or `"name+=0.15"`: a label plus an offset. `"<"` / `">"` (also `"<+0.1"`, `">-0.2"`): start / end of the previous item, i.e. the most recent non-label insert or else the last child. `"+=0.3"` / `"-=0.3"`: relative to the current end. A number: absolute local seconds.]),
+  ),
+  returns: (type: "Composition", desc: [A new immutable tree; the original is unchanged.]),
+  desc: [A `label` is a zero-duration named instant. In a `sequence` it takes no step and no `gap`: it marks where the next step starts, or where the previous step ends when it is last. Positions resolve to absolute local times when the composition is scheduled or played; inserts go after the children and before `stretch`, `repeat` and `delay`. A malformed `at` raises `ValueError` immediately; an unknown label (the error lists the defined ones) or a position before 0 raises `ValueError` from `schedule()` or `scene.play`. An exact label name always wins, so `"part-2"` finds a label called `"part-2"`.],
+)[
+```python
+from gaanim import label, sequence
+
+intro = (
+    sequence(
+        title.animate.write().duration(0.8),
+        label("golpe"),
+        subtitle.animate.fade_in().duration(0.4),
+    )
+    .insert(logo.animate.grow_from_center(), at="golpe+0.15")
+    .insert(glow.animate.flash(), at="<")        # starts with the logo
+    .insert(footer.animate.fade_in(), at="-=0.2")  # overlaps the end
+)
+print(intro.schedule().labels)  # {'golpe': 0.8}
+scene.play(intro)
+```
+
+`Schedule.labels` is a `dict` of resolved label times in local seconds, in time
+order, including nested and inserted labels. A stretched composition scales
+them; a repeated one reports the first repetition. For named instants on the
+global timeline use `scene.marker` (see Escena).
+]
+
 == Tiempo y easing
 
 Configure any `Anim` fluently before passing to `play`:
@@ -1062,3 +1160,128 @@ scene.render()
 fuente dentro de un marco fijo, con las unidades descritas en la API de medios.
 `VideoSegment` es una hoja finita de composición: admite `parallel`, `sequence`
 y `stagger`, pero no `stretch`. Su velocidad se configura al crear el fragmento.
+
+== Transiciones entre segmentos
+
+`Transition` describe el paso de un segmento al siguiente en `scene.segment(...)`
+o `scene.link(...)`. Todas las transiciones salvo `cut` aceptan `easing=`, con
+cualquier `Easing`, incluidos los springs que sobrepasan el destino. Todas
+aceptan `overlay=`, un `Overlay` dibujado encima del corte. Ninguna de las dos
+opciones cambia la duración de los segmentos. Sin `easing`, `cross_fade`,
+`fade_through`, `zoom_through` y `morph` avanzan de forma lineal. Los revelados
+vectoriales (`wipe`, `clock_wipe`, `iris`, `blinds`, `push` y `slide`) usan
+`Easing.SMOOTH`.
+
+Los revelados vectoriales recortan ambos segmentos con caminos animados dentro
+del marco visible de la cámara: el entrante se ve dentro de la región revelada
+y el saliente en el resto. Si los segmentos tienen fondos distintos, el fondo
+entrante se revela con la misma forma. Todo es geometría `kurbo`, sin texturas
+intermedias, así que la transición es nítida a cualquier resolución y un seek
+reproduce exactamente el mismo frame. El borde suave de `wipe(feather=...)` es
+una rampa de alfa lineal compuesta vectorialmente (`DestIn`), también sin
+texturas. Los objetos persistentes (`scene.persist`) no se recortan ni se
+desplazan.
+
+#api-entry(
+  name: "Transition.wipe",
+  kind: "factory",
+  signature: "Transition.wipe(duration: float, direction: str = \"left\", feather: float = 0.1, *, easing: Easing | None = None, overlay: Overlay | None = None) -> Transition",
+  params: (
+    (name: "duration", type: "float", default: none, desc: [Segundos, positivo.]),
+    (name: "direction", type: "str", default: "\"left\"", desc: [Sentido en que viaja el borde: `left`, `right`, `up`, `down` o una diagonal como `up_left`. Con `"left"` el revelado empieza en el lado derecho.]),
+    (name: "feather", type: "float", default: "0.1", desc: [Ancho del borde suave como fracción del recorrido, en `[0, 1]`. `0` da un borde duro.]),
+  ),
+  returns: (type: "Transition", desc: [Barrido lineal.]),
+  desc: [Un borde recto cruza el marco y descubre el segmento entrante. Una duración no positiva, una dirección desconocida o un `feather` fuera de `[0, 1]` lanzan `ValueError`.],
+)[
+```python
+scene.segment("detalle", Transition.wipe(0.6, direction="left", feather=0.1))
+```
+]
+
+#api-entry(
+  name: "Transition.clock_wipe",
+  kind: "factory",
+  signature: "Transition.clock_wipe(duration: float, start_angle: float = 90.0, *, easing: Easing | None = None, overlay: Overlay | None = None) -> Transition",
+  params: (
+    (name: "duration", type: "float", default: none, desc: [Segundos, positivo.]),
+    (name: "start_angle", type: "float", default: "90.0", desc: [Grados en sentido antihorario desde +x; `90` empieza a las doce.]),
+  ),
+  returns: (type: "Transition", desc: [Barrido radial.]),
+  desc: [Una aguja gira en sentido horario alrededor del centro del marco y deja ver el segmento entrante en el sector recorrido.],
+)[
+```python
+scene.segment("resumen", Transition.clock_wipe(0.8, start_angle=90))
+```
+]
+
+#api-entry(
+  name: "Transition.iris",
+  kind: "factory",
+  signature: "Transition.iris(duration: float, center: tuple[float, float] = (0.0, 0.0), shape: str | Drawable = \"circle\", *, easing: Easing | None = None, overlay: Overlay | None = None) -> Transition",
+  params: (
+    (name: "duration", type: "float", default: none, desc: [Segundos, positivo.]),
+    (name: "center", type: "tuple[float, float]", default: "(0.0, 0.0)", desc: [Centro del iris en unidades de escena.]),
+    (name: "shape", type: "str | Drawable", default: "\"circle\"", desc: [`circle`, `diamond`, `square`, `star` o un `Drawable` cuyo contorno vectorial se usa como plantilla.]),
+  ),
+  returns: (type: "Transition", desc: [Iris que crece hasta cubrir el marco.]),
+  desc: [La forma crece desde `center` hasta que el segmento entrante ocupa todo el marco. Un `Drawable` se centra en su caja; se sigue dibujando en su propio segmento, así que conviene ocultarlo si solo sirve de plantilla. Uno sin camino vuelve al círculo. Un nombre desconocido lanza `ValueError`.],
+)[
+```python
+scene.segment("zoom", Transition.iris(0.7, center=(2, 1), shape="star"))
+```
+]
+
+#api-entry(
+  name: "Transition.blinds",
+  kind: "factory",
+  signature: "Transition.blinds(duration: float, count: int = 8, angle: float = 0.0, *, easing: Easing | None = None, overlay: Overlay | None = None) -> Transition",
+  params: (
+    (name: "duration", type: "float", default: none, desc: [Segundos, positivo.]),
+    (name: "count", type: "int", default: "8", desc: [Número de lamas, entre 1 y 512.]),
+    (name: "angle", type: "float", default: "0.0", desc: [Inclinación de las lamas en grados; `0` son lamas horizontales que se abren hacia abajo.]),
+  ),
+  returns: (type: "Transition", desc: [Persiana veneciana.]),
+  desc: [Todas las lamas se abren a la vez y en la misma fracción.],
+)[
+```python
+scene.segment("datos", Transition.blinds(0.6, count=8, angle=0))
+```
+]
+
+#api-entry(
+  name: "Transition.push",
+  kind: "factory",
+  signature: "Transition.push(duration: float, direction: str = \"up\", *, easing: Easing | None = None, overlay: Overlay | None = None) -> Transition",
+  params: (
+    (name: "duration", type: "float", default: none, desc: [Segundos, positivo.]),
+    (name: "direction", type: "str", default: "\"up\"", desc: [Movimiento de ambos marcos: `left`, `right`, `up` o `down`.]),
+  ),
+  returns: (type: "Transition", desc: [Empuje.]),
+  desc: [El segmento entrante empuja al saliente fuera del marco: ambos se desplazan un ancho o un alto de marco y cada uno queda recortado a su propio marco. `Transition.slide(duration, direction)` es la variante en la que el saliente queda quieto y el entrante lo cubre al deslizarse encima.],
+)[
+```python
+scene.segment("siguiente", Transition.push(0.5, direction="up"))
+scene.segment("final", Transition.slide(0.5, "left", easing=Easing.spring(bounce=0.2)))
+```
+]
+
+#api-entry(
+  name: "Overlay",
+  kind: "class",
+  signature: "Overlay.flash(color: Color | None = None, duration: float = 0.2) | Overlay.light_leak(seed: int = 0, hue: float = 0.1, duration: float = 0.8, intensity: float = 0.8)",
+  params: (
+    (name: "color", type: "Color | None", default: "None", desc: [Color del destello; blanco si se omite.]),
+    (name: "seed", type: "int", default: "0", desc: [Semilla de la disposición de las manchas de luz.]),
+    (name: "hue", type: "float", default: "0.1", desc: [Tono base en vueltas: `0.1` naranja cálido, `0.6` azul.]),
+    (name: "duration", type: "float", default: "0.2 / 0.8", desc: [Segundos, positivo. La ventana se centra en el punto medio de la transición; en `cut`, en el propio corte.]),
+    (name: "intensity", type: "float", default: "0.8", desc: [Brillo máximo, en `[0, 4]`.]),
+  ),
+  returns: (type: "Overlay", desc: [Capa para `overlay=` de cualquier `Transition`.]),
+  desc: [`flash` cubre el marco con un color que sube durante la primera mitad y se apaga en la segunda. `light_leak` dibuja manchas de luz suaves en modo pantalla (`screen`) que derivan por el marco. Las dos son funciones puras del tiempo y de la semilla, así que preview, seek y export coinciden. Valores fuera de rango lanzan `ValueError`.],
+)[
+```python
+scene.segment("impacto", Transition.cut(overlay=Overlay.flash(WHITE, 0.15)))
+scene.segment("cálido", Transition.cross_fade(0.4, overlay=Overlay.light_leak(seed=2, hue=0.1)))
+```
+]

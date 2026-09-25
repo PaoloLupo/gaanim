@@ -12,6 +12,7 @@ pub use ops::{
 mod types;
 pub use gaanim_layout::{Anchor, Direction};
 pub use gaanim_text::prelude::TextAnchor;
+pub use segment::SceneMarker;
 pub use segment::{
     PresentationBrand, SegmentError, SegmentHandle, SegmentId, SegmentManifest, SegmentSpec,
     SegmentStop,
@@ -61,6 +62,7 @@ pub use canvas_impl::{
     SupportHandle, SurroundingRectError, SurroundingRectHandle, ThemeError, TypstAssetError,
     VideoClip, VideoLoadError, VideoSegment, stagger_weights,
 };
+pub use canvas_impl::{InsertPosition, ScheduleLabel};
 pub use gaanim_media::narration::{MarkerSource, ScriptSection, TakeFiles};
 pub use narration::{
     LiveTakeSpec, MarkerSpec, NarrationManifest, ScriptSpec, TextSource, VoiceoverError,
@@ -76,7 +78,12 @@ pub(crate) use compile::{
     CompileCheckpoint, SegmentMarker, split_text_math, text_inline_typst_source,
 };
 mod incremental;
+mod text_motion;
 pub(crate) use incremental::SceneFingerprints;
+pub mod text_animator;
+pub use text_animator::{
+    SelectorShape, TextAnimator, TextAnimatorError, TextAnimatorOut, TextRevealStyle,
+};
 
 /// dotLottie selectors and typed inputs.
 pub use gaanim_renderer::lottie::{LottieInput, LottiePackageOptions};

@@ -621,36 +621,70 @@ class LayoutOwnershipError(Exception):
     """Raised when a Layout cannot take or retain ownership of child position."""
 
 class Transition:
+    """Effect used between two segments (``scene.segment`` or ``scene.link``).
+
+    Every transition except ``cut`` accepts ``easing=`` (any ``Easing``,
+    including springs, which may overshoot) and every transition accepts
+    ``overlay=`` (an ``Overlay`` drawn above the cut). Neither changes a
+    segment's duration. Without ``easing`` the original transitions run
+    linearly and the vector reveals (``wipe``, ``clock_wipe``, ``iris``,
+    ``blinds``, ``push``, ``slide``) use ``Easing.SMOOTH``. Vector reveals
+    clip both segments with animated paths in the visible camera frame, so
+    they stay sharp at any resolution and need no textures.
+    """
+
     @staticmethod
-    def cut() -> Transition:
-        """Create a cut transition.
+    def cut(*, overlay: Optional[Overlay] = None) -> Transition:
+        """Switch segments instantly, optionally under an ``overlay``.
 
         Example:
-            result = Transition.cut()
+            result = Transition.cut(overlay=Overlay.flash(WHITE, 0.15))
         """
         ...
     @staticmethod
-    def cross_fade(duration: float) -> Transition:
-        """Create a cross fade transition.
+    def cross_fade(
+        duration: float,
+        *,
+        easing: Optional[Easing] = None,
+        overlay: Optional[Overlay] = None,
+    ) -> Transition:
+        """Fade the outgoing segment out while the incoming one fades in.
 
         Example:
-            result = Transition.cross_fade(1.0)
+            result = Transition.cross_fade(0.4, overlay=Overlay.light_leak(seed=2, hue=0.1))
         """
         ...
     @staticmethod
-    def fade_through(duration: float, color: Color) -> Transition:
-        """Create a fade through transition.
+    def fade_through(
+        duration: float,
+        color: Color,
+        *,
+        easing: Optional[Easing] = None,
+        overlay: Optional[Overlay] = None,
+    ) -> Transition:
+        """Fade out during the first half and fade the next segment in during the second.
 
         Example:
             result = Transition.fade_through(1.0, BLUE)
         """
         ...
     @staticmethod
-    def slide(duration: float, direction: str) -> Transition:
-        """Create a slide transition.
+    def slide(
+        duration: float,
+        direction: str,
+        *,
+        easing: Optional[Easing] = None,
+        overlay: Optional[Overlay] = None,
+    ) -> Transition:
+        """Slide the incoming segment over the still outgoing one.
+
+        ``direction`` (``"left"``, ``"right"``, ``"up"``, ``"down"``) is the
+        motion of the incoming frame, which covers the outgoing segment as it
+        travels one frame width or height. Use ``push`` to move both. Raises
+        ``ValueError`` for another direction.
 
         Example:
-            result = Transition.slide(1.0, "right")
+            result = Transition.slide(0.5, "left", easing=Easing.spring(bounce=0.2))
         """
         ...
     @staticmethod
@@ -659,15 +693,23 @@ class Transition:
         *,
         center: tuple[float, float] = (0.0, 0.0),
         max_zoom: float = 4.0,
+        easing: Optional[Easing] = None,
+        overlay: Optional[Overlay] = None,
     ) -> Transition:
-        """Create a zoom through transition.
+        """Zoom the camera into the outgoing segment and back out on the incoming one.
 
         Example:
             result = Transition.zoom_through(1.0)
         """
         ...
     @staticmethod
-    def morph(duration: float, *, pairs: Sequence[tuple[Drawable, Drawable]] = ()) -> Transition:
+    def morph(
+        duration: float,
+        *,
+        pairs: Sequence[tuple[Drawable, Drawable]] = (),
+        easing: Optional[Easing] = None,
+        overlay: Optional[Overlay] = None,
+    ) -> Transition:
         """Carry paired drawables from the outgoing segment into the incoming one.
 
         Each ``(source, target)`` pair shares one bounding box that travels
@@ -681,6 +723,143 @@ class Transition:
 
         Example:
             scene.link(overview, detail, Transition.morph(0.8, pairs=[(card, panel)]))
+        """
+        ...
+    @staticmethod
+    def wipe(
+        duration: float,
+        direction: str = "left",
+        feather: float = 0.1,
+        *,
+        easing: Optional[Easing] = None,
+        overlay: Optional[Overlay] = None,
+    ) -> Transition:
+        """Sweep a straight edge across the frame to reveal the next segment.
+
+        ``direction`` is the travel of the edge: ``"left"``, ``"right"``,
+        ``"up"``, ``"down"`` or a diagonal such as ``"up_left"``. ``"left"``
+        starts revealing at the right side. ``feather`` in ``[0, 1]`` is the
+        soft-edge width as a fraction of the travel; the soft edge is a vector
+        alpha ramp, and ``0`` gives a hard edge. Raises ``ValueError`` for a
+        non-positive duration, an unknown direction or a feather outside
+        ``[0, 1]``.
+
+        Example:
+            result = Transition.wipe(0.6, direction="left", feather=0.1)
+        """
+        ...
+    @staticmethod
+    def clock_wipe(
+        duration: float,
+        start_angle: float = 90.0,
+        *,
+        easing: Optional[Easing] = None,
+        overlay: Optional[Overlay] = None,
+    ) -> Transition:
+        """Reveal the next segment behind a hand sweeping clockwise around the frame center.
+
+        ``start_angle`` is in degrees, counter-clockwise from +x, so the
+        default ``90`` starts at twelve o'clock. Raises ``ValueError`` for a
+        non-positive duration or a non-finite angle.
+
+        Example:
+            result = Transition.clock_wipe(0.8, start_angle=90)
+        """
+        ...
+    @staticmethod
+    def iris(
+        duration: float,
+        center: tuple[float, float] = (0.0, 0.0),
+        shape: str | Drawable = "circle",
+        *,
+        easing: Optional[Easing] = None,
+        overlay: Optional[Overlay] = None,
+    ) -> Transition:
+        """Open a shape from ``center`` (scene units) until the next segment fills the frame.
+
+        ``shape`` is ``"circle"``, ``"diamond"``, ``"square"``, ``"star"`` or
+        a ``Drawable`` whose vector outline is used (centered on its bounds;
+        the drawable itself is still drawn in its own segment, so hide it if
+        it is only a stencil). A drawable without a path falls back to a
+        circle. Raises ``ValueError`` for a non-positive duration, a
+        non-finite center or an unknown shape name.
+
+        Example:
+            result = Transition.iris(0.7, center=(2, 1), shape="circle")
+        """
+        ...
+    @staticmethod
+    def blinds(
+        duration: float,
+        count: int = 8,
+        angle: float = 0.0,
+        *,
+        easing: Optional[Easing] = None,
+        overlay: Optional[Overlay] = None,
+    ) -> Transition:
+        """Open ``count`` parallel slats together to reveal the next segment.
+
+        ``angle`` tilts the slats in degrees; ``0`` gives horizontal slats that
+        open downwards. Raises ``ValueError`` for a non-positive duration, a
+        count outside ``1..512`` or a non-finite angle.
+
+        Example:
+            result = Transition.blinds(0.6, count=8, angle=0)
+        """
+        ...
+    @staticmethod
+    def push(
+        duration: float,
+        direction: str = "up",
+        *,
+        easing: Optional[Easing] = None,
+        overlay: Optional[Overlay] = None,
+    ) -> Transition:
+        """Let the incoming segment push the outgoing one out of the frame.
+
+        Both frames move together by one frame width or height in
+        ``direction`` (``"left"``, ``"right"``, ``"up"``, ``"down"``), each
+        clipped to its own frame. Raises ``ValueError`` for a non-positive
+        duration or another direction.
+
+        Example:
+            result = Transition.push(0.5, direction="up")
+        """
+        ...
+
+class Overlay:
+    """A look drawn above a transition, centered on its midpoint (the cut for
+    ``Transition.cut``). Overlays never change segment durations and are pure
+    functions of time, so seeks and exports match playback exactly.
+    """
+
+    @staticmethod
+    def flash(color: Optional[Color] = None, duration: float = 0.2) -> Overlay:
+        """Flash the whole frame with ``color`` (white by default), peaking at the cut.
+
+        The flash rises over the first half of ``duration`` seconds and fades
+        over the second. Raises ``ValueError`` for a non-positive duration.
+
+        Example:
+            result = Transition.cut(overlay=Overlay.flash(WHITE, 0.15))
+        """
+        ...
+    @staticmethod
+    def light_leak(
+        seed: int = 0,
+        hue: float = 0.1,
+        duration: float = 0.8,
+        intensity: float = 0.8,
+    ) -> Overlay:
+        """Drift soft, screen-blended light blobs across the frame around the cut.
+
+        ``seed`` makes a deterministic layout; ``hue`` is the base hue in
+        turns (``0.1`` warm orange, ``0.6`` blue); ``intensity`` in ``[0, 4]``
+        scales the peak brightness. Raises ``ValueError`` for a non-positive
+        duration, a non-finite hue or an intensity outside ``[0, 4]``.
+
+        Example:
+            result = Transition.cross_fade(0.4, overlay=Overlay.light_leak(seed=2, hue=0.1))
         """
         ...
 
@@ -910,6 +1089,95 @@ class Anim:
     def circumscribe(self) -> Anim: ...
     def flash(self) -> Anim: ...
     def show_passing_flash(self, *, time_width: float = 0.2) -> Anim: ...
+    def typewriter(
+        self,
+        cps: float = 18.0,
+        cursor: Optional[str] = "▍",
+        blink: float = 2.0,
+        jitter: float = 0.2,
+        seed: int = 0,
+        keep_cursor: bool = True,
+    ) -> Anim:
+        """Clear this Text and type it again, one grapheme per keystroke.
+
+        ``cps`` is keystrokes per second; each interval is scaled by a factor
+        in ``[1 - jitter, 1 + jitter]`` drawn from ``seed`` and the grapheme
+        index, so any frame is reproducible from its time. The layout is the
+        final one: glyphs appear in place and nothing reflows. ``cursor`` is a
+        string drawn after the last typed grapheme (``None`` or ``""`` for
+        none; block characters such as ``"▍"`` and ``"█"`` are exact
+        rectangles). It stays solid while typing, then blinks ``blink``
+        on/off cycles per second (``0`` keeps it solid); ``keep_cursor=False``
+        removes it when typing ends. Without an explicit ``duration`` the
+        animation lasts until the last keystroke (about ``graphemes / cps``)
+        and uses linear timing. Raises ``ValueError`` for ``cps <= 0``,
+        ``blink < 0`` or ``jitter`` outside ``[0, 1)``, and ``TypeError``
+        unless the proxy belongs to a whole Text.
+
+        Example:
+            prompt = scene.text("gaanim render").move_to(-4, 0)
+            scene.play(prompt.animate.typewriter(cps=18, cursor="▍"))
+        """
+        ...
+    def backspace(self, count: Optional[int] = None, cps: float = 24.0) -> Anim:
+        """Delete the last ``count`` visible graphemes (all when ``None``).
+
+        Deletions land at a steady ``cps`` and the typewriter cursor follows
+        them back; a Text without one gets the default blinking cursor.
+        ``count`` is capped at the visible graphemes. The default duration is
+        ``count / cps``. Raises ``ValueError`` for ``cps <= 0``.
+
+        Example:
+            scene.play(prompt.animate.backspace(6))
+        """
+        ...
+    def retype(self, text: str, cps: float = 18.0, jitter: float = 0.2, seed: int = 0) -> Anim:
+        """Delete back to the prefix shared with ``text``, then type the rest.
+
+        ``text`` is plain text laid out with this Text's style and pen origin,
+        so the shared prefix stays in place. Deletions run at ``cps`` without
+        jitter and typing behaves like ``typewriter`` (same ``cps``,
+        ``jitter`` and ``seed``). Afterwards the Text shows ``text`` and
+        later typing motions continue from it; its declared content (layout
+        size, ``text[...]`` selections) is unchanged. Raises ``ValueError``
+        for an empty ``text``,
+        ``cps <= 0`` or ``jitter`` outside ``[0, 1)``.
+
+        Example:
+            scene.play(prompt.animate.retype("gaanim export --from clímax"))
+        """
+        ...
+    def scramble(self, charset: str = "upper", reveal_delay: float = 0.3, speed: float = 20.0, seed: int = 0) -> Anim:
+        """Decode this Text: each grapheme cycles through random glyphs, then settles.
+
+        Every non-space grapheme shows a glyph of ``charset`` chosen by
+        ``hash(seed, index, floor(time * speed))`` (``speed`` changes per
+        second), centered in the final glyph's cell, so the width of the
+        final text is reserved and never jumps. After ``reveal_delay``
+        seconds the graphemes settle from left to right until the end.
+        ``charset`` is ``"upper"``, ``"lower"``, ``"digits"``, ``"hex"``,
+        ``"symbols"`` or a literal string such as ``"01"``; its glyphs are
+        shaped once with the Text's font. The default duration is
+        ``reveal_delay`` plus 0.05 s per grapheme (at least 0.6 s), with
+        linear timing. Raises ``ValueError`` for an empty charset,
+        ``speed <= 0`` or ``reveal_delay < 0``.
+
+        Example:
+            scene.play(label.animate.scramble(charset="upper", reveal_delay=0.3))
+        """
+        ...
+    def scramble_to(self, text: str, charset: str = "upper", reveal_delay: float = 0.3, speed: float = 20.0, seed: int = 0) -> Anim:
+        """Like ``scramble``, decoding into the new plain ``text``.
+
+        The current glyphs disappear at the start and every position of
+        ``text`` scrambles in the layout of ``text`` before settling left to
+        right. Afterwards the Text shows ``text`` (see ``retype``). Raises
+        ``ValueError`` for an empty ``text``.
+
+        Example:
+            scene.play(label.animate.scramble_to("LANZAMIENTO", charset="01"))
+        """
+        ...
     def move_along(
         self,
         target: Drawable,
@@ -966,6 +1234,95 @@ class Anim:
 
         Example:
             scene.play(ring.animate.trim(start=0.0, end=1.0))
+        """
+        ...
+    def reveal(
+        self,
+        style: Optional[Literal["slide_up", "slide_down", "fade", "scale", "blur"]] = None,
+        *,
+        by: Literal["grapheme", "word", "line", "part"] = "line",
+        mask: bool = True,
+        stagger: float = 0.06,
+    ) -> Anim:
+        """Reveal a Text unit by unit, ``stagger`` seconds apart.
+
+        ``style`` defaults to ``"slide_up"``: each unit rises one row height
+        from behind a vector mask clipped to its row, so it works in SVG
+        export too. ``"slide_down"`` falls from above; with ``mask=False``
+        slides travel less and fade in instead of hiding behind the mask.
+        ``"fade"``, ``"scale"`` and ``"blur"`` ignore ``mask``. Units are
+        graphemes, words, explicit lines (``text.lines``) or semantic parts.
+        ``easing`` eases each unit (ease-out cubic by default) and the
+        duration covers the whole cascade; a stagger that does not fit is
+        compressed. Glyphs hold their hidden state until the reveal starts,
+        as with ``fade_in``. Seeks are exact.
+
+        On a text selection (``text["x"].animate``) this is the selection
+        reveal: ``style`` is ``"fade"`` (default), ``"wipe"`` or
+        ``"from_below"`` and ``by``/``mask``/``stagger`` raise ``TypeError``.
+        Non-Text drawables raise ``TypeError``; unknown styles or units raise
+        ``ValueError``.
+
+        Example:
+            scene.play(title.animate.reveal(by="line", style="slide_up", stagger=0.06))
+            scene.play(quote.animate.reveal(by="word", style="blur", stagger=0.04))
+        """
+        ...
+    def conceal(
+        self,
+        style: Literal["slide_up", "slide_down", "fade", "scale", "blur"] = "slide_up",
+        *,
+        by: Literal["grapheme", "word", "line", "part"] = "line",
+        mask: bool = True,
+        stagger: float = 0.06,
+    ) -> Anim:
+        """Exit matching ``reveal``: units leave one by one, first unit first, and stay hidden.
+
+        Units leave in reading order, ``stagger`` seconds apart, starting
+        from rest. Slides keep the reveal's direction of motion:
+        ``"slide_up"`` exits upward out of each row mask and
+        ``"slide_down"`` downward; ``"fade"``, ``"scale"`` and ``"blur"``
+        go back to their hidden state. Units accelerate out (ease-in cubic
+        by default; ``easing`` replaces it). Raises the same errors as
+        ``reveal``.
+
+        Example:
+            scene.play(headline.animate.conceal(by="line", style="slide_up"))
+        """
+        ...
+    def blur_in(
+        self,
+        sigma: float = 0.3,
+        *,
+        by: Literal["grapheme", "word", "line", "part"] = "grapheme",
+        stagger: float = 0.02,
+    ) -> Anim:
+        """Bring a Text in unit by unit from a transparent Gaussian blur.
+
+        ``sigma`` is the starting blur in scene units (the same effect as
+        ``blur``) and ``stagger`` the delay in seconds between units; each
+        unit clears its blur and fades in with an ease-out. Glyphs hold the
+        blurred, transparent state until the animation starts. Non-Text drawables raise ``TypeError``; a negative
+        ``sigma`` or ``stagger`` raises ``ValueError``.
+
+        Example:
+            scene.play(title.animate.blur_in(sigma=0.3, by="grapheme", stagger=0.02))
+        """
+        ...
+    def tracking(self, value: float) -> Anim:
+        """Animate the extra space between neighboring glyphs to ``value`` scene units.
+
+        Glyphs shift along the text's baseline without a new layout: rows
+        grow from their left edge, center or right edge according to the
+        text alignment, and ``0`` restores the original spacing. Default
+        easing is smooth. It combines with text animations that do not move
+        glyphs, such as ``blur_in``; ``scene.play`` rejects two simultaneous
+        animations that write the same glyph channel (for example ``tracking``
+        with a sliding ``reveal``). Non-Text drawables raise ``TypeError``.
+
+        Example:
+            title.tracking(0.4)
+            scene.play(title.animate.tracking(0.0).duration(1.2))
         """
         ...
     def path_arc(self, angle: float) -> Anim:
@@ -1077,6 +1434,15 @@ class Schedule:
     def span(self) -> float: ...
     @property
     def entries(self) -> tuple[ScheduleEntry, ...]: ...
+    @property
+    def labels(self) -> dict[str, float]:
+        """Resolved ``label`` instants as ``{name: seconds}``, in time order.
+
+        Times are local to the composition, like ``ScheduleEntry.start``, and
+        include nested and inserted labels shifted to their final position.
+        A repeated composition reports the first repetition.
+        """
+        ...
 
 class Composition:
     """Pure, immutable tree of animations and timeline-synchronized media."""
@@ -1103,6 +1469,51 @@ class Composition:
     def schedule(self, *, duration: Optional[float] = None) -> Schedule:
         """Resolve local offsets using the supplied outer defaults without scheduling."""
         ...
+    def insert(self, item: Playable, at: str | float) -> Composition:
+        """Return a copy that also plays ``item`` at the local position ``at``.
+
+        ``at`` follows GSAP's position parameter and is resolved when the
+        composition is scheduled or played:
+
+        - ``"name"``, ``"name+0.15"``, ``"name-0.2"`` (or ``"name+=0.15"``):
+          a ``label`` of this composition, including nested and earlier
+          inserted labels, plus an offset. An exact label name always wins,
+          so ``"part-2"`` finds a label called ``"part-2"``.
+        - ``"<"`` / ``">"`` (optionally ``"<+0.1"``, ``">-0.2"``): the start /
+          end of the previous item, which is the most recent non-label
+          insert, or the last child before any insert.
+        - ``"+=0.3"`` / ``"-=0.3"``: relative to the current end of the
+          composition, including earlier inserts.
+        - A number: absolute local seconds.
+
+        Inserts are placed after the children and before ``stretch``,
+        ``repeat`` and ``delay``, which then apply to them as well. A
+        malformed position raises ``ValueError`` immediately; an unknown
+        label or a position that resolves before 0 raises ``ValueError``
+        from ``schedule``/``scene.play`` with the defined labels listed.
+
+        Example:
+            intro = sequence(
+                title.animate.write().duration(0.8),
+                label("hit"),
+                subtitle.animate.fade_in().duration(0.4),
+            ).insert(logo.animate.grow_from_center(), at="hit+0.15") \\
+             .insert(glow.animate.flash(), at="<")
+        """
+        ...
+
+def label(name: str) -> Composition:
+    """A zero-duration named instant for ``sequence``, ``parallel`` or ``stagger``.
+
+    In a ``sequence`` a label takes no step and no ``gap``: it marks where
+    the next step starts, or where the previous step ends when it is last.
+    Reference it from ``Composition.insert(..., at="name+0.1")``; the
+    resolved times are listed by ``Composition.schedule().labels``. Names
+    are trimmed and must be unique within one composition tree; empty
+    names, numbers and names starting with ``<``, ``>``, ``+``, ``-`` or
+    ``=`` raise ``ValueError``.
+    """
+    ...
 
 # Typing-only in this native stub; import it at runtime with ``from gaanim import Playable``.
 Playable: TypeAlias = Anim | Audio | Video | VideoSegment | Lottie | Composition
@@ -2139,6 +2550,36 @@ class TextSelectionAnimation:
             scene.play(eq["c"].animate.annotate("velocidad de la luz", offset=(0, 0.6)))
         """
         ...
+    def marker(
+        self,
+        color: Color | None = None,
+        *,
+        skew: float = 0.05,
+        blend: Literal["normal", "multiply"] = "normal",
+        opacity: float = 0.45,
+        padding: float | None = None,
+    ) -> Anim:
+        """Sweep a highlighter band behind each rendered line of the selection.
+
+        Every line spanned by the selection gets one band that covers the
+        full glyph height of that line plus ``padding`` (world units; ``None``
+        uses 10% of the line height). Bands grow from the left edge, one line
+        after another, sharing the animation duration by band length. They are
+        drawn behind the glyphs but above objects authored before the text,
+        and stay on screen afterwards.
+
+        ``color`` defaults to a highlighter yellow and its alpha is multiplied
+        by ``opacity``. ``skew`` tilts each band in radians (positive rises to
+        the right), capped so long lines stay covered. ``blend="multiply"`` is
+        accepted but currently composited like ``"normal"`` behind the text
+        until per-object blend modes exist. Raises ``ValueError`` for an
+        unknown ``blend``, a non-finite ``skew``, ``opacity`` outside
+        ``[0, 1]``, or a negative ``padding``.
+
+        Example:
+            scene.play(quote.words[3:6].animate.marker(YELLOW, skew=0.05))
+        """
+        ...
     def morph_to(self, target: TextSelection) -> Anim: ...
     def copy_to(self, target: TextSelection) -> Anim: ...
 
@@ -2162,6 +2603,26 @@ class TextSelection:
             formula["mass"].fill(GOLD)
         """
         ...
+    def marker(
+        self,
+        color: Color | None = None,
+        *,
+        skew: float = 0.05,
+        blend: Literal["normal", "multiply"] = "normal",
+        opacity: float = 0.45,
+        padding: float | None = None,
+    ) -> TextSelection:
+        """Place a highlighter band behind each selected line immediately.
+
+        Static form of ``selection.animate.marker(...)`` with the same
+        arguments and errors: the full bands appear at the current timeline
+        cursor (the scene start during declaration) and stay on screen.
+        Returns this selection for chaining.
+
+        Example:
+            quote.words[0:2].marker(opacity=0.35)
+        """
+        ...
     @property
     def animate(self) -> TextSelectionAnimation:
         """Return a pure animation proxy scoped to the selected glyphs.
@@ -2181,6 +2642,64 @@ class TextQuery:
     def __getitem__(self, index: int) -> TextSelection: ...
     @overload
     def __getitem__(self, index: slice) -> TextSelection: ...
+
+class TextAnimator:
+    """Range selector over the units of one Text (After Effects-style text animator).
+
+    Create it with ``Text.animator``, define the "out" state with ``set`` and
+    play it with ``animate.sweep()``. Each unit's influence is evaluated
+    natively from its position in ``order`` and the selector ``shape``, so
+    seeks are exact and nothing calls back into Python per frame.
+    """
+    def set(
+        self,
+        *,
+        offset: Optional[tuple[float, float]] = None,
+        opacity: Optional[float] = None,
+        scale: Optional[float] = None,
+        rotation: Optional[float] = None,
+        blur: Optional[float] = None,
+        tracking: Optional[float] = None,
+        color: Optional[Color] = None,
+    ) -> TextAnimator:
+        """Define the state a unit reaches at full influence and return this animator.
+
+        ``offset`` moves units in scene units, ``opacity`` (0..1) is
+        absolute, ``scale`` and ``rotation`` (radians, clamped to less than
+        half a turn) act around each unit's center, ``blur`` is a Gaussian
+        sigma in scene units, ``tracking`` adds scene units between glyphs
+        and ``color`` sets a solid fill. Omitted values keep what an earlier
+        ``set`` defined; unset channels stay at rest. Sweeps capture the
+        state when ``sweep()`` is called. Invalid values raise ``ValueError``.
+
+        Example:
+            wave = title.animator(by="grapheme", shape="smooth").set(offset=(0, -0.4), opacity=0.0)
+        """
+        ...
+    @property
+    def animate(self) -> TextAnimatorAnimation:
+        """Typed proxy whose ``sweep()`` returns a composable ``Anim``."""
+        ...
+
+class TextAnimatorAnimation:
+    """Animation proxy of a ``TextAnimator``."""
+    def sweep(self, start: float = 0.0, end: float = 1.0, *, stagger: Optional[float] = None) -> Anim:
+        """Move the selector range from ``start`` to ``end`` over the animation.
+
+        ``0`` lies before the first unit and ``1`` after the last, so the
+        default sweep crosses every unit once; ``sweep(1, 0)`` plays it
+        backward. Units take their window in ``order``: with a reveal shape
+        they move from the out state to rest, with ``"triangle"``/``"round"``
+        a wave passes through them. ``stagger`` is the delay in seconds
+        between units (``None`` staggers adaptively). ``easing`` eases each
+        unit's transition (linear by default) and the result works in
+        ``scene.play``, ``parallel``, ``sequence`` and ``stagger``. Entry
+        sweeps hold their first frame until they start.
+
+        Example:
+            scene.play(wave.animate.sweep().duration(1.2))
+        """
+        ...
 
 class Text(Drawable):
     """Structured, Layout-v2-measurable vector text and mathematics."""
@@ -2230,6 +2749,42 @@ class Text(Drawable):
     def lines(self) -> TextQuery: ...
     @property
     def parts(self) -> TextQuery: ...
+    def animator(
+        self,
+        by: Literal["grapheme", "word", "line", "part"] = "grapheme",
+        shape: Literal["square", "ramp", "smooth", "ease_in", "ease_out", "triangle", "round"] = "smooth",
+        order: Literal["forward", "reverse", "center", "random"] = "forward",
+        seed: int = 0,
+    ) -> TextAnimator:
+        """Create a range animator over this text's graphemes, words, explicit lines or parts.
+
+        ``shape`` is the selector profile: ``"square"``, ``"ramp"``,
+        ``"smooth"``, ``"ease_in"`` and ``"ease_out"`` move each unit from the
+        out state to rest (a reveal); ``"triangle"`` and ``"round"`` rise to
+        the out state and settle back (a wave). ``order`` sets which unit the
+        range reaches first; ``"random"`` is a permutation fixed by ``seed``.
+        Units follow ``text.graphemes``/``words``/``lines``/``parts`` and
+        punctuation joins its neighbor. Invalid names raise ``ValueError``.
+
+        Example:
+            wave = title.animator(by="grapheme", shape="smooth", order="forward", seed=0)
+            wave.set(offset=(0, -0.4), opacity=0.0, scale=0.6, rotation=0.2)
+            scene.play(wave.animate.sweep().duration(1.2))
+        """
+        ...
+    def tracking(self, value: float) -> Self:
+        """Set the extra space between neighboring glyphs to ``value`` scene units now.
+
+        Glyphs shift along the baseline without a new layout, anchored at
+        the left edge, center or right edge of each row according to the
+        text alignment; ``0`` restores the layout spacing. Animate it with
+        ``animate.tracking(value)``. Returns this Text.
+
+        Example:
+            title.tracking(0.4)
+            scene.play(title.animate.tracking(0.0))
+        """
+        ...
     @overload
     @overload
     def move_to(self, reference: Drawable, /) -> Self: ...
@@ -2404,6 +2959,21 @@ class SceneStop:
         """Name of the segment containing the stop."""
         ...
 
+class SceneMarker:
+    """A named timeline instant authored with ``scene.marker``."""
+    @property
+    def name(self) -> str:
+        """Unique marker name, usable with ``gaanim export --from/--to``."""
+        ...
+    @property
+    def time(self) -> float:
+        """Absolute timeline time in seconds."""
+        ...
+    @property
+    def segment(self) -> str:
+        """Name of the segment active when the marker was authored."""
+        ...
+
 class CameraState:
     """Opaque reusable authored camera state owned by one Scene.
 
@@ -2468,11 +3038,23 @@ class CameraAnimation:
         ...
     @overload
     def pan_to(self, target: Endpoint) -> Anim: ...
-    def zoom_to(self, zoom: ScalarSource) -> Anim:
-        """Configure the camera with zoom to.
+    def zoom_to(
+        self,
+        zoom: ScalarSource,
+        *,
+        interpolation: Literal["exponential", "linear"] = "exponential",
+    ) -> Anim:
+        """Animate the orthographic zoom; values above one zoom in.
+
+        ``interpolation="exponential"`` (the default) evaluates
+        ``z0 * (z1 / z0) ** p`` so the visible area changes by the same ratio
+        every frame and a large zoom reads as constant speed.
+        ``"linear"`` restores ``z0 + (z1 - z0) * p``. ``p`` is the eased
+        progress, so ``.easing(...)`` still shapes the move. A non-positive
+        constant zoom or an unknown interpolation raises ``ValueError``.
 
         Example:
-            scene.camera.zoom_to(1.0)
+            scene.camera.animate.zoom_to(8.0).duration(1.5)
         """
         ...
     def frame_to(
@@ -2481,11 +3063,17 @@ class CameraAnimation:
         margin: float | tuple[float, float] | tuple[float, float, float, float] | None = None,
         *,
         dynamic: bool = False,
+        interpolation: Literal["exponential", "linear"] = "exponential",
     ) -> Anim:
-        """Configure the camera with frame to.
+        """Pan and zoom so ``targets`` fit the viewport with ``margin``.
+
+        With ``interpolation="exponential"`` (the default) the zoom is
+        exponential and the pan follows the change of visible width, so the
+        view scales about a fixed point instead of drifting before it settles.
+        ``"linear"`` interpolates position and zoom independently.
 
         Example:
-            scene.camera.frame_to(target)
+            scene.camera.animate.frame_to([circle, label], margin=0.4).duration(1.0)
         """
         ...
     def rotate_to(self, angle: ScalarSource) -> Anim:
@@ -2511,13 +3099,35 @@ class CameraAnimation:
         ...
     def shake(
         self,
-        amplitude: float = 0.12,
-        frequency: float = 8.0,
+        amplitude: Optional[float] = None,
+        frequency: Optional[float] = None,
+        *,
+        trauma: Optional[float] = None,
+        decay: Optional[float] = None,
+        rotation: Optional[float] = None,
+        seed: Optional[int] = None,
     ) -> Anim:
-        """Configure the camera with shake.
+        """Shake the camera deterministically and return it to rest.
+
+        By default the shake follows the trauma model: ``trauma`` (``0..1``,
+        default ``0.8``) decays by ``decay`` per second (default ``1.5``) and
+        the displacement is proportional to ``trauma ** 2``. Translation (at
+        most ``amplitude`` scene units at trauma 1, default ``0.4``) and roll
+        (at most ``rotation`` radians, default ``0.02``) come from seeded
+        coherent noise sampled at ``frequency`` Hz (default ``12``). The clip
+        lasts ``trauma / decay`` seconds (one second when ``decay`` is zero);
+        a shorter ``.duration()`` still releases smoothly to rest. The shake
+        is a pure function of time, so seeks and exports match playback.
+
+        Passing ``amplitude`` without any of ``trauma``, ``decay``,
+        ``rotation`` or ``seed`` keeps the legacy sine shake: ``amplitude``
+        is the peak offset, ``frequency`` counts oscillations per clip
+        (default ``8``) and the clip lasts 0.5 s, so ``shake(0.2, 6)`` keeps
+        its previous look. Negative values, or ``trauma`` above one, raise
+        ``ValueError``.
 
         Example:
-            scene.camera.shake()
+            scene.camera.animate.shake(trauma=0.8, decay=1.5, frequency=12, rotation=0.02, seed=0)
         """
         ...
     def look_at(
@@ -5399,6 +6009,24 @@ class Scene:
             if "GAANIM_SNAPSHOTS" in os.environ:
                 scene.snapshots(os.environ["GAANIM_SNAPSHOTS"], [s.time for s in scene.stops])
         """
+        ...
+    def marker(self, name: str) -> None:
+        """Name the current cursor on the global timeline.
+
+        A marker is metadata only: it neither pauses playback nor moves the
+        cursor. The editor draws it on the seek bar (click it to jump there)
+        and ``gaanim export --from <name> --to <name>`` accepts it in place
+        of seconds. Names are trimmed and unique per scene; an empty name, a
+        duplicate or a name that parses as a number raises ``ValueError``.
+
+        Example:
+            scene.play(intro)
+            scene.marker("climax")
+        """
+        ...
+    @property
+    def markers(self) -> list[SceneMarker]:
+        """Markers authored so far, in timeline order, with absolute times."""
         ...
     def play(
         self,

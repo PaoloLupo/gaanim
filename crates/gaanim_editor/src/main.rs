@@ -262,7 +262,7 @@ fn dispatch_export_mode() -> bool {
         eprintln!("gaanim export: --encoder requires MP4 output");
         std::process::exit(2);
     }
-    if let Err(error) = validate_export_range(from, to) {
+    if let Err(error) = validate_export_range(from.as_ref(), to.as_ref()) {
         eprintln!("gaanim export: {error}");
         std::process::exit(2);
     }
@@ -303,20 +303,80 @@ fn dispatch_python_api_validation_mode() -> bool {
     true
 }
 
-/// Seconds for `--from` / `--to`: finite and non-negative.
-fn parse_export_seconds(flag: &str, value: Option<&String>) -> Result<f64, String> {
-    value
-        .and_then(|value| value.parse::<f64>().ok())
-        .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
-        .ok_or_else(|| format!("{flag} requires a non-negative number of seconds"))
+/// One end of an export range: seconds, or a `scene.marker` name resolved
+/// after the script runs.
+#[derive(Debug, Clone, PartialEq)]
+enum ExportBound {
+    Seconds(f64),
+    Marker(String),
 }
 
-fn validate_export_range(from: Option<f64>, to: Option<f64>) -> Result<(), String> {
+impl std::fmt::Display for ExportBound {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Seconds(seconds) => write!(formatter, "{seconds}"),
+            Self::Marker(name) => write!(formatter, "{name}"),
+        }
+    }
+}
+
+/// `--from` / `--to`: finite non-negative seconds, or a marker name.
+fn parse_export_seconds(flag: &str, value: Option<&String>) -> Result<ExportBound, String> {
+    let value = value
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| format!("{flag} requires seconds or a marker name"))?;
+    match value.parse::<f64>() {
+        Ok(seconds) if seconds.is_finite() && seconds >= 0.0 => Ok(ExportBound::Seconds(seconds)),
+        Ok(_) => Err(format!(
+            "{flag} requires a non-negative number of seconds or a marker name"
+        )),
+        Err(_) if value.starts_with('-') => Err(format!(
+            "{flag} requires a non-negative number of seconds or a marker name"
+        )),
+        Err(_) => Ok(ExportBound::Marker(value.to_string())),
+    }
+}
+
+fn validate_export_range(
+    from: Option<&ExportBound>,
+    to: Option<&ExportBound>,
+) -> Result<(), String> {
     match (from, to) {
-        (Some(from), Some(to)) if to <= from => {
+        (Some(ExportBound::Seconds(from)), Some(ExportBound::Seconds(to))) if to <= from => {
             Err(format!("--to ({to}) must be greater than --from ({from})"))
         }
         _ => Ok(()),
+    }
+}
+
+/// Resolve marker bounds against the markers the script authored.
+fn resolve_export_bound(
+    flag: &str,
+    bound: Option<&ExportBound>,
+    markers: &[gaanim_api::canvas::SceneMarker],
+) -> Result<Option<f64>, String> {
+    match bound {
+        None => Ok(None),
+        Some(ExportBound::Seconds(seconds)) => Ok(Some(*seconds)),
+        Some(ExportBound::Marker(name)) => markers
+            .iter()
+            .find(|marker| marker.name == *name)
+            .map(|marker| Some(marker.time))
+            .ok_or_else(|| {
+                let known = markers
+                    .iter()
+                    .map(|marker| format!("{:?}", marker.name))
+                    .collect::<Vec<_>>();
+                format!(
+                    "{flag}: unknown marker {name:?}; the script defines {}",
+                    if known.is_empty() {
+                        "no markers (use scene.marker(\"name\"))".to_string()
+                    } else {
+                        known.join(", ")
+                    }
+                )
+            }),
     }
 }
 
@@ -331,9 +391,10 @@ struct ExportWorkerArgs {
     width: u32,
     height: u32,
     fit: gaanim_export::prelude::OutputFit,
-    /// Exported time range in seconds; `None` means the scene start/end.
-    from: Option<f64>,
-    to: Option<f64>,
+    /// Exported time range in seconds or marker names; `None` means the
+    /// scene start/end.
+    from: Option<ExportBound>,
+    to: Option<ExportBound>,
 }
 
 fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String> {
@@ -408,7 +469,7 @@ fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String>
     if args[3] != "mp4" && encoder != VideoEncoder::Auto {
         return Err("--encoder requires MP4 output".to_string());
     }
-    validate_export_range(from, to)?;
+    validate_export_range(from.as_ref(), to.as_ref())?;
     Ok(ExportWorkerArgs {
         script: PathBuf::from(&args[0]),
         output: args[1].clone(),
@@ -450,6 +511,26 @@ fn run_export_worker(worker: ExportWorkerArgs) -> Result<(), String> {
     }
 
     let canvas = script_runner::load_script_canvas(&worker.script)?;
+    let markers = canvas.markers();
+    let from = resolve_export_bound("--from", worker.from.as_ref(), &markers)?;
+    let to = resolve_export_bound("--to", worker.to.as_ref(), &markers)?;
+    if let (Some(from), Some(to)) = (from, to)
+        && to <= from
+    {
+        return Err(format!(
+            "--to ({}) resolves to {to}s, which must be after --from ({}) at {from}s",
+            worker
+                .to
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_default(),
+            worker
+                .from
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_default(),
+        ));
+    }
     let quality = match worker.quality.as_str() {
         "draft" => gaanim_export::prelude::QualityPreset::Draft,
         "standard" => gaanim_export::prelude::QualityPreset::Standard,
@@ -469,8 +550,8 @@ fn run_export_worker(worker: ExportWorkerArgs) -> Result<(), String> {
     config.width = worker.width;
     config.height = worker.height;
     config.fit = worker.fit;
-    config.start_time = worker.from;
-    config.end_time = worker.to;
+    config.start_time = from;
+    config.end_time = to;
     config.aspect_ratio = gaanim_export::prelude::AspectRatioPreset::Custom;
     config.format = format;
     config.video_encoder = worker.encoder;
@@ -1486,6 +1567,30 @@ mod tests {
     }
 
     #[test]
+    fn export_bounds_resolve_scene_markers() {
+        let markers = vec![gaanim_api::canvas::SceneMarker {
+            name: "climax".into(),
+            time: 2.5,
+            segment: "_default".into(),
+        }];
+        let climax = ExportBound::Marker("climax".into());
+        assert_eq!(
+            resolve_export_bound("--from", Some(&climax), &markers),
+            Ok(Some(2.5))
+        );
+        assert_eq!(
+            resolve_export_bound("--to", Some(&ExportBound::Seconds(4.0)), &markers),
+            Ok(Some(4.0))
+        );
+        let error =
+            resolve_export_bound("--to", Some(&ExportBound::Marker("fin".into())), &markers)
+                .unwrap_err();
+        assert!(error.contains("unknown marker \"fin\"") && error.contains("\"climax\""));
+        // Marker ranges are only ordered once the script has run.
+        assert!(validate_export_range(Some(&climax), Some(&ExportBound::Seconds(0.1))).is_ok());
+    }
+
+    #[test]
     fn parses_isolated_export_worker_arguments() {
         let args = ["scene.py", "exports/output.mp4", "standard", "mp4"].map(str::to_string);
         assert_eq!(
@@ -1509,7 +1614,25 @@ mod tests {
         ]
         .map(str::to_string);
         let range = parse_export_worker_args(&range).unwrap();
-        assert_eq!((range.from, range.to), (Some(12.5), Some(15.0)));
+        assert_eq!(
+            (range.from, range.to),
+            (
+                Some(ExportBound::Seconds(12.5)),
+                Some(ExportBound::Seconds(15.0))
+            )
+        );
+        let markers = [
+            "scene.py", "clip.mp4", "draft", "mp4", "--from", "climax", "--to", "fin",
+        ]
+        .map(str::to_string);
+        let markers = parse_export_worker_args(&markers).unwrap();
+        assert_eq!(
+            (markers.from, markers.to),
+            (
+                Some(ExportBound::Marker("climax".into())),
+                Some(ExportBound::Marker("fin".into()))
+            )
+        );
         for invalid in [
             [
                 "scene.py", "clip.mp4", "draft", "mp4", "--from", "3", "--to", "3",

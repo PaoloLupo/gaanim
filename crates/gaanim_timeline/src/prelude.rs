@@ -8,5 +8,6 @@ pub use crate::timeline::{
     PlaybackStopPolicy, SegmentMetadata, SegmentPosition, SegmentStop, Timeline,
 };
 pub use crate::transition::{
-    MorphMapping, MorphProperty, SceneConnection, SlideDirection, TransitionType,
+    IrisShape, MorphMapping, MorphProperty, SceneConnection, SlideDirection, TransitionOverlay,
+    TransitionType,
 };
