@@ -1,6 +1,8 @@
+use gaanim_api::canvas::InsertPosition;
 use gaanim_api::canvas::{Composition, PlayError, Schedule, StaggerLayout, StaggerOrigin};
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 use pyo3::types::PyTuple;
 
 use crate::easing::PyEasing;
@@ -42,11 +44,17 @@ pub struct PySchedule {
     #[pyo3(get)]
     span: f64,
     entries: Vec<PyScheduleEntry>,
+    labels: Vec<(String, f64)>,
 }
 
 impl From<Schedule> for PySchedule {
     fn from(value: Schedule) -> Self {
         Self {
+            labels: value
+                .labels
+                .into_iter()
+                .map(|label| (label.name, label.time))
+                .collect(),
             span: value.span,
             entries: value
                 .entries
@@ -74,6 +82,16 @@ impl PySchedule {
             .map(|entry| Py::new(py, entry))
             .collect::<PyResult<Vec<_>>>()?;
         PyTuple::new(py, entries)
+    }
+
+    /// Resolved labels as `{name: local seconds}`, in time order.
+    #[getter]
+    fn labels<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let labels = PyDict::new(py);
+        for (name, time) in &self.labels {
+            labels.set_item(name, time)?;
+        }
+        Ok(labels)
     }
 }
 
@@ -131,6 +149,40 @@ impl PyComposition {
             .map(Into::into)
             .map_err(play_error)
     }
+
+    /// Place `item` at a label-relative, previous-relative, end-relative or
+    /// absolute local position resolved when the composition is scheduled.
+    fn insert(&self, item: &Bound<'_, PyAny>, at: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let item = extract_playable(item)?;
+        self.inner
+            .clone()
+            .insert(item, insert_position(at)?)
+            .map(|inner| Self { inner })
+            .map_err(play_error)
+    }
+}
+
+fn insert_position(at: &Bound<'_, PyAny>) -> PyResult<InsertPosition> {
+    if let Ok(text) = at.extract::<String>() {
+        return InsertPosition::parse(&text).map_err(play_error);
+    }
+    if at.is_instance_of::<pyo3::types::PyBool>() {
+        return Err(PyTypeError::new_err(
+            "at must be a position string or seconds",
+        ));
+    }
+    let seconds = at
+        .extract::<f64>()
+        .map_err(|_| PyTypeError::new_err("at must be a position string or seconds"))?;
+    InsertPosition::at(seconds).map_err(play_error)
+}
+
+/// A zero-duration named instant to place inside `sequence`/`parallel`/`stagger`.
+#[pyfunction]
+pub fn label(name: &str) -> PyResult<PyComposition> {
+    Composition::label(name)
+        .map(|inner| PyComposition { inner })
+        .map_err(play_error)
 }
 
 pub(crate) fn extract_playable(item: &Bound<'_, PyAny>) -> PyResult<Composition> {

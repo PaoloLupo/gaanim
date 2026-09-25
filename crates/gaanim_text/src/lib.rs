@@ -1,5 +1,6 @@
 pub mod config;
 pub mod font;
+pub mod motion;
 pub mod prelude;
 pub mod shaper;
 pub mod structured;

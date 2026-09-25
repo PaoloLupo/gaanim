@@ -638,7 +638,7 @@ impl PyTextSelectionAnimation {
 
     #[pyo3(signature = (style="fade"))]
     fn reveal(&self, style: &str) -> PyResult<PyCanvasAnim> {
-        self.proxy().reveal(style)
+        self.proxy().reveal(Some(style), None, None, None)
     }
 
     #[pyo3(signature = (label="", *, above=false))]
@@ -649,6 +649,18 @@ impl PyTextSelectionAnimation {
     #[pyo3(signature = (label, offset=(0.0, 0.6)))]
     fn annotate(&self, label: &str, offset: (f64, f64)) -> PyResult<PyCanvasAnim> {
         self.proxy().annotate(label, offset)
+    }
+
+    #[pyo3(signature = (color=None, *, skew=0.05, blend="normal", opacity=0.45, padding=None))]
+    fn marker(
+        &self,
+        color: Option<PyColor>,
+        skew: f64,
+        blend: &str,
+        opacity: f32,
+        padding: Option<f64>,
+    ) -> PyResult<PyCanvasAnim> {
+        self.proxy().marker(color, skew, blend, opacity, padding)
     }
 
     fn morph_to(&self, target: &PyTextSelection) -> PyResult<PyCanvasAnim> {
@@ -723,6 +735,21 @@ impl PyTextSelection {
         })
     }
 
+    #[pyo3(signature = (color=None, *, skew=0.05, blend="normal", opacity=0.45, padding=None))]
+    fn marker(
+        &self,
+        color: Option<PyColor>,
+        skew: f64,
+        blend: &str,
+        opacity: f32,
+        padding: Option<f64>,
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        let style = crate::pydrawable::text_marker_style(color, skew, blend, opacity, padding)?;
+        self.inner().with_marker(style);
+        Ok(self.clone())
+    }
+
     /// Start a compound fill/opacity animation scoped to this selection.
     #[getter]
     fn animate(&self) -> PyResult<PyTextSelectionAnimation> {
@@ -736,7 +763,7 @@ impl PyTextSelection {
 #[pyclass(name = "Text", module = "gaanim_core", extends = PyDrawable, skip_from_py_object)]
 #[derive(Clone)]
 pub struct PyText {
-    handle: gaanim_api::canvas::DrawableHandle,
+    pub(crate) handle: gaanim_api::canvas::DrawableHandle,
     spec: TextSpec,
     /// Derive the horizontal line alignment from the anchor of `move_to`
     /// because the text was created without `flow` or `text_align`.

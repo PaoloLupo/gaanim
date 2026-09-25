@@ -226,8 +226,9 @@ OPTIONS:
                                  falls back to libx264; others never fall back
         --transparent            Keep the alpha channel (WebM, WebP, PNG); the
                                  scene needs a transparent background
-        --from <SECONDS>         Start of the exported range (default 0)
-        --to <SECONDS>           End of the exported range (default: scene end;
+        --from <SECONDS|MARKER>  Start of the exported range (default 0); a
+                                 name uses the time of scene.marker(name)
+        --to <SECONDS|MARKER>    End of the exported range (default: scene end;
                                  later values are clamped). Audio is trimmed to
                                  the range and PNG frames are numbered from 0
     -h, --help                   Print this help"#

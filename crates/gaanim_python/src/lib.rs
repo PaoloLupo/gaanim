@@ -20,7 +20,9 @@ mod pylayout;
 mod pymatrix;
 mod pystyle;
 mod pytext;
+mod pytext_animator;
 mod rolling_number;
+mod text_motion;
 mod transition;
 mod updater;
 mod visualization;
@@ -37,6 +39,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         _py.get_type::<LayoutOwnershipError>(),
     )?;
     m.add_class::<transition::PyTransitionType>()?;
+    m.add_class::<transition::PyOverlay>()?;
     m.add_class::<color::PyColor>()?;
     m.add_class::<color::PyColorMap>()?;
     m.add_class::<brush::PyBrush>()?;
@@ -76,6 +79,8 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(composition::sequence, m)?)?;
     m.add_function(wrap_pyfunction!(composition::stagger, m)?)?;
     m.add_function(wrap_pyfunction!(composition::distribute, m)?)?;
+    m.add_function(wrap_pyfunction!(composition::label, m)?)?;
+    m.add_class::<pycanvas::PySceneMarker>()?;
     m.add_class::<pydrawable::PyCanvasAnim>()?;
     m.add_class::<pydrawable::PyAnchorPoint>()?;
     m.add_class::<pydrawable::PyDrawable>()?;
@@ -103,6 +108,8 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pytext::PyTextSelection>()?;
     m.add_class::<pytext::PyTextSelectionAnimation>()?;
     m.add_class::<pytext::PyText>()?;
+    m.add_class::<pytext_animator::PyTextAnimator>()?;
+    m.add_class::<pytext_animator::PyTextAnimatorAnimation>()?;
     m.add_function(wrap_pyfunction!(pytext::text_part, m)?)?;
     m.add_function(wrap_pyfunction!(pytext::text_parts, m)?)?;
     m.add_class::<pylayout::PyLayoutItem>()?;

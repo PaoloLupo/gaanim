@@ -488,6 +488,7 @@ Unknown identifiers such as `sin` remain unchanged.
 
 ```text
 selection.fill(color) -> TextSelection
+selection.marker(color=None, *, skew=0.05, blend="normal", opacity=0.45, padding=None) -> TextSelection
 selection.animate.fill(color).duration(seconds) -> Anim
 selection.animate.opacity(opacity).duration(seconds) -> Anim
 selection.animate.fill(color).opacity(value) -> Anim
@@ -502,6 +503,7 @@ selection.animate.cancel() -> Anim
 selection.animate.reveal(style="fade") -> Anim
 selection.animate.brace(label="", *, above=False) -> Anim
 selection.animate.annotate(label, offset=(0, 0.6)) -> Anim
+selection.animate.marker(color=None, *, skew=0.05, blend="normal", opacity=0.45, padding=None) -> Anim
 
 selection.animate.morph_to(target_selection).duration(seconds) -> Anim
 selection.animate.copy_to(target_selection).duration(seconds) -> Anim
@@ -517,6 +519,33 @@ with a short rise), so a term can enter an equation that is already visible.
 fades in `label`; `annotate` places `label` at `offset` from the selection
 center with a leader line. The brace, line, and labels are new objects in the
 selection's color and remain on screen.
+
+`marker` sweeps a highlighter band behind every rendered line the selection
+spans. Each band covers the full glyph
+height of its line plus `padding` (world units; `None` uses 10% of the line
+height), grows from the left edge, and the lines follow one another, sharing
+the duration by band length. `color` defaults to a highlighter yellow whose
+alpha is multiplied by `opacity`; `skew` tilts each band in radians (positive
+rises to the right) and is capped at a quarter of the band thickness so long
+lines stay covered. Bands are drawn behind the glyphs, at the text's
+`z_index`, but above objects authored before the text, such as a card. Per-object
+blend modes do not exist yet, so `blend="multiply"` is accepted and composited
+like `"normal"`; because the band sits behind the glyphs, the text keeps its
+color either way. An unknown `blend`, a non-finite `skew`, `opacity` outside
+`[0, 1]`, or a negative `padding` raises `ValueError`. The static
+`selection.marker(...)` places the finished bands at the current timeline
+cursor. Like the brace, the bands are new objects that stay on screen and do
+not follow later movements of the text.
+
+```python
+# show-code: true
+from gaanim import Scene
+scene = Scene(frame=(16, 9), background="#f8f5ee")
+quote = scene.text("Lo que no se mide no se puede mejorar", color="#1f2937").move_to(0, 0)
+scene.play([quote.words[4:9].animate.marker(skew=0.04).duration(1.2)])
+# output: text_marker.webp
+scene.render()
+```
 Every animation descriptor above can be placed directly in `scene.play([...])`.
 
 == Animaciones de texto completo
@@ -544,6 +573,94 @@ Timing is configured uniformly after choosing the effect, so
 `text.animate.write().duration(0.8)` and
 `text.animate.write(by="word").duration(0.8)` are the intended forms.
 
+=== Revelados con máscara, blur-in y tracking
+
+```text
+text.animate.reveal(style="slide_up", *, by="line", mask=True, stagger=0.06) -> Anim
+text.animate.conceal(style="slide_up", *, by="line", mask=True, stagger=0.06) -> Anim
+text.animate.blur_in(sigma=0.3, *, by="grapheme", stagger=0.02) -> Anim
+text.animate.tracking(value) -> Anim
+text.tracking(value) -> Text
+```
+
+`reveal` hace entrar el texto unidad por unidad, con `stagger` segundos entre
+unidades. `by` acepta `grapheme`, `word`, `line` (líneas explícitas `\n`) o
+`part`, con la segmentación de `text.graphemes`/`words`/`lines`/`parts`. Con
+`style="slide_up"` (predeterminado) cada unidad sube una altura de fila desde
+detrás de una máscara vectorial recortada a su fila, así que también funciona en
+el export SVG; `"slide_down"` cae desde arriba. Con `mask=False` los
+deslizamientos recorren menos distancia y aparecen con un fundido. `"fade"`,
+`"scale"` y `"blur"` ignoran `mask`. La duración cubre toda la cascada: si el
+`stagger` no cabe, se comprime. `easing` suaviza cada unidad (ease-out cúbico
+por defecto). Los glifos permanecen ocultos hasta que empieza el revelado, como
+con `fade_in`. `conceal` es la salida correspondiente: desde el reposo, las
+unidades salen en orden de lectura, la primera primero, con `stagger` segundos
+entre ellas, y quedan ocultas. Los deslizamientos conservan la dirección del
+revelado: con `"slide_up"` cada unidad sale hacia arriba por el borde de su
+máscara y con `"slide_down"` hacia abajo; `"fade"`, `"scale"` y `"blur"`
+vuelven a su estado oculto. Las unidades aceleran al salir (ease-in cúbico por
+defecto).
+
+`blur_in` hace entrar cada unidad desde un desenfoque gaussiano transparente de
+`sigma` unidades de escena, el mismo efecto que `blur`. `tracking` añade `value`
+unidades de escena entre glifos vecinos sin volver a componer el párrafo: cada
+fila crece desde su borde izquierdo, su centro o su borde derecho según la
+alineación del texto, y `0` restaura el espaciado original. `text.tracking(v)`
+fija el valor al instante. `scene.play` rechaza dos animaciones simultáneas que
+escriben el mismo canal de un glifo (por ejemplo `tracking` con un `reveal` que
+desliza), así que combina `tracking` con animaciones que no mueven glifos, como
+`blur_in`.
+
+En una selección (`text["x"].animate.reveal("from_below")`) `reveal` conserva
+su forma local con `"fade"`, `"wipe"` o `"from_below"`; ahí `by`, `mask` y
+`stagger` lanzan `TypeError`. Sobre un `Drawable` que no es `Text` estas
+animaciones lanzan `TypeError`, y un estilo, una unidad o un valor negativo
+lanzan `ValueError`.
+
+```python
+title.animate.reveal(by="line", style="slide_up", mask=True, stagger=0.06)
+quote.animate.reveal(by="word", style="blur", stagger=0.04)
+headline.animate.conceal(by="line", style="slide_up")
+
+title.tracking(0.4)
+scene.play([
+    title.animate.blur_in(sigma=0.3, by="grapheme", stagger=0.02).duration(1.2),
+    title.animate.tracking(0.0).duration(1.2),
+])
+```
+
+=== Animador de rango
+
+#api-entry(
+  name: "Text.animator",
+  kind: "method",
+  signature: "animator(by=\"grapheme\", shape=\"smooth\", order=\"forward\", seed=0) -> TextAnimator",
+  params: (
+    (name: "by", type: "str", default: "\"grapheme\"", desc: [Unidad: `grapheme`, `word`, `line` (explícita) o `part`. La puntuación se une a su vecina.]),
+    (name: "shape", type: "str", default: "\"smooth\"", desc: [Perfil del selector. `square`, `ramp`, `smooth`, `ease_in` y `ease_out` llevan cada unidad del estado "fuera" al reposo (revelado); `triangle` y `round` suben al estado "fuera" y vuelven (ola).]),
+    (name: "order", type: "str", default: "\"forward\"", desc: [Qué unidad alcanza primero el rango: `forward`, `reverse`, `center` o `random`.]),
+    (name: "seed", type: "int", default: "0", desc: [Fija la permutación de `order="random"`.]),
+  ),
+  returns: (type: "TextAnimator", desc: [Selector de rango reutilizable sobre las unidades del texto.]),
+  desc: [Motor por glifo al estilo de los Text Animators de After Effects. `animator.set(offset=None, opacity=None, scale=None, rotation=None, blur=None, tracking=None, color=None)` define el estado "fuera" (influencia 1) y devuelve el animador: `offset` en unidades de escena, `opacity` absoluta, `scale` y `rotation` (radianes, menos de media vuelta) alrededor del centro de cada unidad, `blur` como sigma gaussiana, `tracking` entre glifos y `color` como relleno sólido. `animator.animate` es un proxy `TextAnimatorAnimation` de solo lectura, y `animator.animate.sweep(start=0.0, end=1.0, *, stagger=None)` devuelve un `Anim` que mueve el rango de `start` a `end`: `0` está antes de la primera unidad y `1` después de la última, y `sweep(1, 0)` lo recorre hacia atrás. `stagger` es el retraso en segundos entre unidades (`None` lo adapta). `easing` suaviza la transición de cada unidad. Rust evalúa la influencia de cada unidad a partir de su índice normalizado y la forma del selector, así que un seek a `t` coincide con la reproducción continua y no se invoca Python por fotograma. Nombres inválidos lanzan `ValueError`; un `Drawable` que no es `Text` lanza `TypeError`.],
+)[
+```python
+from gaanim import Scene, parallel
+
+scene = Scene(frame=(16, 9), background="#0f172a")
+title = scene.text("Tipografía cinética", role="title").move_to(0, 0)
+wave = title.animator(by="grapheme", shape="smooth", order="forward", seed=0)
+wave.set(offset=(0, -0.4), opacity=0.0, scale=0.6, rotation=0.2)  # estado "fuera"
+scene.play([wave.animate.sweep().duration(1.2)])  # recorre el rango 0 → 1
+
+bob = title.animator(by="word", shape="round").set(offset=(0, 0.3))
+scene.play(parallel(bob.animate.sweep().duration(1.0)))  # una ola que pasa
+```
+]
+
+`reveal`, `conceal` y `blur_in` son presets de este animador, y
+`write(by=..., order=...)` usa la misma segmentación y los mismos órdenes.
+
 === Énfasis y anotación
 
 ```text
@@ -552,8 +669,8 @@ text.animate.wiggle() -> Anim
 ```
 
 These operate on the complete `Text`; the typed selection proxy adds `pulse`,
-`wave`, `highlight`, `focus`, `cancel`, `reveal`, `brace`, and `annotate` for
-local subsets.
+`wave`, `highlight`, `focus`, `cancel`, `reveal`, `brace`, `annotate`, and
+`marker` for local subsets.
 
 == Transiciones estructurales
 

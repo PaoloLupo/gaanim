@@ -17,6 +17,7 @@ pub use crate::canvas::{
     VectorField2DHandle, VectorField3DHandle, VideoClip, VideoLoadError, VideoOptions,
     VideoSegment,
 };
+pub use crate::canvas::{InsertPosition, SceneMarker, ScheduleLabel};
 pub use crate::matrix::{
     MatrixError, MatrixIndex, MatrixOrder, MatrixShape, order_indices, validate_rows,
 };

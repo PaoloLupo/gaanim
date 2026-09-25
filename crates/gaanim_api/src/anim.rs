@@ -183,6 +183,9 @@ pub enum PropertyScale {
 #[derive(Debug, Clone)]
 pub enum AnimationType {
     PropertySource(PropertySourceTarget),
+    /// Typewriter, backspace, retype or scramble motion of a Text
+    /// (see [`crate::text_motion`]).
+    TextMotion(crate::text_motion::TextMotion),
     /// Pure extension callback with explicitly owned property channels.
     CustomProperties(gaanim_animation::CustomAnimation),
     /// Several typed property targets evaluated concurrently.
@@ -205,9 +208,11 @@ pub enum AnimationType {
     },
     CameraZoom {
         to: f64,
+        interpolation: gaanim_math::ZoomInterpolation,
     },
     CameraZoomSource {
         to: gaanim_animation::ScalarSource,
+        interpolation: gaanim_math::ZoomInterpolation,
     },
     CameraRotation {
         to: DQuat,
@@ -218,11 +223,13 @@ pub enum AnimationType {
     CameraFrame {
         target: ObjectId,
         margin: f64,
+        interpolation: gaanim_math::ZoomInterpolation,
     },
     CameraFrameMany {
         targets: Vec<ObjectId>,
         margins: [f64; 4],
         dynamic: bool,
+        interpolation: gaanim_math::ZoomInterpolation,
     },
     CameraFollow {
         target: ObjectId,
@@ -236,6 +243,8 @@ pub enum AnimationType {
     CameraShake {
         amplitude: f64,
         frequency: f64,
+        /// Trauma/noise model; `None` keeps the legacy sine shake.
+        trauma: Option<gaanim_math::TraumaShake>,
     },
     CameraLookAt {
         eye: DVec3,
@@ -506,6 +515,9 @@ pub enum AnimationType {
     ShowPassingFlash {
         time_width: f64,
     },
+    /// Per-unit text range animation (sweep, reveal presets, tracking); see
+    /// [`crate::canvas::text_animator`].
+    TextAnimator(Box<crate::canvas::text_animator::TextAnimatorSpec>),
 }
 
 #[derive(Debug, Clone)]
@@ -524,7 +536,10 @@ pub enum TextSelectionEffect {
     OpacityTo(f32),
     Brace { label: String, above: bool },
     Annotate { label: String, offset: DVec3 },
+    Marker(TextMarkerStyle),
 }
+
+pub use crate::builder::text_marker::{MarkerBlend, TextMarkerStyle};
 
 /// A fluent builder for an animation tween clip.
 #[derive(Debug, Clone)]
@@ -686,6 +701,7 @@ impl AnimationType {
             | Self::Unwrite { .. }
             | Self::Uncreate { .. }
             | Self::ShowPassingFlash { .. }
+            | Self::TextMotion(_)
             | Self::Wiggle => RateFunc::Linear,
             Self::Create { .. } | Self::DrawBorderThenFill { .. } => RateFunc::DoubleSmooth,
             Self::Indicate { .. } | Self::Flash { .. } | Self::Circumscribe { .. } => {

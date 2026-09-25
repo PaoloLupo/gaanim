@@ -198,6 +198,72 @@ def validate_timeline_cursor_contract(module: object) -> list[str]:
     return failures
 
 
+def validate_timeline_labels_contract(module: object) -> list[str]:
+    """TM-05: composition labels, relative insert positions and scene markers."""
+    failures: list[str] = []
+    if not callable(getattr(module, "label", None)):
+        return ["label"]
+    scene = module.Scene(frame=(16, 9))
+    geometry = scene.geometry
+    title = geometry.dot(4).animate.fade_in().duration(0.8)
+    subtitle = geometry.dot(4).animate.fade_in().duration(0.4)
+    plan = (
+        module.sequence(title, module.label("hit"), subtitle, gap=0.1)
+        .insert(geometry.dot(4).animate.fade_in().duration(1.0), at="hit+0.15")
+        .insert(geometry.dot(4).animate.fade_in().duration(0.5), at="<")
+        .insert(geometry.dot(4).animate.fade_in().duration(0.2), at="-=0.3")
+        .insert(geometry.dot(4).animate.fade_in().duration(0.2), at=0.25)
+    )
+    schedule = plan.schedule()
+    labels = schedule.labels
+    starts = [round(entry.start, 6) for entry in schedule.entries]
+    if not isinstance(labels, dict) or list(labels) != ["hit"] or abs(labels["hit"] - 0.9) > 1e-9:
+        failures.append("Schedule.labels did not resolve the sequence label")
+    if starts != [0.0, 0.9, 1.05, 1.05, 1.75, 0.25]:
+        failures.append(f"Composition.insert positions resolved to {starts}")
+    for position in ("", "<x", "+0.2", "-1", "+=abc"):
+        try:
+            plan.insert(geometry.dot(4).animate.fade_in(), at=position)
+        except ValueError:
+            continue
+        failures.append(f"Composition.insert accepted malformed position {position!r}")
+    unknown = plan.insert(geometry.dot(4).animate.fade_in(), at="missing")
+    try:
+        unknown.schedule()
+    except ValueError as error:
+        if "missing" not in str(error) or "hit" not in str(error):
+            failures.append("unknown label errors must name the label and list defined labels")
+    else:
+        failures.append("Composition.schedule accepted an unknown label")
+    try:
+        module.label("")
+    except ValueError:
+        pass
+    else:
+        failures.append("label('') was accepted")
+    scene.play(plan)
+
+    if scene.markers != []:
+        failures.append("a Scene must start without markers")
+    scene.marker("climax")
+    scene.wait(0.5)
+    scene.marker("end")
+    markers = scene.markers
+    expected_climax = round(plan.schedule().span, 6)
+    if [(marker.name, round(marker.time, 6)) for marker in markers] != [
+        ("climax", expected_climax),
+        ("end", round(expected_climax + 0.5, 6)),
+    ] or not all(isinstance(marker, module.SceneMarker) for marker in markers):
+        failures.append("Scene.markers did not report named markers in absolute time")
+    for bad in ("climax", "", "2.5"):
+        try:
+            scene.marker(bad)
+        except ValueError:
+            continue
+        failures.append(f"Scene.marker accepted {bad!r}")
+    return failures
+
+
 def validate_theme_typography_contract(module: object) -> list[str]:
     """Theme font directories and the theme-wide markup default."""
     failures: list[str] = []
@@ -1026,6 +1092,39 @@ def validate_camera_rig_contract(module: object) -> list[str]:
     return failures
 
 
+def validate_camera_motion_contract(module: object) -> list[str]:
+    """Exercise trauma shake and exponential zoom (CA-01, CA-02)."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    marker = scene.geometry.dot(0.2)
+    camera = scene.camera.animate
+    animations = (
+        camera.shake(trauma=0.8, decay=1.5, frequency=12, rotation=0.02, seed=0),
+        camera.shake(0.2, 6),
+        camera.shake(amplitude=0.3, seed=4),
+        camera.zoom_to(8.0, interpolation="exponential"),
+        camera.zoom_to(2.0, interpolation="linear"),
+        camera.frame_to(marker, 0.5, interpolation="linear"),
+    )
+    if not all(isinstance(animation, module.Anim) for animation in animations):
+        failures.append("camera shake/zoom interpolation did not return Anim")
+    invalid_calls = (
+        lambda: camera.shake(trauma=1.5),
+        lambda: camera.shake(decay=-1.0),
+        lambda: camera.shake(-0.1, 4.0),
+        lambda: camera.zoom_to(2.0, interpolation="cubic"),
+        lambda: camera.frame_to(marker, interpolation="log"),
+    )
+    for call in invalid_calls:
+        try:
+            call()
+        except ValueError:
+            pass
+        else:
+            failures.append("camera motion accepted an invalid shake or interpolation")
+    return failures
+
+
 def validate_matrix_contract(module: object) -> list[str]:
     """Exercise matrix construction, selectors, ordering, and mutations."""
     failures: list[str] = []
@@ -1398,7 +1497,7 @@ def validate_scene_capability_surface(module) -> list[str]:
         "media", "slides", "text", "viz", "fade_out_all", "link", "persist",
         "play", "release", "render", "reuse", "sections", "segment", "snapshots", "stop",
         "wait", "time", "cursor", "stops", "random", "noise",
-        "voiceover", "live_take", "narration_script",
+        "voiceover", "live_take", "narration_script", "marker", "markers",
     }
     actual = {name for name in dir(module.Scene) if not name.startswith("_")}
     failures = []
@@ -1721,6 +1820,101 @@ def validate_narration_contract(module: object) -> list[str]:
     return failures
 
 
+def validate_text_animator_contract(module) -> list[str]:
+    """Text range animator, masked reveals, blur-in and tracking (TX-01/02/05)."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    title = scene.text("uno dos\ntres")
+    wave = title.animator(by="word", shape="round", order="random", seed=3)
+    if wave.set(offset=(0, -0.4), opacity=0.0, scale=0.6, rotation=0.2) is not wave:
+        failures.append("TextAnimator.set must return the animator")
+    if not isinstance(wave.animate, module.TextAnimatorAnimation):
+        failures.append("TextAnimator.animate did not return its typed proxy")
+    for anim in (
+        wave.animate.sweep().duration(1.2),
+        wave.animate.sweep(1.0, 0.0, stagger=0.05),
+        title.animate.reveal(by="line", style="slide_up", mask=True, stagger=0.06),
+        title.animate.reveal(by="word", style="blur", stagger=0.04),
+        title.animate.conceal(by="line", style="slide_up"),
+        title.animate.blur_in(sigma=0.3, by="grapheme", stagger=0.02),
+        title.animate.tracking(0.0),
+    ):
+        if not isinstance(anim, module.Anim):
+            failures.append(f"text animator preset returned {type(anim).__name__}, not Anim")
+    if title.tracking(0.4) is not title:
+        failures.append("Text.tracking must return the Text")
+    if not isinstance(title.words[0].animate.reveal("from_below"), module.Anim):
+        failures.append("the text selection reveal(style) form stopped working")
+    rejected = (
+        (ValueError, lambda: title.animator(shape="wobble")),
+        (ValueError, lambda: title.animator(by="sentence")),
+        (ValueError, lambda: wave.set(opacity=2.0)),
+        (ValueError, lambda: title.animate.reveal(style="wipe")),
+        (ValueError, lambda: title.animate.blur_in(sigma=-1.0)),
+        (TypeError, lambda: title.words[0].animate.reveal("fade", by="word")),
+        (TypeError, lambda: scene.geometry.circle(1.0).animate.blur_in()),
+        (ValueError, lambda: title.animate.opacity(0.5).tracking(0.2)),
+    )
+    for error, build in rejected:
+        try:
+            build()
+        except error:
+            pass
+        else:
+            failures.append(f"a text animator call did not raise {error.__name__}")
+    scene.play(title.animate.reveal(by="line"))
+    scene.play(wave.animate.sweep())
+    return failures
+
+
+def validate_transition_contract(module: object) -> list[str]:
+    """Vector reveals, easing on every transition and overlays on the cut."""
+    failures: list[str] = []
+    T, O = module.Transition, module.Overlay
+    spring = module.Easing.spring(bounce=0.2)
+    flash = O.flash(module.WHITE, 0.15)
+    leak = O.light_leak(seed=2, hue=0.1)
+    built = [
+        T.cut(overlay=flash),
+        T.cross_fade(0.4, easing=module.Easing.SMOOTH, overlay=leak),
+        T.slide(0.5, "left", easing=spring),
+        T.wipe(0.6, direction="left", feather=0.1),
+        T.wipe(0.6, "up_right", 0.0),
+        T.clock_wipe(0.8, start_angle=90),
+        T.iris(0.7, center=(2, 1), shape="star"),
+        T.blinds(0.6, count=8, angle=0),
+        T.push(0.5, direction="up", overlay=flash),
+    ]
+    if not all(isinstance(value, T) for value in built):
+        failures.append("Transition factories must return Transition")
+    if "overlay=Overlay.flash" not in repr(built[0]):
+        failures.append("Transition.cut(overlay=...) lost its overlay")
+    for label, factory in [
+        ("wipe direction", lambda: T.wipe(0.5, direction="sideways")),
+        ("wipe feather", lambda: T.wipe(0.5, feather=1.5)),
+        ("iris shape", lambda: T.iris(0.5, shape="blob")),
+        ("blinds count", lambda: T.blinds(0.5, count=0)),
+        ("push duration", lambda: T.push(0.0)),
+        ("flash duration", lambda: O.flash(module.WHITE, -1.0)),
+        ("light_leak intensity", lambda: O.light_leak(intensity=9.0)),
+    ]:
+        try:
+            factory()
+        except (ValueError, OverflowError):
+            pass
+        else:
+            failures.append(f"Transition accepted an invalid {label}")
+    scene = module.Scene(frame=(16, 9))
+    scene.segment("first")
+    stencil = scene.geometry.circle(1.0)
+    scene.wait(0.5)
+    scene.segment("second", T.iris(0.5, shape=stencil, overlay=flash))
+    scene.wait(0.5)
+    if abs(scene.cursor - 1.0) > 1e-9:
+        failures.append("transition overlays must not change segment durations")
+    return failures
+
+
 def main() -> int:
     tree = ast.parse(STUB.read_text(encoding="utf-8"), filename=str(STUB))
     module = importlib.import_module("gaanim.gaanim_core")
@@ -1768,6 +1962,7 @@ def main() -> int:
     missing.extend(validate_layout_detach_contract(module))
     missing.extend(validate_reactive_connector_contract(module))
     missing.extend(validate_camera_rig_contract(module))
+    missing.extend(validate_camera_motion_contract(module))
     missing.extend(validate_matrix_contract(module))
     missing.extend(validate_matrix_stub_typing())
     missing.extend(validate_vector_geometry_contract(module))
@@ -1783,7 +1978,10 @@ def main() -> int:
     missing.extend(validate_editorial_contract(module))
     missing.extend(validate_theme_typography_contract(module))
     missing.extend(validate_timeline_cursor_contract(module))
+    missing.extend(validate_timeline_labels_contract(module))
     missing.extend(validate_narration_contract(module))
+    missing.extend(validate_text_animator_contract(module))
+    missing.extend(validate_transition_contract(module))
     missing.extend(validate_runtime_type_aliases(module))
     missing.extend(documented_text_api_failures(tree))
     missing.extend(documented_editorial_api_failures(tree))

@@ -265,11 +265,22 @@ pub enum PropertyLensSpec {
     CameraZoom {
         from: f64,
         to: f64,
+        #[cfg_attr(feature = "serde", serde(default))]
+        interpolation: gaanim_math::ZoomInterpolation,
     },
     #[cfg_attr(feature = "serde", serde(skip))]
     CameraZoomSource {
         from: f64,
         to: gaanim_animation::TrackingScalar,
+        interpolation: gaanim_math::ZoomInterpolation,
+    },
+    /// Pan and zoom together; exponential mode scales the view about a fixed point.
+    CameraPanZoom {
+        from_position: gaanim_core::glam::DVec3,
+        to_position: gaanim_core::glam::DVec3,
+        from_zoom: f64,
+        to_zoom: f64,
+        interpolation: gaanim_math::ZoomInterpolation,
     },
     #[cfg_attr(feature = "serde", serde(skip))]
     CameraRotationSource {
@@ -310,12 +321,18 @@ pub enum PropertyLensSpec {
         margins: [f64; 4],
         frame_width: f64,
         frame_height: f64,
+        interpolation: gaanim_math::ZoomInterpolation,
     },
     /// A deterministic damped shake around `origin`.
+    ///
+    /// With `trauma`, the shake is the trauma/noise model and `amplitude` /
+    /// `frequency` only mirror its values for display.
     CameraShake {
         origin: gaanim_core::glam::DVec3,
         amplitude: f64,
         frequency: f64,
+        #[cfg_attr(feature = "serde", serde(default))]
+        trauma: Option<gaanim_math::TraumaShake>,
     },
     /// Tween the camera's look-at target (for orbit/look_at).
     CameraTarget {
@@ -498,11 +515,17 @@ impl PropertyLensSpec {
                 from: *from,
                 to: *to,
             },
-            Self::CameraZoom { from, to } => PropertyLens::CameraZoom {
+            Self::CameraZoom { from, to, .. } => PropertyLens::CameraZoom {
                 from: *from,
                 to: *to,
             },
-            Self::CameraZoomSource { from, to } => PropertyLens::CameraZoomSource {
+            Self::CameraPanZoom {
+                from_zoom, to_zoom, ..
+            } => PropertyLens::CameraZoom {
+                from: *from_zoom,
+                to: *to_zoom,
+            },
+            Self::CameraZoomSource { from, to, .. } => PropertyLens::CameraZoomSource {
                 from: *from,
                 to: to.clone(),
             },
@@ -550,6 +573,7 @@ impl PropertyLensSpec {
                 margins,
                 frame_width,
                 frame_height,
+                ..
             } => PropertyLens::CameraFrameDynamic {
                 targets: targets.clone(),
                 from_position: *from_position,
@@ -562,6 +586,7 @@ impl PropertyLensSpec {
                 origin,
                 amplitude,
                 frequency,
+                ..
             } => PropertyLens::CameraShake {
                 origin: *origin,
                 amplitude: *amplitude,
