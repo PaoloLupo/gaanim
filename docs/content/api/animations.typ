@@ -476,7 +476,7 @@ scene.render()
 # show-code: true
 from gaanim import CYAN, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-prompt = scene.text("gaanim render").fill(CYAN).move_to(-3, 0)
+prompt = scene.text("gaanim render", role="code").fill(CYAN).move_to(-3, 0)
 scene.play([prompt.animate.typewriter(cps=18, cursor="▍")])
 scene.wait(0.4)
 scene.play([prompt.animate.backspace(6)])

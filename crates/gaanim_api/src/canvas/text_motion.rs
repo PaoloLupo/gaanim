@@ -342,10 +342,19 @@ mod tests {
     ) -> (usize, Option<f64>) {
         use gaanim_core::kurbo::Shape;
         timeline.seek(world, time);
+        // Count glyphs the renderer fills: a non-empty closed path that
+        // differs from its `PathSource` is drawn as a trimmed outline only.
         let glyphs = world
-            .query::<(&gaanim_scene::Path2D, &gaanim_scene::components::TextSpan)>()
+            .query::<(
+                &gaanim_scene::Path2D,
+                Option<&gaanim_scene::PathSource>,
+                &gaanim_scene::components::TextSpan,
+            )>()
             .iter(world)
-            .filter(|(path, _)| !path.0.is_empty())
+            .filter(|(path, source, _)| {
+                !path.0.is_empty()
+                    && source.is_none_or(|source| source.0.elements() == path.0.elements())
+            })
             .count();
         let cursor = world
             .query_filtered::<&gaanim_scene::Path2D, (
