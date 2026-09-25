@@ -40,6 +40,16 @@ propuesta, cómo encaja en la arquitectura y cuándo se considera terminado.
    `plugins/gaanim-dev/skills/gaanim-add-feature`: crate dueño, `gaanim_api`, PyO3,
    docstring en `gaanim_core.pyi`, export en `__init__.py`, página Typst según
    `plugins/gaanim-dev/references/api-doc-map.md` y un ejemplo ejecutable.
+   El ítem no está terminado hasta que la guía correspondiente de
+   `docs/content/guias/` tiene una sección que lo enseña: qué consigue, un
+   ejemplo mínimo ejecutable, cuándo usarlo frente a las alternativas y un
+   enlace a su ficha de referencia. Las guías son `movimiento.typ` (tiempo,
+   easing, coreografía, procedural y trayectorias), `tipografia-cinetica.typ`
+   (texto), `transiciones.typ` (transiciones y cámara) y `efectos.typ`
+   (efectos, shaders y composición). Si ninguna encaja, crea la guía y
+   añádela a la parte «Guías» de `docs/content/index.typ`. Cuando el ítem
+   sustituye una limitación que la guía declaraba, por ejemplo en «Lo que
+   todavía no existe» de `efectos.typ`, actualiza también esa nota.
 3. Los ítems visuales llevan un ejemplo con `GAANIM_SNAPSHOTS` y un baseline en
    `tests/visual/`. Solo se hace `--bless` después de aprobar el cambio visual.
 4. Al cerrar un ítem, marca la casilla, enlaza el PR y actualiza *Hoy en Gaanim* en
