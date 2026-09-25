@@ -32,11 +32,11 @@ pub use signals::{
     MobjectSpec, NormalOnCurve, PointOnCurve, PositionBinding, ReactiveLineRegen,
     ReactiveMeshRegen, ReactiveReadout, ReactiveReadoutLayout, Signal, SignalBinding, SpecValue,
     TangentOnCurve, Vec3Signal, always_redraw_regen_system, curvature_on_curve_system,
-    format_reactive_number, localize_decimal_separator, normal_on_curve_system,
-    point_on_curve_system, position_binding_system, reactive_3d_regen_system,
-    reactive_readout_layout_system, reactive_readout_update_system, right_align_readout_path,
-    right_aligned_readout_baseline, shape_readout_text, shape_readout_text_with_weight,
-    signal_binding_system, tangent_on_curve_system,
+    curve_bindings_pre_pass_system, format_reactive_number, localize_decimal_separator,
+    normal_on_curve_system, point_on_curve_system, position_binding_system,
+    reactive_3d_regen_system, reactive_readout_layout_system, reactive_readout_update_system,
+    right_align_readout_path, right_aligned_readout_baseline, shape_readout_text,
+    shape_readout_text_with_weight, signal_binding_system, tangent_on_curve_system,
 };
 pub use tween::{
     AnimatableLens, CameraStateSource, DeltaTime, MorphTable, PropertyLens, Tween, TweenState,
@@ -61,7 +61,8 @@ pub use updaters::{
     tracking_world_to_local, updater_system,
 };
 pub use writing::{
-    FillDrawProgress, PathReveal, PathSource, WriteTipGlow, path_source_seed_added_system,
+    FillDrawProgress, PathReveal, PathSource, PathTrimWindow, WriteTipGlow,
+    path_source_seed_added_system,
 };
 
 use bevy::prelude::*;
@@ -123,7 +124,8 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
                 sampled_series_system.after(updater_system),
                 (
                     property_binding_system.after(sampled_series_system),
-                    position_binding_system.after(property_binding_system),
+                    curve_bindings_pre_pass_system.after(property_binding_system),
+                    position_binding_system.after(curve_bindings_pre_pass_system),
                 ),
                 mechanism_binding_system.after(position_binding_system),
                 endpoint_follow_system.after(mechanism_binding_system),
@@ -239,5 +241,53 @@ mod tests {
                 .first(),
             Some(PathEl::MoveTo(point)) if *point == Point::new(expected.x, expected.y)
         ));
+    }
+
+    #[test]
+    fn followers_observe_point_on_curve_in_the_same_frame() {
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default())
+            .insert_resource(gaanim_text::font::FontRegistry::new())
+            .add_plugins((
+                gaanim_scene::hierarchy::GaanimScenePlugin,
+                GaanimAnimationPlugin,
+            ));
+
+        let mut path = BezPath::new();
+        path.move_to(Point::new(-6.0, -2.0));
+        path.line_to(Point::new(6.0, -2.0));
+        let curve = app.world_mut().spawn(Path2D(Arc::new(path))).id();
+        let tracker = app.world_mut().spawn(FloatSignal::new(1.0)).id();
+        // A seek restores the marker to its declared origin before updaters run.
+        let marker = app
+            .world_mut()
+            .spawn((
+                SpatialTransform::default(),
+                PointOnCurve::new(curve, tracker),
+            ))
+            .id();
+        let follower = app
+            .world_mut()
+            .spawn((
+                SpatialTransform::default(),
+                EndpointFollow {
+                    endpoint: TrackingEndpoint::Entity(marker),
+                    offset: DVec3::ZERO,
+                    offset_space: FollowOffsetSpace::World,
+                },
+            ))
+            .id();
+
+        app.update();
+
+        let translation = app
+            .world()
+            .get::<SpatialTransform>(follower)
+            .expect("follower transform")
+            .translation;
+        assert!(
+            translation.distance(DVec3::new(6.0, -2.0, 0.0)) < 1e-9,
+            "{translation:?}"
+        );
     }
 }

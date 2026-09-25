@@ -1297,10 +1297,18 @@ pub enum PlayError {
     DuplicateAnimation,
     #[error("an animation proxy must select at least one action or property")]
     EmptyAnimation,
-    #[error("play contains multiple animations for target {target:?} channel '{channel}'")]
+    #[error(
+        "play overlaps {first} and {second} on the same {target_kind} ({target}); both drive its \
+         '{channel}' channel. Play them one after another or combine them into one animation"
+    )]
     ConflictingChannel {
         target: gaanim_core::ObjectId,
         channel: String,
+        /// Drawable kind, such as `line` or `circle`.
+        target_kind: &'static str,
+        /// The earlier animation and its span within the call, e.g. `Trim (0.00–1.00 s)`.
+        first: String,
+        second: String,
     },
     #[error("audio declarations can only be played by their owning Scene")]
     ForeignAudio,
@@ -4770,13 +4778,16 @@ impl SceneModel {
             anim.validate_paint_targets(&mut paint_targets)
                 .map_err(|error| PlayError::InvalidPaint(error.to_owned()))?;
         }
-        let mut occupied: Vec<(gaanim_core::ObjectId, String, f64, f64)> = Vec::new();
+        let mut occupied: Vec<(gaanim_core::ObjectId, String, f64, f64, &'static str)> = Vec::new();
+        let described =
+            |label: &str, start: f64, end: f64| format!("{label} ({start:.2}–{end:.2} s)");
         for resolved_item in &resolved {
             let PlayItem::Animation(anim) = &resolved_item.item else {
                 continue;
             };
             let start = resolved_item.start;
             let end = start + resolved_item.duration.unwrap_or(0.0);
+            let label = crate::builder::SceneBuilder::anim_label(&anim.inner.anim_type);
             for channel in animation_channels(anim) {
                 if self
                     .state
@@ -4794,8 +4805,8 @@ impl SceneModel {
                         channel,
                     });
                 }
-                let conflicts = occupied.iter().any(
-                    |(target, occupied_channel, occupied_start, occupied_end)| {
+                let conflict = occupied.iter().find(
+                    |(target, occupied_channel, occupied_start, occupied_end, _)| {
                         if *target != anim.inner.target || *occupied_channel != channel {
                             return false;
                         }
@@ -4809,13 +4820,27 @@ impl SceneModel {
                         }
                     },
                 );
-                if conflicts {
+                if let Some((_, _, occupied_start, occupied_end, occupied_label)) = conflict {
+                    let target_kind = self
+                        .state
+                        .lock()
+                        .expect("canvas state poisoned")
+                        .object_specs
+                        .get(&anim.inner.target)
+                        .map_or("drawable", |spec| {
+                            super::theme::spawn_name(
+                                &spec.lock().expect("object spec poisoned").kind,
+                            )
+                        });
                     return Err(PlayError::ConflictingChannel {
                         target: anim.inner.target,
                         channel,
+                        target_kind,
+                        first: described(occupied_label, *occupied_start, *occupied_end),
+                        second: described(label, start, end),
                     });
                 }
-                occupied.push((anim.inner.target, channel, start, end));
+                occupied.push((anim.inner.target, channel, start, end, label));
             }
         }
         if resolved.iter().any(
@@ -8055,6 +8080,43 @@ mod tests {
     }
 
     #[test]
+    fn unstyled_reactive_numbers_use_the_body_text_color() {
+        for (background, expected) in [
+            (None, Color::BLACK),
+            (Some(Color::from_rgb8(9, 11, 23)), Color::WHITE),
+        ] {
+            let mut canvas = SceneModel::new(640, 360);
+            canvas.set_background(background);
+            canvas.reactive_readout(
+                gaanim_animation::ScalarSource::Constant(3.5),
+                ".2f",
+                "",
+                "",
+                "invalid",
+                None,
+            );
+
+            let mut world = World::new();
+            world.insert_resource(Timeline::new());
+            world.insert_resource(gaanim_text::font::FontRegistry::new());
+            world.insert_resource(gaanim_text::prelude::TextConfig::default());
+            canvas.compile(&mut world);
+            world.flush();
+
+            let fill = world
+                .query::<(&gaanim_scene::ObjectTag, &gaanim_scene::FillBrush)>()
+                .iter(&world)
+                .find_map(|(tag, fill)| (tag.0 == "SvgPath#ReactiveReadout").then_some(fill))
+                .expect("compiled readout number");
+            assert!(
+                matches!(fill.0.as_ref(), Some(Brush::Solid(color)) if *color == expected),
+                "{:?} on {background:?}",
+                fill.0
+            );
+        }
+    }
+
+    #[test]
     fn angle_color_applies_to_the_reactive_numeric_value() {
         let mut canvas = SceneModel::new(640, 360);
         let gold = Color::from_rgb8(255, 200, 0);
@@ -10646,6 +10708,27 @@ mod tests {
             scene.play_items(vec![left.into(), right.into()]),
             Err(PlayError::ConflictingChannel { channel, .. }) if channel == "translation"
         ));
+
+        let line = scene.line(-1.0, 0.0, 1.0, 0.0);
+        let error = scene
+            .play_items(vec![
+                line.animate()
+                    .trim(None, Some(1.0), None)
+                    .duration(1.0)
+                    .into(),
+                line.animate()
+                    .trim(Some(1.0), None, None)
+                    .duration(1.0)
+                    .into(),
+            ])
+            .expect_err("overlapping trims share the effect channel");
+        let message = error.to_string();
+        assert!(
+            message.contains("Trim (0.00–1.00 s)")
+                && message.contains("same line")
+                && message.contains("'effect'"),
+            "{message}"
+        );
 
         let mut foreign_scene = SceneModel::new(320, 180);
         let foreign = foreign_scene.circle(10.0).animate().fade_in();

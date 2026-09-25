@@ -300,8 +300,11 @@ pub enum PropertyLens {
         path: Arc<BezPath>,
         /// Rotate along the tangent, plus this offset in radians.
         orient: Option<f64>,
+        /// Clear the pivot anchor so the local origin rides the path.
+        reset_anchor: bool,
     },
-    /// Move the entity along a 3D polyline at normalized arc length.
+    /// Move the entity along a 3D polyline at normalized arc length,
+    /// clearing its pivot anchor.
     PathFollow3D {
         points: Arc<Vec<gaanim_core::glam::DVec3>>,
     },
@@ -672,12 +675,19 @@ pub fn evaluate_tweens_system(
                     connector.progress = (*from + (*to - *from) * t).clamp(0.0, 1.0);
                 }
             }
-            PropertyLens::PathFollow { path, orient } => {
+            PropertyLens::PathFollow {
+                path,
+                orient,
+                reset_anchor,
+            } => {
                 // Sample the Bézier path at the eased `t` and set
                 // the entity's translation to the sampled point.
                 let p = get_point_at_alpha(path, t);
                 if let Ok(mut transform) = transforms.get_mut(tween.target) {
                     transform.translation = gaanim_core::glam::DVec3::new(p.x, p.y, 0.0);
+                    if *reset_anchor {
+                        transform.anchor = gaanim_core::glam::DVec3::ZERO;
+                    }
                     if let Some(offset) = orient {
                         transform.rotation = gaanim_core::glam::DQuat::from_rotation_z(
                             gaanim_math::path_tangent_angle(path, t) + offset,
@@ -688,6 +698,7 @@ pub fn evaluate_tweens_system(
             PropertyLens::PathFollow3D { points } => {
                 if let Ok(mut transform) = transforms.get_mut(tween.target) {
                     transform.translation = gaanim_math::get_point_on_polyline(points, t);
+                    transform.anchor = gaanim_core::glam::DVec3::ZERO;
                 }
             }
             PropertyLens::SignalFloat { from, to } => {

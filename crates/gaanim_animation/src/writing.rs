@@ -71,6 +71,39 @@ pub(crate) fn path_at_reveal(source: &Arc<BezPath>, reveal: f64) -> Arc<BezPath>
     }
 }
 
+/// Visible window of a path set by `trim` or a passing flash, kept so that
+/// regenerated paths (endpoint lines, connectors, reactive plots) show the
+/// same window instead of their full geometry.
+///
+/// The timeline writes it with each trim or flash clip and clears it when a
+/// Create/Write progression takes over the path.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct PathTrimWindow {
+    pub start: f64,
+    pub end: f64,
+    pub offset: f64,
+    pub sequential: bool,
+}
+
+/// Visible geometry for a regenerated path: its trim window when one is
+/// active, otherwise its draw progress.
+pub(crate) fn visible_path(
+    source: &Arc<BezPath>,
+    reveal: f64,
+    trim: Option<&PathTrimWindow>,
+) -> Arc<BezPath> {
+    match trim {
+        Some(window) => Arc::new(gaanim_math::trim_path(
+            source.as_ref(),
+            window.start,
+            window.end,
+            window.offset,
+            window.sequential,
+        )),
+        None => path_at_reveal(source, reveal),
+    }
+}
+
 /// Marker + parameters for the glowing pen-tip effect shown during Write.
 ///
 /// When present on an entity that also has a `PathCompletion` animation,

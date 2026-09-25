@@ -76,6 +76,9 @@ pub struct EntitySnapshot {
     /// with the current trim so they do not overwrite it with the full path.
     #[cfg_attr(feature = "serde", serde(default))]
     pub path_reveal: Option<f64>,
+    /// Trim or passing-flash window that regenerated paths must keep showing.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub path_trim_window: Option<gaanim_animation::PathTrimWindow>,
     /// Value of a `FloatSignal` (e.g. `Parameter` / `ValueTracker`) at capture time.
     /// Restoring this on seek ensures looped playback returns to the initial
     /// parameter value instead of staying at the final animated value.
@@ -256,6 +259,7 @@ fn insert_snapshot_components(
         entity_mut,
         snap.path_reveal.map(gaanim_animation::PathReveal),
     );
+    sync_optional(entity_mut, snap.path_trim_window);
     match snap.float_signal {
         Some(value)
             if entity_mut
@@ -401,6 +405,9 @@ impl WorldSnapshot {
                     path_reveal: world
                         .get::<gaanim_animation::PathReveal>(entity)
                         .map(|p| p.0),
+                    path_trim_window: world
+                        .get::<gaanim_animation::PathTrimWindow>(entity)
+                        .copied(),
                     float_signal: world
                         .get::<gaanim_animation::FloatSignal>(entity)
                         .map(|s| s.value),

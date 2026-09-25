@@ -380,7 +380,13 @@ pub enum PropertyLensSpec {
         path: BezPath,
         /// Rotate along the tangent, plus this offset in radians.
         orient: Option<f64>,
+        /// Place the local origin on the path by clearing the pivot anchor
+        /// while the clip applies, as `move_along` authors it.
+        #[cfg_attr(feature = "serde", serde(default))]
+        reset_anchor: bool,
     },
+    /// Move along a 3D polyline; the pivot anchor is cleared like a 2D
+    /// `move_along`.
     PathFollow3D {
         points: Vec<gaanim_core::glam::DVec3>,
     },
@@ -652,9 +658,14 @@ impl PropertyLensSpec {
                 from_far: *from_far,
                 to_far: *to_far,
             },
-            Self::PathFollow { path, orient } => PropertyLens::PathFollow {
+            Self::PathFollow {
+                path,
+                orient,
+                reset_anchor,
+            } => PropertyLens::PathFollow {
                 path: std::sync::Arc::new(path.clone()),
                 orient: *orient,
+                reset_anchor: *reset_anchor,
             },
             Self::PathFollow3D { points } => PropertyLens::PathFollow3D {
                 points: std::sync::Arc::new(points.clone()),

@@ -1345,7 +1345,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         self.timeline.connect(current, target, transition);
     }
 
-    fn anim_label(ty: &AnimationType) -> &'static str {
+    pub(crate) fn anim_label(ty: &AnimationType) -> &'static str {
         match ty {
             AnimationType::PropertySource(_) => "Properties",
             AnimationType::CustomProperties(_) => "Custom",
@@ -3311,6 +3311,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         angle,
                     ),
                     orient: None,
+                    reset_anchor: false,
                 }
             }
             (_, lens) => lens,
@@ -5486,7 +5487,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         };
 
         // Resolve and persist the final translation so subsequent
-        // animations build on top of the new position.
+        // animations build on top of the new position. The entity keeps its
+        // initial transform: the clip clears the anchor and moves it when the
+        // playhead reaches the move.
         let end_point = gaanim_math::get_point_at_alpha(&path, 1.0);
         let end_translation = gaanim_core::glam::DVec3::new(end_point.x, end_point.y, 0.0);
 
@@ -5498,7 +5501,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     gaanim_math::path_tangent_angle(&path, 1.0) + offset,
                 );
             }
-            self.commands.entity(state.entity).insert(state.transform);
         }
 
         let clip_start = self.current_time + anim.delay;
@@ -5511,6 +5513,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 lens: PropertyLensSpec::PathFollow {
                     path,
                     orient: follow.orient,
+                    reset_anchor: true,
                 },
                 rate_func: anim.rate_func.clone(),
                 delay: 0.0,
@@ -5531,7 +5534,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         if let Some(state) = self.states.get_mut(anim.target) {
             state.transform.translation = end_translation;
             state.transform.anchor = gaanim_core::glam::DVec3::ZERO;
-            self.commands.entity(state.entity).insert(state.transform);
         }
         let clip_start = self.current_time + anim.delay;
         self.timeline.add_clip(
@@ -5603,6 +5605,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         lens: PropertyLensSpec::PathFollow {
                             path: arc_path,
                             orient: None,
+                            reset_anchor: false,
                         },
                         rate_func: anim.rate_func.clone(),
                         delay: 0.0,
