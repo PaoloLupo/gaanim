@@ -1,580 +1,308 @@
 #import "../../components/section.typ": docs-chapter
 #import "../../components/api.typ": api-entry
+#import "../../components/tutorial.typ": experimental
 
 #show: docs-chapter.with(
-  title: "API de Scene",
-  description: "API pública canónica para construir animaciones con Gaanim",
+  title: "Escena",
+  description: "Scene, el lienzo lógico, la línea de tiempo, los segmentos, la cámara y la salida",
   route: "/referencia/scene/",
 )
 
-= Capacidades de Scene
+= Escena
 
-`Scene` orquesta tiempo, segmentos y salida. Las fábricas viven en handles que
-pertenecen a la misma escena y comparten su modelo diferido:
+`Scene` es el punto de entrada de toda animación: crea los objetos, programa
+la línea de tiempo, organiza los segmentos y entrega el resultado al
+ejecutable de Gaanim. Cada script crea una escena, la llena y termina con
+`scene.render()`.
 
 ```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-shape = scene.geometry.circle(1)
-title = scene.text("Resultado")
-page = scene.layout.column([title, shape])
-value = scene.viz.parameter(0.0)
+from gaanim import BLUE, Scene
+
+scene = Scene(frame=(16, 9), background="#0f172a")
+dot = scene.geometry.circle(0.6).fill(BLUE)
+scene.play([dot.animate.create().duration(0.8)])
+scene.wait(0.5)
+scene.render()
 ```
 
-Las demás capacidades son `media`, `slides`, `mechanics` y `assets`.
-Pasar un drawable de otra escena conserva los mismos errores de propiedad. La
-tabla completa para actualizar código 0.1 está en
-#link("/apendices/novedades/", "Migrar de 0.1 a 0.2").
+Esta página documenta la escena, su lienzo (`scene.canvas`), su cámara
+(`scene.camera`) y las secciones. Los métodos comunes de los objetos están en
+#link("/referencia/drawable/")[Drawable], las animaciones en
+#link("/referencia/animations/")[Animaciones] y los temas en
+#link("/referencia/themes/")[Temas y colores]. Para ejecutar, validar y
+exportar un script, consulta la #link("/referencia/cli/")[línea de comandos].
 
-= Scene
-
-`Scene` es el punto de entrada público de una animación. Es propietaria de los
-objetos, la línea de tiempo, el renderizado, la exportación y los segmentos con
-nombre. Crea una `Scene` para cada animación.
-
-== Constructor y viewport
+== Constructor
 
 #api-entry(
   name: "Scene",
-  kind: "constructor",
-  signature: "Scene(*, frame: tuple[float, float] = (16.0, 9.0), background: BackgroundLike | None = None, margin: float | None = None, theme: str | Theme | None = None)",
-  params: ((name: "frame", type: "tuple[float, float]", default: "(16.0, 9.0)", desc: [Ancho y alto del marco lógico centrado en el origen.]), (name: "background", type: "BackgroundLike | None", default: "None", desc: [`ColorLike`, `Brush` o `Background`; tiene prioridad sobre el fondo del tema.]), (name: "margin", type: "float | None", default: "None", desc: [Margen uniforme en unidades lógicas.]), (name: "theme", type: "str | Theme | None", default: "None", desc: [Nombre incluido o tema centralizado reutilizable.]),),
-  returns: (type: "Scene", desc: [Una escena nueva para autoría.]),
-  desc: [Instala el tema antes de crear objetos. Nombres desconocidos o valores inválidos producen `ValueError` o `TypeError`.],
+  kind: "class",
+  signature: "Scene(*, frame: tuple[float, float] = (16.0, 9.0), background: BackgroundLike | None = None, margin: float | None = None, theme: str | Theme | None = None, post: PostProcess | None = None)",
+  params: (
+    (name: "frame", type: "tuple[float, float]", default: "(16.0, 9.0)", desc: [Ancho y alto del marco lógico, centrado en el origen. Toda la geometría, los márgenes, los tamaños de texto y los trazos usan esta unidad.]),
+    (name: "background", type: "BackgroundLike | None", default: "None", desc: [Color, `Brush` o `Background`. Tiene prioridad sobre el fondo del tema.]),
+    (name: "margin", type: "float | None", default: "None", desc: [Margen uniforme en unidades lógicas; reduce el área segura.]),
+    (name: "theme", type: "str | Theme | None", default: "None", desc: [Nombre de un tema incluido o un `Theme`. Sin tema, la escena no tiene ninguno activo.]),
+    (name: "post", type: "PostProcess | None", default: "None", desc: [Postprocesado WGSL aplicado a todos los segmentos que no lo sustituyan.]),
+  ),
+  returns: (type: "Scene", desc: [Una escena vacía, lista para crear objetos.]),
+  desc: [Los píxeles de salida no se eligen aquí sino al previsualizar o exportar, así que la composición es la misma a cualquier resolución. Un marco no finito o no positivo, WGSL inválido o un tema desconocido lanzan `ValueError`; un `theme` de otro tipo lanza `TypeError`. La antigua forma `Scene(width, height)` en píxeles ya no se acepta.],
 )[
-
 ```python
-from gaanim import BLACK, Scene
+from gaanim import Scene
 
-scene = Scene(frame=(16, 9), background=BLACK, margin=0.5)
-
-# La resolución se elige al exportar, no cambia la composición.
-assert scene.canvas.frame_width == 16
-assert scene.canvas.frame_height == 9
-scene.canvas.set_margin(0.4)
+scene = Scene(frame=(16, 9), background="#0f172a", margin=0.5, theme="presentation")
+print(scene.canvas.frame_width, scene.canvas.safe_width)  # 16.0 15.0
 ```
 ]
 
-La forma tardía equivalente es `scene.canvas.set_theme(theme)`. Los objetos
-compatibles conservan metadatos semánticos hasta la compilación, así que las
-reglas también alcanzan objetos creados antes de esa llamada. Consulta
-#link("/referencia/themes/", "Temas y colores").
+Sin `theme` ni `background`, el fondo es blanco y los objetos sin estilo
+propio también, así que no se ven: elige un tema o un fondo. Consulta
+#link("/referencia/themes/#api-canvas-set-theme")[`Canvas.set_theme`].
 
-`scene.canvas.set_preset(...)` configura un marco lógico estándar y un área
-segura que respetan todas las operaciones de layout y colocación en bordes:
+== Capacidades
 
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-scene.canvas.set_preset("vertical")  # marco lógico 9×16
-print(scene.canvas.safe_width, scene.canvas.safe_height)  # medidas del área segura
-page = scene.layout.column([scene.text("Video vertical", role="title")], within="safe")
-```
+Las fábricas viven en handles que pertenecen a la escena. Un objeto de una
+escena no puede usarse en otra: pasarlo lanza `ValueError`.
 
-Los presets disponibles son `"widescreen"` (16×9), `"vertical"` (9×16) y
-`"square"` (10×10). Usa
-`set_safe_area(top=..., right=..., bottom=..., left=...)` cuando una marca o
-plataforma requiera márgenes internos personalizados.
-
-== Iluminación 3D y cámara del editor
-
-`scene.geometry.lighting_3d(preset="studio", intensity=1.0, shadows=True)` installs one
-friendly ambient/key/fill rig for native PBR primitives and glTF content. Use
-`preset="none"` for emissive-only or externally lit work. The rig is scene
-level, so several models never create duplicate automatic lights.
-
-The editor keeps its inspection camera separate from `scene.camera`. Both 2D
-and 3D scenes open with interactive mode disabled. Every activation through
-`I` or the *Interactive: ON/OFF* indicator in Overlays (`O`) starts from a fresh
-copy of the current timeline-authored camera; the prior inspection position is
-never reused. *Camera View* continues to show the authored camera, and neither
-mode changes snapshots, Presenter View, or export. Picking retains selection
-for framing without drawing a bounding box over the selected object.
-
-- `Num0`: switch between *Free 3D* and *Camera View*.
-- Right drag: orbit; middle drag or Shift+left drag: pan; wheel: dolly.
-- `F`: frame the selection, or the complete scene when nothing is selected.
-- `R`: reset and frame; `I`: toggle inspection mode.
-
-The visible output frame keeps the scene's logical frame and aspect ratio fixed.
-Picking and ray casting are limited to that frame. Purely 2D scenes remain
-orthographic unless inspection is enabled manually.
-
-Timeline and compact seek-bar snapping are disabled while the compiled scene
-contains 3D content. Purely 2D scenes retain the regular snapping behavior.
-
-== Creación de objetos
-
-Cada fábrica devuelve un `Drawable` con métodos fluidos de estilo y layout.
-
-== Máscaras vectoriales dinámicas
-
-`drawable.clip(mask, rule="nonzero", invert=False)` conserva una relación
-vectorial viva: la máscara puede moverse, escalarse, rotarse o transformarse y
-el recorte se recalcula antes de bounds y extracción. La máscara sigue visible;
-usa `no_fill().no_stroke()` si solo debe definir la silueta. `invert=True`
-recorta al exterior de la silueta. Las máscaras son 2D vectoriales; no admiten
-alfa/luminancia ráster.
-El `Text` unificado usa de forma predeterminada la familia científica New
-Computer Modern incluida; los fragmentos `$...$` usan su pareja New Computer
-Modern Math. Usa `scene.text("$a + b = 2$")` para matemáticas en línea y
-`scene.text.equation("a + b = 2")` para una ecuación independiente compilada como
-`$ a + b = 2 $`.
-
-```python
-from gaanim import Axis, BLUE, GOLD, GREEN, WHITE, Scene
-
-scene = Scene(frame=(16, 9))
-
-circle = scene.geometry.circle(0.8).fill(BLUE).stroke(WHITE, 0.04).move_to(-1.6, 0)
-rect = scene.geometry.rect(1.8, 1.0).fill(GOLD).move_to(1.6, 0)
-triangle = scene.geometry.polygon([(0, 1.0), (-0.9, -0.7), (0.9, -0.7)])
-star = scene.geometry.star(5, 0.9, 0.42)
-hexagon = scene.geometry.regular_polygon(6, 0.84)
-slice = scene.geometry.sector(0, 0, 1.0, 0.0, 1.8)
-ring = scene.geometry.annulus(1.0, 0.56)
-underbrace = scene.geometry.brace(-1.2, -1.0, 1.2, -1.0, 0.36)
-approved = scene.geometry.checkmark(0.32).fill(GREEN)
-rejected = scene.geometry.cross(0.32).stroke(WHITE, 0.04)
-corner = scene.geometry.right_angle(0.4)
-label = scene.text("Gaanim", role="title").move_to(0, 2.2)
-formula = scene.text("$E = m c^2$").move_to(0, -1.8)
-arrow = scene.geometry.arrow(-0.8, 0, 0.8, 0)
-angle = scene.geometry.arc(0, 0, 0.64, 0.0, 1.2).no_fill().stroke(WHITE, 0.03)
-rotation = scene.geometry.curved_arrow(-0.9, -0.8, 0.9, -0.8, 0.9).fill(WHITE)
-rotation_arc = scene.geometry.curved_arrow_arc(0, -0.8, 0.9, 0.2, 1.4).fill(WHITE)
-guide = scene.geometry.dashed_line(-1.8, -1.2, 1.8, -1.2, dash_length=0.18, gap_length=0.10)
-measure_arrow = scene.geometry.double_arrow(-1.4, -1.6, 1.4, -1.6)
-measure = scene.mechanics.dimension(-0.8, 0.8, 0.8, 0.8, 0.24)
-spring = scene.geometry.path([(-0.8, 0), (-0.5, 0.24), (-0.2, -0.24), (0.1, 0.24), (0.4, -0.24), (0.8, 0)]).no_fill().stroke(WHITE, 0.04)
-axes = scene.viz.cartesian_2d(
-    Axis.linear(-5, 5).ticks(1).label("x").style(color=WHITE),
-    Axis.linear(-3, 3).ticks(1).label("f(x)").style(color=WHITE),
-)
-logo = scene.media.image("assets/logo.webp").scale_to(0.25).move_to(3.6, 1.8)
-icon = scene.media.svg("assets/icon.svg").scale_to(0.5).move_to(-3.6, 1.8)
-```
-
-Available factories are `circle`, `rect`, `rounded_rect`, `square`, `dot`,
-`ellipse`, `line`, `arrow`, `dashed_line`, `double_arrow`, `polygon`, `star`, `regular_polygon`, `sector`, `annulus`, `brace`, `checkmark`, `cross`, `right_angle`, `arc`, `curved_arrow`, `dimension`, `path`, `axes`, `text`, and
-`group`. `image(path, width=..., height=..., fit="contain")` loads PNG, JPEG,
-and WebP files. `contain` preserves aspect ratio inside the target, `cover`
-fills and clips it, and `stretch` fills it without preserving aspect ratio.
-Pass `crop=(x, y, width, height)` in source pixels (top-left origin) to select
-a source rectangle. The regular `Drawable` methods such as `scale_to`, `rotate_to`,
-`opacity`, and `move_to` remain available. Reusing the same path shares its decoded
-texture for the process.
-
-`svg(path)` imports SVG geometry as a real hierarchy of regular vector paths
-and source groups. Named groups and paths are available through `part(id)`:
-
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-robot = scene.media.svg("assets/robot.svg")
-arm = robot.part("left-arm")
-joint = robot.part("elbow")
-
-arm.fill(BLUE)  # group styles reach every descendant path
-scene.play([joint.animate.rotate_by(0.6)])
-```
-
-Part IDs are case-sensitive. Duplicate source IDs fail during import, while an
-unknown ID raises `KeyError` and lists the available names. The importer
-resolves paths and basic shapes, solid or linear/radial gradient fills and
-strokes, CSS, `viewBox`, transforms, `<use>`, outlined text, `clipPath`,
-`feGaussianBlur`, and `feDropShadow`. Patterns, masks, embedded raster images,
-and arbitrary filter graphs are intentionally omitted.
-
-Coordinate systems, plots, data marks, and calculus constructions use the
-typed visualization API. Build immutable `Axis` specifications, create a
-`CoordinateSpace`, then call methods on that space:
-
-```python
->>>from gaanim import Scene
->>>scene = Scene(frame=(16, 9))
-import math
-from gaanim import Axis, BLUE
-
-space = scene.viz.cartesian_2d(
-    Axis.linear(-3, 3).ticks(1).label("x"),
-    Axis.linear(-2, 2).ticks(1).label("f(x)"),
-    width=9,
-    height=4.8,
-)
-curve = space.plot(lambda x: math.sin(x)).stroke(BLUE, 0.03)
-marker = scene.geometry.dot(0.06).at_coordinate(space.coord(1, 1))
-```
-
-Consulta #link("/referencia/visualization/", "la API de visualización") para conocer
-las escalas, los espacios polares, complejos y 3D, las expresiones nativas, los
-datos y estadísticas, y las herramientas educativas.
-
-`bezier(start, controls, end)` creates a native quadratic Bézier with one
-control point or a cubic Bézier with two. It remains a real Bézier path, so it
-can drive the reactive curve bindings directly.
-
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-curve = scene.geometry.bezier((-1.8, 0), [(-0.8, 1.8), (0.8, -1.8)], (1.8, 0))
-```
-
-`path(definition)` is the compact entry point for custom technical geometry.
-Pass a sequence of `(x, y)` points for an open polyline, or cursor commands for
-a composed path. The explicit `polyline` and `curve` factories remain available
-for code that benefits from stating the exact path kind.
-
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-rail = scene.geometry.path([(-1.8, 0), (0, 0.8), (1.8, 0)])
-profile = scene.geometry.path([
-    ("move", [(-1.8, -0.4)]),
-    ("cubic", [(-0.8, 1), (0.8, -1), (1.8, 0.4)]),
-])
-```
-
-`arc(cx, cy, radius, start_angle, sweep_angle)` uses radians. `curved_arrow`
-connects two points with an angular deflection; `curved_arrow_arc` follows an
-explicit center/radius arc. Both use radians, while
-`dimension(x1, y1, x2, y2, offset)` draws extension lines and a perpendicular
-double-headed measurement arrow.
-
-== Geometría reactiva
-
-`Parameter` anima un escalar independientemente de los objetos visibles. Usa
-`always_redraw_arc` to regenerate a curved arrow from that value each frame.
-Reactive visual helpers are hidden when declared. Add their entry animation to
-`scene.play(...)`—for example `arc.animate.fade_in()`, `trail.animate.fade_in()`, or
-`spring.animate.create()`—before or alongside the animation that drives them. The
-`Parameter` es una señal no visual y no necesita una animación de entrada.
-
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-theta = scene.viz.parameter(0.2)
-rotation = scene.geometry.always_redraw_arc(theta, 0, 0, 1.4, 0.0).fill(WHITE)
-scene.play([
-    rotation.animate.fade_in().duration(0.3),
-    theta.animate.set(4.5).duration(2.0),
-])
-```
-
-For simple spatial relationships, `attach_to` keeps a drawable centered on
-another drawable after its updaters run. `bind_x_from`, `bind_y_from`, and
-`bind_position_from(source, axes="xy")` provide axis-level control.
-
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
->>>marker = scene.geometry.dot(0.06)
-label = scene.text("moving label")
-label.attach_to(marker)
-marker.add_updater(Updater.orbit(0, 0, 1.2, 1.2))
-scene.play([label.animate.fade_in().duration(0.3)])
-```
-
-`Updater.wiggle(position=0.08, rotation=0, scale=0, frequency=2, octaves=2,
-seed=0)` adds organic, seeded jitter and `Updater.oscillate(channel,
-waveform="sine", frequency=1, low=0, high=1, phase=0)` a periodic value on `x`,
-`y`, `rotation` (added) or `scale`, `opacity` (multiplied). Unlike the other
-presets they are layers over the drawable's animation: they are pure functions
-of timeline time, so a seek lands on the same frame as playback, and they add to
-`animate.move_to` and other clips instead of replacing them.
-
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
->>>logo = scene.media.image("assets/logo.webp").scale_to(0.25)
->>>light = scene.geometry.circle(0.3).fill(GOLD)
-logo.add_updater(Updater.wiggle(position=0.08, rotation=0.03, seed=1))
-light.add_updater(Updater.oscillate("opacity", waveform="triangle", frequency=0.5, low=0.4, high=1.0))
-scene.play([logo.animate.move_to(3, 0).duration(2)])  # still wiggling while it moves
-```
-
-For reproducible variation, `scene.random(seed)` returns a `Random` stream
-(`uniform`, `gauss`, `integer`, `choice`, `shuffle`) whose values are the same
-on every platform, and `scene.noise(frequency=1, amplitude=1, octaves=1,
-seed=0, center=0)` returns smooth seeded noise over time as a `Computed`,
-evaluated natively each frame:
-
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
->>>title = scene.text("Gaanim", role="title")
-rng = scene.random(seed=42)
-stars = [scene.geometry.dot(0.04).move_to(rng.uniform(-7, 7), rng.uniform(-4, 4)) for _ in range(60)]
-drift = scene.noise(frequency=0.6, amplitude=0.3, octaves=3, seed=5)
-title.rotate_to(computed(lambda v: 0.1 * v, inputs=[drift]))
-```
-
-Groups and drawables can rotate or scale around a scene-space point through
-`with_pivot(x, y)` (also available as `pivot`). This is useful for a mechanism
-with a physical hinge:
-
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
->>>rail = scene.geometry.line(-1.8, 0, 1.8, 0)
->>>spring = scene.mechanics.spring_between((-1.8, 0.4), (0.6, 0.4))
->>>mass = scene.geometry.dot(0.2).move_to(0.6, 0.4)
-from math import pi
-
-mechanism = scene.geometry.group([rail, spring, mass]).with_pivot(0, 0)
-scene.play([mechanism.animate.rotate_by(pi / 3).duration(1.0)])
-```
-
-`spring_between(from, to, coils=8, amplitude=0.12, crossing=0)` creates a native
-reactive helical spring. Each endpoint can be a drawable or an `(x, y)` tuple,
-so it follows a moving mass without a Python callback every frame. Set
-`crossing` from `0` to `1` to fold parts of each turn back into e-like visual
-crossings.
-
-`callout(text, target, offset=(1.6, 0.96), width=2.4, height=0.72)` creates a
-reusable editorial label: its card, text, and connector follow the target
-natively. It returns a regular `Drawable` group, so it can be animated like any
-other mobject.
-
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-mass = scene.geometry.dot(0.2).fill(GOLD)
-note = scene.slides.callout("Moving mass", mass, offset=(1.8, 1))
-scene.play([mass.animate.shift_by(2.4, 0).duration(1.2), note.animate.fade_in().duration(0.4)])
-```
-
-The themed factories `badge`, `chip`, `card`, `banner`, `lower_third`,
-`stat_card`, `quote_card`, and `section_header` are documented together under
-#link("/referencia/objetos/", [Mobjects — Composición editorial]). `banner` replaces
-the removed `caption` helper, while `badge` is positioned through the regular
-Drawable API (`scene.slides.badge("READY").move_to(x, y)`).
-
-`title_card(title, subtitle=None)` returns a restrained, centered opening with
-title, optional subtitle, and an accent rule. Its elements remain a single
-animatable drawable. Pass `panel=True` for a framed version.
-
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-opening = scene.slides.title_card("Vector motion", "A short technical explanation")
-scene.play([opening.animate.fade_in_from(Direction.DOWN, distance=0.48).duration(0.6)])
-```
-
-`bullets(items)` creates a vertically aligned bullet list as one drawable. The
-default gap and colors are suitable for a technical presentation; tune
-`width`, `gap`, `bullet_radius`, `bullet_color`, and `color` when needed.
-
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-agenda = scene.slides.bullets(["Setup", "Motion", "Export"], gap=0.9)
-scene.play([agenda.animate.fade_in_from(Direction.DOWN, distance=0.4).duration(0.5)])
-```
-
-Charts are immutable tabular specifications materialized into stable semantic
-layers. Their marks remain batched independently from row count.
-
-```python
->>>from gaanim import Scene
->>>scene = Scene(frame=(16, 9))
-from gaanim import Axis, ChartSpec
-
-spec = ChartSpec({"x": [0, 1, 2], "value": [18, 42, 31]}) \
-  .mark("bar").encode(x="x", y="value") \
-  .axes(x=Axis.category(["Q1", "Q2", "Q3"]), y=Axis.linear(0, 50))
-chart = scene.viz.chart(spec)
-scene.play([chart.layer("axes").animate.create(), chart.layer("marks").animate.grow_from_center().duration(0.6)])
-```
-
-`table(headers, rows)` creates a compact table with a restrained blue header and
-thin construction rules. Each row must have exactly one non-empty cell per header.
-
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-results = scene.slides.table(
-    ["Method", "Error", "Time"],
-    [["Baseline", "0.18", "48 ms"], ["GPU", "0.04", "15 ms"]],
-)
-scene.play([results.animate.fade_in_from(Direction.DOWN, distance=0.3).duration(0.5)])
-```
-
-`typst(source)` compiles full Typst document markup into a vector drawable.
-Use it for publication-style layouts such as table spans or custom mathematical
-structures; `text("$...$")` is the concise API for math-only content. The
-embedded world resolves `@preview/...` imports through the standard Typst
-Universe cache; the first use downloads the requested package.
-
-The document keeps Typst's own proportions and is scaled so its default 11pt
-text is as large as the `body` text role. Other lengths follow: `#set text(size:
-22pt)` is twice the body size, and table insets and rule widths scale with the
-text. `width` is a Typst page width (`"16cm"`, `"800pt"`, or a number of points)
-measured before that scaling.
-
-A string is inline markup. Pass a `pathlib.Path` to load a `.typ` asset instead;
-relative paths use `scene.assets.assets_dir(...)`, and a missing or unreadable asset
-raises `RuntimeError` before the drawable is created.
-
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-comparison = scene.text.typst('''
+#api-entry(
+  name: "Scene.geometry / text / layout / media / viz / slides / mechanics / sections / assets",
+  kind: "property",
+  signature: "scene.geometry -> Geometry · scene.text -> Typography · scene.layout -> LayoutBuilder · scene.media -> MediaLibrary · scene.viz -> Visualization · scene.slides -> SlideKit · scene.mechanics -> Mechanics · scene.sections -> SceneSections · scene.assets -> AssetManager",
+  returns: (type: "handle", desc: [Un handle de solo lectura ligado a esta escena.]),
+  desc: [Cada propiedad agrupa las fábricas de un área.],
+)[
 #table(
-  columns: 2,
-  [*Method*], [*Error*],
-  [Baseline], [0.18],
-  [GPU], [0.04],
+  columns: (auto, 1fr),
+  inset: 7pt,
+  [*Propiedad*], [*Contenido*],
+  [`scene.geometry`], [Primitivas, trayectorias, flechas, geometría reactiva y 3D. Ver #link("/referencia/geometria/")[Geometría].],
+  [`scene.text`], [Texto, ecuaciones, Typst y código. Ver #link("/referencia/text/")[Texto].],
+  [`scene.layout`], [Filas, columnas, grids y regiones. Ver #link("/referencia/layout/")[Layout].],
+  [`scene.media`], [Imágenes, SVG, vídeo, audio, Lottie y glTF. Ver #link("/referencia/medios/")[Medios] y #link("/referencia/audio/")[Audio].],
+  [`scene.viz`], [Ejes, funciones, gráficas, parámetros y matrices. Ver #link("/referencia/visualization/")[Visualización].],
+  [`scene.slides`], [Tarjetas, viñetas, tablas e identidad de presentación. Ver #link("/referencia/diapositivas/")[Diapositivas].],
+  [`scene.mechanics`], [Muelles, cotas, fuerzas y apoyos. Ver #link("/referencia/mecanica/")[Mecánica].],
+  [`scene.sections`], [Agenda y barra de progreso de secciones. Ver #link(<secciones>)[Secciones].],
+  [`scene.assets`], [Carpeta de recursos, precarga y recarga. Ver #link("/referencia/assets/")[Recursos].],
 )
-''')
-
-from pathlib import Path
-title = scene.text.typst(Path("assets/title.typ"))
-```
-
-`code(source, language=...)` creates a monospaced vector code block with a
-quiet technical frame. It is suitable for code reveals and can be animated as
-one drawable; token-level highlighting and diffs are planned separately.
 
 ```python
 >>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-snippet = scene.text.code("result = mass * acceleration", language="python")
-scene.play([snippet.animate.fade_in().duration(0.4)])
+>>>scene = Scene(frame=(16, 9), theme="technical")
+shape = scene.geometry.circle(1)
+title = scene.text("Resultado", role="title")
+page = scene.layout.column([title, shape])
+value = scene.viz.parameter(0.0)
 ```
+]
 
-`point_on_curve(curve, tracker)` creates a 0.08-unit dot whose position follows the
-normalized value of a `Parameter` along a sampled `polyline` or Bézier
-path. The value is clamped to
-`[0, 1]` and measured by arc length, with no Python callback during playback.
+#api-entry(
+  name: "Scene.canvas",
+  kind: "property",
+  returns: (type: "Canvas", desc: [El lienzo lógico de la escena.]),
+  desc: [Marco, área segura, márgenes, fondo, tema, fuentes y postprocesado. Los miembros de marco y área segura están abajo; los de estilo, en #link("/referencia/themes/")[Temas y colores].],
+  none,
+)
 
+#api-entry(
+  name: "Scene.camera",
+  kind: "property",
+  returns: (type: "Camera", desc: [La cámara que se ve en la previsualización y en la exportación.]),
+  desc: [Consulta #link(<camara>)[Cámara].],
+  none,
+)
+
+#api-entry(
+  name: "Scene.time",
+  kind: "property",
+  returns: (type: "TimeInput", desc: [Los segundos absolutos de la línea de tiempo como entrada reactiva.]),
+  desc: [Es la misma fuente que `scene.viz.time`. Pásala a `computed` o a un setter absoluto; sigue los seeks exactos y la exportación.],
+)[
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
-from math import cos, pi, sin
-
-t = scene.viz.parameter(0.0)
-curve = scene.geometry.polyline([
-  (2.25 * cos(u), 1.25 * sin(2 * u))
-  for u in (2 * pi * index / 240 for index in range(241))
-])
-dot = scene.geometry.point_on_curve(curve, t).fill(GOLD)
-scene.play([dot.animate.fade_in().duration(0.3), t.animate.set(1.0).duration(2.0)])
+>>>dot = scene.geometry.dot(0.1)
+dot.move_to(computed(lambda t: -4 + t, inputs=[scene.time]), 0)
+scene.wait(3)
 ```
+]
 
-`tangent_on_curve(curve, tracker, length=0.8)` returns a line centered on that
-same position and rotated to the current polyline segment. It uses the same
-native arc-length sampling as `point_on_curve`.
+Las narraciones (`Scene.voiceover`, `Scene.narration_script` y
+`Scene.live_take`) están en #link("/referencia/audio/")[Audio].
 
-`normal_on_curve(curve, tracker, length=0.8)` is the perpendicular companion,
-rotated 90 degrees counter-clockwise from the tangent.
+== Marco lógico y área segura
 
-`curvature_on_curve(curve, tracker, window=0.02)` returns the local osculating
-circle estimated from neighboring arc-length samples. Style it as a regular
-circle, usually with `no_fill().stroke(...)`.
+El marco es el rectángulo que se ve, en unidades lógicas y centrado en el
+origen: con el predeterminado de 16 × 9, `x` va de `-8` a `8` e `y` de `-4.5`
+a `4.5`. El área segura es el marco menos los márgenes; la usan el layout
+(`within="safe"`) y las colocaciones en bordes y esquinas.
 
-Use `label.follow_to(mass, offset=(0, 0.48))` for annotations that accompany an
-object without covering it. `dimension_between(from, to, offset)` similarly
-keeps a technical measurement synchronized with moving endpoints. These
-generated visuals, including `attach_to`, `bind_*`, curve markers, tracking
-lines, springs, dimensions, and traced paths, remain hidden until their own
-entry animation is included in `scene.play(...)`.
+#api-entry(
+  name: "Canvas.frame_width",
+  kind: "property",
+  returns: (type: "float", desc: [Ancho del marco lógico; `16.0` en una escena predeterminada.]),
+  none,
+)
+
+#api-entry(
+  name: "Canvas.frame_height",
+  kind: "property",
+  returns: (type: "float", desc: [Alto del marco lógico; `9.0` en una escena predeterminada.]),
+  none,
+)
+
+#api-entry(
+  name: "Canvas.aspect_ratio",
+  kind: "property",
+  returns: (type: "float", desc: [Ancho dividido entre alto del marco.]),
+  none,
+)
+
+#api-entry(
+  name: "Canvas.safe_width",
+  kind: "property",
+  returns: (type: "float", desc: [Ancho del marco menos los márgenes izquierdo y derecho.]),
+  none,
+)
+
+#api-entry(
+  name: "Canvas.safe_height",
+  kind: "property",
+  returns: (type: "float", desc: [Alto del marco menos los márgenes superior e inferior.]),
+  none,
+)
+
+#api-entry(
+  name: "Canvas.set_margin",
+  kind: "method",
+  params: ((name: "margin", type: "float", default: none, desc: [Margen igual en los cuatro lados, en unidades lógicas.]),),
+  returns: (type: "None", desc: [Reemplaza el área segura actual.]),
+  desc: [Equivale a `Scene(margin=...)` después de crear la escena.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.canvas.set_margin(0.4)
+print(scene.canvas.safe_width, scene.canvas.safe_height)  # 15.2 8.2
+```
+]
+
+#api-entry(
+  name: "Canvas.set_safe_area",
+  kind: "method",
+  params: (
+    (name: "top", type: "float", default: "0.0", desc: [Margen superior en unidades lógicas.]),
+    (name: "right", type: "float", default: "0.0", desc: [Margen derecho.]),
+    (name: "bottom", type: "float", default: "0.0", desc: [Margen inferior.]),
+    (name: "left", type: "float", default: "0.0", desc: [Margen izquierdo.]),
+  ),
+  returns: (type: "None", desc: [Reemplaza el área segura actual.]),
+  desc: [Útil cuando una marca o una plataforma reserva franjas propias, como la interfaz de un vídeo vertical.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.canvas.set_safe_area(top=0.5, bottom=1.0)
+print(scene.canvas.safe_height)  # 7.5
+```
+]
+
+#api-entry(
+  name: "Canvas.set_preset",
+  kind: "method",
+  params: ((name: "name", type: "\"widescreen\" | \"vertical\" | \"square\"", default: none, desc: [Composición estándar.]),),
+  returns: (type: "None", desc: [Reemplaza el marco lógico y el área segura.]),
+  desc: [`"widescreen"` da un marco 16 × 9 con área segura 15 × 8, `"vertical"` un marco 9 × 16 con área segura 8 × 13.5 y `"square"` un marco 10 × 10 con área segura 9 × 9.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9), theme="technical")
+scene.canvas.set_preset("vertical")
+page = scene.layout.column([scene.text("Vídeo vertical", role="title")], within="safe")
+```
+]
 
 == Línea de tiempo
 
-`play` receives a list of animations; calls are sequential and animations in a
-single list run in parallel.
-
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
->>>circle = scene.geometry.circle(0.8).fill(BLUE).move_to(-1.6, 0)
->>>rect = scene.geometry.rect(1.8, 1.0).fill(GOLD).move_to(1.6, 0)
->>>label = scene.text("Gaanim", role="title").move_to(0, 2.2)
-scene.play([
-    circle.animate.create().duration(1.0).easing(Easing.SMOOTH),
-    rect.animate.grow_from_center().duration(1.0).easing(Easing.spring(stiffness=90, damping=12)),
-    label.animate.write().duration(0.8),
-])
-scene.wait(0.5)
-scene.play([circle.animate.shift_by(2.5, 0).duration(1.0)])
-scene.play([rect.animate.fade_out().duration(0.5)])
-```
-
-`segment` is the single structural unit for visibility, transitions, notes,
-presentation layouts, and optional backgrounds. Segment boundaries remain
-continuous; use `stop()` only where interactive playback must wait for input.
+Cada llamada a `play` o `wait` avanza el cursor de autoría. Las animaciones
+de una misma lista empiezan juntas; llamadas sucesivas van una detrás de otra.
 
 #api-entry(
-  name: "Scene.segment",
+  name: "Scene.play",
   kind: "method",
-  signature: "segment(name, transition=None, *, notes=None, template=None, background=None) -> Segment",
-  params: ((name: "name", type: "str", default: none, desc: [Non-empty name, unique within the Scene without regard to ASCII case.]), (name: "transition", type: "Transition | None", default: "None", desc: [Incoming transition from the preceding segment.]), (name: "notes", type: "str | None", default: "None", desc: [Speaker notes shown by Presenter View.]), (name: "template", type: "LayoutTemplate | None", default: "None", desc: [Typed Python template instantiated later with `Segment.bind`.]), (name: "background", type: "BackgroundLike | None", default: "None", desc: [`ColorLike`, `Brush`, or `Background` used only while this segment is active; `None` uses the Scene background.]),),
-  returns: (type: "Segment", desc: [Stable handle accepted by `link`; `bind(**slots)` returns its root Layout.]),
-  desc: [Creates and activates a structural segment. The first call replaces the untouched implicit segment. An incoming transition on that first segment, or an empty or duplicate name, raises `ValueError`.],
+  params: (
+    (name: "items", type: "Playable | Sequence[Playable]", default: none, desc: [Un `Anim`, audio, vídeo, Lottie o `Composition`, o una lista que se reproduce en paralelo.]),
+    (name: "duration", type: "float | None", default: "None", desc: [Duración para las animaciones que no fijan la suya.]),
+    (name: "easing", type: "Easing | None", default: "None", desc: [Easing para las animaciones que no fijan el suyo.]),
+  ),
+  returns: (type: "None", desc: [Avanza el cursor hasta el final del bloque.]),
+  desc: [Programa el bloque de forma atómica: un `Anim` ya usado, de otra escena, repetido o que escribe un canal ocupado en el mismo tramo lanza `ValueError` sin aplicar ningún cambio. `duration` y `easing` son valores por defecto; los que fija cada `Anim` o cada grupo tienen prioridad.],
 )[
 ```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-intro = scene.segment(
-    "Introduction",
-    notes="State the goal.",
-    template=title_slide,
-    background="#0f172a",
-)
-intro.bind(title=scene.text("One clear idea", role="title"))
-scene.wait(0.5)
-details = scene.segment(
-    "Details",
-    Transition.cross_fade(0.4),
-    template=lecture,
-    background=Brush.linear(["#172554", "#0f172a"], start=(-8, 0), end=(8, 0)),
-)
-scene.link(intro, details, Transition.cross_fade(0.4))
+from gaanim import BLUE, GOLD, Easing, Scene
+
+scene = Scene(frame=(16, 9), theme="technical")
+circle = scene.geometry.circle(0.8).fill(BLUE).move_to(-1.6, 0)
+rect = scene.geometry.rect(1.8, 1.0).fill(GOLD).move_to(1.6, 0)
+scene.play([circle.animate.create(), rect.animate.grow_from_center()], duration=0.8)
+scene.play(circle.animate.shift_by(1.2, 0), easing=Easing.SNAPPY)
+scene.render()
 ```
 ]
 
 #api-entry(
-  name: "Scene.stop",
+  name: "Scene.wait",
   kind: "method",
-  signature: "stop(name=None) -> None",
-  params: ((name: "name", type: "str | None", default: "None", desc: [Optional Presenter View label.]),),
-  returns: (type: "None", desc: [Adds no duration and creates no visual change.]),
-  desc: [Pauses real-time playback when the playhead reaches this exact position. At a segment boundary, the completed outgoing segment remains visible until playback advances, so no trailing `wait()` is required. Export, snapshots, and explicit seeks ignore stops and traverse the timeline continuously. After a recorded `live_take()` starts, a stop instead waits as long as the speaker paused there (see #link("/referencia/audio/", "Audio")). Empty names and a second stop at the same segment-local timestamp raise `ValueError`.],
+  params: ((name: "seconds", type: "float", default: none, desc: [Tiempo que se mantiene la imagen, en segundos.]),),
+  returns: (type: "None", desc: [Avanza el cursor.]),
 )[
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
->>>result = scene.text("$x = 2$")
-scene.play([result.animate.write().duration(0.6)])
-scene.stop("result-ready")
+scene.wait(1.0)
 ```
 ]
 
 #api-entry(
-  name: "Scene.cursor / stops",
+  name: "Scene.fade_out_all",
+  kind: "method",
+  params: ((name: "seconds", type: "float", default: none, desc: [Duración del fundido.]),),
+  returns: (type: "None", desc: [Avanza el cursor `seconds`.]),
+  desc: [Desvanece a la vez, con easing suave, todos los objetos del segmento activo. Es la forma rápida de cerrar una escena.],
+)[
+```python
+from gaanim import Scene
+
+scene = Scene(frame=(16, 9), theme="technical")
+title = scene.text("Fin", role="title")
+scene.play(title.animate.write())
+scene.fade_out_all(0.6)
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Scene.cursor",
   kind: "property",
-  signature: "cursor -> float / stops -> list[SceneStop]",
-  params: (),
-  returns: (type: "float / list[SceneStop]", desc: [The authoring cursor, and every stop authored so far with `name`, `time`, and `segment`.]),
-  desc: [Both use absolute timeline seconds across segments and are read-only. `stops` lists stops in timeline order; read it at the end of the script, before `render()`, to request one snapshot per pause.],
+  returns: (type: "float", desc: [Posición del cursor de autoría, en segundos absolutos de la línea de tiempo.]),
+  desc: [Cuenta a través de todos los segmentos y es de solo lectura.],
 )[
 ```python
->>>import os
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
-if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
-    scene.snapshots(snapshots, [stop.time for stop in scene.stops])
+>>>title = scene.text("Hola")
+scene.play([title.animate.write().duration(0.8)])
+reveal_time = scene.cursor  # 0.8
 ```
 ]
 
 #api-entry(
-  name: "Scene.marker / markers",
+  name: "Scene.marker",
   kind: "method",
-  signature: "marker(name: str) -> None / markers -> list[SceneMarker]",
-  params: ((name: "name", type: "str", default: none, desc: [Unique marker name; it is trimmed.]),),
-  returns: (type: "None / list[SceneMarker]", desc: [`markers` lists every marker authored so far with `name`, absolute `time`, and the active `segment`, in timeline order.]),
-  desc: [Names the current cursor on the global timeline. A marker is metadata only: it adds no duration, does not pause playback and does not move the cursor. The editor draws markers as small triangles above the seek bar; hovering shows the name and clicking one jumps exactly to it. `gaanim export --from <marker> --to <marker>` accepts marker names in place of seconds. Empty names, duplicates, and names that parse as a number raise `ValueError`. For named instants inside a `Composition`, use `label` (see Animaciones).],
+  params: ((name: "name", type: "str", default: none, desc: [Nombre único del instante; se recortan los espacios.]),),
+  returns: (type: "None", desc: [No añade duración ni mueve el cursor.]),
+  desc: [Da nombre al instante actual de la línea de tiempo global. Es solo un metadato: no pausa la reproducción. El editor lo dibuja como un triángulo sobre la barra de tiempo (al pasar el cursor muestra el nombre y un clic salta a él), y `gaanim export --from` / `--to` lo aceptan en lugar de segundos. Un nombre vacío, repetido o que se lee como número lanza `ValueError`. Para instantes dentro de una `Composition`, usa #link("/referencia/animations/#api-label")[`label`].],
 )[
 ```python
 >>>from gaanim import *
@@ -593,28 +321,183 @@ gaanim export escena.py --output climax.mp4 --from climax --to fin
 ]
 
 #api-entry(
-  name: "Scene.reuse / persist / release",
+  name: "Scene.markers",
+  kind: "property",
+  returns: (type: "list[SceneMarker]", desc: [Los marcadores creados hasta ahora, en orden temporal.]),
+  desc: [Cada `SceneMarker` tiene `name`, `time` (segundos absolutos) y `segment` (el segmento activo al crearlo).],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.wait(1.5)
+scene.marker("climax")
+print([(m.name, m.time) for m in scene.markers])  # [('climax', 1.5)]
+```
+]
+
+== Segmentos
+
+Un segmento es la unidad estructural de la escena: agrupa objetos, define la
+transición de entrada, las notas para Presenter View, la plantilla y un fondo
+propio. Los límites entre segmentos son continuos; `stop()` marca dónde la
+reproducción interactiva espera al presentador.
+
+#api-entry(
+  name: "Scene.segment",
   kind: "method",
-  signature: "reuse(object, *others) / persist(object, *others) / release(object, *others) -> None",
-  params: ((name: "object", type: "Drawable", default: none, desc: [First drawable to reuse or change lifetime.]), (name: "others", type: "Drawable...", default: "()", desc: [Additional drawables from the same Scene.]),),
-  returns: (type: "None", desc: [Queues a scene-membership change at the current timeline cursor.]),
-  desc: [`reuse` adopts existing drawables into the active segment. `persist` keeps them available across future segments and outside automatic transitions. `release` returns persistent drawables to the active segment. Visual state is preserved; drawables from another Scene raise `ValueError`.],
+  signature: "segment(name: str, transition: Transition | None = None, *, notes: str | None = None, template: Callable[..., Layout] | None = None, background: BackgroundLike | None = None, post: PostProcess | Literal[False] | None = None) -> Segment",
+  params: (
+    (name: "name", type: "str", default: none, desc: [Nombre no vacío, único en la escena sin distinguir mayúsculas.]),
+    (name: "transition", type: "Transition | None", default: "None", desc: [Transición de entrada desde el segmento anterior. Ver #link("/referencia/animations/#api-transition-cross-fade")[Transiciones].]),
+    (name: "notes", type: "str | None", default: "None", desc: [Notas del orador que muestra Presenter View.]),
+    (name: "template", type: "Callable[..., Layout] | None", default: "None", desc: [Plantilla de Python que se rellena después con `Segment.bind`.]),
+    (name: "background", type: "BackgroundLike | None", default: "None", desc: [Fondo solo mientras el segmento está activo; `None` usa el de la escena.]),
+    (name: "post", type: "PostProcess | False | None", default: "None", desc: [Postprocesado del segmento: otro `PostProcess`, `False` para ninguno o `None` para heredar `scene.canvas.post`.]),
+  ),
+  returns: (type: "Segment", desc: [Handle que aceptan `link` y `bind`.]),
+  desc: [Crea el segmento y lo activa. La primera llamada sustituye al segmento implícito inicial, que aún no tiene contenido. Un nombre vacío o repetido, o una transición en el primer segmento, lanzan `ValueError`; un `post` de otro tipo lanza `TypeError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9), theme="presentation")
+intro = scene.segment("Introducción", notes="Presenta el objetivo.", template=title_slide)
+intro.bind(title=scene.text("Una idea clara", role="title"))
+scene.wait(0.5)
+details = scene.segment(
+    "Detalles",
+    Transition.cross_fade(0.4),
+    background=Brush.linear(["#172554", "#0f172a"], start=(-8, 0), end=(8, 0)),
+)
+scene.wait(0.5)
+```
+]
+
+#api-entry(
+  name: "Segment.bind",
+  kind: "method",
+  params: ((name: "slots", type: "**Any", default: "{}", desc: [Un argumento con nombre por hueco de la plantilla.]),),
+  returns: (type: "Layout", desc: [El layout raíz del segmento.]),
+  desc: [Rellena la plantilla del segmento. Un hueco obligatorio que falta o uno que no existe lanzan `TypeError`; un segmento sin plantilla lanza `ValueError`. Las plantillas incluidas (`title_slide`, `lecture`, `comparison`…) se importan desde `gaanim`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9), theme="presentation")
+>>>baseline = scene.geometry.rect(3, 2).fill(GRAY)
+>>>proposed = scene.geometry.rect(3, 2).fill(BLUE)
+results = scene.segment("Resultados", template=comparison, notes="Compara los dos modelos.")
+results.bind(title=scene.text("Resultados", role="title"), left=baseline, right=proposed)
+scene.stop("comparación")
+```
+]
+
+#api-entry(
+  name: "Scene.link",
+  kind: "method",
+  params: (
+    (name: "from_", type: "Segment", default: none, desc: [Segmento de origen.]),
+    (name: "to", type: "Segment", default: none, desc: [Segmento de destino, posterior a `from_`.]),
+    (name: "transition", type: "Transition", default: none, desc: [Transición que sustituye a la de entrada de `to`.]),
+  ),
+  returns: (type: "None", desc: [No mueve el cursor.]),
+  desc: [Declara la transición entre dos segmentos ya creados. Hace falta para `Transition.morph`, cuyos pares incluyen objetos del segmento de destino. Un segmento de otra escena, o un `to` que no va después de `from_`, lanzan un error.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9), theme="technical")
+overview = scene.segment("Resumen")
+card = scene.geometry.rect(3, 2).fill(BLUE).move_to(-4, 0)
+scene.wait(0.5)
+detail = scene.segment("Detalle")
+panel = scene.geometry.rect(12, 6).fill(BLUE)
+scene.wait(0.5)
+scene.link(overview, detail, Transition.morph(0.8, pairs=[(card, panel)]))
+```
+]
+
+#api-entry(
+  name: "Scene.stop",
+  kind: "method",
+  params: ((name: "name", type: "str | None", default: "None", desc: [Etiqueta de la pausa en Presenter View.]),),
+  returns: (type: "None", desc: [No añade duración ni cambia la imagen.]),
+  desc: [Pausa la reproducción interactiva cuando el cursor llega a este instante. En el límite de un segmento, el segmento saliente sigue visible hasta que se avanza, así que no hace falta un `wait()` final. La exportación, las capturas y los seeks ignoran las pausas. Después de un `live_take()` grabado, la pausa espera tanto como la pausa real del orador (ver #link("/referencia/audio/")[Audio]). Un nombre vacío o una segunda pausa en el mismo instante del segmento lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>result = scene.text("$x = 2$")
+scene.play([result.animate.write().duration(0.6)])
+scene.stop("resultado")
+```
+]
+
+#api-entry(
+  name: "Scene.stops",
+  kind: "property",
+  returns: (type: "list[SceneStop]", desc: [Las pausas creadas hasta ahora, en orden temporal.]),
+  desc: [Cada `SceneStop` tiene `name` (o `None`), `time` en segundos absolutos y `segment`. Léela al final del script, antes de `render()`, para pedir una captura por pausa; `gaanim --diff --capture-stops` hace lo mismo sin cambiar el script.],
+)[
+```python
+>>>import os
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
+    scene.snapshots(snapshots, [stop.time for stop in scene.stops])
+```
+]
+
+Al empezar un segmento, los objetos de los anteriores dejan de verse. Estos
+tres métodos cambian a qué segmento pertenece un objeto, en el cursor actual y
+sin alterar su estado visual. Un objeto de otra escena lanza `ValueError`.
+
+#api-entry(
+  name: "Scene.reuse",
+  kind: "method",
+  params: (
+    (name: "object", type: "Drawable", default: none, desc: [Primer objeto.]),
+    (name: "others", type: "Drawable", default: "()", desc: [Más objetos de la misma escena.]),
+  ),
+  returns: (type: "None"),
+  desc: [Adopta objetos en el segmento activo. Un objeto visible en el segmento anterior queda quieto durante la transición automática y luego pasa a ser contenido del segmento activo. Llamarlo después de `play()` o `wait()` actúa en ese instante.],
+  none,
+)
+
+#api-entry(
+  name: "Scene.persist",
+  kind: "method",
+  params: (
+    (name: "object", type: "Drawable", default: none, desc: [Primer objeto.]),
+    (name: "others", type: "Drawable", default: "()", desc: [Más objetos de la misma escena.]),
+  ),
+  returns: (type: "None"),
+  desc: [Mantiene objetos visibles y animables en los segmentos siguientes, desde el cursor actual. Las transiciones automáticas (`cross_fade`, `slide`…) no los afectan. Un objeto invisible sigue invisible hasta que una animación de entrada cambia su opacidad.],
+  none,
+)
+
+#api-entry(
+  name: "Scene.release",
+  kind: "method",
+  params: (
+    (name: "object", type: "Drawable", default: none, desc: [Primer objeto.]),
+    (name: "others", type: "Drawable", default: "()", desc: [Más objetos de la misma escena.]),
+  ),
+  returns: (type: "None"),
+  desc: [Termina la persistencia y devuelve los objetos al segmento activo. Al inicio de un segmento, el objeto queda quieto durante la transición de entrada y después pasa a ser local. Nunca oculta ni elimina el objeto: la siguiente transición lo trata como contenido saliente normal.],
 )[
 ```python
 # show-code: true
 from gaanim import BLUE, GOLD, Scene, Transition
 
 scene = Scene(frame=(16, 9), background="#0f172a")
-title = scene.text("Shared context", role="title").fill(GOLD).move_to(0, 0.875)
+title = scene.text("Contexto compartido", role="title").fill(GOLD).move_to(0, 0.875)
 scene.play([title.animate.write().duration(0.5)])
 
-scene.segment("content", Transition.cross_fade(0.35))
+scene.segment("contenido", Transition.cross_fade(0.35))
 scene.reuse(title)
 dot = scene.geometry.dot(0.225).fill(BLUE).move_to(0, -0.375)
 scene.play([dot.animate.grow_from_center().duration(0.4)])
 scene.persist(title)
 
-scene.segment("closing", Transition.slide(0.35, "left"))
+scene.segment("cierre", Transition.slide(0.35, "left"))
 scene.release(title)
 scene.wait(0.5)
 # output: preview.webp
@@ -622,437 +505,94 @@ scene.render()
 ```
 ]
 
-== Segmentos de presentación e identidad visual
+La identidad de una presentación (logo, pie, número de diapositiva) se
+configura una vez con `scene.slides.brand(...)`; consulta
+#link("/guias/presentaciones/")[Presentaciones].
 
-Configure the deck identity once before declaring presentation segments:
+== Secciones <secciones>
 
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-scene.canvas.set_theme("presentation")
-scene.slides.brand(
-    logo="assets/university.svg",
-    footer="UNIVERSITY · MASTER THESIS · 2026",
-    slide_numbers=True,
-    rule=True,
-    show_on_cover=False,
-    logo_scale=0.75,
-)
-```
-
-The logo, theme-colored rule, footer, and current slide number are generated
-inside every explicit segment, above the slide content, so navigation and
-independent segment export remain correct. The logo is fitted to 0.6 scene
-units tall and multiplied by `logo_scale`. Cover layouts omit the chrome by
-default.
-
-`segment(template=...)` accepts a built-in or project-defined typed Python
-template. `bind(**slots)` validates required, optional, and extra slots and
-returns the segment's root `Layout`.
-
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
->>>baseline = scene.geometry.rect(3, 2).fill(GRAY)
->>>proposed = scene.geometry.rect(3, 2).fill(BLUE)
-segment = scene.segment("Results", template=comparison, notes="Compare both models.")
-segment.bind(title=scene.text("Results", role="title"), left=baseline, right=proposed)
-scene.stop("comparison-ready")
-```
-
-`Transition.zoom_through(duration, center=(0, 0), max_zoom=4)` zooms into a
-scene-space point before revealing the next segment. It is useful when a detail
-of the outgoing scene introduces the following section.
-
-`Transition.morph(duration, pairs=[(source, target), ...])` carries each pair
-across the cut: source and target share one bounding box that travels from the
-source's box to the target's, while the target fades in over the first half
-and the source fades out over the second, so a card can become the heading of
-the next slide. Unpaired content cross-fades. Declare the pairs with
-`scene.link` once both segments exist, because the target drawables belong to
-the incoming segment:
-
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-overview = scene.segment("Overview")
-card = scene.geometry.rect(3, 2).fill(BLUE).move_to(-4, 0)
-detail = scene.segment("Detail")
-panel = scene.geometry.rect(12, 6).fill(BLUE).move_to(0, 0)
-scene.link(overview, detail, Transition.morph(0.8, pairs=[(card, panel)]))
-```
-
-== Cámara
-
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
->>>circle = scene.geometry.circle(0.8).fill(BLUE).move_to(-1.6, 0)
->>>label = scene.text("Gaanim", role="title").move_to(0, 2.2)
-overview = scene.camera.save("overview")
-detail = scene.camera.state_2d(center=(-1.6, 0.4), zoom=1.5)
-scene.play([scene.camera.animate.to(detail).duration(0.8)])
-scene.play([scene.camera.animate.restore("overview").duration(0.6)])
-
-scene.play([scene.camera.animate.pan_to(-1.6, 0.4).duration(0.8)])
-scene.play([scene.camera.animate.zoom_to(1.5).duration(0.6)])
-scene.play([scene.camera.animate.frame_to([circle, label], margin=(0.32, 0.48), dynamic=True).duration(0.9)])
-scene.play([scene.camera.animate.rotate_to(0.15).duration(0.5)])
-scene.play([scene.camera.animate.follow(circle.anchor_point(Anchor.TOP), offset=(0, 0.24), lag=0.2).duration(2.0)])
-scene.play([scene.camera.animate.shake(amplitude=0.12, frequency=8).duration(0.4)])
-
-# Camera animations return Anim and can run beside drawable animations.
-scene.play([
-    circle.animate.move_to(1.8, 0).duration(1.2),
-    scene.camera.animate.orbit(delta_yaw=0.5, delta_pitch=0.1).duration(1.2),
-])
-```
-
-`CameraState` represents a complete reusable authored pose without canvas or
-host viewport dimensions. `camera.state_2d(center=(0, 0), zoom=1,
-rotation=0)` creates an orthographic state; `camera.state_3d(eye, target,
-up=(0, 1, 0), fov_y=pi/4, near=0.1, far=1000)` creates a perspective look-at
-state. Both validate their complete pose without advancing the timeline.
-
-`camera.capture()` records the authored camera evaluated at the current cursor
-and returns a `CameraState`; the operation itself has zero duration. It runs
-before persistent bindings, temporary rig effects, shake, and editor view
-overrides, so restoring it is deterministic across preview, seek, and export.
-`camera.save(name)` captures and stores the same state under a non-empty name,
-replacing an existing entry. `camera.animate.to(state).duration(1)` and
-`camera.animate.restore(name).duration(1)` return ordinary composable `Anim` values.
-States belong to their creating `Scene`; unknown names and cross-scene use
-raise `ValueError`.
-
-`camera.frame_to` accepts one drawable or a sequence, with scalar, two-side, or
-CSS-order four-side margins. With `dynamic=True`, it recomputes the union after
-updaters and layout in the same frame. `camera.pan_to`, `camera.follow`, and
-`camera.look_at` accept a `Drawable`, `AnchorPoint`, `PointRef`, or a 2D/3D
-tuple. Zoom and rotation also accept `Parameter`, `Variable`, and `Computed`.
-`camera.follow` supports world/local offsets and deterministic absolute-time
-lag. `camera.orthographic(...)` changes projection explicitly, while
-`camera.reset()` restores pose, target, up, and default orthographic projection.
-`camera.shake` is deterministic so previews, seeks, and exports match. The
-camera methods return `Anim`: discarded results retain the existing sequential
-behavior, while passing them to `scene.play` regroups them with drawable or
-glTF Action animations at the same timeline start. Fluent `Anim` controls such
-as `.duration()`, `.delay()`, `.easing(Easing.SMOOTH)`, and `.easing(Easing.LINEAR)` also apply. The
-old flat `scene.camera_*` methods are removed; `scene.camera.*` is the sole
-public camera surface.
-
-=== Zoom exponencial y shake por trauma
-
-`camera.animate.zoom_to(zoom, *, interpolation="exponential")` and
-`camera.animate.frame_to(..., interpolation="exponential")` interpolate zoom as
-`z0 * (z1 / z0) ** p`, where `p` is the eased progress. The visible area then
-changes by the same ratio every frame, so an 8x zoom reads as constant speed
-instead of accelerating. `frame_to` also pans in proportion to the change of
-visible width, so the view scales about a fixed point and the framed content
-travels in a straight line. `interpolation="linear"` restores the independent
-linear position and zoom of earlier releases; any other value raises
-`ValueError`. The immediate `camera.zoom_to` / `camera.frame_to` cuts are
-unaffected.
-
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-scene.play([scene.camera.animate.zoom_to(8.0).duration(1.5)])
-scene.play([scene.camera.animate.zoom_to(1.0, interpolation="linear").duration(0.8)])
-```
-
-`camera.animate.shake(amplitude=None, frequency=None, *, trauma=None,
-decay=None, rotation=None, seed=None)` follows the trauma model: trauma starts
-at `trauma` (`0..1`, default `0.8`), falls by `decay` per second (default
-`1.5`), and the camera moves by `trauma ** 2`, so light hits barely register
-while heavy ones shake hard. Translation (at most `amplitude` scene units at
-trauma 1, default `0.4`) and roll (at most `rotation` radians, default `0.02`)
-come from seeded coherent noise sampled at `frequency` Hz (default `12`). The
-default duration is `trauma / decay` seconds (one second when `decay=0`); a
-shorter `.duration()` still releases to rest, and easing does not reshape the
-decay. The offset is a pure function of time, so seeks, snapshots and exports
-match playback, and it is added after follow, framing and bindings.
-
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-scene.play([scene.camera.animate.shake(trauma=0.8, decay=1.5, frequency=12, rotation=0.02, seed=0)])
-scene.play([scene.camera.animate.shake(trauma=0.4, seed=3)])  # a lighter hit
-```
-
-Passing `amplitude` without any of `trauma`, `decay`, `rotation` or `seed` keeps
-the previous sine shake for compatibility: `amplitude` is its peak offset,
-`frequency` counts oscillations per clip (default `8`), and it lasts 0.5 s, so
-`shake(0.12, 8)` and `shake(amplitude=0.5, frequency=4)` look as before. A bare
-`shake()` uses the trauma model. Negative values and `trauma` above one raise
-`ValueError`.
-
-=== Bindings reactivos persistentes
-
-Bindings are non-rendered ECS constraints with stable creation order. They are
-active from creation unless `enabled=False`, remain active across segments,
-and record `enable()` / `disable()` at the current timeline cursor. Each
-constraint owns only declared channels. Influence is a scalar source in
-`0..1`; later constraints compose over earlier ones. Temporary follow/dynamic
-framing runs after bindings, and shake is always an additive final modifier.
-
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-import math
-
-theta = scene.viz.parameter(0.0)
-focus = scene.geometry.point_ref(
-    computed(lambda t: t * 2.25, inputs=[theta]),
-    computed(lambda t: math.sin(t * 2), inputs=[theta]),
-)
-rig2d = scene.camera.bind_2d(center=focus, zoom=computed(lambda t: 1 + t * 0.3, inputs=[theta]))
-scene.play([theta.animate.set(1.0).duration(2.0)])
-rig2d.disable()
-
-rig3d = scene.camera.bind_3d(
-    eye=(6, 4, 8), target=focus, fov_y=0.8, influence=0.75,
-)
-rig3d.disable()
-```
-
-`bind_2d` requires `center`, `zoom`, or `rotation` and selects orthographic
-projection. `bind_3d` requires `eye`, `target`, or `fov_y` and selects
-perspective. Camera APIs reject non-finite values, invalid zoom/FOV/clipping,
-degenerate look-at poses, and influence outside `0..1`; there are no silent
-clamps.
-
-=== Cámara 3D
-
-La cámara 3D usa coordenadas de mundo `(x, y, z)` y los ángulos se expresan en
-radianes. `scene.camera.look_at(...)` y `scene.camera.perspective(...)` fijan
-la pose de inmediato en el cursor actual y devuelven `Camera` para encadenar.
-Para un movimiento animado usa `scene.camera.animate`: sus métodos devuelven
-un `Anim` cuya duración configuras después con `.duration(seconds)`.
+`Section` agrupa pasos de contenido que se construyen con funciones de Python.
+Cada paso abre su propio segmento; la función recibe la escena y crea
+contenido y pausas sin volver a llamar a `segment`. Estas clases se importan
+desde `gaanim`.
 
 #api-entry(
-  name: "Camera.perspective",
-  kind: "method",
-  signature: "perspective(fov_y: float, near: float = 0.1, far: float = 1000.0) -> Camera",
-  params: ((name: "fov_y", type: "float", default: none, desc: [Vertical field of view in radians.]), (name: "near", type: "float", default: "0.1", desc: [Positive near clipping plane.]), (name: "far", type: "float", default: "1000.0", desc: [Far clipping plane, greater than near.]),),
-  returns: (type: "Camera", desc: [The same camera, for chaining.]),
-  desc: [Switches the scene to perspective projection immediately. Requires `0 < near < far` and `0 < fov_y < pi`. `scene.camera.animate.perspective(fov_y, near=0.1, far=1000.0)` returns a composable `Anim` instead.],
+  name: "Section",
+  kind: "class",
+  signature: "Section(key: str, steps: Sequence[SectionStep], *, title: str | None = None)",
+  params: (
+    (name: "key", type: "str", default: none, desc: [Identidad estable de la sección; única entre las secciones de una escena.]),
+    (name: "steps", type: "Sequence[SectionStep]", default: none, desc: [Pasos en orden; se copian al crear la sección.]),
+    (name: "title", type: "str | None", default: "None", desc: [Nombre que muestran la agenda y la barra de progreso; sin él se usa `key`.]),
+  ),
+  returns: (type: "Section", desc: [Tiene `key`, `title` y `steps`.]),
+  desc: [Una clave, un título o una lista de pasos vacíos lanzan `ValueError`; un paso de otro tipo, `TypeError`. `section.build(scene, *, on_enter=None)` abre cada segmento, llama a `on_enter(scene, progress)` y ejecuta la función del paso; devuelve los `Segment` en orden y no inserta pausas. Reutiliza la misma instancia para repetir la sección: el progreso vuelve a empezar y los nombres de segmento incluyen clave, visita, número y nombre del paso. Las excepciones se propagan sin deshacer lo ya creado.],
 )[
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-scene.camera.perspective(fov_y=0.785, near=0.1, far=1000.0)
-```
-]
-
-#api-entry(
-  name: "Camera.look_at",
-  kind: "method",
-  signature: "look_at(eye: Endpoint, target: Endpoint, up: tuple[float, float, float] | None = None) -> Camera",
-  params: ((name: "eye", type: "Endpoint", default: none, desc: [Reactive camera position in world space.]), (name: "target", type: "Endpoint", default: none, desc: [Reactive point the camera looks at.]), (name: "up", type: "(float,float,float)", default: "None", desc: [World up direction; defaults to (0,1,0).]),),
-  returns: (type: "Camera", desc: [The same camera, for chaining.]),
-  desc: [Positions the camera at `eye` and aims it at `target` immediately. Endpoints resolve after reactive layout; eye and target must differ and up must be non-zero and non-collinear. `scene.camera.animate.look_at(eye, target, up=None)` returns a composable `Anim` instead.],
-)[
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-scene.camera.look_at(eye=(7, 5, 6), target=(0, 0, 0))
-```
-]
-
-#api-entry(
-  name: "CameraAnimation.orbit",
-  kind: "method",
-  signature: "camera.animate.orbit(delta_yaw: float, delta_pitch: float) -> Anim",
-  params: ((name: "delta_yaw", type: "float", default: none, desc: [Horizontal orbit angle in radians.]), (name: "delta_pitch", type: "float", default: none, desc: [Vertical orbit angle in radians.]),),
-  returns: (type: "Anim", desc: [A composable orbit around the current look-at target; set its timing with `.duration(seconds)`.]),
-  desc: [Use small yaw and pitch deltas for a smooth turn around the current target.],
-)[
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-marker = scene.geometry.dot(0.075)
-scene.play([
-    marker.animate.fade_in().duration(1.0),
-    scene.camera.animate.orbit(delta_yaw=0.5, delta_pitch=0.1).duration(1.0),
-])
-```
-]
-
-#api-entry(
-  name: "CameraAnimation.dolly",
-  kind: "method",
-  signature: "camera.animate.dolly(factor: float) -> Anim",
-  params: ((name: "factor", type: "float", default: none, desc: [Positive distance multiplier.]),),
-  returns: (type: "Anim", desc: [A composable camera move toward or away from its target; set its timing with `.duration(seconds)`.]),
-  desc: [`factor < 1` moves closer; `factor > 1` moves farther. The factor must be finite and positive.],
-)[
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-scene.play([scene.camera.animate.dolly(factor=0.85).duration(0.6)])
-```
-]
-
-== Recorte y máscaras
-
-Use any vector drawable as clipping geometry for another drawable or a nested
-group. The mask keeps its own visibility; make it transparent when it should
-only constrain content:
-
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
->>>chart_group = scene.geometry.group([scene.geometry.rect(6, 3).fill(BLUE), scene.geometry.circle(1).fill(GOLD)])
-mask = scene.geometry.rounded_rect(5.25, 2.75, 0.35).no_fill().no_stroke()
-chart_group.clip(mask)
-```
-
-Mask and target transforms are resolved in world space, so they can be placed,
-scaled, rotated, or nested independently. `rule="evenodd"` supports paths with
-holes, and `drawable.no_clip()` removes a previously assigned mask.
-
-== Salida
-
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-scene.render()  # Submit the authored timeline to the Gaanim host
-```
-
-Preview, export and visual capture are host responsibilities. Export a script
-without changing it:
-
-```bash
-gaanim export my_animation.py --output output.webp --width 1280 --height 720 --quality standard
-gaanim export my_animation.py --output output.mp4 --width 1920 --height 1080 --encoder nvenc
-gaanim export overlay.py --output overlay.webm --transparent
-```
-
-`--width` y `--height` eligen la resolución sin cambiar la composición lógica.
-Una relación de aspecto distinta falla por defecto; `--fit contain` añade
-barras y `--fit cover` recorta los bordes. `--quality` ajusta el FPS, la
-compresión y la velocidad de codificación. MP4 prueba automáticamente NVENC,
-AMF y QSV; usa el
-primer encoder hardware que complete un probe real y cae a `libx264` solo si
-ninguno funciona. `--encoder libx264|nvenc|amf|qsv|vaapi` exige una
-implementación concreta sin fallback; también está disponible en el editor.
-VAAPI es explícito porque un driver defectuoso puede bloquear la GPU completa.
-`--transparent` conserva
-el canal alpha en WebM, WebP y secuencias PNG; MP4 y GIF lo rechazan. La escena
-debe usar un fondo con alpha, por ejemplo `background="#00000000"`.
-
-Una secuencia PNG escribe un archivo por fotograma. Si `--output` contiene un
-patrón `%d` o `%0Nd` (por ejemplo `frames/f_%04d.png`), ese patrón se sustituye
-por el número de fotograma empezando en 0 (`f_0000.png`, `f_0001.png`, …); sin
-patrón, el número se añade al nombre como `f_00000.png`.
-
-`--from` y `--to` (en segundos) exportan solo un tramo, por ejemplo
-`gaanim export . --output tramo.mp4 --from 12 --to 15`. El audio se recorta al
-mismo tramo, una secuencia PNG numera sus fotogramas desde 0 y un `--to`
-posterior al final de la escena se limita a su duración; un tramo vacío produce
-un error.
-
-`--from` y `--to` también aceptan el nombre de un `scene.marker`, por ejemplo
-`gaanim export . --output tramo.mp4 --from climax --to fin`; los nombres se
-resuelven después de ejecutar el script y un marcador inexistente produce un
-error que lista los definidos. Se pueden combinar segundos y marcadores.
-
-`gaanim export --help` lista todas las opciones y formatos, y
-`gaanim --version` muestra la versión instalada.
-
-Run a script through the Gaanim application:
-
-```bash
-gaanim my_animation.py
-```
-
-For visual regression, the executable injects the authoritative directory.
-The script only declares exact timeline times:
-
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-import os
-
-if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
-    scene.snapshots(snapshots, [0.0, 1.0])
-```
-
-== Composing sections
-
-`Section(key, steps)` groups ordered Python content builders. Each immutable
-`SectionStep` supplies a name, builder and optional `transition`, `notes`,
-`template` and `background`, with the same meanings as `Scene.segment`.
-The helper opens the segment itself; builders receive the original `Scene`
-and author content and stops without calling `segment` again.
-
 ```python
 from gaanim import Scene, Section, SectionStep
 
-scene = Scene(frame=(16, 9))
+scene = Scene(frame=(16, 9), theme="technical")
 
-def context(scene):
-    title = scene.text("Context", size=0.5)
+def contexto(scene):
+    title = scene.text("Contexto", size=0.5)
     scene.play(title.animate.write())
     scene.stop()
 
-def proposal(scene):
-    title = scene.text("Proposal", size=0.5)
+def propuesta(scene):
+    title = scene.text("Propuesta", size=0.5)
     scene.play(title.animate.write())
     scene.stop()
 
-section = Section("introduction", [
-    SectionStep(name="Context", build=context, notes="Introduce the problem."),
-    SectionStep(name="Proposal", build=proposal),
+section = Section("introduccion", [
+    SectionStep(name="Contexto", build=contexto, notes="Presenta el problema."),
+    SectionStep(name="Propuesta", build=propuesta),
 ])
 
-def enter(scene, progress):
+def al_entrar(scene, progress):
     print(progress.key, progress.index, progress.total, progress.fraction)
 
-segments = section.build(scene, on_enter=enter)
+segments = section.build(scene, on_enter=al_entrar)
 scene.render()
 ```
+]
 
-`build(scene, *, on_enter=None)` returns native segment handles in order.
-It first opens a segment, calls `on_enter(scene, progress)`, then invokes its
-builder. The callback may animate a persistent navigation indicator or bind
-template slots through `progress.segment`. `SectionProgress` also exposes
-`key`, `step`, one-based `index`, `total`, one-based `visit` and
-`fraction = index / total`. Stops inside the builder never advance progress.
-No stops or divider slides are inserted automatically.
+#api-entry(
+  name: "SectionStep",
+  kind: "class",
+  signature: "SectionStep(*, name: str, build: Callable[[Scene], None], transition: Transition | None = None, notes: str | None = None, template: Callable[..., Layout] | None = None, background: BackgroundLike | None = None)",
+  params: (
+    (name: "name", type: "str", default: none, desc: [Nombre del paso.]),
+    (name: "build", type: "Callable[[Scene], None]", default: none, desc: [Función que crea el contenido del paso.]),
+    (name: "transition, notes, template, background", type: "", default: "None", desc: [Igual que en `Scene.segment`.]),
+  ),
+  returns: (type: "SectionStep", desc: [Valor inmutable.]),
+  desc: [Un nombre vacío lanza `ValueError`; una función o plantilla que no se puede llamar, `TypeError`.],
+  none,
+)
 
-Reuse the same `Section` instance to repeat a section, including after other
-sections: progress restarts and generated segment names include its key, visit,
-ordinal and step name. Use a unique key for each instance within a scene.
-This is an authoring helper, not a new runtime navigation-group type.
+#api-entry(
+  name: "SectionProgress",
+  kind: "class",
+  signature: "SectionProgress(key, step, index, total, visit, segment)",
+  returns: (type: "SectionProgress", desc: [Contexto que recibe `on_enter`.]),
+  desc: [`key` y `step` identifican la sección y el paso; `index` (desde 1) y `total` cuentan los pasos; `visit` (desde 1) cuenta las repeticiones de la sección; `segment` es el `Segment` recién abierto, útil para `bind`. `fraction` vale `index / total`. Las pausas dentro de un paso no avanzan el progreso.],
+  none,
+)
 
-Empty keys, names or step lists raise `ValueError`; invalid step types and
-noncallable builders or callbacks raise `TypeError`. Native segment errors
-still apply, including a transition on the scene's first segment. Exceptions
-propagate without rolling back already authored content; a failed build
-consumes its visit number. See `examples/section_composition.py` for an animated
-progress rail and configurable arrows in a 16×9 frame.
-
-`Section(key, steps, title=...)` adds a display name for navigation; without
-it the key is shown.
-
-== Section navigation
-
-`scene.sections` builds the two recurring pieces of a talk: an agenda of
-sections and a progress rail. Both supply structure, state and transitions on
-a neutral base of theme colors; every visual value is an argument, a style or
-a builder you provide, and every part is an ordinary drawable you can restyle,
-animate or hide. Sections may be `Section` instances, plain keys, or
-`(key, title)` pairs.
-
+#api-entry(
+  name: "Scene.sections",
+  kind: "property",
+  returns: (type: "SceneSections", desc: [Fábricas `agenda(...)` y `progress_rail(...)`.]),
+  desc: [Construyen las dos piezas de navegación de una charla sobre una base neutra de colores del tema. Cada parte es un drawable normal que puedes reestilizar, animar u ocultar. Las secciones pueden ser instancias de `Section`, claves o pares `(clave, título)`.],
+)[
 ```python
 >>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
+>>>scene = Scene(frame=(16, 9), theme="technical")
 >>>def _content(scene):
->>>    scene.play(scene.text("Content", size=0.5).animate.write())
+>>>    scene.play(scene.text("Contenido", size=0.5).animate.write())
 >>>sections = [
->>>    Section("intro", [SectionStep(name="Context", build=_content)], title="Introduction"),
->>>    Section("method", [SectionStep(name="Model", build=_content)], title="Method"),
+>>>    Section("intro", [SectionStep(name="Contexto", build=_content)], title="Introducción"),
+>>>    Section("metodo", [SectionStep(name="Modelo", build=_content)], title="Método"),
 >>>]
 agenda = scene.sections.agenda(sections, pitch=0.66)
 agenda.root.move_to(-2, 1.4, Anchor.TOP_LEFT)
@@ -1064,38 +604,734 @@ for section in sections:
     scene.play([agenda.animate.focus(section), rail.animate.enter(section)])
     section.build(scene, on_enter=lambda scene, p: scene.play(rail.animate.to(p)))
 ```
+]
 
-*Agenda.* Every entry is `done`, `current` or `upcoming`. Entries sit
-`pitch` apart (`direction="column"` or `"row"`), placed by their left-center
-point. Each entry holds one drawable per state stacked in place and only the
-one for its state is visible, so a state may change weight, color or content:
-`focus` cross-fades them. Defaults use the theme (`done` in `foreground`,
-`current` in `accent` weight 700, `upcoming` in `muted`); `styles={"current":
-TextStyle(...)}` replaces any of them, and `item=lambda scene, entry, state:
-...` replaces the text with any drawable, for example a number and a title in
-a group; annotate such builders with `NavigationEntry` and `NavigationState`
-(the `Literal` of the three states), both importable from `gaanim`. `marker=lambda scene: ...` adds a drawable `marker_gap` before the
-current entry that slides with `focus`.
+*Agenda.* `scene.sections.agenda(sections, current=None, *, direction="column",
+pitch=0.5, styles=None, item=None, marker=None, marker_gap=0.3)` devuelve un
+`Agenda`. Cada entrada está en uno de tres estados, `done`, `current` o
+`upcoming`, y se coloca por su punto izquierdo-central a `pitch` unidades de la
+anterior, en columna o en fila. Cada entrada guarda un drawable por estado y
+solo muestra el suyo, así que un estado puede cambiar peso, color o contenido:
+`focus` hace un fundido cruzado entre ellos. Por defecto `done` usa
+`foreground`, `current` usa `accent` con peso 700 y `upcoming` usa `muted`;
+`styles={"current": TextStyle(...)}` sustituye cualquiera de ellos e
+`item=lambda scene, entry, state: ...` sustituye el texto por cualquier
+drawable. `marker=lambda scene: ...` añade un indicador a `marker_gap` de la
+entrada actual que se desliza con `focus`. Para anotar esas funciones,
+`NavigationEntry` y `NavigationState` se importan desde `gaanim`.
 
-- `agenda.item(key)` is the group of an entry, `agenda.items("done")` the
-  entries in a state, and `agenda.variant(key, "current")` the drawable shown
-  in that state.
-- `agenda.focus(key)` and `agenda.advance(steps)` change state immediately;
-  `agenda.animate.focus(key)` and `agenda.animate.advance()` return
-  compositions for `scene.play`; their `easing=` keyword eases every
-  cross-fade and the marker slide. Targets accept a key, a 0-based index, a
-  `Section` or a `SectionProgress` (the `SectionTarget` alias; sections
-  accept `SectionLike`).
+- `agenda.item(key)` es el grupo de una entrada, `agenda.items("done")` las
+  entradas en un estado y `agenda.variant(key, "current")` el drawable de ese
+  estado.
+- `agenda.focus(key)` y `agenda.advance(steps)` cambian el estado de
+  inmediato; `agenda.animate.focus(key)` y `agenda.animate.advance()` devuelven
+  composiciones para `scene.play`, con `easing=` opcional. Los destinos aceptan
+  una clave, un índice desde 0, un `Section` o un `SectionProgress`.
 
-*Progress rail.* A continuous rail is one track with a mark at every section
-boundary; `segmented=True` gives each section its own track, `gap` apart.
-`rail.animate.to(progress)` fills the sections before a `SectionProgress` and
-its share of steps; numbers in `[0, 1]` set the whole-rail fraction.
-`rail.animate.enter(section)` makes a section current with nothing of it
-filled yet, as on a divider slide. `captions=True` names each section above
-its span on a shared baseline and colors it by state (`caption_colors`
-overrides `muted`/`accent`/`muted`). `track`, `fills`, `marks`, `captions` and
-`label` are the parts; `track=`, `mark=` and `caption=` builders replace
-their shapes. Rails fill left to right, or upward with
-`orientation="vertical"`. See `examples/section_navigation.py` for divider
-slides with a numbered agenda, a sliding marker and a segmented HUD rail.
+*Barra de progreso.* `scene.sections.progress_rail(sections=None, *,
+length=12.0, thickness=0.08, orientation="horizontal", segmented=False, ...)`
+devuelve un `ProgressRail`. Una barra continua es una sola pista con una marca
+en cada límite de sección; `segmented=True` da a cada sección su propia pista,
+separadas por `gap`. `rail.animate.to(progress)` llena las secciones anteriores
+a un `SectionProgress` y su parte de pasos; un número en `[0, 1]` fija la
+fracción de toda la barra. `rail.animate.enter(section)` marca una sección como
+actual sin llenar nada, como en una diapositiva divisoria. `captions=True`
+nombra cada sección sobre su tramo y la colorea por estado. Las partes son
+`track`, `fills`, `marks`, `captions` y `label`, y los argumentos `track=`,
+`mark=` y `caption=` sustituyen sus formas. Las barras se llenan de izquierda a
+derecha, o hacia arriba con `orientation="vertical"`.
+
+== Salida
+
+#api-entry(
+  name: "Scene.render",
+  kind: "method",
+  returns: (type: "None", desc: [Entrega la línea de tiempo al ejecutable de Gaanim.]),
+  desc: [Llámalo una vez, al final del script. Qué se hace con la escena (previsualizarla, validarla, exportarla o capturarla) lo decide el comando que ejecuta el script. Fuera de la aplicación de Gaanim, por ejemplo con `python main.py`, lanza `RuntimeError`.],
+)[
+```python
+from gaanim import Scene
+
+scene = Scene(frame=(16, 9))
+scene.wait(0.5)
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Scene.snapshots",
+  kind: "method",
+  params: (
+    (name: "directory", type: "str", default: none, desc: [La ruta que `gaanim --diff` pasa en `GAANIM_SNAPSHOTS`.]),
+    (name: "times", type: "Sequence[float]", default: none, desc: [Instantes absolutos que se capturan.]),
+  ),
+  returns: (type: "int", desc: [Número de fotogramas capturados.]),
+  desc: [Pide al ejecutable que capture seeks exactos para la comparación visual. Sin `gaanim --diff`, o con otra ruta, lanza `RuntimeError`. Consulta #link("/guias/capturas-y-comparacion/")[Capturas y comparación visual].],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+import os
+
+if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
+    scene.snapshots(snapshots, [0.0, 1.0])
+```
+]
+
+== Variación reproducible
+
+#api-entry(
+  name: "Scene.random",
+  kind: "method",
+  params: ((name: "seed", type: "int", default: "0", desc: [Semilla del generador.]),),
+  returns: (type: "Random", desc: [Un generador con semilla.]),
+  desc: [La misma semilla da los mismos valores en cualquier plataforma, así que la escena sale igual en la previsualización y en la exportación.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+rng = scene.random(seed=42)
+stars = [scene.geometry.dot(0.04).move_to(rng.uniform(-7, 7), rng.uniform(-4, 4)) for _ in range(60)]
+```
+]
+
+#api-entry(
+  name: "Random.uniform",
+  kind: "method",
+  params: (
+    (name: "low", type: "float", default: "0.0", desc: [Límite inferior, incluido.]),
+    (name: "high", type: "float", default: "1.0", desc: [Límite superior, excluido.]),
+  ),
+  returns: (type: "float", desc: [Un número en `[low, high)`.]),
+  desc: [`high < low` lanza `ValueError`.],
+  none,
+)
+
+#api-entry(
+  name: "Random.gauss",
+  kind: "method",
+  params: (
+    (name: "mean", type: "float", default: "0.0", desc: [Media.]),
+    (name: "std", type: "float", default: "1.0", desc: [Desviación típica.]),
+  ),
+  returns: (type: "float", desc: [Un valor de una distribución normal.]),
+  desc: [Una desviación negativa lanza `ValueError`.],
+  none,
+)
+
+#api-entry(
+  name: "Random.integer",
+  kind: "method",
+  params: (
+    (name: "low", type: "int", default: none, desc: [Límite inferior, incluido.]),
+    (name: "high", type: "int", default: none, desc: [Límite superior, excluido.]),
+  ),
+  returns: (type: "int", desc: [Un entero en `[low, high)`.]),
+  desc: [Un rango vacío lanza `ValueError`.],
+  none,
+)
+
+#api-entry(
+  name: "Random.choice",
+  kind: "method",
+  params: ((name: "items", type: "Sequence[Any]", default: none, desc: [Elementos entre los que elegir.]),),
+  returns: (type: "Any", desc: [Uno de los elementos.]),
+  desc: [Una secuencia vacía lanza `IndexError`.],
+  none,
+)
+
+#api-entry(
+  name: "Random.shuffle",
+  kind: "method",
+  params: ((name: "items", type: "list[Any]", default: none, desc: [Lista que se baraja.]),),
+  returns: (type: "None", desc: [Modifica la lista.]),
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+rng = scene.random(seed=7)
+colors = [BLUE, GOLD, CYAN]
+rng.shuffle(colors)
+size = rng.gauss(1.0, 0.1)
+count = rng.integer(3, 8)
+accent = rng.choice(colors)
+```
+]
+
+#api-entry(
+  name: "Random.seed",
+  kind: "property",
+  returns: (type: "int", desc: [La semilla con la que se creó el generador.]),
+  none,
+)
+
+#api-entry(
+  name: "Scene.noise",
+  kind: "method",
+  params: (
+    (name: "frequency", type: "float", default: "1.0", desc: [Rapidez con que cambia el valor.]),
+    (name: "amplitude", type: "float", default: "1.0", desc: [El valor queda en `[-amplitude, amplitude]` alrededor de `center`.]),
+    (name: "octaves", type: "int", default: "1", desc: [Capas de detalle fino, de 1 a 8.]),
+    (name: "seed", type: "int", default: "0", desc: [Semilla del ruido.]),
+    (name: "center", type: "float", default: "0.0", desc: [Valor central.]),
+  ),
+  returns: (type: "Computed", desc: [Un escalar reactivo que depende del tiempo de la línea de tiempo.]),
+  desc: [Ruido simplex fractal con semilla, evaluado de forma nativa en cada fotograma sin llamar a Python; la reproducción, los seeks y la exportación coinciden. Valores inválidos lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>title = scene.text("Gaanim", role="title")
+drift = scene.noise(frequency=0.6, amplitude=0.3, octaves=3, seed=5)
+title.rotate_to(computed(lambda v: 0.1 * v, inputs=[drift]))
+scene.wait(2)
+```
+]
+
+== Cámara <camara>
+
+`scene.camera` controla qué parte del mundo se ve. Sus métodos directos
+aplican un corte en el cursor, sin avanzar el tiempo, y devuelven la cámara
+para encadenar. Los mismos métodos bajo `scene.camera.animate` devuelven un
+`Anim` que se programa con `scene.play` junto a cualquier otra animación y
+admite `.duration()`, `.delay()` y `.easing()`.
+
+```python
+# show-code: true
+from gaanim import BLUE, GOLD, Scene
+
+scene = Scene(frame=(16, 9), background="#0f172a")
+circle = scene.geometry.circle(0.8).fill(BLUE).move_to(-4, 1)
+square = scene.geometry.square(1.2).fill(GOLD).move_to(4, -1)
+scene.play([scene.camera.animate.frame_to(circle, margin=0.6).duration(0.8)])
+scene.play([scene.camera.animate.frame_to(square, margin=0.6).duration(0.8)])
+scene.play([scene.camera.animate.reset().duration(0.6)])
+# output: preview.webp
+scene.render()
+```
+
+Los destinos de posición (`pan_to`, `follow`, `look_at`, `bind_*`) aceptan un
+`Drawable`, un `AnchorPoint`, un `PointRef` o una tupla 2D o 3D. El zoom y la
+rotación aceptan también `Parameter`, `Variable` y `Computed`. Las APIs de
+cámara rechazan valores no finitos, zooms, campos de visión y planos de
+recorte inválidos, poses de `look_at` degeneradas e influencias fuera de
+`[0, 1]` con `ValueError`, sin recortar valores en silencio.
+
+=== Poses guardadas
+
+#api-entry(
+  name: "Camera.state_2d",
+  kind: "method",
+  params: (
+    (name: "center", type: "tuple[float, float]", default: "(0.0, 0.0)", desc: [Punto que queda en el centro de la vista.]),
+    (name: "zoom", type: "float", default: "1.0", desc: [Zoom ortográfico; más de 1 acerca.]),
+    (name: "rotation", type: "float", default: "0.0", desc: [Giro de la vista en radianes.]),
+  ),
+  returns: (type: "CameraState", desc: [Una pose ortográfica reutilizable.]),
+  desc: [Valida la pose sin avanzar la línea de tiempo. Un `CameraState` pertenece a la escena que lo creó y no depende del tamaño del lienzo ni de la ventana.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+detail = scene.camera.state_2d(center=(-1.6, 0.4), zoom=1.5)
+scene.play([scene.camera.animate.to(detail).duration(0.8)])
+```
+]
+
+#api-entry(
+  name: "Camera.capture",
+  kind: "method",
+  returns: (type: "CameraState", desc: [La pose que la cámara tiene en el cursor.]),
+  desc: [No tiene duración. Registra la pose escrita en el script antes de los bindings, los efectos temporales, el shake y la vista de inspección del editor, así que restaurarla da el mismo resultado al previsualizar, buscar y exportar.],
+  none,
+)
+
+#api-entry(
+  name: "Camera.save",
+  kind: "method",
+  params: ((name: "name", type: "str", default: none, desc: [Nombre no vacío; reemplaza una pose guardada con el mismo nombre.]),),
+  returns: (type: "CameraState", desc: [La pose capturada.]),
+  desc: [Captura la pose actual y la guarda con un nombre para `restore`.],
+  none,
+)
+
+#api-entry(
+  name: "Camera.to",
+  kind: "method",
+  params: ((name: "state", type: "CameraState", default: none, desc: [Pose de esta escena.]),),
+  returns: (type: "Camera", desc: [La misma cámara.]),
+  desc: [Salta a la pose en el cursor. Una pose de otra escena lanza `ValueError`.],
+  none,
+)
+
+#api-entry(
+  name: "Camera.restore",
+  kind: "method",
+  params: ((name: "name", type: "str", default: none, desc: [Nombre usado en `save`.]),),
+  returns: (type: "Camera", desc: [La misma cámara.]),
+  desc: [Salta a una pose guardada. Un nombre desconocido lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.camera.save("general")
+scene.camera.zoom_to(2.0)
+scene.wait(0.5)
+scene.camera.restore("general")
+```
+]
+
+=== Encuadre
+
+#api-entry(
+  name: "Camera.pan_to",
+  kind: "method",
+  signature: "pan_to(x: float, y: float) -> Camera | pan_to(target: Endpoint) -> Camera",
+  params: (
+    (name: "x, y", type: "float", default: none, desc: [Punto que queda en el centro de la vista.]),
+    (name: "target", type: "Endpoint", default: none, desc: [Objeto, punto de anclaje o tupla que se centra.]),
+  ),
+  returns: (type: "Camera", desc: [La misma cámara.]),
+  none,
+)
+
+#api-entry(
+  name: "Camera.zoom_to",
+  kind: "method",
+  params: ((name: "zoom", type: "ScalarSource", default: none, desc: [Zoom ortográfico; más de 1 acerca y menos de 1 aleja. Debe ser positivo.]),),
+  returns: (type: "Camera", desc: [La misma cámara.]),
+  none,
+)
+
+#api-entry(
+  name: "Camera.frame_to",
+  kind: "method",
+  params: (
+    (name: "targets", type: "Drawable | Sequence[Drawable]", default: none, desc: [Objetos que deben caber en la vista.]),
+    (name: "margin", type: "float | tuple", default: "None", desc: [Margen alrededor: un valor, `(vertical, horizontal)` o cuatro lados en el orden de CSS.]),
+    (name: "dynamic", type: "bool", default: "False", desc: [Recalcula la unión en cada fotograma, después de los updaters y del layout.]),
+  ),
+  returns: (type: "Camera", desc: [La misma cámara.]),
+  desc: [Centra y ajusta el zoom para que los objetos quepan en la vista.],
+  none,
+)
+
+#api-entry(
+  name: "Camera.rotate_to",
+  kind: "method",
+  params: ((name: "angle", type: "ScalarSource", default: none, desc: [Giro de la vista en radianes.]),),
+  returns: (type: "Camera", desc: [La misma cámara.]),
+  none,
+)
+
+#api-entry(
+  name: "Camera.orthographic",
+  kind: "method",
+  params: ((name: "zoom", type: "float", default: "1.0", desc: [Zoom positivo.]),),
+  returns: (type: "Camera", desc: [La misma cámara.]),
+  desc: [Selecciona la proyección ortográfica, la de una escena 2D.],
+  none,
+)
+
+#api-entry(
+  name: "Camera.reset",
+  kind: "method",
+  returns: (type: "Camera", desc: [La misma cámara.]),
+  desc: [Restaura la pose 2D predeterminada, el vector vertical, el objetivo y la proyección ortográfica.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>circle = scene.geometry.circle(0.8).move_to(-3, 1)
+scene.camera.pan_to(circle).zoom_to(1.5).rotate_to(0.1)
+scene.wait(0.5)
+scene.camera.frame_to(circle, margin=0.4)
+scene.wait(0.5)
+scene.camera.reset()
+```
+]
+
+#api-entry(
+  name: "Camera.animate",
+  kind: "property",
+  returns: (type: "CameraAnimation", desc: [El vocabulario animado de la cámara.]),
+  desc: [Cada método devuelve un `Anim` nuevo; construirlo no cambia nada hasta pasarlo a `scene.play`.],
+  none,
+)
+
+=== Movimientos animados
+
+#api-entry(
+  name: "CameraAnimation.to",
+  kind: "method",
+  params: ((name: "state", type: "CameraState", default: none, desc: [Pose de esta escena.]),),
+  returns: (type: "Anim", desc: [Movimiento hasta la pose.]),
+  desc: [Una pose de otra escena lanza `ValueError`.],
+  none,
+)
+
+#api-entry(
+  name: "CameraAnimation.restore",
+  kind: "method",
+  params: ((name: "name", type: "str", default: none, desc: [Nombre usado en `Camera.save`.]),),
+  returns: (type: "Anim", desc: [Movimiento hasta la pose guardada.]),
+  desc: [Un nombre desconocido lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.camera.save("general")
+scene.play([scene.camera.animate.zoom_to(2.0).duration(0.6)])
+scene.play([scene.camera.animate.restore("general").duration(0.6)])
+```
+]
+
+#api-entry(
+  name: "CameraAnimation.pan_to",
+  kind: "method",
+  signature: "pan_to(x: float, y: float) -> Anim | pan_to(target: Endpoint) -> Anim",
+  params: (
+    (name: "x, y", type: "float", default: none, desc: [Punto que termina en el centro de la vista.]),
+    (name: "target", type: "Endpoint", default: none, desc: [Objeto, punto de anclaje o tupla que se centra.]),
+  ),
+  returns: (type: "Anim", desc: [Desplazamiento de la vista.]),
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.play([scene.camera.animate.pan_to(-1.6, 0.4).duration(0.8)])
+```
+]
+
+#api-entry(
+  name: "CameraAnimation.zoom_to",
+  kind: "method",
+  params: (
+    (name: "zoom", type: "ScalarSource", default: none, desc: [Zoom final; más de 1 acerca.]),
+    (name: "interpolation", type: "\"exponential\" | \"linear\"", default: "\"exponential\"", desc: [Cómo se interpola el zoom.]),
+  ),
+  returns: (type: "Anim", desc: [Zoom animado.]),
+  desc: [Con `"exponential"` el zoom sigue `z0 * (z1 / z0) ** p`, donde `p` es el progreso con easing: el área visible cambia en la misma proporción en cada fotograma y un zoom de 8× se lee a velocidad constante. `"linear"` usa `z0 + (z1 - z0) * p`. Un zoom constante no positivo o una interpolación desconocida lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.play([scene.camera.animate.zoom_to(8.0).duration(1.5)])
+scene.play([scene.camera.animate.zoom_to(1.0, interpolation="linear").duration(0.8)])
+```
+]
+
+#api-entry(
+  name: "CameraAnimation.frame_to",
+  kind: "method",
+  params: (
+    (name: "targets", type: "Drawable | Sequence[Drawable]", default: none, desc: [Objetos que deben caber en la vista.]),
+    (name: "margin", type: "float | tuple", default: "None", desc: [Igual que en `Camera.frame_to`.]),
+    (name: "dynamic", type: "bool", default: "False", desc: [Sigue a los objetos si se mueven durante el movimiento.]),
+    (name: "interpolation", type: "\"exponential\" | \"linear\"", default: "\"exponential\"", desc: [Con `"exponential"` el zoom es exponencial y el desplazamiento acompaña al cambio de ancho visible, así que la vista escala alrededor de un punto fijo y el contenido viaja en línea recta. `"linear"` interpola posición y zoom por separado.]),
+  ),
+  returns: (type: "Anim", desc: [Encuadre animado.]),
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>circle = scene.geometry.circle(0.8).move_to(-1.6, 0)
+>>>label = scene.text("Gaanim").move_to(0, 2.2)
+scene.play([scene.camera.animate.frame_to([circle, label], margin=(0.32, 0.48), dynamic=True).duration(0.9)])
+```
+]
+
+#api-entry(
+  name: "CameraAnimation.rotate_to",
+  kind: "method",
+  params: ((name: "angle", type: "ScalarSource", default: none, desc: [Giro final de la vista en radianes.]),),
+  returns: (type: "Anim", desc: [Giro animado.]),
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.play([scene.camera.animate.rotate_to(0.15).duration(0.5)])
+```
+]
+
+#api-entry(
+  name: "CameraAnimation.follow",
+  kind: "method",
+  params: (
+    (name: "target", type: "Endpoint", default: none, desc: [Objeto o punto que se sigue.]),
+    (name: "offset", type: "tuple[float, float]", default: "(0.0, 0.0)", desc: [Desplazamiento de la vista respecto del objetivo.]),
+    (name: "offset_space", type: "\"world\" | \"local\"", default: "\"world\"", desc: [`"local"` gira el desplazamiento con el objetivo.]),
+    (name: "lag", type: "float", default: "0.0", desc: [Retraso de seguimiento en segundos, determinista.]),
+  ),
+  returns: (type: "Anim", desc: [Seguimiento durante la duración del `Anim`.]),
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>circle = scene.geometry.circle(0.5).move_to(-4, 0)
+scene.play([
+    circle.animate.move_to(4, 0).duration(2.0),
+    scene.camera.animate.follow(circle.anchor_point(Anchor.TOP), offset=(0, 0.24), lag=0.2).duration(2.0),
+])
+```
+]
+
+#api-entry(
+  name: "CameraAnimation.shake",
+  kind: "method",
+  params: (
+    (name: "amplitude", type: "float | None", default: "0.4", desc: [Desplazamiento máximo en unidades de escena con trauma 1.]),
+    (name: "frequency", type: "float | None", default: "12", desc: [Frecuencia del ruido en Hz.]),
+    (name: "trauma", type: "float | None", default: "0.8", desc: [Intensidad inicial, en `[0, 1]`.]),
+    (name: "decay", type: "float | None", default: "1.5", desc: [Trauma que se pierde por segundo.]),
+    (name: "rotation", type: "float | None", default: "0.02", desc: [Giro máximo en radianes con trauma 1.]),
+    (name: "seed", type: "int | None", default: "0", desc: [Semilla del ruido.]),
+  ),
+  returns: (type: "Anim", desc: [Sacudida que termina en reposo.]),
+  desc: [Sigue el modelo de trauma: el desplazamiento es proporcional a `trauma ** 2`, así que un golpe leve apenas se nota y uno fuerte sacude mucho. Traslación y giro salen de ruido coherente con semilla. Dura `trauma / decay` segundos (un segundo con `decay=0`); un `.duration()` más corto también vuelve suavemente al reposo, y el easing no cambia el decaimiento. Se suma después de follow, encuadre y bindings, y es función pura del tiempo. Pasar solo `amplitude` (sin `trauma`, `decay`, `rotation` ni `seed`) mantiene la sacudida sinusoidal anterior: `amplitude` es el pico, `frequency` cuenta oscilaciones por clip (8 por defecto) y dura 0.5 s. Valores negativos o `trauma` mayor que 1 lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.play([scene.camera.animate.shake(trauma=0.8, decay=1.5, frequency=12, rotation=0.02, seed=0)])
+scene.play([scene.camera.animate.shake(trauma=0.4, seed=3)])  # un golpe más leve
+```
+]
+
+#api-entry(
+  name: "CameraAnimation.orthographic",
+  kind: "method",
+  params: ((name: "zoom", type: "float", default: "1.0", desc: [Zoom positivo.]),),
+  returns: (type: "Anim", desc: [Paso animado a la proyección ortográfica.]),
+  none,
+)
+
+#api-entry(
+  name: "CameraAnimation.reset",
+  kind: "method",
+  returns: (type: "Anim", desc: [Vuelta animada a la pose y proyección predeterminadas.]),
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.play([scene.camera.animate.zoom_to(2.0).duration(0.5)])
+scene.play([scene.camera.animate.reset().duration(0.5)])
+```
+]
+
+=== Bindings persistentes
+
+Un binding es una restricción de cámara que no se dibuja: desde que se crea
+(salvo con `enabled=False`) escribe los canales que declara en cada fotograma,
+también a través de segmentos. `influence` es un escalar en `[0, 1]` que mezcla
+el binding con la pose anterior, y los bindings posteriores se componen sobre
+los anteriores. `follow` y el encuadre dinámico actúan después, y el shake se
+suma al final.
+
+#api-entry(
+  name: "Camera.bind_2d",
+  kind: "method",
+  params: (
+    (name: "center", type: "Endpoint | None", default: "None", desc: [Punto que sigue el centro de la vista.]),
+    (name: "zoom", type: "ScalarSource | None", default: "None", desc: [Zoom reactivo.]),
+    (name: "rotation", type: "ScalarSource | None", default: "None", desc: [Giro reactivo en radianes.]),
+    (name: "influence", type: "ScalarSource | None", default: "None", desc: [Peso en `[0, 1]`; sin él, 1.]),
+    (name: "enabled", type: "bool", default: "True", desc: [Activo desde el cursor actual.]),
+  ),
+  returns: (type: "CameraConstraint", desc: [El binding, con `enable()` y `disable()`.]),
+  desc: [Necesita `center`, `zoom` o `rotation`, y selecciona la proyección ortográfica.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+import math
+
+theta = scene.viz.parameter(0.0)
+focus = scene.geometry.point_ref(
+    computed(lambda t: t * 2.25, inputs=[theta]),
+    computed(lambda t: math.sin(t * 2), inputs=[theta]),
+)
+rig = scene.camera.bind_2d(center=focus, zoom=computed(lambda t: 1 + t * 0.3, inputs=[theta]))
+scene.play([theta.animate.set(1.0).duration(2.0)])
+rig.disable()
+```
+]
+
+#api-entry(
+  name: "CameraConstraint.enable",
+  kind: "method",
+  returns: (type: "None", desc: [Activa el binding en el cursor actual.]),
+  none,
+)
+
+#api-entry(
+  name: "CameraConstraint.disable",
+  kind: "method",
+  returns: (type: "None", desc: [Desactiva el binding en el cursor actual.]),
+  desc: [Los cambios quedan registrados en la línea de tiempo: un seek anterior vuelve a verlo activo.],
+  none,
+)
+
+=== Cámara 3D
+
+#experimental()
+
+La cámara 3D usa coordenadas de mundo `(x, y, z)` y ángulos en radianes. Las
+primitivas 3D están en #link("/referencia/geometria/")[Geometría] y los modelos
+glTF en #link("/referencia/medios/#api-medialibrary-gltf")[Medios]. Para una
+introducción, consulta la guía #link("/guias/camara-y-3d/")[Cámara y 3D].
+
+#api-entry(
+  name: "Camera.state_3d",
+  kind: "method",
+  params: (
+    (name: "eye", type: "tuple[float, float, float]", default: none, desc: [Posición de la cámara.]),
+    (name: "target", type: "tuple[float, float, float]", default: none, desc: [Punto al que mira.]),
+    (name: "up", type: "tuple[float, float, float]", default: "(0.0, 1.0, 0.0)", desc: [Dirección vertical del mundo.]),
+    (name: "fov_y", type: "float", default: "0.785…", desc: [Campo de visión vertical en radianes (π/4).]),
+    (name: "near, far", type: "float", default: "0.1, 1000.0", desc: [Planos de recorte, con `0 < near < far`.]),
+  ),
+  returns: (type: "CameraState", desc: [Una pose en perspectiva reutilizable.]),
+  none,
+)
+
+#api-entry(
+  name: "Camera.perspective",
+  kind: "method",
+  params: (
+    (name: "fov_y", type: "float", default: none, desc: [Campo de visión vertical en radianes, en `(0, pi)`.]),
+    (name: "near", type: "float", default: "0.1", desc: [Plano de recorte cercano, positivo.]),
+    (name: "far", type: "float", default: "1000.0", desc: [Plano de recorte lejano, mayor que `near`.]),
+  ),
+  returns: (type: "Camera", desc: [La misma cámara.]),
+  desc: [Cambia a proyección en perspectiva en el cursor.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.camera.perspective(fov_y=0.785, near=0.1, far=1000.0)
+```
+]
+
+#api-entry(
+  name: "Camera.look_at",
+  kind: "method",
+  params: (
+    (name: "eye", type: "Endpoint", default: none, desc: [Posición de la cámara en el mundo.]),
+    (name: "target", type: "Endpoint", default: none, desc: [Punto al que mira.]),
+    (name: "up", type: "tuple[float, float, float] | None", default: "None", desc: [Dirección vertical; `(0, 1, 0)` si se omite.]),
+  ),
+  returns: (type: "Camera", desc: [La misma cámara.]),
+  desc: [Coloca la cámara en `eye` mirando a `target`. Los extremos se resuelven después del layout reactivo; `eye` y `target` deben ser distintos y `up` no puede ser nulo ni paralelo a la dirección de la mirada.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.camera.look_at(eye=(7, 5, 6), target=(0, 0, 0))
+```
+]
+
+#api-entry(
+  name: "Camera.bind_3d",
+  kind: "method",
+  params: (
+    (name: "eye", type: "Endpoint | None", default: "None", desc: [Posición reactiva de la cámara.]),
+    (name: "target", type: "Endpoint | None", default: "None", desc: [Punto reactivo al que mira.]),
+    (name: "fov_y", type: "ScalarSource | None", default: "None", desc: [Campo de visión reactivo en radianes.]),
+    (name: "up", type: "tuple[float, float, float]", default: "(0.0, 1.0, 0.0)", desc: [Dirección vertical.]),
+    (name: "influence", type: "ScalarSource | None", default: "None", desc: [Peso en `[0, 1]`.]),
+    (name: "enabled", type: "bool", default: "True", desc: [Activo desde el cursor actual.]),
+  ),
+  returns: (type: "CameraConstraint", desc: [El binding.]),
+  desc: [Necesita `eye`, `target` o `fov_y`, y selecciona la proyección en perspectiva.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+rig = scene.camera.bind_3d(eye=(6, 4, 8), target=(0, 0, 0), fov_y=0.8, influence=0.75)
+scene.wait(1)
+rig.disable()
+```
+]
+
+#api-entry(
+  name: "CameraAnimation.look_at",
+  kind: "method",
+  params: (
+    (name: "eye", type: "Endpoint", default: none, desc: [Posición final de la cámara.]),
+    (name: "target", type: "Endpoint", default: none, desc: [Punto al que mira al final.]),
+    (name: "up", type: "tuple[float, float, float] | None", default: "None", desc: [Dirección vertical; `(0, 1, 0)` si se omite.]),
+  ),
+  returns: (type: "Anim", desc: [Movimiento animado de la cámara.]),
+  none,
+)
+
+#api-entry(
+  name: "CameraAnimation.orbit",
+  kind: "method",
+  params: (
+    (name: "delta_yaw", type: "float", default: none, desc: [Giro horizontal alrededor del objetivo, en radianes.]),
+    (name: "delta_pitch", type: "float", default: none, desc: [Giro vertical, en radianes.]),
+  ),
+  returns: (type: "Anim", desc: [Órbita alrededor del objetivo actual de `look_at`.]),
+  desc: [Usa incrementos pequeños para un giro suave.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>scene.camera.look_at(eye=(7, 5, 6), target=(0, 0, 0))
+scene.play([scene.camera.animate.orbit(delta_yaw=0.5, delta_pitch=0.1).duration(1.0)])
+```
+]
+
+#api-entry(
+  name: "CameraAnimation.perspective",
+  kind: "method",
+  params: (
+    (name: "fov_y", type: "float", default: none, desc: [Campo de visión vertical final, en radianes.]),
+    (name: "near", type: "float", default: "0.1", desc: [Plano cercano.]),
+    (name: "far", type: "float", default: "1000.0", desc: [Plano lejano.]),
+  ),
+  returns: (type: "Anim", desc: [Paso animado a la perspectiva.]),
+  none,
+)
+
+#api-entry(
+  name: "CameraAnimation.dolly",
+  kind: "method",
+  params: ((name: "factor", type: "float", default: none, desc: [Multiplicador positivo de la distancia al objetivo.]),),
+  returns: (type: "Anim", desc: [Acercamiento o alejamiento.]),
+  desc: [Un factor menor que 1 acerca la cámara y uno mayor la aleja.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>scene.camera.look_at(eye=(7, 5, 6), target=(0, 0, 0))
+scene.play([scene.camera.animate.dolly(factor=0.85).duration(0.6)])
+```
+]
+
+=== Cámara de inspección del editor
+
+El editor tiene una cámara de inspección separada de `scene.camera`, que
+nunca cambia las capturas, Presenter View ni la exportación. Empieza
+desactivada; cada vez que se activa con `I` (o con el indicador
+*Interactive* del panel de overlays, `O`) parte de una copia de la cámara de
+la escena en ese instante.
+
+- `Num0`: alterna entre *Free 3D* y *Camera View* (la cámara de la escena).
+- Arrastrar con el botón derecho: orbitar; con el central o Mayús + izquierdo:
+  desplazar; rueda: acercar o alejar.
+- `F`: encuadra la selección, o toda la escena si no hay nada seleccionado.
+- `R`: restablece y encuadra; `I`: activa o desactiva la inspección.
+
+El marco de salida visible conserva el marco lógico y su proporción, y la
+selección con el ratón se limita a ese marco. Mientras la escena tiene
+contenido 3D, la barra de tiempo desactiva el ajuste magnético.
+
+== Recorte y máscaras
+
+Cualquier objeto vectorial puede recortar a otro con una máscara viva que se
+recalcula en cada fotograma: consulta
+#link("/referencia/drawable/#api-drawable-clip")[`Drawable.clip`] y
+#link("/referencia/drawable/#api-drawable-no-clip")[`Drawable.no_clip`].

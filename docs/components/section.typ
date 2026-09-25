@@ -2,7 +2,7 @@
 #import "../content/redirects.typ": moved
 // Internal links (`#link("/guias/layout/")`) must reach a page of the book or
 // a forwarding page of a moved route; the build fails otherwise.
-#let check-internal-links = false
+#let check-internal-links = true
 
 #let known-route(dest) = {
   let target = dest.trim("/", at: start).split("#").first()
@@ -438,7 +438,12 @@
       })
     }
 
-    cell-chain.update(result.chain) + calc-vars.update(old => old + result.vars) + layout-content
+    // Each cell contributes only its own code. Folding it into the state
+    // (instead of storing the whole chain it computed) lets Typst resolve a run
+    // of continued cells in one layout pass rather than one pass per link.
+    let own = result.own
+    let chain-update = cell-chain.update(chain => if continues and chain != none { chain + own } else { own })
+    chain-update + calc-vars.update(old => old + result.vars) + layout-content
   }
 }
 

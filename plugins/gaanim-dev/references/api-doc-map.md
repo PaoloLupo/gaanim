@@ -6,13 +6,22 @@ has the correct user-facing concept, then include it from
 
 | API area | Primary Typst page |
 |---|---|
-| `Scene`, viewport, timeline, camera, clipping, output | `docs/content/referencia/scene.typ` |
-| constructors, `Drawable`, geometry, text, media, reactive objects | `docs/content/referencia/objetos.typ` |
+| `Scene`, canvas frame and safe area, timeline, segments, sections, camera, output | `docs/content/referencia/scene.typ` |
+| `Drawable` handle: style, transforms, effects, anchors, reactive bindings | `docs/content/referencia/drawable.typ` |
+| `scene.geometry`: primitives, paths, booleans, reactive geometry, 3D primitives | `docs/content/referencia/geometria.typ` |
+| `scene.text`, `Text`, `TextStyle`, `TextFlow`, selections, Typst, measurement | `docs/content/referencia/text.typ` |
+| `scene.viz`: coordinate spaces, calculus, data series, `Parameter`/`computed`, readouts, `ChartSpec`, vector fields | `docs/content/referencia/visualization.typ` |
+| `scene.viz.matrix`, `Matrix`, `MatrixSelection`, matrix algebra | `docs/content/referencia/matrices.typ` |
+| `scene.media`: images, SVG, video, Lottie, glTF | `docs/content/referencia/medios.typ` |
+| `scene.slides`: editorial components and presentation branding | `docs/content/referencia/diapositivas.typ` |
+| `scene.mechanics`: dimensions, springs, forces, supports, gears | `docs/content/referencia/mecanica.typ` |
 | `Anim`, transitions, updaters, easing, writing | `docs/content/referencia/animations.typ` |
-| anchors, grids, regions, flow, stacks, tracks | `docs/content/referencia/layout.typ` |
-| colors, brushes, themes, gradients, effects | `docs/content/referencia/themes.typ` |
-| manifests, preloading, SVG asset behavior | `docs/content/referencia/assets.typ` |
-| audio behavior | `docs/content/referencia/audio.typ` |
+| `scene.layout`: rows, columns, grids, stacks, items, reflow, constraints, templates | `docs/content/referencia/layout.typ` |
+| `Color`, `ColorMap`, brushes, backgrounds, post-processing, themes | `docs/content/referencia/themes.typ` |
+| `AssetManager`, preloading, SVG/Lottie/glTF import behavior | `docs/content/referencia/assets.typ` |
+| `scene.media.audio`, voiceover and narration | `docs/content/referencia/audio.typ` |
+| `gaanim` command line: `init`, `check`, `export`, presenting, `--diff` | `docs/content/referencia/cli.typ` |
+| `gaanim.toml` manifest schema and project resolution | `docs/content/referencia/gaanim-toml.typ` |
 
 Follow `docs/components/api.typ` and neighboring entries. Keep each documented
 signature identical to the callable Python surface, describe units/defaults

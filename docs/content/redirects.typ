@@ -8,7 +8,7 @@
   ("api/audio/", "referencia/audio/"),
   ("api/layout/", "referencia/layout/"),
   ("api/matrices/", "referencia/matrices/"),
-  ("api/mobjects/", "referencia/objetos/"),
+  ("api/mobjects/", "referencia/geometria/"),
   ("api/scene/", "referencia/scene/"),
   ("api/text/", "referencia/text/"),
   ("api/themes/", "referencia/themes/"),
@@ -25,6 +25,7 @@
   ("guia/primera-escena/", "tutorial/primera-escena/"),
   ("guia/reactividad/", "tutorial/reactividad/"),
   ("guia/terminar-proyecto/", "tutorial/terminar-proyecto/"),
+  ("guias/avanzado/", "guias/reactividad/"),
   ("guides/layout/", "guias/layout/"),
   ("guides/migration-0-2/", "apendices/novedades/"),
   ("guides/performance/", "guias/proyectos/"),
@@ -32,11 +33,12 @@
   ("guides/slides/", "guias/presentaciones/"),
   ("guides/visual-regression/", "guias/capturas-y-comparacion/"),
   ("manual/animaciones/", "empezar/como-piensa-gaanim/"),
-  ("manual/avanzado/", "guias/avanzado/"),
+  ("manual/avanzado/", "guias/reactividad/"),
   ("manual/escena/", "empezar/como-piensa-gaanim/"),
   ("manual/guia-rapida/", "empezar/primera-animacion/"),
   ("manual/introduccion/", "empezar/como-piensa-gaanim/"),
   ("manual/objetos/", "empezar/como-piensa-gaanim/"),
+  ("referencia/objetos/", "referencia/geometria/"),
 )
 
 #for (old, new) in moved {

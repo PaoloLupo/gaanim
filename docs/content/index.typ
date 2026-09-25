@@ -26,27 +26,37 @@
 #include "guias/tipografia-cinetica.typ"
 #include "guias/transiciones.typ"
 #include "guias/efectos.typ"
-#include "guias/avanzado.typ"
+#include "guias/reactividad.typ"
+#include "guias/camara-y-3d.typ"
 #include "guias/presentaciones.typ"
 #include "guias/proyectos.typ"
 #include "guias/capturas-y-comparacion.typ"
 
 #book-part("IV", "Ejemplos", description: "Escenas completas listas para copiar y ejecutar")
+#include "ejemplos/index.typ"
 #include "ejemplos/basicos.typ"
 #include "ejemplos/avanzados.typ"
 
 #book-part("V", "Referencia", description: "Firmas, parámetros y contratos de la superficie pública")
 #include "referencia/index.typ"
 #include "referencia/scene.typ"
+#include "referencia/drawable.typ"
+#include "referencia/geometria.typ"
 #include "referencia/text.typ"
-#include "referencia/visualization.typ"
 #include "referencia/layout.typ"
-#include "referencia/assets.typ"
-#include "referencia/audio.typ"
-#include "referencia/objetos.typ"
+#include "referencia/visualization.typ"
 #include "referencia/matrices.typ"
+#include "referencia/medios.typ"
+#include "referencia/audio.typ"
+#include "referencia/assets.typ"
+#include "referencia/diapositivas.typ"
+#include "referencia/mecanica.typ"
 #include "referencia/animations.typ"
 #include "referencia/themes.typ"
+#include "referencia/cli.typ"
+#include "referencia/gaanim-toml.typ"
 
-#book-part("VI", "Apéndices", description: "Novedades de cada versión y notas de migración")
+#book-part("VI", "Apéndices", description: "Novedades de cada versión, glosario y solución de problemas")
 #include "apendices/novedades.typ"
+#include "apendices/glosario.typ"
+#include "apendices/solucion-de-problemas.typ"

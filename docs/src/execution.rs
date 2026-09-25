@@ -449,9 +449,10 @@ pub fn compile_code_cell(
     }
 
     // `# continue`: replay the page's previous cell first, hidden and with its
-    // output muted, so a fragment runs with the names it builds on. The chain
-    // drops `render()` calls so only the last cell submits the scene.
-    let chain = format!("{}{}", prelude, without_render_calls(&code_to_execute));
+    // output muted, so a fragment runs with the names it builds on. Each cell
+    // hands Typst its own code without `render()` calls (`own`); Typst
+    // concatenates a run of continued cells into the next cell's prelude.
+    let own = without_render_calls(&code_to_execute);
     let mut chain_lines = 0;
     if !prelude.trim().is_empty() {
         let replay = format!(
@@ -533,7 +534,7 @@ pub fn compile_code_cell(
     result.insert("caption".into(), Value::Str(caption.as_str().into()));
     result.insert("webp".into(), Value::Str(outcome.webp.as_str().into()));
     result.insert("vars".into(), Value::Dict(Dict::new()));
-    result.insert("chain".into(), Value::Str(chain.as_str().into()));
+    result.insert("own".into(), Value::Str(own.as_str().into()));
 
     if !outcome.stderr.is_empty() {
         engine.sink.warn(SourceDiagnostic::warning(

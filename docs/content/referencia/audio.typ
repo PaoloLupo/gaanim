@@ -9,13 +9,21 @@
 
 = Audio
 
-Declara primero el audio y actívalo explícitamente con `scene.play([audio])`.
-Las rutas relativas usan
-`scene.assets.assets_dir(...)`, igual que las imágenes y los archivos SVG. Al exportar
-MP4 o WebM, Gaanim envía las pistas a FFmpeg, las alinea con la línea de tiempo,
-las mezcla y combina el resultado con el video renderizado. En la vista previa,
-las mismas pistas siguen el reloj del timeline.
+Música, efectos y narración sincronizados con la línea de tiempo. Declaras una
+pista con `scene.media.audio(...)` y la activas con `scene.play([pista])`. La
+vista previa la reproduce siguiendo el reloj de la escena (pausa, seek y
+velocidad incluidos) y la exportación a MP4 o WebM la mezcla con el video.
 
+== Pistas de audio
+
+Archivos de sonido que empiezan en el cursor donde los activas.
+
+#api-entry(
+  name: "MediaLibrary.audio",
+  kind: "factory",
+  params: ((name: "path", type: "str", default: none, desc: [Archivo de audio; una ruta relativa usa la carpeta de assets, igual que imágenes y SVG.]), (name: "duration", type: "float | None", default: "None", desc: [Recorta la pista y la hace participar en la duración del lote. Sin ella, la pista suena de fondo sin alargar la línea de tiempo.]), (name: "volume", type: "float", default: "1.0", desc: [Ganancia lineal.]), (name: "fade_in / fade_out", type: "float", default: "0.0", desc: [Fundidos de entrada y salida en segundos; el de salida es determinista cuando hay `duration`.])),
+  desc: [Declara una pista validada. La declaración no cambia la línea de tiempo: `scene.play([pista])` fija su inicio en el cursor absoluto de esa llamada. Rutas o tiempos inválidos lanzan `ValueError`.],
+)[
 ```python
 from gaanim import Scene
 
@@ -31,10 +39,7 @@ scene.play([pop])
 scene.render()
 ```
 
-La declaración no modifica el timeline. `scene.play(...)` fija el inicio en su
-cursor absoluto. Una pista con `duration` participa en la duración del batch;
-sin `duration`, comienza como fondo sin alargar el timeline. `duration` también
-recorta la fuente y hace determinista el fundido de salida.
+Una narración grabada con duración fija alarga el lote y termina con un fundido:
 
 ```python
 >>>from gaanim import *
@@ -49,28 +54,32 @@ narration = scene.media.audio(
 )
 scene.play([narration])
 ```
+]
 
-La vista previa reproduce varias pistas a la vez y mantiene su posición al
-pausar, recorrer el timeline o cambiar la velocidad. `volume`, `fade_in` y
-`fade_out` se aplican también durante esa reproducción. MP4 usa AAC y WebM usa
-Opus. Las secuencias de imágenes, GIF y WebP animado rechazan las pistas porque
-esos formatos no transportan audio.
+#api-entry(
+  name: "Audio",
+  kind: "class",
+  signature: "scene.media.audio(...) -> Audio",
+  desc: [Declaración de audio ligada a la escena que la creó. Solo se usa pasándola a `scene.play`.],
+  none,
+)
 
-El video sigue el mismo modelo: `clip = scene.media.video(...)` solo declara el
-drawable y `scene.play([clip])` activa juntos sus frames y su audio embebido.
-Ambos se pausan, recorren y repiten junto con el timeline. `audio=false`
-silencia ese video y `volume` configura su ganancia.
+La vista previa reproduce varias pistas a la vez y aplica `volume`, `fade_in` y
+`fade_out`. MP4 usa AAC y WebM usa Opus. Las secuencias de imágenes, GIF y WebP
+animado rechazan las pistas porque esos formatos no transportan audio.
 
+== Audio de los videos
 
-== Audio de fragmentos de video
+El audio embebido de un video sigue las mismas reglas que una pista.
 
-`video.segment(start=..., end=..., speed=None, audio=None, volume=None)` usa
-la misma selección temporal para imagen y audio. Las opciones omitidas heredan
-las del video. Cada fragmento genera una pista finita; las pausas entre fragmentos
-son silenciosas aunque el último fotograma siga visible. `speed` conserva el tono,
-como en la reproducción de video existente. `audio=False` silencia ese fragmento.
+`clip = scene.media.video(...)` solo declara el video y `scene.play([clip])`
+activa juntos sus fotogramas y su audio; ambos se pausan, recorren y repiten con
+la línea de tiempo. `audio=False` silencia el video y `volume` fija su ganancia.
+Con `video.segment(start=..., end=...)`, cada fragmento genera una pista finita:
+las pausas entre fragmentos son silenciosas aunque el último fotograma siga
+visible, y `speed` conserva el tono. Consulta #link("/referencia/medios/")[Medios].
 
-= Narración
+== Narración
 
 Gaanim graba tu voz sin salir del editor y la sincroniza con la escena, sin
 editor de video externo. Hay dos formas de trabajar:
@@ -89,7 +98,7 @@ editor recarga la escena con los tiempos nuevos. `render()` y la exportación
 alargan el timeline para que ninguna toma quede cortada, y MP4/WebM mezclan las
 tomas como cualquier otra pista.
 
-== El guion
+=== El guion
 
 El texto que lees no tiene que vivir en el código. Escríbelo en
 `narration/script.md` con cualquier editor: cada encabezado `## clave` contiene
@@ -121,7 +130,7 @@ un guion cargado, una clave sin sección emite un `UserWarning`. El botón
 que faltan, y lo abre en tu editor. En una toma en vivo, el teleprompter
 muestra la sección con el nombre del segmento actual.
 
-== Grabar desde el editor
+=== Grabar desde el editor
 
 Abre el panel con el botón de micrófono de la barra de reproducción (o
 *Más controles → Narración*). El panel lista el guion, la toma en vivo y cada
@@ -144,7 +153,7 @@ teleprompter a su línea de estado para ver la escena.
 Durante la grabación el audio del preview se silencia para que la toma anterior
 no se cuele en el micrófono.
 
-== Nivel de la voz
+=== Nivel de la voz
 
 Al grabar, el medidor del teleprompter muestra los picos del micrófono en dBFS.
 La zona verde, entre -18 y -6 dBFS, es la ideal. Entre -6 y -3 dBFS el medidor
@@ -162,7 +171,7 @@ se conserva en `narration/.originals/`. En *Voz y grabación* puedes cambiar el
 nivel final: el panel avisa si eliges más de -14 LUFS o menos de -20, o
 desactivar la nivelación. Las tomas sin nivelar aparecen marcadas en el panel.
 
-== Whisper (opcional)
+=== Whisper (opcional)
 
 En lugar de pulsar Espacio, whisper.cpp puede detectar cuándo dices cada
 palabra. Instala `whisper-cli` y un modelo `ggml-*.bin`, e indícalos en
@@ -172,7 +181,7 @@ puede hacerse automáticamente al guardar cada toma. Requiere FFmpeg. Para que
 una marca se resuelva por transcripción, su nombre debe ser la palabra o frase
 que dices; se ignoran mayúsculas, tildes y puntuación.
 
-== Cómo se resuelven las marcas
+=== Cómo se resuelven las marcas
 
 Cada marca se busca, en este orden: la marca pulsada al grabar (o escrita a
 mano en el JSON), la transcripción de Whisper y, por último, su posición
@@ -200,13 +209,15 @@ El JSON es editable: mover un número retima la escena sin tocar el código.
 `holds` los segundos de cada pausa de una toma en vivo y `loudness` el nivel en
 LUFS al que se niveló.
 
+=== API de narración
+
+Los bloques de voz en off, sus marcas y la toma en vivo.
+
 #api-entry(
   name: "Scene.voiceover",
   kind: "method",
-  signature: "voiceover(key, *, text=None, volume=1.0) -> Voiceover",
   params: ((name: "key", type: "str", default: none, desc: [Nombre de la toma: letras, dígitos, `-`, `_` o `.`. Es el nombre de archivo dentro de `narration/`.]), (name: "text", type: "str | None", default: "None", desc: [Texto del bloque: teleprompter y estimación de tiempos. Sin él se usa la sección `## key` del guion y, si no existe, las `notes` del segmento activo.]), (name: "volume", type: "float", default: "1.0", desc: [Ganancia lineal de la toma.]),),
-  returns: (type: "Voiceover", desc: [El bloque, usable con `with`.]),
-  desc: [Empieza un bloque en el cursor. Una toma grabada (`.wav`, `.flac`, `.mp3`, `.m4a`, `.aac`, `.ogg` u `.opus`) suena desde aquí y fija la duración del bloque; si no existe, la duración se estima del texto. Al salir del `with` se espera el resto de la toma. Claves inválidas o repetidas, volumen negativo o tomas ilegibles producen `ValueError`.],
+  desc: [Empieza un bloque en el cursor y devuelve un `Voiceover`, usable con `with`. Una toma grabada (`.wav`, `.flac`, `.mp3`, `.m4a`, `.aac`, `.ogg` u `.opus`) suena desde aquí y fija la duración del bloque; si no existe, la duración se estima del texto. Al salir del `with` se espera el resto de la toma. Claves inválidas o repetidas, volumen negativo o tomas ilegibles lanzan `ValueError`.],
 )[
 ```python
 # show-code: true
@@ -226,23 +237,43 @@ scene.render()
 ]
 
 #api-entry(
-  name: "Voiceover",
-  kind: "class",
-  signature: "wait_until(marker) / until(marker) -> float / finish() / key, text, start, duration, end, remaining, recorded",
+  name: "Voiceover.wait_until",
+  kind: "method",
   params: ((name: "marker", type: "str", default: none, desc: [Nombre de la marca: palabra o frase del guion, o el nombre pulsado al grabar.]),),
-  returns: (type: "None / float", desc: [`until` devuelve los segundos desde el cursor hasta la marca, nunca negativos.]),
-  desc: [`wait_until` avanza el cursor hasta la marca; si ya quedó atrás o no existe, no espera. `until` sirve como `duration` para terminar una animación justo en la marca. `finish` espera el resto de la toma y cierra el bloque; repetirlo no hace nada. Usar un bloque cerrado produce `ValueError`. `recorded` es `False` mientras la duración sea estimada.],
+  desc: [Avanza el cursor hasta la marca. Si la marca ya quedó atrás o no existe, no espera. Usarlo en un bloque cerrado lanza `ValueError`.],
+  none,
+)
+
+#api-entry(
+  name: "Voiceover.until",
+  kind: "method",
+  desc: [Segundos desde el cursor hasta la marca, nunca negativos. Úsalo como `duration` para que una animación termine justo en la marca.],
 )[
 ```python
 >>>from gaanim import *
 >>>scene = Scene()
 >>>scene.assets.assets_dir("assets")
->>>logo = scene.media.svg("logo.svg")
+>>>logo = scene.media.svg("logo.svg").scale_to(0.025)
 vo = scene.voiceover("cierre", text="Y eso es todo por hoy")
 scene.play([logo.animate.fade_in()], duration=vo.until("todo"))
 vo.finish()
 ```
 ]
+
+#api-entry(
+  name: "Voiceover.finish",
+  kind: "method",
+  desc: [Espera el resto de la toma y cierra el bloque; repetirlo no hace nada. Es lo que hace el `with` al salir.],
+  none,
+)
+
+#api-entry(
+  name: "Voiceover.key / text / start / duration / end / remaining / recorded",
+  kind: "property",
+  signature: "key: str · text: str | None · start: float · duration: float · end: float · remaining: float · recorded: bool",
+  desc: [Nombre de la toma, texto del bloque, segundos absolutos de inicio y fin, duración (medida o estimada), segundos que faltan desde el cursor y si hay un archivo grabado (`False` mientras la duración sea estimada).],
+  none,
+)
 
 #api-entry(
   name: "Scene.narration_script",
@@ -280,7 +311,7 @@ scene.segment("intro", notes="Presentamos el problema")
 scene.play([titulo.animate.write()])
 scene.stop()
 scene.segment("idea", notes="La idea clave es…")
->>>diagrama = scene.media.svg("architecture.svg")
+>>>diagrama = scene.media.svg("architecture.svg").scale_to(0.02)
 scene.play([diagrama.animate.fade_in()])
 scene.stop()
 scene.render()

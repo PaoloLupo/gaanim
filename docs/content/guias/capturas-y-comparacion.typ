@@ -6,62 +6,61 @@
   route: "/guias/capturas-y-comparacion/",
 )
 
-`gaanim --diff` captura fotogramas exactos de una escena y los compara con una
-versión que ya aprobaste. Sirve para comprobar que un cambio en el código no
-alteró lo que se ve. Las capturas de cada escena viven en una carpeta propia
-dentro del proyecto:
+En esta guía aprenderás a comprobar que un cambio en el código no alteró lo
+que se ve. `gaanim --diff` captura fotogramas exactos de una escena, los
+compara con una versión que ya aprobaste y te muestra las diferencias en un
+visor.
+
+= Dónde se guardan las capturas
+
+Cada escena tiene su propia carpeta dentro del proyecto:
 
 ```text
 tests/visual/<nombre-de-la-escena>/
-  baseline/  # PNGs aprobados y manifest.json: se versionan
-  current/   # captura de la implementación actual: local
-  report/    # visor egui, JSON y heatmaps: local
+  baseline/  # capturas aprobadas y manifest.json: guárdalas en git
+  current/   # captura de la versión actual: local
+  report/    # visor, informe JSON y mapas de calor: local
 ```
 
-Por ejemplo, `escenas/intro.py` usa automáticamente `tests/visual/escenas/intro/`. No hace falta escribir las rutas de `baseline`, `current` ni `output`.
+Por ejemplo, `escenas/intro.py` usa automáticamente
+`tests/visual/escenas/intro/`. No hace falta escribir las rutas de
+`baseline`, `current` ni `report`.
 
 = Flujo normal
 
-Primero registra la implementación correcta como baseline:
++ Elige los instantes que quieres capturar. El script llama a
+  `scene.snapshots(...)` cuando existe la variable de entorno
+  `GAANIM_SNAPSHOTS`; `gaanim --diff` la define y ejecuta la captura sin abrir
+  ventana:
 
-```bash
-gaanim --diff --example escenas/intro.py --bless
-```
+  ```python
+  >>>from gaanim import Scene
+  >>>scene = Scene(frame=(16, 9))
+  import os
+  if os.environ.get("GAANIM_SNAPSHOTS"):
+      scene.snapshots(os.environ["GAANIM_SNAPSHOTS"], [0.0, 0.5, 1.0])
+  ```
 
-Después, en cada cambio, captura el ejemplo, compara contra ese baseline y abre el visor egui:
++ Cuando la escena se vea como quieres, apruébala. `--bless` guarda la captura
+  como versión aprobada (`baseline/`):
 
-```bash
-gaanim --diff --example escenas/intro.py
-```
+  ```bash
+  gaanim --diff --example escenas/intro.py --bless
+  ```
 
-El script debe llamar a `scene.snapshots(...)` cuando existe la variable `GAANIM_SNAPSHOTS`. El CLI define esa variable y ejecuta la captura sin abrir ventana:
++ Después de cada cambio, captura otra vez, compara con la versión aprobada y
+  abre el visor:
 
-```python
->>>from gaanim import Scene
->>>scene = Scene(frame=(16, 9))
-import os
-if os.environ.get("GAANIM_SNAPSHOTS"):
-    scene.snapshots(os.environ["GAANIM_SNAPSHOTS"], [0.0, 0.5, 1.0])
-```
+  ```bash
+  gaanim --diff --example escenas/intro.py
+  ```
 
-== Capturar cada pausa de una presentación
+`--bless` sobrescribe la versión aprobada: úsalo solo cuando hayas revisado y
+aceptado el cambio visual.
 
-Para revisar una presentación, `--capture-stops` captura el fotograma que muestra el presentador en cada `scene.stop()`, sin tocar el script: no hace falta llamar a `scene.snapshots` ni leer `GAANIM_SNAPSHOTS`. El script solo debe terminar con `scene.render()`.
-
-```bash
-gaanim --diff --example mi-charla --capture-stops --capture-only
-gaanim --diff --example mi-charla --capture-stops --stops 12,30 --capture-only
-```
-
-- Cada pausa se captura en su instante exacto: las animaciones anteriores ya terminaron y una pausa al final de un segmento conserva ese segmento en pantalla, sin desfases manuales.
-- Los archivos se llaman `stop_0001.png`, `stop_0002.png`, … según la numeración global (desde 1) de las pausas, así que el baseline y la captura actual se emparejan por pausa aunque cambien los tiempos.
-- `--stops` acepta números y rangos (`12,30`, `3-7`); los números siguen siendo los de la numeración completa.
-- `--sections resultados,cierre` y `--from resultados` capturan solo las pausas de esos segmentos, claves de `Section` o nombres de `SectionStep` (ver #link("/guias/presentaciones/")[Presentaciones]); se combinan con `--stops` y conservan la numeración global.
-- Además de `manifest.json`, escribe `stops.json` con número, tiempo, segmento, nombre de la pausa y archivo de cada captura.
-- Funciona con `--bless`, `--capture-only` y `--no-gui`; no con `--no-capture`.
-- Solo compara si el baseline tiene su propio `stops.json`. Si no hay baseline, o es un baseline de `scene.snapshots`, captura, avisa de que no hay nada que comparar y termina con éxito. `--bless` con `--capture-stops` reemplaza el `manifest.json` del baseline, así que no lo uses sobre un baseline de `scene.snapshots` que quieras conservar.
-
-Si prefieres elegir los tiempos desde el script, `scene.stops` devuelve las pausas con su tiempo absoluto y `scene.cursor` el instante actual de autoría:
+Si prefieres capturar las pausas del script, `scene.stops` devuelve cada
+`scene.stop()` con su instante y `scene.cursor` da el instante actual de la
+escena:
 
 ```python
 >>>import os
@@ -71,25 +70,68 @@ if os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(os.environ["GAANIM_SNAPSHOTS"], [stop.time for stop in scene.stops])
 ```
 
+= Capturar cada pausa de una presentación
+
+Para revisar una presentación, `--capture-stops` captura el fotograma que se ve
+en cada `scene.stop()` sin tocar el script: no hace falta llamar a
+`scene.snapshots` ni leer `GAANIM_SNAPSHOTS`. El script solo debe terminar con
+`scene.render()`.
+
+```bash
+gaanim --diff --example mi-charla --capture-stops --capture-only
+gaanim --diff --example mi-charla --capture-stops --stops 12,30 --capture-only
+```
+
+- Cada pausa se captura en su instante exacto: las animaciones anteriores ya
+  terminaron, y una pausa al final de un segmento conserva ese segmento en
+  pantalla.
+- Los archivos se llaman `stop_0001.png`, `stop_0002.png`… según la numeración
+  global de las pausas (desde 1), así que la versión aprobada y la actual se
+  emparejan por pausa aunque cambien los tiempos.
+- `--stops` acepta números y rangos (`12,30`, `3-7`) de esa misma numeración.
+- `--sections resultados,cierre` y `--from resultados` capturan solo las
+  pausas de esos segmentos, claves de `Section` o nombres de `SectionStep`
+  (ver #link("/guias/presentaciones/")[Presentaciones]); se combinan con
+  `--stops` y conservan la numeración global.
+- Además de `manifest.json`, escribe `stops.json` con el número, el instante,
+  el segmento, el nombre de la pausa y el archivo de cada captura.
+- Funciona con `--bless`, `--capture-only` y `--no-gui`, pero no con
+  `--no-capture`.
+- Solo compara si la versión aprobada tiene su propio `stops.json`. Si no hay
+  versión aprobada, o se hizo con `scene.snapshots`, captura, avisa de que no
+  hay nada que comparar y termina con éxito. `--bless` con `--capture-stops`
+  reemplaza el `manifest.json` aprobado: no lo uses sobre una versión de
+  `scene.snapshots` que quieras conservar.
+
 = Automatizar y tolerar diferencias
 
 ```bash
 gaanim --diff --example escenas/intro.py --no-gui --pixel-threshold 4 --max-changed-ratio 0.0001
 ```
 
-- `--no-gui` — genera el informe sin abrir el visor (útil en integración continua).
-- `--no-capture` — compara los PNG ya presentes en `current/`.
-- `--capture-only` — escribe `current/` (o `--current <DIR>`) y termina sin
-  comparar ni modificar un baseline; sirve para diagnóstico y benchmarks.
-- `--capture-stops` / `--stops <LISTA>` — captura cada `scene.stop()` en lugar
-  de `scene.snapshots` (ver arriba).
-- `--tests-root <DIR>` — cambia la carpeta global por defecto.
-- `--pixel-threshold` / `--max-changed-ratio` — tolerancias.
+- `--no-gui` genera el informe sin abrir el visor, útil en integración
+  continua.
+- `--no-capture` compara los PNG que ya están en `current/`.
+- `--capture-only` escribe `current/` (o la carpeta de `--current <DIR>`) y
+  termina sin comparar ni modificar la versión aprobada.
+- `--capture-stops` y `--stops <LISTA>` capturan cada `scene.stop()` en lugar
+  de usar `scene.snapshots` (ver arriba).
+- `--tests-root <DIR>` cambia la carpeta raíz, que por defecto es
+  `tests/visual`.
+- `--pixel-threshold` y `--max-changed-ratio` fijan cuánto puede cambiar cada
+  píxel y qué proporción de píxeles puede cambiar sin que cuente como
+  diferencia.
 
-El modo manual con `--baseline`, `--current` y `--output` sigue disponible para comparar carpetas arbitrarias:
+Para comparar dos carpetas cualesquiera, indica las rutas a mano con
+`--baseline`, `--current` y `--output`:
 
 ```bash
-gaanim --diff --baseline tests/visual/a/baseline --current tests/visual/a/current --output tests/visual/a/report --no-gui
+gaanim --diff --baseline capturas/antes --current capturas/despues --output capturas/informe --no-gui
 ```
 
-El reporte JSON incluye el seek, porcentaje de píxeles modificados, error medio, delta máximo y rectángulo del cambio. El visor alterna baseline/actual/diff con `1`, `2` y `3`.
+= Leer el resultado
+
+El informe JSON incluye, para cada captura, el instante, el porcentaje de
+píxeles modificados, el error medio, la diferencia máxima y el rectángulo que
+contiene el cambio. En el visor, las teclas `1`, `2` y `3` alternan entre la
+versión aprobada, la actual y el mapa de diferencias.

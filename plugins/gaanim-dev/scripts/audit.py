@@ -47,9 +47,16 @@ REQUIRED_DOCS = {
     "assets.typ",
     "audio.typ",
     "index.typ",
+    "diapositivas.typ",
+    "drawable.typ",
+    "geometria.typ",
     "layout.typ",
-    "objetos.typ",
+    "matrices.typ",
+    "mecanica.typ",
+    "medios.typ",
     "scene.typ",
+    "text.typ",
+    "visualization.typ",
     "themes.typ",
 }
 

@@ -416,5 +416,5 @@ un drawable: no los solapes en el mismo `play`; encadénalos con `sequence`.
   `distribute`, `repeat`, `loop`, `label`, `move_along`, `path_arc` y `trim`.
 - #link("/referencia/scene/")[Scene]: `scene.random`, `scene.noise`,
   `Updater.wiggle`, `Updater.oscillate` y `scene.marker`.
-- #link("/referencia/objetos/")[Objetos]: los drawables que sirven de
+- #link("/referencia/geometria/")[Geometría]: los drawables que sirven de
   trayectoria.

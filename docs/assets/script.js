@@ -245,17 +245,27 @@ const CLASS_PAGES = [
     [/^(Color|ColorMap|Brush|Background|StrokeStyle|Style|Theme|AxesStyle|Glow|Shadow)$/, "referencia/themes/"],
     [/^(Axis|Scale|Field|Value|Guide|ChartSpec|Chart\w*|Visualization|Data\w*|Computed|Parameter|Variable|TimeInput|Matrix\w*|Plot\w*|Axes\w*|Number\w*)$/, "referencia/visualization/"],
     [/^(Audio\w*)$/, "referencia/audio/"],
-    [/^(Asset\w*|Media\w*|Video\w*|Image\w*|Svg\w*|Lottie\w*)$/, "referencia/assets/"],
+    [/^(AssetManager)$/, "referencia/assets/"],
+    [/^(MediaLibrary|Video\w*|Image|Lottie)$/, "referencia/medios/"],
+    [/^(Drawable)$/, "referencia/drawable/"],
+    [/^(SlideKit)$/, "referencia/diapositivas/"],
+    [/^(Mechanics|Dimension|AngleDimension|Support|ForceVector)$/, "referencia/mecanica/"],
+    [/^(Canvas|SceneMarker|CameraState|CameraConstraint)$/, "referencia/scene/"],
+    [/^(Overlay|Random)$/, "referencia/animations/"],
+    [/^(PostProcess)$/, "referencia/themes/"],
+    [/^(Readout|RollingNumber|CoordinateRef|CoordinateSpace\w*|PolarSpace|NumberLine|VectorField|ArrowVectorField|StreamLines|FlowParticles)$/, "referencia/visualization/"],
 ];
 const pageForClass = (cls) => {
     if (!cls) return "referencia/";
     const match = CLASS_PAGES.find(([re]) => re.test(cls));
-    return match ? match[1] : "referencia/objetos/";
+    return match ? match[1] : "referencia/geometria/";
 };
 const PAGE_LABELS = {
     "referencia/": "API", "referencia/scene/": "Escena", "referencia/animations/": "Animaciones", "referencia/text/": "Texto",
     "referencia/layout/": "Layout", "referencia/themes/": "Temas", "referencia/visualization/": "Visualización",
-    "referencia/audio/": "Audio", "referencia/assets/": "Recursos", "referencia/objetos/": "Objetos",
+    "referencia/audio/": "Audio", "referencia/assets/": "Recursos", "referencia/geometria/": "Geometría",
+    "referencia/drawable/": "Drawable", "referencia/medios/": "Medios", "referencia/diapositivas/": "Diapositivas",
+    "referencia/mecanica/": "Mecánica", "referencia/matrices/": "Matrices", "referencia/cli/": "CLI",
 };
 
 // The `.animate` proxy returns `Anim`, but the reference documents those

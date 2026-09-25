@@ -297,7 +297,7 @@ inglés (Fase 4).
 - Las fichas `api-entry` fallan si nombran símbolos que el stub no expone y, sin
   firma escrita, muestran la del stub.
 
-### Fase 2: arquitectura (M)
+### Fase 2: arquitectura (M) · hecha
 
 - Mover las páginas según la tabla anterior, con rutas en español y páginas de
   redirección para las rutas antiguas enlazadas desde README y plugins.
@@ -306,7 +306,7 @@ inglés (Fase 4).
 - Separar la documentación de contribución: excluirla del wheel en
   `crates/gaanim_python/hatch_build.py` o moverla fuera de `docs/content`.
 
-### Fase 3: tutorial reescrito (M)
+### Fase 3: tutorial reescrito (M) · hecha
 
 - Un único archivo canónico (`docs/content/tutorial/circulo_al_seno.py`), que el
   wheel incluye. Cada lección muestra el diff y el archivo completo con su vista
@@ -314,7 +314,7 @@ inglés (Fase 4).
 - Una sola forma de reactividad, coherente con `guias/reactividad`.
 - Puntos de control con capturas en el instante que piden revisar.
 
-### Fase 4: referencia completa (M-L)
+### Fase 4: referencia completa (M-L) · hecha
 
 - Una página por namespace.
 - Cobertura de `Easing`, `Color`, `Lottie`, `Camera`/`CameraAnimation`, `Canvas`,
@@ -322,7 +322,7 @@ inglés (Fase 4).
 - Unificar layout, assets, audio y themes al formato de fichas.
 - Referencia de la CLI y de `gaanim.toml`.
 
-### Fase 5: contenido nuevo (M)
+### Fase 5: contenido nuevo (M) · hecha
 
 - Guías de movimiento, tipografía cinética, transiciones y efectos con lo
   entregado en las olas 0–2.
@@ -330,7 +330,7 @@ inglés (Fase 4).
   (`motion_design_backlog.md`, paso 2) una sección en su guía, no solo la ficha.
 - Galería de ejemplos y novedades por versión.
 
-### Fase 6: pulido visual (S-M)
+### Fase 6: pulido visual (S-M) · hecha
 
 - Home en cuatro bloques: hero, tres pasos, galería y cuatro puertas (Empezar,
   Tutorial, Guías, Referencia).
@@ -346,3 +346,28 @@ inglés (Fase 4).
   existen y páginas del libro ausentes del menú.
 - El glosario como fuente de términos: *drawable* (no *mobject*), *handle*,
   *fábrica*, *línea de tiempo*, *escena*.
+
+## Hallazgos del runtime (fuera del alcance de la documentación)
+
+Ejecutar todos los ejemplos destapó comportamientos del runtime que la
+documentación ahora describe tal como son, pero que conviene corregir en código:
+
+- `Text.next_to`, `to_edge` y `to_corner` usan un espaciado por defecto de
+  `24.0` (`crates/gaanim_python/src/pytext.rs`) frente al `0.24` del stub.
+- `animate.rotate_by(...).about_point(...)` ignora el punto
+  (`crates/gaanim_api/src/anim.rs:652`); `with_pivot` sí funciona.
+- `Geometry.transform_matching*` no avanza `scene.cursor` ni la línea de tiempo.
+- `Scene()` sin fondo ni tema dibuja blanco sobre blanco; no hay tema por
+  defecto aunque la documentación antigua decía `technical`.
+- Los formatos de eje `"pi"` y `"fraction"` no simplifican (`2π/2`).
+- `bind_y_from` ignora una fuente movida con `follow(PointRef)`.
+- `text.animate.transform_to` pierde los colores de `part()`.
+- Un `Text` con `wrap="auto"` en contenedores `hug` envuelve distinto de lo que
+  el layout midió; un `fade_in` dentro de `layout.column` se ve desde t=0.
+- `chart.animate.to(...)` deja un gráfico 2D invisible en la exportación.
+- `scene.media.svg` importa a una unidad por píxel SVG.
+- `marker(blend="multiply")` se dibuja igual que `"normal"`.
+- El stub declara `Canvas.theme` como escribible (es de solo lectura) y omite
+  `Color.r/g/b/a`; `load_project()` exige `assets_dir` aunque la CLI lo supone.
+- 3D (experimental): la exportación nativa necesita una ventana (Xvfb en CI),
+  registra errores "use-after-free" de Bevy y un `gaanim.glb` no apareció.

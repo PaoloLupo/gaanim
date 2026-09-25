@@ -144,10 +144,10 @@ scene.render()
     ("Animar el tiempo", "tutorial/animar-tiempo/"),
     ("Terminar el proyecto", "tutorial/terminar-proyecto/"),
   ))
-  door("guias/layout/", "Guías", "Resolver una tarea", [Composición, movimiento, texto animado, presentaciones y producción.], (
-    ("Layout", "guias/layout/"),
+  door("guias/movimiento/", "Guías", "Resolver una tarea", [Composición, movimiento, texto animado, presentaciones y producción.], (
+    ("Movimiento", "guias/movimiento/"),
+    ("Tipografía cinética", "guias/tipografia-cinetica/"),
     ("Presentaciones", "guias/presentaciones/"),
-    ("Proyectos y exportación", "guias/proyectos/"),
   ))
   door("referencia/", "Referencia", "Consultar la API", [Firmas, parámetros y ejemplos de cada objeto y animación.], (
     ("Escena", "referencia/scene/"),
@@ -157,7 +157,7 @@ scene.render()
 })
 
 #html.div(class: "home-more", [
-  #link("/ejemplos/basicos/")[Ejemplos] ·
+  #link("/ejemplos/")[Galería de ejemplos] ·
   #link("/apendices/novedades/")[Novedades] ·
   #link("documentation.pdf")[Toda la documentación en PDF] ·
   #link("https://github.com/PaoloLupo/gaanim")[Código fuente] ·

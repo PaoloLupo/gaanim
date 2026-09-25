@@ -167,6 +167,14 @@ class ImpactTests(unittest.TestCase):
         self.assertIn("just validate-python-api", result.commands)
         self.assertIn("transform_demo", result.visual_examples)
 
+    def test_cli_and_manifest_changes_select_their_reference_pages(self):
+        with tempfile.TemporaryDirectory() as temp:
+            launcher = impact.analyze_paths(Path(temp), ["crates/gaanim_launcher/src/main.rs"])
+            project = impact.analyze_paths(Path(temp), ["crates/gaanim_project/src/lib.rs"])
+        self.assertIn("docs/content/referencia/cli.typ", launcher.documentation)
+        self.assertIn("docs/content/referencia/gaanim-toml.typ", project.documentation)
+        self.assertIn("docs/content/referencia/cli.typ", project.documentation)
+
     def test_renderer_change_does_not_require_public_docs(self):
         with tempfile.TemporaryDirectory() as temp:
             result = impact.analyze_paths(

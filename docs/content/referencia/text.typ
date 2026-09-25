@@ -3,72 +3,19 @@
 
 #show: docs-chapter.with(
   title: "Texto",
-  description: "Prosa, matemáticas, partes semánticas, flujo responsive, selecciones y animación estructural",
+  description: "scene.text: prosa, ecuaciones, partes semánticas, estilo, flujo, selecciones, documentos Typst y medición",
   route: "/referencia/text/",
+  nav: "Texto",
 )
 
 = Texto
 
-`scene.text()` es la fábrica general de prosa, títulos, párrafos, matemáticas y
-contenido mixto. `scene.text.equation()` es su atajo para matemáticas en bloque.
-Ambas devuelven el mismo `Text` especializado: un `Drawable` vectorial que
-conserva la estructura semántica, es medido intrínsecamente por Layout v2 y
-expone selecciones locales y animaciones específicas de texto.
+`scene.text(...)` crea prosa, títulos, párrafos, matemáticas y contenido mixto;
+`scene.text.equation(...)` es su atajo para ecuaciones en bloque. Ambas
+devuelven un `Text`: un `Drawable` vectorial que conserva la estructura
+semántica, se mide con el mismo motor que #link("/referencia/layout/")[Layout]
+y permite seleccionar y animar partes sueltas.
 
-```python
-from gaanim import GOLD, Scene, TextFlow, TextStyle, part
-
-scene = Scene(frame=(16, 9), background="#0f172a")
-formula = part("formula", "$E = ", part("mass", "m", color=GOLD), " c^2$")
-copy = scene.text(
-    "La energía es ",
-    formula,
-    role="body",
-    style=TextStyle(size=0.34),
-    flow=TextFlow(wrap=6.5, align="center"),
-).move_to(0, 0)
-
-scene.play([copy.animate.write(by="part", stagger=0.06).duration(1.2)])
-scene.play([copy["formula"]["mass"].animate.indicate().duration(0.6)])
-```
-
-Usa un rol para la prosa y `scene.text.equation()` para una ecuación independiente.
-`scene.text.typst()` permite crear documentos Typst arbitrarios, pero no ofrece la
-API de selección estructurada de `Text` descrita aquí.
-
-== Responsabilidades
-
-- `TextStyle` controla el aspecto de los glifos y las métricas tipográficas.
-- `TextFlow` controla la composición interna de líneas.
-- Solo Layout v2 controla caja exterior, relleno, ajuste, crecimiento, pistas,
-  restricciones, propiedad y recomposición.
-- `TextSelection` señala glifos dentro de un `Text`; nunca se convierte en hijo
-  independiente de Layout.
-
-Esta separación evita tener un segundo solucionador de cajas de texto. Consulta
-#link("/referencia/layout/", "Layout v2") para dimensionar y colocar contenedores.
-
-== Scene.text
-
-#api-entry(
-  name: "Scene.text",
-  kind: "factory",
-  signature: "text(*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None, lang=None, markup=None) -> Text",
-  params: (
-    (name: "content", type: "str | TextPart | TextParts", default: none, desc: [One or more composable strings, semantic parts, or compact ordered part groups. The flattened result must not be empty.]),
-    (name: "role", type: "TextRole | None", default: "None", desc: [Semantic role. Fully mathematical content infers `math`; everything else infers `body`.]),
-    (name: "style", type: "TextStyle | None", default: "None", desc: [Reusable visual and metric overlay.]),
-    (name: "flow", type: "TextFlow | None", default: "None", desc: [Reusable internal line-composition options.]),
-    (name: "style overrides", type: "keyword arguments", default: "None", desc: [Direct font, metric, color, opacity, spacing, and baseline values.]),
-    (name: "flow overrides", type: "keyword arguments", default: "None", desc: [Direct wrap, alignment, line limit, overflow, direction, hyphenation, and `lang` values.]),
-    (name: "markup", type: "bool | None", default: "None", desc: [Interpret `*strong*` and `_emphasis_`. `False` keeps `*` and `_` literal while `$...$` math still applies. `None` uses the theme's `text_markup`, which is `True` by default.]),
-  ),
-  returns: (type: "Text", desc: [Structured vector text measured by the same intrinsic Layout v2 pass in every context.]),
-  desc: [Direct keywords override `TextStyle` and `TextFlow`. The `color` argument
-    accepts `ColorLike`: a `Color`, CSS/hex string, or RGB/RGBA tuple of bytes.
-    `None` inherits the style/theme color. This also applies to `equation`.
-    Invalid content, delimiters, roles, metrics, or flow values raise `TypeError` or `ValueError`.],
-)[
 ```python
 # show-code: true
 from gaanim import GOLD, Scene, TextFlow, part
@@ -83,20 +30,49 @@ scene.play([copy.animate.write(by="part").duration(1.0)])
 # output: text_factory.webp
 scene.render()
 ```
-]
 
-== Typography.equation
+Cada pieza tiene una responsabilidad:
+
+- `TextStyle` controla el aspecto de los glifos y las métricas tipográficas.
+- `TextFlow` controla cómo se componen las líneas dentro del texto.
+- Layout controla la caja exterior: relleno, ajuste, crecimiento y posición.
+- `TextSelection` señala glifos dentro de un `Text`; nunca es un hijo
+  independiente de Layout.
+
+== Crear texto
+
+Las dos fábricas de texto y los roles tipográficos del tema.
+
+#api-entry(
+  name: "Scene.text",
+  kind: "factory",
+  signature: "scene.text(*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None, lang=None, markup=None) -> Text",
+  params: (
+    (name: "content", type: "str | TextPart | TextParts", default: none, desc: [Una o varias cadenas, partes semánticas o grupos de partes. El resultado no puede estar vacío.]),
+    (name: "role", type: "str | None", default: "None", desc: [Rol tipográfico. Si todo es matemático se infiere `math`; si no, `body`.]),
+    (name: "style / flow", type: "TextStyle | None / TextFlow | None", default: "None", desc: [Estilo y flujo reutilizables.]),
+    (name: "font … baseline", type: "argumentos con nombre", default: "None", desc: [Ajustes directos de estilo: fuente, métricas, color, opacidad, espaciado y línea base. Sustituyen a `style`.]),
+    (name: "wrap … lang", type: "argumentos con nombre", default: "None", desc: [Ajustes directos de flujo: ajuste de línea, alineación, límite de líneas, desbordamiento, dirección, guiones e idioma. Sustituyen a `flow`.]),
+    (name: "markup", type: "bool | None", default: "None", desc: [Interpreta `*negrita*` y `_cursiva_`. `False` deja `*` y `_` literales (la matemática `$…$` sigue activa); `None` usa `text_markup` del tema, que por defecto es `True`.]),
+  ),
+  desc: [`$…$` activa la matemática y `\$` escribe un dólar literal. `color` acepta un `Color`, una cadena CSS/hex o una tupla RGB(A); `None` hereda el color del estilo o del tema. `lang="es"` con `hyphenate=True` da párrafos justificados con guiones en español. Contenido, delimitadores, roles, métricas o flujos inválidos lanzan `TypeError` o `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+title = scene.text("Movimiento circular", role="title")
+note = scene.text("Radio $r = 1.5$", size=0.36, color="#94a3b8").move_to(0, -1)
+```
+]
 
 #api-entry(
   name: "Typography.equation",
   kind: "factory",
-  signature: "equation(*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None) -> Text",
   params: (
-    (name: "content", type: "str | TextPart | TextParts", default: none, desc: [Equation source without surrounding math delimiters.]),
-    (name: "options", type: "same as Scene.text", default: "None", desc: [The complete style and flow surface is shared with `scene.text()`.]),
+    (name: "content", type: "str | TextPart | TextParts", default: none, desc: [Ecuación sin los delimitadores `$`.]),
+    (name: "opciones", type: "igual que scene.text", default: "None", desc: [Comparte todo el estilo y el flujo de `scene.text` (salvo `lang` y `markup`).]),
   ),
-  returns: (type: "Text", desc: [A standalone structured equation with normal `Text` selections and animations.]),
-  desc: [Wraps content internally as `$ ... $`. Those spaces are preserved because Typst uses them to distinguish a block equation from inline `$...$`. Every content boundary inside math becomes ordinary Typst whitespace, so Typst itself determines operator and identifier spacing. Empty content raises `ValueError`.],
+  desc: [Envuelve el contenido como `$ … $`: esos espacios hacen que Typst componga una ecuación en bloque. Cada frontera entre piezas es un espacio normal de Typst, así que Typst decide el espaciado de operadores e identificadores. Sin rol ni tamaño explícitos usa el tamaño matemático de 0.44 unidades. Contenido vacío lanza `ValueError`.],
 )[
 ```python
 # show-code: true
@@ -114,22 +90,15 @@ scene.render()
 ```
 ]
 
-== Roles
+=== Roles
 
-The accepted roles are:
-
-```text
-"title" | "subtitle" | "kicker" | "heading" | "body" |
-"caption" | "label" | "code" | "math"
-```
-
-The default text configuration uses these sizes in scene units:
-`title=0.64`, `subtitle=0.48`, `kicker=0.32`, `heading=0.48`, `body=0.40`,
-`caption=0.32`, `label=0.36`, `code=0.36`, and `math=0.44`. Prose uses New Computer
-Modern by default, code uses Consolas, and math uses New Computer Modern Math.
-The active theme and explicit style may replace the resolved color and
-typography. Under a theme, `kicker` resolves to the palette's `accent` color,
-which makes it the natural small line above a title:
+Los roles son `title`, `subtitle`, `kicker`, `heading`, `body`, `caption`,
+`label`, `code` y `math`. Sus tamaños predeterminados, en unidades de escena,
+son: `title` 0.64, `subtitle` 0.48, `kicker` 0.32, `heading` 0.48, `body` 0.40,
+`caption` 0.32, `label` 0.36, `code` 0.36 y `math` 0.44. La prosa usa New
+Computer Modern, el código Consolas y la matemática New Computer Modern Math.
+Con un tema, `kicker` toma el color `accent`, ideal para la línea corta sobre un
+título:
 
 ```python
 >>>from gaanim import *
@@ -138,147 +107,25 @@ kicker = scene.text("MISMO TERREMOTO. TRES EDIFICIOS.", role="kicker").move_to(0
 title = scene.text("¿Cuál sufrirá más?", role="title").move_to(0, 3)
 ```
 
-Resolution order is:
+El estilo se resuelve en este orden, de menor a mayor prioridad: rol y tema,
+`TextStyle`/`TextFlow`, argumentos directos de `scene.text`, estilo local de cada
+`part` y, por último, `selection.fill(...)` o `text.fill(...)` posteriores.
 
-```text
-role/theme -> TextStyle/TextFlow -> direct scene.text keywords
-           -> local part style -> later TextSelection.fill / Text.fill
-```
+== Partes semánticas y matemáticas
 
-== Medición sin spawn
-
-#api-entry(
-  name: "Typography.measure",
-  kind: "method",
-  signature: "measure(content, *, role=None, size=None, font=None, color=None, wrap=None, weight=None, style=None, markup=None, flow=None, line_spacing=None) -> tuple[float, float]",
-  params: (
-    (name: "content", type: "str", default: none, desc: [Text to measure; must not be empty.]),
-    (name: "role", type: "TextRole | None", default: "None", desc: [Role whose theme defaults resolve size, family, and color (`body` when omitted).]),
-    (name: "size, font, color", type: "float | str | Color | None", default: "None", desc: [Explicit overrides, resolved exactly as on the spawned text object.]),
-    (name: "wrap", type: "float | None", default: "None", desc: [Fixed composition width; `None` measures a single unwrapped block.]),
-    (name: "weight", type: "int | None", default: "None", desc: [Font weight override.]),
-    (name: "style", type: "TextStyle | None", default: "None", desc: [Reusable typography (italic, spacing, …); `size`, `font`, `weight` and `color` override it.]),
-    (name: "markup", type: "bool | None", default: "None", desc: [Same as `scene.text`: `False` measures `*` and `_` as literal characters; `None` follows the theme.]),
-    (name: "flow", type: "TextFlow | None", default: "None", desc: [Paragraph settings (alignment, line spacing, hyphenation, …). Its `"auto"` wrap measures unwrapped because no layout width is offered.]),
-    (name: "line_spacing", type: "float | None", default: "None", desc: [Line-height multiplier, as in `scene.text`; overrides `flow`.]),
-  ),
-  returns: (type: "tuple[float, float]", desc: [Laid-out `(width, height)` in scene units.]),
-  desc: [Runs the same Typst pipeline that renders `scene.text` and shares its cache, so a later spawn of the same text reuses the measurement. Use it to size boxes to their content instead of guessing widths.],
-)[
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-width, height = scene.text.measure("PGA = 0.35 g", role="label")
-_, paragraph_height = scene.text.measure("Primera línea\nSegunda línea", line_spacing=1.6)
-box = scene.geometry.rounded_rect(width + 0.56, height + 0.32, 0.14).move_to(0, -4.14)
-```
-]
-
-== Contenido estructurado y matemáticas
-
-Strings, `TextPart`, and the compact `TextParts` group form one ordered content
-tree. `TextParts` expands to ordinary sibling parts before the tree is stored,
-so semantic paths remain identical to those created with repeated `part()`
-calls and more stable than manual character ranges.
-
-=== Marcado de énfasis en línea
-
-Ordinary strings accept a small Typst-inspired markup language. `*strong*`
-selects a bold face, `_emphasis_` selects italic, and the delimiters may be
-nested as `*_strong emphasis_*`. Markup styling is compiled into the same
-structured Typst runs as `TextStyle`, so it works with wrapping, selections,
-animations, semantic parts, and Layout v2 measurement.
-
-```python
-# show-code: true
-from gaanim import GOLD, Scene
-
-scene = Scene(frame=(16, 9), background="#0f172a")
-copy = scene.text(
-    "Normal, _emphasis_, *strong* and *_both_*.",
-    size=0.36,
-).move_to(0, 0)
-scene.play([copy.animate.write(by="word", stagger=0.05).duration(1.2)])
-scene.play([copy.words[3].animate.indicate().duration(0.6)])
-# output: text_inline_markup.webp
-scene.render()
-```
-
-- `\\*` and `\\_` produce literal delimiters.
-- Markup may span adjacent strings and `part()` boundaries without adding a
-  shaping gap.
-- Markers inside `$...$` remain mathematical syntax; subscripts such as `x_1`
-  and multiplication with `*` are not interpreted as prose emphasis.
-- Intraword underscores (`snake_case`), repeated markers (`__init__`), and a
-  spaced expression such as `5 * 4` remain literal.
-- A valid opening delimiter without its matching close, or crossed nesting,
-  raises `ValueError`. Escape a literal adjacent marker when it could be read
-  as an opener.
-- For technical content full of `_` or `*` (labels such as `tb:dist_comp`,
-  identifiers such as `X1_2`), pass `markup=False`: every `*` and `_` stays
-  literal, backslashes included, while `$...$` math still applies.
-  `text.become(...)` keeps the current mode unless `markup=` is given.
-- `Theme(text_markup=False)` makes that the default for `scene.text`,
-  `scene.text.measure`, `badge` and `chip`; a call that passes `markup=`
-  keeps its own choice.
-
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-label = scene.text("Valores: V_e del piso 1 (tb:agriet_xy)", markup=False)
-```
-
-#api-entry(
-  name: "parts",
-  kind: "factory",
-  signature: "parts(mapping: Mapping[str, str] | None = None, /, **content: str) -> TextParts",
-  params: (
-    (name: "mapping", type: "Mapping[str, str] | None", default: "None", desc: [Ordered names and their plain text, named with strings as in `part()`. Keeps insertion order and accepts names that are not Python identifiers, such as `"tb:dist"`.]),
-    (name: "content", type: "keyword str entries", default: none, desc: [Shortcut for identifier names: `parts(mass="m")` equals `parts({"mass": "m"})`.]),
-  ),
-  returns: (type: "TextParts", desc: [Immutable ordered group accepted by `scene.text()`, `scene.text.equation()`, `Text.become()`, and `part()`.]),
-  desc: [Inside `$...$`, adjacent sibling entries become distinct Typst math tokens and retain Typst's native tight spacing. Empty input, mixing a mapping with keyword entries, repeated or empty names, or wholly empty content raise `ValueError`; a non-mapping positional argument, non-string names, or non-string values raise `TypeError`. Use `part()` for local styles or nesting.],
-)[
-```python
-# show-code: true
-from gaanim import GOLD, Scene, parts
-scene = Scene(frame=(16, 9), background="#0f172a")
-equation = scene.text.equation(
-    "-",
-    parts(mass_left="m", gravity="g sin(theta)"),
-    "=",
-    parts(mass_right="m", length="L", acceleration="theta''"),
-).move_to(0, 0)
-scene.play([equation.animate.write(by="part").duration(1.2)])
-scene.play([equation["gravity"].animate.indicate().duration(0.6)])
-scene.play([equation["acceleration"].animate.fill(GOLD).duration(0.6)])
-# output: compact_text_parts.webp
-scene.render()
-```
-
-A mapping names the parts with strings, like `part()` does, and admits names
-that keyword arguments cannot express:
-
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-label = scene.text(parts({"tb:dist": "d = ", "x-1": "4.2 m"}))
-label["tb:dist"].fill(GOLD)
-```
-]
+Nombra fragmentos del contenido para colorearlos, animarlos o transformarlos
+después sin contar caracteres.
 
 #api-entry(
   name: "part",
-  kind: "factory",
+  kind: "function",
   signature: "part(name, *content, style=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None) -> TextPart",
   params: (
-    (name: "name", type: "str", default: none, desc: [Non-empty semantic name, unique among its siblings.]),
-    (name: "content", type: "str | TextPart", default: none, desc: [Nested composable content.]),
-    (name: "style", type: "TextStyle | None", default: "None", desc: [Typography inherited by the complete subtree.]),
-    (name: "direct style", type: "keyword arguments", default: "None", desc: [Convenient local overlay for the listed visual and metric fields.]),
+    (name: "name", type: "str", default: none, desc: [Nombre no vacío y único entre sus hermanos.]),
+    (name: "content", type: "str | TextPart | TextParts", default: none, desc: [Contenido anidado.]),
+    (name: "style / estilo directo", type: "TextStyle | argumentos con nombre", default: "None", desc: [Tipografía local que hereda todo el subárbol.]),
   ),
-  returns: (type: "TextPart", desc: [Immutable semantic subtree accepted by `part()` and `scene.text()`.]),
-  desc: [Duplicate sibling names, empty names, invalid metrics, or invalid nested content raise `ValueError` or `TypeError`.],
+  desc: [Subárbol semántico inmutable. La ruta de nombres anidados es estable y la usan las selecciones y las transiciones de texto. Nombres repetidos o vacíos, métricas inválidas o contenido anidado inválido lanzan `ValueError` o `TypeError`.],
 )[
 ```python
 # show-code: true
@@ -299,92 +146,153 @@ scene.render()
 ```
 ]
 
-=== Delimitadores matemáticos
-
-- `$...$` switches the unified Typst compositor into mathematics.
-- `scene.text.equation(*content)` supplies `$ ... $` for a standalone equation;
-  omit those delimiters from its content.
-- `$$...$$` currently uses the same vector math compositor; it does not create
-  a separate public display-math object.
-- `\$` produces a literal dollar sign.
-- An unmatched delimiter raises `ValueError`.
-- If every non-whitespace segment is mathematical, the inferred role is
-  `math`; mixed prose and math infer `body` unless `role` is explicit.
-- Every boundary between content nodes inside math becomes one ordinary Typst
-  whitespace token. Typst itself determines the resulting operator and word
-  spacing, so writing `"= "` is unnecessary.
-- Local part properties stay inside the same Typst equation. Changing a
-  part's color, font, size, weight, italic style, spacing, decoration, or
-  baseline never introduces a synthetic `#h()` gap.
-- Outside math, boundaries remain exact and no whitespace is inserted.
-- Math syntax may still span boundaries. For example,
-  `part("x", "x"), "_1"` is compiled as `x _1`; Typst keeps `_1` attached as
-  the subscript rather than treating the inserted source whitespace as a
-  fixed visual gap.
-
-== TextStyle
-
 #api-entry(
-  name: "TextStyle",
-  kind: "value",
-  signature: "TextStyle(*, font=None, math_font=None, fallbacks=(), size=None, weight=None, italic=None, color=None, stroke=None, stroke_width=None, opacity=None, letter_spacing=None, word_spacing=None, decorations=(), baseline=None)",
+  name: "parts",
+  kind: "function",
+  signature: "parts(mapping=None, /, **content: str) -> TextParts",
   params: (
-    (name: "font / math_font", type: "str | None", default: "None", desc: [Primary prose and mathematical font families.]),
-    (name: "fallbacks", type: "Sequence[str]", default: "()", desc: [Ordered fallback font families for prose shaping.]),
-    (name: "size", type: "float | None", default: "None", desc: [Positive finite size in scene units.]),
-    (name: "weight", type: "int | None", default: "None", desc: [Numeric weight from 1 through 1000.]),
-    (name: "color / stroke", type: "Color | None", default: "None", desc: [Glyph fill and optional outline color.]),
-    (name: "opacity", type: "float | None", default: "None", desc: [Whole-Text alpha from 0 through 1.]),
-    (name: "spacing", type: "float | None", default: "None", desc: [Non-negative letter and word spacing in scene units.]),
-    (name: "decorations", type: "Sequence[str]", default: "()", desc: [`underline`, `strike`, or `strikethrough`.]),
-    (name: "baseline", type: "float | None", default: "None", desc: [Finite baseline offset in scene units; positive values move glyphs upward.]),
+    (name: "mapping", type: "Mapping[str, str] | None", default: "None", desc: [Nombres y texto en orden. Admite nombres que no son identificadores de Python, como `"tb:dist"`.]),
+    (name: "content", type: "str con nombre", default: none, desc: [Atajo para nombres que son identificadores: `parts(mass="m")` equivale a `parts({"mass": "m"})`.]),
   ),
-  returns: (type: "TextStyle", desc: [Reusable immutable typography overlay.]),
-  desc: [It intentionally has no box width, height, padding, fit, growth, columns, or vertical alignment. Invalid values raise `ValueError`.],
+  desc: [Grupo ordenado de partes simples, equivalente a varias llamadas a `part()`. Dentro de `$…$`, las entradas contiguas son tokens distintos de Typst y conservan su espaciado ajustado. Usa `part()` para estilos locales o anidamiento. Entradas vacías, repetidas o mezclar un mapa con argumentos con nombre lanzan `ValueError`; nombres o valores que no son cadenas, `TypeError`.],
 )[
 ```python
-from gaanim import GOLD, TextStyle
+# show-code: true
+from gaanim import GOLD, Scene, parts
+scene = Scene(frame=(16, 9), background="#0f172a")
+equation = scene.text.equation(
+    "-",
+    parts(mass_left="m", gravity="g sin(theta)"),
+    "=",
+    parts(mass_right="m", length="L", acceleration="theta''"),
+).move_to(0, 0)
+scene.play([equation.animate.write(by="part").duration(1.2)])
+scene.play([equation["gravity"].animate.indicate().duration(0.6)])
+scene.play([equation["acceleration"].animate.fill(GOLD).duration(0.6)])
+# output: compact_text_parts.webp
+scene.render()
+```
 
-display = TextStyle(
-    font="New Computer Modern",
-    math_font="New Computer Modern Math",
-    fallbacks=("Arial",),
-    size=0.42,
-    weight=650,
-    italic=False,
-    color=GOLD,
-    opacity=0.95,
-    letter_spacing=0.4,
-    word_spacing=1.0,
-    decorations=("underline",),
-    baseline=0,
-)
+Un mapa admite nombres que los argumentos con nombre no pueden expresar:
+
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+label = scene.text(parts({"tb:dist": "d = ", "x-1": "4.2 m"}))
+label["tb:dist"].fill(GOLD)
 ```
 ]
 
-Root `stroke`, `stroke_width`, and `opacity` affect the complete `Text`.
-Nested parts resolve font, size, weight, italic, color, spacing, decoration, and
-baseline through the structured Typst tree. A later fluent `text.fill(...)`,
-`text.stroke(...)`, or `text.opacity(...)` updates the complete drawable.
+=== Énfasis en línea
 
-== TextFlow y ajuste de líneas
+Las cadenas admiten un marcado mínimo inspirado en Typst: `*negrita*`,
+`_cursiva_` y ambos anidados, `*_así_*`. Se compila en las mismas pasadas que
+`TextStyle`, así que funciona con ajuste de línea, selecciones, animaciones,
+partes y medición.
+
+```python
+# show-code: true
+from gaanim import GOLD, Scene
+
+scene = Scene(frame=(16, 9), background="#0f172a")
+copy = scene.text(
+    "Normal, _cursiva_, *negrita* y *_ambas_*.",
+    size=0.36,
+).move_to(0, 0)
+scene.play([copy.animate.write(by="word", stagger=0.05).duration(1.2)])
+scene.play([copy.words[2].animate.indicate().duration(0.6)])
+# output: text_inline_markup.webp
+scene.render()
+```
+
+- `\\*` y `\\_` escriben los delimitadores literales.
+- El marcado puede cruzar cadenas contiguas y fronteras de `part()` sin añadir
+  huecos.
+- Dentro de `$…$` los marcadores son sintaxis matemática: `x_1` es un subíndice
+  y `*` una multiplicación.
+- Los guiones bajos dentro de palabras (`snake_case`), los marcadores repetidos
+  (`__init__`) y una expresión con espacios como `5 * 4` quedan literales.
+- Un delimitador de apertura sin cierre, o un anidamiento cruzado, lanza
+  `ValueError`.
+- Para contenido técnico lleno de `_` o `*` (`tb:dist_comp`, `X1_2`) pasa
+  `markup=False`: todo queda literal, barras invertidas incluidas, y `$…$`
+  sigue siendo matemática. `text.become(...)` conserva el modo salvo que pases
+  `markup=`.
+- `Theme(text_markup=False)` lo hace predeterminado para `scene.text`,
+  `scene.text.measure`, `badge` y `chip`.
+
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+label = scene.text("Valores: V_e del piso 1 (tb:agriet_xy)", markup=False)
+```
+
+=== Delimitadores matemáticos
+
+- `$…$` cambia el compositor Typst a matemáticas; `$$…$$` usa el mismo
+  compositor y no crea un objeto distinto.
+- `scene.text.equation(...)` añade `$ … $`: no escribas los delimitadores.
+- `\$` escribe un dólar literal y un delimitador sin pareja lanza `ValueError`.
+- Si todo el contenido es matemático, el rol inferido es `math`; si mezcla prosa
+  y matemáticas, `body`.
+- Dentro de la matemática, cada frontera entre piezas es un espacio normal de
+  Typst, así que no hace falta escribir `"= "`. Fuera de la matemática las
+  fronteras son exactas.
+- Los estilos locales de una parte quedan dentro de la misma ecuación Typst:
+  cambiar su color, fuente o tamaño nunca añade huecos artificiales.
+- La sintaxis puede cruzar fronteras: `part("x", "x"), "_1"` se compila como
+  `x _1` y Typst mantiene `_1` como subíndice.
+
+== Estilo y flujo
+
+Aspecto de los glifos y composición de las líneas, como valores reutilizables.
+
+#api-entry(
+  name: "TextStyle",
+  kind: "class",
+  signature: "TextStyle(*, font=None, math_font=None, fallbacks=(), size=None, weight=None, italic=None, color=None, stroke=None, stroke_width=None, opacity=None, letter_spacing=None, word_spacing=None, decorations=(), baseline=None)",
+  params: (
+    (name: "font / math_font", type: "str | None", default: "None", desc: [Familias de prosa y de matemáticas.]),
+    (name: "fallbacks", type: "Sequence[str]", default: "()", desc: [Familias de respaldo en orden.]),
+    (name: "size", type: "float | None", default: "None", desc: [Tamaño positivo en unidades de escena.]),
+    (name: "weight", type: "int | None", default: "None", desc: [Peso numérico de 1 a 1000.]),
+    (name: "color / stroke / stroke_width", type: "Color | None / Color | None / float | None", default: "None", desc: [Relleno de los glifos y contorno opcional.]),
+    (name: "opacity", type: "float | None", default: "None", desc: [Opacidad de todo el texto, de 0 a 1.]),
+    (name: "letter_spacing / word_spacing", type: "float | None", default: "None", desc: [Espaciado adicional no negativo, en unidades de escena.]),
+    (name: "decorations", type: "Sequence[str]", default: "()", desc: [`underline`, `strike` o `strikethrough`.]),
+    (name: "baseline", type: "float | None", default: "None", desc: [Desplazamiento de la línea base; positivo sube los glifos.]),
+  ),
+  desc: [Estilo tipográfico inmutable y reutilizable. No tiene ancho, alto, relleno ni ajuste de caja: eso es de Layout. `stroke`, `stroke_width` y `opacity` del estilo raíz afectan a todo el texto; en las partes anidadas se resuelven fuente, tamaño, peso, cursiva, color, espaciado, decoraciones y línea base. Valores inválidos lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+display = TextStyle(
+    font="New Computer Modern",
+    math_font="New Computer Modern Math",
+    size=0.42,
+    weight=650,
+    color=GOLD,
+    letter_spacing=0.02,
+    decorations=("underline",),
+)
+>>>scene = Scene(frame=(16, 9))
+heading = scene.text("Resultados", style=display)
+```
+]
 
 #api-entry(
   name: "TextFlow",
-  kind: "value",
+  kind: "class",
   signature: "TextFlow(*, wrap=\"auto\", align=\"left\", line_spacing=1.2, max_lines=None, overflow=\"clip\", direction=\"auto\", hyphenate=False, lang=None)",
   params: (
-    (name: "wrap", type: "\"auto\" | False | float", default: "\"auto\"", desc: [Use the offered width, preserve a line except explicit newlines, or cap typographic width. Numeric widths must be positive and finite.]),
-    (name: "align", type: "left | center | right | justify", default: "\"left\"", desc: [Internal paragraph alignment.]),
-    (name: "line_spacing", type: "float", default: "1.2", desc: [Positive line-height multiplier.]),
-    (name: "max_lines", type: "int | None", default: "None", desc: [Optional limit of at least one line.]),
-    (name: "overflow", type: "visible | clip | ellipsis", default: "\"clip\"", desc: [Behavior beyond `max_lines`.]),
-    (name: "direction", type: "auto | ltr | rtl", default: "\"auto\"", desc: [Text direction passed to the compositor.]),
-    (name: "hyphenate", type: "bool", default: "False", desc: [Enable Typst hyphenation.]),
-    (name: "lang", type: "str | None", default: "None", desc: [Lowercase ISO 639 code (`"es"`, `"en"`, …) choosing hyphenation patterns and language typography. `None` keeps the English default; other values raise `ValueError`. `scene.text(..., lang="es")` sets it directly.]),
+    (name: "wrap", type: "\"auto\" | False | float", default: "\"auto\"", desc: [`"auto"` usa el ancho que ofrece Layout (o el área segura); `False` mantiene una línea salvo saltos explícitos; un número limita el ancho tipográfico.]),
+    (name: "align", type: "str", default: "\"left\"", desc: [`left`, `center`, `right` o `justify`.]),
+    (name: "line_spacing", type: "float", default: "1.2", desc: [Multiplicador positivo de la altura de línea.]),
+    (name: "max_lines / overflow", type: "int | None / str", default: "None / \"clip\"", desc: [Límite de líneas y qué pasa después: `visible`, `clip` o `ellipsis` (hoy se recorta igual que `clip`, sin dibujar la elipsis).]),
+    (name: "direction", type: "str", default: "\"auto\"", desc: [`auto`, `ltr` o `rtl`.]),
+    (name: "hyphenate / lang", type: "bool / str | None", default: "False / None", desc: [Guiones de Typst y código ISO 639 en minúsculas (`"es"`, `"en"`…) que elige los patrones; `None` usa inglés.]),
   ),
-  returns: (type: "TextFlow", desc: [Reusable immutable internal composition options.]),
-  desc: [`wrap="auto"` uses Layout v2's offered width or the free scene's safe-frame offer. Direct `scene.text` flow keywords override this object.],
+  desc: [Opciones inmutables de composición de líneas. Los argumentos directos de `scene.text` sustituyen a este objeto.],
 )[
 ```python
 # show-code: true
@@ -405,11 +313,11 @@ scene.render()
 ```
 ]
 
-When `scene.text` receives neither `flow` nor `text_align`, an explicit anchor
-in `move_to` also chooses the alignment of a text with explicit line breaks: `Anchor.*_LEFT` and
-`TextAnchor.BASELINE_LEFT` align left, `*_RIGHT` align right, and centered
-anchors center. A right-anchored note therefore reads flush right without
-repeating the side:
+Sin `flow` ni `text_align`, el anclaje de `move_to` también alinea un texto con
+saltos de línea explícitos: `Anchor.*_LEFT` y `TextAnchor.BASELINE_LEFT` alinean
+a la izquierda, `*_RIGHT` a la derecha y los anclajes centrados centran. Un
+`flow` o `text_align` explícitos siempre ganan; el texto de una sola línea
+conserva la alineación izquierda.
 
 ```python
 >>>from gaanim import *
@@ -417,45 +325,60 @@ repeating the side:
 note = scene.text("Fuente: ensayo 3\nEscala 1:50").move_to(7.5, -4, Anchor.BOTTOM_RIGHT)
 ```
 
-An explicit `flow` or `text_align` always wins. Text without an anchor, and
-single-line text, keep the default left alignment: centering a single line
-would not move its glyphs, but it would widen its layout box and any gradient
-mapped to it.
+== Posición
 
-`overflow="visible"` leaves the limited block unclipped. `"clip"` clips it.
-`"ellipsis"` is a distinct public/cache value but currently uses the same
-visual clipping as `"clip"`; an ellipsis glyph is not emitted yet.
-
-== Integración con Layout
-
-A free `Text` and that same `Text` inside a row, column, grid, stack, or nested
-layout use the same intrinsic text measurer. `wrap="auto"` makes the leaf
-width-sensitive. Numeric wrapping is further limited by the owner's offered
-constraints.
-
-Metric changes and `become` invalidate measurement and request reflow from the
-owning Layout. A replacing `text.animate.transform_to(target)` transition uses
-the same duration for text and reflow. Transient `indicate`, `pulse`,
-`wiggle`, `wave`, `highlight`, and `focus` do not change measurement.
-
-Layout owns translation. Once managed, a `Text` rejects manual placement such
-as `move_to`, `shift_by`, `next_to`, and positional animations; configure its
-`scene.layout.item(...)` or Layout owner instead. Cross-scene or incompatible-owner
-transition targets raise `LayoutOwnershipError`.
-
-== Consultas y selecciones
+Colocación por línea base para que palabras y ecuaciones se alineen.
 
 #api-entry(
-  name: "TextSelection and TextQuery",
+  name: "Text.move_to",
   kind: "method",
-  signature: "text[name] | text[index_or_slice] | text.graphemes|words|lines|parts[index_or_slice] -> TextSelection",
+  signature: "move_to(x, y, anchor: Anchor | TextAnchor | None = None) | move_to(reference) | move_to(point) -> Text",
   params: (
-    (name: "name", type: "str", default: none, desc: [A top-level part; continue indexing to navigate nested semantic paths. A string that names no part selects every literal occurrence of that text instead (case- and whitespace-insensitive).]),
-    (name: "index", type: "int", default: none, desc: [Supports negative indices.]),
-    (name: "slice", type: "slice", default: none, desc: [Contiguous non-empty range; step must equal 1.]),
+    (name: "x / y", type: "float | fuente reactiva", default: none, desc: [Punto de destino en unidades de escena.]),
+    (name: "anchor", type: "Anchor | TextAnchor | None", default: "None", desc: [Anclaje geométrico, o `TextAnchor.BASELINE_LEFT`, `BASELINE_CENTER` o `BASELINE_RIGHT` sobre la línea base.]),
   ),
-  returns: (type: "TextSelection", desc: [Deferred local selection inside its owning `Text`.]),
-  desc: [Direct numeric indexing selects rendered Unicode graphemes. Query views expose graphemes, Unicode words, explicit lines, and semantic parts. A grapheme, word, or line slice selects the rendered text from its first to its last unit, including punctuation between words, at the position where the slice starts. Strings that are neither a part nor text in the `Text`, and invalid ranges, raise `KeyError`, `IndexError`, `TypeError`, or `ValueError`.],
+  desc: [Una sola línea se coloca por defecto con `TextAnchor.BASELINE_CENTER`: el centro horizontal visual en `x` y la línea base en `y`. Así, textos y ecuaciones con distintas ascendentes, fracciones o tamaños comparten línea base. Un bloque de varias líneas sin anclaje usa su centro visual, y un `TextAnchor` explícito usa la primera línea. Los anclajes geométricos (`Anchor.TOP_LEFT`…) se basan en los límites y no garantizan una línea base común. Un `Drawable` o un `AnchorPoint` centran el texto sobre la referencia sin seguirla. Un texto gestionado por Layout lanza `LayoutOwnershipError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+word = scene.text("Tipografía").move_to(0, 1)
+equation = scene.text.equation("frac(x_1^2, y_2) = 1").move_to(0, -0.5, TextAnchor.BASELINE_CENTER)
+left = scene.text("alineado a la izquierda").move_to(-4, -2, TextAnchor.BASELINE_LEFT)
+corner = scene.text("esquina").move_to(-7, 4, Anchor.TOP_LEFT)
+```
+]
+
+`Text` hereda todos los métodos de #link("/referencia/drawable/")[`Drawable`] y
+conserva su tipo al encadenarlos.
+
+#api-entry(
+  name: "Text.glow / blur / shadow / no_effects",
+  kind: "method",
+  signature: "glow(color, radius=0.16, intensity=1.0) · blur(sigma=0.04) · shadow(color, x=0.08, y=-0.08, blur=0.06) · no_effects() -> Text",
+  desc: [Los efectos de `Drawable`, redefinidos para devolver el `Text` y conservar el anclaje tipográfico de un `move_to` posterior.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+title = scene.text("Gaanim", role="title").glow(BLUE).move_to(0, 1, TextAnchor.BASELINE_CENTER)
+```
+]
+
+== Selecciones
+
+Señalan grafemas, palabras, líneas o partes de un texto para darles estilo o
+animarlas sin separarlas del texto.
+
+#api-entry(
+  name: "TextSelection",
+  kind: "class",
+  signature: "text[name] · text[index] · text[start:end] · selection[name] -> TextSelection",
+  params: (
+    (name: "name", type: "str", default: none, desc: [Una parte de primer nivel; sigue indexando para bajar por partes anidadas. Una cadena que no es parte selecciona cada aparición literal de ese texto, sin distinguir mayúsculas ni espacios.]),
+    (name: "index / slice", type: "int | slice", default: none, desc: [Grafemas renderizados; admite índices negativos y rangos contiguos con paso 1.]),
+  ),
+  desc: [Selección diferida dentro de su `Text`. Un rango de grafemas, palabras o líneas selecciona el texto desde la primera hasta la última unidad, puntuación incluida. Cadenas que no son parte ni texto lanzan `KeyError`; índices fuera de rango, `IndexError`.],
 )[
 ```python
 # show-code: true
@@ -475,79 +398,134 @@ scene.render()
 ```
 ]
 
-`text.words` follows Unicode word boundaries, so punctuation such as `,` or
-`:` is not a word: `"uno dos, tres"` has three words and `words[1:3]` selects
-`dos, tres`. `text["dos, tres"]` selects the same literal text by content.
-
-The current `lines` query follows explicit `\n` boundaries in the structured
-source. It does not expose lines created only by responsive wrapping. `parts`
-is depth-first over the semantic tree. A selection remains attached to one
-`Text`, so it cannot be inserted separately into Layout.
-
-`selection.fill(color)` recompiles a semantic part with its local paint. In
-math, the styled part remains in the same Typst equation as its neighbors, so
-the color change does not add whitespace or move adjacent terms.
-
-Selection animations resolve the authored mathematical source to the glyphs
-that Typst emitted. Literal matching has priority; when it finds nothing,
-Typst's math parser and Codex convert symbol names and modifiers such as
-`theta`, `sum`, or `arrow.r.long`, official shorthands such as `<=`, and prime
-syntax such as `theta''` to the same Unicode used by the rendered equation.
-Unknown identifiers such as `sin` remain unchanged.
-
-=== Superficie de TextSelection
-
-```text
-selection.fill(color) -> TextSelection
-selection.marker(color=None, *, skew=0.05, blend="normal", opacity=0.45, padding=None) -> TextSelection
-selection.animate.fill(color).duration(seconds) -> Anim
-selection.animate.opacity(opacity).duration(seconds) -> Anim
-selection.animate.fill(color).opacity(value) -> Anim
-
-selection.animate.indicate() -> Anim
-selection.animate.pulse() -> Anim
-selection.animate.wiggle() -> Anim
-selection.animate.wave() -> Anim
-selection.animate.highlight() -> Anim
-selection.animate.focus() -> Anim
-selection.animate.cancel() -> Anim
-selection.animate.reveal(style="fade") -> Anim
-selection.animate.brace(label="", *, above=False) -> Anim
-selection.animate.annotate(label, offset=(0, 0.6)) -> Anim
-selection.animate.marker(color=None, *, skew=0.05, blend="normal", opacity=0.45, padding=None) -> Anim
-
-selection.animate.morph_to(target_selection).duration(seconds) -> Anim
-selection.animate.copy_to(target_selection).duration(seconds) -> Anim
+#api-entry(
+  name: "Text.graphemes / words / lines / parts",
+  kind: "property",
+  signature: "graphemes · words · lines · parts -> TextQuery",
+  desc: [Vistas indexables (`TextQuery`) sobre las unidades del texto. `words` sigue los límites de palabra de Unicode, así que la puntuación no es una palabra: `"uno dos, tres"` tiene tres y `words[1:3]` selecciona `dos, tres`. `lines` sigue los saltos `\n` explícitos, no las líneas creadas por el ajuste. `parts` recorre el árbol semántico en profundidad. `len(query)` cuenta las unidades y `"mass" in text.parts` comprueba si existe una parte, también con rutas anidadas como `"formula.mass"`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+copy = scene.text("uno dos, tres")
+tail = copy.words[1:3]
+if "mass" in copy.parts:
+    copy["mass"].fill(GOLD)
 ```
+]
 
-The `animate` proxy is deliberately local: it accepts fill
-and opacity, while transform, scale, rotation, material, and stroke targets
-raise `TypeError`. `cancel` draws a diagonal mark and dims the glyphs; the next
-replacing text transition retires both. `reveal` makes only the selected glyphs
-appear with `"fade"`, `"wipe"` (stroke trace, then fill) or `"from_below"` (fade
-with a short rise), so a term can enter an equation that is already visible.
-`brace` draws a brace under the selection, or over it with `above=True`, and
-fades in `label`; `annotate` places `label` at `offset` from the selection
-center with a leader line. The brace, line, and labels are new objects in the
-selection's color and remain on screen.
+#api-entry(
+  name: "TextSelection.fill",
+  kind: "method",
+  desc: [Colorea los glifos seleccionados de forma persistente. En matemáticas, la parte sigue en la misma ecuación Typst: cambiar su color no añade espacios ni mueve los términos vecinos.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+formula = scene.text.equation("E = ", part("mass", "m"), " c^2")
+formula["mass"].fill(GOLD)
+```
+]
 
-`marker` sweeps a highlighter band behind every rendered line the selection
-spans. Each band covers the full glyph
-height of its line plus `padding` (world units; `None` uses 10% of the line
-height), grows from the left edge, and the lines follow one another, sharing
-the duration by band length. `color` defaults to a highlighter yellow whose
-alpha is multiplied by `opacity`; `skew` tilts each band in radians (positive
-rises to the right) and is capped at a quarter of the band thickness so long
-lines stay covered. Bands are drawn behind the glyphs, at the text's
-`z_index`, but above objects authored before the text, such as a card. Per-object
-blend modes do not exist yet, so `blend="multiply"` is accepted and composited
-like `"normal"`; because the band sits behind the glyphs, the text keeps its
-color either way. An unknown `blend`, a non-finite `skew`, `opacity` outside
-`[0, 1]`, or a negative `padding` raises `ValueError`. The static
-`selection.marker(...)` places the finished bands at the current timeline
-cursor. Like the brace, the bands are new objects that stay on screen and do
-not follow later movements of the text.
+#api-entry(
+  name: "TextSelection.marker",
+  kind: "method",
+  desc: [Coloca al instante bandas de rotulador detrás de cada línea seleccionada, con los mismos argumentos que `animate.marker`. Aparecen en el cursor (el inicio de la escena durante la declaración) y no siguen movimientos posteriores del texto.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+quote = scene.text("Lo que no se mide no se puede mejorar")
+quote.words[0:2].marker(opacity=0.35)
+```
+]
 
+#api-entry(
+  name: "TextSelection.animate / TextSelectionAnimation.fill / opacity",
+  kind: "property",
+  desc: [Proxy `TextSelectionAnimation` limitado a los glifos seleccionados. Acepta `fill` y `opacity`, combinables (`animate.fill(RED).opacity(0.6)`); los destinos de transformación, escala, rotación, material o trazo lanzan `TypeError`. Cada método devuelve un `Anim` para `scene.play`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+eq = scene.text("$E = ", part("mass", "m"), " c^2$")
+scene.play([eq.animate.write().duration(0.8), eq["mass"].animate.fill(RED).opacity(0.7).duration(0.8)])
+```
+]
+
+#api-entry(
+  name: "TextSelectionAnimation.indicate / pulse / wiggle / wave / highlight / focus",
+  kind: "method",
+  signature: "indicate() · pulse() · wiggle() · wave() · highlight() · focus() -> Anim",
+  desc: [Énfasis transitorios sobre la selección. No cambian la medición del texto ni provocan reflow.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+eq = scene.text.equation("F = ", part("mass", "m"), " a")
+scene.play([eq["mass"].animate.highlight().duration(0.8)])
+scene.play([eq["mass"].animate.wave().duration(0.8)])
+```
+]
+
+#api-entry(
+  name: "TextSelectionAnimation.cancel",
+  kind: "method",
+  desc: [Tacha la selección con una marca diagonal y atenúa sus glifos. La siguiente transición de texto que reemplace el contenido retira ambos.],
+  none,
+)
+
+#api-entry(
+  name: "TextSelectionAnimation.reveal",
+  kind: "method",
+  desc: [Hace aparecer solo los glifos seleccionados con `"fade"`, `"wipe"` (traza y luego rellena) o `"from_below"` (fundido con una subida corta), para que un término entre en una ecuación ya visible. Un estilo desconocido lanza `ValueError`. Para revelar un texto completo por líneas o palabras, usa `Anim.reveal` (ver #link("/referencia/animations/")[Animaciones]).],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+eq = scene.text.equation("a^2 + b^2 = ", part("rhs", "c^2"))
+scene.play([eq["rhs"].animate.reveal("from_below").duration(0.6)])
+```
+]
+
+#api-entry(
+  name: "TextSelectionAnimation.brace",
+  kind: "method",
+  desc: [Dibuja una llave bajo la selección (sobre ella con `above=True`) y hace aparecer `label`. La llave y la etiqueta son objetos nuevos, del color de los glifos, que permanecen en pantalla.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+eq = scene.text.equation("E = ", part("mass", "m"), " c^2")
+scene.play([eq["mass"].animate.brace("masa")])
+```
+]
+
+#api-entry(
+  name: "TextSelectionAnimation.annotate",
+  kind: "method",
+  desc: [Coloca `label` a `offset` del centro de la selección con una línea guía. La línea y la etiqueta permanecen; un desplazamiento no finito lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+eq = scene.text.equation("E = m ", part("c", "c"), "^2")
+scene.play([eq["c"].animate.annotate("velocidad de la luz", offset=(0, 0.8))])
+```
+]
+
+#api-entry(
+  name: "TextSelectionAnimation.marker",
+  kind: "method",
+  params: (
+    (name: "color", type: "Color | None", default: "None", desc: [Color del rotulador; por defecto un amarillo cuyo alfa se multiplica por `opacity`.]),
+    (name: "skew", type: "float", default: "0.05", desc: [Inclinación de cada banda en radianes (positivo sube hacia la derecha), limitada para cubrir líneas largas.]),
+    (name: "blend", type: "str", default: "\"normal\"", desc: [`"normal"` o `"multiply"`; hoy ambos se componen igual porque la banda va detrás del texto.]),
+    (name: "opacity", type: "float", default: "0.45", desc: [De 0 a 1.]),
+    (name: "padding", type: "float | None", default: "None", desc: [Margen en unidades del mundo; `None` usa el 10 % de la altura de línea.]),
+  ),
+  desc: [Pasa un rotulador detrás de cada línea que abarca la selección. Cada banda cubre la altura de los glifos de su línea más `padding` y crece desde la izquierda; las líneas se suceden y se reparten la duración según su longitud. Las bandas quedan detrás de los glifos pero delante de lo creado antes del texto, y permanecen. Un `blend` desconocido, un `skew` no finito, una opacidad fuera de `[0, 1]` o un `padding` negativo lanzan `ValueError`.],
+)[
 ```python
 # show-code: true
 from gaanim import Scene
@@ -557,108 +535,48 @@ scene.play([quote.words[4:9].animate.marker(skew=0.04).duration(1.2)])
 # output: text_marker.webp
 scene.render()
 ```
-Every animation descriptor above can be placed directly in `scene.play([...])`.
+]
 
-== Animaciones de texto completo
-
-=== Entrada y salida
-
-```text
-text.animate.write(*, by="grapheme", order="forward", stagger=0) -> Anim
-text.animate.fade_in() -> Anim
-
-text.animate.unwrite() -> Anim
-text.animate.fade_out() -> Anim
-```
-
-`by` accepts `grapheme`, `word`, `line`, or `part`; `order` accepts `forward`,
-`reverse`, `center`, or `random`; `stagger` must be finite and non-negative.
-The glyphs of one word, line, or part start together, with the segmentation of
-`text.words`, `text.lines` (explicit `\n` lines), and `text.parts`; a glyph
-belongs to its innermost part. Punctuation and text outside every group join the
-neighboring group. Groups start in `order`: `center` starts the middle group
-first and then those equally far from it, and `random` is a fixed pseudo-random
-permutation, so previews, seeks, and exports agree. `stagger` is the lag ratio
-between consecutive groups; `None` adapts it to the number of groups.
-Timing is configured uniformly after choosing the effect, so
-`text.animate.write().duration(0.8)` and
-`text.animate.write(by="word").duration(0.8)` are the intended forms.
-
-=== Revelados con máscara, blur-in y tracking
-
-```text
-text.animate.reveal(style="slide_up", *, by="line", mask=True, stagger=0.06) -> Anim
-text.animate.conceal(style="slide_up", *, by="line", mask=True, stagger=0.06) -> Anim
-text.animate.blur_in(sigma=0.3, *, by="grapheme", stagger=0.02) -> Anim
-text.animate.tracking(value) -> Anim
-text.tracking(value) -> Text
-```
-
-`reveal` hace entrar el texto unidad por unidad, con `stagger` segundos entre
-unidades. `by` acepta `grapheme`, `word`, `line` (líneas explícitas `\n`) o
-`part`, con la segmentación de `text.graphemes`/`words`/`lines`/`parts`. Con
-`style="slide_up"` (predeterminado) cada unidad sube una altura de fila desde
-detrás de una máscara vectorial recortada a su fila, así que también funciona en
-el export SVG; `"slide_down"` cae desde arriba. Con `mask=False` los
-deslizamientos recorren menos distancia y aparecen con un fundido. `"fade"`,
-`"scale"` y `"blur"` ignoran `mask`. La duración cubre toda la cascada: si el
-`stagger` no cabe, se comprime. `easing` suaviza cada unidad (ease-out cúbico
-por defecto). Los glifos permanecen ocultos hasta que empieza el revelado, como
-con `fade_in`. `conceal` es la salida correspondiente: desde el reposo, las
-unidades salen en orden de lectura, la primera primero, con `stagger` segundos
-entre ellas, y quedan ocultas. Los deslizamientos conservan la dirección del
-revelado: con `"slide_up"` cada unidad sale hacia arriba por el borde de su
-máscara y con `"slide_down"` hacia abajo; `"fade"`, `"scale"` y `"blur"`
-vuelven a su estado oculto. Las unidades aceleran al salir (ease-in cúbico por
-defecto).
-
-`blur_in` hace entrar cada unidad desde un desenfoque gaussiano transparente de
-`sigma` unidades de escena, el mismo efecto que `blur`. `tracking` añade `value`
-unidades de escena entre glifos vecinos sin volver a componer el párrafo: cada
-fila crece desde su borde izquierdo, su centro o su borde derecho según la
-alineación del texto, y `0` restaura el espaciado original. `text.tracking(v)`
-fija el valor al instante. `scene.play` rechaza dos animaciones simultáneas que
-escriben el mismo canal de un glifo (por ejemplo `tracking` con un `reveal` que
-desliza), así que combina `tracking` con animaciones que no mueven glifos, como
-`blur_in`.
-
-En una selección (`text["x"].animate.reveal("from_below")`) `reveal` conserva
-su forma local con `"fade"`, `"wipe"` o `"from_below"`; ahí `by`, `mask` y
-`stagger` lanzan `TypeError`. Sobre un `Drawable` que no es `Text` estas
-animaciones lanzan `TypeError`, y un estilo, una unidad o un valor negativo
-lanzan `ValueError`.
-
+#api-entry(
+  name: "TextSelectionAnimation.morph_to / copy_to",
+  kind: "method",
+  signature: "morph_to(target: TextSelection) · copy_to(target: TextSelection) -> Anim",
+  desc: [Transiciones locales entre partes: `morph_to` sustituye la selección por el destino y `copy_to` conserva el origen mientras una copia viaja hasta el destino.],
+)[
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
->>>title = scene.text("Tipografía cinética", role="title").move_to(0, 1.5)
->>>quote = scene.text("Lo que no se mide no se puede mejorar").move_to(0, 0)
->>>headline = scene.text("Titular\nen dos líneas", role="heading").move_to(0, -2)
-title.animate.reveal(by="line", style="slide_up", mask=True, stagger=0.06)
-quote.animate.reveal(by="word", style="blur", stagger=0.04)
-headline.animate.conceal(by="line", style="slide_up")
-
-title.tracking(0.4)
-scene.play([
-    title.animate.blur_in(sigma=0.3, by="grapheme", stagger=0.02).duration(1.2),
-    title.animate.tracking(0.0).duration(1.2),
-])
+energy = scene.text("$E = ", part("mass", "m"), " c^2$").move_to(0, 1)
+momentum = scene.text("$p = ", part("mass", "m"), " v$").move_to(0, -1)
+scene.play([energy["mass"].animate.copy_to(momentum["mass"]).duration(0.8)])
 ```
+]
 
-=== Animador de rango
+Las animaciones de selección resuelven el código matemático escrito a los
+glifos que emitió Typst. Primero se busca el fragmento literal; si no aparece,
+el analizador matemático de Typst convierte nombres de símbolo (`theta`, `sum`,
+`arrow.r.long`), atajos (`<=`) y primas (`theta''`) al mismo Unicode que la
+ecuación renderizada.
+
+== Animación de texto completo
+
+La escritura por grupos, los revelados con máscara, el desenfoque de entrada, el
+tracking, la máquina de escribir y el efecto de decodificación están en
+#link("/referencia/animations/")[Animaciones] (`Anim.write`, `Anim.reveal`,
+`Anim.conceal`, `Anim.blur_in`, `Anim.tracking`, `Anim.typewriter`,
+`Anim.scramble`). Aquí están el animador de rango, que los generaliza, y el
+tracking inmediato.
 
 #api-entry(
   name: "Text.animator",
   kind: "method",
-  signature: "animator(by=\"grapheme\", shape=\"smooth\", order=\"forward\", seed=0) -> TextAnimator",
   params: (
     (name: "by", type: "str", default: "\"grapheme\"", desc: [Unidad: `grapheme`, `word`, `line` (explícita) o `part`. La puntuación se une a su vecina.]),
-    (name: "shape", type: "str", default: "\"smooth\"", desc: [Perfil del selector. `square`, `ramp`, `smooth`, `ease_in` y `ease_out` llevan cada unidad del estado "fuera" al reposo (revelado); `triangle` y `round` suben al estado "fuera" y vuelven (ola).]),
+    (name: "shape", type: "str", default: "\"smooth\"", desc: [Perfil del selector. `square`, `ramp`, `smooth`, `ease_in` y `ease_out` llevan cada unidad del estado «fuera» al reposo (revelado); `triangle` y `round` suben al estado «fuera» y vuelven (ola).]),
     (name: "order", type: "str", default: "\"forward\"", desc: [Qué unidad alcanza primero el rango: `forward`, `reverse`, `center` o `random`.]),
     (name: "seed", type: "int", default: "0", desc: [Fija la permutación de `order="random"`.]),
   ),
-  returns: (type: "TextAnimator", desc: [Selector de rango reutilizable sobre las unidades del texto.]),
-  desc: [Motor por glifo al estilo de los Text Animators de After Effects. `animator.set(offset=None, opacity=None, scale=None, rotation=None, blur=None, tracking=None, color=None)` define el estado "fuera" (influencia 1) y devuelve el animador: `offset` en unidades de escena, `opacity` absoluta, `scale` y `rotation` (radianes, menos de media vuelta) alrededor del centro de cada unidad, `blur` como sigma gaussiana, `tracking` entre glifos y `color` como relleno sólido. `animator.animate` es un proxy `TextAnimatorAnimation` de solo lectura, y `animator.animate.sweep(start=0.0, end=1.0, *, stagger=None)` devuelve un `Anim` que mueve el rango de `start` a `end`: `0` está antes de la primera unidad y `1` después de la última, y `sweep(1, 0)` lo recorre hacia atrás. `stagger` es el retraso en segundos entre unidades (`None` lo adapta). `easing` suaviza la transición de cada unidad. Rust evalúa la influencia de cada unidad a partir de su índice normalizado y la forma del selector, así que un seek a `t` coincide con la reproducción continua y no se invoca Python por fotograma. Nombres inválidos lanzan `ValueError`; un `Drawable` que no es `Text` lanza `TypeError`.],
+  desc: [Selector de rango por glifo al estilo de los _Text Animators_ de After Effects. Rust evalúa la influencia de cada unidad a partir de su índice y la forma del selector, así que un seek coincide con la reproducción y no se llama a Python por fotograma. `reveal`, `conceal` y `blur_in` son preajustes de este animador. Nombres inválidos lanzan `ValueError`; sobre un objeto que no es `Text`, `TypeError`.],
 )[
 ```python
 from gaanim import Scene, parallel
@@ -671,36 +589,52 @@ scene.play([wave.animate.sweep().duration(1.2)])  # recorre el rango 0 → 1
 
 bob = title.animator(by="word", shape="round").set(offset=(0, 0.3))
 scene.play(parallel(bob.animate.sweep().duration(1.0)))  # una ola que pasa
+scene.render()
 ```
 ]
 
-`reveal`, `conceal` y `blur_in` son presets de este animador, y
-`write(by=..., order=...)` usa la misma segmentación y los mismos órdenes.
-
-=== Énfasis y anotación
-
-```text
-text.animate.indicate() -> Anim
-text.animate.wiggle() -> Anim
-```
-
-These operate on the complete `Text`; the typed selection proxy adds `pulse`,
-`wave`, `highlight`, `focus`, `cancel`, `reveal`, `brace`, `annotate`, and
-`marker` for local subsets.
-
-== Transiciones estructurales
+#api-entry(
+  name: "TextAnimator.set / animate",
+  kind: "method",
+  params: (
+    (name: "offset", type: "(float, float) | None", default: "None", desc: [Desplazamiento en unidades de escena.]),
+    (name: "opacity", type: "float | None", default: "None", desc: [Opacidad absoluta de 0 a 1.]),
+    (name: "scale / rotation", type: "float | None", default: "None", desc: [Alrededor del centro de cada unidad; la rotación en radianes, menos de media vuelta.]),
+    (name: "blur / tracking", type: "float | None", default: "None", desc: [Sigma gaussiana y espacio extra entre glifos, en unidades de escena.]),
+    (name: "color", type: "Color | None", default: "None", desc: [Relleno sólido.])),
+  desc: [Define el estado «fuera» (influencia 1) y devuelve el animador. Los valores omitidos conservan lo definido antes; los canales nunca definidos quedan en reposo. Cada barrido captura el estado al llamar a `sweep()`. Valores inválidos lanzan `ValueError`.],
+  none,
+)
 
 #api-entry(
-  name: "Text.animate.transform_to",
+  name: "TextAnimatorAnimation.sweep",
   kind: "method",
-  signature: "text.animate.transform_to(target).duration(seconds) -> Anim",
-  params: (
-    (name: "target", type: "Text", default: none, desc: [Destination text in the same scene and a compatible Layout ownership context.]),
-    (name: "duration", type: "float", default: "1.0", desc: [Positive finite seconds, shared with Layout reflow.]),
-  ),
-  returns: (type: "Anim", desc: [Deferred structural transition accepted by `scene.play()`.]),
-  desc: [The pure proxy does not change either text until `scene.play` commits it. Ownership violations raise `LayoutOwnershipError`.],
+  desc: [Accesible como `animator.animate.sweep(...)`. Devuelve un `Anim` que mueve el rango de `start` a `end`: `0` está antes de la primera unidad y `1` después de la última, así que `sweep(1, 0)` lo recorre hacia atrás. `stagger` es el retraso en segundos entre unidades (`None` lo adapta) y `easing` suaviza cada unidad. Funciona en `scene.play`, `parallel`, `sequence` y `stagger`; los barridos de entrada mantienen su primer fotograma hasta empezar.],
+  none,
+)
+
+#api-entry(
+  name: "Text.tracking",
+  kind: "method",
+  desc: [Fija al instante `value` unidades de escena extra entre glifos vecinos, sin recomponer el párrafo: cada fila crece desde su borde izquierdo, su centro o su borde derecho según la alineación. `0` restaura el espaciado. Anímalo con `animate.tracking(value)`.],
 )[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+title = scene.text("Tipografía", role="title").tracking(0.4)
+scene.play([title.animate.tracking(0.0).duration(1.2)])
+```
+]
+
+=== Transiciones estructurales
+
+`text.animate.transform_to(target)` (ver `Anim.transform_to` en
+#link("/referencia/animations/")[Animaciones]) empareja las partes semánticas de
+dos textos: los términos compartidos viajan a su nuevo sitio y el resto aparece
+o desaparece. La transición usa la misma duración para el texto y para el reflow
+de su Layout; un destino de otra escena o con otro propietario lanza
+`LayoutOwnershipError`.
+
 ```python
 # show-code: true
 from gaanim import GOLD, Scene, part
@@ -713,119 +647,115 @@ scene.play([before.animate.transform_to(after).duration(0.8)])
 # output: text_transition.webp
 scene.render()
 ```
-]
 
-For local transitions, `selection.animate.morph_to(target)` replaces one
-selection and `selection.animate.copy_to(target)` preserves the source while
-moving a copy to the target.
+== Cambiar el contenido
 
-== Sustitución de contenido con become
-
-```text
-text.become(
-    *content,
-    role=None,
-    style=None,
-    flow=None,
-    duration=1.0,
-) -> None
-```
-
-`become` preserves the Python `Text` identity, increments its structured
-version, replaces content, and requests owner reflow. It is an immediate
-authoring call, not an `Anim`, so do not put it inside `scene.play`. Invalid
-content, delimiters, metrics, flow, or duration raise `TypeError` or
-`ValueError`.
-
-```text
-copy.become("Resultado: ", part("value", "$42$", color=GOLD), duration=0.8)
-```
-
-== TextAnchor y posicionamiento
+Sustituye el contenido de un texto sin crear otro objeto.
 
 #api-entry(
-  name: "Text.move_to",
+  name: "Text.become",
   kind: "method",
-  signature: ".move_to(x, y, anchor: Anchor | TextAnchor = None) -> Text",
+  desc: [Reemplaza el contenido conservando la identidad del `Text`, incrementa su versión estructural y pide reflow a su Layout. Es una llamada inmediata de autoría, no un `Anim`: no la pongas en `scene.play`. `markup=None` conserva el modo de marcado actual. Contenido o delimitadores inválidos lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+copy = scene.text("Calculando…")
+scene.wait(0.5)
+copy.become("Resultado: ", part("value", "$42$", color=GOLD))
+```
+]
+
+== Documentos Typst, código y medición
+
+Para lo que no cabe en un `Text`: documentos Typst completos, bloques de código y
+medidas antes de crear nada.
+
+#api-entry(
+  name: "Typography.typst",
+  kind: "factory",
   params: (
-    (name: "x / y", type: "float", default: none, desc: [Target point in scene units.]),
-    (name: "anchor", type: "Anchor | TextAnchor | None", default: "None", desc: [Geometric bounds anchor or baseline-left/center/right text anchor; positional or keyword.]),
+    (name: "source", type: "str | os.PathLike", default: none, desc: [Marcado Typst en línea o la ruta de un archivo `.typ` (relativa a la carpeta de assets).]),
+    (name: "width", type: "str | float | int | None", default: "None", desc: [Ancho de página Typst antes de escalar: `"16cm"`, `"800pt"` o un número en puntos.]),
   ),
-  returns: (type: "Text", desc: [The same specialized fluent handle.]),
-  desc: [A single line defaults to `TextAnchor.BASELINE_CENTER`; a multiline block without an explicit anchor keeps visual-center placement. Explicit `TextAnchor` values use the first visual line. A single `Drawable` or `AnchorPoint` argument aligns the visual center to that reference without creating a reactive follow. Layout-owned text raises `LayoutOwnershipError`, and non-anchor values raise `TypeError`.],
+  desc: [Compila un documento Typst arbitrario (tablas con celdas combinadas, estructuras matemáticas propias, paquetes `@preview/…`) como un `Drawable`. Conserva sus proporciones y se escala para que su texto de 11 pt mida lo mismo que el rol `body`. No ofrece las selecciones de `Text`. Una fuente vacía lanza `ValueError` y un archivo ilegible, `RuntimeError`.],
 )[
 ```python
 # show-code: true
-from gaanim import Anchor, Scene, TextAnchor
-scene = Scene(frame=(16, 9))
-scene.text("baseline left").move_to(-2.75, 0.75, anchor=TextAnchor.BASELINE_LEFT)
-scene.text.equation("frac(x_1^2, y_2) = 1").move_to(0, 0)
-scene.text("geometric corner").move_to(-2.75, -1.25, anchor=Anchor.TOP_LEFT)
+from gaanim import Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+tbl = scene.text.typst('#table(columns: 2, [*Método*], [*Error*], [Base], [0.18], [GPU], [0.04])')
+scene.play([tbl.animate.fade_in().duration(0.6)])
+# output: preview.webp
+scene.render()
+```
+
+También carga archivos:
+
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+from pathlib import Path
+title = scene.text.typst(Path("assets/title.typ"))
 ```
 ]
 
-== Capacidades heredadas de Drawable
-
-`Text` remains a `Drawable`. It preserves its specialized subtype through the
-common fluent methods:
-
-```text
-text.fill(color).stroke(color, width).opacity(alpha).z_index(layer)
-text.move_to(x, y).move_to_3d(x, y, z).next_to(other, direction)
-text.align_to(other, anchor).to_edge(direction).to_corner(anchor)
-text.scale_to(factor).rotate_to(radians).with_pivot(x, y)
-text.billboard().hud()
-```
-
-For single-line text, `text.move_to(x, y)` places the visual horizontal center on
-`x` and the typographic baseline on `y`. `scene.text.equation(...)` returns the same
-`Text` type and follows the same rule, so words and equations with different
-ascenders, descenders, fractions, scripts, or authored sizes can share a
-stable baseline:
-
+#api-entry(
+  name: "Typography.code",
+  kind: "factory",
+  desc: [Bloque de código monoespaciado dentro de un marco de `width` × `height`, con `font_size`, `background`, `color` y `accent` opcionales. `language` queda registrado para el resaltado futuro: hoy no se colorean tokens.],
+)[
 ```python
-from gaanim import Scene, TextAnchor
-
-scene = Scene(frame=(16, 9))
-word = scene.text("Typography").move_to(0, 1)
-equation = scene.text.equation("frac(x_1^2, y_2) = 1").move_to(
-    0, -0.5, TextAnchor.BASELINE_CENTER
-)
-left = scene.text("left aligned").move_to(
-    -4, -2, TextAnchor.BASELINE_LEFT
-)
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+snippet = scene.text.code("result = mass * acceleration", language="python", width=6, height=1.2)
+scene.play([snippet.animate.fade_in().duration(0.5)])
 ```
+]
 
-`TextAnchor.BASELINE_LEFT`, `BASELINE_CENTER`, and `BASELINE_RIGHT` select the
-horizontal point on the baseline. On multiline text, an explicit `TextAnchor`
-uses the first visual line; omitting the anchor keeps the block's visual center
-behavior. Geometric anchors remain bounds-based: two texts placed with
-`Anchor.TOP_LEFT` share their top-left corner, but do not necessarily share a
-baseline. `Drawable.at` accepts only geometric `Anchor` values; passing a
-`TextAnchor` to a non-text drawable raises `TypeError`.
+#api-entry(
+  name: "Typography.measure",
+  kind: "method",
+  params: (
+    (name: "content", type: "str", default: none, desc: [Texto no vacío.]),
+    (name: "role", type: "str | None", default: "None", desc: [Rol cuyos valores del tema resuelven tamaño, familia y color (`body` si se omite).]),
+    (name: "size / font / color / weight", type: "—", default: "None", desc: [Ajustes explícitos, resueltos igual que en `scene.text`.]),
+    (name: "wrap", type: "float | None", default: "None", desc: [Ancho fijo de composición; `None` mide un bloque sin ajuste.]),
+    (name: "style / flow / line_spacing / markup", type: "—", default: "None", desc: [Como en `scene.text`. El `wrap="auto"` de un `flow` mide sin ajuste porque no hay ancho ofrecido.]),
+  ),
+  desc: [Devuelve `(ancho, alto)` en unidades de escena sin crear el texto. Usa el mismo proceso Typst que `scene.text` y comparte su caché. Úsalo para dimensionar cajas al contenido en lugar de adivinar.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+width, height = scene.text.measure("PGA = 0.35 g", role="label")
+_, paragraph_height = scene.text.measure("Primera línea\nSegunda línea", line_spacing=1.6)
+box = scene.geometry.rounded_rect(width + 0.56, height + 0.32, 0.14).move_to(0, -4.14)
+```
+]
 
-Free text can also use generic Drawable animations such as move, rotate,
-scale, fade transforms, or replacement transforms. Prefer the structural text
-transitions when semantic matching matters. Layout-managed text retains visual
-effects and non-positional transforms, but its owner controls translation.
+== Integración con Layout
+
+Un `Text` libre y el mismo `Text` dentro de una fila, columna, grid o stack usan
+el mismo medidor. `wrap="auto"` lo hace sensible al ancho ofrecido; un ajuste
+numérico queda además limitado por ese ancho. Los cambios de métrica, `become` y
+`animate.transform_to` invalidan la medición y piden reflow; los énfasis
+transitorios (`indicate`, `pulse`, `wiggle`, `wave`, `highlight`, `focus`) no.
+
+Layout es dueño de la traslación: un `Text` gestionado rechaza `move_to`,
+`shift_by`, `next_to` y las animaciones de posición con `LayoutOwnershipError`.
+Configura su `scene.layout.item(...)` o su contenedor. Los efectos visuales y
+las transformaciones no posicionales siguen disponibles. Consulta
+#link("/referencia/layout/")[Layout].
 
 == Errores y casos límite
 
-- `TypeError`: content is not `str` or `TextPart`; query keys or explicit
-  match mappings have the wrong type.
-- `ValueError`: empty content, unbalanced math, duplicate sibling parts,
-  invalid role/style/flow, invalid grouping/order/stagger, invalid direction,
-  or non-positive transition duration.
-- `KeyError`: a string that is neither a semantic part nor text in the
-  `Text`, no shared automatic expansion anchor.
-- `IndexError`: query index out of range or empty slice.
-- `ValueError`: selection slices with a step other than 1.
-- `LayoutOwnershipError`: manual positioning of managed text or a transition
-  across scenes/incompatible owners.
-
-== Véase también
-
-- #link("/referencia/layout/", "Layout v2 — outer boxes, ownership, constraints, and reflow")
-- #link("/referencia/animations/", "Animations — generic Drawable animations and timing")
-- #link("/referencia/themes/", "Themes — role colors and typography context")
-- #link("/referencia/objetos/", "Mobjects — raw Typst documents and other drawables")
+- `TypeError`: contenido que no es `str` ni `TextPart`, o claves de consulta del
+  tipo equivocado.
+- `ValueError`: contenido vacío, matemáticas desequilibradas, partes hermanas
+  repetidas, rol, estilo o flujo inválidos, agrupación u orden inválidos, rangos
+  con paso distinto de 1.
+- `KeyError`: una cadena que no es parte semántica ni texto del `Text`.
+- `IndexError`: índice fuera de rango o rango vacío.
+- `LayoutOwnershipError`: posicionar a mano un texto gestionado, o una
+  transición entre escenas o propietarios incompatibles.

@@ -46,7 +46,9 @@
   if kind == "factory" { rgb("#6366f1") }
   else if kind == "method" { rgb("#7c3aed") }
   else if kind == "class" { rgb("#0891b2") }
-  else { rgb("#88c0d0") }
+  else if kind == "property" { rgb("#059669") }
+  else if kind == "constant" { rgb("#db2777") }
+  else { rgb("#d97706") }
 }
 
 // Plain text of rich content, for the search index.
@@ -90,11 +92,19 @@
     signature
   }
 
-  let kind-label = upper(if kind == "factory" { "fábrica" }
-    else if kind == "method" { "método" }
-    else if kind == "class" { "clase" }
-    else if kind == "function" { "función" }
-    else { kind })
+  let kind-labels = (
+    factory: "fábrica",
+    method: "método",
+    class: "clase",
+    function: "función",
+    property: "propiedad",
+    constant: "constante",
+  )
+  assert(
+    kind in kind-labels,
+    message: "api-entry \"" + name + "\": kind must be one of " + kind-labels.keys().join(", "),
+  )
+  let kind-label = upper(kind-labels.at(kind))
 
   if target() not in ("bundle", "html") {
     block(

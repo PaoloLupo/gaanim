@@ -1,3 +1,6 @@
+# Escenas completas de /ejemplos/basicos/. Cada celda `# %% nombre` es un
+# script independiente: cópiala a un .py y ábrela con `gaanim archivo.py`.
+
 # %% basic_circle
 from gaanim import Easing, BLACK, BLUE, GOLD, WHITE, Scene
 
@@ -23,7 +26,7 @@ caption = scene.text("La masa y la energía están relacionadas", role="subtitle
 
 scene.play([title.animate.write().duration(1.0), equation.animate.write().duration(1.5)])
 scene.play([caption.animate.fade_in().duration(0.8)])
-scene.wait(1.0)
+scene.wait(0.5)
 scene.render()
 
 # %% shapes_gallery
@@ -44,5 +47,18 @@ scene.play(stagger(
     arrow.animate.create().duration(0.8),
     each=0.1,
 ))
-scene.wait(1.0)
+scene.wait(0.5)
+scene.render()
+
+# %% groups
+from gaanim import Easing, BLACK, BLUE, GREEN, RED, Scene
+
+scene = Scene(frame=(16, 9), background=BLACK)
+left = scene.geometry.circle(0.5).fill(BLUE).move_to(-1, 0)
+middle = scene.geometry.circle(0.5).fill(RED).move_to(0, 0)
+right = scene.geometry.circle(0.5).fill(GREEN).move_to(1, 0)
+group = scene.geometry.group([left, middle, right])
+
+scene.play([group.animate.grow_from_center().duration(1.0).easing(Easing.spring(stiffness=90.0, damping=12.0))])
+scene.play([group.animate.shift_by(0, 1.5).duration(1.0), group.animate.rotate_by(3.14159).duration(1.0)])
 scene.render()

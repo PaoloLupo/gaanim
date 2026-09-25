@@ -311,6 +311,8 @@ h1:hover .heading-anchor, h2:hover .heading-anchor, h3:hover .heading-anchor, h4
 
 /* Inline and block code */
 code, pre, .typ-raw { font-family: var(--font-code); }
+/* Long identifiers and commands in running text wrap instead of widening the page on phones. */
+:not(pre) > code { overflow-wrap: anywhere; }
 :not(pre) > code {
     font-size: 0.86em;
     padding: 0.12em 0.38em;
@@ -819,6 +821,8 @@ table th, .code-header, .code-cell-anim .anim-preview::before, .api-badge, .kind
 .badge-factory, .kind-factory { --kind-color: var(--kind-factory); }
 .badge-class, .kind-class, .kind-constructor { --kind-color: var(--kind-class); }
 .badge-function, .kind-function { --kind-color: var(--kind-function); }
+.badge-property, .kind-property, .kind-attribute { --kind-color: var(--kind-property); }
+.badge-constant, .kind-constant { --kind-color: var(--kind-constant); }
 .kind-property, .kind-attribute { --kind-color: var(--kind-property); }
 .kind-constant, .kind-type { --kind-color: var(--kind-constant); }
 .api-desc { padding: 14px 16px 2px; color: var(--text-soft); }

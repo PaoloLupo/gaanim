@@ -2,21 +2,62 @@
 
 #show: docs-chapter.with(
   title: "Layout",
-  description: "Composición didáctica de escenas adaptables sin coordenadas manuales",
+  description: "Organiza títulos, columnas y tarjetas sin escribir coordenadas a mano",
   route: "/guias/layout/",
 )
 
-= Qué resuelve Layout
+En esta guía aprenderás a componer páginas didácticas (un título, varias
+tarjetas, un pie) que se colocan solas y se reorganizan cuando añades o
+cambias contenido. No escribirás ni una coordenada.
+
+```python
+# output: preview.webp
+from gaanim import CYAN, GOLD, WHITE, Color, Scene
+
+scene = Scene(frame=(16, 9), background="#0f172a", margin=0.5)
+CARD = Color(30, 41, 59)
+
+def card(title, body, accent):
+    return scene.layout.card(
+        [
+            scene.text(title, role="subtitle").fill(accent),
+            scene.text(body, role="body", wrap=False).fill(WHITE),
+        ],
+        padding=0.4, gap=0.15, background=CARD,
+    )
+
+title = scene.text("Tres ideas", role="title").fill(WHITE)
+cards = scene.layout.row([
+    card("Medir", "Cada objeto\nconoce su tamaño", CYAN),
+    card("Repartir", "El layout\nreparte el espacio", GOLD),
+], gap=0.5)
+footer = scene.text("Sin coordenadas manuales", role="caption").fill(WHITE)
+page = scene.layout.column(
+    [title, scene.layout.item(cards, grow=1), footer],
+    within="safe", width="fill", height="fill", align="center", justify="between",
+)
+
+scene.play([page.animate.fade_in().duration(0.6)])
+scene.wait(0.4)
+extra = card("Adaptar", "Una tarjeta más\nreorganiza el resto", CYAN)
+cards.add(extra)
+scene.play([extra.animate.fade_in().duration(0.5)])
+scene.wait(0.6)
+scene.render()
+```
+
+= Cuándo usar Layout
 
 Layout organiza contenido editorial: títulos, columnas, tarjetas, leyendas y
-paneles. Usa un árbol de filas, columnas, grids y stacks. Cada cambio ejecuta
-el ciclo determinista `measure → solve → place`; el resultado se materializa
-como una operación de la línea de tiempo.
+paneles. Describes un árbol de filas, columnas, rejillas y capas; Gaanim mide
+cada objeto, reparte el espacio y coloca los hijos. El resultado se registra
+en la línea de tiempo como cualquier otro cambio.
 
-Para movimiento geométrico deliberado sigue usando transformaciones y
-coordenadas. Para relaciones espaciales entre bloques usa Layout.
+Para un movimiento geométrico deliberado (un punto que recorre una órbita, un
+objeto que se desplaza) sigue usando transformaciones y coordenadas. Para las
+relaciones de espacio entre bloques, usa Layout.
 
-== Primera columna
+= Una página en columna
 
 ```python
 >>>from gaanim import *
@@ -36,19 +77,33 @@ page = scene.layout.column(
 )
 ```
 
-El área `safe` respeta el margen de la escena. `hug` prefiere el tamaño
-intrínseco, `fill` consume el espacio ofrecido y un número fija la dimensión.
+- `within="safe"` usa el área segura, es decir, el fotograma menos el margen
+  de la escena.
+- `width` y `height` aceptan `"hug"` (el tamaño propio del contenido),
+  `"fill"` (todo el espacio disponible) o un número en unidades de escena.
+- `scene.layout.item(hijo, grow=1)` hace que un hijo crezca para ocupar el
+  espacio que sobra.
+- `align` coloca los hijos en el eje transversal y `justify` los reparte en
+  el eje principal.
 
-== Filas, grids y capas
+= Filas, rejillas y capas
 
-Usa `scene.layout.row` para distribuir elementos horizontalmente, `scene.layout.grid` para
-tracks bidimensionales y `scene.layout.stack` para overlays. Los layouts anidados
-reciben el espacio que ofrece su padre.
+- `scene.layout.row` reparte elementos en horizontal; con `wrap=True` pasan a
+  la línea siguiente cuando no caben.
+- `scene.layout.grid` organiza filas y columnas. `rows` y `columns` aceptan un
+  número o una lista de pistas: un tamaño fijo, `"auto"` o fracciones como
+  `"1fr"`.
+- `scene.layout.stack` superpone sus hijos, por ejemplo un texto sobre una
+  imagen.
+- `scene.layout.card` es una columna, fila o capa con fondo, borde y relleno.
 
-== Posición y constraints
+Los layouts se anidan: cada uno recibe el espacio que le ofrece su padre.
 
-El layout controla la traslación de sus hijos. Usa `offset` para ajustes
-editoriales pequeños y constraints para relaciones entre ramas:
+= Relaciones entre ramas
+
+Dentro de un layout, él controla la posición de sus hijos. Para un ajuste
+editorial pequeño usa `offset=` en `scene.layout.item`. Para relacionar
+objetos de ramas distintas, declara restricciones con `scene.layout.constrain`:
 
 ```python
 # continue
@@ -61,21 +116,27 @@ scene.layout.constrain(
 )
 ```
 
-Las relaciones obligatorias incompatibles fallan antes del render. Las débiles
-pueden consultarse mediante los diagnósticos de layout.
+Si dos restricciones obligatorias son incompatibles, la escena falla antes de
+renderizar. Las restricciones débiles (`.weak()`) se cumplen cuando es posible;
+`scene.layout.check_layout()` y `page.diagnostics()` explican cuáles no se
+cumplieron.
 
-== Responsive 16:9 y 9:16
+= Un mismo árbol para 16:9 y 9:16
 
-Conserva el mismo árbol y cambia solo el viewport. Usa `fill`, crecimiento,
-tracks fr, wrapping y templates para que el contenido se redistribuya. Reserva
-`absolute=True` para overlays y evita `move_to()` dentro del árbol.
+Para producir la misma escena en horizontal y en vertical, conserva el árbol y
+cambia solo el formato, por ejemplo con `scene.canvas.set_preset("vertical")`.
+Usa `"fill"`, `grow`, pistas fraccionarias y `wrap=True` para que el
+contenido se redistribuya solo. Reserva `absolute=True` para elementos
+superpuestos y evita `move_to()` dentro del árbol.
 
-Los cambios de estructura disparan reflow. `Text` también invalida su medida
-al cambiar contenido, fuente, tamaño, spacing o wrapping. Transiciones
-estructurales como `become` y `text.animate.transform_to(target)` propagan el
-reflow al layout padre con la misma duración.
+= Cambios que reorganizan la página
 
-== Referencia
+Añadir, quitar o reemplazar hijos (`add`, `remove`, `replace`) vuelve a
+calcular la disposición en el cursor actual. Un `Text` también se vuelve a
+medir cuando cambian su contenido, fuente, tamaño, espaciado o ajuste de
+línea. Las transiciones de estructura, como `become` o
+`text.animate.transform_to(otro)`, reorganizan el layout padre con la misma
+duración que la animación.
 
-Consulta #link("/referencia/layout/")[la API de Layout] para todas las firmas, reglas
-por elemento, constraints y plantillas disponibles.
+Consulta #link("/referencia/layout/")[la referencia de Layout] para todas las
+firmas, las opciones de cada elemento, las restricciones y las plantillas.

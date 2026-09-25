@@ -293,5 +293,5 @@ presentaciones, en #link("/guias/presentaciones/")[Presentaciones].
   proyecto completo, lección a lección.
 - La #link("/referencia/")[referencia] documenta cada fábrica, setter y
   animación: #link("/referencia/scene/")[Scene],
-  #link("/referencia/objetos/")[objetos] y
+  #link("/referencia/geometria/")[geometría] y
   #link("/referencia/text/")[texto].

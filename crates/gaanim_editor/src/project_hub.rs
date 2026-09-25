@@ -1777,7 +1777,7 @@ fn learn_ui(ui: &mut Ui) {
             Icon::Grid,
             "Ejemplos",
             "Escenas listas para copiar y modificar.",
-            "ejemplos/basicos/",
+            "ejemplos/",
         ),
         (
             Icon::Present,
