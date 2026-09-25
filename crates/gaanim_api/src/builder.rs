@@ -8023,6 +8023,37 @@ mod tests {
     }
 
     #[test]
+    fn glyphs_after_a_line_break_record_their_own_characters() {
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        let mut builder = SceneBuilder::new(&mut commands, &mut timeline, &fonts, &text_config);
+
+        let text = builder.typst(
+            "primera linea\nsegunda con otra frase\ntercera",
+            false,
+            None,
+            None,
+            Some(32.0),
+            None,
+        );
+        let state = builder.states.get(text.id).expect("compiled text");
+        let drawn: String = state
+            .child_spans
+            .iter()
+            .flat_map(|child| child.characters())
+            .collect();
+        assert_eq!(drawn, "primeralineasegundaconotrafrasetercera");
+
+        let phrase = builder.select(text, "otra frase").child_ids;
+        assert_eq!(phrase.len(), 9);
+        assert_eq!(builder.select(text, "tercera").child_ids.len(), 7);
+    }
+
+    #[test]
     fn selections_match_every_character_a_ligature_draws() {
         let world = World::new();
         let mut queue = CommandQueue::default();

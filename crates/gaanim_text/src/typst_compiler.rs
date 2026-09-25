@@ -546,15 +546,12 @@ fn extract_frame_items(
                         let bbox = path.bounding_box();
                         let local_bounds = Bounds3D::new_2d(bbox.x0, bbox.y0, bbox.x1, bbox.y1);
 
-                        // Match glyph to corresponding source char and range
+                        // `glyph.range` indexes this run's text; `glyph.span.1`
+                        // is an offset into the source node, which spans every
+                        // line of a multi-line Text, so it only locates source.
                         let byte_offset = glyph.span.1 as usize;
-                        let c = text
-                            .text
-                            .get(byte_offset..)
-                            .and_then(|s| s.chars().next())
-                            .unwrap_or('?');
-
                         let drawn = text.text.get(glyph.range()).unwrap_or_default();
+                        let c = drawn.chars().next().unwrap_or('?');
                         let ligature = (drawn.chars().nth(1).is_some()).then(|| Arc::from(drawn));
 
                         let span_range = world.range(glyph.span.0).unwrap_or(0..0);
