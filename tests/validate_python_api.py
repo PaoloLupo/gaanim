@@ -1863,6 +1863,7 @@ def validate_text_animator_contract(module) -> list[str]:
         else:
             failures.append(f"a text animator call did not raise {error.__name__}")
     scene.play([title.animate.reveal(by="line"), wave.animate.sweep()])
+    return failures
 
 
 def validate_transition_contract(module: object) -> list[str]:
