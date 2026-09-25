@@ -138,7 +138,7 @@ enum AbsoluteLensChannel {
     FillLevel,
     MediaFrame,
     ConnectorGrow,
-    /// A dynamic lens that initializes its components before its clip.
+    /// A dynamic lens's [`hold_channel`](gaanim_animation::tween::AnimatableLens::hold_channel).
     Held(&'static str),
 }
 
@@ -1219,10 +1219,7 @@ impl Timeline {
                 continue;
             }
             let channel = if let PropertyLensSpec::Dynamic(lens) = &anim.lens {
-                // Snapshots do not record the components these lenses own.
-                lens.0
-                    .holds_before_start()
-                    .then(|| AbsoluteLensChannel::Held(lens.0.type_name()))
+                lens.0.hold_channel().map(AbsoluteLensChannel::Held)
             } else if replay_without_restore {
                 absolute_lens_channel(&anim.lens)
             } else {
@@ -1252,7 +1249,10 @@ impl Timeline {
         }
         for ((target, _), (_, lens, initial_t)) in future_property_initials {
             if let Some(&target_entity) = entity_map.get(&target) {
-                apply_lens_spec(world, target_entity, &lens, initial_t, false);
+                match &lens {
+                    PropertyLensSpec::Dynamic(lens) => lens.0.hold(world, target_entity, initial_t),
+                    _ => apply_lens_spec(world, target_entity, &lens, initial_t, false),
+                }
             }
         }
 

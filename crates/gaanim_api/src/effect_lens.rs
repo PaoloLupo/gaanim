@@ -140,8 +140,9 @@ impl gaanim_animation::AnimatableLens for EffectLens {
         "Effects"
     }
 
-    fn holds_before_start(&self) -> bool {
-        true
+    // Snapshots do not record these components.
+    fn hold_channel(&self) -> Option<&'static str> {
+        Some("Effects")
     }
 }
 

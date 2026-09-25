@@ -1113,7 +1113,9 @@ class Anim:
         on/off cycles per second (``0`` keeps it solid); ``keep_cursor=False``
         removes it when typing ends. Without an explicit ``duration`` the
         animation lasts until the last keystroke (about ``graphemes / cps``)
-        and uses linear timing. Raises ``ValueError`` for ``cps <= 0``,
+        and uses linear timing. Like other entries, the Text stays hidden
+        from the scene start until its typing starts, so staggered rows wait
+        unseen. Raises ``ValueError`` for ``cps <= 0``,
         ``blink < 0`` or ``jitter`` outside ``[0, 1)``, and ``TypeError``
         unless the proxy belongs to a whole Text.
 
@@ -1162,7 +1164,8 @@ class Anim:
         ``"symbols"`` or a literal string such as ``"01"``; its glyphs are
         shaped once with the Text's font. The default duration is
         ``reveal_delay`` plus 0.05 s per grapheme (at least 0.6 s), with
-        linear timing. Raises ``ValueError`` for an empty charset,
+        linear timing. The Text stays hidden until the scramble starts.
+        Raises ``ValueError`` for an empty charset,
         ``speed <= 0`` or ``reveal_delay < 0``.
 
         Example:
@@ -1859,6 +1862,9 @@ class Drawable:
         blur: float = 0.06,
     ) -> Drawable:
         """Apply shadow to this drawable and return the result.
+
+        The shadow is ``color`` blurred by ``blur`` scene units and offset by
+        ``(x, y)``; the color's alpha scales its opacity continuously.
 
         Example:
             result = drawable.shadow(BLUE)

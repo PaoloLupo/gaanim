@@ -470,7 +470,7 @@ scene.render()
     (name: "text", type: "str", default: none, desc: [`retype`: new plain text. The prefix shared with the visible text is kept; the rest is deleted and typed.]),
   ),
   returns: (type: "Anim", desc: [Text motion accepted by #raw("scene.play()"), with linear timing.]),
-  desc: [`typewriter` clears the Text and reveals ⌊t·cps⌋ graphemes (with jitter) in their final layout, so nothing reflows; the cursor follows the pen of the last typed grapheme, across lines. `backspace` removes graphemes from the end and `retype` deletes back to the shared prefix, then types the rest of `text`, laid out with the Text's style from the same pen origin. Without an explicit duration each motion lasts until its last keystroke (about `graphemes / cps`); `.duration(...)` rescales the rhythm. Every glyph is evaluated natively from the clip time, so seeks, snapshots and export match continuous playback. Raises `ValueError` for invalid numbers or an empty `text`, and `TypeError` unless the proxy belongs to a whole Text.],
+  desc: [`typewriter` clears the Text and reveals ⌊t·cps⌋ graphemes (with jitter) in their final layout, so nothing reflows; the cursor follows the pen of the last typed grapheme, across lines. `backspace` removes graphemes from the end and `retype` deletes back to the shared prefix, then types the rest of `text`, laid out with the Text's style from the same pen origin. Without an explicit duration each motion lasts until its last keystroke (about `graphemes / cps`); `.duration(...)` rescales the rhythm. Every glyph is evaluated natively from the clip time, so seeks, snapshots and export match continuous playback. Like other entries, a Text that `typewriter` types stays hidden from the scene start until its typing starts, so rows in a `stagger` wait unseen. Raises `ValueError` for invalid numbers or an empty `text`, and `TypeError` unless the proxy belongs to a whole Text.],
 )[
 ```python
 # show-code: true
@@ -499,7 +499,7 @@ scene.render()
     (name: "text", type: "str", default: none, desc: [`scramble_to`: new plain text to decode into.]),
   ),
   returns: (type: "Anim", desc: [Text motion accepted by #raw("scene.play()"), with linear timing.]),
-  desc: [A decoding reveal: each non-space grapheme shows seeded charset glyphs centered in its final cell, then settles to the real glyph from left to right after `reveal_delay`. The final text's layout is reserved, so the width never jumps; `scramble_to` hides the current glyphs and decodes the new text in its own layout. The default duration is `reveal_delay` plus 0.05 s per grapheme (at least 0.6 s). Frames are exact for any seek.],
+  desc: [A decoding reveal: each non-space grapheme shows seeded charset glyphs centered in its final cell, then settles to the real glyph from left to right after `reveal_delay`. The final text's layout is reserved, so the width never jumps; `scramble_to` hides the current glyphs and decodes the new text in its own layout. The default duration is `reveal_delay` plus 0.05 s per grapheme (at least 0.6 s). The scrambled text stays hidden until the motion starts. Frames are exact for any seek.],
 )[
 ```python
 # show-code: true
@@ -1090,7 +1090,8 @@ scene.play(orbit.animate.trim(offset=1.0).duration(2))           # segmento viaj
 `animate.glow(color, radius, intensity)`, `animate.blur(sigma)` y
 `animate.shadow(color, x, y, blur)` interpolan los efectos estáticos del mismo
 nombre y se combinan con otros destinos de propiedad. Un efecto ausente crece
-desde cero; `glow(None)`, `blur(0)` y `shadow(None)` lo desvanecen.
+desde cero; `glow(None)`, `blur(0)` y `shadow(None)` lo desvanecen. El alfa del
+color de una sombra escala su opacidad de forma continua.
 
 ```python
 card.shadow(BLACK, 0, -0.05, 0.05)
