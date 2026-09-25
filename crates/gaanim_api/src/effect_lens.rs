@@ -139,6 +139,10 @@ impl gaanim_animation::AnimatableLens for EffectLens {
     fn type_name(&self) -> &'static str {
         "Effects"
     }
+
+    fn holds_before_start(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]

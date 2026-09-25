@@ -448,6 +448,34 @@ impl PyTextQuery {
         }
     }
 
+    /// Rendered-text byte ranges of grapheme, word, and line units.
+    fn ranges(&self) -> Option<Vec<std::ops::Range<usize>>> {
+        match self.kind {
+            QueryKind::Grapheme => Some(self.spec.grapheme_ranges()),
+            QueryKind::Word => Some(self.spec.word_ranges()),
+            QueryKind::Line => Some(self.spec.explicit_line_ranges()),
+            QueryKind::Part => None,
+        }
+    }
+
+    /// Select the rendered text from the first to the last unit, including
+    /// punctuation between words, as the occurrence that starts there.
+    fn span_selection(&self, span: std::ops::Range<usize>) -> PyTextSelection {
+        let rendered = self.spec.rendered_text();
+        let fragment = rendered[span.clone()].to_string();
+        let occurrence = gaanim_api::builder::literal_selection_matches(&rendered, &fragment)
+            .iter()
+            .position(|found| found.end > span.start)
+            .unwrap_or(0);
+        PyTextSelection {
+            handle: self.handle.clone(),
+            spec: self.spec.clone(),
+            path: Vec::new(),
+            fragment,
+            occurrence: Some(occurrence),
+        }
+    }
+
     fn selection(&self, index: isize) -> PyResult<PyTextSelection> {
         let values = self.values();
         let normalized = if index < 0 {
@@ -458,6 +486,9 @@ impl PyTextQuery {
         let Some((fragment, occurrence, path)) = values.get(normalized as usize) else {
             return Err(PyIndexError::new_err("text selection index out of range"));
         };
+        if let Some(ranges) = self.ranges() {
+            return Ok(self.span_selection(ranges[normalized as usize].clone()));
+        }
         Ok(PyTextSelection {
             handle: self.handle.clone(),
             spec: self.spec.clone(),
@@ -478,28 +509,20 @@ impl PyTextQuery {
         if indices.slicelength == 0 {
             return Err(PyIndexError::new_err("text selection slice is empty"));
         }
-        let selected = &values[indices.start as usize..indices.stop as usize];
-        let separator = match self.kind {
-            QueryKind::Word => " ",
-            QueryKind::Line => "\n",
-            _ => "",
-        };
-        let fragment = selected
+        let (start, stop) = (indices.start as usize, indices.stop as usize);
+        if let Some(ranges) = self.ranges() {
+            return Ok(self.span_selection(ranges[start].start..ranges[stop - 1].end));
+        }
+        let fragment = values[start..stop]
             .iter()
             .map(|(value, _, _)| value.as_str())
-            .collect::<Vec<_>>()
-            .join(separator);
-        let rendered = self.spec.rendered_text();
-        let occurrence = rendered
-            .match_indices(&fragment)
-            .position(|_| true)
-            .unwrap_or(0);
+            .collect::<String>();
         Ok(PyTextSelection {
             handle: self.handle.clone(),
             spec: self.spec.clone(),
             path: Vec::new(),
             fragment,
-            occurrence: Some(occurrence),
+            occurrence: Some(0),
         })
     }
 
@@ -820,10 +843,28 @@ impl PyText {
         }
     }
 
+    /// Every occurrence of a fragment that is not a part name. Plain text
+    /// must contain it; mathematics may still resolve Typst symbol names.
+    fn literal(&self, fragment: String) -> Option<PyTextSelection> {
+        let found =
+            !gaanim_api::builder::literal_selection_matches(&self.spec.rendered_text(), &fragment)
+                .is_empty();
+        (found || (self.spec.has_math() && !fragment.trim().is_empty())).then(|| PyTextSelection {
+            handle: self.handle.clone(),
+            spec: self.spec.clone(),
+            path: Vec::new(),
+            fragment,
+            occurrence: None,
+        })
+    }
+
     fn named(&self, name: &str) -> PyResult<PyTextSelection> {
         let path = vec![name.to_string()];
         let Some(part) = self.spec.parts().into_iter().find(|part| part.path == path) else {
-            return Err(PyKeyError::new_err(name.to_string()));
+            return Err(PyKeyError::new_err(format!(
+                "{name:?} is neither a part name nor text in this Text; \
+                 use text.words[...] or text.graphemes[...] for positional selections"
+            )));
         };
         Ok(PyTextSelection {
             handle: self.handle.clone(),
@@ -901,6 +942,48 @@ bb",),
 bb",))?;
             unanchored.call_method1("move_to", (1.0, 0.0))?;
             assert_eq!(align(&unanchored)?, (TextAlign::Left, TextAlign::Left));
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn string_and_positional_selections_resolve_rendered_occurrences() {
+        Python::initialize();
+        Python::attach(|py| -> PyResult<()> {
+            let module = PyModule::new(py, "gaanim_core")?;
+            crate::gaanim_core(py, &module)?;
+            let scene = module.getattr("Scene")?.call0()?;
+            let text = scene.call_method1("text", ("La casa, la otra casa, la casa",))?;
+            let selected = |selection: Bound<'_, PyAny>| -> PyResult<(String, Option<usize>)> {
+                let selection = selection.extract::<PyRef<'_, PyTextSelection>>()?;
+                Ok((selection.fragment.clone(), selection.occurrence))
+            };
+            let words = text.getattr("words")?;
+            let slice = |start: isize, stop: isize| PySlice::new(py, start, stop, 1);
+
+            // Punctuation between words stays in the fragment, and the
+            // occurrence is the one the slice starts at.
+            assert_eq!(
+                selected(words.get_item(slice(1, 3))?)?,
+                ("casa, la".into(), Some(0))
+            );
+            assert_eq!(
+                selected(words.get_item(slice(4, 6))?)?,
+                ("casa, la".into(), Some(1))
+            );
+            assert_eq!(
+                selected(words.get_item(slice(5, 7))?)?,
+                ("la casa".into(), Some(1))
+            );
+            // Single words count case-insensitive matches like the renderer.
+            assert_eq!(selected(words.get_item(2)?)?, ("la".into(), Some(1)));
+            assert_eq!(selected(words.get_item(-1)?)?, ("casa".into(), Some(2)));
+
+            let phrase = selected(text.get_item("otra casa")?)?;
+            assert_eq!(phrase, ("otra casa".into(), None));
+            let missing = text.get_item("no aparece").unwrap_err();
+            assert!(missing.is_instance_of::<pyo3::exceptions::PyKeyError>(py));
             Ok(())
         })
         .unwrap();
@@ -1380,6 +1463,7 @@ impl PyText {
         crate::custom::ensure_authoring_allowed()?;
         if let Ok(name) = key.extract::<String>() {
             self.named(&name)
+                .or_else(|error| self.literal(name).ok_or(error))
         } else if let Ok(index) = key.extract::<isize>() {
             PyTextQuery {
                 handle: self.handle.clone(),

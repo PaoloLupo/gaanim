@@ -316,6 +316,44 @@ impl TextSpec {
             .collect()
     }
 
+    /// Byte ranges in [`Self::rendered_text`] of each item of [`Self::graphemes`].
+    pub fn grapheme_ranges(&self) -> Vec<std::ops::Range<usize>> {
+        self.rendered_text()
+            .grapheme_indices(true)
+            .map(|(start, grapheme)| start..start + grapheme.len())
+            .collect()
+    }
+
+    /// Byte ranges in [`Self::rendered_text`] of each item of [`Self::words`].
+    /// Punctuation between words stays outside every range.
+    pub fn word_ranges(&self) -> Vec<std::ops::Range<usize>> {
+        self.rendered_text()
+            .unicode_word_indices()
+            .map(|(start, word)| start..start + word.len())
+            .collect()
+    }
+
+    /// Byte ranges in [`Self::rendered_text`] of each item of [`Self::explicit_lines`].
+    pub fn explicit_line_ranges(&self) -> Vec<std::ops::Range<usize>> {
+        let rendered = self.rendered_text();
+        let mut start = 0;
+        rendered
+            .split('\n')
+            .map(|line| {
+                let range = start..start + line.len();
+                start = range.end + 1;
+                range
+            })
+            .collect()
+    }
+
+    /// Whether any `$...$` segment is typeset as mathematics, whose glyphs
+    /// can differ from the authored source in [`Self::rendered_text`].
+    pub fn has_math(&self) -> bool {
+        parse_inline_math(&self.plain_text())
+            .is_ok_and(|segments| segments.iter().any(|segment| segment.math))
+    }
+
     pub fn parts(&self) -> Vec<TextPartInfo> {
         let mut raw = Vec::new();
         collect_parts(&self.content, &mut Vec::new(), &mut raw);
@@ -732,6 +770,29 @@ pub fn rendered_text_with_markup(text: &str, markup: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unit_ranges_locate_units_in_rendered_text() {
+        let spec = TextSpec::new(
+            vec!["uno dos, tres\ncuatro $x$".into()],
+            None,
+            TextStyle::default(),
+            TextFlow::default(),
+        )
+        .unwrap();
+        let rendered = spec.rendered_text();
+        let slices = |ranges: Vec<std::ops::Range<usize>>| -> Vec<String> {
+            ranges
+                .into_iter()
+                .map(|range| rendered[range].to_string())
+                .collect()
+        };
+        assert_eq!(slices(spec.word_ranges()), spec.words());
+        assert_eq!(spec.words(), ["uno", "dos", "tres", "cuatro", "x"]);
+        assert_eq!(slices(spec.grapheme_ranges()), spec.graphemes());
+        assert_eq!(slices(spec.explicit_line_ranges()), spec.explicit_lines());
+        assert!(spec.has_math());
+    }
 
     #[test]
     fn nested_parts_keep_semantic_paths() {

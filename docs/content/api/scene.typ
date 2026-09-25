@@ -970,7 +970,8 @@ current entry that slides with `focus`.
   in that state.
 - `agenda.focus(key)` and `agenda.advance(steps)` change state immediately;
   `agenda.animate.focus(key)` and `agenda.animate.advance()` return
-  compositions for `scene.play`. Targets accept a key, a 0-based index, a
+  compositions for `scene.play`; their `easing=` keyword eases every
+  cross-fade and the marker slide. Targets accept a key, a 0-based index, a
   `Section` or a `SectionProgress` (the `SectionTarget` alias; sections
   accept `SectionLike`).
 

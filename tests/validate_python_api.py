@@ -1609,6 +1609,10 @@ def validate_section_navigation_contract(module) -> list[str]:
     agenda.advance(-5)
     if agenda.current.key != "intro":
         failures.append("agenda.advance did not clamp to the first entry")
+    eased = agenda.animate.advance(easing=module.Easing.SNAPPY)
+    if not isinstance(eased, module.Composition) or agenda.current.key != "method":
+        failures.append("agenda.animate.advance(easing=...) did not return an eased Composition")
+    scene.play(eased, duration=0.1)
     for build in (lambda: scene.sections.agenda([]),
                   lambda: scene.sections.agenda(["a", "a"]),
                   lambda: scene.sections.agenda(["a"], styles={"active": None}),

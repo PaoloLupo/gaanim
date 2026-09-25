@@ -2638,7 +2638,12 @@ class TextSelection:
         """
         ...
 class TextQuery:
-    """Deferred indexable view over rendered text units."""
+    """Deferred indexable view over rendered text units.
+
+    Words follow Unicode word boundaries, so punctuation is not a word. A
+    grapheme, word, or line slice selects the rendered text from its first
+    to its last unit, punctuation included, where the slice starts.
+    """
     def __len__(self) -> int: ...
     def __contains__(self, value: str) -> bool: ...
     @overload
@@ -2741,7 +2746,17 @@ class Text(Drawable):
         """
         ...
     @overload
-    def __getitem__(self, name: str) -> TextSelection: ...
+    def __getitem__(self, name: str) -> TextSelection:
+        """Select a top-level part by name, or else every literal occurrence of the text.
+
+        Literal matching ignores case and whitespace like ``color_by``.
+        A string that is neither a part name nor text in this ``Text``
+        raises ``KeyError``.
+
+        Example:
+            scene.play(copy["no se generaliza"].animate.marker())
+        """
+        ...
     @overload
     def __getitem__(self, index: int | slice) -> TextSelection: ...
     @property

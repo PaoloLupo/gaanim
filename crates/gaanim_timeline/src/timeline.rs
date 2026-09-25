@@ -138,6 +138,8 @@ enum AbsoluteLensChannel {
     FillLevel,
     MediaFrame,
     ConnectorGrow,
+    /// A dynamic lens that initializes its components before its clip.
+    Held(&'static str),
 }
 
 fn absolute_lens_channel(lens: &PropertyLensSpec) -> Option<AbsoluteLensChannel> {
@@ -1216,7 +1218,12 @@ impl Timeline {
             {
                 continue;
             }
-            let channel = if replay_without_restore {
+            let channel = if let PropertyLensSpec::Dynamic(lens) = &anim.lens {
+                // Snapshots do not record the components these lenses own.
+                lens.0
+                    .holds_before_start()
+                    .then(|| AbsoluteLensChannel::Held(lens.0.type_name()))
+            } else if replay_without_restore {
                 absolute_lens_channel(&anim.lens)
             } else {
                 match anim.lens {
