@@ -488,6 +488,7 @@ Unknown identifiers such as `sin` remain unchanged.
 
 ```text
 selection.fill(color) -> TextSelection
+selection.marker(color=None, *, skew=0.05, blend="normal", opacity=0.45, padding=None) -> TextSelection
 selection.animate.fill(color).duration(seconds) -> Anim
 selection.animate.opacity(opacity).duration(seconds) -> Anim
 selection.animate.fill(color).opacity(value) -> Anim
@@ -502,6 +503,7 @@ selection.animate.cancel() -> Anim
 selection.animate.reveal(style="fade") -> Anim
 selection.animate.brace(label="", *, above=False) -> Anim
 selection.animate.annotate(label, offset=(0, 0.6)) -> Anim
+selection.animate.marker(color=None, *, skew=0.05, blend="normal", opacity=0.45, padding=None) -> Anim
 
 selection.animate.morph_to(target_selection).duration(seconds) -> Anim
 selection.animate.copy_to(target_selection).duration(seconds) -> Anim
@@ -517,6 +519,33 @@ with a short rise), so a term can enter an equation that is already visible.
 fades in `label`; `annotate` places `label` at `offset` from the selection
 center with a leader line. The brace, line, and labels are new objects in the
 selection's color and remain on screen.
+
+`marker` sweeps a highlighter band behind every rendered line the selection
+spans. Each band covers the full glyph
+height of its line plus `padding` (world units; `None` uses 10% of the line
+height), grows from the left edge, and the lines follow one another, sharing
+the duration by band length. `color` defaults to a highlighter yellow whose
+alpha is multiplied by `opacity`; `skew` tilts each band in radians (positive
+rises to the right) and is capped at a quarter of the band thickness so long
+lines stay covered. Bands are drawn behind the glyphs, at the text's
+`z_index`, but above objects authored before the text, such as a card. Per-object
+blend modes do not exist yet, so `blend="multiply"` is accepted and composited
+like `"normal"`; because the band sits behind the glyphs, the text keeps its
+color either way. An unknown `blend`, a non-finite `skew`, `opacity` outside
+`[0, 1]`, or a negative `padding` raises `ValueError`. The static
+`selection.marker(...)` places the finished bands at the current timeline
+cursor. Like the brace, the bands are new objects that stay on screen and do
+not follow later movements of the text.
+
+```python
+# show-code: true
+from gaanim import Scene
+scene = Scene(frame=(16, 9), background="#f8f5ee")
+quote = scene.text("Lo que no se mide no se puede mejorar", color="#1f2937").move_to(0, 0)
+scene.play([quote.words[4:9].animate.marker(skew=0.04).duration(1.2)])
+# output: text_marker.webp
+scene.render()
+```
 Every animation descriptor above can be placed directly in `scene.play([...])`.
 
 == Animaciones de texto completo
@@ -635,8 +664,8 @@ text.animate.wiggle() -> Anim
 ```
 
 These operate on the complete `Text`; the typed selection proxy adds `pulse`,
-`wave`, `highlight`, `focus`, `cancel`, `reveal`, `brace`, and `annotate` for
-local subsets.
+`wave`, `highlight`, `focus`, `cancel`, `reveal`, `brace`, `annotate`, and
+`marker` for local subsets.
 
 == Transiciones estructurales
 

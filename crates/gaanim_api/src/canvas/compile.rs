@@ -6491,6 +6491,18 @@ impl SceneModel {
                 copy: *copy,
                 semantic_pairs: semantic_pairs.clone(),
             },
+            // A marker draws behind the glyphs at the text's stack level.
+            AnimationType::TextSelection {
+                fragment,
+                occurrence,
+                effect: crate::anim::TextSelectionEffect::Marker(style),
+            } => AnimationType::TextSelection {
+                fragment: fragment.clone(),
+                occurrence: *occurrence,
+                effect: crate::anim::TextSelectionEffect::Marker(style.clone().with_text_z_index(
+                    crate::builder::text_marker::stacked_spec_z_index(object_specs, anim.target),
+                )),
+            },
             AnimationType::TextSelectionTransform {
                 target,
                 source_fragment,

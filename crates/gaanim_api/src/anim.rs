@@ -536,7 +536,10 @@ pub enum TextSelectionEffect {
     OpacityTo(f32),
     Brace { label: String, above: bool },
     Annotate { label: String, offset: DVec3 },
+    Marker(TextMarkerStyle),
 }
+
+pub use crate::builder::text_marker::{MarkerBlend, TextMarkerStyle};
 
 /// A fluent builder for an animation tween clip.
 #[derive(Debug, Clone)]

@@ -2141,6 +2141,11 @@ impl Anim {
         })
     }
 
+    /// Sweep a highlighter band behind each selected line, left to right.
+    pub fn marker(self, style: crate::anim::TextMarkerStyle) -> Self {
+        self.selection_effect(crate::anim::TextSelectionEffect::Marker(style))
+    }
+
     /// Target a scalar Parameter/Variable value through the common proxy.
     pub fn set(self, value: f64) -> Self {
         assert!(value.is_finite(), "parameter values must be finite");

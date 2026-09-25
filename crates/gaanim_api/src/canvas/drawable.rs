@@ -2180,6 +2180,33 @@ impl FragmentSelection {
         self.animate(TextSelectionEffect::Annotate { label, offset }, duration)
     }
 
+    /// Sweeps a highlighter band behind each selected line, left to right.
+    pub fn marker(self, style: crate::anim::TextMarkerStyle, duration: impl OptDuration) -> Anim {
+        self.animate(TextSelectionEffect::Marker(style), duration)
+    }
+
+    /// Instantly places a highlighter band behind each selected line at the
+    /// current timeline cursor.
+    pub fn with_marker(self, style: crate::anim::TextMarkerStyle) -> Self {
+        if !self.fragment.trim().is_empty() {
+            let effect = TextSelectionEffect::Marker(style);
+            let anim_type = AnimationType::TextSelection {
+                fragment: self.fragment.clone(),
+                occurrence: self.occurrence,
+                effect,
+            };
+            let rate_func = anim_type.default_rate_func();
+            self.push(Op::Immediate(AnimationBuilder {
+                target: self.target,
+                anim_type,
+                duration: 0.0,
+                delay: 0.0,
+                rate_func,
+            }));
+        }
+        self
+    }
+
     /// Reveals this fragment with `Fade`, `Wipe`, or `FromBelow`.
     pub fn reveal(self, style: FragmentRevealStyle, duration: impl OptDuration) -> Anim {
         let effect = match style {

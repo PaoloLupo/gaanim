@@ -31,6 +31,9 @@ use typst_syntax::ast::{
 };
 use typst_syntax::{SyntaxNode, parse_math};
 
+/// Marker-style highlighter behind text selections (AN-02).
+pub mod text_marker;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DrawMode {
     Grow,
@@ -1377,6 +1380,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 TextSelectionEffect::Cancel => "CancelText",
                 TextSelectionEffect::Brace { .. } => "BraceText",
                 TextSelectionEffect::Annotate { .. } => "AnnotateText",
+                TextSelectionEffect::Marker(_) => "MarkerText",
                 _ => "TextSelection",
             },
             AnimationType::FadeTransform { .. }
@@ -2266,6 +2270,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             TextSelectionEffect::Annotate { label, offset } => {
                 self.play_text_selection_annotate_internal(anim, &selected, label, offset);
             }
+            TextSelectionEffect::Marker(style) => {
+                self.play_text_selection_marker_internal(anim, &selected, style);
+            }
             effect => {
                 let count = selected.len();
                 for (index, target) in selected.into_iter().enumerate() {
@@ -2333,7 +2340,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         TextSelectionEffect::Focus
                         | TextSelectionEffect::Cancel
                         | TextSelectionEffect::Brace { .. }
-                        | TextSelectionEffect::Annotate { .. } => unreachable!(),
+                        | TextSelectionEffect::Annotate { .. }
+                        | TextSelectionEffect::Marker(_) => unreachable!(),
                     };
                     self.play_internal(AnimationBuilder {
                         target,
