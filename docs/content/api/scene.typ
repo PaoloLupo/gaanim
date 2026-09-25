@@ -260,6 +260,33 @@ marker.add_updater(Updater.orbit(0, 0, 1.2, 1.2))
 scene.play([label.animate.fade_in().duration(0.3)])
 ```
 
+`Updater.wiggle(position=0.08, rotation=0, scale=0, frequency=2, octaves=2,
+seed=0)` adds organic, seeded jitter and `Updater.oscillate(channel,
+waveform="sine", frequency=1, low=0, high=1, phase=0)` a periodic value on `x`,
+`y`, `rotation` (added) or `scale`, `opacity` (multiplied). Unlike the other
+presets they are layers over the drawable's animation: they are pure functions
+of timeline time, so a seek lands on the same frame as playback, and they add to
+`animate.move_to` and other clips instead of replacing them.
+
+```python
+logo.add_updater(Updater.wiggle(position=0.08, rotation=0.03, seed=1))
+light.add_updater(Updater.oscillate("opacity", waveform="triangle", frequency=0.5, low=0.4, high=1.0))
+scene.play([logo.animate.move_to(3, 0).duration(2)])  # still wiggling while it moves
+```
+
+For reproducible variation, `scene.random(seed)` returns a `Random` stream
+(`uniform`, `gauss`, `integer`, `choice`, `shuffle`) whose values are the same
+on every platform, and `scene.noise(frequency=1, amplitude=1, octaves=1,
+seed=0, center=0)` returns smooth seeded noise over time as a `Computed`,
+evaluated natively each frame:
+
+```python
+rng = scene.random(seed=42)
+stars = [scene.geometry.dot(0.04).move_to(rng.uniform(-7, 7), rng.uniform(-4, 4)) for _ in range(60)]
+drift = scene.noise(frequency=0.6, amplitude=0.3, octaves=3, seed=5)
+title.rotate_to(computed(lambda v: 0.1 * v, inputs=[drift]))
+```
+
 Groups and drawables can rotate or scale around a scene-space point through
 `with_pivot(x, y)` (also available as `pivot`). This is useful for a mechanism
 with a physical hinge:

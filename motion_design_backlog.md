@@ -103,15 +103,15 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
 
 | ☐ | ID | Ítem | Coste | Impacto | Depende | Issue |
 |---|---|---|---|---|---|---|
-| ☐ | [TM-01](#tm-01--springs-perceptuales-y-presets) | Springs perceptuales (`bounce`) y presets | S | ★★★ | — | [#120](https://github.com/PaoloLupo/gaanim/issues/120) |
-| ☐ | [TM-02](#tm-02--easings-paramétricos-y-expresivos) | Easings paramétricos y expresivos | S | ★★ | QW-06 | [#121](https://github.com/PaoloLupo/gaanim/issues/121) |
-| ☐ | [TM-03](#tm-03--repeat-yoyo-y-loop) | `repeat` / `yoyo` / `loop` para `Anim` y `Composition` | S | ★★★ | — | [#122](https://github.com/PaoloLupo/gaanim/issues/122) |
-| ☐ | [PR-01](#pr-01--stagger-con-origen-rejilla-y-distribución) | Stagger con origen, rejilla y distribución | M | ★★★ | — | [#123](https://github.com/PaoloLupo/gaanim/issues/123) |
-| ☐ | [PR-02](#pr-02--aleatoriedad-con-semilla-y-ruido-coherente) | Aleatoriedad con semilla y ruido coherente | S | ★★★ | — | [#124](https://github.com/PaoloLupo/gaanim/issues/124) |
-| ☐ | [PR-03](#pr-03--updaters-procedurales-wiggle-y-osciladores) | `Updater.wiggle` y `Updater.oscillate` | S | ★★ | PR-02 | [#125](https://github.com/PaoloLupo/gaanim/issues/125) |
-| ☐ | [FX-01](#fx-01--efectos-animables-glow-blur-shadow) | `glow`/`blur`/`shadow` animables | S | ★★★ | — | [#126](https://github.com/PaoloLupo/gaanim/issues/126) |
-| ☐ | [TR-01](#tr-01--trim-paths-animable) | Trim paths animable (`start`/`end`/`offset`) | S | ★★★ | — | [#127](https://github.com/PaoloLupo/gaanim/issues/127) |
-| ☐ | [TR-03](#tr-03--movimiento-orientado-sobre-trayectoria-y-en-arco) | `move_along` orientado y `path_arc` | S | ★★ | — | [#128](https://github.com/PaoloLupo/gaanim/issues/128) |
+| ☑ | [TM-01](#tm-01--springs-perceptuales-y-presets) | Springs perceptuales (`bounce`) y presets | S | ★★★ | — | [#120](https://github.com/PaoloLupo/gaanim/issues/120) |
+| ☑ | [TM-02](#tm-02--easings-paramétricos-y-expresivos) | Easings paramétricos y expresivos | S | ★★ | QW-06 | [#121](https://github.com/PaoloLupo/gaanim/issues/121) |
+| ☑ | [TM-03](#tm-03--repeat-yoyo-y-loop) | `repeat` / `yoyo` / `loop` para `Anim` y `Composition` | S | ★★★ | — | [#122](https://github.com/PaoloLupo/gaanim/issues/122) |
+| ☑ | [PR-01](#pr-01--stagger-con-origen-rejilla-y-distribución) | Stagger con origen, rejilla y distribución | M | ★★★ | — | [#123](https://github.com/PaoloLupo/gaanim/issues/123) |
+| ☑ | [PR-02](#pr-02--aleatoriedad-con-semilla-y-ruido-coherente) | Aleatoriedad con semilla y ruido coherente | S | ★★★ | — | [#124](https://github.com/PaoloLupo/gaanim/issues/124) |
+| ☑ | [PR-03](#pr-03--updaters-procedurales-wiggle-y-osciladores) | `Updater.wiggle` y `Updater.oscillate` | S | ★★ | PR-02 | [#125](https://github.com/PaoloLupo/gaanim/issues/125) |
+| ☑ | [FX-01](#fx-01--efectos-animables-glow-blur-shadow) | `glow`/`blur`/`shadow` animables | S | ★★★ | — | [#126](https://github.com/PaoloLupo/gaanim/issues/126) |
+| ☑ | [TR-01](#tr-01--trim-paths-animable) | Trim paths animable (`start`/`end`/`offset`) | S | ★★★ | — | [#127](https://github.com/PaoloLupo/gaanim/issues/127) |
+| ☑ | [TR-03](#tr-03--movimiento-orientado-sobre-trayectoria-y-en-arco) | `move_along` orientado y `path_arc` | S | ★★ | — | [#128](https://github.com/PaoloLupo/gaanim/issues/128) |
 
 ### Ola 2: tipografía cinética, transiciones y cámara
 

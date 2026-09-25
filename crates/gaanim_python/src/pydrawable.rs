@@ -131,6 +131,15 @@ impl PyCanvasAnim {
     }
 
     /// Emphasis effects that exist only for `text[...]` selections.
+    fn require_drawable_effect(&self, name: &str) -> PyResult<()> {
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(format!(
+                "{name}() requires a Drawable animation proxy"
+            )));
+        }
+        self.require_property_slot(name)
+    }
+
     fn require_selection_effect_slot(&self, effect: &str) -> PyResult<()> {
         use gaanim_api::anim::AnimationType;
         if !matches!(
@@ -264,6 +273,68 @@ impl PyCanvasAnim {
             self,
             PropertySources::Opacity(scalar_for_anim(value, self)?),
         )
+    }
+
+    #[pyo3(signature = (color=None, radius=0.16, intensity=1.0))]
+    fn glow(&self, color: Option<PyColor>, radius: f64, intensity: f32) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        self.require_drawable_effect("glow")?;
+        if !radius.is_finite() || radius <= 0.0 {
+            return Err(PyValueError::new_err("radius must be finite and positive"));
+        }
+        if !intensity.is_finite() || intensity < 0.0 {
+            return Err(PyValueError::new_err(
+                "intensity must be finite and non-negative",
+            ));
+        }
+        let glow = color.map(|color| gaanim_api::canvas::Glow {
+            color: color.0,
+            radius,
+            intensity,
+        });
+        Ok(Self {
+            inner: self.inner.clone().glow(glow),
+        })
+    }
+
+    #[pyo3(signature = (sigma=0.04))]
+    fn blur(&self, sigma: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        self.require_drawable_effect("blur")?;
+        if !sigma.is_finite() || sigma < 0.0 {
+            return Err(PyValueError::new_err(
+                "sigma must be finite and non-negative",
+            ));
+        }
+        let blur = (sigma > 0.0).then_some(gaanim_api::canvas::GaussianBlur { sigma });
+        Ok(Self {
+            inner: self.inner.clone().blur(blur),
+        })
+    }
+
+    #[pyo3(signature = (color=None, x=0.08, y=-0.08, blur=0.06))]
+    fn shadow(&self, color: Option<PyColor>, x: f64, y: f64, blur: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        self.require_drawable_effect("shadow")?;
+        if !x.is_finite() || !y.is_finite() {
+            return Err(PyValueError::new_err("shadow offset must be finite"));
+        }
+        if !blur.is_finite() || blur < 0.0 {
+            return Err(PyValueError::new_err(
+                "shadow blur must be finite and non-negative",
+            ));
+        }
+        let shadow = color.map(|color| gaanim_api::canvas::DropShadow {
+            color: color.0,
+            offset: gaanim_core::glam::DVec2::new(x, y),
+            blur_radius: blur,
+        });
+        Ok(Self {
+            inner: self.inner.clone().shadow(shadow),
+        })
     }
 
     fn set(&self, value: f64) -> PyResult<Self> {
@@ -830,16 +901,82 @@ impl PyCanvasAnim {
         })
     }
 
-    fn move_along(&self, target: &PyDrawable) -> PyResult<Self> {
+    #[pyo3(signature = (target, *, orient=false, rotate_offset=0.0, start=0.0, end=1.0))]
+    fn move_along(
+        &self,
+        target: &PyDrawable,
+        orient: bool,
+        rotate_offset: f64,
+        start: f64,
+        end: f64,
+    ) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
         self.require_transformable()?;
+        if !rotate_offset.is_finite() || !start.is_finite() || !end.is_finite() {
+            return Err(PyValueError::new_err(
+                "rotate_offset, start and end must be finite",
+            ));
+        }
+        if !(0.0 <= start && start < end && end <= 1.0) {
+            return Err(PyValueError::new_err(
+                "move_along requires 0 <= start < end <= 1",
+            ));
+        }
         self.require_effect_slot("move_along")?;
         self.inner
             .clone()
-            .move_along(&target.0)
+            .move_along_with(
+                &target.0,
+                gaanim_api::anim::PathFollowOptions {
+                    orient: orient.then_some(rotate_offset),
+                    start,
+                    end,
+                },
+            )
             .map(|inner| Self { inner })
             .map_err(PyValueError::new_err)
+    }
+
+    #[pyo3(signature = (start=None, end=None, offset=None))]
+    fn trim(&self, start: Option<f64>, end: Option<f64>, offset: Option<f64>) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "trim() requires a Drawable animation proxy",
+            ));
+        }
+        validate_trim(start, end, offset)?;
+        if start.is_none() && end.is_none() && offset.is_none() {
+            return Err(PyValueError::new_err(
+                "trim() needs at least one of start, end or offset",
+            ));
+        }
+        self.require_effect_slot("trim")?;
+        Ok(Self {
+            inner: self.inner.clone().trim(start, end, offset),
+        })
+    }
+
+    fn path_arc(&self, angle: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        if !angle.is_finite() {
+            return Err(PyValueError::new_err("path_arc angle must be finite"));
+        }
+        let has_translation = matches!(
+            &self.inner.inner.anim_type,
+            gaanim_api::anim::AnimationType::Properties(properties) if properties.translation.is_some()
+        );
+        if !has_translation {
+            return Err(PyValueError::new_err(
+                "path_arc() follows a move_to or shift_by target; add one first, e.g. .move_to(4, 0).path_arc(1.0)",
+            ));
+        }
+        Ok(Self {
+            inner: self.inner.clone().path_arc(angle),
+        })
     }
 
     fn fade_transform_to(&self, target: &PyDrawable) -> PyResult<Self> {
@@ -1005,6 +1142,57 @@ impl PyCanvasAnim {
         })
     }
 
+    #[pyo3(signature = (count, *, yoyo=false, delay=0.0))]
+    fn repeat(&self, count: i64, yoyo: bool, delay: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        if !(1..=10_000).contains(&count) {
+            return Err(PyValueError::new_err("count must be between 1 and 10000"));
+        }
+        if !delay.is_finite() || delay < 0.0 {
+            return Err(PyValueError::new_err(
+                "delay must be a finite non-negative number",
+            ));
+        }
+        let mode = if yoyo {
+            gaanim_math::RepeatMode::PingPong
+        } else {
+            gaanim_math::RepeatMode::Cycle
+        };
+        Ok(Self {
+            inner: self.inner.clone().repeat(count as u32, mode, delay),
+        })
+    }
+
+    #[pyo3(name = "loop", signature = (mode="cycle", *, until, delay=0.0))]
+    fn loop_for(&self, mode: &str, until: f64, delay: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        let mode = match mode {
+            "cycle" => gaanim_math::RepeatMode::Cycle,
+            "pingpong" => gaanim_math::RepeatMode::PingPong,
+            "offset" => gaanim_math::RepeatMode::Offset,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "unknown loop mode {other:?}; expected \"cycle\", \"pingpong\" or \"offset\""
+                )))
+            }
+        };
+        if !until.is_finite() || until <= 0.0 {
+            return Err(PyValueError::new_err(
+                "until must be a finite positive number of seconds",
+            ));
+        }
+        if !delay.is_finite() || delay < 0.0 {
+            return Err(PyValueError::new_err(
+                "delay must be a finite non-negative number",
+            ));
+        }
+        Ok(Self {
+            inner: self.inner.clone().loop_for(until, mode, delay),
+        })
+    }
+
     fn lag_ratio(&self, value: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
@@ -1050,6 +1238,20 @@ impl PyCanvasAnim {
         self.require_native_animation()?;
         self.pivot(x, y)
     }
+}
+
+fn validate_trim(start: Option<f64>, end: Option<f64>, offset: Option<f64>) -> PyResult<()> {
+    for (name, value) in [("start", start), ("end", end)] {
+        if value.is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value)) {
+            return Err(PyValueError::new_err(format!(
+                "{name} must be within [0, 1]"
+            )));
+        }
+    }
+    if offset.is_some_and(|value| !value.is_finite()) {
+        return Err(PyValueError::new_err("offset must be finite"));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1579,6 +1781,29 @@ impl PyDrawable {
             ));
         }
         Ok(Self(self.0.clone().glow(color.0, radius, intensity)))
+    }
+    /// Show only part of the drawn path.
+    #[pyo3(signature = (start=None, end=None, offset=None, mode=None))]
+    fn trim(
+        &self,
+        start: Option<f64>,
+        end: Option<f64>,
+        offset: Option<f64>,
+        mode: Option<&str>,
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        validate_trim(start, end, offset)?;
+        let sequential = match mode {
+            None => None,
+            Some("simultaneous") => Some(false),
+            Some("sequential") => Some(true),
+            Some(other) => {
+                return Err(PyValueError::new_err(format!(
+                    "unknown trim mode {other:?}; expected \"simultaneous\" or \"sequential\""
+                )))
+            }
+        };
+        Ok(Self(self.0.clone().trim(start, end, offset, sequential)))
     }
     /// Apply a cached soft vector blur.
     #[pyo3(signature = (sigma=0.04))]

@@ -214,6 +214,13 @@ pub enum PropertyLensSpec {
         from: f64,
         to: f64,
     },
+    /// Trim window `[start, end, offset]` interpolated between two states;
+    /// see [`gaanim_math::trim_path`].
+    PathTrim {
+        from: [f64; 3],
+        to: [f64; 3],
+        sequential: bool,
+    },
     PathMorph {
         from: BezPath,
         to: BezPath,
@@ -354,6 +361,8 @@ pub enum PropertyLensSpec {
     /// world-space translation.
     PathFollow {
         path: BezPath,
+        /// Rotate along the tangent, plus this offset in radians.
+        orient: Option<f64>,
     },
     PathFollow3D {
         points: Vec<gaanim_core::glam::DVec3>,
@@ -380,6 +389,9 @@ pub enum PropertyLensSpec {
     /// Runtime callback evaluated identically during playback and exact seeks.
     #[cfg_attr(feature = "serde", serde(skip))]
     CustomProperties(gaanim_animation::CustomPropertyLens),
+    /// Lens implemented above the timeline (e.g. renderer effects).
+    #[cfg_attr(feature = "serde", serde(skip))]
+    Dynamic(gaanim_animation::tween::DynamicLens),
     Custom {
         type_name: String,
         params: String,
@@ -433,6 +445,15 @@ impl PropertyLensSpec {
             Self::PathCompletion { from, to } => PropertyLens::PathCompletion {
                 from: *from,
                 to: *to,
+            },
+            Self::PathTrim {
+                from,
+                to,
+                sequential,
+            } => PropertyLens::PathTrim {
+                from: *from,
+                to: *to,
+                sequential: *sequential,
             },
             Self::PathMorph { from, to } => PropertyLens::PathMorph {
                 from: from.clone(),
@@ -600,8 +621,9 @@ impl PropertyLensSpec {
                 from_far: *from_far,
                 to_far: *to_far,
             },
-            Self::PathFollow { path } => PropertyLens::PathFollow {
+            Self::PathFollow { path, orient } => PropertyLens::PathFollow {
                 path: std::sync::Arc::new(path.clone()),
+                orient: *orient,
             },
             Self::PathFollow3D { points } => PropertyLens::PathFollow3D {
                 points: std::sync::Arc::new(points.clone()),
@@ -625,6 +647,7 @@ impl PropertyLensSpec {
                 time_width: *time_width,
             },
             Self::CustomProperties(lens) => PropertyLens::Custom(Box::new(lens.clone())),
+            Self::Dynamic(lens) => PropertyLens::Custom(lens.0.clone_box()),
             Self::PropertySource(lens) => PropertyLens::Custom(Box::new(lens.clone())),
             Self::Custom { type_name, .. } => PropertyLens::Custom(Box::new(DummyLens {
                 type_name: type_name.clone(),

@@ -303,10 +303,15 @@ scene.render()
 #api-entry(
   name: "Drawable.move_along_path",
   kind: "method",
-  signature: ".animate.move_along(target: Drawable) -> Anim",
-  params: ((name: "target", type: "Drawable", default: none, desc: [Path drawable to follow — circle, rect, curve, polyline, etc. Its world geometry (after `at`, groups) is sampled.]),),
+  signature: ".animate.move_along(target, *, orient=False, rotate_offset=0, start=0, end=1) -> Anim",
+  params: (
+    (name: "target", type: "Drawable", default: none, desc: [Path drawable to follow — circle, rect, curve, polyline, etc. Its world geometry (after `at`, groups) is sampled.]),
+    (name: "orient", type: "bool", default: "False", desc: [Turn along the path tangent.]),
+    (name: "rotate_offset", type: "float", default: "0", desc: [Radians added to the tangent angle when orienting.]),
+    (name: "start, end", type: "float", default: "0, 1", desc: [Travelled portion of the path as arc-length fractions.]),
+  ),
   returns: (type: "Anim", desc: [Follow-path translation.]),
-  desc: [Samples the target's Bézier outline by true arc-length and sets the caller's translation to the point at eased `t` (`get_point_at_alpha`). Combine with `.easing(Easing.LINEAR)` for uniform speed, or `.easing(Easing.SMOOTH)` for ease. Rotation/scale unaffected.],
+  desc: [Samples the target's Bézier outline by true arc-length and sets the caller's translation to the point at eased `t` (`get_point_at_alpha`). Combine with `.easing(Easing.LINEAR)` for uniform speed, or `.easing(Easing.SMOOTH)` for ease. With `orient=True` the rotation follows the tangent (plus `rotate_offset`), so a plane points where it flies; otherwise rotation and scale are unaffected. `.move_to(x, y).path_arc(angle)` instead bends an ordinary move into a circular arc that turns by `angle` radians.],
 )[
 ```python
 # show-code: true
@@ -875,10 +880,37 @@ El IDE puede navegar el catálogo sin recordar strings:
 
 - Presets: `LINEAR`, `SMOOTH`, `DOUBLE_SMOOTH`, `THERE_AND_BACK`,
   `LINGERING`, `RUNNING_START`, `EXPONENTIAL_DECAY` y `NOT_QUITE_THERE`.
+- Springs con nombre: `SMOOTH_SPRING` (sin rebote), `GENTLE`, `QUICK`, `SNAPPY` y
+  `BOUNCY`.
 - Familias de `EasingCurve`: `QUADRATIC`, `CUBIC`, `QUARTIC`, `QUINTIC`,
   `EXPONENTIAL`, `SINE`, `CIRCULAR`, `BACK`, `ELASTIC` y `BOUNCE`.
 - Fábricas: `ease_in`, `ease_out`, `ease_in_out`, `spring`, `steps`,
-  `mirror`, `there_and_back`, `cubic_bezier` y `custom`.
+  `mirror`, `there_and_back`, `cubic_bezier`, `custom`, `back`, `elastic`,
+  `bounce`, `slow_mo`, `rough`, `squish` y `from_svg`.
+
+`Easing.spring(bounce=0.35)` describe el resorte por cómo se ve, no por su
+física: `bounce` es el sobrepaso máximo (0 = amortiguamiento crítico, sin
+rebote) y el resorte se asienta dentro de la duración de la animación, así que
+`duration` controla el ritmo. La forma física `spring(stiffness, damping,
+mass=1, velocity=0)` sigue disponible; `velocity` es la velocidad inicial en
+distancias por duración del clip. Todos los resortes terminan exactamente en el
+destino.
+
+#table(
+  columns: (1.4fr, 2fr),
+  inset: 7pt,
+  [*Fábrica*], [*Carácter*],
+  [`back(overshoot=1.70158, mode="out")`], [Retrocede o se pasa del destino],
+  [`elastic(amplitude=1, period=0.3, mode="out")`], [Oscila como una banda elástica],
+  [`bounce(strength=1, mode="out")`], [Rebota al llegar; `strength=0` es un cúbico],
+  [`slow_mo(linear_ratio=0.7, power=0.7)`], [Rápido, cámara lenta, rápido],
+  [`rough(strength=1, points=20, seed=0)`], [Parpadeo y jitter deterministas],
+  [`squish(easing, start, end)`], [Aplica `easing` solo entre `start` y `end`],
+  [`from_svg("M0,0 C0.3,0 0.2,1.2 1,1")`], [Curva dibujada en cualquier editor],
+  [`steps(n, jump="end")`], [Saltos discretos con los modos de CSS],
+)
+
+`mode` acepta `"in"`, `"out"` e `"in_out"`.
 
 Las fábricas rechazan números no finitos y dominios inválidos. No se aceptan
 nombres de easing ni existe un fallback silencioso a `SMOOTH`.
@@ -914,6 +946,77 @@ scene.play([g.animate.create().duration(1.0).lag_ratio(0.25)])
 scene.render()
 ```
 ]
+
+=== Stagger espacial
+
+`stagger(*items, each=0.1)` escalona por índice. Con `origin`, `grid`, `total` o
+`easing`, el retardo de cada ítem crece con su distancia al origen: `"start"`,
+`"end"`, `"center"`, `"edges"` (de los bordes hacia dentro), `"random"` (orden
+aleatorio con `seed`) o un punto `(x, y)`. Las distancias usan las posiciones
+declaradas (`grid="auto"`) o las celdas de `grid=(filas, columnas)`; `each` es
+el retardo por paso de separación y `total` fija la duración de toda la onda.
+`distribute(items, low, high, origin=...)` usa el mismo orden para repartir
+valores (tamaños, opacidades) en lugar de tiempos.
+
+```python
+scene.play(stagger(*[d.animate.grow_from_center() for d in dots], each=0.03, origin="center"))
+scene.play(stagger(*anims, total=1.2, origin="random", seed=7))
+scene.play(stagger(*anims, each=0.05, origin=(0.0, -3.0)))
+for dot, size in zip(dots, distribute(dots, 0.4, 1.4, origin="edges")):
+    dot.scale_by(size)
+```
+
+=== Trim de trazos y efectos animables
+
+`drawable.trim(start=None, end=None, offset=None, mode=None)` muestra solo la
+ventana `[start, end]` del trazo (fracciones de longitud de arco), desplazada
+por `offset`, que da la vuelta al final del camino. Los valores omitidos
+conservan el actual (al principio `0`, `1` y `0`). `mode="simultaneous"` recorta
+cada subtrazo y cada descendiente a la vez; `"sequential"` recorta la longitud
+total, así los subtrazos aparecen uno tras otro. `animate.trim(...)` lo anima:
+
+```python
+logo.trim(end=0.0)
+scene.play(logo.animate.trim(end=1.0).duration(1.2))             # dibujar
+ring.trim(start=0.5, end=0.5)
+scene.play(ring.animate.trim(start=0.0, end=1.0))                # desde el centro
+orbit.trim(start=0.0, end=0.15)
+scene.play(orbit.animate.trim(offset=1.0).duration(2))           # segmento viajero
+```
+
+`animate.glow(color, radius, intensity)`, `animate.blur(sigma)` y
+`animate.shadow(color, x, y, blur)` interpolan los efectos estáticos del mismo
+nombre y se combinan con otros destinos de propiedad. Un efecto ausente crece
+desde cero; `glow(None)`, `blur(0)` y `shadow(None)` lo desvanecen.
+
+```python
+card.shadow(BLACK, 0, -0.05, 0.05)
+scene.play(card.animate.shadow(BLACK, 0, -0.25, 0.4).scale_to(1.04))  # levantar
+scene.play(orb.animate.glow(CYAN, radius=0.5, intensity=2.0).repeat(3, yoyo=True))
+hero.blur(0.3)
+scene.play(hero.animate.blur(0.0).duration(0.6))                       # blur-in
+```
+
+=== Repetición
+
+`anim.repeat(count, yoyo=False, delay=0)` reproduce la animación `count` veces:
+`duration` y `easing` describen un ciclo y `delay` separa los ciclos. Con
+`yoyo=True` los ciclos alternan de sentido; un número par de ciclos termina
+donde empezó y las animaciones siguientes continúan desde ahí.
+`anim.loop(mode="cycle", until=segundos, delay=0)` repite tantos ciclos
+completos como quepan en `until`: `"cycle"` reinicia, `"pingpong"` alterna y
+`"offset"` continúa desde el final del ciclo anterior, así `rotate_by` o
+`shift_by` se acumulan. `Composition.repeat(count, delay=0)` repite un árbol
+completo de animaciones. La duración total entra en `play` y en
+`Composition.schedule()`, y el timeline sigue siendo finito y exacto al hacer
+seek.
+
+```python
+scene.play(spinner.animate.rotate_by(TAU).duration(1.2).repeat(3))
+scene.play(badge.animate.scale_to(1.08).duration(0.4).repeat(4, yoyo=True, delay=0.1))
+scene.play(arrow.animate.shift_by(0.3, 0).duration(0.5).loop("pingpong", until=4.0))
+scene.play(parallel(a.animate.rotate_by(TAU), b.animate.shift_by(1, 0)).repeat(2))
+```
 
 #api-entry(
   name: "Anim easing",

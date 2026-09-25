@@ -69,6 +69,26 @@ pub struct DrawAnimationConfig {
     pub groups: Option<Vec<Vec<ObjectId>>>,
 }
 
+/// How `move_along` travels its path.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PathFollowOptions {
+    /// Turn the object along the path tangent, plus this offset in radians.
+    pub orient: Option<f64>,
+    /// Portion of the path to travel, as arc-length fractions.
+    pub start: f64,
+    pub end: f64,
+}
+
+impl Default for PathFollowOptions {
+    fn default() -> Self {
+        Self {
+            orient: None,
+            start: 0.0,
+            end: 1.0,
+        }
+    }
+}
+
 /// Typed targets collected by `DrawableHandle::animate()`.
 ///
 /// Each populated channel is expanded into an ordinary timeline animation at
@@ -88,6 +108,20 @@ pub struct PropertyAnimation {
     pub material: Option<(gaanim_scene::Material3D, gaanim_scene::Material3D)>,
     pub fill_level: Option<(f64, f64)>,
     pub media_frame: Option<(gaanim_scene::MediaFrame, gaanim_scene::MediaFrame)>,
+    /// Travel the translation along a circular arc turning by this angle.
+    pub path_arc: Option<f64>,
+    /// Target glow (`Some(None)` removes it).
+    pub glow: Option<Option<gaanim_renderer::effects::Glow>>,
+    /// Target blur (`Some(None)` removes it).
+    pub blur: Option<Option<gaanim_renderer::effects::GaussianBlur>>,
+    /// Target drop shadow (`Some(None)` removes it).
+    pub shadow: Option<Option<gaanim_renderer::effects::DropShadow>>,
+}
+
+impl PropertyAnimation {
+    pub(crate) fn has_effects(&self) -> bool {
+        self.glow.is_some() || self.blur.is_some() || self.shadow.is_some()
+    }
 }
 
 impl PropertyAnimation {
@@ -104,6 +138,7 @@ impl PropertyAnimation {
             && self.material.is_none()
             && self.fill_level.is_none()
             && self.media_frame.is_none()
+            && !self.has_effects()
     }
 
     pub(crate) fn is_transform_only(&self) -> bool {
@@ -117,6 +152,7 @@ impl PropertyAnimation {
             && self.material.is_none()
             && self.fill_level.is_none()
             && self.media_frame.is_none()
+            && !self.has_effects()
     }
 }
 
@@ -308,6 +344,22 @@ pub enum AnimationType {
         from: f64,
         to: f64,
     },
+    /// Interpolate renderer effects; `None` leaves an effect unchanged and
+    /// `Some(None)` fades it out.
+    EffectsTo {
+        glow: Option<Option<gaanim_renderer::effects::Glow>>,
+        blur: Option<Option<gaanim_renderer::effects::GaussianBlur>>,
+        shadow: Option<Option<gaanim_renderer::effects::DropShadow>>,
+    },
+    /// Trim the drawn path (and its descendants') to `[start, end]` shifted
+    /// by `offset`; `None` keeps the current value. `sequential` measures
+    /// the window over all sub-paths instead of within each.
+    PathTrim {
+        start: Option<f64>,
+        end: Option<f64>,
+        offset: Option<f64>,
+        sequential: Option<bool>,
+    },
     /// Move and resize a live surrounding rectangle between object sets.
     SurroundingRectRetarget {
         from: Vec<BoundsTarget>,
@@ -436,6 +488,7 @@ pub enum AnimationType {
     MoveAlongPath {
         path: gaanim_core::kurbo::BezPath,
         path_target: Option<ObjectId>,
+        follow: PathFollowOptions,
     },
     /// Move the target along a retained 3D polyline at normalized arc length.
     MoveAlongPath3D {
@@ -1056,6 +1109,7 @@ impl MobjectRef {
             anim_type: AnimationType::MoveAlongPath {
                 path,
                 path_target: None,
+                follow: PathFollowOptions::default(),
             },
             duration: 2.0,
             rate_func: RateFunc::Linear,
