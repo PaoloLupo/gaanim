@@ -63,6 +63,8 @@ pub(crate) enum Icon {
     Book,
     ExternalLink,
     Package,
+    Mic,
+    Record,
 }
 
 /// How an icon button presents its state.
@@ -445,6 +447,30 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color:
                 stroke,
             );
             painter.line_segment([p(0.0, 0.0), p(0.0, 0.42)], stroke);
+        }
+        Icon::Mic => {
+            painter.rect_stroke(
+                Rect::from_min_max(p(-0.14, -0.44), p(0.14, 0.10)),
+                0.0,
+                stroke,
+                egui::StrokeKind::Middle,
+            );
+            painter.line(
+                vec![
+                    p(-0.30, -0.08),
+                    p(-0.30, 0.10),
+                    p(-0.16, 0.25),
+                    p(0.16, 0.25),
+                    p(0.30, 0.10),
+                    p(0.30, -0.08),
+                ],
+                stroke,
+            );
+            painter.line_segment([p(0.0, 0.25), p(0.0, 0.42)], stroke);
+            painter.line_segment([p(-0.16, 0.42), p(0.16, 0.42)], stroke);
+        }
+        Icon::Record => {
+            painter.circle_filled(c, s * 0.3, color);
         }
     }
 }

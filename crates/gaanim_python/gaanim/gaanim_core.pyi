@@ -956,6 +956,71 @@ class Audio:
     starts as background audio without extending the timeline.
     """
 
+class Voiceover:
+    """A voiceover block created by ``Scene.voiceover``.
+
+    Markers are named instants of the take. A marker resolves, in order, from
+    the times tapped while recording, then the Whisper transcript (the marker
+    name must be the spoken word or phrase; case, accents and punctuation are
+    ignored), then its proportional position in the block's text. Markers are
+    searched after the previous one, so a repeated word matches its next
+    occurrence; asking again for the same name returns the same time. A
+    marker found nowhere warns and does not wait.
+    """
+    def __enter__(self) -> Voiceover: ...
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> bool:
+        """Wait for the rest of the take unless the block raised."""
+        ...
+    def wait_until(self, marker: str) -> None:
+        """Advance the scene cursor to ``marker``.
+
+        A marker already behind the cursor, or not found, does not wait.
+
+        Raises:
+            ValueError: If the block has finished.
+        """
+        ...
+    def until(self, marker: str) -> float:
+        """Seconds from the scene cursor to ``marker``, never negative.
+
+        Use it as an animation duration that ends exactly on the marker.
+
+        Example:
+            scene.play([arrow.animate.move_to(2, 0)], duration=vo.until("pendiente"))
+        """
+        ...
+    def finish(self) -> None:
+        """Wait for the rest of the take and close the block; idempotent."""
+        ...
+    @property
+    def key(self) -> str:
+        """Take name, the file stem inside ``narration/``."""
+        ...
+    @property
+    def text(self) -> Optional[str]:
+        """Script of the block: ``text`` or the segment notes."""
+        ...
+    @property
+    def start(self) -> float:
+        """Absolute timeline second where the take starts."""
+        ...
+    @property
+    def duration(self) -> float:
+        """Take length in seconds, measured or estimated from the text."""
+        ...
+    @property
+    def end(self) -> float:
+        """Absolute timeline second where the take ends."""
+        ...
+    @property
+    def remaining(self) -> float:
+        """Seconds from the scene cursor to the end of the take."""
+        ...
+    @property
+    def recorded(self) -> bool:
+        """Whether an audio file backs the take; ``False`` means estimated."""
+        ...
+
 class Updater:
     """Preset updater — attach to a DrawableHandle via add_updater()."""
     @staticmethod
@@ -4896,7 +4961,86 @@ class Scene:
 
         At a segment boundary, the completed outgoing segment remains visible
         until playback advances; no trailing ``wait`` is required.
-        Export ignores stops and renders the timeline continuously.
+        Export ignores stops and renders the timeline continuously. After a
+        recorded ``live_take`` starts, a stop instead waits for as long as the
+        speaker paused there while recording.
+        """
+        ...
+    def voiceover(
+        self,
+        key: str,
+        *,
+        text: Optional[str] = None,
+        volume: float = 1.0,
+    ) -> Voiceover:
+        """Start a voiceover block at the cursor, timed by a narration take.
+
+        The take is ``narration/<key>.wav`` (or ``.flac``, ``.mp3``, ``.m4a``,
+        ``.aac``, ``.ogg``, ``.opus``) inside the asset directory, or beside
+        the script when no asset directory is set. The editor's recorder
+        writes it. A recorded take plays from the cursor and sets the block's
+        length; until then the length is estimated from the block's text at
+        about 150 words per minute, so the scene can be edited before
+        recording. The text is ``text``, else the ``## <key>`` section of the
+        narration script (``narration/script.md``, loaded automatically, or
+        the file given to ``narration_script``), else the active segment's
+        ``notes``; it is shown as the teleprompter while recording. With a
+        script loaded, a key without a section warns. Leaving the ``with``
+        block waits for the rest of the take, and ``render()`` extends the
+        timeline so no take is cut off.
+
+        Raises:
+            ValueError: If ``key`` is not a plain file name (letters, digits,
+                ``-``, ``_``, ``.``), is already used by this scene, the
+                volume is negative, or the take cannot be read.
+
+        Example:
+            with scene.voiceover("intro", text="Hoy vemos la derivada") as vo:
+                scene.play(title.animate.write())
+                vo.wait_until("derivada")
+                scene.play(curve.animate.create())
+        """
+        ...
+    def narration_script(self, path: str) -> None:
+        """Read voiceover texts from a Markdown script edited outside the code.
+
+        Each ``## key`` heading holds the text of ``voiceover("key")``; a
+        ``# Title`` ends a section, ``###`` headings are notes that are not
+        read, and HTML comments are ignored. A relative path resolves in the
+        asset directory (or beside the script without one). Without this
+        call, ``narration/script.md`` is loaded automatically when it exists.
+        Call it before the voiceovers that use it. Saving the file reloads
+        the scene in the editor.
+
+        Raises:
+            ValueError: If the file cannot be read, a ``##`` heading is not a
+                valid key, or a key appears twice.
+
+        Example:
+            scene.narration_script("guion.md")
+            with scene.voiceover("intro") as vo:
+                vo.wait_until("derivada")
+        """
+        ...
+    def live_take(self, key: str = "live", *, volume: float = 1.0) -> None:
+        """Start the scene's live take at the cursor.
+
+        Record it from the editor's narration panel by presenting the scene
+        and talking over it: playback pauses at every later ``stop()`` until
+        you advance. With ``narration/<key>.*`` recorded, the take plays from
+        here and each later ``stop()`` becomes a wait as long as the pause
+        you made there, so the timeline plays straight through in sync with
+        your voice. Without a take, stops stay interactive.
+
+        Raises:
+            ValueError: If the scene already has a live take, ``key`` is not
+                a plain file name or is used by a voiceover, or the take
+                cannot be read.
+
+        Example:
+            scene.live_take("clase")
+            scene.play([title.animate.write()])
+            scene.stop()
         """
         ...
     @property

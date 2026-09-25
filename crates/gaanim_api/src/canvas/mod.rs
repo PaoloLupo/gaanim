@@ -48,6 +48,7 @@ pub use visualization::{
     VectorField3DHandle, VisualizationError,
 };
 mod canvas_impl;
+mod narration;
 pub use crate::export::{AudioTrack, AudioTrackError};
 pub use canvas_impl::clear_asset_caches;
 pub use canvas_impl::{
@@ -58,6 +59,11 @@ pub use canvas_impl::{
     PlayItem, SceneModel, SceneObjectError, Schedule, ScheduleEntry, SupportHandle,
     SurroundingRectError, SurroundingRectHandle, ThemeError, TypstAssetError, VideoClip,
     VideoLoadError, VideoSegment,
+};
+pub use gaanim_media::narration::{MarkerSource, ScriptSection, TakeFiles};
+pub use narration::{
+    LiveTakeSpec, MarkerSpec, NarrationManifest, ScriptSpec, TextSource, VoiceoverError,
+    VoiceoverHandle, VoiceoverSpec, live_take_recording, set_live_take_recording,
 };
 mod theme;
 pub use gaanim_objects::prelude::SvgLoadError;

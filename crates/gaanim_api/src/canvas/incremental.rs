@@ -64,6 +64,9 @@ impl SceneModel {
             margin,
             asset_root,
             audio_tracks,
+            // Editor metadata: its timing already lives in the segment waits
+            // and `audio_tracks`, and it is never compiled.
+            narration: _,
             branding,
             camera_position,
             lighting_3d,

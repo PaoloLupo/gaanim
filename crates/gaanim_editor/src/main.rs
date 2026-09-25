@@ -523,6 +523,9 @@ fn start_script_session(
     let (payload_tx, payload_rx) = crossbeam_channel::unbounded::<ReloadPayload>();
     let (error_tx, error_rx) = crossbeam_channel::unbounded::<String>();
     let runner = script_runner::ScriptRunner::spawn(script_path.clone(), payload_tx, error_tx);
+    world.insert_resource(gaanim_editor::narration::ScriptReload(std::sync::Arc::new(
+        runner.asset_reload_handle(),
+    )));
     let file_watcher::FileWatcher { changed_rx, stop } =
         file_watcher::FileWatcher::spawn(script_path.clone());
     std::thread::Builder::new()

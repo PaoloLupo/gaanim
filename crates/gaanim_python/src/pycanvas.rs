@@ -905,6 +905,181 @@ pub struct PyAudio {
     pub(crate) inner: gaanim_api::canvas::AudioClip,
 }
 
+/// A voiceover block whose narration take sets the pace of the scene.
+#[pyclass(name = "Voiceover", module = "gaanim_core")]
+pub struct PyVoiceover {
+    scene: Arc<Mutex<ApiCanvas>>,
+    handle: gaanim_api::canvas::VoiceoverHandle,
+}
+
+fn voiceover_error(error: gaanim_api::canvas::VoiceoverError) -> PyErr {
+    pyo3::exceptions::PyValueError::new_err(error.to_string())
+}
+
+/// Directory of the script calling into the scene API.
+fn calling_script_dir(py: Python<'_>) -> PyResult<PathBuf> {
+    let frame = py.import("inspect")?.call_method0("currentframe")?;
+    let filename = frame
+        .getattr("f_code")?
+        .getattr("co_filename")?
+        .extract::<String>()?;
+    Ok(PathBuf::from(filename)
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from(".")))
+}
+
+/// Takes live in `narration/` under the asset directory; scenes without one
+/// keep them beside their script.
+fn prepare_narration_directory(py: Python<'_>, scene: &mut ApiCanvas) -> PyResult<()> {
+    if scene.asset_root.is_none() {
+        scene.set_narration_fallback_root(calling_script_dir(py)?);
+    }
+    Ok(())
+}
+
+impl PyVoiceover {
+    fn warn_if_missing(
+        &self,
+        py: Python<'_>,
+        name: &str,
+        source: gaanim_api::canvas::MarkerSource,
+    ) -> PyResult<()> {
+        if source != gaanim_api::canvas::MarkerSource::Missing {
+            return Ok(());
+        }
+        let key = self
+            .scene
+            .lock()
+            .expect("scene canvas poisoned")
+            .voiceover_spec(self.handle)
+            .key
+            .clone();
+        let message = format!(
+            "voiceover {key:?}: marker {name:?} is not in its text, transcript or tapped \
+             markers; the scene continues without waiting"
+        );
+        let category = py.get_type::<pyo3::exceptions::PyUserWarning>();
+        PyErr::warn(
+            py,
+            category.as_any(),
+            &std::ffi::CString::new(message).expect("marker names contain no NUL"),
+            1,
+        )
+    }
+}
+
+#[pymethods]
+impl PyVoiceover {
+    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    /// Leaving the block waits for the rest of the take. After an exception
+    /// the block is left open so the original error surfaces unchanged.
+    fn __exit__(
+        &self,
+        exc_type: Option<&Bound<'_, PyAny>>,
+        _exc: Option<&Bound<'_, PyAny>>,
+        _traceback: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<bool> {
+        if exc_type.is_none_or(|exc_type| exc_type.is_none()) {
+            self.finish()?;
+        }
+        Ok(false)
+    }
+
+    /// Advance the scene cursor to a named marker of the take.
+    fn wait_until(&self, py: Python<'_>, marker: &str) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        let source = self
+            .scene
+            .lock()
+            .expect("scene canvas poisoned")
+            .voiceover_wait_until(self.handle, marker)
+            .map_err(voiceover_error)?;
+        self.warn_if_missing(py, marker, source)
+    }
+
+    /// Seconds from the scene cursor to a named marker, never negative.
+    fn until(&self, py: Python<'_>, marker: &str) -> PyResult<f64> {
+        crate::custom::ensure_authoring_allowed()?;
+        let (seconds, source) = self
+            .scene
+            .lock()
+            .expect("scene canvas poisoned")
+            .voiceover_until(self.handle, marker)
+            .map_err(voiceover_error)?;
+        self.warn_if_missing(py, marker, source)?;
+        Ok(seconds)
+    }
+
+    /// Wait for the rest of the take and close the block.
+    fn finish(&self) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.scene
+            .lock()
+            .expect("scene canvas poisoned")
+            .finish_voiceover(self.handle);
+        Ok(())
+    }
+
+    #[getter]
+    fn key(&self) -> String {
+        let scene = self.scene.lock().expect("scene canvas poisoned");
+        scene.voiceover_spec(self.handle).key.clone()
+    }
+
+    #[getter]
+    fn text(&self) -> Option<String> {
+        let scene = self.scene.lock().expect("scene canvas poisoned");
+        scene.voiceover_spec(self.handle).text.clone()
+    }
+
+    #[getter]
+    fn start(&self) -> f64 {
+        let scene = self.scene.lock().expect("scene canvas poisoned");
+        scene.voiceover_spec(self.handle).start_time
+    }
+
+    #[getter]
+    fn duration(&self) -> f64 {
+        let scene = self.scene.lock().expect("scene canvas poisoned");
+        scene.voiceover_spec(self.handle).duration
+    }
+
+    #[getter]
+    fn end(&self) -> f64 {
+        let scene = self.scene.lock().expect("scene canvas poisoned");
+        let spec = scene.voiceover_spec(self.handle);
+        spec.start_time + spec.duration
+    }
+
+    #[getter]
+    fn remaining(&self) -> f64 {
+        let scene = self.scene.lock().expect("scene canvas poisoned");
+        scene.voiceover_remaining(self.handle)
+    }
+
+    #[getter]
+    fn recorded(&self) -> bool {
+        let scene = self.scene.lock().expect("scene canvas poisoned");
+        scene.voiceover_spec(self.handle).recorded
+    }
+
+    fn __repr__(&self) -> String {
+        let scene = self.scene.lock().expect("scene canvas poisoned");
+        let spec = scene.voiceover_spec(self.handle);
+        format!(
+            "Voiceover(key={:?}, start={}, duration={}, recorded={})",
+            spec.key,
+            spec.start_time,
+            spec.duration,
+            if spec.recorded { "True" } else { "False" }
+        )
+    }
+}
+
 /// A drawable video declaration that starts only when passed to ``Scene.play``.
 pub(crate) use crate::pydrawable::{PyImage, PyVideo};
 
@@ -5306,6 +5481,64 @@ impl PyScene {
             .expect("scene canvas poisoned")
             .stop(name)
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+    }
+
+    /// Start a voiceover block at the cursor, timed by `narration/<key>.*`.
+    #[pyo3(signature = (key, *, text=None, volume=1.0))]
+    fn voiceover(
+        &self,
+        py: Python<'_>,
+        key: &str,
+        text: Option<String>,
+        volume: f64,
+    ) -> PyResult<PyVoiceover> {
+        crate::custom::ensure_authoring_allowed()?;
+        let mut scene = self.inner.lock().expect("scene canvas poisoned");
+        prepare_narration_directory(py, &mut scene)?;
+        let explicit_text = text.is_some();
+        let handle = scene
+            .voiceover(key, text, volume)
+            .map_err(voiceover_error)?;
+        let missing_from_script = scene
+            .narration_manifest()
+            .script
+            .filter(|script| !explicit_text && script.text(key).is_none())
+            .map(|script| script.path);
+        drop(scene);
+        if let Some(path) = missing_from_script {
+            let message = format!(
+                "voiceover {key:?} has no \"## {key}\" section in {}",
+                path.display()
+            );
+            let category = py.get_type::<pyo3::exceptions::PyUserWarning>();
+            PyErr::warn(
+                py,
+                category.as_any(),
+                &std::ffi::CString::new(message).expect("paths contain no NUL"),
+                1,
+            )?;
+        }
+        Ok(PyVoiceover {
+            scene: self.inner.clone(),
+            handle,
+        })
+    }
+
+    /// Read voiceover texts from a Markdown narration script.
+    fn narration_script(&self, py: Python<'_>, path: &str) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        let mut scene = self.inner.lock().expect("scene canvas poisoned");
+        prepare_narration_directory(py, &mut scene)?;
+        scene.narration_script(path).map_err(voiceover_error)
+    }
+
+    /// Start the live take; later stops become the pauses recorded in it.
+    #[pyo3(signature = (key="live", *, volume=1.0))]
+    fn live_take(&self, py: Python<'_>, key: &str, volume: f64) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        let mut scene = self.inner.lock().expect("scene canvas poisoned");
+        prepare_narration_directory(py, &mut scene)?;
+        scene.live_take(key, volume).map_err(voiceover_error)
     }
 
     /// Current authoring cursor in absolute timeline seconds.

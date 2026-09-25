@@ -15,6 +15,8 @@ use gaanim_scene::{RasterImage, SceneSet};
 use gaanim_timeline::timeline::Timeline;
 use serde::Deserialize;
 
+pub mod narration;
+
 /// Metadata read from the first video stream in a media file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VideoMetadata {
@@ -585,6 +587,9 @@ struct PreviewAudioKey {
     offset_bits: u64,
     duration_bits: Option<u64>,
     speed_bits: u64,
+    /// Size and modification time, so a take re-recorded at the same path is
+    /// decoded again instead of replaying the cached previous take.
+    file_stamp: Option<(u64, std::time::SystemTime)>,
 }
 
 impl PreviewAudioKey {
@@ -594,6 +599,9 @@ impl PreviewAudioKey {
             offset_bits: track.source_offset.to_bits(),
             duration_bits: track.source_duration.map(f64::to_bits),
             speed_bits: track.speed.to_bits(),
+            file_stamp: std::fs::metadata(&track.path)
+                .ok()
+                .and_then(|metadata| Some((metadata.len(), metadata.modified().ok()?))),
         }
     }
 }
@@ -610,6 +618,15 @@ struct PreviewAudioRegistry {
     entries: Vec<Option<PreviewAudioEntry>>,
     cache: HashMap<PreviewAudioKey, Arc<[u8]>>,
     failed: std::collections::HashSet<PreviewAudioKey>,
+    /// Tracks whose failed seek was already reported.
+    seek_warned: std::collections::HashSet<PreviewAudioKey>,
+}
+
+/// Whether a track whose source already ended must be rebuilt: it loops, or
+/// the playhead is back before its end. The margin keeps a track that just
+/// finished from being rebuilt while the timeline catches up with it.
+fn needs_rebuild(track: &AudioTrack, active_duration: f64, scene_time: f64) -> bool {
+    track.looping || scene_time < track.start_time + active_duration - 0.1
 }
 
 #[derive(Resource)]
@@ -827,9 +844,28 @@ fn sync_preview_audio_system(world: &mut World) {
         Source, Volume,
     };
 
-    if !world.resource::<PreviewAudioEnabled>().0
-        || !world.contains_resource::<Assets<AudioSource>>()
-    {
+    if !world.contains_resource::<Assets<AudioSource>>() {
+        return;
+    }
+    if !world.resource::<PreviewAudioEnabled>().0 {
+        // Silence tracks that were already playing, e.g. while the editor
+        // records narration over the scene.
+        let entities: Vec<Entity> = world
+            .get_resource::<PreviewAudioRegistry>()
+            .map(|registry| {
+                registry
+                    .entries
+                    .iter()
+                    .flatten()
+                    .map(|entry| entry.entity)
+                    .collect()
+            })
+            .unwrap_or_default();
+        for entity in entities {
+            if let Some(sink) = world.get_mut::<AudioSink>(entity) {
+                sink.pause();
+            }
+        }
         return;
     }
 
@@ -889,13 +925,15 @@ fn sync_preview_audio_system(world: &mut World) {
             continue;
         };
         let handle = world.resource_mut::<Assets<AudioSource>>().add(source);
+        // Play once: Bevy's looping mode wraps the source in a buffer that
+        // rejects every seek, so scrubbing would leave the audio behind.
+        // A finished source is rebuilt below when the playhead returns.
         let audio = world
             .spawn((
                 AudioPlayer(handle),
-                PlaybackSettings::LOOP
+                PlaybackSettings::ONCE
                     .paused()
-                    .with_volume(Volume::Linear(track.volume as f32))
-                    .with_duration(std::time::Duration::from_secs_f64(duration)),
+                    .with_volume(Volume::Linear(track.volume as f32)),
             ))
             .id();
         registry.entries[index] = Some(PreviewAudioEntry {
@@ -908,6 +946,8 @@ fn sync_preview_audio_system(world: &mut World) {
     let scene_time = timeline.current_time;
     let timeline_playing = timeline.is_playing;
     let playback_rate = timeline.playback_rate.max(0.01);
+    let mut rebuild = Vec::new();
+    let mut seek_errors = Vec::new();
     for (index, entry) in registry.entries.iter().copied().enumerate() {
         let Some(entry) = entry else {
             continue;
@@ -927,6 +967,14 @@ fn sync_preview_audio_system(world: &mut World) {
         let Some(mut sink) = world.get_mut::<AudioSink>(entry.entity) else {
             continue;
         };
+        // A source that played to its end empties the sink, which can no
+        // longer seek. Rebuild it while the playhead can still reach it.
+        if sink.empty() {
+            if needs_rebuild(track, active_duration, scene_time) {
+                rebuild.push(index);
+            }
+            continue;
+        }
         let fade_in = if track.fade_in > 0.0 {
             (elapsed / track.fade_in).clamp(0.0, 1.0)
         } else {
@@ -941,14 +989,33 @@ fn sync_preview_audio_system(world: &mut World) {
             (track.volume * fade_in.min(fade_out)) as f32,
         ));
         sink.set_speed(playback_rate as f32);
+        // The sink measures and seeks in playback time; the decoded track is
+        // in scene time, which runs `playback_rate` times faster.
         let observed = sink.position().as_secs_f64() * playback_rate;
-        if (observed - target).abs() > 0.05 {
-            let _ = sink.try_seek(std::time::Duration::from_secs_f64(target));
+        if (observed - target).abs() > 0.05
+            && let Err(error) =
+                sink.try_seek(std::time::Duration::from_secs_f64(target / playback_rate))
+        {
+            seek_errors.push((index, error.to_string()));
         }
         if active && timeline_playing {
             sink.play();
         } else {
             sink.pause();
+        }
+    }
+    for (index, error) in seek_errors {
+        let key = PreviewAudioKey::new(&registry.tracks[index]);
+        if registry.seek_warned.insert(key) {
+            eprintln!(
+                "[gaanim] preview audio cannot follow the playhead in {}: {error}",
+                registry.tracks[index].path.display()
+            );
+        }
+    }
+    for index in rebuild {
+        if let Some(entry) = registry.entries[index].take() {
+            let _ = world.despawn(entry.entity);
         }
     }
     world.insert_resource(registry);
@@ -1221,5 +1288,56 @@ mod tests {
             "Bevy must enable the WAV decoder used by preview audio"
         );
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn finished_tracks_are_rebuilt_only_while_the_playhead_can_reach_them() {
+        let path = std::env::temp_dir().join(format!("gaanim-rebuild-{}.wav", std::process::id()));
+        narration::write_wav_take(&path, &[0.0; 8], 8_000).unwrap();
+        let mut track = AudioTrack::new(&path, 2.0, Some(3.0), 1.0, 0.0, 0.0).unwrap();
+        assert!(
+            needs_rebuild(&track, 3.0, 0.5),
+            "scrubbed back before the track"
+        );
+        assert!(
+            needs_rebuild(&track, 3.0, 4.0),
+            "scrubbed back inside the track"
+        );
+        assert!(!needs_rebuild(&track, 3.0, 4.95), "just finished playing");
+        assert!(!needs_rebuild(&track, 3.0, 9.0), "after the track");
+        track.looping = true;
+        assert!(needs_rebuild(&track, 3.0, 9.0));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn decoded_preview_audio_seeks_both_ways_when_ffmpeg_is_available() {
+        use bevy::audio::{Decodable, Source};
+        if Command::new("ffmpeg").arg("-version").output().is_err() {
+            eprintln!("skipping preview seek check because FFmpeg is unavailable");
+            return;
+        }
+        // One level per second, so a sample tells where the decoder is.
+        let directory = std::env::temp_dir().join(format!("gaanim-seek-{}", std::process::id()));
+        let path = directory.join("take.wav");
+        let levels = [0.1_f32, 0.4, 0.7];
+        let samples: Vec<f32> = levels
+            .iter()
+            .flat_map(|level| std::iter::repeat_n(*level, 8_000))
+            .collect();
+        narration::write_wav_take(&path, &samples, 8_000).unwrap();
+        let bytes = decode_preview_audio_range(&path, 0.0, None, 1.0).unwrap();
+        let mut decoder = bevy::audio::AudioSource { bytes }.decoder();
+        for (second, level) in [(2.5, 0.7), (0.5, 0.1), (1.5, 0.4)] {
+            decoder
+                .try_seek(std::time::Duration::from_secs_f64(second))
+                .expect("preview audio must seek");
+            let sample = decoder.next().expect("audio after the seek");
+            assert!(
+                (sample - level).abs() < 0.02,
+                "{second} s: {sample} != {level}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(directory);
     }
 }

@@ -360,8 +360,13 @@ impl RecentProjects {
 }
 
 fn recent_projects_path() -> Option<PathBuf> {
-    ProjectDirs::from("dev", "Gaanim", "Gaanim")
-        .map(|dirs| dirs.data_local_dir().join("recent-projects.json"))
+    user_data_dir().map(|dir| dir.join("recent-projects.json"))
+}
+
+/// Per-user directory for Gaanim state such as recent projects and editor
+/// preferences.
+pub fn user_data_dir() -> Option<PathBuf> {
+    ProjectDirs::from("dev", "Gaanim", "Gaanim").map(|dirs| dirs.data_local_dir().to_path_buf())
 }
 
 pub fn default_project_parent() -> PathBuf {
