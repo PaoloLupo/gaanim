@@ -1754,6 +1754,52 @@ def validate_narration_contract(module: object) -> list[str]:
     return failures
 
 
+def validate_text_animator_contract(module) -> list[str]:
+    """Text range animator, masked reveals, blur-in and tracking (TX-01/02/05)."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    title = scene.text("uno dos\ntres")
+    wave = title.animator(by="word", shape="round", order="random", seed=3)
+    if wave.set(offset=(0, -0.4), opacity=0.0, scale=0.6, rotation=0.2) is not wave:
+        failures.append("TextAnimator.set must return the animator")
+    if not isinstance(wave.animate, module.TextAnimatorAnimation):
+        failures.append("TextAnimator.animate did not return its typed proxy")
+    for anim in (
+        wave.animate.sweep().duration(1.2),
+        wave.animate.sweep(1.0, 0.0, stagger=0.05),
+        title.animate.reveal(by="line", style="slide_up", mask=True, stagger=0.06),
+        title.animate.reveal(by="word", style="blur", stagger=0.04),
+        title.animate.conceal(by="line", style="slide_up"),
+        title.animate.blur_in(sigma=0.3, by="grapheme", stagger=0.02),
+        title.animate.tracking(0.0),
+    ):
+        if not isinstance(anim, module.Anim):
+            failures.append(f"text animator preset returned {type(anim).__name__}, not Anim")
+    if title.tracking(0.4) is not title:
+        failures.append("Text.tracking must return the Text")
+    if not isinstance(title.words[0].animate.reveal("from_below"), module.Anim):
+        failures.append("the text selection reveal(style) form stopped working")
+    rejected = (
+        (ValueError, lambda: title.animator(shape="wobble")),
+        (ValueError, lambda: title.animator(by="sentence")),
+        (ValueError, lambda: wave.set(opacity=2.0)),
+        (ValueError, lambda: title.animate.reveal(style="wipe")),
+        (ValueError, lambda: title.animate.blur_in(sigma=-1.0)),
+        (TypeError, lambda: title.words[0].animate.reveal("fade", by="word")),
+        (TypeError, lambda: scene.geometry.circle(1.0).animate.blur_in()),
+        (ValueError, lambda: title.animate.opacity(0.5).tracking(0.2)),
+    )
+    for error, build in rejected:
+        try:
+            build()
+        except error:
+            pass
+        else:
+            failures.append(f"a text animator call did not raise {error.__name__}")
+    scene.play([title.animate.reveal(by="line"), wave.animate.sweep()])
+    return failures
+
+
 def main() -> int:
     tree = ast.parse(STUB.read_text(encoding="utf-8"), filename=str(STUB))
     module = importlib.import_module("gaanim.gaanim_core")
@@ -1818,6 +1864,7 @@ def main() -> int:
     missing.extend(validate_theme_typography_contract(module))
     missing.extend(validate_timeline_cursor_contract(module))
     missing.extend(validate_narration_contract(module))
+    missing.extend(validate_text_animator_contract(module))
     missing.extend(validate_runtime_type_aliases(module))
     missing.extend(documented_text_api_failures(tree))
     missing.extend(documented_editorial_api_failures(tree))

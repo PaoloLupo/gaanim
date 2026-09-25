@@ -1037,12 +1037,39 @@ impl PyCanvasAnim {
         })
     }
 
-    #[pyo3(signature = (style="fade"))]
-    pub(crate) fn reveal(&self, style: &str) -> PyResult<Self> {
+    /// On a Text proxy, reveal unit by unit (TX-01); on a text selection,
+    /// reveal the selected glyphs with `style` "fade", "wipe" or "from_below".
+    #[pyo3(signature = (style=None, *, by=None, mask=None, stagger=None))]
+    pub(crate) fn reveal(
+        &self,
+        style: Option<&str>,
+        by: Option<&str>,
+        mask: Option<bool>,
+        stagger: Option<f64>,
+    ) -> PyResult<Self> {
         use gaanim_api::canvas::FragmentRevealStyle;
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
-        let style = match style {
+        let selection = self.inner.property_target_is_text_selection()
+            || matches!(
+                self.inner.inner.anim_type,
+                gaanim_api::anim::AnimationType::TextSelection { .. }
+            );
+        if !selection {
+            return crate::pytext_animator::text_reveal(
+                self,
+                style.unwrap_or("slide_up"),
+                by.unwrap_or("line"),
+                mask.unwrap_or(true),
+                stagger.unwrap_or(0.06),
+            );
+        }
+        if by.is_some() || mask.is_some() || stagger.is_some() {
+            return Err(PyTypeError::new_err(
+                "by, mask, and stagger apply to whole-Text reveals, not to text selections",
+            ));
+        }
+        let style = match style.unwrap_or("fade") {
             "fade" => FragmentRevealStyle::Fade,
             "wipe" => FragmentRevealStyle::Wipe,
             "from_below" => FragmentRevealStyle::FromBelow,
@@ -1440,7 +1467,7 @@ mod tests {
             other => panic!("expected a selection effect, got {other:?}"),
         };
         assert!(matches!(
-            effect(selection.reveal("from_below").unwrap()),
+            effect(selection.reveal(Some("from_below"), None, None, None).unwrap()),
             TextSelectionEffect::RevealFromBelow
         ));
         assert!(matches!(
@@ -1451,7 +1478,7 @@ mod tests {
             effect(selection.annotate("c", (0.0, 0.6)).unwrap()),
             TextSelectionEffect::Annotate { offset, .. } if offset.y == 0.6
         ));
-        assert!(error_is::<PyValueError>(selection.reveal("slide")));
+        assert!(error_is::<PyValueError>(selection.reveal(Some("slide"), None, None, None)));
         assert!(error_is::<PyValueError>(
             selection.annotate("c", (f64::INFINITY, 0.0))
         ));
@@ -1459,7 +1486,7 @@ mod tests {
         let circle = PyCanvasAnim {
             inner: scene.circle(1.0).animate(),
         };
-        assert!(error_is::<PyTypeError>(circle.reveal("fade")));
+        assert!(error_is::<PyTypeError>(circle.reveal(Some("fade"), None, None, None)));
         assert!(error_is::<PyTypeError>(circle.brace("", false)));
         assert!(error_is::<PyTypeError>(circle.annotate("x", (0.0, 0.6))));
     }

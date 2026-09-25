@@ -968,6 +968,90 @@ class Anim:
             scene.play(ring.animate.trim(start=0.0, end=1.0))
         """
         ...
+    def reveal(
+        self,
+        style: Optional[Literal["slide_up", "slide_down", "fade", "scale", "blur"]] = None,
+        *,
+        by: Literal["grapheme", "word", "line", "part"] = "line",
+        mask: bool = True,
+        stagger: float = 0.06,
+    ) -> Anim:
+        """Reveal a Text unit by unit, ``stagger`` seconds apart.
+
+        ``style`` defaults to ``"slide_up"``: each unit rises one row height
+        from behind a vector mask clipped to its row, so it works in SVG
+        export too. ``"slide_down"`` falls from above; with ``mask=False``
+        slides travel less and fade in instead of hiding behind the mask.
+        ``"fade"``, ``"scale"`` and ``"blur"`` ignore ``mask``. Units are
+        graphemes, words, explicit lines (``text.lines``) or semantic parts.
+        ``easing`` eases each unit (ease-out cubic by default) and the
+        duration covers the whole cascade; a stagger that does not fit is
+        compressed. Glyphs hold their hidden state until the reveal starts,
+        as with ``fade_in``. Seeks are exact.
+
+        On a text selection (``text["x"].animate``) this is the selection
+        reveal: ``style`` is ``"fade"`` (default), ``"wipe"`` or
+        ``"from_below"`` and ``by``/``mask``/``stagger`` raise ``TypeError``.
+        Non-Text drawables raise ``TypeError``; unknown styles or units raise
+        ``ValueError``.
+
+        Example:
+            scene.play(title.animate.reveal(by="line", style="slide_up", stagger=0.06))
+            scene.play(quote.animate.reveal(by="word", style="blur", stagger=0.04))
+        """
+        ...
+    def conceal(
+        self,
+        style: Literal["slide_up", "slide_down", "fade", "scale", "blur"] = "slide_up",
+        *,
+        by: Literal["grapheme", "word", "line", "part"] = "line",
+        mask: bool = True,
+        stagger: float = 0.06,
+    ) -> Anim:
+        """Exit symmetric to ``reveal``: units leave in reading order and stay hidden.
+
+        ``"slide_up"`` sends each unit up behind its row mask. Raises the
+        same errors as ``reveal``.
+
+        Example:
+            scene.play(headline.animate.conceal(by="line", style="slide_up"))
+        """
+        ...
+    def blur_in(
+        self,
+        sigma: float = 0.3,
+        *,
+        by: Literal["grapheme", "word", "line", "part"] = "grapheme",
+        stagger: float = 0.02,
+    ) -> Anim:
+        """Bring a Text in unit by unit from a transparent Gaussian blur.
+
+        ``sigma`` is the starting blur in scene units (the same effect as
+        ``blur``) and ``stagger`` the delay in seconds between units; each
+        unit clears its blur and fades in with an ease-out. Glyphs hold the
+        blurred, transparent state until the animation starts. Non-Text drawables raise ``TypeError``; a negative
+        ``sigma`` or ``stagger`` raises ``ValueError``.
+
+        Example:
+            scene.play(title.animate.blur_in(sigma=0.3, by="grapheme", stagger=0.02))
+        """
+        ...
+    def tracking(self, value: float) -> Anim:
+        """Animate the extra space between neighboring glyphs to ``value`` scene units.
+
+        Glyphs shift along the text's baseline without a new layout: rows
+        grow from their left edge, center or right edge according to the
+        text alignment, and ``0`` restores the original spacing. Default
+        easing is smooth. It combines with text animations that do not move
+        glyphs, such as ``blur_in``; ``scene.play`` rejects two simultaneous
+        animations that write the same glyph channel (for example ``tracking``
+        with a sliding ``reveal``). Non-Text drawables raise ``TypeError``.
+
+        Example:
+            title.tracking(0.4)
+            scene.play(title.animate.tracking(0.0).duration(1.2))
+        """
+        ...
     def path_arc(self, angle: float) -> Anim:
         """Travel this animation's ``move_to``/``shift_by`` along a circular arc.
 
@@ -2182,6 +2266,64 @@ class TextQuery:
     @overload
     def __getitem__(self, index: slice) -> TextSelection: ...
 
+class TextAnimator:
+    """Range selector over the units of one Text (After Effects-style text animator).
+
+    Create it with ``Text.animator``, define the "out" state with ``set`` and
+    play it with ``animate.sweep()``. Each unit's influence is evaluated
+    natively from its position in ``order`` and the selector ``shape``, so
+    seeks are exact and nothing calls back into Python per frame.
+    """
+    def set(
+        self,
+        *,
+        offset: Optional[tuple[float, float]] = None,
+        opacity: Optional[float] = None,
+        scale: Optional[float] = None,
+        rotation: Optional[float] = None,
+        blur: Optional[float] = None,
+        tracking: Optional[float] = None,
+        color: Optional[Color] = None,
+    ) -> TextAnimator:
+        """Define the state a unit reaches at full influence and return this animator.
+
+        ``offset`` moves units in scene units, ``opacity`` (0..1) is
+        absolute, ``scale`` and ``rotation`` (radians, clamped to less than
+        half a turn) act around each unit's center, ``blur`` is a Gaussian
+        sigma in scene units, ``tracking`` adds scene units between glyphs
+        and ``color`` sets a solid fill. Omitted values keep what an earlier
+        ``set`` defined; unset channels stay at rest. Sweeps capture the
+        state when ``sweep()`` is called. Invalid values raise ``ValueError``.
+
+        Example:
+            wave = title.animator(by="grapheme", shape="smooth").set(offset=(0, -0.4), opacity=0.0)
+        """
+        ...
+    @property
+    def animate(self) -> TextAnimatorAnimation:
+        """Typed proxy whose ``sweep()`` returns a composable ``Anim``."""
+        ...
+
+class TextAnimatorAnimation:
+    """Animation proxy of a ``TextAnimator``."""
+    def sweep(self, start: float = 0.0, end: float = 1.0, *, stagger: Optional[float] = None) -> Anim:
+        """Move the selector range from ``start`` to ``end`` over the animation.
+
+        ``0`` lies before the first unit and ``1`` after the last, so the
+        default sweep crosses every unit once; ``sweep(1, 0)`` plays it
+        backward. Units take their window in ``order``: with a reveal shape
+        they move from the out state to rest, with ``"triangle"``/``"round"``
+        a wave passes through them. ``stagger`` is the delay in seconds
+        between units (``None`` staggers adaptively). ``easing`` eases each
+        unit's transition (linear by default) and the result works in
+        ``scene.play``, ``parallel``, ``sequence`` and ``stagger``. Entry
+        sweeps hold their first frame until they start.
+
+        Example:
+            scene.play(wave.animate.sweep().duration(1.2))
+        """
+        ...
+
 class Text(Drawable):
     """Structured, Layout-v2-measurable vector text and mathematics."""
     def glow(self, color: Color, radius: float = 0.16, intensity: float = 1.0) -> Self:
@@ -2230,6 +2372,42 @@ class Text(Drawable):
     def lines(self) -> TextQuery: ...
     @property
     def parts(self) -> TextQuery: ...
+    def animator(
+        self,
+        by: Literal["grapheme", "word", "line", "part"] = "grapheme",
+        shape: Literal["square", "ramp", "smooth", "ease_in", "ease_out", "triangle", "round"] = "smooth",
+        order: Literal["forward", "reverse", "center", "random"] = "forward",
+        seed: int = 0,
+    ) -> TextAnimator:
+        """Create a range animator over this text's graphemes, words, explicit lines or parts.
+
+        ``shape`` is the selector profile: ``"square"``, ``"ramp"``,
+        ``"smooth"``, ``"ease_in"`` and ``"ease_out"`` move each unit from the
+        out state to rest (a reveal); ``"triangle"`` and ``"round"`` rise to
+        the out state and settle back (a wave). ``order`` sets which unit the
+        range reaches first; ``"random"`` is a permutation fixed by ``seed``.
+        Units follow ``text.graphemes``/``words``/``lines``/``parts`` and
+        punctuation joins its neighbor. Invalid names raise ``ValueError``.
+
+        Example:
+            wave = title.animator(by="grapheme", shape="smooth", order="forward", seed=0)
+            wave.set(offset=(0, -0.4), opacity=0.0, scale=0.6, rotation=0.2)
+            scene.play(wave.animate.sweep().duration(1.2))
+        """
+        ...
+    def tracking(self, value: float) -> Self:
+        """Set the extra space between neighboring glyphs to ``value`` scene units now.
+
+        Glyphs shift along the baseline without a new layout, anchored at
+        the left edge, center or right edge of each row according to the
+        text alignment; ``0`` restores the layout spacing. Animate it with
+        ``animate.tracking(value)``. Returns this Text.
+
+        Example:
+            title.tracking(0.4)
+            scene.play(title.animate.tracking(0.0))
+        """
+        ...
     @overload
     @overload
     def move_to(self, reference: Drawable, /) -> Self: ...

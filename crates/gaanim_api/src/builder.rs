@@ -263,7 +263,7 @@ fn normalized_match_spans(
     matches
 }
 
-fn adaptive_lag_ratio(item_count: usize) -> f64 {
+pub(crate) fn adaptive_lag_ratio(item_count: usize) -> f64 {
     (4.0 / item_count.max(1) as f64).min(0.2)
 }
 
@@ -345,7 +345,7 @@ fn bounds_edge_point(
 }
 
 /// Stagger slot of each of `count` groups for `order`.
-fn draw_group_slots(count: usize, order: crate::anim::DrawOrder) -> Vec<usize> {
+pub(crate) fn draw_group_slots(count: usize, order: crate::anim::DrawOrder) -> Vec<usize> {
     use crate::anim::DrawOrder;
     match order {
         DrawOrder::Forward => (0..count).collect(),
@@ -712,6 +712,8 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub(crate) media_frames: HashMap<ObjectId, gaanim_scene::MediaFrame>,
     /// Authored local geometry of solid arrows, used by `GrowArrow`.
     pub(crate) arrow_shapes: HashMap<ObjectId, gaanim_math::ArrowShape>,
+    /// Extra glyph tracking of Text roots set by `tracking(...)`, in scene units.
+    pub(crate) text_tracking: HashMap<ObjectId, f64>,
     /// Objects whose scene membership is intentionally global at the current authoring cursor.
     persistent_objects: HashSet<ObjectId>,
     /// Objects whose membership has an explicit reuse/persist/release schedule in this scene.
@@ -753,6 +755,7 @@ pub(crate) struct SceneBuilderState {
     effects: HashMap<ObjectId, crate::effect_lens::EffectState>,
     media_frames: HashMap<ObjectId, gaanim_scene::MediaFrame>,
     arrow_shapes: HashMap<ObjectId, gaanim_math::ArrowShape>,
+    text_tracking: HashMap<ObjectId, f64>,
     persistent_objects: HashSet<ObjectId>,
     membership_managed_objects: HashSet<ObjectId>,
     text_cancellation_marks: HashMap<ObjectId, Vec<ObjectId>>,
@@ -782,6 +785,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             effects: self.effects.clone(),
             media_frames: self.media_frames.clone(),
             arrow_shapes: self.arrow_shapes.clone(),
+            text_tracking: self.text_tracking.clone(),
             persistent_objects: self.persistent_objects.clone(),
             membership_managed_objects: self.membership_managed_objects.clone(),
             text_cancellation_marks: self.text_cancellation_marks.clone(),
@@ -818,6 +822,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             effects,
             media_frames,
             arrow_shapes,
+            text_tracking,
             persistent_objects,
             membership_managed_objects,
             text_cancellation_marks,
@@ -848,6 +853,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             path_arc: None,
             media_frames,
             arrow_shapes,
+            text_tracking,
             persistent_objects,
             membership_managed_objects,
             text_cancellation_marks,
@@ -1145,6 +1151,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             path_arc: None,
             media_frames: HashMap::new(),
             arrow_shapes: HashMap::new(),
+            text_tracking: HashMap::new(),
             property_bindings: HashMap::new(),
             property_source_cursors: HashMap::new(),
             persistent_objects: HashSet::new(),
@@ -1376,6 +1383,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::GrowArrow => "Arrow",
             AnimationType::SignalFloat { .. } => "Signal",
             AnimationType::ShowPassingFlash { .. } => "ShowPassingFlash",
+            AnimationType::TextAnimator(_) => "TextAnimator",
         }
     }
 
@@ -2752,6 +2760,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_text_selection_internal(anim, fragment, occurrence, effect);
             return;
         }
+        if let AnimationType::TextAnimator(spec) = anim.anim_type.clone() {
+            self.play_text_animator_internal(anim, *spec);
+            return;
+        }
         if let AnimationType::TextSelectionProperties {
             fragment,
             occurrence,
@@ -3218,7 +3230,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::MoveAlongPath3D { .. }
             | AnimationType::Transform { .. }
             | AnimationType::ReplacementTransform { .. }
-            | AnimationType::GrowArrow => {
+            | AnimationType::GrowArrow
+            | AnimationType::TextAnimator(_) => {
                 unreachable!("Expansion is dispatched in the early branch above")
             }
             AnimationType::SignalFloat { to } => {

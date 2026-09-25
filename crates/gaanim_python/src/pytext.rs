@@ -638,7 +638,7 @@ impl PyTextSelectionAnimation {
 
     #[pyo3(signature = (style="fade"))]
     fn reveal(&self, style: &str) -> PyResult<PyCanvasAnim> {
-        self.proxy().reveal(style)
+        self.proxy().reveal(Some(style), None, None, None)
     }
 
     #[pyo3(signature = (label="", *, above=false))]
@@ -736,7 +736,7 @@ impl PyTextSelection {
 #[pyclass(name = "Text", module = "gaanim_core", extends = PyDrawable, skip_from_py_object)]
 #[derive(Clone)]
 pub struct PyText {
-    handle: gaanim_api::canvas::DrawableHandle,
+    pub(crate) handle: gaanim_api::canvas::DrawableHandle,
     spec: TextSpec,
     /// Derive the horizontal line alignment from the anchor of `move_to`
     /// because the text was created without `flow` or `text_align`.

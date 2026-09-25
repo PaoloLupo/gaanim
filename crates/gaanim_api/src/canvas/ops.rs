@@ -132,6 +132,7 @@ impl CanvasState {
                 | AnimationType::RotateBy3D { .. } => "rotation",
                 AnimationType::SignalFloat { .. } => "signal",
                 AnimationType::PathTrim { .. } => "trim",
+                AnimationType::TextAnimator(_) => "text_animator",
                 _ => "other",
             }
         }
