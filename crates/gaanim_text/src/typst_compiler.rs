@@ -295,10 +295,14 @@ fn typst_resources_for(font_registry: &FontRegistry) -> (FontUniverseKey, Arc<Ty
         extra_fonts,
         system_font_count,
     });
-    typst_resources_cache()
+    // Another thread may have built the same universe since the lookup; keep
+    // the first entry so every caller shares one `TypstResources`.
+    let resources = typst_resources_cache()
         .lock()
         .expect("Typst resources cache poisoned")
-        .insert(key.clone(), resources.clone());
+        .entry(key.clone())
+        .or_insert(resources)
+        .clone();
     (key, resources)
 }
 
