@@ -31,6 +31,6 @@ scene.play([lines.animate.conceal(by="line", style="slide_up", stagger=0.15).dur
 scene.wait(0.3)
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
-    scene.snapshots(snapshots, [0.3, 0.6, 0.9, 2.0])
+    scene.snapshots(snapshots, [0.3, 0.6, 0.9, 2.3])
 else:
     scene.render()

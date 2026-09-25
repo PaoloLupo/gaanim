@@ -2962,7 +2962,9 @@ class SceneStop:
 class SceneMarker:
     """A named timeline instant authored with ``scene.marker``."""
     @property
-    def name(self) -> str: ...
+    def name(self) -> str:
+        """Unique marker name, usable with ``gaanim export --from/--to``."""
+        ...
     @property
     def time(self) -> float:
         """Absolute timeline time in seconds."""

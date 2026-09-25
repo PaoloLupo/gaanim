@@ -117,17 +117,17 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
 
 | ☐ | ID | Ítem | Coste | Impacto | Depende | Issue |
 |---|---|---|---|---|---|---|
-| ☐ | [TX-02](#tx-02--animador-de-rango-de-texto) | Animador de rango de texto (motor por glifo) | M | ★★★ | QW-01 | [#129](https://github.com/PaoloLupo/gaanim/issues/129) |
-| ☐ | [TX-01](#tx-01--revelados-con-máscara-por-línea-palabra-o-carácter) | Revelados con máscara por línea, palabra o carácter | M | ★★★ | TX-02 | [#130](https://github.com/PaoloLupo/gaanim/issues/130) |
-| ☐ | [TX-03](#tx-03--máquina-de-escribir-con-cursor) | Máquina de escribir con cursor | S | ★★ | — | [#131](https://github.com/PaoloLupo/gaanim/issues/131) |
-| ☐ | [TX-04](#tx-04--scramble--decode) | Scramble / decode | M | ★★ | PR-02 | [#132](https://github.com/PaoloLupo/gaanim/issues/132) |
-| ☐ | [TX-05](#tx-05--blur-in-y-tracking) | Blur-in y tracking | S | ★★ | FX-01, TX-02 | [#133](https://github.com/PaoloLupo/gaanim/issues/133) |
-| ☐ | [TS-01](#ts-01--wipes-iris-push-y-blinds-con-easing) | Wipes, iris, push y blinds, con easing | M | ★★★ | — | [#134](https://github.com/PaoloLupo/gaanim/issues/134) |
-| ☐ | [TS-04](#ts-04--overlays-sobre-el-corte) | Overlays sobre el corte (flash, light leak) | S | ★ | — | [#135](https://github.com/PaoloLupo/gaanim/issues/135) |
-| ☐ | [TM-05](#tm-05--etiquetas-posiciones-relativas-y-marcadores) | Etiquetas, posiciones relativas y marcadores | M | ★★★ | — | [#136](https://github.com/PaoloLupo/gaanim/issues/136) |
-| ☐ | [CA-01](#ca-01--shake-por-trauma-con-ruido) | Shake por trauma con ruido | S | ★★ | PR-02 | [#137](https://github.com/PaoloLupo/gaanim/issues/137) |
-| ☐ | [CA-02](#ca-02--zoom-perceptualmente-uniforme) | Zoom perceptualmente uniforme | S | ★★ | — | [#138](https://github.com/PaoloLupo/gaanim/issues/138) |
-| ☐ | [AN-02](#an-02--resaltador-tipo-marcador) | Resaltador tipo marcador | S | ★★ | — | [#139](https://github.com/PaoloLupo/gaanim/issues/139) |
+| ☑ | [TX-02](#tx-02--animador-de-rango-de-texto) | Animador de rango de texto (motor por glifo) | M | ★★★ | QW-01 | [#129](https://github.com/PaoloLupo/gaanim/issues/129) |
+| ☑ | [TX-01](#tx-01--revelados-con-máscara-por-línea-palabra-o-carácter) | Revelados con máscara por línea, palabra o carácter | M | ★★★ | TX-02 | [#130](https://github.com/PaoloLupo/gaanim/issues/130) |
+| ☑ | [TX-03](#tx-03--máquina-de-escribir-con-cursor) | Máquina de escribir con cursor | S | ★★ | — | [#131](https://github.com/PaoloLupo/gaanim/issues/131) |
+| ☑ | [TX-04](#tx-04--scramble--decode) | Scramble / decode | M | ★★ | PR-02 | [#132](https://github.com/PaoloLupo/gaanim/issues/132) |
+| ☑ | [TX-05](#tx-05--blur-in-y-tracking) | Blur-in y tracking | S | ★★ | FX-01, TX-02 | [#133](https://github.com/PaoloLupo/gaanim/issues/133) |
+| ☑ | [TS-01](#ts-01--wipes-iris-push-y-blinds-con-easing) | Wipes, iris, push y blinds, con easing | M | ★★★ | — | [#134](https://github.com/PaoloLupo/gaanim/issues/134) |
+| ☑ | [TS-04](#ts-04--overlays-sobre-el-corte) | Overlays sobre el corte (flash, light leak) | S | ★ | — | [#135](https://github.com/PaoloLupo/gaanim/issues/135) |
+| ☑ | [TM-05](#tm-05--etiquetas-posiciones-relativas-y-marcadores) | Etiquetas, posiciones relativas y marcadores | M | ★★★ | — | [#136](https://github.com/PaoloLupo/gaanim/issues/136) |
+| ☑ | [CA-01](#ca-01--shake-por-trauma-con-ruido) | Shake por trauma con ruido | S | ★★ | PR-02 | [#137](https://github.com/PaoloLupo/gaanim/issues/137) |
+| ☑ | [CA-02](#ca-02--zoom-perceptualmente-uniforme) | Zoom perceptualmente uniforme | S | ★★ | — | [#138](https://github.com/PaoloLupo/gaanim/issues/138) |
+| ☑ | [AN-02](#an-02--resaltador-tipo-marcador) | Resaltador tipo marcador | S | ★★ | — | [#139](https://github.com/PaoloLupo/gaanim/issues/139) |
 
 ### Ola 3: acabado visual (shaders y composición)
 
