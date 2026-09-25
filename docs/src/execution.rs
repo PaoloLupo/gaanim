@@ -462,8 +462,13 @@ pub fn compile_code_cell(
         code_to_execute = format!("{}{}", replay, code_to_execute);
     }
 
-    // Hash and cell ID
-    let cell_hash = typst_utils::hash128(code_to_execute.as_bytes());
+    // Hash and cell ID. An export's preview settings are part of its identity,
+    // so changing them re-renders the previews instead of reusing old files.
+    let cell_hash = if expected_webp.is_some() {
+        typst_utils::hash128(format!("{code_to_execute}{}", PREVIEW_ARGS.join(" ")).as_bytes())
+    } else {
+        typst_utils::hash128(code_to_execute.as_bytes())
+    };
     let cell_id = if !id.is_empty() {
         id.to_string()
     } else if let Some(ref override_id) = cell_id_override {
@@ -539,6 +544,14 @@ pub fn compile_code_cell(
 
     Ok(Value::Dict(result))
 }
+
+/// Export options for the animated previews: small and light enough for a web
+/// page (they sit next to the code), and fast to render on a CPU rasterizer.
+/// Scenes with another aspect ratio are letterboxed.
+const PREVIEW_ARGS: [&str; 7] = [
+    "--quality", "draft", "--width", "960", "--height", "540", "--fit",
+];
+const PREVIEW_FIT: &str = "contain";
 
 /// Prefix of the diagnostic a failing example emits; the builder counts them.
 pub const EXAMPLE_ERROR: &str = "Execution error in Python cell:";
@@ -670,6 +683,33 @@ pub fn run_collected(jobs: usize) -> usize {
     pending.len()
 }
 
+/// Delete cached results and previews that no cell of the last compilation
+/// used, so the cache (and CI's saved copy of it) does not grow forever.
+/// Returns how many files were removed.
+pub fn prune_unused() -> usize {
+    let stats = stats();
+    let used = |id: &str| stats.executed.contains(id) || stats.cached.contains(id);
+    let root = project_root();
+    let mut removed = 0;
+    let dirs = [
+        (root.join("target/code_cache"), ".json"),
+        (root.join("assets/generated"), "_anim.webp"),
+    ];
+    for (dir, suffix) in dirs {
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for entry in entries.filter_map(Result::ok) {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if let Some(id) = name.strip_suffix(suffix)
+                && !used(id)
+                && fs::remove_file(entry.path()).is_ok()
+            {
+                removed += 1;
+            }
+        }
+    }
+    removed
+}
+
 fn project_root() -> PathBuf {
     PROJECT_ROOT
         .read()
@@ -787,8 +827,8 @@ fn execute(job: &CellJob, work_dir: &Path, temp_file: &Path) -> CellOutcome {
                 .arg(temp_file)
                 .arg("--output")
                 .arg(output)
-                .arg("--quality")
-                .arg("standard");
+                .args(PREVIEW_ARGS)
+                .arg(PREVIEW_FIT);
         }
         CellMode::Check => {
             command.arg("check").arg(temp_file);

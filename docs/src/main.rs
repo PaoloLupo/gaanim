@@ -47,6 +47,13 @@ fn compile(command: &CompileCommand) -> Result<ExitCode> {
 
     report.print(&world);
     let failed = report.print_examples();
+    // Only a complete, successful build knows every cell still in use.
+    if report.0.output.is_ok() && failed == 0 {
+        let removed = execution::prune_unused();
+        if removed > 0 {
+            writeln!(out(), "Removed {removed} unused cached examples.").unwrap();
+        }
+    }
 
     if report.0.output.is_err() || (failed > 0 && !command.args.allow_example_errors) {
         return Ok(ExitCode::FAILURE);
