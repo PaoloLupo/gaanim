@@ -9,7 +9,8 @@ scene = Scene(frame=(16, 9), background=BLACK)
 title = scene.text("Typewriter", role="title").fill(WHITE).move_to(0, 3.6)
 hint = scene.text("cps=18 · jitter=0.2 · cursor=▍").fill(GRAY).scale_by(0.5).move_to(0, 2.4)
 
-prompt = scene.text("> gaanim render --preview").fill(CYAN).move_to(-2.2, 0.4)
+# The code role uses a monospace face, so "--" stays two hyphens.
+prompt = scene.text("> gaanim render --preview", role="code").fill(CYAN).move_to(-2.2, 0.4)
 
 # 25 graphemes at 18 cps: about 1.4 s, then the cursor blinks while idle.
 scene.play([prompt.animate.typewriter(cps=18, cursor="▍", blink=2.0, jitter=0.2, seed=7)])

@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use bevy::prelude::{Entity, World};
 use gaanim_core::kurbo::{Affine, BezPath, Shape};
-use gaanim_scene::Path2D;
+use gaanim_scene::{Path2D, PathSource};
 use gaanim_text::motion::scramble_pick;
 
 use crate::tween::AnimatableLens;
@@ -29,6 +29,21 @@ fn write_owned(world: &mut World, entity: Entity, path: BezPath) {
     {
         current.0 = Arc::new(path);
     }
+}
+
+/// Replace the glyph's shape itself: `Path2D` and its `PathSource`.
+///
+/// The renderer treats a closed `PathSource` that differs from `Path2D` as a
+/// path trimmed by `write`/`create` and only strokes it, so a substituted
+/// glyph must also become the source to be filled.
+fn write_shape(world: &mut World, entity: Entity, path: Arc<BezPath>) {
+    if let Some(mut source) = world.get_mut::<PathSource>(entity)
+        && !Arc::ptr_eq(&source.0, &path)
+        && source.0.elements() != path.elements()
+    {
+        source.0 = path.clone();
+    }
+    write_path(world, entity, &path);
 }
 
 /// Shows a glyph outline only while `appear <= t < vanish` (either bound
@@ -171,17 +186,17 @@ impl ScrambleGlyphLens {
 impl AnimatableLens for ScrambleGlyphLens {
     fn interpolate(&self, world: &mut World, entity: Entity, t: f64) {
         if t >= self.settle_at {
-            write_path(world, entity, &self.final_path);
+            write_shape(world, entity, self.final_path.clone());
             return;
         }
-        let path = match self.pick_at(t) {
+        match self.pick_at(t) {
             Some(index) => {
                 let (glyph, center) = &self.charset.glyphs[index];
-                Affine::translate((self.anchor.0 - center, self.anchor.1)) * glyph
+                let placed = Affine::translate((self.anchor.0 - center, self.anchor.1)) * glyph;
+                write_shape(world, entity, Arc::new(placed));
             }
-            None => BezPath::new(),
-        };
-        write_owned(world, entity, path);
+            None => write_owned(world, entity, BezPath::new()),
+        }
     }
 
     fn clone_box(&self) -> Box<dyn AnimatableLens> {
@@ -275,15 +290,37 @@ mod tests {
         assert_eq!(lens.pick_at(0.1), lens.pick_at(0.124));
         assert_eq!(lens.pick_at(0.8), None);
 
-        let (mut world, entity) = glyph_world();
+        // A glyph as spawned: its shape is both the drawn path and the source.
+        let mut world = World::new();
+        let original = Arc::new(square(1.0));
+        let entity = world
+            .spawn((Path2D(original.clone()), PathSource(original)))
+            .id();
+        // The renderer only fills a closed path equal to its `PathSource`
+        // (a differing one is a write/create trim), so a scrambled glyph must
+        // replace both or it renders as nothing.
+        let filled = |world: &World| {
+            let path = &world.get::<Path2D>(entity).unwrap().0;
+            let source = &world.get::<PathSource>(entity).unwrap().0;
+            !path.is_empty() && path.elements() == source.elements()
+        };
         lens.interpolate(&mut world, entity, 0.3);
+        assert!(filled(&world));
         let scrambled = world.get::<Path2D>(entity).unwrap().0.bounding_box();
         assert!((scrambled.center().x - 5.0).abs() < 1e-9);
         assert_eq!(scrambled.y0, 1.0);
         lens.interpolate(&mut world, entity, 0.9);
+        assert!(filled(&world));
         assert_eq!(
             world.get::<Path2D>(entity).unwrap().0.bounding_box(),
             Rect::new(0.0, 0.0, 1.0, 1.0)
+        );
+        // Seeking back into the scramble is exact.
+        lens.interpolate(&mut world, entity, 0.3);
+        assert!(filled(&world));
+        assert_eq!(
+            world.get::<Path2D>(entity).unwrap().0.bounding_box(),
+            scrambled
         );
         let secondary = ScrambleGlyphLens {
             primary: false,
