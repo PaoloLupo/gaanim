@@ -1863,6 +1863,53 @@ def validate_text_animator_contract(module) -> list[str]:
         else:
             failures.append(f"a text animator call did not raise {error.__name__}")
     scene.play([title.animate.reveal(by="line"), wave.animate.sweep()])
+
+
+def validate_transition_contract(module: object) -> list[str]:
+    """Vector reveals, easing on every transition and overlays on the cut."""
+    failures: list[str] = []
+    T, O = module.Transition, module.Overlay
+    spring = module.Easing.spring(bounce=0.2)
+    flash = O.flash(module.WHITE, 0.15)
+    leak = O.light_leak(seed=2, hue=0.1)
+    built = [
+        T.cut(overlay=flash),
+        T.cross_fade(0.4, easing=module.Easing.SMOOTH, overlay=leak),
+        T.slide(0.5, "left", easing=spring),
+        T.wipe(0.6, direction="left", feather=0.1),
+        T.wipe(0.6, "up_right", 0.0),
+        T.clock_wipe(0.8, start_angle=90),
+        T.iris(0.7, center=(2, 1), shape="star"),
+        T.blinds(0.6, count=8, angle=0),
+        T.push(0.5, direction="up", overlay=flash),
+    ]
+    if not all(isinstance(value, T) for value in built):
+        failures.append("Transition factories must return Transition")
+    if "overlay=Overlay.flash" not in repr(built[0]):
+        failures.append("Transition.cut(overlay=...) lost its overlay")
+    for label, factory in [
+        ("wipe direction", lambda: T.wipe(0.5, direction="sideways")),
+        ("wipe feather", lambda: T.wipe(0.5, feather=1.5)),
+        ("iris shape", lambda: T.iris(0.5, shape="blob")),
+        ("blinds count", lambda: T.blinds(0.5, count=0)),
+        ("push duration", lambda: T.push(0.0)),
+        ("flash duration", lambda: O.flash(module.WHITE, -1.0)),
+        ("light_leak intensity", lambda: O.light_leak(intensity=9.0)),
+    ]:
+        try:
+            factory()
+        except (ValueError, OverflowError):
+            pass
+        else:
+            failures.append(f"Transition accepted an invalid {label}")
+    scene = module.Scene(frame=(16, 9))
+    scene.segment("first")
+    stencil = scene.geometry.circle(1.0)
+    scene.wait(0.5)
+    scene.segment("second", T.iris(0.5, shape=stencil, overlay=flash))
+    scene.wait(0.5)
+    if abs(scene.cursor - 1.0) > 1e-9:
+        failures.append("transition overlays must not change segment durations")
     return failures
 
 
@@ -1932,6 +1979,7 @@ def main() -> int:
     missing.extend(validate_timeline_labels_contract(module))
     missing.extend(validate_narration_contract(module))
     missing.extend(validate_text_animator_contract(module))
+    missing.extend(validate_transition_contract(module))
     missing.extend(validate_runtime_type_aliases(module))
     missing.extend(documented_text_api_failures(tree))
     missing.extend(documented_editorial_api_failures(tree))

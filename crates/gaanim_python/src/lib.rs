@@ -39,6 +39,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         _py.get_type::<LayoutOwnershipError>(),
     )?;
     m.add_class::<transition::PyTransitionType>()?;
+    m.add_class::<transition::PyOverlay>()?;
     m.add_class::<color::PyColor>()?;
     m.add_class::<color::PyColorMap>()?;
     m.add_class::<brush::PyBrush>()?;

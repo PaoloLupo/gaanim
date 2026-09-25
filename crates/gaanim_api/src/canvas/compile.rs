@@ -5674,6 +5674,36 @@ impl SceneModel {
         id_map: &HashMap<ObjectId, ObjectId>,
     ) -> gaanim_timeline::transition::TransitionType {
         use gaanim_timeline::transition::{MorphMapping, TransitionType};
+        // Easing/overlay wrappers and drawable iris outlines carry authored ids too.
+        match transition {
+            TransitionType::Styled {
+                base,
+                easing,
+                overlay,
+            } => {
+                return TransitionType::Styled {
+                    base: Box::new(Self::runtime_transition(base, id_map)),
+                    easing: easing.clone(),
+                    overlay: overlay.clone(),
+                };
+            }
+            TransitionType::Iris {
+                duration,
+                center,
+                shape: gaanim_timeline::transition::IrisShape::Drawable(id),
+            } => {
+                return TransitionType::Iris {
+                    duration: *duration,
+                    center: *center,
+                    shape: id_map
+                        .get(id)
+                        .map_or(gaanim_timeline::transition::IrisShape::Circle, |id| {
+                            gaanim_timeline::transition::IrisShape::Drawable(*id)
+                        }),
+                };
+            }
+            _ => {}
+        }
         let TransitionType::Morph { duration, mappings } = transition else {
             return transition.clone();
         };

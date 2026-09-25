@@ -621,36 +621,70 @@ class LayoutOwnershipError(Exception):
     """Raised when a Layout cannot take or retain ownership of child position."""
 
 class Transition:
+    """Effect used between two segments (``scene.segment`` or ``scene.link``).
+
+    Every transition except ``cut`` accepts ``easing=`` (any ``Easing``,
+    including springs, which may overshoot) and every transition accepts
+    ``overlay=`` (an ``Overlay`` drawn above the cut). Neither changes a
+    segment's duration. Without ``easing`` the original transitions run
+    linearly and the vector reveals (``wipe``, ``clock_wipe``, ``iris``,
+    ``blinds``, ``push``, ``slide``) use ``Easing.SMOOTH``. Vector reveals
+    clip both segments with animated paths in the visible camera frame, so
+    they stay sharp at any resolution and need no textures.
+    """
+
     @staticmethod
-    def cut() -> Transition:
-        """Create a cut transition.
+    def cut(*, overlay: Optional[Overlay] = None) -> Transition:
+        """Switch segments instantly, optionally under an ``overlay``.
 
         Example:
-            result = Transition.cut()
+            result = Transition.cut(overlay=Overlay.flash(WHITE, 0.15))
         """
         ...
     @staticmethod
-    def cross_fade(duration: float) -> Transition:
-        """Create a cross fade transition.
+    def cross_fade(
+        duration: float,
+        *,
+        easing: Optional[Easing] = None,
+        overlay: Optional[Overlay] = None,
+    ) -> Transition:
+        """Fade the outgoing segment out while the incoming one fades in.
 
         Example:
-            result = Transition.cross_fade(1.0)
+            result = Transition.cross_fade(0.4, overlay=Overlay.light_leak(seed=2, hue=0.1))
         """
         ...
     @staticmethod
-    def fade_through(duration: float, color: Color) -> Transition:
-        """Create a fade through transition.
+    def fade_through(
+        duration: float,
+        color: Color,
+        *,
+        easing: Optional[Easing] = None,
+        overlay: Optional[Overlay] = None,
+    ) -> Transition:
+        """Fade out during the first half and fade the next segment in during the second.
 
         Example:
             result = Transition.fade_through(1.0, BLUE)
         """
         ...
     @staticmethod
-    def slide(duration: float, direction: str) -> Transition:
-        """Create a slide transition.
+    def slide(
+        duration: float,
+        direction: str,
+        *,
+        easing: Optional[Easing] = None,
+        overlay: Optional[Overlay] = None,
+    ) -> Transition:
+        """Slide the incoming segment over the still outgoing one.
+
+        ``direction`` (``"left"``, ``"right"``, ``"up"``, ``"down"``) is the
+        motion of the incoming frame, which covers the outgoing segment as it
+        travels one frame width or height. Use ``push`` to move both. Raises
+        ``ValueError`` for another direction.
 
         Example:
-            result = Transition.slide(1.0, "right")
+            result = Transition.slide(0.5, "left", easing=Easing.spring(bounce=0.2))
         """
         ...
     @staticmethod
@@ -659,15 +693,23 @@ class Transition:
         *,
         center: tuple[float, float] = (0.0, 0.0),
         max_zoom: float = 4.0,
+        easing: Optional[Easing] = None,
+        overlay: Optional[Overlay] = None,
     ) -> Transition:
-        """Create a zoom through transition.
+        """Zoom the camera into the outgoing segment and back out on the incoming one.
 
         Example:
             result = Transition.zoom_through(1.0)
         """
         ...
     @staticmethod
-    def morph(duration: float, *, pairs: Sequence[tuple[Drawable, Drawable]] = ()) -> Transition:
+    def morph(
+        duration: float,
+        *,
+        pairs: Sequence[tuple[Drawable, Drawable]] = (),
+        easing: Optional[Easing] = None,
+        overlay: Optional[Overlay] = None,
+    ) -> Transition:
         """Carry paired drawables from the outgoing segment into the incoming one.
 
         Each ``(source, target)`` pair shares one bounding box that travels
@@ -681,6 +723,143 @@ class Transition:
 
         Example:
             scene.link(overview, detail, Transition.morph(0.8, pairs=[(card, panel)]))
+        """
+        ...
+    @staticmethod
+    def wipe(
+        duration: float,
+        direction: str = "left",
+        feather: float = 0.1,
+        *,
+        easing: Optional[Easing] = None,
+        overlay: Optional[Overlay] = None,
+    ) -> Transition:
+        """Sweep a straight edge across the frame to reveal the next segment.
+
+        ``direction`` is the travel of the edge: ``"left"``, ``"right"``,
+        ``"up"``, ``"down"`` or a diagonal such as ``"up_left"``. ``"left"``
+        starts revealing at the right side. ``feather`` in ``[0, 1]`` is the
+        soft-edge width as a fraction of the travel; the soft edge is a vector
+        alpha ramp, and ``0`` gives a hard edge. Raises ``ValueError`` for a
+        non-positive duration, an unknown direction or a feather outside
+        ``[0, 1]``.
+
+        Example:
+            result = Transition.wipe(0.6, direction="left", feather=0.1)
+        """
+        ...
+    @staticmethod
+    def clock_wipe(
+        duration: float,
+        start_angle: float = 90.0,
+        *,
+        easing: Optional[Easing] = None,
+        overlay: Optional[Overlay] = None,
+    ) -> Transition:
+        """Reveal the next segment behind a hand sweeping clockwise around the frame center.
+
+        ``start_angle`` is in degrees, counter-clockwise from +x, so the
+        default ``90`` starts at twelve o'clock. Raises ``ValueError`` for a
+        non-positive duration or a non-finite angle.
+
+        Example:
+            result = Transition.clock_wipe(0.8, start_angle=90)
+        """
+        ...
+    @staticmethod
+    def iris(
+        duration: float,
+        center: tuple[float, float] = (0.0, 0.0),
+        shape: str | Drawable = "circle",
+        *,
+        easing: Optional[Easing] = None,
+        overlay: Optional[Overlay] = None,
+    ) -> Transition:
+        """Open a shape from ``center`` (scene units) until the next segment fills the frame.
+
+        ``shape`` is ``"circle"``, ``"diamond"``, ``"square"``, ``"star"`` or
+        a ``Drawable`` whose vector outline is used (centered on its bounds;
+        the drawable itself is still drawn in its own segment, so hide it if
+        it is only a stencil). A drawable without a path falls back to a
+        circle. Raises ``ValueError`` for a non-positive duration, a
+        non-finite center or an unknown shape name.
+
+        Example:
+            result = Transition.iris(0.7, center=(2, 1), shape="circle")
+        """
+        ...
+    @staticmethod
+    def blinds(
+        duration: float,
+        count: int = 8,
+        angle: float = 0.0,
+        *,
+        easing: Optional[Easing] = None,
+        overlay: Optional[Overlay] = None,
+    ) -> Transition:
+        """Open ``count`` parallel slats together to reveal the next segment.
+
+        ``angle`` tilts the slats in degrees; ``0`` gives horizontal slats that
+        open downwards. Raises ``ValueError`` for a non-positive duration, a
+        count outside ``1..512`` or a non-finite angle.
+
+        Example:
+            result = Transition.blinds(0.6, count=8, angle=0)
+        """
+        ...
+    @staticmethod
+    def push(
+        duration: float,
+        direction: str = "up",
+        *,
+        easing: Optional[Easing] = None,
+        overlay: Optional[Overlay] = None,
+    ) -> Transition:
+        """Let the incoming segment push the outgoing one out of the frame.
+
+        Both frames move together by one frame width or height in
+        ``direction`` (``"left"``, ``"right"``, ``"up"``, ``"down"``), each
+        clipped to its own frame. Raises ``ValueError`` for a non-positive
+        duration or another direction.
+
+        Example:
+            result = Transition.push(0.5, direction="up")
+        """
+        ...
+
+class Overlay:
+    """A look drawn above a transition, centered on its midpoint (the cut for
+    ``Transition.cut``). Overlays never change segment durations and are pure
+    functions of time, so seeks and exports match playback exactly.
+    """
+
+    @staticmethod
+    def flash(color: Optional[Color] = None, duration: float = 0.2) -> Overlay:
+        """Flash the whole frame with ``color`` (white by default), peaking at the cut.
+
+        The flash rises over the first half of ``duration`` seconds and fades
+        over the second. Raises ``ValueError`` for a non-positive duration.
+
+        Example:
+            result = Transition.cut(overlay=Overlay.flash(WHITE, 0.15))
+        """
+        ...
+    @staticmethod
+    def light_leak(
+        seed: int = 0,
+        hue: float = 0.1,
+        duration: float = 0.8,
+        intensity: float = 0.8,
+    ) -> Overlay:
+        """Drift soft, screen-blended light blobs across the frame around the cut.
+
+        ``seed`` makes a deterministic layout; ``hue`` is the base hue in
+        turns (``0.1`` warm orange, ``0.6`` blue); ``intensity`` in ``[0, 4]``
+        scales the peak brightness. Raises ``ValueError`` for a non-positive
+        duration, a non-finite hue or an intensity outside ``[0, 4]``.
+
+        Example:
+            result = Transition.cross_fade(0.4, overlay=Overlay.light_leak(seed=2, hue=0.1))
         """
         ...
 

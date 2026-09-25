@@ -270,6 +270,8 @@ pub struct ExtractedElement {
     render_order: RenderOrder,
     scene: Arc<vello::Scene>,
     clip_mask: Option<ClipMask>,
+    /// Side of the active scene transition this element belongs to.
+    transition_side: gaanim_scene::TransitionSide,
 }
 
 /// Stack order of a drawn element: its own `z_index` plus every ancestor's,
@@ -362,7 +364,131 @@ fn shared_clip_run_end(elements: &[ExtractedElement], start: usize) -> usize {
     end
 }
 
+/// Composite elements, masking each run of transition scene members with its
+/// side's reveal, then draw the transition overlays above everything.
 fn append_extracted_elements(
+    main_scene: &mut vello::Scene,
+    elements: &[ExtractedElement],
+    composition_bounds: kurbo::Rect,
+    transition: Option<&gaanim_scene::SceneTransitionFrame>,
+) {
+    let mut index = 0;
+    while index < elements.len() {
+        let side = elements[index].transition_side;
+        let mut end = index + 1;
+        while elements
+            .get(end)
+            .is_some_and(|element| element.transition_side == side)
+        {
+            end += 1;
+        }
+        let mask = transition.and_then(|frame| frame.mask_for(side));
+        if let Some(mask) = mask {
+            push_transition_mask(main_scene, mask);
+        }
+        append_element_run(main_scene, &elements[index..end], composition_bounds);
+        if let Some(mask) = mask {
+            pop_transition_mask(main_scene, mask);
+        }
+        index = end;
+    }
+    if let Some(frame) = transition {
+        for layer in &frame.overlays {
+            main_scene.push_layer(
+                peniko::Fill::NonZero,
+                layer.blend,
+                1.0,
+                kurbo::Affine::IDENTITY,
+                &layer.clip,
+            );
+            for (path, brush) in &layer.fills {
+                main_scene.fill(
+                    peniko::Fill::NonZero,
+                    kurbo::Affine::IDENTITY,
+                    brush,
+                    None,
+                    path,
+                );
+            }
+            main_scene.pop_layer();
+        }
+    }
+}
+
+/// Open a world-space layer that keeps only a transition side's visible region.
+fn push_transition_mask(scene: &mut vello::Scene, mask: &gaanim_scene::TransitionMask) {
+    if mask.fade.is_some() {
+        scene.push_layer(
+            mask.rule,
+            peniko::BlendMode::default(),
+            1.0,
+            kurbo::Affine::IDENTITY,
+            &mask.path,
+        );
+    } else {
+        scene.push_clip_layer(mask.rule, kurbo::Affine::IDENTITY, &mask.path);
+    }
+}
+
+/// Close a transition mask. A feathered mask first multiplies the layer by
+/// its linear alpha ramp (a vector `DestIn` composite, no textures).
+fn pop_transition_mask(scene: &mut vello::Scene, mask: &gaanim_scene::TransitionMask) {
+    if let Some((opaque, clear)) = mask.fade {
+        scene.push_layer(
+            mask.rule,
+            peniko::BlendMode::new(peniko::Mix::Normal, peniko::Compose::DestIn),
+            1.0,
+            kurbo::Affine::IDENTITY,
+            &mask.path,
+        );
+        let ramp = peniko::Gradient::new_linear(opaque, clear)
+            .with_stops([peniko::Color::BLACK, peniko::Color::TRANSPARENT]);
+        scene.fill(
+            mask.rule,
+            kurbo::Affine::IDENTITY,
+            &peniko::Brush::Gradient(ramp),
+            None,
+            &mask.path,
+        );
+        scene.pop_layer();
+    }
+    scene.pop_layer();
+}
+
+/// Timeline position whose segment background fills the whole frame. While a
+/// transition splits the frame this is the outgoing segment.
+fn transition_background_time(
+    transition: Option<&gaanim_scene::SceneTransitionFrame>,
+    time_seconds: f64,
+) -> f64 {
+    transition
+        .and_then(|frame| frame.backgrounds)
+        .map_or(time_seconds, |(outgoing, _)| outgoing)
+}
+
+/// Draw the incoming segment's background inside its reveal when it differs
+/// from the outgoing one.
+fn fill_transition_background(
+    scene: &mut vello::Scene,
+    background: &CanvasBackground,
+    pixel_size: (u32, u32),
+    transition: Option<&gaanim_scene::SceneTransitionFrame>,
+) {
+    let Some(frame) = transition else {
+        return;
+    };
+    let (Some((outgoing, incoming)), Some(mask)) = (frame.backgrounds, &frame.incoming_mask) else {
+        return;
+    };
+    if std::ptr::eq(background.paint_at(outgoing), background.paint_at(incoming)) {
+        return;
+    }
+    push_transition_mask(scene, mask);
+    fill_canvas_background(scene, background, pixel_size, incoming, None);
+    pop_transition_mask(scene, mask);
+}
+
+fn append_element_run(
     main_scene: &mut vello::Scene,
     elements: &[ExtractedElement],
     composition_bounds: kurbo::Rect,
@@ -1041,6 +1167,10 @@ pub fn compile_scene_from_world(
         .map_or(0.0, |state| state.current_time);
     let mut extracted = Vec::new();
     let mut culled_entities = std::collections::HashSet::new();
+    let transition_frame = world
+        .get_resource::<gaanim_scene::SceneTransitionFrame>()
+        .filter(|frame| !frame.is_empty())
+        .cloned();
     let opacity_fallback = world
         .get_resource::<CanvasBackground>()
         .map(|background| {
@@ -1378,6 +1508,13 @@ pub fn compile_scene_from_world(
             ),
             scene: Arc::new(scene),
             clip_mask: clip_opt.cloned(),
+            transition_side: transition_frame
+                .as_ref()
+                .map_or_else(Default::default, |frame| {
+                    frame.side_of(entity, |e| {
+                        child_query.get(world, e).ok().map(ChildOf::parent)
+                    })
+                }),
         });
     }
 
@@ -1407,8 +1544,14 @@ pub fn compile_scene_from_world(
                 &mut main_scene,
                 canvas_bg,
                 canvas_bg.pixel_size,
-                background_time,
+                transition_background_time(transition_frame.as_ref(), background_time),
                 None,
+            );
+            fill_transition_background(
+                &mut main_scene,
+                canvas_bg,
+                canvas_bg.pixel_size,
+                transition_frame.as_ref(),
             );
         }
     }
@@ -1416,7 +1559,12 @@ pub fn compile_scene_from_world(
     let composition_bounds = extracted.iter().fold(opacity_fallback, |bounds, elem| {
         bounds.union(elem.opacity_bounds)
     });
-    append_extracted_elements(&mut main_scene, &extracted, composition_bounds);
+    append_extracted_elements(
+        &mut main_scene,
+        &extracted,
+        composition_bounds,
+        transition_frame.as_ref(),
+    );
 
     main_scene
 }
@@ -1442,6 +1590,7 @@ pub fn gaanim_render_system(
     gaanim_camera: Option<Res<gaanim_math::ResolvedCamera>>,
     playback_state: Option<Res<gaanim_animation::PlaybackState>>,
     canvas_bg: Option<Res<CanvasBackground>>,
+    transition_frame: Option<Res<gaanim_scene::SceneTransitionFrame>>,
     child_query: Query<&ChildOf>,
     order_query: Query<&RenderOrder>,
     view_query: Query<(
@@ -1892,6 +2041,12 @@ pub fn gaanim_render_system(
             ),
             scene: Arc::clone(fragment),
             clip_mask: clip_ref.as_ref().map(|c| (**c).clone()),
+            transition_side: transition_frame
+                .as_deref()
+                .filter(|frame| !frame.is_empty())
+                .map_or_else(Default::default, |frame| {
+                    frame.side_of(entity, |e| child_query.get(e).ok().map(ChildOf::parent))
+                }),
         });
 
         // Accumulate AABB from WorldBounds if available, otherwise approximate from transform
@@ -1943,8 +2098,14 @@ pub fn gaanim_render_system(
                 &mut main_scene,
                 canvas_bg,
                 pixel_size,
-                time_seconds,
+                transition_background_time(transition_frame.as_deref(), time_seconds),
                 shader_frame.is_some().then_some(&mut shader_request),
+            );
+            fill_transition_background(
+                &mut main_scene,
+                canvas_bg,
+                pixel_size,
+                transition_frame.as_deref(),
             );
         }
     }
@@ -1962,6 +2123,9 @@ pub fn gaanim_render_system(
         &mut main_scene,
         local_extracted.as_slice(),
         composition_bounds,
+        transition_frame
+            .as_deref()
+            .filter(|frame| !frame.is_empty()),
     );
     local_extracted.clear();
 
@@ -2530,6 +2694,7 @@ mod tests {
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),
             clip_mask: None,
+            transition_side: Default::default(),
         };
         let elements = vec![element(0.5), element(0.5), element(0.5), element(0.75)];
 
@@ -2552,6 +2717,7 @@ mod tests {
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),
             clip_mask,
+            transition_side: Default::default(),
         };
         let elements = vec![
             element(Some(mask(1, false))),
