@@ -162,6 +162,10 @@ Revisado en un build local, a 1440 px y a 390 px:
 
 ## Principios del rediseño
 
+- **La API 3D se presenta como experimental.** Tiene errores conocidos y
+  mucho trabajo pendiente: cada sección que la documenta abre con el aviso
+  `#experimental()` (`docs/components/tutorial.typ`).
+
 1. **El código de la documentación se ejecuta, siempre.** No ejecutarlo es la
    excepción: se declara con `# no-run: <motivo>`. CI falla con cualquier error.
 2. **Una fuente para cada hecho.** Firmas y valores por defecto salen del stub.

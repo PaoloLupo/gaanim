@@ -145,6 +145,9 @@ foco. Consulta `docs/content/guias/presentaciones.typ` para el detalle.
 
 ## 3D nativo e inspección
 
+> **Experimental.** La API 3D todavía tiene errores conocidos y puede cambiar
+> entre versiones; queda mucho trabajo para estabilizarla.
+
 Gaanim incluye `cube`, `sphere`, `cylinder`, `cone` y `plane` como mallas PBR
 animables, con `Material3D.matte`, `Material3D.metal` y
 `Material3D.emissive`. `scene.geometry.lighting_3d("studio")` proporciona un único rig

@@ -1,5 +1,5 @@
-#let lesson-box(title, body) = context if target() in ("bundle", "html") {
-  html.elem("aside", attrs: (class: "lesson-box"), {
+#let lesson-box(title, body, class: "lesson-box") = context if target() in ("bundle", "html") {
+  html.elem("aside", attrs: (class: class), {
     html.div(class: "lesson-box-title", title)
     body
   })
@@ -20,3 +20,14 @@
 
 #let checkpoint(body) = lesson-box("Punto de control", body)
 #let idea(body) = lesson-box("Idea clave", body)
+
+// Marks an API that still changes and has known bugs. `#experimental()` shows
+// the standard notice for the 3D API; `#experimental[...]` a custom one.
+#let experimental(..body) = lesson-box(
+  "Experimental",
+  body.pos().at(0, default: [
+    La API 3D es experimental: todavía tiene errores conocidos y puede cambiar
+    entre versiones. Úsala para explorar, pero no la tomes como estable.
+  ]),
+  class: "lesson-box lesson-box-experimental",
+)

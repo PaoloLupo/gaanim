@@ -296,6 +296,8 @@ h1:hover .heading-anchor, h2:hover .heading-anchor, h3:hover .heading-anchor, h4
     border-left: 3px solid var(--primary);
     background: var(--primary-soft);
 }
+.lesson-box-experimental { border-left-color: var(--warning); background: color-mix(in srgb, var(--warning) 8%, transparent); }
+.lesson-box-experimental .lesson-box-title { color: var(--warning); }
 .lesson-box > p:first-of-type { margin-top: 0; }
 .lesson-box > p:last-child { margin-bottom: 0; }
 .lesson-box-title {
