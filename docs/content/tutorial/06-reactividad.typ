@@ -3,132 +3,165 @@
 
 #docs-chapter(
   title: "Dar vida a la escena",
-  description: "Updaters, geometría reactiva y movimiento circular uniforme",
+  description: "Un parámetro animable que mueve el punto y arrastra al radio",
   route: "/tutorial/reactividad/",
 )[
 
-= El punto deja de ser una posición fija
+= Objetivo
 
-Una animación tradicional conoce un estado inicial y uno final. Nuestro punto
-debe recorrer una órbita continuamente. Para eso usaremos un `Updater`.
+Al terminar este capítulo, después de que se escriba el panel, el punto dará
+una vuelta completa al círculo en sentido antihorario, a velocidad constante, y
+el radio lo seguirá en todo momento.
 
-Amplía los imports:
+No vamos a animar la posición del punto de un sitio a otro. Vamos a animar un
+solo número, el ángulo `theta`, y a declarar que la posición del punto depende
+de él. En el capítulo siguiente, la onda dependerá del mismo número.
+
+= Cambios
+
+== Un import de Python
+
+Añade `import math` al principio del archivo: necesitaremos `math.pi`.
 
 ```python
-from gaanim import BLUE, WHITE, YELLOW, Color, Scene, Updater
-```
+import math
 
-Después de crear `point`, registra el movimiento:
-
-```python
->>>from gaanim import BLUE, WHITE, YELLOW, Color, Scene, Updater
->>>BACKGROUND = Color(15, 23, 42)
->>>PRIMARY = BLUE
+from gaanim import WHITE, YELLOW, Color, Easing, Scene, stagger
+>>># Contexto mínimo para validar los fragmentos de esta página.
+>>>PRIMARY = Color(96, 165, 250)
 >>>ACCENT = YELLOW
 >>>MUTED = Color(148, 163, 184)
->>>scene = Scene(frame=(16, 9), background=BACKGROUND, margin=0.6)
->>>title = scene.text("Movimiento circular", role="title").fill(WHITE).move_to(0, 3.25)
->>>caption = scene.text("Un punto, un radio constante", role="subtitle").fill(MUTED).move_to(0, 2.69)
->>>orbit = scene.geometry.circle(1.5).stroke(PRIMARY, 0.05).no_fill().move_to(-4, 0)
->>>radius = scene.geometry.line(-4, 0, -2.5, 0).stroke(MUTED, 0.025)
->>>point = scene.geometry.dot(0.125).fill(ACCENT).move_to(-2.5, 0)
->>>system = scene.geometry.group([orbit, radius, point])
->>>from gaanim import stagger
->>>scene.play(stagger(
->>>    title.animate.write().duration(0.8),
->>>    caption.animate.fade_in().duration(0.6),
->>>    each=0.12,
->>>))
->>>scene.play(stagger(
->>>    orbit.animate.create().duration(1.0),
->>>    radius.animate.create().duration(0.7),
->>>    point.animate.fade_in().duration(0.35),
->>>    each=0.15,
->>>))
->>>scene.wait(0.8)
->>>from gaanim import Easing
->>>scene.play([system.animate.shift_by(0.5, 0).duration(0.6).easing(Easing.SMOOTH)])
->>>scene.play([system.animate.shift_by(-0.5, 0).duration(0.6).easing(Easing.SMOOTH)])
->>>formula = scene.text("$y(t) = r sin(omega t)$", role="subtitle").fill(WHITE)
->>>explanation = scene.text("La altura del punto se convertirá en una curva.", role="body").fill(MUTED)
->>>panel = scene.layout.column([formula, explanation], gap=0.225, align="start")
->>>panel.move_to(3.5, 1.875)
->>>scene.play(stagger(
->>>    formula.animate.write().duration(0.8),
->>>    explanation.animate.fade_in().duration(0.6),
->>>    each=0.1,
->>>))
->>>scene.wait(0.8)
-point.add_updater(
-    Updater.orbit(cx=-4, cy=0, radius=1.5, speed=1.2)
-)
+>>>scene = Scene(frame=(16, 9))
+>>>CENTER = (-4.5, -1.0)
+>>>R = 1.5
 ```
 
-`speed` es velocidad angular en radianes por segundo. Con `1.2`, una vuelta
-completa tarda aproximadamente `2*pi/1.2` segundos.
+== Un ángulo animable
 
-== El radio también debe reaccionar
-
-La línea estática del capítulo anterior ya no sirve: su extremo se quedaría en
-la posición inicial. Sustituye su creación por estas líneas, colocadas después
-de crear `point`, porque la línea necesita ese handle:
+Sustituye la zona `# Círculo` completa por esta versión:
 
 ```python
 # continue
-radius = scene.geometry.tracking_line((-4, 0), point)
-radius.stroke(MUTED, 0.025).no_fill()
+# Círculo
+theta = scene.viz.parameter(0.0)
+orbit = scene.geometry.circle(R).stroke(PRIMARY, 0.05).no_fill().move_to(*CENTER)
+circle_ref = scene.geometry.polar_point(CENTER, R, theta)
+point = scene.geometry.dot(0.125).fill(ACCENT).follow(circle_ref)
+radius = scene.geometry.line(CENTER, point).stroke(MUTED, 0.025)
+point.z_index(1)
 ```
 
-`tracking_line` resuelve sus extremos en el mismo frame. El origen permanece
-fijo y el otro extremo sigue el handle `point`.
+Solo cambian tres cosas:
 
-Como la geometría reactiva comienza oculta, revélala dentro de la timeline:
+- `scene.viz.parameter(0.0)` crea `theta`, un `Parameter`: un número de la
+  escena que empieza en `0` y que se puede animar como cualquier objeto.
+- `scene.geometry.polar_point(CENTER, R, theta)` describe un punto a distancia
+  `R` de `CENTER` con ángulo `theta`, en radianes, medido desde la derecha y en
+  sentido antihorario. No dibuja nada: es una referencia que Gaanim recalcula
+  cuando cambia `theta`.
+- `point` ya no usa `move_to`, sino `follow(circle_ref)`: su centro queda pegado
+  a esa referencia. Con `theta = 0`, el punto está donde estaba antes, en el
+  borde derecho.
+
+`radius` no cambia. En el capítulo 2 le dimos `point` como extremo, así que ya
+sigue al punto allá donde vaya.
+
+== Animar el ángulo
+
+En la zona `# Línea de tiempo`, añade la vuelta completa antes de
+`scene.wait(1)`:
 
 ```python
 # continue
-scene.play([
-    point.animate.fade_in().duration(0.3),
-    radius.animate.fade_in().duration(0.3),
-])
-scene.wait(5.3)
-point.remove_updater()
+scene.play([theta.animate.set(2 * math.pi).duration(4).easing(Easing.LINEAR)])
 ```
 
-La espera es ahora parte activa de la escena: mientras el cursor avanza, el
-updater cambia la posición en cada frame. `remove_updater()` congela el punto al
-terminar la demostración.
+`theta.animate.set(2 * math.pi)` lleva el ángulo de `0` a $2 pi$, una vuelta
+completa, en 4 segundos. `scene.play` también acepta una lista de animaciones,
+que empiezan a la vez; aquí solo hay una.
+
+`Easing.LINEAR` hace que el ángulo avance siempre al mismo ritmo. Con el easing
+por defecto, el punto arrancaría despacio y frenaría al final, y el movimiento
+circular dejaría de ser uniforme.
 
 #idea[
-Un updater describe una regla, no una secuencia de posiciones. Gaanim puede
-evaluar esa regla al reproducir, exportar o buscar un instante exacto.
+Anima el valor, no la forma. `theta` es la única fuente de verdad: el punto
+depende de él y el radio depende del punto. Como todo se calcula a partir del
+tiempo, puedes saltar a cualquier instante y la escena será exactamente la
+misma que al reproducirla de corrido.
 ]
 
-== Separar construcción y comportamiento
+= Archivo completo
 
-El código se entiende mejor si conserva este orden:
+```python
+# output: preview.webp
+import math
 
-1. Crea `point` y `radius`.
-2. Registra la relación reactiva.
-3. Programa su aparición.
-4. Deja avanzar el tiempo.
-5. Retira el updater cuando ya no sea necesario.
+from gaanim import WHITE, YELLOW, Color, Easing, Scene, stagger
 
-== Errores frecuentes
+# Paleta
+BACKGROUND = Color(15, 23, 42)
+PRIMARY = Color(96, 165, 250)
+ACCENT = YELLOW
+MUTED = Color(148, 163, 184)
 
-- Si el punto gira alrededor del lugar incorrecto, revisa `cx` y `cy`.
-- Si no toca la órbita, el radio del updater y el del círculo no coinciden.
-- Si la línea no aparece, falta su `fade_in` dentro de `scene.play`.
-- Si el movimiento cambia entre seeks, evita callbacks con estado no
-  determinista; los presets nativos son reproducibles.
+scene = Scene(frame=(16, 9), background=BACKGROUND, margin=0.6)
+
+CENTER = (-4.5, -1.0)
+R = 1.5
+
+# Texto
+title = scene.text("Del círculo al seno", role="title")
+title.fill(WHITE).move_to(0, 3.4)
+caption = scene.text("Un punto que gira a radio constante", role="subtitle")
+caption.fill(MUTED).move_to(0, 2.8)
+
+formula = scene.text("$y = r sin(theta)$", role="subtitle").fill(WHITE)
+explanation = scene.text("La altura del punto dibuja la onda.", role="body")
+explanation.fill(MUTED)
+panel = scene.layout.column([formula, explanation], gap=0.2, width=6.5)
+panel.move_to(3.5, 1.6)
+
+# Círculo
+theta = scene.viz.parameter(0.0)
+orbit = scene.geometry.circle(R).stroke(PRIMARY, 0.05).no_fill().move_to(*CENTER)
+circle_ref = scene.geometry.polar_point(CENTER, R, theta)
+point = scene.geometry.dot(0.125).fill(ACCENT).follow(circle_ref)
+radius = scene.geometry.line(CENTER, point).stroke(MUTED, 0.025)
+point.z_index(1)
+
+# Línea de tiempo
+scene.play(stagger(
+    title.animate.write().duration(0.8),
+    caption.animate.fade_in().duration(0.5),
+    each=0.5,
+))
+scene.play(stagger(
+    orbit.animate.create().duration(0.8),
+    radius.animate.create().duration(0.4),
+    point.animate.grow_from_center().duration(0.5).easing(Easing.SNAPPY),
+    each=0.25,
+))
+scene.play(stagger(
+    formula.animate.write().duration(0.8),
+    explanation.animate.write().duration(0.8),
+    each=0.2,
+))
+scene.play([theta.animate.set(2 * math.pi).duration(4).easing(Easing.LINEAR)])
+scene.wait(1)
+scene.render()
+```
 
 #checkpoint[
-El punto debe completar aproximadamente una vuelta y el radio debe conservar
-siempre un extremo en el centro del círculo. Pausar el editor en distintos
-instantes no debe romper la relación.
+La vista previa dura 8 segundos y la vuelta ocupa del segundo 3 al 7. Arrastra
+la barra de reproducción del editor: en el segundo 4 el punto está arriba
+($theta = pi\/2$), en el 5 a la izquierda, en el 6 abajo y en el 7 de vuelta
+a la derecha. El radio une siempre el centro con el punto.
 ]
 
-== Siguiente paso
-
-Ya tenemos movimiento circular. Ahora proyectaremos la altura del punto sobre
-un eje horizontal y conservaremos el recorrido de esa proyección.
+La reactividad tiene más herramientas: valores calculados, rastros y
+updaters para simulaciones. Las encontrarás en la guía
+#link("/guias/reactividad/")[Reactividad]. En el siguiente capítulo,
+#link("/tutorial/circulo-al-seno/")[Del círculo a la onda], usaremos `theta`
+para dibujar la curva seno.
 ]

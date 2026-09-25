@@ -7,88 +7,142 @@
   route: "/tutorial/primera-escena/",
 )[
 
-= Del lienzo vacío al círculo unitario
+= Objetivo
 
-Abre `main.py` y reemplaza su contenido. Nuestro primer objetivo es deliberadamente
-modesto: un círculo, un punto y un título. Todavía no habrá movimiento.
+Al terminar este capítulo, `main.py` mostrará un fotograma quieto: el título,
+un círculo a la izquierda, un punto amarillo en su borde derecho y el radio que
+los une. Todavía no habrá movimiento.
+
+Abre `main.py` y borra su contenido: vamos a escribir la escena desde cero.
+
+= Cambios
+
+== El lienzo
 
 ```python
-from gaanim import BLUE, WHITE, YELLOW, Scene
+from gaanim import CYAN, WHITE, YELLOW, Scene
 
 scene = Scene(frame=(16, 9), background="#0f172a", margin=0.6)
 
-title = scene.text("Movimiento circular", role="title")
-title.fill(WHITE).move_to(0, 3.25)
+CENTER = (-4.5, -1.0)
+R = 1.5
+```
 
-orbit = scene.geometry.circle(1.5)
-orbit.stroke(BLUE, 0.05).no_fill().move_to(-4, 0)
+`Scene(frame=(16, 9), ...)` crea un lienzo horizontal de 16 unidades de ancho y
+9 de alto. El origen `(0, 0)` está en el centro: X crece hacia la derecha e Y
+hacia arriba, así que X va de `-8` a `8` e Y de `-4.5` a `4.5`. `margin=0.6`
+reserva un borde de seguridad de 0.6 unidades para que nada quede pegado al
+límite del fotograma.
+
+Estas unidades son lógicas y no dependen de la resolución: la misma escena se
+exporta a 1280 × 720 o a 3840 × 2160 sin cambiar el código. Radios, grosores de
+trazo y tamaños de texto usan la misma unidad.
+
+`CENTER` y `R` guardan el centro y el radio del círculo. Toda la geometría del
+tutorial se calculará a partir de ellos: si cambias uno, todo lo demás lo
+acompaña.
+
+== El título
+
+```python
+# continue
+title = scene.text("Del círculo al seno", role="title")
+title.fill(WHITE).move_to(0, 3.4)
+```
+
+`scene.text` crea texto vectorial. El rol `"title"` elige el tamaño de un
+título; `fill` le da color y `move_to` coloca su centro cerca del borde
+superior.
+
+La variable `title` no contiene una imagen ni unas coordenadas: es un _handle_,
+una referencia al objeto que ya vive en la escena. Con él seguiremos
+modificándolo y, más adelante, animándolo.
+
+== El círculo y el punto
+
+```python
+# continue
+orbit = scene.geometry.circle(R)
+orbit.stroke(CYAN, 0.05).no_fill().move_to(*CENTER)
 
 point = scene.geometry.dot(0.125)
-point.fill(YELLOW).move_to(-2.5, 0)
+point.fill(YELLOW).move_to(CENTER[0] + R, CENTER[1])
+```
 
+`scene.geometry` agrupa las fábricas de formas. El círculo solo tiene trazo
+(`stroke` con color y grosor, y `no_fill`) porque representa una trayectoria.
+`move_to(*CENTER)` desempaqueta la tupla en sus dos coordenadas.
+
+El punto se coloca a `R` unidades a la derecha del centro, es decir, justo
+sobre el borde del círculo.
+
+#idea[
+Nombra los objetos por su papel, no por su aspecto. `orbit` sigue siendo un buen
+nombre aunque en el próximo capítulo cambie de color; `cyan_circle` dejaría de
+serlo.
+]
+
+== El radio
+
+```python
+# continue
+radius = scene.geometry.line(CENTER, point).stroke(WHITE, 0.025)
+```
+
+`scene.geometry.line` acepta coordenadas u objetos como extremos. Aquí el
+origen es el punto fijo `CENTER`, pero el final es el handle `point`: la línea
+termina siempre donde esté el punto. Hoy eso no se nota, porque el punto está
+quieto; en el capítulo 6, cuando el punto gire, el radio lo seguirá sin tocar
+esta línea.
+
+== Mantener el fotograma
+
+Termina el archivo con:
+
+```python
+# continue
+scene.wait(1)
 scene.render()
 ```
 
-Guarda el archivo y vuelve a la ventana de Gaanim.
+`scene.render()` entrega la escena al editor y debe ser siempre la última
+línea. `scene.wait(1)` mantiene el fotograma durante un segundo: una escena sin
+duración no tiene nada que exportar. En el capítulo 4 sustituiremos esa espera
+por animaciones.
 
-== El viewport
-
-`Scene(frame=(16, 9), ...)` crea un lienzo horizontal de 16 unidades de ancho y
-9 de alto. El origen `(0, 0)` está en el centro, X crece hacia la derecha e Y
-hacia arriba, así que X va de `-8` a `8` e Y de `-4.5` a `4.5`. Por eso el
-título usa `y=3.25`, cerca del borde superior, y el sistema circular aparece a
-la izquierda con `x=-4`.
-
-Estas unidades son lógicas: no dependen de la resolución. La misma escena se
-exporta a 1280×720 o a 3840×2160 sin cambiar el código; los píxeles se eligen al
-exportar. El radio `1.5` ocupa 1.5 unidades desde el centro del círculo hasta su
-borde, y los grosores de trazo y los tamaños de texto usan la misma unidad.
-
-== Handles y estado inicial
-
-Las variables `title`, `orbit` y `point` no contienen coordenadas ni imágenes.
-Son handles con los que seguimos describiendo un objeto registrado en `scene`.
-
-Separamos algunas llamadas en dos líneas para ver la intención:
+= Archivo completo
 
 ```python
-# continue
-orbit = scene.geometry.circle(1.5)
-orbit.stroke(BLUE, 0.05).no_fill().move_to(-4, 0)
+# output: preview.webp
+from gaanim import CYAN, WHITE, YELLOW, Scene
+
+scene = Scene(frame=(16, 9), background="#0f172a", margin=0.6)
+
+CENTER = (-4.5, -1.0)
+R = 1.5
+
+title = scene.text("Del círculo al seno", role="title")
+title.fill(WHITE).move_to(0, 3.4)
+
+orbit = scene.geometry.circle(R)
+orbit.stroke(CYAN, 0.05).no_fill().move_to(*CENTER)
+
+point = scene.geometry.dot(0.125)
+point.fill(YELLOW).move_to(CENTER[0] + R, CENTER[1])
+
+radius = scene.geometry.line(CENTER, point).stroke(WHITE, 0.025)
+
+scene.wait(1)
+scene.render()
 ```
-
-La misma construcción podría escribirse como una sola cadena. Ambas formas
-producen el mismo estado inicial.
-
-#idea[
-Usa nombres que expliquen el papel del objeto, no su forma. `orbit` comunica
-más que `blue_circle`; después podremos cambiar su color sin volver falso el
-nombre de la variable.
-]
-
-== Relación geométrica
-
-El centro de la órbita es `(-4, 0)` y su radio es `1.5`. El punto inicial se
-coloca en `(-2.5, 0)`: exactamente 1.5 unidades a la derecha. Esta relación
-será importante cuando el punto empiece a girar.
-
-Podemos hacer visible el radio:
-
-```python
-# continue
-radius = scene.geometry.line(-4, 0, -2.5, 0).stroke(WHITE, 0.025)
-```
-
-Añade esa línea antes de `scene.render()`.
 
 #checkpoint[
-La escena debe mostrar el título, un círculo a la izquierda, un punto amarillo
-en su borde derecho y una línea blanca desde el centro hasta el punto.
+Al guardar, el editor muestra el título arriba, un círculo cian a la izquierda
+y un radio blanco horizontal que termina en el punto amarillo, sobre el borde
+derecho del círculo. Si el punto no toca el círculo, revisa que su posición use
+`CENTER[0] + R`.
 ]
 
-== Lo que acabamos de aprender
-
-Ya sabes crear una escena, leer su sistema de coordenadas, conservar handles y
-construir una relación geométrica con medidas coherentes. En el siguiente
-capítulo convertiremos este boceto en una composición visual consistente.
+En el siguiente capítulo, #link("/tutorial/objetos-estilo/")[Objetos y estilo],
+convertiremos este boceto en una composición con jerarquía visual.
 ]

@@ -3,111 +3,140 @@
 
 #docs-chapter(
   title: "Objetos y estilo",
-  description: "Cómo pensar en drawables, rellenos, trazos, grupos y jerarquía visual",
+  description: "Una paleta con propósito, rellenos, trazos, texto secundario y orden de dibujo",
   route: "/tutorial/objetos-estilo/",
 )[
 
-= Hacer que el fotograma comunique
+= Objetivo
 
-Nuestro primer fotograma funciona, pero todos sus elementos compiten por igual.
-Ahora definiremos una pequeña jerarquía visual y prepararemos el código para que
-el sistema circular se pueda tratar como una unidad.
+El primer fotograma funciona, pero todos sus elementos compiten por la atención.
+Al terminar este capítulo tendrá una jerarquía clara: la órbita define el
+espacio, el punto amarillo es el foco, el radio queda en segundo plano y un
+subtítulo gris explica la escena. Seguirá sin haber movimiento.
+
+= Cambios
 
 == Una paleta con propósito
 
-Amplía los imports y define colores semánticos:
+Sustituye el import y la línea de `Scene` por:
 
 ```python
-from gaanim import BLUE, WHITE, YELLOW, Color, Scene
+from gaanim import WHITE, YELLOW, Color, Scene
 
+# Paleta
 BACKGROUND = Color(15, 23, 42)
-PRIMARY = BLUE
+PRIMARY = Color(96, 165, 250)
 ACCENT = YELLOW
 MUTED = Color(148, 163, 184)
 
 scene = Scene(frame=(16, 9), background=BACKGROUND, margin=0.6)
+
+CENTER = (-4.5, -1.0)
+R = 1.5
 ```
 
-Los nombres dicen para qué sirve cada color. Si la identidad visual cambia,
-solo modificamos la paleta.
+`Color(r, g, b)` crea un color a partir de sus componentes de 0 a 255; el
+fondo es el mismo azul noche de antes. Los nombres dicen para qué sirve cada
+color, no cómo es: `PRIMARY` para la geometría principal, `ACCENT` para lo que
+debe mirar el espectador y `MUTED` para lo secundario. Si mañana cambias la
+identidad visual, solo tocas la paleta.
 
-== Relleno y trazo
+`CYAN` ya no se usa, así que desaparece del import.
 
-Un drawable vectorial puede tener relleno, trazo o ambos. La órbita representa
-una trayectoria, así que no necesita relleno. El punto necesita contraste y el
-radio debe ser secundario:
+== Texto principal y secundario
+
+En la zona `# Texto`, añade un subtítulo debajo del título:
 
 ```python
 # continue
-orbit = scene.geometry.circle(1.5).stroke(PRIMARY, 0.05).no_fill().move_to(-4, 0)
-point = scene.geometry.dot(0.125).fill(ACCENT).move_to(-2.5, 0)
-radius = scene.geometry.line(-4, 0, -2.5, 0).stroke(MUTED, 0.025)
+# Texto
+title = scene.text("Del círculo al seno", role="title")
+title.fill(WHITE).move_to(0, 3.4)
+caption = scene.text("Un punto que gira a radio constante", role="subtitle")
+caption.fill(MUTED).move_to(0, 2.8)
 ```
 
-El orden de creación también influye en la lectura cuando los objetos se
-superponen: lo registrado después suele quedar visualmente por encima.
+Los roles conectan el texto con la tipografía del tema: `"subtitle"` es más
+pequeño que `"title"`. El color `MUTED` termina de marcarlo como información
+secundaria.
 
-== Texto como objeto vectorial
+== Relleno, trazo y color
 
-`scene.text` no crea una etiqueta del sistema operativo; crea geometría
-vectorial medible y animable. Los roles conectan el texto con la tipografía del
-tema:
+Reescribe la geometría con la paleta. Ahora cada objeto cabe en una sola
+cadena de llamadas:
 
 ```python
 # continue
-title = scene.text("Movimiento circular", role="title")
-title.fill(WHITE).move_to(0, 3.25)
-
-caption = scene.text("Un punto, un radio constante", role="subtitle")
-caption.fill(MUTED).move_to(0, 2.69)
+# Círculo
+orbit = scene.geometry.circle(R).stroke(PRIMARY, 0.05).no_fill().move_to(*CENTER)
+point = scene.geometry.dot(0.125).fill(ACCENT).move_to(CENTER[0] + R, CENTER[1])
+radius = scene.geometry.line(CENTER, point).stroke(MUTED, 0.025)
 ```
 
-== Agrupar sin perder las piezas
+Una forma vectorial puede tener relleno (`fill`), trazo (`stroke`) o ambos. La
+órbita solo tiene trazo porque es una trayectoria; el punto solo tiene relleno
+porque es una masa. El radio usa la mitad de grosor que la órbita y un color
+apagado: está para explicar, no para protagonizar.
 
-Agrupa la geometría del círculo:
+== El orden de dibujo
+
+Si te fijas en el capítulo anterior, el extremo del radio se dibujaba encima
+del punto. Por defecto, lo que se crea después queda encima, y `radius` tiene
+que crearse después de `point` porque lo usa como extremo. Súbelo de capa:
 
 ```python
 # continue
-system = scene.geometry.group([orbit, radius, point])
+point.z_index(1)
 ```
 
-`system` permite animar las tres piezas juntas. Los handles originales siguen
-siendo útiles: podremos mover `point` y actualizar `radius` por separado.
+`z_index` fija la capa de dibujo: los valores más altos se dibujan encima. Con
+`1`, el punto queda por delante del radio y de la órbita, que siguen en la capa
+`0`.
 
 #idea[
-Un grupo expresa pertenencia visual. No lo uses solo para reducir líneas de
-código. Agrupa objetos que el espectador debería reconocer como una unidad.
+El estilo también es contenido. Un color de acento y un trazo más fino ya le
+dicen al espectador dónde mirar antes de que ocurra nada.
 ]
 
-== Estado del proyecto
-
-Hasta aquí, la parte central de `main.py` se lee así:
+= Archivo completo
 
 ```python
->>>from gaanim import BLUE, WHITE, YELLOW, Color, Scene
->>>BACKGROUND = Color(15, 23, 42)
->>>PRIMARY = BLUE
->>>ACCENT = YELLOW
->>>MUTED = Color(148, 163, 184)
->>>scene = Scene(frame=(16, 9), background=BACKGROUND, margin=0.6)
-title = scene.text("Movimiento circular", role="title").fill(WHITE).move_to(0, 3.25)
-caption = scene.text("Un punto, un radio constante", role="subtitle").fill(MUTED).move_to(0, 2.69)
+# output: preview.webp
+from gaanim import WHITE, YELLOW, Color, Scene
 
-orbit = scene.geometry.circle(1.5).stroke(PRIMARY, 0.05).no_fill().move_to(-4, 0)
-radius = scene.geometry.line(-4, 0, -2.5, 0).stroke(MUTED, 0.025)
-point = scene.geometry.dot(0.125).fill(ACCENT).move_to(-2.5, 0)
-system = scene.geometry.group([orbit, radius, point])
+# Paleta
+BACKGROUND = Color(15, 23, 42)
+PRIMARY = Color(96, 165, 250)
+ACCENT = YELLOW
+MUTED = Color(148, 163, 184)
 
+scene = Scene(frame=(16, 9), background=BACKGROUND, margin=0.6)
+
+CENTER = (-4.5, -1.0)
+R = 1.5
+
+# Texto
+title = scene.text("Del círculo al seno", role="title")
+title.fill(WHITE).move_to(0, 3.4)
+caption = scene.text("Un punto que gira a radio constante", role="subtitle")
+caption.fill(MUTED).move_to(0, 2.8)
+
+# Círculo
+orbit = scene.geometry.circle(R).stroke(PRIMARY, 0.05).no_fill().move_to(*CENTER)
+point = scene.geometry.dot(0.125).fill(ACCENT).move_to(CENTER[0] + R, CENTER[1])
+radius = scene.geometry.line(CENTER, point).stroke(MUTED, 0.025)
+point.z_index(1)
+
+scene.wait(1)
 scene.render()
 ```
 
 #checkpoint[
-Comprueba que la órbita domina sobre el radio, que el punto es el foco y que el
-subtítulo se lee como información secundaria. Todavía no debe moverse nada.
+La órbita es azul claro, el radio gris y más fino, y el punto amarillo se ve
+entero, por encima del extremo del radio. Bajo el título aparece el subtítulo
+«Un punto que gira a radio constante» en gris.
 ]
 
-== Siguiente paso
-
-Ya tenemos un fotograma diseñado. Ahora construiremos el tiempo: primero
-aparecerá el texto, después se dibujará la órbita y finalmente entrará el punto.
+En el siguiente capítulo, #link("/tutorial/animar-tiempo/")[Animar el tiempo],
+haremos que cada elemento entre en escena en su momento.
 ]

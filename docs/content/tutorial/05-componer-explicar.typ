@@ -3,133 +3,150 @@
 
 #docs-chapter(
   title: "Componer y explicar",
-  description: "Texto matemático, Layout y una estructura que guía la mirada",
+  description: "Texto matemático, un panel con Layout y un reparto claro del espacio",
   route: "/tutorial/componer-explicar/",
 )[
 
-= Añadir una explicación, no decorar
+= Objetivo
 
-La mitad izquierda ya contiene el sistema circular. Reservaremos la derecha
-para explicar qué significa. Esta separación es una decisión narrativa: a la
-izquierda ocurre el fenómeno; a la derecha lo nombramos.
+La izquierda ya contiene el círculo. Al terminar este capítulo, arriba a la
+derecha aparecerá un panel con la fórmula $y = r sin(theta)$ y una frase que
+anuncia lo que ocurrirá: la altura del punto dibujará una onda. El panel se
+escribirá justo después de la entrada del círculo.
 
-== Texto matemático con Typst
+El espacio queda repartido con intención: a la izquierda ocurre el fenómeno,
+arriba a la derecha lo nombramos y debajo del panel queda sitio libre para la
+onda del capítulo 7.
 
-Gaanim compone matemáticas dentro de `scene.text`. Añade dos objetos:
+= Cambios
+
+== Texto matemático
+
+Añade al final de la zona `# Texto`:
 
 ```python
->>>from gaanim import BLUE, WHITE, YELLOW, Color, Scene
->>>BACKGROUND = Color(15, 23, 42)
->>>PRIMARY = BLUE
->>>ACCENT = YELLOW
+>>># Contexto mínimo para validar los fragmentos de esta página.
+>>>from gaanim import WHITE, Color, Scene, stagger
 >>>MUTED = Color(148, 163, 184)
->>>scene = Scene(frame=(16, 9), background=BACKGROUND, margin=0.6)
->>>title = scene.text("Movimiento circular", role="title").fill(WHITE).move_to(0, 3.25)
->>>caption = scene.text("Un punto, un radio constante", role="subtitle").fill(MUTED).move_to(0, 2.69)
->>>orbit = scene.geometry.circle(1.5).stroke(PRIMARY, 0.05).no_fill().move_to(-4, 0)
->>>radius = scene.geometry.line(-4, 0, -2.5, 0).stroke(MUTED, 0.025)
->>>point = scene.geometry.dot(0.125).fill(ACCENT).move_to(-2.5, 0)
->>>system = scene.geometry.group([orbit, radius, point])
->>>from gaanim import stagger
->>>scene.play(stagger(
->>>    title.animate.write().duration(0.8),
->>>    caption.animate.fade_in().duration(0.6),
->>>    each=0.12,
->>>))
->>>scene.play(stagger(
->>>    orbit.animate.create().duration(1.0),
->>>    radius.animate.create().duration(0.7),
->>>    point.animate.fade_in().duration(0.35),
->>>    each=0.15,
->>>))
->>>scene.wait(0.8)
->>>from gaanim import Easing
->>>scene.play([system.animate.shift_by(0.5, 0).duration(0.6).easing(Easing.SMOOTH)])
->>>scene.play([system.animate.shift_by(-0.5, 0).duration(0.6).easing(Easing.SMOOTH)])
-formula = scene.text("$y(t) = r sin(omega t)$", role="subtitle").fill(WHITE)
-explanation = scene.text(
-    "La altura del punto se convertirá en una curva.",
-    role="body",
-).fill(MUTED)
+>>>scene = Scene(frame=(16, 9))
+
+formula = scene.text("$y = r sin(theta)$", role="subtitle").fill(WHITE)
+explanation = scene.text("La altura del punto dibuja la onda.", role="body")
+explanation.fill(MUTED)
 ```
 
-La cadena conserva el código Python, mientras que el contenido entre `$...$`
-se interpreta como matemáticas de Typst.
+`scene.text` compone con Typst lo que va entre `$...$`: `sin` se escribe en
+redonda, `theta` se convierte en θ y las variables van en cursiva. El resto de
+la cadena es texto normal.
 
-== De coordenadas sueltas a Layout
+Estos dos textos no llevan `move_to`: su posición la decidirá el panel.
 
-Podríamos asignar una coordenada distinta a cada texto, pero perderíamos la
-relación entre ellos. Una columna expresa que forman un panel:
+== Un panel con Layout
+
+Justo debajo, agrupa los dos textos en una columna:
 
 ```python
 # continue
-panel = scene.layout.column(
-    [formula, explanation],
-    gap=0.225,
-    align="start",
-)
-panel.move_to(3.5, 1.875)
+panel = scene.layout.column([formula, explanation], gap=0.2, width=6.5)
+panel.move_to(3.5, 1.6)
 ```
 
-Layout posee la posición de sus hijos. Después de crear la columna no llames
-`at()` sobre `formula` o `explanation`; mueve el contenedor `panel` o usa sus
-reglas de configuración.
+`scene.layout.column` apila sus hijos de arriba abajo, separados por `gap`
+unidades y alineados a la izquierda. `width=6.5` fija el ancho del panel: si la
+frase no cupiera, se partiría en varias líneas dentro de ese ancho. Después
+movemos el panel entero; sus hijos lo acompañan.
 
-== Layout local y layout de página
-
-Aquí usamos un layout local: organiza un pequeño grupo y luego colocamos el
-grupo como una unidad. Para una página completa se puede usar `within="safe"`,
-`width="fill"` y `height="fill"`:
-
-```python
-# continue
-# Ilustrativo: no lo añadas a main.py.
-content = scene.text("Contenido de la página", role="body")
-page = scene.layout.stack(
-    [content],
-    within="safe",
-    width="fill",
-    height="fill",
-    align="center",
-)
-```
-
-No necesitamos convertir toda la escena ahora. El círculo usa coordenadas
-porque su geometría depende de un centro y un radio exactos; el panel usa
-Layout porque su geometría depende del contenido.
+A partir de aquí, el panel es el dueño de la posición de `formula` y
+`explanation`. No llames a `move_to` sobre ellos: Gaanim lo rechaza con un
+`LayoutOwnershipError`. Para recolocarlos, mueve `panel`.
 
 #idea[
-Usa coordenadas para explicar geometría. Usa Layout para organizar contenido.
-La buena composición no consiste en elegir uno de los dos, sino en asignar a
-cada sistema la responsabilidad adecuada.
+Usa coordenadas para la geometría y Layout para el contenido. El círculo
+depende de un centro y un radio exactos, así que usa coordenadas. El panel
+depende de lo que miden sus textos, así que usa Layout: si cambias la frase, la
+columna se recalcula sola.
 ]
 
-== Introducir el panel en la timeline
+== La entrada del panel
 
-Añade después de la entrada del sistema:
+En la zona `# Línea de tiempo`, añade una tercera entrada antes de
+`scene.wait(1)`:
 
 ```python
 # continue
-from gaanim import stagger
 scene.play(stagger(
     formula.animate.write().duration(0.8),
-    explanation.animate.fade_in().duration(0.6),
-    each=0.1,
+    explanation.animate.write().duration(0.8),
+    each=0.2,
 ))
-scene.wait(0.8)
 ```
 
-El espectador ya conoce el círculo cuando aparece la fórmula. El texto no
-compite con la primera revelación.
+El panel ocupa del segundo 2 al 3, cuando el espectador ya conoce el círculo:
+la explicación llega después del fenómeno y no compite con él.
+
+= Archivo completo
+
+```python
+# output: preview.webp
+from gaanim import WHITE, YELLOW, Color, Easing, Scene, stagger
+
+# Paleta
+BACKGROUND = Color(15, 23, 42)
+PRIMARY = Color(96, 165, 250)
+ACCENT = YELLOW
+MUTED = Color(148, 163, 184)
+
+scene = Scene(frame=(16, 9), background=BACKGROUND, margin=0.6)
+
+CENTER = (-4.5, -1.0)
+R = 1.5
+
+# Texto
+title = scene.text("Del círculo al seno", role="title")
+title.fill(WHITE).move_to(0, 3.4)
+caption = scene.text("Un punto que gira a radio constante", role="subtitle")
+caption.fill(MUTED).move_to(0, 2.8)
+
+formula = scene.text("$y = r sin(theta)$", role="subtitle").fill(WHITE)
+explanation = scene.text("La altura del punto dibuja la onda.", role="body")
+explanation.fill(MUTED)
+panel = scene.layout.column([formula, explanation], gap=0.2, width=6.5)
+panel.move_to(3.5, 1.6)
+
+# Círculo
+orbit = scene.geometry.circle(R).stroke(PRIMARY, 0.05).no_fill().move_to(*CENTER)
+point = scene.geometry.dot(0.125).fill(ACCENT).move_to(CENTER[0] + R, CENTER[1])
+radius = scene.geometry.line(CENTER, point).stroke(MUTED, 0.025)
+point.z_index(1)
+
+# Línea de tiempo
+scene.play(stagger(
+    title.animate.write().duration(0.8),
+    caption.animate.fade_in().duration(0.5),
+    each=0.5,
+))
+scene.play(stagger(
+    orbit.animate.create().duration(0.8),
+    radius.animate.create().duration(0.4),
+    point.animate.grow_from_center().duration(0.5).easing(Easing.SNAPPY),
+    each=0.25,
+))
+scene.play(stagger(
+    formula.animate.write().duration(0.8),
+    explanation.animate.write().duration(0.8),
+    each=0.2,
+))
+scene.wait(1)
+scene.render()
+```
 
 #checkpoint[
-El panel debe permanecer a la derecha y sus dos líneas deben conservar una
-separación consistente. Si Layout informa ownership errors, busca una llamada
-posicional aplicada a uno de sus hijos después de crear la columna.
+La vista previa dura 4 segundos. Entre el segundo 2 y el 3 se escriben la
+fórmula y la frase, alineadas a la izquierda y en una sola línea cada una,
+arriba a la derecha y por debajo del subtítulo. Bajo el panel queda un espacio
+vacío: lo ocupará la onda.
 ]
 
-== Siguiente paso
-
-La escena ya plantea una promesa: la altura del punto formará una curva. En el
-próximo capítulo haremos que el punto se mueva y que el radio lo siga.
+En el siguiente capítulo, #link("/tutorial/reactividad/")[Dar vida a la
+escena], el punto empezará a girar y el radio lo seguirá.
 ]

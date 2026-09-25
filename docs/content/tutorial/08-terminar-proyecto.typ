@@ -3,195 +3,152 @@
 
 #docs-chapter(
   title: "Terminar el proyecto",
-  description: "Organizar el archivo, validar, exportar y saber qué aprender después",
+  description: "Un cierre para la animación, el archivo final, la revisión y la exportación",
   route: "/tutorial/terminar-proyecto/",
 )[
 
-= De experimento a proyecto
+= Objetivo
 
-Una escena está terminada cuando otra persona puede abrirla, entender su
-estructura y producir el mismo resultado. El último paso no es añadir más
-efectos: es hacer explícitas las decisiones.
+La explicación ya funciona. En este capítulo le damos un final: cuando el
+punto completa la vuelta, la proyección se retira y la escena se queda quieta
+un momento con el círculo y la onda. Después comprobaremos el proyecto y lo
+exportaremos a video.
 
-== Organizar `main.py`
+= Cambios
 
-Divide el archivo en cinco zonas reconocibles:
+== Describir el archivo
 
-```python
-# 1. Imports y paleta
-# 2. Scene y configuración
-# 3. Objetos estáticos
-# 4. Relaciones reactivas
-# 5. Timeline y salida
-```
-
-No escondas cada línea en una función. Crea funciones cuando nombren una idea
-reutilizable, como `build_axes()` o `build_reactive_projection()`, y conserva la
-timeline principal visible de arriba abajo.
-
-== Elegir una salida
-
-Durante la edición termina con:
+Añade un docstring al principio de `main.py`. Es lo primero que leerá quien
+abra el archivo, incluido tú dentro de unos meses:
 
 ```python
->>>from gaanim import BLUE, WHITE, YELLOW, Color, Scene
->>>from gaanim import Easing, stagger
->>>BACKGROUND = Color(15, 23, 42)
->>>PRIMARY = BLUE
->>>ACCENT = YELLOW
->>>MUTED = Color(148, 163, 184)
->>>scene = Scene(frame=(16, 9), background=BACKGROUND, margin=0.6)
->>>title = scene.text("Movimiento circular", role="title").fill(WHITE).move_to(0, 3.25)
->>>caption = scene.text("Un punto, un radio constante", role="subtitle").fill(MUTED).move_to(0, 2.69)
->>>orbit = scene.geometry.circle(1.5).stroke(PRIMARY, 0.05).no_fill().move_to(-4, 0)
->>>system = scene.geometry.group([orbit])
->>>formula = scene.text("$y(t) = r sin(omega t)$", role="subtitle").fill(WHITE)
->>>explanation = scene.text("La altura del punto se convertirá en una curva.", role="body").fill(MUTED)
->>>panel = scene.layout.column([formula, explanation], gap=0.225, align="start")
->>>panel.move_to(3.5, 1.875)
->>>scene.play(stagger(
->>>    title.animate.write().duration(0.8),
->>>    caption.animate.fade_in().duration(0.6),
->>>    each=0.12,
->>>))
->>>scene.play(stagger(
->>>    orbit.animate.create().duration(1.0),
->>>    each=0.15,
->>>))
->>>scene.play(stagger(
->>>    formula.animate.write().duration(0.8),
->>>    explanation.animate.fade_in().duration(0.6),
->>>    each=0.1,
->>>))
->>>scene.wait(0.8)
->>>scene.wait(0.8)
->>>scene.play([system.animate.shift_by(0.5, 0).duration(0.6).easing(Easing.SMOOTH)])
->>>scene.play([system.animate.shift_by(-0.5, 0).duration(0.6).easing(Easing.SMOOTH)])
->>>circle_center = (-4, 0)
->>>import math
->>>from gaanim import Axis
->>>axis = (
->>>  Axis.linear(0, 3 * math.pi)
->>>  .ticks(math.pi)
->>>  .numbers("pi", denominator=1)
->>>)
->>>timeline = scene.viz.number_line(axis, length=7.5)
->>>timeline.drawable().move_to(2.25, 0)
->>>import math
->>>from gaanim import computed
->>>radius = 1.5
->>>theta = scene.viz.parameter(0.0)
->>>sine_curve = timeline.function(
->>>  lambda value: math.sin(value),
->>>  normal_scale=radius,
->>>  reveal=theta,
->>>)
->>>sine_curve.stroke(PRIMARY, 0.04).no_fill()
->>>circle_ref = scene.geometry.polar_point(circle_center, radius, theta)
->>>circle_dot = scene.geometry.dot(0.125).fill(ACCENT).follow(circle_ref)
->>>wave_ref = timeline.point_ref(
->>>  theta,
->>>  normal_offset=computed(lambda angle: radius * math.sin(angle), inputs=[theta]),
->>>)
->>>wave_dot = scene.geometry.dot(0.1).fill(ACCENT).follow(wave_ref)
->>>radius_line = scene.geometry.tracking_line(circle_center, circle_ref)
->>>radius_line.stroke(MUTED, 0.025).no_fill()
->>>projection = scene.geometry.tracking_line(circle_ref, wave_ref)
->>>projection.stroke(ACCENT, 0.025).no_fill()
->>>scene.play([
->>>  circle_dot.animate.fade_in().duration(0.3),
->>>  radius_line.animate.fade_in().duration(0.3),
->>>  timeline.animate.create().duration(0.8),
->>>  sine_curve.animate.fade_in().duration(0.01),
->>>  wave_dot.animate.fade_in().duration(0.3),
->>>  projection.animate.fade_in().duration(0.3),
->>>])
->>>scene.play([
->>>  theta.animate.set(3 * math.pi).duration(8).easing(Easing.LINEAR),
->>>])
-scene.render()
+"""Del círculo al seno: el proyecto final del tutorial de Gaanim.
+
+Un punto gira sobre un círculo y su altura dibuja una onda seno. Un único
+parámetro, ``theta``, gobierna el punto, el radio, la onda y su proyección.
+"""
+>>># Contexto mínimo para validar los fragmentos de esta página.
+>>>from gaanim import Scene
+>>>scene = Scene(frame=(16, 9))
+>>>projection = scene.geometry.line((0, 0), (1, 0))
 ```
 
-Para un video final no cambies el script; exporta desde la raíz del proyecto:
+== Un cierre que respira
 
-```bash
-gaanim export . --output exports/movimiento-circular.mp4
-```
-
-MP4 y WebM necesitan FFmpeg. Para revisar rápidamente una animación en una web
-o documento, WebP suele ser más liviano.
-
-== Capturas reproducibles
-
-El ejemplo final acepta el directorio que inyecta el comparador visual:
+Al final de la zona `# Línea de tiempo`, sustituye `scene.wait(1)` por:
 
 ```python
 # continue
-import os
-
-snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")
-if snapshot_dir:
-    end = scene.cursor  # duración total de la timeline
-    scene.snapshots(snapshot_dir, [0.0, end * 0.25, end * 0.5, end * 0.75, end])
-else:
-    scene.render()
+scene.play([projection.animate.fade_out().duration(0.5)])
+scene.wait(1.5)
 ```
 
-La misma escena puede servir al editor y a pruebas visuales sin mantener dos
-archivos distintos.
+La línea de proyección era un andamio para explicar la relación entre los dos
+puntos. Al terminar la vuelta queda superpuesta a la recta, así que la
+retiramos con `fade_out`. La pausa final de 1.5 segundos da tiempo a mirar el
+resultado antes de que el video termine: una exportación acaba exactamente en
+el último instante de la línea de tiempo.
 
-== Comprobar antes de exportar
+= Archivo completo
 
-Desde la raíz del proyecto:
+Este es el programa terminado. Es el mismo archivo que se instala con Gaanim en
+`_docs/tutorial/circulo_al_seno.py`, dentro de la carpeta del paquete `gaanim`:
+
+```python
+# cell: circulo_al_seno
+# output: preview.webp
+# timeout: 300
+```
+
+#checkpoint[
+La vista previa dura 10 segundos. Hasta el segundo 8 es igual que la del
+capítulo anterior; entre el 8 y el 8.5 la línea de proyección se desvanece y
+en los últimos 1.5 segundos quedan el círculo con su radio, la recta y la onda
+completa, con los dos puntos amarillos a la altura de la recta.
+]
+
+= Comprobar el proyecto
+
+Desde la carpeta del proyecto:
 
 ```bash
 gaanim check .
-gaanim .
 ```
 
-Revisa la escena completa y también instantes intermedios. Busca texto fuera
-del área segura, objetos que aparezcan antes de su entrada, relaciones que se
-rompan al hacer seek y pausas demasiado cortas para leer.
+`gaanim check` ejecuta la escena sin abrir ventana e informa de su duración, en
+este caso 10 segundos. Si algo falla, muestra el error de Python con su línea.
+Con `--strict` también falla ante las advertencias.
+
+Después abre la escena con `gaanim .` y revísala entera, también a saltos con
+la barra de reproducción:
+
+- Todo el texto queda dentro del margen de seguridad.
+- Ningún objeto aparece antes de su animación de entrada.
+- El radio, la proyección y la onda siguen al punto en cualquier instante.
+- Las pausas son lo bastante largas para leer la fórmula.
+
+= Exportar
+
+Cuando la escena esté lista, expórtala sin tocar el script:
+
+```bash
+gaanim export . --output exports/del-circulo-al-seno.mp4
+```
+
+La extensión elige el formato: `.mp4` y `.webm` para video, `.webp` y `.gif`
+para animaciones ligeras en una web o un documento, y `.png` para una
+secuencia de imágenes. Todos salvo PNG necesitan FFmpeg. `--quality` elige
+entre `draft` (rápido), `standard` (el valor por defecto) y `production`, y
+`--from` y `--to` exportan solo un tramo:
+
+```bash
+gaanim export . --output exports/vuelta.webp --from 4 --to 8
+```
+
+La referencia completa de estas opciones está en
+#link("/referencia/cli/")[Línea de comandos].
 
 #idea[
-Una buena animación no es la que contiene más métodos de la API. Es la que
+Una buena animación no es la que usa más funciones de la API. Es la que
 mantiene una relación clara entre lo que se ve, el orden en que se revela y la
-idea que debe comprender el espectador.
+idea que debe entender el espectador.
 ]
 
-== Qué aprendiste realmente
+= Lo que has aprendido
 
-El proyecto recorrió las capas fundamentales de Gaanim:
+- `Scene` define un lienzo de unidades lógicas, con el origen en el centro y un
+  margen de seguridad.
+- `scene.text` y `scene.geometry` crean objetos y devuelven handles; `fill`,
+  `stroke`, `no_fill` y `z_index` les dan estilo y orden.
+- `.animate`, `scene.play`, `stagger`, `duration`, `Easing` y `scene.wait`
+  construyen la línea de tiempo.
+- `scene.layout.column` organiza contenido que depende de su medida y pasa a
+  ser el dueño de la posición de sus hijos.
+- Un `Parameter` animado con `theta.animate.set(...)` gobierna todo lo que
+  depende de él: `polar_point`, `follow`, líneas con objetos como extremos y
+  valores `computed`.
+- `Axis`, `scene.viz.number_line`, `number_line.function(..., reveal=theta)` y
+  `number_line.point_ref` convierten el ángulo en una curva sin deriva.
+- `gaanim check` y `gaanim export` validan y producen la salida sin cambiar el
+  script.
 
-- `Scene` definió el espacio y la timeline.
-- Los drawables expresaron geometría, texto y estilo.
-- `play`, `wait`, duración y easing construyeron el ritmo.
-- Layout organizó contenido que depende de su medida.
-- Los updaters describieron movimiento continuo.
-- `tracking_line`, `polar_point` y `follow` conectaron objetos en el mismo frame.
-- Un `Parameter` compartido y `NumberLine.function(..., reveal=theta)`
-  convirtieron el ángulo en una curva que se forma sin deriva.
-- Render, export y snapshots produjeron salidas distintas desde la misma escena.
+= Cómo continuar
 
-== Cómo continuar
+Modifica el proyecto antes de empezar otro. Guarda una copia y prueba, en este
+orden:
 
-No leas la referencia API de principio a fin. Úsala cuando tengas una pregunta
-concreta. Para ampliar este proyecto, prueba en este orden:
++ Cambia `R` a `1.2`: el círculo, el punto, la onda y la proyección se adaptan.
++ Da dos vueltas: lleva el eje y la animación de `theta` hasta `4 * math.pi`.
++ Añade una segunda curva con `number_line.function(math.cos, ...)` y otro color.
++ Anima el panel con otras entradas y easings de
+  #link("/guias/movimiento/")[Movimiento].
 
-1. Cambia el radio y la velocidad angular.
-2. Añade una segunda curva con otra fase.
-3. Sustituye colores locales por un `Theme`.
-4. Adapta la composición a un viewport 9:16.
-5. Convierte la explicación en segmentos de una presentación.
-
-#checkpoint[
-`gaanim check .` debe terminar sin errores y `gaanim .` debe reproducir
-`main.py` completo. Conserva una copia antes de experimentar con extensiones.
-]
-
-== Después de la guía
-
-La parte siguiente abre un taller de escenas con recetas de texto estructurado,
-datos, Layout, reactividad, 3D, proyectos, presentaciones y regresión visual.
-La referencia técnica de la API queda reservada para el apéndice final.
+Para ir más lejos, las guías resuelven tareas concretas:
+#link("/guias/layout/")[Layout] para composiciones más ricas,
+#link("/guias/reactividad/")[Reactividad] para rastros, valores calculados y
+simulaciones, #link("/guias/presentaciones/")[Presentaciones] para convertir la
+escena en diapositivas y #link("/guias/capturas-y-comparacion/")[Capturas y
+comparación] para comprobar que un cambio no altera lo que se ve. Consulta la
+#link("/referencia/")[Referencia] cuando tengas una pregunta concreta sobre una
+función.
 ]

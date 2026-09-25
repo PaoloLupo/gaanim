@@ -3,88 +3,109 @@
 
 #docs-chapter(
   title: "Antes de empezar",
-  description: "Qué vamos a construir y cómo trabajar con la guía",
+  description: "Qué vamos a construir, cómo está organizado el tutorial y cómo preparar el proyecto",
   route: "/tutorial/antes-de-empezar/",
 )[
 
-= Un proyecto que crecerá contigo
+= Qué vamos a construir
 
-Esta guía no es un catálogo de funciones. Es el relato de un proyecto. Vamos a
-construir una explicación animada de una idea matemática: cómo el movimiento
-de un punto sobre un círculo produce una curva seno.
+En este tutorial construirás, paso a paso, una animación de diez segundos que
+explica una idea matemática: cómo un punto que gira sobre un círculo dibuja una
+onda seno.
 
-Al principio solo veremos un círculo quieto. Después aprenderemos a darle
-estilo, controlar el tiempo, organizar texto, mover un punto de manera
-reactiva, proyectar su altura y conservar el recorrido como una curva. Al final
-tendremos un proyecto que se puede previsualizar, exportar y comprobar.
+Al terminar, la escena mostrará un título, un círculo con su radio y un punto
+que da una vuelta completa. A la derecha, una recta numerada de $0$ a $2 pi$ y
+una onda que se dibuja al mismo ritmo, unida al punto por una línea de
+proyección. Todo el movimiento depende de un único valor: el ángulo `theta`.
+
+Cada capítulo añade una idea de Gaanim a la misma escena:
+
++ *Primera escena*: el lienzo, las coordenadas y los primeros objetos.
++ *Objetos y estilo*: una paleta con propósito, trazos, texto y orden de dibujo.
++ *Animar el tiempo*: `scene.play`, duraciones, `stagger` y easing.
++ *Componer y explicar*: una fórmula y un panel organizado con Layout.
++ *Dar vida a la escena*: un parámetro animable que mueve el punto y el radio.
++ *Del círculo a la onda*: una recta numerada, la curva seno y la proyección.
++ *Terminar el proyecto*: un cierre, la revisión y la exportación.
+
+= Cómo leer cada capítulo
+
+Todos los capítulos siguen el mismo orden:
+
++ *Objetivo*: qué verás al terminar el capítulo.
++ *Cambios*: fragmentos de código con la explicación de cada uno. Un comentario
+  como `# Círculo` indica en qué zona de `main.py` va cada fragmento.
++ *Archivo completo*: el `main.py` entero en ese punto, con una vista previa de
+  lo que debe mostrar. Si algo no coincide, compara tu archivo con este.
+
+Cada archivo completo se ejecuta al construir esta documentación, así que
+siempre funciona tal como aparece.
 
 #idea[
-Cada capítulo parte del archivo del capítulo anterior. No copies todos los
-fragmentos a la vez. Ejecuta el proyecto después de cada cambio y observa qué
-responsabilidad acaba de aparecer.
+No copies todos los fragmentos de golpe. Aplica un cambio, guarda y mira el
+resultado en el editor. Ver cómo reacciona la escena a cada línea enseña más que
+leer el código terminado.
 ]
 
-== Lo que necesitas saber
+= Lo que necesitas saber
 
-La guía supone Python básico: imports, variables, funciones, listas y bloques
-`if`. No necesitas conocer Rust, Bevy, Vello ni programación de GPU.
+El tutorial supone Python básico: imports, variables, tuplas, funciones y
+listas. No necesitas saber Rust, Bevy ni programación de GPU.
 
-Gaanim usa una API fluida. Una expresión como
-`scene.geometry.circle(1.5).stroke(WHITE, 0.05).move_to(-4, 0)` se lee de izquierda a
-derecha: crea un círculo, define su trazo y lo coloca en la escena. Todas las
-medidas usan unidades lógicas de un fotograma de 16×9, no píxeles.
+Gaanim usa una API fluida: cada llamada devuelve el mismo objeto, así que
+puedes encadenarlas. Esta expresión crea un círculo, le da un trazo y lo coloca
+en la escena, de izquierda a derecha:
 
-== Instalar Gaanim
+```python
+>>>from gaanim import WHITE, Scene
+>>>scene = Scene(frame=(16, 9))
+circle = scene.geometry.circle(1.5).stroke(WHITE, 0.05).move_to(-4, 0)
+```
 
-Sigue #link("/empezar/instalacion/")[Instalación] para tu sistema.
-Necesitas Python 3.14. FFmpeg es opcional hasta el capítulo de exportación.
+Todas las medidas usan unidades lógicas de un fotograma de 16 × 9, nunca
+píxeles.
 
-Crea el proyecto que utilizaremos durante todo el libro:
+= Preparar el proyecto
+
+Si todavía no tienes Gaanim, sigue primero
+#link("/empezar/instalacion/")[Instalación]. Después crea el proyecto que
+usaremos durante todo el tutorial y ábrelo:
 
 ```bash
-gaanim init video movimiento-circular
-cd movimiento-circular
+gaanim init video del-circulo-al-seno
+cd del-circulo-al-seno
 gaanim .
 ```
 
-El último comando abre la previsualización. Mientras editas `main.py`, el hot
-reload vuelve a construir la escena al guardar.
+`gaanim .` abre el editor con la escena de ejemplo del proyecto.
+Mientras editas `main.py`, el editor vuelve a ejecutar la escena cada vez que
+guardas.
 
-== La carpeta del proyecto
-
-El scaffold contiene cuatro piezas importantes:
+Estas son las piezas del proyecto que importan en el tutorial:
 
 ```text
-movimiento-circular/
-  gaanim.toml
-  main.py
-  assets/
-  exports/
+del-circulo-al-seno/
+  gaanim.toml   # nombre del proyecto y archivo de entrada
+  main.py       # la escena: el único archivo que editaremos
+  assets/       # imágenes, SVG y fuentes
+  exports/      # videos exportados
 ```
 
-`main.py` contiene la escena. `gaanim.toml` describe el proyecto. `assets/`
-guarda imágenes, SVG y fuentes. `exports/` recibe los videos y previews. Durante
-los primeros capítulos solo modificaremos `main.py`.
-
-== Cómo leer el código
-
-Una escena tiene tres tiempos distintos:
-
-1. Construcción: creas los objetos y describes su estado inicial.
-2. Timeline: `play` y `wait` ordenan lo que ocurrirá.
-3. Salida: `render`, `export` o `snapshots` decide qué producir.
-
-No confundas crear un objeto con animarlo. `scene.geometry.circle(...)` registra un
-objeto. `circle.animate.create()` devuelve una animación. `scene.play([...])` coloca esa
-animación en el tiempo.
+El scaffold crea además un `README.md`, un `pyproject.toml` para el entorno de
+Python y un `AGENTS.md` para asistentes de código.
 
 #checkpoint[
-Antes de seguir, `gaanim .` debe abrir el proyecto sin errores. Si no ocurre,
-usa `gaanim check .` y revisa Python, el manifiesto y la ruta de `main.py`.
+El editor muestra la escena de ejemplo del proyecto sin errores. Si no se abre,
+ejecuta `gaanim check .` desde la carpeta del proyecto para ver qué falla y revisa
+#link("/empezar/instalacion/")[Instalación].
 ]
 
-== Siguiente capítulo
+= El archivo final
 
-En #link("/tutorial/primera-escena/")[Primera escena] reemplazaremos el scaffold por
-el primer fotograma de nuestra explicación.
+El resultado de este tutorial también se instala con Gaanim: está en la carpeta
+del paquete `gaanim`, en `_docs/tutorial/circulo_al_seno.py`. Úsalo para
+comparar si te pierdes, pero intenta llegar a él por tu cuenta.
+
+En el siguiente capítulo, #link("/tutorial/primera-escena/")[Primera escena],
+sustituirás el ejemplo por el primer fotograma de la explicación.
 ]
