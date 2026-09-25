@@ -403,11 +403,17 @@ pub trait AnimatableLens: Send + Sync + std::fmt::Debug + 'static {
     fn clone_box(&self) -> Box<dyn AnimatableLens>;
     /// Returns the descriptive type name of the custom lens.
     fn type_name(&self) -> &'static str;
-    /// Whether this lens owns components that keyframe snapshots do not
-    /// record, so a seek before the clip must apply its initial value, as
-    /// it does for absolute property channels.
-    fn holds_before_start(&self) -> bool {
-        false
+    /// Name of the state this lens owns before its clip starts, such as an
+    /// entry that keeps its target hidden until then. A seek before the clip
+    /// applies [`Self::hold`] of the earliest future clip per target and
+    /// channel, so lenses writing the same components share a channel.
+    fn hold_channel(&self) -> Option<&'static str> {
+        None
+    }
+    /// Write the state shown before the clip starts; `initial` is the clip's
+    /// eased value at progress 0.
+    fn hold(&self, world: &mut bevy::prelude::World, entity: Entity, initial: f64) {
+        self.interpolate(world, entity, initial);
     }
 }
 

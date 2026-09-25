@@ -867,6 +867,46 @@ fn draw_soft_fill(
     }
 }
 
+/// Draw a drop shadow under `path`.
+///
+/// A blurred shadow builds the blur's coverage from black taps and colors it
+/// with one opaque fill inside a layer carrying the color's alpha. Tinting
+/// every tap instead quantized the color per tap (brushes are 8-bit): alphas
+/// below about 24/255 vanished, larger ones all looked alike, and light warm
+/// tones drifted in hue.
+fn draw_shadow(scene: &mut vello::Scene, path: &kurbo::BezPath, shadow: &DropShadow) {
+    let offset = kurbo::Affine::translate((shadow.offset.x, shadow.offset.y));
+    let sharp = shadow.blur_radius.is_nan() || shadow.blur_radius <= 0.0;
+    if sharp {
+        let brush = peniko::Brush::Solid(shadow.color);
+        scene.fill(peniko::Fill::NonZero, offset, &brush, None, path);
+        return;
+    }
+    let reach = BLUR_TAP_RADIUS * shadow.blur_radius + 1.0e-3;
+    let area = path.bounding_box().inflate(reach, reach);
+    let alpha = shadow.color.components[3];
+    scene.push_layer(
+        peniko::Fill::NonZero,
+        peniko::BlendMode::default(),
+        alpha,
+        offset,
+        &area,
+    );
+    let color = peniko::Brush::Solid(shadow.color.with_alpha(1.0));
+    scene.fill(peniko::Fill::NonZero, offset, &color, None, &area);
+    scene.push_layer(
+        peniko::Fill::NonZero,
+        peniko::BlendMode::new(peniko::Mix::Normal, peniko::Compose::DestIn),
+        1.0,
+        offset,
+        &area,
+    );
+    let coverage = peniko::Brush::Solid(peniko::Color::BLACK);
+    draw_soft_fill(scene, path, &coverage, shadow.blur_radius, 1.0, offset);
+    scene.pop_layer();
+    scene.pop_layer();
+}
+
 fn draw_soft_stroke(
     scene: &mut vello::Scene,
     path: &kurbo::BezPath,
@@ -1346,26 +1386,7 @@ pub fn compile_scene_from_world(
         };
 
         if let Some(shadow) = shadow_opt {
-            let shadow_transform = kurbo::Affine::translate((shadow.offset.x, shadow.offset.y));
-            let shadow_brush = peniko::Brush::Solid(shadow.color);
-            if shadow.blur_radius > 0.0 {
-                draw_soft_fill(
-                    &mut scene,
-                    elem_path,
-                    &shadow_brush,
-                    shadow.blur_radius,
-                    1.0,
-                    shadow_transform,
-                );
-            } else {
-                scene.fill(
-                    peniko::Fill::NonZero,
-                    shadow_transform,
-                    &shadow_brush,
-                    None,
-                    elem_path,
-                );
-            }
+            draw_shadow(&mut scene, elem_path, shadow);
         }
 
         if let Some(glow) = glow_opt {
@@ -1884,26 +1905,7 @@ pub fn gaanim_render_system(
 
             // 1. Draw Drop Shadow (rendered under the geometry with custom translation offset)
             if let Some(shadow) = elem_shadow {
-                let shadow_transform = kurbo::Affine::translate((shadow.offset.x, shadow.offset.y));
-                let shadow_brush = peniko::Brush::Solid(shadow.color);
-                if shadow.blur_radius > 0.0 {
-                    draw_soft_fill(
-                        &mut scene,
-                        elem_path,
-                        &shadow_brush,
-                        shadow.blur_radius,
-                        1.0,
-                        shadow_transform,
-                    );
-                } else {
-                    scene.fill(
-                        peniko::Fill::NonZero,
-                        shadow_transform,
-                        &shadow_brush,
-                        None,
-                        elem_path,
-                    );
-                }
+                draw_shadow(&mut scene, elem_path, shadow);
             }
 
             if let Some(glow) = elem_glow {

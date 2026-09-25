@@ -368,6 +368,50 @@ mod tests {
     }
 
     #[test]
+    fn typed_entries_stay_hidden_until_they_start() {
+        use bevy::ecs::world::CommandQueue;
+        let mut canvas = SceneModel::new(640, 360);
+        let first = canvas.text("abc");
+        let second = canvas.text("def");
+        let third = canvas.text("ghi");
+        // 3 keystrokes at 10 cps each: 0.0-0.3 s and 0.3-0.6 s.
+        for text in [&first, &second] {
+            canvas.play(vec![
+                text.animate()
+                    .typewriter(10.0, None, 0.0, 0.0, 0, false)
+                    .unwrap(),
+            ]);
+        }
+        // Scrambles 0.6-1.2 s.
+        canvas.play(vec![third.animate().scramble("upper", 0.3, 20.0, 0).unwrap()]);
+
+        let world = bevy::prelude::World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = bevy::prelude::Commands::new(&mut queue, &world);
+        let mut timeline = gaanim_timeline::timeline::Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+        let mut world = world;
+        queue.apply(&mut world);
+        timeline.add_keyframe(
+            0.0,
+            gaanim_timeline::snapshot::WorldSnapshot::capture(&mut world),
+        );
+
+        // Only the first text types before 0.3 s; the others wait hidden.
+        let expected = [(0.0, 0), (0.15, 1), (0.45, 4), (2.0, 9), (0.15, 1)];
+        for (time, glyphs) in expected {
+            assert_eq!(
+                typed_state(&mut world, &mut timeline, time).0,
+                glyphs,
+                "at {time}"
+            );
+        }
+    }
+
+    #[test]
     fn compiled_typing_is_a_pure_function_of_time() {
         use bevy::ecs::world::CommandQueue;
         let mut canvas = SceneModel::new(640, 360);

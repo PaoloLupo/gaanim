@@ -46,6 +46,10 @@ fn write_shape(world: &mut World, entity: Entity, path: Arc<BezPath>) {
     write_path(world, entity, &path);
 }
 
+/// Hold channel of the lenses that rewrite a typed glyph's outline, so the
+/// earliest pending typing motion decides what the glyph shows before it.
+const GLYPH_SHAPE: &str = "TypedGlyph";
+
 /// Shows a glyph outline only while `appear <= t < vanish` (either bound
 /// optional), hiding it with an empty path otherwise.
 #[derive(Debug, Clone)]
@@ -76,6 +80,19 @@ impl AnimatableLens for GlyphVisibilityLens {
 
     fn type_name(&self) -> &'static str {
         "Typewriter"
+    }
+
+    fn hold_channel(&self) -> Option<&'static str> {
+        Some(GLYPH_SHAPE)
+    }
+
+    /// Before the clip a glyph is shown unless the clip types it in.
+    fn hold(&self, world: &mut World, entity: Entity, _initial: f64) {
+        if self.appear.is_none() {
+            write_path(world, entity, &self.path);
+        } else {
+            write_owned(world, entity, BezPath::new());
+        }
     }
 }
 
@@ -205,6 +222,15 @@ impl AnimatableLens for ScrambleGlyphLens {
 
     fn type_name(&self) -> &'static str {
         "Scramble"
+    }
+
+    fn hold_channel(&self) -> Option<&'static str> {
+        Some(GLYPH_SHAPE)
+    }
+
+    /// A scrambled grapheme stays hidden until its clip starts.
+    fn hold(&self, world: &mut World, entity: Entity, _initial: f64) {
+        write_owned(world, entity, BezPath::new());
     }
 }
 
