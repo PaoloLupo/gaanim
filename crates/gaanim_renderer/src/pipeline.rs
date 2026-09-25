@@ -416,18 +416,20 @@ fn append_extracted_elements(
 }
 
 /// Open a world-space layer that keeps only a transition side's visible region.
+///
+/// Always an isolated `push_layer`, never `push_clip_layer`: the masked run
+/// contains fragments with their own blend layers (closed strokes, e.g. text
+/// glyphs, opacity groups, `ClipMask`s), and vello does not yet clip nested
+/// blend layers inside a clip-only layer (linebender/vello#1198), so those
+/// elements escaped the reveal.
 fn push_transition_mask(scene: &mut vello::Scene, mask: &gaanim_scene::TransitionMask) {
-    if mask.fade.is_some() {
-        scene.push_layer(
-            mask.rule,
-            peniko::BlendMode::default(),
-            1.0,
-            kurbo::Affine::IDENTITY,
-            &mask.path,
-        );
-    } else {
-        scene.push_clip_layer(mask.rule, kurbo::Affine::IDENTITY, &mask.path);
-    }
+    scene.push_layer(
+        mask.rule,
+        peniko::BlendMode::default(),
+        1.0,
+        kurbo::Affine::IDENTITY,
+        &mask.path,
+    );
 }
 
 /// Close a transition mask. A feathered mask first multiplies the layer by
@@ -2733,6 +2735,30 @@ mod tests {
         // Inverted masks depend on each element's bounds and stay separate.
         assert_eq!(shared_clip_run_end(&elements, 3), 4);
         assert_eq!(shared_clip_run_end(&elements, 5), 6);
+    }
+
+    #[test]
+    fn transition_masks_are_isolated_layers_that_clip_nested_blend_layers() {
+        // vello's clip-only layer (`DrawBeginClip::CLIP_BLEND_MODE`) does not
+        // clip nested blend layers, such as the stroke layer of a text glyph.
+        const CLIP_ONLY: u32 = 0x8003;
+        let rect = kurbo::Rect::new(0.0, 0.0, 1.0, 1.0);
+        for fade in [
+            None,
+            Some((kurbo::Point::ZERO, kurbo::Point::new(1.0, 0.0))),
+        ] {
+            let mask = gaanim_scene::TransitionMask {
+                path: rect.to_path(0.1),
+                rule: peniko::Fill::NonZero,
+                fade,
+            };
+            let mut scene = vello::Scene::new();
+            push_transition_mask(&mut scene, &mask);
+            pop_transition_mask(&mut scene, &mask);
+            let draw_data = &scene.encoding().draw_data;
+            assert_ne!(draw_data.first(), Some(&CLIP_ONLY), "fade: {fade:?}");
+            assert!(!draw_data.contains(&CLIP_ONLY));
+        }
     }
 
     #[test]
