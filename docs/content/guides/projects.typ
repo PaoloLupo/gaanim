@@ -95,6 +95,15 @@ archivos y carpetas ocultos (`.git`, `.venv`, archivos de intercambio del
 editor), `venv`, `env`, `__pycache__`, `exports`, `snapshots`, `target`, los
 temporales (`~`, `.swp`, `.tmp`, `.bak`) y los `.lock`.
 
+Los módulos Python del proyecto también recargan. Python se inicializa una sola
+vez por sesión, pero antes de cada ejecución Gaanim descarga de `sys.modules`
+todos los módulos cuyo archivo está dentro de la raíz del proyecto (salvo en
+las carpetas ignoradas de arriba), así que guardar un `.py` importado por el
+entry point vuelve a importarlo sin purgas manuales. Los paquetes instalados y
+el código fuera de la raíz del proyecto siguen en caché hasta reiniciar Gaanim.
+La raíz del proyecto, su carpeta `src/` y la del script están en `sys.path`, y `__file__`,
+`sys.argv[0]` y `sys.path` usan rutas normales, sin el prefijo `\\?\` de Windows.
+
 Puedes crear el `.venv` dentro del proyecto con `uv`:
 
 ```powershell

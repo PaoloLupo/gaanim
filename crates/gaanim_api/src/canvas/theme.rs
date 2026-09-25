@@ -962,7 +962,7 @@ fn spawn_family(kind: &SpawnKind) -> &'static str {
     }
 }
 
-fn spawn_name(kind: &SpawnKind) -> &'static str {
+pub(crate) fn spawn_name(kind: &SpawnKind) -> &'static str {
     match kind {
         SpawnKind::FillLevelOutline { .. } => "fill_level_outline",
         SpawnKind::FillLevel { .. } => "fill_level",

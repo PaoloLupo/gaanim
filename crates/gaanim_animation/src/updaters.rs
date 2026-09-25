@@ -563,6 +563,7 @@ pub fn evaluate_reactive_positions(world: &mut World, time: f64) {
     }
     sampled_series_system(world);
     crate::apply_property_bindings(world, time);
+    crate::signals::curve_bindings_pre_pass_system(world);
     crate::signals::position_binding_system(world);
     mechanism_binding_system(world);
     endpoint_follow_system(world);
@@ -1846,7 +1847,11 @@ fn write_path(world: &mut World, entity: Entity, path: BezPath) {
         .map(|progress| progress.0)
         .unwrap_or(1.0)
         .clamp(0.0, 1.0);
-    let visible = crate::writing::path_at_reveal(&path, reveal);
+    let visible = crate::writing::visible_path(
+        &path,
+        reveal,
+        world.get::<crate::writing::PathTrimWindow>(entity),
+    );
     if let Some(mut path_comp) = world.get_mut::<Path2D>(entity) {
         path_comp.0 = visible;
     }
@@ -3171,6 +3176,50 @@ mod tests {
         endpoint_follow_system(&mut world);
         let transform = world.get::<SpatialTransform>(target).unwrap();
         assert!(transform.translation.distance(DVec3::new(22.0, 27.0, 0.0)) < 1e-9);
+    }
+
+    #[test]
+    fn tracking_line_respects_active_trim_window() {
+        let mut world = World::new();
+        let empty = Arc::new(BezPath::new());
+        let line = world
+            .spawn((
+                SpatialTransform::default(),
+                Path2D(empty.clone()),
+                PathSource(empty),
+                LocalBounds(gaanim_math::Bounds3D::default()),
+                crate::writing::PathTrimWindow {
+                    start: 0.0,
+                    end: 0.0,
+                    offset: 0.0,
+                    sequential: false,
+                },
+                TrackingLine::new(
+                    TrackingEndpoint::Static(DVec3::ZERO),
+                    TrackingEndpoint::Static(DVec3::new(100.0, 0.0, 0.0)),
+                ),
+            ))
+            .id();
+
+        tracking_line_system(&mut world);
+        assert!(
+            world
+                .get::<Path2D>(line)
+                .expect("tracking path")
+                .0
+                .is_empty()
+        );
+
+        world
+            .get_mut::<crate::writing::PathTrimWindow>(line)
+            .expect("trim window")
+            .end = 0.25;
+        tracking_line_system(&mut world);
+        let visible = world.get::<Path2D>(line).expect("trimmed tracking path");
+        assert!(matches!(
+            visible.0.elements().last(),
+            Some(gaanim_core::kurbo::PathEl::LineTo(point)) if (point.x - 25.0).abs() < 1e-9
+        ));
     }
 
     #[test]

@@ -1091,7 +1091,16 @@ class Anim:
     def draw_border_then_fill(self) -> Anim: ...
     def circumscribe(self) -> Anim: ...
     def flash(self) -> Anim: ...
-    def show_passing_flash(self, *, time_width: float = 0.2) -> Anim: ...
+    def show_passing_flash(self, *, time_width: float = 0.2) -> Anim:
+        """Sweep a visible window of the path from start to end.
+
+        ``time_width`` is the window length as a fraction of the path, in
+        ``(0, 1]``. Like ``create()``, the drawable stays hidden before the
+        flash unless an earlier path animation (``create``, ``write``,
+        ``trim``) shows it, and it is hidden again once the window leaves the
+        end. Draw a separate line for a pulse over a visible one.
+        """
+        ...
     def typewriter(
         self,
         cps: float = 18.0,
@@ -1631,7 +1640,8 @@ class Voiceover:
         ...
     @property
     def text(self) -> Optional[str]:
-        """Script of the block: ``text`` or the segment notes."""
+        """Script of the block: ``text``, else the ``## <key>`` section of the
+        narration script, else the segment notes; ``None`` without any."""
         ...
     @property
     def start(self) -> float:
@@ -2271,6 +2281,7 @@ class Drawable:
 
         World offsets remain screen-aligned; local offsets rotate and scale with
         drawable or anchored sources. Non-finite offsets and invalid modes error.
+        The drawable stays hidden until its entry animation is played.
         """
         ...
     def bind_rotation_from(self, source: Drawable, *, ratio: float = 1.0, phase: float = 0.0) -> Self:
@@ -4995,6 +5006,9 @@ class Visualization:
         drivers) keep free continuous wheels.
         font_family=None inherits the scene's body font when compiled, including
         theme typography; an explicit family overrides it with normal font fallback.
+        color=None uses the theme's text color, or without a theme the body text
+        color chosen for the scene background. Like other drawables without an
+        entry animation, the counter is visible from its declaration.
         Families and weight (1..1000) resolve exactly like ``scene.text``: by the
         family stored in each font, including ``Theme(font_files=...)`` and variable
         fonts. Sources driven outside the
@@ -5128,7 +5142,9 @@ class Visualization:
         The label, equality sign, number, and unit all use ``font_size``;
         omitting it selects the shared 0.48-unit reactive annotation size.
         ``color`` applies to the label, reactive value, and unit and remains in
-        effect when the number changes or the timeline seeks.
+        effect when the number changes or the timeline seeks. Without it, every
+        term uses the theme's text color, or without a theme the body text
+        color chosen for the scene background.
         ``decimal_separator`` replaces the ``.`` between integer and fractional
         digits; ``","`` also turns ``,`` grouping into ``.`` (``1.234,50``).
         It must be one character that is not a digit, sign, space, ``e`` or

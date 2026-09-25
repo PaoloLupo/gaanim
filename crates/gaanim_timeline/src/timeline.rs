@@ -84,6 +84,7 @@ type RestoredComponentChanged = Or<(
         Changed<gaanim_animation::SurroundingRect>,
         Changed<gaanim_animation::WriteTipGlow>,
         Changed<gaanim_animation::PathReveal>,
+        Changed<gaanim_animation::PathTrimWindow>,
         Changed<gaanim_animation::FloatSignal>,
         Changed<gaanim_scene::Material3D>,
         Changed<gaanim_animation::TracedPath>,
@@ -153,9 +154,9 @@ fn absolute_lens_channel(lens: &PropertyLensSpec) -> Option<AbsoluteLensChannel>
         PropertyLensSpec::StrokePaint { .. } => AbsoluteLensChannel::StrokeColor,
         PropertyLensSpec::StrokeColor { .. } => AbsoluteLensChannel::StrokeColor,
         PropertyLensSpec::StrokeWidth { .. } => AbsoluteLensChannel::StrokeWidth,
-        PropertyLensSpec::PathCompletion { .. } | PropertyLensSpec::PathTrim { .. } => {
-            AbsoluteLensChannel::PathCompletion
-        }
+        PropertyLensSpec::PathCompletion { .. }
+        | PropertyLensSpec::PathTrim { .. }
+        | PropertyLensSpec::PathRange { .. } => AbsoluteLensChannel::PathCompletion,
         PropertyLensSpec::PathMorph { .. } | PropertyLensSpec::ArrowGrow { .. } => {
             AbsoluteLensChannel::PathMorph
         }
@@ -1224,7 +1225,11 @@ impl Timeline {
                 absolute_lens_channel(&anim.lens)
             } else {
                 match anim.lens {
-                    PropertyLensSpec::PathCompletion { .. } | PropertyLensSpec::PathTrim { .. } => {
+                    // A future passing flash starts from an empty window, so
+                    // the drawable stays hidden until it passes, like Create.
+                    PropertyLensSpec::PathCompletion { .. }
+                    | PropertyLensSpec::PathTrim { .. }
+                    | PropertyLensSpec::PathRange { .. } => {
                         Some(AbsoluteLensChannel::PathCompletion)
                     }
                     PropertyLensSpec::FillLevel { .. } => Some(AbsoluteLensChannel::FillLevel),
@@ -2451,6 +2456,9 @@ fn apply_lens_spec(
             {
                 em.insert(reveal);
             }
+            // Create/Write now owns the visible path; an earlier trim window
+            // must not keep clipping regenerated geometry.
+            set_path_trim_window(world, target, None);
         }
         PropertyLensSpec::PathTrim {
             from,
@@ -2474,6 +2482,16 @@ fn apply_lens_spec(
                     path.0 = std::sync::Arc::new(trimmed);
                 }
             }
+            set_path_trim_window(
+                world,
+                target,
+                Some(gaanim_animation::PathTrimWindow {
+                    start,
+                    end,
+                    offset,
+                    sequential: *sequential,
+                }),
+            );
         }
         PropertyLensSpec::PathMorph { from, to } => {
             let morphed = if completed {
@@ -2776,12 +2794,19 @@ fn apply_lens_spec(
                 };
             }
         }
-        PropertyLensSpec::PathFollow { path, orient } => {
+        PropertyLensSpec::PathFollow {
+            path,
+            orient,
+            reset_anchor,
+        } => {
             // Sample the Bézier path at the eased `t` and set the
             // entity's translation to the sampled world point.
             let p = gaanim_math::get_point_at_alpha(path, t);
             if let Some(mut transform) = world.get_mut::<SpatialTransform>(target) {
                 transform.translation = gaanim_core::glam::DVec3::new(p.x, p.y, 0.0);
+                if *reset_anchor {
+                    transform.anchor = gaanim_core::glam::DVec3::ZERO;
+                }
                 if let Some(offset) = orient {
                     transform.rotation = gaanim_core::glam::DQuat::from_rotation_z(
                         gaanim_math::path_tangent_angle(path, t) + offset,
@@ -2792,6 +2817,7 @@ fn apply_lens_spec(
         PropertyLensSpec::PathFollow3D { points } => {
             if let Some(mut transform) = world.get_mut::<SpatialTransform>(target) {
                 transform.translation = gaanim_math::get_point_on_polyline(points, t);
+                transform.anchor = gaanim_core::glam::DVec3::ZERO;
             }
         }
         PropertyLensSpec::SignalFloat { from, to } => {
@@ -2823,6 +2849,16 @@ fn apply_lens_spec(
                     path.0 = std::sync::Arc::new(trimmed);
                 }
             }
+            set_path_trim_window(
+                world,
+                target,
+                Some(gaanim_animation::PathTrimWindow {
+                    start,
+                    end,
+                    offset: 0.0,
+                    sequential: false,
+                }),
+            );
             if world.get::<LineListSource>(target).is_none() {
                 let line_clone = world.get::<LineListData>(target).cloned();
                 if let Some(line) = line_clone
@@ -2848,6 +2884,32 @@ fn apply_lens_spec(
         PropertyLensSpec::Dynamic(lens) => lens.0.interpolate(world, target, t),
         PropertyLensSpec::Custom { .. } => {
             // Custom dynamically-registered extensions are evaluated by normal ECS tween systems.
+        }
+    }
+}
+
+/// Record the visible window a trim or flash applies, so that systems which
+/// regenerate `Path2D` every frame keep showing that window.
+fn set_path_trim_window(
+    world: &mut World,
+    target: Entity,
+    window: Option<gaanim_animation::PathTrimWindow>,
+) {
+    if world
+        .get::<gaanim_animation::PathTrimWindow>(target)
+        .copied()
+        == window
+    {
+        return;
+    }
+    if let Ok(mut entity) = world.get_entity_mut(target) {
+        match window {
+            Some(window) => {
+                entity.insert(window);
+            }
+            None => {
+                entity.remove::<gaanim_animation::PathTrimWindow>();
+            }
         }
     }
 }

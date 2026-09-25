@@ -1010,9 +1010,9 @@ scene.render()
   name: "Text roles and TextStyle",
   kind: "value",
   signature: "TextStyle(font=None, math_font=None, size=None, weight=None, color=None, ...)",
-  params: ((name: "font", type: "str | None", default: "None", desc: [Primary text font.]), (name: "math_font", type: "str | None", default: "None", desc: [Math font used by inline equations.]), (name: "size", type: "float | None", default: "None", desc: [Font size in canvas/Typst points.]), (name: "weight", type: "int | None", default: "None", desc: [Font weight from 1 through 1000.]), (name: "color", type: "Color | None", default: "None", desc: [Resolved glyph color.])),
+  params: ((name: "font", type: "str | None", default: "None", desc: [Primary text font.]), (name: "math_font", type: "str | None", default: "None", desc: [Math font used by inline equations.]), (name: "size", type: "float | None", default: "None", desc: [Font size in scene units.]), (name: "weight", type: "int | None", default: "None", desc: [Font weight from 1 through 1000.]), (name: "color", type: "Color | None", default: "None", desc: [Resolved glyph color.])),
   returns: (type: "TextStyle", desc: [Reusable typography overlay.]),
-  desc: [Roles are title, subtitle, heading, body, caption, label, code, and math. The 1080p-oriented defaults are respectively 64, 48, 48, 40, 32, 36, 36, and 44 scene units. Role theme values are resolved before `TextStyle`, direct keywords, local `part` style, and persistent selection changes.],
+  desc: [Roles are title, subtitle, kicker, heading, body, caption, label, code, and math. Their default sizes are respectively 0.64, 0.48, 0.32, 0.48, 0.40, 0.32, 0.36, 0.36, and 0.44 scene units, sized for a 16×9 frame. Role theme values are resolved before `TextStyle`, direct keywords, local `part` style, and persistent selection changes.],
 )[
 ```python
 # show-code: true
@@ -1196,7 +1196,7 @@ scene.render()
   signature: "group(members: list[Drawable]) -> Drawable",
   params: ((name: "members", type: "list[Drawable]", default: none, desc: [Members to group.]),),
   returns: (type: "Drawable", desc: [Group drawable.]),
-  desc: [Move/rotate/scale as one while preserving the authored coordinate frame used by member updaters. A deferred trace, force, or connector no longer hides already-visible siblings merely by joining the group. A group `move` keeps deferred members hidden until their own entry; `write`, `create`, and fades on the group are explicit entries for the complete subtree. Use `LayoutBuilder.row`, `column`, `grid`, or `stack` for layout.],
+  desc: [Move/rotate/scale as one while preserving the authored coordinate frame used by member updaters. A deferred trace, force, or connector no longer hides already-visible siblings merely by joining the group, and a group declared after `wait` or `play` never hides members that were already visible. A group `move` keeps deferred members hidden until their own entry; `write`, `create`, and fades on the group are explicit entries for the complete subtree. Use `LayoutBuilder.row`, `column`, `grid`, or `stack` for layout.],
 )[
 ```python
 # show-code: true
@@ -1507,7 +1507,7 @@ scene.play([k.animate.create(), k.animate.set(100).duration(1.5)])
   signature: "readout(source, *, inputs=(), label=None, format='.2f', prefix='', suffix='', unit=None, font_size=None, color=None, invalid='invalid', decimal_separator='.') -> Readout",
   params: ((name: "source", type: "number | Parameter | Variable | Computed | callable", default: none, desc: [Escalar o función Python pura cuyos argumentos corresponden a `inputs`.]), (name: "inputs", type: "Sequence[Parameter | Variable | Computed | TimeInput]", default: "()", desc: [Dependencias explícitas en orden.]), (name: "invalid", type: "str", default: "'invalid'", desc: [Texto usado cuando la evaluación es inválida o no finita.]), (name: "decimal_separator", type: "str", default: "'.'", desc: [Separador decimal, como en `variable`. Un dígito, signo, espacio, `e` o `%` produce `ValueError`.]),),
   returns: (type: "Readout", desc: [Grupo dibujable reactivo.]),
-  desc: [The numeric path is regenerated only if the formatted text changes, avoiding work for sub-precision animation steps. `label`, `equals`, `number`, and `unit` are available as drawable parts; every part uses `font_size`, defaulting together to 0.48 scene units. They keep equal equation-style spacing and a shared visual baseline for textual terms. `color` paints the complete row and remains applied to regenerated numeric glyphs and timeline seeks.],
+  desc: [The numeric path is regenerated only if the formatted text changes, avoiding work for sub-precision animation steps. `label`, `equals`, `number`, and `unit` are available as drawable parts; every part uses `font_size`, defaulting together to 0.48 scene units. They keep equal equation-style spacing and a shared visual baseline for textual terms. `color` paints the complete row and remains applied to regenerated numeric glyphs and timeline seeks. Without `color`, the row uses the theme's text color or, without a theme, the body text color chosen for the background.],
 )[
 ```python
 import math
@@ -1534,6 +1534,7 @@ scene.play([area.animate.create(), radius.animate.set(3.0).duration(1.5)])
     (name: "direction", type: "str", default: "'up'", desc: [`up` o `down` para magnitudes crecientes. Al disminuir la magnitud se invierte el movimiento.]),
     (name: "font_size / digit_spacing", type: "float", default: "0.75 / 0.02", desc: [Tamaño de fuente y espacio adicional entre celdas, en unidades de escena. Positivo y no negativo, respectivamente.]),
     (name: "line_height", type: "float", default: "1.25", desc: [Altura de la ventana y distancia entre dígitos, como múltiplo de la altura visible de las cifras; al menos 1.]),
+    (name: "color", type: "Color | None", default: "None", desc: [Color de las cifras, el signo y los afijos. Sin él se usa el color de texto del tema o, sin tema, el color del texto de cuerpo elegido para el fondo.]),
   ),
   returns: (type: "RollingNumber", desc: [Drawable con un Parameter propio y animación escalar.]),
   desc: [Las cifras son contornos vectoriales de ancho fijo, recortados dentro de cada celda. Los glifos se preparan una vez y la geometría depende del valor actual, sin acumular estado entre fotogramas. Esto permite reproducción, seeks en cualquier orden y exportación consistentes. El borde derecho permanece anclado; `min_digits` reserva posiciones para evitar crecimiento durante un acarreo. El signo y los separadores permanecen estáticos. Las magnitudes negativas giran como sus valores absolutos.],
@@ -1606,6 +1607,9 @@ al terminar, el valor final se lee limpio, como en `odometer`. Las fuentes que n
 se animan con tweens (valores calculados, tiempo o drivers de muestras) mantienen
 el giro continuo libre.
 Los símbolos no giran.
+Como cualquier drawable sin animación de entrada, el contador es visible desde
+su declaración; `counter.visual.animate.fade_in()` u otra entrada lo mantiene
+oculto hasta que empieza.
 Consulta `examples/rolling_number_demo.py` para dinero, ceros iniciales, cuenta
 regresiva y movimiento continuo.
 ]

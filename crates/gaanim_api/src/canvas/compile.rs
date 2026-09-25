@@ -2614,12 +2614,15 @@ impl SceneModel {
                     object_scopes.insert(spec.id, CompiledObjectScope::Segment(scene_id));
                     // Compilation creates every entity up front so arbitrary timeline seeks
                     // remain possible. An object declared after earlier animations must still
-                    // stay hidden until the playhead reaches its declaration point.
+                    // stay hidden until the playhead reaches its declaration point. A group
+                    // adds no geometry of its own: its members already follow their own
+                    // declarations, and hiding the group would hide them since time zero.
                     if spec.defer_visibility_until_play {
                         if let Some(state) = builder.states.get(actual.id).cloned() {
                             builder.hide_visuals_now(&state);
                         }
                     } else if !transform_targets.contains(&spec.id)
+                        && !matches!(spec.kind, SpawnKind::Group(_) | SpawnKind::GroupNoCenter(_))
                         && builder.current_time > scene_start + 1e-9
                         && let Some(state) = builder.states.get(actual.id).cloned()
                     {
@@ -7588,11 +7591,13 @@ impl SceneModel {
                 } else {
                     (path, bounds)
                 };
+                // Numbers are text: without an explicit or themed fill they use
+                // the body color, which contrasts with the scene background.
                 let svg_path = gaanim_objects::prelude::SvgPath {
                     id: "ReactiveReadout".to_owned(),
                     path,
                     bounds,
-                    fill: None,
+                    fill: Some(gaanim_core::peniko::Brush::Solid(body.fill_color)),
                     stroke: StrokeBrush::transparent(),
                 };
                 let source_path = std::sync::Arc::new(svg_path.path.clone());
@@ -10367,6 +10372,50 @@ mod tests {
     }
 
     #[test]
+    fn late_group_keeps_already_visible_members_visible() {
+        let mut canvas = SceneModel::new(640, 360);
+        let first = canvas.circle(10.0);
+        let second = canvas.circle(10.0);
+        canvas.wait(1.0);
+        let group = canvas.group(&[&first, &second]);
+        canvas.play(vec![group.animate().opacity(0.3).duration(0.5)]);
+
+        let mut world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &config);
+        drop(commands);
+        queue.apply(&mut world);
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+
+        let opacity_of = |world: &mut World, handle: &DrawableHandle| {
+            let id = ObjectId::from_raw(handle.id.as_raw() - 1);
+            world
+                .query::<(&MobjectId, &Opacity)>()
+                .iter(world)
+                .find(|(object, _)| object.0 == id)
+                .unwrap()
+                .1
+                .0
+        };
+        for time in [0.5, 2.0, 0.0] {
+            timeline.seek(&mut world, time);
+            for member in [&first, &second] {
+                assert_eq!(opacity_of(&mut world, member), 1.0, "member at {time}");
+            }
+            let expected = if time < 1.0 { 1.0 } else { 0.3 };
+            let group_opacity = opacity_of(&mut world, &group);
+            assert!(
+                (group_opacity - expected).abs() < 1e-5,
+                "group opacity {group_opacity} at {time}"
+            );
+        }
+    }
+
+    #[test]
     fn visual_effects_are_attached_to_compiled_drawables() {
         let mut canvas = SceneModel::new(640, 360);
         canvas
@@ -11508,26 +11557,85 @@ mod tests {
             .filter_map(|clip| match &clip.payload {
                 gaanim_timeline::clip::ClipPayload::Animation(
                     gaanim_timeline::clip::AnimationSpec {
-                        lens: gaanim_timeline::clip::PropertyLensSpec::PathFollow { path, orient },
+                        lens:
+                            gaanim_timeline::clip::PropertyLensSpec::PathFollow {
+                                path,
+                                orient,
+                                reset_anchor,
+                            },
                         ..
                     },
-                ) => Some((clip.start, path.clone(), *orient)),
+                ) => Some((clip.start, path.clone(), *orient, *reset_anchor)),
                 _ => None,
             })
             .collect();
         assert_eq!(follows.len(), 2);
-        let (_, route_part, orient) = follows.iter().find(|entry| entry.0 == 0.0).unwrap();
+        let (_, route_part, orient, reset_anchor) =
+            follows.iter().find(|entry| entry.0 == 0.0).unwrap();
         assert_eq!(*orient, Some(0.5));
+        assert!(
+            *reset_anchor,
+            "move_along places the local origin on the route"
+        );
         // Half of the 7-unit route ends 3.5 units along it.
         let end = gaanim_math::get_point_at_alpha(route_part, 1.0);
         assert!((end.x - 3.5).abs() < 1e-3 && end.y.abs() < 1e-3, "{end:?}");
-        let (_, arc, orient) = follows.iter().find(|entry| entry.0 > 0.0).unwrap();
+        let (_, arc, orient, reset_anchor) = follows.iter().find(|entry| entry.0 > 0.0).unwrap();
         assert_eq!(*orient, None);
+        assert!(!*reset_anchor, "path_arc keeps the authored pivot");
         let middle = gaanim_math::get_point_at_alpha(arc, 0.5);
         assert!(
             middle.y < -0.2,
             "arc should bow below the chord: {middle:?}"
         );
+    }
+
+    #[test]
+    fn move_along_keeps_the_declared_state_until_it_starts() {
+        let mut canvas = SceneModel::new(640, 360);
+        let route = canvas.polyline(&[(-6.0, -2.0), (0.0, 2.0), (6.0, -2.0)]);
+        let ball = canvas.circle(0.2).move_to(-6.0, -2.0);
+        canvas.wait(1.0);
+        canvas.play(vec![ball.animate().grow_from_center().duration(0.3)]);
+        canvas.play(vec![
+            ball.animate().move_along(&route).unwrap().duration(1.0),
+        ]);
+
+        let mut world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &config);
+        drop(commands);
+        queue.apply(&mut world);
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+
+        let id = ObjectId::from_raw(ball.id.as_raw() - 1);
+        for (time, translation, scale) in [
+            (0.5, DVec3::new(-6.0, -2.0, 0.0), 0.0),
+            (3.0, DVec3::new(6.0, -2.0, 0.0), 1.0),
+            (0.5, DVec3::new(-6.0, -2.0, 0.0), 0.0),
+        ] {
+            timeline.seek(&mut world, time);
+            let transform = *world
+                .query::<(&MobjectId, &SpatialTransform)>()
+                .iter(&world)
+                .find(|(object, _)| object.0 == id)
+                .unwrap()
+                .1;
+            assert!(
+                transform.translation.distance(translation) < 1e-6,
+                "{:?} at {time}",
+                transform.translation
+            );
+            assert!(
+                (transform.scale.x - scale).abs() < 1e-9,
+                "{:?} at {time}",
+                transform.scale
+            );
+        }
     }
 
     #[test]

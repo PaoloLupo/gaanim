@@ -808,6 +808,17 @@ pub fn curvature_on_curve_system(world: &mut World) {
     }
 }
 
+/// Places every curve-bound marker on its current curve before position
+/// bindings, followers and tracking lines read it. After a seek restores a
+/// marker's initial transform, the late pass after curve regenerators would
+/// otherwise run too late for the drawables that follow the marker.
+pub fn curve_bindings_pre_pass_system(world: &mut World) {
+    point_on_curve_system(world);
+    tangent_on_curve_system(world);
+    normal_on_curve_system(world);
+    curvature_on_curve_system(world);
+}
+
 fn point_at_polyline_fraction(path: &BezPath, fraction: f64) -> Option<Point> {
     sample_polyline(path, fraction).map(|(point, _)| point)
 }
@@ -1384,12 +1395,13 @@ pub fn always_redraw_regen_system(world: &mut World) {
             .map(|r| r.0)
             .unwrap_or(1.0)
             .clamp(0.0, 1.0);
-        updates.push((entity, path, bounds, reveal));
+        let trim = world.get::<crate::writing::PathTrimWindow>(entity).copied();
+        updates.push((entity, path, bounds, reveal, trim));
     }
 
-    for (entity, path, bounds, reveal) in updates {
+    for (entity, path, bounds, reveal, trim) in updates {
         let path = Arc::new(path);
-        let visible = crate::writing::path_at_reveal(&path, reveal);
+        let visible = crate::writing::visible_path(&path, reveal, trim.as_ref());
         if let Some(mut path_comp) = world.get_mut::<gaanim_scene::Path2D>(entity) {
             path_comp.0 = visible;
         }

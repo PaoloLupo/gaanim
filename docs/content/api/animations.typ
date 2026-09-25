@@ -243,25 +243,6 @@ scene.play([frame.retarget(equation["result"]).duration(0.9).easing(Easing.sprin
 ]
 
 #api-entry(
-  name: "Drawable.animate.move_to",
-  kind: "method",
-  signature: ".animate.move_to(x: float, y: float) -> Anim",
-  params: ((name: "x", type: "float", default: none, desc: [Target x.]), (name: "y", type: "float", default: none, desc: [Target y.]),),
-  returns: (type: "Anim", desc: [Glide to position.]),
-  desc: [Smoother arrival than `move_to`. Good for camera-like drifts.],
-)[
-```python
-# show-code: true
-from gaanim import BLUE, Scene
-scene = Scene(frame=(16, 9), background="#0f172a")
-label = scene.text("Glide").move_to(-1.25, 0)
-scene.play([label.animate.move_to(1, 0).duration(1.1)])
-# output: preview.webp
-scene.render()
-```
-]
-
-#api-entry(
   name: "Drawable.scale",
   kind: "method",
   signature: ".animate.scale_by(factor: float) -> Anim",
@@ -1086,6 +1067,29 @@ scene.play(ring.animate.trim(start=0.0, end=1.0))                # desde el cent
 orbit.trim(start=0.0, end=0.15)
 scene.play(orbit.animate.trim(offset=1.0).duration(2))           # segmento viajero
 ```
+
+El recorte se mantiene también en los trazos que se regeneran en cada
+fotograma: líneas entre extremos (`line((x1, y1), (x2, y2))`, `line(a, b)`),
+conectores y curvas reactivas.
+
+`animate.show_passing_flash(time_width=0.2)` recorre el trazo con una ventana
+de longitud `time_width` (fracción del camino, en `(0, 1]`). Igual que con
+`create()`, el drawable permanece oculto antes del destello, salvo que una
+animación de trazo anterior (`create`, `write`, `trim`) lo muestre, y vuelve a
+ocultarse cuando la ventana sale por el final. Para un pulso sobre una línea
+visible, dibuja una segunda línea encima.
+
+```python
+pulse = scene.geometry.line(-5, 0, 5, 0).stroke(CYAN, 0.06)
+scene.wait(0.5)                                                  # oculta
+scene.play(pulse.animate.show_passing_flash(time_width=0.3).duration(1.0))
+scene.wait(0.5)                                                  # oculta
+```
+
+Las animaciones de trazo de un mismo drawable (`create`, `write`, `trim`,
+`show_passing_flash`) comparten el canal `effect`, así que no pueden solaparse
+dentro de un `play`. El error indica las dos animaciones, sus tramos y el tipo
+de drawable; encadénalas con `sequence` sin solape o combínalas en una sola.
 
 `animate.glow(color, radius, intensity)`, `animate.blur(sigma)` y
 `animate.shadow(color, x, y, blur)` interpolan los efectos estáticos del mismo
