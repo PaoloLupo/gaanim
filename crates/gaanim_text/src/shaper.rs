@@ -36,11 +36,23 @@ pub struct HierarchyChild {
     pub id: ObjectId,
     pub entity: Entity,
     pub span: TextSpan,
+    /// Everything a glyph draws when it covers several characters, such as
+    /// the `fi` ligature; `span.character` is only its first character.
+    pub ligature: Option<Arc<str>>,
     pub path: Arc<gaanim_core::kurbo::BezPath>,
     pub bounds: Bounds3D,
     pub transform: SpatialTransform,
     pub fill: Option<Brush>,
     pub stroke: StrokeBrush,
+}
+
+impl HierarchyChild {
+    /// The characters this glyph draws, in order.
+    pub fn characters(&self) -> impl Iterator<Item = char> + '_ {
+        let ligature = self.ligature.as_deref().map(str::chars);
+        let single = ligature.is_none().then_some(self.span.character);
+        ligature.into_iter().flatten().chain(single)
+    }
 }
 
 fn normalize_single_line_text(text: &str) -> String {
@@ -231,6 +243,7 @@ pub fn compile_text_to_hierarchy(
                 id: char_id,
                 entity: child_entity,
                 span,
+                ligature: None,
                 path: child_path,
                 bounds: glyph_local_bounds,
                 transform: child_transform,

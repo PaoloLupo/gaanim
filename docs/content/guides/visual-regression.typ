@@ -58,6 +58,7 @@ gaanim --diff --example mi-charla --capture-stops --stops 12,30 --capture-only
 - `--sections resultados,cierre` y `--from resultados` capturan solo las pausas de esos segmentos o claves de `Section` (ver la guía de diapositivas); se combinan con `--stops` y conservan la numeración global.
 - Además de `manifest.json`, escribe `stops.json` con número, tiempo, segmento, nombre de la pausa y archivo de cada captura.
 - Funciona con `--bless`, `--capture-only` y `--no-gui`; no con `--no-capture`.
+- Solo compara si el baseline tiene su propio `stops.json`. Si no hay baseline, o es un baseline de `scene.snapshots`, captura, avisa de que no hay nada que comparar y termina con éxito. `--bless` con `--capture-stops` reemplaza el `manifest.json` del baseline, así que no lo uses sobre un baseline de `scene.snapshots` que quieras conservar.
 
 Si prefieres elegir los tiempos desde el script, `scene.stops` devuelve las pausas con su tiempo absoluto y `scene.cursor` el instante actual de autoría:
 

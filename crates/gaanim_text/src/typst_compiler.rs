@@ -39,6 +39,7 @@ struct PendingTypstChild {
     stroke: StrokeBrush,
     tag: ObjectTag,
     span: gaanim_scene::components::TextSpan,
+    ligature: Option<Arc<str>>,
 }
 
 #[derive(Clone)]
@@ -50,6 +51,7 @@ struct CachedTypstChild {
     stroke: StrokeBrush,
     tag: ObjectTag,
     span: gaanim_scene::components::TextSpan,
+    ligature: Option<Arc<str>>,
 }
 
 #[derive(Clone)]
@@ -552,6 +554,9 @@ fn extract_frame_items(
                             .and_then(|s| s.chars().next())
                             .unwrap_or('?');
 
+                        let drawn = text.text.get(glyph.range()).unwrap_or_default();
+                        let ligature = (drawn.chars().nth(1).is_some()).then(|| Arc::from(drawn));
+
                         let span_range = world.range(glyph.span.0).unwrap_or(0..0);
                         let source_start = span_range.start + byte_offset;
                         let source_end = source_start + c.len_utf8();
@@ -572,6 +577,7 @@ fn extract_frame_items(
                             stroke: default_stroke.clone(),
                             tag: ObjectTag("TypstGlyph".into()),
                             span,
+                            ligature,
                         });
 
                         *char_index_counter += 1;
@@ -622,6 +628,7 @@ fn extract_frame_items(
                         .unwrap_or_else(StrokeBrush::transparent),
                     tag: ObjectTag("TypstShape".into()),
                     span,
+                    ligature: None,
                 });
                 *char_index_counter += 1;
 
@@ -868,6 +875,7 @@ fn compile_typst_source_with_resources(
             stroke: child.stroke,
             tag: child.tag,
             span: child.span,
+            ligature: child.ligature,
         });
     }
 
@@ -1115,6 +1123,7 @@ fn spawn_cached_typst_hierarchy(
             id: child_id,
             entity: child_entity,
             span: child.span,
+            ligature: child.ligature.clone(),
             path: Arc::new(child.path.clone()),
             bounds: child.bounds,
             transform: child.transform,
