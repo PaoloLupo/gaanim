@@ -1035,7 +1035,7 @@ pub struct Anim {
     consumed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     duration_explicit: bool,
     rate_explicit: bool,
-    property_spec: Option<std::sync::Arc<std::sync::Mutex<ObjectSpec>>>,
+    pub(crate) property_spec: Option<std::sync::Arc<std::sync::Mutex<ObjectSpec>>>,
     camera_capture_before_play: Option<u64>,
     repeat: Option<AnimRepeat>,
 }

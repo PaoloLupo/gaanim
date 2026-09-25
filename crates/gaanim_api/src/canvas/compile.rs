@@ -8660,7 +8660,7 @@ impl SceneModel {
 /// Such glyphs, and punctuation outside every unit, join the preceding unit,
 /// or the following one at the start. Returns `None` when no glyph matches a
 /// unit.
-fn reveal_groups(
+pub(crate) fn reveal_groups(
     glyphs: &[(ObjectId, char)],
     visible: &[(char, Option<usize>)],
 ) -> Option<Vec<Vec<ObjectId>>> {

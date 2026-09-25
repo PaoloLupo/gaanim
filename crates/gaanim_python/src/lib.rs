@@ -20,6 +20,7 @@ mod pylayout;
 mod pymatrix;
 mod pystyle;
 mod pytext;
+mod pytext_animator;
 mod rolling_number;
 mod transition;
 mod updater;
@@ -103,6 +104,8 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pytext::PyTextSelection>()?;
     m.add_class::<pytext::PyTextSelectionAnimation>()?;
     m.add_class::<pytext::PyText>()?;
+    m.add_class::<pytext_animator::PyTextAnimator>()?;
+    m.add_class::<pytext_animator::PyTextAnimatorAnimation>()?;
     m.add_function(wrap_pyfunction!(pytext::text_part, m)?)?;
     m.add_function(wrap_pyfunction!(pytext::text_parts, m)?)?;
     m.add_class::<pylayout::PyLayoutItem>()?;

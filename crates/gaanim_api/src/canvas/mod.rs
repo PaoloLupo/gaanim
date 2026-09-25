@@ -77,6 +77,10 @@ pub(crate) use compile::{
 };
 mod incremental;
 pub(crate) use incremental::SceneFingerprints;
+pub mod text_animator;
+pub use text_animator::{
+    SelectorShape, TextAnimator, TextAnimatorError, TextAnimatorOut, TextRevealStyle,
+};
 
 /// dotLottie selectors and typed inputs.
 pub use gaanim_renderer::lottie::{LottieInput, LottiePackageOptions};

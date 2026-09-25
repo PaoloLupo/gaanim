@@ -964,6 +964,9 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
     if matches!(anim.inner.anim_type, FadeInFrom { .. }) {
         return vec!["translation".into(), "opacity".into()];
     }
+    if let TextAnimator(spec) = &anim.inner.anim_type {
+        return spec.channels();
+    }
     if let CustomProperties(animation) = &anim.inner.anim_type {
         return animation
             .channels()

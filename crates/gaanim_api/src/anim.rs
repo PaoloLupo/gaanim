@@ -506,6 +506,9 @@ pub enum AnimationType {
     ShowPassingFlash {
         time_width: f64,
     },
+    /// Per-unit text range animation (sweep, reveal presets, tracking); see
+    /// [`crate::canvas::text_animator`].
+    TextAnimator(Box<crate::canvas::text_animator::TextAnimatorSpec>),
 }
 
 #[derive(Debug, Clone)]
