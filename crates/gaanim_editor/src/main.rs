@@ -1099,6 +1099,19 @@ fn dispatch_diff_mode() -> bool {
         std::process::exit(0);
     }
 
+    match comparison_blocker(&parsed.baseline, parsed.capture_stops) {
+        Some(Ok(note)) => {
+            println!("Snapshots captured: {}", parsed.current.display());
+            println!("{note}");
+            std::process::exit(0);
+        }
+        Some(Err(error)) => {
+            eprintln!("gaanim --diff: {error}");
+            std::process::exit(2);
+        }
+        None => {}
+    }
+
     let report = match gaanim_diff::compare_directories(
         &parsed.baseline,
         &parsed.current,
@@ -1136,6 +1149,25 @@ fn dispatch_diff_mode() -> bool {
     }
 
     std::process::exit(if passed { 0 } else { 1 });
+}
+
+/// Why `--diff` ends after capturing instead of comparing with `baseline`:
+/// `Ok` for a successful stop capture that has no stop baseline to compare
+/// with (a `scene.snapshots` baseline shares none of its ids), `Err` when
+/// there is no baseline at all.
+fn comparison_blocker(baseline: &Path, capture_stops: bool) -> Option<Result<String, String>> {
+    if capture_stops && !baseline.join(gaanim_diff::STOPS_FILE).is_file() {
+        return Some(Ok(format!(
+            "No stop baseline in {}; nothing to compare. Pass --capture-only to skip this check.",
+            baseline.display()
+        )));
+    }
+    (!baseline.is_dir()).then(|| {
+        Err(format!(
+            "baseline {} does not exist; capture it with --bless first",
+            baseline.display()
+        ))
+    })
 }
 
 /// Run the script like `gaanim check` and capture the frame shown at each stop.
@@ -1564,6 +1596,28 @@ mod tests {
             visual_test_case_dir(root, Path::new("examples/nested/demo.py")).unwrap(),
             root.join("nested").join("demo")
         );
+    }
+
+    #[test]
+    fn diff_compares_only_against_a_baseline_of_the_same_capture_kind() {
+        let root = std::env::temp_dir().join(format!("gaanim_diff_blocker_{}", std::process::id()));
+        let baseline = root.join("baseline");
+        let _ = std::fs::remove_dir_all(&root);
+
+        // No baseline: stop captures succeed, snapshot diffs explain the fix.
+        assert!(matches!(comparison_blocker(&baseline, true), Some(Ok(_))));
+        let missing = comparison_blocker(&baseline, false).unwrap().unwrap_err();
+        assert!(missing.contains("--bless"), "{missing}");
+
+        // A scene.snapshots baseline has no stops.json.
+        std::fs::create_dir_all(&baseline).unwrap();
+        std::fs::write(baseline.join(gaanim_diff::MANIFEST_FILE), "{}").unwrap();
+        assert!(matches!(comparison_blocker(&baseline, true), Some(Ok(_))));
+        assert_eq!(comparison_blocker(&baseline, false), None);
+
+        std::fs::write(baseline.join(gaanim_diff::STOPS_FILE), "{}").unwrap();
+        assert_eq!(comparison_blocker(&baseline, true), None);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

@@ -7569,17 +7569,19 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             let mut index_mapping = Vec::new();
 
             for (span_idx, child) in state.child_spans.iter().enumerate() {
-                let raw_c = child.span.character;
-                if raw_c.is_whitespace() || raw_c == '^' || raw_c == '_' {
-                    continue;
-                }
+                // A ligature glyph matches every character it draws.
+                for raw_c in child.characters() {
+                    if raw_c.is_whitespace() || raw_c == '^' || raw_c == '_' {
+                        continue;
+                    }
 
-                for lower in standard_math_char(raw_c).to_lowercase() {
-                    let start_byte = normalized_text.len();
-                    normalized_text.push(lower);
-                    let end_byte = normalized_text.len();
-                    for _ in start_byte..end_byte {
-                        index_mapping.push(span_idx);
+                    for lower in standard_math_char(raw_c).to_lowercase() {
+                        let start_byte = normalized_text.len();
+                        normalized_text.push(lower);
+                        let end_byte = normalized_text.len();
+                        for _ in start_byte..end_byte {
+                            index_mapping.push(span_idx);
+                        }
                     }
                 }
             }
@@ -7699,6 +7701,7 @@ mod tests {
                 char_index: 0,
                 source_range: (0..character.len_utf8()).into(),
             },
+            ligature: None,
             path,
             bounds: Bounds3D::default(),
             transform: SpatialTransform::default(),
@@ -7741,6 +7744,7 @@ mod tests {
                 char_index: 0,
                 source_range: (0..0).into(),
             },
+            ligature: None,
             path: std::sync::Arc::new(rule),
             bounds: Bounds3D::default(),
             transform: SpatialTransform::default(),
@@ -8016,6 +8020,34 @@ mod tests {
         );
         assert!(literal_selection_matches(text, "casa la").is_empty());
         assert!(literal_selection_matches(text, " ").is_empty());
+    }
+
+    #[test]
+    fn selections_match_every_character_a_ligature_draws() {
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        let mut builder = SceneBuilder::new(&mut commands, &mut timeline, &fonts, &text_config);
+
+        let text = builder.typst("uno filtrado dos", false, None, None, Some(32.0), None);
+        let state = builder.states.get(text.id).expect("compiled text");
+        let ligature = state
+            .child_spans
+            .iter()
+            .find(|child| child.ligature.is_some())
+            .expect("the default font joins fi into one glyph");
+        assert_eq!(ligature.characters().collect::<String>(), "fi");
+        let ligature = ligature.id;
+
+        let word = builder.select(text, "filtrado").child_ids;
+        assert_eq!(word.len(), 7, "fi is one glyph");
+        assert!(word.contains(&ligature));
+        // A fragment that starts or ends inside the ligature takes its glyph.
+        assert!(builder.select(text, "iltrado").child_ids.contains(&ligature));
+        assert!(builder.select(text, "uno f").child_ids.contains(&ligature));
     }
 
     #[test]
