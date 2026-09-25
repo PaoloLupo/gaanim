@@ -4,7 +4,6 @@
   title: "Referencia de la API",
   description: "Firmas, parámetros y contratos de la superficie pública de Gaanim",
   route: "/api/",
-  code-langs: (),
 )
 
 #let card(href, eyebrow, title, body) = html.a(href: href, class: "home-card", {

@@ -4,7 +4,6 @@
   title: "Layout",
   description: "Composición didáctica de escenas adaptables sin coordenadas manuales",
   route: "/guides/layout/",
-  code-langs: (),
 )
 
 = Qué resuelve Layout
@@ -20,6 +19,11 @@ coordenadas. Para relaciones espaciales entre bloques usa Layout.
 == Primera columna
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9), margin=0.5)
+>>>title = scene.text("Título", role="title")
+>>>content = scene.text("Contenido principal", role="body")
+>>>footer = scene.text("Pie de página", role="body")
 page = scene.layout.column(
     [title, scene.layout.item(content, grow=1), footer],
     within="safe",
@@ -47,6 +51,9 @@ El layout controla la traslación de sus hijos. Usa `offset` para ajustes
 editoriales pequeños y constraints para relaciones entre ramas:
 
 ```python
+# continue
+>>>chart = scene.geometry.rect(4, 2.5)
+>>>label = scene.text("Etiqueta", role="body")
 scene.layout.constrain(
     label.left == chart.right + 0.3,
     label.center_y == chart.center_y,

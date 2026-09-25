@@ -5,7 +5,6 @@
   title: "Audio",
   description: "Pistas sincronizadas, narración grabada en el editor y mezcla en la exportación de video",
   route: "/api/audio/",
-  code-langs: (),
 )
 
 = Audio
@@ -29,7 +28,6 @@ scene.play([music])
 scene.wait(1.5)
 scene.play([pop])
 
-# output: lesson.mp4
 scene.render()
 ```
 
@@ -39,6 +37,9 @@ sin `duration`, comienza como fondo sin alargar el timeline. `duration` también
 recorta la fuente y hace determinista el fundido de salida.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene()
+>>>scene.assets.assets_dir("assets")
 narration = scene.media.audio(
     "narration.m4a",
     duration=7.5,
@@ -233,6 +234,10 @@ scene.render()
   desc: [`wait_until` avanza el cursor hasta la marca; si ya quedó atrás o no existe, no espera. `until` sirve como `duration` para terminar una animación justo en la marca. `finish` espera el resto de la toma y cierra el bloque; repetirlo no hace nada. Usar un bloque cerrado produce `ValueError`. `recorded` es `False` mientras la duración sea estimada.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene()
+>>>scene.assets.assets_dir("assets")
+>>>logo = scene.media.svg("logo.svg")
 vo = scene.voiceover("cierre", text="Y eso es todo por hoy")
 scene.play([logo.animate.fade_in()], duration=vo.until("todo"))
 vo.finish()
@@ -248,6 +253,9 @@ vo.finish()
   desc: [Sin esta llamada se carga `narration/script.md` si existe. Llámala antes de los bloques que la usan. Un archivo ilegible, un `##` que no es una clave válida o una clave repetida producen `ValueError`.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene()
+>>>scene.assets.assets_dir("assets")
 scene.narration_script("guion.md")
 with scene.voiceover("intro") as vo:
     vo.wait_until("derivada")
@@ -263,11 +271,16 @@ with scene.voiceover("intro") as vo:
   desc: [Empieza la toma en el cursor. Con la toma grabada, suena desde aquí y cada `stop()` posterior espera lo que duró tu pausa, así que el timeline se reproduce de corrido en sincronía con tu voz. Sin toma, las paradas siguen siendo interactivas. Una segunda toma en vivo, una clave inválida o usada por una voz en off, o una toma ilegible producen `ValueError`.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene()
+>>>scene.assets.assets_dir("assets")
 scene.live_take("clase")
 scene.segment("intro", notes="Presentamos el problema")
+>>>titulo = scene.text("El problema", role="title")
 scene.play([titulo.animate.write()])
 scene.stop()
 scene.segment("idea", notes="La idea clave es…")
+>>>diagrama = scene.media.svg("architecture.svg")
 scene.play([diagrama.animate.fade_in()])
 scene.stop()
 scene.render()

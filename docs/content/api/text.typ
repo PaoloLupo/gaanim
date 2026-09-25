@@ -5,7 +5,6 @@
   title: "Texto",
   description: "Prosa, matemáticas, partes semánticas, flujo responsive, selecciones y animación estructural",
   route: "/api/text/",
-  code-langs: (),
 )
 
 = Texto
@@ -133,6 +132,8 @@ typography. Under a theme, `kicker` resolves to the palette's `accent` color,
 which makes it the natural small line above a title:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 kicker = scene.text("MISMO TERREMOTO. TRES EDIFICIOS.", role="kicker").move_to(0, 3.77)
 title = scene.text("¿Cuál sufrirá más?", role="title").move_to(0, 3)
 ```
@@ -165,6 +166,8 @@ role/theme -> TextStyle/TextFlow -> direct scene.text keywords
   desc: [Runs the same Typst pipeline that renders `scene.text` and shares its cache, so a later spawn of the same text reuses the measurement. Use it to size boxes to their content instead of guessing widths.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 width, height = scene.text.measure("PGA = 0.35 g", role="label")
 _, paragraph_height = scene.text.measure("Primera línea\nSegunda línea", line_spacing=1.6)
 box = scene.geometry.rounded_rect(width + 0.56, height + 0.32, 0.14).move_to(0, -4.14)
@@ -220,6 +223,8 @@ scene.render()
   keeps its own choice.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 label = scene.text("Valores: V_e del piso 1 (tb:agriet_xy)", markup=False)
 ```
 
@@ -255,6 +260,8 @@ A mapping names the parts with strings, like `part()` does, and admits names
 that keyword arguments cannot express:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 label = scene.text(parts({"tb:dist": "d = ", "x-1": "4.2 m"}))
 label["tb:dist"].fill(GOLD)
 ```
@@ -405,6 +412,8 @@ anchors center. A right-anchored note therefore reads flush right without
 repeating the side:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 note = scene.text("Fuente: ensayo 3\nEscala 1:50").move_to(7.5, -4, Anchor.BOTTOM_RIGHT)
 ```
 
@@ -620,6 +629,11 @@ animaciones lanzan `TypeError`, y un estilo, una unidad o un valor negativo
 lanzan `ValueError`.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>title = scene.text("Tipografía cinética", role="title").move_to(0, 1.5)
+>>>quote = scene.text("Lo que no se mide no se puede mejorar").move_to(0, 0)
+>>>headline = scene.text("Titular\nen dos líneas", role="heading").move_to(0, -2)
 title.animate.reveal(by="line", style="slide_up", mask=True, stagger=0.06)
 quote.animate.reveal(by="word", style="blur", stagger=0.04)
 headline.animate.conceal(by="line", style="slide_up")

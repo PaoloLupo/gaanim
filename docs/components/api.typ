@@ -1,8 +1,46 @@
-#import "section.typ": docs-chapter, code-cell
+#import "section.typ": docs-chapter, python-block
 
-// API entry card — params, return, kind badge + live rendered example
-// Body Python blocks with `# show-code: true`, `# output:`, and `scene.render()` compile through the Gaanim executable.
-// Plain fragment blocks without magic comments render as static code (no execution).
+// API entry card — params, return, kind badge + live rendered example.
+// Every Python block in the body runs through the Gaanim executable unless it
+// says `# no-run: <motivo>` (see `python-block` in section.typ).
+
+// Public symbols of `gaanim_core.pyi`, keyed by qualified name.
+#let api-symbols = {
+  let symbols = (:)
+  for symbol in json(bytes(stdx.python-api())) {
+    symbols.insert(symbol.name, symbol.signature)
+  }
+  symbols
+}
+
+// `Class.member` names an entry claims to document. A bare member after a
+// separator belongs to the previous class: `Drawable.fill / stroke`.
+#let api-entry-symbols(name) = {
+  let owner = none
+  let found = ()
+  for token in name.split(regex("\\s*(/|,| and )\\s*")) {
+    let token = token.trim()
+    let qualified = token.match(regex("^([A-Z]\\w*)\\.(\\w+)$"))
+    if qualified != none {
+      owner = qualified.captures.at(0)
+      found.push(token)
+    } else if owner != none and token.match(regex("^[a-z_]\\w*$")) != none {
+      found.push(owner + "." + token)
+    }
+  }
+  found
+}
+
+// `Drawable` documents the methods reached through `.animate` too.
+#let api-symbol-exists(symbol) = {
+  let (owner, member) = symbol.split(".")
+  let candidates = if owner in ("Drawable", "Anim") {
+    ("Drawable." + member, "Anim." + member)
+  } else {
+    (symbol,)
+  }
+  candidates.any(candidate => candidate in api-symbols)
+}
 
 #let badge-color(kind) = {
   if kind == "factory" { rgb("#6366f1") }
@@ -37,6 +75,20 @@
   body,
 ) = context {
   assert.ne(name, none, message: "api-entry: name is required")
+
+  // The reference may not document what the stub does not expose.
+  let symbols = api-entry-symbols(name)
+  let missing = symbols.filter(symbol => not api-symbol-exists(symbol))
+  assert(
+    missing.len() == 0,
+    message: "api-entry \"" + name + "\" names symbols missing from gaanim_core.pyi: " + missing.join(", "),
+  )
+  // Without a hand-written signature, show the stub's.
+  let signature = if signature == none and symbols.len() == 1 and symbols.first() in api-symbols {
+    api-symbols.at(symbols.first())
+  } else {
+    signature
+  }
 
   let kind-label = upper(if kind == "factory" { "fábrica" }
     else if kind == "method" { "método" }
@@ -94,18 +146,7 @@
           #v(6pt)
           #text(weight: "bold", size: 9pt, [Ejemplo:])
           #v(2pt)
-          #show raw.where(lang: "python"): it => {
-            if it.has("label") and it.label == <_stop> {
-              it
-            } else {
-              let t = str(it.text)
-              if t.contains("show-code") or t.contains("output:") {
-                code-cell(it)
-              } else {
-                it
-              }
-            }
-          }
+          #show raw.where(lang: "python"): python-block
           #body
         ]
       ]
@@ -173,24 +214,11 @@
         })
       }
 
-      // example slot — enables gaanim compilation locally even when parent docs-chapter has code-langs: ()
-      // Only blocks with `# show-code: true` or `# output:` are executed; plain fragments stay static.
       if body != none {
         html.div(class: "api-example", {
           html.div(class: "api-example-label", "Ejemplo")
           [
-            #show raw.where(lang: "python"): it => {
-              if it.has("label") and it.label == <_stop> {
-                it
-              } else {
-                let t = str(it.text)
-                if t.contains("show-code") or t.contains("output:") {
-                  code-cell(it)
-                } else {
-                  it
-                }
-              }
-            }
+            #show raw.where(lang: "python"): python-block
             #body
           ]
         })

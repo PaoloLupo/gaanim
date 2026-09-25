@@ -4,7 +4,6 @@
   title: "Rendimiento reproducible",
   description: "Perfiles, presupuestos y reportes p50/p95 del runtime nativo",
   route: "/guides/performance/",
-  code-langs: (),
 )
 
 Gaanim mide el flujo completo desde el ejecutable nativo. El wheel de autoría

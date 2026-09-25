@@ -5,7 +5,6 @@
   title: "Matrices",
   description: "Matrices seleccionables, mutables y conectadas con álgebra simbólica",
   route: "/api/matrices/",
-  code-langs: (),
 )
 
 = Matrices
@@ -67,7 +66,7 @@ para descomposiciones. `Matrix` expone en el LSP los métodos fluidos de
 aproximan silenciosamente; usa `exact=False, precision=N` de forma explícita.
 
 ```python
-# show-code: true
+# no-run: requiere el extra opcional gaanim[algebra] (SymPy), que el build de la documentación no instala
 from gaanim import Scene
 scene = Scene(frame=(16, 9))
 a = scene.viz.matrix([[1, 2], [3, 4]])

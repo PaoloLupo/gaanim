@@ -4,7 +4,6 @@
   title: "Presentaciones",
   description: "Crea, previsualiza y presenta diapositivas semánticas reutilizables",
   route: "/guides/slides/",
-  code-langs: (),
 )
 
 Los proyectos `slides` son el punto de partida general para clases, charlas,

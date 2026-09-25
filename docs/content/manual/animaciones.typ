@@ -4,7 +4,6 @@
   title: "Animaciones y tiempo",
   description: "Entrada, transformación, easing, paralelismo y secuencia",
   route: "/manual/animaciones/",
-  code-langs: (),
 )
 
 = Descriptores de animación
@@ -14,6 +13,10 @@ devuelven un `Anim`.
 Puedes configurar ese descriptor antes de entregarlo a la escena.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>orbit = scene.geometry.circle(1.75).stroke(BLUE, 0.05).no_fill()
+>>>point = scene.geometry.dot(0.15).fill(YELLOW).move_to(1.75, 0)
 entrance = orbit.animate.create().duration(1.2).easing(Easing.SMOOTH)
 movement = point.animate.rotate_by(6.28318).about_point(0, 0).duration(4.0).easing(Easing.LINEAR)
 

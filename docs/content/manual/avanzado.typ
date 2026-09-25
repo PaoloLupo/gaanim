@@ -4,7 +4,6 @@
   title: "Temas avanzados",
   description: "Reactividad, visualización, 3D, presentaciones y pruebas visuales",
   route: "/manual/avanzado/",
-  code-langs: (),
 )
 
 = Reactividad

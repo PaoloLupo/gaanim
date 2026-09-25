@@ -5,7 +5,6 @@
   title: "Animaciones",
   description: "Animaciones de Drawable: movimiento, fundido, escritura, transformación y tiempo",
   route: "/api/animations/",
-  code-langs: (),
 )
 
 = Animaciones
@@ -16,6 +15,9 @@ cursor actual sin avanzar el tiempo; la misma llamada bajo la propiedad
 `Scene.play([...])`.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>dot = scene.geometry.dot(0.1)
 dot.move_to(1.25, 1).fill(BLUE)
 scene.play([dot.animate.move_to(5, 1).fill(RED)])
 ```
@@ -42,6 +44,9 @@ varios objetivos en el `Anim` devuelto: comparten duración, curva y retraso, y
 se muestrean simultáneamente desde la línea temporal:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>circle = scene.geometry.circle(1)
 scene.play([
   circle.animate
     .move_to(2, 0.5)
@@ -82,6 +87,10 @@ Los setters absolutos de posición, rotación, escala y opacidad aceptan
 Esto incluye sus variantes 3D y permite mezclar números y fuentes por eje.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>dot = scene.geometry.dot(0.1)
+>>>other = scene.geometry.square(0.5).move_to(-3, 1)
 phase = scene.viz.parameter(0.0)
 height = computed(lambda x: x*x, inputs=[phase])
 dot.move_to(phase, height)
@@ -105,6 +114,10 @@ escena, resuelto al inicio; no registra seguimiento persistente.
 == Animaciones personalizadas
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>dot = scene.geometry.dot(0.1)
+>>>callback = lambda alpha: {"position": (alpha, 0.0), "opacity": 1.0 - 0.5*alpha}
 animation = dot.animate.custom(callback, channels=("position", "opacity"))
 ```
 
@@ -117,6 +130,9 @@ no negativo. Todos los números deben ser finitos. Los tipos públicos
 `AnimationChannel` y `CustomAnimationValues` describen este contrato.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>dot = scene.geometry.dot(0.1)
 from gaanim import Easing, parallel
 
 motion = dot.animate.custom(
@@ -145,6 +161,7 @@ diagnóstico; la exportación falla explícitamente.
 == Acciones glTF
 
 ```python
+# no-run: firma de referencia; no es código ejecutable
 model.animation(
   "Walk",
   duration=None,
@@ -169,6 +186,7 @@ resolve the same Action pose.
 == Transformaciones 3D
 
 ```python
+# no-run: firmas de referencia; no es código ejecutable
 part.animate.shift_by_3d(dx, dy, dz) -> Anim
 part.animate.move_to_3d(x, y, z) -> Anim
 part.animate.rotate_by_3d(axis, radians) -> Anim
@@ -237,6 +255,10 @@ scene.render()
   desc: [Interpolates left, right, top, and bottom while both source and destination may continue moving. At completion the frame remains bound to the destination. Timeline seeks and rewinds reproduce the same geometry.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>equation = scene.text("$", part("lhs", "x + 3"), " = ", part("result", "7"), "$")
+>>>frame = scene.geometry.surrounding_rect(equation["lhs"])
 scene.play([frame.retarget(equation["result"]).duration(0.9).easing(Easing.spring(stiffness=90, damping=12))])
 ```
 ]
@@ -266,7 +288,7 @@ scene.render()
   signature: ".animate.rotate_by(radians: float) -> Anim",
   params: ((name: "radians", type: "float", default: none, desc: [Angle in radians.]),),
   returns: (type: "Anim", desc: [Rotation anim.]),
-  desc: [Clockwise positive in screen coords. Use `with_pivot` for hinge or chain `.pivot(x,y)` / `.about_point(x,y)` on the `Anim` for orbital motion (e.g. `dot.pivot(200,0).animate.rotate_by(TAU)`). Turns of any size, including several revolutions, follow one easing over the whole duration, and the pivot stays fixed throughout.],
+  desc: [Clockwise positive in screen coords. Use `with_pivot` for hinge or chain `.pivot(x,y)` / `.about_point(x,y)` on the `Anim` for orbital motion (e.g. `dot.pivot(2, 0).animate.rotate_by(math.tau)`). Turns of any size, including several revolutions, follow one easing over the whole duration, and the pivot stays fixed throughout.],
 )[
 ```python
 # show-code: true
@@ -720,6 +742,10 @@ scene.play([compact.animate.transform_to(expanded).duration(0.9)])
   desc: [Keeps the source selection visible and moves a semantic copy into the destination selection.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>energy = scene.text("$E = ", part("mass", "m"), " c^2$").move_to(0, 1)
+>>>momentum = scene.text("$p = ", part("mass", "m"), " v$").move_to(0, -1)
 scene.play([energy["mass"].animate.copy_to(momentum["mass"]).duration(0.8)])
 ```
 ]
@@ -817,6 +843,10 @@ Their endpoints may continue moving during the reveal because regeneration
 updates the full path source and reapplies the current draw progress:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>anchor = scene.geometry.dot(0.08).move_to(0, 2)
+>>>mass = scene.geometry.circle(0.3).move_to(0, -1)
 rod = scene.geometry.tracking_line(anchor, mass).no_fill().stroke(WHITE, 0.05)
 scene.play([rod.animate.create().duration(0.8), mass.animate.shift_by(1.5, 0).duration(0.8)])
 scene.play([rod.animate.write().duration(0.8), mass.animate.shift_by(-1, 0.5).duration(0.8)])
@@ -838,6 +868,8 @@ scene.play([rod.animate.write().duration(0.8), mass.animate.shift_by(-1, 0.5).du
   desc: [Drives the property as a pure function of timeline time, evaluated in Rust — no per-frame Python callbacks. Translation axes and `rotation` are relative to the authored pose (`base + offset + scale * sample`); `scale`, `opacity`, and `signal` are absolute. Samples outside the series clamp to its first/last value. Seeks and paused scrubbing are exact because the driver keeps no accumulated state. Each property is an independent channel: driving `"x"` and then `"y"` keeps both, while driving the same property again replaces it. Detach with `remove_updater()`.],
 )[
 ```python
+>>>import math
+>>>accel = [0.05 * math.sin(0.3 * i) for i in range(200)]
 from gaanim import CYAN, Scene
 
 scene = Scene()
@@ -873,6 +905,12 @@ that reference the parameter follow the measured series for free.
   desc: [The tree remains structured until `Scene.play` resolves defaults, spans, overlaps, channel conflicts, and relative targets atomically. Use `defaults`, `delay`, `stretch`, and `schedule` to configure or inspect a subtree.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>title = scene.text("Título").move_to(0, 2)
+>>>box = scene.geometry.rect(2, 1)
+>>>label = scene.text("Etiqueta").move_to(-3, -2)
+>>>badge = scene.geometry.circle(0.3).move_to(3, -2)
 from gaanim import Scene, parallel, sequence, stagger
 
 scene.play(
@@ -917,6 +955,13 @@ def entrance(*items: Playable) -> Playable:
   desc: [A `label` is a zero-duration named instant. In a `sequence` it takes no step and no `gap`: it marks where the next step starts, or where the previous step ends when it is last. Positions resolve to absolute local times when the composition is scheduled or played; inserts go after the children and before `stretch`, `repeat` and `delay`. A malformed `at` raises `ValueError` immediately; an unknown label (the error lists the defined ones) or a position before 0 raises `ValueError` from `schedule()` or `scene.play`. An exact label name always wins, so `"part-2"` finds a label called `"part-2"`.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>title = scene.text("Título").move_to(0, 2)
+>>>subtitle = scene.text("Subtítulo").move_to(0, 1)
+>>>logo = scene.geometry.circle(0.6)
+>>>glow = scene.geometry.circle(0.8).no_fill().stroke(GOLD, 0.04)
+>>>footer = scene.text("Pie").move_to(0, -3)
 from gaanim import label, sequence
 
 intro = (
@@ -944,6 +989,12 @@ global timeline use `scene.marker` (see Escena).
 Configure any `Anim` fluently before passing to `play`:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>circle = scene.geometry.circle(0.5).move_to(-4, 0)
+>>>label = scene.text("Etiqueta").move_to(0, 2)
+>>>icon = scene.geometry.square(0.6).move_to(3, 0)
+>>>a, b, c = (scene.geometry.dot(0.1).move_to(x, -2) for x in (-1, 0, 1))
 from gaanim import Easing, EasingCurve
 
 scene.play([
@@ -1007,6 +1058,10 @@ sobrepasar el destino); si no, o si `samples` no está en `[2, 65536]`, se lanza
 `ValueError`.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>import math
+>>>ball = scene.geometry.circle(0.3).move_to(0, 2)
 salto = Easing.custom(lambda t: 1 - abs(math.cos(3 * math.pi * t)) * (1 - t) ** 2)
 scene.play(ball.animate.move_to(0, -2).duration(1.2).easing(salto))
 ```
@@ -1042,9 +1097,12 @@ el retardo por paso de separación y `total` fija la duración de toda la onda.
 valores (tamaños, opacidades) en lugar de tiempos.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>dots = [scene.geometry.dot(0.12).move_to(x, y) for x in range(-3, 4) for y in (-1, 0, 1)]
 scene.play(stagger(*[d.animate.grow_from_center() for d in dots], each=0.03, origin="center"))
-scene.play(stagger(*anims, total=1.2, origin="random", seed=7))
-scene.play(stagger(*anims, each=0.05, origin=(0.0, -3.0)))
+scene.play(stagger(*[d.animate.indicate() for d in dots], total=1.2, origin="random", seed=7))
+scene.play(stagger(*[d.animate.fill(GOLD) for d in dots], each=0.05, origin=(0.0, -3.0)))
 for dot, size in zip(dots, distribute(dots, 0.4, 1.4, origin="edges")):
     dot.scale_by(size)
 ```
@@ -1059,6 +1117,11 @@ cada subtrazo y cada descendiente a la vez; `"sequential"` recorta la longitud
 total, así los subtrazos aparecen uno tras otro. `animate.trim(...)` lo anima:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>logo = scene.geometry.star(5, 1, 0.5).no_fill().stroke(WHITE, 0.04).move_to(-4, 0)
+>>>ring = scene.geometry.circle(1).no_fill().stroke(WHITE, 0.04)
+>>>orbit = scene.geometry.circle(1.5).no_fill().stroke(CYAN, 0.04).move_to(4, 0)
 logo.trim(end=0.0)
 scene.play(logo.animate.trim(end=1.0).duration(1.2))             # dibujar
 ring.trim(start=0.5, end=0.5)
@@ -1079,6 +1142,8 @@ ocultarse cuando la ventana sale por el final. Para un pulso sobre una línea
 visible, dibuja una segunda línea encima.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 pulse = scene.geometry.line(-5, 0, 5, 0).stroke(CYAN, 0.06)
 scene.wait(0.5)                                                  # oculta
 scene.play(pulse.animate.show_passing_flash(time_width=0.3).duration(1.0))
@@ -1100,6 +1165,11 @@ desde cero; `glow(None)`, `blur(0)` y `shadow(None)` lo desvanecen. El alfa del
 color de una sombra escala su opacidad de forma continua.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>card = scene.geometry.rounded_rect(3, 2, 0.2).fill(WHITE)
+>>>orb = scene.geometry.circle(0.5).fill(CYAN).move_to(4, 0)
+>>>hero = scene.text("Hola").move_to(0, 3)
 card.shadow(BLACK, 0, -0.05, 0.05)
 scene.play(card.animate.shadow(BLACK, 0, -0.25, 0.4).scale_to(1.04))  # levantar
 scene.play(orb.animate.glow(CYAN, radius=0.5, intensity=2.0).repeat(3, yoyo=True))
@@ -1122,10 +1192,18 @@ completo de animaciones. La duración total entra en `play` y en
 seek.
 
 ```python
-scene.play(spinner.animate.rotate_by(TAU).duration(1.2).repeat(3))
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>import math
+>>>spinner = scene.geometry.square(0.8).move_to(-4, 0)
+>>>badge = scene.geometry.circle(0.4).move_to(-1.5, 0)
+>>>arrow = scene.geometry.arrow(0.5, 0, 2, 0)
+>>>a = scene.geometry.square(0.5).move_to(3, 1)
+>>>b = scene.geometry.dot(0.1).move_to(3, -1)
+scene.play(spinner.animate.rotate_by(math.tau).duration(1.2).repeat(3))
 scene.play(badge.animate.scale_to(1.08).duration(0.4).repeat(4, yoyo=True, delay=0.1))
 scene.play(arrow.animate.shift_by(0.3, 0).duration(0.5).loop("pingpong", until=4.0))
-scene.play(parallel(a.animate.rotate_by(TAU), b.animate.shift_by(1, 0)).repeat(2))
+scene.play(parallel(a.animate.rotate_by(math.tau), b.animate.shift_by(1, 0)).repeat(2))
 ```
 
 #api-entry(
@@ -1207,6 +1285,10 @@ desplazan.
   desc: [Un borde recto cruza el marco y descubre el segmento entrante. Una duración no positiva, una dirección desconocida o un `feather` fuera de `[0, 1]` lanzan `ValueError`.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>scene.segment("intro")
+>>>scene.wait(1)
 scene.segment("detalle", Transition.wipe(0.6, direction="left", feather=0.1))
 ```
 ]
@@ -1223,6 +1305,10 @@ scene.segment("detalle", Transition.wipe(0.6, direction="left", feather=0.1))
   desc: [Una aguja gira en sentido horario alrededor del centro del marco y deja ver el segmento entrante en el sector recorrido.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>scene.segment("intro")
+>>>scene.wait(1)
 scene.segment("resumen", Transition.clock_wipe(0.8, start_angle=90))
 ```
 ]
@@ -1240,6 +1326,10 @@ scene.segment("resumen", Transition.clock_wipe(0.8, start_angle=90))
   desc: [La forma crece desde `center` hasta que el segmento entrante ocupa todo el marco. Un `Drawable` se centra en su caja; se sigue dibujando en su propio segmento, así que conviene ocultarlo si solo sirve de plantilla. Uno sin camino vuelve al círculo. Un nombre desconocido lanza `ValueError`.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>scene.segment("intro")
+>>>scene.wait(1)
 scene.segment("zoom", Transition.iris(0.7, center=(2, 1), shape="star"))
 ```
 ]
@@ -1257,6 +1347,10 @@ scene.segment("zoom", Transition.iris(0.7, center=(2, 1), shape="star"))
   desc: [Todas las lamas se abren a la vez y en la misma fracción.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>scene.segment("intro")
+>>>scene.wait(1)
 scene.segment("datos", Transition.blinds(0.6, count=8, angle=0))
 ```
 ]
@@ -1273,6 +1367,10 @@ scene.segment("datos", Transition.blinds(0.6, count=8, angle=0))
   desc: [El segmento entrante empuja al saliente fuera del marco: ambos se desplazan un ancho o un alto de marco y cada uno queda recortado a su propio marco. `Transition.slide(duration, direction)` es la variante en la que el saliente queda quieto y el entrante lo cubre al deslizarse encima.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>scene.segment("intro")
+>>>scene.wait(1)
 scene.segment("siguiente", Transition.push(0.5, direction="up"))
 scene.segment("final", Transition.slide(0.5, "left", easing=Easing.spring(bounce=0.2)))
 ```
@@ -1293,6 +1391,10 @@ scene.segment("final", Transition.slide(0.5, "left", easing=Easing.spring(bounce
   desc: [`flash` cubre el marco con un color que sube durante la primera mitad y se apaga en la segunda. `light_leak` dibuja manchas de luz suaves en modo pantalla (`screen`) que derivan por el marco. Las dos son funciones puras del tiempo y de la semilla, así que preview, seek y export coinciden. Valores fuera de rango lanzan `ValueError`.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>scene.segment("intro")
+>>>scene.wait(1)
 scene.segment("impacto", Transition.cut(overlay=Overlay.flash(WHITE, 0.15)))
 scene.segment("cálido", Transition.cross_fade(0.4, overlay=Overlay.light_leak(seed=2, hue=0.1)))
 ```

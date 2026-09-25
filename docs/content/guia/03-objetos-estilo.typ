@@ -5,7 +5,6 @@
   title: "Objetos y estilo",
   description: "Cómo pensar en drawables, rellenos, trazos, grupos y jerarquía visual",
   route: "/guia/objetos-estilo/",
-  code-langs: (),
 )[
 
 = Hacer que el fotograma comunique
@@ -39,6 +38,7 @@ una trayectoria, así que no necesita relleno. El punto necesita contraste y el
 radio debe ser secundario:
 
 ```python
+# continue
 orbit = scene.geometry.circle(1.5).stroke(PRIMARY, 0.05).no_fill().move_to(-4, 0)
 point = scene.geometry.dot(0.125).fill(ACCENT).move_to(-2.5, 0)
 radius = scene.geometry.line(-4, 0, -2.5, 0).stroke(MUTED, 0.025)
@@ -54,6 +54,7 @@ vectorial medible y animable. Los roles conectan el texto con la tipografía del
 tema:
 
 ```python
+# continue
 title = scene.text("Movimiento circular", role="title")
 title.fill(WHITE).move_to(0, 3.25)
 
@@ -66,6 +67,7 @@ caption.fill(MUTED).move_to(0, 2.69)
 Agrupa la geometría del círculo:
 
 ```python
+# continue
 system = scene.geometry.group([orbit, radius, point])
 ```
 
@@ -82,6 +84,12 @@ código. Agrupa objetos que el espectador debería reconocer como una unidad.
 Hasta aquí, la parte central de `main.py` se lee así:
 
 ```python
+>>>from gaanim import BLUE, WHITE, YELLOW, Color, Scene
+>>>BACKGROUND = Color(15, 23, 42)
+>>>PRIMARY = BLUE
+>>>ACCENT = YELLOW
+>>>MUTED = Color(148, 163, 184)
+>>>scene = Scene(frame=(16, 9), background=BACKGROUND, margin=0.6)
 title = scene.text("Movimiento circular", role="title").fill(WHITE).move_to(0, 3.25)
 caption = scene.text("Un punto, un radio constante", role="subtitle").fill(MUTED).move_to(0, 2.69)
 

@@ -4,7 +4,6 @@
   title: "Proyectos",
   description: "Estructura, manifiesto y flujo con gaanim init / check / --diff",
   route: "/guides/projects/",
-  code-langs: (),
 )
 
 Gaanim puede abrir un script Python suelto, pero para trabajos reales conviene usar un proyecto. Un proyecto mantiene código, assets y exportaciones juntos, y puede ejecutarse desde cualquier directorio. No necesitas tocar `PATH`/`VIRTUAL_ENV` manualmente: el launcher `gaanim` detecta el `.venv` cercano.

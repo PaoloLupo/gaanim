@@ -4,7 +4,6 @@
   title: "Recursos",
   description: "Rutas portables de imágenes, SVG, Lottie y glTF, manifiestos y precarga",
   route: "/api/assets/",
-  code-langs: (),
 )
 
 = Recursos
@@ -35,6 +34,9 @@ Vello 0.9, especialmente útil para fotos, capturas y vídeo que se escalan o
 rotan; tiene un coste de GPU mayor que la calidad media.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene()
+>>>scene.assets.assets_dir("assets")
 hero = scene.media.image("cover.png", width=8, quality="high")
 clip = scene.media.video("intro.mp4", height=4.5, quality="high", audio=False)
 scene.play([clip])
@@ -73,6 +75,7 @@ output_dir = "exports"
 Después, cárgalo antes de crear objetos dibujables:
 
 ```python
+>>>from gaanim import Scene
 scene = Scene()
 scene.assets.load_project()  # lee gaanim.toml junto a este script de Python
 ```
@@ -92,6 +95,9 @@ usa `scene.media.image`; las composiciones Lottie se analizan en la caché que u
 `scene.media.lottie`.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene()
+>>>scene.assets.assets_dir("assets")
 scene.assets.preload(["logo.svg", "cover.png", "pulse.json"])
 ```
 
@@ -108,6 +114,9 @@ cambia en disco sin reiniciar el proceso, limpia las cachés antes de reconstrui
 los objetos afectados:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene()
+>>>scene.assets.assets_dir("assets")
 scene.assets.reload_assets()
 cover = scene.media.image("cover.png")
 pulse = scene.media.lottie("pulse.json")
@@ -139,6 +148,7 @@ por sí sola la animación interna del JSON:
 from gaanim import Scene, sequence
 
 scene = Scene()
+>>>scene.assets.assets_dir("assets")
 clip = scene.media.lottie("pulse.json")
 scene.play(sequence(clip.animate.create().duration(1.0), clip))
 ```
@@ -176,6 +186,9 @@ Gaanim; no se aplican los controles de reproducción del manifiesto v1.
 `clip.state_machine_ids` enumeran los identificadores disponibles.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene()
+>>>scene.assets.assets_dir("assets")
 clip = scene.media.lottie("button.lottie", state_machine_id="main", width=4)
 clip.set_input("active", False)
 scene.play([clip])
@@ -217,6 +230,9 @@ con extensión `.gltf` o `.glb`. `scene` acepta el nombre de una escena, un índ
 basado en cero o `None` para usar la escena predeterminada del archivo.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene()
+>>>scene.assets.assets_dir("assets")
 model = scene.media.gltf("robot.glb", scene="Presentation")
 arm = model.part("Robot/Rig/Arm")
 
@@ -263,6 +279,9 @@ SVG para colocarla en el frame.
 Los grupos, trayectorias y textos con nombre siguen siendo direccionables:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene()
+>>>scene.assets.assets_dir("assets")
 diagram = scene.media.svg("architecture.svg")
 diagram.part("database").animate.indicate().duration(0.6)
 diagram.part("caption").animate.opacity(0.5)

@@ -5,7 +5,6 @@
   title: "API de visualización",
   description: "Gráficos inmutables y espacios científicos tipados en 2D y 3D",
   route: "/api/visualization/",
-  code-langs: (),
 )
 
 = Visualización
@@ -64,6 +63,8 @@ método devuelve una receta nueva. Esto permite conservar un estado inicial y
 derivar de él el siguiente estado sin mutaciones ocultas:
 
 ```python
+>>>from gaanim import *
+>>>base = ChartSpec({"category": ["a", "b", "c"], "time": [0, 1, 2], "value": [3, 1, 2]})
 bars = base.mark("bar").encode(x="category", y="value")
 points = base.mark("point").encode(x="time", y="value")
 ```
@@ -156,6 +157,7 @@ izquierda, girado 90 grados. En un eje vertical, `"top"` y `"bottom"` son
 alias de los extremos.
 
 ```python
+>>>from gaanim import *
 color = Field("temperature", scale=Scale.symlog((-100, 100), threshold=1))
 x = Axis.log(0.1, 1000, base=10).ticks(10).label("frequency")
 y = Axis.linear(0, 1).label("relative value", position="top")
@@ -197,6 +199,10 @@ dominio definido explícitamente (`axes(...)` o `scale.domain`) nunca se
 modifica, y los gráficos 3D conservan el dominio de los datos.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>spec = ChartSpec({"id": ["a", "b", "c"], "x": [-1, 0, 1], "y": [1, 2, 3], "height": [-1, 0.5, 1.5]}, key="id").mark("point").encode(x="x", y="y")
+>>>chart = scene.viz.chart(spec)
 target = spec.encode(z="height").axes(z=Axis.linear(-2, 2))
 scene.play([
   chart.animate.to(target).duration(1.4),
@@ -339,6 +345,8 @@ animación.
 )[]
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 plane = scene.viz.cartesian_2d(
   Axis.linear(-4, 4).ticks(1).label("x"),
   Axis.linear(-2, 2).ticks(1).label("y"),
@@ -354,6 +362,8 @@ polar = scene.viz.polar(
 ```
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 plane = scene.viz.cartesian_2d(
   Axis.linear(-6, 6).label("x"),
   Axis.linear(-3, 3).label("y"),
@@ -401,6 +411,9 @@ ventana vigente y con la posición, escala y rotación del plano. Se acepta
 en cualquier lugar donde se admite un `Endpoint`:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>plane = scene.viz.cartesian_2d(Axis.linear(-6, 6), Axis.linear(-3, 3))
 peak = plane.data_to_scene(2, 4)
 note = scene.text("máximo").follow(peak, offset=(0.6, 0.4))
 arrow = scene.geometry.connector(note, peak)
@@ -415,6 +428,9 @@ No se recortan los objetos colocados con `at_coordinate` ni las marcas de
 `scene.viz.chart`, cuyo dominio se infiere de los datos y no admite `view_to`.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>plane = scene.viz.cartesian_2d(Axis.linear(-6, 6), Axis.linear(-3, 3))
 scene.play([plane.animate.view_to((-2, 2), (-3, 3)).duration(1.0)])
 ```
 
@@ -450,7 +466,7 @@ scene.play(streams.flow(3.0, time_width=0.12))
 ```
 
 #api-entry(
-  name: "Cartesian2D.field / Cartesian3D.field",
+  name: "CoordinateSpace.field / CoordinateSpace3D.field",
   kind: "method",
   signature: "field(function, *, inputs=()) -> VectorField",
   params: (
@@ -531,7 +547,7 @@ si el espacio se mueve o escala, la serie lo acompaña. No existe una conversió
 manual entre datos y coordenadas de la escena que pueda desincronizarse.
 
 #api-entry(
-  name: "Cartesian2D.plot_data",
+  name: "CoordinateSpace.plot_data",
   kind: "method",
   signature: "plot_data(xs, ys, *, step=False, baseline=None, policy=\"gap\", color=None, width=None) -> Drawable",
   params: (
@@ -545,6 +561,9 @@ manual entre datos y coordenadas de la escena que pueda desincronizarse.
   desc: [Valida que las series no estén vacías y tengan la misma longitud. Es la ruta estática para datos medidos; usa `Parameter.drive_from_samples` cuando el tiempo de la escena debe recorrer las muestras.],
 )[
 ```python
+>>>import math
+>>>times = [i * 0.1 for i in range(301)]
+>>>accel = [0.3 * math.sin(2 * t) * math.exp(-t / 12) for t in times]
 from gaanim import CYAN, Axis, Scene
 
 scene = Scene()
@@ -560,7 +579,7 @@ scene.play([plane.animate.create().duration(0.85), curve.animate.create().durati
 ]
 
 #api-entry(
-  name: "Cartesian2D.scatter_data",
+  name: "CoordinateSpace.scatter_data",
   kind: "method",
   signature: "scatter_data(xs, ys, *, radius=0.06, policy=\"gap\", color=None) -> Drawable",
   params: (
@@ -573,6 +592,10 @@ scene.play([plane.animate.create().duration(0.85), curve.animate.create().durati
   desc: [Úsalo para destacar muestras sobre una curva de `plot_data`; ambos elementos siguen el mismo plano.],
 )[
 ```python
+# continue
+>>>from gaanim import GOLD
+>>>peak_times = [0.8, 3.9, 7.1]
+>>>peak_values = [0.28, -0.22, 0.17]
 peaks = plane.scatter_data(peak_times, peak_values, radius=0.07, color=GOLD)
 scene.play([peaks.animate.fade_in()])
 ```

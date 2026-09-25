@@ -4,7 +4,6 @@
   title: "Partes de una escena",
   description: "Viewport, objetos, línea de tiempo, cámara y salida",
   route: "/manual/escena/",
-  code-langs: (),
 )
 
 = Anatomía de `Scene`
@@ -16,6 +15,7 @@ escena habitual se lee de arriba abajo en cinco zonas.
 == Configuración
 
 ```python
+>>>from gaanim import *
 scene = Scene(frame=(16, 9), background="#0f172a", margin=0.8)
 ```
 
@@ -28,6 +28,7 @@ Las fábricas `scene.geometry.circle`, `scene.text`, `scene.geometry.arrow` y si
 objetos en la escena. Guarda sus handles con nombres que expresen su función:
 
 ```python
+# continue
 orbit = scene.geometry.circle(1.75)
 moving_point = scene.geometry.dot(0.15)
 explanation = scene.text("Radio constante", role="body")
@@ -45,6 +46,7 @@ estructuras editoriales como títulos, columnas y tarjetas.
 una pausa. Varias llamadas consecutivas se reproducen en secuencia.
 
 ```python
+# continue
 scene.play([orbit.animate.create().duration(1.0)])
 scene.play([moving_point.animate.fade_in().duration(0.3)])
 scene.wait(1.0)

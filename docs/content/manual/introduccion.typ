@@ -4,7 +4,6 @@
   title: "Introducción",
   description: "Qué es Gaanim, cómo pensar una escena y cómo recorrer este manual",
   route: "/manual/introduccion/",
-  code-langs: (),
 )
 
 = Bienvenido a Gaanim

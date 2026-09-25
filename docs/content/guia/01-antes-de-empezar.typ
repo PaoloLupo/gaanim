@@ -5,7 +5,6 @@
   title: "Antes de empezar",
   description: "Qué vamos a construir y cómo trabajar con la guía",
   route: "/guia/antes-de-empezar/",
-  code-langs: (),
 )[
 
 = Un proyecto que crecerá contigo

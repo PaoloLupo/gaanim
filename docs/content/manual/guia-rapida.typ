@@ -4,7 +4,6 @@
   title: "Guía rápida",
   description: "Construye y exporta una primera animación de movimiento circular",
   route: "/manual/guia-rapida/",
-  code-langs: (),
 )
 
 = Objetivo
@@ -27,6 +26,7 @@ CSS o un objeto `Color`.
 == Añade los objetos
 
 ```python
+# continue
 title = scene.text("Movimiento circular", role="title").fill(WHITE).move_to(0, 3.125)
 orbit = scene.geometry.circle(1.75).stroke(BLUE, 0.05).no_fill()
 point = scene.geometry.dot(0.15).fill(YELLOW).move_to(1.75, 0)
@@ -39,6 +39,7 @@ encadenando llamadas.
 == Programa la entrada
 
 ```python
+# continue
 scene.play(stagger(
     title.animate.write().duration(0.8),
     orbit.animate.create().duration(1.0),
@@ -56,6 +57,7 @@ escalona sus inicios; `duration` controla la duración individual.
 Durante el trabajo usa:
 
 ```python
+# continue
 scene.render()
 ```
 

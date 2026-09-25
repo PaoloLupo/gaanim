@@ -274,15 +274,24 @@ inglés (Fase 4).
   y el damero de `/api/`.
 - Traducir las etiquetas de la interfaz (`Code:`).
 
-### Fase 1: ejecución obligatoria (M)
+### Fase 1: ejecución obligatoria (M) · hecha
 
-- Invertir el valor por defecto: todo bloque `python` se ejecuta, y
-  `# no-run: <motivo>` es la excepción explícita.
-- Celdas que continúan: un bloque puede extender el archivo de la celda anterior
-  de la misma página (`# continue`). Así un tutorial en fragmentos se valida entero.
-- En CI, fallar ante cualquier error de ejecución, no solo ante `docs-example-error`
-  en páginas con vista previa.
-- Firmas del stub en `api-entry` y fallo ante símbolos inexistentes.
+- Todo bloque `python` se ejecuta con el runtime real; `# no-run: <motivo>` es la
+  excepción explícita. Los fragmentos sin `render()` se validan contra el módulo
+  embebido, así que cada nombre que usan tiene que existir.
+- `# continue` repite, oculta, la celda anterior de la misma página: un tutorial
+  en fragmentos se valida entero.
+- `docs/fixtures/` es un proyecto de muestra enlazado en el directorio de cada
+  celda, para que los ejemplos de recursos se ejecuten de verdad.
+- El build falla ante cualquier ejemplo con error (`--allow-example-errors` para
+  borradores) e imprime un resumen. El workflow `Docs` corre también en PRs que
+  tocan `crates/**`.
+- Las celdas pendientes se ejecutan en paralelo (`--jobs`) y se recompila una vez.
+- La caché registra la versión del stub y del runtime: al cambiar, una vista
+  previa se revalida con `check` en vez de renderizarse, y los fallos se
+  reintentan siempre.
+- Las fichas `api-entry` fallan si nombran símbolos que el stub no expone y, sin
+  firma escrita, muestran la del stub.
 
 ### Fase 2: arquitectura (M)
 

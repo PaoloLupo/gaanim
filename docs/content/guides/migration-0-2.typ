@@ -4,7 +4,6 @@
   title: "Migrar de 0.1 a 0.2",
   description: "Separación de Scene en capacidades enfocadas",
   route: "/guides/migration-0-2/",
-  code-langs: (),
 )
 
 Gaanim 0.2 convierte `Scene` en el orquestador del tiempo y la presentación.
@@ -19,9 +18,10 @@ centrado de `16×9`; la resolución pertenece al editor o al comando de
 exportación.
 
 ```python
+>>>from gaanim import Scene
 # Antes: composición acoplada a 1920×1080
-scene = Scene(1920, 1080, margin=60)
-circle = scene.geometry.circle(120).move_to(360, -120)
+<<< scene = Scene(1920, 1080, margin=60)
+<<< circle = scene.geometry.circle(120).move_to(360, -120)
 
 # Ahora: las mismas proporciones en unidades lógicas (escala 1920 / 16 = 120)
 scene = Scene(frame=(16, 9), margin=0.5)

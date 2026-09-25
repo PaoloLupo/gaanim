@@ -333,13 +333,22 @@
 
 #let calc-vars = state("calc-vars", (:))
 
+// Source of the page's last executed cell, replayed by `# continue`.
+#let cell-chain = state("docs-cell-chain", none)
+
 #let code-cell(
   it,
   lang: "python",
   id: "",
 ) = {
   context {
-    let result = stdx.compile-code-cell(it, lang: lang, id: id)
+    let continues = str(it.text).split("\n").any(line => line.trim() == "# continue")
+    let prelude = if continues { cell-chain.get() } else { "" }
+    assert(
+      prelude != none,
+      message: "`# continue` needs an executed Python block earlier on the same page",
+    )
+    let result = stdx.compile-code-cell(it, lang: lang, id: id, prelude: prelude)
 
     let source-raw = raw(result.code.trim(), lang: lang, block: true)
     let source-labeled = [#source-raw <_stop>]
@@ -431,8 +440,29 @@
       })
     }
 
-    calc-vars.update(old => old + result.vars) + layout-content
+    cell-chain.update(result.chain) + calc-vars.update(old => old + result.vars) + layout-content
   }
+}
+
+// Every Python block runs with the real runtime unless its first lines say
+// `# no-run: <motivo>`. The reason is required so a skipped block stays a
+// deliberate, reviewable exception.
+#let python-block(it) = {
+  if it.has("label") and it.label == <_stop> {
+    return it
+  }
+  let lines = str(it.text).split("\n")
+  let marker = lines.find(line => line.trim().starts-with("# no-run"))
+  if marker == none {
+    return code-cell(it, lang: "python")
+  }
+  let reason = marker.trim().slice("# no-run".len()).trim()
+  assert(
+    reason.starts-with(":") and reason.slice(1).trim() != "",
+    message: "`# no-run` needs a reason: `# no-run: <motivo>`",
+  )
+  let shown = lines.filter(line => not line.trim().starts-with("# no-run")).join("\n")
+  [#raw(shown.trim(), lang: "python", block: true) <_stop>]
 }
 
 
@@ -467,12 +497,11 @@
     description: description,
   )) <blog-post>]
 
+  // Each page starts its own `# continue` chain.
+  cell-chain.update(none)
+
   show raw.where(lang: "python"): it => {
-    if "python" not in code-langs or (it.has("label") and it.label == <_stop>) {
-      it
-    } else {
-      code-cell(it, lang: "python")
-    }
+    if "python" not in code-langs { it } else { python-block(it) }
   }
 
   docs-section(

@@ -5,7 +5,6 @@
   title: "Temas y colores",
   description: "Reglas visuales centralizadas, colores CSS y paletas reutilizables",
   route: "/api/themes/",
-  code-langs: (),
 )
 
 = Temas y colores
@@ -32,6 +31,7 @@ También puedes cambiar mediante `scene.canvas` el fondo dentro de los límites
 creados para la escena:
 
 ```python
+# continue
 from gaanim import Color
 
 scene.canvas.background = Color(40, 42, 54)
@@ -47,6 +47,8 @@ interpolar. Un color sólido también puede transformarse en un gradiente y
 viceversa. Los extremos conservan exactamente las pinturas originales.
 
 ```python
+# continue
+>>>from gaanim import Brush
 paint = Brush.linear([BLUE, GOLD], start=(-1, 0), end=(1, 0))
 scene.play(circle.animate.fill(paint).duration(1.5))
 ```
@@ -182,6 +184,7 @@ shader, `post=False` dibuja ese segmento sin postprocesado y `post=None` (el
 valor predeterminado) hereda el de la escena.
 
 ```python
+# continue
 from pathlib import Path
 
 scene.canvas.post = PostProcess.shader(Path("assets/grade.wgsl"))
@@ -258,6 +261,8 @@ Los nombres disponibles de los temas se enumeran a continuación.
 La misma API breve incluye paletas conocidas de editores y terminales:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 scene.canvas.set_theme("dracula")
 scene.canvas.set_theme("nord")
 scene.canvas.set_theme("solarized-dark")
@@ -290,8 +295,8 @@ theme = Theme(
         "chart": "#88C0D0",
     },
     fonts={
-        "text": "Inter",
-        "code": "JetBrains Mono",
+        "text": "Aleo",
+        "code": "Victor Mono",
     },
     sizes={"title": 0.72, "body": 0.34},
     text={
@@ -310,8 +315,8 @@ theme = Theme(
     series=[colors.tailwind.blue[600], colors.tailwind.amber[500]],
     layout={"page_padding": 0.7, "column_gap": 0.6},
     font_files={
-        "Inter": "assets/Inter-Regular.ttf",
-        "JetBrains Mono": "assets/JetBrainsMono-Regular.ttf",
+        "Aleo": "assets/fonts/Aleo-VariableFont.ttf",
+        "Victor Mono": "assets/fonts/VictorMono-VariableFont.ttf",
     },
 )
 
@@ -323,7 +328,7 @@ scene = Scene(frame=(16, 9), theme=theme)
 `font_dir` registra todos los archivos `.ttf`, `.otf`, `.ttc` y `.otc` que están
 directamente en un directorio (sin subdirectorios). Cada cara se resuelve por la
 familia, el peso y el estilo que declara su archivo, así que no hace falta
-nombrarlas una por una: con `fonts={"text": "Inter"}`, `weight=700` encuentra el
+nombrarlas una por una: con `fonts={"text": "Aleo"}`, `weight=700` encuentra el
 archivo en negrita. `font_files` sigue sirviendo para registrar archivos sueltos.
 Un directorio sin fuentes o un archivo ilegible producen `ValueError`, y un
 directorio inexistente, `OSError`.
@@ -333,10 +338,11 @@ directorio inexistente, `OSError`.
 muchas etiquetas técnicas. Una llamada que pasa `markup=` conserva su elección.
 
 ```python
+>>>from gaanim import Scene, Theme
 theme = Theme(
     "paper",
     font_dir="assets/fonts",
-    fonts={"text": "Inter", "code": "JetBrains Mono"},
+    fonts={"text": "Aleo", "code": "Victor Mono"},
     text_markup=False,
 )
 scene = Scene(theme=theme)
@@ -391,6 +397,7 @@ el equipo de presentación. El registro subyacente admite archivos TTF y OTF.
 Para comenzar sin heredar un esquema con nombre, omite el primer argumento:
 
 ```python
+>>>from gaanim import Theme
 brand = Theme(
     name="brand",
     colors={
@@ -412,6 +419,7 @@ Otro `Theme` puede ser el primer argumento para hacer explícitas su modificaci�
 y reutilización:
 
 ```python
+# continue
 print_theme = Theme(
     brand,
     name="brand-print",
@@ -498,6 +506,11 @@ Los objetos vectoriales manuales pueden consumir los mismos tokens semánticos
 que los componentes:
 
 ```python
+>>>from gaanim import *
+>>>theme = Theme("technical")
+>>>scene = Scene(frame=(16, 9), theme=theme)
+>>>title = scene.text("Título", role="title")
+>>>body = scene.text("Cuerpo", role="body")
 scene.geometry.rounded_rect(5.25, 2.25, 0.3) \
     .fill(scene.canvas.color("panel")) \
     .stroke(scene.canvas.color("accent"), 0.04)
@@ -518,6 +531,9 @@ insuficiente, o si la tipografía es inválida. Devuelven una lista vacía cuand
 las combinaciones principales están listas:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>scene.canvas.set_theme("technical")
 warnings = scene.canvas.validate_theme()
 if warnings:
     raise ValueError("\n".join(warnings))
@@ -533,6 +549,8 @@ un `Brush` reutilizable. Las coordenadas del gradiente usan el espacio local del
 objeto, de modo que la pintura acompaña sus transformaciones posteriores.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 from gaanim import Brush
 
 gradient = Brush.linear(
@@ -548,6 +566,9 @@ Los gradientes radiales y angulares usan la misma convención de lista de colore
 Los colores se distribuyen uniformemente y se requieren dos paradas como mínimo:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>scene.canvas.set_theme("technical")
 orb = scene.geometry.circle(1.5).fill(
     Brush.radial(
         ["white", scene.canvas.color("accent"), "#0000"],
@@ -576,6 +597,11 @@ predeterminados mantienen breves las llamadas comunes, mientras radio,
 intensidad, desplazamiento y desenfoque siguen siendo configurables:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>title = scene.text("Título", role="title").move_to(0, 2)
+>>>background_blob = scene.geometry.circle(2).fill("#1E3A8A")
+>>>card = scene.geometry.rounded_rect(4, 2, 0.2).fill("#18202E").move_to(0, -2)
 title.glow("#38BDF8")
 background_blob.blur(0.15)
 card.shadow("#00000080", x=0.12, y=-0.12, blur=0.1)
@@ -586,7 +612,7 @@ lo que los efectos sin cambios se reutilizan desde la caché. Funcionan sobre
 rellenos y trazos, incluidos los pinceles de gradiente. `no_effects()` elimina
 los tres sin cambiar el relleno ni el trazo del objeto. En `Text`, los cuatro
 conservan el handle especializado y el anclaje tipográfico de una llamada
-posterior a `at()`.
+posterior a `move_to()`.
 
 == Constantes de color
 
@@ -615,6 +641,8 @@ posterior a `at()`.
 `Color` recibe canales RGBA de 0 a 255:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 from gaanim import Color
 
 custom = Color(128, 51, 204, 255)

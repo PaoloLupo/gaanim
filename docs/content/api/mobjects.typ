@@ -5,7 +5,6 @@
   title: "Objetos",
   description: "Fábricas de objetos de Scene: primitivas, trayectorias, texto, medios y composición",
   route: "/api/mobjects/",
-  code-langs: (),
 )
 
 = Objetos
@@ -16,6 +15,12 @@ animación con la API fluida.
 == Booleanas vectoriales
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>shape = scene.geometry.rect(3, 2)
+>>>hole = scene.geometry.circle(0.6)
+>>>left = scene.geometry.circle(1).move_to(-0.5, 0)
+>>>right = scene.geometry.circle(1).move_to(0.5, 0)
 cut = scene.geometry.difference(shape, hole, live=True)
 merged = scene.geometry.union(left, right, tolerance=0.25)
 shared = scene.geometry.intersection(left, right)
@@ -38,6 +43,8 @@ independiente. `keep_outline=True` añade una copia reactiva que usa únicamente
 su stroke; oculta el original si su fill no debe cubrir el nivel.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 drop = scene.media.svg("drop.svg").no_fill().stroke("#dbeafe", 0.05).opacity(0)
 water = scene.geometry.fill_level(drop, "#38bdf8", 0.0)
 scene.play([water.animate.fill_level(0.72).duration(1.4)])
@@ -50,6 +57,7 @@ escena se rechazan. Una muestra no finita genera un diagnóstico y usa el valor
 de respaldo de la vinculación.
 
 ```python
+# continue
 from gaanim import computed
 
 amount = scene.viz.parameter(0)
@@ -152,6 +160,7 @@ scene.render()
 == Modelos glTF importados
 
 ```python
+# no-run: firmas de referencia, no es código ejecutable
 MediaLibrary.gltf(path: str, *, scene: str | int | None = None) -> Drawable
 Drawable.part(selector: str) -> Drawable
 Drawable.parts() -> tuple[str, ...]
@@ -183,6 +192,7 @@ scene.play([cube.animate.material(Material3D.metal(GOLD)).duration(1.0)])
 ```
 
 ```python
+# no-run: firmas de referencia, no es código ejecutable
 Geometry.cube(size=2.0, *, material=None) -> Primitive3D
 Geometry.sphere(radius=1.0, *, segments=32, rings=16, material=None) -> Primitive3D
 Geometry.cylinder(radius=1.0, height=2.0, *, segments=32, caps=True, material=None) -> Primitive3D
@@ -863,6 +873,7 @@ scene.play([
 scene.play([scene.camera.animate.orbit(delta_yaw=0.5, delta_pitch=0.1).duration(0.8)])
 scene.play([scene.camera.animate.dolly(factor=0.85).duration(0.5)])
 scene.wait(0.5)
+# timeout: 300
 # output: 3d-quickstart.webp
 scene.render()
 ```
@@ -876,6 +887,8 @@ scene.render()
   desc: [Creates Cartesian axes and up to three grid planes. Use `surface` and `parametric` on the returned space so data coordinates share the same mapping.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 axes = scene.viz.cartesian_3d(
     Axis.linear(-5, 5).ticks(1).label("x"),
     Axis.linear(-5, 5).ticks(1).label("y"),
@@ -893,6 +906,10 @@ axes = scene.viz.cartesian_3d(
   desc: [Use `color` for a uniform line, `colors` for explicit vertex colors, or `colormap` for a time-ordered gradient. A colors list must have exactly the same length as `points`.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>import math
+>>>points = [(math.cos(t / 8), math.sin(t / 8), t / 40 - 1) for t in range(81)]
 helix = scene.geometry.polyline_3d(points, colormap="inferno")
 ```
 ]
@@ -906,6 +923,8 @@ helix = scene.geometry.polyline_3d(points, colormap="inferno")
   desc: [Places a drawable in 3D world space. Add `.billboard()` to keep text or a marker facing the camera, or `.hud()` for a fixed screen-space overlay.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 label = scene.text("origin").move_to_3d(0, 0, 0.5).billboard()
 ```
 ]
@@ -919,6 +938,8 @@ label = scene.text("origin").move_to_3d(0, 0, 0.5).billboard()
   desc: [Sampling begins at the timeline cursor where the trail is declared, so earlier segments and seeks cannot pre-fill it. Add `trail.animate.fade_in()` to `scene.play(...)` to reveal it. With `dissipating_time`, samples expire from the tail in editor playback, random seeks, snapshots, and exports. After a seek the trail is rebuilt by resampling sources moved by updaters, `drive_from_samples`, reactive bindings, and `follow`; a source moved only by `.animate` starts a fresh trail at the seek target.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 from gaanim import RED
 
 dot = scene.geometry.dot(0.09).move_to(1.5, 0)
@@ -936,6 +957,8 @@ scene.play([trail.animate.fade_in()])
   desc: [The trail updates while `source` moves, so it works with `Updater` or `add_updater_fn`. Sampling starts where the trail is declared. Add `trail.animate.fade_in()` or `trail.animate.create()` to `scene.play(...)` to reveal it. `dissipating_time` expires the old tail, `max_points` limits memory, and `min_distance` filters nearly identical samples.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 dot = scene.geometry.dot(0.09).move_to_3d(1, 0, 0)
 dot.add_updater(Updater.orbit(0, 0, 1, 1.5))
 trail = scene.geometry.traced_path_3d(
@@ -1261,8 +1284,10 @@ scene.render()
   desc: [`radius=None` derives a pill radius from measured height. The panel is sized from the same styled text that is drawn. Invalid text, finite geometry, weight or unbalanced markup raises `ValueError`; position with `.move_to(...)`.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 tag = scene.slides.badge("READY", variant="success", appearance="solid").move_to(-2.4, 1.2)
-code = scene.slides.badge("_vel_max", font="Cascadia Mono", weight=600, markup=False)
+code = scene.slides.badge("_vel_max", font="DejaVu Sans Mono", weight=600, markup=False)
 scene.play([tag.animate.grow_from_center()])
 ```
 ]
@@ -1276,6 +1301,8 @@ scene.play([tag.animate.grow_from_center()])
   desc: [A smaller badge for filters, states, and metadata. Theme, label typography and validation behavior match `badge`.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 live = scene.slides.chip("Live", variant="danger", appearance="outline")
 ```
 ]
@@ -1289,6 +1316,8 @@ live = scene.slides.chip("Live", variant="danger", appearance="outline")
   desc: [Semantic text roles are measured at construction. Empty supplied slots or invalid dimensions raise `ValueError`.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 result = scene.slides.card("Result", "The solver converged.", "12 ms", variant="accent")
 ```
 ]
@@ -1302,6 +1331,8 @@ result = scene.slides.card("Result", "The solver converged.", "12 ms", variant="
   desc: [Replacement for the removed `caption` helper. Height follows measured title and subtitle content.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 notice = scene.slides.banner("Simulation complete", position="bottom", variant="success")
 ```
 ]
@@ -1315,6 +1346,8 @@ notice = scene.slides.banner("Simulation complete", position="bottom", variant="
   desc: [Kicker, title, and subtitle use Theme roles and wrap within the authored width.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 speaker = scene.slides.lower_third("Ada Lovelace", "Mathematician", kicker="SPEAKER")
 ```
 ]
@@ -1328,6 +1361,8 @@ speaker = scene.slides.lower_third("Ada Lovelace", "Mathematician", kicker="SPEA
   desc: [Value and delta use the semantic tone; no numeric sign or formatting is inferred.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 metric = scene.slides.stat_card("98%", "Accuracy", delta="+4.2%", variant="success")
 ```
 ]
@@ -1341,6 +1376,8 @@ metric = scene.slides.stat_card("98%", "Accuracy", delta="+4.2%", variant="succe
   desc: [Adds typographic quotation marks and a semantic attribution treatment.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 quote = scene.slides.quote_card("Clarity matters.", "Gaanim", appearance="outline")
 ```
 ]
@@ -1354,6 +1391,8 @@ quote = scene.slides.quote_card("Clarity matters.", "Gaanim", appearance="outlin
   desc: [Kicker, title, and subtitle share alignment and Theme roles.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 heading = scene.slides.section_header("Method", kicker="02", align="center")
 ```
 ]
@@ -1405,6 +1444,8 @@ scene.render()
   desc: [Materialize with `scene.viz.chart(spec)`; build a new spec after replacing a `DataSource` to capture its new immutable version.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 from gaanim import Axis, ChartSpec
 spec = ChartSpec({"x": [0, 1, 2], "value": [18, 42, 31]}) \
   .mark("bar").encode(x="x", y="value") \
@@ -1457,6 +1498,8 @@ primero y los valores reactivos después, exactamente en el orden declarado.
 de `inputs`, tanto en otro `computed` como en gráficas, campos y readouts:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 from gaanim import computed
 import math
 
@@ -1590,6 +1633,8 @@ de la rueda, y por eso no equivale a una línea base. Sin anchor explícito, el
 contador conserva el posicionamiento por centro visual de un Drawable.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 from gaanim import TextAnchor
 
 number = scene.viz.rolling_number(2, min_digits=2, font_size=1)
@@ -1616,6 +1661,8 @@ decimales elegidos, por ejemplo `12.34` con `decimals=2`, o pasa `snap=True` a
 cercano que se puede mostrar, y `current` coincide con lo que se ve al terminar:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 mean = scene.viz.rolling_number(0, decimals=1)
 scene.play([mean.count_to(61.7956, snap=True)])  # Termina en 61.8.
 ```
@@ -1812,7 +1859,7 @@ height = scene.mechanics.dimension_between(
   frame.anchor_point(Anchor.TOP_RIGHT),
   frame.anchor_point(Anchor.BOTTOM_RIGHT),
   0.6, side="right", show_value=True, unit="m", color=BLACK,
-  font="Cascadia Mono", weight=700,
+  font="DejaVu Sans Mono", weight=700,
 )
 scene.play([
   dim.animate.fade_in().duration(0.3),
@@ -1953,7 +2000,7 @@ scene.render()
 Reference for the fluent handle returned by every factory. All return `Drawable` for chaining unless noted.
 
 #api-entry(
-  name: "Drawable.fill / stroke / opacity / effects",
+  name: "Drawable.fill / stroke / opacity / glow / blur / shadow",
   kind: "method",
   signature: ".fill(color) .stroke(color,width) .opacity(0..1) .glow / .blur / .shadow",
   params: ((name: "color", type: "Color|Brush", default: none, desc: [Fill or stroke paint.]),),
@@ -2086,6 +2133,8 @@ para hacer paneo o zoom dentro del marco. Se combina con `.duration(...)` y
 con las transformaciones habituales. `frame` y `quality` son setters inmediatos.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 foto = scene.media.image("foto.jpg").frame(8, 4.5, fit="cover")
 scene.play([
     foto.animate.crop(0.25, 0.25, 0.5, 0.5, normalized=True).duration(2)
@@ -2102,6 +2151,8 @@ velocidad, audio y volumen del video; no heredan `offset`, `duration` ni `loop`.
 El fragmento dura `(end - start) / speed` segundos de escena y siempre es finito.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 video = scene.media.video("clip.mp4").frame(8, 4.5)
 scene.play([video.segment(start=2, end=5)])
 scene.wait(1)

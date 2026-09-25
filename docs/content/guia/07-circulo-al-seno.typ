@@ -5,7 +5,6 @@
   title: "Del círculo a la curva seno",
   description: "Una recta numérica y un parámetro compartido para explicar la periodicidad",
   route: "/guia/circulo-al-seno/",
-  code-langs: (),
 )[
 
 = Una fase, dos representaciones
@@ -30,12 +29,46 @@ radio, elimina primero:
 Después define el centro del círculo junto a la paleta:
 
 ```python
+>>>from gaanim import BLUE, WHITE, YELLOW, Color, Scene
+>>>from gaanim import Easing, stagger
+>>>BACKGROUND = Color(15, 23, 42)
+>>>PRIMARY = BLUE
+>>>ACCENT = YELLOW
+>>>MUTED = Color(148, 163, 184)
+>>>scene = Scene(frame=(16, 9), background=BACKGROUND, margin=0.6)
+>>>title = scene.text("Movimiento circular", role="title").fill(WHITE).move_to(0, 3.25)
+>>>caption = scene.text("Un punto, un radio constante", role="subtitle").fill(MUTED).move_to(0, 2.69)
+>>>orbit = scene.geometry.circle(1.5).stroke(PRIMARY, 0.05).no_fill().move_to(-4, 0)
+>>>system = scene.geometry.group([orbit])
+>>>formula = scene.text("$y(t) = r sin(omega t)$", role="subtitle").fill(WHITE)
+>>>explanation = scene.text("La altura del punto se convertirá en una curva.", role="body").fill(MUTED)
+>>>panel = scene.layout.column([formula, explanation], gap=0.225, align="start")
+>>>panel.move_to(3.5, 1.875)
+>>>scene.play(stagger(
+>>>    title.animate.write().duration(0.8),
+>>>    caption.animate.fade_in().duration(0.6),
+>>>    each=0.12,
+>>>))
+>>>scene.play(stagger(
+>>>    orbit.animate.create().duration(1.0),
+>>>    each=0.15,
+>>>))
+>>>scene.play(stagger(
+>>>    formula.animate.write().duration(0.8),
+>>>    explanation.animate.fade_in().duration(0.6),
+>>>    each=0.1,
+>>>))
+>>>scene.wait(0.8)
+>>>scene.wait(0.8)
+>>>scene.play([system.animate.shift_by(0.5, 0).duration(0.6).easing(Easing.SMOOTH)])
+>>>scene.play([system.animate.shift_by(-0.5, 0).duration(0.6).easing(Easing.SMOOTH)])
 circle_center = (-4, 0)
 ```
 
 == Preparar una recta numerada con pi
 
 ```python
+# continue
 import math
 from gaanim import Axis
 
@@ -57,6 +90,7 @@ generan como `0`, `π`, `2π` y `3π`; no hay que colocar textos manualmente.
 perpendicular. Un valor de uno ocupa `normal_scale` unidades locales.
 
 ```python
+# continue
 import math
 from gaanim import computed
 
@@ -76,6 +110,7 @@ numérico exacto para que reproducción y seek produzcan la misma geometría.
 == Compartir el ángulo
 
 ```python
+# continue
 circle_ref = scene.geometry.polar_point(circle_center, radius, theta)
 circle_dot = scene.geometry.dot(0.125).fill(ACCENT).follow(circle_ref)
 
@@ -93,6 +128,7 @@ rota o escala, el punto y la curva la acompañan.
 == Mostrar la correspondencia
 
 ```python
+# continue
 radius_line = scene.geometry.tracking_line(circle_center, circle_ref)
 radius_line.stroke(MUTED, 0.025).no_fill()
 projection = scene.geometry.tracking_line(circle_ref, wave_ref)

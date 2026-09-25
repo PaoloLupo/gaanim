@@ -5,7 +5,6 @@
   title: "Primera escena",
   description: "El lienzo, las coordenadas y el primer fotograma del proyecto",
   route: "/guia/primera-escena/",
-  code-langs: (),
 )[
 
 = Del lienzo vacío al círculo unitario
@@ -53,6 +52,7 @@ Son handles con los que seguimos describiendo un objeto registrado en `scene`.
 Separamos algunas llamadas en dos líneas para ver la intención:
 
 ```python
+# continue
 orbit = scene.geometry.circle(1.5)
 orbit.stroke(BLUE, 0.05).no_fill().move_to(-4, 0)
 ```
@@ -75,6 +75,7 @@ será importante cuando el punto empiece a girar.
 Podemos hacer visible el radio:
 
 ```python
+# continue
 radius = scene.geometry.line(-4, 0, -2.5, 0).stroke(WHITE, 0.025)
 ```
 

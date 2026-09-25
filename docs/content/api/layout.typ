@@ -4,7 +4,6 @@
   title: "Layout",
   description: "Árboles responsive, tracks de grid, constraints relacionales y reflow animado",
   route: "/api/layout/",
-  code-langs: (),
 )
 
 = Layout
@@ -26,6 +25,11 @@ posición. Mezclar `move_to()` o `shift_by()` con Layout introduce dos autoridad
 la misma coordenada y Gaanim lo rechaza explícitamente.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>copy = scene.text("Un texto adaptable que se recompone con el ancho de su caja.", flow=TextFlow(wrap="auto"))
+>>>diagram = scene.geometry.circle(1.5)
+>>>footer = scene.text("Fuente: ejemplo", role="caption")
 page = scene.layout.column(
     [
         scene.text("Resultado", role="title"),
@@ -53,6 +57,7 @@ también admite `between`, `around` y `evenly`.
 Los constructores públicos son:
 
 ```python
+# no-run: firmas de referencia de los constructores; no es código ejecutable
 scene.layout.row(children, *, gap=0.24, padding=0, width="hug", height="hug",
           align="center", justify="start", wrap=False, within=None)
 scene.layout.column(children, *, gap=0.24, padding=0, width="hug", height="hug",
@@ -89,6 +94,8 @@ El radio se limita a la mitad de la dimensión menor de la caja. Radio y ancho
 de borde negativos o no finitos producen `ValueError`.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 card = scene.layout.card(
     [scene.text("Modelo"), scene.text("Resultados")],
     padding=0.3, gap=0.2, background="#f5f5f5", border="#626878",
@@ -108,12 +115,14 @@ e inmutables: nombres vacíos, repetidos u offsets no finitos producen
 
 == Posicionamiento mediante anchors
 
-Fuera de un árbol `Layout`, `at()` también acepta el `AnchorPoint` de otro
+Fuera de un árbol `Layout`, `move_to()` también acepta el `AnchorPoint` de otro
 objeto. El centro del objeto receptor se coloca sobre el anchor después de
 aplicar la traslación, rotación y escala iniciales de la referencia. El offset
 opcional pertenece al espacio local de la referencia.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 from gaanim import Anchor
 
 card = scene.geometry.rect(3, 1.5).move_to(1, 0.25).rotate_to(0.15)
@@ -128,9 +137,9 @@ No se puede combinar un `AnchorPoint` con los argumentos `y` o `anchor` de la
 variante numérica. La relación se resuelve durante el layout inicial; para
 seguir una referencia mientras se anima, usa `follow` o `attach_to`.
 
-`move_to()` admite las mismas referencias y devuelve un `Anim`: `obj.move_to(card)`
-mueve centro con centro, mientras
-`obj.move_to(card.anchor_point(Anchor.BOTTOM_LEFT))` anima el centro de `obj`
+`animate.move_to()` admite las mismas referencias y devuelve un `Anim`:
+`obj.animate.move_to(card)` mueve centro con centro, mientras
+`obj.animate.move_to(card.anchor_point(Anchor.BOTTOM_LEFT))` anima el centro de `obj`
 hasta ese anchor. El destino se calcula con el estado de layout que tiene la
 referencia al programar la animación.
 
@@ -164,7 +173,7 @@ ellos y el árbol resultante aún puede recibir restricciones y animarse.
 === Escena completa sin coordenadas
 
 La escena siguiente usa un árbol `column -> row -> stack -> column`. Ningún hijo
-llama a `at()`: el árbol exterior decide todas las traslaciones y el texto se
+llama a `move_to()`: el árbol exterior decide todas las traslaciones y el texto se
 vuelve a medir con el ancho de la tarjeta que lo contiene.
 
 ```python
@@ -243,6 +252,13 @@ sobrante entre hermanos. Demasiados `fill` anidados suelen indicar que no está
 claro qué contenedor debe controlar el tamaño.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>icon = scene.geometry.circle(0.15)
+>>>label = scene.text("Nuevo", role="label")
+>>>sidebar = scene.geometry.rect(2.5, 4)
+>>>content = scene.geometry.rect(6, 4)
+>>>inspector = scene.geometry.rect(3, 4)
 badge = scene.layout.row([icon, label], width="hug", padding=(0.1, 0.175), gap=0.1)
 
 workspace = scene.layout.row(
@@ -266,7 +282,7 @@ workspace.configure(
 )
 ```
 
-`padding` acepta `padding=24`, `padding=(vertical, horizontal)` o
+`padding` acepta `padding=0.3`, `padding=(vertical, horizontal)` o
 `padding=(top, right, bottom, left)`. Las filas y columnas usan un único `gap`;
 los grids pueden sustituirlo mediante `row_gap` y `column_gap`.
 
@@ -283,6 +299,15 @@ Esta distinción resuelve la mayoría de dudas sobre cuál de las dos propiedade
 usar.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>back = scene.text("Atrás", role="label")
+>>>search = scene.geometry.rounded_rect(4, 0.5, 0.1)
+>>>actions = scene.text("Acciones", role="label")
+>>>intro = scene.text("Introducción")
+>>>explanation = scene.text("Explicación")
+>>>result = scene.text("Resultado")
+>>>tags = [scene.text(t, role="label") for t in ("rust", "gpu", "vello", "bevy", "python")]
 toolbar = scene.layout.row(
     [back, scene.layout.item(search, grow=1, align="stretch"), actions],
     width="fill",
@@ -325,6 +350,10 @@ Estas reglas funcionan durante la construcción y pueden cambiarse después sin
 reconstruir el árbol:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>chart = scene.geometry.rect(4, 2.5)
+>>>page = scene.layout.column([scene.text("Ventas", role="title"), chart], within="safe")
 page.configure_item(
     chart,
     grow=2,
@@ -344,6 +373,12 @@ sucio y la medición adaptable se propagan automáticamente hasta el propietario
 exterior.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>photo = scene.geometry.rect(4, 3)
+>>>title = scene.text("Título", role="title")
+>>>copy = "Un párrafo que se recompone con el ancho del área segura."
+>>>footer = scene.text("Pie", role="caption")
 background = scene.layout.stack(
     [scene.layout.item(photo, fit="cover")],
     within="frame",
@@ -382,9 +417,16 @@ preferible a filas anidadas cuando varias regiones deben compartir líneas de
 alineación.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>hero = scene.geometry.rect(3, 2)
+>>>chart = scene.geometry.rect(6, 2)
+>>>notes = scene.text("Notas")
+>>>photo = scene.geometry.rect(4, 3)
+>>>caption = scene.text("Pie de foto", role="caption")
 cards = scene.layout.grid(
     [hero, scene.layout.item(chart, column_span=2), notes],
-    columns=[240, "1fr", "2fr"],
+    columns=[3, "1fr", "2fr"],
     rows=["auto", "1fr"],
     gap=0.3,
     width="fill",
@@ -418,6 +460,10 @@ transforman el árbol completo. La restricción anterior corresponde únicamente
 a los hijos cuya traslación pertenece al contenedor.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>formula = scene.text("$a^2 + b^2 = c^2$")
+>>>explanation = scene.text("Teorema de Pitágoras")
 panel = scene.layout.column([formula, explanation], gap=0.625, align="center")
 panel.move_to(5, 2.5)
 ```
@@ -427,6 +473,14 @@ Layout y una animación escribieran la misma posición, recorrer la línea de
 tiempo podría resolver resultados diferentes según el orden de evaluación.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>title = scene.text("Título", role="title")
+>>>old = scene.text("Antes")
+>>>new = scene.text("Después")
+>>>chart = scene.geometry.rect(4, 2)
+>>>extra = scene.text("Extra")
+>>>page = scene.layout.column([title, old, chart], within="safe")
 page.add(extra, at=1)
 page.replace(old, new)
 page.detach(title)
@@ -449,17 +503,23 @@ operaciones posicionales. Esto es útil al llevar un hijo administrado a un
 segmento nuevo:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>scene.segment("intro")
+>>>title = scene.text("Título", role="title")
+>>>page = scene.layout.column([title, scene.text("Contenido")], within="safe")
+>>>scene.wait(1)
 scene.segment("detail", Transition.cross_fade(0.4))
 scene.reuse(title)
 page.detach(title)
 scene.play([title.animate.move_to(0, 2.5).duration(0.35)])
 ```
 
-El valor `animate` de estas operaciones, así como el de `configure`,
-`configure_item` y `reflow`, es una duración en segundos. En `detach` solo se
-anima el reflow de los hijos restantes; el hijo separado permanece visible y
-fijo hasta recibir una animación explícita. Con `None`, la línea de tiempo
-registra una transición instantánea y determinista.
+Estas operaciones, así como `configure`, `configure_item` y `reflow`, no
+reciben una duración: la línea de tiempo registra en el cursor un reflow
+instantáneo y determinista. Tras `detach`, los hijos restantes se recolocan y
+el hijo separado permanece visible y fijo hasta recibir una animación
+explícita.
 
 == Constraints lineales
 
@@ -472,6 +532,11 @@ cuando dos ramas separadas deban compartir una relación geométrica, por ejempl
 alinear una etiqueta externa con el centro de un gráfico.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>chart = scene.geometry.rect(5, 3)
+>>>page = scene.layout.column([chart], within="safe")
+>>>label = scene.text("Máximo")
 relations = scene.layout.constrain(
     (label.left == chart.right + 0.3).strong(),
     label.center_y == chart.center_y,
@@ -500,6 +565,9 @@ sola línea y un valor numérico limita el ancho tipográfico sin crear un segun
 modelo de cajas.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>diagram = scene.geometry.circle(1.5)
 from gaanim import TextFlow
 
 copy = scene.text(
@@ -531,19 +599,31 @@ otra escena o con propietario incompatible producen `LayoutOwnershipError`.
 Las plantillas son funciones tipadas de Python:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>title = scene.text("Comparación", role="title")
+>>>copy = scene.text("Texto", flow=TextFlow(wrap="auto"))
+>>>diagram = scene.geometry.circle(1.5)
 from gaanim import comparison, layout_template
 
 @layout_template
 def two_columns(scene, *, title, left, right, footer=None):
-    return scene.layout.column([
+    children = [
         title,
         scene.layout.row([scene.layout.item(left, grow=1), scene.layout.item(right, grow=1)]),
-        footer,
-    ], within="safe", width="fill", height="fill")
+    ]
+    if footer is not None:
+        children.append(footer)
+    return scene.layout.column(children, within="safe", width="fill", height="fill")
 
 page = scene.layout.template(two_columns, title=title, left=copy, right=diagram)
+# Un objeto pertenece a un solo Layout: cada página recibe sus propios hijos.
 slide = scene.segment("Comparison", template=comparison)
-page = slide.bind(title=title, left=copy, right=diagram)
+slide_page = slide.bind(
+    title=scene.text("Antes y después", role="title"),
+    left=scene.text("Antes"),
+    right=scene.text("Después"),
+)
 ```
 
 Las plantillas incluidas son `title_slide`, `lecture`, `comparison`,
@@ -552,11 +632,11 @@ Las plantillas incluidas son `title_slide`, `lecture`, `comparison`,
 Las plantillas incluidas consumen tokens de Layout del tema en lugar de
 dimensiones aisladas. Léelos con `scene.canvas.layout_token(name)` y
 sustitúyelos mediante
-`Theme(..., layout={"page_padding": 56, "column_gap": 48})`.
+`Theme(..., layout={"page_padding": 0.7, "column_gap": 0.6})`.
 
 == Errores frecuentes
 
-- *Usar `at()` después de adjuntar un objeto.* Expresa la intención mediante
+- *Usar `move_to()` después de adjuntar un objeto.* Expresa la intención mediante
   `align`, `anchor`, `offset` o una restricción.
 - *Aplicar `fill` en todos los niveles.* Decide qué contenedor posee el espacio
   disponible y deja que los descendientes usen `hug` cuando corresponda.

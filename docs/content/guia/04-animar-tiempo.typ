@@ -5,7 +5,6 @@
   title: "Animar el tiempo",
   description: "Timeline, entradas, paralelismo, duración y easing",
   route: "/guia/animar-tiempo/",
-  code-langs: (),
 )[
 
 = De un fotograma a una secuencia
@@ -17,6 +16,18 @@ revelarse.
 Sustituye la última línea por:
 
 ```python
+>>>from gaanim import BLUE, WHITE, YELLOW, Color, Scene
+>>>BACKGROUND = Color(15, 23, 42)
+>>>PRIMARY = BLUE
+>>>ACCENT = YELLOW
+>>>MUTED = Color(148, 163, 184)
+>>>scene = Scene(frame=(16, 9), background=BACKGROUND, margin=0.6)
+>>>title = scene.text("Movimiento circular", role="title").fill(WHITE).move_to(0, 3.25)
+>>>caption = scene.text("Un punto, un radio constante", role="subtitle").fill(MUTED).move_to(0, 2.69)
+>>>orbit = scene.geometry.circle(1.5).stroke(PRIMARY, 0.05).no_fill().move_to(-4, 0)
+>>>radius = scene.geometry.line(-4, 0, -2.5, 0).stroke(MUTED, 0.025)
+>>>point = scene.geometry.dot(0.125).fill(ACCENT).move_to(-2.5, 0)
+>>>system = scene.geometry.group([orbit, radius, point])
 from gaanim import stagger
 scene.play(stagger(
     title.animate.write().duration(0.8),
@@ -54,6 +65,7 @@ fundido corto.
 Para mover el sistema completo y devolverlo a su sitio:
 
 ```python
+# continue
 from gaanim import Easing
 scene.play([system.animate.shift_by(0.5, 0).duration(0.6).easing(Easing.SMOOTH)])
 scene.play([system.animate.shift_by(-0.5, 0).duration(0.6).easing(Easing.SMOOTH)])

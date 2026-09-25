@@ -51,3 +51,9 @@ tests/visual/**/report/
 
 # Narration takes recorded while trying the examples.
 /examples/narration/
+
+# Sample project the documentation examples load files from (docs/fixtures).
+!docs/fixtures/**/*.svg
+!docs/fixtures/**/*.png
+!docs/fixtures/**/*.mp4
+!docs/fixtures/**/*.webp

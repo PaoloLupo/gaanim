@@ -4,7 +4,6 @@
   title: "Objetos, texto y estilos",
   description: "Cómo crear, agrupar y dar apariencia al contenido de una escena",
   route: "/manual/objetos/",
-  code-langs: (),
 )
 
 = Objetos dibujables
@@ -14,6 +13,8 @@ Las primitivas, el texto, las imágenes y los grupos comparten operaciones de
 tema y animaciones.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 orbit = scene.geometry.circle(1.75).stroke(BLUE, 0.05).no_fill()
 point = scene.geometry.dot(0.15).fill(YELLOW).move_to(1.75, 0)
 label = scene.text("r", role="body").fill(WHITE).move_to(0.875, 0.3)
@@ -29,6 +30,7 @@ handles individuales.
 matemáticos se compone con Typst:
 
 ```python
+# continue
 formula = scene.text("$x(t) = r cos(t)$", role="subtitle")
 ```
 

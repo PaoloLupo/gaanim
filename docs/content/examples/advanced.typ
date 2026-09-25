@@ -4,7 +4,6 @@
   title: "Ejemplos avanzados",
   description: "Recetas modernas de texto, datos, composición, reactividad, 3D y presentaciones",
   route: "/examples/advanced/",
-  code-langs: (),
 )
 
 = Taller de posibilidades

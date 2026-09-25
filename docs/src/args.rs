@@ -44,4 +44,13 @@ pub struct CompileArgs {
 
     #[arg(long)]
     pub open: bool,
+
+    /// Examples to run at the same time (default: available CPU cores).
+    #[arg(long, value_name = "N")]
+    pub jobs: Option<usize>,
+
+    /// Finish with success even when examples fail (they still show their
+    /// errors on the page). Watch mode always allows them.
+    #[arg(long = "allow-example-errors")]
+    pub allow_example_errors: bool,
 }

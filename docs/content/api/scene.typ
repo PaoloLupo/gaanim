@@ -5,7 +5,6 @@
   title: "API de Scene",
   description: "API pública canónica para construir animaciones con Gaanim",
   route: "/api/scene/",
-  code-langs: (),
 )
 
 = Capacidades de Scene
@@ -14,6 +13,8 @@
 pertenecen a la misma escena y comparten su modelo diferido:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 shape = scene.geometry.circle(1)
 title = scene.text("Resultado")
 page = scene.layout.column([title, shape])
@@ -63,6 +64,8 @@ reglas también alcanzan objetos creados antes de esa llamada. Consulta
 segura que respetan todas las operaciones de layout y colocación en bordes:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 scene.canvas.set_preset("vertical")  # marco lógico 9×16
 print(scene.canvas.safe_width, scene.canvas.safe_height)  # medidas del área segura
 page = scene.layout.column([scene.text("Video vertical", role="title")], within="safe")
@@ -166,6 +169,8 @@ texture for the process.
 and source groups. Named groups and paths are available through `part(id)`:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 robot = scene.media.svg("assets/robot.svg")
 arm = robot.part("left-arm")
 joint = robot.part("elbow")
@@ -186,6 +191,8 @@ typed visualization API. Build immutable `Axis` specifications, create a
 `CoordinateSpace`, then call methods on that space:
 
 ```python
+>>>from gaanim import Scene
+>>>scene = Scene(frame=(16, 9))
 import math
 from gaanim import Axis, BLUE
 
@@ -208,6 +215,8 @@ control point or a cubic Bézier with two. It remains a real Bézier path, so it
 can drive the reactive curve bindings directly.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 curve = scene.geometry.bezier((-1.8, 0), [(-0.8, 1.8), (0.8, -1.8)], (1.8, 0))
 ```
 
@@ -217,6 +226,8 @@ a composed path. The explicit `polyline` and `curve` factories remain available
 for code that benefits from stating the exact path kind.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 rail = scene.geometry.path([(-1.8, 0), (0, 0.8), (1.8, 0)])
 profile = scene.geometry.path([
     ("move", [(-1.8, -0.4)]),
@@ -240,6 +251,8 @@ Reactive visual helpers are hidden when declared. Add their entry animation to
 `Parameter` es una señal no visual y no necesita una animación de entrada.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 theta = scene.viz.parameter(0.2)
 rotation = scene.geometry.always_redraw_arc(theta, 0, 0, 1.4, 0.0).fill(WHITE)
 scene.play([
@@ -253,6 +266,9 @@ another drawable after its updaters run. `bind_x_from`, `bind_y_from`, and
 `bind_position_from(source, axes="xy")` provide axis-level control.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>marker = scene.geometry.dot(0.06)
 label = scene.text("moving label")
 label.attach_to(marker)
 marker.add_updater(Updater.orbit(0, 0, 1.2, 1.2))
@@ -268,6 +284,10 @@ of timeline time, so a seek lands on the same frame as playback, and they add to
 `animate.move_to` and other clips instead of replacing them.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>logo = scene.media.image("assets/logo.webp").scale_to(0.25)
+>>>light = scene.geometry.circle(0.3).fill(GOLD)
 logo.add_updater(Updater.wiggle(position=0.08, rotation=0.03, seed=1))
 light.add_updater(Updater.oscillate("opacity", waveform="triangle", frequency=0.5, low=0.4, high=1.0))
 scene.play([logo.animate.move_to(3, 0).duration(2)])  # still wiggling while it moves
@@ -280,6 +300,9 @@ seed=0, center=0)` returns smooth seeded noise over time as a `Computed`,
 evaluated natively each frame:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>title = scene.text("Gaanim", role="title")
 rng = scene.random(seed=42)
 stars = [scene.geometry.dot(0.04).move_to(rng.uniform(-7, 7), rng.uniform(-4, 4)) for _ in range(60)]
 drift = scene.noise(frequency=0.6, amplitude=0.3, octaves=3, seed=5)
@@ -291,8 +314,15 @@ Groups and drawables can rotate or scale around a scene-space point through
 with a physical hinge:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>rail = scene.geometry.line(-1.8, 0, 1.8, 0)
+>>>spring = scene.mechanics.spring_between((-1.8, 0.4), (0.6, 0.4))
+>>>mass = scene.geometry.dot(0.2).move_to(0.6, 0.4)
+from math import pi
+
 mechanism = scene.geometry.group([rail, spring, mass]).with_pivot(0, 0)
-scene.play([mechanism.animate.rotate_by(PI / 3).duration(1.0)])
+scene.play([mechanism.animate.rotate_by(pi / 3).duration(1.0)])
 ```
 
 `spring_between(from, to, coils=8, amplitude=0.12, crossing=0)` creates a native
@@ -307,6 +337,8 @@ natively. It returns a regular `Drawable` group, so it can be animated like any
 other mobject.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 mass = scene.geometry.dot(0.2).fill(GOLD)
 note = scene.slides.callout("Moving mass", mass, offset=(1.8, 1))
 scene.play([mass.animate.shift_by(2.4, 0).duration(1.2), note.animate.fade_in().duration(0.4)])
@@ -323,6 +355,8 @@ title, optional subtitle, and an accent rule. Its elements remain a single
 animatable drawable. Pass `panel=True` for a framed version.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 opening = scene.slides.title_card("Vector motion", "A short technical explanation")
 scene.play([opening.animate.fade_in_from(Direction.DOWN, distance=0.48).duration(0.6)])
 ```
@@ -332,6 +366,8 @@ default gap and colors are suitable for a technical presentation; tune
 `width`, `gap`, `bullet_radius`, `bullet_color`, and `color` when needed.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 agenda = scene.slides.bullets(["Setup", "Motion", "Export"], gap=0.9)
 scene.play([agenda.animate.fade_in_from(Direction.DOWN, distance=0.4).duration(0.5)])
 ```
@@ -340,6 +376,8 @@ Charts are immutable tabular specifications materialized into stable semantic
 layers. Their marks remain batched independently from row count.
 
 ```python
+>>>from gaanim import Scene
+>>>scene = Scene(frame=(16, 9))
 from gaanim import Axis, ChartSpec
 
 spec = ChartSpec({"x": [0, 1, 2], "value": [18, 42, 31]}) \
@@ -353,6 +391,8 @@ scene.play([chart.layer("axes").animate.create(), chart.layer("marks").animate.g
 thin construction rules. Each row must have exactly one non-empty cell per header.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 results = scene.slides.table(
     ["Method", "Error", "Time"],
     [["Baseline", "0.18", "48 ms"], ["GPU", "0.04", "15 ms"]],
@@ -377,6 +417,8 @@ relative paths use `scene.assets.assets_dir(...)`, and a missing or unreadable a
 raises `RuntimeError` before the drawable is created.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 comparison = scene.text.typst('''
 #table(
   columns: 2,
@@ -395,6 +437,8 @@ quiet technical frame. It is suitable for code reveals and can be animated as
 one drawable; token-level highlighting and diffs are planned separately.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 snippet = scene.text.code("result = mass * acceleration", language="python")
 scene.play([snippet.animate.fade_in().duration(0.4)])
 ```
@@ -405,10 +449,14 @@ path. The value is clamped to
 `[0, 1]` and measured by arc length, with no Python callback during playback.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+from math import cos, pi, sin
+
 t = scene.viz.parameter(0.0)
 curve = scene.geometry.polyline([
   (2.25 * cos(u), 1.25 * sin(2 * u))
-  for u in (2 * PI * index / 240 for index in range(241))
+  for u in (2 * pi * index / 240 for index in range(241))
 ])
 dot = scene.geometry.point_on_curve(curve, t).fill(GOLD)
 scene.play([dot.animate.fade_in().duration(0.3), t.animate.set(1.0).duration(2.0)])
@@ -438,6 +486,11 @@ entry animation is included in `scene.play(...)`.
 single list run in parallel.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>circle = scene.geometry.circle(0.8).fill(BLUE).move_to(-1.6, 0)
+>>>rect = scene.geometry.rect(1.8, 1.0).fill(GOLD).move_to(1.6, 0)
+>>>label = scene.text("Gaanim", role="title").move_to(0, 2.2)
 scene.play([
     circle.animate.create().duration(1.0).easing(Easing.SMOOTH),
     rect.animate.grow_from_center().duration(1.0).easing(Easing.spring(stiffness=90, damping=12)),
@@ -461,6 +514,8 @@ continuous; use `stop()` only where interactive playback must wait for input.
   desc: [Creates and activates a structural segment. The first call replaces the untouched implicit segment. An incoming transition on that first segment, or an empty or duplicate name, raises `ValueError`.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 intro = scene.segment(
     "Introduction",
     notes="State the goal.",
@@ -488,6 +543,9 @@ scene.link(intro, details, Transition.cross_fade(0.4))
   desc: [Pauses real-time playback when the playhead reaches this exact position. At a segment boundary, the completed outgoing segment remains visible until playback advances, so no trailing `wait()` is required. Export, snapshots, and explicit seeks ignore stops and traverse the timeline continuously. After a recorded `live_take()` starts, a stop instead waits as long as the speaker paused there (see #link("/api/audio/", "Audio")). Empty names and a second stop at the same segment-local timestamp raise `ValueError`.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>result = scene.text("$x = 2$")
 scene.play([result.animate.write().duration(0.6)])
 scene.stop("result-ready")
 ```
@@ -502,6 +560,9 @@ scene.stop("result-ready")
   desc: [Both use absolute timeline seconds across segments and are read-only. `stops` lists stops in timeline order; read it at the end of the script, before `render()`, to request one snapshot per pause.],
 )[
 ```python
+>>>import os
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(snapshots, [stop.time for stop in scene.stops])
 ```
@@ -516,6 +577,10 @@ if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
   desc: [Names the current cursor on the global timeline. A marker is metadata only: it adds no duration, does not pause playback and does not move the cursor. The editor draws markers as small triangles above the seek bar; hovering shows the name and clicking one jumps exactly to it. `gaanim export --from <marker> --to <marker>` accepts marker names in place of seconds. Empty names, duplicates, and names that parse as a number raise `ValueError`. For named instants inside a `Composition`, use `label` (see Animaciones).],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>intro = scene.text("Intro").animate.write()
+>>>outro = scene.text("Fin").move_to(0, -1).animate.write()
 scene.play(intro)
 scene.marker("climax")
 scene.play(outro)
@@ -562,6 +627,8 @@ scene.render()
 Configure the deck identity once before declaring presentation segments:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 scene.canvas.set_theme("presentation")
 scene.slides.brand(
     logo="assets/university.svg",
@@ -584,6 +651,10 @@ template. `bind(**slots)` validates required, optional, and extra slots and
 returns the segment's root `Layout`.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>baseline = scene.geometry.rect(3, 2).fill(GRAY)
+>>>proposed = scene.geometry.rect(3, 2).fill(BLUE)
 segment = scene.segment("Results", template=comparison, notes="Compare both models.")
 segment.bind(title=scene.text("Results", role="title"), left=baseline, right=proposed)
 scene.stop("comparison-ready")
@@ -602,6 +673,8 @@ the next slide. Unpaired content cross-fades. Declare the pairs with
 the incoming segment:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 overview = scene.segment("Overview")
 card = scene.geometry.rect(3, 2).fill(BLUE).move_to(-4, 0)
 detail = scene.segment("Detail")
@@ -612,6 +685,10 @@ scene.link(overview, detail, Transition.morph(0.8, pairs=[(card, panel)]))
 == Cámara
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>circle = scene.geometry.circle(0.8).fill(BLUE).move_to(-1.6, 0)
+>>>label = scene.text("Gaanim", role="title").move_to(0, 2.2)
 overview = scene.camera.save("overview")
 detail = scene.camera.state_2d(center=(-1.6, 0.4), zoom=1.5)
 scene.play([scene.camera.animate.to(detail).duration(0.8)])
@@ -621,7 +698,7 @@ scene.play([scene.camera.animate.pan_to(-1.6, 0.4).duration(0.8)])
 scene.play([scene.camera.animate.zoom_to(1.5).duration(0.6)])
 scene.play([scene.camera.animate.frame_to([circle, label], margin=(0.32, 0.48), dynamic=True).duration(0.9)])
 scene.play([scene.camera.animate.rotate_to(0.15).duration(0.5)])
-scene.play([scene.camera.animate.follow(circle.anchor(Anchor.TOP), offset=(0, 0.24), lag=0.2).duration(2.0)])
+scene.play([scene.camera.animate.follow(circle.anchor_point(Anchor.TOP), offset=(0, 0.24), lag=0.2).duration(2.0)])
 scene.play([scene.camera.animate.shake(amplitude=0.12, frequency=8).duration(0.4)])
 
 # Camera animations return Anim and can run beside drawable animations.
@@ -677,6 +754,8 @@ linear position and zoom of earlier releases; any other value raises
 unaffected.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 scene.play([scene.camera.animate.zoom_to(8.0).duration(1.5)])
 scene.play([scene.camera.animate.zoom_to(1.0, interpolation="linear").duration(0.8)])
 ```
@@ -694,6 +773,8 @@ decay. The offset is a pure function of time, so seeks, snapshots and exports
 match playback, and it is added after follow, framing and bindings.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 scene.play([scene.camera.animate.shake(trauma=0.8, decay=1.5, frequency=12, rotation=0.02, seed=0)])
 scene.play([scene.camera.animate.shake(trauma=0.4, seed=3)])  # a lighter hit
 ```
@@ -715,9 +796,16 @@ constraint owns only declared channels. Influence is a scalar source in
 framing runs after bindings, and shake is always an additive final modifier.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+import math
+
 theta = scene.viz.parameter(0.0)
-focus = scene.geometry.point_ref(theta * 2.25, (theta * 2).sin())
-rig2d = scene.camera.bind_2d(center=focus, zoom=1 + theta * 0.3)
+focus = scene.geometry.point_ref(
+    computed(lambda t: t * 2.25, inputs=[theta]),
+    computed(lambda t: math.sin(t * 2), inputs=[theta]),
+)
+rig2d = scene.camera.bind_2d(center=focus, zoom=computed(lambda t: 1 + t * 0.3, inputs=[theta]))
 scene.play([theta.animate.set(1.0).duration(2.0)])
 rig2d.disable()
 
@@ -750,6 +838,8 @@ un `Anim` cuya duración configuras después con `.duration(seconds)`.
   desc: [Switches the scene to perspective projection immediately. Requires `0 < near < far` and `0 < fov_y < pi`. `scene.camera.animate.perspective(fov_y, near=0.1, far=1000.0)` returns a composable `Anim` instead.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 scene.camera.perspective(fov_y=0.785, near=0.1, far=1000.0)
 ```
 ]
@@ -763,6 +853,8 @@ scene.camera.perspective(fov_y=0.785, near=0.1, far=1000.0)
   desc: [Positions the camera at `eye` and aims it at `target` immediately. Endpoints resolve after reactive layout; eye and target must differ and up must be non-zero and non-collinear. `scene.camera.animate.look_at(eye, target, up=None)` returns a composable `Anim` instead.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 scene.camera.look_at(eye=(7, 5, 6), target=(0, 0, 0))
 ```
 ]
@@ -776,6 +868,8 @@ scene.camera.look_at(eye=(7, 5, 6), target=(0, 0, 0))
   desc: [Use small yaw and pitch deltas for a smooth turn around the current target.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 marker = scene.geometry.dot(0.075)
 scene.play([
     marker.animate.fade_in().duration(1.0),
@@ -793,6 +887,8 @@ scene.play([
   desc: [`factor < 1` moves closer; `factor > 1` moves farther. The factor must be finite and positive.],
 )[
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 scene.play([scene.camera.animate.dolly(factor=0.85).duration(0.6)])
 ```
 ]
@@ -804,6 +900,9 @@ group. The mask keeps its own visibility; make it transparent when it should
 only constrain content:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>chart_group = scene.geometry.group([scene.geometry.rect(6, 3).fill(BLUE), scene.geometry.circle(1).fill(GOLD)])
 mask = scene.geometry.rounded_rect(5.25, 2.75, 0.35).no_fill().no_stroke()
 chart_group.clip(mask)
 ```
@@ -815,6 +914,8 @@ holes, and `drawable.no_clip()` removes a previously assigned mask.
 == Salida
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 scene.render()  # Submit the authored timeline to the Gaanim host
 ```
 
@@ -869,6 +970,8 @@ For visual regression, the executable injects the authoritative directory.
 The script only declares exact timeline times:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 import os
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
@@ -943,6 +1046,14 @@ animate or hide. Sections may be `Section` instances, plain keys, or
 `(key, title)` pairs.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>def _content(scene):
+>>>    scene.play(scene.text("Content", size=0.5).animate.write())
+>>>sections = [
+>>>    Section("intro", [SectionStep(name="Context", build=_content)], title="Introduction"),
+>>>    Section("method", [SectionStep(name="Model", build=_content)], title="Method"),
+>>>]
 agenda = scene.sections.agenda(sections, pitch=0.66)
 agenda.root.move_to(-2, 1.4, Anchor.TOP_LEFT)
 rail = scene.sections.progress_rail(sections, segmented=True, captions=True)

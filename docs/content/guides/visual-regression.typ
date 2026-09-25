@@ -4,7 +4,6 @@
   title: "Regresión visual",
   description: "Snapshots deterministas por ejemplo y visor egui",
   route: "/guides/visual-regression/",
-  code-langs: (),
 )
 
 Cada ejemplo guarda sus snapshots de regresión en una única carpeta global:
@@ -37,6 +36,8 @@ gaanim --diff --example examples/visual_diff_demo.py
 El script debe llamar a `scene.snapshots(...)` cuando existe la variable `GAANIM_SNAPSHOTS`, como hace `examples/visual_diff_demo.py`. El CLI define esa variable y ejecuta la captura headless automáticamente:
 
 ```python
+>>>from gaanim import Scene
+>>>scene = Scene(frame=(16, 9))
 import os
 if os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(os.environ["GAANIM_SNAPSHOTS"], [0.0, 0.5, 1.0])
@@ -62,6 +63,9 @@ gaanim --diff --example mi-charla --capture-stops --stops 12,30 --capture-only
 Si prefieres elegir los tiempos desde el script, `scene.stops` devuelve las pausas con su tiempo absoluto y `scene.cursor` el instante actual de autoría:
 
 ```python
+>>>import os
+>>>from gaanim import Scene
+>>>scene = Scene(frame=(16, 9))
 if os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(os.environ["GAANIM_SNAPSHOTS"], [stop.time for stop in scene.stops])
 ```
