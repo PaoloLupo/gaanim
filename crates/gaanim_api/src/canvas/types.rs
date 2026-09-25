@@ -935,6 +935,9 @@ pub struct ObjectSpec {
     /// Full kurbo stroke geometry when cap/join/dash options are configured.
     pub stroke_style: Option<gaanim_core::kurbo::Stroke>,
     pub stroke_overridden: bool,
+    /// Stroke placement relative to closed contours; `None` keeps the
+    /// renderer default (inside closed shapes).
+    pub stroke_align: Option<gaanim_renderer::effects::StrokeAlign>,
     /// This group is the public root of an imported SVG hierarchy.
     pub(crate) svg_root: bool,
     pub glow: Option<gaanim_renderer::effects::Glow>,
@@ -996,6 +999,7 @@ impl ObjectSpec {
             stroke: None,
             stroke_style: None,
             stroke_overridden: false,
+            stroke_align: None,
             svg_root: false,
             glow: None,
             blur: None,

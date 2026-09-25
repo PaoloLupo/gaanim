@@ -8222,6 +8222,16 @@ impl SceneModel {
         };
         // Applies to primitives as well as groups/text, which skip `post_apply`
         // when they finish through `finish_spawn_builder`.
+        if let Some(align) = spec.stroke_align
+            && let Some(state) = builder.states.get(mref.id)
+        {
+            let entities: Vec<_> = std::iter::once(state.entity)
+                .chain(state.child_spans.iter().map(|child| child.entity))
+                .collect();
+            for entity in entities {
+                builder.commands.entity(entity).insert(align);
+            }
+        }
         if let Some(role) = spec.coordinate_view_role
             && let Some(state) = builder.states.get(mref.id)
         {
@@ -11730,6 +11740,86 @@ mod tests {
             let along = affine * Point::new(1.0, 0.0);
             assert!(center.distance(origin) < 1e-6, "{center:?} at {time}");
             assert!(along.distance(tip) < 1e-6, "{along:?} at {time}");
+        }
+    }
+
+    #[test]
+    fn move_along_an_arrow_travels_its_axis_from_tail_to_tip() {
+        let mut canvas = SceneModel::new(640, 360);
+        let straight = canvas.arrow(-2.0, 1.0, 2.0, 1.0);
+        let curved = canvas.curved_arrow_arc(0.0, -1.0, 1.5, 0.0, std::f64::consts::PI);
+        let dot = canvas.dot(0.05).move_to(-2.0, 1.0);
+        let other = canvas.dot(0.05).move_to(1.5, -1.0);
+        canvas.play(vec![
+            dot.animate()
+                .move_along(&straight)
+                .unwrap()
+                .duration(1.0)
+                .rate_func(RateFunc::Linear),
+            other
+                .animate()
+                .move_along(&curved)
+                .unwrap()
+                .duration(1.0)
+                .rate_func(RateFunc::Linear),
+        ]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+
+        for (time, on_line, on_arc) in [
+            (0.5, Point::new(0.0, 1.0), Point::new(0.0, 0.5)),
+            (1.0, Point::new(2.0, 1.0), Point::new(-1.5, -1.0)),
+        ] {
+            timeline.seek(&mut world, time);
+            let at = |world: &mut World, handle: &DrawableHandle| {
+                transform_of(world, handle).to_affine_2d() * Point::ORIGIN
+            };
+            let line = at(&mut world, &dot);
+            let arc = at(&mut world, &other);
+            assert!(line.distance(on_line) < 1e-3, "{line:?} at {time}");
+            assert!(arc.distance(on_arc) < 1e-3, "{arc:?} at {time}");
+        }
+    }
+
+    #[test]
+    fn full_turns_about_an_off_center_pivot_keep_the_pivot_fixed() {
+        // The pivot is off the drawable's origin, so the turn also swings its
+        // translation; both must follow the same eased angle.
+        let (cx, cy) = (4.3, -2.2);
+        let mut canvas = SceneModel::new(640, 360);
+        let arm = canvas
+            .rect(0.6, 0.1)
+            .move_to(cx + 0.5, cy)
+            .with_pivot(cx, cy);
+        canvas.play(vec![
+            arm.animate()
+                .rotate_by(std::f64::consts::TAU)
+                .duration(1.0)
+                .rate_func(RateFunc::Smooth),
+        ]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+
+        timeline.seek(&mut world, 0.0);
+        let local_pivot =
+            transform_of(&mut world, &arm).to_affine_2d().inverse() * Point::new(cx, cy);
+        for time in [0.1, 0.25, 0.4, 0.5, 0.75, 0.9, 1.0] {
+            timeline.seek(&mut world, time);
+            let affine = transform_of(&mut world, &arm).to_affine_2d();
+            let pivot = affine * local_pivot;
+            assert!(
+                pivot.distance(Point::new(cx, cy)) < 1e-3,
+                "pivot drifted to {pivot:?} at {time}"
+            );
+            let direction = affine * Point::new(1.0, 0.0) - affine * Point::ORIGIN;
+            let expected = std::f64::consts::TAU * RateFunc::Smooth.evaluate(time);
+            let turned = direction
+                .y
+                .atan2(direction.x)
+                .rem_euclid(std::f64::consts::TAU);
+            let error = (turned - expected.rem_euclid(std::f64::consts::TAU)).abs();
+            assert!(
+                error.min(std::f64::consts::TAU - error) < 1e-6,
+                "turned {turned} instead of {expected} at {time}"
+            );
         }
     }
 

@@ -69,8 +69,10 @@ gaanim --present mi-charla --from resultados
 
 `--sections` reproduce solo los segmentos indicados y `--from` empieza en uno y
 sigue hasta el final; combinados, `--from` recorta la lista. Cada nombre
-selecciona el segmento con ese nombre exacto o todos los segmentos de una
-`Section` con esa clave, sin distinguir mayúsculas. Un nombre desconocido se
+selecciona el segmento con ese nombre exacto, todos los segmentos de una
+`Section` con esa clave o el paso de una `Section` con ese nombre de
+`SectionStep` (por ejemplo `--sections "Problemática · país sísmico"`), sin
+distinguir mayúsculas. Un nombre desconocido se
 muestra como error con las opciones disponibles, y entonces se reproduce todo.
 
 El script se ejecuta completo: objetos persistentes, cámara y tema llegan al

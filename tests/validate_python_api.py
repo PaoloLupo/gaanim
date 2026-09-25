@@ -1227,10 +1227,18 @@ def validate_vector_geometry_contract(module) -> list[str]:
     if not isinstance(level.animate.fill_level(0.75), module.Anim):
         failures.append("Anim.fill_level did not return Anim")
 
+    for align in ("inside", "center", "outside"):
+        if not isinstance(scene.geometry.rect(1, 1).stroke(module.WHITE, 0.1, align=align), module.Drawable):
+            failures.append(f"Drawable.stroke(align={align!r}) did not return Drawable")
+    halo = scene.text("halo").stroke(module.WHITE, 0.1, align="outside")
+    if not isinstance(halo, module.Text):
+        failures.append("Text.stroke(align='outside') did not return Text")
+
     for call in (
         lambda: scene.geometry.union(left),
         lambda: scene.geometry.fill_level(left, module.BLUE, -0.1),
         lambda: level.animate.fill_level(1.1),
+        lambda: scene.geometry.rect(1, 1).stroke(module.WHITE, 0.1, align="outer"),
     ):
         try:
             call()

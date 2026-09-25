@@ -267,7 +267,7 @@ scene.render()
   signature: ".animate.rotate_by(radians: float) -> Anim",
   params: ((name: "radians", type: "float", default: none, desc: [Angle in radians.]),),
   returns: (type: "Anim", desc: [Rotation anim.]),
-  desc: [Clockwise positive in screen coords. Use `with_pivot` for hinge or chain `.pivot(x,y)` / `.about_point(x,y)` on the `Anim` for orbital motion (e.g. `dot.pivot(200,0).animate.rotate_by(TAU)`).],
+  desc: [Clockwise positive in screen coords. Use `with_pivot` for hinge or chain `.pivot(x,y)` / `.about_point(x,y)` on the `Anim` for orbital motion (e.g. `dot.pivot(200,0).animate.rotate_by(TAU)`). Turns of any size, including several revolutions, follow one easing over the whole duration, and the pivot stays fixed throughout.],
 )[
 ```python
 # show-code: true
@@ -286,7 +286,7 @@ scene.render()
   kind: "method",
   signature: ".animate.move_along(target, *, orient=False, rotate_offset=0, start=0, end=1) -> Anim",
   params: (
-    (name: "target", type: "Drawable", default: none, desc: [Path drawable to follow — circle, rect, curve, polyline, etc. Its world geometry (after `at`, groups) is sampled.]),
+    (name: "target", type: "Drawable", default: none, desc: [Path drawable to follow — circle, rect, curve, polyline, etc. Its world geometry (after `at`, groups) is sampled. A solid `arrow` or `curved_arrow` is followed along its axis from tail to tip.]),
     (name: "orient", type: "bool", default: "False", desc: [Turn along the path tangent.]),
     (name: "rotate_offset", type: "float", default: "0", desc: [Radians added to the tangent angle when orienting.]),
     (name: "start, end", type: "float", default: "0, 1", desc: [Travelled portion of the path as arc-length fractions in `[0, 1]`. `start > end` travels it backwards, e.g. `start=0.5, end=0.2`; equal values raise `ValueError`.]),
@@ -1090,6 +1090,9 @@ Las animaciones de trazo de un mismo drawable (`create`, `write`, `trim`,
 `show_passing_flash`) comparten el canal `effect`, así que no pueden solaparse
 dentro de un `play`. El error indica las dos animaciones, sus tramos y el tipo
 de drawable; encadénalas con `sequence` sin solape o combínalas en una sola.
+Dos tramos que se tocan (uno termina cuando empieza el otro, como los pasos de
+un `sequence` dentro de un `stagger`) no se consideran solapados aunque sus
+tiempos acumulados difieran por redondeo.
 
 `animate.glow(color, radius, intensity)`, `animate.blur(sigma)` y
 `animate.shadow(color, x, y, blur)` interpolan los efectos estáticos del mismo

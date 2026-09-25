@@ -106,6 +106,13 @@ pub enum PropertyLens {
         from: gaanim_core::glam::DQuat,
         to: gaanim_core::glam::DQuat,
     },
+    /// Turns `from` by `radians` about its local Z axis. Unlike a slerp,
+    /// it follows the full angle, so turns beyond half a revolution keep
+    /// their direction and a single easing.
+    RotationZ {
+        from: gaanim_core::glam::DQuat,
+        radians: f64,
+    },
     Scale {
         from: gaanim_core::glam::DVec3,
         to: gaanim_core::glam::DVec3,
@@ -333,6 +340,7 @@ impl std::fmt::Debug for PropertyLens {
         match self {
             Self::Translation { from, to } => write!(f, "Translation({:?} -> {:?})", from, to),
             Self::Rotation { from, to } => write!(f, "Rotation({:?} -> {:?})", from, to),
+            Self::RotationZ { from, radians } => write!(f, "RotationZ({from:?} + {radians})"),
             Self::Scale { from, to } => write!(f, "Scale({:?} -> {:?})", from, to),
             Self::Opacity { from, to } => write!(f, "Opacity({} -> {})", from, to),
             Self::FillColor { from, to } => write!(f, "FillColor({:?} -> {:?})", from, to),
@@ -420,6 +428,15 @@ pub trait AnimatableLens: Send + Sync + std::fmt::Debug + 'static {
     }
 }
 
+/// Rotation reached `t` of the way through a [`PropertyLens::RotationZ`] turn.
+pub fn rotation_z_at(
+    from: gaanim_core::glam::DQuat,
+    radians: f64,
+    t: f64,
+) -> gaanim_core::glam::DQuat {
+    (from * gaanim_core::glam::DQuat::from_rotation_z(radians * t)).normalize()
+}
+
 /// A shared [`AnimatableLens`] implemented by a crate above the timeline
 /// (for example renderer effects), evaluated identically in playback and seeks.
 #[derive(Clone)]
@@ -501,6 +518,11 @@ pub fn evaluate_tweens_system(
             PropertyLens::Rotation { from, to } => {
                 if let Ok(mut transform) = transforms.get_mut(tween.target) {
                     transform.rotation = from.slerp(*to, t);
+                }
+            }
+            PropertyLens::RotationZ { from, radians } => {
+                if let Ok(mut transform) = transforms.get_mut(tween.target) {
+                    transform.rotation = rotation_z_at(*from, *radians, t);
                 }
             }
             PropertyLens::Scale { from, to } => {

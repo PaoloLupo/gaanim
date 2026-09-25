@@ -109,6 +109,27 @@ scene.render()
 ]
 
 #api-entry(
+  name: "Drawable.stroke",
+  kind: "method",
+  signature: "stroke(paint: Paint, width: float, *, align: str | None = None) -> Self",
+  params: ((name: "paint", type: "Paint", default: none, desc: [Color or Brush.]), (name: "width", type: "float", default: none, desc: [Width in logical scene units.]), (name: "align", type: "str | None", default: "None", desc: [`"inside"`, `"center"`, or `"outside"` the closed contours; `None` keeps the stroke inside.])),
+  returns: (type: "Self", desc: [The stroked drawable.]),
+  desc: [Closed contours, including every text glyph, keep their stroke inside by default so `write` draws a constant width. `"center"` straddles the contour and `"outside"` draws the whole width beyond it, e.g. a halo under a label that hides lines behind it. Open paths always center their stroke. The alignment is declaration state and is not animated. Other values raise `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import Anchor, BLACK, RED, WHITE, Scene
+scene = Scene(frame=(16, 9), background=WHITE)
+scene.geometry.line(-6, -0.4, 6, 0.4).stroke(RED, 0.04)
+scene.text("halo", size=0.8).fill(WHITE).stroke(WHITE, 0.15, align="outside").move_to(0, 0, Anchor.CENTER)
+scene.text("halo", size=0.8).fill(BLACK).move_to(0, 0, Anchor.CENTER)
+scene.wait(0.1)
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
   name: "Drawable.stroke_style",
   kind: "method",
   signature: "stroke_style(style: StrokeStyle) -> Self",
@@ -368,7 +389,7 @@ scene.render()
   signature: "line(p1: Endpoint, p2: Endpoint) -> Drawable",
   params: ((name: "p1", type: "Endpoint", default: none, desc: [Fixed tuple, drawable origin, `PointRef`, or `AnchorPoint`.]), (name: "p2", type: "Endpoint", default: none, desc: [Second fixed or same-frame endpoint.])),
   returns: (type: "Drawable", desc: [Visible line segment that follows reference endpoints.]),
-  desc: [Creates axes, dividers, or connectors. The compatibility form `line(x1, y1, x2, y2)` remains accepted. Invalid endpoints and mixed arities raise `TypeError`.],
+  desc: [Creates axes, dividers, or connectors. Two fixed 2D tuples make an ordinary line that moves with its group, like the compatibility form `line(x1, y1, x2, y2)`; reference endpoints are resolved in world space every frame. Invalid endpoints and mixed arities raise `TypeError`.],
 )[
 ```python
 # show-code: true

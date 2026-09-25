@@ -1089,12 +1089,22 @@ impl PyText {
         })
     }
 
-    fn stroke(slf: PyRef<'_, Self>, paint: PyPaint, width: f64) -> PyResult<PyRef<'_, Self>> {
+    #[pyo3(signature = (paint, width, *, align=None))]
+    fn stroke<'py>(
+        slf: PyRef<'py, Self>,
+        paint: PyPaint,
+        width: f64,
+        align: Option<&str>,
+    ) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            slf.handle.clone().stroke_brush(paint.0, width);
-            slf
-        })
+        let align = align
+            .map(crate::pydrawable::parse_stroke_align)
+            .transpose()?;
+        let handle = slf.handle.clone().stroke_brush(paint.0, width);
+        if let Some(align) = align {
+            handle.stroke_align(align);
+        }
+        Ok(slf)
     }
 
     fn no_stroke(slf: PyRef<'_, Self>) -> PyResult<PyRef<'_, Self>> {
