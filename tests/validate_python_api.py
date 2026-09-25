@@ -1397,7 +1397,7 @@ def validate_scene_capability_surface(module) -> list[str]:
         "assets", "camera", "canvas", "geometry", "layout", "mechanics",
         "media", "slides", "text", "viz", "fade_out_all", "link", "persist",
         "play", "release", "render", "reuse", "sections", "segment", "snapshots", "stop",
-        "wait", "time", "cursor", "stops",
+        "wait", "time", "cursor", "stops", "random", "noise",
     }
     actual = {name for name in dir(module.Scene) if not name.startswith("_")}
     failures = []
