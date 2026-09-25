@@ -380,6 +380,12 @@ pub enum PropertyLensSpec {
         from: f64,
         to: f64,
     },
+    /// Grow a reactive connector from its tail. Writes the visible fraction
+    /// of `TrackingConnector`; progress `1.0` is exactly the full connector.
+    ConnectorGrow {
+        from: f64,
+        to: f64,
+    },
     /// Trims the path in a sliding range window.
     PathRange {
         from: f64,
@@ -634,6 +640,10 @@ impl PropertyLensSpec {
             },
             Self::ArrowGrow { shape, from, to } => PropertyLens::ArrowGrow {
                 shape: shape.clone(),
+                from: *from,
+                to: *to,
+            },
+            Self::ConnectorGrow { from, to } => PropertyLens::ConnectorGrow {
                 from: *from,
                 to: *to,
             },

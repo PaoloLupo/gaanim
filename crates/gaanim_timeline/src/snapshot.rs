@@ -64,6 +64,9 @@ pub struct EntitySnapshot {
     /// Live target/interpolation state for a reactive surrounding rectangle.
     #[cfg_attr(feature = "serde", serde(default))]
     pub surrounding_rect: Option<gaanim_animation::SurroundingRect>,
+    /// Visible fraction of a reactive connector, animated by `grow_arrow`.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub connector_progress: Option<f64>,
     /// Runtime progress for the transient Write pen-tip illumination.
     /// Restoring it prevents a partial glyph/head highlight from surviving a rewind.
     #[cfg_attr(feature = "serde", serde(skip))]
@@ -241,6 +244,13 @@ fn insert_snapshot_components(
     sync_optional(entity_mut, snap.media_frame);
     sync_optional(entity_mut, snap.coordinate_view_role);
     sync_optional(entity_mut, snap.surrounding_rect.clone());
+    if let Some(progress) = snap.connector_progress
+        && let Some(mut connector) =
+            entity_mut.get_mut::<gaanim_animation::updaters::TrackingConnector>()
+        && connector.progress != progress
+    {
+        connector.progress = progress;
+    }
     sync_optional(entity_mut, snap.write_tip_glow.clone());
     sync_optional(
         entity_mut,
@@ -384,6 +394,9 @@ impl WorldSnapshot {
                     surrounding_rect: world
                         .get::<gaanim_animation::SurroundingRect>(entity)
                         .cloned(),
+                    connector_progress: world
+                        .get::<gaanim_animation::updaters::TrackingConnector>(entity)
+                        .map(|connector| connector.progress),
                     write_tip_glow: world.get::<gaanim_animation::WriteTipGlow>(entity).cloned(),
                     path_reveal: world
                         .get::<gaanim_animation::PathReveal>(entity)

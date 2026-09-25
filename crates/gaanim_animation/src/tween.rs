@@ -163,6 +163,12 @@ pub enum PropertyLens {
         from: f64,
         to: f64,
     },
+    /// Grow a reactive connector from its tail by animating its visible
+    /// fraction; the derived-geometry system rebuilds the path every frame.
+    ConnectorGrow {
+        from: f64,
+        to: f64,
+    },
     /// Cross-fade the fill alpha during a Write animation.
     /// The renderer multiplies the fill brush's color alpha by
     /// `from + (to - from) * t`. Inserted into the entity as
@@ -336,6 +342,7 @@ impl std::fmt::Debug for PropertyLens {
             Self::PathCompletion { from, to } => write!(f, "PathCompletion({} -> {})", from, to),
             Self::PathTrim { from, to, .. } => write!(f, "PathTrim({from:?} -> {to:?})"),
             Self::ArrowGrow { from, to, .. } => write!(f, "ArrowGrow({from} -> {to})"),
+            Self::ConnectorGrow { from, to } => write!(f, "ConnectorGrow({from} -> {to})"),
             Self::FillDrawProgress { from, to } => {
                 write!(f, "FillDrawProgress({} -> {})", from, to)
             }
@@ -433,7 +440,10 @@ pub fn evaluate_tweens_system(
     mut paths: Query<&mut Path2D>,
     mut fill_progress: Query<&mut FillDrawProgress>,
     mut fill_levels: Query<&mut gaanim_scene::FillLevel>,
-    mut surrounding_rects: Query<&mut crate::SurroundingRect>,
+    (mut surrounding_rects, mut connectors): (
+        Query<&mut crate::SurroundingRect>,
+        Query<&mut crate::updaters::TrackingConnector>,
+    ),
     mut tip_glows: Query<&mut WriteTipGlow>,
     mut float_signals: Query<&mut crate::signals::FloatSignal>,
     mut path_reveals: Query<&mut PathReveal>,
@@ -643,6 +653,11 @@ pub fn evaluate_tweens_system(
                 // full arrow's thin shaft.
                 if let Ok((mut source, _)) = sources.get_mut(tween.target) {
                     source.0 = grown;
+                }
+            }
+            PropertyLens::ConnectorGrow { from, to } => {
+                if let Ok(mut connector) = connectors.get_mut(tween.target) {
+                    connector.progress = (*from + (*to - *from) * t).clamp(0.0, 1.0);
                 }
             }
             PropertyLens::PathFollow { path, orient } => {

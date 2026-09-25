@@ -1267,6 +1267,9 @@ pub struct TrackingConnector {
     pub head_width: f64,
     pub body_width: f64,
     pub max_head_ratio: Option<f64>,
+    /// Visible fraction of the polyline measured from the tail, animated by
+    /// `grow_arrow`. The head keeps its full size and rides the tip.
+    pub progress: f64,
 }
 
 /// A card background reads its parent's resolved local layout box.
@@ -1320,15 +1323,26 @@ fn connector_path(
     head_width: f64,
     body_width: f64,
     ratio: Option<f64>,
+    progress: f64,
 ) -> BezPath {
     use gaanim_core::kurbo::{Point, Stroke, StrokeOpts, stroke};
     let mut points = points.to_vec();
-    if points.iter().any(|p| !p.is_finite()) {
+    if points.iter().any(|p| !p.is_finite()) || progress.is_nan() {
         return BezPath::new();
     }
     points.dedup_by(|a, b| (a.truncate() - b.truncate()).length_squared() < 1e-20);
     if points.len() < 2 {
         return BezPath::new();
+    }
+    if progress < 1.0 {
+        return partial_connector_path(
+            &points,
+            head_length,
+            head_width,
+            body_width,
+            ratio,
+            progress.max(0.0),
+        );
     }
     let tip = points[points.len() - 1];
     let delta = (tip - points[points.len() - 2]).truncate();
@@ -1349,6 +1363,87 @@ fn connector_path(
     style.end_cap = gaanim_core::kurbo::Cap::Butt;
     style.join = gaanim_core::kurbo::Join::Miter;
     let mut path = stroke(centerline.iter(), &style, &StrokeOpts::default(), 0.001);
+    let left = shoulder + normal * half_head;
+    let right = shoulder - normal * half_head;
+    path.move_to(Point::new(left.x, left.y));
+    path.line_to((tip.x, tip.y));
+    path.line_to((right.x, right.y));
+    path.close_path();
+    path
+}
+
+/// A connector grown to `progress` of its polyline length from the tail.
+///
+/// The head keeps the size it has on the complete connector and spans the
+/// last `head` units of the visible spine, so the tip travels along the path
+/// (turning smoothly through waypoints) instead of the arrow being scaled.
+/// Until the visible length reaches the head size, only a proportionally
+/// smaller head is drawn.
+fn partial_connector_path(
+    points: &[DVec3],
+    head_length: f64,
+    head_width: f64,
+    body_width: f64,
+    ratio: Option<f64>,
+    progress: f64,
+) -> BezPath {
+    use gaanim_core::glam::DVec2;
+    use gaanim_core::kurbo::{Point, Stroke, StrokeOpts, stroke};
+    let points: Vec<DVec2> = points.iter().map(|p| p.truncate()).collect();
+    let mut cumulative = vec![0.0];
+    for pair in points.windows(2) {
+        cumulative.push(cumulative[cumulative.len() - 1] + (pair[1] - pair[0]).length());
+    }
+    let total = cumulative[cumulative.len() - 1];
+    let visible = total * progress.min(1.0);
+    if visible <= 1e-9 {
+        return BezPath::new();
+    }
+    let last_segment = total - cumulative[cumulative.len() - 2];
+    let full_head = head_length.min(last_segment * ratio.unwrap_or(1.0));
+    let head = full_head.min(visible);
+    let point_at = |distance: f64| -> DVec2 {
+        let index = cumulative
+            .windows(2)
+            .position(|w| distance <= w[1])
+            .unwrap_or(points.len() - 2);
+        let span = cumulative[index + 1] - cumulative[index];
+        let t = if span > 0.0 {
+            ((distance - cumulative[index]) / span).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        points[index].lerp(points[index + 1], t)
+    };
+    let tip = point_at(visible);
+    let shoulder_distance = visible - head;
+    let shoulder = point_at(shoulder_distance);
+    let chord = tip - shoulder;
+    let direction = if chord.length_squared() > 1e-20 {
+        chord.normalize()
+    } else {
+        (points[1] - points[0]).normalize_or_zero()
+    };
+    let normal = DVec2::new(-direction.y, direction.x);
+    let half_head = head_width * (head / head_length) * 0.5;
+
+    let mut path = BezPath::new();
+    if shoulder_distance > 1e-9 {
+        let mut centerline = BezPath::new();
+        centerline.move_to((points[0].x, points[0].y));
+        for (point, distance) in points.iter().zip(&cumulative).skip(1) {
+            if *distance >= shoulder_distance {
+                break;
+            }
+            centerline.line_to((point.x, point.y));
+        }
+        centerline.line_to((shoulder.x, shoulder.y));
+        let mut style = Stroke::new(body_width);
+        style.start_cap = gaanim_core::kurbo::Cap::Butt;
+        style.end_cap = gaanim_core::kurbo::Cap::Butt;
+        style.join = gaanim_core::kurbo::Join::Miter;
+        path = stroke(centerline.iter(), &style, &StrokeOpts::default(), 0.001);
+    }
     let left = shoulder + normal * half_head;
     let right = shoulder - normal * half_head;
     path.move_to(Point::new(left.x, left.y));
@@ -1535,6 +1630,7 @@ pub fn tracking_line_system(world: &mut World) {
                     connector.head_width,
                     connector.body_width,
                     connector.max_head_ratio,
+                    connector.progress,
                 )
             })
             .unwrap_or_default();
@@ -2323,14 +2419,47 @@ mod tests {
 
     #[test]
     fn connector_handles_collapsed_points_and_short_final_segment() {
-        assert!(connector_path(&[DVec3::ZERO, DVec3::ZERO], 0.18, 0.15, 0.036, None).is_empty());
-        assert!(connector_path(&[DVec3::ZERO, DVec3::NAN], 0.18, 0.15, 0.036, None).is_empty());
+        assert!(connector_path(&[DVec3::ZERO, DVec3::ZERO], 0.18, 0.15, 0.036, None, 1.0).is_empty());
+        assert!(connector_path(&[DVec3::ZERO, DVec3::NAN], 0.18, 0.15, 0.036, None, 1.0).is_empty());
         let points = [DVec3::ZERO, DVec3::ZERO, DVec3::new(0.1, 0.0, 0.0)];
-        let path = connector_path(&points, 0.18, 0.15, 0.036, Some(0.5));
+        let path = connector_path(&points, 0.18, 0.15, 0.036, Some(0.5), 1.0);
         let bounds = path.bounding_box();
         assert!((bounds.x1 - 0.1).abs() < 1e-9);
         assert!(bounds.x0.abs() < 1e-9);
         assert!((bounds.height() - 0.15 * 0.05 / 0.18).abs() < 1e-9);
+    }
+
+    #[test]
+    fn partial_connector_grows_from_the_tail_with_a_full_size_head() {
+        let points = [
+            DVec3::ZERO,
+            DVec3::new(2.0, 0.0, 0.0),
+            DVec3::new(2.0, 2.0, 0.0),
+        ];
+        let (head_length, head_width, body) = (0.4, 0.3, 0.05);
+        assert!(connector_path(&points, head_length, head_width, body, None, 0.0).is_empty());
+
+        // Halfway (2 of 4 units) the tip sits on the corner, with the head
+        // pointing along the first segment at full size.
+        let half = connector_path(&points, head_length, head_width, body, None, 0.5);
+        let bounds = half.bounding_box();
+        assert!((bounds.x1 - 2.0).abs() < 1e-9, "{bounds:?}");
+        assert!(bounds.x0.abs() < 1e-9);
+        assert!((bounds.height() - head_width).abs() < 1e-9);
+
+        // Before the visible length reaches the head size the head shrinks.
+        let early = connector_path(&points, head_length, head_width, body, None, 0.05);
+        let bounds = early.bounding_box();
+        assert!((bounds.x1 - 0.2).abs() < 1e-9);
+        assert!((bounds.height() - head_width * 0.5).abs() < 1e-9);
+
+        // Completion matches the static connector exactly.
+        let complete = connector_path(&points, head_length, head_width, body, None, 1.0);
+        let nearly = connector_path(&points, head_length, head_width, body, None, 1.0 - 1e-12);
+        let (a, b) = (complete.bounding_box(), nearly.bounding_box());
+        assert!((a.x0 - b.x0).abs() < 1e-6 && (a.x1 - b.x1).abs() < 1e-6);
+        assert!((a.y0 - b.y0).abs() < 1e-6 && (a.y1 - b.y1).abs() < 1e-6);
+        assert!((a.y1 - 2.0).abs() < 1e-9);
     }
 
     #[test]

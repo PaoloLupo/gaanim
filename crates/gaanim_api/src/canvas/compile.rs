@@ -4754,8 +4754,10 @@ impl SceneModel {
                                 head_width: *head_width,
                                 body_width: *body_width,
                                 max_head_ratio: *max_head_ratio,
+                                progress: 1.0,
                             },
                         );
+                        builder.connectors.insert(target_id);
                     }
                 }
                 Op::AttachLayoutBackground {

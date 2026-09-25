@@ -712,6 +712,8 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub(crate) media_frames: HashMap<ObjectId, gaanim_scene::MediaFrame>,
     /// Authored local geometry of solid arrows, used by `GrowArrow`.
     pub(crate) arrow_shapes: HashMap<ObjectId, gaanim_math::ArrowShape>,
+    /// Reactive connectors, which `GrowArrow` grows through their progress.
+    pub(crate) connectors: HashSet<ObjectId>,
     /// Objects whose scene membership is intentionally global at the current authoring cursor.
     persistent_objects: HashSet<ObjectId>,
     /// Objects whose membership has an explicit reuse/persist/release schedule in this scene.
@@ -753,6 +755,7 @@ pub(crate) struct SceneBuilderState {
     effects: HashMap<ObjectId, crate::effect_lens::EffectState>,
     media_frames: HashMap<ObjectId, gaanim_scene::MediaFrame>,
     arrow_shapes: HashMap<ObjectId, gaanim_math::ArrowShape>,
+    connectors: HashSet<ObjectId>,
     persistent_objects: HashSet<ObjectId>,
     membership_managed_objects: HashSet<ObjectId>,
     text_cancellation_marks: HashMap<ObjectId, Vec<ObjectId>>,
@@ -782,6 +785,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             effects: self.effects.clone(),
             media_frames: self.media_frames.clone(),
             arrow_shapes: self.arrow_shapes.clone(),
+            connectors: self.connectors.clone(),
             persistent_objects: self.persistent_objects.clone(),
             membership_managed_objects: self.membership_managed_objects.clone(),
             text_cancellation_marks: self.text_cancellation_marks.clone(),
@@ -818,6 +822,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             effects,
             media_frames,
             arrow_shapes,
+            connectors,
             persistent_objects,
             membership_managed_objects,
             text_cancellation_marks,
@@ -848,6 +853,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             path_arc: None,
             media_frames,
             arrow_shapes,
+            connectors,
             persistent_objects,
             membership_managed_objects,
             text_cancellation_marks,
@@ -1145,6 +1151,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             path_arc: None,
             media_frames: HashMap::new(),
             arrow_shapes: HashMap::new(),
+            connectors: HashSet::new(),
             property_bindings: HashMap::new(),
             property_source_cursors: HashMap::new(),
             persistent_objects: HashSet::new(),
@@ -5598,7 +5605,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// Internal: schedule a `GrowArrow` animation. Authored solid arrows grow
     /// from their tail: the tip travels along the (straight or curved) spine
     /// with an undistorted head, instead of Manim's uniform scale about the
-    /// start point. Any other target, or an arrow whose geometry changed after
+    /// start point. Reactive connectors grow the same way along their live
+    /// polyline. Any other target, or an arrow whose geometry changed after
     /// spawning, falls back to `Create`.
     fn play_grow_arrow_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         let Some(state) = self.states.get(anim.target) else {
@@ -5609,6 +5617,32 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             return;
         };
         let entity = state.entity;
+        if self.connectors.contains(&anim.target) {
+            // Hide the connector before its clip starts; the tracking system
+            // rebuilds its path from the progress every frame.
+            self.commands
+                .entity(entity)
+                .queue(|mut connector: bevy::prelude::EntityWorldMut<'_>| {
+                    if let Some(mut connector) =
+                        connector.get_mut::<gaanim_animation::updaters::TrackingConnector>()
+                    {
+                        connector.progress = 0.0;
+                    }
+                });
+            self.timeline.add_clip(
+                parent_track,
+                self.current_time + anim.delay,
+                anim.duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: anim.target,
+                    lens: PropertyLensSpec::ConnectorGrow { from: 0.0, to: 1.0 },
+                    rate_func: anim.rate_func,
+                    delay: 0.0,
+                    label: self.current_label.clone(),
+                }),
+            );
+            return;
+        }
         let shape = self
             .arrow_shapes
             .get(&anim.target)

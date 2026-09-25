@@ -899,8 +899,11 @@ class Anim:
         with its proportions intact over the first head length, then keeps its
         authored size while the shaft extends; stroke width never changes.
         Applies to ``scene.geometry.arrow``, ``curved_arrow`` and
-        ``curved_arrow_arc``. Any other drawable, or an arrow reshaped by a
-        transform, falls back to ``create()``. ``Smooth`` is the default easing.
+        ``curved_arrow_arc``. A ``scene.geometry.connector`` grows along its
+        live polyline (through every ``via`` waypoint) while its endpoints keep
+        following their references; the head keeps its full size and turns at
+        corners. Any other drawable, or an arrow reshaped by a transform, falls
+        back to ``create()``. ``Smooth`` is the default easing.
         Raises ``TypeError`` on a text-selection proxy.
         """
         ...
