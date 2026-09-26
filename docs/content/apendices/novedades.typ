@@ -64,6 +64,18 @@ Cambios todavía sin publicar.
   que trae Gaanim en cualquier sistema. Antes salía en Arial si estaba
   instalada y desaparecía en los equipos Linux que no la tienen.
 
+== Cambios
+
+- La terminal muestra solo lo que te sirve: el logo de Gaanim al abrir la
+  vista previa, exportar o pedir `--help`, y líneas breves y con color
+  (`gaanim ▸`, `✓`, `!`, `✗`) para la recarga, la exportación y los errores.
+  Los mensajes internos de Bevy, wgpu, winit y del audio (adaptador,
+  shaders, ventana, «ALSA lib ...» en equipos sin tarjeta de sonido) ya no
+  aparecen salvo que sean errores, y las trazas de Python empiezan en tu
+  código. Consulta
+  #link("/apendices/solucion-de-problemas/")[Solución de problemas]
+  para ver de nuevo todos los mensajes o quitar el color.
+
 = 0.4.1
 
 Versión de correcciones sobre 0.4.0.

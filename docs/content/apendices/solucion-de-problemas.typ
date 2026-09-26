@@ -84,6 +84,10 @@ están explicados en la sección de problemas de
 - *La recarga tarda más de lo normal:* los segmentos con funciones de Python
   (updaters, funciones reactivas, easings propios) se recompilan siempre.
   Para comparar con una recarga completa, arranca con `GAANIM_INCREMENTAL=0`.
+- *Necesito los mensajes del motor:* Gaanim oculta los avisos de Bevy, wgpu,
+  winit y el audio. Para verlos, arranca con `RUST_LOG=info` (o
+  `RUST_LOG=wgpu=warn` para un solo módulo). `NO_COLOR=1` quita los colores;
+  el logo solo aparece cuando la salida es una terminal.
 - *En la vista del presentador no veo los objetos 3D:* sus vistas previas
   solo dibujan las capas 2D; la audiencia sí los ve. La API 3D es
   experimental (ver #link("/guias/camara-y-3d/")[Cámara y 3D]).

@@ -12,6 +12,7 @@
 
 use bevy::prelude::*;
 use gaanim_api::host::ReloadPayload;
+use gaanim_core::console;
 use gaanim_export::encoder::VideoEncoder;
 use pyo3::prelude::*;
 use std::path::{Path, PathBuf};
@@ -53,6 +54,13 @@ fn main() {
     }
 
     let launch = parse_args();
+    #[cfg(target_os = "linux")]
+    gaanim_editor::alsa_quiet::silence_alsa_errors();
+    console::banner(if launch.present {
+        "Presentation"
+    } else {
+        "GPU-accelerated vector animation engine"
+    });
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
@@ -79,7 +87,8 @@ fn main() {
                 }),
                 ..default()
             })
-            .set(gaanim_scene::gaanim_asset_plugin()),
+            .set(gaanim_scene::gaanim_asset_plugin())
+            .set(gaanim_scene::logging::log_plugin()),
     )
     .add_plugins(gaanim_scene::GaanimScenePlugin)
     .add_plugins(gaanim_animation::GaanimAnimationPlugin)
@@ -121,7 +130,7 @@ fn main() {
 
     if let Some(script_path) = launch.script_path {
         if let Err(error) = start_script_session(app.world_mut(), script_path, launch.project) {
-            eprintln!("gaanim: {error}");
+            console::error(error);
             std::process::exit(2);
         }
     } else {
@@ -154,7 +163,7 @@ fn dispatch_export_mode() -> bool {
             flag @ ("--from" | "--to") => {
                 index += 1;
                 let seconds = parse_export_seconds(flag, args.get(index)).unwrap_or_else(|error| {
-                    eprintln!("gaanim export: {error}");
+                    console::error(format!("export: {error}"));
                     std::process::exit(2);
                 });
                 if flag == "--from" {
@@ -177,10 +186,10 @@ fn dispatch_export_mode() -> bool {
                     .get(index)
                     .and_then(|value| VideoEncoder::parse_arg(value))
                     .unwrap_or_else(|| {
-                        eprintln!(
-                            "gaanim export: encoder must be {}",
+                        console::error(format!(
+                            "export: encoder must be {}",
                             VideoEncoder::ARG_VALUES.join(", ")
-                        );
+                        ));
                         std::process::exit(2);
                     });
             }
@@ -192,7 +201,7 @@ fn dispatch_export_mode() -> bool {
                     .and_then(|value| value.parse().ok())
                     .filter(|value| *value > 0)
                     .unwrap_or_else(|| {
-                        eprintln!("gaanim export: --width requires a positive integer");
+                        console::error("export: --width requires a positive integer");
                         std::process::exit(2);
                     });
             }
@@ -203,7 +212,7 @@ fn dispatch_export_mode() -> bool {
                     .and_then(|value| value.parse().ok())
                     .filter(|value| *value > 0)
                     .unwrap_or_else(|| {
-                        eprintln!("gaanim export: --height requires a positive integer");
+                        console::error("export: --height requires a positive integer");
                         std::process::exit(2);
                     });
             }
@@ -214,18 +223,18 @@ fn dispatch_export_mode() -> bool {
                     Some("contain") => gaanim_export::prelude::OutputFit::Contain,
                     Some("cover") => gaanim_export::prelude::OutputFit::Cover,
                     _ => {
-                        eprintln!("gaanim export: --fit must be error, contain, or cover");
+                        console::error("export: --fit must be error, contain, or cover");
                         std::process::exit(2);
                     }
                 };
             }
             value if value.starts_with('-') => {
-                eprintln!("gaanim export: unknown option `{value}`");
+                console::error(format!("export: unknown option `{value}`"));
                 std::process::exit(2);
             }
             value if script.is_none() => script = Some(PathBuf::from(value)),
             value => {
-                eprintln!("gaanim export: unexpected argument `{value}`");
+                console::error(format!("export: unexpected argument `{value}`"));
                 std::process::exit(2);
             }
         }
@@ -238,11 +247,11 @@ fn dispatch_export_mode() -> bool {
             std::process::exit(2);
         });
     let output = output.unwrap_or_else(|| {
-        eprintln!("gaanim export: --output is required");
+        console::error("export: --output is required");
         std::process::exit(2);
     });
     if !matches!(quality.as_str(), "draft" | "standard" | "production") {
-        eprintln!("gaanim export: quality must be draft, standard, or production");
+        console::error("export: quality must be draft, standard, or production");
         std::process::exit(2);
     }
     let format = Path::new(&output)
@@ -251,21 +260,22 @@ fn dispatch_export_mode() -> bool {
         .map(str::to_ascii_lowercase)
         .filter(|format| matches!(format.as_str(), "mp4" | "webm" | "webp" | "gif" | "png"))
         .unwrap_or_else(|| {
-            eprintln!("gaanim export: output extension must be mp4, webm, webp, gif, or png");
+            console::error("export: output extension must be mp4, webm, webp, gif, or png");
             std::process::exit(2);
         });
     if transparent && !matches!(format.as_str(), "webm" | "webp" | "png") {
-        eprintln!("gaanim export: --transparent requires WebM, WebP, or PNG output");
+        console::error("export: --transparent requires WebM, WebP, or PNG output");
         std::process::exit(2);
     }
     if format != "mp4" && encoder != VideoEncoder::Auto {
-        eprintln!("gaanim export: --encoder requires MP4 output");
+        console::error("export: --encoder requires MP4 output");
         std::process::exit(2);
     }
     if let Err(error) = validate_export_range(from.as_ref(), to.as_ref()) {
-        eprintln!("gaanim export: {error}");
+        console::error(format!("export: {error}"));
         std::process::exit(2);
     }
+    console::banner("Export");
     if let Err(error) = run_export_worker(ExportWorkerArgs {
         script,
         output,
@@ -279,7 +289,7 @@ fn dispatch_export_mode() -> bool {
         from,
         to,
     }) {
-        eprintln!("gaanim export: {error}");
+        console::error(format!("export: {error}"));
         std::process::exit(1);
     }
     true
@@ -297,7 +307,7 @@ fn dispatch_python_api_validation_mode() -> bool {
     gaanim_python::register_inittab();
     Python::initialize();
     if let Err(error) = script_runner::validate_python_api(Path::new(&args[1])) {
-        eprintln!("gaanim Python API validation failed: {error}");
+        console::error(format!("Python API validation failed: {error}"));
         std::process::exit(1);
     }
     true
@@ -491,11 +501,11 @@ fn dispatch_export_worker_mode() -> bool {
         return false;
     }
     let worker = parse_export_worker_args(&args[1..]).unwrap_or_else(|error| {
-        eprintln!("gaanim export worker: {error}");
+        console::error(format!("export worker: {error}"));
         std::process::exit(2);
     });
     if let Err(error) = run_export_worker(worker) {
-        eprintln!("gaanim export worker: {error}");
+        console::error(format!("export worker: {error}"));
         std::process::exit(1);
     }
     true
@@ -587,7 +597,7 @@ fn start_script_session(
     if let Some(project) = &project
         && let Err(error) = gaanim_project::provision_authoring_package(&project.root)
     {
-        eprintln!("gaanim: authoring environment not ready: {error}");
+        console::warn(format!("authoring environment not ready: {error}"));
     }
     let hint = project
         .as_ref()
@@ -676,39 +686,42 @@ fn dispatch_init_mode() -> bool {
         return true;
     }
     let parsed = parse_init_args(&args).unwrap_or_else(|error| {
-        eprintln!("gaanim init: {error}");
+        console::error(format!("init: {error}"));
         eprintln!("Run `gaanim init --help` for usage.");
         std::process::exit(2);
     });
 
     let project = gaanim_project::create_project(&parsed).unwrap_or_else(|error| {
-        eprintln!("gaanim init: {error}");
+        console::error(format!("init: {error}"));
         std::process::exit(2);
     });
 
-    match gaanim_project::provision_authoring_package(&project.root) {
-        Ok(venv) => println!("Python authoring environment: {}", venv.display()),
-        Err(error) => eprintln!("gaanim init: authoring environment not ready: {error}"),
-    }
-
-    println!(
+    let venv = gaanim_project::provision_authoring_package(&project.root);
+    console::success(format!(
         "Created {} project: {}",
         parsed.kind.name(),
         project.root.display()
-    );
-    println!("Edit: {}", project.entry.display());
-    println!("Preview: gaanim {}", project.root.display());
-    println!("Check: gaanim check {}", project.root.display());
+    ));
+    console::detail("Edit", project.entry.display());
+    console::detail("Preview", format!("gaanim {}", project.root.display()));
+    console::detail("Check", format!("gaanim check {}", project.root.display()));
     if parsed.kind.is_slides() {
-        println!(
-            "Present: gaanim --present --monitor 1 {}",
-            project.root.display()
+        console::detail(
+            "Present",
+            format!("gaanim --present --monitor 1 {}", project.root.display()),
         );
     } else {
-        println!(
-            "Export: gaanim export {} --output exports/video.mp4 --quality production",
-            project.root.display()
+        console::detail(
+            "Export",
+            format!(
+                "gaanim export {} --output exports/video.mp4 --quality production",
+                project.root.display()
+            ),
         );
+    }
+    match venv {
+        Ok(venv) => console::detail("Python", venv.display()),
+        Err(error) => console::warn(format!("authoring environment not ready: {error}")),
     }
     true
 }
@@ -774,18 +787,18 @@ fn dispatch_check_mode() -> bool {
         return true;
     }
     let parsed = parse_check_args(&args).unwrap_or_else(|error| {
-        eprintln!("gaanim check: {error}");
+        console::error(format!("check: {error}"));
         eprintln!("Run `gaanim check --help` for usage.");
         std::process::exit(2);
     });
     let script = gaanim_project::resolve_entry(&parsed.script).unwrap_or_else(|error| {
-        eprintln!("gaanim check: {error}");
+        console::error(format!("check: {error}"));
         std::process::exit(2);
     });
 
     let probe = gaanim_project::EnvironmentProbe::detect(Some(&script));
     let venv_root = gaanim_project::activate_environment(&probe).unwrap_or_else(|error| {
-        eprintln!("gaanim check: {error}");
+        console::error(format!("check: {error}"));
         std::process::exit(2);
     });
     gaanim_python::register_inittab();
@@ -794,7 +807,7 @@ fn dispatch_check_mode() -> bool {
         python_home::inject_venv_site_packages(venv);
     }
     let canvas = script_runner::load_script_canvas(&script).unwrap_or_else(|error| {
-        eprintln!("gaanim check: could not load project: {error}");
+        console::error(format!("check: could not load project: {error}"));
         std::process::exit(2);
     });
     let source = std::fs::read_to_string(&script).unwrap_or_default();
@@ -829,23 +842,30 @@ fn dispatch_check_mode() -> bool {
             report.duration, canvas.frame.width, canvas.frame.height
         );
     }
+    let color = console::color_enabled(console::Stream::Stdout);
+    let label = |text: &str, level| console::paint_level(text, level, color);
     for error in &report.errors {
-        println!("  ERROR: {error}");
+        println!("  {}: {error}", label("ERROR", console::Level::Error));
     }
     for warning in &report.warnings {
-        println!("  WARN: {warning}");
+        println!("  {}: {warning}", label("WARN", console::Level::Warn));
     }
     if report.errors.is_empty() && report.warnings.is_empty() {
-        println!("  PASS: ready to present");
+        println!(
+            "  {}: ready to present",
+            label("PASS", console::Level::Success)
+        );
     } else if report.errors.is_empty() {
         println!(
-            "  PASS with {} warning{}",
+            "  {} with {} warning{}",
+            label("PASS", console::Level::Success),
             report.warnings.len(),
             if report.warnings.len() == 1 { "" } else { "s" }
         );
     } else {
         println!(
-            "  FAIL: {} error{}",
+            "  {}: {} error{}",
+            label("FAIL", console::Level::Error),
             report.errors.len(),
             if report.errors.len() == 1 { "" } else { "s" }
         );
@@ -1039,7 +1059,7 @@ fn dispatch_diff_mode() -> bool {
             return true;
         }
         Err(error) => {
-            eprintln!("gaanim --diff: {error}");
+            console::error(format!("--diff: {error}"));
             eprintln!("Run `gaanim --diff --help` for usage.");
             std::process::exit(2);
         }
@@ -1049,7 +1069,7 @@ fn dispatch_diff_mode() -> bool {
         && (parsed.capture || parsed.bless)
     {
         let script = gaanim_project::resolve_entry(example).unwrap_or_else(|error| {
-            eprintln!("gaanim --diff: {error}");
+            console::error(format!("--diff: {error}"));
             std::process::exit(2);
         });
         let capture_dir = if parsed.bless {
@@ -1064,7 +1084,7 @@ fn dispatch_diff_mode() -> bool {
         );
         let probe = gaanim_project::EnvironmentProbe::detect(Some(&script));
         let venv_root = gaanim_project::activate_environment(&probe).unwrap_or_else(|error| {
-            eprintln!("gaanim --diff: {error}");
+            console::error(format!("--diff: {error}"));
             std::process::exit(2);
         });
         gaanim_python::register_inittab();
@@ -1080,14 +1100,14 @@ fn dispatch_diff_mode() -> bool {
                 &parsed.selection,
             );
         } else if let Err(error) = script_runner::capture_script_snapshots(&script, capture_dir) {
-            eprintln!("gaanim --diff: snapshot capture failed: {error}");
+            console::error(format!("--diff: snapshot capture failed: {error}"));
             std::process::exit(2);
         }
         if !capture_dir.join(gaanim_diff::MANIFEST_FILE).is_file() {
-            eprintln!(
-                "gaanim --diff: {} did not call scene.snapshots(...)",
+            console::error(format!(
+                "--diff: {} did not call scene.snapshots(...)",
                 script.display()
-            );
+            ));
             std::process::exit(2);
         }
     }
@@ -1109,7 +1129,7 @@ fn dispatch_diff_mode() -> bool {
             std::process::exit(0);
         }
         Some(Err(error)) => {
-            eprintln!("gaanim --diff: {error}");
+            console::error(format!("--diff: {error}"));
             std::process::exit(2);
         }
         None => {}
@@ -1123,7 +1143,7 @@ fn dispatch_diff_mode() -> bool {
     ) {
         Ok(report) => report,
         Err(error) => {
-            eprintln!("gaanim --diff: {error}");
+            console::error(format!("--diff: {error}"));
             std::process::exit(2);
         }
     };
@@ -1147,7 +1167,7 @@ fn dispatch_diff_mode() -> bool {
             parsed.options,
         )
     {
-        eprintln!("gaanim --diff: could not open egui viewer: {error}");
+        console::error(format!("--diff: could not open egui viewer: {error}"));
         std::process::exit(2);
     }
 
@@ -1181,7 +1201,7 @@ fn capture_stop_snapshots(
     selection: &gaanim_timeline::selection::SegmentSelection,
 ) {
     let canvas = script_runner::load_script_canvas(script).unwrap_or_else(|error| {
-        eprintln!("gaanim --diff: {error}");
+        console::error(format!("--diff: {error}"));
         std::process::exit(2);
     });
     let selected;
@@ -1190,13 +1210,13 @@ fn capture_stop_snapshots(
     } else {
         selected = gaanim_diff::stops_in_selection(&canvas.segment_manifest(), selection, stops)
             .unwrap_or_else(|error| {
-                eprintln!("gaanim --diff: {error}");
+                console::error(format!("--diff: {error}"));
                 std::process::exit(2);
             });
         Some(selected.as_slice())
     };
     let capture = gaanim_diff::capture_stops(canvas, capture_dir, stops).unwrap_or_else(|error| {
-        eprintln!("gaanim --diff: stop capture failed: {error}");
+        console::error(format!("--diff: stop capture failed: {error}"));
         std::process::exit(2);
     });
     for stop in &capture.stops.stops {
@@ -1467,8 +1487,10 @@ fn parse_args() -> LaunchArgs {
         };
     }
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
-        eprintln!("gaanim — GPU-accelerated vector animation engine (hot-reload viewer)");
-        eprintln!();
+        if !console::banner("GPU-accelerated vector animation engine") {
+            eprintln!("gaanim — GPU-accelerated vector animation engine (hot-reload viewer)");
+            eprintln!();
+        }
         eprintln!("usage:");
         eprintln!("  gaanim");
         eprintln!(
@@ -1490,7 +1512,7 @@ fn parse_args() -> LaunchArgs {
         std::process::exit(0);
     }
     let parsed = parse_launch_args(&args).unwrap_or_else(|error| {
-        eprintln!("gaanim: {error}");
+        console::error(error);
         std::process::exit(2);
     });
     let Some(raw_path) = parsed.script_path.as_ref() else {
@@ -1498,13 +1520,13 @@ fn parse_args() -> LaunchArgs {
     };
     let (path, project) = if raw_path.is_dir() {
         let project = gaanim_project::resolve_project(raw_path).unwrap_or_else(|error| {
-            eprintln!("gaanim: {error}");
+            console::error(error);
             std::process::exit(2);
         });
         (project.entry.clone(), Some(project))
     } else {
         let path = gaanim_project::resolve_entry(raw_path).unwrap_or_else(|error| {
-            eprintln!("gaanim: {error}");
+            console::error(error);
             std::process::exit(2);
         });
         let project = gaanim_project::find_project_for_script(&path);

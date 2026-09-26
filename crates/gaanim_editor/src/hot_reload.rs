@@ -233,7 +233,7 @@ pub fn reload_listener_system(world: &mut World) {
             width,
             height,
         );
-        eprintln!("[gaanim] {}", status.last_message);
+        gaanim_core::console::success(&status.last_message);
         status.shown_at = Some(now);
     }
     // Éxito limpia el error previo
@@ -265,7 +265,7 @@ fn apply_segment_selection(world: &mut World) -> Option<String> {
         }
         Err(error) => {
             let message = format!("--sections/--from: {error}");
-            eprintln!("[gaanim] {message}");
+            gaanim_core::console::warn(&message);
             Some(message)
         }
     }

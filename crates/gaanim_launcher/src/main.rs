@@ -3,6 +3,7 @@
 //! It handles commands that do not need Python, discovers a compatible runtime
 //! for project/script launches, and then starts the `gaanim-core` binary.
 
+use gaanim_core::console;
 use gaanim_project::{
     CreateProjectOptions, EnvironmentProbe, ProjectKind, activate_environment, core_environment,
     create_project, python_requirement,
@@ -24,7 +25,7 @@ fn main() {
     let hint = find_script_hint(&args);
     let probe = EnvironmentProbe::detect(hint.as_deref());
     if let Err(error) = activate_environment(&probe) {
-        eprintln!("gaanim: {error}");
+        console::error(error);
         eprintln!(
             "Run `gaanim --help` for usage, or install {} (for example `uv python install 3.14`) and retry.",
             python_requirement()
@@ -50,10 +51,7 @@ fn main() {
             })
         });
     if !core_exe.is_file() {
-        eprintln!(
-            "gaanim launcher: core binary not found at {}",
-            core_exe.display()
-        );
+        console::error(format!("core binary not found at {}", core_exe.display()));
         std::process::exit(1);
     }
     let status = Command::new(&core_exe)
@@ -61,7 +59,7 @@ fn main() {
         .envs(core_environment(&probe))
         .status()
         .unwrap_or_else(|error| {
-            eprintln!("gaanim: failed to spawn {}: {error}", core_exe.display());
+            console::error(format!("failed to start {}: {error}", core_exe.display()));
             std::process::exit(1);
         });
     std::process::exit(status.code().unwrap_or(1));
@@ -90,36 +88,40 @@ fn handle_no_python_commands(args: &[String]) -> bool {
         return false;
     }
     let parsed = parse_init_args(&args[2..]).unwrap_or_else(|error| {
-        eprintln!("gaanim init: {error}");
+        console::error(format!("init: {error}"));
         eprintln!("Run `gaanim init --help` for usage.");
         std::process::exit(2);
     });
     let project = create_project(&parsed).unwrap_or_else(|error| {
-        eprintln!("gaanim init: {error}");
+        console::error(format!("init: {error}"));
         std::process::exit(2);
     });
-    println!(
+    let venv = gaanim_project::provision_authoring_package(&project.root);
+    console::success(format!(
         "Created {} project: {}",
         parsed.kind.name(),
         project.root.display()
-    );
-    println!("Edit: {}", project.entry.display());
-    match gaanim_project::provision_authoring_package(&project.root) {
-        Ok(venv) => println!("Python authoring environment: {}", venv.display()),
-        Err(error) => eprintln!("gaanim init: authoring environment not ready: {error}"),
-    }
-    println!("Preview: gaanim {}", project.root.display());
-    println!("Check: gaanim check {}", project.root.display());
+    ));
+    console::detail("Edit", project.entry.display());
+    console::detail("Preview", format!("gaanim {}", project.root.display()));
+    console::detail("Check", format!("gaanim check {}", project.root.display()));
     if parsed.kind.is_slides() {
-        println!(
-            "Present: gaanim --present --monitor 1 {}",
-            project.root.display()
+        console::detail(
+            "Present",
+            format!("gaanim --present --monitor 1 {}", project.root.display()),
         );
     } else {
-        println!(
-            "Export: gaanim export {} --output exports/video.mp4 --quality production",
-            project.root.display()
+        console::detail(
+            "Export",
+            format!(
+                "gaanim export {} --output exports/video.mp4 --quality production",
+                project.root.display()
+            ),
         );
+    }
+    match venv {
+        Ok(venv) => console::detail("Python", venv.display()),
+        Err(error) => console::warn(format!("authoring environment not ready: {error}")),
     }
     true
 }
@@ -177,8 +179,10 @@ fn find_script_hint(args: &[String]) -> Option<PathBuf> {
 }
 
 fn print_general_help() {
-    println!("gaanim — GPU-accelerated vector animation engine");
-    println!();
+    if !console::banner("GPU-accelerated vector animation engine") {
+        println!("gaanim — GPU-accelerated vector animation engine");
+        println!();
+    }
     println!("usage:");
     println!("  gaanim");
     println!(

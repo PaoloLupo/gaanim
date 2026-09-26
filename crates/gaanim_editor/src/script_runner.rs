@@ -120,6 +120,25 @@ fn format_py_traceback(py: Python<'_>, err: &PyErr) -> String {
     err.to_string()
 }
 
+/// Drops the frames of Gaanim's script runner (`<string>`) and of Python's
+/// own machinery (`<frozen runpy>`, `<frozen importlib._bootstrap>`) from a
+/// formatted traceback, so it starts at the person's code.
+fn without_runner_frames(traceback: &str) -> String {
+    let mut kept = String::with_capacity(traceback.len());
+    let mut skipping = false;
+    for line in traceback.split_inclusive('\n') {
+        if let Some(frame) = line.strip_prefix("  File \"") {
+            skipping = frame.starts_with("<string>") || frame.starts_with("<frozen ");
+        } else if !line.starts_with("    ") {
+            skipping = false;
+        }
+        if !skipping {
+            kept.push_str(line);
+        }
+    }
+    kept
+}
+
 fn run_script_thread(
     script_path: PathBuf,
     payload_tx: Sender<ReloadPayload>,
@@ -142,7 +161,7 @@ fn run_script_thread(
             let _ = error_tx.send(format!("[bootstrap] {}", msg));
             e.print(py);
         });
-        eprintln!("[gaanim] failed to bootstrap in-memory `gaanim` package");
+        gaanim_core::console::error("could not load the in-memory `gaanim` package");
     }
 
     // Run immediately on first iteration, then block for re-run signals.
@@ -156,13 +175,13 @@ fn run_script_thread(
         host::set_compile_started_at(None);
         if let Err(e) = result {
             Python::attach(|py| {
-                let tb = format_py_traceback(py, &e);
+                let tb = without_runner_frames(&format_py_traceback(py, &e));
                 let header = format!("{} — traceback:", script_path.display());
                 let full = format!("{}\n{}", header, tb);
                 let _ = error_tx.send(full);
-                e.print(py);
+                eprint!("{tb}");
             });
-            eprintln!("[gaanim] script error (waiting for next save to retry)");
+            gaanim_core::console::error("script failed; save the file to retry");
         }
 
         // Block until the next re-run request (or channel closed).
@@ -477,6 +496,29 @@ fn is_reloadable_project_module(path: &Path, root: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tracebacks_start_at_the_script() {
+        let traceback = concat!(
+            "Traceback (most recent call last):\n",
+            "  File \"<string>\", line 3, in <module>\n",
+            "  File \"<frozen runpy>\", line 287, in run_path\n",
+            "  File \"/work/main.py\", line 4, in <module>\n",
+            "    undefined_name\n",
+            "  File \"<frozen importlib._bootstrap>\", line 1, in _find_and_load\n",
+            "    ^^^^\n",
+            "NameError: name 'undefined_name' is not defined\n",
+        );
+        assert_eq!(
+            without_runner_frames(traceback),
+            concat!(
+                "Traceback (most recent call last):\n",
+                "  File \"/work/main.py\", line 4, in <module>\n",
+                "    undefined_name\n",
+                "NameError: name 'undefined_name' is not defined\n",
+            )
+        );
+    }
 
     /// Scripts share one interpreter and its global `sys` state (modules,
     /// path caches, streams); run them one at a time.

@@ -192,12 +192,18 @@ fn without_preflight_report(stdout: &str) -> &str {
     }
 }
 
-/// Drop the runtime's tracing lines (`2026-01-01T00:00:00.000Z  INFO ...`)
-/// and ALSA's complaints about a build machine without a sound card.
+/// Drop the runtime's log lines (`gaanim ▸ ...`, or the older tracing format
+/// `2026-01-01T00:00:00.000Z  INFO ...`) and ALSA's complaints about a build
+/// machine without a sound card.
 fn without_runtime_logs(stderr: &str) -> String {
     stderr
         .lines()
         .filter(|line| !line.starts_with("ALSA lib "))
+        .filter(|line| {
+            !["▸", "·", "✓", "!", "✗"]
+                .iter()
+                .any(|mark| line.starts_with(&format!("gaanim {mark} ")))
+        })
         .filter(|line| {
             let mut fields = line.split_whitespace();
             let timestamp = fields.next().unwrap_or("");
@@ -1034,6 +1040,12 @@ mod tests {
         assert_eq!(without_runtime_logs(&strip_ansi_escape_codes(colored)), "");
         assert_eq!(
             without_runtime_logs("ALSA lib pcm.c:2721:(snd_pcm_open_noupdate) Unknown PCM default"),
+            ""
+        );
+        assert_eq!(
+            without_runtime_logs(
+                "gaanim ▸ Watching examples\ngaanim ! bevy_asset: missing\ngaanim ✓ Scene ready"
+            ),
             ""
         );
         assert_eq!(
