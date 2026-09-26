@@ -145,6 +145,10 @@ fn svg_font_database() -> Arc<usvg::fontdb::Database> {
         // explicit `DejaVu Sans` request always resolves to these exact bytes.
         database.load_font_data(DEJAVU_SANS_BOLD.to_vec());
         database.load_system_fonts();
+        // The generic `sans-serif` family defaults to Arial, which many Linux
+        // hosts lack; text asking for it would then disappear. Resolve it to
+        // the bundled face instead, the same on every machine.
+        database.set_sans_serif_family("DejaVu Sans");
         Arc::new(database)
     }))
 }
@@ -544,6 +548,24 @@ mod tests {
     use super::{SVG_PIXELS_PER_UNIT, SvgDocument, SvgLoadError, SvgNode, svg_font_database};
     use gaanim_core::kurbo::Shape;
     use gaanim_core::peniko::Brush;
+
+    #[test]
+    fn generic_sans_serif_resolves_to_the_bundled_face() {
+        let database = svg_font_database();
+        assert_eq!(
+            database.family_name(&usvg::fontdb::Family::SansSerif),
+            "DejaVu Sans"
+        );
+        assert!(
+            database
+                .query(&usvg::fontdb::Query {
+                    families: &[usvg::fontdb::Family::SansSerif],
+                    ..Default::default()
+                })
+                .is_some(),
+            "sans-serif text must find a face even without system fonts"
+        );
+    }
 
     #[test]
     fn bundled_dejavu_bold_wins_over_system_fonts() {
