@@ -67,9 +67,9 @@ scene.assets.load_project()             # lee assets_dir de ./gaanim.toml
 logo = scene.media.image("logo.webp")   # es assets/logo.webp
 ```
 
-`load_project` lee solo una línea `assets_dir = "…"` con comillas dobles; si el
-manifiesto no la tiene, lanza `ValueError` aunque la CLI use `"assets"` como
-valor predeterminado. Escríbela siempre. Consulta
+`load_project` lee solo la clave `assets_dir` de nivel superior, escrita como
+cadena entre comillas; si el manifiesto no la tiene, usa `"assets"`, igual que
+la CLI y el editor. Consulta
 #link("/referencia/assets/#api-assetmanager-load-project")[`AssetManager.load_project`].
 
 === `output_dir`

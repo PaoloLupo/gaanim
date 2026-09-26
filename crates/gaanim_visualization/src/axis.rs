@@ -550,15 +550,16 @@ impl Axis {
             NumberFormat::Scientific(places) => format!("{value:.places$e}"),
             NumberFormat::Percent(places) => format!("{:.places$}%", value * 100.0),
             NumberFormat::Fraction { denominator } => {
-                let numerator = (value * *denominator as f64).round() as i64;
-                if *denominator == 1 {
+                let (numerator, denominator) = reduced_fraction(value, *denominator);
+                if denominator == 1 {
                     numerator.to_string()
                 } else {
                     format!("{numerator}/{denominator}")
                 }
             }
             NumberFormat::Pi { denominator } => {
-                let numerator = (value / std::f64::consts::PI * *denominator as f64).round() as i64;
+                let (numerator, denominator) =
+                    reduced_fraction(value / std::f64::consts::PI, *denominator);
                 match (numerator, denominator) {
                     (0, _) => "0".to_owned(),
                     (1, 1) => "π".to_owned(),
@@ -574,6 +575,23 @@ impl Axis {
             NumberFormat::DateTime { pattern } => format!("{value:.0} {pattern}"),
         }
     }
+}
+
+/// Rounds `value` to the nearest multiple of `1/denominator` and reduces the
+/// resulting fraction, so `denominator = 2` labels `1.0` as `1` rather than
+/// `2/2`. The sign lives on the numerator; zero reduces to `0/1`.
+fn reduced_fraction(value: f64, denominator: u32) -> (i64, i64) {
+    let denominator = i64::from(denominator.max(1));
+    let numerator = (value * denominator as f64).round() as i64;
+    let divisor = gcd(numerator.unsigned_abs(), denominator.unsigned_abs()).max(1) as i64;
+    (numerator / divisor, denominator / divisor)
+}
+
+fn gcd(mut left: u64, mut right: u64) -> u64 {
+    while right != 0 {
+        (left, right) = (right, left % right);
+    }
+    left
 }
 
 fn typographic_minus(label: String) -> String {
@@ -723,5 +741,54 @@ mod tests {
             .unwrap()
             .numbers(NumberFormat::Pi { denominator: 2 });
         assert_eq!(axis.format_value(std::f64::consts::FRAC_PI_2), "π/2");
+    }
+
+    #[test]
+    fn pi_and_fraction_labels_are_reduced() {
+        use std::f64::consts::PI;
+        let pi = Axis::linear(-7.0, 7.0)
+            .unwrap()
+            .numbers(NumberFormat::Pi { denominator: 2 });
+        let labels = [0.0, 0.5, 1.0, 1.5, 2.0, -0.5, -1.0, -1.5, -2.0]
+            .map(|multiple| pi.format_value(multiple * PI));
+        assert_eq!(
+            labels,
+            [
+                "0",
+                "π/2",
+                "π",
+                "3π/2",
+                "2π",
+                "\u{2212}π/2",
+                "\u{2212}π",
+                "\u{2212}3π/2",
+                "\u{2212}2π"
+            ]
+        );
+        let quarters = pi.clone().numbers(NumberFormat::Pi { denominator: 4 });
+        assert_eq!(quarters.format_value(0.75 * PI), "3π/4");
+        assert_eq!(quarters.format_value(PI / 2.0), "π/2");
+        assert_eq!(quarters.format_value(-0.0), "0");
+
+        let fraction = Axis::linear(-3.0, 3.0)
+            .unwrap()
+            .numbers(NumberFormat::Fraction { denominator: 4 });
+        let labels =
+            [0.0, 0.25, 0.5, 1.0, 1.5, 2.0, -0.5, -1.25].map(|value| fraction.format_value(value));
+        assert_eq!(
+            labels,
+            [
+                "0",
+                "1/4",
+                "1/2",
+                "1",
+                "3/2",
+                "2",
+                "\u{2212}1/2",
+                "\u{2212}5/4"
+            ]
+        );
+        let zero_denominator = fraction.numbers(NumberFormat::Fraction { denominator: 0 });
+        assert_eq!(zero_denominator.format_value(2.0), "2");
     }
 }

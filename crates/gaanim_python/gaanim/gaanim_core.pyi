@@ -173,6 +173,22 @@ class Color:
     def from_oklch(l: float, c: float, h: float, a: float = 1.0) -> Color:
         """Create perceptual OKLCH color; lightness and alpha use 0..1."""
         ...
+    @property
+    def r(self) -> int:
+        """Red channel as an 8-bit sRGB integer (0..255)."""
+        ...
+    @property
+    def g(self) -> int:
+        """Green channel as an 8-bit sRGB integer (0..255)."""
+        ...
+    @property
+    def b(self) -> int:
+        """Blue channel as an 8-bit sRGB integer (0..255)."""
+        ...
+    @property
+    def a(self) -> int:
+        """Alpha channel as an 8-bit integer (0..255)."""
+        ...
 
     """A CSS Color 4 or explicit RGBA color.
 
@@ -924,9 +940,14 @@ class Anim:
     def transform_to(self, target: Drawable) -> Anim:
         """Morph in place to a same-scene target.
 
-        Text transforms adopt the target's measured typographic baseline at
-        the endpoint, including equations with scripts or limits. Absent fill
-        and composed timing are preserved.
+        Absent fill and composed timing are preserved. A ``Text`` transformed
+        into another ``Text`` is a structural transition: parts with the same
+        name travel to their new place, matching glyphs morph, the rest
+        collapses or grows in, every glyph keeps its own (``part()``) color,
+        and the target is shown at the end. Texts managed by different
+        Layouts (e.g. cells of two matrices) instead morph as one shape: the
+        source keeps its identity and takes the target's outline, color and
+        typographic baseline.
         """
         ...
     def fill_level(self, level: float) -> Anim:
@@ -1420,17 +1441,20 @@ class Anim:
         """
         ...
     def pivot(self, x: float, y: float) -> Anim:
-        """Configure this animation with pivot.
+        """Turn the chained 2D ``rotate_by`` about the scene point ``(x, y)``.
+
+        Call it after ``rotate_by``; the drawable's own pivot is unchanged
+        for later animations. Animations without a 2D rotation ignore it.
 
         Example:
-            result = animation.pivot(1.0, 1.0)
+            scene.play([arm.animate.rotate_by(math.pi / 2).pivot(0, 0)])
         """
         ...
     def about_point(self, x: float, y: float) -> Anim:
-        """Configure this animation with about point.
+        """Alias of ``pivot``: turn the chained ``rotate_by`` about ``(x, y)``.
 
         Example:
-            result = animation.about_point(1.0, 1.0)
+            scene.play([arm.animate.rotate_by(math.pi / 2).about_point(0, 0)])
         """
         ...
 
@@ -2261,14 +2285,20 @@ class Drawable:
         """
         ...
     def bind_y_from(self, source: Drawable) -> None:
-        """Bind Y and defer this visual until its entry animation is played.
+        """Copy the Y of ``source`` every frame and defer this visual until its entry animation is played.
+
+        The copy sees ``source`` wherever it is placed that frame: animated,
+        moved by an updater, or positioned with ``follow``.
 
         Example:
             drawable.bind_y_from(source)
         """
         ...
     def bind_x_from(self, source: Drawable) -> None:
-        """Bind X and defer this visual until its entry animation is played.
+        """Copy the X of ``source`` every frame and defer this visual until its entry animation is played.
+
+        The copy sees ``source`` wherever it is placed that frame: animated,
+        moved by an updater, or positioned with ``follow``.
 
         Example:
             drawable.bind_x_from(source)
@@ -2602,9 +2632,10 @@ class TextSelectionAnimation:
 
         ``color`` defaults to a highlighter yellow and its alpha is multiplied
         by ``opacity``. ``skew`` tilts each band in radians (positive rises to
-        the right), capped so long lines stay covered. ``blend="multiply"`` is
-        accepted but currently composited like ``"normal"`` behind the text
-        until per-object blend modes exist. Raises ``ValueError`` for an
+        the right), capped so long lines stay covered. ``blend="multiply"``
+        multiplies the band with the background, cards or panels under it,
+        like ink on paper (it disappears on a black background);
+        ``"normal"`` paints it over them. Raises ``ValueError`` for an
         unknown ``blend``, a non-finite ``skew``, ``opacity`` outside
         ``[0, 1]``, or a negative ``padding``.
 
@@ -2918,7 +2949,13 @@ class Canvas:
         Segments that set their own ``post`` keep their override.
         """
         ...
-    theme: Optional[str]
+    @property
+    def theme(self) -> Optional[str]:
+        """Name of the active built-in or custom theme; ``None`` without one.
+
+        Read-only: change it with ``set_theme``.
+        """
+        ...
     def set_theme(self, theme: str | Theme) -> None:
         """Apply a built-in color scheme or a custom Theme."""
         ...
@@ -3275,7 +3312,9 @@ class Axis:
         """Return a copy with the given tick-number format.
 
         ``precision`` applies to ``fixed``, ``scientific`` and ``percent``;
-        ``denominator`` to ``fraction`` and ``pi``. Negative numbers use the
+        ``denominator`` to ``fraction`` and ``pi``, which round to the nearest
+        multiple of ``1/denominator`` and reduce it (``denominator=2`` labels
+        ``π/2``, ``π``, ``3π/2``, ``2π``). Negative numbers use the
         typographic minus U+2212, and values that round to zero have no sign.
         """
         ...
@@ -3620,7 +3659,14 @@ class DataSource:
     def __len__(self) -> int: ...
 
 class ChartAnimation:
-    def to(self, target: ChartSpec, *, match_: Literal["key", "index"] = "key", fallback: Literal["error", "crossfade"] = "error") -> Anim: ...
+    def to(self, target: ChartSpec, *, match_: Literal["key", "index"] = "key", fallback: Literal["error", "crossfade"] = "error") -> Anim:
+        """Transition to ``target``, which replaces this chart when the clip ends.
+
+        Same-dimension 2D charts morph their matching marks, axes, and labels
+        and fade the rest; 2D↔3D and crossfade transitions fade between the
+        charts.
+        """
+        ...
 
 class Chart:
     """Materialized chart with stable marks, axes, grid, and guide layers."""
@@ -4443,17 +4489,21 @@ class Geometry:
         """
         ...
     def transform_matching_shapes(self, source: Drawable, target: Drawable, *, duration: float = 1.0) -> None:
-        """Configure or query the scene with transform matching shapes.
+        """Morph matching pieces of ``source`` into ``target`` and fade the rest.
+
+        Plays at the cursor like ``scene.play`` and advances it by ``duration``.
 
         Example:
-            scene.transform_matching_shapes(source, target)
+            scene.geometry.transform_matching_shapes(source, target, duration=1.2)
         """
         ...
     def transform_matching(self, source: Drawable, target: Drawable, *, mode: str = "shapes", duration: float = 1.0) -> None:
-        """Configure or query the scene with transform matching.
+        """Auto-matching morph; ``mode`` is ``"shapes"`` or ``"tex"``.
+
+        Plays at the cursor like ``scene.play`` and advances it by ``duration``.
 
         Example:
-            scene.transform_matching(source, target)
+            scene.geometry.transform_matching(source, target, mode="tex")
         """
         ...
     def group(self, members: Sequence[Drawable]) -> Drawable:
@@ -4818,8 +4868,9 @@ class LayoutBuilder:
     def column(self, children: Sequence[Drawable | Layout | LayoutItem], *, gap: float = 0.24, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "start", justify: Justify = "start", wrap: bool = False, within: Optional[Literal["safe", "frame"]] = None) -> Layout:
         """Create a vertical Layout v2 container with optional wrapping.
 
-        Responsive text is composed at the width offered by the column, even
-        when its visible glyph bounds are narrower.
+        Responsive text that fits the offered width keeps its natural lines;
+        longer text wraps at that width and keeps the lines it was measured
+        with, so a hugging column never rewraps it into more lines.
         """
         ...
     def grid(self, children: Sequence[Drawable | Layout | LayoutItem], *, rows: int | Sequence[Track] = 1, columns: int | Sequence[Track] = 1, gap: float = 0.0, row_gap: Optional[float] = None, column_gap: Optional[float] = None, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "stretch", justify: Justify = "start", auto_flow: Literal["row", "column"] = "row", within: Optional[Literal["safe", "frame"]] = None) -> Layout:
@@ -4977,10 +5028,17 @@ class MediaLibrary:
         """
         ...
     def svg(self, path: str) -> Drawable:
-        """Create an SVG hierarchy whose fluent stroke widths use logical scene units.
+        """Import an SVG as a hierarchy of vector paths addressable with ``part(id)``.
+
+        Geometry is imported at one scene unit per SVG pixel of the document
+        size (``width``/``height``, or the ``viewBox`` when those are absent),
+        centered on the origin. A 16x9 frame is 16 units wide, so a typical
+        360-pixel SVG must be scaled down: ``scale_to(target_width / 360)``
+        gives it ``target_width`` scene units. Fluent stroke widths stay in
+        logical scene units and are not reduced by that scale.
 
         Example:
-            result = scene.svg("assets/example.svg")
+            logo = scene.media.svg("assets/logo.svg").scale_to(4 / 360)  # 4 units wide
         """
         ...
     def gltf(self, path: str, *, scene: str | int | None = None) -> Drawable:
@@ -5766,10 +5824,15 @@ TEAL: Color
 class AssetManager:
     """Scene-owned project asset resolution, preload, and reload controller."""
     def assets_dir(self, path: str) -> None:
-        """Use assets dir on this Scene or create the requested value.
+        """Set the folder that resolves relative image, SVG, audio and model paths.
+
+        A relative ``path`` is resolved against the process working
+        directory, not the calling script; use ``load_project()`` or build the
+        path from ``__file__`` for launch-independent scripts. A missing folder
+        raises ValueError.
 
         Example:
-            scene.assets_dir("example")
+            scene.assets.assets_dir(str(Path(__file__).parent / "assets"))
         """
         ...
     def preload(self, paths: Sequence[str]) -> None:
@@ -5784,11 +5847,15 @@ class AssetManager:
         """Load a project manifest and set its asset directory.
 
         With no path, reads ``gaanim.toml`` beside the calling Python script.
-        An explicit path is used as provided; assets are resolved relative to
-        the selected manifest. Raises RuntimeError if it cannot be read.
+        An explicit relative path is resolved against the process working
+        directory. ``assets_dir`` is resolved relative to the selected
+        manifest and defaults to ``"assets"`` when the manifest omits it, as in
+        the CLI and editor. Raises RuntimeError if the manifest cannot be read
+        and ValueError if ``assets_dir`` is not a quoted string or the folder
+        does not exist.
 
         Example:
-            scene.load_project()
+            scene.assets.load_project()
         """
         ...
     def reload_assets(self) -> None:

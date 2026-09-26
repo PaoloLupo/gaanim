@@ -583,11 +583,26 @@ impl PositionBinding {
 
 /// System that applies `PositionBinding` — copies source position axes to target.
 pub fn position_binding_system(world: &mut World) {
+    apply_position_bindings(world, false);
+}
+
+/// Re-applies `PositionBinding` after `endpoint_follow_system`, so a binding
+/// whose source is positioned with `follow(...)` copies the followed position
+/// of the current frame. Targets that follow an endpoint themselves keep the
+/// followed position.
+pub fn followed_position_binding_system(world: &mut World) {
+    apply_position_bindings(world, true);
+}
+
+fn apply_position_bindings(world: &mut World, skip_followers: bool) {
     let mut updates = Vec::new();
 
     // Collect all bindings and their source positions.
     let mut query = world.query::<(Entity, &PositionBinding)>();
     for (target, binding) in query.iter(world) {
+        if skip_followers && world.get::<crate::updaters::EndpointFollow>(target).is_some() {
+            continue;
+        }
         if let Some(src_transform) = world.get::<SpatialTransform>(binding.source) {
             updates.push((
                 target,

@@ -568,7 +568,7 @@ scene.play([tag.animate.fade_in(), ball.animate.shift_by(3, 0)])
   name: "Drawable.bind_x_from / bind_y_from / bind_position_from",
   kind: "method",
   signature: "bind_x_from(source) · bind_y_from(source) · bind_position_from(source, axes=\"xy\") -> None",
-  desc: [Copia la coordenada X, la Y o ambas de `source`. `axes` acepta `"x"`, `"y"` o `"xy"`. Útil para proyecciones sobre un eje. Devuelven `None`.],
+  desc: [Copia la coordenada X, la Y o ambas de `source` en cada fotograma, donde quiera que esté: animada, movida por un updater o colocada con `follow(...)`. `axes` acepta `"x"`, `"y"` o `"xy"`. Útil para proyecciones sobre un eje. Devuelven `None`.],
 )[
 ```python
 >>>from gaanim import *

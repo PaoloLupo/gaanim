@@ -63,7 +63,7 @@ escena. Después, las rutas se resuelven dentro de `assets_dir`:
 from gaanim import Scene
 
 scene = Scene(frame=(16, 9))
-scene.assets.load_project("gaanim.toml")
+scene.assets.load_project()  # lee ./gaanim.toml junto al script
 logo = scene.media.svg("logo.svg")  # busca assets/logo.svg
 scene.play([logo.animate.fade_in().duration(0.5)])
 scene.render()
@@ -185,7 +185,7 @@ continuo.
 = Convertir un script suelto en proyecto
 
 Crea un proyecto con `gaanim init video mi-video`, reemplaza su `main.py` por
-tu script, añade `scene.assets.load_project("gaanim.toml")` justo después de
+tu script, añade `scene.assets.load_project()` justo después de
 crear la `Scene` y mueve los recursos a `assets/`.
 
 Si algo falla al abrir o exportar, consulta

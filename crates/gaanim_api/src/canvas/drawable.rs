@@ -289,36 +289,7 @@ impl DrawableHandle {
             .expect("object spec poisoned")
             .fragment_tags
             .clone();
-        let requested = requested.unwrap_or_else(|| {
-            source_tags
-                .iter()
-                .filter_map(|(name, _, _)| {
-                    target_tags
-                        .iter()
-                        .any(|(target_name, _, _)| target_name == name)
-                        .then_some((name.clone(), name.clone()))
-                })
-                .collect()
-        });
-        requested
-            .into_iter()
-            .filter_map(|(source_name, target_name)| {
-                let (_, source_fragment, source_occurrence) = source_tags
-                    .iter()
-                    .rev()
-                    .find(|(name, _, _)| name == &source_name)?;
-                let (_, target_fragment, target_occurrence) = target_tags
-                    .iter()
-                    .rev()
-                    .find(|(name, _, _)| name == &target_name)?;
-                Some((
-                    source_fragment.clone(),
-                    *source_occurrence,
-                    target_fragment.clone(),
-                    *target_occurrence,
-                ))
-            })
-            .collect()
+        text_semantic_pairs(&source_tags, &target_tags, requested)
     }
 
     fn require_text_transition_target(
@@ -2319,4 +2290,44 @@ impl FragmentSelection {
         )
         .with_duration(duration))
     }
+}
+
+/// Pairs the semantic parts two texts share by name (or the explicitly
+/// `requested` name pairs) as `(source fragment, occurrence, target fragment,
+/// occurrence)` for [`AnimationType::TextTransition`].
+pub(crate) fn text_semantic_pairs(
+    source_tags: &[(String, String, Option<usize>)],
+    target_tags: &[(String, String, Option<usize>)],
+    requested: Option<Vec<(String, String)>>,
+) -> Vec<(String, Option<usize>, String, Option<usize>)> {
+    let requested = requested.unwrap_or_else(|| {
+        source_tags
+            .iter()
+            .filter_map(|(name, _, _)| {
+                target_tags
+                    .iter()
+                    .any(|(target_name, _, _)| target_name == name)
+                    .then_some((name.clone(), name.clone()))
+            })
+            .collect()
+    });
+    requested
+        .into_iter()
+        .filter_map(|(source_name, target_name)| {
+            let (_, source_fragment, source_occurrence) = source_tags
+                .iter()
+                .rev()
+                .find(|(name, _, _)| name == &source_name)?;
+            let (_, target_fragment, target_occurrence) = target_tags
+                .iter()
+                .rev()
+                .find(|(name, _, _)| name == &target_name)?;
+            Some((
+                source_fragment.clone(),
+                *source_occurrence,
+                target_fragment.clone(),
+                *target_occurrence,
+            ))
+        })
+        .collect()
 }

@@ -570,38 +570,44 @@ struct CompiledTextMeasure {
     color: PenikoColor,
 }
 
+/// Line composition chosen for a responsive text leaf while measuring it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TextComposition {
+    /// The text fits the offered width unwrapped; compose it without a limit.
+    Natural,
+    /// Wrap at this width. `ink_width` is the resulting visible width.
+    Wrapped { width: f64, ink_width: f64 },
+}
+
+impl TextComposition {
+    /// Width to materialize the text at; `None` composes it unwrapped.
+    fn width(self) -> Option<f64> {
+        match self {
+            Self::Natural => None,
+            Self::Wrapped { width, .. } => Some(width),
+        }
+    }
+}
+
 struct CompiledLayoutMeasure<'a> {
     fixed: BTreeMap<gaanim_layout::LayoutId, DVec2>,
     texts: BTreeMap<gaanim_layout::LayoutId, CompiledTextMeasure>,
-    text_composition_widths: RefCell<BTreeMap<gaanim_layout::LayoutId, f64>>,
+    text_compositions: RefCell<BTreeMap<gaanim_layout::LayoutId, TextComposition>>,
+    natural_text_sizes: RefCell<BTreeMap<gaanim_layout::LayoutId, DVec2>>,
     font_registry: &'a gaanim_text::font::FontRegistry,
 }
 
-impl gaanim_layout::IntrinsicMeasure for CompiledLayoutMeasure<'_> {
-    fn measure(
+impl CompiledLayoutMeasure<'_> {
+    /// Visible size of `text` composed at `width` (`None`: unwrapped).
+    fn measure_text(
         &self,
         id: gaanim_layout::LayoutId,
-        constraints: gaanim_layout::BoxConstraints,
+        text: &CompiledTextMeasure,
+        width: Option<f64>,
     ) -> Result<DVec2, gaanim_layout::LayoutError> {
-        let Some(text) = self.texts.get(&id) else {
-            return Ok(constraints.constrain(*self.fixed.get(&id).unwrap_or(&DVec2::ZERO)));
-        };
-        let offered_width = if constraints.max.x.is_finite() {
-            constraints.max.x.max(1.0)
-        } else {
-            640.0
-        };
-        let composition_width = match text.spec.flow.wrap {
-            StructuredTextWrap::NoWrap => None,
-            StructuredTextWrap::Auto => Some(offered_width),
-            StructuredTextWrap::Width(limit) => Some(offered_width.min(limit).max(1.0)),
-        };
-        if let Some(width) = composition_width {
-            self.text_composition_widths.borrow_mut().insert(id, width);
-        }
         let source = structured_text_typst_source(
             &text.spec,
-            Some(offered_width),
+            width,
             text.font_size,
             &text.font_family,
             text.color,
@@ -621,10 +627,77 @@ impl gaanim_layout::IntrinsicMeasure for CompiledLayoutMeasure<'_> {
             id,
             message: errors.join("; "),
         })?;
-        Ok(constraints.constrain(DVec2::new(
+        Ok(DVec2::new(
             bounds.width().max(0.0),
             bounds.height().max(0.0),
-        )))
+        ))
+    }
+}
+
+impl gaanim_layout::IntrinsicMeasure for CompiledLayoutMeasure<'_> {
+    fn measure(
+        &self,
+        id: gaanim_layout::LayoutId,
+        constraints: gaanim_layout::BoxConstraints,
+    ) -> Result<DVec2, gaanim_layout::LayoutError> {
+        let Some(text) = self.texts.get(&id) else {
+            return Ok(constraints.constrain(*self.fixed.get(&id).unwrap_or(&DVec2::ZERO)));
+        };
+        let offered_width = if constraints.max.x.is_finite() {
+            constraints.max.x.max(1.0)
+        } else {
+            640.0
+        };
+        let limit = match text.spec.flow.wrap {
+            StructuredTextWrap::NoWrap => None,
+            StructuredTextWrap::Auto => Some(offered_width),
+            StructuredTextWrap::Width(limit) => Some(offered_width.min(limit).max(1.0)),
+        };
+        let cached_natural = self.natural_text_sizes.borrow().get(&id).copied();
+        let natural = match cached_natural {
+            Some(size) => size,
+            None => {
+                let size = self.measure_text(id, text, None)?;
+                self.natural_text_sizes.borrow_mut().insert(id, size);
+                size
+            }
+        };
+        let Some(limit) = limit else {
+            return Ok(constraints.constrain(natural));
+        };
+        // Measurement reports visible (ink) bounds, so a hugging parent
+        // offers the text exactly its ink width next. Composing at that
+        // narrower width can break lines again, because line advances exceed
+        // the ink. Keep a composition whose ink already fits the offer:
+        // unwrapped text stays unwrapped, and a wrapped text keeps its lines
+        // until it is offered less than its ink or more than it wrapped at.
+        const FIT_EPSILON: f64 = 1.0e-6;
+        let previous = self.text_compositions.borrow().get(&id).copied();
+        let width = if natural.x <= limit + FIT_EPSILON {
+            None
+        } else if let Some(TextComposition::Wrapped { width, ink_width }) = previous
+            && ink_width <= limit + FIT_EPSILON
+            && limit <= width + FIT_EPSILON
+        {
+            Some(width)
+        } else {
+            Some(limit)
+        };
+        let (composition, size) = match width {
+            None => (TextComposition::Natural, natural),
+            Some(width) => {
+                let size = self.measure_text(id, text, Some(width))?;
+                (
+                    TextComposition::Wrapped {
+                        width,
+                        ink_width: size.x,
+                    },
+                    size,
+                )
+            }
+        };
+        self.text_compositions.borrow_mut().insert(id, composition);
+        Ok(constraints.constrain(size))
     }
 
     fn is_width_sensitive(&self, id: gaanim_layout::LayoutId) -> bool {
@@ -2553,7 +2626,7 @@ impl SceneModel {
                 })
             })
             .collect();
-        for op in &seg.ops {
+        for (op_index, op) in seg.ops.iter().enumerate() {
             match op {
                 Op::Spawn(spec) => {
                     let live = spec.lock().expect("object spec poisoned").clone();
@@ -2756,6 +2829,7 @@ impl SceneModel {
                                 builder.play(anim);
                             }
                         }
+                        Self::continue_text_transition_identity(anim, id_map);
                     }
                 }
                 Op::Immediate(anim) => {
@@ -2820,6 +2894,9 @@ impl SceneModel {
                         }
                     }
                     builder.current_time = start + max_duration;
+                    for anim in anims {
+                        Self::continue_text_transition_identity(anim, id_map);
+                    }
                 }
                 Op::FragmentFill {
                     target,
@@ -3479,6 +3556,9 @@ impl SceneModel {
                     semantic_pairs,
                     duration,
                 } => {
+                    // The authoring cursor always advances by `duration`, so the
+                    // compiled playhead must too, even when nothing matched.
+                    let end = builder.current_time + duration.max(0.0);
                     Self::fade_cancellation_marks(builder, cancellation_marks, *source, *duration);
                     Self::fade_canceled_term_children(
                         builder,
@@ -3534,6 +3614,7 @@ impl SceneModel {
                             );
                         }
                     }
+                    builder.current_time = end;
                 }
                 Op::LayoutTransition {
                     from_version,
@@ -3594,7 +3675,8 @@ impl SceneModel {
                     let measurer = CompiledLayoutMeasure {
                         fixed: tree.fixed.clone(),
                         texts: tree.texts.clone(),
-                        text_composition_widths: RefCell::default(),
+                        text_compositions: RefCell::default(),
+                        natural_text_sizes: RefCell::default(),
                         font_registry: builder.font_registry,
                     };
                     let resolved =
@@ -3612,7 +3694,7 @@ impl SceneModel {
                                 continue;
                             }
                         };
-                    let text_composition_widths = measurer.text_composition_widths.into_inner();
+                    let text_compositions = measurer.text_compositions.into_inner();
                     if !resolved.diagnostics.is_empty() {
                         let mut state = diagnostic_state.lock().expect("canvas state poisoned");
                         state
@@ -3659,27 +3741,32 @@ impl SceneModel {
                         let Some(target_box) = resolved.boxes.get(layout_id).copied() else {
                             continue;
                         };
-                        let width = text_composition_widths
-                            .get(layout_id)
-                            .copied()
-                            .unwrap_or_else(|| target_box.bounds.width())
-                            .max(1.0);
+                        // Unwrapped (natural) text is keyed by an infinite width.
+                        let width = match text_compositions.get(layout_id) {
+                            Some(composition) => composition.width().unwrap_or(f64::INFINITY),
+                            None => target_box.bounds.width(),
+                        }
+                        .max(1.0);
                         let current_width = responsive_text_widths
                             .get(source)
                             .copied()
                             .unwrap_or_else(|| frame_bounds.width().max(1.0));
-                        if (width - current_width).abs() <= 1.0e-6 {
+                        if width == current_width || (width - current_width).abs() <= 1.0e-6 {
                             continue;
                         }
                         let mut materialized = text_spec;
                         let SpawnKind::Text(text) = &mut materialized.kind else {
                             continue;
                         };
-                        text.flow.wrap = StructuredTextWrap::Width(match text.flow.wrap {
-                            StructuredTextWrap::Width(limit) => limit.min(width),
-                            StructuredTextWrap::Auto => width,
-                            StructuredTextWrap::NoWrap => continue,
-                        });
+                        text.flow.wrap = if width.is_finite() {
+                            StructuredTextWrap::Width(match text.flow.wrap {
+                                StructuredTextWrap::Width(limit) => limit.min(width),
+                                StructuredTextWrap::Auto => width,
+                                StructuredTextWrap::NoWrap => continue,
+                            })
+                        } else {
+                            StructuredTextWrap::NoWrap
+                        };
                         let replacement = Self::spawn_one(
                             builder,
                             &materialized,
@@ -3688,7 +3775,8 @@ impl SceneModel {
                             text_config,
                             scene_background,
                         );
-                        text_crossfades.push((member, replacement.id));
+                        let entry_pending = Self::fade_in_pending(&seg.ops, op_index, *source);
+                        text_crossfades.push((member, replacement.id, entry_pending));
                         materialized_by_id.insert(*layout_id, replacement.id);
                         id_map.insert(*source, replacement.id);
                         responsive_text_widths.insert(*source, width);
@@ -3945,7 +4033,16 @@ impl SceneModel {
                             ]
                         })
                         .collect();
-                    for (old, new) in text_crossfades {
+                    for (old, new, entry_pending) in text_crossfades {
+                        if entry_pending {
+                            // The text has not entered yet and its fade-in now
+                            // targets the replacement: a crossfade here would
+                            // show it before that fade-in starts.
+                            if let Some(state) = builder.states.get(old).cloned() {
+                                builder.hide_visuals_now(&state);
+                            }
+                            continue;
+                        }
                         animations.push(AnimationBuilder {
                             target: old,
                             anim_type: AnimationType::FadeOut,
@@ -5825,7 +5922,12 @@ impl SceneModel {
                 Op::Animate { anim, active } if *active => match &anim.anim_type {
                     AnimationType::Transform { target }
                     | AnimationType::ReplacementTransform { target }
-                    | AnimationType::FadeTransform { target } => {
+                    | AnimationType::FadeTransform { target }
+                    | AnimationType::TextTransition {
+                        target,
+                        copy: false,
+                        ..
+                    } => {
                         targets.insert(*target);
                     }
                     _ => {}
@@ -5835,7 +5937,12 @@ impl SceneModel {
                         match &anim.anim_type {
                             AnimationType::Transform { target }
                             | AnimationType::ReplacementTransform { target }
-                            | AnimationType::FadeTransform { target } => {
+                            | AnimationType::FadeTransform { target }
+                            | AnimationType::TextTransition {
+                                target,
+                                copy: false,
+                                ..
+                            } => {
                                 targets.insert(*target);
                             }
                             _ => {}
@@ -5913,6 +6020,44 @@ impl SceneModel {
         }
 
         builder.schedule_show_at(actual, builder.current_time + anim.delay.max(0.0));
+    }
+
+    /// A replacing text transition hands the scene over to its target text.
+    /// Later operations on the source handle continue on the target, as a
+    /// transformed object keeps its identity (chained `transform_to`, moves).
+    fn continue_text_transition_identity(
+        anim: &AnimationBuilder,
+        id_map: &mut HashMap<ObjectId, ObjectId>,
+    ) {
+        if let AnimationType::TextTransition {
+            target,
+            copy: false,
+            ..
+        } = &anim.anim_type
+            && let Some(&actual) = id_map.get(target)
+        {
+            id_map.insert(anim.target, actual);
+        }
+    }
+
+    /// Whether `target`'s first fade-in in this segment comes after the op at
+    /// `index`, i.e. the object is still waiting for that entry animation.
+    fn fade_in_pending(ops: &[Op], index: usize, target: ObjectId) -> bool {
+        let fades_in = |op: &Op| {
+            let anims: &[AnimationBuilder] = match op {
+                Op::Animate { anim, active: true } => std::slice::from_ref(anim),
+                Op::Play(anims) => anims,
+                _ => &[],
+            };
+            anims.iter().any(|anim| {
+                anim.target == target
+                    && matches!(
+                        anim.anim_type,
+                        AnimationType::FadeIn | AnimationType::FadeInFrom { .. }
+                    )
+            })
+        };
+        !ops[..index].iter().any(fades_in) && ops[index + 1..].iter().any(fades_in)
     }
 
     fn animation_reveals_deferred(anim_type: &AnimationType) -> bool {
@@ -11744,6 +11889,34 @@ mod tests {
     }
 
     #[test]
+    fn about_point_turns_an_animate_rotation_around_that_point() {
+        let mut canvas = SceneModel::new(640, 360);
+        let bar = canvas.rect(3.0, 0.3).move_to(1.5, 0.0);
+        let other = canvas.rect(3.0, 0.3).move_to(1.5, 0.0);
+        canvas.play(vec![
+            bar.animate()
+                .rotate_by(std::f64::consts::FRAC_PI_2)
+                .about_point(0.0, 0.0)
+                .duration(1.0),
+            other
+                .animate()
+                .rotate_by(std::f64::consts::FRAC_PI_2)
+                .pivot(0.0, 0.0)
+                .duration(1.0),
+        ]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+
+        timeline.seek(&mut world, 1.0);
+        for handle in [&bar, &other] {
+            let affine = transform_of(&mut world, handle).to_affine_2d();
+            let center = affine * Point::ORIGIN;
+            let along = affine * Point::new(1.0, 0.0);
+            assert!(center.distance(Point::new(0.0, 1.5)) < 1e-6, "{center:?}");
+            assert!(along.distance(Point::new(0.0, 2.5)) < 1e-6, "{along:?}");
+        }
+    }
+
+    #[test]
     fn move_along_an_arrow_travels_its_axis_from_tail_to_tip() {
         let mut canvas = SceneModel::new(640, 360);
         let straight = canvas.arrow(-2.0, 1.0, 2.0, 1.0);
@@ -12833,7 +13006,8 @@ mod tests {
                     color: gaanim_core::peniko::Color::WHITE,
                 },
             )]),
-            text_composition_widths: RefCell::default(),
+            text_compositions: RefCell::default(),
+            natural_text_sizes: RefCell::default(),
             font_registry: &fonts,
         };
         let narrow = gaanim_layout::IntrinsicMeasure::measure(
@@ -12891,7 +13065,8 @@ mod tests {
                         color: gaanim_core::peniko::Color::WHITE,
                     },
                 )]),
-                text_composition_widths: RefCell::default(),
+                text_compositions: RefCell::default(),
+                natural_text_sizes: RefCell::default(),
                 font_registry: &fonts,
             };
             let wide = gaanim_layout::IntrinsicMeasure::measure(
@@ -12905,11 +13080,83 @@ mod tests {
             .unwrap();
             assert!(wide.x < 1760.0, "fixture should have tight visual bounds");
             assert_eq!(
-                measurer.text_composition_widths.borrow().get(&id),
-                Some(&1760.0),
-                "{content:?} must be materialized at the width used to measure it"
+                measurer.text_compositions.borrow().get(&id),
+                Some(&TextComposition::Natural),
+                "{content:?} fits unwrapped and must be materialized unwrapped"
+            );
+            // A hugging parent offers exactly the measured ink width next; the
+            // text must keep its single line instead of breaking again.
+            let hugged = gaanim_layout::IntrinsicMeasure::measure(
+                &measurer,
+                id,
+                gaanim_layout::BoxConstraints {
+                    min: DVec2::ZERO,
+                    max: DVec2::new(wide.x, 1000.0),
+                },
+            )
+            .unwrap();
+            assert_eq!(hugged, wide, "{content:?} rewrapped at its own ink width");
+            assert_eq!(
+                measurer.text_compositions.borrow().get(&id),
+                Some(&TextComposition::Natural)
             );
         }
+    }
+
+    #[test]
+    fn wrapped_text_keeps_its_lines_when_offered_its_ink_width() {
+        let id = gaanim_layout::LayoutId(3);
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let measurer = CompiledLayoutMeasure {
+            fixed: BTreeMap::new(),
+            texts: BTreeMap::from([(
+                id,
+                CompiledTextMeasure {
+                    spec: StructuredTextSpec::new(
+                        vec!["A wrapped paragraph inside a hugging card keeps the lines it was measured with.".into()],
+                        None,
+                        gaanim_text::prelude::TextStyle::default(),
+                        gaanim_text::prelude::TextFlow::default(),
+                    )
+                    .unwrap(),
+                    font_size: 28.0,
+                    font_family: "New Computer Modern".into(),
+                    math_font: "New Computer Modern Math".into(),
+                    color: gaanim_core::peniko::Color::WHITE,
+                },
+            )]),
+            text_compositions: RefCell::default(),
+            natural_text_sizes: RefCell::default(),
+            font_registry: &fonts,
+        };
+        let measure = |width: f64| {
+            gaanim_layout::IntrinsicMeasure::measure(
+                &measurer,
+                id,
+                gaanim_layout::BoxConstraints {
+                    min: DVec2::ZERO,
+                    max: DVec2::new(width, 1000.0),
+                },
+            )
+            .unwrap()
+        };
+        let first = measure(400.0);
+        assert!(
+            first.x < 400.0,
+            "fixture must wrap with ragged ink: {first:?}"
+        );
+        let hugged = measure(first.x);
+        assert_eq!(hugged, first, "offering the ink width must not add lines");
+        assert_eq!(
+            measurer.text_compositions.borrow().get(&id).copied(),
+            Some(TextComposition::Wrapped {
+                width: 400.0,
+                ink_width: first.x,
+            })
+        );
+        // Less room than the ink really rewraps.
+        let narrow = measure(first.x * 0.5);
+        assert!(narrow.y > first.y, "narrow={narrow:?}, first={first:?}");
     }
 
     #[test]
@@ -13258,6 +13505,115 @@ mod tests {
                 }
             ) if *from == 0.0 && *to == 1.0
         )));
+    }
+
+    #[test]
+    fn text_transform_to_continues_the_source_handle_on_its_target() {
+        use gaanim_timeline::clip::{AnimationSpec, ClipPayload, PropertyLensSpec};
+        let mut canvas = SceneModel::new(640, 360);
+        let source = canvas.math_text("x + 3 = 7");
+        let target = canvas.math_text("x = 4");
+        canvas.play(vec![
+            source
+                .animate()
+                .transform_to(&target)
+                .unwrap()
+                .duration(1.0),
+        ]);
+        canvas.play(vec![source.animate().fade_out().duration(0.5)]);
+
+        let (_, timeline) = compiled_world(&canvas);
+        let opacity_clips: Vec<_> = timeline
+            .clips
+            .values()
+            .filter_map(|clip| match &clip.payload {
+                ClipPayload::Animation(AnimationSpec {
+                    target,
+                    lens: PropertyLensSpec::Opacity { to, .. },
+                    label,
+                    ..
+                }) => Some((clip.start, clip.duration, *target, *to, label.clone())),
+                _ => None,
+            })
+            .collect();
+        // The target root is shown when the transition starts...
+        let target_root = opacity_clips
+            .iter()
+            .find(|(start, _, _, to, label)| {
+                *start == 0.0 && *to > 0.0 && label.as_deref() == Some("EquationHandoff")
+            })
+            .map(|(_, _, id, _, _)| *id)
+            .expect("the transition reveals its target root");
+        // ...and a later animation of the source handle drives that target.
+        assert!(
+            opacity_clips.iter().any(|(start, duration, id, to, _)| {
+                (*start - 1.0).abs() < 1.0e-9
+                    && *duration == 0.5
+                    && *id == target_root
+                    && *to == 0.0
+            }),
+            "fade_out on the source must continue on the target: {opacity_clips:?}"
+        );
+    }
+
+    #[test]
+    fn responsive_layout_text_stays_hidden_until_its_fade_in() {
+        let mut canvas = SceneModel::new(640, 360);
+        let text = canvas.configured_text(
+            "Hidden until it fades in",
+            gaanim_text::prelude::TextStyle::default(),
+            gaanim_text::prelude::TextFlow::default(),
+        );
+        let container = canvas.group(&[&text]);
+        text.claim_layout(&container).unwrap();
+        canvas.reflow_layout(
+            &container,
+            vec![crate::canvas::LayoutMemberSpec {
+                id: text.id,
+                style: gaanim_layout::LayoutItemStyle::default(),
+            }],
+            crate::canvas::LayoutSpec {
+                kind: gaanim_layout::LayoutNodeKind::Column { wrap: false },
+                style: gaanim_layout::LayoutStyle::default(),
+                within: LayoutWithin::Safe,
+            },
+            1,
+            None,
+            None,
+            None,
+        );
+        canvas.wait(0.5);
+        canvas.play(vec![text.animate().fade_in().duration(0.5)]);
+
+        let (_, timeline) = compiled_world(&canvas);
+        // The layout recomposes the text at its offered width. That swap must
+        // not reveal the replacement before the authored fade-in at 0.5 s.
+        let reveal_starts: Vec<_> = timeline
+            .clips
+            .values()
+            .filter(|clip| {
+                matches!(
+                    &clip.payload,
+                    gaanim_timeline::clip::ClipPayload::Animation(
+                        gaanim_timeline::clip::AnimationSpec {
+                            lens: gaanim_timeline::clip::PropertyLensSpec::Opacity { to, .. },
+                            ..
+                        }
+                    ) if *to > 0.0
+                )
+            })
+            .map(|clip| clip.start)
+            .collect();
+        assert!(
+            reveal_starts
+                .iter()
+                .any(|start| (start - 0.5).abs() < 1.0e-9),
+            "the authored fade-in must remain: {reveal_starts:?}"
+        );
+        assert!(
+            reveal_starts.iter().all(|start| *start >= 0.5 - 1.0e-9),
+            "revealed before the fade-in: {reveal_starts:?}"
+        );
     }
 
     #[test]

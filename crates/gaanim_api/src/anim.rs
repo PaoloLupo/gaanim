@@ -649,9 +649,21 @@ impl AnimationBuilder {
         self
     }
 
+    /// Sets the scene-space point a 2D `rotate_by` turns about.
+    ///
+    /// Applies to a standalone rotation and to the `rotate_by` channel of a
+    /// compound `animate` chain; other animations are left unchanged.
     pub fn pivot(mut self, x: f64, y: f64) -> Self {
-        if let AnimationType::RotateBy { ref mut pivot, .. } = self.anim_type {
-            *pivot = Some(DVec3::new(x, y, 0.0));
+        let point = Some(DVec3::new(x, y, 0.0));
+        match &mut self.anim_type {
+            AnimationType::RotateBy { pivot, .. } => *pivot = point,
+            AnimationType::Properties(properties)
+            | AnimationType::TextSelectionProperties { properties, .. } => {
+                if let Some(PropertyRotation::By2D { pivot, .. }) = &mut properties.rotation {
+                    *pivot = point;
+                }
+            }
+            _ => {}
         }
         self
     }

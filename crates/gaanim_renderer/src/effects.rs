@@ -23,6 +23,15 @@ impl Default for DropShadow {
     }
 }
 
+/// Component: composites the element onto what is drawn beneath it with a
+/// blend mode instead of plain source-over (e.g. a multiply highlighter).
+///
+/// The element is drawn in its own layer, so inside an isolated group (an
+/// opacity group, a clip or a transition reveal) it blends with that group's
+/// content only.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct ElementBlend(pub gaanim_core::peniko::BlendMode);
+
 /// Component: where a stroke sits relative to a closed contour.
 ///
 /// Without it a closed contour keeps its stroke inside the shape, so a

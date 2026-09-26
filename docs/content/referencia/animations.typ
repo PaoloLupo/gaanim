@@ -235,14 +235,14 @@ scene.render()
   kind: "method",
   params: ((name: "x, y", type: "float", default: none, desc: [Punto de giro en unidades de escena.]),),
   returns: (type: "Anim", desc: [El mismo `Anim`.]),
-  desc: [*Limitación conocida:* hoy no cambia el punto de giro de `animate.rotate_by(...)` y se ignora sin error. Para girar alrededor de un punto, fija el pivote del objeto con `Drawable.with_pivot(x, y)` (o su alias `Drawable.pivot`) antes de animar, como en el ejemplo.],
+  desc: [Hace que el `rotate_by(...)` ya encadenado gire alrededor de `(x, y)` en lugar del pivote del objeto, sin cambiar ese pivote para animaciones posteriores. Llámalo después de `rotate_by`; en animaciones sin giro 2D no tiene efecto. Para fijar el pivote de forma duradera usa `Drawable.with_pivot(x, y)`.],
 )[
 ```python
 import math
 from gaanim import Easing, BLACK, WHITE, Scene
 scene = Scene(frame=(16, 9), background=BLACK)
 dot = scene.geometry.dot(0.125).fill(WHITE).move_to(0.75, 0)
-scene.play([dot.pivot(0, 0).animate.rotate_by(math.tau).duration(1.5).easing(Easing.LINEAR)])
+scene.play([dot.animate.rotate_by(math.tau).pivot(0, 0).duration(1.5).easing(Easing.LINEAR)])
 # output: preview.webp
 scene.render()
 ```
@@ -253,7 +253,7 @@ scene.render()
   kind: "method",
   params: ((name: "x, y", type: "float", default: none, desc: [Punto de giro en unidades de escena.]),),
   returns: (type: "Anim", desc: [El mismo `Anim`.]),
-  desc: [Alias de `Anim.pivot`, con la misma limitación.],
+  desc: [Alias de `Anim.pivot`: `arm.animate.rotate_by(pi / 2).about_point(0, 0)`.],
   none,
 )
 
@@ -869,7 +869,7 @@ scene.play(title.animate.tracking(0.0).duration(1.2))
   kind: "method",
   params: ((name: "target", type: "Drawable", default: none, desc: [Objeto de la misma escena cuya forma se adopta.]),),
   returns: (type: "Anim", desc: [Transformación en el sitio.]),
-  desc: [Transforma la geometría del objeto hasta la del destino. Respeta los tiempos compuestos y un relleno ausente no se inventa. En un `Text`, al terminar adopta la línea base medida del destino, también en ecuaciones con índices o límites.],
+  desc: [Transforma la geometría del objeto hasta la del destino. Respeta los tiempos compuestos y un relleno ausente no se inventa. De un `Text` a otro `Text` es una transición estructural: las partes con el mismo nombre viajan a su sitio, cada glifo conserva su color (también los de `part()`) y al terminar se muestra el destino; entre textos de Layouts distintos es un morph de forma única (ver #link("/referencia/text/")[Texto]).],
 )[
 ```python
 # show-code: true
@@ -915,8 +915,8 @@ scene.play(square.animate.replacement_transform_to(circle))
     (name: "target", type: "Drawable", default: none, desc: [Objeto o grupo de destino.]),
     (name: "duration", type: "float", default: "1.0", desc: [Segundos; finito y positivo.]),
   ),
-  returns: (type: "None", desc: [Programa la transformación en el cursor.]),
-  desc: [Empareja las piezas de origen y destino por forma, posición y color, transforma las parejas y funde el resto. *No avanza el cursor*: añade `scene.wait(duration)` después, o la escena puede terminar antes de que acabe.],
+  returns: (type: "None", desc: [Reproduce la transformación en el cursor y lo avanza `duration` segundos.]),
+  desc: [Empareja las piezas de origen y destino por forma, posición y color, transforma las parejas y funde el resto. Se reproduce como un `scene.play`: lo siguiente empieza cuando termina.],
 )[
 ```python
 from gaanim import GOLD, WHITE, Scene
@@ -926,7 +926,6 @@ e1 = scene.text("$E = m c$").fill(WHITE).scale_to(1.3)
 e2 = scene.text("$p = m v$").fill(GOLD).scale_to(1.3)
 scene.play(e1.animate.write())
 scene.geometry.transform_matching_shapes(e1, e2, duration=1.2)
-scene.wait(1.2)
 scene.render()
 ```
 ]
@@ -939,7 +938,7 @@ scene.render()
     (name: "mode", type: "str", default: "\"shapes\"", desc: [`"shapes"` empareja por geometría; `"tex"` empareja glifos de textos y ecuaciones por carácter.]),
     (name: "duration", type: "float", default: "1.0", desc: [Segundos; finito y positivo.]),
   ),
-  returns: (type: "None", desc: [Programa la transformación en el cursor, sin avanzarlo.]),
+  returns: (type: "None", desc: [Reproduce la transformación en el cursor y lo avanza `duration` segundos.]),
   desc: [Versión general de `transform_matching_shapes`. Para textos estructurados es preferible `animate.transform_to`, que es un `Anim` normal.],
   none,
 )

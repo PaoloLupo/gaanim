@@ -520,7 +520,7 @@ scene.play([eq["c"].animate.annotate("velocidad de la luz", offset=(0, 0.8))])
   params: (
     (name: "color", type: "Color | None", default: "None", desc: [Color del rotulador; por defecto un amarillo cuyo alfa se multiplica por `opacity`.]),
     (name: "skew", type: "float", default: "0.05", desc: [Inclinación de cada banda en radianes (positivo sube hacia la derecha), limitada para cubrir líneas largas.]),
-    (name: "blend", type: "str", default: "\"normal\"", desc: [`"normal"` o `"multiply"`; hoy ambos se componen igual porque la banda va detrás del texto.]),
+    (name: "blend", type: "str", default: "\"normal\"", desc: [`"normal"` pinta la banda encima de lo que tiene debajo; `"multiply"` la multiplica con el fondo o la tarjeta, como tinta sobre papel (sobre negro no se ve). En ambos casos va detrás de los glifos.]),
     (name: "opacity", type: "float", default: "0.45", desc: [De 0 a 1.]),
     (name: "padding", type: "float | None", default: "None", desc: [Margen en unidades del mundo; `None` usa el 10 % de la altura de línea.]),
   ),
@@ -631,9 +631,13 @@ scene.play([title.animate.tracking(0.0).duration(1.2)])
 `text.animate.transform_to(target)` (ver `Anim.transform_to` en
 #link("/referencia/animations/")[Animaciones]) empareja las partes semánticas de
 dos textos: los términos compartidos viajan a su nuevo sitio y el resto aparece
-o desaparece. La transición usa la misma duración para el texto y para el reflow
-de su Layout; un destino de otra escena o con otro propietario lanza
-`LayoutOwnershipError`.
+o desaparece. Cada glifo conserva su color, también los de `part()`, y al
+terminar queda visible el destino. La transición usa la misma duración para el
+texto y para el reflow de su Layout. Un destino de otra escena lanza
+`ValueError`. Entre textos gestionados por Layouts distintos (por ejemplo,
+celdas de dos matrices) la transformación es un morph de forma única: el origen
+conserva su identidad y adopta el contorno, el color y la línea base del
+destino.
 
 ```python
 # show-code: true
@@ -738,7 +742,9 @@ box = scene.geometry.rounded_rect(width + 0.56, height + 0.32, 0.14).move_to(0, 
 
 Un `Text` libre y el mismo `Text` dentro de una fila, columna, grid o stack usan
 el mismo medidor. `wrap="auto"` lo hace sensible al ancho ofrecido; un ajuste
-numérico queda además limitado por ese ancho. Los cambios de métrica, `become` y
+numérico queda además limitado por ese ancho. Un texto que cabe conserva sus
+líneas naturales, y uno que se ajusta mantiene las líneas con las que se midió:
+un contenedor que abraza su contenido (`"hug"`) nunca lo reparte en más líneas. Los cambios de métrica, `become` y
 `animate.transform_to` invalidan la medición y piden reflow; los énfasis
 transitorios (`indicate`, `pulse`, `wiggle`, `wave`, `highlight`, `focus`) no.
 

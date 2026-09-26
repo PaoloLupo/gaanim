@@ -2163,6 +2163,34 @@ impl Anim {
         if !self.belongs_to(&target.state) {
             return Err("transform targets must belong to the same Scene");
         }
+        // Text to text is a structural transition: glyphs keep their own
+        // (part) fills while shared semantic parts travel, instead of
+        // flattening both hierarchies into one single-colored path.
+        let source_text = self.property_spec.as_ref().and_then(|spec| {
+            let spec = spec.lock().expect("object spec poisoned");
+            matches!(spec.kind, SpawnKind::Text(_))
+                .then(|| (spec.fragment_tags.clone(), spec.layout_owner))
+        });
+        let target_text = {
+            let spec = target.spec.lock().expect("object spec poisoned");
+            matches!(spec.kind, SpawnKind::Text(_))
+                .then(|| (spec.fragment_tags.clone(), spec.layout_owner))
+        };
+        // Texts managed by different Layouts (e.g. cells of two matrices)
+        // keep the generic morph, which leaves the source standing in for
+        // the target inside its own Layout.
+        if let (Some((source_tags, source_owner)), Some((target_tags, target_owner))) =
+            (source_text, target_text)
+            && source_owner == target_owner
+        {
+            let semantic_pairs =
+                super::drawable::text_semantic_pairs(&source_tags, &target_tags, None);
+            return Ok(self.effect(AnimationType::TextTransition {
+                target: target.id,
+                copy: false,
+                semantic_pairs,
+            }));
+        }
         Ok(self.effect(AnimationType::Transform { target: target.id }))
     }
 

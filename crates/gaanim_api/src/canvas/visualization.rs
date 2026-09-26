@@ -473,9 +473,10 @@ impl ChartHandle {
         let transition = self.spec.transition_to(&target.spec, matching, fallback)?;
         Ok(match transition.kind {
             // Charts are composite retained hierarchies and can cross the
-            // vector/mesh renderer boundary.  Replacement preserves the
-            // morph proxy during the clip, then atomically hands ownership to
-            // the complete target hierarchy at the exact endpoint.
+            // vector/mesh renderer boundary.  Replacement morphs matched
+            // visual leaves (marks, axes, labels) during the clip, then
+            // atomically hands ownership to the complete target hierarchy at
+            // the exact endpoint.
             gaanim_visualization::TransitionKind::Morph
                 if transition.source.dimensions == transition.target.dimensions =>
             {
@@ -1826,6 +1827,16 @@ impl SceneModel {
         )
     }
 
+    /// Rendered width of a tick number at `scale`, shaped exactly like the
+    /// label text. Vertical-axis numbers are right-aligned with it so labels
+    /// of any length keep the same gap to their tick. Falls back to the
+    /// conservative estimate if shaping fails.
+    pub(crate) fn tick_number_width(&self, text: &str, scale: f64) -> f64 {
+        self.measure_text(text, None, None, None, None, None)
+            .map(|(width, _)| width * scale)
+            .unwrap_or_else(|_| self.axis_text_size(text, scale).0)
+    }
+
     pub(crate) fn x_tick_label_extra_offset(&self, text: &str, scale: f64) -> f64 {
         const SINGLE_LINE_EXTRA: f64 = 0.04;
         let font_size =
@@ -2016,6 +2027,12 @@ impl SceneModel {
             let distance = (label.position.y - axis_origin.y).abs()
                 + self.x_tick_label_extra_offset(&label.text, number_scale);
             label.position.y = axis_origin.y + x_labels_direction * distance;
+        }
+        // Numbers are centered on their authored position. Shift y numbers
+        // left by half their width so their right edge keeps the tick gap and
+        // wide labels such as "10000" never cross the axis.
+        for label in geometry.numbers.iter_mut().skip(x_tick_labels.len()) {
+            label.position.x -= self.tick_number_width(&label.text, number_scale) * 0.5;
         }
         let y_tick_width = space
             .map
@@ -5112,6 +5129,43 @@ mod tests {
         assert_eq!(anchors, [Some(Anchor::Left), Some(Anchor::Bottom)]);
     }
 
+    #[test]
+    fn vertical_axis_numbers_are_right_aligned_at_the_tick_gap() {
+        let mut canvas = SceneModel::new(400, 200);
+        let y = Axis::linear(-12500.0, 12500.0)
+            .unwrap()
+            .ticks(5000.0)
+            .unwrap();
+        let space = canvas
+            .coordinate_axes(
+                Axis::linear(0.0, 10000.0).unwrap().ticks(2500.0).unwrap(),
+                y.clone(),
+                Some(400.0),
+                Some(200.0),
+                true,
+            )
+            .unwrap();
+        let numbers = group_child_translations(
+            &canvas,
+            space.layer(SpaceLayer::Numbers).expect("axis tick labels"),
+        );
+        // The x crossing (0) hides the y number at zero.
+        let labels = ["\u{2212}10000", "\u{2212}5000", "5000", "10000"];
+        let y_numbers = &numbers[numbers.len() - labels.len()..];
+        let gap_edge = -200.0 - y.style_value().tick_length - 0.12;
+        let widths = labels.map(|label| canvas.tick_number_width(label, 1.0));
+        assert!(widths[0] > widths[2], "labels of different length differ");
+        for ((label, number), width) in labels.iter().zip(y_numbers).zip(widths) {
+            let right = number.x + width * 0.5;
+            assert!(
+                (right - gap_edge).abs() < 1e-9,
+                "{label} ends at {right}, expected {gap_edge}"
+            );
+        }
+        // x numbers stay centered on their ticks.
+        assert!((numbers[1].x - (-100.0)).abs() < 1e-9);
+    }
+
     fn svg_stroke_color(handle: &DrawableHandle) -> Color {
         let spec = handle.spec.lock().expect("object spec poisoned");
         let SpawnKind::SvgPath(path) = &spec.kind else {
@@ -6701,6 +6755,80 @@ mod tests {
             animation.inner.anim_type,
             crate::anim::AnimationType::FadeTransform { .. }
         ));
+    }
+
+    #[test]
+    fn same_dimension_chart_transition_stays_visible_during_the_clip() {
+        use gaanim_scene::prelude::{ChildOf, Entity, World};
+        let spec = |values: Vec<f64>| {
+            let table = gaanim_visualization::DataTable::numeric([
+                ("x".to_owned(), vec![0.0, 1.0, 2.0]),
+                ("value".to_owned(), values),
+            ])
+            .unwrap();
+            ChartSpec::new(table, None)
+                .unwrap()
+                .mark(MarkKind::Bar, BTreeMap::new())
+                .encode(Channel::X, Encoding::field("x"))
+                .unwrap()
+                .encode(Channel::Y, Encoding::field("value"))
+                .unwrap()
+        };
+        let mut canvas = SceneModel::new(640, 360);
+        let source = canvas.chart(spec(vec![18.0, 42.0, 31.0])).unwrap();
+        let identical = canvas.chart(spec(vec![18.0, 42.0, 31.0])).unwrap();
+        canvas.wait(0.5);
+        canvas.play(vec![
+            source
+                .transition_to(&identical, MatchPolicy::Index, TransitionFallback::Error)
+                .unwrap()
+                .duration(1.0),
+        ]);
+        canvas.wait(0.5);
+
+        let mut world = World::new();
+        world.insert_resource(gaanim_timeline::timeline::Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        let mut timeline = world
+            .remove_resource::<gaanim_timeline::timeline::Timeline>()
+            .unwrap();
+        timeline.add_keyframe(
+            0.0,
+            gaanim_timeline::snapshot::WorldSnapshot::capture(&mut world),
+        );
+        let visible_paths = |world: &mut World| {
+            let paths: Vec<Entity> = world
+                .query::<(Entity, &gaanim_scene::Path2D)>()
+                .iter(world)
+                .filter(|(_, path)| !path.0.elements().is_empty())
+                .map(|(entity, _)| entity)
+                .collect();
+            paths
+                .into_iter()
+                .filter(|&entity| {
+                    let mut opacity = 1.0;
+                    let mut current = Some(entity);
+                    while let Some(node) = current {
+                        opacity *= world
+                            .get::<gaanim_scene::Opacity>(node)
+                            .map_or(1.0, |value| value.0);
+                        current = world.get::<ChildOf>(node).map(ChildOf::parent);
+                    }
+                    opacity > 0.99
+                })
+                .count()
+        };
+
+        timeline.seek(&mut world, 0.25);
+        let before = visible_paths(&mut world);
+        assert!(before > 3, "the source chart draws its marks and axes");
+        for time in [0.75, 1.0, 1.25, 1.75] {
+            timeline.seek(&mut world, time);
+            assert_eq!(visible_paths(&mut world), before, "at {time}");
+        }
     }
 
     #[test]

@@ -252,8 +252,9 @@ scene.render()
 ```
 
 Las bandas se dibujan detrás de los glifos pero encima de lo que creaste antes
-que el texto. `blend="multiply"` se acepta, pero por ahora se compone igual que
-`"normal"`: los modos de fusión por objeto todavía no existen.
+que el texto. Con `blend="multiply"` la banda se multiplica con el fondo o la
+tarjeta que tiene debajo, como tinta sobre papel: realza sobre fondos claros y
+desaparece sobre negro.
 
 == Referencia
 

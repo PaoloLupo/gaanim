@@ -3579,18 +3579,19 @@ impl SceneModel {
         } else {
             Vec::new()
         };
-        self.state
-            .lock()
-            .expect("canvas state poisoned")
-            .active_mut()
-            .ops
-            .push(Op::TransformMatching {
-                source: source.id,
-                target: target.id,
-                mode,
-                semantic_pairs,
-                duration,
-            });
+        // Played like any other animation: it starts at the cursor, freezes
+        // declaration state, and advances the cursor by its duration.
+        let mut guard = self.state.lock().expect("canvas state poisoned");
+        guard.freeze_spawn_specs();
+        let segment = guard.active_mut();
+        segment.cursor += duration;
+        segment.ops.push(Op::TransformMatching {
+            source: source.id,
+            target: target.id,
+            mode,
+            semantic_pairs,
+            duration,
+        });
         target.clone()
     }
 
@@ -7323,6 +7324,40 @@ mod tests {
     }
 
     #[test]
+    fn text_transform_to_text_is_a_semantic_text_transition() {
+        let mut canvas = SceneModel::new(320, 180);
+        let source = canvas
+            .math_text("x + 3 = 7")
+            .define_tag("lhs", "x", Some(0));
+        let target = canvas.math_text("x = 4").define_tag("lhs", "x", Some(0));
+        let circle = canvas.circle(1.0);
+        // Text to text keeps glyph (part) fills: a structural transition,
+        // not a flattened single-color path morph.
+        let anim = source.animate().transform_to(&target).unwrap();
+        match &anim.inner.anim_type {
+            AnimationType::TextTransition {
+                target: to,
+                copy,
+                semantic_pairs,
+            } => {
+                assert_eq!(*to, target.id);
+                assert!(!copy);
+                assert_eq!(
+                    semantic_pairs,
+                    &vec![("x".to_string(), Some(0), "x".to_string(), Some(0))]
+                );
+            }
+            other => panic!("expected a text transition, got {other:?}"),
+        }
+        // Other drawables keep the generic morph.
+        let shape = circle.animate().transform_to(&target).unwrap();
+        assert!(matches!(
+            shape.inner.anim_type,
+            AnimationType::Transform { .. }
+        ));
+    }
+
+    #[test]
     fn step_equation_preserves_explicit_tag_mapping_and_occurrence() {
         let mut canvas = SceneModel::new(320, 180);
         let source = canvas
@@ -9831,6 +9866,19 @@ mod tests {
         assert!((value - 5.0).abs() < 1e-9);
         assert!(force.number.is_some());
         assert!(force.unit.is_some());
+    }
+
+    #[test]
+    fn transform_matching_advances_the_cursor_like_a_played_animation() {
+        let mut canvas = SceneModel::new(1280, 720);
+        let source = canvas.rect(1.0, 1.0);
+        let target = canvas.circle(0.5);
+        canvas.wait(0.5);
+        canvas.transform_matching_shapes(&source, &target, 1.5);
+        assert_eq!(canvas.current_time(), 2.0);
+        canvas.transform_matching(&target, &source, "tex", 0.25);
+        assert_eq!(canvas.current_time(), 2.25);
+        assert_eq!(canvas.segment_manifest().duration(), 2.25);
     }
 
     #[test]

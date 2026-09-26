@@ -567,6 +567,7 @@ pub fn evaluate_reactive_positions(world: &mut World, time: f64) {
     crate::signals::position_binding_system(world);
     mechanism_binding_system(world);
     endpoint_follow_system(world);
+    crate::signals::followed_position_binding_system(world);
 }
 
 /// Sistema exclusivo que lee la posición del source de cada TracedPath y regenera su Path2D.
@@ -3176,6 +3177,45 @@ mod tests {
         endpoint_follow_system(&mut world);
         let transform = world.get::<SpatialTransform>(target).unwrap();
         assert!(transform.translation.distance(DVec3::new(22.0, 27.0, 0.0)) < 1e-9);
+    }
+
+    #[test]
+    fn position_bindings_read_a_source_positioned_by_follow() {
+        let mut world = World::new();
+        let source = world
+            .spawn((
+                SpatialTransform::default(),
+                EndpointFollow {
+                    endpoint: TrackingEndpoint::Static(DVec3::new(3.0, 4.0, 0.0)),
+                    offset: DVec3::ZERO,
+                    offset_space: FollowOffsetSpace::World,
+                },
+            ))
+            .id();
+        let bound = world
+            .spawn((
+                SpatialTransform::new_2d(-1.0, 0.0),
+                crate::signals::PositionBinding::new(source, crate::signals::AxisMask::Y),
+            ))
+            .id();
+        // A target that follows an endpoint itself keeps the followed position.
+        let follower = world
+            .spawn((
+                SpatialTransform::default(),
+                crate::signals::PositionBinding::new(source, crate::signals::AxisMask::XY),
+                EndpointFollow {
+                    endpoint: TrackingEndpoint::Static(DVec3::new(-5.0, 6.0, 0.0)),
+                    offset: DVec3::ZERO,
+                    offset_space: FollowOffsetSpace::World,
+                },
+            ))
+            .id();
+
+        evaluate_reactive_positions(&mut world, 0.0);
+
+        let at = |entity| world.get::<SpatialTransform>(entity).unwrap().translation;
+        assert!(at(bound).distance(DVec3::new(-1.0, 4.0, 0.0)) < 1e-9);
+        assert!(at(follower).distance(DVec3::new(-5.0, 6.0, 0.0)) < 1e-9);
     }
 
     #[test]

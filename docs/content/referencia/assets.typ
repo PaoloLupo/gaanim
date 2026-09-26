@@ -39,7 +39,7 @@ bytes o arrays.
   kind: "method",
   params: ((name: "path", type: "str | None", default: "None", desc: [Ruta del manifiesto; sin ella, el `gaanim.toml` que está junto al script que llama.]),),
   returns: (type: "None", desc: [Fija la carpeta de recursos.]),
-  desc: [Lee la línea `assets_dir = "…"` del manifiesto y la resuelve respecto de la carpeta del manifiesto, así que funciona igual se lance Gaanim desde donde se lance. Es la forma recomendada en un proyecto. Un manifiesto ilegible lanza `RuntimeError`; uno sin `assets_dir` o que apunta a una carpeta inexistente, `ValueError`. Consulta #link("/referencia/gaanim-toml/")[`gaanim.toml`].],
+  desc: [Lee la clave `assets_dir` del manifiesto (`"assets"` si falta, como en la CLI) y la resuelve respecto de la carpeta del manifiesto, así que funciona igual se lance Gaanim desde donde se lance. Una ruta explícita relativa, en cambio, se resuelve desde el directorio de trabajo del proceso; sin argumento se usa el `gaanim.toml` junto al script. Es la forma recomendada en un proyecto. Un manifiesto ilegible lanza `RuntimeError`; un `assets_dir` que no es una cadena entre comillas o que apunta a una carpeta inexistente, `ValueError`. Consulta #link("/referencia/gaanim-toml/")[`gaanim.toml`].],
 )[
 ```python
 >>>from gaanim import *
@@ -244,7 +244,10 @@ print(model.animations())  # acciones de Blender
 `scene.media.svg(path)` conserva el documento como geometría vectorial: una
 jerarquía real de caminos y grupos a la que se llega con
 #link("/referencia/medios/#api-drawable-part")[`part(id)`]. Por eso un SVG
-sirve también como máscara o como operando de operaciones booleanas.
+sirve también como máscara o como operando de operaciones booleanas. Se
+importa a una unidad de escena por píxel del documento, centrado en el origen:
+dale tamaño con `scale_to(ancho / ancho_en_px)` (consulta
+#link("/referencia/medios/#api-medialibrary-svg")[`MediaLibrary.svg`]).
 
 *Qué se importa.* Grupos anidados, CSS, transformaciones, `viewBox` y
 `<use>`; rellenos y trazos sólidos, lineales y radiales con sus modos de
