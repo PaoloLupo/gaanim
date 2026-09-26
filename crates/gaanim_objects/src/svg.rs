@@ -11,6 +11,20 @@ use gaanim_scene::StrokeBrush;
 
 const DEJAVU_SANS_BOLD: &[u8] = include_bytes!("../assets/fonts/DejaVuSans-Bold.ttf");
 
+/// SVG user units (CSS pixels) that make one logical scene unit.
+///
+/// This is the same 100 px → 1 unit factor the pixel-to-logical-unit migration
+/// applied to every other authored length (a 3 px default stroke became 0.03, a
+/// 40 px body font 0.40). Imported geometry, stroke widths, gradient radii,
+/// clip paths and filter lengths therefore keep their proportions relative to
+/// native Gaanim objects: a 200×100 px document spans 2×1 units.
+pub const SVG_PIXELS_PER_UNIT: f64 = 100.0;
+
+/// Convert an SVG length (already expressed in document user units) to scene units.
+fn svg_length(value: f64) -> f64 {
+    value / SVG_PIXELS_PER_UNIT
+}
+
 /// A fully resolved SVG path ready to spawn as an engine mobject.
 #[derive(Debug, Clone)]
 pub struct SvgPath {
@@ -85,6 +99,10 @@ pub enum SvgLoadError {
 
 impl SvgDocument {
     /// Load an SVG while retaining source groups and named paths.
+    ///
+    /// Coordinates are converted to logical scene units at
+    /// [`SVG_PIXELS_PER_UNIT`] document pixels per unit, centered on the
+    /// document's `width`/`height` (or `viewBox` when those are absent).
     ///
     /// `usvg` resolves basic shapes, CSS styles, `<use>`, `viewBox`, and nested
     /// transforms before this conversion. Raster `<image>` nodes and advanced
@@ -211,9 +229,9 @@ fn group_blur(group: &usvg::Group) -> Option<f64> {
         .iter()
         .flat_map(|filter| filter.primitives())
         .filter_map(|primitive| match primitive.kind() {
-            usvg::filter::Kind::GaussianBlur(blur) => {
-                Some(f64::from((blur.std_dev_x().get() + blur.std_dev_y().get()) * 0.5) * scale)
-            }
+            usvg::filter::Kind::GaussianBlur(blur) => Some(svg_length(
+                f64::from((blur.std_dev_x().get() + blur.std_dev_y().get()) * 0.5) * scale,
+            )),
             _ => None,
         })
         .next_back()
@@ -228,10 +246,11 @@ fn group_shadow(group: &usvg::Group) -> Option<SvgShadow> {
         .filter_map(|primitive| match primitive.kind() {
             usvg::filter::Kind::DropShadow(shadow) => Some(SvgShadow {
                 color: svg_color(shadow.color(), shadow.opacity().get()),
-                offset_x: f64::from(shadow.dx()) * scale,
-                offset_y: -f64::from(shadow.dy()) * scale,
-                blur_radius: f64::from((shadow.std_dev_x().get() + shadow.std_dev_y().get()) * 0.5)
-                    * scale,
+                offset_x: svg_length(f64::from(shadow.dx()) * scale),
+                offset_y: -svg_length(f64::from(shadow.dy()) * scale),
+                blur_radius: svg_length(
+                    f64::from((shadow.std_dev_x().get() + shadow.std_dev_y().get()) * 0.5) * scale,
+                ),
             }),
             _ => None,
         })
@@ -291,7 +310,9 @@ fn convert_path(
                 transform_scale(transform) * outer_transform.map(transform_scale).unwrap_or(1.0);
             StrokeBrush {
                 brush: Some(brush),
-                style: gaanim_core::kurbo::Stroke::new(f64::from(stroke.width().get()) * scale),
+                style: gaanim_core::kurbo::Stroke::new(svg_length(
+                    f64::from(stroke.width().get()) * scale,
+                )),
             }
         })
     });
@@ -366,7 +387,8 @@ fn paint_to_brush(
             let scale = ((transform.sx * transform.sy - transform.kx * transform.ky).abs()).sqrt()
                 * outer_transform
                     .map(|outer| transform_scale(outer) as f32)
-                    .unwrap_or(1.0);
+                    .unwrap_or(1.0)
+                / SVG_PIXELS_PER_UNIT as f32;
             let stops = gradient_stops(gradient.stops(), opacity);
             Some(Brush::Gradient(
                 Gradient::new_two_point_radial(
@@ -509,13 +531,17 @@ fn compose_transform(first: usvg::Transform, second: usvg::Transform) -> usvg::T
     }
 }
 
+/// Map an SVG document point (Y down, origin top-left) to centered scene units (Y up).
 fn scene_point((x, y): (f32, f32), width: f64, height: f64) -> Point {
-    Point::new(f64::from(x) - width * 0.5, height * 0.5 - f64::from(y))
+    Point::new(
+        svg_length(f64::from(x) - width * 0.5),
+        svg_length(height * 0.5 - f64::from(y)),
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{SvgDocument, SvgLoadError, SvgNode, svg_font_database};
+    use super::{SVG_PIXELS_PER_UNIT, SvgDocument, SvgLoadError, SvgNode, svg_font_database};
     use gaanim_core::kurbo::Shape;
     use gaanim_core::peniko::Brush;
 
@@ -546,8 +572,8 @@ mod tests {
         .unwrap();
         let document = SvgDocument::load(&temp).unwrap();
         let bounds = document.root.bounds().expect("paths have bounds");
-        assert!((bounds.width() - 72.0).abs() < 0.5, "{bounds:?}");
-        assert!((bounds.height() - 72.0).abs() < 0.5, "{bounds:?}");
+        assert!((bounds.width() - 0.72).abs() < 0.005, "{bounds:?}");
+        assert!((bounds.height() - 0.72).abs() < 0.005, "{bounds:?}");
     }
 
     #[test]
@@ -642,13 +668,15 @@ mod tests {
             .clip_path
             .as_ref()
             .expect("clip path should be retained");
-        assert!(clip.bounding_box().width() > 190.0);
-        assert_eq!(card.blur_sigma, Some(1.5));
+        assert!(clip.bounding_box().width() > 1.9);
+        assert!((card.blur_sigma.unwrap() - 0.015).abs() < 1e-9);
         let shadow = card
             .shadow
             .as_ref()
             .expect("drop shadow should be retained");
-        assert_eq!((shadow.offset_x, shadow.offset_y), (4.0, -5.0));
+        assert!((shadow.offset_x - 0.04).abs() < 1e-9, "{shadow:?}");
+        assert!((shadow.offset_y + 0.05).abs() < 1e-9, "{shadow:?}");
+        assert!((shadow.blur_radius - 0.03).abs() < 1e-9, "{shadow:?}");
 
         let SvgNode::Path(background) = &card.children[0] else {
             panic!("expected gradient background");
@@ -664,5 +692,97 @@ mod tests {
         };
         assert_eq!(label.id, "label");
         assert!(!label.children.is_empty());
+    }
+
+    fn load_temp(name: &str, contents: &str) -> SvgDocument {
+        let temp = std::env::temp_dir().join(format!("{name}_{}.svg", std::process::id()));
+        std::fs::write(&temp, contents).unwrap();
+        let document = SvgDocument::load(&temp).unwrap();
+        std::fs::remove_file(temp).unwrap();
+        document
+    }
+
+    #[test]
+    fn imports_one_logical_unit_per_hundred_svg_pixels_centered_on_origin() {
+        assert_eq!(SVG_PIXELS_PER_UNIT, 100.0);
+        let document = load_temp(
+            "gaanim_svg_logical_scale_test",
+            r##"<svg width="200" height="100" xmlns="http://www.w3.org/2000/svg">
+                <rect id="full" width="200" height="100" fill="#ff0000"/>
+                <rect id="corner" x="150" y="0" width="50" height="50" fill="#00ff00"/>
+              </svg>"##,
+        );
+        let bounds = document.root.bounds().expect("paths have bounds");
+        assert!((bounds.min.x + 1.0).abs() < 1e-6, "{bounds:?}");
+        assert!((bounds.max.x - 1.0).abs() < 1e-6, "{bounds:?}");
+        assert!((bounds.min.y + 0.5).abs() < 1e-6, "{bounds:?}");
+        assert!((bounds.max.y - 0.5).abs() < 1e-6, "{bounds:?}");
+
+        // Top-right corner in SVG (Y down) lands top-right in the scene (Y up).
+        let SvgNode::Path(corner) = &document.root.children[1] else {
+            panic!("expected corner path");
+        };
+        let corner = corner.bounds;
+        let extents = [corner.min.x, corner.max.x, corner.min.y, corner.max.y];
+        for (actual, expected) in extents.into_iter().zip([0.5, 1.0, 0.0, 0.5]) {
+            assert!((actual - expected).abs() < 1e-6, "{corner:?}");
+        }
+
+        // A viewBox-only document uses the viewBox size as its pixel size.
+        let document = load_temp(
+            "gaanim_svg_viewbox_scale_test",
+            r##"<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                <rect width="100" height="100" fill="#ff0000"/>
+              </svg>"##,
+        );
+        let bounds = document.root.bounds().expect("paths have bounds");
+        assert!((bounds.width() - 1.0).abs() < 1e-6, "{bounds:?}");
+        assert!((bounds.height() - 1.0).abs() < 1e-6, "{bounds:?}");
+    }
+
+    #[test]
+    fn stroke_widths_and_gradient_radii_scale_with_the_geometry() {
+        let document = load_temp(
+            "gaanim_svg_logical_stroke_scale_test",
+            r##"<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                  <radialGradient id="glow" gradientUnits="userSpaceOnUse" cx="50" cy="50" r="40">
+                    <stop offset="0" stop-color="#ffffff"/>
+                    <stop offset="1" stop-color="#000000"/>
+                  </radialGradient>
+                </defs>
+                <rect id="plain" x="10" y="10" width="30" height="30" fill="none"
+                      stroke="#000000" stroke-width="3"/>
+                <g transform="scale(2)">
+                  <rect id="scaled" x="30" y="5" width="10" height="10" fill="none"
+                        stroke="#000000" stroke-width="3"/>
+                </g>
+                <circle id="orb" cx="50" cy="50" r="40" fill="url(#glow)"/>
+              </svg>"##,
+        );
+        let path = |index: usize| match &document.root.children[index] {
+            SvgNode::Path(path) => path.clone(),
+            SvgNode::Group(group) => match &group.children[0] {
+                SvgNode::Path(path) => path.clone(),
+                SvgNode::Group(_) => panic!("unexpected nested group"),
+            },
+        };
+        let plain = path(0);
+        assert_eq!(plain.id, "plain");
+        assert!((plain.stroke.style.width - 0.03).abs() < 1e-9);
+        let scaled = path(1);
+        assert_eq!(scaled.id, "scaled");
+        assert!((scaled.stroke.style.width - 0.06).abs() < 1e-9);
+        assert!((scaled.bounds.width() - 0.2).abs() < 1e-6);
+
+        let orb = path(2);
+        let Some(Brush::Gradient(gradient)) = &orb.fill else {
+            panic!("expected radial gradient fill");
+        };
+        let gaanim_core::peniko::GradientKind::Radial(radial) = gradient.kind else {
+            panic!("expected radial gradient kind, got {:?}", gradient.kind);
+        };
+        assert!((f64::from(radial.end_radius) - 0.4).abs() < 1e-6);
+        assert!(radial.end_center.x.abs() < 1e-6 && radial.end_center.y.abs() < 1e-6);
     }
 }

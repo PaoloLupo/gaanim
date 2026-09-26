@@ -55,11 +55,17 @@ están explicados en la sección de problemas de
   las dos animaciones; combínalas en una o ponlas en secuencia.
 - *Los objetos son enormes o diminutos:* las medidas están en unidades
   lógicas, no en píxeles. El fotograma mide 16 × 9; un círculo de radio `1`
-  ocupa una octava parte del ancho. Un SVG es la excepción: se importa a una
-  unidad por píxel del documento, así que dale tamaño con `scale_to`.
-- *Todo sale en blanco:* una escena sin tema tiene fondo blanco y el texto, las
-  formas y los ejes sin color propio también son blancos. Elige un tema
-  (`Scene(theme="technical")`) o un fondo; `gaanim check` lo avisa.
+  ocupa una octava parte del ancho. Un SVG se importa a 100 px por unidad
+  (uno de 300 px mide 3 unidades); ajústalo con `scale_to`.
+- *Todo sale en blanco:* una escena creada con `Scene(theme=None)` (o tras
+  `scene.canvas.set_theme(None)`) no tiene tema: el fondo es blanco y el texto,
+  las formas y los ejes sin color propio también son blancos. Quita
+  `theme=None` para volver al tema `technical` predeterminado, elige otro tema
+  o pon un fondo que contraste; `gaanim check` lo avisa.
+- *Mis objetos tienen otro color del que esperaba:* las escenas usan por
+  defecto el tema `technical`, que rellena las formas sin color con el acento
+  y pinta texto y ejes en gris claro. Un `.fill(...)`, `.stroke(...)` o
+  `color=` explícito siempre gana al tema.
 - *Un texto o una tarjeta se salen de su sitio dentro de un layout:* no uses
   `move_to()` en objetos dentro de un layout; expresa la intención con
   `align`, `offset` o una restricción (ver #link("/guias/layout/")[Layout]).

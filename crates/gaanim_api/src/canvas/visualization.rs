@@ -4515,6 +4515,8 @@ mod tests {
     fn rolling_number_inherits_custom_body_font_and_preserves_explicit_override() {
         for font in [None, Some("New Computer Modern")] {
             let mut canvas = SceneModel::new(16.0, 9.0);
+            // The host text configuration only applies without a theme.
+            canvas.clear_theme();
             canvas
                 .rolling_number(
                     ScalarSource::constant(42.0),
@@ -5017,6 +5019,8 @@ mod tests {
     #[test]
     fn multiline_category_ticks_align_their_first_line_with_single_line_ticks() {
         let mut canvas = SceneModel::new(400, 200);
+        // Unthemed axes keep the unscaled tick-number size.
+        canvas.clear_theme();
         let space = canvas
             .coordinate_axes(
                 Axis::category(["Una línea".into(), "Dos\nlíneas".into()]).unwrap(),
@@ -5132,6 +5136,8 @@ mod tests {
     #[test]
     fn vertical_axis_numbers_are_right_aligned_at_the_tick_gap() {
         let mut canvas = SceneModel::new(400, 200);
+        // Unthemed axes keep the unscaled tick-number size.
+        canvas.clear_theme();
         let y = Axis::linear(-12500.0, 12500.0)
             .unwrap()
             .ticks(5000.0)

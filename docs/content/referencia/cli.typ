@@ -86,8 +86,9 @@ Los atajos de teclado del modo presentación y de Presenter View están en
 gaanim init <video|slides> [DIRECTORIO] [--force]
 ```
 
-Crea un proyecto ejecutable. `video` genera una escena animada 16:9 y
-`slides`, un starter de segmentos con notas y pausas para Presenter View. Sin
+Crea un proyecto ejecutable con un `main.py` mínimo: `video` genera una
+escena de dos segundos (un título y un círculo) y `slides`, dos diapositivas
+con notas y pausas para Presenter View. Sin
 `DIRECTORIO` se usa `gaanim-video` o `gaanim-slides`.
 
 #table(
@@ -119,9 +120,10 @@ duración, el tamaño del marco y una línea por problema (`ERROR:` o `WARN:`), 
 termina con `PASS` o `FAIL`.
 
 - En toda escena: que la línea de tiempo dure algo, que no queden textos de
-  plantilla que empiecen por `[` y, si no hay tema, que el fondo no sea blanco
-  o casi blanco, porque el texto, las formas y los ejes sin color propio
-  también son blancos y no se verían.
+  plantilla que empiecen por `[` y, si quitaste el tema (`theme=None` o
+  `set_theme(None)`), que el fondo no sea blanco o casi blanco, porque el
+  texto, las formas y los ejes sin color propio también son blancos y no se
+  verían.
 - Si la escena usa segmentos (una presentación): que exista al menos un
   segmento, que ninguno dure cero segundos, que cada uno tenga notas y que
   las pausas tengan nombre; avisa si el marco no es 16:9 o si la escena dura

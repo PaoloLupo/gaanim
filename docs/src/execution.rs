@@ -466,7 +466,13 @@ pub fn compile_code_cell(
     // Hash and cell ID. An export's preview settings are part of its identity,
     // so changing them re-renders the previews instead of reusing old files.
     let cell_hash = if expected_webp.is_some() {
-        typst_utils::hash128(format!("{code_to_execute}{}", PREVIEW_ARGS.join(" ")).as_bytes())
+        typst_utils::hash128(
+            format!(
+                "{code_to_execute}{}{PREVIEW_REVISION}",
+                PREVIEW_ARGS.join(" ")
+            )
+            .as_bytes(),
+        )
     } else {
         typst_utils::hash128(code_to_execute.as_bytes())
     };
@@ -504,13 +510,20 @@ pub fn compile_code_cell(
         }
         lookup => {
             let job = match lookup {
-                Lookup::Revalidate(webp) => CellJob { cached_webp: Some(webp), ..job },
+                Lookup::Revalidate(webp) => CellJob {
+                    cached_webp: Some(webp),
+                    ..job
+                },
                 _ => job,
             };
             if COLLECTING.load(Ordering::SeqCst) {
                 // First pass: queue the cell and render a placeholder. The
                 // builder runs the queue in parallel and compiles again.
-                PENDING.lock().unwrap().entry(job.cell_id.clone()).or_insert(job);
+                PENDING
+                    .lock()
+                    .unwrap()
+                    .entry(job.cell_id.clone())
+                    .or_insert(job);
                 CellOutcome::default()
             } else {
                 eprintln!("Running example {}...", job.cell_id);
@@ -530,7 +543,10 @@ pub fn compile_code_cell(
         "stdout".into(),
         Value::Str(without_preflight_report(&outcome.stdout).trim_end().into()),
     );
-    result.insert("stderr".into(), Value::Str(outcome.stderr.trim_end().into()));
+    result.insert(
+        "stderr".into(),
+        Value::Str(outcome.stderr.trim_end().into()),
+    );
     result.insert("caption".into(), Value::Str(caption.as_str().into()));
     result.insert("webp".into(), Value::Str(outcome.webp.as_str().into()));
     result.insert("vars".into(), Value::Dict(Dict::new()));
@@ -550,9 +566,19 @@ pub fn compile_code_cell(
 /// page (they sit next to the code), and fast to render on a CPU rasterizer.
 /// Scenes with another aspect ratio are letterboxed.
 const PREVIEW_ARGS: [&str; 7] = [
-    "--quality", "draft", "--width", "960", "--height", "540", "--fit",
+    "--quality",
+    "draft",
+    "--width",
+    "960",
+    "--height",
+    "540",
+    "--fit",
 ];
 const PREVIEW_FIT: &str = "contain";
+
+/// Bump when the engine's default look changes (theme, palette, units), so
+/// cached previews re-render instead of being merely re-checked.
+const PREVIEW_REVISION: u32 = 2;
 
 /// Prefix of the diagnostic a failing example emits; the builder counts them.
 pub const EXAMPLE_ERROR: &str = "Execution error in Python cell:";
@@ -640,7 +666,11 @@ impl RunStats {
 
 fn record(cell_id: &str, executed: bool) {
     let mut stats = STATS.lock().unwrap();
-    let set = if executed { &mut stats.executed } else { &mut stats.cached };
+    let set = if executed {
+        &mut stats.executed
+    } else {
+        &mut stats.cached
+    };
     set.insert(cell_id.to_string());
 }
 
@@ -697,7 +727,9 @@ pub fn prune_unused() -> usize {
         (root.join("assets/generated"), "_anim.webp"),
     ];
     for (dir, suffix) in dirs {
-        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
         for entry in entries.filter_map(Result::ok) {
             let name = entry.file_name().to_string_lossy().to_string();
             if let Some(id) = name.strip_suffix(suffix)
@@ -744,7 +776,11 @@ fn lookup_cache(job: &CellJob) -> Lookup {
     // A failure is final for this build (both passes and the PDF see it) but
     // is retried by the next build.
     if !outcome.stderr.trim().is_empty() {
-        return if text("run") == *RUN_ID { Lookup::Hit(outcome) } else { Lookup::Miss };
+        return if text("run") == *RUN_ID {
+            Lookup::Hit(outcome)
+        } else {
+            Lookup::Miss
+        };
     }
     let root = project_root();
     let webp_is_valid = !outcome.webp.is_empty() && is_valid_webp(&root.join(&outcome.webp));
@@ -766,7 +802,11 @@ fn core_binary() -> PathBuf {
         .ok()
         .and_then(|executable| executable.parent().map(Path::to_path_buf))
         .unwrap_or_else(|| project_root().join("target/debug"))
-        .join(if cfg!(windows) { "gaanim-core.exe" } else { "gaanim-core" })
+        .join(if cfg!(windows) {
+            "gaanim-core.exe"
+        } else {
+            "gaanim-core"
+        })
 }
 
 /// Run one cell and cache its outcome. Never fails: problems become the
@@ -792,9 +832,8 @@ fn run_cell(job: &CellJob) -> CellOutcome {
             match collect_webp(&root, &work_dir.join(name), &job.cell_id) {
                 Some(path) => outcome.webp = path,
                 None => {
-                    outcome.stderr = format!(
-                        "The export finished without writing a valid `{name}` preview."
-                    )
+                    outcome.stderr =
+                        format!("The export finished without writing a valid `{name}` preview.")
                 }
             }
         }
@@ -990,7 +1029,8 @@ mod tests {
         let stderr = "2026-09-25T22:46:49.427640Z  WARN winit: error setting XSETTINGS\n\
                       2026-09-25T22:46:50.753327Z ERROR bevy_render: slab\n";
         assert_eq!(without_runtime_logs(stderr), "");
-        let colored = "\u{1b}[2m2026-09-25T22:57:48.171032Z\u{1b}[0m \u{1b}[33m WARN\u{1b}[0m bevy_audio";
+        let colored =
+            "\u{1b}[2m2026-09-25T22:57:48.171032Z\u{1b}[0m \u{1b}[33m WARN\u{1b}[0m bevy_audio";
         assert_eq!(without_runtime_logs(&strip_ansi_escape_codes(colored)), "");
         assert_eq!(
             without_runtime_logs("ALSA lib pcm.c:2721:(snd_pcm_open_noupdate) Unknown PCM default"),

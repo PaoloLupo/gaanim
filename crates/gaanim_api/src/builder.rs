@@ -5192,8 +5192,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 continue;
             }
             if let Some(opacity) = self.states.get(id).map(|state| state.opacity) {
-                self.timeline
-                    .add_clip(parent_track, start, 0.0, zero_opacity_clip(id, 0.0, opacity));
+                self.timeline.add_clip(
+                    parent_track,
+                    start,
+                    0.0,
+                    zero_opacity_clip(id, 0.0, opacity),
+                );
             }
         }
 
@@ -5885,15 +5889,15 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         if self.connectors.contains(&anim.target) {
             // Hide the connector before its clip starts; the tracking system
             // rebuilds its path from the progress every frame.
-            self.commands
-                .entity(entity)
-                .queue(|mut connector: bevy::prelude::EntityWorldMut<'_>| {
+            self.commands.entity(entity).queue(
+                |mut connector: bevy::prelude::EntityWorldMut<'_>| {
                     if let Some(mut connector) =
                         connector.get_mut::<gaanim_animation::updaters::TrackingConnector>()
                     {
                         connector.progress = 0.0;
                     }
-                });
+                },
+            );
             self.timeline.add_clip(
                 parent_track,
                 self.current_time + anim.delay,
@@ -8280,7 +8284,12 @@ mod tests {
         assert_eq!(word.len(), 7, "fi is one glyph");
         assert!(word.contains(&ligature));
         // A fragment that starts or ends inside the ligature takes its glyph.
-        assert!(builder.select(text, "iltrado").child_ids.contains(&ligature));
+        assert!(
+            builder
+                .select(text, "iltrado")
+                .child_ids
+                .contains(&ligature)
+        );
         assert!(builder.select(text, "uno f").child_ids.contains(&ligature));
     }
 

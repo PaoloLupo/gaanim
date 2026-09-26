@@ -28,7 +28,7 @@ axes = scene.viz.cartesian_3d(
     Axis.linear(-30, 30).ticks(10).label("x").style(color=WHITE),
     Axis.linear(-30, 30).ticks(10).label("y").style(color=WHITE),
     Axis.linear(0, 50).ticks(10).label("z").style(color=WHITE),
-    size=(0.5, 0.5, 0.416667),
+    size=(60, 60, 50),
     grid=True,
 ).move_to_3d(0, 0, 25)
 

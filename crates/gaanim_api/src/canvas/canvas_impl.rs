@@ -2005,7 +2005,19 @@ pub struct SceneModel {
 }
 
 impl SceneModel {
+    /// Create a scene of `width` x `height` logical units using the default
+    /// [`CanvasTheme::DEFAULT_NAME`] theme and its background.
+    ///
+    /// Explicit backgrounds, [`SceneModel::set_theme`] and
+    /// [`SceneModel::apply_theme`] replace these defaults;
+    /// [`SceneModel::clear_theme`] returns to a plain unthemed canvas.
     pub fn new(width: impl Into<f64>, height: impl Into<f64>) -> Self {
+        let mut scene = Self::unthemed(width, height);
+        scene.apply_theme(CanvasTheme::default_builtin());
+        scene
+    }
+
+    fn unthemed(width: impl Into<f64>, height: impl Into<f64>) -> Self {
         let width = width.into();
         let height = height.into();
         Self {
@@ -2136,11 +2148,28 @@ impl SceneModel {
     /// `technical` is the quiet dark style used by the built-in technical
     /// components. `presentation` adds a warmer, higher-contrast hierarchy for
     /// projected slides. `paper` provides a light documentation canvas.
-    /// Calling this method also selects the theme background; callers can
-    /// still override [`SceneModel::background`] afterwards.
+    /// Calling this method also selects the theme background unless a
+    /// background was set explicitly; callers can still override
+    /// [`SceneModel::background`] afterwards. New scenes start with
+    /// [`CanvasTheme::DEFAULT_NAME`].
     pub fn set_theme(&mut self, name: &str) -> Result<(), ThemeError> {
         self.apply_theme(CanvasTheme::builtin(name)?);
         Ok(())
+    }
+
+    /// Remove the active theme, leaving a plain unthemed canvas.
+    ///
+    /// Unless a background was set explicitly, the theme background is removed
+    /// too and the scene renders on white. Unstyled text, shapes and axes then
+    /// use the host text configuration's white foreground, so give them
+    /// explicit colors or a contrasting background.
+    pub fn clear_theme(&mut self) {
+        if !self.background_overridden {
+            self.background = None;
+            self.background_paint = None;
+        }
+        self.theme = None;
+        self.theme_style = None;
     }
 
     /// Apply a complete custom or derived visual theme.
@@ -2216,11 +2245,21 @@ impl SceneModel {
     }
 
     pub(crate) fn themed_text_config(&self) -> gaanim_text::prelude::TextConfig {
+        self.scene_text_config(&gaanim_text::prelude::TextConfig::default())
+    }
+
+    /// Text configuration this scene compiles with: the active theme's roles,
+    /// or `base` (the host configuration) without a theme, followed by the
+    /// canvas font overrides. Runtime replay, fingerprints and
+    /// [`SceneModel::compile`] all resolve text through this method.
+    pub(crate) fn scene_text_config(
+        &self,
+        base: &gaanim_text::prelude::TextConfig,
+    ) -> gaanim_text::prelude::TextConfig {
         let mut config = self
             .theme_style
             .as_ref()
-            .map(|theme| theme.text.clone())
-            .unwrap_or_default();
+            .map_or_else(|| base.clone(), |theme| theme.text.clone());
         if let Some(theme) = &self.theme_style {
             for (role, overlay) in &theme.text_styles {
                 if let Some(style) = config.roles.get_mut(role) {
@@ -3830,6 +3869,11 @@ impl SceneModel {
     /// Shapes, paths, solid or gradient paints, outlined text, transforms,
     /// CSS, `<use>`, `viewBox`, and vector `clipPath` groups are imported.
     /// Raster images, patterns, masks, and arbitrary filters remain omitted.
+    ///
+    /// The document is centered on the origin at
+    /// [`SVG_PIXELS_PER_UNIT`](gaanim_objects::prelude::SVG_PIXELS_PER_UNIT)
+    /// SVG pixels per logical unit, the factor used by the rest of the engine,
+    /// so a 200×100 px document spans 2×1 units and a 3 px stroke is 0.03.
     pub fn svg(&mut self, path: impl AsRef<Path>) -> Result<DrawableHandle, SvgLoadError> {
         let document = gaanim_objects::prelude::SvgDocument::load(self.resolve_asset_path(path))?;
         Ok(self.svg_document(&document))
@@ -8188,11 +8232,20 @@ mod tests {
 
     #[test]
     fn unstyled_reactive_numbers_use_the_body_text_color() {
-        for (background, expected) in [
-            (None, Color::BLACK),
-            (Some(Color::from_rgb8(9, 11, 23)), Color::WHITE),
+        let technical = crate::canvas::CanvasTheme::default_builtin()
+            .palette
+            .foreground;
+        // Themed scenes use the theme body color; unthemed ones use the host
+        // text configuration (white) whatever the background, like runtime replay.
+        for (themed, background, expected) in [
+            (true, None, technical),
+            (false, None, Color::WHITE),
+            (false, Some(Color::from_rgb8(9, 11, 23)), Color::WHITE),
         ] {
             let mut canvas = SceneModel::new(640, 360);
+            if !themed {
+                canvas.clear_theme();
+            }
             canvas.set_background(background);
             canvas.reactive_readout(
                 gaanim_animation::ScalarSource::Constant(3.5),
@@ -8360,14 +8413,14 @@ mod tests {
             .expect("presentation is a built-in theme");
         let config = canvas.themed_text_config();
 
-        assert_eq!(canvas.background, Some(Color::from_rgb8(0x07, 0x0B, 0x16)));
+        assert_eq!(canvas.background, Some(Color::from_rgb8(0x12, 0x12, 0x12)));
         assert_eq!(
             config.roles[&TextRole::Title].fill_color,
             Color::from_rgb8(0xFF, 0xD1, 0x66)
         );
         assert_eq!(
             config.roles[&TextRole::Body].fill_color,
-            Color::from_rgb8(0xF4, 0xF7, 0xFB)
+            Color::from_rgb8(0xF2, 0xF2, 0xF2)
         );
     }
 
@@ -9487,6 +9540,8 @@ mod tests {
     #[test]
     fn axes_compile_grid_lines_and_ticks_with_independent_styles() {
         let mut canvas = SceneModel::new(640, 360);
+        // An active theme's axes rules replace `AxesConfig` colors.
+        canvas.clear_theme();
         let axis_color = Color::from_rgb8(0x11, 0x22, 0x33);
         let grid_color = Color::from_rgb8(0x44, 0x55, 0x66);
         let tick_color = Color::from_rgb8(0x77, 0x88, 0x99);
@@ -11464,10 +11519,19 @@ mod grow_arrow_tests {
             gaanim_animation::tracking_line_system(&mut world);
             path_of(&world, entity)
         };
-        assert!(bounds_at(0.0).elements().is_empty(), "hidden before growing");
+        assert!(
+            bounds_at(0.0).elements().is_empty(),
+            "hidden before growing"
+        );
         let half = bounds_at(0.5).bounding_box();
-        assert!((half.x1 - 2.0).abs() < 1e-9 && half.x0.abs() < 1e-9, "{half:?}");
-        assert!((half.height() - 0.3).abs() < 1e-9, "the head keeps its width");
+        assert!(
+            (half.x1 - 2.0).abs() < 1e-9 && half.x0.abs() < 1e-9,
+            "{half:?}"
+        );
+        assert!(
+            (half.height() - 0.3).abs() < 1e-9,
+            "the head keeps its width"
+        );
         let full = bounds_at(1.0).bounding_box();
         assert!((full.y1 - 2.0).abs() < 1e-9, "the tip reaches the endpoint");
         // Reverse seeks are exact.

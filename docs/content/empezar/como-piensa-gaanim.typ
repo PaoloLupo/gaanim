@@ -207,8 +207,11 @@ gana. Los roles de texto (`title`, `subtitle`, `body`, `label`…) también
 vienen del tema, así que `scene.text(..., role="title")` tiene el aspecto de
 título sin fijar tamaño ni fuente.
 
-`Scene(theme="paper")` usa un tema incluido tal cual; `Theme.schemes()` lista
-los disponibles. Los detalles están en
+Toda escena empieza con el tema `technical` (fondo gris casi negro, texto
+claro y formas con el color de acento), así que un `Scene()` sin argumentos ya
+se ve bien. `Scene(theme="paper")` usa otro tema incluido tal cual;
+`Theme.schemes()` lista los disponibles y `Scene(theme=None)` crea un lienzo
+sin tema, blanco, en el que das color a cada objeto. Los detalles están en
 #link("/referencia/themes/")[Temas y colores].
 
 = Coordenadas o layout

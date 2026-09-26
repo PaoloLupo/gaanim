@@ -292,6 +292,62 @@ def validate_theme_typography_contract(module: object) -> list[str]:
     return failures
 
 
+def stub_theme_names(tree: ast.Module) -> list[str]:
+    """Names listed by the stub's ``ThemeName`` literal."""
+    for node in tree.body:
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "ThemeName"
+            and isinstance(node.value, ast.Subscript)
+        ):
+            elements = node.value.slice
+            items = elements.elts if isinstance(elements, ast.Tuple) else [elements]
+            return [item.value for item in items if isinstance(item, ast.Constant)]
+    return []
+
+
+def validate_default_theme_contract(module: object, tree: ast.Module) -> list[str]:
+    """New scenes use the technical theme; explicit choices and None still win."""
+    failures: list[str] = []
+    names = stub_theme_names(tree)
+    if not names:
+        return ["the stub does not declare the ThemeName literal"]
+    missing = sorted(set(module.Theme.schemes()) - set(names))
+    if missing:
+        failures.append(f"ThemeName is missing built-in themes: {missing}")
+    for name in names:
+        try:
+            module.Theme(name)
+            module.Scene(theme=name)
+        except ValueError:
+            failures.append(f"ThemeName lists {name!r}, which the runtime rejects")
+    scene = module.Scene(frame=(16, 9))
+    if scene.canvas.theme != "technical":
+        failures.append(f"Scene() theme is {scene.canvas.theme!r}, expected 'technical'")
+    if scene.canvas.validate_theme():
+        failures.append("the default theme reports readability warnings")
+    scene.canvas.color("accent")
+    if module.Scene(background="#ff0000").canvas.theme != "technical":
+        failures.append("an explicit background removed the default theme")
+    plain = module.Scene(theme=None)
+    if plain.canvas.theme is not None:
+        failures.append("Scene(theme=None) kept a theme")
+    try:
+        plain.canvas.color("accent")
+    except ValueError:
+        pass
+    else:
+        failures.append("canvas.color resolved a role without a theme")
+    scene.canvas.set_theme(None)
+    if scene.canvas.theme is not None:
+        failures.append("set_theme(None) did not remove the theme")
+    scene.canvas.set_theme("paper")
+    if scene.canvas.theme != "paper":
+        failures.append("set_theme('paper') did not replace the theme")
+    return failures
+
+
 def validate_stub_attribute_writability(module: object, tree: ast.Module) -> list[str]:
     """Stub attributes declared writable must accept assignment at runtime.
 
@@ -1207,6 +1263,69 @@ def validate_matrix_contract(module: object) -> list[str]:
     return failures
 
 
+def validate_matrix_logical_units(module: object) -> list[str]:
+    """Keep matrix spacing and delimiters in logical units so small matrices fit the frame.
+
+    Pixel-sized defaults (24-unit gaps, 180-unit brackets) once pushed every
+    entry of a 3x3 matrix outside a 16x9 frame and drew a frame-filling
+    parenthesis for a 2x2 one.
+    """
+    failures: list[str] = []
+    matrix_module = importlib.import_module("gaanim.matrix")
+    tree = ast.parse(STUB.read_text(encoding="utf-8"), filename=str(STUB))
+    documented: dict[str, float] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == "Visualization":
+            for member in node.body:
+                if isinstance(member, ast.FunctionDef) and member.name == "matrix":
+                    for arg, default in zip(member.args.kwonlyargs, member.args.kw_defaults):
+                        if isinstance(default, ast.Constant) and isinstance(default.value, float):
+                            documented[arg.arg] = default.value
+    frame_width, frame_height = 16.0, 9.0
+    scene = module.Scene(frame=(frame_width, frame_height))
+    for size in (2, 3):
+        data = [[row * size + column + 1 for column in range(size)] for row in range(size)]
+        for delimiters, glyph in (("brackets", "["), ("parentheses", "(")):
+            matrix = scene.viz.matrix(
+                data,
+                delimiters=delimiters,
+                row_labels=[f"r_{row}" for row in range(size)],
+                column_labels=[f"c_{column}" for column in range(size)],
+            )
+            options = matrix._options
+            for name in ("row_gap", "column_gap", "delimiter_gap"):
+                expected = documented.get(name)
+                if expected is None:
+                    failures.append(f"Visualization.matrix stub does not document a {name} default")
+                elif not math.isclose(options[name], expected):
+                    failures.append(
+                        f"matrix default {name}={options[name]} differs from the documented {expected}"
+                    )
+            delimiter_width, delimiter_height = scene.text.measure(
+                glyph, size=matrix_module._default_delimiter_size(size)
+            )
+            cells = [scene.text.measure(f"${value}$") for row in data for value in row]
+            cell_width = max(width for width, _ in cells)
+            cell_height = max(height for _, height in cells)
+            label_width = scene.text.measure("$r_0$")[0]
+            extent_width = (
+                label_width + 2 * delimiter_width + size * cell_width + (size + 2) * options["column_gap"]
+            )
+            extent_height = max(
+                delimiter_height,
+                (size + 1) * cell_height + size * options["row_gap"],
+            )
+            label = f"{size}x{size} {delimiters} matrix"
+            if not extent_width < frame_width / 2 or not extent_height < frame_height / 2:
+                failures.append(
+                    f"a default {label} spans about {extent_width:.2f}x{extent_height:.2f} "
+                    f"units, beyond half of a {frame_width:g}x{frame_height:g} frame"
+                )
+            if delimiter_height < size * cell_height:
+                failures.append(f"the automatic delimiter of a {label} is shorter than its entries")
+    return failures
+
+
 def validate_matrix_stub_typing() -> list[str]:
     """Keep the matrix facade drawable-compatible and derivations specialized."""
     matrix_stub = STUB.with_name("matrix.pyi")
@@ -2043,6 +2162,7 @@ def main() -> int:
     missing.extend(validate_camera_rig_contract(module))
     missing.extend(validate_camera_motion_contract(module))
     missing.extend(validate_matrix_contract(module))
+    missing.extend(validate_matrix_logical_units(module))
     missing.extend(validate_matrix_stub_typing())
     missing.extend(validate_vector_geometry_contract(module))
     missing.extend(validate_composition_contract(module))
@@ -2056,6 +2176,7 @@ def main() -> int:
     missing.extend(validate_layout_card_ports_contract(module))
     missing.extend(validate_editorial_contract(module))
     missing.extend(validate_theme_typography_contract(module))
+    missing.extend(validate_default_theme_contract(module, tree))
     missing.extend(validate_stub_attribute_writability(module, tree))
     missing.extend(validate_timeline_cursor_contract(module))
     missing.extend(validate_timeline_labels_contract(module))

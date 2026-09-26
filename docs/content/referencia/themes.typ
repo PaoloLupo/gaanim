@@ -23,15 +23,30 @@ scene.play([circle.animate.create(), label.animate.write()])
 scene.render()
 ```
 
-Una escena empieza *sin tema*: `scene.canvas.theme` vale `None`, el fondo es
-blanco y el texto y las formas sin estilo propio también son blancos, así que
-no se ven. Elige siempre un tema (`Scene(theme=...)` o
-`scene.canvas.set_theme(...)`) o al menos un fondo (`Scene(background=...)`);
-`gaanim check` avisa cuando una escena sin tema tiene un fondo blanco o casi
-blanco.
-Sin tema, `scene.canvas.color(...)` y `scene.canvas.validate_theme()` lanzan
-`ValueError`, y los componentes como `badge` o `card` usan colores propios
-parecidos a los de `technical`.
+Toda escena empieza con el tema `technical`: `Scene()` equivale a
+`Scene(theme="technical")`, `scene.canvas.theme` vale `"technical"` y el fondo
+es gris casi negro (`#121212`), con texto y ejes claros y formas rellenas con
+el color de acento. Otro tema (`Scene(theme=...)` o
+`scene.canvas.set_theme(...)`) sustituye al predeterminado, un fondo explícito
+(`Scene(background=...)`) gana al del tema y los colores que pones en cada
+objeto ganan a los del tema.
+
+Para un lienzo sin tema, pasa `Scene(theme=None)` o llama a
+`scene.canvas.set_theme(None)`. Sin tema el fondo vuelve a ser blanco (salvo
+que hayas elegido uno) y el texto, las formas y los ejes sin estilo propio son
+blancos, así que dales color o usa un fondo que contraste; `gaanim check`
+avisa cuando no se verían. Sin tema, `scene.canvas.color(...)` y
+`scene.canvas.validate_theme()` lanzan `ValueError`, y los componentes como
+`badge` o `card` usan los colores de `technical`.
+
+```python
+from gaanim import Scene
+
+scene = Scene(frame=(16, 9), theme=None, background="white")
+dot = scene.geometry.circle(1).fill("#2563eb")
+label = scene.text("Sin tema", color="black").move_to(0, 2)
+scene.render()
+```
 
 == Colores
 
@@ -446,9 +461,9 @@ siempre tiene prioridad.
 #api-entry(
   name: "Canvas.set_theme",
   kind: "method",
-  params: ((name: "theme", type: "str | Theme", default: none, desc: [Nombre de un tema incluido o un `Theme`.]),),
-  returns: (type: "None", desc: [Instala el tema en la escena.]),
-  desc: [Equivale a `Scene(theme=...)` después de crear la escena. Las reglas se aplican al compilar, así que también alcanzan a los objetos creados antes de la llamada. Un nombre desconocido lanza `ValueError`.],
+  params: ((name: "theme", type: "ThemeName | Theme | None", default: none, desc: [Nombre o alias de un tema incluido, un `Theme`, o `None` para quitar el tema.]),),
+  returns: (type: "None", desc: [Instala el tema en la escena, o lo quita.]),
+  desc: [Equivale a `Scene(theme=...)` después de crear la escena y sustituye al tema `technical` predeterminado. El fondo del tema reemplaza al actual salvo que la escena tenga un fondo explícito. Las reglas se aplican al compilar, así que también alcanzan a los objetos creados antes de la llamada. Un nombre desconocido lanza `ValueError`.],
 )[
 ```python
 from gaanim import Scene
@@ -466,8 +481,8 @@ scene.render()
   columns: (auto, auto, 1fr),
   inset: 7pt,
   [*Tema*], [*Alias*], [*Aspecto*],
-  [`technical`], [`scientific`], [Oscuro y sobrio, para matemáticas y documentación técnica.],
-  [`presentation`], [`deck`], [Para proyectar: fondo azul marino, títulos dorados y cuerpo brillante.],
+  [`technical` (predeterminado)], [`scientific`], [Oscuro y sobrio, para matemáticas y documentación técnica: fondo `#121212`, texto `#E6E6E6`, datos en gris `#BDBDBD`, acento ámbar `#F2A541` y rejilla `#707070`.],
+  [`presentation`], [`deck`], [Para proyectar: el mismo fondo gris casi negro que `technical` (`#121212`), títulos y acentos dorados, gráficos en coral `#F4845F` y cuerpo brillante.],
   [`paper`], [`light`], [Lienzo blanco con tinta oscura.],
   [`dracula`, `nord`, `tokyo-night`], [`tokyo`], [Paletas oscuras de editores conocidos.],
   [`solarized-dark`, `solarized-light`], [], [Solarized en sus dos variantes.],
@@ -475,11 +490,16 @@ scene.render()
   [`catppuccin-mocha`, `catppuccin-latte`], [`catppuccin`, `mocha`, `latte`], [Catppuccin oscuro y claro.],
 )
 
+Los nombres no distinguen mayúsculas. En el stub, `Scene(theme=...)`,
+`Canvas.set_theme` y `Theme(base)` tipan el nombre como `ThemeName`, un
+`Literal` con los once nombres y los ocho alias de la tabla, así que el editor
+los autocompleta. `Theme.schemes()` devuelve solo los nombres canónicos.
+
 #api-entry(
   name: "Canvas.theme",
   kind: "property",
   signature: "theme: str | None",
-  returns: (type: "str | None", desc: [Nombre del tema activo, o `None` si no hay ninguno.]),
+  returns: (type: "str | None", desc: [Nombre del tema activo: `"technical"` en una escena nueva, o `None` después de `Scene(theme=None)` o `set_theme(None)`.]),
   desc: [Es de solo lectura: para cambiarlo usa `set_theme`.],
   none,
 )
@@ -487,7 +507,7 @@ scene.render()
 #api-entry(
   name: "Theme.schemes",
   kind: "method",
-  returns: (type: "list[str]", desc: [Los nombres de los temas incluidos.]),
+  returns: (type: "list[str]", desc: [Los nombres canónicos de los temas incluidos, sin alias.]),
 )[
 ```python
 >>>from gaanim import *
@@ -576,9 +596,9 @@ if warnings:
 #api-entry(
   name: "Theme",
   kind: "class",
-  signature: "Theme(base: str | Theme | None = None, *, name=None, colors=None, fonts=None, sizes=None, text=None, styles=None, series=None, heatmap=None, layout=None, font_files=None, font_dir=None, text_markup=None)",
+  signature: "Theme(base: ThemeName | Theme | None = None, *, name=None, colors=None, fonts=None, sizes=None, text=None, styles=None, series=None, heatmap=None, layout=None, font_files=None, font_dir=None, text_markup=None)",
   params: (
-    (name: "base", type: "str | Theme | None", default: "None", desc: [Tema del que se deriva; solo se sustituye lo que pasas. Sin él, se parte de un tema neutro llamado `custom`.]),
+    (name: "base", type: "ThemeName | Theme | None", default: "None", desc: [Tema del que se deriva; solo se sustituye lo que pasas. Sin él, se parte de la paleta de `technical` con el nombre `custom`.]),
     (name: "name", type: "str | None", default: "None", desc: [Nombre del tema nuevo.]),
     (name: "colors", type: "dict[str, ColorLike] | None", default: "None", desc: [Roles de color y tokens propios para las reglas.]),
     (name: "fonts", type: "dict[str, str] | None", default: "None", desc: [Familias por rol de fuente.]),

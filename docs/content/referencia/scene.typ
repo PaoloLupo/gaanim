@@ -37,12 +37,12 @@ exportar un script, consulta la #link("/referencia/cli/")[línea de comandos].
 #api-entry(
   name: "Scene",
   kind: "class",
-  signature: "Scene(*, frame: tuple[float, float] = (16.0, 9.0), background: BackgroundLike | None = None, margin: float | None = None, theme: str | Theme | None = None, post: PostProcess | None = None)",
+  signature: "Scene(*, frame: tuple[float, float] = (16.0, 9.0), background: BackgroundLike | None = None, margin: float | None = None, theme: ThemeName | Theme | None = \"technical\", post: PostProcess | None = None)",
   params: (
     (name: "frame", type: "tuple[float, float]", default: "(16.0, 9.0)", desc: [Ancho y alto del marco lógico, centrado en el origen. Toda la geometría, los márgenes, los tamaños de texto y los trazos usan esta unidad.]),
     (name: "background", type: "BackgroundLike | None", default: "None", desc: [Color, `Brush` o `Background`. Tiene prioridad sobre el fondo del tema.]),
     (name: "margin", type: "float | None", default: "None", desc: [Margen uniforme en unidades lógicas; reduce el área segura.]),
-    (name: "theme", type: "str | Theme | None", default: "None", desc: [Nombre de un tema incluido o un `Theme`. Sin tema, la escena no tiene ninguno activo.]),
+    (name: "theme", type: "ThemeName | Theme | None", default: "\"technical\"", desc: [Nombre o alias de un tema incluido, o un `Theme`. `None` crea la escena sin tema.]),
     (name: "post", type: "PostProcess | None", default: "None", desc: [Postprocesado WGSL aplicado a todos los segmentos que no lo sustituyan.]),
   ),
   returns: (type: "Scene", desc: [Una escena vacía, lista para crear objetos.]),
@@ -56,8 +56,12 @@ print(scene.canvas.frame_width, scene.canvas.safe_width)  # 16.0 15.0
 ```
 ]
 
-Sin `theme` ni `background`, el fondo es blanco y los objetos sin estilo
-propio también, así que no se ven: elige un tema o un fondo. Consulta
+Sin `theme`, la escena usa el tema `technical`: fondo gris casi negro
+(`#121212`), texto y ejes claros y formas rellenas con el color de acento. Un
+`background` explícito gana al fondo del tema, y los colores de cada objeto
+ganan a los del tema. `theme=None` deja un lienzo sin tema: fondo blanco (si
+no pasas `background`) y objetos sin estilo también blancos, así que tendrás
+que darles color. Consulta
 #link("/referencia/themes/#api-canvas-set-theme")[`Canvas.set_theme`].
 
 == Capacidades

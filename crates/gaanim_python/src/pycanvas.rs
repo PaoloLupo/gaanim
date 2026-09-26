@@ -635,7 +635,7 @@ fn component_palette(scene: &ApiCanvas) -> ComponentPalette {
     } else {
         ComponentPalette {
             foreground: Color::from_rgb8(0xE6, 0xED, 0xF5),
-            accent: Color::from_rgb8(0x5B, 0x8F, 0xC9),
+            accent: Color::from_rgb8(0xF2, 0xA5, 0x41),
             panel: Color::from_rgb8(0x10, 0x16, 0x20),
             header: Color::from_rgb8(0x16, 0x2B, 0x46),
             rule: Color::from_rgb8(0x5B, 0x70, 0x88),
@@ -707,6 +707,43 @@ fn editorial_style(
 
 fn editorial_error(error: gaanim_api::canvas::EditorialError) -> PyErr {
     pyo3::exceptions::PyValueError::new_err(error.to_string())
+}
+
+/// A theme argument: a built-in scheme name or alias, or a `Theme`.
+/// `None` is handled by the caller as "no theme".
+pub(crate) enum PyThemeInput {
+    /// Keep the scene's default theme (never produced from Python values).
+    Default,
+    Theme(CanvasTheme),
+}
+
+impl<'a, 'py> FromPyObject<'a, 'py> for PyThemeInput {
+    type Error = PyErr;
+
+    fn extract(obj: pyo3::Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
+        if let Ok(name) = obj.extract::<String>() {
+            return CanvasTheme::builtin(&name)
+                .map(Self::Theme)
+                .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()));
+        }
+        if let Ok(theme) = obj.cast::<PyTheme>() {
+            return Ok(Self::Theme(theme.borrow().inner.clone()));
+        }
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "theme must be a built-in scheme name, Theme, or None",
+        ))
+    }
+}
+
+impl PyThemeInput {
+    /// Apply this choice to `canvas`; `None` removes the theme.
+    fn apply_to(choice: Option<Self>, canvas: &mut ApiCanvas) {
+        match choice {
+            Some(Self::Default) => {}
+            Some(Self::Theme(theme)) => canvas.apply_theme(theme),
+            None => canvas.clear_theme(),
+        }
+    }
 }
 
 /// Reusable colors, typography, and embedded font files for a scene.
@@ -1343,7 +1380,8 @@ impl PyCanvas {
         Ok(())
     }
 
-    /// Name of the selected built-in or custom visual theme, if any.
+    /// Name of the selected built-in or custom visual theme; `"technical"` by
+    /// default and `None` after `set_theme(None)` or `Scene(theme=None)`.
     #[getter]
     fn theme(&self) -> PyResult<Option<String>> {
         crate::custom::ensure_authoring_allowed()?;
@@ -1356,26 +1394,17 @@ impl PyCanvas {
         })
     }
 
-    /// Apply a built-in visual theme.
+    /// Apply a built-in visual theme, a custom `Theme`, or remove it with None.
     ///
     /// Accepts either a built-in color-scheme name or a reusable `Theme`.
     /// Custom themes can derive a scheme and override semantic colors,
-    /// typography, sizes, and embedded font files.
-    fn set_theme(&self, theme: &Bound<'_, PyAny>) -> PyResult<()> {
+    /// typography, sizes, and embedded font files. `None` leaves a plain
+    /// unthemed canvas (white, unless a background was set explicitly).
+    fn set_theme(&self, theme: Option<PyThemeInput>) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
         let mut canvas = self.inner.lock().expect("scene canvas poisoned");
-        if let Ok(name) = theme.extract::<String>() {
-            canvas
-                .set_theme(&name)
-                .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
-        } else if let Ok(theme) = theme.extract::<PyRef<'_, PyTheme>>() {
-            canvas.apply_theme(theme.inner.clone());
-            Ok(())
-        } else {
-            Err(pyo3::exceptions::PyTypeError::new_err(
-                "set_theme expects a built-in scheme name or Theme",
-            ))
-        }
+        PyThemeInput::apply_to(theme, &mut canvas);
+        Ok(())
     }
 
     /// Override the canvas-wide prose, math, and code font families.
@@ -2468,32 +2497,29 @@ impl PyScene {
     }
 
     #[new]
-    #[pyo3(signature = (*, frame=(16.0, 9.0), background=None, margin=None, theme=None, post=None))]
+    #[pyo3(signature = (
+        *,
+        frame=(16.0, 9.0),
+        background=None,
+        margin=None,
+        theme=Some(PyThemeInput::Default),
+        post=None,
+    ))]
     fn new(
         frame: (f64, f64),
         background: Option<crate::brush::PyBackgroundInput>,
         margin: Option<f64>,
-        theme: Option<&Bound<'_, PyAny>>,
+        theme: Option<PyThemeInput>,
         post: Option<PyRef<'_, crate::brush::PyPostProcess>>,
     ) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         let frame = gaanim_api::canvas::SceneFrame::new(frame.0, frame.1)
             .validate()
             .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        // New scenes start with the default "technical" theme; `theme=None`
+        // opts out and an explicit `background=` always wins.
         let mut canvas = ApiCanvas::new(frame.width, frame.height);
-        if let Some(theme) = theme {
-            if let Ok(name) = theme.extract::<String>() {
-                canvas
-                    .set_theme(&name)
-                    .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
-            } else if let Ok(theme) = theme.extract::<PyRef<'_, PyTheme>>() {
-                canvas.apply_theme(theme.inner.clone());
-            } else {
-                return Err(pyo3::exceptions::PyTypeError::new_err(
-                    "theme must be a built-in scheme name, Theme, or None",
-                ));
-            }
-        }
+        PyThemeInput::apply_to(theme, &mut canvas);
         if let Some(background) = background {
             canvas.set_background_paint(Some(background.0));
         }
@@ -4516,6 +4542,8 @@ impl PyMediaLibrary {
     }
 
     /// Load an SVG as an animatable group of vector paths.
+    ///
+    /// Imported at 100 SVG pixels per logical scene unit, centered on the origin.
     fn svg(&self, path: &str) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
         self.inner
@@ -4569,7 +4597,7 @@ impl PyGeometry {
         })
     }
 
-    #[pyo3(signature = (*operands, live=false, tolerance=0.25, rule="nonzero"))]
+    #[pyo3(signature = (*operands, live=false, tolerance=0.0025, rule="nonzero"))]
     fn union(
         &self,
         operands: &Bound<'_, PyTuple>,
@@ -4586,7 +4614,7 @@ impl PyGeometry {
             rule,
         )
     }
-    #[pyo3(signature = (*operands, live=false, tolerance=0.25, rule="nonzero"))]
+    #[pyo3(signature = (*operands, live=false, tolerance=0.0025, rule="nonzero"))]
     fn intersection(
         &self,
         operands: &Bound<'_, PyTuple>,
@@ -4603,7 +4631,7 @@ impl PyGeometry {
             rule,
         )
     }
-    #[pyo3(signature = (subject, *clips, live=false, tolerance=0.25, rule="nonzero"))]
+    #[pyo3(signature = (subject, *clips, live=false, tolerance=0.0025, rule="nonzero"))]
     fn difference(
         &self,
         subject: PyDrawable,
@@ -4623,7 +4651,7 @@ impl PyGeometry {
             rule,
         )
     }
-    #[pyo3(signature = (*operands, live=false, tolerance=0.25, rule="nonzero"))]
+    #[pyo3(signature = (*operands, live=false, tolerance=0.0025, rule="nonzero"))]
     fn xor(
         &self,
         operands: &Bound<'_, PyTuple>,
@@ -6851,6 +6879,106 @@ fn resolve_ray(obj: &Bound<'_, PyAny>) -> PyResult<CanvasRay> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Names in the stub's `ThemeName` literal, in declaration order.
+    fn stub_theme_names() -> Vec<String> {
+        let stub = include_str!("../gaanim/gaanim_core.pyi");
+        let start = stub
+            .find("ThemeName: TypeAlias = Literal[")
+            .expect("the stub declares ThemeName");
+        let rest = &stub[start..];
+        let body = &rest[rest.find('[').unwrap() + 1..rest.find(']').unwrap()];
+        body.split(',')
+            .map(|name| name.trim().trim_matches('"').to_string())
+            .filter(|name| !name.is_empty())
+            .collect()
+    }
+
+    #[test]
+    fn stub_theme_names_match_the_runtime_builtins_and_aliases() {
+        let mut expected: Vec<String> = CanvasTheme::BUILTIN_NAMES
+            .iter()
+            .chain(CanvasTheme::BUILTIN_ALIASES.iter().map(|(alias, _)| alias))
+            .map(|name| name.to_string())
+            .collect();
+        let mut declared = stub_theme_names();
+        expected.sort();
+        declared.sort();
+        assert_eq!(
+            declared, expected,
+            "update ThemeName in gaanim_core.pyi and referencia/themes.typ"
+        );
+    }
+
+    #[test]
+    fn scenes_default_to_the_technical_theme_and_opt_out_with_none() {
+        Python::initialize();
+        Python::attach(|py| -> PyResult<()> {
+            let module = PyModule::new(py, "gaanim_core")?;
+            crate::gaanim_core(py, &module)?;
+            let scene_class = module.getattr("Scene")?;
+            let scene = |kwargs: &[(&str, Bound<'_, PyAny>)]| -> PyResult<ApiCanvas> {
+                let dict = PyDict::new(py);
+                for (key, value) in kwargs {
+                    dict.set_item(key, value)?;
+                }
+                let scene = scene_class.call((), Some(&dict))?;
+                let canvas = scene.extract::<PyRef<'_, PyScene>>()?.inner.clone();
+                let canvas = canvas.lock().unwrap().clone();
+                Ok(canvas)
+            };
+            let technical = CanvasTheme::builtin("technical")
+                .unwrap()
+                .palette
+                .background;
+
+            let default = scene(&[])?;
+            assert_eq!(default.theme.as_deref(), Some("technical"));
+            assert_eq!(default.background, Some(technical));
+            assert!(default.theme_color("accent").is_ok());
+            assert!(default.validate_theme().unwrap().is_empty());
+
+            use gaanim_core::peniko::Color;
+            let red = Color::from_rgb8(255, 0, 0);
+            let explicit = scene(&[("background", "#ff0000".into_pyobject(py)?.into_any())])?;
+            assert_eq!(explicit.theme.as_deref(), Some("technical"));
+            assert_eq!(
+                explicit.background,
+                Some(red),
+                "an explicit background wins"
+            );
+
+            let paper = scene(&[("theme", "light".into_pyobject(py)?.into_any())])?;
+            assert_eq!(paper.theme.as_deref(), Some("paper"));
+            assert_eq!(paper.background, Some(Color::WHITE));
+
+            let plain = scene(&[("theme", py.None().into_bound(py))])?;
+            assert_eq!(plain.theme, None);
+            assert_eq!(plain.background, None);
+            assert!(plain.theme_color("accent").is_err());
+            assert!(plain.unthemed_contrast_warning().is_some());
+
+            let kept = scene(&[
+                ("theme", py.None().into_bound(py)),
+                ("background", "#ff0000".into_pyobject(py)?.into_any()),
+            ])?;
+            assert_eq!((kept.theme, kept.background), (None, Some(red)));
+
+            let live = scene_class.call((), None)?;
+            let canvas = live.getattr("canvas")?;
+            canvas.call_method1("set_theme", (py.None(),))?;
+            assert!(canvas.getattr("theme")?.is_none());
+            canvas.call_method1("set_theme", ("dracula",))?;
+            assert_eq!(canvas.getattr("theme")?.extract::<String>()?, "dracula");
+            let custom = module.getattr("Theme")?.call1(("paper",))?;
+            canvas.call_method1("set_theme", (custom,))?;
+            assert_eq!(canvas.getattr("theme")?.extract::<String>()?, "paper");
+            assert!(canvas.call_method1("set_theme", ("nope",)).is_err());
+            assert!(canvas.call_method1("set_theme", (3,)).is_err());
+            Ok(())
+        })
+        .unwrap();
+    }
 
     #[test]
     fn image_quality_accepts_the_public_values_and_rejects_unknown_ones() {

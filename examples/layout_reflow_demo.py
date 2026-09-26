@@ -12,6 +12,6 @@ agenda.add(scene.text("Place").fill(WHITE))
 scene.wait(2.8)
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
-    scene.snapshots(snapshots, [0.0, 1.2, 2.0, 3.2])
+    scene.snapshots(snapshots, [0.0, 1.2, 2.0, 2.7])
 else:
     scene.render()

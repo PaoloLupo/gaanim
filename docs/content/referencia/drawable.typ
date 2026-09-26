@@ -203,7 +203,7 @@ dot.shift_by(1, 0.5)
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
-logo = scene.media.svg("assets/logo.svg").scale_to(0.025)
+logo = scene.media.svg("assets/logo.svg").scale_to(2.5)
 ```
 ]
 

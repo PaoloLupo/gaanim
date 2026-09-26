@@ -9,5 +9,5 @@ pub use crate::primitives::{
     square, star, triangle,
 };
 pub use crate::primitives3d::{Primitive3DError, cone, cube, cylinder, plane, sphere};
-pub use crate::svg::{SvgDocument, SvgGroup, SvgLoadError, SvgNode, SvgPath};
+pub use crate::svg::{SVG_PIXELS_PER_UNIT, SvgDocument, SvgGroup, SvgLoadError, SvgNode, SvgPath};
 pub use crate::text::{MathContent, TextContent, TypstDocument};

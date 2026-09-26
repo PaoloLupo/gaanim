@@ -245,8 +245,9 @@ print(model.animations())  # acciones de Blender
 jerarquía real de caminos y grupos a la que se llega con
 #link("/referencia/medios/#api-drawable-part")[`part(id)`]. Por eso un SVG
 sirve también como máscara o como operando de operaciones booleanas. Se
-importa a una unidad de escena por píxel del documento, centrado en el origen:
-dale tamaño con `scale_to(ancho / ancho_en_px)` (consulta
+importa a 100 píxeles del documento por unidad lógica, centrado en el origen:
+un SVG de 300 px de ancho mide 3 unidades, y `scale_to(factor)` lo agranda o
+lo reduce (consulta
 #link("/referencia/medios/#api-medialibrary-svg")[`MediaLibrary.svg`]).
 
 *Qué se importa.* Grupos anidados, CSS, transformaciones, `viewBox` y
@@ -264,8 +265,8 @@ el texto en caminos en el SVG de origen.
 Los identificadores de las partes distinguen mayúsculas; un identificador
 repetido en el archivo falla al importar y uno desconocido lanza `KeyError`
 con los nombres disponibles. El grosor aplicado al objeto raíz con
-`stroke(...)` está en unidades lógicas de escena y no se reduce al escalar el
-SVG para encajarlo en el marco.
+`stroke(...)` está en unidades lógicas de escena y no cambia al escalar el
+SVG con `scale_to`; los trazos propios del archivo sí escalan con él.
 
 ```python
 >>>from gaanim import *

@@ -11,7 +11,7 @@ axes = scene.viz.cartesian_3d(
     Axis.linear(-5, 5).ticks(1).label("x").style(color=WHITE),
     Axis.linear(-5, 5).ticks(1).label("y").style(color=WHITE),
     Axis.linear(-3, 3).ticks(1).label("z").style(color=WHITE),
-    size=(0.125, 0.125, 0.075),
+    size=(10, 10, 6),
 )
 
 surface = axes.surface(lambda x, y: math.sin(x) * math.cos(y), resolution=(36, 36))

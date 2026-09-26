@@ -9,7 +9,7 @@ space = scene.viz.cartesian_3d(
     Axis.log(0.1, 1000, base=10).ticks(10).label("log x"),
     Axis.symlog(-100, 100, base=10, threshold=1).ticks(10).label("symlog y"),
     Axis.power(0, 16, 0.5).ticks(2).label("sqrt z"),
-    size=(0.125, 0.1, 0.075),
+    size=(10, 8, 6),
 )
 curve = space.parametric(
     lambda t: (10 ** (3 * t - 1), 80 * (2 * t - 1), 16 * t * t), (0, 1)

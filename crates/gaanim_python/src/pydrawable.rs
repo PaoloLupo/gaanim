@@ -1536,7 +1536,11 @@ mod tests {
             other => panic!("expected a selection effect, got {other:?}"),
         };
         assert!(matches!(
-            effect(selection.reveal(Some("from_below"), None, None, None).unwrap()),
+            effect(
+                selection
+                    .reveal(Some("from_below"), None, None, None)
+                    .unwrap()
+            ),
             TextSelectionEffect::RevealFromBelow
         ));
         assert!(matches!(
@@ -1547,7 +1551,12 @@ mod tests {
             effect(selection.annotate("c", (0.0, 0.6)).unwrap()),
             TextSelectionEffect::Annotate { offset, .. } if offset.y == 0.6
         ));
-        assert!(error_is::<PyValueError>(selection.reveal(Some("slide"), None, None, None)));
+        assert!(error_is::<PyValueError>(selection.reveal(
+            Some("slide"),
+            None,
+            None,
+            None
+        )));
         assert!(error_is::<PyValueError>(
             selection.annotate("c", (f64::INFINITY, 0.0))
         ));
@@ -1555,7 +1564,12 @@ mod tests {
         let circle = PyCanvasAnim {
             inner: scene.circle(1.0).animate(),
         };
-        assert!(error_is::<PyTypeError>(circle.reveal(Some("fade"), None, None, None)));
+        assert!(error_is::<PyTypeError>(circle.reveal(
+            Some("fade"),
+            None,
+            None,
+            None
+        )));
         assert!(error_is::<PyTypeError>(circle.brace("", false)));
         assert!(error_is::<PyTypeError>(circle.annotate("x", (0.0, 0.6))));
     }

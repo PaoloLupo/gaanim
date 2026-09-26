@@ -554,9 +554,9 @@ cerradas.
 Los operandos se conservan como objetos independientes y el resultado hereda el
 estilo del primero. Con `live=True`, el resultado se reconstruye cuando cambian
 los caminos o las transformaciones de sus fuentes. `tolerance` es el error
-máximo, en unidades de escena, al aproximar las curvas: el valor predeterminado
-(0.25) convierte un círculo pequeño en un polígono visible, así que usa `0.01`
-para curvas suaves. Debe ser finita y positiva. `rule` acepta `"nonzero"` o
+máximo, en unidades de escena, al aproximar las curvas; el valor predeterminado
+(`0.0025`, unos 0.3 px a 1080p) mantiene suaves los círculos. Súbelo solo para
+acelerar resultados `live=True` muy complejos. Debe ser finita y positiva. `rule` acepta `"nonzero"` o
 `"evenodd"`; operandos de otra escena o valores inválidos lanzan `ValueError`.
 
 #api-entry(
@@ -570,7 +570,7 @@ from gaanim import BLUE, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
 left = scene.geometry.circle(1).move_to(-0.5, 0)
 right = scene.geometry.circle(1).move_to(0.5, 0)
-merged = scene.geometry.union(left, right, tolerance=0.01).fill(BLUE)
+merged = scene.geometry.union(left, right).fill(BLUE)
 left.opacity(0)
 right.opacity(0)
 scene.play([merged.animate.create().duration(1.0)])
@@ -604,7 +604,7 @@ from gaanim import GOLD, WHITE, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
 plate = scene.geometry.rect(3, 2).fill(GOLD)
 hole = scene.geometry.circle(0.6).fill(WHITE).move_to(-0.8, 0)
-cut = scene.geometry.difference(plate, hole, live=True, tolerance=0.01)
+cut = scene.geometry.difference(plate, hole, live=True)
 plate.opacity(0)
 hole.opacity(0.2)
 scene.play([hole.animate.shift_by(1.6, 0).duration(1.2)])
@@ -641,7 +641,7 @@ progreso con forma.
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
-drop = scene.media.svg("drop.svg").scale_to(0.025).no_fill().stroke("#dbeafe", 0.05).opacity(0)
+drop = scene.media.svg("drop.svg").scale_to(2.5).no_fill().stroke("#dbeafe", 0.05).opacity(0)
 water = scene.geometry.fill_level(drop, "#38bdf8", 0.0)
 scene.play([water.animate.fill_level(0.72).duration(1.4)])
 ```

@@ -2557,19 +2557,9 @@ impl SceneModel {
         let mut text_config = world
             .remove_resource::<gaanim_text::prelude::TextConfig>()
             .expect("TextConfig missing");
-        if self.theme.is_some() {
-            text_config = self.themed_text_config();
-        } else {
-            let bg_color = self.background.unwrap_or(gaanim_core::peniko::Color::WHITE);
-            let default_fg = if typst_foreground_for_background(bg_color) == "000000" {
-                gaanim_core::peniko::Color::BLACK
-            } else {
-                gaanim_core::peniko::Color::WHITE
-            };
-            for role_style in text_config.roles.values_mut() {
-                role_style.fill_color = default_fg;
-            }
-        }
+        // Same resolution as runtime replay: the theme's roles, or the host
+        // configuration unchanged without a theme.
+        text_config = self.scene_text_config(&text_config);
         self.register_theme_fonts(&mut font_registry);
         let mut commands = world.commands();
         self.compile_into(&mut commands, &mut timeline, &font_registry, &text_config);
@@ -11103,6 +11093,95 @@ mod tests {
             .find(|order| order.z_index == 5)
             .expect("layered group");
         assert_ne!(layered.creation_order, 0);
+    }
+
+    fn compiled_solid_fills(canvas: &SceneModel) -> (World, Vec<PenikoColor>) {
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        let colors = world
+            .query::<&gaanim_scene::FillBrush>()
+            .iter(&world)
+            .filter_map(|fill| match fill.0.as_ref() {
+                Some(gaanim_core::peniko::Brush::Solid(color)) => Some(*color),
+                _ => None,
+            })
+            .collect();
+        (world, colors)
+    }
+
+    #[test]
+    fn new_scenes_compile_with_the_default_technical_theme() {
+        let technical = crate::canvas::CanvasTheme::builtin("technical").unwrap();
+        let mut canvas = SceneModel::new(640, 360);
+        assert_eq!(canvas.theme.as_deref(), Some("technical"));
+        assert_eq!(canvas.background, Some(technical.palette.background));
+        canvas.circle(40.0);
+        let explicit = PenikoColor::from_rgb8(0xFF, 0x00, 0x00);
+        canvas.circle(20.0).fill(explicit).move_to(100.0, 0.0);
+        canvas.text("Body copy");
+
+        let (world, fills) = compiled_solid_fills(&canvas);
+        assert!(
+            fills.contains(&technical.palette.accent),
+            "themed shape fill"
+        );
+        assert!(fills.contains(&explicit), "explicit fills still win");
+        assert!(fills.contains(&technical.palette.foreground), "themed text");
+        let rgba = technical.palette.background.to_rgba8();
+        assert_eq!(
+            world.resource::<ClearColor>().0,
+            Color::srgba_u8(rgba.r, rgba.g, rgba.b, rgba.a)
+        );
+    }
+
+    #[test]
+    fn explicit_backgrounds_survive_theme_changes_and_removal() {
+        let navy = PenikoColor::from_rgb8(0x0F, 0x17, 0x2A);
+        let mut canvas = SceneModel::new(640, 360);
+        canvas.set_background(Some(navy));
+        canvas.set_theme("paper").unwrap();
+        assert_eq!(canvas.background, Some(navy));
+        canvas.clear_theme();
+        assert_eq!(
+            (canvas.theme.as_deref(), canvas.background),
+            (None, Some(navy))
+        );
+
+        let mut plain = SceneModel::new(640, 360);
+        plain.clear_theme();
+        assert_eq!(
+            (plain.background, plain.background_paint.is_none()),
+            (None, true)
+        );
+        assert!(plain.theme_color("foreground").is_err());
+        plain.set_theme("paper").unwrap();
+        assert_eq!(plain.background, Some(PenikoColor::WHITE));
+    }
+
+    #[test]
+    fn unthemed_compile_uses_the_host_text_config_like_runtime_replay() {
+        let mut canvas = SceneModel::new(640, 360);
+        canvas.clear_theme();
+        canvas.text("Body copy");
+        let host = gaanim_text::prelude::TextConfig::default();
+        let resolved = canvas.scene_text_config(&host);
+        for (role, style) in &host.roles {
+            assert_eq!(
+                resolved.roles[role].fill_color, style.fill_color,
+                "{role:?}"
+            );
+        }
+        // `compile` no longer picks black text for the white default
+        // background: both paths keep the host (white) foreground, which
+        // `unthemed_contrast_warning` reports.
+        let (_, fills) = compiled_solid_fills(&canvas);
+        assert!(fills.contains(&PenikoColor::WHITE));
+        assert!(!fills.contains(&PenikoColor::BLACK));
+        assert!(canvas.unthemed_contrast_warning().is_some());
     }
 
     #[test]

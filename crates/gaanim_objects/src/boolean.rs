@@ -50,9 +50,12 @@ impl BooleanOp {
     }
 }
 
-/// Flattening tolerance passed to `kurbo::flatten`. Smaller = more accurate,
-/// larger = faster. 0.25 is a good balance for screen-space rendering.
-const FLATTEN_TOLERANCE: f64 = 0.25;
+/// Default flattening tolerance passed to `kurbo::flatten`, in scene units.
+/// Smaller = more accurate, larger = faster. 0.0025 units is about 0.3 px at
+/// the default 120 px per unit, so a unit circle keeps a smooth outline. (It
+/// was 0.25 while scenes were authored in pixels; the logical-unit migration
+/// divided lengths by 100.)
+pub const FLATTEN_TOLERANCE: f64 = 0.0025;
 
 /// Result of a boolean operation. Each element is one outer contour
 /// (holes are encoded as additional subpaths in the same `BezPath`).
@@ -337,6 +340,46 @@ mod tests {
         assert!(filled.paths[0].elements().len() > 20);
         assert!((filled.bounds.width() - 200.0).abs() < 0.5);
         assert!((filled.bounds.height() - 150.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn default_tolerance_keeps_unit_circles_smooth_in_scene_units() {
+        // Scenes are authored in logical units (a unit circle is ~120 px at
+        // 1080p). The default tolerance must not polygonize such circles.
+        let left = kurbo::Circle::new((-0.75, 0.0), 1.0).to_path(0.1);
+        let right = kurbo::Circle::new((0.75, 0.0), 1.0).to_path(0.1);
+        let union = apply(&left, &right, BooleanOp::Union);
+
+        assert_eq!(union.paths.len(), 1);
+        let points: Vec<kurbo::Point> = union.paths[0]
+            .elements()
+            .iter()
+            .filter_map(|el| match el {
+                PathEl::MoveTo(p) | PathEl::LineTo(p) => Some(*p),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            points.len() > 48,
+            "union of unit circles flattened to only {} vertices",
+            points.len()
+        );
+        // Every vertex lies on one of the source circles...
+        for p in &points {
+            let error = (p.distance((-0.75, 0.0).into()) - 1.0)
+                .abs()
+                .min((p.distance((0.75, 0.0).into()) - 1.0).abs());
+            assert!(error < 0.01, "vertex {p:?} is {error} off the circles");
+        }
+        // ...and chord midpoints stay within the flattening tolerance, which
+        // a 0.25-unit tolerance (octagon-like outline) would violate.
+        for pair in points.windows(2) {
+            let mid = pair[0].midpoint(pair[1]);
+            let error = (mid.distance((-0.75, 0.0).into()) - 1.0)
+                .abs()
+                .min((mid.distance((0.75, 0.0).into()) - 1.0).abs());
+            assert!(error < 0.01, "chord midpoint {mid:?} is {error} inside");
+        }
     }
 
     #[test]

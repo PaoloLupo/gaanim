@@ -75,7 +75,10 @@ fn require_finite(name: &str, value: f64) -> PyResult<()> {
 fn require_text_effect_slot(anim: &PyCanvasAnim, name: &str) -> PyResult<()> {
     crate::custom::ensure_authoring_allowed()?;
     if anim.inner.property_target_is_text_selection()
-        || matches!(anim.inner.inner.anim_type, AnimationType::TextSelection { .. })
+        || matches!(
+            anim.inner.inner.anim_type,
+            AnimationType::TextSelection { .. }
+        )
     {
         return Err(PyTypeError::new_err(format!(
             "{name}() requires a Text animation proxy, e.g. title.animate.{name}()"
@@ -142,7 +145,9 @@ impl PyTextAnimator {
         }
         if let Some(opacity) = opacity {
             if !opacity.is_finite() || !(0.0..=1.0).contains(&opacity) {
-                return Err(PyValueError::new_err("opacity must be between zero and one"));
+                return Err(PyValueError::new_err(
+                    "opacity must be between zero and one",
+                ));
             }
         }
         if let Some(scale) = scale {

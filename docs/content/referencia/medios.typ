@@ -24,7 +24,7 @@ from gaanim import Scene
 
 scene = Scene(frame=(16, 9), background="#0f172a")
 photo = scene.media.image("assets/cover.png").frame(6, 3.4, fit="cover").move_to(-3.5, 0)
-robot = scene.media.svg("assets/robot.svg").scale_to(0.02).move_to(3.5, 0)
+robot = scene.media.svg("assets/robot.svg").scale_to(2).move_to(3.5, 0)
 scene.play([photo.animate.fade_in(), robot.animate.write()], duration=1.2)
 # output: preview.webp
 scene.render()
@@ -108,14 +108,14 @@ con acceso a cada parte por su `id`.
 #api-entry(
   name: "MediaLibrary.svg",
   kind: "factory",
-  desc: [Importa geometría, degradados, transformaciones, `clipPath` y `feGaussianBlur` como caminos vectoriales normales. La geometría se importa a una unidad de escena por píxel del tamaño del documento (`width`/`height`, o el `viewBox` si faltan), centrada en el origen. Como el marco mide 16 unidades de ancho, un SVG de 200 píxeles mide 200 unidades y hay que reducirlo: `scale_to(ancho / 200)` le da `ancho` unidades (por ejemplo, `scale_to(4 / 200)` para 4 unidades). Los anchos de trazo fluidos siguen en unidades lógicas de escena aunque el SVG se escale. Los detalles de compatibilidad están en #link("/referencia/assets/")[Recursos].],
+  desc: [Importa geometría, degradados, transformaciones, `clipPath` y `feGaussianBlur` como caminos vectoriales normales. El documento se importa a 100 píxeles SVG por unidad lógica, la misma equivalencia que usa el resto del motor (el trazo por defecto de 0.03 equivale a 3 px), centrado en el origen. El tamaño en píxeles es el `width`/`height` del documento, o el `viewBox` si faltan: un SVG de 200 × 200 px mide 2 × 2 unidades en el marco de 16 × 9. Trazos, degradados, `clipPath`, texto y filtros escalan con la geometría. `scale_to(factor)` cambia el tamaño de todo el SVG; los anchos de trazo fluidos aplicados a la raíz siguen en unidades lógicas de escena aunque el SVG se escale. Los detalles de compatibilidad están en #link("/referencia/assets/")[Recursos].],
 )[
 ```python
 # show-code: true
 from gaanim import BLUE, Scene
 scene = Scene(frame=(16, 9), background="#f8fafc")
-# robot.svg mide 200 px: 5 / 200 lo deja en 5 unidades de ancho
-robot = scene.media.svg("assets/robot.svg").scale_to(5 / 200).move_to(0, 0)
+# robot.svg mide 200 px, es decir 2 unidades: scale_to(2.5) lo deja en 5
+robot = scene.media.svg("assets/robot.svg").scale_to(2.5).move_to(0, 0)
 robot.part("left-arm").fill(BLUE)
 scene.play([robot.animate.write().duration(0.8)])
 scene.play([robot.part("head").animate.shift_by(0, 0.4).duration(0.6)])
@@ -132,7 +132,7 @@ scene.render()
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
-robot = scene.media.svg("assets/robot.svg").scale_to(0.02)
+robot = scene.media.svg("assets/robot.svg").scale_to(2)
 head = robot.part("head").fill(GOLD)
 ```
 ]
