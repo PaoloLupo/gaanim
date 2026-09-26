@@ -13736,7 +13736,7 @@ mod tests {
     fn readout_decimal_separator_reaches_the_compiled_text() {
         let mut canvas = SceneModel::new(640, 360);
         let number = canvas.reactive_readout(
-            gaanim_animation::ScalarSource::constant(3.14159),
+            gaanim_animation::ScalarSource::constant(1.23456),
             ".2f",
             "",
             "",
@@ -13748,7 +13748,7 @@ mod tests {
         let mut world = compile_canvas_for_layout(canvas);
         let mut query = world.query::<&gaanim_animation::ReactiveReadout>();
         let readout = query.single(&world).expect("exactly one compiled readout");
-        assert_eq!(readout.last_text, "3,14");
+        assert_eq!(readout.last_text, "1,23");
     }
 
     #[test]
