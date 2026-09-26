@@ -697,6 +697,7 @@ fn lerp_transform(rest: &SpatialTransform, out: &SpatialTransform, t: f64) -> Sp
         rotation: rest.rotation.slerp(out.rotation, t),
         scale: rest.scale.lerp(out.scale, t),
         anchor: rest.anchor,
+        skew: rest.skew.lerp(out.skew, t),
     }
 }
 

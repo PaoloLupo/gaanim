@@ -11,6 +11,32 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.4.3
+
+Sin publicar todavía. No requiere cambios en tus escenas.
+
+== Cambios
+
+- `drawable.skew_to(x, y)` y `drawable.animate.skew_to(x, y)` sesgan un
+  objeto o un grupo entero alrededor de su pivote, sin trocearlo: `x` desplaza
+  cada punto en horizontal `x` veces su altura sobre el pivote, e `y` en
+  vertical `y` veces su distancia horizontal a él. Con `with_pivot` en la base,
+  `skew_to(0.15, 0)` inclina una vivienda como el corte de un pórtico en un
+  sismo. Ver `Drawable.skew_to` en
+  #link("/referencia/drawable/")[Drawable].
+
+== Correcciones
+
+- `Transition.zoom_through` muestra solo el segmento saliente mientras la
+  cámara se acerca y solo el entrante mientras se aleja; antes los dos se
+  veían durante toda la transición. El zoom se centra en `center`, que antes
+  se ignoraba.
+- `gaanim check` y `gaanim --diff` muestran en Windows las rutas sin el
+  prefijo `\\?\`.
+- `gaanim check` y la vista previa ya no pueden quedarse colgados buscando
+  Python: el gestor de instalación de Python de Windows ya no intenta instalar
+  una versión que falta, y cada comprobación se abandona a los 10 segundos.
+
 = 0.4.1
 
 Publicada el 26 de septiembre de 2026. Además de correcciones, cambia el tema

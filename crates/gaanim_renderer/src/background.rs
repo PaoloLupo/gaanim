@@ -659,7 +659,7 @@ struct ShaderGpu {
 impl ShaderGpu {
     fn new() -> Result<Self, ShaderBackgroundError> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
+            backends: wgpu::Backends::all().with_env(),
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -795,8 +795,9 @@ pub(crate) mod test_gpu {
     }
 
     pub(crate) fn test_gpu() -> Option<TestGpu> {
+        // CI sets `WGPU_BACKEND` to skip adapters that crash the test process.
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
+            backends: wgpu::Backends::all().with_env(),
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
         let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
@@ -979,7 +980,15 @@ mod tests {
 
             let copied = shader.resolve(width, height, time).unwrap();
             gpu.render(&background_scene(&copied, width, height), &target);
-            assert_eq!(resident, gpu.read(&target), "t = {time}");
+            // Hardware drivers may round the resident texture and the uploaded
+            // copy one step apart; anything more is a real mismatch.
+            let copy = gpu.read(&target);
+            let worst = resident
+                .iter()
+                .zip(&copy)
+                .map(|(a, b)| a.abs_diff(*b))
+                .max();
+            assert!(worst <= Some(1), "t = {time}: channels differ by {worst:?}");
             frames.push(resident);
         }
         assert_ne!(frames[0], frames[1], "the shader output follows time");

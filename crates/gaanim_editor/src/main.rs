@@ -1016,7 +1016,6 @@ struct DiffModeArgs {
     current: PathBuf,
     output: PathBuf,
     options: gaanim_diff::CompareOptions,
-    open_gui: bool,
     example: Option<PathBuf>,
     capture: bool,
     capture_only: bool,
@@ -1064,7 +1063,7 @@ fn dispatch_diff_mode() -> bool {
         };
         println!(
             "Capturing {} -> {}",
-            script.display(),
+            console::display_path(&script),
             capture_dir.display()
         );
         let probe = gaanim_project::EnvironmentProbe::detect(Some(&script));
@@ -1140,23 +1139,10 @@ fn dispatch_diff_mode() -> bool {
         report.changed,
         report.missing
     );
-    println!("Report: {}", parsed.output.join("report.json").display());
+    println!("Report: {}", parsed.output.join("index.html").display());
+    println!("JSON: {}", parsed.output.join(gaanim_diff::REPORT_FILE).display());
 
-    let passed = report.passed;
-    if parsed.open_gui
-        && let Err(error) = gaanim_diff::viewer::run(
-            report,
-            parsed.baseline,
-            parsed.current,
-            parsed.output,
-            parsed.options,
-        )
-    {
-        console::error("diff", format!("could not open egui viewer: {error}"));
-        std::process::exit(2);
-    }
-
-    std::process::exit(if passed { 0 } else { 1 });
+    std::process::exit(if report.passed { 0 } else { 1 });
 }
 
 /// Why `--diff` ends after capturing instead of comparing with `baseline`:
@@ -1228,7 +1214,6 @@ fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String>
     let mut example = None;
     let mut tests_root = PathBuf::from("tests/visual");
     let mut options = gaanim_diff::CompareOptions::default();
-    let mut open_gui = true;
     let mut capture = None;
     let mut capture_only = false;
     let mut bless = false;
@@ -1264,7 +1249,8 @@ fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String>
                     .parse()
                     .map_err(|_| "--max-changed-ratio must be between 0 and 1".to_string())?;
             }
-            "--no-gui" => open_gui = false,
+            // The native viewer was removed; kept so existing scripts still parse.
+            "--no-gui" => {}
             "--no-capture" => capture = Some(false),
             "--capture-only" => capture_only = true,
             "--bless" => bless = true,
@@ -1311,7 +1297,6 @@ fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String>
             current: current.unwrap_or_else(|| case_dir.join("current")),
             output: output.unwrap_or_else(|| case_dir.join("report")),
             options,
-            open_gui,
             example: Some(example),
             capture: capture.unwrap_or(true),
             capture_only,
@@ -1341,7 +1326,6 @@ fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String>
         })?,
         output: output.unwrap_or_else(|| PathBuf::from("tests/visual/report")),
         options,
-        open_gui,
         example: None,
         capture: false,
         capture_only: false,
@@ -1701,7 +1685,6 @@ mod tests {
         assert!(parsed.capture);
         assert!(parsed.capture_only);
         assert!(!parsed.bless);
-        assert!(!parsed.open_gui);
         assert_eq!(parsed.current, PathBuf::from("target/performance/seek"));
     }
 
@@ -1919,7 +1902,6 @@ mod tests {
         assert_eq!(parsed.output, PathBuf::from("report"));
         assert_eq!(parsed.options.pixel_threshold, 4);
         assert_eq!(parsed.options.max_changed_ratio, 0.001);
-        assert!(!parsed.open_gui);
     }
 
     #[test]

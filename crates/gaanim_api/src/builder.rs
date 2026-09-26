@@ -1448,6 +1448,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::ScaleTo { .. }
             | AnimationType::ScaleUniform { .. }
             | AnimationType::ScaleBy3D { .. } => "Scale",
+            AnimationType::SkewTo { .. } => "Skew",
             AnimationType::FadeTo { .. }
             | AnimationType::FadeIn
             | AnimationType::FadeOut
@@ -2668,6 +2669,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     crate::anim::PropertyScale::By(factor) => AnimationType::ScaleBy3D { factor },
                 });
             }
+            if let Some(to) = properties.skew {
+                channels.push(AnimationType::SkewTo { to });
+            }
             if let Some(opacity) = properties.opacity {
                 channels.push(AnimationType::FadeTo { to: opacity });
             }
@@ -3222,6 +3226,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 let to = from * factor;
                 state.transform.scale = to;
                 PropertyLensSpec::Scale { from, to }
+            }
+            AnimationType::SkewTo { to } => {
+                let from = state.transform.skew;
+                state.transform.skew = to;
+                PropertyLensSpec::Skew { from, to }
             }
             AnimationType::FadeTo { to } => {
                 let from = state.opacity;

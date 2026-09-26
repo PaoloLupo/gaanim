@@ -1363,6 +1363,11 @@ impl PyText {
         Ok(slf)
     }
 
+    fn skew_to<'py>(slf: PyRef<'py, Self>, x: f64, y: f64) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle.clone()).skew_to(x, y)?;
+        Ok(slf)
+    }
+
     fn rotate_to_3d<'py>(
         slf: PyRef<'py, Self>,
         x: &Bound<'_, PyAny>,

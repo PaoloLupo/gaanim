@@ -1,5 +1,5 @@
 use bevy::prelude::Component;
-use gaanim_core::glam::{DMat4, DQuat, DVec3};
+use gaanim_core::glam::{DMat4, DQuat, DVec2, DVec3};
 use gaanim_core::kurbo::Affine;
 
 /// A unified 2D/3D spatial transform representing translation, rotation, scale, and pivot (anchor).
@@ -20,6 +20,10 @@ pub struct SpatialTransform {
     pub scale: DVec3,
     /// The pivot/anchor point in local space around which rotation and scaling occur.
     pub anchor: DVec3,
+    /// 2D shear factors applied between rotation and scale: `x` moves points
+    /// horizontally by `x` times their height above the anchor, `y` moves them
+    /// vertically by `y` times their offset to its right.
+    pub skew: DVec2,
 }
 
 impl Default for SpatialTransform {
@@ -29,6 +33,7 @@ impl Default for SpatialTransform {
             rotation: DQuat::IDENTITY,
             scale: DVec3::ONE,
             anchor: DVec3::ZERO,
+            skew: DVec2::ZERO,
         }
     }
 }
@@ -41,6 +46,7 @@ impl SpatialTransform {
             rotation: DQuat::IDENTITY,
             scale: DVec3::ONE,
             anchor: DVec3::ZERO,
+            skew: DVec2::ZERO,
         }
     }
 
@@ -51,6 +57,7 @@ impl SpatialTransform {
             rotation: DQuat::IDENTITY,
             scale: DVec3::ONE,
             anchor: DVec3::ZERO,
+            skew: DVec2::ZERO,
         }
     }
 
@@ -61,6 +68,7 @@ impl SpatialTransform {
             rotation: DQuat::IDENTITY,
             scale: DVec3::ONE,
             anchor: DVec3::ZERO,
+            skew: DVec2::ZERO,
         }
     }
 
@@ -102,6 +110,12 @@ impl SpatialTransform {
         self
     }
 
+    /// Sets the 2D shear factors.
+    pub fn with_skew_2d(mut self, x: f64, y: f64) -> Self {
+        self.skew = DVec2::new(x, y);
+        self
+    }
+
     /// Sets the pivot/anchor point in local space.
     pub fn with_anchor(mut self, anchor: DVec3) -> Self {
         self.anchor = anchor;
@@ -121,7 +135,7 @@ impl SpatialTransform {
     /// Computes the 2D affine transformation matrix for Vello rendering.
     ///
     /// The transformation order takes the pivot/anchor into account:
-    /// `translate(translation + anchor) * rotate(z_angle) * scale(scale.x, scale.y) * translate(-anchor)`
+    /// `translate(translation + anchor) * rotate(z_angle) * skew(skew) * scale(scale.x, scale.y) * translate(-anchor)`
     pub fn to_affine_2d(&self) -> Affine {
         let z_angle = self.z_angle();
 
@@ -129,6 +143,7 @@ impl SpatialTransform {
             self.translation.x + self.anchor.x,
             self.translation.y + self.anchor.y,
         )) * Affine::rotate(z_angle)
+            * Affine::skew(self.skew.x, self.skew.y)
             * Affine::scale_non_uniform(self.scale.x, self.scale.y)
             * Affine::translate((-self.anchor.x, -self.anchor.y))
     }
@@ -136,17 +151,22 @@ impl SpatialTransform {
     /// Computes the 4x4 transformation matrix for a 3D rendering pipeline.
     ///
     /// Follows the pivot/anchor transformation sequence:
-    /// `translate(translation + anchor) * rotate(rotation) * scale(scale) * translate(-anchor)`
+    /// `translate(translation + anchor) * rotate(rotation) * skew(skew) * scale(scale) * translate(-anchor)`
     pub fn to_mat4(&self) -> DMat4 {
         let translate_pivot = DMat4::from_translation(self.translation + self.anchor);
         let rotate = DMat4::from_quat(self.rotation);
+        let mut skew = DMat4::IDENTITY;
+        skew.x_axis.y = self.skew.y;
+        skew.y_axis.x = self.skew.x;
         let scale = DMat4::from_scale(self.scale);
         let translate_neg_pivot = DMat4::from_translation(-self.anchor);
 
-        translate_pivot * rotate * scale * translate_neg_pivot
+        translate_pivot * rotate * skew * scale * translate_neg_pivot
     }
 
-    /// Decomposes a 2D affine transformation into translation, scaling, and rotation components.
+    /// Decomposes a 2D affine transformation into translation, rotation,
+    /// horizontal shear and scale (`rotate * skew(x, 0) * scale`), so that
+    /// `to_affine_2d` reproduces it exactly, including reflections.
     pub fn from_affine_2d(affine: &Affine) -> Self {
         let coeffs = affine.as_coeffs();
         let tx = coeffs[4];
@@ -158,14 +178,22 @@ impl SpatialTransform {
         let d = coeffs[3];
 
         let sx = (a * a + b * b).sqrt();
-        let sy = (c * c + d * d).sqrt();
-
         // Extract rotation angle around Z axis
         let angle = b.atan2(a);
+        let (sin, cos) = angle.sin_cos();
+        // The second column, un-rotated, is `(skew.x * sy, sy)`.
+        let sheared = c * cos + d * sin;
+        let sy = d * cos - c * sin;
+        let (sy, skew_x) = if sy.abs() > 1.0e-12 {
+            (sy, sheared / sy)
+        } else {
+            ((c * c + d * d).sqrt(), 0.0)
+        };
 
         let mut transform = Self::new_2d(tx, ty);
         transform.scale = gaanim_core::glam::DVec3::new(sx, sy, 1.0);
         transform.rotation = gaanim_core::glam::DQuat::from_rotation_z(angle);
+        transform.skew = DVec2::new(skew_x, 0.0);
 
         transform
     }
@@ -279,6 +307,41 @@ mod tests {
         // A 180° rotation around (10,0) should keep (10,0) fixed
         assert!((transformed.x - 10.0).abs() < 1e-9);
         assert!((transformed.y - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn skew_shears_about_the_anchor_after_scaling() {
+        let t = SpatialTransform::new_2d(0.0, 0.0)
+            .with_anchor(DVec3::new(0.0, -1.0, 0.0))
+            .with_scale_2d(2.0, 2.0)
+            .with_skew_2d(0.25, 0.0);
+        let affine = t.to_affine_2d();
+        // The anchor stays put; a point one local unit above it is two scaled
+        // units high and leans 0.25 per unit of that height.
+        let base = affine * kurbo::Point::new(0.0, -1.0);
+        let top = affine * kurbo::Point::new(0.0, 0.0);
+        assert!((base - kurbo::Point::new(0.0, -1.0)).hypot() < 1e-9);
+        assert!((top - kurbo::Point::new(0.5, 1.0)).hypot() < 1e-9);
+        let mat4 = t.to_mat4().transform_point3(DVec3::ZERO);
+        assert!((mat4 - DVec3::new(0.5, 1.0, 0.0)).length() < 1e-9);
+    }
+
+    #[test]
+    fn affine_decomposition_round_trips_shear_and_reflection() {
+        for affine in [
+            SpatialTransform::new_2d(1.0, 2.0)
+                .with_rotation_2d(0.7)
+                .with_scale_2d(1.5, 0.5)
+                .with_skew_2d(0.3, 0.0)
+                .to_affine_2d(),
+            Affine::scale_non_uniform(1.0, -2.0),
+            Affine::rotate(0.4) * Affine::skew(0.0, 0.5) * Affine::scale(2.0),
+        ] {
+            let round_trip = SpatialTransform::from_affine_2d(&affine).to_affine_2d();
+            for (left, right) in affine.as_coeffs().iter().zip(round_trip.as_coeffs()) {
+                assert!((left - right).abs() < 1e-9, "{affine:?} != {round_trip:?}");
+            }
+        }
     }
 
     #[test]

@@ -421,11 +421,7 @@ fn edited_ago(project: &ResolvedProject) -> Option<String> {
 
 /// Paths as people write them, without Windows' `\\?\` verbatim prefix.
 fn display_path(path: &Path) -> String {
-    let text = path.display().to_string();
-    match text.strip_prefix(r"\\?\") {
-        Some(rest) => rest.to_owned(),
-        None => text,
-    }
+    gaanim_core::console::plain_path(path).display().to_string()
 }
 
 // ---- Tools on the computer -------------------------------------------------------------

@@ -2,7 +2,7 @@
 
 use gaanim_animation::{PropertySources, ScalarSource};
 use gaanim_core::ObjectId;
-use gaanim_core::glam::{DQuat, DVec3, EulerRot};
+use gaanim_core::glam::{DQuat, DVec2, DVec3, EulerRot};
 use gaanim_core::peniko::{Brush, Color, ImageData, ImageQuality};
 use gaanim_layout::{Anchor, Direction, LayoutItemStyle, LayoutNodeKind, LayoutStyle};
 use gaanim_math::{Bounds3D, RateFunc};
@@ -836,6 +836,8 @@ pub enum LayoutOp {
     SetRotation(f64),
     SetRotation3D(DVec3),
     RotateBy(DQuat),
+    /// Absolute 2D shear factors; see `SpatialTransform::skew`.
+    SetSkew(DVec2),
     /// Scene-space point around which rotation and scaling are performed.
     SetPivot(DVec3),
     MoveAnchorTo {
@@ -1916,6 +1918,11 @@ impl Anim {
         self.update_properties(|properties| {
             properties.scale = Some(PropertyScale::By(DVec3::new(x, y, z)))
         })
+    }
+
+    /// Target absolute 2D shear factors about the drawable's pivot.
+    pub fn skew_to(self, x: f64, y: f64) -> Self {
+        self.update_properties(|properties| properties.skew = Some(DVec2::new(x, y)))
     }
 
     pub fn rotate_by(self, radians: f64) -> Self {

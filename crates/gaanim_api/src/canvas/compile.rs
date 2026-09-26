@@ -8727,6 +8727,9 @@ impl SceneModel {
                 LayoutOp::RotateBy(delta) => {
                     transform.rotation = *delta * transform.rotation;
                 }
+                LayoutOp::SetSkew(skew) => {
+                    transform.skew = *skew;
+                }
                 LayoutOp::SetPivot(pivot) => {
                     pivot_in_scene = Some(*pivot);
                 }
@@ -11939,6 +11942,36 @@ mod tests {
             .find(|(object, _)| object.0 == id)
             .unwrap()
             .1
+    }
+
+    #[test]
+    fn skew_shears_about_the_pivot_and_seeks_exactly() {
+        let mut canvas = SceneModel::new(640, 360);
+        let wall = canvas
+            .rect(2.0, 2.0)
+            .move_to(0.0, 0.0)
+            .with_pivot(0.0, -1.0);
+        canvas.play(vec![wall.animate().skew_to(0.5, 0.0).duration(1.0)]);
+        canvas.wait(1.0);
+        let wall = wall.skew_to(0.0, 0.0);
+        canvas.wait(1.0);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+
+        // The base stays on the pivot; the top leans by skew × height (2).
+        for (time, top_x) in [(0.5, 0.5), (1.5, 1.0), (2.5, 0.0), (0.5, 0.5)] {
+            timeline.seek(&mut world, time);
+            let affine = transform_of(&mut world, &wall).to_affine_2d();
+            let base = affine * Point::new(0.0, -1.0);
+            let top = affine * Point::new(0.0, 1.0);
+            assert!(
+                base.distance(Point::new(0.0, -1.0)) < 1e-6,
+                "{base:?} at {time}"
+            );
+            assert!(
+                top.distance(Point::new(top_x, 1.0)) < 1e-6,
+                "{top:?} at {time}"
+            );
+        }
     }
 
     #[test]

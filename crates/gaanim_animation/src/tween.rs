@@ -117,6 +117,11 @@ pub enum PropertyLens {
         from: gaanim_core::glam::DVec3,
         to: gaanim_core::glam::DVec3,
     },
+    /// 2D shear factors; see `SpatialTransform::skew`.
+    Skew {
+        from: gaanim_core::glam::DVec2,
+        to: gaanim_core::glam::DVec2,
+    },
 
     // === Visuals ===
     Opacity {
@@ -342,6 +347,7 @@ impl std::fmt::Debug for PropertyLens {
             Self::Rotation { from, to } => write!(f, "Rotation({:?} -> {:?})", from, to),
             Self::RotationZ { from, radians } => write!(f, "RotationZ({from:?} + {radians})"),
             Self::Scale { from, to } => write!(f, "Scale({:?} -> {:?})", from, to),
+            Self::Skew { from, to } => write!(f, "Skew({:?} -> {:?})", from, to),
             Self::Opacity { from, to } => write!(f, "Opacity({} -> {})", from, to),
             Self::FillColor { from, to } => write!(f, "FillColor({:?} -> {:?})", from, to),
             Self::FillPaint { from, to } => write!(f, "FillPaint({from:?} -> {to:?})"),
@@ -528,6 +534,11 @@ pub fn evaluate_tweens_system(
             PropertyLens::Scale { from, to } => {
                 if let Ok(mut transform) = transforms.get_mut(tween.target) {
                     transform.scale = from.lerp(*to, t);
+                }
+            }
+            PropertyLens::Skew { from, to } => {
+                if let Ok(mut transform) = transforms.get_mut(tween.target) {
+                    transform.skew = from.lerp(*to, t);
                 }
             }
             PropertyLens::Opacity { from, to } => {

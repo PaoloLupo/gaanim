@@ -1,5 +1,5 @@
 use gaanim_core::ObjectId;
-use gaanim_core::glam::{DQuat, DVec3};
+use gaanim_core::glam::{DQuat, DVec2, DVec3};
 use gaanim_core::peniko::Color;
 use gaanim_layout::Anchor;
 use gaanim_math::RateFunc;
@@ -100,6 +100,8 @@ pub struct PropertyAnimation {
     pub translation: Option<PropertyTranslation>,
     pub rotation: Option<PropertyRotation>,
     pub scale: Option<PropertyScale>,
+    /// Absolute 2D shear factors.
+    pub skew: Option<DVec2>,
     pub opacity: Option<f32>,
     pub fill: Option<gaanim_core::peniko::Brush>,
     pub stroke_color: Option<gaanim_core::peniko::Brush>,
@@ -131,6 +133,7 @@ impl PropertyAnimation {
             && self.translation.is_none()
             && self.rotation.is_none()
             && self.scale.is_none()
+            && self.skew.is_none()
             && self.opacity.is_none()
             && self.fill.is_none()
             && self.stroke_color.is_none()
@@ -144,7 +147,10 @@ impl PropertyAnimation {
 
     pub(crate) fn is_transform_only(&self) -> bool {
         self.source_targets.is_empty()
-            && (self.translation.is_some() || self.rotation.is_some() || self.scale.is_some())
+            && (self.translation.is_some()
+                || self.rotation.is_some()
+                || self.scale.is_some()
+                || self.skew.is_some())
             && self.opacity.is_none()
             && self.fill.is_none()
             && self.stroke_color.is_none()
@@ -316,6 +322,10 @@ pub enum AnimationType {
     },
     ScaleBy3D {
         factor: DVec3,
+    },
+    /// Absolute 2D shear factors; see `SpatialTransform::skew`.
+    SkewTo {
+        to: DVec2,
     },
     FadeTo {
         to: f32,

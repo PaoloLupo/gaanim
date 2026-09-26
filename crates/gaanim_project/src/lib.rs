@@ -459,10 +459,66 @@ trait CommandRunner {
 
 struct SystemRunner;
 
+/// How long one probe may run. Probes answer in well under a second; a probe
+/// that blocks (a launcher prompting or downloading a runtime, a uv lock held
+/// by another process) is abandoned so detection never hangs.
+const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 impl CommandRunner for SystemRunner {
     fn output(&self, program: &OsStr, args: &[OsString]) -> Option<Output> {
-        python_command(program).args(args).output().ok()
+        let mut command = python_command(program);
+        command
+            .args(args)
+            // The Windows Python install manager's `py` otherwise offers to
+            // install a missing runtime, which downloads or waits for input.
+            .env("PYTHON_MANAGER_AUTOMATIC_INSTALL", "false")
+            .env("PYTHON_MANAGER_CONFIRM", "false");
+        output_with_timeout(command, PROBE_TIMEOUT)
     }
+}
+
+/// `Command::output` with a deadline: the child is killed once it expires.
+fn output_with_timeout(mut command: Command, timeout: std::time::Duration) -> Option<Output> {
+    use std::io::Read;
+    use std::process::Stdio;
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .ok()?;
+    // Drain both pipes on threads so a chatty child cannot block on a full pipe.
+    let drain = |pipe: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_end(&mut bytes);
+            }
+            bytes
+        })
+    };
+    let stdout = drain(child.stdout.take().map(|pipe| Box::new(pipe) as _));
+    let stderr = drain(child.stderr.take().map(|pipe| Box::new(pipe) as _));
+    let deadline = std::time::Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                // Grandchildren may still hold the pipes open; do not wait on them.
+                return None;
+            }
+        }
+    };
+    Some(Output {
+        status,
+        stdout: stdout.join().unwrap_or_default(),
+        stderr: stderr.join().unwrap_or_default(),
+    })
 }
 
 fn detect_environment_with(
@@ -814,6 +870,33 @@ fn prepend_to_path(path: impl AsRef<Path>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn probes_that_block_are_abandoned() {
+        let sleeper = |seconds: &str| {
+            if cfg!(windows) {
+                let mut command = Command::new("powershell");
+                command.args([
+                    "-NoProfile",
+                    "-Command",
+                    &format!("Start-Sleep {seconds}; 'done'"),
+                ]);
+                command
+            } else {
+                let mut command = Command::new("sh");
+                command.args(["-c", &format!("sleep {seconds}; echo done")]);
+                command
+            }
+        };
+        let started = std::time::Instant::now();
+        assert!(
+            output_with_timeout(sleeper("30"), std::time::Duration::from_millis(500)).is_none()
+        );
+        assert!(started.elapsed() < std::time::Duration::from_secs(20));
+        let output = output_with_timeout(sleeper("0"), std::time::Duration::from_secs(30)).unwrap();
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "done");
+    }
 
     #[test]
     fn only_video_and_slides_are_project_kinds() {
