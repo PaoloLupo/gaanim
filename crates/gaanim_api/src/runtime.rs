@@ -61,9 +61,7 @@ fn replay_prepared<R>(
             return None;
         }
     };
-    if canvas.theme.is_some() {
-        text_config = canvas.themed_text_config();
-    }
+    text_config = canvas.scene_text_config(&text_config);
     canvas.register_theme_fonts(&mut font_registry);
 
     let result = {
@@ -234,13 +232,8 @@ pub fn replay_canvas_incremental(
 }
 
 fn scene_fingerprints(world: &mut World, canvas: &SceneModel) -> Option<SceneFingerprints> {
-    let text_config = if canvas.theme.is_some() {
-        canvas.themed_text_config()
-    } else {
-        world
-            .get_resource::<gaanim_text::prelude::TextConfig>()?
-            .clone()
-    };
+    let text_config =
+        canvas.scene_text_config(world.get_resource::<gaanim_text::prelude::TextConfig>()?);
     let mut fonts = world.get_resource_mut::<gaanim_text::font::FontRegistry>()?;
     canvas.register_theme_fonts(&mut fonts);
     Some(canvas.fingerprints(&text_config, &fonts))

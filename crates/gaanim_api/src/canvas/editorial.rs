@@ -870,7 +870,7 @@ impl SceneModel {
         let panel = theme_color("panel", Color::from_rgb8(0x10, 0x16, 0x20));
         let tone = match style.variant {
             EditorialVariant::Neutral => theme_color("muted", Color::from_rgb8(0x94, 0xA3, 0xB8)),
-            EditorialVariant::Accent => theme_color("accent", Color::from_rgb8(0x5B, 0x8F, 0xC9)),
+            EditorialVariant::Accent => theme_color("accent", Color::from_rgb8(0xF2, 0xA5, 0x41)),
             EditorialVariant::Success => theme_color("success", SUCCESS),
             EditorialVariant::Warning => theme_color("warning", WARNING),
             EditorialVariant::Danger => theme_color("danger", DANGER),

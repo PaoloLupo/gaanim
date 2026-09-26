@@ -3,7 +3,7 @@
 import math
 import os
 
-from gaanim import BLACK, Axis, RED, Scene
+from gaanim import Axis, RED, Scene
 
 scene = Scene(frame=(16, 9))
 k = scene.viz.variable(1.0, label="$k$", format=".1f", color=RED)
@@ -16,7 +16,7 @@ area = scene.viz.readout(
     label="$A$",
     unit="$m^2$",
 )
-area.move_to(4.5, 2.75).fill(BLACK)
+area.move_to(4.5, 2.75)
 k.move_to(-4.5, 2.75)
 
 scene.play([k.animate.create(), area.animate.create(), axes.animate.create(), curve.animate.write()])

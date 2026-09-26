@@ -11,6 +11,6 @@ page.add(scene.text("Place").fill(WHITE))
 scene.wait(2.25)
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
-    scene.snapshots(snapshots, [0.0, 0.8, 1.6, 3.0])
+    scene.snapshots(snapshots, [0.0, 0.8, 1.6, 2.2])
 else:
     scene.render()

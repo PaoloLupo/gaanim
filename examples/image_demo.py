@@ -7,14 +7,8 @@ from gaanim import Anchor, GOLD, WHITE, Scene
 
 
 scene = Scene(frame=(16, 9))
-source = (
-    Path(__file__).resolve().parents[1]
-    / "tests"
-    / "visual"
-    / "transform_demo"
-    / "baseline"
-    / "seek_0008_t_12_900000.png"
-)
+# A checked-in, generated brand image: stable input for the fit modes below.
+source = Path(__file__).resolve().parents[1] / "docs" / "assets" / "brand" / "gaanim-social.png"
 
 title = scene.text("ImageMobject", role="title").fill(WHITE).move_to(0, 3.666667, anchor=Anchor.CENTER)
 # Loading the same path repeatedly reuses the process-local decoded texture cache.
@@ -26,7 +20,7 @@ crop = (
         width=4.166667,
         height=2.5,
         fit="stretch",
-        crop=(360, 190, 960, 540),
+        crop=(320, 160, 640, 320),
     )
     .move_to(5, 0.333333)
     .opacity(0.78)

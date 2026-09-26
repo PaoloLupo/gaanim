@@ -1931,6 +1931,11 @@ mod tests {
     fn scene_preflight_warns_about_white_on_white_defaults() {
         let mut canvas = gaanim_api::canvas::SceneModel::new(16.0, 9.0);
         canvas.wait(1.0);
+        assert!(
+            scene_preflight(&canvas, "").warnings.is_empty(),
+            "new scenes use the default theme"
+        );
+        canvas.clear_theme();
         let report = scene_preflight(&canvas, "");
         assert_eq!(report.warnings.len(), 1, "{:?}", report.warnings);
         assert!(report.warnings[0].contains("no theme is active"));

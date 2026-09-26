@@ -209,9 +209,9 @@ def _state(index: int, current: int | None) -> NavigationState:
     return "current" if index == current else "done"
 
 
-# Roles of the neutral custom theme, used when the scene has no theme.
+# Roles of the default "technical" theme, used after `set_theme(None)`.
 _FALLBACK_COLORS = {
-    "foreground": "#E2E8F0", "muted": "#94A3B8", "accent": "#5B8FC9", "rule": "#5B7088",
+    "foreground": "#E6E6E6", "muted": "#A0A0A0", "accent": "#F2A541", "rule": "#707070",
 }
 
 

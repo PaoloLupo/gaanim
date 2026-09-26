@@ -352,11 +352,5 @@ inglés (Fase 4).
 Ejecutar todos los ejemplos destapó comportamientos del runtime que la
 documentación ahora describe tal como son, pero que conviene corregir en código:
 
-- Decisión pendiente: `Scene()` sin fondo ni tema dibuja blanco sobre blanco.
-  Nunca hubo tema por defecto (los temas nacieron con `theme: None`), así que
-  no se cambió el valor visible; `gaanim check` ahora lo avisa.
-- Decisión pendiente: `scene.media.svg` importa a una unidad por píxel SVG
-  (el paso a unidades lógicas no tocó el importador). La escala está
-  documentada y `examples/svg_demo.py` usa `scale_to(1.35 / 60)`.
 - 3D (experimental): la exportación nativa necesita una ventana (Xvfb en CI),
   registra errores "use-after-free" de Bevy y un modelo `robot.glb` no apareció en la exportación.

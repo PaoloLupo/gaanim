@@ -878,7 +878,7 @@ pub fn resolve_fill_level_system(
                 &mask,
                 &band,
                 gaanim_objects::boolean::BooleanOp::Intersection,
-                0.25,
+                gaanim_objects::boolean::FLATTEN_TOLERANCE,
                 gaanim_objects::boolean::BooleanFillRule::NonZero,
             );
             let mut output =

@@ -39,7 +39,7 @@ Las claves desconocidas se ignoran.
 === `kind`
 
 `"video"` y `"slides"` distinguen los dos tipos de proyecto en el Inicio y en
-el starter de `gaanim init`. No cambian cómo se ejecuta ni cómo se exporta la
+la plantilla de `gaanim init`. No cambian cómo se ejecuta ni cómo se exporta la
 escena: `gaanim check` aplica las comprobaciones de presentación cuando la
 escena usa segmentos, sea cual sea su `kind`. Los valores antiguos
 `"presentation"` y `"thesis"` producen un error que pide cambiarlos por

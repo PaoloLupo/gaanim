@@ -11,6 +11,56 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= Próxima versión
+
+Cambios todavía sin publicar.
+
+== Al actualizar
+
+- `Scene()` usa por defecto el tema `technical`: fondo gris casi negro
+  `#121212`, texto y ejes claros y formas sin color propio rellenas con el
+  acento ámbar `#F2A541`. Antes una escena empezaba sin tema y en blanco, y el
+  texto y las formas sin color no se veían. `scene.canvas.theme` vale
+  `"technical"`, y `scene.canvas.color(...)` y `validate_theme()` ya no lanzan
+  `ValueError` en una escena nueva.
+- El tema `technical` (y `Theme()` sin base) cambia su fondo azulado
+  `#0B1018` por el gris neutro `#121212`, con texto `#E6E6E6`, texto atenuado
+  `#A0A0A0`, panel `#1C1C1C`, cabecera `#2A2A2A` y regla `#707070`, y sus
+  acentos azules por un ámbar `#F2A541` (formas y énfasis) y un gris neutro
+  `#BDBDBD` para los datos de los gráficos: ningún color del tema tiene tinte
+  azul.
+- El tema `presentation` usa la misma base neutra: fondo `#121212` (antes el
+  azul marino `#070B16`), texto `#F2F2F2`, texto atenuado `#A8A8A8` y paneles
+  y reglas grises; conserva sus títulos y acentos dorados, y sus gráficos
+  pasan del azul `#5B8FFF` al coral `#F4845F`.
+- Las operaciones booleanas (`union`, `intersection`, `difference`, `xor`) y
+  las máscaras de `fill_level` aproximan las curvas con una tolerancia de
+  `0.0025` unidades en lugar de `0.25`, un valor que había quedado en escala de
+  píxeles: los círculos vuelven a salir suaves en vez de poligonales.
+- `scene.viz.matrix(...)` vuelve a aplicar los valores documentados en
+  unidades lógicas: `row_gap` y `column_gap` de `0.24` (antes `24`) y un
+  delimitador automático de `max(0.72, 0.6 × filas)` (antes
+  `max(72, 60 × filas)`). Con los valores en píxeles, una matriz de 3 × 3 dejaba
+  sus entradas fuera del marco y el paréntesis de una de 2 × 2 lo tapaba entero;
+  las matrices con separaciones y `delimiter_size` explícitos no cambian.
+- Lo explícito sigue ganando: `Scene(background=...)` conserva su fondo,
+  `Scene(theme=...)` y `scene.canvas.set_theme(...)` sustituyen al tema
+  predeterminado y los colores de cada objeto ganan a los del tema.
+- Para recuperar el lienzo anterior, sin tema y blanco, usa
+  `Scene(theme=None)` o `scene.canvas.set_theme(None)`; `gaanim check` avisa
+  si el texto y las formas sin color no se verían sobre el fondo.
+- En el stub, los nombres de tema tienen el tipo `ThemeName`, así que el
+  editor autocompleta los temas incluidos y sus alias.
+- `scene.media.svg(path)` importa el documento a 100 píxeles SVG por unidad
+  lógica, la misma equivalencia que el resto del motor (un trazo de 3 px mide
+  0.03, como el trazo por defecto), en lugar de una unidad por píxel. Un SVG de
+  360 × 220 px ahora mide 3.6 × 2.2 unidades en vez de desbordar el marco de
+  16 × 9; los trazos, degradados, `clipPath`, texto y filtros del archivo
+  escalan igual. Es un cambio incompatible: si tus escenas compensaban la
+  escala anterior con `scale_to(f)` o `scale_by(f)`, multiplica ese factor por
+  100 (`scale_to(0.025)` pasa a `scale_to(2.5)`) o quítalo si el tamaño
+  natural te sirve. Los anchos fijados con `.stroke(color, ancho)` no cambian.
+
 = 0.4.1
 
 Versión de correcciones sobre 0.4.0.

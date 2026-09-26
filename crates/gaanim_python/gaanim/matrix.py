@@ -282,12 +282,25 @@ class MatrixDerivation:
         return MatrixSelectionAnimation._from_animations(animations)
 
 
+# Layout defaults in logical scene units (a default frame is 16x9). They must
+# match ``Visualization.matrix`` in gaanim_core.pyi; pixel-sized values here
+# would place a small matrix far outside the frame.
+_DEFAULT_ROW_GAP = 0.24
+_DEFAULT_COLUMN_GAP = 0.24
+_DEFAULT_DELIMITER_GAP = 0.12
+
+
+def _default_delimiter_size(rows: int) -> float:
+    """Automatic delimiter font size, in logical units, spanning ``rows`` entries."""
+    return max(0.72, 0.6 * rows)
+
+
 def _build_matrix(scene: Any, data: Any, **options: Any) -> Matrix:
     values = _matrix_rows(data)
     _validate_rectangular(values)
-    row_gap = _non_negative(float(options.get("row_gap", 24.0)), "row_gap")
-    column_gap = _non_negative(float(options.get("column_gap", 24.0)), "column_gap")
-    delimiter_gap = _non_negative(float(options.get("delimiter_gap", 0.12)), "delimiter_gap")
+    row_gap = _non_negative(float(options.get("row_gap", _DEFAULT_ROW_GAP)), "row_gap")
+    column_gap = _non_negative(float(options.get("column_gap", _DEFAULT_COLUMN_GAP)), "column_gap")
+    delimiter_gap = _non_negative(float(options.get("delimiter_gap", _DEFAULT_DELIMITER_GAP)), "delimiter_gap")
     delimiter = options.get("delimiters", "brackets")
     row_labels, column_labels = options.get("row_labels"), options.get("column_labels")
     cell_mode, label_mode = options.get("cell_mode", "math"), options.get("label_mode", "math")
@@ -328,7 +341,7 @@ def _build_matrix(scene: Any, data: Any, **options: Any) -> Matrix:
             items.append(scene.layout.item(label, row=0, column=column + entry_column_offset, align="center"))
     delimiter_cells = []
     requested_size = options.get("delimiter_size")
-    size = float(requested_size) if requested_size is not None else max(72.0, 60.0 * len(values))
+    size = float(requested_size) if requested_size is not None else _default_delimiter_size(len(values))
     weight = int(options.get("delimiter_weight", 300))
     if not 100 <= weight <= 900: raise ValueError("delimiter_weight must be between 100 and 900")
     if has_delimiters:

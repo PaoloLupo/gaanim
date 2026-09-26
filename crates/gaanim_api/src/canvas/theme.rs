@@ -236,58 +236,69 @@ impl CanvasTheme {
         "catppuccin-latte",
     ];
 
-    /// A neutral custom theme that can be overridden role by role.
+    /// Alternative names accepted by [`CanvasTheme::builtin`], with the
+    /// canonical built-in each one selects.
+    pub const BUILTIN_ALIASES: &'static [(&'static str, &'static str)] = &[
+        ("scientific", "technical"),
+        ("deck", "presentation"),
+        ("light", "paper"),
+        ("gruvbox", "gruvbox-dark"),
+        ("tokyo", "tokyo-night"),
+        ("catppuccin", "catppuccin-mocha"),
+        ("mocha", "catppuccin-mocha"),
+        ("latte", "catppuccin-latte"),
+    ];
+
+    /// Built-in theme every new [`SceneModel`](crate::canvas::SceneModel)
+    /// starts with. [`SceneModel::clear_theme`](crate::canvas::SceneModel::clear_theme)
+    /// removes it.
+    pub const DEFAULT_NAME: &'static str = "technical";
+
+    /// Quiet neutral dark palette of the `technical` theme: a near-black
+    /// neutral background with light gray text, neutral gray data and a warm
+    /// amber accent (no blue tints).
+    pub const TECHNICAL_PALETTE: ThemePalette = ThemePalette {
+        background: rgb(0x121212),
+        foreground: rgb(0xE6E6E6),
+        muted: rgb(0xA0A0A0),
+        title: rgb(0xFAFAFA),
+        accent: rgb(0xF2A541),
+        chart: rgb(0xBDBDBD),
+        panel: rgb(0x1C1C1C),
+        header: rgb(0x2A2A2A),
+        rule: rgb(0x707070),
+    };
+
+    /// A neutral custom theme, using the `technical` palette, that can be
+    /// overridden role by role.
     pub fn custom(name: impl Into<String>) -> Self {
-        Self::from_palette(
-            name,
-            ThemePalette {
-                background: rgb(0x0B1018),
-                foreground: rgb(0xE2E8F0),
-                muted: rgb(0x94A3B8),
-                title: rgb(0xF8FAFC),
-                accent: rgb(0x5B8FC9),
-                chart: rgb(0x4C78A8),
-                panel: rgb(0x101620),
-                header: rgb(0x162B46),
-                rule: rgb(0x5B7088),
-            },
-        )
+        Self::from_palette(name, Self::TECHNICAL_PALETTE)
+    }
+
+    /// The built-in theme selected by the default for new scenes.
+    pub fn default_builtin() -> Self {
+        Self::builtin(Self::DEFAULT_NAME).expect("the default theme is built in")
     }
 
     pub fn builtin(name: &str) -> Result<Self, ThemeError> {
         let normalized = name.to_ascii_lowercase();
-        let canonical = match normalized.as_str() {
-            "scientific" => "technical",
-            "deck" => "presentation",
-            "light" => "paper",
-            "gruvbox" => "gruvbox-dark",
-            "tokyo" => "tokyo-night",
-            "catppuccin" | "mocha" => "catppuccin-mocha",
-            "latte" => "catppuccin-latte",
-            other => other,
-        };
+        let canonical = Self::BUILTIN_ALIASES
+            .iter()
+            .find(|(alias, _)| *alias == normalized)
+            .map_or(normalized.as_str(), |(_, canonical)| *canonical);
         let palette = match canonical {
-            "technical" => ThemePalette {
-                background: rgb(0x0B1018),
-                foreground: rgb(0xE2E8F0),
-                muted: rgb(0x94A3B8),
-                title: rgb(0xF8FAFC),
-                accent: rgb(0x5B8FC9),
-                chart: rgb(0x4C78A8),
-                panel: rgb(0x101620),
-                header: rgb(0x162B46),
-                rule: rgb(0x5B7088),
-            },
+            "technical" => Self::TECHNICAL_PALETTE,
+            // Same neutral near-black base as `technical`, with gold titles.
             "presentation" => ThemePalette {
-                background: rgb(0x070B16),
-                foreground: rgb(0xF4F7FB),
-                muted: rgb(0x9EACC3),
+                background: rgb(0x121212),
+                foreground: rgb(0xF2F2F2),
+                muted: rgb(0xA8A8A8),
                 title: rgb(0xFFD166),
                 accent: rgb(0xFFD166),
-                chart: rgb(0x5B8FFF),
-                panel: rgb(0x10182B),
-                header: rgb(0x17233D),
-                rule: rgb(0x384766),
+                chart: rgb(0xF4845F),
+                panel: rgb(0x1C1C1C),
+                header: rgb(0x2A2A2A),
+                rule: rgb(0x707070),
             },
             "paper" => ThemePalette {
                 background: Color::WHITE,
@@ -862,7 +873,7 @@ fn text_role(role: &str) -> Result<TextRole, String> {
     }
 }
 
-fn rgb(value: u32) -> Color {
+const fn rgb(value: u32) -> Color {
     Color::from_rgb8(
         ((value >> 16) & 0xff) as u8,
         ((value >> 8) & 0xff) as u8,
@@ -1030,6 +1041,8 @@ const UNTHEMED_MINIMUM_CONTRAST: f64 = 1.5;
 impl crate::canvas::SceneModel {
     /// Preflight warning for scenes whose unstyled objects would vanish.
     ///
+    /// New scenes use the default theme, so this only applies after
+    /// [`SceneModel::clear_theme`](crate::canvas::SceneModel::clear_theme).
     /// Without a theme, text, shapes and axes default to the text
     /// configuration's white foreground, and the background defaults to white.
     /// Returns a warning when that foreground is indistinguishable from the
@@ -1049,8 +1062,8 @@ impl crate::canvas::SceneModel {
             format!(
                 "no theme is active and the background #{:02x}{:02x}{:02x} has {ratio:.2}:1 \
                  contrast with the default white text, shapes and axes; objects without an \
-                 explicit color will be invisible. Use `Scene(theme=\"technical\")` (or \
-                 another theme) or a contrasting `background=`",
+                 explicit color will be invisible. Keep a theme (omit `theme=None`, or call \
+                 `scene.canvas.set_theme(\"technical\")`) or use a contrasting `background=`",
                 rgba.r, rgba.g, rgba.b
             )
         })
@@ -1136,9 +1149,14 @@ mod tests {
     #[test]
     fn unthemed_white_scenes_warn_about_invisible_defaults() {
         let mut canvas = crate::canvas::SceneModel::new(16.0, 9.0);
+        assert!(
+            canvas.unthemed_contrast_warning().is_none(),
+            "the default theme keeps new scenes readable"
+        );
+        canvas.clear_theme();
         let warning = canvas
             .unthemed_contrast_warning()
-            .expect("default scene is white on white");
+            .expect("an unthemed scene is white on white");
         assert!(
             warning.contains("#ffffff") && warning.contains("theme"),
             "{warning}"
@@ -1150,6 +1168,35 @@ mod tests {
         canvas.background = None;
         canvas.set_theme("technical").unwrap();
         assert!(canvas.unthemed_contrast_warning().is_none());
+    }
+
+    #[test]
+    fn aliases_select_their_canonical_builtin() {
+        for (alias, canonical) in CanvasTheme::BUILTIN_ALIASES {
+            assert!(CanvasTheme::BUILTIN_NAMES.contains(canonical), "{alias}");
+            assert!(!CanvasTheme::BUILTIN_NAMES.contains(alias), "{alias}");
+            assert_eq!(CanvasTheme::builtin(alias).unwrap().name, *canonical);
+        }
+        assert!(CanvasTheme::BUILTIN_NAMES.contains(&CanvasTheme::DEFAULT_NAME));
+    }
+
+    #[test]
+    fn technical_theme_is_neutral_dark_and_readable() {
+        let theme = CanvasTheme::default_builtin();
+        assert_eq!(theme.name, "technical");
+        assert_eq!(theme.palette.background, rgb(0x121212));
+        let bg = theme.palette.background.to_rgba8();
+        assert!(
+            bg.r == bg.g && bg.g == bg.b,
+            "the background is a neutral gray"
+        );
+        assert!(theme.validate().is_empty(), "{:?}", theme.validate());
+        assert!(
+            contrast_ratio(theme.palette.rule, theme.palette.background) >= 3.0,
+            "grid/rule lines stay visible"
+        );
+        assert!(contrast_ratio(theme.palette.accent, theme.palette.background) >= 4.5);
+        assert_eq!(CanvasTheme::custom("x").palette, theme.palette);
     }
 
     #[test]

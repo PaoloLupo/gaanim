@@ -3,7 +3,7 @@
 import math
 import os
 
-from gaanim import BLUE, GOLD, RED, Axis, Scene, computed
+from gaanim import GOLD, RED, Axis, Scene, computed
 
 
 scene = Scene(frame=(16, 9))
@@ -19,7 +19,7 @@ plane = scene.viz.cartesian_2d(
 curve = plane.plot(
     lambda x, scale, offset: scale * math.sin(x + offset) if x >= 0 else scale * math.cos(x - offset),
     inputs=[amplitude, phase],
-).stroke(BLUE, 0.05)
+).stroke("#60a5fa", 0.05)
 
 pulse = computed(
     lambda scale, t: 42.0 + 8.0 * scale * math.sin(t),

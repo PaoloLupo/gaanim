@@ -21,6 +21,36 @@ CurveControl: TypeAlias = CurvePoint | Literal["auto"] | None
 CurveCommand: TypeAlias = tuple[str, Sequence[CurvePoint | CurveControl]]
 """A ``Scene.path`` or ``Scene.curve`` command and its arguments."""
 
+ThemeName: TypeAlias = Literal[
+    "technical",
+    "presentation",
+    "paper",
+    "dracula",
+    "nord",
+    "solarized-dark",
+    "solarized-light",
+    "gruvbox-dark",
+    "tokyo-night",
+    "catppuccin-mocha",
+    "catppuccin-latte",
+    "scientific",
+    "deck",
+    "light",
+    "gruvbox",
+    "tokyo",
+    "catppuccin",
+    "mocha",
+    "latte",
+]
+"""A built-in theme name or alias accepted by ``Scene(theme=...)``,
+``Canvas.set_theme`` and ``Theme(base)``. Matching ignores case.
+
+Aliases: ``scientific`` → ``technical``, ``deck`` → ``presentation``,
+``light`` → ``paper``, ``gruvbox`` → ``gruvbox-dark``, ``tokyo`` →
+``tokyo-night``, ``catppuccin``/``mocha`` → ``catppuccin-mocha`` and
+``latte`` → ``catppuccin-latte``. ``Theme.schemes()`` lists the canonical names.
+"""
+
 class EasingCurve:
     """A discoverable curve family used by the typed ``Easing`` factories."""
     QUADRATIC: ClassVar[EasingCurve]
@@ -375,7 +405,7 @@ class Theme:
     """Reusable semantic colors, typography, fonts, and Layout v2 tokens."""
     def __init__(
         self,
-        base: Optional[str | Theme] = None,
+        base: Optional[ThemeName | Theme] = None,
         *,
         name: Optional[str] = None,
         colors: Optional[dict[str, ColorLike]] = None,
@@ -392,8 +422,10 @@ class Theme:
     ) -> None:
         """Create or derive a centralized visual theme.
 
-        Rules use family/type/part selectors or ``.classes``. Text values reuse
-        the structured ``TextStyle`` overlay.
+        ``base`` is a built-in name or alias (see ``ThemeName``) or another
+        Theme. Without ``base`` the theme starts from the ``technical``
+        palette. Rules use family/type/part selectors or ``.classes``. Text
+        values reuse the structured ``TextStyle`` overlay.
 
         ``font_dir`` embeds every ``.ttf``, ``.otf``, ``.ttc`` and ``.otc``
         file directly inside the directory (not subdirectories). Each face is
@@ -429,7 +461,7 @@ class Theme:
         ...
     @staticmethod
     def schemes() -> list[str]:
-        """Use schemes on this Theme or create the requested value.
+        """Canonical built-in theme names, without aliases.
 
         Example:
             result = Theme.schemes()
@@ -2953,11 +2985,23 @@ class Canvas:
     def theme(self) -> Optional[str]:
         """Name of the active built-in or custom theme; ``None`` without one.
 
-        Read-only: change it with ``set_theme``.
+        New scenes report ``"technical"``. Read-only: change it with
+        ``set_theme``.
         """
         ...
-    def set_theme(self, theme: str | Theme) -> None:
-        """Apply a built-in color scheme or a custom Theme."""
+    def set_theme(self, theme: ThemeName | Theme | None) -> None:
+        """Apply a built-in color scheme or a custom Theme; ``None`` removes it.
+
+        The theme background replaces the current one unless the scene was
+        created with an explicit ``background=``. ``None`` leaves a plain
+        canvas: white background (unless one was set explicitly) and white
+        default text, shapes and axes, so give objects explicit colors.
+        ``color`` and ``validate_theme`` raise ``ValueError`` without a theme.
+        Unknown names raise ``ValueError``; other types raise ``TypeError``.
+
+        Example:
+            scene.canvas.set_theme("paper")
+        """
         ...
     def set_fonts(
         self,
@@ -2981,13 +3025,18 @@ class Canvas:
         """
         ...
     def color(self, role: str) -> Color:
-        """Resolve a semantic color from the active theme."""
+        """Resolve a semantic color from the active theme.
+
+        Raises ``ValueError`` for unknown roles or after ``set_theme(None)``.
+        """
         ...
     def layout_token(self, name: str) -> float:
         """Resolve a spacing/layout token from the theme or default scale."""
         ...
     def validate_theme(self) -> list[str]:
-        """Configure the canvas with validate theme.
+        """Return readability warnings for the active theme; empty when it passes.
+
+        Raises ``ValueError`` after ``set_theme(None)``.
 
         Example:
             result = scene.canvas.validate_theme()
@@ -4519,21 +4568,23 @@ class Geometry:
             result = scene.group([drawable])
         """
         ...
-    def union(self, *operands: Drawable, live: bool = False, tolerance: float = 0.25, rule: Literal["nonzero", "evenodd"] = "nonzero") -> Drawable:
+    def union(self, *operands: Drawable, live: bool = False, tolerance: float = 0.0025, rule: Literal["nonzero", "evenodd"] = "nonzero") -> Drawable:
         """Return the union of at least two vector drawables.
 
         Sources remain available. With ``live=True`` the result follows source
-        path and transform changes; invalid scenes, operands, rules, or
-        tolerances raise ``ValueError``.
+        path and transform changes. ``tolerance`` is the maximum error, in
+        scene units, when curves are flattened; the default ``0.0025`` (about
+        0.3 px at 1080p) keeps circles smooth. Invalid scenes, operands,
+        rules, or tolerances raise ``ValueError``.
         """
         ...
-    def intersection(self, *operands: Drawable, live: bool = False, tolerance: float = 0.25, rule: Literal["nonzero", "evenodd"] = "nonzero") -> Drawable:
+    def intersection(self, *operands: Drawable, live: bool = False, tolerance: float = 0.0025, rule: Literal["nonzero", "evenodd"] = "nonzero") -> Drawable:
         """Return the shared vector area of at least two drawables."""
         ...
-    def difference(self, subject: Drawable, *clips: Drawable, live: bool = False, tolerance: float = 0.25, rule: Literal["nonzero", "evenodd"] = "nonzero") -> Drawable:
+    def difference(self, subject: Drawable, *clips: Drawable, live: bool = False, tolerance: float = 0.0025, rule: Literal["nonzero", "evenodd"] = "nonzero") -> Drawable:
         """Subtract each clip from the subject in deterministic left-to-right order."""
         ...
-    def xor(self, *operands: Drawable, live: bool = False, tolerance: float = 0.25, rule: Literal["nonzero", "evenodd"] = "nonzero") -> Drawable:
+    def xor(self, *operands: Drawable, live: bool = False, tolerance: float = 0.0025, rule: Literal["nonzero", "evenodd"] = "nonzero") -> Drawable:
         """Return the symmetric difference of at least two vector drawables."""
         ...
     def fill_level(self, mask: Drawable, paint: Paint, level: Optional[ScalarSource] = None, *, direction: Literal["up", "down", "left", "right"] = "up", keep_outline: bool = True) -> Drawable:
@@ -5030,15 +5081,19 @@ class MediaLibrary:
     def svg(self, path: str) -> Drawable:
         """Import an SVG as a hierarchy of vector paths addressable with ``part(id)``.
 
-        Geometry is imported at one scene unit per SVG pixel of the document
-        size (``width``/``height``, or the ``viewBox`` when those are absent),
-        centered on the origin. A 16x9 frame is 16 units wide, so a typical
-        360-pixel SVG must be scaled down: ``scale_to(target_width / 360)``
-        gives it ``target_width`` scene units. Fluent stroke widths stay in
-        logical scene units and are not reduced by that scale.
+        The document is imported at 100 SVG pixels per logical scene unit, the
+        same factor the rest of the engine uses (a 0.03 default stroke is a
+        3 px stroke), centered on the origin. The pixel size is the document
+        ``width``/``height``, or the ``viewBox`` when those are absent: a
+        360x220 px SVG spans 3.6x2.2 units of the 16x9 frame. Stroke widths,
+        gradients, clip paths, text outlines and filter lengths scale with the
+        geometry. ``scale_to(factor)`` resizes the whole import; fluent stroke
+        widths set on the root stay in logical scene units and are not
+        affected by that scale.
 
         Example:
-            logo = scene.media.svg("assets/logo.svg").scale_to(4 / 360)  # 4 units wide
+            logo = scene.media.svg("assets/logo.svg")  # 120 px -> 1.2 units
+            big = scene.media.svg("assets/logo.svg").scale_to(4 / 1.2)  # 4 units wide
         """
         ...
     def gltf(self, path: str, *, scene: str | int | None = None) -> Drawable:
@@ -5152,7 +5207,10 @@ class Visualization:
     ) -> Cartesian3D:
         """Create typed 3D axes with independently selectable planes and annotations.
 
-        ``xy_grid``, ``xz_grid`` and ``yz_grid`` override ``grid`` when set;
+        ``size`` is the full world-space extent of the axes box along x, y and
+        z in logical scene units (the same units as the camera ``eye``), not
+        pixels and not a per-data-unit scale; choose it relative to the camera
+        distance. ``xy_grid``, ``xz_grid`` and ``yz_grid`` override ``grid`` when set;
         axis-specific ticks, numbers, and titles follow the same precedence.
         Hidden layers remain available as empty ``Drawable`` objects.
         """
@@ -5915,7 +5973,7 @@ class Scene:
         frame: tuple[float, float] = (16.0, 9.0),
         background: Optional[BackgroundLike] = None,
         margin: Optional[float] = None,
-        theme: Optional[str | Theme] = None,
+        theme: ThemeName | Theme | None = "technical",
         post: Optional[PostProcess] = None,
     ) -> None:
         """Create a resolution-independent scene in logical units.
@@ -5924,6 +5982,15 @@ class Scene:
         margins, text sizes, strokes, and effects use the same logical unit;
         output pixels are selected by the editor or exporter. ``post`` applies
         a ``PostProcess`` to every segment that does not override it.
+
+        Scenes use the ``"technical"`` theme by default: a neutral near-black
+        background (``#121212``) with light text and axes and accent-filled
+        shapes. ``theme`` accepts another built-in name or alias
+        (``ThemeName``) or a ``Theme``. An explicit ``background`` always wins
+        over the theme background, and explicit fills, strokes and text
+        colors override theme values. ``theme=None`` opts out: a plain white
+        canvas whose unstyled objects are white too, so set colors or a
+        contrasting ``background``.
         Non-finite or non-positive frame dimensions, invalid WGSL, and unknown
         themes raise ``ValueError``. The former ``Scene(width, height)`` pixel
         API is not accepted.
