@@ -46,7 +46,7 @@ jobs:
             }
           }
           # Launcher should start without python on PATH; core is tested via launcher
-          .\target\release\gaanim.exe --help 2>&1 | Out-Host
+          .\target\dist\gaanim.exe --help 2>&1 | Out-Host
 
       - name: Package zip
         shell: pwsh
