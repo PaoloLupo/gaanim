@@ -11,6 +11,22 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= Sin publicar
+
+No requiere cambios en tus escenas.
+
+== Correcciones
+
+- `grow_from_center()` crece desde el centro de la caja aunque la figura se
+  declare con coordenadas absolutas, como una línea entre dos puntos o un
+  polígono de vértices fijos. Antes escalaba desde el pivote, que en esas
+  figuras es el origen de la escena, y la figura viajaba desde `(0, 0)` hasta
+  su sitio mientras crecía. Ya no hace falta `with_pivot` como remedio.
+- `grow_from_edge` y `grow_from_point` mantienen fijo el punto indicado también
+  cuando el objeto tiene un pivote propio con `with_pivot`.
+- Tras `grow_from_edge` o `grow_from_point`, un `scale_by` o `scale_to`
+  posterior parte del tamaño declarado en lugar de escala cero.
+
 = 0.4.2
 
 Publicada el 26 de septiembre de 2026. No requiere cambios en tus escenas.

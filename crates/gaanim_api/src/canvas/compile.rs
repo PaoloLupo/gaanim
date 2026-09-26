@@ -12199,6 +12199,46 @@ mod tests {
     }
 
     #[test]
+    fn scale_entries_pin_their_box_point_with_absolute_geometry_and_pivots() {
+        let mut canvas = SceneModel::new(640, 360);
+        // Declared in absolute coordinates: the pivot stays at the origin.
+        let triangle = canvas.polygon(vec![(3.0, 1.0), (5.0, 1.0), (4.0, 3.0)]);
+        let square = canvas.square(1.0).with_pivot(0.3, 0.2).move_to(-2.0, -2.0);
+        canvas.play(vec![
+            triangle.animate().grow_from_center().duration(1.0),
+            square
+                .animate()
+                .grow_from_edge(gaanim_layout::Direction::Down)
+                .duration(1.0),
+        ]);
+        canvas.play(vec![triangle.animate().scale_by(2.0).duration(1.0)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+
+        let world_point = |world: &mut World, handle: &DrawableHandle, local: DVec3| {
+            transform_of(world, handle)
+                .to_mat4()
+                .transform_point3(local)
+        };
+        for (handle, local) in [
+            (&triangle, DVec3::new(4.0, 2.0, 0.0)),
+            (&square, DVec3::new(0.0, -0.5, 0.0)),
+        ] {
+            timeline.seek(&mut world, 1.0);
+            let pinned = world_point(&mut world, handle, local);
+            for time in [0.1, 0.5, 0.9] {
+                timeline.seek(&mut world, time);
+                let point = world_point(&mut world, handle, local);
+                assert!(
+                    point.distance(pinned) < 1e-6,
+                    "{point:?} drifted from {pinned:?} at {time}"
+                );
+            }
+        }
+        timeline.seek(&mut world, 2.0);
+        assert!((transform_of(&mut world, &triangle).scale.x - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
     fn trims_chain_from_the_current_window() {
         let mut canvas = SceneModel::new(640, 360);
         let ring = canvas.circle(1.0).trim(Some(0.5), Some(0.5), None, None);

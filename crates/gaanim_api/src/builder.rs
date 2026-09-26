@@ -3108,6 +3108,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_grow_from_edge_internal(anim, track);
             return;
         }
+        if matches!(anim.anim_type, AnimationType::GrowFromCenter)
+            && self.grow_center_off_pivot(anim.target)
+        {
+            self.play_grow_from_edge_internal(anim, track);
+            return;
+        }
         if matches!(anim.anim_type, AnimationType::Flash { .. }) {
             self.play_flash_internal(anim, track);
             return;
@@ -5390,9 +5396,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         let target_scale = state.transform.scale;
         let target_pos = state.transform.translation;
+        // Scaling happens around `translation + anchor`, so the translation
+        // that keeps the point fixed at scale zero is offset by the anchor.
+        let pinned_pos = gaanim_core::glam::DVec3::new(px, py, 0.0) - state.transform.anchor;
 
         let from = gaanim_core::glam::DVec3::ZERO;
-        state.transform.scale = from;
         zero_declared_scale(self.commands, state.entity);
 
         self.timeline.add_clip(
@@ -5418,7 +5426,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
                 lens: PropertyLensSpec::Translation {
-                    from: gaanim_core::glam::DVec3::new(px, py, 0.0),
+                    from: pinned_pos,
                     to: target_pos,
                 },
                 rate_func: anim.rate_func.clone(),
@@ -5428,9 +5436,23 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         );
     }
 
+    /// Whether the box center of `target` differs from its scale pivot, as for
+    /// shapes declared in absolute coordinates. `grow_from_center` then pins
+    /// that center like `grow_from_edge`; otherwise it only scales, which
+    /// leaves reactive translation untouched.
+    fn grow_center_off_pivot(&self, target: ObjectId) -> bool {
+        let Some(state) = self.states.get(target) else {
+            return false;
+        };
+        let center = gaanim_layout::transform_bounds(state.bounds, &state.transform).center();
+        let pivot = state.transform.translation + state.transform.anchor;
+        center.distance(pivot) > 1e-9
+    }
+
     fn play_grow_from_edge_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         let direction = match &anim.anim_type {
             AnimationType::GrowFromEdge { direction } => *direction,
+            AnimationType::GrowFromCenter => gaanim_core::glam::DVec3::ZERO,
             _ => return,
         };
 
@@ -5441,13 +5463,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         let target_scale = state.transform.scale;
         let target_pos = state.transform.translation;
-        let edge_world = bounds_edge_point(
+        let pinned_pos = bounds_edge_point(
             gaanim_layout::transform_bounds(state.bounds, &state.transform),
             direction,
-        );
+        ) - state.transform.anchor;
 
         let from = gaanim_core::glam::DVec3::ZERO;
-        state.transform.scale = from;
         zero_declared_scale(self.commands, state.entity);
 
         self.timeline.add_clip(
@@ -5473,7 +5494,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
                 lens: PropertyLensSpec::Translation {
-                    from: edge_world,
+                    from: pinned_pos,
                     to: target_pos,
                 },
                 rate_func: anim.rate_func.clone(),
