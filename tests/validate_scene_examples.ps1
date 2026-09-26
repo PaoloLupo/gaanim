@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Runner = ".\\target\\debug\\gaanim.exe"
+    [string]$Runner = $(if ($env:OS -eq "Windows_NT") { ".\\target\\debug\\gaanim.exe" } else { "./target/debug/gaanim" })
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,22 +13,20 @@ if (-not (Test-Path -LiteralPath $Runner -PathType Leaf)) {
 # embedded host accepts render() but then reports that no snapshots were
 # requested. That expected diagnostic proves the public Python API executed.
 # Export examples are covered separately because they intentionally invoke an
-# encoder rather than the interactive host.
+# encoder rather than the interactive host, and examples that capture
+# snapshots are compared against their baselines instead.
 $examples = @(
     "03_anchors.py",
     "advanced_animations_demo.py",
-    "boolean_ops.py",
     "group_demo.py",
     "layout_verification.py",
     "math_animation.py",
-    "move_along_path.py",
     "number_plane_tangent.py",
     "reactive_features_demo.py",
     "scenes.py",
     "sine_curve.py",
     "sprint1_demo.py",
     "test_slides.py",
-    "theme_demo.py",
     "write_smoke.py"
 )
 

@@ -482,6 +482,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires a working GPU adapter; hosted Windows runners crash in the driver"]
     fn post_process_changes_only_the_camera_frame() {
         use bevy_vello::vello::{Scene, kurbo, peniko};
         use gaanim_renderer::post_process::{CanvasPostProcess, PostProcessShader};

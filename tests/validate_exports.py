@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import struct
 import subprocess
 import sys
 from typing import Any
@@ -20,7 +21,9 @@ from typing import Any
 VIDEO_FORMATS = {
     "mp4": {"video": "h264", "audio": "aac"},
     "webm": {"video": "vp9", "audio": "opus"},
-    "webp": {"video": "webp_anim"},
+    # Animated WebP is read from its RIFF container: FFmpeg before 7.1 cannot
+    # decode animations and reports a 0x0 "webp" stream without a duration.
+    "webp": {},
     "gif": {"video": "gif"},
 }
 ALL_FORMATS = (*VIDEO_FORMATS, "png")
@@ -184,6 +187,84 @@ def validate_duration(probe: dict[str, Any], artifact: Path) -> None:
         )
 
 
+def webp_chunks(data: bytes, artifact: Path) -> list[tuple[bytes, bytes]]:
+    """Returns the (fourcc, payload) chunks of a RIFF/WEBP byte string."""
+    if len(data) < 12 or data[:4] != b"RIFF" or data[8:12] != b"WEBP":
+        raise SmokeFailure(f"{artifact} is not a RIFF/WEBP file")
+    chunks = []
+    offset = 12
+    while offset + 8 <= len(data):
+        fourcc = data[offset : offset + 4]
+        (size,) = struct.unpack("<I", data[offset + 4 : offset + 8])
+        payload = data[offset + 8 : offset + 8 + size]
+        if len(payload) != size:
+            raise SmokeFailure(f"{artifact} has a truncated {fourcc!r} chunk")
+        chunks.append((fourcc, payload))
+        offset += 8 + size + (size & 1)
+    return chunks
+
+
+def uint24(data: bytes) -> int:
+    return int.from_bytes(data[:3], "little")
+
+
+def webp_animation(artifact: Path) -> dict[str, Any]:
+    """Reads the canvas, frames and timing of an animated WebP."""
+    chunks = webp_chunks(artifact.read_bytes(), artifact)
+    header = next((payload for fourcc, payload in chunks if fourcc == b"VP8X"), None)
+    if header is None or len(header) < 10:
+        raise SmokeFailure(f"{artifact} has no extended (VP8X) header")
+    frames = [payload for fourcc, payload in chunks if fourcc == b"ANMF"]
+    if not header[0] & 0x02 or not frames:
+        raise SmokeFailure(f"{artifact} is not an animated WebP")
+    return {
+        "width": 1 + uint24(header[4:7]),
+        "height": 1 + uint24(header[7:10]),
+        "alpha": bool(header[0] & 0x10),
+        "frames": frames,
+        "duration": sum(uint24(frame[12:15]) for frame in frames) / 1000.0,
+    }
+
+
+def webp_first_frame(artifact: Path, destination: Path) -> Path:
+    """Writes the first animation frame as a still WebP any FFmpeg can decode."""
+    animation = webp_animation(artifact)
+    frame = animation["frames"][0]
+    width, height = animation["width"], animation["height"]
+    if (uint24(frame[0:3]), uint24(frame[3:6])) != (0, 0) or (
+        1 + uint24(frame[6:9]),
+        1 + uint24(frame[9:12]),
+    ) != (width, height):
+        raise SmokeFailure(f"{artifact} does not start with a full-canvas frame")
+    flags = 0x10 if animation["alpha"] else 0
+    header = bytes([flags, 0, 0, 0]) + (width - 1).to_bytes(3, "little")
+    header += (height - 1).to_bytes(3, "little")
+    body = b"WEBP" + b"VP8X" + struct.pack("<I", len(header)) + header + frame[16:]
+    destination.write_bytes(b"RIFF" + struct.pack("<I", len(body)) + body)
+    return destination
+
+
+def validate_webp(artifact: Path) -> dict[str, Any]:
+    animation = webp_animation(artifact)
+    actual = (animation["width"], animation["height"])
+    if actual != (WIDTH, HEIGHT):
+        raise SmokeFailure(f"{artifact} has dimensions {actual}, expected {(WIDTH, HEIGHT)}")
+    if len(animation["frames"]) < 2:
+        raise SmokeFailure(f"{artifact} has only {len(animation['frames'])} frame(s)")
+    duration = animation["duration"]
+    if not MIN_DURATION <= duration <= MAX_DURATION:
+        raise SmokeFailure(
+            f"{artifact} duration is {duration:.6f}s, expected "
+            f"{MIN_DURATION:.2f}..{MAX_DURATION:.2f}s"
+        )
+    return {
+        "width": animation["width"],
+        "height": animation["height"],
+        "frames": len(animation["frames"]),
+        "duration": duration,
+    }
+
+
 def generate_audio_fixture(output: Path, *, cwd: Path) -> None:
     run(
         [
@@ -204,6 +285,8 @@ def generate_audio_fixture(output: Path, *, cwd: Path) -> None:
 
 
 def validate_alpha(artifact: Path, *, cwd: Path, format_name: str) -> None:
+    if format_name == "webp":
+        artifact = webp_first_frame(artifact, artifact.with_suffix(".frame0.webp"))
     command = ["ffmpeg", "-v", "error"]
     if format_name == "webm":
         command.extend(["-c:v", "libvpx-vp9"])
@@ -326,6 +409,13 @@ def export_format(
 
     if not artifact.is_file() or artifact.stat().st_size == 0:
         raise SmokeFailure(f"Export did not create a non-empty {artifact}")
+    if format_name == "webp":
+        return {
+            "format": format_name,
+            "artifact": str(artifact),
+            "bytes": artifact.stat().st_size,
+            "animation": validate_webp(artifact),
+        }
     probe = ffprobe(artifact, cwd=repo)
     expected = VIDEO_FORMATS[format_name]
     video = require_stream(probe, "video", expected["video"], artifact)

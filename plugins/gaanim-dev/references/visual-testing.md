@@ -30,6 +30,9 @@ deliberate safety interlock.
 After approval, review the newly tracked baseline images and manifest. Do not
 commit `current/` or `report/`.
 
-The repository currently runs visual regression on Windows in CI. On a host
+CI runs visual regression on Ubuntu 24.04 with Mesa's software Vulkan driver
+(lavapipe, `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`) under
+Xvfb; capture approved baselines in that environment so CI can match them
+pixel for pixel. Hosted Windows runners have no usable GPU adapter. On a host
 where the runner cannot be built or executed, report the suite as skipped and
 run the remaining checks; never call it successful.

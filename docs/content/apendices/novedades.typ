@@ -60,6 +60,9 @@ Cambios todavía sin publicar.
   escala anterior con `scale_to(f)` o `scale_by(f)`, multiplica ese factor por
   100 (`scale_to(0.025)` pasa a `scale_to(2.5)`) o quítalo si el tamaño
   natural te sirve. Los anchos fijados con `.stroke(color, ancho)` no cambian.
+- El texto de un SVG con la familia genérica `sans-serif` usa la DejaVu Sans
+  que trae Gaanim en cualquier sistema. Antes salía en Arial si estaba
+  instalada y desaparecía en los equipos Linux que no la tienen.
 
 = 0.4.1
 
