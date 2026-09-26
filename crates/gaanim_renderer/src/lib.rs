@@ -2,6 +2,7 @@ use bevy::prelude::*;
 
 pub mod background;
 mod background_gpu;
+pub mod canvas;
 pub mod diagnostics;
 pub mod effects;
 pub mod lottie;
@@ -45,10 +46,8 @@ impl Plugin for GaanimDerivedGeometryPlugin {
 
 impl Plugin for GaanimRendererPlugin {
     fn build(&self, app: &mut App) {
-        // Automatically register bevy_vello if not already registered
-        if !app.is_plugin_added::<bevy_vello::VelloPlugin>() {
-            app.add_plugins(bevy_vello::VelloPlugin::default());
-        }
+        // Rasterize the composed scene with Vello and draw it in the window.
+        app.add_plugins(canvas::VelloCanvasPlugin);
 
         // Shader backgrounds render on the render device when one exists.
         background_gpu::build(app);

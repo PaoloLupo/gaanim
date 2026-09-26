@@ -29,7 +29,9 @@ This file guides repository work; model selection belongs to the calling client.
   - `gaanim_animation` — tween entities, signals, writing system.
   - `gaanim_timeline` — BTree-indexed clips, snapshot seek.
   - `gaanim_media` — FFmpeg-backed video frames and timeline-synchronized preview audio.
-  - `gaanim_renderer` — Vello 0.9 backend, `bevy_vello` 0.14.0, fragment retain caching.
+  - `gaanim_renderer` — Vello 0.9 backend, fragment retain caching, and its own
+    Bevy canvas (`canvas.rs`): Vello renders to a texture that a full-screen pass
+    composites into the `VelloView` camera's main 2D pass.
   - `gaanim_objects` — primitive bundles (circle, rect, etc.), text objects.
   - `gaanim_layout` — anchors, grids, regions, flow, and positioning queries.
   - `gaanim_visualization` — scales, coordinate spaces, sampling, data, and statistics.
@@ -84,7 +86,7 @@ all use the application host, which owns the native runtime.
 ## Build / toolchain quirks
 
 - **Bevy 0.19** is the current ECS target. Do not import `bevy::ecs::*` directly outside `gaanim_scene` — use re-exports from `gaanim_scene` or `gaanim_core`.
-- **Vello 0.9**, **bevy_vello 0.14.0**, **bevy_egui 0.42.0**, **PyO3 0.28**.
+- **Vello 0.9**, **bevy_egui 0.42.0**, **PyO3 0.28**.
 - Rust editions vary: most crates use **2024**; `gaanim_python` uses **2021**.
 - `Cargo.lock` exists locally but is **gitignored** (library/workspace convention).
 - Workspace profiles: `dev` uses `opt-level = 1` for workspace crates, `opt-level = 3` for dependencies.
@@ -93,7 +95,9 @@ all use the application host, which owns the native runtime.
   gitignored `.cargo/config.toml` as described in README; preserve `PYO3_PYTHON`.
 - Shared Bevy features only enable `multi_threaded`; consumer manifests enable
   their required subsystems. `gaanim_scene` still requires PBR and glTF for its
-  3D components and systems. Keep window/audio features out of the shared base.
+  3D components and systems (plus `png` for glTF textures). Keep window/audio
+  features out of the shared base, and do not add Bevy's UI, sprite, text, or
+  gizmo subsystems: the editor draws its UI with egui.
 - Prefer `just check-package <crate>` during local iteration. `just build-timings`
   writes `target/cargo-timings/cargo-timing.html`; it performs a real build.
 - Dev recipes use `scripts/dev.py` to opt selected Bevy consumers into

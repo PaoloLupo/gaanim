@@ -6,15 +6,11 @@
 //! records a user-visible failure, and recreates the render device after a
 //! device-loss event.
 
-use bevy::diagnostic::DiagnosticsStore;
 use bevy::prelude::*;
 use bevy::render::error_handler::{ErrorType, RenderError, RenderErrorHandler, RenderErrorPolicy};
 use bevy::render::settings::RenderCreation;
 
-use bevy_vello::render::diagnostics::{
-    CLIPS_COUNT, OPEN_CLIPS_COUNT, PATH_COUNT, PATH_SEGMENTS_COUNT, UI_SCENE_COUNT,
-    WORLD_SCENE_COUNT,
-};
+use crate::canvas::VelloFrameStats;
 
 /// The kind of a renderer failure reported by Bevy/wgpu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,41 +91,36 @@ impl RenderHealth {
     }
 }
 
-/// Per-frame Vello scene complexity measured by `bevy_vello`.
+/// Per-frame Vello scene complexity measured when the canvas is rendered.
 ///
-/// Values are from the most recently completed render extraction and are thus
-/// normally one frame behind the editor UI. `None` means no rendered frame has
-/// published that measurement yet.
+/// Values are from the most recently rendered frame and are thus normally one
+/// frame behind the editor UI. `None` means no frame has been rendered yet.
 #[derive(Resource, Debug, Clone, Default, PartialEq)]
 pub struct VelloDiagnostics {
     pub world_scenes: Option<u32>,
-    pub ui_scenes: Option<u32>,
     pub paths: Option<u32>,
     pub path_segments: Option<u32>,
     pub clips: Option<u32>,
     pub open_clips: Option<u32>,
 }
 
-fn latest(diagnostics: &DiagnosticsStore, path: &bevy::diagnostic::DiagnosticPath) -> Option<u32> {
-    diagnostics
-        .get_measurement(path)
-        .and_then(|measurement| (measurement.value >= 0.0).then_some(measurement.value as u32))
-}
-
-/// Copy Vello's published diagnostics into a compact, host-facing resource.
+/// Copy the canvas render counts into a compact, host-facing resource.
 pub fn collect_vello_diagnostics_system(
-    diagnostics: Option<Res<DiagnosticsStore>>,
+    stats: Option<Res<VelloFrameStats>>,
     mut vello: ResMut<VelloDiagnostics>,
 ) {
-    let Some(diagnostics) = diagnostics else {
+    let Some([scenes, paths, path_segments, clips, open_clips]) =
+        stats.and_then(|stats| stats.latest())
+    else {
         return;
     };
-    vello.world_scenes = latest(&diagnostics, &WORLD_SCENE_COUNT);
-    vello.ui_scenes = latest(&diagnostics, &UI_SCENE_COUNT);
-    vello.paths = latest(&diagnostics, &PATH_COUNT);
-    vello.path_segments = latest(&diagnostics, &PATH_SEGMENTS_COUNT);
-    vello.clips = latest(&diagnostics, &CLIPS_COUNT);
-    vello.open_clips = latest(&diagnostics, &OPEN_CLIPS_COUNT);
+    *vello = VelloDiagnostics {
+        world_scenes: Some(scenes),
+        paths: Some(paths),
+        path_segments: Some(path_segments),
+        clips: Some(clips),
+        open_clips: Some(open_clips),
+    };
 }
 
 /// Install Gaanim's non-destructive Bevy render-error policy.

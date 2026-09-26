@@ -33,6 +33,10 @@ Sin publicar todavía. No requiere cambios en tus escenas.
   #link("/guias/capturas-y-comparacion/")[Capturas y comparación visual].
   La opción `--no-gui` desaparece y ahora es un error: quítala de tus scripts
   y de la integración continua.
+- El ejecutable ya no incluye la interfaz, los sprites, el texto ni los gizmos
+  de Bevy, que Gaanim no usaba: el lienzo de Vello se compone en la ventana con
+  un pase propio. Las escenas se ven igual; solo puede cambiar qué línea 3D
+  queda encima cuando dos líneas transparentes coinciden exactamente.
 
 == Correcciones
 

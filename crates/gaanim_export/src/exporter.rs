@@ -416,7 +416,7 @@ fn setup_scene_system(world: &mut World) {
 
 /// Replay a window-backed scene before Vello creates its render target, then
 /// give the Vello camera an explicit physical viewport. This removes the
-/// startup race between WindowPlugin and bevy_vello's render-target setup.
+/// startup race between WindowPlugin and the Vello canvas texture setup.
 fn setup_window_scene_system(world: &mut World) {
     setup_scene_system(world);
     world.flush();
@@ -681,7 +681,7 @@ where
                 resolved_camera.as_ref().map(|resolved| &resolved.camera),
             );
 
-            let mut scene = bevy_vello::vello::Scene::new();
+            let mut scene = vello::Scene::new();
             let camera_to_vello = capture_camera_to_vello_transform(
                 resolved_camera.as_ref(),
                 config.width,
@@ -709,14 +709,14 @@ where
             .get_resource::<ClearColor>()
             .map(|cc| {
                 let rgba = cc.0.to_srgba();
-                bevy_vello::vello::peniko::Color::from_rgba8(
+                vello::peniko::Color::from_rgba8(
                     (rgba.red * 255.0) as u8,
                     (rgba.green * 255.0) as u8,
                     (rgba.blue * 255.0) as u8,
                     (rgba.alpha * 255.0) as u8,
                 )
             })
-            .unwrap_or(bevy_vello::vello::peniko::Color::BLACK);
+            .unwrap_or(vello::peniko::Color::BLACK);
 
         let render_started_at = Instant::now();
         let frame_data = gpu
@@ -909,7 +909,7 @@ where
             resolved_camera.as_ref().map(|resolved| &resolved.camera),
         );
 
-        let mut scene = bevy_vello::vello::Scene::new();
+        let mut scene = vello::Scene::new();
         let camera_to_vello = capture_camera_to_vello_transform(
             resolved_camera.as_ref(),
             config.width,
@@ -940,14 +940,14 @@ where
             .get_resource::<ClearColor>()
             .map(|clear| {
                 let rgba = clear.0.to_srgba();
-                bevy_vello::vello::peniko::Color::from_rgba8(
+                vello::peniko::Color::from_rgba8(
                     (rgba.red * 255.0) as u8,
                     (rgba.green * 255.0) as u8,
                     (rgba.blue * 255.0) as u8,
                     (rgba.alpha * 255.0) as u8,
                 )
             })
-            .unwrap_or(bevy_vello::vello::peniko::Color::BLACK);
+            .unwrap_or(vello::peniko::Color::BLACK);
 
         let phase_started = Instant::now();
         let rgba = gpu
