@@ -1423,7 +1423,9 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
     let compound_channels: &[&str] = match &anim.inner.anim_type {
         FadeInFrom { .. } => &["translation", "opacity"],
         RotateBy { pivot: Some(_), .. } => &["rotation", "translation"],
-        GrowFromPoint { .. } | GrowFromEdge { .. } => &["translation", "scale"],
+        GrowFromPoint { .. } | GrowFromEdge { .. } | CameraViewPop { .. } => {
+            &["translation", "scale"]
+        }
         SpinInFromNothing => &["scale", "rotation"],
         Create3D => &["scale", "opacity"],
         Indicate { .. } => &["scale", "fill"],
@@ -1458,7 +1460,8 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
         | ScaleUniform { .. }
         | ScaleBy3D { .. }
         | GrowFromCenter
-        | ShrinkToCenter => "scale",
+        | ShrinkToCenter
+        | CameraViewZoomTo { .. } => "scale",
         SkewTo { .. } => "skew",
         FadeTo { .. } | FadeIn | FadeOut | FadeInFrom { .. } => "opacity",
         FillColorTo { .. } | FillPaintTo { .. } => "fill",
@@ -1972,6 +1975,33 @@ fn load_image(path: impl AsRef<Path>) -> Result<gaanim_core::peniko::ImageData, 
 
 /// Default height of a presentation brand logo in scene units.
 const BRAND_LOGO_HEIGHT: f64 = 0.6;
+
+/// Spawn a drawable into the canvas that owns `state`, as
+/// [`SceneModel::spawn`] does, so handles can create helper drawables.
+pub(crate) fn spawn_in(
+    state: &SharedCanvasState,
+    kind: SpawnKind,
+    register_top_level: bool,
+) -> DrawableHandle {
+    let mut guard = state.lock().expect("canvas state poisoned");
+    let id = guard.next_object_id();
+    let active_idx = guard.active_idx;
+    if register_top_level {
+        guard.active_mut().mobject_ids.push(id);
+        guard.all_drawables.push(id);
+    }
+    drop(guard);
+
+    let handle = DrawableHandle::new(id, kind, state.clone(), active_idx);
+    {
+        let mut state = state.lock().expect("canvas state poisoned");
+        state.object_specs.insert(id, handle.spec.clone());
+        state.segments[active_idx]
+            .ops
+            .push(Op::Spawn(handle.spec.clone()));
+    }
+    handle
+}
 
 /// Top-level facade for building Gaanim animations.
 #[derive(Debug, Clone)]
@@ -2578,24 +2608,7 @@ impl SceneModel {
     }
 
     fn spawn_registered(&mut self, kind: SpawnKind, register_top_level: bool) -> DrawableHandle {
-        let mut guard = self.state.lock().expect("canvas state poisoned");
-        let id = guard.next_object_id();
-        let active_idx = guard.active_idx;
-        if register_top_level {
-            guard.active_mut().mobject_ids.push(id);
-            guard.all_drawables.push(id);
-        }
-        drop(guard);
-
-        let handle = DrawableHandle::new(id, kind, self.state.clone(), active_idx);
-        {
-            let mut state = self.state.lock().expect("canvas state poisoned");
-            state.object_specs.insert(id, handle.spec.clone());
-            state.segments[active_idx]
-                .ops
-                .push(Op::Spawn(handle.spec.clone()));
-        }
-        handle
+        spawn_in(&self.state, kind, register_top_level)
     }
 
     // -- Segment management --
@@ -6759,7 +6772,7 @@ impl SceneModel {
         Ok(handle)
     }
 
-    fn endpoint_line(
+    pub(crate) fn endpoint_line(
         &mut self,
         from: CanvasEndpoint,
         to: CanvasEndpoint,

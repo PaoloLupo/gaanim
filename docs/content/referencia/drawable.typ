@@ -509,12 +509,16 @@ scene.render()
   name: "Drawable.camera_view",
   kind: "method",
   params: (
-    (name: "frame", type: "Drawable", default: none, desc: [Objeto cuyo recuadro encuadra la segunda cámara. Moverlo desplaza la vista, reducirlo acerca y girarlo gira la vista en sentido contrario.]),
-    (name: "fit", type: "str", default: "\"contain\"", desc: [Cómo ocupa el recuadro la pantalla: `"contain"` lo muestra entero, `"cover"` llena la pantalla y `"stretch"` escala cada eje por separado.]),
+    (name: "frame", type: "Drawable | None", default: "None", desc: [Objeto que hace de cámara: su centro marca adónde mira y su giro gira la vista en sentido contrario. Sin `zoom`, su tamaño también fija el aumento, así que reducirlo acerca. Sin `frame`, la cámara mira a través de un marco invisible.]),
+    (name: "center", type: "tuple | Drawable | AnchorPoint | None", default: "None", desc: [Adónde mira la cámara cuando no hay `frame`: un punto, el centro de un objeto o un punto de anclaje; por defecto, el origen. Con `frame` lanza `ValueError`.]),
+    (name: "zoom", type: "float | Parameter | Computed | None", default: "None", desc: [Aumento fijo en lugar del tamaño del marco. Un número da a la vista su propio zoom, que `animate.zoom_to` cambia a velocidad percibida constante; un `Parameter` se anima de forma lineal; un `Computed` se sigue y no se puede fijar. Sin `frame` ni `zoom`, vale 1.]),
+    (name: "fit", type: "str", default: "\"contain\"", desc: [Con un aumento dado por el marco: `"contain"` muestra el marco entero, `"cover"` llena la pantalla y `"stretch"` escala cada eje por separado.]),
     (name: "background", type: "Paint | str | None", default: "\"canvas\"", desc: [Fondo de la vista: `"canvas"` pinta el fondo de la escena tal como lo ve la cámara, un color o `Brush` pinta la pantalla y `None` deja ver el relleno propio de la pantalla.]),
     (name: "exclude", type: "Sequence[Drawable]", default: "()", desc: [Objetos, con sus hijos, que la vista no muestra.]),
+    (name: "layers", type: "Sequence[str]", default: "()", desc: [Capas de vista (ver `view_layer`) que la vista muestra además de los objetos normales.]),
   ),
-  desc: [Convierte esta figura en una pantalla que muestra lo que ve una segunda cámara, como un _picture-in-picture_ o una lupa. La cámara encuadra el recuadro de `frame` y lo sigue en cada fotograma, así que se anima como cualquier objeto; el aumento es el tamaño de la pantalla dividido entre el de `frame`. La pantalla dibuja su relleno, encima la vista recortada a su contorno y encima su trazo; la opacidad y los fundidos afectan a todo. La vista no muestra la pantalla, `frame` ni `exclude`; oculta `frame` con `no_stroke()` si solo debe hacer de cámara. Una pantalla que aparece dentro de otra vista muestra su pintura pero no su vista. Solo una figura cerrada 2D puede ser pantalla (rectángulo, cuadrado, círculo, punto, elipse, polígono, estrella, sector, anillo, curva, camino SVG o booleano); con texto, grupos, imágenes u objetos 3D, con `frame` igual a la propia pantalla, con objetos de otra escena o con un `fit` o `background` desconocido lanza `ValueError`. Una llamada posterior o `no_camera_view()` sustituye la vista.],
+  returns: (type: "CameraView", desc: [La cámara, con `pan_to`, `zoom_to`, `rotate_to`, `follow` y `animate`; ver #link("/referencia/scene/")[Escena].]),
+  desc: [Convierte esta figura en una pantalla que muestra lo que ve una segunda cámara, como un _picture-in-picture_ o una lupa. La pantalla dibuja su relleno, encima la vista recortada a su contorno y encima su trazo; la opacidad y los fundidos afectan a todo. La vista no muestra la pantalla, el marco, `exclude` ni las superposiciones HUD; una pantalla que aparece dentro de otra vista muestra su pintura pero no su vista. Solo una figura cerrada 2D puede ser pantalla (rectángulo, cuadrado, círculo, punto, elipse, polígono, estrella, sector, anillo, curva, camino SVG o booleano). Lanza `ValueError` con texto, grupos, imágenes u objetos 3D, con `frame` igual a la propia pantalla, con objetos o parámetros de otra escena, con un zoom no positivo, con un nombre de capa vacío o con un `fit` o `background` desconocido. Una llamada posterior o `no_camera_view()` sustituye la vista.],
 )[
 ```python
 # show-code: true
@@ -538,6 +542,27 @@ scene.render()
   desc: [Quita la vista de cámara y la figura vuelve a dibujarse como una forma normal.],
   none,
 )
+
+#api-entry(
+  name: "Drawable.view_layer",
+  kind: "method",
+  params: ((name: "name", type: "str | None", default: none, desc: [Nombre de la capa; `None` devuelve el objeto a ninguna capa.]),),
+  desc: [Pone el objeto y sus hijos en una capa de vista: la cámara principal no lo dibuja y solo lo muestran las vistas de cámara que listan esa capa en `layers`. Sirve para una lupa de rayos X que revela lo que hay debajo, o para etiquetas que solo aparecen en el zoom. Un nombre vacío lanza `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import GOLD, WHITE, Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+scene.geometry.rounded_rect(6, 3, 0.4).fill("#334155").no_stroke()
+for x in (-2, 0, 2):
+    scene.geometry.circle(0.5).fill(GOLD).no_stroke().move_to(x, 0).view_layer("xray")
+lens = scene.geometry.circle(1.2).stroke(WHITE, 0.05).move_to(-3, 0)
+view = lens.camera_view(center=(-3, 0), layers=["xray"])
+scene.play([lens.animate.move_to(3, 0).duration(2.0), view.animate.pan_to(3, 0).duration(2.0)])
+# output: preview.webp
+scene.render()
+```
+]
 
 == Animación
 
@@ -764,7 +789,7 @@ panel = scene.geometry.rect(2, 1).move_to_3d(0, 0, 0).rotate_to_3d(0.3, 0.6, 0)
 #api-entry(
   name: "Drawable.hud",
   kind: "method",
-  desc: [Fija el objeto a la pantalla como superposición: usa coordenadas de pantalla y la cámara 3D no lo afecta. Colócalo con `.move_to(x, y)` después de `.hud()`.],
+  desc: [Fija el objeto a la imagen como superposición: se queda en su sitio aunque la cámara 2D se desplace, acerque o gire, y aunque se mueva la cámara 3D. Sus coordenadas son las de la cámara sin mover, así que `.move_to(0, 3.5)` lo pone arriba en un fotograma de 16 × 9. Se dibuja encima de la escena y nunca aparece dentro de una vista de cámara.],
 )[
 ```python
 >>>from gaanim import *

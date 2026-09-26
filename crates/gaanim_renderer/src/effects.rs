@@ -129,12 +129,14 @@ pub enum CameraViewBackground {
 /// as a second camera sees it.
 ///
 /// The camera frames `source`: its local bounds under its world transform, so
-/// moving, scaling or rotating the source pans, zooms or rotates the view. The
-/// screen draws its shadow, glow and fill, then the backdrop and the scene
-/// clipped to its outline, then its stroke on top. The screen, the source and
-/// every `exclude` subtree are left out of the view, and views never show the
-/// content of other views.
-#[derive(Component, Debug, Clone, PartialEq)]
+/// moving, scaling or rotating the source pans, zooms or rotates the view.
+/// With an explicit `zoom` the source only sets where the camera looks (its
+/// center) and its rotation, and `zoom` scales world units into the screen's
+/// local units. The screen draws its shadow, glow and fill, then the backdrop
+/// and the scene clipped to its outline, then its stroke on top. The screen,
+/// the source and every `exclude` subtree are left out of the view, and views
+/// never show the content of other views.
+#[derive(Component, Debug, Clone)]
 pub struct CameraView {
     /// Drawable whose bounds frame the captured region.
     pub source: Entity,
@@ -142,7 +144,16 @@ pub struct CameraView {
     pub background: CameraViewBackground,
     /// Roots of subtrees the view does not show.
     pub exclude: Vec<Entity>,
+    /// Explicit magnification; `None` derives it from the source's size.
+    pub zoom: Option<gaanim_animation::TrackingScalar>,
+    /// View layers shown besides the drawables on no layer.
+    pub layers: Vec<std::sync::Arc<str>>,
 }
+
+/// Component: puts a drawable on a named view layer. The main camera does not
+/// draw it; only camera views that list the layer show it.
+#[derive(Component, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ViewLayer(pub std::sync::Arc<str>);
 
 /// A retained reactive vector boolean. Sources are vector leaves in world
 /// space; the result path is rebuilt in `SceneSet::DerivedGeometry`.

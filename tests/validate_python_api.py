@@ -1351,23 +1351,56 @@ def validate_matrix_stub_typing() -> list[str]:
 
 
 def validate_camera_view_contract(module) -> list[str]:
-    """Closed shapes show a second camera's view; other drawables are rejected."""
+    """Closed shapes show a second camera; views pan, zoom, pop and follow."""
     failures: list[str] = []
     scene = module.Scene(frame=(16, 9))
     frame = scene.geometry.rect(1.6, 0.9).move_to(-4, 0)
-    marker = scene.geometry.dot(0.1)
+    marker = scene.geometry.dot(0.1).view_layer("xray")
     screen = scene.geometry.rounded_rect(6.4, 3.6, 0.2).move_to(3, 0)
-    for label, result in (
-        ("defaults", screen.camera_view(frame)),
-        ("fit/exclude", screen.camera_view(frame, fit="cover", exclude=[marker])),
-        ("color background", screen.camera_view(frame, background="#101820")),
-        ("brush background", screen.camera_view(frame, background=module.Brush.solid(module.BLUE))),
-        ("no background", screen.camera_view(frame, background=None, fit="stretch")),
-        ("circle lens", scene.geometry.circle(0.5).camera_view(frame, background="canvas")),
-        ("no_camera_view", screen.no_camera_view()),
-    ):
-        if not isinstance(result, module.Drawable):
-            failures.append(f"Drawable.camera_view ({label}) did not return Drawable")
+    zoom = scene.viz.parameter(2.0)
+    views = {
+        "defaults": screen.camera_view(frame),
+        "fit/exclude": screen.camera_view(frame, fit="cover", exclude=[marker]),
+        "color background": screen.camera_view(frame, background="#101820"),
+        "brush background": screen.camera_view(frame, background=module.Brush.solid(module.BLUE)),
+        "no background": screen.camera_view(frame, background=None, fit="stretch"),
+        "explicit zoom": scene.geometry.circle(0.5).camera_view(center=(1, 1), zoom=3, layers=["xray"]),
+        "parameter zoom": scene.geometry.circle(0.5).camera_view(frame, zoom=zoom),
+        "inset": scene.camera.inset(frame, zoom=4, at=module.Anchor.TOP_LEFT),
+        "fixed circle inset": scene.camera.inset((1, 1), shape="circle", at=(5, -2), fixed=True, connectors=False),
+        "following inset": scene.camera.inset(frame.anchor_point(module.Anchor.CENTER), follow=True),
+    }
+    for label, view in views.items():
+        if not isinstance(view, module.CameraView):
+            failures.append(f"camera view ({label}) is not a CameraView")
+            continue
+        if not isinstance(view.screen, module.Drawable) or not isinstance(view.frame, module.Drawable):
+            failures.append(f"CameraView ({label}) lost its screen or frame")
+        animate = view.animate
+        for name, anim in (
+            ("pan_to", animate.pan_to(1, 0)),
+            ("pan_to endpoint", animate.pan_to(marker)),
+            ("rotate_to", animate.rotate_to(0.2)),
+            ("pop_out", animate.pop_out()),
+            ("pop_in", animate.pop_in()),
+            ("zoom_to", animate.zoom_to(5)),
+        ):
+            if not isinstance(anim, module.Anim):
+                failures.append(f"CameraView.animate.{name} ({label}) did not return Anim")
+        if view.pan_to(0.5, 0.5).zoom_to(3).rotate_to(0.1) is not view:
+            failures.append(f"CameraView setters ({label}) must return the view")
+    if len(views["inset"].connectors) != 2 or views["fixed circle inset"].connectors:
+        failures.append("Camera.inset created the wrong connectors")
+    if not isinstance(views["explicit zoom"].zoom, module.Computed):
+        failures.append("an explicit CameraView.zoom must be a Computed")
+    if not isinstance(views["parameter zoom"].zoom, module.Parameter):
+        failures.append("a Parameter CameraView.zoom must return the Parameter")
+    if views["defaults"].follow(marker) is not views["defaults"]:
+        failures.append("CameraView.follow must return the view")
+    if not isinstance(screen.no_camera_view(), module.Drawable):
+        failures.append("Drawable.no_camera_view did not return Drawable")
+    if not isinstance(marker.view_layer(None), module.Drawable):
+        failures.append("Drawable.view_layer did not return Drawable")
     foreign = module.Scene(frame=(16, 9)).geometry.rect(1, 1)
     for label, call in (
         ("text screen", lambda: scene.text("zoom").camera_view(frame)),
@@ -1377,13 +1410,22 @@ def validate_camera_view_contract(module) -> list[str]:
         ("foreign exclude", lambda: screen.camera_view(frame, exclude=[foreign])),
         ("unknown fit", lambda: screen.camera_view(frame, fit="fill")),
         ("unknown background", lambda: screen.camera_view(frame, background="scene")),
+        ("frame and center", lambda: screen.camera_view(frame, center=(0, 0))),
+        ("zero zoom", lambda: screen.camera_view(zoom=0)),
+        ("empty layer", lambda: screen.camera_view(frame, layers=[" "])),
+        ("empty view layer", lambda: marker.view_layer("")),
+        ("frame-sized zoom readout", lambda: views["defaults"].zoom),
+        ("negative zoom_to", lambda: views["defaults"].zoom_to(-1)),
+        ("unknown inset shape", lambda: scene.camera.inset(frame, shape="star")),
+        ("zero inset size", lambda: scene.camera.inset(frame, size=0)),
+        ("reactive inset target", lambda: scene.camera.inset(scene.geometry.offset_point((0, 0), 1, 1))),
     ):
         try:
             call()
         except ValueError:
             pass
         else:
-            failures.append(f"Drawable.camera_view accepted a {label}")
+            failures.append(f"camera views accepted a {label}")
     return failures
 
 

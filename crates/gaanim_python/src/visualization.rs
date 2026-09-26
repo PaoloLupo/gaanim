@@ -63,6 +63,17 @@ pub struct PyComputed {
 }
 
 impl PyComputed {
+    /// A native scalar that depends on the parameters of `owner`'s Scene.
+    pub(crate) fn native_source(
+        source: ScalarSource,
+        owner: Option<gaanim_api::canvas::DrawableHandle>,
+    ) -> Self {
+        Self {
+            source,
+            owners: owner.map(ReactiveOwner::Drawable).into_iter().collect(),
+        }
+    }
+
     /// A native, time-driven scalar owned by `canvas`; `recipe` must fully
     /// describe `sample` so hot reload treats equal recipes as equal content.
     pub(crate) fn native_time_source(

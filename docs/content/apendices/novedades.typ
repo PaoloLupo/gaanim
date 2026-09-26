@@ -17,18 +17,40 @@ No requiere cambios en tus escenas.
 
 == Cambios
 
-- `pantalla.camera_view(marco)` convierte una figura cerrada en una pantalla
-  que muestra lo que ve una segunda cámara, como un _picture-in-picture_ o una
-  lupa. La cámara encuadra el recuadro de `marco` y lo sigue en cada
-  fotograma: moverlo desplaza la vista, reducirlo acerca y girarlo gira la
-  vista, todo con las animaciones habituales. La vista se recorta al contorno
-  de la pantalla, entre su relleno y su trazo, y admite `fit`, `background` y
-  `exclude`; `no_camera_view()` la quita. Ver `Drawable.camera_view` en
-  #link("/referencia/drawable/")[Drawable] y las cámaras secundarias en
-  #link("/guias/camara-y-3d/")[Cámara y 3D].
-  
+- Cámaras secundarias: `pantalla.camera_view(marco)` convierte una figura
+  cerrada en una pantalla que muestra lo que ve una segunda cámara, como un
+  _picture-in-picture_ o una lupa, y devuelve un `CameraView`. El marco es la
+  cámara: su centro marca adónde mira y su giro gira la vista, y sin `zoom=`
+  su tamaño fija el aumento. La vista se recorta al contorno de la pantalla,
+  entre su relleno y su trazo, y admite `fit`, `background`, `exclude` y
+  `layers`; `no_camera_view()` la quita.
+- `CameraView` tiene el vocabulario de `scene.camera`: `pan_to`, `zoom_to`,
+  `rotate_to`, `follow` y `animate`. Con `zoom=` (un número, un `Parameter`
+  o un `Computed`) el aumento es explícito, `animate.zoom_to` lo cambia a
+  velocidad percibida constante y `view.zoom` lo expone para lecturas; sin
+  marco, `center=` elige adónde mira. `animate.pop_out()` hace brotar la
+  pantalla de la región que ve su cámara, sin saltos, y `animate.pop_in()` la
+  devuelve.
+- `scene.camera.inset(objetivo, zoom=, at=)` monta de una vez la pantalla, un
+  marco que recuadra lo que muestra y dos conectores. Con `follow=True` el
+  marco persigue a un objeto en movimiento y con `fixed=True` la pantalla se
+  queda fija en la imagen aunque la cámara principal se mueva.
+- `drawable.view_layer("nombre")` saca un objeto de la cámara principal: solo
+  lo muestran las vistas que listan esa capa en `layers=`, por ejemplo una
+  lupa de rayos X.
+
+Ver `Drawable.camera_view` en #link("/referencia/drawable/")[Drawable], las
+vistas de cámara en #link("/referencia/scene/")[Escena] y las cámaras
+secundarias en #link("/guias/camara-y-3d/")[Cámara y 3D].
+
 == Correcciones
 
+- `.hud()` fija de verdad el objeto a la imagen también en 2D: antes se movía
+  con `scene.camera` al desplazarla, acercarla o girarla. Las escenas con la
+  cámara 2D quieta se ven igual.
+- `.hud()` funciona en figuras simples como rectángulos, círculos o
+  polígonos, que ahora se dibujan encima de la escena como el resto de
+  superposiciones; antes la llamada no tenía efecto en ellas.
 - `grow_from_center()` crece desde el centro de la caja aunque la figura se
   declare con coordenadas absolutas, como una línea entre dos puntos o un
   polígono de vértices fijos. Antes escalaba desde el pivote, que en esas

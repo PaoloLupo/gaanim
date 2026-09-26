@@ -2055,6 +2055,34 @@ impl Anim {
         })
     }
 
+    /// Scale this camera view frame so the view it frames on `screen`
+    /// reaches `zoom`, measured with `fit` against both sizes when played.
+    pub(crate) fn camera_view_zoom_to(
+        self,
+        screen: ObjectId,
+        zoom: f64,
+        fit: gaanim_renderer::effects::CameraViewFit,
+    ) -> Self {
+        self.effect(AnimationType::CameraViewZoomTo { screen, zoom, fit })
+    }
+
+    /// Grow this camera view screen out of the region its camera sees
+    /// (`out`), or shrink it back into that region.
+    pub(crate) fn camera_view_pop(
+        self,
+        frame: ObjectId,
+        focus: Option<(ObjectId, DVec3, DVec3)>,
+        zoom: Option<(ObjectId, bool)>,
+        out: bool,
+    ) -> Self {
+        self.effect(AnimationType::CameraViewPop {
+            frame,
+            focus,
+            zoom,
+            out,
+        })
+    }
+
     /// Grow an arrow from its tail with an undistorted, travelling head.
     pub fn grow_arrow(self) -> Self {
         self.effect(AnimationType::GrowArrow)

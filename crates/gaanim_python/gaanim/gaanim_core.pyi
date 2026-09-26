@@ -1990,51 +1990,81 @@ class Drawable:
         ...
     def camera_view(
         self,
-        frame: Drawable,
+        frame: Optional[Drawable] = None,
         *,
+        center: tuple[float, float] | Drawable | AnchorPoint | None = None,
+        zoom: ScalarSource | None = None,
         fit: Literal["contain", "cover", "stretch"] = "contain",
         background: Paint | Literal["canvas"] | None = "canvas",
         exclude: Sequence[Drawable] = (),
-    ) -> Drawable:
-        """Show inside this shape what a second camera framing ``frame`` sees.
+        layers: Sequence[str] = (),
+    ) -> CameraView:
+        """Show inside this shape what a second camera sees and return the camera.
 
         This drawable becomes a screen, like a picture-in-picture or a
-        magnifying lens. The camera sees the region of ``frame``'s bounds and
-        follows its transform every frame: moving ``frame`` pans the view,
-        scaling it down zooms in and rotating it turns the view the other way.
-        The zoom is the screen size divided by the frame size. ``fit`` maps
-        the frame onto the screen: ``"contain"`` keeps the whole frame
-        visible, ``"cover"`` fills the screen and ``"stretch"`` scales each
-        axis on its own.
+        magnifying lens. The camera looks through ``frame``: its center sets
+        where the camera looks and its rotation turns the view the other way,
+        every frame. Without ``zoom`` the frame's size also sets the zoom
+        (screen size over frame size, mapped by ``fit``: ``"contain"`` keeps
+        the whole frame visible, ``"cover"`` fills the screen and
+        ``"stretch"`` scales each axis on its own), so scaling the frame down
+        zooms in.
+
+        ``zoom`` fixes the magnification instead and the frame's size stops
+        mattering: a number gives the view its own zoom, which
+        ``CameraView.animate.zoom_to`` changes at a constant perceived speed;
+        a ``Parameter`` is animated linearly by it; a ``Computed`` or time
+        input is followed and cannot be set. Without ``frame`` the camera
+        looks through an invisible frame at ``center`` (the origin by
+        default) with a zoom of 1 unless ``zoom`` is given.
 
         The screen draws its own fill first, then ``background`` and the view
         clipped to its outline, then its stroke on top; opacity and fades
         apply to all of it. ``background="canvas"`` paints the scene
         background as the camera sees it, a color or ``Brush`` paints the
-        screen, and ``None`` lets the screen's own fill show. The screen,
-        ``frame`` and every drawable in ``exclude`` (with its children) stay
-        out of the view; hide the frame with ``no_stroke()`` or
-        ``opacity(0)`` to use it only as the camera. Screens seen inside
-        another view show their own paint, not their view. A later call or
-        ``no_camera_view()`` replaces the view.
+        screen, and ``None`` lets the screen's own fill show. The screen, the
+        frame and every drawable in ``exclude`` (with its children) stay out
+        of the view; hide a visible frame with ``no_stroke()`` to use it only
+        as the camera. ``layers`` lists the view layers (see ``view_layer``)
+        this view shows besides ordinary drawables. HUD overlays never appear
+        in a view, and screens seen inside another view show their own paint,
+        not their view. A later call or ``no_camera_view()`` replaces the
+        view.
 
         The screen must be a single closed 2D shape: a rect, square, rounded
         rect, circle, dot, ellipse, polygon, star, sector, annulus, curve, SVG
-        path or boolean. Text, groups, images and 3D objects, a ``frame`` equal
-        to this drawable, drawables of another Scene, or an unknown ``fit`` or
-        ``background`` raise ``ValueError``.
+        path or boolean. Text, groups, images and 3D objects, a ``frame``
+        equal to this drawable, both ``frame`` and ``center``, drawables or
+        parameters of another Scene, a zoom that is not positive, an empty
+        layer name, or an unknown ``fit`` or ``background`` raise
+        ``ValueError``.
 
         Example:
             frame = scene.geometry.rect(2, 1.125).no_fill().stroke(YELLOW, 0.04)
             screen = scene.geometry.rounded_rect(6.4, 3.6, 0.2).move_to(-4, -1.5)
-            screen.camera_view(frame)
+            view = screen.camera_view(frame)
             scene.play([frame.animate.scale_to(0.5)])  # zoom in twice as much
+            lens = scene.geometry.circle(1).camera_view(center=(2, 1), zoom=3)
+            scene.play([lens.animate.zoom_to(6), lens.animate.pan_to(3, 1)])
         """
         ...
     def no_camera_view(self) -> Drawable:
         """Remove the camera view shown inside this drawable and return it.
 
         The drawable draws as a plain shape again.
+        """
+        ...
+    def view_layer(self, name: Optional[str]) -> Drawable:
+        """Put this drawable and its children on a view layer and return it.
+
+        The main camera does not draw drawables on a layer: only camera
+        views that list the layer in ``layers`` show them, for example a
+        skeleton that appears only inside an X-ray lens. ``None`` puts the
+        drawable back on no layer. An empty name raises ``ValueError``.
+
+        Example:
+            bones = scene.geometry.group(...).view_layer("xray")
+            lens.camera_view(center=(0, 0), zoom=2, layers=["xray"])
         """
         ...
     def set_fill_level(self, level: ScalarSource) -> Drawable:
@@ -2166,15 +2196,17 @@ class Drawable:
         """
         ...
     def hud(self) -> Self:
-        """Pin the drawable to the screen as a fixed HUD overlay.
+        """Pin the drawable to the output frame as a HUD overlay.
 
-        HUD drawables use screen-space coordinates and are not affected by
-        the 3D camera. Use ``.move_to(x, y)`` after ``.hud()`` to position them in
-        the viewport. The method is chainable and returns the same
-        ``Drawable``.
+        A HUD drawable keeps its place on screen while the 2D camera pans,
+        zooms or rotates, and while a 3D camera moves. Its coordinates are
+        scene units of the unmoved camera, so ``move_to(0, 3.5)`` puts it near
+        the top of a 16 x 9 frame. HUD drawables draw above the scene and
+        never appear inside camera views. The method is chainable and returns
+        the same ``Drawable``.
 
         Example:
-            title = scene.text("glTF demo").hud().move_to(0.0, 300.0)
+            title = scene.text("glTF demo").hud().move_to(0.0, 3.5)
         """
         ...
     def scale_by(self, factor: float) -> Self:
@@ -3220,6 +3252,157 @@ class Camera:
     def reset(self) -> Camera: ...
     def bind_2d(self, *, center: Optional[Endpoint] = None, zoom: Optional[ScalarSource] = None, rotation: Optional[ScalarSource] = None, influence: Optional[ScalarSource] = None, enabled: bool = True) -> CameraConstraint: ...
     def bind_3d(self, *, eye: Optional[Endpoint] = None, target: Optional[Endpoint] = None, fov_y: Optional[ScalarSource] = None, up: tuple[float, float, float] = (0.0, 1.0, 0.0), influence: Optional[ScalarSource] = None, enabled: bool = True) -> CameraConstraint: ...
+    def inset(
+        self,
+        target: Endpoint,
+        *,
+        zoom: float | Parameter = 2.0,
+        at: Anchor | tuple[float, float] = Anchor.TOP_RIGHT,
+        size: Optional[float] = None,
+        shape: Literal["rect", "rounded", "circle"] = "rounded",
+        follow: bool = False,
+        connectors: bool = True,
+        color: Optional[ColorLike] = None,
+        fixed: bool = False,
+        background: Paint | Literal["canvas"] | None = "canvas",
+        exclude: Sequence[Drawable] = (),
+        layers: Sequence[str] = (),
+    ) -> CameraView:
+        """Show an enlarged detail of the scene in an inset screen.
+
+        Creates a screen, a frame on ``target`` that outlines the region the
+        screen shows, and two connector lines joining them, and returns the
+        view. The frame's scale follows the zoom, so it always outlines what
+        the screen shows at its resting size. ``at`` places the screen
+        against a corner or edge of the scene frame (``Anchor.CENTER``
+        centers it) or centers it on a point; the connectors join the corners
+        that face each other from that side. ``size`` is the screen width, or
+        the diameter of a circle, and defaults to 30% of the scene width (20%
+        for a circle); rectangles take the scene frame's proportions.
+
+        ``follow=True`` keeps the frame on a moving ``target``; without it the
+        frame is placed once and ``target`` must be a point, a drawable or an
+        anchor point. ``fixed=True`` pins the screen to the output frame like
+        a HUD overlay, so it stays put while ``scene.camera`` moves. ``color``
+        strokes the screen, frame and connectors and defaults to the theme
+        accent. ``background``, ``exclude`` and ``layers`` work as in
+        ``Drawable.camera_view``; the connectors never appear in the view. A
+        zoom or size that is not positive, an unknown ``shape`` or ``at``, or
+        a reactive ``target`` without ``follow`` raise ``ValueError``.
+
+        Example:
+            view = scene.camera.inset(atom, zoom=4, at=Anchor.TOP_RIGHT)
+            scene.play([view.animate.pop_out().duration(0.8)])
+            scene.play([view.animate.zoom_to(8).duration(1.5)])
+        """
+        ...
+
+class CameraView:
+    """A second camera shown inside a screen drawable.
+
+    Returned by ``Drawable.camera_view`` and ``Camera.inset``. The camera is
+    ``frame``: panning moves it, rotating turns it, and zooming either scales
+    it or changes the view's zoom.
+    """
+    @property
+    def screen(self) -> Drawable:
+        """The drawable that shows the view."""
+        ...
+    @property
+    def frame(self) -> Drawable:
+        """The drawable that plays the camera; animate it like any drawable."""
+        ...
+    @property
+    def connectors(self) -> list[Drawable]:
+        """Lines joining the frame to the screen of an inset; empty otherwise."""
+        ...
+    @property
+    def zoom(self) -> Parameter | Computed:
+        """The zoom as a reactive value, for readouts and bindings.
+
+        A view created with a number returns a ``Computed``, one created with
+        a ``Parameter`` or ``Computed`` returns it. A view whose frame's size
+        sets the zoom raises ``ValueError``.
+
+        Example:
+            label = scene.viz.readout(view.zoom, format=".1f", prefix="x")
+        """
+        ...
+    @property
+    def animate(self) -> CameraViewAnimation:
+        """Pure animation proxy; pass its results to ``Scene.play``."""
+        ...
+    @overload
+    def pan_to(self, x: float, y: float) -> CameraView: ...
+    @overload
+    def pan_to(self, target: tuple[float, float] | Drawable | AnchorPoint) -> CameraView: ...
+    def pan_to(self, x: Any, y: Any = None) -> CameraView:
+        """Point the camera at ``(x, y)``, a drawable or an anchor point at the cursor.
+
+        Moves the frame's center there and returns this view.
+        """
+        ...
+    def zoom_to(self, zoom: float) -> CameraView:
+        """Set the zoom at the current cursor and return this view.
+
+        A frame-sized view scales its frame to reach ``zoom``, measured with
+        its ``fit`` against both sizes at that point. A zoom that is not
+        positive, or a view that follows a ``Computed`` zoom, raises
+        ``ValueError``.
+        """
+        ...
+    def rotate_to(self, radians: ScalarSource) -> CameraView:
+        """Turn the camera to ``radians``; the view turns the other way."""
+        ...
+    def follow(self, target: Endpoint, *, offset: tuple[float, float] = (0.0, 0.0)) -> CameraView:
+        """Keep the camera on ``target`` plus ``offset`` from now on and return this view.
+
+        The frame follows the endpoint every frame, so ``pan_to`` has no
+        effect afterwards, and ``pop_out``/``pop_in`` start from where a
+        followed drawable or anchor point is at that moment. A non-finite
+        offset raises ``ValueError``.
+        """
+        ...
+
+class CameraViewAnimation:
+    """Animations of a ``CameraView``, each returned as an ``Anim``."""
+    @overload
+    def pan_to(self, x: float, y: float) -> Anim: ...
+    @overload
+    def pan_to(self, target: tuple[float, float] | Drawable | AnchorPoint) -> Anim: ...
+    def pan_to(self, x: Any, y: Any = None) -> Anim:
+        """Pan the camera to ``(x, y)``, a drawable or an anchor point."""
+        ...
+    def zoom_to(self, zoom: float) -> Anim:
+        """Zoom to ``zoom``.
+
+        A view's own zoom changes at a constant perceived speed, a
+        ``Parameter`` zoom animates linearly and a frame-sized view scales its
+        frame. A zoom that is not positive, or a ``Computed`` zoom, raises
+        ``ValueError``.
+
+        Example:
+            scene.play([view.animate.zoom_to(6).duration(1.5)])
+        """
+        ...
+    def rotate_to(self, radians: ScalarSource) -> Anim:
+        """Turn the camera to ``radians``."""
+        ...
+    def pop_out(self) -> Anim:
+        """Grow the screen out of the region its camera sees into its place.
+
+        Shrunk over that region, the screen shows the scene at its real size,
+        so the view pops out of the scene without a jump. Played first, it is
+        the screen's entry: until then the screen waits over the region.
+        After ``pop_in`` it returns the screen to where it rested.
+
+        Example:
+            scene.play([view.animate.pop_out().duration(0.8)])
+        """
+        ...
+    def pop_in(self) -> Anim:
+        """Shrink the screen back into the region its camera sees."""
+        ...
 
 class CameraAnimation:
     def to(self, state: CameraState) -> Anim:

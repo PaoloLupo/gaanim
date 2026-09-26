@@ -19,8 +19,7 @@ use crate::anim::{
     AnimationBuilder, AnimationType, DrawAnimationConfig, PropertyAnimation, TextSelectionEffect,
 };
 use crate::canvas::ops::{
-    AnchorPoint, CameraViewSpec, FragmentRevealStyle, Op, SharedCanvasState, SharedObjectSpec,
-    UpdaterPreset,
+    AnchorPoint, FragmentRevealStyle, Op, SharedCanvasState, SharedObjectSpec, UpdaterPreset,
 };
 use crate::canvas::types::{Anim, LayoutOp, ObjectSpec, OptDuration, SpawnKind};
 
@@ -98,53 +97,6 @@ impl Default for ClipOptions {
             invert: false,
         }
     }
-}
-
-/// Options for a camera view shown inside a drawable.
-#[derive(Debug, Clone, Default)]
-pub struct CameraViewOptions {
-    /// How the framed region fills the screen.
-    pub fit: gaanim_renderer::effects::CameraViewFit,
-    /// Paint behind the view's content, inside the screen.
-    pub background: gaanim_renderer::effects::CameraViewBackground,
-    /// Drawables (with their subtrees) the view leaves out.
-    pub exclude: Vec<DrawableHandle>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum CameraViewError {
-    #[error("camera view drawables must belong to the same Scene")]
-    ForeignScene,
-    #[error(
-        "a camera view screen must be a single closed 2D shape: a rect, square, circle, dot, ellipse, polygon, star, sector, annulus, curve, SVG path or boolean"
-    )]
-    UnsupportedScreen,
-    #[error("a drawable cannot frame its own camera view")]
-    OwnSource,
-}
-
-/// Whether a drawable of `kind` is one closed 2D vector leaf that can show a
-/// camera view.
-fn is_camera_view_screen(kind: &SpawnKind) -> bool {
-    matches!(
-        kind,
-        SpawnKind::Circle(_)
-            | SpawnKind::Rect(..)
-            | SpawnKind::RoundedRect(..)
-            | SpawnKind::SurroundingRect
-            | SpawnKind::Square(_)
-            | SpawnKind::Dot(_)
-            | SpawnKind::Ellipse(..)
-            | SpawnKind::Polygon(_)
-            | SpawnKind::Star { .. }
-            | SpawnKind::RegularPolygon { .. }
-            | SpawnKind::Sector { .. }
-            | SpawnKind::Annulus { .. }
-            | SpawnKind::Bezier { .. }
-            | SpawnKind::Curve(_)
-            | SpawnKind::SvgPath(_)
-            | SpawnKind::Boolean { .. }
-    )
 }
 
 /// A deferred glyph selection inside a text-like [`DrawableHandle`].
@@ -1175,70 +1127,6 @@ impl DrawableHandle {
                 mask: None,
                 rule: gaanim_core::peniko::Fill::NonZero,
                 invert: false,
-            });
-        self
-    }
-
-    /// Show inside this shape what a second camera framing `source` sees.
-    ///
-    /// See [`Self::camera_view_with`].
-    pub fn camera_view(self, source: &DrawableHandle) -> Result<Self, CameraViewError> {
-        self.camera_view_with(source, CameraViewOptions::default())
-    }
-
-    /// Make this closed shape a screen for a second camera that frames
-    /// `source`: the camera sees `source`'s bounds and follows its transform,
-    /// so moving, scaling or rotating `source` pans, zooms or rotates the
-    /// view. The screen draws its fill, then the view clipped to its outline,
-    /// then its stroke. The screen, `source` and `options.exclude` stay out of
-    /// the view. A later call or [`Self::no_camera_view`] replaces it.
-    pub fn camera_view_with(
-        self,
-        source: &DrawableHandle,
-        options: CameraViewOptions,
-    ) -> Result<Self, CameraViewError> {
-        if !self.same_canvas(source)
-            || !options
-                .exclude
-                .iter()
-                .all(|excluded| self.same_canvas(excluded))
-        {
-            return Err(CameraViewError::ForeignScene);
-        }
-        if source.id == self.id {
-            return Err(CameraViewError::OwnSource);
-        }
-        if !is_camera_view_screen(&self.spec.lock().expect("object spec poisoned").kind) {
-            return Err(CameraViewError::UnsupportedScreen);
-        }
-        let view = CameraViewSpec {
-            source: source.id,
-            fit: options.fit,
-            background: options.background,
-            exclude: options.exclude.iter().map(|excluded| excluded.id).collect(),
-        };
-        self.state
-            .lock()
-            .expect("canvas state poisoned")
-            .active_mut()
-            .ops
-            .push(Op::SetCameraView {
-                target: self.id,
-                view: Some(view),
-            });
-        Ok(self)
-    }
-
-    /// Remove the camera view shown inside this drawable.
-    pub fn no_camera_view(self) -> Self {
-        self.state
-            .lock()
-            .expect("canvas state poisoned")
-            .active_mut()
-            .ops
-            .push(Op::SetCameraView {
-                target: self.id,
-                view: None,
             });
         self
     }

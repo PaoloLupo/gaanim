@@ -17,7 +17,7 @@ use gaanim_visualization::{
     scatter_points, step_path, violin_path,
 };
 
-use super::ops::Op;
+use super::ops::{Op, SharedCanvasState};
 use super::{Anchor, CanvasEndpoint, DrawableHandle, PointRef, SceneModel, SpawnKind};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -66,6 +66,25 @@ pub struct CoordinateRef {
 pub struct Parameter {
     handle: DrawableHandle,
     value: Arc<Mutex<f64>>,
+}
+
+/// Create a parameter in the canvas that owns `state`, as
+/// [`SceneModel::parameter`] does.
+pub(crate) fn parameter_in(
+    state: &SharedCanvasState,
+    initial: f64,
+) -> Result<Parameter, VisualizationError> {
+    if !initial.is_finite() {
+        return Err(VisualizationError::InvalidParameter);
+    }
+    let handle = super::canvas_impl::spawn_in(state, SpawnKind::ValueTracker(initial), true);
+    let value = Arc::new(Mutex::new(initial));
+    state
+        .lock()
+        .expect("canvas state poisoned")
+        .parameter_values
+        .insert(handle.id, value.clone());
+    Ok(Parameter { handle, value })
 }
 
 impl Parameter {
@@ -1039,17 +1058,7 @@ impl DrawableHandle {
 impl SceneModel {
     /// Create an animatable native scalar for reactive expressions.
     pub fn parameter(&mut self, initial: f64) -> Result<Parameter, VisualizationError> {
-        if !initial.is_finite() {
-            return Err(VisualizationError::InvalidParameter);
-        }
-        let handle = self.value_tracker(initial);
-        let value = Arc::new(Mutex::new(initial));
-        self.state
-            .lock()
-            .expect("canvas state poisoned")
-            .parameter_values
-            .insert(handle.id, value.clone());
-        Ok(Parameter { handle, value })
+        parameter_in(&self.state, initial)
     }
 
     /// Resolve the live mirrors required by a reactive callback evaluator.

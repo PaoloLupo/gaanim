@@ -198,6 +198,81 @@ scene.render()
 - La cámara ve la escena aunque la región quede fuera de la cámara
   principal, así que puedes mostrar a la vez dos zonas alejadas.
 
+=== Zoom, paneo y pop-out
+
+`camera_view` devuelve un `CameraView` con el mismo vocabulario que
+`scene.camera`: `pan_to`, `zoom_to` y `rotate_to`, al instante o con
+`animate`. Con `zoom=` la vista tiene su propio aumento y el tamaño del marco
+deja de contar; sin marco, la cámara mira a `center` a través de un marco
+invisible. `animate.zoom_to` cambia ese zoom a velocidad percibida constante,
+como el de la cámara principal.
+
+`animate.pop_out()` hace brotar la pantalla de la región que ve su cámara:
+empieza encogida sobre esa región, mostrando la escena a tamaño real, y crece
+hasta su sitio. `animate.pop_in()` la devuelve.
+
+```python
+# continue
+vista = scene.geometry.rounded_rect(5, 2.8, 0.2).stroke(WHITE, 0.05).move_to(-3.5, -2.3)
+vista = vista.camera_view(center=(-4.5, -0.9), zoom=3)
+scene.play([vista.animate.pop_out().duration(0.8)])
+scene.play([vista.animate.pan_to(-1, 0).duration(1.0), vista.animate.zoom_to(6).duration(1.0)])
+scene.play([vista.animate.pop_in().duration(0.6)])
+```
+
+=== Insets con conectores
+
+`scene.camera.inset(objetivo, zoom=, at=)` monta de una vez la pantalla, un
+marco sobre el objetivo que recuadra lo que muestra y dos conectores entre
+ambos. `at` coloca la pantalla en una esquina o un borde del fotograma, o en
+un punto. Con `follow=True` el marco persigue a un objeto en movimiento, y
+`view.zoom` es un valor reactivo que puedes mostrar con un readout.
+
+```python
+# output: preview.webp
+from gaanim import CYAN, Anchor, Easing, Scene
+
+scene = Scene(frame=(16, 9), background="#0f172a")
+for x in range(-7, 8):
+    for y in range(-4, 2):
+        scene.geometry.dot(0.04).fill("#334155").move_to(x, y)
+bola = scene.geometry.circle(0.12).fill(CYAN).move_to(-6, -3)
+view = scene.camera.inset(bola, zoom=5, at=Anchor.TOP_RIGHT, follow=True)
+scene.viz.readout(view.zoom, format=".0f", prefix="×").move_to(4.5, 0.4)
+
+scene.play([view.animate.pop_out().duration(0.8)])
+scene.play([bola.animate.move_to(5, -2).duration(2.0).easing(Easing.SMOOTH)])
+scene.play([view.animate.zoom_to(2).duration(1.0)])
+scene.render()
+```
+
+Con `fixed=True` la pantalla se queda fija en la imagen aunque
+`scene.camera` se desplace o acerque, como cualquier objeto con `.hud()`.
+
+=== Capas: la lupa de rayos X
+
+`drawable.view_layer("nombre")` saca un objeto de la cámara principal: solo
+lo muestran las vistas que listan esa capa en `layers=`. Así una lupa puede
+revelar lo que hay debajo de una superficie.
+
+```python
+# output: preview.webp
+from gaanim import GOLD, WHITE, Scene
+
+scene = Scene(frame=(16, 9), background="#0f172a")
+scene.geometry.rounded_rect(9, 4, 0.6).fill("#475569").no_stroke()
+for x in (-3, -1, 1, 3):
+    scene.geometry.rect(0.3, 3).fill(GOLD).no_stroke().move_to(x, 0).view_layer("rayos_x")
+
+lupa = scene.geometry.circle(1.3).stroke(WHITE, 0.06).move_to(-4, 0)
+vista = lupa.camera_view(center=(-4, 0), zoom=1.2, layers=["rayos_x"])
+scene.play([
+    lupa.animate.move_to(4, 0).duration(3.0),
+    vista.animate.pan_to(4, 0).duration(3.0),
+])
+scene.render()
+```
+
 = Escenas 3D
 
 Gaanim puede mezclar objetos 3D con el resto de la escena. Empieza con una

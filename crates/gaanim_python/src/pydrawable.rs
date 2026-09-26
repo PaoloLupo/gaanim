@@ -431,7 +431,7 @@ impl PyCanvasAnim {
     }
 
     #[pyo3(signature = (x, y=None, anchor=None))]
-    fn move_to(
+    pub(crate) fn move_to(
         &self,
         x: &Bound<'_, PyAny>,
         y: Option<&Bound<'_, PyAny>>,
@@ -615,7 +615,7 @@ impl PyCanvasAnim {
         })
     }
 
-    fn rotate_to(&self, radians: &Bound<'_, PyAny>) -> PyResult<Self> {
+    pub(crate) fn rotate_to(&self, radians: &Bound<'_, PyAny>) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
         self.require_transformable()?;
@@ -2079,47 +2079,44 @@ impl PyDrawable {
         crate::custom::ensure_authoring_allowed()?;
         Ok(Self(self.0.clone().no_clip()))
     }
-    /// Show inside this closed shape what a second camera framing `frame` sees.
-    #[pyo3(signature = (frame, *, fit="contain", background=CameraViewBackgroundArg::Canvas, exclude=Vec::new()))]
+    /// Show inside this closed shape what a second camera sees.
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (frame=None, *, center=None, zoom=None, fit="contain", background=CameraViewBackgroundArg::Canvas, exclude=Vec::new(), layers=Vec::new()))]
     fn camera_view(
         &self,
-        frame: &PyDrawable,
+        frame: Option<PyDrawable>,
+        center: Option<Bound<'_, PyAny>>,
+        zoom: Option<Bound<'_, PyAny>>,
         fit: &str,
         background: CameraViewBackgroundArg,
         exclude: Vec<PyDrawable>,
-    ) -> PyResult<Self> {
-        use gaanim_api::canvas::{CameraViewBackground, CameraViewFit, CameraViewOptions};
+        layers: Vec<String>,
+    ) -> PyResult<crate::pycamera_view::PyCameraView> {
         crate::custom::ensure_authoring_allowed()?;
-        let fit = match fit {
-            "contain" => CameraViewFit::Contain,
-            "cover" => CameraViewFit::Cover,
-            "stretch" => CameraViewFit::Stretch,
-            other => {
-                return Err(PyValueError::new_err(format!(
-                    "fit must be 'contain', 'cover', or 'stretch', got {other:?}"
-                )))
-            }
-        };
-        let background = match background {
-            CameraViewBackgroundArg::Canvas => CameraViewBackground::Canvas,
-            CameraViewBackgroundArg::None => CameraViewBackground::None,
-            CameraViewBackgroundArg::Paint(brush) => CameraViewBackground::Brush(brush),
-        };
-        let options = CameraViewOptions {
+        crate::pycamera_view::camera_view(
+            &self.0,
+            frame.as_ref(),
+            center.as_ref(),
+            zoom.as_ref(),
             fit,
             background,
-            exclude: exclude.into_iter().map(|drawable| drawable.0).collect(),
-        };
-        self.0
-            .clone()
-            .camera_view_with(&frame.0, options)
-            .map(Self)
-            .map_err(|error| PyValueError::new_err(error.to_string()))
+            exclude,
+            layers,
+        )
     }
     /// Remove the camera view shown inside this drawable.
     fn no_camera_view(&self) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         Ok(Self(self.0.clone().no_camera_view()))
+    }
+    /// Put this drawable on a view layer, or back on none with `None`.
+    fn view_layer(&self, name: Option<String>) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.0
+            .clone()
+            .view_layer(name.as_deref())
+            .map(Self)
+            .map_err(|error| PyValueError::new_err(error.to_string()))
     }
     fn set_fill_level(&self, level: &Bound<'_, PyAny>) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;

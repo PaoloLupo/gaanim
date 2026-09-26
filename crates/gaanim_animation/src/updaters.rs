@@ -1884,14 +1884,23 @@ pub fn tracking_world_to_local(entity: Entity, point: DVec3, world: &World) -> D
 
 fn entity_world_matrix(entity: Entity, world: &World) -> Option<DMat4> {
     let mut chain = Vec::new();
+    let mut hud = false;
     let mut current = entity;
     for _ in 0..256 {
         chain.push(world.get::<SpatialTransform>(current)?.to_mat4());
+        hud |= world.get::<gaanim_scene::HudOverlay>(current).is_some();
         let Some(parent) = world
             .get::<ChildOf>(current)
             .map(|relation| relation.parent())
         else {
             let mut matrix = DMat4::IDENTITY;
+            // HUD overlays sit where the camera pins them on the output frame.
+            if hud && let Some(pin) = gaanim_scene::world_hud_pin(world) {
+                matrix = gaanim_math::GlobalSpatialTransform::from_local(
+                    &SpatialTransform::from_affine_2d(&pin),
+                )
+                .mat4;
+            }
             for local in chain.iter().rev() {
                 matrix *= *local;
             }
@@ -2422,6 +2431,38 @@ mod tests {
     use super::*;
     use bevy::prelude::BuildChildrenTransformExt;
     use gaanim_core::kurbo::Shape;
+
+    #[test]
+    fn anchors_on_hud_overlays_follow_their_pinned_place() {
+        let mut world = World::new();
+        let mut camera = gaanim_math::Camera::ortho_2d_frame(16.0, 9.0, 1600, 900);
+        camera.position = DVec3::new(2.0, 1.0, 0.0);
+        camera.projection = gaanim_math::Projection::Orthographic { zoom: 2.0 };
+        world.insert_resource(camera);
+        let local = gaanim_math::Bounds3D::new_2d(-1.0, -0.5, 1.0, 0.5);
+        let screen = world
+            .spawn((
+                SpatialTransform::new_2d(4.0, 3.0),
+                LocalBounds(local),
+                gaanim_scene::HudOverlay,
+            ))
+            .id();
+        let corner = TrackingEndpoint::EntityAnchor {
+            entity: screen,
+            normalized: DVec3::new(1.0, 1.0, 0.0),
+            offset: DVec3::ZERO,
+        };
+        let world_point = resolve_tracking_endpoint(&corner, &world).unwrap();
+        // The moved camera shows it where the unmoved one shows (5, 3.5).
+        let unmoved = gaanim_math::Camera::ortho_2d_frame(16.0, 9.0, 1600, 900);
+        let pixel = camera.to_vello_transform()
+            * gaanim_core::kurbo::Point::new(world_point.x, world_point.y);
+        let expected = unmoved.to_vello_transform() * gaanim_core::kurbo::Point::new(5.0, 3.5);
+        assert!(
+            (pixel - expected).hypot() < 1e-9,
+            "{pixel:?} != {expected:?}"
+        );
+    }
 
     #[test]
     fn connector_handles_collapsed_points_and_short_final_segment() {

@@ -2668,6 +2668,9 @@ impl SceneModel {
                         text_config,
                         scene_background,
                     );
+                    if spec.hud {
+                        Self::apply_hud(builder, actual.id);
+                    }
                     if spec.exclude_from_parent_draw {
                         if let Some(state) = builder.states.get_mut(actual.id) {
                             state.exclude_from_parent_draw = true;
@@ -4607,6 +4610,10 @@ impl SceneModel {
                         continue;
                     };
                     let exclude = view.exclude.iter().filter_map(entity_of).collect();
+                    let zoom = view
+                        .zoom
+                        .as_ref()
+                        .map(|zoom| compile_tracking_scalar(zoom, id_map, &builder.states));
                     builder
                         .commands
                         .entity(screen)
@@ -4615,7 +4622,29 @@ impl SceneModel {
                             fit: view.fit,
                             background: view.background.clone(),
                             exclude,
+                            zoom,
+                            layers: view.layers.clone(),
                         });
+                }
+                Op::SetViewLayer { target, layer } => {
+                    let Some(target) = id_map.get(target).copied() else {
+                        continue;
+                    };
+                    for leaf in Self::visual_leaf_ids(builder, target) {
+                        let Some(state) = builder.states.get(leaf) else {
+                            continue;
+                        };
+                        let mut entity = builder.commands.entity(state.entity);
+                        match layer {
+                            Some(layer) => {
+                                entity
+                                    .insert(gaanim_renderer::effects::ViewLayer(Arc::clone(layer)));
+                            }
+                            None => {
+                                entity.remove::<gaanim_renderer::effects::ViewLayer>();
+                            }
+                        }
+                    }
                 }
                 Op::Stop => builder.stop(),
                 Op::Show(id) => {
@@ -6672,6 +6701,32 @@ impl SceneModel {
             AnimationType::CameraFollow { target } => AnimationType::CameraFollow {
                 target: *id_map.get(target)?,
             },
+            AnimationType::CameraViewZoomTo { screen, zoom, fit } => {
+                AnimationType::CameraViewZoomTo {
+                    screen: *id_map.get(screen)?,
+                    zoom: *zoom,
+                    fit: *fit,
+                }
+            }
+            AnimationType::CameraViewPop {
+                frame,
+                focus,
+                zoom,
+                out,
+            } => AnimationType::CameraViewPop {
+                frame: *id_map.get(frame)?,
+                focus: match focus {
+                    Some((object, normalized, offset)) => {
+                        Some((*id_map.get(object)?, *normalized, *offset))
+                    }
+                    None => None,
+                },
+                zoom: match zoom {
+                    Some((signal, logarithm)) => Some((*id_map.get(signal)?, *logarithm)),
+                    None => None,
+                },
+                out: *out,
+            },
             AnimationType::FadeTransform { target } => AnimationType::FadeTransform {
                 target: *id_map.get(target)?,
             },
@@ -8469,6 +8524,32 @@ impl SceneModel {
         styled
     }
 
+    /// Mark a spawned drawable (and its glyph spans) as a HUD overlay.
+    ///
+    /// HUD overlays stay in the Vello2D pass, drawn after the 3D meshes, and
+    /// `pin_hud_overlays_system` keeps them fixed on the output frame. The
+    /// high z of the root is inherited by its glyphs.
+    fn apply_hud(builder: &mut SceneBuilder, id: ObjectId) {
+        let Some(state) = builder.states.get(id) else {
+            return;
+        };
+        let root = state.entity;
+        let spans: Vec<Entity> = state.child_spans.iter().map(|span| span.entity).collect();
+        for entity in std::iter::once(root).chain(spans) {
+            builder
+                .commands
+                .entity(entity)
+                .insert(gaanim_scene::HudOverlay);
+        }
+        builder
+            .commands
+            .entity(root)
+            .insert(gaanim_scene::RenderOrder {
+                z_index: 1000,
+                creation_order: id.index() as u64,
+            });
+    }
+
     fn post_apply(
         builder: &mut SceneBuilder,
         id: ObjectId,
@@ -8634,44 +8715,6 @@ impl SceneModel {
                     .commands
                     .entity(state.entity)
                     .insert(bevy::prelude::Transform::default());
-            }
-        }
-        if spec.hud {
-            // HUD is screen-space fixed but still rendered via Vello2D.
-            // Keeping RenderLayer::Vello2D ensures it participates in the
-            // main Vello pass which is now drawn AFTER the 3D meshes (order
-            // 1 vs 0) and after background suppression for perspective, so
-            // HUD appears on top of 3D. HudOverlay is retained as a marker
-            // for potential future dedicated overlay pass.
-            let targets = if child_spans.is_empty() {
-                builder
-                    .states
-                    .get(id)
-                    .map(|s| vec![s.entity])
-                    .unwrap_or_default()
-            } else {
-                child_spans.iter().map(|c| c.entity).collect::<Vec<_>>()
-            };
-            for entity in targets {
-                builder
-                    .commands
-                    .entity(entity)
-                    .insert(gaanim_scene::HudOverlay);
-            }
-            if let Some(state) = builder.states.get(id) {
-                builder
-                    .commands
-                    .entity(state.entity)
-                    .insert(gaanim_scene::HudOverlay);
-                // Keep Vello2D so the element is rendered; the high z on the
-                // parent is inherited by its glyphs.
-                builder
-                    .commands
-                    .entity(state.entity)
-                    .insert(gaanim_scene::RenderOrder {
-                        z_index: 1000,
-                        creation_order: id.index() as u64,
-                    });
             }
         }
         Self::apply_layout(builder, id, spec, id_map, frame_bounds);
@@ -10640,42 +10683,62 @@ mod tests {
         );
     }
 
+    fn entity_of(world: &mut World, handle: &DrawableHandle) -> Entity {
+        let id = ObjectId::from_raw(handle.id.as_raw() - 1);
+        world
+            .query::<(Entity, &MobjectId)>()
+            .iter(world)
+            .find(|(_, object)| object.0 == id)
+            .unwrap()
+            .0
+    }
+
     #[test]
     fn camera_views_bind_their_screen_to_the_framing_drawable() {
         use crate::canvas::{CameraViewError, CameraViewFit, CameraViewOptions};
-        use gaanim_renderer::effects::CameraView;
+        use gaanim_renderer::effects::{CameraView, ViewLayer};
 
         let mut canvas = SceneModel::new(640, 360);
         let frame = canvas.rect(2.0, 1.0).move_to(3.0, 2.0);
         let marker = canvas.dot(0.1).move_to(2.5, 2.0);
-        let screen = canvas
+        let bone = canvas
+            .circle(0.2)
+            .move_to(3.2, 1.8)
+            .view_layer(Some("xray"))
+            .unwrap();
+        let view = canvas
             .rounded_rect(4.0, 2.0, 0.2)
             .move_to(-4.0, -1.0)
             .camera_view_with(
-                &frame,
+                Some(&frame),
                 CameraViewOptions {
                     fit: CameraViewFit::Cover,
                     exclude: vec![marker.clone()],
+                    layers: vec![" xray ".into()],
                     ..Default::default()
                 },
             )
             .unwrap();
-        let entity_of = |world: &mut World, handle: &DrawableHandle| {
-            let id = ObjectId::from_raw(handle.id.as_raw() - 1);
-            world
-                .query::<(Entity, &MobjectId)>()
-                .iter(world)
-                .find(|(_, object)| object.0 == id)
-                .unwrap()
-                .0
-        };
+        let screen = view.screen().clone();
+        assert_eq!(view.frame().id, frame.id);
+        assert!(
+            view.zoom_source().is_none(),
+            "the frame's size sets the zoom"
+        );
 
         let (mut world, _) = compiled_world(&canvas);
         let screen_entity = entity_of(&mut world, &screen);
-        let view = world.get::<CameraView>(screen_entity).unwrap().clone();
-        assert_eq!(view.source, entity_of(&mut world, &frame));
-        assert_eq!(view.exclude, vec![entity_of(&mut world, &marker)]);
-        assert_eq!(view.fit, CameraViewFit::Cover);
+        let camera = world.get::<CameraView>(screen_entity).unwrap().clone();
+        assert_eq!(camera.source, entity_of(&mut world, &frame));
+        assert_eq!(camera.exclude, vec![entity_of(&mut world, &marker)]);
+        assert_eq!(camera.fit, CameraViewFit::Cover);
+        assert_eq!(camera.layers, vec![Arc::<str>::from("xray")]);
+        assert!(camera.zoom.is_none());
+        let bone_entity = entity_of(&mut world, &bone);
+        assert_eq!(
+            world.get::<ViewLayer>(bone_entity),
+            Some(&ViewLayer(Arc::from("xray")))
+        );
 
         let label = canvas.text("zoom");
         assert_eq!(
@@ -10691,10 +10754,248 @@ mod tests {
             screen.clone().camera_view(&foreign).unwrap_err(),
             CameraViewError::ForeignScene
         );
+        assert_eq!(
+            bone.clone().view_layer(Some("  ")).unwrap_err(),
+            CameraViewError::InvalidLayer
+        );
 
         screen.no_camera_view();
+        bone.view_layer(None).unwrap();
         let (mut world, _) = compiled_world(&canvas);
         assert_eq!(world.query::<&CameraView>().iter(&world).count(), 0);
+        assert_eq!(world.query::<&ViewLayer>().iter(&world).count(), 0);
+    }
+
+    #[test]
+    fn explicit_camera_view_zoom_animates_at_constant_perceived_speed() {
+        use crate::canvas::{CameraViewError, CameraViewOptions, CameraViewZoom};
+        use gaanim_renderer::effects::CameraView;
+
+        let mut canvas = SceneModel::new(640, 360);
+        let view = canvas
+            .rect(4.0, 2.0)
+            .camera_view_with(
+                None,
+                CameraViewOptions {
+                    zoom: Some(CameraViewZoom::Value(3.0)),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        canvas.play(vec![view.animate_zoom_to(12.0).unwrap().duration(1.0)]);
+        assert_eq!(view.zoom_to(0.0).unwrap_err(), CameraViewError::InvalidZoom);
+
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let screen = entity_of(&mut world, view.screen());
+        let zoom_at = |world: &mut World, timeline: &mut Timeline, time: f64| {
+            timeline.seek(world, time);
+            let camera = world.get::<CameraView>(screen).unwrap().clone();
+            camera.zoom.unwrap().evaluate(world).unwrap()
+        };
+        assert!((zoom_at(&mut world, &mut timeline, 0.0) - 3.0).abs() < 1e-9);
+        // Halfway through the eased time the zoom is the geometric mean.
+        assert!((zoom_at(&mut world, &mut timeline, 0.5) - 6.0).abs() < 1e-9);
+        assert!((zoom_at(&mut world, &mut timeline, 1.0) - 12.0).abs() < 1e-9);
+        let camera = world.get::<CameraView>(screen).unwrap().clone();
+        assert_eq!(camera.source, entity_of(&mut world, view.frame()));
+
+        let computed = canvas
+            .rect(4.0, 2.0)
+            .camera_view_with(
+                None,
+                CameraViewOptions {
+                    zoom: Some(CameraViewZoom::Source(2.0.into())),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            computed.zoom_to(3.0).unwrap_err(),
+            CameraViewError::ComputedZoom
+        );
+    }
+
+    #[test]
+    fn frame_sized_camera_views_zoom_by_scaling_their_frame() {
+        let mut canvas = SceneModel::new(640, 360);
+        let frame = canvas.rect(2.0, 1.0).move_to(3.0, 2.0);
+        let view = canvas
+            .rect(4.0, 2.0)
+            .move_to(-4.0, -1.0)
+            .camera_view(&frame)
+            .unwrap();
+        view.zoom_to(4.0).unwrap();
+        canvas.play(vec![view.animate_zoom_to(8.0).unwrap().duration(1.0)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        for (time, scale) in [(0.0, 0.5), (1.0, 0.25)] {
+            timeline.seek(&mut world, time);
+            let transform = transform_of(&mut world, &frame);
+            assert!(
+                (transform.scale.x - scale).abs() < 1e-9,
+                "{time}: {transform:?}"
+            );
+            assert!(
+                (transform.scale.y - scale).abs() < 1e-9,
+                "{time}: {transform:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn pop_out_and_pop_in_move_the_screen_through_the_region_its_camera_sees() {
+        use crate::canvas::{CameraViewOptions, CameraViewZoom};
+
+        let mut canvas = SceneModel::new(640, 360);
+        let frame = canvas.rect(2.0, 1.0).move_to(3.0, 2.0);
+        let view = canvas
+            .rect(4.0, 2.0)
+            .move_to(-4.0, -1.0)
+            .camera_view(&frame)
+            .unwrap();
+        canvas.play(vec![view.pop_out().duration(1.0)]);
+        canvas.play(vec![view.pop_in().duration(1.0)]);
+        canvas.play(vec![view.pop_out().duration(1.0)]);
+        // An explicit zoom of 4 shrinks the screen to a quarter over the frame.
+        let lens = canvas
+            .circle(1.0)
+            .move_to(4.0, -3.0)
+            .camera_view_with(
+                Some(&frame),
+                CameraViewOptions {
+                    zoom: Some(CameraViewZoom::Value(4.0)),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        canvas.play(vec![lens.pop_out().duration(1.0)]);
+        // A following camera pops back to where its target is now.
+        let dot = canvas.dot(0.1).move_to(1.0, 1.0);
+        let chase = canvas
+            .rect(4.0, 2.0)
+            .move_to(0.0, -3.0)
+            .camera_view_with(
+                None,
+                CameraViewOptions {
+                    zoom: Some(CameraViewZoom::Value(2.0)),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        chase.follow(crate::canvas::CanvasEndpoint::Entity(dot.id), DVec3::ZERO);
+        canvas.play(vec![dot.animate().move_to(5.0, 2.0).duration(1.0)]);
+        canvas.play(vec![chase.pop_in().duration(1.0)]);
+
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let placed = |world: &mut World, handle: &DrawableHandle| {
+            let transform = transform_of(world, handle);
+            (transform.translation.truncate(), transform.scale.x)
+        };
+        let region = DVec2::new(3.0, 2.0);
+        let rest = DVec2::new(-4.0, -1.0);
+        for (time, center, scale) in [
+            (0.0, region, 0.5),
+            (1.0, rest, 1.0),
+            (2.0, region, 0.5),
+            (3.0, rest, 1.0),
+        ] {
+            timeline.seek(&mut world, time);
+            let (at, size) = placed(&mut world, view.screen());
+            assert!(at.distance(center) < 1e-9, "{time}: {at:?}");
+            assert!((size - scale).abs() < 1e-9, "{time}: {size}");
+        }
+        timeline.seek(&mut world, 3.0);
+        let (at, size) = placed(&mut world, lens.screen());
+        assert!(at.distance(region) < 1e-9 && (size - 0.25).abs() < 1e-9);
+        timeline.seek(&mut world, 4.0);
+        let (at, size) = placed(&mut world, lens.screen());
+        assert!(at.distance(DVec2::new(4.0, -3.0)) < 1e-9 && (size - 1.0).abs() < 1e-9);
+        timeline.seek(&mut world, 6.0);
+        let (at, size) = placed(&mut world, chase.screen());
+        assert!(at.distance(DVec2::new(5.0, 2.0)) < 1e-9, "{at:?}");
+        assert!((size - 0.5).abs() < 1e-9, "{size}");
+    }
+
+    #[test]
+    fn camera_insets_join_their_frame_and_screen_and_hide_the_joins_from_the_view() {
+        use crate::canvas::{
+            CameraInsetOptions, CameraInsetShape, CameraViewError, CanvasEndpoint,
+        };
+        use gaanim_renderer::effects::CameraView;
+
+        let mut canvas = SceneModel::new(640, 360);
+        let target = canvas.dot(0.1).move_to(-3.0, -1.0);
+        let inset = canvas
+            .camera_inset(
+                CanvasEndpoint::Entity(target.id),
+                CameraInsetOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(inset.connectors().len(), 2);
+        let lens = canvas
+            .camera_inset(
+                CanvasEndpoint::Static(DVec3::new(2.0, 1.0, 0.0)),
+                CameraInsetOptions {
+                    shape: CameraInsetShape::Circle,
+                    connectors: false,
+                    fixed: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(lens.connectors().is_empty());
+        let reactive = CanvasEndpoint::Expression {
+            x: 1.0.into(),
+            y: 2.0.into(),
+        };
+        assert_eq!(
+            canvas
+                .camera_inset(reactive.clone(), CameraInsetOptions::default())
+                .unwrap_err(),
+            CameraViewError::UnsupportedTarget
+        );
+        canvas
+            .camera_inset(
+                reactive,
+                CameraInsetOptions {
+                    follow: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        timeline.seek(&mut world, 0.0);
+        let screen = entity_of(&mut world, inset.screen());
+        let camera = world.get::<CameraView>(screen).unwrap().clone();
+        for connector in inset.connectors() {
+            let connector = entity_of(&mut world, connector);
+            assert!(camera.exclude.contains(&connector));
+        }
+        assert!((camera.zoom.unwrap().evaluate(&world).unwrap() - 2.0).abs() < 1e-9);
+        // Later ids shift past the helpers the first inset compiles, so find
+        // the fixed screen by its components.
+        let fixed_screens = world
+            .query_filtered::<(), (With<CameraView>, With<gaanim_scene::HudOverlay>)>()
+            .iter(&world)
+            .count();
+        let huds = world
+            .query_filtered::<Entity, With<gaanim_scene::HudOverlay>>()
+            .iter(&world)
+            .count();
+        let views = world.query::<&CameraView>().iter(&world).count();
+        assert_eq!(
+            fixed_screens, 1,
+            "{huds} HUD entities, {views} camera views"
+        );
+        // The frame sits on the target, sized like the screen before its zoom.
+        let frame = transform_of(&mut world, inset.frame());
+        assert!(
+            frame
+                .translation
+                .truncate()
+                .distance(DVec2::new(-3.0, -1.0))
+                < 1e-9
+        );
     }
 
     #[test]

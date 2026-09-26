@@ -126,7 +126,8 @@ impl CanvasState {
                 | AnimationType::TranslateToAnchorPoint { .. } => "translation",
                 AnimationType::ScaleTo { .. }
                 | AnimationType::ScaleUniform { .. }
-                | AnimationType::ScaleBy3D { .. } => "scale",
+                | AnimationType::ScaleBy3D { .. }
+                | AnimationType::CameraViewZoomTo { .. } => "scale",
                 AnimationType::SkewTo { .. } => "skew",
                 AnimationType::RotateTo { .. }
                 | AnimationType::RotateBy { .. }
@@ -272,6 +273,9 @@ pub(crate) struct CameraViewSpec {
     pub fit: gaanim_renderer::effects::CameraViewFit,
     pub background: gaanim_renderer::effects::CameraViewBackground,
     pub exclude: Vec<ObjectId>,
+    /// Explicit magnification; `None` derives it from the source's size.
+    pub zoom: Option<ScalarSource>,
+    pub layers: Vec<Arc<str>>,
 }
 
 /// A deferred operation accumulated by [`SceneModel`](super::SceneModel) and replayed
@@ -474,6 +478,11 @@ pub(crate) enum Op {
     SetCameraView {
         target: ObjectId,
         view: Option<CameraViewSpec>,
+    },
+    /// Put a drawable hierarchy on a view layer, or back on none.
+    SetViewLayer {
+        target: ObjectId,
+        layer: Option<Arc<str>>,
     },
     /// Insert an explicit zero-duration interactive stop.
     Stop,

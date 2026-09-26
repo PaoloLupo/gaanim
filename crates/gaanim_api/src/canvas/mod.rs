@@ -28,12 +28,16 @@ pub use types::{
 /// Raster image handle; remains compatible with every DrawableHandle consumer.
 pub type ImageHandle = DrawableHandle;
 
+mod camera_view;
 mod drawable;
 mod property_bindings;
+pub use camera_view::{
+    CameraInsetOptions, CameraInsetPlacement, CameraInsetShape, CameraViewError, CameraViewHandle,
+    CameraViewOptions, CameraViewZoom,
+};
 pub use drawable::{
-    CameraViewError, CameraViewOptions, ClipOptions, DrawableHandle, FragmentSelection,
-    GltfAnimationError, LayoutOwnershipError, Primitive3DHandleError, RotationAxisError,
-    SvgPartError,
+    ClipOptions, DrawableHandle, FragmentSelection, GltfAnimationError, LayoutOwnershipError,
+    Primitive3DHandleError, RotationAxisError, SvgPartError,
 };
 mod editorial;
 pub use editorial::{
