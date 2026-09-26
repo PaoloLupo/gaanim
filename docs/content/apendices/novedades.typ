@@ -26,6 +26,18 @@ No requiere cambios en tus escenas.
   `exclude`; `no_camera_view()` la quita. Ver `Drawable.camera_view` en
   #link("/referencia/drawable/")[Drawable] y las cámaras secundarias en
   #link("/guias/camara-y-3d/")[Cámara y 3D].
+  
+== Correcciones
+
+- `grow_from_center()` crece desde el centro de la caja aunque la figura se
+  declare con coordenadas absolutas, como una línea entre dos puntos o un
+  polígono de vértices fijos. Antes escalaba desde el pivote, que en esas
+  figuras es el origen de la escena, y la figura viajaba desde `(0, 0)` hasta
+  su sitio mientras crecía. Ya no hace falta `with_pivot` como remedio.
+- `grow_from_edge` y `grow_from_point` mantienen fijo el punto indicado también
+  cuando el objeto tiene un pivote propio con `with_pivot`.
+- Tras `grow_from_edge` o `grow_from_point`, un `scale_by` o `scale_to`
+  posterior parte del tamaño declarado en lugar de escala cero.
 
 = 0.4.2
 
