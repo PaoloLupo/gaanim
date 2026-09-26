@@ -13,7 +13,7 @@ instalar una versión nueva, sigue
 
 = 0.4.2
 
-Sin publicar todavía. No requiere cambios en tus escenas.
+Publicada el 26 de septiembre de 2026. No requiere cambios en tus escenas.
 
 == Cambios
 
