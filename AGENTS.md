@@ -175,7 +175,7 @@ all use the application host, which owns the native runtime.
   just dev-exec target/debug/gaanim.exe --diff --example examples/visual_diff_demo.py
   ```
 
-  `--bless` overwrites the example baseline, so use it only after intentionally approving a visual change. The normal command captures `current/`, compares it with `baseline/`, and writes `report/index.html` (open it in a browser). `--no-gui` is accepted as a no-op for old scripts; use `--pixel-threshold` and `--max-changed-ratio` to tolerate controlled raster differences.
+  `--bless` overwrites the example baseline, so use it only after intentionally approving a visual change. The normal command captures `current/`, compares it with `baseline/`, and writes `report/index.html` (open it in a browser). Use `--pixel-threshold` and `--max-changed-ratio` to tolerate controlled raster differences.
 - Legacy/manual comparison remains available with `--baseline`, `--current`, and `--output`, but prefer `--example` so paths stay deterministic.
 
 ## Code conventions

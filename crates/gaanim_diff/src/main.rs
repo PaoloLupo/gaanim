@@ -60,8 +60,6 @@ fn run() -> Result<i32, String> {
                     .parse()
                     .map_err(|_| "max changed ratio must be between 0 and 1".to_string())?;
             }
-            // The native viewer was removed; kept so existing scripts still parse.
-            "--no-gui" => {}
             "-h" | "--help" => {
                 print_help();
                 return Ok(0);

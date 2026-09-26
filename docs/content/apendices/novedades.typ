@@ -31,7 +31,8 @@ Sin publicar todavía. No requiere cambios en tus escenas.
   superposición y parpadeo), un recuadro sobre el área cambiada, zoom con
   píxeles nítidos, atajos de teclado y enlaces a un fotograma concreto. Ver
   #link("/guias/capturas-y-comparacion/")[Capturas y comparación visual].
-  `--no-gui` se sigue aceptando, pero ya no tiene efecto.
+  La opción `--no-gui` desaparece y ahora es un error: quítala de tus scripts
+  y de la integración continua.
 
 == Correcciones
 
