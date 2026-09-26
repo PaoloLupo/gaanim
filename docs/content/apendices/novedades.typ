@@ -11,9 +11,11 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
-= Próxima versión
+= 0.4.1
 
-Cambios todavía sin publicar.
+Publicada el 26 de septiembre de 2026. Además de correcciones, cambia el tema
+por defecto y la escala de los SVG: lee «Al actualizar» antes de actualizar
+un proyecto existente.
 
 == Al actualizar
 
@@ -68,6 +70,9 @@ Cambios todavía sin publicar.
   `WARN:` y `ERROR:`. Si un script leía ese texto, usa el código de salida,
   que no cambia: `0` sin errores, `1` con problemas y `2` si el proyecto no
   carga.
+- `scene.geometry.line(p0, p1)` con dos puntos fijos es ahora una línea
+  normal: acompaña al grupo que la contiene cuando lo desplazas. Las líneas
+  con extremos que son objetos o referencias siguen recalculándose.
 
 == Cambios
 
@@ -88,13 +93,6 @@ Cambios todavía sin publicar.
 - Las exportaciones respetan `WGPU_BACKEND` (`vulkan`, `dx12`, `metal`, `gl`)
   igual que la vista previa, para elegir el backend de la GPU cuando el que
   se elige por defecto falla.
-
-= 0.4.1
-
-Versión de correcciones sobre 0.4.0.
-
-== Cambios
-
 - `move_along(path, start=0.5, end=0.2)` recorre el tramo al revés en lugar
   de lanzar `ValueError`, y `move_along` sobre una flecha sólida sigue su eje
   de la cola a la punta.
@@ -126,12 +124,6 @@ Versión de correcciones sobre 0.4.0.
   las dos animaciones implicadas.
 - En Windows, `__file__`, `sys.argv` y `sys.path` usan rutas normales, sin el
   prefijo `\\?\`.
-
-== Al actualizar
-
-- `scene.geometry.line(p0, p1)` con dos puntos fijos es ahora una línea
-  normal: acompaña al grupo que la contiene cuando lo desplazas. Las líneas
-  con extremos que son objetos o referencias siguen recalculándose.
 
 = 0.4.0
 
