@@ -36,17 +36,16 @@ pub fn compute_move_to(
 }
 
 /// Computes the translation needed to move an arbitrary local point to a
-/// target world-space position while preserving rotation, scale, and pivot.
+/// target world-space position while preserving rotation, skew, scale, and pivot.
 pub fn compute_move_point_to(
     transform: &SpatialTransform,
     target: DVec3,
     point_local: DVec3,
 ) -> SpatialTransform {
+    // The world-space offset of the local point relative to the translation.
     let mut new_transform = *transform;
-
-    // Find the world-space offset of the local point relative to translation.
-    let pivot = transform.anchor;
-    let offset_world = pivot + transform.rotation * (transform.scale * (point_local - pivot));
+    new_transform.translation = DVec3::ZERO;
+    let offset_world = new_transform.to_mat4().transform_point3(point_local);
 
     new_transform.translation = target - offset_world;
     new_transform

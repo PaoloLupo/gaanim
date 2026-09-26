@@ -116,6 +116,20 @@ impl SpatialTransform {
         self
     }
 
+    /// Undoes the 2D shear on `vector`; a singular shear leaves it unchanged.
+    pub fn unskew(&self, vector: DVec3) -> DVec3 {
+        let (x, y) = (self.skew.x, self.skew.y);
+        let determinant = 1.0 - x * y;
+        if determinant.abs() <= f64::EPSILON {
+            return vector;
+        }
+        DVec3::new(
+            (vector.x - x * vector.y) / determinant,
+            (vector.y - y * vector.x) / determinant,
+            vector.z,
+        )
+    }
+
     /// Sets the pivot/anchor point in local space.
     pub fn with_anchor(mut self, anchor: DVec3) -> Self {
         self.anchor = anchor;
@@ -324,6 +338,14 @@ mod tests {
         assert!((top - kurbo::Point::new(0.5, 1.0)).hypot() < 1e-9);
         let mat4 = t.to_mat4().transform_point3(DVec3::ZERO);
         assert!((mat4 - DVec3::new(0.5, 1.0, 0.0)).length() < 1e-9);
+    }
+
+    #[test]
+    fn unskew_inverts_the_shear_of_the_affine() {
+        let t = SpatialTransform::new_2d(0.0, 0.0).with_skew_2d(0.4, -0.3);
+        let vector = DVec3::new(1.5, -2.0, 0.0);
+        let sheared = t.to_mat4().transform_vector3(vector);
+        assert!((t.unskew(sheared) - vector).length() < 1e-12);
     }
 
     #[test]

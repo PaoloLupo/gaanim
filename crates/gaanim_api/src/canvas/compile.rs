@@ -8885,8 +8885,9 @@ impl SceneModel {
             if let Some(pivot) = pivot_in_scene {
                 // Satisfy both constraints exactly: the public pivot remains
                 // fixed in scene space while the requested text point lands on
-                // its target after the final rotation and scale.
-                let rotated_delta = transform.rotation.inverse() * (target - pivot);
+                // its target after the final rotation, skew and scale.
+                let rotated_delta =
+                    transform.unskew(transform.rotation.inverse() * (target - pivot));
                 let local_delta = DVec3::new(
                     if transform.scale.x.abs() > f64::EPSILON {
                         rotated_delta.x / transform.scale.x
@@ -11972,6 +11973,40 @@ mod tests {
                 "{top:?} at {time}"
             );
         }
+    }
+
+    #[test]
+    fn anchored_placement_lands_on_the_skewed_shape() {
+        let mut canvas = SceneModel::new(640, 360);
+        canvas
+            .rect(3.0, 2.0)
+            .skew_to(0.5, 0.0)
+            .at_anchor(-4.0, 2.0, Anchor::TopLeft);
+        canvas
+            .text("gyp")
+            .with_pivot(0.0, 0.0)
+            .skew_to(0.3, 0.1)
+            .at_text_anchor(5.0, -1.0, TextAnchor::BaselineLeft);
+
+        let mut world = compile_canvas_for_layout(canvas);
+        let (text_bounds, baseline, text_transform) = only_text_root(&mut world);
+        let rect = world
+            .query_filtered::<(&LocalBounds, &SpatialTransform), Without<TextBaseline>>()
+            .iter(&world)
+            .find(|(bounds, _)| (bounds.0.width() - 3.0).abs() < 1e-9)
+            .map(|(bounds, transform)| (bounds.0, *transform))
+            .unwrap();
+        assert_point_close(
+            rect.1
+                .to_mat4()
+                .transform_point3(Anchor::TopLeft.get_point(&rect.0)),
+            DVec3::new(-4.0, 2.0, 0.0),
+        );
+        let text_anchor = DVec3::new(text_bounds.min.x, baseline.0, text_bounds.center().z);
+        assert_point_close(
+            text_transform.to_mat4().transform_point3(text_anchor),
+            DVec3::new(5.0, -1.0, 0.0),
+        );
     }
 
     #[test]
