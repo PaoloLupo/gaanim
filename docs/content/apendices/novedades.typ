@@ -11,7 +11,7 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
-= 0.4.2
+= 0.4.3
 
 Sin publicar todavía. No requiere cambios en tus escenas.
 
