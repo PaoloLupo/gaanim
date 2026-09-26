@@ -1,3 +1,33 @@
+#import "book.typ": book-outline
+#import "../content/redirects.typ": moved
+// Internal links (`#link("/guias/layout/")`) must reach a page of the book or
+// a forwarding page of a moved route; the build fails otherwise.
+#let check-internal-links = true
+
+#let known-route(dest) = {
+  let target = dest.trim("/", at: start).split("#").first()
+  if target == "" or target.split("/").last().contains(".") {
+    return true
+  }
+  let target = if target.ends-with("/") { target } else { target + "/" }
+  let pages = book-outline().map(part => part.pages).flatten().map(page => page.route)
+  target in pages or moved.any(((old, new)) => old == target)
+}
+
+// A new GitHub issue about one page, with its title and route filled in.
+#let issue-url(title, route) = {
+  let encode(text) = text
+    .replace("%", "%25")
+    .replace(" ", "%20")
+    .replace("&", "%26")
+    .replace("#", "%23")
+    .replace("?", "%3F")
+    .replace("/", "%2F")
+    .replace(":", "%3A")
+    .replace("\n", "%0A")
+  "https://github.com/PaoloLupo/gaanim/issues/new?title=" + encode("Docs: " + title) + "&body=" + encode("Página: /" + route.trim("/") + "/\n\n")
+}
+
 #let html-section(
   title: none,
   title-content: none,
@@ -80,11 +110,17 @@
       asset-base: prefix + "assets/",
     )
 
-    // Authors write site-absolute routes such as `link("/api/scene/")`. Emit
+    // Authors write site-absolute routes such as `link("/referencia/scene/")`. Emit
     // them relative to this page so the site works under any base path,
     // e.g. GitHub Pages' `/<repo>/`.
     show link: it => {
       if type(it.dest) == str and it.dest.starts-with("/") and not it.dest.starts-with("//") {
+        if check-internal-links {
+          assert(
+            known-route(it.dest),
+            message: "internal link to a page that does not exist: " + it.dest,
+          )
+        }
         let relative = prefix + it.dest.slice(1)
         link(if relative == "" { "./" } else { relative }, it.body)
       } else {
@@ -121,55 +157,14 @@
       html.body({
         let chapter-label = label("chap-" + route.replace(regex("[^a-zA-Z0-9]"), "-"))
 
-        let site-map = (
-          "Inicio": "",
-          "Fundamentos": (
-            "Introducción": "manual/introduccion/",
-            "Instalación rápida": "getting-started/",
-            "Instalación detallada": "getting-started/installation/",
-            "Guía rápida": "manual/guia-rapida/",
-            "Scene": "manual/escena/",
-            "Objetos": "manual/objetos/",
-            "Animaciones": "manual/animaciones/",
-          ),
-          "Proyecto práctico": (
-            "1. Antes de empezar": "guia/antes-de-empezar/",
-            "2. Primera escena": "guia/primera-escena/",
-            "3. Objetos y estilo": "guia/objetos-estilo/",
-            "4. Animar el tiempo": "guia/animar-tiempo/",
-            "5. Componer y explicar": "guia/componer-explicar/",
-            "6. Dar vida a la escena": "guia/reactividad/",
-            "7. Del círculo al seno": "guia/circulo-al-seno/",
-            "8. Terminar el proyecto": "guia/terminar-proyecto/",
-          ),
-          "Taller de escenas": (
-            "Ejemplos básicos": "examples/basic/",
-            "Ejemplos avanzados": "examples/advanced/",
-            "Temas avanzados": "manual/avanzado/",
-            "Layout": "guides/layout/",
-            "Proyectos": "guides/projects/",
-            "Presentaciones": "guides/slides/",
-            "Regresión visual": "guides/visual-regression/",
-          ),
-            "Referencia de la API": (
-              "Índice": "api/",
-              "Escena": "api/scene/",
-              "Visualización": "api/visualization/",
-              "Layouts": "api/layout/",
-              "Objetos": "api/mobjects/",
-              "Animaciones": "api/animations/",
-              "Texto": "api/text/",
-              "Colores y temas": "api/themes/",
-              "Recursos": "api/assets/",
-              "Audio": "api/audio/",
-            ),
-        )
-
-        // Section of the current page, for the breadcrumb.
-        let section-name = site-map
-          .pairs()
-          .find(((key, val)) => type(val) == dictionary and val.values().contains(route))
-        let section-name = if section-name == none { none } else { section-name.at(0) }
+        // Parts and chapters in reading order, from `index.typ`.
+        let outline-parts = book-outline()
+        let pages = outline-parts.map(part => part.pages).flatten()
+        let current = pages.position(page => page.route == route)
+        let section-name = outline-parts
+          .find(part => part.pages.any(page => page.route == route))
+        let section-name = if section-name == none { none } else { section-name.title }
+        let href(route) = if prefix + route == "" { "./" } else { prefix + route }
 
         html.header(class: "site-header", {
           html.elem("button", attrs: (
@@ -189,7 +184,7 @@
                 alt: "Gaanim",
               ))
             }
-            html.span(class: "brand-tag", "docs")
+            html.span(class: "brand-tag", "docs " + stdx.version)
           })
           html.elem("button", attrs: (id: "search-trigger", class: "search-trigger", type: "button", "aria-label": "Buscar"), {
             html.span(class: "search-trigger-icon", "⌕")
@@ -197,9 +192,10 @@
             html.elem("kbd", attrs: (class: "search-trigger-kbd"), "Ctrl K")
           })
           html.nav(class: "header-links", {
-            html.a(href: prefix + "manual/guia-rapida/", "Guía")
-            html.a(href: prefix + "api/", "API")
-            html.a(href: prefix + "examples/basic/", "Ejemplos")
+            html.a(href: prefix + "empezar/instalacion/", "Empezar")
+            html.a(href: prefix + "tutorial/antes-de-empezar/", "Tutorial")
+            html.a(href: prefix + "guias/layout/", "Guías")
+            html.a(href: prefix + "referencia/", "Referencia")
             html.a(href: "https://github.com/PaoloLupo/gaanim", class: "header-github", "GitHub")
           })
           html.elem("button", attrs: (id: "theme-toggle-btn", class: "icon-btn theme-toggle-btn", type: "button", "aria-label": "Cambiar tema"), "")
@@ -208,30 +204,24 @@
         html.div(class: "layout-container", {
           html.aside(class: "nav-sidebar", id: "global-nav-sidebar", {
             html.elem("nav", attrs: ("aria-label": "Documentación"), html.ul({
-              for (key, val) in site-map.pairs() {
-                if type(val) == str {
-                  let active-class = if val == route { "nav-active" } else { "" }
-                  html.li(html.a(href: if prefix + val == "" { "./" } else { prefix + val }, class: active-class, key))
-                } else if type(val) == dictionary {
-                  let is-active = val.values().contains(route)
-                  let details-content = {
-                    html.summary(key)
-                    html.ul({
-                      for (sub-key, sub-val) in val.pairs() {
-                        let active-class = if sub-val == route { "nav-active" } else { "" }
-                        html.li(html.a(href: prefix + sub-val, class: active-class, sub-key))
-                      }
-                    })
-                  }
-
-                  html.li(
-                    if is-active {
-                      html.details(open: true, details-content)
-                    } else {
-                      html.details(details-content)
-                    },
-                  )
+              html.li(html.a(href: href(""), class: if route == "/" { "nav-active" } else { "" }, "Inicio"))
+              for part in outline-parts {
+                let details-content = {
+                  html.summary(part.title)
+                  html.ul({
+                    for page in part.pages {
+                      let active-class = if page.route == route { "nav-active" } else { "" }
+                      html.li(html.a(href: href(page.route), class: active-class, page.title))
+                    }
+                  })
                 }
+                html.li(
+                  if part.pages.any(page => page.route == route) {
+                    html.details(open: true, details-content)
+                  } else {
+                    html.details(details-content)
+                  },
+                )
               }
             }))
           })
@@ -241,7 +231,7 @@
             if route != "/" {
               html.elem("nav", attrs: (class: "breadcrumb", "aria-label": "Ruta"), {
                 html.a(href: prefix, "Inicio")
-                if section-name != none {
+                if section-name != none and section-name != title {
                   html.span(class: "breadcrumb-sep", "/")
                   html.span(section-name)
                 }
@@ -265,12 +255,23 @@
                     })
                   }
                   body
+                  // Reading order: previous and next page of the book.
+                  if current != none {
+                    let link-to(page, direction, label) = html.a(href: href(page.route), class: "page-nav-" + direction, {
+                      html.span(class: "page-nav-label", label)
+                      html.span(class: "page-nav-title", page.title)
+                    })
+                    html.elem("nav", attrs: (class: "page-nav", "aria-label": "Páginas contiguas"), {
+                      if current > 0 { link-to(pages.at(current - 1), "prev", "← Anterior") }
+                      if current + 1 < pages.len() { link-to(pages.at(current + 1), "next", "Siguiente →") }
+                    })
+                  }
                 }) #chapter-label]
             }
             html.footer(class: "site-footer", {
               html.span([Gaanim · Documentación generada con Typst])
               html.a(href: prefix + "documentation.pdf", "Descargar PDF")
-              html.a(href: "https://github.com/PaoloLupo/gaanim/issues", "Reportar un problema")
+              html.a(href: issue-url(title, route), "Reportar un problema en esta página")
             })
           })
 
@@ -303,7 +304,6 @@
   route: none,
   kind: none,
   description: none,
-  updated: none,
   body,
 ) = {
   assert.ne(title, none, message: "title is required")
@@ -311,18 +311,6 @@
 
   if title-fmt == auto {
     title-fmt = title
-  }
-
-  show heading: it => context {
-    let content = it
-    if it.level == 1 and updated != none {
-      if target() in ("bundle", "html") {
-        content = [#it #html.div(class: "last-updated", [Última actualización: #updated])]
-      } else {
-        content = [#it #text(fill: rgb("#64748b"), size: 8.5pt, [ (Última actualización: #updated)])]
-      }
-    }
-    content
   }
 
   html-section(
@@ -343,13 +331,22 @@
 
 #let calc-vars = state("calc-vars", (:))
 
+// Source of the page's last executed cell, replayed by `# continue`.
+#let cell-chain = state("docs-cell-chain", none)
+
 #let code-cell(
   it,
   lang: "python",
   id: "",
 ) = {
   context {
-    let result = stdx.compile-code-cell(it, lang: lang, id: id)
+    let continues = str(it.text).split("\n").any(line => line.trim() == "# continue")
+    let prelude = if continues { cell-chain.get() } else { "" }
+    assert(
+      prelude != none,
+      message: "`# continue` needs an executed Python block earlier on the same page",
+    )
+    let result = stdx.compile-code-cell(it, lang: lang, id: id, prelude: prelude)
 
     let source-raw = raw(result.code.trim(), lang: lang, block: true)
     let source-labeled = [#source-raw <_stop>]
@@ -382,11 +379,11 @@
     let header-element = if result.caption.len() > 0 {
       if target() in ("bundle", "html") {
         html.div(class: "code-header", [
-          #html.span(style: "color: var(--accent-purple); font-weight: bold;", "Code:")
+          #html.span(style: "color: var(--accent-purple); font-weight: bold;", "Código:")
           _ #result.caption _
         ])
       } else {
-        text(fill: rgb("#4f46e5"), weight: "bold", size: 9pt, [Code: ]) + text(style: "italic", size: 9pt, result.caption)
+        text(fill: rgb("#4f46e5"), weight: "bold", size: 9pt, [Código: ]) + text(style: "italic", size: 9pt, result.caption)
       }
     } else {
       none
@@ -402,7 +399,7 @@
         fill: rgb("#f8fafc"),
         [
           #if header-element != none [ #header-element #v(4pt) ]
-          #if result.show_code or not has-webp [
+          #if not result.hide_code or not has-webp [
             #source-code
             #v(4pt)
           ]
@@ -415,9 +412,9 @@
           ]
         ]
       )
-    } else if not result.show_code and not has-webp and result-items.len() > 0 {
-      // Result only: the cell hides its code and shows what it printed. A cell
-      // with nothing to show falls through to the code, as in the PDF.
+    } else if result.hide_code and not has-webp and result-items.len() > 0 {
+      // Result only: the cell asked to hide its code (`# hide-code`) and shows
+      // what it printed. A cell with nothing to show falls through to the code.
       html.div(class: "code-result-only", result-items.join())
     } else if has-webp {
       // Side-by-side: code left, WebP right
@@ -441,8 +438,34 @@
       })
     }
 
-    calc-vars.update(old => old + result.vars) + layout-content
+    // Each cell contributes only its own code. Folding it into the state
+    // (instead of storing the whole chain it computed) lets Typst resolve a run
+    // of continued cells in one layout pass rather than one pass per link.
+    let own = result.own
+    let chain-update = cell-chain.update(chain => if continues and chain != none { chain + own } else { own })
+    chain-update + calc-vars.update(old => old + result.vars) + layout-content
   }
+}
+
+// Every Python block runs with the real runtime unless its first lines say
+// `# no-run: <motivo>`. The reason is required so a skipped block stays a
+// deliberate, reviewable exception.
+#let python-block(it) = {
+  if it.has("label") and it.label == <_stop> {
+    return it
+  }
+  let lines = str(it.text).split("\n")
+  let marker = lines.find(line => line.trim().starts-with("# no-run"))
+  if marker == none {
+    return code-cell(it, lang: "python")
+  }
+  let reason = marker.trim().slice("# no-run".len()).trim()
+  assert(
+    reason.starts-with(":") and reason.slice(1).trim() != "",
+    message: "`# no-run` needs a reason: `# no-run: <motivo>`",
+  )
+  let shown = lines.filter(line => not line.trim().starts-with("# no-run")).join("\n")
+  [#raw(shown.trim(), lang: "python", block: true) <_stop>]
 }
 
 
@@ -454,7 +477,7 @@
   route: none,
   title: none,
   description: none,
-  updated: none,
+  nav: none,
   code-langs: ("python",),
   ..args,
   body,
@@ -474,23 +497,22 @@
 
   [#metadata((
     title: title,
+    nav: nav,
     route: route,
     description: description,
   )) <blog-post>]
 
+  // Each page starts its own `# continue` chain.
+  cell-chain.update(none)
+
   show raw.where(lang: "python"): it => {
-    if "python" not in code-langs or (it.has("label") and it.label == <_stop>) {
-      it
-    } else {
-      code-cell(it, lang: "python")
-    }
+    if "python" not in code-langs { it } else { python-block(it) }
   }
 
   docs-section(
     route: route,
     title: title,
     description: description,
-    updated: updated,
     ..args,
     kind: "Chapter",
     body,

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 160">
+  <g id="client"><rect x="10" y="40" width="80" height="50" rx="8" fill="#0ea5e9"/></g>
+  <g id="server"><rect x="110" y="40" width="80" height="50" rx="8" fill="#6366f1"/></g>
+  <g id="database"><ellipse cx="250" cy="45" rx="35" ry="10" fill="#10b981"/><rect x="215" y="45" width="70" height="40" fill="#10b981"/><ellipse cx="250" cy="85" rx="35" ry="10" fill="#10b981"/></g>
+  <path id="links" d="M90 65 H110 M190 65 H215" stroke="#e2e8f0" stroke-width="4" fill="none"/>
+  <g id="caption"><rect x="60" y="120" width="180" height="16" rx="8" fill="#e2e8f0"/></g>
+</svg>

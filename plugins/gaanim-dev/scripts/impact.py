@@ -120,21 +120,40 @@ def _docs_for(paths: Iterable[str]) -> set[str]:
     for path in paths:
         lower = path.lower()
         if "gaanim_animation" in lower or any(
-            token in lower for token in ("anim.rs", "transition.rs", "updater.rs")
+            token in lower for token in ("anim.rs", "transition.rs", "updater.rs", "easing.rs")
         ):
-            docs.add("docs/content/api/animations.typ")
+            docs.add("docs/content/referencia/animations.typ")
         if "gaanim_layout" in lower or "/layout" in lower:
-            docs.add("docs/content/api/layout.typ")
+            docs.add("docs/content/referencia/layout.typ")
         if any(token in lower for token in ("theme", "color", "brush", "effect")):
-            docs.add("docs/content/api/themes.typ")
+            docs.add("docs/content/referencia/themes.typ")
         if any(token in lower for token in ("asset", "svg")):
-            docs.add("docs/content/api/assets.typ")
+            docs.add("docs/content/referencia/assets.typ")
         if "audio" in lower:
-            docs.add("docs/content/api/audio.typ")
-        if any(token in lower for token in ("pydrawable", "drawable", "objects", "primitive", "text")):
-            docs.add("docs/content/api/mobjects.typ")
+            docs.add("docs/content/referencia/audio.typ")
+        if any(token in lower for token in ("pydrawable", "drawable")):
+            docs.add("docs/content/referencia/drawable.typ")
+        if any(token in lower for token in ("gaanim_objects", "objects", "primitive", "geometry", "boolean")):
+            docs.add("docs/content/referencia/geometria.typ")
+        if "text" in lower:
+            docs.add("docs/content/referencia/text.typ")
+        if any(token in lower for token in ("gaanim_media", "media", "image", "video", "lottie", "gltf")):
+            docs.add("docs/content/referencia/medios.typ")
+        if any(token in lower for token in ("gaanim_visualization", "visualization", "chart", "coordinate", "field")):
+            docs.add("docs/content/referencia/visualization.typ")
+        if "matrix" in lower:
+            docs.add("docs/content/referencia/matrices.typ")
+        if any(token in lower for token in ("slide", "editorial")):
+            docs.add("docs/content/referencia/diapositivas.typ")
+        if "mechanic" in lower:
+            docs.add("docs/content/referencia/mecanica.typ")
         if any(token in lower for token in ("pycanvas", "canvas", "scene", "runtime", "camera", "timeline")):
-            docs.add("docs/content/api/scene.typ")
+            docs.add("docs/content/referencia/scene.typ")
+        if "gaanim_launcher" in lower or lower == "crates/gaanim_editor/src/main.rs":
+            docs.add("docs/content/referencia/cli.typ")
+        if "gaanim_project" in lower:
+            docs.add("docs/content/referencia/cli.typ")
+            docs.add("docs/content/referencia/gaanim-toml.typ")
     return docs
 
 
@@ -151,6 +170,12 @@ def analyze_paths(repo: Path, paths: Iterable[str]) -> Impact:
     )
     rust_api = any(path.startswith("crates/gaanim_api/") for path in normalized)
     public_api = rust_api or python_binding
+    # The command line and the project manifest are user-facing contracts too.
+    cli_surface = any(
+        path.startswith(("crates/gaanim_launcher/", "crates/gaanim_project/"))
+        or path == "crates/gaanim_editor/src/main.rs"
+        for path in normalized
+    )
     visual = bool(set(crates) & VISUAL_CRATES)
     performance = bool(set(crates) & PERFORMANCE_CRATES) or any(
         path in PERFORMANCE_PATHS for path in normalized
@@ -176,7 +201,7 @@ def analyze_paths(repo: Path, paths: Iterable[str]) -> Impact:
         if present:
             categories.append(label)
 
-    documentation = sorted(_docs_for(normalized)) if public_api else []
+    documentation = sorted(_docs_for(normalized)) if public_api or cli_surface else []
 
     candidates: set[str] = set()
     for crate in crates:

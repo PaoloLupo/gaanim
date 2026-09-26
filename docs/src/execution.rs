@@ -1,13 +1,20 @@
 use std::{
+    collections::{BTreeMap, BTreeSet},
     fs,
     io::Read,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::{
+        LazyLock, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration as StdDuration,
 };
 
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+
 use typst::{
-    diag::{At, SourceDiagnostic, SourceResult, bail, eco_format},
+    diag::{SourceDiagnostic, SourceResult, bail, eco_format},
     ecow::EcoString,
     engine::Engine,
     foundations::{Dict, Packed, Value, func},
@@ -176,16 +183,44 @@ fn silent_failure(program: &str, success: bool, status: &str, stderr: &str) -> O
     })
 }
 
-fn requires_gaanim_host(code: &str) -> bool {
-    code.contains(".render(")
-        || code.lines().any(|line| {
-            let line = line.trim_start();
-            line.starts_with("from gaanim ")
-                || line.starts_with("from gaanim.")
-                || line == "import gaanim"
-                || line.starts_with("import gaanim ")
-                || line.starts_with("import gaanim.")
+/// What the cell printed, without the report `gaanim check` appends: readers
+/// care about their `print()` output, not the builder's validation.
+fn without_preflight_report(stdout: &str) -> &str {
+    match stdout.find("Scene preflight:") {
+        Some(start) if start == 0 || stdout[..start].ends_with('\n') => &stdout[..start],
+        _ => stdout,
+    }
+}
+
+/// Drop the runtime's tracing lines (`2026-01-01T00:00:00.000Z  INFO ...`)
+/// and ALSA's complaints about a build machine without a sound card.
+fn without_runtime_logs(stderr: &str) -> String {
+    stderr
+        .lines()
+        .filter(|line| !line.starts_with("ALSA lib "))
+        .filter(|line| {
+            let mut fields = line.split_whitespace();
+            let timestamp = fields.next().unwrap_or("");
+            let level = fields.next().unwrap_or("");
+            !(timestamp.len() > 20
+                && timestamp.ends_with('Z')
+                && timestamp.as_bytes()[4] == b'-'
+                && timestamp.as_bytes()[10] == b'T'
+                && matches!(level, "TRACE" | "DEBUG" | "INFO" | "WARN" | "ERROR"))
         })
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
+/// Source of a cell as a later `# continue` cell replays it: every line except
+/// the `render()` call, which only the last cell of a chain may make.
+fn without_render_calls(code: &str) -> String {
+    code.lines()
+        .filter(|line| !line.trim().ends_with(".render()"))
+        .map(|line| format!("{line}\n"))
+        .collect()
 }
 
 #[func]
@@ -198,6 +233,9 @@ pub fn compile_code_cell(
     #[named]
     #[default(EcoString::inline(""))]
     id: EcoString,
+    #[named]
+    #[default(EcoString::inline(""))]
+    prelude: EcoString,
 ) -> SourceResult<Value> {
     let span = raw.span();
 
@@ -209,20 +247,7 @@ pub fn compile_code_cell(
         );
     }
 
-    let mut cmd = "python".to_string();
     let ext = "py";
-
-    // Auto-detect venv (make absolute without resolving symlinks, so the venv
-    // python is used even when current_dir is set to a subdirectory like docs/).
-    if let Ok(cwd) = std::env::current_dir() {
-        let venv_unix = cwd.join(".venv/bin/python");
-        let venv_win = cwd.join(".venv/Scripts/python.exe");
-        if venv_unix.exists() {
-            cmd = venv_unix.to_string_lossy().to_string();
-        } else if venv_win.exists() {
-            cmd = venv_win.to_string_lossy().to_string();
-        }
-    }
 
     // Parse lines: >>> / <<< markers and magic comments
     let mut code_lines = Vec::new();
@@ -242,6 +267,7 @@ pub fn compile_code_cell(
     let mut code_to_execute = String::new();
     let mut code_to_display = String::new();
     let mut show_code = false;
+    let mut hide_code = false;
     let mut timeout_secs: u64 = 120; // gaanim animations can take longer
     let mut caption = String::new();
     let mut target_cell: Option<String> = None;
@@ -251,12 +277,16 @@ pub fn compile_code_cell(
     for (line, _) in code_lines {
         let trimmed = line.trim();
 
+        if trimmed == "# continue" {
+            continue;
+        }
         if trimmed.starts_with("# show-code: true") || trimmed == "# show-code" {
             show_code = true;
             continue;
         }
         if trimmed.starts_with("# show-code: false") || trimmed == "# hide-code" {
             show_code = false;
+            hide_code = true;
             continue;
         }
         if let Some(t) = trimmed.strip_prefix("# timeout:") {
@@ -418,8 +448,28 @@ pub fn compile_code_cell(
         }
     }
 
-    // Hash and cell ID
-    let cell_hash = typst_utils::hash128(code_to_execute.as_bytes());
+    // `# continue`: replay the page's previous cell first, hidden and with its
+    // output muted, so a fragment runs with the names it builds on. Each cell
+    // hands Typst its own code without `render()` calls (`own`); Typst
+    // concatenates a run of continued cells into the next cell's prelude.
+    let own = without_render_calls(&code_to_execute);
+    let mut chain_lines = 0;
+    if !prelude.trim().is_empty() {
+        let replay = format!(
+            "import sys as _sys\n_real_stdout = _sys.stdout\nclass _NullWriter:\n    def write(self, x): pass\n    def flush(self): pass\n_sys.stdout = _NullWriter()\n{}\n_sys.stdout = _real_stdout\n",
+            prelude
+        );
+        chain_lines = replay.lines().count();
+        code_to_execute = format!("{}{}", replay, code_to_execute);
+    }
+
+    // Hash and cell ID. An export's preview settings are part of its identity,
+    // so changing them re-renders the previews instead of reusing old files.
+    let cell_hash = if expected_webp.is_some() {
+        typst_utils::hash128(format!("{code_to_execute}{}", PREVIEW_ARGS.join(" ")).as_bytes())
+    } else {
+        typst_utils::hash128(code_to_execute.as_bytes())
+    };
     let cell_id = if !id.is_empty() {
         id.to_string()
     } else if let Some(ref override_id) = cell_id_override {
@@ -429,280 +479,537 @@ pub fn compile_code_cell(
     } else {
         format!("cell_{:x}", cell_hash)
     };
-    let hex_hash = format!("{:x}", cell_hash);
 
-    // Resolve project root for all file operations
-    let project_root: PathBuf = {
-        let guard = PROJECT_ROOT.read().unwrap();
-        guard.clone().unwrap_or_else(|| PathBuf::from("."))
+    let mode = if let Some(output) = expected_webp {
+        CellMode::Export(output)
+    } else if code_to_execute.contains(".render(") {
+        CellMode::Check
+    } else {
+        CellMode::Validate
+    };
+    let job = CellJob {
+        hash: format!("{:x}", cell_hash),
+        script: format!("{PYTHON_PRELUDE}{code_to_execute}"),
+        prelude_lines: PYTHON_PRELUDE.lines().count() + chain_lines,
+        cell_id,
+        mode,
+        timeout_secs,
+        cached_webp: None,
     };
 
-    // Cache
-    let cache_dir = project_root.join("target/code_cache");
-    let cache_file = cache_dir.join(format!("{}.json", cell_id));
-    fs::create_dir_all(&cache_dir).unwrap();
-
-    let mut stdout = String::new();
-    let mut stderr = String::new();
-    let mut webp_path = String::new();
-    let mut executed = false;
-
-    // Check cache
-    if cache_file.exists()
-        && let Ok(data) = fs::read_to_string(&cache_file)
-        && let Ok(cache) = serde_json::from_str::<serde_json::Value>(&data)
-        && cache["hash"].as_str() == Some(hex_hash.as_str())
-        && cache["stderr"].as_str().unwrap_or("").trim().is_empty()
-    {
-        let cached_webp = cache["webp"].as_str().unwrap_or("");
-        // Una celda que promete una exportación no puede reutilizar una entrada
-        // fallida sin WebP. Las celdas puramente textuales sí aceptan una ruta
-        // vacía como resultado válido.
-        let cached_output_exists = !cached_webp.is_empty()
-            && project_root.join(cached_webp).exists()
-            && is_valid_webp(&project_root.join(cached_webp));
-        let cache_output_is_valid = if expected_webp.is_some() {
-            cached_output_exists
-        } else {
-            cached_webp.is_empty() || cached_output_exists
-        };
-        if cache_output_is_valid {
-            stdout = strip_ansi_escape_codes(cache["stdout"].as_str().unwrap_or(""));
-            stderr = adjust_stderr_line_numbers(
-                &strip_ansi_escape_codes(cache["stderr"].as_str().unwrap_or("")),
-                "",
-                0,
-            );
-            webp_path = cached_webp.to_string();
-            executed = true;
+    let outcome = match lookup_cache(&job) {
+        Lookup::Hit(outcome) => {
+            record(&job.cell_id, false);
+            outcome
         }
-    }
-
-    // Execute if not cached
-    if !executed {
-        eprintln!("Executing Python cell (id: {})...", cell_id);
-
-        // Cada celda necesita su propio directorio de trabajo. Typst puede
-        // evaluarlas en paralelo y casi todos los ejemplos exportan al mismo
-        // nombre (`preview.webp`). Compartir el directorio provoca carreras,
-        // archivos movidos por otra celda y lecturas de WebP incompletos.
-        let cell_work_dir = project_root.join("target/code_cells").join(&cell_id);
-        fs::create_dir_all(&cell_work_dir).unwrap();
-
-        let mut full_script = String::new();
-        full_script.push_str(PYTHON_PRELUDE);
-        full_script.push_str(&code_to_execute);
-
-        let temp_file = project_root.join(format!("target/temp_{}.py", cell_id));
-        fs::write(&temp_file, &full_script).unwrap();
-
-        struct TempFileCleaner {
-            path: PathBuf,
-        }
-        impl Drop for TempFileCleaner {
-            fn drop(&mut self) {
-                let _ = fs::remove_file(&self.path);
-            }
-        }
-        let _cleaner = TempFileCleaner {
-            path: temp_file.clone(),
-        };
-
-        let prelude_lines = PYTHON_PRELUDE.lines().count();
-
-        let uses_gaanim_host = requires_gaanim_host(&code_to_execute);
-        let core_binary = std::env::current_exe()
-            .ok()
-            .and_then(|executable| executable.parent().map(Path::to_path_buf))
-            .unwrap_or_else(|| project_root.join("target/debug"))
-            .join(if cfg!(windows) {
-                "gaanim-core.exe"
+        lookup => {
+            let job = match lookup {
+                Lookup::Revalidate(webp) => CellJob { cached_webp: Some(webp), ..job },
+                _ => job,
+            };
+            if COLLECTING.load(Ordering::SeqCst) {
+                // First pass: queue the cell and render a placeholder. The
+                // builder runs the queue in parallel and compiles again.
+                PENDING.lock().unwrap().entry(job.cell_id.clone()).or_insert(job);
+                CellOutcome::default()
             } else {
-                "gaanim-core"
-            });
-        let mut command = if uses_gaanim_host {
-            let mut command = Command::new(&core_binary);
-            if let Some(output) = &expected_webp {
-                command
-                    .arg("export")
-                    .arg(&temp_file)
-                    .arg("--output")
-                    .arg(output)
-                    .arg("--quality")
-                    .arg("standard");
-            } else if code_to_execute.contains(".render(") {
-                command.arg("check").arg(&temp_file);
-            } else {
-                // Run authoring-only snippets against the same embedded module
-                // without requiring them to submit a scene for rendering.
-                command.arg("--validate-python-api").arg(&temp_file);
-            }
-            command
-        } else {
-            let mut command = Command::new(&cmd);
-            command.arg(&temp_file).arg(&cell_id);
-            command
-        };
-        command
-            .current_dir(&cell_work_dir)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .env("PYTHONUTF8", "1")
-            .env("PYTHONIOENCODING", "utf-8");
-
-        let child = command
-            .spawn()
-            .map_err(|e| eco_format!("Error executing Python: {}", e))
-            .at(span)?;
-
-        let pid = child.id();
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let _ = tx.send(child.wait_with_output());
-        });
-
-        match rx.recv_timeout(StdDuration::from_secs(timeout_secs)) {
-            Ok(Ok(output)) => {
-                stdout = strip_ansi_escape_codes(&String::from_utf8_lossy(&output.stdout));
-                let err_str = String::from_utf8_lossy(&output.stderr);
-                stderr = adjust_stderr_line_numbers(
-                    &err_str,
-                    &temp_file.to_string_lossy(),
-                    prelude_lines,
-                );
-                let program = if uses_gaanim_host {
-                    "gaanim-core"
-                } else {
-                    "python"
-                };
-                if let Some(message) = silent_failure(
-                    program,
-                    output.status.success(),
-                    &output.status.to_string(),
-                    &stderr,
-                ) {
-                    stderr = message;
-                }
-            }
-            Ok(Err(e)) => {
-                bail!(span, "Error executing Python: {}", e);
-            }
-            Err(_) => {
-                #[cfg(target_os = "windows")]
-                {
-                    let _ = Command::new("taskkill")
-                        .args(["/F", "/T", "/PID", &pid.to_string()])
-                        .output();
-                }
-                #[cfg(not(target_os = "windows"))]
-                {
-                    let _ = Command::new("kill").args(["-9", &pid.to_string()]).output();
-                }
-                bail!(
-                    span,
-                    "Timeout: cell exceeded {} seconds limit.",
-                    timeout_secs
-                );
+                eprintln!("Running example {}...", job.cell_id);
+                let outcome = run_cell(&job);
+                record(&job.cell_id, true);
+                outcome
             }
         }
-
-        // Detect output WebP
-        if let Some(ref webp_name) = expected_webp {
-            // wait for exporter to finish flushing (Windows file lock)
-            for _ in 0..15 {
-                if cell_work_dir.join(webp_name).exists() {
-                    let s1 = fs::metadata(cell_work_dir.join(webp_name))
-                        .map(|m| m.len())
-                        .unwrap_or(0);
-                    std::thread::sleep(std::time::Duration::from_millis(120));
-                    let s2 = fs::metadata(cell_work_dir.join(webp_name))
-                        .map(|m| m.len())
-                        .unwrap_or(0);
-                    if s1 == s2 && s1 > 1024 {
-                        break;
-                    }
-                } else {
-                    std::thread::sleep(std::time::Duration::from_millis(80));
-                }
-            }
-            let src_path = cell_work_dir.join(webp_name);
-            let src_valid = fs::metadata(&src_path)
-                .map(|m| m.len() > 100)
-                .unwrap_or(false)
-                && is_valid_webp(&src_path);
-            if src_valid {
-                let img_dir = project_root.join("assets/generated");
-                fs::create_dir_all(&img_dir).unwrap();
-                let dest_name = format!("{}_anim.webp", cell_id);
-                let dest = img_dir.join(&dest_name);
-                // Windows: rename fails if dest exists or src still locked — fallback to copy
-                if let Err(e) = fs::rename(&src_path, &dest) {
-                    // try copy+remove
-                    if fs::copy(&src_path, &dest).is_ok() {
-                        let _ = fs::remove_file(&src_path);
-                    } else {
-                        eprintln!(
-                            "Warning: could not move WebP '{}' -> '{}': {}",
-                            src_path.display(),
-                            dest.display(),
-                            e
-                        );
-                    }
-                }
-                // only set webp_path if dest now exists
-                if dest.exists() {
-                    webp_path = format!("assets/generated/{}", dest_name);
-                } else {
-                    eprintln!(
-                        "Warning: expected WebP '{}' not found after execution (dest missing)",
-                        webp_name
-                    );
-                }
-            } else {
-                eprintln!(
-                    "Warning: expected WebP '{}' not found after execution",
-                    webp_name
-                );
-            }
-        }
-
-        // Save cache
-        let cache = serde_json::json!({
-            "hash": hex_hash,
-            "webp": webp_path,
-            "stdout": stdout,
-            "stderr": stderr,
-        });
-        let _ = fs::write(&cache_file, serde_json::to_string(&cache).unwrap());
-        let _ = fs::remove_dir(&cell_work_dir);
-    }
+    };
 
     // Build result for Typst
     let mut result = Dict::new();
     result.insert("code".into(), Value::Str(code_to_display.trim_end().into()));
     result.insert("show_code".into(), Value::Bool(show_code));
-    result.insert("stdout".into(), Value::Str(stdout.trim_end().into()));
-    result.insert("stderr".into(), Value::Str(stderr.trim_end().into()));
+    result.insert("hide_code".into(), Value::Bool(hide_code));
+    result.insert(
+        "stdout".into(),
+        Value::Str(without_preflight_report(&outcome.stdout).trim_end().into()),
+    );
+    result.insert("stderr".into(), Value::Str(outcome.stderr.trim_end().into()));
     result.insert("caption".into(), Value::Str(caption.as_str().into()));
-    result.insert("webp".into(), Value::Str(webp_path.as_str().into()));
+    result.insert("webp".into(), Value::Str(outcome.webp.as_str().into()));
     result.insert("vars".into(), Value::Dict(Dict::new()));
+    result.insert("own".into(), Value::Str(own.as_str().into()));
 
-    // Emit warning on stderr
-    if !stderr.is_empty() {
+    if !outcome.stderr.is_empty() {
         engine.sink.warn(SourceDiagnostic::warning(
             span,
-            eco_format!("Execution error in Python cell:\n{}", stderr),
+            eco_format!("{EXAMPLE_ERROR}\n{}", outcome.stderr),
         ));
     }
 
     Ok(Value::Dict(result))
 }
 
+/// Export options for the animated previews: small and light enough for a web
+/// page (they sit next to the code), and fast to render on a CPU rasterizer.
+/// Scenes with another aspect ratio are letterboxed.
+const PREVIEW_ARGS: [&str; 7] = [
+    "--quality", "draft", "--width", "960", "--height", "540", "--fit",
+];
+const PREVIEW_FIT: &str = "contain";
+
+/// Prefix of the diagnostic a failing example emits; the builder counts them.
+pub const EXAMPLE_ERROR: &str = "Execution error in Python cell:";
+
+/// How the runtime runs a cell.
+#[derive(Clone, Debug, PartialEq)]
+enum CellMode {
+    /// Export the scene and show the animation (`# output:`).
+    Export(String),
+    /// Build the scene without rendering (the cell calls `render()`).
+    Check,
+    /// Run authoring code against the embedded module; no scene is submitted.
+    Validate,
+}
+
+/// Everything needed to run one cell, independent of Typst.
+#[derive(Clone, Debug)]
+struct CellJob {
+    cell_id: String,
+    hash: String,
+    script: String,
+    prelude_lines: usize,
+    mode: CellMode,
+    timeout_secs: u64,
+    /// Preview from an earlier runtime. When set, the cell only needs a
+    /// `check` to prove it still runs; the animation is kept.
+    cached_webp: Option<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct CellOutcome {
+    stdout: String,
+    stderr: String,
+    webp: String,
+}
+
+enum Lookup {
+    Hit(CellOutcome),
+    /// Succeeded with the same code under another runtime fingerprint.
+    Revalidate(String),
+    Miss,
+}
+
+static COLLECTING: AtomicBool = AtomicBool::new(false);
+static PENDING: LazyLock<Mutex<BTreeMap<String, CellJob>>> = LazyLock::new(Default::default);
+static STATS: LazyLock<Mutex<RunStats>> = LazyLock::new(Default::default);
+
+/// Identifies this build: a failure is reused only within the run that saw it.
+static RUN_ID: LazyLock<String> = LazyLock::new(|| {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    format!("{}-{nanos}", std::process::id())
+});
+
+/// The public API and runtime version a cached result was produced against.
+/// When either changes, cached successes are proved again before reuse.
+static FINGERPRINT: LazyLock<String> = LazyLock::new(|| {
+    let stub = fs::read(project_root().join("../crates/gaanim_python/gaanim/gaanim_core.pyi"))
+        .unwrap_or_default();
+    format!(
+        "{}-{:x}",
+        env!("CARGO_PKG_VERSION"),
+        typst_utils::hash128(&stub)
+    )
+});
+
+/// Which examples ran or came from the cache during one compilation. Sets,
+/// because Typst may evaluate a cell more than once per pass. Failures are
+/// counted from the final diagnostics instead: early layout iterations can
+/// evaluate a `# continue` cell against a chain that has not converged yet.
+#[derive(Clone, Debug, Default)]
+pub struct RunStats {
+    pub executed: BTreeSet<String>,
+    pub cached: BTreeSet<String>,
+}
+
+impl RunStats {
+    /// Cells served from the cache that did not also run in this compilation.
+    pub fn only_cached(&self) -> usize {
+        self.cached.difference(&self.executed).count()
+    }
+}
+
+fn record(cell_id: &str, executed: bool) {
+    let mut stats = STATS.lock().unwrap();
+    let set = if executed { &mut stats.executed } else { &mut stats.cached };
+    set.insert(cell_id.to_string());
+}
+
+/// Start a compilation: forget the previous one's statistics.
+pub fn reset_stats() {
+    *STATS.lock().unwrap() = RunStats::default();
+}
+
+pub fn stats() -> RunStats {
+    STATS.lock().unwrap().clone()
+}
+
+/// From now on, cells that need running are queued instead of run inline.
+pub fn start_collecting() {
+    PENDING.lock().unwrap().clear();
+    COLLECTING.store(true, Ordering::SeqCst);
+}
+
+/// Stop queueing and run every queued cell, `jobs` at a time. Returns how
+/// many ran; the caller must compile again (with memoization evicted) to show
+/// their results.
+pub fn run_collected(jobs: usize) -> usize {
+    COLLECTING.store(false, Ordering::SeqCst);
+    let pending: Vec<CellJob> = std::mem::take(&mut *PENDING.lock().unwrap())
+        .into_values()
+        .collect();
+    if pending.is_empty() {
+        return 0;
+    }
+    eprintln!("Running {} examples, {} at a time...", pending.len(), jobs);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(jobs.max(1))
+        .build()
+        .expect("example thread pool");
+    pool.install(|| {
+        pending.par_iter().for_each(|job| {
+            run_cell(job);
+            record(&job.cell_id, true);
+        });
+    });
+    pending.len()
+}
+
+/// Delete cached results and previews that no cell of the last compilation
+/// used, so the cache (and CI's saved copy of it) does not grow forever.
+/// Returns how many files were removed.
+pub fn prune_unused() -> usize {
+    let stats = stats();
+    let used = |id: &str| stats.executed.contains(id) || stats.cached.contains(id);
+    let root = project_root();
+    let mut removed = 0;
+    let dirs = [
+        (root.join("target/code_cache"), ".json"),
+        (root.join("assets/generated"), "_anim.webp"),
+    ];
+    for (dir, suffix) in dirs {
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for entry in entries.filter_map(Result::ok) {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if let Some(id) = name.strip_suffix(suffix)
+                && !used(id)
+                && fs::remove_file(entry.path()).is_ok()
+            {
+                removed += 1;
+            }
+        }
+    }
+    removed
+}
+
+fn project_root() -> PathBuf {
+    PROJECT_ROOT
+        .read()
+        .unwrap()
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn cache_file(cell_id: &str) -> PathBuf {
+    project_root()
+        .join("target/code_cache")
+        .join(format!("{cell_id}.json"))
+}
+
+fn lookup_cache(job: &CellJob) -> Lookup {
+    let Ok(data) = fs::read_to_string(cache_file(&job.cell_id)) else {
+        return Lookup::Miss;
+    };
+    let Ok(cache) = serde_json::from_str::<serde_json::Value>(&data) else {
+        return Lookup::Miss;
+    };
+    let text = |key: &str| cache[key].as_str().unwrap_or("").to_string();
+    if text("hash") != job.hash {
+        return Lookup::Miss;
+    }
+    let outcome = CellOutcome {
+        stdout: strip_ansi_escape_codes(&text("stdout")),
+        stderr: strip_ansi_escape_codes(&text("stderr")),
+        webp: text("webp"),
+    };
+    // A failure is final for this build (both passes and the PDF see it) but
+    // is retried by the next build.
+    if !outcome.stderr.trim().is_empty() {
+        return if text("run") == *RUN_ID { Lookup::Hit(outcome) } else { Lookup::Miss };
+    }
+    let root = project_root();
+    let webp_is_valid = !outcome.webp.is_empty() && is_valid_webp(&root.join(&outcome.webp));
+    let exports = matches!(job.mode, CellMode::Export(_));
+    if exports && !webp_is_valid || !exports && !outcome.webp.is_empty() && !webp_is_valid {
+        return Lookup::Miss;
+    }
+    if text("fingerprint") == *FINGERPRINT {
+        Lookup::Hit(outcome)
+    } else if exports {
+        Lookup::Revalidate(outcome.webp)
+    } else {
+        Lookup::Miss
+    }
+}
+
+fn core_binary() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|executable| executable.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| project_root().join("target/debug"))
+        .join(if cfg!(windows) { "gaanim-core.exe" } else { "gaanim-core" })
+}
+
+/// Run one cell and cache its outcome. Never fails: problems become the
+/// cell's error text so the page shows them next to the code.
+fn run_cell(job: &CellJob) -> CellOutcome {
+    let root = project_root();
+    // Each cell needs its own working directory: cells run in parallel and
+    // most export to the same name (`preview.webp`).
+    let work_dir = root.join("target/code_cells").join(&job.cell_id);
+    let _ = fs::create_dir_all(&work_dir);
+    link_fixtures(&root.join("fixtures"), &work_dir);
+    // The script lives next to the fixtures, as `main.py` does in a project,
+    // so calls that resolve paths from the script (`load_project()`) work.
+    let temp_file = work_dir.join("main.py");
+    let _ = fs::write(&temp_file, &job.script);
+
+    let mut outcome = execute(job, &work_dir, &temp_file);
+
+    if outcome.stderr.is_empty() {
+        if let Some(webp) = &job.cached_webp {
+            outcome.webp = webp.clone();
+        } else if let CellMode::Export(name) = &job.mode {
+            match collect_webp(&root, &work_dir.join(name), &job.cell_id) {
+                Some(path) => outcome.webp = path,
+                None => {
+                    outcome.stderr = format!(
+                        "The export finished without writing a valid `{name}` preview."
+                    )
+                }
+            }
+        }
+    }
+
+    let cache = serde_json::json!({
+        "hash": job.hash,
+        "fingerprint": *FINGERPRINT,
+        "run": *RUN_ID,
+        "webp": outcome.webp,
+        "stdout": outcome.stdout,
+        "stderr": outcome.stderr,
+    });
+    let _ = fs::create_dir_all(root.join("target/code_cache"));
+    let _ = fs::write(cache_file(&job.cell_id), cache.to_string());
+    let _ = fs::remove_dir_all(&work_dir);
+    outcome
+}
+
+fn execute(job: &CellJob, work_dir: &Path, temp_file: &Path) -> CellOutcome {
+    let program = "gaanim-core";
+    let mut command = Command::new(core_binary());
+    match &job.mode {
+        // A preview that only needs revalidating is checked, not rendered.
+        CellMode::Export(_) if job.cached_webp.is_some() => {
+            command.arg("check").arg(temp_file);
+        }
+        CellMode::Export(output) => {
+            command
+                .arg("export")
+                .arg(temp_file)
+                .arg("--output")
+                .arg(output)
+                .args(PREVIEW_ARGS)
+                .arg(PREVIEW_FIT);
+        }
+        CellMode::Check => {
+            command.arg("check").arg(temp_file);
+        }
+        // Fragments run against the embedded module without submitting a scene.
+        CellMode::Validate => {
+            command.arg("--validate-python-api").arg(temp_file);
+        }
+    }
+    command
+        .current_dir(work_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env("PYTHONUTF8", "1")
+        .env("PYTHONIOENCODING", "utf-8");
+
+    let child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            return CellOutcome {
+                stderr: format!("Could not start {program}: {error}"),
+                ..Default::default()
+            };
+        }
+    };
+    let pid = child.id();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+
+    match rx.recv_timeout(StdDuration::from_secs(job.timeout_secs)) {
+        Ok(Ok(output)) => {
+            let raw_stderr = strip_ansi_escape_codes(&String::from_utf8_lossy(&output.stderr));
+            let mut stderr = adjust_stderr_line_numbers(
+                &raw_stderr,
+                &temp_file.to_string_lossy(),
+                job.prelude_lines,
+            );
+            if let Some(message) = silent_failure(
+                program,
+                output.status.success(),
+                &output.status.to_string(),
+                &stderr,
+            ) {
+                stderr = message;
+            }
+            // A run that succeeded may still log (the windowed 3D export does);
+            // only other output, such as a Typst warning, marks it as failed.
+            if output.status.success() {
+                stderr = without_runtime_logs(&stderr);
+            }
+            CellOutcome {
+                stdout: strip_ansi_escape_codes(&String::from_utf8_lossy(&output.stdout)),
+                stderr: stderr.trim().to_string(),
+                webp: String::new(),
+            }
+        }
+        Ok(Err(error)) => CellOutcome {
+            stderr: format!("Could not wait for {program}: {error}"),
+            ..Default::default()
+        },
+        Err(_) => {
+            #[cfg(target_os = "windows")]
+            let _ = Command::new("taskkill")
+                .args(["/F", "/T", "/PID", &pid.to_string()])
+                .output();
+            #[cfg(not(target_os = "windows"))]
+            let _ = Command::new("kill").args(["-9", &pid.to_string()]).output();
+            CellOutcome {
+                stderr: format!(
+                    "Timeout: the example ran longer than {} seconds (`# timeout:` raises the limit).",
+                    job.timeout_secs
+                ),
+                ..Default::default()
+            }
+        }
+    }
+}
+
+/// Make the sample project in `docs/fixtures` (manifest, images, fonts…)
+/// visible from a cell's working directory, so examples that load files by
+/// relative path run as they would in a reader's project.
+fn link_fixtures(fixtures: &Path, work_dir: &Path) {
+    let Ok(entries) = fs::read_dir(fixtures) else {
+        return;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let target = work_dir.join(entry.file_name());
+        #[cfg(unix)]
+        let _ = std::os::unix::fs::symlink(entry.path(), &target);
+        #[cfg(not(unix))]
+        let _ = copy_recursively(&entry.path(), &target);
+    }
+}
+
+#[cfg(not(unix))]
+fn copy_recursively(source: &Path, target: &Path) -> std::io::Result<()> {
+    if source.is_dir() {
+        fs::create_dir_all(target)?;
+        for entry in fs::read_dir(source)?.filter_map(Result::ok) {
+            copy_recursively(&entry.path(), &target.join(entry.file_name()))?;
+        }
+        Ok(())
+    } else {
+        fs::copy(source, target).map(|_| ())
+    }
+}
+
+/// Move a finished export into `assets/generated` and return its site path.
+fn collect_webp(root: &Path, source: &Path, cell_id: &str) -> Option<String> {
+    // Wait for the exporter to finish flushing (Windows keeps a file lock).
+    for _ in 0..15 {
+        let size = || fs::metadata(source).map(|m| m.len()).unwrap_or(0);
+        if source.exists() {
+            let before = size();
+            std::thread::sleep(StdDuration::from_millis(120));
+            if before == size() && before > 1024 {
+                break;
+            }
+        } else {
+            std::thread::sleep(StdDuration::from_millis(80));
+        }
+    }
+    if !is_valid_webp(source) {
+        return None;
+    }
+    let dir = root.join("assets/generated");
+    fs::create_dir_all(&dir).ok()?;
+    let name = format!("{cell_id}_anim.webp");
+    let dest = dir.join(&name);
+    // Windows: rename fails while the source is locked; fall back to a copy.
+    if fs::rename(source, &dest).is_err() {
+        fs::copy(source, &dest).ok()?;
+        let _ = fs::remove_file(source);
+    }
+    dest.exists().then(|| format!("assets/generated/{name}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        adjust_stderr_line_numbers, has_valid_webp_signature, requires_gaanim_host, silent_failure,
+        adjust_stderr_line_numbers, has_valid_webp_signature, silent_failure,
+        strip_ansi_escape_codes, without_preflight_report, without_render_calls,
+        without_runtime_logs,
     };
+
+    #[test]
+    fn the_check_report_is_not_part_of_what_a_cell_printed() {
+        let stdout = "hola\nScene preflight: /tmp/main.py\n  PASS with 1 warning\n";
+        assert_eq!(without_preflight_report(stdout), "hola\n");
+        assert_eq!(without_preflight_report("Scene preflight: x\n"), "");
+        assert_eq!(without_preflight_report("no report"), "no report");
+    }
+
+    #[test]
+    fn runtime_logs_are_not_errors_but_other_output_is() {
+        let stderr = "2026-09-25T22:46:49.427640Z  WARN winit: error setting XSETTINGS\n\
+                      2026-09-25T22:46:50.753327Z ERROR bevy_render: slab\n";
+        assert_eq!(without_runtime_logs(stderr), "");
+        let colored = "\u{1b}[2m2026-09-25T22:57:48.171032Z\u{1b}[0m \u{1b}[33m WARN\u{1b}[0m bevy_audio";
+        assert_eq!(without_runtime_logs(&strip_ansi_escape_codes(colored)), "");
+        assert_eq!(
+            without_runtime_logs("ALSA lib pcm.c:2721:(snd_pcm_open_noupdate) Unknown PCM default"),
+            ""
+        );
+        assert_eq!(
+            without_runtime_logs("Typst warning: unknown font family: cascadia mono"),
+            "Typst warning: unknown font family: cascadia mono"
+        );
+    }
+
+    #[test]
+    fn a_replayed_cell_keeps_its_code_but_not_its_render_call() {
+        let code = "scene = Scene()\ncircle = scene.geometry.circle(1)\n  scene.render()\n";
+        assert_eq!(
+            without_render_calls(code),
+            "scene = Scene()\ncircle = scene.geometry.circle(1)\n"
+        );
+    }
 
     #[test]
     fn a_process_that_fails_silently_reports_its_exit_status() {
@@ -721,16 +1028,6 @@ mod tests {
             ),
             None
         );
-    }
-
-    #[test]
-    fn authoring_cells_use_the_native_host_without_requiring_render() {
-        assert!(requires_gaanim_host(
-            "from gaanim import Scene\nscene = Scene()"
-        ));
-        assert!(requires_gaanim_host("from gaanim.matrix import Matrix"));
-        assert!(requires_gaanim_host("import gaanim as g"));
-        assert!(!requires_gaanim_host("import math\nprint(math.pi)"));
     }
 
     #[test]

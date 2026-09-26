@@ -1765,37 +1765,37 @@ fn learn_ui(ui: &mut Ui) {
             Icon::Book,
             "Guía rápida",
             "Tu primera escena en cinco minutos.",
-            "manual/guia-rapida/",
+            "empezar/primera-animacion/",
         ),
         (
             Icon::Play,
             "Proyecto práctico",
             "Del círculo al seno en ocho capítulos.",
-            "guia/antes-de-empezar/",
+            "tutorial/antes-de-empezar/",
         ),
         (
             Icon::Grid,
             "Ejemplos",
             "Escenas listas para copiar y modificar.",
-            "examples/basic/",
+            "ejemplos/",
         ),
         (
             Icon::Present,
             "Presentaciones",
             "Pasos, notas y modo presentador.",
-            "guides/slides/",
+            "guias/presentaciones/",
         ),
         (
             Icon::Code,
             "Referencia de la API",
             "Cada función, con ejemplos animados.",
-            "api/",
+            "referencia/",
         ),
         (
             Icon::Export,
             "Instalación y exportación",
             "Formatos, FFmpeg y actualizaciones.",
-            "getting-started/installation/",
+            "empezar/instalacion/",
         ),
     ];
     let gap = 12.0;

@@ -238,24 +238,34 @@ const KIND_LABELS = {
 
 // Pages for symbols without a hand-written reference entry.
 const CLASS_PAGES = [
-    [/^(Scene|Segment|SceneStop|Transition|Composition|Schedule|ScheduleEntry|Camera\w*)$/, "api/scene/"],
-    [/^(Anim|Easing|EasingCurve|Updater|TextSelectionAnimation)$/, "api/animations/"],
-    [/^(Text\w*|Typography|Parts?)$/, "api/text/"],
-    [/^(Layout\w*|Anchor|AnchorPoint|TextAnchor|Direction|ConstraintSet|PointRef|Align)$/, "api/layout/"],
-    [/^(Color|ColorMap|Brush|Background|StrokeStyle|Style|Theme|AxesStyle|Glow|Shadow)$/, "api/themes/"],
-    [/^(Axis|Scale|Field|Value|Guide|ChartSpec|Chart\w*|Visualization|Data\w*|Computed|Parameter|Variable|TimeInput|Matrix\w*|Plot\w*|Axes\w*|Number\w*)$/, "api/visualization/"],
-    [/^(Audio\w*)$/, "api/audio/"],
-    [/^(Asset\w*|Media\w*|Video\w*|Image\w*|Svg\w*|Lottie\w*)$/, "api/assets/"],
+    [/^(Scene|Segment|SceneStop|Transition|Composition|Schedule|ScheduleEntry|Camera\w*)$/, "referencia/scene/"],
+    [/^(Anim|Easing|EasingCurve|Updater|TextSelectionAnimation)$/, "referencia/animations/"],
+    [/^(Text\w*|Typography|Parts?)$/, "referencia/text/"],
+    [/^(Layout\w*|Anchor|AnchorPoint|TextAnchor|Direction|ConstraintSet|PointRef|Align)$/, "referencia/layout/"],
+    [/^(Color|ColorMap|Brush|Background|StrokeStyle|Style|Theme|AxesStyle|Glow|Shadow)$/, "referencia/themes/"],
+    [/^(Axis|Scale|Field|Value|Guide|ChartSpec|Chart\w*|Visualization|Data\w*|Computed|Parameter|Variable|TimeInput|Matrix\w*|Plot\w*|Axes\w*|Number\w*)$/, "referencia/visualization/"],
+    [/^(Audio\w*)$/, "referencia/audio/"],
+    [/^(AssetManager)$/, "referencia/assets/"],
+    [/^(MediaLibrary|Video\w*|Image|Lottie)$/, "referencia/medios/"],
+    [/^(Drawable)$/, "referencia/drawable/"],
+    [/^(SlideKit)$/, "referencia/diapositivas/"],
+    [/^(Mechanics|Dimension|AngleDimension|Support|ForceVector)$/, "referencia/mecanica/"],
+    [/^(Canvas|SceneMarker|CameraState|CameraConstraint)$/, "referencia/scene/"],
+    [/^(Overlay|Random)$/, "referencia/animations/"],
+    [/^(PostProcess)$/, "referencia/themes/"],
+    [/^(Readout|RollingNumber|CoordinateRef|CoordinateSpace\w*|PolarSpace|NumberLine|VectorField|ArrowVectorField|StreamLines|FlowParticles)$/, "referencia/visualization/"],
 ];
 const pageForClass = (cls) => {
-    if (!cls) return "api/";
+    if (!cls) return "referencia/";
     const match = CLASS_PAGES.find(([re]) => re.test(cls));
-    return match ? match[1] : "api/mobjects/";
+    return match ? match[1] : "referencia/geometria/";
 };
 const PAGE_LABELS = {
-    "api/": "API", "api/scene/": "Escena", "api/animations/": "Animaciones", "api/text/": "Texto",
-    "api/layout/": "Layout", "api/themes/": "Temas", "api/visualization/": "Visualización",
-    "api/audio/": "Audio", "api/assets/": "Recursos", "api/mobjects/": "Objetos",
+    "referencia/": "API", "referencia/scene/": "Escena", "referencia/animations/": "Animaciones", "referencia/text/": "Texto",
+    "referencia/layout/": "Layout", "referencia/themes/": "Temas", "referencia/visualization/": "Visualización",
+    "referencia/audio/": "Audio", "referencia/assets/": "Recursos", "referencia/geometria/": "Geometría",
+    "referencia/drawable/": "Drawable", "referencia/medios/": "Medios", "referencia/diapositivas/": "Diapositivas",
+    "referencia/mecanica/": "Mecánica", "referencia/matrices/": "Matrices", "referencia/cli/": "CLI",
 };
 
 // The `.animate` proxy returns `Anim`, but the reference documents those

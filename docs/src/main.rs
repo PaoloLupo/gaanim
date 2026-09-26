@@ -46,8 +46,16 @@ fn compile(command: &CompileCommand) -> Result<ExitCode> {
         .expect("Compilation failed");
 
     report.print(&world);
+    let failed = report.print_examples();
+    // Only a complete, successful build knows every cell still in use.
+    if report.0.output.is_ok() && failed == 0 {
+        let removed = execution::prune_unused();
+        if removed > 0 {
+            writeln!(out(), "Removed {removed} unused cached examples.").unwrap();
+        }
+    }
 
-    if report.0.output.is_err() {
+    if report.0.output.is_err() || (failed > 0 && !command.args.allow_example_errors) {
         return Ok(ExitCode::FAILURE);
     }
 
@@ -78,6 +86,7 @@ fn watch(command: &WatchCommand) -> ! {
 
         print_watch_header(&config);
         report.print(&world);
+        report.print_examples();
         writeln!(out(), "Compiled in {:.2?}", dur).unwrap();
 
         comemo::evict(10);
@@ -102,6 +111,7 @@ fn print_watch_header(config: &Config) {
 }
 
 struct Config {
+    jobs: usize,
     input: Option<PathBuf>,
     output: Option<PathBuf>,
     pdf_output: Option<PathBuf>,
@@ -132,6 +142,9 @@ impl Config {
         };
 
         Self {
+            jobs: args.jobs.unwrap_or_else(|| {
+                std::thread::available_parallelism().map_or(1, |cores| cores.get())
+            }),
             input: args.input.clone(),
             output,
             pdf_output,
@@ -145,7 +158,7 @@ fn out() -> termcolor::StandardStream {
     termcolor::StandardStream::stderr(termcolor::ColorChoice::Auto)
 }
 
-struct Report(Warned<typst::diag::SourceResult<()>>);
+struct Report(Warned<typst::diag::SourceResult<()>>, execution::RunStats);
 
 impl Report {
     fn print(&self, world: &DocWorld) {
@@ -163,18 +176,62 @@ impl Report {
         )
         .unwrap();
     }
+
+    /// Summarize the examples of this compilation and return how many failed.
+    fn print_examples(&self) -> usize {
+        let stats = &self.1;
+        let failed = self
+            .0
+            .warnings
+            .iter()
+            .filter(|diag| diag.message.starts_with(execution::EXAMPLE_ERROR))
+            .map(|diag| diag.span)
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        let mut out = out();
+        writeln!(
+            out,
+            "Examples: {} run, {} cached, {} failed",
+            stats.executed.len(),
+            stats.only_cached(),
+            failed
+        )
+        .unwrap();
+        if failed > 0 {
+            writeln!(
+                out,
+                "Failing examples are listed above as \"{}\" warnings.",
+                execution::EXAMPLE_ERROR
+            )
+            .unwrap();
+        }
+        failed
+    }
 }
 
 fn compile_once(world: &DocWorld, config: &mut Config) -> Report {
-    let Warned { output, warnings } = typst::compile::<Bundle>(world);
+    execution::reset_stats();
+
+    // First pass: queue every example that is not cached, run the queue in
+    // parallel, then compile again so the pages show the results. When nothing
+    // was queued, the first pass already is the final result.
+    execution::start_collecting();
+    let mut compiled = typst::compile::<Bundle>(world);
+    if execution::run_collected(config.jobs) > 0 {
+        comemo::evict(0);
+        compiled = typst::compile::<Bundle>(world);
+    }
+
+    // The PDF reads the same cells from the cache; count them once.
+    let stats = execution::stats();
+    let Warned { output, warnings } = compiled;
     let mut result = output.and_then(|bundle| export_website(bundle, config));
 
-    if result.is_ok() {
-        if let Some(pdf_path) = config.pdf_output.clone() {
-            if let Err(pdf_err) = export_pdf(world, &pdf_path) {
-                result = Err(pdf_err);
-            }
-        }
+    if result.is_ok()
+        && let Some(pdf_path) = config.pdf_output.clone()
+        && let Err(pdf_err) = export_pdf(world, &pdf_path)
+    {
+        result = Err(pdf_err);
     }
 
     let mut warned = Warned {
@@ -202,7 +259,7 @@ fn compile_once(world: &DocWorld, config: &mut Config) -> Report {
             && !diag.message.ends_with("was ignored during HTML export")
     });
 
-    Report(warned)
+    Report(warned, stats)
 }
 
 fn export_website(bundle: Bundle, config: &Config) -> typst::diag::SourceResult<()> {

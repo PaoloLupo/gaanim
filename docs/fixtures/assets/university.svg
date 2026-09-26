@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <path id="roof" d="M10 40 L50 12 L90 40 Z" fill="#1d4ed8"/>
+  <rect id="columns" x="20" y="44" width="60" height="36" fill="#1d4ed8"/>
+  <rect id="base" x="12" y="82" width="76" height="8" fill="#1d4ed8"/>
+</svg>

@@ -1,0 +1,5 @@
+name = "fixtures"
+kind = "video"
+entry = "main.py"
+assets_dir = "assets"
+output_dir = "exports"

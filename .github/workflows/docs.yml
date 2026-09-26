@@ -10,9 +10,13 @@ on:
       - "crates/**"
       - "Cargo.toml"
       - ".github/workflows/docs.yml"
+  # Pull requests use the same paths as main: an API change that breaks an
+  # example must fail before it merges.
   pull_request:
     paths:
       - "docs/**"
+      - "crates/**"
+      - "Cargo.toml"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
@@ -45,7 +49,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev \
-            mesa-vulkan-drivers ffmpeg
+            mesa-vulkan-drivers ffmpeg xvfb libxkbcommon-x11-0
 
       - name: Expose the embedded Python runtime
         run: |
@@ -57,7 +61,8 @@ jobs:
           shared-key: docs
 
       # Previews are keyed by each example's source hash, so a stale cache
-      # only re-renders the examples that changed.
+      # only re-renders the examples that changed. Results cached against
+      # another stub or runtime version are re-checked before reuse.
       - name: Restore rendered previews
         uses: actions/cache@v4
         with:
@@ -70,15 +75,11 @@ jobs:
       - name: Build preview runtime
         run: cargo build -p gaanim_editor --bin gaanim-core
 
+      # Runs every example with the real runtime and fails when any of them
+      # reports an error; the log lists each failing cell with its location.
+      # Scenes with native 3D content export through a window, hence Xvfb.
       - name: Build documentation
-        run: cargo run -p docs -- compile
-
-      - name: Fail on broken examples
-        run: |
-          if grep -rl 'docs-example-error' dist/site --include=index.html; then
-            echo "::error::Some documentation examples failed; see the pages listed above."
-            exit 1
-          fi
+        run: xvfb-run -a cargo run -p docs -- compile
 
       - uses: actions/upload-pages-artifact@v3
         with:

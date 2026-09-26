@@ -68,7 +68,9 @@
     --kind-constant: #db2777;
     --kind-factory: #4f46e5;
 
-    --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    /* Body text uses the reader's system face; headings share Aleo with the PDF. */
+    --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-display: "Aleo", Georgia, "Times New Roman", serif;
     --font-code: "VictorMono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     --font-math: "NewComputerModernMath", serif;
 
@@ -229,7 +231,7 @@ hr { border: none; border-top: 1px solid var(--border); margin: 2em 0; }
 h1, h2, h3, h4 {
     position: relative;
     color: var(--text);
-    font-family: var(--font-sans);
+    font-family: var(--font-display);
     line-height: 1.25;
     letter-spacing: -0.02em;
     scroll-margin-top: calc(var(--header-h) + 16px);
@@ -260,10 +262,57 @@ main h2::before, main.page-home > h3::before {
 }
 h1:hover .heading-anchor, h2:hover .heading-anchor, h3:hover .heading-anchor, h4:hover .heading-anchor { opacity: 1; }
 
-.last-updated { font-size: 0.8rem; color: var(--text-muted); margin: -0.4em 0 1.6em; }
+/* Previous / next page at the end of each chapter */
+.page-nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    margin: 3em 0 1em;
+}
+.page-nav a {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    color: inherit !important;
+    text-decoration: none !important;
+}
+.page-nav a:hover { border-color: var(--primary); }
+.page-nav-next { grid-column: 2; text-align: right; }
+.page-nav-label { font-family: var(--font-label); font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+.page-nav-title { font-weight: 650; color: var(--text); }
+@media (max-width: 560px) {
+    .page-nav { grid-template-columns: minmax(0, 1fr); }
+    .page-nav-next { grid-column: 1; }
+}
+
+/* Tutorial callouts: "Idea clave" and "Punto de control" */
+.lesson-box {
+    margin: 1.4em 0;
+    padding: 14px 18px;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--primary);
+    background: var(--primary-soft);
+}
+.lesson-box-experimental { border-left-color: var(--warning); background: color-mix(in srgb, var(--warning) 8%, transparent); }
+.lesson-box-experimental .lesson-box-title { color: var(--warning); }
+.lesson-box > p:first-of-type { margin-top: 0; }
+.lesson-box > p:last-child { margin-bottom: 0; }
+.lesson-box-title {
+    margin-bottom: 6px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--primary);
+}
 
 /* Inline and block code */
 code, pre, .typ-raw { font-family: var(--font-code); }
+/* Long identifiers and commands in running text wrap instead of widening the page on phones. */
+:not(pre) > code { overflow-wrap: anywhere; }
 :not(pre) > code {
     font-size: 0.86em;
     padding: 0.12em 0.38em;
@@ -455,7 +504,7 @@ main > table { display: block; overflow-x: auto; }
 .home-hero-kicker, .home-card-eyebrow, .home-step-number, .toc-title, .nav-sidebar summary,
 table th, .code-header, .code-cell-anim .anim-preview::before, .api-badge, .kind-badge,
 .api-params-title, .api-example-label, .search-group-title, .search-filter, .search-tip,
-.search-footer, .copy-code-btn, .home-hero-cta a, .site-footer, .last-updated {
+.search-footer, .copy-code-btn, .home-hero-cta a, .site-footer, .lesson-box-title {
     font-family: var(--font-label);
 }
 
@@ -772,6 +821,8 @@ table th, .code-header, .code-cell-anim .anim-preview::before, .api-badge, .kind
 .badge-factory, .kind-factory { --kind-color: var(--kind-factory); }
 .badge-class, .kind-class, .kind-constructor { --kind-color: var(--kind-class); }
 .badge-function, .kind-function { --kind-color: var(--kind-function); }
+.badge-property, .kind-property, .kind-attribute { --kind-color: var(--kind-property); }
+.badge-constant, .kind-constant { --kind-color: var(--kind-constant); }
 .kind-property, .kind-attribute { --kind-color: var(--kind-property); }
 .kind-constant, .kind-type { --kind-color: var(--kind-constant); }
 .api-desc { padding: 14px 16px 2px; color: var(--text-soft); }
@@ -1194,6 +1245,29 @@ table th, .code-header, .code-cell-anim .anim-preview::before, .api-badge, .kind
 .home-card-eyebrow { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--primary); }
 .home-cards-learn .home-card-eyebrow { color: var(--success); }
 
+/* Home: four doors, each with its main destination and a few shortcuts */
+.home-doors { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.home-door { padding: 0; }
+.home-door-main {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 18px 18px 12px;
+    color: inherit !important;
+    text-decoration: none !important;
+}
+.home-door-links {
+    margin: 0;
+    padding: 0 18px 16px;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.88rem;
+}
+.home-door-links a::before { content: "→ "; color: var(--text-muted); }
+.home-more { margin: 8px 0 32px; font-size: 0.9rem; color: var(--text-muted); }
+
 /* ============================================================
    Responsive
    ============================================================ */
@@ -1240,4 +1314,4 @@ table th, .code-header, .code-cell-anim .anim-preview::before, .api-badge, .kind
 .page-header { margin-bottom: 28px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
 .page-header h1 { margin-bottom: 8px; }
 .page-lead { margin: 0; font-size: 1.12rem; line-height: 1.6; color: var(--text-muted) !important; }
-.page-header + h2, .page-header + .last-updated + h2 { border-top: none; padding-top: 0; margin-top: 0.6em; }
+.page-header + h2 { border-top: none; padding-top: 0; margin-top: 0.6em; }
