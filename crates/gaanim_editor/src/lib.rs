@@ -1277,6 +1277,45 @@ fn snap_seek_fraction(
 /// The design stays legible with dozens of scenes: chapters are separated by
 /// gaps instead of ornaments, a label is drawn only when it fits its chip,
 /// and the full name of any chapter is shown in the hover tooltip.
+/// Line between two scenes in the timeline.
+const SCENE_DIVIDER: egui::Color32 = egui::Color32::from_rgba_premultiplied(88, 92, 104, 150);
+
+/// How a scene chip in the timeline lane is drawn.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ChipStyle {
+    fill: egui::Color32,
+    outline: Option<egui::Stroke>,
+}
+
+/// The current scene is tinted with the accent; the one under the pointer is
+/// lit, and outlined when the pointer is on the lane, where a click jumps to
+/// its start.
+fn chip_style(is_active: bool, is_hovered: bool, pointer_in_lane: bool) -> ChipStyle {
+    let click_target = is_hovered && pointer_in_lane;
+    let fill = match (is_active, is_hovered) {
+        (true, true) => palette::ACCENT.gamma_multiply(0.38),
+        (true, false) => palette::ACCENT.gamma_multiply(0.30),
+        (false, true) if click_target => egui::Color32::from_white_alpha(44),
+        (false, true) => egui::Color32::from_white_alpha(26),
+        (false, false) => egui::Color32::from_white_alpha(12),
+    };
+    let outline = if click_target {
+        Some(egui::Stroke::new(
+            1.0,
+            if is_active {
+                palette::ACCENT
+            } else {
+                egui::Color32::from_white_alpha(120)
+            },
+        ))
+    } else if is_active {
+        Some(egui::Stroke::new(1.0, palette::ACCENT.gamma_multiply(0.7)))
+    } else {
+        None
+    };
+    ChipStyle { fill, outline }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn paint_seek_bar(
     ui: &mut egui::Ui,
@@ -1292,7 +1331,7 @@ fn paint_seek_bar(
     const LANE_H: f32 = 22.0;
     const LANE_GAP: f32 = 6.0;
     const TRACK_ZONE_H: f32 = 18.0;
-    const CHAPTER_GAP: f32 = 2.0;
+    const CHAPTER_GAP: f32 = 3.0;
 
     let has_scenes = !scenes.is_empty();
     let lane_h = if has_scenes { LANE_H + LANE_GAP } else { 0.0 };
@@ -1327,6 +1366,9 @@ fn paint_seek_bar(
             .flatten()
     });
     let hovered_scene_idx = hover_frac.and_then(scene_at);
+    // Clicking the lane jumps to a scene's start; clicking the track seeks to
+    // the exact time, so only the lane shows a scene as the click target.
+    let pointer_in_lane = has_scenes && pointer.is_some_and(|pos| lane_rect.contains(pos));
 
     // ── Chapter lane ────────────────────────────────────────────────────
     let label_font = egui::FontId::proportional(11.5);
@@ -1350,21 +1392,22 @@ fn paint_seek_bar(
         chips.push(Some(chip));
         let is_active = active_scene_idx == Some(i);
         let is_hovered = hovered_scene_idx == Some(i);
-        let base = if is_active {
-            palette::ACCENT.gamma_multiply(0.16)
-        } else if is_hovered {
-            egui::Color32::from_white_alpha(22)
-        } else {
-            egui::Color32::from_white_alpha(10)
-        };
-        painter.rect_filled(chip, 0.0, base);
+        let style = chip_style(is_active, is_hovered, pointer_in_lane);
+        painter.rect_filled(chip, 0.0, style.fill);
         if is_active {
             // Progress inside the current chapter.
             let progress_x = playhead_x.clamp(chip.min.x, chip.max.x);
             let clip = egui::Rect::from_min_max(chip.min, egui::pos2(progress_x, chip.max.y));
             painter
                 .with_clip_rect(clip.intersect(painter.clip_rect()))
-                .rect_filled(chip, 0.0, palette::ACCENT.gamma_multiply(0.22));
+                .rect_filled(chip, 0.0, palette::ACCENT.gamma_multiply(0.24));
+            // An accent underline marks the current scene even at a glance.
+            let underline =
+                egui::Rect::from_min_max(egui::pos2(chip.min.x, chip.max.y - 2.0), chip.max);
+            painter.rect_filled(underline, 0.0, palette::ACCENT);
+        }
+        if let Some(stroke) = style.outline {
+            painter.rect_stroke(chip, 0.0, stroke, egui::StrokeKind::Inside);
         }
 
         let name = scene_display_name(&seg.name);
@@ -1484,6 +1527,21 @@ fn paint_seek_bar(
             painter
                 .with_clip_rect(clip.intersect(painter.clip_rect()))
                 .rect_filled(piece_rect, 0.0, palette::ACCENT);
+        }
+    }
+
+    // Scene boundaries: a divider across the lane and the track, so where one
+    // scene ends and the next begins reads at a glance.
+    if has_scenes {
+        for &cut in &bounds[1..bounds.len() - 1] {
+            let x = x_at(cut);
+            painter.line_segment(
+                [
+                    egui::pos2(x, lane_rect.min.y),
+                    egui::pos2(x, bar_y + TRACK_ZONE_H / 2.0 - 1.0),
+                ],
+                egui::Stroke::new(1.5, SCENE_DIVIDER),
+            );
         }
     }
 
@@ -3038,6 +3096,26 @@ mod tests {
             .single(app.world())
             .expect("primary window");
         assert!(matches!(window.mode, bevy::window::WindowMode::Windowed));
+    }
+
+    #[test]
+    fn scene_chips_mark_the_current_scene_and_the_click_target() {
+        let idle = chip_style(false, false, false);
+        let current = chip_style(true, false, false);
+        let target = chip_style(false, true, true);
+        let track_hover = chip_style(false, true, false);
+        // The current scene and the click target stand out from idle chips.
+        assert!(current.fill.a() > idle.fill.a() && current.outline.is_some());
+        assert!(target.fill.a() > track_hover.fill.a());
+        assert!(target.outline.is_some() && idle.outline.is_none());
+        // Hovering the track (exact seek) does not outline a scene.
+        assert!(track_hover.outline.is_none());
+        assert_eq!(
+            chip_style(true, true, true)
+                .outline
+                .map(|stroke| stroke.color),
+            Some(palette::ACCENT)
+        );
     }
 
     #[test]

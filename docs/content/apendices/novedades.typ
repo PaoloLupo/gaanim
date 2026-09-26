@@ -11,6 +11,18 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= Próxima versión
+
+Cambios todavía sin publicar.
+
+== Cambios
+
+- En la línea de tiempo del editor, la escena actual se distingue con el
+  color de acento, un subrayado y un contorno. La escena bajo el cursor se
+  ilumina, y queda contorneada cuando un clic saltaría a su inicio. Una línea
+  vertical separa cada escena de la siguiente en los carriles de escenas y
+  de reproducción.
+
 = 0.4.1
 
 Publicada el 26 de septiembre de 2026. Además de correcciones, cambia el tema
