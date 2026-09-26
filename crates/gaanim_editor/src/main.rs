@@ -1140,7 +1140,10 @@ fn dispatch_diff_mode() -> bool {
         report.missing
     );
     println!("Report: {}", parsed.output.join("index.html").display());
-    println!("JSON: {}", parsed.output.join(gaanim_diff::REPORT_FILE).display());
+    println!(
+        "JSON: {}",
+        parsed.output.join(gaanim_diff::REPORT_FILE).display()
+    );
 
     std::process::exit(if report.passed { 0 } else { 1 });
 }
@@ -1249,8 +1252,6 @@ fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String>
                     .parse()
                     .map_err(|_| "--max-changed-ratio must be between 0 and 1".to_string())?;
             }
-            // The native viewer was removed; kept so existing scripts still parse.
-            "--no-gui" => {}
             "--no-capture" => capture = Some(false),
             "--capture-only" => capture_only = true,
             "--bless" => bless = true,
@@ -1677,7 +1678,6 @@ mod tests {
             "--current",
             "target/performance/seek",
             "--capture-only",
-            "--no-gui",
         ]
         .map(str::to_string);
         let parsed = parse_diff_mode_args(&args).unwrap().unwrap();
@@ -1880,6 +1880,13 @@ mod tests {
     }
 
     #[test]
+    fn diff_rejects_the_removed_no_gui_flag() {
+        let args =
+            ["--baseline", "baseline", "--current", "current", "--no-gui"].map(str::to_string);
+        assert!(parse_diff_mode_args(&args).is_err());
+    }
+
+    #[test]
     fn parses_named_diff_flags() {
         let args = [
             "--baseline",
@@ -1892,7 +1899,6 @@ mod tests {
             "4",
             "--max-changed-ratio",
             "0.001",
-            "--no-gui",
         ]
         .map(str::to_string);
 

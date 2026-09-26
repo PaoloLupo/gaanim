@@ -302,7 +302,7 @@ la escena. Para ejecutar un binario ya validado sin invocar un build, usa
 `just dev-exec target/debug/gaanim.exe examples/quickstart.py` en Windows
 (`target/debug/gaanim` en Unix). Ese comando prepara las rutas de las bibliotecas
 compartidas de Bevy y Rust y conserva las de Python. No copies únicamente el
-ejecutable dev para distribuirlo; utiliza `just build-release`.
+ejecutable dev para distribuirlo; utiliza `just build-dist`.
 
 La verificación rápida de agentes prueba los crates con cambios Rust en una
 sola invocación, sin añadir automáticamente otro `check` de todo el workspace.
@@ -329,8 +329,11 @@ multimedia añade audio y los hosts añaden ventanas nativas.
 `target/cargo-timings/cargo-timing.html`. Para medir una iteración representativa,
 úsalo después de un cambio habitual en Rust; una ejecución sin cambios mide
 principalmente la comprobación de caché. La primera compilación tras modificar
-perfiles o linker reconstruye los artefactos afectados. Usa `just build-release`
-para distribución y validación de rendimiento.
+perfiles o linker reconstruye los artefactos afectados. `just build-release`
+usa el perfil `release` (LTO local por crate, 16 codegen units) para builds
+optimizados y benchmarks locales; `just build-dist` usa el perfil `dist`
+(ThinLTO entre crates, un codegen unit), más lento pero más pequeño, para los
+binarios distribuidos.
 
 La API pública de Python comienza en `Scene`, que conserva la orquestación y
 expone las capacidades `geometry`, `text`, `layout`, `media`, `viz`, `slides`,

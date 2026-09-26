@@ -238,7 +238,7 @@ def analyze_paths(repo: Path, paths: Iterable[str]) -> Impact:
     for example in visual_examples:
         runner = "target/debug/gaanim.exe" if sys.platform == "win32" else "target/debug/gaanim"
         commands.append(
-            f"just dev-exec {runner} --diff --example examples/{example}.py --no-gui"
+            f"just dev-exec {runner} --diff --example examples/{example}.py"
         )
 
     return Impact(

@@ -1,6 +1,6 @@
 """Run inside the current Gaanim host: drive_from_samples(..., "xy") contract.
 
-just dev-exec target/debug/gaanim.exe --diff --example tests/sampled_xy_api_contract.py --capture-only --no-gui
+just dev-exec target/debug/gaanim.exe --diff --example tests/sampled_xy_api_contract.py --capture-only
 """
 import os
 

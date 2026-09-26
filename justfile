@@ -70,17 +70,21 @@ build-timings:
 build-release:
     cargo build -p gaanim_editor -p gaanim_launcher --release
 
+# Build the distributed binaries (single codegen unit; slower, smaller).
+build-dist:
+    cargo build -p gaanim_editor -p gaanim_launcher --profile dist
+
 [windows]
-build-release-install: build-release wheel
+build-release-install: build-dist wheel
     New-Item -ItemType Directory -Force -Path "C:\Tools\gaanim" | Out-Null
-    Copy-Item -Path "./target/release/gaanim.exe" -Destination "C:\Tools\gaanim\" -Force
-    Copy-Item -Path "./target/release/gaanim-core.exe" -Destination "C:\Tools\gaanim\" -Force
+    Copy-Item -Path "./target/dist/gaanim.exe" -Destination "C:\Tools\gaanim\" -Force
+    Copy-Item -Path "./target/dist/gaanim-core.exe" -Destination "C:\Tools\gaanim\" -Force
     Copy-Item -Path (Get-ChildItem "./target/wheels/gaanim-*-py3-none-any.whl" | Select-Object -First 1).FullName -Destination "C:\Tools\gaanim\" -Force
 
 [unix]
-build-release-install: build-release wheel
+build-release-install: build-dist wheel
     mkdir -p "$HOME/.local/bin" "$HOME/.local/share/gaanim"
-    install -m 755 ./target/release/gaanim ./target/release/gaanim-core "$HOME/.local/bin/"
+    install -m 755 ./target/dist/gaanim ./target/dist/gaanim-core "$HOME/.local/bin/"
     install -m 644 ./target/wheels/gaanim-*-py3-none-any.whl "$HOME/.local/share/gaanim/"
 
 # Install the lightweight authoring package in the local virtual environment.

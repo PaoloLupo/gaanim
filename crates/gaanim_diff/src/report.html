@@ -1,0 +1,526 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>gaanim · diff visual</title>
+<style>
+:root{
+  --bg:#f6f7f9;--panel:#ffffff;--panel-2:#f0f2f5;--line:#dfe3e8;--text:#161a21;--muted:#5d6675;--faint:#8b93a1;
+  --accent:#4f5bd5;--accent-soft:#e7e9fb;--ok:#1f9d55;--ok-soft:#e3f5ea;--bad:#d6334a;--bad-soft:#fbe6e9;
+  --warn:#b7791f;--warn-soft:#fbf1dd;--check-a:#e9ecf0;--check-b:#f7f8fa;--shadow:0 1px 2px #0000000f,0 4px 16px #00000010;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0c0e13;--panel:#141821;--panel-2:#1a1f2a;--line:#272e3b;--text:#e8ecf3;--muted:#9aa3b2;--faint:#6b7483;
+  --accent:#8b96ff;--accent-soft:#252a47;--ok:#3ccf7d;--ok-soft:#15291f;--bad:#ff6378;--bad-soft:#35161d;
+  --warn:#f0b454;--warn-soft:#33270f;--check-a:#12151c;--check-b:#171b24;--shadow:0 1px 2px #0000004d,0 8px 24px #00000040;
+}}
+:root[data-theme="dark"]{
+  --bg:#0c0e13;--panel:#141821;--panel-2:#1a1f2a;--line:#272e3b;--text:#e8ecf3;--muted:#9aa3b2;--faint:#6b7483;
+  --accent:#8b96ff;--accent-soft:#252a47;--ok:#3ccf7d;--ok-soft:#15291f;--bad:#ff6378;--bad-soft:#35161d;
+  --warn:#f0b454;--warn-soft:#33270f;--check-a:#12151c;--check-b:#171b24;--shadow:0 1px 2px #0000004d,0 8px 24px #00000040;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;display:grid;grid-template-rows:auto 1fr;overflow:hidden}
+button,input,select{font:inherit;color:inherit}
+.mono{font-family:ui-monospace,"Cascadia Code","SF Mono",Consolas,monospace;font-variant-numeric:tabular-nums}
+header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:9px;font-weight:650;font-size:15px;letter-spacing:-.01em}
+.brand svg{width:20px;height:20px;color:var(--accent)}
+.verdict{font-weight:700;font-size:12px;letter-spacing:.06em;padding:3px 10px;border-radius:999px}
+.verdict.pass{color:var(--ok);background:var(--ok-soft)}.verdict.fail{color:var(--bad);background:var(--bad-soft)}
+.stats{display:flex;gap:6px;flex-wrap:wrap}
+.stat{display:flex;gap:6px;align-items:baseline;padding:3px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel-2)}
+.stat b{font-size:14px}.stat span{color:var(--muted)}
+.stat.bad b{color:var(--bad)}.stat.warn b{color:var(--warn)}.stat.ok b{color:var(--ok)}
+.settings{color:var(--muted);margin-left:auto}
+.icon-btn{border:1px solid var(--line);background:var(--panel-2);border-radius:8px;width:30px;height:30px;display:grid;place-items:center;cursor:pointer}
+.icon-btn:hover{border-color:var(--accent)}
+.layout{display:grid;grid-template-columns:300px 1fr;min-height:0}
+aside{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line);background:var(--panel)}
+.filters{padding:10px;display:grid;gap:8px;border-bottom:1px solid var(--line)}
+.search{width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel-2);outline:none}
+.search:focus{border-color:var(--accent)}
+.chips{display:flex;gap:4px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:transparent;border-radius:999px;padding:3px 10px;cursor:pointer;color:var(--muted)}
+.chip.active{background:var(--accent-soft);border-color:var(--accent);color:var(--text)}
+.chip .n{opacity:.7;margin-left:4px}
+.list{overflow:auto;padding:6px;flex:1}
+.item{display:grid;grid-template-columns:64px 1fr;gap:10px;align-items:center;width:100%;text-align:left;padding:6px;border:1px solid transparent;border-radius:10px;background:none;cursor:pointer}
+.item:hover{background:var(--panel-2)}
+.item.selected{background:var(--accent-soft);border-color:var(--accent)}
+.thumb{width:64px;height:40px;border-radius:6px;overflow:hidden;background:repeating-conic-gradient(var(--check-a) 0 25%,var(--check-b) 0 50%) 50%/10px 10px;display:grid;place-items:center;border:1px solid var(--line)}
+.thumb img{width:100%;height:100%;object-fit:contain}
+.item .id{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .sub{display:flex;gap:8px;color:var(--muted);font-size:12px;align-items:center}
+.dot{width:8px;height:8px;border-radius:50%;flex:none}
+.s-unchanged{--c:var(--ok)}.s-changed,.s-dimension_mismatch{--c:var(--bad)}.s-missing_baseline,.s-missing_current{--c:var(--warn)}
+.dot{background:var(--c)}
+.empty-list{padding:30px 12px;text-align:center;color:var(--faint)}
+main{display:grid;grid-template-rows:auto 1fr auto;min-height:0;min-width:0}
+.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--panel)}
+.seg{display:flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--panel-2)}
+.seg button{border:0;background:transparent;padding:5px 10px;cursor:pointer;color:var(--muted);white-space:nowrap}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button.active{background:var(--accent-soft);color:var(--text);font-weight:600}
+.seg button:disabled{opacity:.35;cursor:not-allowed}
+.seg kbd{font:10px ui-monospace,monospace;opacity:.6;margin-left:5px}
+.spacer{flex:1}
+.zoom-label{min-width:48px;text-align:center;color:var(--muted)}
+.toggle{display:flex;align-items:center;gap:6px;color:var(--muted);cursor:pointer;user-select:none}
+.toggle input{accent-color:var(--accent)}
+.stage{position:relative;overflow:auto;background:repeating-conic-gradient(var(--check-a) 0 25%,var(--check-b) 0 50%) 50%/16px 16px;min-height:0}
+.canvas{display:flex;gap:24px;padding:24px;min-width:100%;min-height:100%;align-items:center;justify-content:center;width:max-content}
+.pane{display:grid;gap:6px;justify-items:center}
+.pane-label{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:var(--panel);padding:2px 8px;border-radius:6px;border:1px solid var(--line)}
+.frame{position:relative;box-shadow:var(--shadow);outline:1px solid var(--line);background:var(--check-b);flex:none}
+.frame img{position:absolute;left:0;top:0;display:block;user-select:none;-webkit-user-drag:none}
+.frame.pixelated img{image-rendering:pixelated}
+.bounds{position:absolute;border:2px solid var(--bad);box-shadow:0 0 0 1px #0000004d,inset 0 0 0 1px #0000004d;pointer-events:none;border-radius:2px}
+.bounds.label-inside::after{bottom:auto;top:0;left:0;margin:0;border-radius:0 0 4px 0}
+.bounds::after{content:attr(data-label);position:absolute;left:-2px;bottom:100%;margin-bottom:4px;background:var(--bad);color:#fff;font:600 10px ui-monospace,monospace;padding:1px 5px;border-radius:4px;white-space:nowrap}
+.swipe-handle{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);transform:translateX(-1px);pointer-events:none}
+.swipe-handle::after{content:"";position:absolute;top:50%;left:50%;width:22px;height:22px;transform:translate(-50%,-50%);border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px var(--panel)}
+.frame.swipe{cursor:ew-resize}
+.notice{padding:40px;text-align:center;color:var(--muted);background:var(--panel);border:1px dashed var(--line);border-radius:12px}
+.range{display:flex;align-items:center;gap:8px;color:var(--muted)}
+.range input{accent-color:var(--accent);width:140px}
+.details{display:flex;flex-wrap:wrap;gap:0;border-top:1px solid var(--line);background:var(--panel)}
+.metric{padding:8px 14px;border-right:1px solid var(--line);flex:0 0 auto}
+.metric .k{font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.05em}
+.metric .v{font-size:14px;font-weight:600}
+.metric.title{flex:1 0 auto}
+.metric.title .v{display:flex;gap:8px;align-items:center;font-size:15px}
+.badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;color:var(--c);background:color-mix(in srgb,var(--c) 14%,transparent)}
+.help{position:fixed;inset:0;background:#0008;display:none;place-items:center;z-index:10}
+.help.open{display:grid}
+.help-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px 24px;min-width:320px;box-shadow:var(--shadow)}
+.help-card h2{margin:0 0 12px;font-size:15px}
+.help-card table{border-collapse:collapse}.help-card td{padding:4px 10px 4px 0}
+kbd.key{font:11px ui-monospace,monospace;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:1px 6px;background:var(--panel-2)}
+@media (max-width:820px){
+  body{overflow:auto;height:auto}
+  .layout{grid-template-columns:1fr}
+  aside{max-height:40vh;border-right:0;border-bottom:1px solid var(--line)}
+  .stage{min-height:60vh}
+  .settings{margin-left:0;width:100%}
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="8" height="16" rx="2"/><rect x="13" y="4" width="8" height="16" rx="2"/><path d="M7 9v6M17 9v6"/></svg>gaanim · diff visual</div>
+  <span id="verdict" class="verdict"></span>
+  <div id="stats" class="stats"></div>
+  <span id="settings" class="settings mono"></span>
+  <button id="theme" class="icon-btn" title="Cambiar tema" aria-label="Cambiar tema"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg></button>
+  <button id="help-btn" class="icon-btn" title="Atajos de teclado (?)" aria-label="Atajos de teclado">?</button>
+</header>
+<div class="layout">
+  <aside>
+    <div class="filters">
+      <input id="search" class="search" type="search" placeholder="Buscar frame…" autocomplete="off">
+      <div id="chips" class="chips"></div>
+    </div>
+    <div id="list" class="list" role="listbox" aria-label="Frames"></div>
+  </aside>
+  <main>
+    <div class="toolbar">
+      <div id="modes" class="seg" role="tablist"></div>
+      <div id="mode-extra"></div>
+      <span class="spacer"></span>
+      <label class="toggle"><input id="show-bounds" type="checkbox" checked> Área cambiada</label>
+      <div class="seg">
+        <button id="zoom-out" title="Alejar (−)">−</button>
+        <button id="zoom-fit" title="Ajustar (F)">Ajustar</button>
+        <button id="zoom-1" title="Tamaño real (0)">1:1</button>
+        <button id="zoom-in" title="Acercar (+)">+</button>
+      </div>
+      <span id="zoom-label" class="zoom-label mono"></span>
+      <div class="seg">
+        <button id="prev" title="Anterior (←)">←</button>
+        <button id="next" title="Siguiente (→)">→</button>
+      </div>
+    </div>
+    <div id="stage" class="stage"><div id="canvas" class="canvas"></div></div>
+    <div id="details" class="details"></div>
+  </main>
+</div>
+<div id="help" class="help" role="dialog" aria-modal="true" aria-label="Atajos de teclado">
+  <div class="help-card">
+    <h2>Atajos de teclado</h2>
+    <table id="help-table"></table>
+  </div>
+</div>
+<script>
+const report = __REPORT_JSON__;
+
+const STATUS = {
+  unchanged: 'Sin cambios', changed: 'Cambiado', dimension_mismatch: 'Tamaño distinto',
+  missing_baseline: 'Falta baseline', missing_current: 'Falta actual'
+};
+const MODES = [
+  {id: 'diff', label: 'Diff', key: '3', needs: ['diff']},
+  {id: 'baseline', label: 'Baseline', key: '1', needs: ['baseline']},
+  {id: 'current', label: 'Actual', key: '2', needs: ['current']},
+  {id: 'side', label: 'Lado a lado', key: '4', needs: ['baseline', 'current']},
+  {id: 'swipe', label: 'Cortina', key: '5', needs: ['baseline', 'current']},
+  {id: 'onion', label: 'Superponer', key: '6', needs: ['baseline', 'current']},
+  {id: 'blink', label: 'Parpadeo', key: '7', needs: ['baseline', 'current']},
+];
+const FILTERS = [
+  {id: 'all', label: 'Todos', test: () => true},
+  {id: 'failures', label: 'Fallos', test: f => f.status !== 'unchanged'},
+  {id: 'changed', label: 'Cambiados', test: f => f.status === 'changed' || f.status === 'dimension_mismatch'},
+  {id: 'missing', label: 'Ausentes', test: f => f.status.startsWith('missing')},
+];
+const ZOOMS = [0.125, 0.25, 0.33, 0.5, 0.67, 0.75, 1, 1.5, 2, 3, 4, 6, 8, 12, 16];
+
+const $ = sel => document.querySelector(sel);
+const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+const pct = r => r === 0 ? '0%' : r < 0.0001 ? '<0,01%' : (r * 100).toLocaleString('es', {maximumFractionDigits: r < 0.01 ? 3 : 2}) + '%';
+const num = n => n.toLocaleString('es');
+const fmtTime = t => t == null ? '—' : t.toFixed(3) + ' s';
+
+const hasFailures = report.frames.some(f => f.status !== 'unchanged');
+const state = {
+  filter: hasFailures ? 'failures' : 'all', query: '', index: 0, mode: 'diff',
+  zoom: 'fit', bounds: true, swipe: 0.5, onion: 0.5, blinkOn: false,
+};
+let blinkTimer = null;
+
+function fileOf(frame, kind) { return frame[kind + '_file'] || null; }
+function sizeOf(frame, kind) {
+  if (kind === 'baseline') return frame.baseline_size;
+  if (kind === 'current') return frame.current_size;
+  const a = frame.baseline_size || [0, 0], b = frame.current_size || [0, 0];
+  return [Math.max(a[0], b[0]), Math.max(a[1], b[1])];
+}
+function frameSize(frame) { return sizeOf(frame, 'diff'); }
+function modeAvailable(frame, mode) { return MODES.find(m => m.id === mode).needs.every(k => fileOf(frame, k)); }
+function visibleFrames() {
+  const test = FILTERS.find(f => f.id === state.filter).test;
+  const q = state.query.trim().toLowerCase();
+  return report.frames.map((f, i) => [f, i]).filter(([f]) => test(f) && (!q || f.id.toLowerCase().includes(q)));
+}
+function current() { return report.frames[state.index]; }
+
+/* ---------- header ---------- */
+function renderHeader() {
+  const v = $('#verdict');
+  v.textContent = report.passed ? 'PASS' : 'FAIL';
+  v.className = 'verdict ' + (report.passed ? 'pass' : 'fail');
+  const stats = $('#stats');
+  const add = (value, label, cls) => { const s = el('div', 'stat ' + (cls || '')); s.append(el('b', 'mono', num(value)), el('span', null, label)); stats.append(s); };
+  add(report.compared, 'comparados', 'ok');
+  add(report.changed, 'cambiados', report.changed ? 'bad' : '');
+  add(report.missing, 'ausentes', report.missing ? 'warn' : '');
+  $('#settings').textContent = `umbral/canal ${report.pixel_threshold} · ratio máx. ${report.max_changed_ratio}`;
+  document.title = `${report.passed ? 'PASS' : 'FAIL'} · gaanim diff visual`;
+}
+
+/* ---------- sidebar ---------- */
+function renderChips() {
+  const chips = $('#chips'); chips.textContent = '';
+  for (const f of FILTERS) {
+    const count = report.frames.filter(f.test).length;
+    const b = el('button', 'chip' + (state.filter === f.id ? ' active' : ''), f.label);
+    b.append(el('span', 'n mono', count));
+    b.onclick = () => { state.filter = f.id; renderChips(); renderList(); ensureSelectionVisible(); };
+    chips.append(b);
+  }
+}
+function renderList() {
+  const list = $('#list'); list.textContent = '';
+  const frames = visibleFrames();
+  if (!frames.length) { list.append(el('div', 'empty-list', 'Ningún frame coincide con el filtro.')); return; }
+  for (const [frame, i] of frames) {
+    const item = el('button', 'item s-' + frame.status + (i === state.index ? ' selected' : ''));
+    item.setAttribute('role', 'option');
+    item.setAttribute('aria-selected', i === state.index);
+    item.dataset.index = i;
+    const thumb = el('div', 'thumb');
+    const src = fileOf(frame, 'diff') || fileOf(frame, 'current') || fileOf(frame, 'baseline');
+    if (src) { const img = el('img'); img.loading = 'lazy'; img.alt = ''; img.src = src; thumb.append(img); }
+    const info = el('div');
+    info.style.minWidth = '0';
+    info.append(el('div', 'id', frame.id));
+    const sub = el('div', 'sub');
+    sub.append(el('span', 'dot'), el('span', 'mono', fmtTime(frame.time_seconds)));
+    if (frame.status === 'unchanged' || frame.status === 'changed') sub.append(el('span', 'mono', pct(frame.changed_ratio)));
+    else sub.append(el('span', null, STATUS[frame.status]));
+    info.append(sub);
+    item.append(thumb, info);
+    item.onclick = () => select(i);
+    list.append(item);
+  }
+}
+function ensureSelectionVisible() {
+  const frames = visibleFrames();
+  if (frames.length && !frames.some(([, i]) => i === state.index)) select(frames[0][1]);
+}
+
+/* ---------- toolbar ---------- */
+function renderModes() {
+  const seg = $('#modes'); seg.textContent = '';
+  const frame = current();
+  for (const m of MODES) {
+    const b = el('button', state.mode === m.id ? 'active' : '', m.label);
+    b.append(el('kbd', null, m.key));
+    b.disabled = !frame || !modeAvailable(frame, m.id);
+    b.title = b.disabled ? 'No disponible para este frame' : `${m.label} (${m.key})`;
+    b.onclick = () => setMode(m.id);
+    seg.append(b);
+  }
+  const extra = $('#mode-extra'); extra.textContent = '';
+  if (state.mode === 'onion') {
+    const r = el('label', 'range');
+    r.append('Baseline');
+    const input = el('input'); input.type = 'range'; input.min = 0; input.max = 1; input.step = 0.01; input.value = state.onion;
+    input.oninput = () => { state.onion = +input.value; const top = $('#canvas .top'); if (top) top.style.opacity = state.onion; };
+    r.append(input, 'Actual');
+    extra.append(r);
+  }
+}
+function setMode(mode) {
+  const frame = current();
+  if (!frame || !modeAvailable(frame, mode)) return;
+  state.mode = mode;
+  renderModes(); renderStage(); writeHash();
+}
+
+/* ---------- stage ---------- */
+function scaleFor(size, panes) {
+  if (state.zoom !== 'fit') return state.zoom;
+  const stage = $('#stage');
+  const pad = 48, gap = 24 * (panes - 1), label = panes > 1 ? 28 : 0;
+  const w = (stage.clientWidth - pad - gap) / panes, h = stage.clientHeight - pad - label;
+  return Math.max(0.02, Math.min(w / size[0], h / size[1]));
+}
+function makeFrame(frame, box, scale, layers) {
+  const node = el('div', 'frame' + (scale >= 2 ? ' pixelated' : ''));
+  node.style.width = box[0] * scale + 'px';
+  node.style.height = box[1] * scale + 'px';
+  for (const layer of layers) {
+    const img = el('img', layer.cls || '');
+    img.src = layer.src; img.alt = layer.alt; img.draggable = false;
+    img.style.width = layer.size[0] * scale + 'px';
+    img.style.height = layer.size[1] * scale + 'px';
+    if (layer.style) Object.assign(img.style, layer.style);
+    node.append(img);
+  }
+  const b = frame.change_bounds;
+  if (state.bounds && b && frame.status !== 'unchanged') {
+    const r = el('div', 'bounds');
+    r.style.left = b[0] * scale - 2 + 'px';
+    r.style.top = b[1] * scale - 2 + 'px';
+    r.style.width = (b[2] - b[0] + 1) * scale + 4 + 'px';
+    r.style.height = (b[3] - b[1] + 1) * scale + 4 + 'px';
+    r.dataset.label = `${b[2] - b[0] + 1}×${b[3] - b[1] + 1} px`;
+    if (b[1] * scale < 22) r.classList.add('label-inside');
+    node.append(r);
+  }
+  return node;
+}
+function layer(frame, kind, extra) {
+  return Object.assign({src: fileOf(frame, kind), size: sizeOf(frame, kind) || frameSize(frame), alt: `${kind}: ${frame.id}`}, extra || {});
+}
+function pane(label, node) { const p = el('div', 'pane'); p.append(el('span', 'pane-label', label), node); return p; }
+
+function renderStage() {
+  stopBlink();
+  const canvas = $('#canvas'); canvas.textContent = '';
+  const frame = current();
+  if (!frame) { canvas.append(el('div', 'notice', 'No hay frames en este informe.')); updateZoomLabel(1); return; }
+  if (!modeAvailable(frame, state.mode)) {
+    state.mode = MODES.find(m => modeAvailable(frame, m.id))?.id || 'diff';
+    renderModes();
+  }
+  const box = frameSize(frame);
+  let scale;
+  switch (state.mode) {
+    case 'side': {
+      scale = scaleFor(box, 2);
+      canvas.append(
+        pane('Baseline', makeFrame(frame, box, scale, [layer(frame, 'baseline')])),
+        pane('Actual', makeFrame(frame, box, scale, [layer(frame, 'current')])));
+      break;
+    }
+    case 'swipe': {
+      scale = scaleFor(box, 1);
+      const node = makeFrame(frame, box, scale, [layer(frame, 'baseline'), layer(frame, 'current', {cls: 'top'})]);
+      node.classList.add('swipe');
+      const handle = el('div', 'swipe-handle'); node.append(handle);
+      const apply = () => {
+        const x = state.swipe * box[0] * scale;
+        node.querySelector('.top').style.clipPath = `inset(0 0 0 ${x}px)`;
+        handle.style.left = x + 'px';
+      };
+      const drag = e => { const r = node.getBoundingClientRect(); state.swipe = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)); apply(); };
+      node.addEventListener('pointerdown', e => { node.setPointerCapture(e.pointerId); drag(e); });
+      node.addEventListener('pointermove', e => { if (node.hasPointerCapture(e.pointerId)) drag(e); });
+      apply();
+      canvas.append(pane('Baseline ◂ ▸ Actual', node));
+      break;
+    }
+    case 'onion': {
+      scale = scaleFor(box, 1);
+      canvas.append(pane('Baseline + Actual', makeFrame(frame, box, scale, [layer(frame, 'baseline'), layer(frame, 'current', {cls: 'top', style: {opacity: state.onion}})])));
+      break;
+    }
+    case 'blink': {
+      scale = scaleFor(box, 1);
+      const node = makeFrame(frame, box, scale, [layer(frame, 'baseline'), layer(frame, 'current', {cls: 'top'})]);
+      const p = pane('Baseline', node);
+      canvas.append(p);
+      const top = node.querySelector('.top'), label = p.querySelector('.pane-label');
+      const tick = () => { state.blinkOn = !state.blinkOn; top.style.visibility = state.blinkOn ? 'visible' : 'hidden'; label.textContent = state.blinkOn ? 'Actual' : 'Baseline'; };
+      state.blinkOn = true; tick();
+      blinkTimer = setInterval(tick, 600);
+      break;
+    }
+    default: {
+      scale = scaleFor(box, 1);
+      const labels = {diff: 'Diff', baseline: 'Baseline', current: 'Actual'};
+      canvas.append(pane(labels[state.mode], makeFrame(frame, box, scale, [layer(frame, state.mode)])));
+    }
+  }
+  if (frame.status.startsWith('missing')) {
+    const note = el('div', 'notice', frame.status === 'missing_baseline'
+      ? 'Este frame no existe en la baseline. Si es intencional, apruébalo con --bless.'
+      : 'Este frame existe en la baseline pero no se capturó en la versión actual.');
+    note.style.maxWidth = '280px';
+    canvas.append(note);
+  }
+  updateZoomLabel(scale);
+}
+function stopBlink() { if (blinkTimer) { clearInterval(blinkTimer); blinkTimer = null; } }
+function updateZoomLabel(scale) { $('#zoom-label').textContent = Math.round(scale * 100) + '%'; }
+function currentScale() { const f = current(); return f ? scaleFor(frameSize(f), state.mode === 'side' ? 2 : 1) : 1; }
+function zoomStep(dir) {
+  const s = currentScale();
+  const next = dir > 0 ? ZOOMS.find(z => z > s + 1e-6) : [...ZOOMS].reverse().find(z => z < s - 1e-6);
+  if (next) { state.zoom = next; renderStage(); }
+}
+
+/* ---------- details ---------- */
+function renderDetails() {
+  const d = $('#details'); d.textContent = '';
+  const frame = current();
+  if (!frame) return;
+  const metric = (k, v, cls) => { const m = el('div', 'metric ' + (cls || '')); m.append(el('div', 'k', k)); const vv = el('div', 'v mono'); if (v instanceof Node) vv.append(v); else vv.textContent = v; m.append(vv); d.append(m); return m; };
+  const title = el('span'); title.append(el('span', null, frame.id));
+  const badge = el('span', 'badge s-' + frame.status, STATUS[frame.status]); title.append(badge);
+  metric('Frame', title, 'title');
+  metric('Tiempo', fmtTime(frame.time_seconds));
+  metric('Píxeles cambiados', `${num(frame.changed_pixels)} / ${num(frame.total_pixels)}`);
+  metric('Proporción', pct(frame.changed_ratio));
+  metric('Error medio (MAE)', frame.mean_absolute_error.toFixed(6));
+  metric('Δ máx. por canal', String(frame.max_channel_delta));
+  const b = frame.change_bounds;
+  metric('Área cambiada', b ? `[${b[0]}, ${b[1]}] → [${b[2]}, ${b[3]}]` : '—');
+  const size = s => s ? `${s[0]}×${s[1]}` : '—';
+  metric('Tamaño', frame.status === 'dimension_mismatch' ? `${size(frame.baseline_size)} → ${size(frame.current_size)}` : size(frame.current_size || frame.baseline_size));
+}
+
+/* ---------- selection & navigation ---------- */
+function select(i) {
+  if (i < 0 || i >= report.frames.length) return;
+  state.index = i;
+  for (const item of document.querySelectorAll('.item')) {
+    const on = +item.dataset.index === i;
+    item.classList.toggle('selected', on);
+    item.setAttribute('aria-selected', on);
+    if (on) item.scrollIntoView({block: 'nearest'});
+  }
+  renderModes(); renderStage(); renderDetails(); writeHash();
+}
+function step(offset) {
+  const frames = visibleFrames();
+  if (!frames.length) return;
+  const pos = frames.findIndex(([, i]) => i === state.index);
+  const next = pos < 0 ? 0 : Math.min(frames.length - 1, Math.max(0, pos + offset));
+  select(frames[next][1]);
+}
+function writeHash() {
+  const f = current(); if (!f) return;
+  history.replaceState(null, '', '#' + encodeURIComponent(f.id) + '&' + state.mode);
+}
+function readHash() {
+  const [id, mode] = decodeURIComponent(location.hash.slice(1)).split('&');
+  const i = report.frames.findIndex(f => f.id === id);
+  if (i >= 0) { state.index = i; if (!FILTERS.find(f => f.id === state.filter).test(report.frames[i])) state.filter = 'all'; }
+  if (MODES.some(m => m.id === mode)) state.mode = mode;
+}
+
+/* ---------- theme & help ---------- */
+function initTheme() {
+  let saved = null;
+  try { saved = localStorage.getItem('gaanim-diff-theme'); } catch (_) {}
+  if (saved) document.documentElement.dataset.theme = saved;
+  $('#theme').onclick = () => {
+    const dark = document.documentElement.dataset.theme
+      ? document.documentElement.dataset.theme === 'dark'
+      : matchMedia('(prefers-color-scheme: dark)').matches;
+    const next = dark ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem('gaanim-diff-theme', next); } catch (_) {}
+  };
+}
+const SHORTCUTS = [
+  ['1 · 2 · 3', 'Baseline · Actual · Diff'], ['4 · 5 · 6 · 7', 'Lado a lado · Cortina · Superponer · Parpadeo'],
+  ['← → / J K', 'Frame anterior / siguiente'], ['F · 0', 'Ajustar · tamaño real'], ['+ −', 'Acercar / alejar (también Ctrl + rueda)'],
+  ['B', 'Mostrar u ocultar el área cambiada'], ['/', 'Buscar'], ['?', 'Mostrar esta ayuda'],
+];
+function initHelp() {
+  const t = $('#help-table');
+  for (const [k, v] of SHORTCUTS) { const tr = el('tr'); const td = el('td'); td.append(el('kbd', 'key', k)); tr.append(td, el('td', null, v)); t.append(tr); }
+  const help = $('#help');
+  $('#help-btn').onclick = () => help.classList.add('open');
+  help.onclick = () => help.classList.remove('open');
+}
+
+/* ---------- wiring ---------- */
+function init() {
+  readHash();
+  renderHeader(); renderChips(); renderList(); initTheme(); initHelp();
+  ensureSelectionVisible();
+  select(state.index);
+  $('#search').oninput = e => { state.query = e.target.value; renderList(); };
+  $('#show-bounds').onchange = e => { state.bounds = e.target.checked; renderStage(); };
+  $('#zoom-in').onclick = () => zoomStep(1);
+  $('#zoom-out').onclick = () => zoomStep(-1);
+  $('#zoom-fit').onclick = () => { state.zoom = 'fit'; renderStage(); };
+  $('#zoom-1').onclick = () => { state.zoom = 1; renderStage(); };
+  $('#prev').onclick = () => step(-1);
+  $('#next').onclick = () => step(1);
+  $('#stage').addEventListener('wheel', e => { if (e.ctrlKey) { e.preventDefault(); zoomStep(e.deltaY < 0 ? 1 : -1); } }, {passive: false});
+  addEventListener('hashchange', () => { readHash(); renderChips(); renderList(); select(state.index); });
+  let resizeTimer;
+  addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (state.zoom === 'fit') renderStage(); }, 80); });
+  addEventListener('keydown', e => {
+    if (e.target.matches('input[type=search]')) { if (e.key === 'Escape') e.target.blur(); return; }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const mode = MODES.find(m => m.key === e.key);
+    if (mode) { setMode(mode.id); return; }
+    switch (e.key) {
+      case 'ArrowLeft': case 'ArrowUp': case 'k': case 'K': step(-1); break;
+      case 'ArrowRight': case 'ArrowDown': case 'j': case 'J': step(1); break;
+      case 'f': case 'F': state.zoom = 'fit'; renderStage(); break;
+      case '0': state.zoom = 1; renderStage(); break;
+      case '+': case '=': zoomStep(1); break;
+      case '-': case '_': zoomStep(-1); break;
+      case 'b': case 'B': $('#show-bounds').click(); break;
+      case '/': $('#search').focus(); break;
+      case '?': $('#help').classList.toggle('open'); break;
+      case 'Escape': $('#help').classList.remove('open'); break;
+      default: return;
+    }
+    e.preventDefault();
+  });
+}
+init();
+</script>
+</body>
+</html>

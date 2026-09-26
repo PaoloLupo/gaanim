@@ -21,7 +21,7 @@ gaanim_animation = { path = "../gaanim_animation" }
 gaanim_timeline = { path = "../gaanim_timeline" }
 gaanim_media = { path = "../gaanim_media" }
 gaanim_export = { path = "../gaanim_export" }
-gaanim_diff = { path = "../gaanim_diff", features = ["gui"] }
+gaanim_diff = { path = "../gaanim_diff" }
 gaanim_renderer = { path = "../gaanim_renderer" }
 gaanim_python = { path = "../gaanim_python" }
 gaanim_text = { path = "../gaanim_text" }
@@ -32,7 +32,6 @@ bevy = { workspace = true, features = [
     "wayland",      # native windowing on Hyprland/Omarchy
     "keyboard",
     "mouse",
-    "default_font",
 ] }
 glam = { workspace = true }
 kurbo = { workspace = true }

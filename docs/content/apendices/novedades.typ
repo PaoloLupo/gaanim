@@ -11,7 +11,7 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
-= 0.4.3
+= 0.4.2
 
 Sin publicar todavía. No requiere cambios en tus escenas.
 
@@ -24,6 +24,15 @@ Sin publicar todavía. No requiere cambios en tus escenas.
   `skew_to(0.15, 0)` inclina una vivienda como el corte de un pórtico en un
   sismo. Ver `Drawable.skew_to` en
   #link("/referencia/drawable/")[Drawable].
+- `gaanim --diff` ya no abre un visor nativo: al comparar escribe
+  `report/index.html`, que imprime al terminar y se abre en el navegador sin
+  conexión. El informe añade una lista filtrable con miniaturas, siete modos de
+  comparación (diff, versión aprobada, actual, lado a lado, cortina,
+  superposición y parpadeo), un recuadro sobre el área cambiada, zoom con
+  píxeles nítidos, atajos de teclado y enlaces a un fotograma concreto. Ver
+  #link("/guias/capturas-y-comparacion/")[Capturas y comparación visual].
+  La opción `--no-gui` desaparece y ahora es un error: quítala de tus scripts
+  y de la integración continua.
 
 == Correcciones
 

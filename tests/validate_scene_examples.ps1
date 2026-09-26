@@ -33,7 +33,7 @@ $examples = @(
 foreach ($example in $examples) {
     $previousErrorAction = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    $output = & $Runner --diff --example "examples/$example" --no-gui 2>&1 | Out-String
+    $output = & $Runner --diff --example "examples/$example" 2>&1 | Out-String
     $exitCode = $LASTEXITCODE
     $ErrorActionPreference = $previousErrorAction
     if ($exitCode -ne 2 -or $output -notmatch "did not call scene\.snapshots") {

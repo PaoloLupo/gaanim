@@ -2,8 +2,6 @@
 
 mod model;
 mod stops;
-#[cfg(feature = "gui")]
-pub mod viewer;
 
 pub use model::{
     DiffReport, FrameDiff, FrameStatus, MANIFEST_FILE, REPORT_FILE, SnapshotEntry, SnapshotManifest,
@@ -488,16 +486,8 @@ fn render_html(report: &DiffReport) -> Result<String> {
     Ok(REPORT_HTML.replace("__REPORT_JSON__", &json))
 }
 
-const REPORT_HTML: &str = r#"<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>gaanim visual diff</title>
-<style>
-:root{color-scheme:dark;--bg:#0b0d12;--panel:#151922;--line:#293140;--text:#e9edf5;--muted:#98a2b3;--ok:#37d67a;--bad:#ff5d73;--accent:#7c8cff}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 ui-sans-serif,system-ui,sans-serif}header{position:sticky;top:0;z-index:3;background:#0b0d12ee;backdrop-filter:blur(12px);border-bottom:1px solid var(--line);padding:18px 24px}.top{display:flex;gap:18px;align-items:center;flex-wrap:wrap}h1{font-size:20px;margin:0}.summary{color:var(--muted)}.pass{color:var(--ok)}.fail{color:var(--bad)}button{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:7px 11px;cursor:pointer}button.active{border-color:var(--accent);background:#222941}.keys{margin-left:auto;color:var(--muted)}main{padding:22px;display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:18px}.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}.card.changed{border-color:#713745}.meta{padding:13px 15px;display:flex;gap:10px;align-items:baseline}.meta strong{font-size:15px}.badge{margin-left:auto;border-radius:999px;padding:2px 8px;font-size:12px;background:#262d3a}.changed .badge{color:var(--bad);background:#351f27}.viewport{height:360px;background:repeating-conic-gradient(#10141b 0 25%,#141923 0 50%) 50%/20px 20px;display:grid;place-items:center;overflow:auto}.viewport img{max-width:100%;max-height:100%;object-fit:contain;image-rendering:auto}.metrics{padding:10px 15px;color:var(--muted);font-variant-numeric:tabular-nums}.empty{padding:60px;text-align:center;color:var(--muted)}@media(max-width:520px){main{grid-template-columns:1fr;padding:10px}.viewport{height:260px}.keys{display:none}}
-</style></head>
-<body><header><div class="top"><h1>gaanim visual diff</h1><span id="summary" class="summary"></span><button data-mode="baseline">1 Baseline</button><button data-mode="current">2 Current</button><button class="active" data-mode="diff">3 Diff</button><button id="toggle">Only failures</button><span class="keys">Keyboard: 1 / 2 / 3</span></div></header><main id="grid"></main>
-<script>const report=__REPORT_JSON__;let mode='diff',onlyFailures=false;const grid=document.querySelector('#grid');const summary=document.querySelector('#summary');summary.textContent=`${report.passed?'PASS':'FAIL'} · ${report.compared} compared · ${report.changed} changed · ${report.missing} missing`;summary.classList.add(report.passed?'pass':'fail');function srcFor(frame){return frame[mode+'_file']||frame.current_file||frame.baseline_file}function draw(){grid.innerHTML='';const frames=report.frames.filter(f=>!onlyFailures||f.status!=='unchanged');if(!frames.length){grid.innerHTML='<div class="empty">No frames match this filter.</div>';return}for(const frame of frames){const card=document.createElement('article');card.className='card '+(frame.status==='unchanged'?'':'changed');const time=frame.time_seconds==null?'':` · ${frame.time_seconds.toFixed(6)}s`;const ratio=(frame.changed_ratio*100).toFixed(4);card.innerHTML=`<div class="meta"><strong></strong><span class="time"></span><span class="badge"></span></div><div class="viewport"></div><div class="metrics">${frame.changed_pixels.toLocaleString()} / ${frame.total_pixels.toLocaleString()} px (${ratio}%) · MAE ${frame.mean_absolute_error.toFixed(6)} · max Δ ${frame.max_channel_delta}</div>`;card.querySelector('strong').textContent=frame.id;card.querySelector('.time').textContent=time;card.querySelector('.badge').textContent=frame.status.replaceAll('_',' ');const src=srcFor(frame);const viewport=card.querySelector('.viewport');if(src){const img=document.createElement('img');img.src=src;img.alt=`${mode}: ${frame.id}`;viewport.appendChild(img)}else{viewport.textContent=`No ${mode} image`}grid.appendChild(card)}}function setMode(next){mode=next;document.querySelectorAll('[data-mode]').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));draw()}document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));document.querySelector('#toggle').onclick=e=>{onlyFailures=!onlyFailures;e.target.classList.toggle('active',onlyFailures);draw()};addEventListener('keydown',e=>{if(e.key==='1')setMode('baseline');if(e.key==='2')setMode('current');if(e.key==='3')setMode('diff')});draw();</script></body></html>"#;
+/// Self-contained report page; `__REPORT_JSON__` receives the serialized report.
+const REPORT_HTML: &str = include_str!("report.html");
 
 #[cfg(test)]
 mod tests {
@@ -566,7 +556,9 @@ mod tests {
         assert!(!report.passed);
         assert_eq!(report.changed, 1);
         assert!(report_dir.join(REPORT_FILE).is_file());
-        assert!(report_dir.join("index.html").is_file());
+        let html = fs::read_to_string(report_dir.join("index.html")).unwrap();
+        assert!(!html.contains("__REPORT_JSON__"));
+        assert!(html.contains(r#""diff_file":"assets/diff/0000_frame.png""#));
         assert!(report_dir.join("assets/diff/0000_frame.png").is_file());
 
         fs::remove_dir_all(root).unwrap();
