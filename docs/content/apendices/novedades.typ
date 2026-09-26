@@ -66,15 +66,20 @@ Cambios todavía sin publicar.
 
 == Cambios
 
-- La terminal muestra solo lo que te sirve: el logo de Gaanim al abrir la
-  vista previa, exportar o pedir `--help`, y líneas breves y con color
-  (`gaanim ▸`, `✓`, `!`, `✗`) para la recarga, la exportación y los errores.
-  Los mensajes internos de Bevy, wgpu, winit y del audio (adaptador,
-  shaders, ventana, «ALSA lib ...» en equipos sin tarjeta de sonido) ya no
-  aparecen salvo que sean errores, y las trazas de Python empiezan en tu
-  código. Consulta
+- La terminal muestra solo lo que te sirve, con color y columnas alineadas:
+  el logo de Gaanim al abrir la vista previa, exportar o pedir `--help`, y
+  una línea por evento con su etiqueta (`watch`, `ready`, `reload`, `export`,
+  `python`…), donde los detalles secundarios aparecen atenuados. Los mensajes
+  internos de Bevy, wgpu, winit y egui (adaptador, shaders, ventana) solo se
+  muestran si son errores; los de ALSA se resumen en un único aviso `audio`,
+  y las trazas de Python empiezan en tu código y resaltan el error.
+  `gaanim check` usa el mismo formato: `pass`, `warning`, `error` o `fail`.
+  Consulta
   #link("/apendices/solucion-de-problemas/")[Solución de problemas]
   para ver de nuevo todos los mensajes o quitar el color.
+- `gaanim --help` y la ayuda de cada comando están reescritas: incluyen
+  ejemplos, las teclas del modo presentación, las variables de entorno y el
+  enlace a esta documentación.
 
 = 0.4.1
 

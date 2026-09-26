@@ -95,7 +95,7 @@ fn paint(text: &str, style: &str, color: bool) -> String {
 pub fn paint_level(text: &str, level: Level, color: bool) -> String {
     let style = match level {
         Level::Debug => DIM.to_string(),
-        Level::Info => rgb(VIOLET),
+        Level::Info => format!("{BOLD}{}", rgb(VIOLET)),
         Level::Success => GREEN.to_string(),
         Level::Warn => YELLOW.to_string(),
         Level::Error => RED.to_string(),
@@ -103,67 +103,167 @@ pub fn paint_level(text: &str, level: Level, color: bool) -> String {
     paint(text, &style, color)
 }
 
-/// Formats one status line: `gaanim ▸ message`, with an optional scope (the
-/// crate that logged it) for messages that do not come from Gaanim itself.
-pub fn format_line(level: Level, scope: Option<&str>, message: &str, color: bool) -> String {
-    let mark = match level {
+/// Text roles of the help screens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Style {
+    /// Section headings (`USAGE`, `COMMANDS`).
+    Heading,
+    /// Commands, options and keys a person types.
+    Command,
+    /// Placeholders and secondary text.
+    Muted,
+    /// Emphasis inside prose.
+    Strong,
+}
+
+/// Paints `text` in a help-screen role.
+pub fn style(text: &str, role: Style, color: bool) -> String {
+    let code = match role {
+        Style::Heading => format!("{BOLD}{}", rgb(VIOLET)),
+        Style::Command => rgb(GOLD),
+        Style::Muted => DIM.to_string(),
+        Style::Strong => BOLD.to_string(),
+    };
+    paint(text, &code, color)
+}
+
+/// Width of the label column in status lines.
+const LABEL_WIDTH: usize = 10;
+/// Column where messages start: two spaces, the mark, a space and the label.
+pub const MESSAGE_COLUMN: usize = 4 + LABEL_WIDTH;
+
+fn mark(level: Level) -> &'static str {
+    match level {
         Level::Debug => "·",
         Level::Info => "▸",
         Level::Success => "✓",
         Level::Warn => "!",
         Level::Error => "✗",
-    };
-    let brand = paint("gaanim", &format!("{BOLD}{}", rgb(VIOLET)), color);
-    let mark = paint_level(mark, level, color);
-    let scope = scope
-        .map(|scope| format!("{} ", paint(&format!("{scope}:"), DIM, color)))
-        .unwrap_or_default();
-    let message = match level {
-        Level::Warn => paint(message, "\x1b[33m", color),
-        Level::Error => paint(message, "\x1b[31m", color),
-        Level::Debug => paint(message, DIM, color),
-        Level::Info | Level::Success => message.to_string(),
-    };
-    format!("{brand} {mark} {scope}{message}")
+    }
 }
 
-fn emit(level: Level, message: impl Display) {
+/// Formats one status line, `  ▸ watch     examples/ · save a file to
+/// reload`: a mark and a label coloured by level, then the message, whose
+/// details after the first ` · ` are dimmed.
+pub fn format_line(level: Level, label: &str, message: &str, color: bool) -> String {
+    let mark = paint_level(mark(level), level, color);
+    let label = paint_level(
+        &format!("{label:<width$}", width = LABEL_WIDTH - 1),
+        level,
+        color,
+    );
+    let message = match message.split_once(" · ") {
+        Some((head, tail)) => format!("{head}{}", paint(&format!(" · {tail}"), DIM, color)),
+        None => message.to_string(),
+    };
+    format!("  {mark} {label} {message}")
+}
+
+/// Whether `line` is a status line written by [`format_line`] without colour.
+pub fn is_status_line(line: &str) -> bool {
+    let mut chars = line.chars();
+    line.starts_with("  ")
+        && chars.nth(2).is_some_and(|mark| "▸·✓!✗".contains(mark))
+        && chars.next() == Some(' ')
+}
+
+/// The label of a status line written by [`format_line`] without colour.
+pub fn status_label(line: &str) -> Option<&str> {
+    if !is_status_line(line) {
+        return None;
+    }
+    // Skip the two-space indent and the mark (which may be several bytes).
+    let (_mark, rest) = line[2..].split_once(' ')?;
+    rest.split_whitespace().next()
+}
+
+/// Prints a status line on stderr.
+pub fn status(level: Level, label: &str, message: impl Display) {
     let line = format_line(
         level,
-        None,
+        label,
         &message.to_string(),
         color_enabled(Stream::Stderr),
     );
     let _ = writeln!(std::io::stderr().lock(), "{line}");
 }
 
-/// Progress a person follows: a file being watched, a scene loaded.
-pub fn info(message: impl Display) {
-    emit(Level::Info, message);
+/// Progress a person follows: a file being watched, a frame being rendered.
+pub fn info(label: &str, message: impl Display) {
+    status(Level::Info, label, message);
 }
 
-/// A finished step: an export written, a check passed.
-pub fn success(message: impl Display) {
-    emit(Level::Success, message);
+/// A finished step: a scene loaded, an export written.
+pub fn success(label: &str, message: impl Display) {
+    status(Level::Success, label, message);
 }
 
 /// Something that works but deserves attention.
-pub fn warn(message: impl Display) {
-    emit(Level::Warn, message);
+pub fn warn(label: &str, message: impl Display) {
+    status(Level::Warn, label, message);
 }
 
 /// A failure the person has to act on.
-pub fn error(message: impl Display) {
-    emit(Level::Error, message);
+pub fn error(label: &str, message: impl Display) {
+    status(Level::Error, label, message);
 }
 
-/// Formats an indented `Key:  value` line shown under a status line.
+/// Colours a Python traceback: frame locations dimmed, the source lines as
+/// they are, and the final `Error: message` line in red.
+pub fn format_traceback(traceback: &str, color: bool) -> String {
+    let lines: Vec<&str> = traceback.lines().collect();
+    let last = lines
+        .iter()
+        .rposition(|line| !line.trim().is_empty() && !line.starts_with(' '));
+    lines
+        .iter()
+        .enumerate()
+        .map(|(index, line)| {
+            if Some(index) == last {
+                paint(line, RED, color)
+            } else if line.starts_with("  File ") || line.starts_with("Traceback ") {
+                paint(line, DIM, color)
+            } else {
+                line.to_string()
+            }
+        })
+        .map(|line| line + "\n")
+        .collect()
+}
+
+/// A path as a person would type it: relative to the current directory when it
+/// lies inside it, otherwise unchanged.
+pub fn display_path(path: &std::path::Path) -> String {
+    let relative = std::env::current_dir().ok().and_then(|cwd| {
+        path.strip_prefix(cwd)
+            .ok()
+            .map(std::path::Path::to_path_buf)
+    });
+    match relative {
+        Some(relative) if relative.as_os_str().is_empty() => ".".to_string(),
+        Some(relative) => relative.display().to_string(),
+        None => path.display().to_string(),
+    }
+}
+
+/// Formats a dimmed line aligned under the messages of status lines.
+pub fn format_hint(message: &str, color: bool) -> String {
+    format!("{:MESSAGE_COLUMN$}{}", "", paint(message, DIM, color))
+}
+
+/// Prints a dimmed follow-up line under a status line, such as how to get help.
+pub fn hint(message: impl Display) {
+    let line = format_hint(&message.to_string(), color_enabled(Stream::Stderr));
+    let _ = writeln!(std::io::stderr().lock(), "{line}");
+}
+
+/// Formats a `Key:  value` line aligned under the messages of status lines.
 pub fn format_detail(key: &str, value: &str, color: bool) -> String {
     let key = paint(&format!("{:<12}", format!("{key}:")), DIM, color);
-    format!("    {key} {value}")
+    format!("{:MESSAGE_COLUMN$}{key}{value}", "")
 }
 
-/// Prints an indented `Key:  value` line under a status line.
+/// Prints a `Key:  value` line under a status line.
 pub fn detail(key: &str, value: impl Display) {
     let line = format_detail(key, &value.to_string(), color_enabled(Stream::Stderr));
     let _ = writeln!(std::io::stderr().lock(), "{line}");
@@ -331,23 +431,65 @@ mod tests {
     #[test]
     fn plain_lines_have_no_escapes() {
         assert_eq!(
-            format_line(Level::Info, None, "Scene ready", false),
-            "gaanim ▸ Scene ready"
+            format_line(Level::Info, "watch", "examples", false),
+            "  ▸ watch     examples"
         );
         assert_eq!(
-            format_line(Level::Warn, Some("bevy_asset"), "missing file", false),
-            "gaanim ! bevy_asset: missing file"
+            format_line(Level::Error, "export", "--output is required", false),
+            "  ✗ export    --output is required"
         );
         assert_eq!(
-            format_line(Level::Error, None, "export: --output is required", false),
-            "gaanim ✗ export: --output is required"
+            format_detail("Encoder", "CPU (libx264)", false),
+            "              Encoder:    CPU (libx264)"
         );
         assert_eq!(
-            format_detail("Encoder", "CPU (libx264)", false).trim_start(),
-            "Encoder:     CPU (libx264)"
+            format_detail("Encoder", "x", false).find('E'),
+            Some(MESSAGE_COLUMN)
         );
-        let colored = format_line(Level::Success, None, "done", true);
-        assert!(colored.contains('\x1b') && colored.ends_with("done"));
+        let colored = format_line(Level::Success, "ready", "Scene ready · 0.02s", true);
+        assert!(colored.contains('\x1b') && colored.contains("Scene ready"));
+        // Details after the first separator are dimmed, the headline is not.
+        assert!(colored.contains(&format!("Scene ready{DIM} · 0.02s")));
+    }
+
+    #[test]
+    fn tracebacks_keep_their_text_and_highlight_the_error() {
+        let traceback = "Traceback (most recent call last):\n  File \"main.py\", line 4, in <module>\n    undefined_name\nNameError: boom\n";
+        assert_eq!(format_traceback(traceback, false), traceback);
+        let colored = format_traceback(traceback, true);
+        assert!(colored.contains(&format!("{RED}NameError: boom{RESET}")));
+        assert!(colored.contains("\n    undefined_name\n"));
+    }
+
+    #[test]
+    fn paths_inside_the_current_directory_are_relative() {
+        let cwd = std::env::current_dir().unwrap();
+        assert_eq!(display_path(&cwd), ".");
+        assert_eq!(
+            display_path(&cwd.join("examples").join("a.py")),
+            format!("examples{}a.py", std::path::MAIN_SEPARATOR)
+        );
+        let outside = std::path::Path::new("/definitely/elsewhere/a.py");
+        assert_eq!(display_path(outside), outside.display().to_string());
+    }
+
+    #[test]
+    fn status_lines_are_recognised() {
+        for level in [
+            Level::Debug,
+            Level::Info,
+            Level::Success,
+            Level::Warn,
+            Level::Error,
+        ] {
+            assert!(is_status_line(&format_line(level, "ready", "x", false)));
+        }
+        assert!(!is_status_line("Traceback (most recent call last):"));
+        assert!(!is_status_line("  File \"main.py\", line 4"));
+        assert!(!is_status_line("hello"));
+        assert_eq!(status_label("  ▸ check     main.py"), Some("check"));
+        assert_eq!(status_label("  ✗ error     boom"), Some("error"));
+        assert_eq!(status_label("plain"), None);
     }
 
     #[test]

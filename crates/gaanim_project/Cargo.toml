@@ -5,6 +5,7 @@ edition = "2024"
 description = "Shared Gaanim project scaffolding, manifests, recents, and environment discovery"
 
 [dependencies]
+gaanim_core = { path = "../gaanim_core" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }

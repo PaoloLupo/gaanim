@@ -28,10 +28,10 @@ pub struct CapturedFrame {
 }
 
 fn create_progress_bar(total_frames: u64) -> ProgressBar {
-    let pb = ProgressBar::new(total_frames).with_prefix("gaanim");
+    let pb = ProgressBar::new(total_frames).with_prefix("render");
     pb.set_style(
         ProgressStyle::default_bar()
-            .template("{prefix:.bold.99} {spinner:.99} {bar:32.99/238} {pos:>4}/{len} frames · {msg} · {eta} left")
+            .template("  {spinner:.99} {prefix:<9.bold.99} {bar:32.99/238} {pos:>4}/{len} frames · {msg} · {eta} left")
             .unwrap()
             .progress_chars("━━─")
     );
@@ -63,14 +63,15 @@ fn encoder_label(config: &ExportConfig) -> &'static str {
 fn export_log(
     telemetry: &Option<ExportTelemetry>,
     level: console::Level,
+    label: &str,
     message: impl Into<String>,
 ) {
     let message = message.into();
     if let Some(telemetry) = telemetry {
-        telemetry.push_log(console::format_line(level, None, &message, false));
+        telemetry.push_log(console::format_line(level, label, &message, false));
     }
     let color = console::color_enabled(console::Stream::Stdout);
-    println!("{}", console::format_line(level, None, &message, color));
+    println!("{}", console::format_line(level, label, &message, color));
 }
 
 /// An export setting under the heading. `Encoder:` lines are also parsed by
@@ -89,7 +90,8 @@ fn export_summary(telemetry: &Option<ExportTelemetry>, config: &ExportConfig) {
     export_log(
         telemetry,
         console::Level::Info,
-        format!("Exporting {}", config.output_path),
+        "export",
+        config.output_path.clone(),
     );
     export_detail(
         telemetry,
@@ -235,6 +237,7 @@ fn export_pipeline_system(
         export_log(
             &pipeline.telemetry,
             console::Level::Error,
+            "error",
             message.to_string(),
         );
         publish_export_result(
@@ -254,7 +257,12 @@ fn export_pipeline_system(
         match rx.try_recv() {
             Ok(frame_data) => {
                 if let Err(e) = pipeline.encoder.push_frame(frame_data) {
-                    export_log(&pipeline.telemetry, console::Level::Error, e.to_string());
+                    export_log(
+                        &pipeline.telemetry,
+                        console::Level::Error,
+                        "error",
+                        e.to_string(),
+                    );
                     bevy::prelude::error!("Encoder error: {}", e);
                     publish_export_result(&pipeline.result_tx, &mut pipeline.result_sent, Err(e));
                     exit.write(AppExit::Success);
@@ -286,10 +294,16 @@ fn export_pipeline_system(
                     export_log(
                         &pipeline.telemetry,
                         console::Level::Info,
+                        "encode",
                         "Finalizing the file",
                     );
                     if let Err(e) = pipeline.encoder.finalize() {
-                        export_log(&pipeline.telemetry, console::Level::Error, e.to_string());
+                        export_log(
+                            &pipeline.telemetry,
+                            console::Level::Error,
+                            "error",
+                            e.to_string(),
+                        );
                         bevy::prelude::error!("Encoder finalization error: {}", e);
                         publish_export_result(
                             &pipeline.result_tx,
@@ -304,6 +318,7 @@ fn export_pipeline_system(
                     export_log(
                         &pipeline.telemetry,
                         console::Level::Success,
+                        "done",
                         format!(
                             "Exported in {:.2}s: {}",
                             duration.as_secs_f64(),
@@ -327,6 +342,7 @@ fn export_pipeline_system(
                 export_log(
                     &pipeline.telemetry,
                     console::Level::Error,
+                    "error",
                     error.to_string(),
                 );
                 bevy::prelude::error!("{error}");
@@ -728,11 +744,16 @@ where
     }
 
     pb.finish_and_clear();
-    export_log(&telemetry, console::Level::Info, "Finalizing the file");
+    export_log(
+        &telemetry,
+        console::Level::Info,
+        "encode",
+        "Finalizing the file",
+    );
 
     let finalize_started_at = Instant::now();
     let encode_active_time = encoder.finalize_with_timings().inspect_err(|e| {
-        export_log(&telemetry, console::Level::Error, e.to_string());
+        export_log(&telemetry, console::Level::Error, "error", e.to_string());
         bevy::prelude::error!("Encoder finalization error: {}", e);
     })?;
     let finalize_time = finalize_started_at.elapsed();
@@ -749,6 +770,7 @@ where
     export_log(
         &telemetry,
         console::Level::Success,
+        "done",
         format!(
             "Exported in {:.2}s: {}",
             duration.as_secs_f64(),

@@ -133,10 +133,10 @@ impl LottieAsset {
                 .insert(cache_key)
         {
             for warning in &asset.warnings {
-                gaanim_core::console::warn(format!(
-                    "Lottie warning for '{}': {warning}",
-                    asset.path.display()
-                ));
+                gaanim_core::console::warn(
+                    "lottie",
+                    format!("Lottie warning for '{}': {warning}", asset.path.display()),
+                );
             }
         }
         Ok(asset)

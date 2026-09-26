@@ -59,8 +59,8 @@ pub fn log_plugin() -> LogPlugin {
     }
 }
 
-/// Formats events as `gaanim ▸ message`, naming the crate for messages that do
-/// not come from Gaanim.
+/// Formats events like every other status line, naming the crate for messages
+/// that do not come from Gaanim.
 struct ConsoleFormat;
 
 impl<S, N> FormatEvent<S, N> for ConsoleFormat
@@ -76,14 +76,30 @@ where
     ) -> std::fmt::Result {
         let metadata = event.metadata();
         let mut message = String::new();
+        if let Some(krate) = event_scope(metadata.target()) {
+            message.push_str(krate);
+            message.push_str(": ");
+        }
         ctx.format_fields(Writer::new(&mut message), event)?;
+        let level = console_level(*metadata.level());
         let line = console::format_line(
-            console_level(*metadata.level()),
-            event_scope(metadata.target()),
+            level,
+            level_label(level),
             &message,
             writer.has_ansi_escapes(),
         );
         writeln!(writer, "{line}")
+    }
+}
+
+/// Engine and library messages are labelled by their level; the crate that
+/// logged them opens the message.
+fn level_label(level: console::Level) -> &'static str {
+    match level {
+        console::Level::Error => "error",
+        console::Level::Warn => "warning",
+        console::Level::Debug => "debug",
+        console::Level::Info | console::Level::Success => "info",
     }
 }
 

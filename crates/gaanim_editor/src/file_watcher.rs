@@ -108,22 +108,31 @@ fn watch_loop(scope: WatchScope, stop: Arc<AtomicBool>, changed_tx: mpsc::Sender
     let mut watcher = match notify::recommended_watcher(tx) {
         Ok(w) => w,
         Err(e) => {
-            console::error(format!("could not start the file watcher: {e}"));
+            console::error("watch", format!("could not start the file watcher: {e}"));
             return;
         }
     };
 
     if let Err(e) = watcher.watch(&scope.root, RecursiveMode::Recursive) {
-        console::error(format!(
-            "could not watch project sources under {}: {e}",
-            scope.root.display()
-        ));
+        console::error(
+            "watch",
+            format!(
+                "could not watch project sources under {}: {e}",
+                scope.root.display()
+            ),
+        );
         return;
     }
-    console::info(format!(
-        "Watching {} (save a file to reload)",
-        scope.root.display()
-    ));
+    console::info(
+        "watch",
+        format!(
+            "Watching {} · save a file to reload",
+            match console::display_path(&scope.root).as_str() {
+                "." => "the current folder".to_string(),
+                path => path.to_string(),
+            }
+        ),
+    );
 
     let debounce = Duration::from_millis(200);
     let poll_interval = Duration::from_millis(250);
@@ -151,19 +160,22 @@ fn watch_loop(scope: WatchScope, stop: Arc<AtomicBool>, changed_tx: mpsc::Sender
                 reload_deadline = Some(Instant::now() + debounce);
             }
             Ok(Err(e)) => {
-                console::warn(format!("file watcher: {e}"));
+                console::warn("watch", e);
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 if reload_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                     reload_deadline = None;
                     if let Some(change) = pending.take() {
-                        console::info(format!(
-                            "{} changed, reloading",
-                            match change {
-                                ProjectChange::Source => "Python source",
-                                ProjectChange::Assets => "project asset",
-                            }
-                        ));
+                        console::info(
+                            "reload",
+                            format!(
+                                "{} changed",
+                                match change {
+                                    ProjectChange::Source => "Python source",
+                                    ProjectChange::Assets => "project asset",
+                                }
+                            ),
+                        );
                         let _ = changed_tx.send(change);
                     }
                 }
