@@ -169,6 +169,89 @@ fn propagate_transforms_recursive(
     }
 }
 
+/// World transform that keeps HUD overlays fixed on the output frame while an
+/// orthographic camera pans, zooms or rotates.
+///
+/// A point authored at `p` for the unmoved camera must sit at `pin * p` so the
+/// moved camera shows it at the same pixel. `None` when no correction applies,
+/// as with a perspective camera, whose 2D overlay pass never moves.
+pub fn hud_pin(camera: &gaanim_math::Camera) -> Option<gaanim_core::kurbo::Affine> {
+    use gaanim_core::kurbo::Affine;
+    let gaanim_math::Projection::Orthographic { zoom } = camera.projection else {
+        return None;
+    };
+    if !zoom.is_finite() || zoom <= 0.0 {
+        return None;
+    }
+    let pin = Affine::translate((camera.position.x, camera.position.y))
+        * Affine::rotate(camera.z_angle())
+        * Affine::scale(zoom.recip());
+    (pin != Affine::IDENTITY).then_some(pin)
+}
+
+/// [`hud_pin`] of the camera a frame shows, read straight from a world by
+/// code that composes world transforms itself before the camera phase.
+///
+/// The editor's view override wins, as in [`resolve_camera_system`]; otherwise
+/// the authored camera, which the timeline has already written this frame.
+/// The camera rig is skipped: before the camera phase it still holds the pose
+/// of the previous frame, which after a seek can be any earlier time.
+pub fn world_hud_pin(world: &bevy::prelude::World) -> Option<gaanim_core::kurbo::Affine> {
+    let camera = world
+        .get_resource::<gaanim_math::CameraViewOverride>()
+        .and_then(|view| view.0)
+        .or_else(|| world.get_resource::<gaanim_math::Camera>().copied())?;
+    hud_pin(&camera)
+}
+
+/// System: pin HUD overlays to the output frame.
+///
+/// Runs after [`transform_propagation_system`] and recomposes every HUD
+/// subtree from its local transforms under the camera's [`hud_pin`], so the
+/// result is the same whether or not propagation ran this frame. Bounds,
+/// anchors, picking and rendering all read the pinned world transforms.
+#[allow(clippy::too_many_arguments)]
+pub fn pin_hud_overlays_system(
+    camera: Option<Res<gaanim_math::ResolvedCamera>>,
+    hud: Query<Entity, With<crate::components::HudOverlay>>,
+    children_query: Query<&Children>,
+    mut transforms: Query<(&SpatialTransform, &mut GlobalSpatialTransform)>,
+    view_roles: Query<&CoordinateViewRole>,
+    label_offsets: Query<&CoordinateLabelOffset>,
+    parents: Query<&ChildOf>,
+    mut pinned: Local<bool>,
+) {
+    let pin = camera.as_deref().and_then(|camera| hud_pin(camera));
+    // Unpinned HUD transforms are exactly what propagation produced; recompose
+    // once more after a pin ends so none keeps the last pinned placement.
+    if pin.is_none() && !*pinned {
+        return;
+    }
+    *pinned = pin.is_some();
+    let pin = pin.unwrap_or(gaanim_core::kurbo::Affine::IDENTITY);
+    let pin = GlobalSpatialTransform::from_local(&SpatialTransform::from_affine_2d(&pin));
+    for root in &hud {
+        let parent = parents.get(root).ok().map(ChildOf::parent);
+        if parent.is_some_and(|parent| hud.contains(parent)) {
+            continue;
+        }
+        let parent_global = parent.and_then(|parent| transforms.get(parent).ok().map(|(_, g)| *g));
+        let pinned_parent = parent_global.map_or(pin, |parent| GlobalSpatialTransform {
+            affine_2d: pin.affine_2d * parent.affine_2d,
+            mat4: pin.mat4 * parent.mat4,
+        });
+        propagate_transforms_recursive(
+            root,
+            Some(pinned_parent),
+            &children_query,
+            &mut transforms,
+            &view_roles,
+            &label_offsets,
+            &parents,
+        );
+    }
+}
+
 /// Run condition: skip opacity propagation when no local opacity has changed.
 pub fn has_opacity_changes(query: Query<&Opacity, Or<(Changed<Opacity>, Added<Opacity>)>>) -> bool {
     !query.is_empty()
@@ -1354,6 +1437,89 @@ pub fn update_3d_triangle_meshes_system(
 mod tests {
     use super::*;
     use bevy::prelude::{App, BuildChildrenTransformExt, Schedule, Update, World};
+
+    #[test]
+    fn hud_overlays_keep_their_pixels_while_the_2d_camera_moves() {
+        use bevy::prelude::IntoScheduleConfigs;
+        use gaanim_core::glam::{DQuat, DVec3};
+        let authored = gaanim_math::Camera::ortho_2d_frame(16.0, 9.0, 1600, 900);
+        let mut moved = authored;
+        moved.position = DVec3::new(3.0, -1.0, 0.0);
+        moved.rotation = DQuat::from_rotation_z(0.3);
+        moved.projection = gaanim_math::Projection::Orthographic { zoom: 2.5 };
+
+        let mut world = World::new();
+        world.insert_resource(gaanim_math::ResolvedCamera::new(
+            moved,
+            gaanim_math::CameraViewport::default(),
+        ));
+        let panel = world
+            .spawn((
+                SpatialTransform::new_2d(5.0, 3.0),
+                GlobalSpatialTransform::default(),
+                crate::components::HudOverlay,
+            ))
+            .id();
+        let glyph = world
+            .spawn((
+                SpatialTransform::new_2d(0.5, 0.0),
+                GlobalSpatialTransform::default(),
+                ChildOf(panel),
+            ))
+            .id();
+        let world_item = world
+            .spawn((
+                SpatialTransform::new_2d(5.0, 3.0),
+                GlobalSpatialTransform::default(),
+            ))
+            .id();
+        let mut schedule = Schedule::default();
+        schedule.add_systems(
+            (
+                transform_propagation_system.run_if(has_transform_changes),
+                pin_hud_overlays_system,
+            )
+                .chain(),
+        );
+
+        let pixel = |world: &World, camera: &gaanim_math::Camera, entity: Entity| {
+            let origin = world
+                .get::<GlobalSpatialTransform>(entity)
+                .unwrap()
+                .affine_2d
+                * gaanim_core::kurbo::Point::ORIGIN;
+            camera.to_vello_transform() * origin
+        };
+        // Running twice checks that pinning does not compound when
+        // propagation is skipped on an unchanged frame.
+        for _ in 0..2 {
+            schedule.run(&mut world);
+            for (entity, authored_at) in [(panel, (5.0, 3.0)), (glyph, (5.5, 3.0))] {
+                let expected =
+                    authored.to_vello_transform() * gaanim_core::kurbo::Point::from(authored_at);
+                let actual = pixel(&world, &moved, entity);
+                assert!(
+                    (actual - expected).hypot() < 1e-6,
+                    "{actual:?} != {expected:?}"
+                );
+            }
+        }
+        // Scene content still moves with the camera.
+        let expected = authored.to_vello_transform() * gaanim_core::kurbo::Point::new(5.0, 3.0);
+        assert!((pixel(&world, &moved, world_item) - expected).hypot() > 1.0);
+
+        // Resetting the camera returns the overlay to its authored place.
+        world.insert_resource(gaanim_math::ResolvedCamera::new(
+            authored,
+            gaanim_math::CameraViewport::default(),
+        ));
+        schedule.run(&mut world);
+        let global = world.get::<GlobalSpatialTransform>(panel).unwrap();
+        assert_eq!(
+            global.affine_2d * gaanim_core::kurbo::Point::ORIGIN,
+            (5.0, 3.0).into()
+        );
+    }
 
     #[test]
     fn label_offsets_stay_unzoomed_while_their_anchor_follows_the_view() {

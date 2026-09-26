@@ -1176,6 +1176,156 @@ rig.disable()
   none,
 )
 
+=== Vistas de cámara
+
+Una vista de cámara muestra dentro de una figura lo que ve una segunda
+cámara. `Drawable.camera_view` (en #link("/referencia/drawable/")[Drawable])
+convierte cualquier figura cerrada en pantalla; `scene.camera.inset` monta de
+una vez la pantalla, el marco y los conectores. Ambos devuelven un
+`CameraView`.
+
+#api-entry(
+  name: "Camera.inset",
+  kind: "method",
+  params: (
+    (name: "target", type: "Endpoint", default: none, desc: [Qué ampliar: un punto, un objeto o un punto de anclaje. Con `follow=True`, cualquier extremo reactivo.]),
+    (name: "zoom", type: "float | Parameter", default: "2.0", desc: [Aumento de la pantalla en reposo.]),
+    (name: "at", type: "Anchor | tuple[float, float]", default: "Anchor.TOP_RIGHT", desc: [Esquina o borde del fotograma donde va la pantalla (`Anchor.CENTER` la centra), o punto donde se centra.]),
+    (name: "size", type: "float | None", default: "None", desc: [Ancho de la pantalla, o diámetro si es un círculo; por defecto, el 30 % del ancho de la escena (20 % para un círculo). Los rectángulos toman la proporción del fotograma.]),
+    (name: "shape", type: "str", default: "\"rounded\"", desc: [`"rect"`, `"rounded"` o `"circle"`.]),
+    (name: "follow", type: "bool", default: "False", desc: [El marco sigue a `target` mientras se mueve.]),
+    (name: "connectors", type: "bool", default: "True", desc: [Dos líneas que unen las esquinas enfrentadas del marco y la pantalla.]),
+    (name: "color", type: "Color | None", default: "None", desc: [Trazo de la pantalla, el marco y los conectores; por defecto, el acento del tema.]),
+    (name: "fixed", type: "bool", default: "False", desc: [Fija la pantalla a la imagen como un HUD, para que no se mueva con `scene.camera`.]),
+    (name: "background / exclude / layers", type: "", default: none, desc: [Como en `Drawable.camera_view`. Los conectores nunca aparecen en la vista.]),
+  ),
+  returns: (type: "CameraView", desc: [La vista, con sus `connectors`.]),
+  desc: [Muestra un detalle ampliado en una pantalla aparte. El marco sigue el zoom, así que siempre recuadra lo que la pantalla muestra en reposo. Lanza `ValueError` con un zoom o tamaño no positivo, un `shape` o `at` desconocido, o un `target` reactivo sin `follow`.],
+)[
+```python
+# show-code: true
+from gaanim import Anchor, CYAN, GOLD, Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+for i in range(24):
+    scene.geometry.dot(0.05).fill(CYAN if i % 2 else GOLD).move_to(-6 + 0.25 * i, -1 + 0.15 * (i % 5))
+view = scene.camera.inset((-4, -0.7), zoom=4, at=Anchor.TOP_RIGHT)
+scene.play([view.animate.pop_out().duration(0.8)])
+scene.play([view.animate.pan_to(-1.5, -0.7).duration(1.2), view.animate.zoom_to(8).duration(1.2)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "CameraView.screen",
+  kind: "property",
+  returns: (type: "Drawable", desc: [La figura que muestra la vista.]),
+  none,
+)
+
+#api-entry(
+  name: "CameraView.frame",
+  kind: "property",
+  returns: (type: "Drawable", desc: [El objeto que hace de cámara; se anima como cualquier otro.]),
+  none,
+)
+
+#api-entry(
+  name: "CameraView.connectors",
+  kind: "property",
+  returns: (type: "list[Drawable]", desc: [Las líneas de un inset; vacía en otras vistas.]),
+  none,
+)
+
+#api-entry(
+  name: "CameraView.zoom",
+  kind: "property",
+  returns: (type: "Parameter | Computed", desc: [El zoom como valor reactivo, para lecturas y vínculos.]),
+  desc: [Una vista creada con un número devuelve un `Computed`; con un `Parameter` o `Computed`, lo devuelve tal cual. Si el tamaño del marco fija el zoom, lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>view = scene.camera.inset((0, 0), zoom=3)
+label = scene.viz.readout(view.zoom, format=".1f", prefix="x")
+```
+]
+
+#api-entry(
+  name: "CameraView.pan_to",
+  kind: "method",
+  params: ((name: "x, y / target", type: "float / Endpoint", default: none, desc: [Coordenadas, un objeto o un punto de anclaje.]),),
+  returns: (type: "CameraView", desc: [La misma vista.]),
+  desc: [Apunta la cámara en el cursor actual: mueve el centro del marco.],
+  none,
+)
+
+#api-entry(
+  name: "CameraView.zoom_to",
+  kind: "method",
+  params: ((name: "zoom", type: "float", default: none, desc: [Aumento, mayor que cero.]),),
+  returns: (type: "CameraView", desc: [La misma vista.]),
+  desc: [Fija el zoom en el cursor actual. Si el tamaño del marco fija el zoom, escala el marco para alcanzarlo, medido con su `fit` sobre ambos tamaños en ese punto. Un zoom no positivo, o una vista que sigue un `Computed`, lanza `ValueError`.],
+  none,
+)
+
+#api-entry(
+  name: "CameraView.rotate_to",
+  kind: "method",
+  params: ((name: "radians", type: "float", default: none, desc: [Giro de la cámara; la vista gira en sentido contrario.]),),
+  returns: (type: "CameraView", desc: [La misma vista.]),
+  none,
+)
+
+#api-entry(
+  name: "CameraView.follow",
+  kind: "method",
+  params: ((name: "target", type: "Endpoint", default: none, desc: [Qué seguir.]), (name: "offset", type: "tuple[float, float]", default: "(0, 0)", desc: [Desplazamiento en unidades de escena.])),
+  returns: (type: "CameraView", desc: [La misma vista.]),
+  desc: [Mantiene la cámara sobre `target` desde ese momento; `pan_to` deja de tener efecto.],
+  none,
+)
+
+#api-entry(
+  name: "CameraView.animate",
+  kind: "property",
+  returns: (type: "CameraViewAnimation", desc: [Proxy de animación; sus resultados se pasan a `scene.play`.]),
+  none,
+)
+
+#api-entry(
+  name: "CameraViewAnimation.zoom_to",
+  kind: "method",
+  params: ((name: "zoom", type: "float", default: none, desc: [Aumento final.]),),
+  returns: (type: "Anim", desc: [La animación.]),
+  desc: [El zoom propio de la vista cambia a velocidad percibida constante; un `Parameter` se anima de forma lineal y una vista con zoom de marco escala el marco.],
+  none,
+)
+
+#api-entry(
+  name: "CameraViewAnimation.pan_to / rotate_to",
+  kind: "method",
+  returns: (type: "Anim", desc: [La animación.]),
+  desc: [Versiones animadas de `CameraView.pan_to` y `CameraView.rotate_to`.],
+  none,
+)
+
+#api-entry(
+  name: "CameraViewAnimation.pop_out",
+  kind: "method",
+  returns: (type: "Anim", desc: [La animación.]),
+  desc: [La pantalla sale de la región que ve su cámara y crece hasta su sitio. Encogida sobre esa región muestra la escena a tamaño real, así que la vista brota de la escena sin saltos. Si es la primera animación de la pantalla, hace de entrada: hasta entonces la pantalla espera sobre la región. Tras `pop_in`, la devuelve a donde estaba.],
+  none,
+)
+
+#api-entry(
+  name: "CameraViewAnimation.pop_in",
+  kind: "method",
+  returns: (type: "Anim", desc: [La animación.]),
+  desc: [Encoge la pantalla de vuelta a la región que ve su cámara.],
+  none,
+)
+
 === Cámara 3D
 
 #experimental()

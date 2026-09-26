@@ -14,6 +14,7 @@ mod custom;
 mod easing;
 mod procedural;
 mod py3d;
+mod pycamera_view;
 mod pycanvas;
 mod pydrawable;
 mod pylayout;
@@ -56,6 +57,8 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pycanvas::PyCameraAnimation>()?;
     m.add_class::<pycanvas::PyCameraState>()?;
     m.add_class::<pycanvas::PyCameraConstraint>()?;
+    m.add_class::<pycamera_view::PyCameraView>()?;
+    m.add_class::<pycamera_view::PyCameraViewAnimation>()?;
     m.add_class::<pycanvas::PyScene>()?;
     m.add_class::<pycanvas::PySceneStop>()?;
     m.add_class::<pycanvas::PyGeometry>()?;

@@ -85,6 +85,8 @@ impl Plugin for GaanimScenePlugin {
             (
                 crate::systems::transform_propagation_system
                     .run_if(crate::systems::has_transform_changes),
+                crate::systems::pin_hud_overlays_system
+                    .after(crate::systems::transform_propagation_system),
                 crate::systems::opacity_propagation_system
                     .run_if(crate::systems::has_opacity_changes)
                     .after(crate::systems::sync_new_opacities),

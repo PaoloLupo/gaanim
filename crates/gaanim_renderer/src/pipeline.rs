@@ -1,8 +1,9 @@
 use crate::background::{BackgroundPaint, ShaderBackgroundRequest};
 use crate::background_gpu::ShaderBackgroundFrame;
 use crate::effects::{
-    BooleanBinding, ClipMask, DropShadow, ElementBlend, FillLevelBinding, GaussianBlur, Glow,
-    StrokeAlign, VectorOutlineBinding,
+    BooleanBinding, CameraView, CameraViewBackground, CameraViewFit, ClipMask, DropShadow,
+    ElementBlend, FillLevelBinding, GaussianBlur, Glow, StrokeAlign, VectorOutlineBinding,
+    ViewLayer,
 };
 use crate::lottie::LottiePlayer;
 use crate::stroke::{draw_stroke, view_stroke_transform};
@@ -119,14 +120,15 @@ fn resolve_canvas_background_brush(
     }
 }
 
-/// Draw the canvas background into a scene in world coordinates.
+/// Draw the canvas background into a scene in world coordinates and return
+/// its paint for camera view backdrops.
 fn fill_canvas_background(
     scene: &mut vello::Scene,
     background: &CanvasBackground,
     pixel_size: (u32, u32),
     time_seconds: f64,
     gpu: Option<&mut Option<ShaderBackgroundRequest>>,
-) {
+) -> CanvasPaint {
     let (rect, transform) = canvas_background_geometry(background);
     let (brush, brush_transform) =
         resolve_canvas_background_brush(background, rect, pixel_size, time_seconds, gpu);
@@ -137,6 +139,12 @@ fn fill_canvas_background(
         brush_transform,
         &rect,
     );
+    CanvasPaint {
+        brush,
+        brush_transform,
+        rect,
+        fallback: background.paint_at(time_seconds).fallback_color(),
+    }
 }
 
 /// Keep Bevy's native clear pass aligned with the active segment background.
@@ -199,6 +207,9 @@ pub struct GaanimRenderCache {
     pub fragment_cache: HashMap<ObjectId, Arc<vello::Scene>>,
     stroke_views: HashMap<ObjectId, kurbo::Affine>,
     fragment_inputs: HashMap<ObjectId, FragmentInputs>,
+    /// Strokes of camera view screens, split from their fragments so they
+    /// draw above the view. An entry marks a fragment built as a screen.
+    screen_overlays: HashMap<ObjectId, Arc<vello::Scene>>,
 }
 
 /// Values of the timeline-driven components a retained fragment was built from.
@@ -261,6 +272,7 @@ impl PartialEq for FragmentInputs {
     }
 }
 
+#[derive(Clone)]
 pub struct ExtractedElement {
     transform: kurbo::Affine,
     opacity: f32,
@@ -274,6 +286,278 @@ pub struct ExtractedElement {
     blend: Option<peniko::BlendMode>,
     /// Side of the active scene transition this element belongs to.
     transition_side: gaanim_scene::TransitionSide,
+    /// The element and its ancestors, recorded only while camera views
+    /// exist so they can leave excluded subtrees out.
+    lineage: Vec<Entity>,
+    /// World bounds that cull the element from camera views.
+    view_bounds: Option<kurbo::Rect>,
+    /// HUD overlays belong to the screen, never to a camera's view.
+    in_views: bool,
+    /// View layer of the element: only camera views that list it draw it.
+    layer: Option<Arc<str>>,
+    /// Set when the element is a camera view screen.
+    screen: Option<ExtractedScreen>,
+}
+
+/// A camera view screen: its view and the stroke drawn above it.
+#[derive(Clone)]
+struct ExtractedScreen {
+    view: Arc<ExtractedCameraView>,
+    /// The screen's stroke, drawn above the view's content.
+    overlay: Option<Arc<vello::Scene>>,
+}
+
+/// A [`CameraView`] resolved against this frame's transforms.
+struct ExtractedCameraView {
+    /// Screen outline in its local coordinates.
+    clip: Arc<kurbo::BezPath>,
+    /// Maps the world the camera sees onto the screen; `None` when the source
+    /// or the screen has no area.
+    content: Option<kurbo::Affine>,
+    /// World region the camera sees, with a culling margin.
+    region: kurbo::Rect,
+    /// Roots of the subtrees the view leaves out.
+    excluded: Vec<Entity>,
+    /// View layers the view shows besides the drawables on no layer.
+    layers: Vec<Arc<str>>,
+    background: CameraViewBackground,
+}
+
+impl ExtractedCameraView {
+    /// Whether the view shows `element`, seen from `screen`.
+    fn shows(&self, element: &ExtractedElement, screen: &ExtractedElement) -> bool {
+        use gaanim_scene::TransitionSide;
+        element.in_views
+            && element
+                .layer
+                .as_ref()
+                .is_none_or(|layer| self.layers.contains(layer))
+            && !self
+                .excluded
+                .iter()
+                .any(|root| element.lineage.contains(root))
+            && (screen.transition_side == TransitionSide::None
+                || element.transition_side == TransitionSide::None
+                || element.transition_side == screen.transition_side)
+            && element
+                .view_bounds
+                .is_none_or(|bounds| rects_overlap(bounds, self.region))
+    }
+}
+
+impl ExtractedElement {
+    /// This element as the camera of a view sees it: `content` maps it onto
+    /// the screen.
+    fn seen_through(&self, content: kurbo::Affine) -> Self {
+        Self {
+            transform: content * self.transform,
+            opacity: self.opacity,
+            opacity_bounds: content.transform_rect_bbox(self.opacity_bounds),
+            opacity_group: self.opacity_group,
+            render_order: self.render_order,
+            scene: Arc::clone(&self.scene),
+            clip_mask: self.clip_mask.clone(),
+            blend: self.blend,
+            transition_side: self.transition_side,
+            lineage: Vec::new(),
+            view_bounds: None,
+            in_views: self.in_views,
+            layer: self.layer.clone(),
+            screen: self.screen.clone(),
+        }
+    }
+}
+
+/// Canvas background paint of the frame, reused by camera view backdrops.
+struct CanvasPaint {
+    brush: peniko::Brush,
+    brush_transform: Option<kurbo::Affine>,
+    rect: kurbo::Rect,
+    fallback: peniko::Color,
+}
+
+/// What camera views composite from: every extracted element of the frame.
+struct ViewContext<'a> {
+    elements: &'a [ExtractedElement],
+    canvas: Option<&'a CanvasPaint>,
+}
+
+/// Whether two rectangles touch, including degenerate (zero-area) ones.
+fn rects_overlap(a: kurbo::Rect, b: kurbo::Rect) -> bool {
+    a.x0 <= b.x1 && b.x0 <= a.x1 && a.y0 <= b.y1 && b.y0 <= a.y1
+}
+
+fn bounds_rect(bounds: &gaanim_math::Bounds3D) -> kurbo::Rect {
+    kurbo::Rect::new(bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y)
+}
+
+/// Affine that carries what a camera view's source frames onto its screen.
+///
+/// `source` and `screen` are local rectangles with their world transforms.
+/// `fit` scales the source rectangle onto the screen rectangle, center to
+/// center; the source transform is undone, so moving, scaling or rotating the
+/// source pans, zooms or rotates the view. `None` when either rectangle has no
+/// area or the source transform cannot be inverted.
+pub(crate) fn camera_view_transform(
+    source: (kurbo::Rect, kurbo::Affine),
+    screen: (kurbo::Rect, kurbo::Affine),
+    fit: CameraViewFit,
+) -> Option<kurbo::Affine> {
+    const MIN_EXTENT: f64 = 1e-9;
+    let (source_rect, source_affine) = source;
+    let (screen_rect, screen_affine) = screen;
+    let extents = [
+        source_rect.width(),
+        source_rect.height(),
+        screen_rect.width(),
+        screen_rect.height(),
+    ];
+    if extents
+        .iter()
+        .any(|extent| !extent.is_finite() || *extent < MIN_EXTENT)
+    {
+        return None;
+    }
+    let determinant = source_affine.determinant();
+    if !determinant.is_finite() || determinant.abs() < MIN_EXTENT * MIN_EXTENT {
+        return None;
+    }
+    let scale_x = screen_rect.width() / source_rect.width();
+    let scale_y = screen_rect.height() / source_rect.height();
+    let (scale_x, scale_y) = match fit {
+        CameraViewFit::Contain => (scale_x.min(scale_y), scale_x.min(scale_y)),
+        CameraViewFit::Cover => (scale_x.max(scale_y), scale_x.max(scale_y)),
+        CameraViewFit::Stretch => (scale_x, scale_y),
+    };
+    let frame = kurbo::Affine::translate(screen_rect.center().to_vec2())
+        * kurbo::Affine::scale_non_uniform(scale_x, scale_y)
+        * kurbo::Affine::translate(-source_rect.center().to_vec2());
+    let content = screen_affine * frame * source_affine.inverse();
+    content.is_finite().then_some(content)
+}
+
+/// Affine of a camera view with an explicit magnification.
+///
+/// The camera looks at the center of `source`'s rectangle and turns with its
+/// rotation; its size plays no part. `zoom` scales world units into the
+/// screen's local units, so the screen's own scale still applies: a screen
+/// shrunk to `1 / zoom` shows the scene at its real size.
+pub(crate) fn explicit_camera_view_transform(
+    source: (kurbo::Rect, kurbo::Affine),
+    screen: (kurbo::Rect, kurbo::Affine),
+    zoom: f64,
+) -> Option<kurbo::Affine> {
+    const MIN_EXTENT: f64 = 1e-9;
+    let (source_rect, source_affine) = source;
+    let (screen_rect, screen_affine) = screen;
+    if !zoom.is_finite()
+        || zoom < MIN_EXTENT
+        || !(screen_rect.width() >= MIN_EXTENT && screen_rect.height() >= MIN_EXTENT)
+    {
+        return None;
+    }
+    let center = source_affine * source_rect.center();
+    let [a, b, _, _, _, _] = source_affine.as_coeffs();
+    let rotation = if a == 0.0 && b == 0.0 {
+        0.0
+    } else {
+        b.atan2(a)
+    };
+    let content = screen_affine
+        * kurbo::Affine::translate(screen_rect.center().to_vec2())
+        * kurbo::Affine::scale(zoom)
+        * kurbo::Affine::rotate(-rotation)
+        * kurbo::Affine::translate(-center.to_vec2());
+    content.is_finite().then_some(content)
+}
+
+/// Resolve the camera views of this frame's visible screens.
+///
+/// `source_frame` returns the local rectangle and world transform that a
+/// source drawable frames; `zoom` evaluates an explicit magnification.
+fn resolve_camera_views<'a>(
+    screens: impl Iterator<
+        Item = (
+            Entity,
+            &'a CameraView,
+            &'a GlobalSpatialTransform,
+            &'a LocalBounds,
+            &'a Path2D,
+        ),
+    >,
+    mut source_frame: impl FnMut(Entity) -> Option<(kurbo::Rect, kurbo::Affine)>,
+    mut zoom: impl FnMut(&gaanim_animation::TrackingScalar) -> Option<f64>,
+) -> HashMap<Entity, Arc<ExtractedCameraView>> {
+    screens
+        .map(|(entity, view, transform, bounds, path)| {
+            let screen = (bounds_rect(&bounds.0), transform.affine_2d);
+            let content = source_frame(view.source).and_then(|source| match &view.zoom {
+                Some(scalar) => explicit_camera_view_transform(source, screen, zoom(scalar)?),
+                None => camera_view_transform(source, screen, view.fit),
+            });
+            // The world the camera sees: the screen carried back through the
+            // view, with a margin for strokes and effects beyond the bounds.
+            let region = content.map_or(kurbo::Rect::ZERO, |content| {
+                let seen = content
+                    .inverse()
+                    .transform_rect_bbox(screen.1.transform_rect_bbox(screen.0));
+                let margin = seen.width().max(seen.height()) * 0.08;
+                seen.inflate(margin, margin)
+            });
+            let mut excluded = Vec::with_capacity(view.exclude.len() + 2);
+            excluded.extend([entity, view.source]);
+            excluded.extend(view.exclude.iter().copied());
+            let resolved = ExtractedCameraView {
+                clip: Arc::clone(&path.0),
+                content,
+                region,
+                excluded,
+                layers: view.layers.clone(),
+                background: view.background.clone(),
+            };
+            (entity, Arc::new(resolved))
+        })
+        .collect()
+}
+
+/// Local rectangle and world transform a camera view source frames: a
+/// leaf's own bounds, or the world bounds of a group whose children move.
+fn camera_source_frame(
+    transform: &GlobalSpatialTransform,
+    local: Option<&LocalBounds>,
+    world: Option<&WorldBounds>,
+    is_group: bool,
+) -> Option<(kurbo::Rect, kurbo::Affine)> {
+    match local {
+        Some(local) if !is_group => Some((bounds_rect(&local.0), transform.affine_2d)),
+        _ => world.map(|world| (bounds_rect(&world.0), kurbo::Affine::IDENTITY)),
+    }
+}
+
+/// Whether culling by the main camera must keep `bounds` because a camera
+/// view sees it.
+fn seen_by_camera_views(
+    views: &HashMap<Entity, Arc<ExtractedCameraView>>,
+    bounds: &gaanim_math::Bounds3D,
+) -> bool {
+    let rect = bounds_rect(bounds);
+    views
+        .values()
+        .any(|view| view.content.is_some() && rects_overlap(rect, view.region))
+}
+
+/// The element and its ancestors, nearest first.
+fn element_lineage(
+    entity: Entity,
+    mut parent_of: impl FnMut(Entity) -> Option<Entity>,
+) -> Vec<Entity> {
+    let mut lineage = vec![entity];
+    let mut current = entity;
+    while let Some(parent) = parent_of(current) {
+        lineage.push(parent);
+        current = parent;
+    }
+    lineage
 }
 
 /// Stack order of a drawn element: its own `z_index` plus every ancestor's,
@@ -387,6 +671,7 @@ fn opacity_run_end(elements: &[ExtractedElement], start: usize) -> usize {
     while let Some(element) = elements.get(end) {
         if element.clip_mask.is_some()
             || element.blend.is_some()
+            || element.screen.is_some()
             || element.opacity_group != elements[start].opacity_group
             || !element.opacity.is_finite()
             || element.opacity <= 0.0
@@ -422,9 +707,10 @@ fn shared_clip_run_end(elements: &[ExtractedElement], start: usize) -> usize {
     };
     let mut end = start + 1;
     while let Some(element) = elements.get(end) {
-        let shares = element.clip_mask.as_ref().is_some_and(|other| {
-            !other.invert && other.rule == clip.rule && other.sources == clip.sources
-        });
+        let shares = element.screen.is_none()
+            && element.clip_mask.as_ref().is_some_and(|other| {
+                !other.invert && other.rule == clip.rule && other.sources == clip.sources
+            });
         if !shares {
             break;
         }
@@ -439,12 +725,26 @@ fn append_extracted_elements(
     main_scene: &mut vello::Scene,
     elements: &[ExtractedElement],
     transition: Option<&gaanim_scene::SceneTransitionFrame>,
+    canvas: Option<&CanvasPaint>,
 ) {
+    let views = ViewContext { elements, canvas };
+    // Drawables on a view layer exist only for the camera views that list it.
+    let unlayered: Vec<ExtractedElement>;
+    let main = if elements.iter().any(|element| element.layer.is_some()) {
+        unlayered = elements
+            .iter()
+            .filter(|element| element.layer.is_none())
+            .cloned()
+            .collect();
+        unlayered.as_slice()
+    } else {
+        elements
+    };
     let mut index = 0;
-    while index < elements.len() {
-        let side = elements[index].transition_side;
+    while index < main.len() {
+        let side = main[index].transition_side;
         let mut end = index + 1;
-        while elements
+        while main
             .get(end)
             .is_some_and(|element| element.transition_side == side)
         {
@@ -454,7 +754,7 @@ fn append_extracted_elements(
         if let Some(mask) = mask {
             push_transition_mask(main_scene, mask);
         }
-        append_element_run(main_scene, &elements[index..end]);
+        append_element_run(main_scene, &main[index..end], Some(&views));
         if let Some(mask) = mask {
             pop_transition_mask(main_scene, mask);
         }
@@ -558,10 +858,22 @@ fn fill_transition_background(
     pop_transition_mask(scene, mask);
 }
 
-fn append_element_run(main_scene: &mut vello::Scene, elements: &[ExtractedElement]) {
+/// Composite a run of elements. Without `views` (inside a camera view)
+/// screens draw their own paint but not what their cameras see.
+fn append_element_run(
+    main_scene: &mut vello::Scene,
+    elements: &[ExtractedElement],
+    views: Option<&ViewContext<'_>>,
+) {
     let mut index = 0;
     while let Some(elem) = elements.get(index) {
         if !elem.opacity.is_finite() || elem.opacity <= 0.0 {
+            index += 1;
+            continue;
+        }
+
+        if let Some(screen) = &elem.screen {
+            append_screen(main_scene, elem, screen, views);
             index += 1;
             continue;
         }
@@ -617,6 +929,109 @@ fn append_element_run(main_scene: &mut vello::Scene, elements: &[ExtractedElemen
         }
         index = end;
     }
+}
+
+/// Draw a camera view screen: its paint, then what its camera sees clipped
+/// to its outline, then its stroke. Opacity, blend and clip apply to all three.
+fn append_screen(
+    scene: &mut vello::Scene,
+    elem: &ExtractedElement,
+    screen: &ExtractedScreen,
+    views: Option<&ViewContext<'_>>,
+) {
+    if let Some(clip) = &elem.clip_mask {
+        scene.push_layer(
+            clip.rule,
+            peniko::BlendMode::default(),
+            1.0,
+            elem.transform,
+            &clip.path,
+        );
+    }
+    let layered = elem.opacity < 1.0 || elem.blend.is_some();
+    if layered {
+        scene.push_layer(
+            peniko::Fill::NonZero,
+            elem.blend.unwrap_or_default(),
+            elem.opacity.clamp(0.0, 1.0),
+            kurbo::Affine::IDENTITY,
+            &elem.opacity_bounds,
+        );
+    }
+    scene.append(&elem.scene, Some(elem.transform));
+    if let Some(views) = views {
+        append_camera_view(scene, elem, &screen.view, views);
+    }
+    if let Some(overlay) = &screen.overlay {
+        scene.append(overlay, Some(elem.transform));
+    }
+    if layered {
+        scene.pop_layer();
+    }
+    if elem.clip_mask.is_some() {
+        scene.pop_layer();
+    }
+}
+
+/// Draw the backdrop and the elements a camera view sees, clipped to its
+/// screen. Screens inside the view show their paint without their own view.
+fn append_camera_view(
+    scene: &mut vello::Scene,
+    screen: &ExtractedElement,
+    view: &ExtractedCameraView,
+    views: &ViewContext<'_>,
+) {
+    // An isolated layer, as for transition masks: vello does not yet clip
+    // nested blend layers inside a clip-only layer (linebender/vello#1198).
+    scene.push_layer(
+        peniko::Fill::NonZero,
+        peniko::BlendMode::default(),
+        1.0,
+        screen.transform,
+        view.clip.as_ref(),
+    );
+    match &view.background {
+        CameraViewBackground::Canvas => {
+            if let Some(canvas) = views.canvas {
+                scene.fill(
+                    peniko::Fill::NonZero,
+                    screen.transform,
+                    canvas.fallback,
+                    None,
+                    view.clip.as_ref(),
+                );
+                if let Some(content) = view.content {
+                    scene.fill(
+                        peniko::Fill::NonZero,
+                        content,
+                        &canvas.brush,
+                        canvas.brush_transform,
+                        &canvas.rect,
+                    );
+                }
+            }
+        }
+        CameraViewBackground::Brush(brush) => {
+            scene.fill(
+                peniko::Fill::NonZero,
+                screen.transform,
+                brush,
+                None,
+                view.clip.as_ref(),
+            );
+        }
+        CameraViewBackground::None => {}
+    }
+    if let Some(content) = view.content {
+        let seen: Vec<ExtractedElement> = views
+            .elements
+            .iter()
+            .filter(|element| view.shows(element, screen))
+            .map(|element| element.seen_through(content))
+            .collect();
+        append_element_run(scene, &seen, None);
+    }
+    scene.pop_layer();
 }
 
 fn canvas_background_geometry(background: &CanvasBackground) -> (kurbo::Rect, kurbo::Affine) {
@@ -1337,6 +1752,7 @@ pub fn gaanim_render_cache_sweep_system(
     cache.fragment_cache.retain(|id, _| active.contains(id));
     cache.stroke_views.retain(|id, _| active.contains(id));
     cache.fragment_inputs.retain(|id, _| active.contains(id));
+    cache.screen_overlays.retain(|id, _| active.contains(id));
 }
 
 /// Standalone function: extracts all visible Vello2D mobjects from a Bevy World
@@ -1401,6 +1817,30 @@ pub fn compile_scene_from_world(
             None
         }
     });
+
+    let camera_views = {
+        let mut screens = world.query_filtered::<(
+            Entity,
+            &CameraView,
+            &GlobalSpatialTransform,
+            &LocalBounds,
+            &Path2D,
+        ), With<Visible>>();
+        let mut sources = world.query::<(
+            &GlobalSpatialTransform,
+            Option<&LocalBounds>,
+            Option<&WorldBounds>,
+            Option<&gaanim_scene::GroupMarker>,
+        )>();
+        resolve_camera_views(
+            screens.iter(world),
+            |entity| {
+                let (transform, local, bounds, group) = sources.get(world, entity).ok()?;
+                camera_source_frame(transform, local, bounds, group.is_some())
+            },
+            |zoom| zoom.evaluate(world),
+        )
+    };
 
     let mut query_mobjects = world.query_filtered::<(
         Entity,
@@ -1495,11 +1935,13 @@ pub fn compile_scene_from_world(
 
             if let Some(w_bounds) = world_bounds_opt
                 && !bounds.intersects(&w_bounds.0)
+                && !seen_by_camera_views(&camera_views, &w_bounds.0)
             {
                 culled_entities.insert(entity);
                 continue;
             }
         }
+        let camera_view = camera_views.get(&entity);
 
         let fill_alpha = fill_progress_opt
             .map(|f| f.0.clamp(0.0, 1.0))
@@ -1635,6 +2077,8 @@ pub fn compile_scene_from_world(
             );
         }
 
+        // A screen draws its stroke above what its camera sees.
+        let mut overlay = camera_view.map(|_| vello::Scene::new());
         if !blurred_vector
             && let Some(stroke_brush) = elem_stroke
             && let Some(style) = elem_stroke_style
@@ -1642,7 +2086,7 @@ pub fn compile_scene_from_world(
             let (effective_stroke_brush, effective_style) =
                 animated_stroke_paint(stroke_brush, style, anim_wave);
             draw_aligned_stroke(
-                &mut scene,
+                overlay.as_mut().unwrap_or(&mut scene),
                 &effective_style,
                 &effective_stroke_brush,
                 stroke_view,
@@ -1703,6 +2147,22 @@ pub fn compile_scene_from_world(
                         child_query.get(world, e).ok().map(ChildOf::parent)
                     })
                 }),
+            lineage: if camera_views.is_empty() {
+                Vec::new()
+            } else {
+                element_lineage(entity, |e| {
+                    child_query.get(world, e).ok().map(ChildOf::parent)
+                })
+            },
+            view_bounds: world_bounds_opt.map(|bounds| bounds_rect(&bounds.0)),
+            in_views: world.get::<gaanim_scene::HudOverlay>(entity).is_none(),
+            layer: world
+                .get::<ViewLayer>(entity)
+                .map(|layer| Arc::clone(&layer.0)),
+            screen: camera_view.map(|view| ExtractedScreen {
+                view: Arc::clone(view),
+                overlay: overlay.map(Arc::new),
+            }),
         });
     }
 
@@ -1726,15 +2186,16 @@ pub fn compile_scene_from_world(
     // the 2D background from occluding the 3D meshes behind it.
     let is_perspective = camera
         .is_some_and(|cam| matches!(cam.projection, gaanim_math::Projection::Perspective { .. }));
+    let mut canvas_paint = None;
     if !is_perspective {
         if let Some(canvas_bg) = world.get_resource::<CanvasBackground>() {
-            fill_canvas_background(
+            canvas_paint = Some(fill_canvas_background(
                 &mut main_scene,
                 canvas_bg,
                 canvas_bg.pixel_size,
                 transition_background_time(transition_frame.as_ref(), background_time),
                 None,
-            );
+            ));
             fill_transition_background(
                 &mut main_scene,
                 canvas_bg,
@@ -1744,10 +2205,50 @@ pub fn compile_scene_from_world(
         }
     }
 
-    append_extracted_elements(&mut main_scene, &extracted, transition_frame.as_ref());
+    append_extracted_elements(
+        &mut main_scene,
+        &extracted,
+        transition_frame.as_ref(),
+        canvas_paint.as_ref(),
+    );
 
     main_scene
 }
+
+/// Visible camera view screens and what resolving their views reads.
+type CameraScreenQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static CameraView,
+        &'static GlobalSpatialTransform,
+        &'static LocalBounds,
+        &'static Path2D,
+    ),
+    With<Visible>,
+>;
+
+/// Everything the render system reads to compose camera views.
+type CameraViewQueries<'w, 's> = (
+    CameraScreenQuery<'w, 's>,
+    CameraSourceQuery<'w, 's>,
+    Query<'w, 's, (), With<gaanim_scene::HudOverlay>>,
+    Query<'w, 's, &'static ViewLayer>,
+    Query<'w, 's, &'static gaanim_animation::FloatSignal>,
+);
+
+/// Transforms and bounds of the drawables that camera views frame.
+type CameraSourceQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static GlobalSpatialTransform,
+        Option<&'static LocalBounds>,
+        Option<&'static WorldBounds>,
+        Option<&'static gaanim_scene::GroupMarker>,
+    ),
+>;
 
 /// System: Extracts, composites, and renders all visible gaanim 2D Mobjects.
 ///
@@ -1812,11 +2313,31 @@ pub fn gaanim_render_system(
     )>,
     mut query_vello_scene: Query<&mut VelloScene2d, With<MainVelloScene>>,
     mut shader_frame: Option<ResMut<ShaderBackgroundFrame>>,
-    mut local_extracted: Local<Vec<ExtractedElement>>,
-    mut local_culled: Local<std::collections::HashSet<Entity>>,
+    (camera_screens, camera_sources, hud_query, layer_query, float_signals): CameraViewQueries,
+    mut scratch: Local<(Vec<ExtractedElement>, std::collections::HashSet<Entity>)>,
 ) {
+    let (local_extracted, local_culled) = &mut *scratch;
     local_extracted.clear();
     local_culled.clear();
+
+    let time_seconds = playback_state
+        .as_ref()
+        .map_or(0.0, |state| state.current_time);
+    let camera_views = resolve_camera_views(
+        camera_screens.iter(),
+        |entity| {
+            let (transform, local, bounds, group) = camera_sources.get(entity).ok()?;
+            camera_source_frame(transform, local, bounds, group.is_some())
+        },
+        |zoom| {
+            zoom.source
+                .evaluate(time_seconds, |logical| {
+                    let (_, entity) = zoom.parameters.iter().find(|(id, _)| *id == logical)?;
+                    float_signals.get(*entity).ok().map(|signal| signal.value)
+                })
+                .ok()
+        },
+    );
 
     // Viewport pixels per world unit, as in the culling bounds below.
     let antialias = antialias_margin(gaanim_camera.as_ref().and_then(|cam| match cam.projection {
@@ -1887,6 +2408,7 @@ pub fn gaanim_render_system(
         ) = query_effects
             .get(entity)
             .unwrap_or((None, None, None, None, None, None, None, None, None, None));
+        let camera_view = camera_views.get(&entity);
 
         // Invalidate before skipping hidden or culled objects. Their new geometry
         // may stop changing before they become visible again (e.g. a rewound Lottie).
@@ -1950,7 +2472,9 @@ pub fn gaanim_render_system(
             || glow_ref.as_ref().is_some_and(|r| r.is_changed())
             || blur_ref.as_ref().is_some_and(|r| r.is_changed())
             || clip_ref.as_ref().is_some_and(|r| r.is_changed())
-            || stroke_align_ref.as_ref().is_some_and(|r| r.is_changed());
+            || stroke_align_ref.as_ref().is_some_and(|r| r.is_changed())
+            // Becoming or ceasing to be a screen moves the stroke.
+            || cache.screen_overlays.contains_key(&mobj_id.0) != camera_view.is_some();
 
         if changed {
             cache.fragment_cache.remove(&mobj_id.0);
@@ -1978,6 +2502,7 @@ pub fn gaanim_render_system(
             // Check if this entity's own bounds are out of camera bounds
             if let Some(w_bounds) = world_bounds_opt
                 && !bounds.intersects(&w_bounds.0)
+                && !seen_by_camera_views(&camera_views, &w_bounds.0)
             {
                 local_culled.insert(entity);
                 continue;
@@ -2027,6 +2552,7 @@ pub fn gaanim_render_system(
             });
             cache.fragment_inputs.insert(mobj_id.0, inputs);
         }
+        let mut rebuilt_overlay = None;
         let fragment = cache.fragment_cache.entry(mobj_id.0).or_insert_with(|| {
             let mut scene = vello::Scene::new();
 
@@ -2146,7 +2672,8 @@ pub fn gaanim_render_system(
                 );
             }
 
-            // 3. Draw Stroke.
+            // 3. Draw Stroke. A screen draws it above what its camera sees.
+            let mut overlay = camera_view.map(|_| vello::Scene::new());
             if !blurred_vector
                 && let Some(stroke_brush) = elem_stroke
                 && let Some(style) = elem_stroke_style
@@ -2154,7 +2681,7 @@ pub fn gaanim_render_system(
                 let (effective_stroke_brush, effective_style) =
                     animated_stroke_paint(stroke_brush, style, anim_wave);
                 draw_aligned_stroke(
-                    &mut scene,
+                    overlay.as_mut().unwrap_or(&mut scene),
                     &effective_style,
                     &effective_stroke_brush,
                     stroke_view,
@@ -2163,9 +2690,20 @@ pub fn gaanim_render_system(
                     stroke_align_ref.as_deref().copied().unwrap_or_default(),
                 );
             }
+            rebuilt_overlay = Some(overlay);
 
             Arc::new(scene)
         });
+        let fragment = Arc::clone(fragment);
+        match rebuilt_overlay {
+            Some(Some(overlay)) => {
+                cache.screen_overlays.insert(mobj_id.0, Arc::new(overlay));
+            }
+            Some(None) => {
+                cache.screen_overlays.remove(&mobj_id.0);
+            }
+            None => {}
+        }
 
         let mut opacity_group = entity;
         while let Ok(child_of) = child_query.get(opacity_group) {
@@ -2215,7 +2753,7 @@ pub fn gaanim_render_system(
                 |e| child_query.get(e).ok().map(ChildOf::parent),
                 |e| order_query.get(e).map_or(0, |order| order.z_index),
             ),
-            scene: Arc::clone(fragment),
+            scene: fragment,
             clip_mask: clip_ref.as_ref().map(|c| (**c).clone()),
             blend,
             transition_side: transition_frame
@@ -2224,6 +2762,21 @@ pub fn gaanim_render_system(
                 .map_or_else(Default::default, |frame| {
                     frame.side_of(entity, |e| child_query.get(e).ok().map(ChildOf::parent))
                 }),
+            lineage: if camera_views.is_empty() {
+                Vec::new()
+            } else {
+                element_lineage(entity, |e| child_query.get(e).ok().map(ChildOf::parent))
+            },
+            view_bounds: world_bounds_opt.map(|bounds| bounds_rect(&bounds.0)),
+            in_views: !hud_query.contains(entity),
+            layer: layer_query
+                .get(entity)
+                .ok()
+                .map(|layer| Arc::clone(&layer.0)),
+            screen: camera_view.map(|view| ExtractedScreen {
+                view: Arc::clone(view),
+                overlay: cache.screen_overlays.get(&mobj_id.0).cloned(),
+            }),
         });
     }
 
@@ -2248,19 +2801,20 @@ pub fn gaanim_render_system(
         .as_ref()
         .is_some_and(|cam| matches!(cam.projection, gaanim_math::Projection::Perspective { .. }));
     let mut shader_request = None;
+    let mut canvas_paint = None;
     if !is_perspective {
         if let Some(ref canvas_bg) = canvas_bg {
             let pixel_size = interactive_background_pixel_size(canvas_bg, gaanim_camera.as_deref());
             let time_seconds = playback_state
                 .as_ref()
                 .map_or(0.0, |state| state.current_time);
-            fill_canvas_background(
+            canvas_paint = Some(fill_canvas_background(
                 &mut main_scene,
                 canvas_bg,
                 pixel_size,
                 transition_background_time(transition_frame.as_deref(), time_seconds),
                 shader_frame.is_some().then_some(&mut shader_request),
-            );
+            ));
             fill_transition_background(
                 &mut main_scene,
                 canvas_bg,
@@ -2280,6 +2834,7 @@ pub fn gaanim_render_system(
         transition_frame
             .as_deref()
             .filter(|frame| !frame.is_empty()),
+        canvas_paint.as_ref(),
     );
     local_extracted.clear();
 
@@ -2389,6 +2944,340 @@ mod tests {
         assert_eq!(stacked(&world, glyph), order(6, 4));
         assert!(stacked(&world, boxed).z_index > circle.z_index);
         assert!(stacked(&world, glyph).z_index > stacked(&world, boxed).z_index);
+    }
+
+    fn assert_affine_near(actual: kurbo::Affine, expected: kurbo::Affine) {
+        let (actual, expected) = (actual.as_coeffs(), expected.as_coeffs());
+        assert!(
+            actual
+                .iter()
+                .zip(expected)
+                .all(|(a, e)| (a - e).abs() < 1e-9),
+            "{actual:?} != {expected:?}"
+        );
+    }
+
+    #[test]
+    fn camera_view_transform_maps_the_framed_region_onto_the_screen() {
+        let unit = |w: f64, h: f64| kurbo::Rect::new(-w / 2.0, -h / 2.0, w / 2.0, h / 2.0);
+        let screen = (unit(4.0, 2.0), kurbo::Affine::translate((-4.0, -1.0)));
+
+        let source = (unit(2.0, 1.0), kurbo::Affine::translate((3.0, 2.0)));
+        let content = camera_view_transform(source, screen, CameraViewFit::Contain).unwrap();
+        assert_eq!(
+            content * kurbo::Point::new(3.0, 2.0),
+            kurbo::Point::new(-4.0, -1.0)
+        );
+        assert_eq!(
+            content * kurbo::Point::new(4.0, 2.5),
+            kurbo::Point::new(-2.0, 0.0)
+        );
+
+        // Shrinking the source zooms in; rotating it turns the view the other way.
+        let zoomed = (source.0, source.1 * kurbo::Affine::scale(0.5));
+        let zoomed = camera_view_transform(zoomed, screen, CameraViewFit::Contain).unwrap();
+        assert_affine_near(
+            zoomed,
+            kurbo::Affine::translate((-4.0, -1.0))
+                * kurbo::Affine::scale(4.0)
+                * kurbo::Affine::translate((-3.0, -2.0)),
+        );
+        let turned = (source.0, source.1 * kurbo::Affine::rotate(0.5));
+        let turned = camera_view_transform(turned, screen, CameraViewFit::Contain).unwrap();
+        assert_affine_near(
+            turned,
+            kurbo::Affine::translate((-4.0, -1.0))
+                * kurbo::Affine::scale(2.0)
+                * kurbo::Affine::rotate(-0.5)
+                * kurbo::Affine::translate((-3.0, -2.0)),
+        );
+
+        // A square source on a 4×2 screen: contain keeps it whole, cover
+        // fills the screen and stretch does both by distorting it.
+        let square = (unit(1.0, 1.0), kurbo::Affine::IDENTITY);
+        let scale_of = |fit| {
+            let [a, _, _, d, _, _] = camera_view_transform(square, screen, fit)
+                .unwrap()
+                .as_coeffs();
+            (a, d)
+        };
+        assert_eq!(scale_of(CameraViewFit::Contain), (2.0, 2.0));
+        assert_eq!(scale_of(CameraViewFit::Cover), (4.0, 4.0));
+        assert_eq!(scale_of(CameraViewFit::Stretch), (4.0, 2.0));
+
+        let line = (
+            kurbo::Rect::new(0.0, 0.0, 3.0, 0.0),
+            kurbo::Affine::IDENTITY,
+        );
+        assert!(camera_view_transform(line, screen, CameraViewFit::Contain).is_none());
+        let flat = (unit(1.0, 1.0), kurbo::Affine::scale_non_uniform(1.0, 0.0));
+        assert!(camera_view_transform(flat, screen, CameraViewFit::Contain).is_none());
+    }
+
+    /// A world with a framed square, the frame, an excluded marker and a
+    /// stroked screen showing the frame's view at twice its size.
+    fn centered_rect(w: f64, h: f64) -> kurbo::Rect {
+        kurbo::Rect::new(-w / 2.0, -h / 2.0, w / 2.0, h / 2.0)
+    }
+
+    /// A filled rectangle drawable at `at`, created `order`-th.
+    fn spawn_shape(
+        world: &mut World,
+        id: u64,
+        at: (f64, f64),
+        shape: kurbo::Rect,
+        order: u64,
+    ) -> Entity {
+        let local = gaanim_math::SpatialTransform::new_2d(at.0, at.1);
+        world
+            .spawn((
+                MobjectId(ObjectId::from_raw(id)),
+                local,
+                GlobalSpatialTransform::from_local(&local),
+                GlobalOpacity(1.0),
+                RenderOrder {
+                    z_index: 0,
+                    creation_order: order,
+                },
+                RenderLayer::Vello2D,
+                Path2D(Arc::new(shape.to_path(0.01))),
+                LocalBounds(gaanim_math::Bounds3D::new_2d(
+                    shape.x0, shape.y0, shape.x1, shape.y1,
+                )),
+                WorldBounds(gaanim_math::Bounds3D::new_2d(
+                    shape.x0 + at.0,
+                    shape.y0 + at.1,
+                    shape.x1 + at.0,
+                    shape.y1 + at.1,
+                )),
+                FillBrush(Some(peniko::Brush::Solid(peniko::Color::WHITE))),
+                Visible,
+            ))
+            .id()
+    }
+
+    /// A world with a framed square, the frame, an excluded marker and a
+    /// stroked screen showing the frame's view at twice its size.
+    fn camera_view_world(world: &mut World) -> Entity {
+        spawn_shape(world, 1, (3.5, 2.0), centered_rect(0.4, 0.4), 1);
+        let frame = spawn_shape(world, 2, (3.0, 2.0), centered_rect(2.0, 1.0), 2);
+        let marker = spawn_shape(world, 3, (2.5, 2.0), centered_rect(0.2, 0.2), 3);
+        let screen = spawn_shape(world, 4, (-4.0, -1.0), centered_rect(4.0, 2.0), 4);
+        world.entity_mut(screen).insert((
+            StrokeBrush::new(peniko::Color::BLACK, 0.05),
+            CameraView {
+                source: frame,
+                fit: CameraViewFit::Contain,
+                background: CameraViewBackground::None,
+                exclude: vec![marker],
+                zoom: None,
+                layers: Vec::new(),
+            },
+        ));
+        screen
+    }
+
+    /// Adds a bone on the `xray` view layer inside the frame and a second
+    /// screen whose camera looks at the frame's center with the zoom of a
+    /// float signal and shows that layer.
+    fn explicit_zoom_world(world: &mut World, zoom: f64) -> (Entity, Entity) {
+        let frame = world
+            .query::<(Entity, &MobjectId)>()
+            .iter(world)
+            .find(|(_, id)| id.0 == ObjectId::from_raw(2))
+            .unwrap()
+            .0;
+        let bone = spawn_shape(world, 5, (3.2, 1.8), centered_rect(0.2, 0.2), 5);
+        world.entity_mut(bone).insert(ViewLayer(Arc::from("xray")));
+        let signal_id = ObjectId::from_raw(50);
+        let signal = world
+            .spawn((
+                MobjectId(signal_id),
+                gaanim_animation::FloatSignal::new(zoom),
+            ))
+            .id();
+        let lens = spawn_shape(world, 6, (4.0, -3.0), centered_rect(2.0, 1.0), 6);
+        world.entity_mut(lens).insert(CameraView {
+            source: frame,
+            fit: CameraViewFit::Contain,
+            background: CameraViewBackground::None,
+            exclude: Vec::new(),
+            zoom: Some(gaanim_animation::TrackingScalar {
+                source: gaanim_animation::ScalarSource::Signal(signal_id),
+                parameters: vec![(signal_id, signal)],
+            }),
+            layers: vec![Arc::from("xray")],
+        });
+        (lens, signal)
+    }
+
+    /// Draw positions of the encoded transforms equal to `affine`.
+    fn transform_indices(scene: &vello::Scene, affine: kurbo::Affine) -> Vec<usize> {
+        let expected = affine.as_coeffs();
+        scene
+            .encoding()
+            .transforms
+            .iter()
+            .enumerate()
+            .filter(|(_, transform)| {
+                transform
+                    .matrix
+                    .iter()
+                    .chain(&transform.translation)
+                    .zip(expected)
+                    .all(|(a, e)| (f64::from(*a) - e).abs() < 1e-5)
+            })
+            .map(|(index, _)| index)
+            .collect()
+    }
+
+    fn transform_index(scene: &vello::Scene, affine: kurbo::Affine) -> Option<usize> {
+        transform_indices(scene, affine).first().copied()
+    }
+
+    #[test]
+    fn camera_views_draw_what_their_source_frames_below_the_screen_stroke() {
+        let mut world = World::new();
+        camera_view_world(&mut world);
+        let scene = compile_scene_from_world(&mut world, None);
+        let view = kurbo::Affine::translate((-4.0, -1.0))
+            * kurbo::Affine::scale(2.0)
+            * kurbo::Affine::translate((-3.0, -2.0));
+        let screen = kurbo::Affine::translate((-4.0, -1.0));
+
+        let seen = transform_index(&scene, view * kurbo::Affine::translate((3.5, 2.0)))
+            .expect("the framed square is drawn inside the screen");
+        let stroke = *transform_indices(&scene, screen).last().unwrap();
+        assert!(seen < stroke, "the screen stroke must cover the view");
+        // The frame, the screen and excluded subtrees stay out of the view.
+        for hidden in [(3.0, 2.0), (2.5, 2.0), (-4.0, -1.0)] {
+            assert!(
+                transform_index(&scene, view * kurbo::Affine::translate(hidden)).is_none(),
+                "{hidden:?} is visible in the view"
+            );
+        }
+    }
+
+    #[test]
+    fn camera_views_keep_what_they_see_from_main_camera_culling() {
+        let mut world = World::new();
+        camera_view_world(&mut world);
+        // The main camera looks only at the screen; the framed square lies
+        // beyond its culling margin.
+        let mut camera = gaanim_math::Camera::ortho_2d_frame(4.0, 2.25, 640, 360);
+        camera.position = gaanim_core::glam::DVec3::new(-4.0, -1.0, 0.0);
+        let view = kurbo::Affine::translate((-4.0, -1.0))
+            * kurbo::Affine::scale(2.0)
+            * kurbo::Affine::translate((-3.0, -2.0));
+        let scene = compile_scene_from_world(&mut world, Some(&camera));
+        assert!(transform_index(&scene, view * kurbo::Affine::translate((3.5, 2.0))).is_some());
+    }
+
+    #[test]
+    fn explicit_zoom_looks_at_the_source_center_with_its_rotation() {
+        let screen = (
+            centered_rect(4.0, 2.0),
+            kurbo::Affine::translate((-4.0, -1.0)),
+        );
+        let source_affine = kurbo::Affine::translate((3.0, 2.0)) * kurbo::Affine::rotate(0.5);
+        let source = (kurbo::Rect::new(0.0, 0.0, 2.0, 2.0), source_affine);
+        let center = source_affine * kurbo::Point::new(1.0, 1.0);
+
+        let content = explicit_camera_view_transform(source, screen, 3.0).unwrap();
+        assert_affine_near(
+            content,
+            kurbo::Affine::translate((-4.0, -1.0))
+                * kurbo::Affine::scale(3.0)
+                * kurbo::Affine::rotate(-0.5)
+                * kurbo::Affine::translate(-center.to_vec2()),
+        );
+        // The source's size plays no part.
+        let larger = (kurbo::Rect::new(-1.0, -1.0, 3.0, 3.0), source_affine);
+        assert_affine_near(
+            explicit_camera_view_transform(larger, screen, 3.0).unwrap(),
+            content,
+        );
+        // A screen shrunk to 1 / zoom shows the scene at its real size.
+        let small = (screen.0, screen.1 * kurbo::Affine::scale(1.0 / 3.0));
+        let real = explicit_camera_view_transform(source, small, 3.0).unwrap();
+        assert!((real.determinant() - 1.0).abs() < 1e-9);
+        for zoom in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(explicit_camera_view_transform(source, screen, zoom).is_none());
+        }
+    }
+
+    #[test]
+    fn view_layers_draw_only_inside_the_camera_views_that_list_them() {
+        let mut world = World::new();
+        camera_view_world(&mut world);
+        let (lens, _) = explicit_zoom_world(&mut world, 2.5);
+        let scene = compile_scene_from_world(&mut world, None);
+        let bone = kurbo::Affine::translate((3.2, 1.8));
+        let frame_view = kurbo::Affine::translate((-4.0, -1.0))
+            * kurbo::Affine::scale(2.0)
+            * kurbo::Affine::translate((-3.0, -2.0));
+        let lens_view = kurbo::Affine::translate((4.0, -3.0))
+            * kurbo::Affine::scale(2.5)
+            * kurbo::Affine::translate((-3.0, -2.0));
+
+        assert!(
+            transform_index(&scene, bone).is_none(),
+            "drawn by the main camera"
+        );
+        assert!(
+            transform_index(&scene, frame_view * bone).is_none(),
+            "drawn without its layer"
+        );
+        assert!(
+            transform_index(&scene, lens_view * bone).is_some(),
+            "missing from its layer's view"
+        );
+        // The explicit view shows the ordinary scene as well.
+        let square = kurbo::Affine::translate((3.5, 2.0));
+        assert!(transform_index(&scene, lens_view * square).is_some());
+
+        world
+            .entity_mut(lens)
+            .get_mut::<CameraView>()
+            .unwrap()
+            .layers
+            .clear();
+        let scene = compile_scene_from_world(&mut world, None);
+        assert!(transform_index(&scene, lens_view * bone).is_none());
+    }
+
+    #[test]
+    fn retained_camera_view_screens_match_a_fresh_compile() {
+        let mut app = App::new();
+        let screen = camera_view_world(app.world_mut());
+        let (_, signal) = explicit_zoom_world(app.world_mut(), 2.5);
+        app.init_resource::<GaanimRenderCache>()
+            .add_systems(Update, gaanim_render_system);
+        let assert_fresh = |app: &mut App, label: &str| {
+            app.update();
+            let fresh = compile_scene_from_world(app.world_mut(), None);
+            let live = app
+                .world_mut()
+                .query::<&VelloScene2d>()
+                .single(app.world())
+                .unwrap();
+            assert!(
+                live.encoding().path_data == fresh.encoding().path_data
+                    && live.encoding().draw_data == fresh.encoding().draw_data
+                    && live.encoding().transforms == fresh.encoding().transforms,
+                "{label}: retained frame differs from a fresh compile"
+            );
+        };
+        assert_fresh(&mut app, "screen");
+        assert_fresh(&mut app, "retained screen");
+        app.world_mut()
+            .get_mut::<gaanim_animation::FloatSignal>(signal)
+            .unwrap()
+            .value = 4.0;
+        assert_fresh(&mut app, "zoom changed");
+        // Ending the view returns the stroke to the retained fragment.
+        app.world_mut().entity_mut(screen).remove::<CameraView>();
+        assert_fresh(&mut app, "plain shape");
     }
 
     #[test]
@@ -2901,6 +3790,11 @@ mod tests {
             clip_mask: None,
             blend: None,
             transition_side: Default::default(),
+            lineage: Vec::new(),
+            view_bounds: None,
+            in_views: true,
+            layer: None,
+            screen: None,
         };
         let run = [
             element(kurbo::Rect::new(-6.0, 1.0, -3.0, 1.2)),
@@ -2924,6 +3818,11 @@ mod tests {
             clip_mask: None,
             blend: None,
             transition_side: Default::default(),
+            lineage: Vec::new(),
+            view_bounds: None,
+            in_views: true,
+            layer: None,
+            screen: None,
         };
         let elements = vec![element(0.5), element(0.5), element(0.5), element(0.75)];
 
@@ -2943,6 +3842,11 @@ mod tests {
             clip_mask: None,
             blend,
             transition_side: Default::default(),
+            lineage: Vec::new(),
+            view_bounds: None,
+            in_views: true,
+            layer: None,
+            screen: None,
         };
         let multiply = Some(peniko::BlendMode::from(peniko::Mix::Multiply));
         let elements = vec![element(None), element(multiply), element(None)];
@@ -2969,6 +3873,11 @@ mod tests {
             clip_mask,
             blend: None,
             transition_side: Default::default(),
+            lineage: Vec::new(),
+            view_bounds: None,
+            in_views: true,
+            layer: None,
+            screen: None,
         };
         let elements = vec![
             element(Some(mask(1, false))),

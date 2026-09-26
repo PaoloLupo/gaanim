@@ -809,6 +809,9 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub(crate) connectors: HashSet<ObjectId>,
     /// Extra glyph tracking of Text roots set by `tracking(...)`, in scene units.
     pub(crate) text_tracking: HashMap<ObjectId, f64>,
+    /// Resting transforms of camera view screens shrunk by `pop_in`, which
+    /// the next `pop_out` returns to.
+    pub(crate) camera_view_rests: HashMap<ObjectId, SpatialTransform>,
     /// Typing state of Texts animated by typewriter/scramble motions.
     pub(crate) text_motion: crate::text_motion::TextMotionState,
     /// Objects whose scene membership is intentionally global at the current authoring cursor.
@@ -854,6 +857,7 @@ pub(crate) struct SceneBuilderState {
     arrow_shapes: HashMap<ObjectId, gaanim_math::ArrowShape>,
     connectors: HashSet<ObjectId>,
     text_tracking: HashMap<ObjectId, f64>,
+    camera_view_rests: HashMap<ObjectId, SpatialTransform>,
     text_motion: crate::text_motion::TextMotionState,
     persistent_objects: HashSet<ObjectId>,
     membership_managed_objects: HashSet<ObjectId>,
@@ -886,6 +890,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             arrow_shapes: self.arrow_shapes.clone(),
             connectors: self.connectors.clone(),
             text_tracking: self.text_tracking.clone(),
+            camera_view_rests: self.camera_view_rests.clone(),
             text_motion: self.text_motion.clone(),
             persistent_objects: self.persistent_objects.clone(),
             membership_managed_objects: self.membership_managed_objects.clone(),
@@ -925,6 +930,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             arrow_shapes,
             connectors,
             text_tracking,
+            camera_view_rests,
             text_motion,
             persistent_objects,
             membership_managed_objects,
@@ -958,6 +964,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             arrow_shapes,
             connectors,
             text_tracking,
+            camera_view_rests,
             text_motion,
             persistent_objects,
             membership_managed_objects,
@@ -1258,6 +1265,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             arrow_shapes: HashMap::new(),
             connectors: HashSet::new(),
             text_tracking: HashMap::new(),
+            camera_view_rests: HashMap::new(),
             text_motion: Default::default(),
             property_bindings: HashMap::new(),
             property_source_cursors: HashMap::new(),
@@ -1486,6 +1494,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::ReplacementTransform { .. } => "Morph",
             AnimationType::Wiggle => "Wiggle",
             AnimationType::GrowFromPoint { .. } | AnimationType::GrowFromEdge { .. } => "Grow",
+            AnimationType::CameraViewZoomTo { .. } => "ViewZoom",
+            AnimationType::CameraViewPop { out: true, .. } => "PopOut",
+            AnimationType::CameraViewPop { out: false, .. } => "PopIn",
             AnimationType::DrawBorderThenFill { .. } => "DrawFill",
             AnimationType::Flash { .. } => "Flash",
             AnimationType::Circumscribe { .. } => "Circum",
@@ -2533,7 +2544,14 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     }
 
     /// Internal method to resolve and schedule a single animation clip.
-    fn play_clip(&mut self, anim: AnimationBuilder) {
+    fn play_clip(&mut self, mut anim: AnimationBuilder) {
+        if let AnimationType::CameraViewZoomTo { screen, zoom, fit } = anim.anim_type {
+            // Resolved against both sizes at the cursor, then played as a scale.
+            let Some(to) = self.camera_view_zoom_scale(anim.target, screen, zoom, fit) else {
+                return;
+            };
+            anim.anim_type = AnimationType::ScaleTo { to };
+        }
         if let AnimationType::CustomProperties(animation) = &anim.anim_type {
             // One root clip owns transforms/opacity. Descendant clips receive
             // paint only, matching the visible paint behavior of native setters.
@@ -3108,6 +3126,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_grow_from_edge_internal(anim, track);
             return;
         }
+        if matches!(anim.anim_type, AnimationType::CameraViewPop { .. }) {
+            self.play_camera_view_pop_internal(anim, track);
+            return;
+        }
         if matches!(anim.anim_type, AnimationType::GrowFromCenter)
             && self.grow_center_off_pivot(anim.target)
         {
@@ -3405,6 +3427,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::Wiggle
             | AnimationType::GrowFromPoint { .. }
             | AnimationType::GrowFromEdge { .. }
+            | AnimationType::CameraViewZoomTo { .. }
+            | AnimationType::CameraViewPop { .. }
             | AnimationType::PathTrim { .. }
             | AnimationType::EffectsTo { .. }
             | AnimationType::DrawBorderThenFill { .. }
@@ -5502,6 +5526,173 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 label: self.current_label.clone(),
             }),
         );
+    }
+
+    /// Width and height of `id`'s local bounds in world units, with `local`
+    /// in place of its own transform when given.
+    fn world_extent(&self, id: ObjectId, local: Option<SpatialTransform>) -> Option<(f64, f64)> {
+        let state = self.states.get(id)?;
+        let parent = state
+            .parent
+            .map_or(gaanim_core::kurbo::Affine::IDENTITY, |parent| {
+                self.get_world_transform(parent).to_affine_2d()
+            });
+        let local = local.unwrap_or(state.transform);
+        let world = SpatialTransform::from_affine_2d(&(parent * local.to_affine_2d()));
+        let size = state.bounds.size();
+        let extent = (
+            (size.x * world.scale.x).abs(),
+            (size.y * world.scale.y).abs(),
+        );
+        (extent.0.is_finite() && extent.1.is_finite() && extent.0 > 1e-9 && extent.1 > 1e-9)
+            .then_some(extent)
+    }
+
+    /// Scale of `frame` that makes the camera view it frames on `screen`
+    /// reach `zoom`, measured with `fit` against both sizes at the cursor.
+    fn camera_view_zoom_scale(
+        &self,
+        frame: ObjectId,
+        screen: ObjectId,
+        zoom: f64,
+        fit: gaanim_renderer::effects::CameraViewFit,
+    ) -> Option<gaanim_core::glam::DVec3> {
+        let (frame_width, frame_height) = self.world_extent(frame, None)?;
+        let (screen_width, screen_height) = self.world_extent(screen, None)?;
+        if !zoom.is_finite() || zoom <= 0.0 {
+            return None;
+        }
+        let (sx, sy) = (screen_width / frame_width, screen_height / frame_height);
+        let current = match fit {
+            gaanim_renderer::effects::CameraViewFit::Cover => sx.max(sy),
+            _ => sx.min(sy),
+        };
+        let ratio = current / zoom;
+        let scale = self.states.get(frame)?.transform.scale;
+        Some(gaanim_core::glam::DVec3::new(
+            scale.x * ratio,
+            scale.y * ratio,
+            scale.z,
+        ))
+    }
+
+    /// Grow a camera view screen out of the region its camera sees, or shrink
+    /// it back into that region.
+    ///
+    /// Shrunk over that region, the screen shows the scene at its real size,
+    /// so the view starts or ends without a jump. An outgoing pop that does
+    /// not follow a `pop_in` is the screen's entry: before it the screen
+    /// waits over the region.
+    fn play_camera_view_pop_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
+        use gaanim_core::glam::DVec3;
+        use gaanim_core::kurbo::{Affine, Point};
+        let AnimationType::CameraViewPop {
+            frame,
+            focus,
+            zoom,
+            out,
+        } = anim.anim_type
+        else {
+            return;
+        };
+        let screen = anim.target;
+        let (Some(state), Some(frame_state)) = (self.states.get(screen), self.states.get(frame))
+        else {
+            return;
+        };
+        let (entity, bounds, current) = (state.entity, state.bounds, state.transform);
+        let popped_in = self.camera_view_rests.get(&screen).copied();
+        let rest = popped_in.unwrap_or(current);
+        let parent = state.parent.map_or(Affine::IDENTITY, |parent| {
+            self.get_world_transform(parent).to_affine_2d()
+        });
+        // A following frame sits on its focus, which the builder tracks; its
+        // own authored place is stale.
+        let focus_point = focus.and_then(|(object, normalized, offset)| {
+            let bounds = self.states.get(object)?.bounds;
+            let local = bounds.center() + normalized * bounds.size() * 0.5 + offset;
+            Some(self.get_world_transform(object).to_affine_2d() * Point::new(local.x, local.y))
+        });
+        let frame_center = focus_point.unwrap_or_else(|| {
+            self.get_world_transform(frame).to_affine_2d()
+                * Point::new(frame_state.bounds.center().x, frame_state.bounds.center().y)
+        });
+        let factor = match zoom {
+            Some((signal, logarithm)) => {
+                let Some(value) = self.float_signals.get(&signal).copied() else {
+                    return;
+                };
+                (if logarithm { value.exp() } else { value }).recip()
+            }
+            None => {
+                let (Some(frame_extent), Some(screen_extent)) = (
+                    self.world_extent(frame, None),
+                    self.world_extent(screen, Some(rest)),
+                ) else {
+                    return;
+                };
+                (frame_extent.0 / screen_extent.0).min(frame_extent.1 / screen_extent.1)
+            }
+        };
+        if !factor.is_finite() || factor <= 0.0 {
+            return;
+        }
+        let mut start = rest;
+        start.scale = DVec3::new(rest.scale.x * factor, rest.scale.y * factor, rest.scale.z);
+        start.translation = DVec3::new(0.0, 0.0, rest.translation.z);
+        let center = start.to_affine_2d() * Point::new(bounds.center().x, bounds.center().y);
+        let target = parent.inverse() * frame_center;
+        start.translation.x = target.x - center.x;
+        start.translation.y = target.y - center.y;
+
+        let (from, to) = if out {
+            self.camera_view_rests.remove(&screen);
+            if popped_in.is_none() {
+                // The screen's entry: it waits over the region until then.
+                let declared = start;
+                self.commands.entity(entity).queue(
+                    move |mut entity: bevy::prelude::EntityWorldMut<'_>| {
+                        if let Some(mut transform) = entity.get_mut::<SpatialTransform>() {
+                            transform.scale = declared.scale;
+                            transform.translation = declared.translation;
+                        }
+                    },
+                );
+                (start, rest)
+            } else {
+                (current, rest)
+            }
+        } else {
+            self.camera_view_rests.entry(screen).or_insert(current);
+            (current, start)
+        };
+        if let Some(state) = self.states.get_mut(screen) {
+            state.transform.scale = to.scale;
+            state.transform.translation = to.translation;
+        }
+        for lens in [
+            PropertyLensSpec::Scale {
+                from: from.scale,
+                to: to.scale,
+            },
+            PropertyLensSpec::Translation {
+                from: from.translation,
+                to: to.translation,
+            },
+        ] {
+            self.timeline.add_clip(
+                parent_track,
+                self.current_time,
+                anim.duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: screen,
+                    lens,
+                    rate_func: anim.rate_func.clone(),
+                    delay: 0.0,
+                    label: self.current_label.clone(),
+                }),
+            );
+        }
     }
 
     fn play_flash_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {

@@ -5,8 +5,9 @@ pub use crate::diagnostics::{
     collect_vello_diagnostics_system,
 };
 pub use crate::effects::{
-    BooleanBinding, ClipMask, DropShadow, ElementBlend, FillLevelBinding, GaussianBlur, Glow,
-    StrokeAlign, VectorOutlineBinding,
+    BooleanBinding, CameraView, CameraViewBackground, CameraViewFit, ClipMask, DropShadow,
+    ElementBlend, FillLevelBinding, GaussianBlur, Glow, StrokeAlign, VectorOutlineBinding,
+    ViewLayer,
 };
 pub use crate::lottie::{
     LottieAsset, LottieError, LottiePlayback, LottiePlayer, clear_lottie_cache,

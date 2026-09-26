@@ -487,6 +487,25 @@ pub enum AnimationType {
     GrowFromEdge {
         direction: gaanim_core::glam::DVec3,
     },
+    /// Scale a camera view's frame so the view it frames on `screen` reaches
+    /// `zoom`, measured with `fit` against both sizes at the cursor.
+    CameraViewZoomTo {
+        screen: ObjectId,
+        zoom: f64,
+        fit: gaanim_renderer::effects::CameraViewFit,
+    },
+    /// Grow a camera view screen out of the region its camera sees (`out`), or
+    /// shrink it back into that region. `zoom` names the parameter holding the
+    /// view's explicit zoom and whether it holds its natural logarithm; without
+    /// it the region is `frame`'s bounds. `focus` is the anchor the frame
+    /// follows (object, normalized bounds point, local offset), which sets the
+    /// region's center instead of the frame's authored place.
+    CameraViewPop {
+        frame: ObjectId,
+        focus: Option<(ObjectId, DVec3, DVec3)>,
+        zoom: Option<(ObjectId, bool)>,
+        out: bool,
+    },
     /// Draw the outline first (like Write) then fill in.
     DrawBorderThenFill {
         config: DrawAnimationConfig,

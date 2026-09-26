@@ -17,7 +17,10 @@ pub use components::{
     RenderOrder, StrokeBrush, TextBaseline, TriangleMeshData, Visible, WorldBounds,
 };
 pub use hierarchy::{GaanimScenePlugin, SceneSet};
-pub use systems::{opacity_propagation_system, sync_new_opacities, transform_propagation_system};
+pub use systems::{
+    hud_pin, opacity_propagation_system, pin_hud_overlays_system, sync_new_opacities,
+    transform_propagation_system, world_hud_pin,
+};
 pub use transition_frame::{
     SceneTransitionFrame, TransitionMask, TransitionOverlayLayer, TransitionSide,
 };

@@ -1833,6 +1833,54 @@ impl PyCamera {
 }
 
 #[pymethods]
+impl PyCamera {
+    /// Show an enlarged detail of the scene in an inset screen.
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (target, *, zoom=None, at=None, size=None, shape="rounded", follow=false, connectors=true, color=None, fixed=false, background=crate::pydrawable::CameraViewBackgroundArg::Canvas, exclude=Vec::new(), layers=Vec::new()))]
+    fn inset(
+        &self,
+        py: Python<'_>,
+        target: Bound<'_, PyAny>,
+        zoom: Option<Bound<'_, PyAny>>,
+        at: Option<Bound<'_, PyAny>>,
+        size: Option<f64>,
+        shape: &str,
+        follow: bool,
+        connectors: bool,
+        color: Option<PyColor>,
+        fixed: bool,
+        background: crate::pydrawable::CameraViewBackgroundArg,
+        exclude: Vec<PyDrawable>,
+        layers: Vec<String>,
+    ) -> PyResult<crate::pycamera_view::PyCameraView> {
+        crate::custom::ensure_authoring_allowed()?;
+        let zoom = zoom.unwrap_or_else(|| 2.0_f64.into_pyobject(py).unwrap().into_any());
+        let at = match at {
+            Some(at) => at,
+            None => Py::new(py, PyAnchor(gaanim_layout::Anchor::TopRight))?
+                .into_bound(py)
+                .into_any(),
+        };
+        let mut canvas = self.inner.lock().expect("scene canvas poisoned");
+        crate::pycamera_view::camera_inset(
+            &mut canvas,
+            &target,
+            &zoom,
+            &at,
+            size,
+            shape,
+            follow,
+            connectors,
+            color,
+            fixed,
+            background,
+            exclude,
+            layers,
+        )
+    }
+}
+
+#[pymethods]
 impl PyCameraAnimation {
     /// Animate to a reusable camera state.
     fn to(&self, state: &PyCameraState) -> PyResult<PyCanvasAnim> {
