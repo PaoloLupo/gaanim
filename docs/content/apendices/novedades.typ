@@ -63,6 +63,11 @@ Cambios todavía sin publicar.
 - El texto de un SVG con la familia genérica `sans-serif` usa la DejaVu Sans
   que trae Gaanim en cualquier sistema. Antes salía en Arial si estaba
   instalada y desaparecía en los equipos Linux que no la tienen.
+- `gaanim check` imprime su informe con el nuevo formato de la terminal
+  (`pass`, `warning`, `error`, `fail`) en lugar de las líneas `PASS:`,
+  `WARN:` y `ERROR:`. Si un script leía ese texto, usa el código de salida,
+  que no cambia: `0` sin errores, `1` con problemas y `2` si el proyecto no
+  carga.
 
 == Cambios
 
@@ -80,6 +85,9 @@ Cambios todavía sin publicar.
 - `gaanim --help` y la ayuda de cada comando están reescritas: incluyen
   ejemplos, las teclas del modo presentación, las variables de entorno y el
   enlace a esta documentación.
+- Las exportaciones respetan `WGPU_BACKEND` (`vulkan`, `dx12`, `metal`, `gl`)
+  igual que la vista previa, para elegir el backend de la GPU cuando el que
+  se elige por defecto falla.
 
 = 0.4.1
 

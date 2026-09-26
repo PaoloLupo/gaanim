@@ -88,6 +88,9 @@ están explicados en la sección de problemas de
   winit y el audio. Para verlos, arranca con `RUST_LOG=info` (o
   `RUST_LOG=wgpu=warn` para un solo módulo). `NO_COLOR=1` quita los colores;
   el logo solo aparece cuando la salida es una terminal.
+- *La vista previa o la exportación fallan al iniciar la GPU:* prueba otro
+  backend con `WGPU_BACKEND`, por ejemplo `WGPU_BACKEND=vulkan` o
+  `WGPU_BACKEND=dx12` en Windows y `WGPU_BACKEND=gl` en Linux.
 - *En la vista del presentador no veo los objetos 3D:* sus vistas previas
   solo dibujan las capas 2D; la audiencia sí los ve. La API 3D es
   experimental (ver #link("/guias/camara-y-3d/")[Cámara y 3D]).
