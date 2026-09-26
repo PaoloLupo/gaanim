@@ -2425,8 +2425,12 @@ mod tests {
 
     #[test]
     fn connector_handles_collapsed_points_and_short_final_segment() {
-        assert!(connector_path(&[DVec3::ZERO, DVec3::ZERO], 0.18, 0.15, 0.036, None, 1.0).is_empty());
-        assert!(connector_path(&[DVec3::ZERO, DVec3::NAN], 0.18, 0.15, 0.036, None, 1.0).is_empty());
+        assert!(
+            connector_path(&[DVec3::ZERO, DVec3::ZERO], 0.18, 0.15, 0.036, None, 1.0).is_empty()
+        );
+        assert!(
+            connector_path(&[DVec3::ZERO, DVec3::NAN], 0.18, 0.15, 0.036, None, 1.0).is_empty()
+        );
         let points = [DVec3::ZERO, DVec3::ZERO, DVec3::new(0.1, 0.0, 0.0)];
         let path = connector_path(&points, 0.18, 0.15, 0.036, Some(0.5), 1.0);
         let bounds = path.bounding_box();

@@ -974,7 +974,9 @@ const BLUR_CORE_COVERAGE: f32 = 0.97;
 /// `BLUR_CORE_COVERAGE * alpha`, keeping solid interiors near full opacity.
 fn blur_taps(sigma: f64, alpha: f32) -> impl Iterator<Item = ((f64, f64), f32)> {
     let extent = BLUR_TAP_RADIUS * sigma / BLUR_TAP_SPACING;
-    let count = (std::f64::consts::PI * extent * extent).ceil().clamp(13.0, 160.0) as u32;
+    let count = (std::f64::consts::PI * extent * extent)
+        .ceil()
+        .clamp(13.0, 160.0) as u32;
     let target = (BLUR_CORE_COVERAGE * alpha.clamp(0.0, 1.0)).min(0.999);
     let tap_alpha = 1.0 - (1.0 - target).powf(1.0 / count as f32);
     let tail = 1.0 - (-0.5 * BLUR_TAP_RADIUS * BLUR_TAP_RADIUS).exp();
@@ -2398,7 +2400,10 @@ mod tests {
                 .fold(0.0, f64::max);
             assert!(max_radius <= BLUR_TAP_RADIUS * sigma + 1e-9);
             let core = 1.0 - taps.iter().map(|(_, a)| 1.0 - a).product::<f32>();
-            assert!((core - BLUR_CORE_COVERAGE * 0.8).abs() < 1e-3, "core {core}");
+            assert!(
+                (core - BLUR_CORE_COVERAGE * 0.8).abs() < 1e-3,
+                "core {core}"
+            );
         }
         // Wider blurs use more taps so neighbouring copies stay close together.
         assert!(blur_taps(0.3, 1.0).count() > blur_taps(0.02, 1.0).count());

@@ -11519,10 +11519,19 @@ mod grow_arrow_tests {
             gaanim_animation::tracking_line_system(&mut world);
             path_of(&world, entity)
         };
-        assert!(bounds_at(0.0).elements().is_empty(), "hidden before growing");
+        assert!(
+            bounds_at(0.0).elements().is_empty(),
+            "hidden before growing"
+        );
         let half = bounds_at(0.5).bounding_box();
-        assert!((half.x1 - 2.0).abs() < 1e-9 && half.x0.abs() < 1e-9, "{half:?}");
-        assert!((half.height() - 0.3).abs() < 1e-9, "the head keeps its width");
+        assert!(
+            (half.x1 - 2.0).abs() < 1e-9 && half.x0.abs() < 1e-9,
+            "{half:?}"
+        );
+        assert!(
+            (half.height() - 0.3).abs() < 1e-9,
+            "the head keeps its width"
+        );
         let full = bounds_at(1.0).bounding_box();
         assert!((full.y1 - 2.0).abs() < 1e-9, "the tip reaches the endpoint");
         // Reverse seeks are exact.

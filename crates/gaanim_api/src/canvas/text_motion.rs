@@ -383,7 +383,9 @@ mod tests {
             ]);
         }
         // Scrambles 0.6-1.2 s.
-        canvas.play(vec![third.animate().scramble("upper", 0.3, 20.0, 0).unwrap()]);
+        canvas.play(vec![
+            third.animate().scramble("upper", 0.3, 20.0, 0).unwrap(),
+        ]);
 
         let world = bevy::prelude::World::new();
         let mut queue = CommandQueue::default();

@@ -61,8 +61,7 @@ pub enum SelectorShape {
 }
 
 impl SelectorShape {
-    pub const NAMES: &'static str =
-        "square, ramp, smooth, ease_in, ease_out, triangle, or round";
+    pub const NAMES: &'static str = "square, ramp, smooth, ease_in, ease_out, triangle, or round";
 
     pub fn parse(name: &str) -> Option<Self> {
         Some(match name {
@@ -797,8 +796,11 @@ impl SceneBuilder<'_, '_, '_> {
             return None;
         }
         let ids: Vec<ObjectId> = glyphs.iter().map(|(id, _)| *id).collect();
-        let index: HashMap<ObjectId, usize> =
-            ids.iter().enumerate().map(|(index, id)| (*id, index)).collect();
+        let index: HashMap<ObjectId, usize> = ids
+            .iter()
+            .enumerate()
+            .map(|(index, id)| (*id, index))
+            .collect();
         let boxes: Vec<kurbo::Rect> = ids
             .iter()
             .map(|id| {
@@ -1096,7 +1098,8 @@ impl SceneBuilder<'_, '_, '_> {
                     state.transform = lerp_transform(&rest, &target, final_influence);
                 }
                 if let Some(opacity) = out.opacity {
-                    state.opacity = rest_opacity + (opacity - rest_opacity) * final_influence as f32;
+                    state.opacity =
+                        rest_opacity + (opacity - rest_opacity) * final_influence as f32;
                 }
                 if let Some((to, from)) = color {
                     state.fill = Some(Brush::Solid(gaanim_core::interpolate_color(
@@ -1174,13 +1177,23 @@ mod tests {
         assert_eq!(SelectorShape::Square.influence(0.51), 0.0);
         // Ramp keeps an easing's overshoot.
         assert!(SelectorShape::Ramp.influence(1.1) < 0.0);
-        assert_eq!(SelectorShape::parse("ease_out"), Some(SelectorShape::EaseOut));
+        assert_eq!(
+            SelectorShape::parse("ease_out"),
+            Some(SelectorShape::EaseOut)
+        );
         assert_eq!(SelectorShape::parse("wobble"), None);
     }
 
     #[test]
     fn unit_rates_follow_their_window_and_hold_outside() {
-        let rate = unit_rate(SelectorShape::Ramp, &RateFunc::Linear, (0.25, 0.75), 0.0, 1.0, false);
+        let rate = unit_rate(
+            SelectorShape::Ramp,
+            &RateFunc::Linear,
+            (0.25, 0.75),
+            0.0,
+            1.0,
+            false,
+        );
         assert!((rate.evaluate(0.0) - 1.0).abs() < 1e-12);
         assert!((rate.evaluate(0.25) - 1.0).abs() < 1e-12);
         assert!((rate.evaluate(0.5) - 0.5).abs() < 1e-9);
@@ -1190,7 +1203,14 @@ mod tests {
         assert_eq!(rate.evaluate(0.4).to_bits(), rate.evaluate(0.4).to_bits());
 
         // A backward range enters the window from its far end.
-        let back = unit_rate(SelectorShape::Ramp, &RateFunc::Linear, (0.25, 0.75), 1.0, 0.0, false);
+        let back = unit_rate(
+            SelectorShape::Ramp,
+            &RateFunc::Linear,
+            (0.25, 0.75),
+            1.0,
+            0.0,
+            false,
+        );
         assert!(back.evaluate(0.0).abs() < 1e-12);
         assert!((back.evaluate(0.5) - 0.5).abs() < 1e-9);
         assert!((back.evaluate(1.0) - 1.0).abs() < 1e-12);
@@ -1207,13 +1227,27 @@ mod tests {
         assert!(eased.evaluate(0.5) < 0.2);
 
         // An exit runs forward from rest to the out state.
-        let exit = unit_rate(SelectorShape::Ramp, &RateFunc::Linear, (0.25, 0.75), 0.0, 1.0, true);
+        let exit = unit_rate(
+            SelectorShape::Ramp,
+            &RateFunc::Linear,
+            (0.25, 0.75),
+            0.0,
+            1.0,
+            true,
+        );
         assert!(exit.evaluate(0.0).abs() < 1e-12);
         assert!((exit.evaluate(0.5) - 0.5).abs() < 1e-9);
         assert!((exit.evaluate(1.0) - 1.0).abs() < 1e-12);
 
         // A frozen range holds one influence.
-        let frozen = unit_rate(SelectorShape::Ramp, &RateFunc::Linear, (0.0, 1.0), 0.5, 0.5, false);
+        let frozen = unit_rate(
+            SelectorShape::Ramp,
+            &RateFunc::Linear,
+            (0.0, 1.0),
+            0.5,
+            0.5,
+            false,
+        );
         assert!((frozen.evaluate(0.0) - 0.5).abs() < 1e-12);
         assert!((frozen.evaluate(1.0) - 0.5).abs() < 1e-12);
     }
@@ -1302,9 +1336,7 @@ mod tests {
             .clips
             .values()
             .filter_map(|clip| match &clip.payload {
-                ClipPayload::Animation(spec)
-                    if spec.label.as_deref() == Some("TextAnimator") =>
-                {
+                ClipPayload::Animation(spec) if spec.label.as_deref() == Some("TextAnimator") => {
                     Some((
                         spec.target,
                         clip.start,
@@ -1411,7 +1443,10 @@ mod tests {
         for line in &lines {
             assert!(line.iter().all(|value| value == &line[0]), "{lines:?}");
         }
-        assert!(lines[0][0] < lines[1][0] && lines[1][0] <= lines[2][0], "{lines:?}");
+        assert!(
+            lines[0][0] < lines[1][0] && lines[1][0] <= lines[2][0],
+            "{lines:?}"
+        );
     }
 
     #[test]
@@ -1437,9 +1472,11 @@ mod tests {
         assert_eq!(translations.len(), 10);
         assert_eq!(masks.len(), 10);
         // Every glyph starts out of place and ends at rest.
-        assert!(translations
-            .iter()
-            .all(|clip| (clip.3 - 1.0).abs() < 1e-9 && clip.4.abs() < 1e-9));
+        assert!(
+            translations
+                .iter()
+                .all(|clip| (clip.3 - 1.0).abs() < 1e-9 && clip.4.abs() < 1e-9)
+        );
         assert!(clips.iter().all(|clip| clip.2.find("Opacity").is_none()));
     }
 
@@ -1526,9 +1563,11 @@ mod tests {
         // The reveal rises from below (its out state is lower)...
         assert!(reveal.iter().all(|clip| clip.0 < 0.0 && clip.1 > 0.99));
         // ...and the conceal starts at rest and leaves upward.
-        assert!(conceal
-            .iter()
-            .all(|clip| clip.0 > 0.0 && clip.1.abs() < 1e-9 && (clip.2 - 1.0).abs() < 1e-9));
+        assert!(
+            conceal
+                .iter()
+                .all(|clip| clip.0 > 0.0 && clip.1.abs() < 1e-9 && (clip.2 - 1.0).abs() < 1e-9)
+        );
         let down = travel(|anim| {
             anim.text_conceal(TextRevealUnit::Line, TextRevealStyle::SlideDown, true, 0.2)
                 .unwrap()
@@ -1562,7 +1601,12 @@ mod tests {
         assert_eq!(opened.len(), 2, "{shifts:?}");
         assert!((opened[1] - 2.0 * opened[0]).abs() < 1e-9, "{shifts:?}");
         assert_eq!(opened.len(), closed.len());
-        assert!(opened.iter().zip(&closed).all(|(a, b)| (a - b).abs() < 1e-9));
+        assert!(
+            opened
+                .iter()
+                .zip(&closed)
+                .all(|(a, b)| (a - b).abs() < 1e-9)
+        );
     }
 
     #[test]
@@ -1571,11 +1615,21 @@ mod tests {
         let circle = canvas.circle(1.0);
         assert_eq!(
             circle
-                .animator(TextRevealUnit::Grapheme, SelectorShape::Smooth, DrawOrder::Forward, 0)
+                .animator(
+                    TextRevealUnit::Grapheme,
+                    SelectorShape::Smooth,
+                    DrawOrder::Forward,
+                    0
+                )
                 .unwrap_err(),
             TextAnimatorError::NotText("animator")
         );
-        assert!(circle.animate().blur_in(0.3, TextRevealUnit::Grapheme, 0.02).is_err());
+        assert!(
+            circle
+                .animate()
+                .blur_in(0.3, TextRevealUnit::Grapheme, 0.02)
+                .is_err()
+        );
     }
 
     #[test]
@@ -1588,7 +1642,10 @@ mod tests {
         assert_eq!(unmasked.opacity, Some(0.0));
         assert!(TextRevealStyle::Blur.out_state(true).blur.is_some());
         assert!(!TextRevealStyle::Fade.masks());
-        assert_eq!(TextRevealStyle::parse("slide_up"), Some(TextRevealStyle::SlideUp));
+        assert_eq!(
+            TextRevealStyle::parse("slide_up"),
+            Some(TextRevealStyle::SlideUp)
+        );
         assert_eq!(TextRevealStyle::parse("wipe"), None);
     }
 }

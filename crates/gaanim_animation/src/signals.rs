@@ -600,7 +600,11 @@ fn apply_position_bindings(world: &mut World, skip_followers: bool) {
     // Collect all bindings and their source positions.
     let mut query = world.query::<(Entity, &PositionBinding)>();
     for (target, binding) in query.iter(world) {
-        if skip_followers && world.get::<crate::updaters::EndpointFollow>(target).is_some() {
+        if skip_followers
+            && world
+                .get::<crate::updaters::EndpointFollow>(target)
+                .is_some()
+        {
             continue;
         }
         if let Some(src_transform) = world.get::<SpatialTransform>(binding.source) {
