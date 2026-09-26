@@ -350,24 +350,7 @@ pub fn validate_python_api(script_path: &Path) -> Result<(), String> {
 /// `Path.relative_to` against ordinary paths in user code (`__file__`,
 /// `sys.path`). The prefix is dropped when the plain form is still valid.
 fn python_path(path: &Path) -> PathBuf {
-    let Some(text) = path.to_str() else {
-        return path.to_path_buf();
-    };
-    let plain = if let Some(share) = text.strip_prefix(r"\\?\UNC\") {
-        format!(r"\\{share}")
-    } else if let Some(rest) = text.strip_prefix(r"\\?\")
-        && rest.as_bytes().get(1) == Some(&b':')
-    {
-        rest.to_owned()
-    } else {
-        return path.to_path_buf();
-    };
-    // Without the prefix, Windows limits paths to MAX_PATH (260) characters.
-    if plain.len() < 260 {
-        PathBuf::from(plain)
-    } else {
-        path.to_path_buf()
-    }
+    gaanim_core::console::plain_path(path)
 }
 
 /// Execute a Python file by path inside the given interpreter, in a fresh

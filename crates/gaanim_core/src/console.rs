@@ -231,9 +231,33 @@ pub fn format_traceback(traceback: &str, color: bool) -> String {
         .collect()
 }
 
+/// A path without Windows' `\\?\` verbatim prefix, which canonical paths carry
+/// and people never type. The prefix is kept when the plain form would exceed
+/// MAX_PATH (260 characters) or is not a drive or UNC path.
+pub fn plain_path(path: &std::path::Path) -> std::path::PathBuf {
+    let Some(text) = path.to_str() else {
+        return path.to_path_buf();
+    };
+    let plain = if let Some(share) = text.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{share}")
+    } else if let Some(rest) = text.strip_prefix(r"\\?\")
+        && rest.as_bytes().get(1) == Some(&b':')
+    {
+        rest.to_owned()
+    } else {
+        return path.to_path_buf();
+    };
+    if plain.len() < 260 {
+        std::path::PathBuf::from(plain)
+    } else {
+        path.to_path_buf()
+    }
+}
+
 /// A path as a person would type it: relative to the current directory when it
-/// lies inside it, otherwise unchanged.
+/// lies inside it, otherwise unchanged apart from the verbatim prefix.
 pub fn display_path(path: &std::path::Path) -> String {
+    let path = &plain_path(path);
     let relative = std::env::current_dir().ok().and_then(|cwd| {
         path.strip_prefix(cwd)
             .ok()
@@ -471,6 +495,27 @@ mod tests {
         );
         let outside = std::path::Path::new("/definitely/elsewhere/a.py");
         assert_eq!(display_path(outside), outside.display().to_string());
+        // Canonical Windows paths carry `\\?\`; they still read as typed.
+        assert_eq!(display_path(&cwd.canonicalize().unwrap()), ".");
+    }
+
+    #[test]
+    fn plain_paths_drop_the_windows_verbatim_prefix() {
+        use std::path::{Path, PathBuf};
+        assert_eq!(
+            plain_path(Path::new(r"\\?\C:\proj\main.py")),
+            PathBuf::from(r"C:\proj\main.py")
+        );
+        assert_eq!(
+            plain_path(Path::new(r"\\?\UNC\server\share\main.py")),
+            PathBuf::from(r"\\server\share\main.py")
+        );
+        let long = format!(r"\\?\C:\{}\main.py", "d".repeat(300));
+        assert_eq!(plain_path(Path::new(&long)), PathBuf::from(&long));
+        assert_eq!(
+            display_path(Path::new(r"\\?\Z:\elsewhere\a.py")),
+            r"Z:\elsewhere\a.py"
+        );
     }
 
     #[test]
