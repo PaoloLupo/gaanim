@@ -54,7 +54,12 @@ jobs:
       - name: Type-check workspace
         run: cargo check --workspace
 
+      # GPU tests skip themselves when no adapter is found. Hosted Windows
+      # runners do report a software adapter, but rendering on it crashes the
+      # test process, so ask wgpu for a backend Windows does not have.
       - name: Run unit tests
+        env:
+          WGPU_BACKEND: ${{ runner.os == 'Windows' && 'metal' || 'vulkan,gl' }}
         run: cargo test --workspace
 
       - name: Lint workspace
