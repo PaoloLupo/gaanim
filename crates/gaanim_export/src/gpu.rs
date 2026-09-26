@@ -1,13 +1,13 @@
-use bevy_vello::vello::RendererOptions;
-use bevy_vello::vello::wgpu::{
+use gaanim_renderer::post_process::{GpuPostProcess, PostProcessRequest};
+use std::sync::{Arc, Mutex, mpsc};
+use thiserror::Error;
+use vello::RendererOptions;
+use vello::wgpu::{
     Backends, BufferDescriptor, BufferUsages, CommandEncoderDescriptor, Extent3d, Instance,
     InstanceDescriptor, Limits, MapMode, Origin3d, PowerPreference, RequestAdapterOptions,
     TexelCopyBufferInfo, TexelCopyBufferLayout, TexelCopyTextureInfo, TextureAspect,
     TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
 };
-use gaanim_renderer::post_process::{GpuPostProcess, PostProcessRequest};
-use std::sync::{Arc, Mutex, mpsc};
-use thiserror::Error;
 
 /// Written to the probe pixels before each render. Vello writes every pixel
 /// of its target unless a stage overflowed its fixed-size buffers, in which
@@ -64,14 +64,14 @@ impl GpuContextError {
 }
 
 pub struct GpuContext {
-    device: bevy_vello::vello::wgpu::Device,
-    queue: bevy_vello::vello::wgpu::Queue,
-    renderer: bevy_vello::vello::Renderer,
-    texture: bevy_vello::vello::wgpu::Texture,
-    texture_view: bevy_vello::vello::wgpu::TextureView,
-    staging: bevy_vello::vello::wgpu::Buffer,
+    device: vello::wgpu::Device,
+    queue: vello::wgpu::Queue,
+    renderer: vello::Renderer,
+    texture: vello::wgpu::Texture,
+    texture_view: vello::wgpu::TextureView,
+    staging: vello::wgpu::Buffer,
     /// One probe pixel per `PROBE_STRIDE` bytes, read before post-processing.
-    probe: bevy_vello::vello::wgpu::Buffer,
+    probe: vello::wgpu::Buffer,
     width: u32,
     height: u32,
     padded_width: u32,
@@ -111,19 +111,18 @@ impl GpuContext {
             .max_storage_buffer_binding_size
             .min(max_buffer_size)
             .max(defaults.max_storage_buffer_binding_size);
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &bevy_vello::vello::wgpu::DeviceDescriptor {
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&vello::wgpu::DeviceDescriptor {
                 label: Some("gaanim-export-gpu"),
-                required_features: bevy_vello::vello::wgpu::Features::empty(),
+                required_features: vello::wgpu::Features::empty(),
                 required_limits: Limits {
                     max_buffer_size,
                     max_storage_buffer_binding_size: max_storage,
                     ..defaults
                 },
                 ..Default::default()
-            },
-        ))
-        .map_err(|e| GpuContextError::Device(e.to_string()))?;
+            }))
+            .map_err(|e| GpuContextError::Device(e.to_string()))?;
 
         let pending_error = Arc::new(Mutex::new(None));
         {
@@ -140,13 +139,11 @@ impl GpuContext {
             let pending_error = pending_error.clone();
             device.on_uncaptured_error(Arc::new(move |error| {
                 let captured = match error {
-                    bevy_vello::vello::wgpu::Error::OutOfMemory { .. } => {
-                        GpuContextError::OutOfMemory
-                    }
-                    bevy_vello::vello::wgpu::Error::Validation { description, .. } => {
+                    vello::wgpu::Error::OutOfMemory { .. } => GpuContextError::OutOfMemory,
+                    vello::wgpu::Error::Validation { description, .. } => {
                         GpuContextError::Validation(description)
                     }
-                    bevy_vello::vello::wgpu::Error::Internal { description, .. } => {
+                    vello::wgpu::Error::Internal { description, .. } => {
                         GpuContextError::Internal(description)
                     }
                 };
@@ -157,11 +154,11 @@ impl GpuContext {
             }));
         }
 
-        let renderer = bevy_vello::vello::Renderer::new(
+        let renderer = vello::Renderer::new(
             &device,
             RendererOptions {
                 use_cpu: false,
-                antialiasing_support: bevy_vello::vello::AaSupport::all(),
+                antialiasing_support: vello::AaSupport::all(),
                 num_init_threads: None,
                 pipeline_cache: None,
             },
@@ -234,13 +231,13 @@ impl GpuContext {
     }
 
     /// Block until `buffer` is mapped for reading.
-    fn map_read(&self, buffer: &bevy_vello::vello::wgpu::Buffer) -> Result<(), GpuContextError> {
+    fn map_read(&self, buffer: &vello::wgpu::Buffer) -> Result<(), GpuContextError> {
         let (tx, rx) = mpsc::channel::<Result<(), String>>();
         buffer.slice(..).map_async(MapMode::Read, move |result| {
             let _ = tx.send(result.map_err(|e| format!("Buffer map failed: {e}")));
         });
         loop {
-            let _ = self.device.poll(bevy_vello::vello::wgpu::PollType::Poll);
+            let _ = self.device.poll(vello::wgpu::PollType::Poll);
             self.check_error()?;
             match rx.try_recv() {
                 Ok(Ok(())) => return Ok(()),
@@ -277,8 +274,8 @@ impl GpuContext {
     /// keep, until it fits or the device limit is reached.
     pub fn render_frame(
         &mut self,
-        scene: &bevy_vello::vello::Scene,
-        base_color: bevy_vello::vello::peniko::Color,
+        scene: &vello::Scene,
+        base_color: vello::peniko::Color,
         post: Option<&PostProcessRequest>,
     ) -> Result<Vec<u8>, GpuContextError> {
         loop {
@@ -297,8 +294,8 @@ impl GpuContext {
     /// One render and readback; `None` when Vello skipped the frame.
     fn render_attempt(
         &mut self,
-        scene: &bevy_vello::vello::Scene,
-        base_color: bevy_vello::vello::peniko::Color,
+        scene: &vello::Scene,
+        base_color: vello::peniko::Color,
         post: Option<&PostProcessRequest>,
     ) -> Result<Option<Vec<u8>>, GpuContextError> {
         self.check_error()?;
@@ -333,11 +330,11 @@ impl GpuContext {
                 &self.queue,
                 scene,
                 &self.texture_view,
-                &bevy_vello::vello::RenderParams {
+                &vello::RenderParams {
                     base_color,
                     width: self.width,
                     height: self.height,
-                    antialiasing_method: bevy_vello::vello::AaConfig::Msaa16,
+                    antialiasing_method: vello::AaConfig::Msaa16,
                 },
             )
             .map_err(|e| GpuContextError::Render(e.to_string()))?;
@@ -440,7 +437,7 @@ mod tests {
     #[test]
     #[ignore = "requires a GPU adapter; run explicitly for raster replay validation"]
     fn raster_images_survive_vector_only_frames_and_replay() {
-        use bevy_vello::vello::{Scene, kurbo::Affine, peniko};
+        use vello::{Scene, kurbo::Affine, peniko};
 
         let mut gpu = GpuContext::new(32, 32).expect("GPU context");
         let image = peniko::ImageData {
@@ -459,7 +456,7 @@ mod tests {
             Affine::IDENTITY,
             peniko::Color::from_rgb8(0, 0, 255),
             None,
-            &bevy_vello::vello::kurbo::Rect::new(0.0, 0.0, 32.0, 32.0),
+            &vello::kurbo::Rect::new(0.0, 0.0, 32.0, 32.0),
         );
 
         let first = gpu
@@ -485,8 +482,8 @@ mod tests {
 
     #[test]
     fn post_process_changes_only_the_camera_frame() {
-        use bevy_vello::vello::{Scene, kurbo, peniko};
         use gaanim_renderer::post_process::{CanvasPostProcess, PostProcessShader};
+        use vello::{Scene, kurbo, peniko};
 
         let Ok(mut gpu) = GpuContext::new(32, 16) else {
             eprintln!("skipped: no GPU adapter");
@@ -542,7 +539,7 @@ mod tests {
 
     #[test]
     fn frame_spanning_paths_render_without_a_retry() {
-        use bevy_vello::vello::{Scene, kurbo, peniko};
+        use vello::{Scene, kurbo, peniko};
 
         let Ok(mut gpu) = GpuContext::new(1920, 1080) else {
             eprintln!("skipped: no GPU adapter");
@@ -574,7 +571,7 @@ mod tests {
 
     #[test]
     fn overflowing_frames_retry_with_larger_buffers() {
-        use bevy_vello::vello::{Scene, kurbo, peniko};
+        use vello::{Scene, kurbo, peniko};
 
         let Ok(mut gpu) = GpuContext::new(1920, 1080) else {
             eprintln!("skipped: no GPU adapter");

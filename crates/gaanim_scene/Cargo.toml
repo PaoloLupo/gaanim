@@ -11,7 +11,9 @@ gaanim_math = { path = "../gaanim_math" }
 
 # Re-use workspace dependencies
 # Scene components and systems own glTF instances, materials, and 3D meshes.
+# glTF textures decode through `png`; glTF scenes instantiate by reflection.
 bevy = { workspace = true, features = [
+    "async_executor",
     "bevy_asset",
     "bevy_log",
     "bevy_world_serialization",
@@ -20,6 +22,8 @@ bevy = { workspace = true, features = [
     "gltf_animation",
     "bevy_pbr",
     "bevy_render",
+    "png",
+    "reflect_auto_register",
 ] }
 glam = { workspace = true }
 kurbo = { workspace = true }

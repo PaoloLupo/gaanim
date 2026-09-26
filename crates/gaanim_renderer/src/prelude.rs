@@ -1,4 +1,5 @@
 pub use crate::background::{BackgroundPaint, ShaderBackground, ShaderBackgroundError};
+pub use crate::canvas::{VelloCanvas, VelloScene2d, VelloView};
 pub use crate::diagnostics::{
     RenderFailure, RenderFailureKind, RenderHealth, VelloDiagnostics,
     collect_vello_diagnostics_system,
@@ -17,4 +18,3 @@ pub use crate::pipeline::{
     sync_gaanim_camera_to_bevy_system,
 };
 pub use crate::{GaanimDerivedGeometryPlugin, GaanimRendererPlugin};
-pub use bevy_vello::prelude::{VelloScene2d, VelloView};

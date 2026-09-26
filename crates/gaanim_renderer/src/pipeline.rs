@@ -19,8 +19,7 @@ use gaanim_scene::{
 use std::collections::HashMap;
 use std::sync::Arc;
 
-// Explicit imports from bevy_vello instead of glob for clarity
-use bevy_vello::integrations::scene::VelloScene2d;
+use crate::canvas::VelloScene2d;
 
 /// Resource: stores the canvas background paint and logical frame bounds.
 ///
@@ -1108,7 +1107,7 @@ fn draw_glow(
 /// System: Synchronizes the `gaanim_math::Camera` resource to the active Bevy `Camera2d`.
 ///
 /// This ensures that zoom, pan, and rotation configured on the gaanim camera are reflected
-/// in the actual rendered output, since `bevy_vello` relies on the Bevy camera for projection.
+/// in the actual rendered output, since the Vello canvas is projected through the Bevy camera.
 pub fn sync_gaanim_camera_to_bevy_system(
     gaanim_camera: Option<Res<gaanim_math::ResolvedCamera>>,
     mut bevy_cameras: Query<(&mut Transform, &mut Projection), With<Camera2d>>,
@@ -1811,15 +1810,12 @@ pub fn gaanim_render_system(
         Option<Ref<Visible>>,
         Option<Ref<StrokeAlign>>,
     )>,
-    mut query_vello_scene: Query<(Entity, &mut VelloScene2d, &mut Transform), With<MainVelloScene>>,
+    mut query_vello_scene: Query<&mut VelloScene2d, With<MainVelloScene>>,
     mut shader_frame: Option<ResMut<ShaderBackgroundFrame>>,
     mut local_extracted: Local<Vec<ExtractedElement>>,
     mut local_culled: Local<std::collections::HashSet<Entity>>,
 ) {
     local_extracted.clear();
-    let mut scene_aabb_min = Vec3::splat(f32::INFINITY);
-    let mut scene_aabb_max = Vec3::splat(f32::NEG_INFINITY);
-
     local_culled.clear();
 
     // Viewport pixels per world unit, as in the culling bounds below.
@@ -2229,23 +2225,6 @@ pub fn gaanim_render_system(
                     frame.side_of(entity, |e| child_query.get(e).ok().map(ChildOf::parent))
                 }),
         });
-
-        // Accumulate AABB from WorldBounds if available, otherwise approximate from transform
-        if let Some(bounds) = world_bounds_opt {
-            let min = Vec3::new(bounds.0.min.x as f32, bounds.0.min.y as f32, 0.0);
-            let max = Vec3::new(bounds.0.max.x as f32, bounds.0.max.y as f32, 0.0);
-            scene_aabb_min = scene_aabb_min.min(min);
-            scene_aabb_max = scene_aabb_max.max(max);
-        } else {
-            // Fallback: use the translation component of the affine 2D transform as a point
-            // estimate with a generous margin. The 4x4 mat4 field is only available under the
-            // `dim3` feature; for the 2D-only path we extract tx/ty from the affine coefficients.
-            let coeffs = transform.affine_2d.as_coeffs();
-            let center = Vec3::new(coeffs[4] as f32, coeffs[5] as f32, 0.0);
-            let margin = Vec3::new(500.0, 500.0, 1.0);
-            scene_aabb_min = scene_aabb_min.min(center - margin);
-            scene_aabb_max = scene_aabb_max.max(center + margin);
-        }
     }
 
     // Sort elements deterministically by RenderOrder to ensure correct layering
@@ -2304,41 +2283,14 @@ pub fn gaanim_render_system(
     );
     local_extracted.clear();
 
-    // Compute a sensible AABB for the VelloScene2d entity.
-    // If the scene is empty, use a default viewport-sized bounds to avoid zero-size culling.
-    let (aabb_min, aabb_max) = if scene_aabb_min.x.is_finite() {
-        (scene_aabb_min, scene_aabb_max)
+    // Hand the composited encoding to the single global scene entity.
+    if let Some(mut scene) = query_vello_scene.iter_mut().next() {
+        *scene = VelloScene2d::from(std::mem::take(&mut main_scene));
     } else {
-        let default = Vec3::new(640.0, 360.0, 0.0);
-        (default * -1.0, default)
-    };
-
-    // Update the single global VelloScene2d or spawn it on demand
-    let mut scene_entity_found = false;
-    for (entity, mut scene, mut scene_transform) in &mut query_vello_scene {
-        // Hand over the composited encoding instead of copying it again.
-        **scene = Box::new(std::mem::take(&mut main_scene));
-        scene_transform.scale = Vec3::new(1.0, -1.0, 1.0);
-        scene_entity_found = true;
-
-        // Update AABB to match current scene bounds
-        commands
-            .entity(entity)
-            .insert(bevy::camera::primitives::Aabb::from_min_max(
-                aabb_min, aabb_max,
-            ));
-    }
-
-    if !scene_entity_found {
         commands.spawn((
             MainVelloScene,
             VelloScene2d::from(main_scene),
-            bevy::camera::primitives::Aabb::from_min_max(aabb_min, aabb_max),
             Transform::from_scale(Vec3::new(1.0, -1.0, 1.0)),
-            GlobalTransform::default(),
-            Visibility::default(),
-            InheritedVisibility::default(),
-            ViewVisibility::default(),
         ));
     }
 }

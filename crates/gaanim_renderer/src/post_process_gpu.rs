@@ -1,4 +1,4 @@
-//! Post-processes the Vello render target of the interactive window.
+//! Post-processes the Vello canvas texture of the interactive window.
 
 use bevy::core_pipeline::{Core2d, Core2dSystems};
 use bevy::prelude::*;
@@ -6,14 +6,13 @@ use bevy::render::render_asset::RenderAssets;
 use bevy::render::renderer::{RenderContext, RenderDevice, RenderQueue, ViewQuery};
 use bevy::render::texture::GpuImage;
 use bevy::render::{Extract, ExtractSchedule, Render, RenderApp, RenderSystems};
-use bevy::sprite_render::MeshMaterial2d;
 use bevy::window::PrimaryWindow;
-use bevy_vello::render::{VelloCanvasMaterial, VelloView};
 use gaanim_core::kurbo;
 
+use crate::canvas::{VelloCanvas, VelloView};
 use crate::post_process::{CanvasPostProcess, GpuPostProcess, PostProcessRequest};
 
-/// Post-process of the next frame and the Vello render target it applies to.
+/// Post-process of the next frame and the canvas texture it applies to.
 #[derive(Resource, Default)]
 struct PostProcessFrame(Option<(PostProcessRequest, AssetId<Image>)>);
 
@@ -54,8 +53,7 @@ fn update_post_process_frame(
     views: Query<(&Camera, Option<&bevy::camera::RenderTarget>), With<VelloView>>,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
-    canvases: Query<&MeshMaterial2d<VelloCanvasMaterial>>,
-    materials: Res<Assets<VelloCanvasMaterial>>,
+    canvas: Res<VelloCanvas>,
     mut frame: ResMut<PostProcessFrame>,
 ) {
     frame.0 = (|| {
@@ -80,7 +78,7 @@ fn update_post_process_frame(
         let window = windows.get(window).ok()?;
         let viewport =
             crate::pipeline::fitted_canvas_viewport(&camera.camera, camera.viewport, window)?;
-        // bevy_vello sizes its target to the camera viewport when one is set.
+        // The canvas texture covers the camera viewport when one is set.
         let target_origin = view
             .viewport
             .as_ref()
@@ -92,8 +90,7 @@ fn update_post_process_frame(
             time,
             kurbo::Rect::new(origin.x, origin.y, origin.x + size.x, origin.y + size.y),
         )?;
-        let material = materials.get(canvases.single().ok()?.id())?;
-        Some((request, material.texture.id()))
+        (canvas.image != Handle::default()).then(|| (request, canvas.image.id()))
     })();
 }
 

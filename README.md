@@ -323,7 +323,9 @@ linker = "rust-lld.exe"
 Si el comando no está disponible, instala `cargo-binutils` y el componente
 `llvm-tools-preview` de Rust. Las funciones de Bevy se activan en los crates
 que las necesitan: matemáticas usa la base ECS, escena conserva PBR/glTF,
-multimedia añade audio y los hosts añaden ventanas nativas.
+el renderizador añade el pipeline 2D donde compone el lienzo de Vello,
+multimedia añade audio y los hosts añaden ventanas nativas. Bevy UI, sprites,
+texto y gizmos no se compilan.
 
 `just build-timings` compila el runtime y genera
 `target/cargo-timings/cargo-timing.html`. Para medir una iteración representativa,

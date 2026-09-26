@@ -37,7 +37,6 @@ glam = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }
 bevy_egui = { version = "0.42.0", default-features = false, features = ["render", "manage_clipboard", "default_fonts"] }
-bevy_vello = "0.14.0"
 # Same winit as bevy_winit; only its `Icon` type is used, for the window icon.
 winit = { version = "0.30", default-features = false }
 pyo3 = { version = "0.28", features = ["abi3-py314"] }

@@ -5,9 +5,9 @@ use std::sync::{Arc, Mutex, Weak};
 use bevy::prelude::*;
 use bevy::render::renderer::{RenderDevice, RenderQueue};
 use bevy::render::{Extract, ExtractSchedule, Render, RenderApp, RenderSystems};
-use bevy_vello::render::VelloRenderer;
 
 use crate::background::{GpuShaderBackgrounds, ShaderBackgroundRequest};
+use crate::canvas::VelloRenderer;
 
 /// Shader background drawn by the latest composed scene.
 ///
