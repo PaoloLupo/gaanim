@@ -31,15 +31,15 @@ scene.text("What the frame sees", role="caption").move_to(3.9, -2.4, anchor=Anch
 
 # A round lens magnifies whatever passes beneath it.
 ruler = scene.text("small print under a magnifying glass", role="caption").scale_to(0.3).move_to(-3.5, -3.3)
-lens = scene.geometry.circle(0.55).stroke("#7DCFFF", 0.04).move_to(-5.6, -3.3)
-lens_frame = scene.geometry.circle(0.22).no_fill().no_stroke().move_to(-5.6, -3.3)
+lens = scene.geometry.circle(0.55).stroke("#7DCFFF", 0.04).move_to(-4.4, -3.3)
+lens_frame = scene.geometry.circle(0.22).no_fill().no_stroke().move_to(-4.4, -3.3)
 lens.camera_view(lens_frame)
 
 scene.play([frame.animate.scale_to(0.5).duration(1.0)])
 scene.play([
     frame.animate.move_to(center[0] + 1.5, center[1] + 0.9).rotate_to(0.4).duration(1.4),
-    lens.animate.move_to(-1.4, -3.3).duration(1.4),
-    lens_frame.animate.move_to(-1.4, -3.3).duration(1.4),
+    lens.animate.move_to(-2.8, -3.3).duration(1.4),
+    lens_frame.animate.move_to(-2.8, -3.3).duration(1.4),
 ])
 scene.play([frame.animate.move_to(*center).rotate_to(0.0).scale_to(1.0).duration(1.2)])
 scene.wait(0.4)
