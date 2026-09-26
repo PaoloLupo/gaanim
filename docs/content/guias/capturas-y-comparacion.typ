@@ -8,8 +8,8 @@
 
 En esta guía aprenderás a comprobar que un cambio en el código no alteró lo
 que se ve. `gaanim --diff` captura fotogramas exactos de una escena, los
-compara con una versión que ya aprobaste y te muestra las diferencias en un
-visor.
+compara con una versión que ya aprobaste y genera un informe HTML para revisar
+las diferencias en el navegador.
 
 = Dónde se guardan las capturas
 
@@ -19,7 +19,7 @@ Cada escena tiene su propia carpeta dentro del proyecto:
 tests/visual/<nombre-de-la-escena>/
   baseline/  # capturas aprobadas y manifest.json: guárdalas en git
   current/   # captura de la versión actual: local
-  report/    # visor, informe JSON y mapas de calor: local
+  report/    # informe HTML y JSON y mapas de calor: local
 ```
 
 Por ejemplo, `escenas/intro.py` usa automáticamente
@@ -48,8 +48,8 @@ Por ejemplo, `escenas/intro.py` usa automáticamente
   gaanim --diff --example escenas/intro.py --bless
   ```
 
-+ Después de cada cambio, captura otra vez, compara con la versión aprobada y
-  abre el visor:
++ Después de cada cambio, captura otra vez y compara con la versión aprobada.
+  El comando imprime la ruta de `report/index.html`; ábrela en el navegador:
 
   ```bash
   gaanim --diff --example escenas/intro.py
@@ -95,7 +95,7 @@ gaanim --diff --example mi-charla --capture-stops --stops 12,30 --capture-only
   `--stops` y conservan la numeración global.
 - Además de `manifest.json`, escribe `stops.json` con el número, el instante,
   el segmento, el nombre de la pausa y el archivo de cada captura.
-- Funciona con `--bless`, `--capture-only` y `--no-gui`, pero no con
+- Funciona con `--bless` y `--capture-only`, pero no con
   `--no-capture`.
 - Solo compara si la versión aprobada tiene su propio `stops.json`. Si no hay
   versión aprobada, o se hizo con `scene.snapshots`, captura, avisa de que no
@@ -106,11 +106,9 @@ gaanim --diff --example mi-charla --capture-stops --stops 12,30 --capture-only
 = Automatizar y tolerar diferencias
 
 ```bash
-gaanim --diff --example escenas/intro.py --no-gui --pixel-threshold 4 --max-changed-ratio 0.0001
+gaanim --diff --example escenas/intro.py --pixel-threshold 4 --max-changed-ratio 0.0001
 ```
 
-- `--no-gui` genera el informe sin abrir el visor, útil en integración
-  continua.
 - `--no-capture` compara los PNG que ya están en `current/`.
 - `--capture-only` escribe `current/` (o la carpeta de `--current <DIR>`) y
   termina sin comparar ni modificar la versión aprobada.
@@ -126,12 +124,25 @@ Para comparar dos carpetas cualesquiera, indica las rutas a mano con
 `--baseline`, `--current` y `--output`:
 
 ```bash
-gaanim --diff --baseline capturas/antes --current capturas/despues --output capturas/informe --no-gui
+gaanim --diff --baseline capturas/antes --current capturas/despues --output capturas/informe
 ```
 
 = Leer el resultado
 
 El informe JSON incluye, para cada captura, el instante, el porcentaje de
 píxeles modificados, el error medio, la diferencia máxima y el rectángulo que
-contiene el cambio. En el visor, las teclas `1`, `2` y `3` alternan entre la
-versión aprobada, la actual y el mapa de diferencias.
+contiene el cambio. El comando termina con código 0 si no hay diferencias, 1 si
+las hay y 2 ante errores, así que sirve tal cual en integración continua.
+
+`report/index.html` funciona sin conexión y muestra lo mismo que el JSON:
+
+- La lista lateral filtra por fallos, cambiados o ausentes y busca por nombre.
+- Siete modos de comparación: diff, versión aprobada, actual, lado a lado,
+  cortina, superposición con opacidad y parpadeo. Las teclas `1` a `7` los
+  alternan.
+- Un recuadro marca el área cambiada; `B` lo oculta.
+- `←`/`→` recorren las capturas, `F` ajusta a la ventana, `0` muestra el
+  tamaño real y `+`/`−` (o `Ctrl` + rueda) cambian el zoom. `?` lista todos los
+  atajos.
+- La dirección de la página incluye la captura y el modo, para compartir un
+  enlace a un fotograma concreto.

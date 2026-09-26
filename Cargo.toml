@@ -37,10 +37,18 @@ debug = "line-tables-only"
 opt-level = 3
 debug = false
 
+# Local optimized builds and benchmarks. Cross-crate ThinLTO dominated the link
+# (5-7 minutes), so release keeps only Cargo's default crate-local ThinLTO and
+# 16 codegen units.
 [profile.release]
+strip = true
+
+# Distributed binaries: cross-crate ThinLTO and one codegen unit trade build
+# time for size and speed.
+[profile.dist]
+inherits = "release"
 lto = "thin"
 codegen-units = 1
-strip = true
 
 [workspace.dependencies]
 # Keep the shared ECS foundation small; consumers opt into rendering, audio,

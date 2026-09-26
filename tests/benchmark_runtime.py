@@ -216,7 +216,6 @@ def scenario_command(
             "--current",
             str(artifact_dir),
             "--capture-only",
-            "--no-gui",
         ]
     if scenario == "export":
         return [

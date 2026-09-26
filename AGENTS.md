@@ -57,6 +57,7 @@ All commands assume `just` is installed. Do not run `cargo build` at the workspa
 | Build application binaries (debug) | `just build` |
 | Build runtime with compilation timings | `just build-timings` |
 | Build application binaries (release) | `just build-release` |
+| Build distributed binaries (`dist` profile) | `just build-dist` |
 | Install authoring wheel in `.venv` | `just python-develop` |
 | Build wheel | `just wheel` → outputs to `target/wheels/` |
 | Run example by name | `just run <name>` (e.g., `just run math_animation`) |
@@ -160,7 +161,7 @@ all use the application host, which owns the native runtime.
 
 ## Visual regression diffs
 
-- `gaanim_diff` provides exact timeline-seek snapshots, PNG comparison, JSON/HTML reports, and a native egui viewer. The main `gaanim` binary exposes it through `--diff`.
+- `gaanim_diff` provides exact timeline-seek snapshots, PNG comparison, and JSON/HTML reports; the HTML report is the visual review UI. The main `gaanim` binary exposes it through `--diff`.
 - Snapshot fixtures are organized globally per example: `tests/visual/<example-relative-path-without-.py>/{baseline,current,report}`. For example, `examples/visual_diff_demo.py` maps to `tests/visual/visual_diff_demo/`.
   - `baseline/` is the approved fixture and should be versioned when intentionally changed.
   - `current/` and `report/` are generated local artifacts and are gitignored.
@@ -174,7 +175,7 @@ all use the application host, which owns the native runtime.
   just dev-exec target/debug/gaanim.exe --diff --example examples/visual_diff_demo.py
   ```
 
-  `--bless` overwrites the example baseline, so use it only after intentionally approving a visual change. The normal command captures `current/`, compares it with `baseline/`, and opens egui. Add `--no-gui` for CI; use `--pixel-threshold` and `--max-changed-ratio` to tolerate controlled raster differences.
+  `--bless` overwrites the example baseline, so use it only after intentionally approving a visual change. The normal command captures `current/`, compares it with `baseline/`, and writes `report/index.html` (open it in a browser). `--no-gui` is accepted as a no-op for old scripts; use `--pixel-threshold` and `--max-changed-ratio` to tolerate controlled raster differences.
 - Legacy/manual comparison remains available with `--baseline`, `--current`, and `--output`, but prefer `--example` so paths stay deterministic.
 
 ## Code conventions

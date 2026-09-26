@@ -232,7 +232,8 @@ gaanim --diff --baseline <DIR> --current <DIR> [OPCIONES]
 ```
 
 Captura fotogramas exactos de una escena y los compara con un baseline
-aprobado; guarda un informe JSON y HTML y abre un visor. Las capturas de
+aprobado y guarda un informe JSON y HTML (`report/index.html`) que se revisa
+en el navegador. Las capturas de
 `--example escenas/intro.py` viven en `tests/visual/escenas/intro/`
 (`baseline/`, `current/` y `report/`). El flujo completo está en
 #link("/guias/capturas-y-comparacion/")[Capturas y comparación visual].
@@ -253,7 +254,6 @@ aprobado; guarda un informe JSON y HTML y abre un visor. Las capturas de
   [`-o`, `--output <DIR>`], [Carpeta del informe.],
   [`--pixel-threshold <0..255>`], [Diferencia por canal que se ignora.],
   [`--max-changed-ratio <0..1>`], [Fracción de píxeles distintos que se tolera.],
-  [`--no-gui`], [Genera el informe sin abrir el visor, por ejemplo en integración continua.],
 )
 
 Sin `--capture-stops`, el script elige los instantes: cuando existe la
@@ -262,7 +262,7 @@ variable de entorno `GAANIM_SNAPSHOTS`, debe llamar a
 
 ```bash
 gaanim --diff --example escenas/intro.py --bless
-gaanim --diff --example escenas/intro.py --no-gui --pixel-threshold 4
+gaanim --diff --example escenas/intro.py --pixel-threshold 4
 gaanim --diff --example mi-charla --capture-stops --stops 3-7 --capture-only
 ```
 

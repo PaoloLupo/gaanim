@@ -67,7 +67,7 @@ def main():
 
     snapshots = OUTPUT / "crop"
     environment = dict(os.environ, GAANIM_MEDIA_CROP="1", GAANIM_SNAPSHOTS=str(snapshots))
-    run([str(HOST), "--diff", "--example", str(SCENE), "--current", str(snapshots), "--capture-only", "--no-gui"], env=environment)
+    run([str(HOST), "--diff", "--example", str(SCENE), "--current", str(snapshots), "--capture-only"], env=environment)
     frames = sorted(snapshots.glob("*.png"))
     assert len(frames) >= 3, "crop snapshots were not captured"
     initial = [p for p in frames if "t_0_000000" in p.name]

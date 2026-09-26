@@ -359,7 +359,6 @@ const DIFF: Page = Page {
                     "--max-changed-ratio <0..1>",
                     "Allowed fraction of changed pixels (default 0)",
                 ),
-                ("--no-gui", "Write the reports without opening the viewer"),
                 ("-h, --help", "Print this help"),
             ],
         ),

@@ -37,7 +37,6 @@ fn run() -> Result<i32, String> {
         .ok_or_else(|| "missing current directory".to_string())?;
     let mut output = PathBuf::from("gaanim-diff-report");
     let mut options = CompareOptions::default();
-    let mut open_gui = true;
 
     while let Some(flag) = args.next() {
         match flag.as_str() {
@@ -61,7 +60,8 @@ fn run() -> Result<i32, String> {
                     .parse()
                     .map_err(|_| "max changed ratio must be between 0 and 1".to_string())?;
             }
-            "--no-gui" => open_gui = false,
+            // The native viewer was removed; kept so existing scripts still parse.
+            "--no-gui" => {}
             "-h" | "--help" => {
                 print_help();
                 return Ok(0);
@@ -100,12 +100,7 @@ fn run() -> Result<i32, String> {
     }
     println!("HTML: {}", output.join("index.html").display());
     println!("JSON: {}", output.join("report.json").display());
-    let exit_code = if report.passed { 0 } else { 1 };
-    if open_gui {
-        gaanim_diff::viewer::run(report, baseline, current, output, options)
-            .map_err(|error| format!("could not open egui viewer: {error}"))?;
-    }
-    Ok(exit_code)
+    Ok(if report.passed { 0 } else { 1 })
 }
 
 fn print_help() {
@@ -119,10 +114,10 @@ OPTIONS:
     -o, --output <DIR>              Report directory (default: gaanim-diff-report)
         --pixel-threshold <0..255>  Ignore per-channel noise up to this value (default: 2)
         --max-changed-ratio <0..1>  Allowed changed-pixel fraction (default: 0)
-        --no-gui                     Generate reports without opening egui (CI)
     -h, --help                      Print help
 
-The command opens the native egui viewer by default. It exits with 0 when all
-frames pass, 1 when visual changes are found, and 2 for invalid input or errors."#
+Open the HTML report in a browser to inspect the frames. The command exits with
+0 when all frames pass, 1 when visual changes are found, and 2 for invalid input
+or errors."#
     );
 }

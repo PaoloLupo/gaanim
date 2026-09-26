@@ -18,7 +18,7 @@ def main():
     env = dict(os.environ, GAANIM_SNAPSHOTS=str(OUTPUT))
     subprocess.run([
         str(HOST), "--diff", "--example", str(ROOT / "tests/rolling_number_api_contract.py"),
-        "--current", str(OUTPUT), "--capture-only", "--no-gui",
+        "--current", str(OUTPUT), "--capture-only",
     ], cwd=ROOT, env=env, check=True, timeout=180)
     frames = sorted(OUTPUT.glob("seek_*.png"))
     assert len(frames) == 8, [path.name for path in frames]

@@ -144,7 +144,6 @@ def _visual(
         command = ["just", "dev-exec", runner_arg, "--diff", "--example", f"examples/{example}.py"]
         if bless:
             command.append("--bless")
-        command.append("--no-gui")
         result = _run(repo, command, dry_run)
         if result != 0:
             report = repo / "tests" / "visual" / example / "report" / "index.html"

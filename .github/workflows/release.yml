@@ -24,8 +24,8 @@ jobs:
 
       - name: Build release binaries
         run: |
-          cargo build -p gaanim_launcher --release --bin gaanim
-          cargo build -p gaanim_editor --release --bin gaanim-core
+          cargo build -p gaanim_launcher --profile dist --bin gaanim
+          cargo build -p gaanim_editor --profile dist --bin gaanim-core
 
       - name: Build authoring wheel
         run: |
@@ -55,8 +55,8 @@ jobs:
           $zipName = "gaanim-v$ver-windows-x64.zip"
           $stage = "dist/stage"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          Copy-Item target/release/gaanim.exe "$stage/gaanim.exe"
-          Copy-Item target/release/gaanim-core.exe "$stage/gaanim-core.exe"
+          Copy-Item target/dist/gaanim.exe "$stage/gaanim.exe"
+          Copy-Item target/dist/gaanim-core.exe "$stage/gaanim-core.exe"
           Copy-Item target/wheels/gaanim-*-py3-none-any.whl "$stage/"
           if (Test-Path README.md) { Copy-Item README.md "$stage/" }
           @"
@@ -118,8 +118,8 @@ jobs:
 
       - name: Build release binaries
         run: |
-          cargo build -p gaanim_launcher --release --bin gaanim
-          cargo build -p gaanim_editor --release --bin gaanim-core
+          cargo build -p gaanim_launcher --profile dist --bin gaanim
+          cargo build -p gaanim_editor --profile dist --bin gaanim-core
 
       - name: Build authoring wheel
         run: |
@@ -134,17 +134,17 @@ jobs:
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             test "v$cargo_ver" = "${{ github.ref_name }}"
           fi
-          target/release/gaanim --help
+          target/dist/gaanim --help
 
       - name: Verify core links against Python 3.14
         run: |
-          ldd target/release/gaanim-core | tee ldd.txt
+          ldd target/dist/gaanim-core | tee ldd.txt
           grep -q 'libpython3\.14\.so' ldd.txt
 
       - name: Smoke test core through the launcher
         # Drop the loader path setup-python exports so the launcher's own
         # runtime discovery (LD_LIBRARY_PATH + PYTHONHOME) is what gets tested.
-        run: env -u LD_LIBRARY_PATH -u PYTHONHOME target/release/gaanim check examples/theme_demo.py
+        run: env -u LD_LIBRARY_PATH -u PYTHONHOME target/dist/gaanim check examples/theme_demo.py
 
       - name: Package tarball
         run: |
@@ -152,7 +152,7 @@ jobs:
           archive="gaanim-v$ver-linux-x64.tar.gz"
           stage="dist/stage"
           mkdir -p "$stage"
-          install -m 755 target/release/gaanim target/release/gaanim-core "$stage/"
+          install -m 755 target/dist/gaanim target/dist/gaanim-core "$stage/"
           install -m 644 target/wheels/gaanim-*-py3-none-any.whl README.md "$stage/"
           tar -C "$stage" -czf "dist/$archive" .
           (cd dist && sha256sum "$archive" > "$archive.sha256")
