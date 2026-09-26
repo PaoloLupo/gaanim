@@ -161,7 +161,7 @@ back = scene.geometry.rect(3, 1).fill(BLUE)
 
 == Posición y transformaciones
 
-Setters absolutos (`move_to`, `scale_to`, `rotate_to`) y relativos (`shift_by`,
+Setters absolutos (`move_to`, `scale_to`, `rotate_to`, `skew_to`) y relativos (`shift_by`,
 `scale_by`, `rotate_by`) en unidades de escena y radianes. Sus versiones
 animadas están en #link("/referencia/animations/")[Animaciones].
 
@@ -235,9 +235,32 @@ tilted = scene.geometry.square(1).rotate_to(math.pi / 4)
 )
 
 #api-entry(
+  name: "Drawable.skew_to",
+  kind: "method",
+  params: ((name: "x", type: "float", default: none, desc: [Corte horizontal: cada punto se desplaza en x `x` veces su altura sobre el pivote.]), (name: "y", type: "float", default: none, desc: [Corte vertical: cada punto se desplaza en y `y` veces su distancia horizontal al pivote.])),
+  desc: [Fija el sesgo (_skew_) absoluto alrededor del pivote; `(0, 0)` lo quita. Los factores son tangentes sin unidades: con el pivote en la base, `skew_to(0.15, 0)` desplaza la parte superior 0.15 unidades por cada unidad de altura. En un grupo deforma a todos los hijos a la vez, sin trocear la figura. `animate.skew_to(x, y)` lo anima. Lanza `ValueError` con factores no finitos.],
+)[
+```python
+# show-code: true
+from gaanim import BLUE, GOLD, Easing, Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+ground = scene.geometry.rect(8, 0.1).fill(GOLD).move_to(0, -2.05)
+house = scene.geometry.group([
+    scene.geometry.rect(3, 2.5).fill(BLUE).move_to(0, -0.75),
+    scene.geometry.polygon([(-1.8, 0.5), (1.8, 0.5), (0, 2)]).fill(BLUE),
+]).with_pivot(0, -2)
+scene.play(house.animate.skew_to(0.2, 0).duration(0.4).easing(Easing.SMOOTH))
+scene.play(house.animate.skew_to(-0.12, 0).duration(0.4).easing(Easing.SMOOTH))
+scene.play(house.animate.skew_to(0, 0).duration(0.5).easing(Easing.SMOOTH))
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
   name: "Drawable.with_pivot",
   kind: "method",
-  desc: [Fija el pivote de rotación y escala en coordenadas de escena. Úsalo para bisagras y brazos que giran alrededor de un extremo. `pivot(x, y)` es un alias.],
+  desc: [Fija el pivote de rotación, escala y sesgo en coordenadas de escena. Úsalo para bisagras y brazos que giran alrededor de un extremo. `pivot(x, y)` es un alias.],
 )[
 ```python
 # show-code: true

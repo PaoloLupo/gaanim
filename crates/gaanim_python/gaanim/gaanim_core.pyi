@@ -1042,6 +1042,17 @@ class Anim:
     def scale_by_3d(self, x: float, y: float, z: float) -> Anim:
         """Multiply the current scale independently on three axes."""
         ...
+    def skew_to(self, x: float, y: float) -> Anim:
+        """Target absolute shear factors about the drawable's pivot.
+
+        ``x`` moves each point horizontally by ``x`` times its height above
+        the pivot, and ``y`` moves it vertically by ``y`` times its offset to
+        the right; ``(0, 0)`` removes the shear. The factors are unitless
+        tangents, so ``skew_to(0.15, 0)`` leans a shape pinned at its base by
+        0.15 units per unit of height. Set the pivot with ``with_pivot``.
+        Raises ``ValueError`` for non-finite factors.
+        """
+        ...
     def rotate_by(self, radians: float) -> Anim:
         """Target a relative Z rotation in radians."""
         ...
@@ -2147,6 +2158,20 @@ class Drawable:
         source replaces it and a numeric setter ends the binding reversibly.
         Sources must belong to this Scene. Animate the source Parameter while
         linked; direct animation or relative writes to this channel error.
+        """
+        ...
+    def skew_to(self, x: float, y: float) -> Self:
+        """Shear the drawable about its pivot immediately at the current cursor.
+
+        ``x`` moves each point horizontally by ``x`` times its height above
+        the pivot, and ``y`` moves it vertically by ``y`` times its offset to
+        the right; ``(0, 0)`` removes the shear. Shearing a group deforms all
+        of its children together. Animate the change with
+        ``drawable.animate.skew_to(x, y)``. Raises ``ValueError`` for
+        non-finite factors.
+
+        Example:
+            house = scene.geometry.rect(2, 3).with_pivot(0, -1.5).skew_to(0.2, 0)
         """
         ...
     def rotate_by(self, radians: float) -> Self:

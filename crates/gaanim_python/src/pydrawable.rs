@@ -632,6 +632,22 @@ impl PyCanvasAnim {
         )
     }
 
+    fn skew_to(&self, x: f64, y: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "TextSelection.animate supports only fill and opacity targets",
+            ));
+        }
+        self.require_transformable()?;
+        self.require_property_slot("skew_to")?;
+        finite_skew(x, y)?;
+        Ok(Self {
+            inner: self.inner.clone().skew_to(x, y),
+        })
+    }
+
     fn rotate_by_3d(&self, axis: &str, radians: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
@@ -1712,6 +1728,15 @@ impl PyDrawable {
     }
 }
 
+/// Shear factors are tangents; infinities or NaN would collapse the shape.
+fn finite_skew(x: f64, y: f64) -> PyResult<()> {
+    if x.is_finite() && y.is_finite() {
+        Ok(())
+    } else {
+        Err(PyValueError::new_err("skew_to() factors must be finite"))
+    }
+}
+
 #[pymethods]
 impl PyDrawable {
     #[pyo3(signature = (anchor=None, *, offset=(0.0, 0.0)))]
@@ -2233,6 +2258,12 @@ impl PyDrawable {
         self.require_free_position("rotate_by")?;
         free_channel(&self.0, PropertyChannel::Rotation)?;
         Ok(Self(self.0.clone().rotate_by(radians)))
+    }
+    pub(crate) fn skew_to(&self, x: f64, y: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_free_position("skew_to")?;
+        finite_skew(x, y)?;
+        Ok(Self(self.0.clone().skew_to(x, y)))
     }
     pub(crate) fn rotate_by_3d(&self, axis: &str, radians: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
@@ -2882,6 +2913,11 @@ macro_rules! media_drawable_methods {
 
     fn rotate_by<'py>(slf: PyRef<'py, Self>, radians: f64) -> PyResult<PyRef<'py, Self>> {
         PyDrawable(slf.handle()).rotate_by(radians)?;
+        Ok(slf)
+    }
+
+    fn skew_to<'py>(slf: PyRef<'py, Self>, x: f64, y: f64) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).skew_to(x, y)?;
         Ok(slf)
     }
 

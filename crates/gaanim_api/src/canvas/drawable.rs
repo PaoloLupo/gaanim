@@ -870,6 +870,7 @@ impl DrawableHandle {
                 to: DQuat::from_euler(EulerRot::XYZ, euler.x, euler.y, euler.z),
             }),
             LayoutOp::RotateBy(delta) => Some(AnimationType::RotateBy3D { delta: *delta }),
+            LayoutOp::SetSkew(to) => Some(AnimationType::SkewTo { to: *to }),
             LayoutOp::MoveAnchorTo { target, anchor } => Some(AnimationType::TranslateAnchorTo {
                 to: *target,
                 anchor: *anchor,
@@ -1414,6 +1415,12 @@ impl DrawableHandle {
 
     pub fn rotate_by(self, radians: f64) -> Self {
         self.push_layout(LayoutOp::RotateBy(DQuat::from_rotation_z(radians)))
+    }
+
+    /// Shear about the pivot: `x` moves points horizontally by `x` times their
+    /// height above it, `y` vertically by `y` times their offset to its right.
+    pub fn skew_to(self, x: f64, y: f64) -> Self {
+        self.push_layout(LayoutOp::SetSkew(DVec2::new(x, y)))
     }
 
     pub fn rotate_by_3d(self, axis: &str, radians: f64) -> Result<Self, RotationAxisError> {

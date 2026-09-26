@@ -278,6 +278,7 @@ fn collect_node(
         ),
         scale: DVec3::new(scale[0].into(), scale[1].into(), scale[2].into()),
         anchor: DVec3::ZERO,
+        skew: Default::default(),
     };
     let mut bounds = Bounds3D::default();
     let mut has_bounds = false;

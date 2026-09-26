@@ -391,6 +391,7 @@ pub(crate) fn authored_position(spec: &super::types::ObjectSpec) -> Option<DVec2
             | LayoutOp::SetRotation(_)
             | LayoutOp::SetRotation3D(_)
             | LayoutOp::RotateBy(_)
+            | LayoutOp::SetSkew(_)
             | LayoutOp::SetPivot(_) => {}
             _ => return None,
         }
@@ -1389,6 +1390,7 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
             ),
             (properties.rotation.is_some(), "rotation"),
             (properties.scale.is_some(), "scale"),
+            (properties.skew.is_some(), "skew"),
             (properties.opacity.is_some(), "opacity"),
             (
                 properties.fill.is_some() || properties.visible_color.is_some(),
@@ -1457,6 +1459,7 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
         | ScaleBy3D { .. }
         | GrowFromCenter
         | ShrinkToCenter => "scale",
+        SkewTo { .. } => "skew",
         FadeTo { .. } | FadeIn | FadeOut | FadeInFrom { .. } => "opacity",
         FillColorTo { .. } | FillPaintTo { .. } => "fill",
         StrokeColorTo { .. } | StrokePaintTo { .. } => "stroke_color",

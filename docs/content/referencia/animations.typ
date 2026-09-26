@@ -212,6 +212,21 @@ scene.play(needle.animate.rotate_to(1.2))
 ]
 
 #api-entry(
+  name: "Anim.skew_to",
+  kind: "method",
+  params: ((name: "x", type: "float", default: none, desc: [Corte horizontal de destino, sin unidades.]), (name: "y", type: "float", default: none, desc: [Corte vertical de destino, sin unidades.])),
+  returns: (type: "Anim", desc: [Sesgo hasta los factores dados.]),
+  desc: [Interpola el sesgo alrededor del pivote, como `Drawable.skew_to`; fija el pivote antes con `with_pivot(x, y)`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>frame = scene.geometry.rect(3, 2).with_pivot(0, -1)
+scene.play(frame.animate.skew_to(0.15, 0).duration(0.4))
+```
+]
+
+#api-entry(
   name: "Anim.rotate_by",
   kind: "method",
   params: ((name: "radians", type: "float", default: none, desc: [Ángulo relativo en radianes; positivo es antihorario.]),),

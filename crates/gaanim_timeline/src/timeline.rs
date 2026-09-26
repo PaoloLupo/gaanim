@@ -129,6 +129,7 @@ enum AbsoluteLensChannel {
     Translation,
     Rotation,
     Scale,
+    Skew,
     Opacity,
     FillColor,
     StrokeColor,
@@ -150,6 +151,7 @@ fn absolute_lens_channel(lens: &PropertyLensSpec) -> Option<AbsoluteLensChannel>
             AbsoluteLensChannel::Rotation
         }
         PropertyLensSpec::Scale { .. } => AbsoluteLensChannel::Scale,
+        PropertyLensSpec::Skew { .. } => AbsoluteLensChannel::Skew,
         PropertyLensSpec::Opacity { .. } => AbsoluteLensChannel::Opacity,
         PropertyLensSpec::FillColor { .. } => AbsoluteLensChannel::FillColor,
         PropertyLensSpec::FillPaint { .. } => AbsoluteLensChannel::FillColor,
@@ -2351,6 +2353,14 @@ fn apply_lens_spec(
                 && transform.scale != value
             {
                 transform.scale = value;
+            }
+        }
+        PropertyLensSpec::Skew { from, to } => {
+            let value = from.lerp(*to, t);
+            if let Some(mut transform) = world.get_mut::<SpatialTransform>(target)
+                && transform.skew != value
+            {
+                transform.skew = value;
             }
         }
         PropertyLensSpec::Opacity { from, to } => {

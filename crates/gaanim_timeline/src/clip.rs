@@ -187,6 +187,10 @@ pub enum PropertyLensSpec {
         from: gaanim_core::glam::DVec3,
         to: gaanim_core::glam::DVec3,
     },
+    Skew {
+        from: gaanim_core::glam::DVec2,
+        to: gaanim_core::glam::DVec2,
+    },
     Opacity {
         from: f32,
         to: f32,
@@ -449,6 +453,10 @@ impl PropertyLensSpec {
                 radians: *radians,
             },
             Self::Scale { from, to } => PropertyLens::Scale {
+                from: *from,
+                to: *to,
+            },
+            Self::Skew { from, to } => PropertyLens::Skew {
                 from: *from,
                 to: *to,
             },

@@ -127,6 +127,7 @@ impl CanvasState {
                 AnimationType::ScaleTo { .. }
                 | AnimationType::ScaleUniform { .. }
                 | AnimationType::ScaleBy3D { .. } => "scale",
+                AnimationType::SkewTo { .. } => "skew",
                 AnimationType::RotateTo { .. }
                 | AnimationType::RotateBy { .. }
                 | AnimationType::RotateBy3D { .. } => "rotation",
@@ -157,6 +158,9 @@ impl CanvasState {
                         }
                         if incoming.scale.is_some() {
                             previous.scale = incoming.scale.clone();
+                        }
+                        if incoming.skew.is_some() {
+                            previous.skew = incoming.skew;
                         }
                         if incoming.opacity.is_some() {
                             previous.opacity = incoming.opacity;
