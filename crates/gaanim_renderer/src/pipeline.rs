@@ -2146,6 +2146,32 @@ pub fn compile_scene_from_world(
     main_scene
 }
 
+/// Visible camera view screens and what resolving their views reads.
+type CameraScreenQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static CameraView,
+        &'static GlobalSpatialTransform,
+        &'static LocalBounds,
+        &'static Path2D,
+    ),
+    With<Visible>,
+>;
+
+/// Transforms and bounds of the drawables that camera views frame.
+type CameraSourceQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static GlobalSpatialTransform,
+        Option<&'static LocalBounds>,
+        Option<&'static WorldBounds>,
+        Option<&'static gaanim_scene::GroupMarker>,
+    ),
+>;
+
 /// System: Extracts, composites, and renders all visible gaanim 2D Mobjects.
 ///
 /// 1. Queries all active Mobjects marked for Vello2D rendering that are visible.
@@ -2210,22 +2236,8 @@ pub fn gaanim_render_system(
     mut query_vello_scene: Query<&mut VelloScene2d, With<MainVelloScene>>,
     mut shader_frame: Option<ResMut<ShaderBackgroundFrame>>,
     (camera_screens, camera_sources, hud_query): (
-        Query<
-            (
-                Entity,
-                &CameraView,
-                &GlobalSpatialTransform,
-                &LocalBounds,
-                &Path2D,
-            ),
-            With<Visible>,
-        >,
-        Query<(
-            &GlobalSpatialTransform,
-            Option<&LocalBounds>,
-            Option<&WorldBounds>,
-            Option<&gaanim_scene::GroupMarker>,
-        )>,
+        CameraScreenQuery,
+        CameraSourceQuery,
         Query<(), With<gaanim_scene::HudOverlay>>,
     ),
     mut scratch: Local<(Vec<ExtractedElement>, std::collections::HashSet<Entity>)>,
@@ -2452,164 +2464,158 @@ pub fn gaanim_render_system(
             });
             cache.fragment_inputs.insert(mobj_id.0, inputs);
         }
-        let render_cache = &mut *cache;
-        let fragment = render_cache
-            .fragment_cache
-            .entry(mobj_id.0)
-            .or_insert_with(|| {
-                let mut scene = vello::Scene::new();
+        let mut rebuilt_overlay = None;
+        let fragment = cache.fragment_cache.entry(mobj_id.0).or_insert_with(|| {
+            let mut scene = vello::Scene::new();
 
-                if let Some(lottie) = lottie_ref.as_deref() {
-                    scene.append(lottie.scene(), None);
-                }
+            if let Some(lottie) = lottie_ref.as_deref() {
+                scene.append(lottie.scene(), None);
+            }
 
-                let empty_bez = kurbo::BezPath::new();
-                let elem_path = if path_reveal_is_empty(tip_glow_ref.as_deref()) {
-                    &empty_bez
-                } else {
-                    path_ref
-                        .as_ref()
-                        .map(|p| p.0.as_ref())
-                        .unwrap_or(&empty_bez)
-                };
-                let source_path = path_source_ref.as_ref().map(|p| p.0.as_ref());
-                let elem_fill = fill_ref.as_ref().and_then(|f| f.0.as_ref());
-                let elem_stroke = stroke_ref.as_ref().and_then(|s| s.brush.as_ref());
-                let elem_stroke_style = stroke_ref.as_ref().map(|s| &s.style);
-                let elem_raster_image = raster_image_ref.as_deref();
-                let elem_shadow = shadow_ref.as_deref();
-                let elem_glow = glow_ref.as_deref();
-                let elem_blur = blur_ref.as_deref();
+            let empty_bez = kurbo::BezPath::new();
+            let elem_path = if path_reveal_is_empty(tip_glow_ref.as_deref()) {
+                &empty_bez
+            } else {
+                path_ref
+                    .as_ref()
+                    .map(|p| p.0.as_ref())
+                    .unwrap_or(&empty_bez)
+            };
+            let source_path = path_source_ref.as_ref().map(|p| p.0.as_ref());
+            let elem_fill = fill_ref.as_ref().and_then(|f| f.0.as_ref());
+            let elem_stroke = stroke_ref.as_ref().and_then(|s| s.brush.as_ref());
+            let elem_stroke_style = stroke_ref.as_ref().map(|s| &s.style);
+            let elem_raster_image = raster_image_ref.as_deref();
+            let elem_shadow = shadow_ref.as_deref();
+            let elem_glow = glow_ref.as_deref();
+            let elem_blur = blur_ref.as_deref();
 
-                // 1. Draw Drop Shadow (rendered under the geometry with custom translation offset)
-                if let Some(shadow) = elem_shadow {
-                    draw_shadow(&mut scene, elem_path, shadow);
-                }
+            // 1. Draw Drop Shadow (rendered under the geometry with custom translation offset)
+            if let Some(shadow) = elem_shadow {
+                draw_shadow(&mut scene, elem_path, shadow);
+            }
 
-                if let Some(glow) = elem_glow {
-                    draw_glow(&mut scene, elem_path, glow, stroke_view);
-                }
+            if let Some(glow) = elem_glow {
+                draw_glow(&mut scene, elem_path, glow, stroke_view);
+            }
 
-                let is_trimmed_closed = source_path.is_some_and(|src| {
-                    src != elem_path && src.elements().contains(&kurbo::PathEl::ClosePath)
-                });
-                let blur_sigma = elem_blur
-                    .map(|blur| blur.sigma)
-                    .filter(|sigma| sigma.is_finite() && *sigma > 0.0);
-                let blurred_vector = if let Some(sigma) = blur_sigma {
-                    if let Some(fill_brush) = elem_fill
-                        && !is_trimmed_closed
-                    {
-                        draw_soft_fill(
-                            &mut scene,
-                            elem_path,
-                            fill_brush,
-                            sigma,
-                            fill_alpha,
-                            kurbo::Affine::IDENTITY,
-                        );
-                    }
-                    if let (Some(stroke_brush), Some(style)) = (elem_stroke, elem_stroke_style) {
-                        draw_soft_stroke(
-                            &mut scene,
-                            elem_path,
-                            stroke_brush,
-                            style,
-                            sigma,
-                            stroke_view,
-                        );
-                    }
-                    if is_trimmed_closed {
-                        elem_stroke.is_some()
-                    } else {
-                        elem_fill.is_some() || elem_stroke.is_some()
-                    }
-                } else {
-                    false
-                };
-
-                // 2. Draw Fill
-                if !blurred_vector
-                    && let Some(raster_image) = elem_raster_image
-                    && let Some(image) = raster_image.image.as_ref()
-                {
-                    scene.push_clip_layer(
-                        peniko::Fill::NonZero,
-                        kurbo::Affine::IDENTITY,
-                        elem_path,
-                    );
-                    scene.draw_image(image.as_ref(), raster_image.local_transform);
-                    scene.pop_layer();
-                } else if !blurred_vector && fill_alpha < 1.0 {
-                    if let Some(fill_brush) = elem_fill {
-                        if fill_alpha > 0.0 && !is_trimmed_closed {
-                            // Push clip layer so ALL fill illumination is STRICTLY CLIPPED inside the character contour!
-                            scene.push_clip_layer(
-                                peniko::Fill::NonZero,
-                                kurbo::Affine::IDENTITY,
-                                elem_path,
-                            );
-
-                            // Fade the authored paint directly; a temporary white
-                            // illumination pass made the fill appear abruptly.
-                            let modulated = modulate_brush_alpha(fill_brush, fill_alpha);
-                            if let Some(ref brush) = modulated {
-                                scene.fill(
-                                    peniko::Fill::NonZero,
-                                    kurbo::Affine::IDENTITY,
-                                    brush,
-                                    None,
-                                    elem_path,
-                                );
-                            }
-
-                            scene.pop_layer();
-                        }
-                    }
-                } else if !blurred_vector
-                    && let Some(fill_brush) = elem_fill
+            let is_trimmed_closed = source_path.is_some_and(|src| {
+                src != elem_path && src.elements().contains(&kurbo::PathEl::ClosePath)
+            });
+            let blur_sigma = elem_blur
+                .map(|blur| blur.sigma)
+                .filter(|sigma| sigma.is_finite() && *sigma > 0.0);
+            let blurred_vector = if let Some(sigma) = blur_sigma {
+                if let Some(fill_brush) = elem_fill
                     && !is_trimmed_closed
                 {
-                    scene.fill(
-                        peniko::Fill::NonZero,
-                        kurbo::Affine::IDENTITY,
+                    draw_soft_fill(
+                        &mut scene,
+                        elem_path,
                         fill_brush,
-                        None,
-                        elem_path,
+                        sigma,
+                        fill_alpha,
+                        kurbo::Affine::IDENTITY,
                     );
                 }
-
-                // 3. Draw Stroke. A screen draws it above what its camera sees.
-                let mut overlay = camera_view.map(|_| vello::Scene::new());
-                if !blurred_vector
-                    && let Some(stroke_brush) = elem_stroke
-                    && let Some(style) = elem_stroke_style
-                {
-                    let (effective_stroke_brush, effective_style) =
-                        animated_stroke_paint(stroke_brush, style, anim_wave);
-                    draw_aligned_stroke(
-                        overlay.as_mut().unwrap_or(&mut scene),
-                        &effective_style,
-                        &effective_stroke_brush,
+                if let (Some(stroke_brush), Some(style)) = (elem_stroke, elem_stroke_style) {
+                    draw_soft_stroke(
+                        &mut scene,
+                        elem_path,
+                        stroke_brush,
+                        style,
+                        sigma,
                         stroke_view,
-                        elem_path,
-                        source_path,
-                        stroke_align_ref.as_deref().copied().unwrap_or_default(),
                     );
                 }
-                match overlay {
-                    Some(overlay) => {
-                        render_cache
-                            .screen_overlays
-                            .insert(mobj_id.0, Arc::new(overlay));
-                    }
-                    None => {
-                        render_cache.screen_overlays.remove(&mobj_id.0);
+                if is_trimmed_closed {
+                    elem_stroke.is_some()
+                } else {
+                    elem_fill.is_some() || elem_stroke.is_some()
+                }
+            } else {
+                false
+            };
+
+            // 2. Draw Fill
+            if !blurred_vector
+                && let Some(raster_image) = elem_raster_image
+                && let Some(image) = raster_image.image.as_ref()
+            {
+                scene.push_clip_layer(peniko::Fill::NonZero, kurbo::Affine::IDENTITY, elem_path);
+                scene.draw_image(image.as_ref(), raster_image.local_transform);
+                scene.pop_layer();
+            } else if !blurred_vector && fill_alpha < 1.0 {
+                if let Some(fill_brush) = elem_fill {
+                    if fill_alpha > 0.0 && !is_trimmed_closed {
+                        // Push clip layer so ALL fill illumination is STRICTLY CLIPPED inside the character contour!
+                        scene.push_clip_layer(
+                            peniko::Fill::NonZero,
+                            kurbo::Affine::IDENTITY,
+                            elem_path,
+                        );
+
+                        // Fade the authored paint directly; a temporary white
+                        // illumination pass made the fill appear abruptly.
+                        let modulated = modulate_brush_alpha(fill_brush, fill_alpha);
+                        if let Some(ref brush) = modulated {
+                            scene.fill(
+                                peniko::Fill::NonZero,
+                                kurbo::Affine::IDENTITY,
+                                brush,
+                                None,
+                                elem_path,
+                            );
+                        }
+
+                        scene.pop_layer();
                     }
                 }
+            } else if !blurred_vector
+                && let Some(fill_brush) = elem_fill
+                && !is_trimmed_closed
+            {
+                scene.fill(
+                    peniko::Fill::NonZero,
+                    kurbo::Affine::IDENTITY,
+                    fill_brush,
+                    None,
+                    elem_path,
+                );
+            }
 
-                Arc::new(scene)
-            });
+            // 3. Draw Stroke. A screen draws it above what its camera sees.
+            let mut overlay = camera_view.map(|_| vello::Scene::new());
+            if !blurred_vector
+                && let Some(stroke_brush) = elem_stroke
+                && let Some(style) = elem_stroke_style
+            {
+                let (effective_stroke_brush, effective_style) =
+                    animated_stroke_paint(stroke_brush, style, anim_wave);
+                draw_aligned_stroke(
+                    overlay.as_mut().unwrap_or(&mut scene),
+                    &effective_style,
+                    &effective_stroke_brush,
+                    stroke_view,
+                    elem_path,
+                    source_path,
+                    stroke_align_ref.as_deref().copied().unwrap_or_default(),
+                );
+            }
+            rebuilt_overlay = Some(overlay);
+
+            Arc::new(scene)
+        });
+        let fragment = Arc::clone(fragment);
+        match rebuilt_overlay {
+            Some(Some(overlay)) => {
+                cache.screen_overlays.insert(mobj_id.0, Arc::new(overlay));
+            }
+            Some(None) => {
+                cache.screen_overlays.remove(&mobj_id.0);
+            }
+            None => {}
+        }
 
         let mut opacity_group = entity;
         while let Ok(child_of) = child_query.get(opacity_group) {
@@ -2659,7 +2665,7 @@ pub fn gaanim_render_system(
                 |e| child_query.get(e).ok().map(ChildOf::parent),
                 |e| order_query.get(e).map_or(0, |order| order.z_index),
             ),
-            scene: Arc::clone(fragment),
+            scene: fragment,
             clip_mask: clip_ref.as_ref().map(|c| (**c).clone()),
             blend,
             transition_side: transition_frame
@@ -2677,7 +2683,7 @@ pub fn gaanim_render_system(
             in_views: !hud_query.contains(entity),
             screen: camera_view.map(|view| ExtractedScreen {
                 view: Arc::clone(view),
-                overlay: render_cache.screen_overlays.get(&mobj_id.0).cloned(),
+                overlay: cache.screen_overlays.get(&mobj_id.0).cloned(),
             }),
         });
     }
