@@ -4,7 +4,9 @@ pub use crate::anim::BoundsTarget;
 pub use gaanim_animation::AxisMask;
 pub use gaanim_animation::{RollingMode, RollingNumberOptions};
 pub use gaanim_renderer::background::{BackgroundPaint, ShaderBackground, ShaderBackgroundError};
-pub use gaanim_renderer::effects::{DropShadow, GaussianBlur, Glow, StrokeAlign};
+pub use gaanim_renderer::effects::{
+    CameraViewBackground, CameraViewFit, DropShadow, GaussianBlur, Glow, StrokeAlign,
+};
 pub use gaanim_renderer::post_process::{PostProcessError, PostProcessOverride, PostProcessShader};
 pub use ops::{
     AnchorPoint, CanvasEndpoint, CanvasRay, FragmentRevealStyle, PointRef, UpdaterPreset,
@@ -29,8 +31,9 @@ pub type ImageHandle = DrawableHandle;
 mod drawable;
 mod property_bindings;
 pub use drawable::{
-    ClipOptions, DrawableHandle, FragmentSelection, GltfAnimationError, LayoutOwnershipError,
-    Primitive3DHandleError, RotationAxisError, SvgPartError,
+    CameraViewError, CameraViewOptions, ClipOptions, DrawableHandle, FragmentSelection,
+    GltfAnimationError, LayoutOwnershipError, Primitive3DHandleError, RotationAxisError,
+    SvgPartError,
 };
 mod editorial;
 pub use editorial::{

@@ -99,6 +99,51 @@ pub struct ClipMask {
     pub invert: bool,
 }
 
+/// How the region framed by a [`CameraView`] source fills its screen.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum CameraViewFit {
+    /// Scale uniformly so the whole framed region stays visible.
+    #[default]
+    Contain,
+    /// Scale uniformly so the framed region covers the whole screen.
+    Cover,
+    /// Scale each axis independently so the region matches the screen.
+    Stretch,
+}
+
+/// Paint behind the content of a [`CameraView`], inside its screen.
+#[derive(Debug, Clone, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum CameraViewBackground {
+    /// The canvas background as the view's camera sees it.
+    #[default]
+    Canvas,
+    /// No backdrop: the screen's own fill shows behind the content.
+    None,
+    /// A brush in the screen's local coordinates.
+    Brush(gaanim_core::peniko::Brush),
+}
+
+/// Component: turns a closed vector leaf into a screen that shows the scene
+/// as a second camera sees it.
+///
+/// The camera frames `source`: its local bounds under its world transform, so
+/// moving, scaling or rotating the source pans, zooms or rotates the view. The
+/// screen draws its shadow, glow and fill, then the backdrop and the scene
+/// clipped to its outline, then its stroke on top. The screen, the source and
+/// every `exclude` subtree are left out of the view, and views never show the
+/// content of other views.
+#[derive(Component, Debug, Clone, PartialEq)]
+pub struct CameraView {
+    /// Drawable whose bounds frame the captured region.
+    pub source: Entity,
+    pub fit: CameraViewFit,
+    pub background: CameraViewBackground,
+    /// Roots of subtrees the view does not show.
+    pub exclude: Vec<Entity>,
+}
+
 /// A retained reactive vector boolean. Sources are vector leaves in world
 /// space; the result path is rebuilt in `SceneSet::DerivedGeometry`.
 #[derive(Component, Debug, Clone)]

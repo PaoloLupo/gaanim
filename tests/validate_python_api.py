@@ -1350,6 +1350,43 @@ def validate_matrix_stub_typing() -> list[str]:
     return failures
 
 
+def validate_camera_view_contract(module) -> list[str]:
+    """Closed shapes show a second camera's view; other drawables are rejected."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    frame = scene.geometry.rect(1.6, 0.9).move_to(-4, 0)
+    marker = scene.geometry.dot(0.1)
+    screen = scene.geometry.rounded_rect(6.4, 3.6, 0.2).move_to(3, 0)
+    for label, result in (
+        ("defaults", screen.camera_view(frame)),
+        ("fit/exclude", screen.camera_view(frame, fit="cover", exclude=[marker])),
+        ("color background", screen.camera_view(frame, background="#101820")),
+        ("brush background", screen.camera_view(frame, background=module.Brush.solid(module.BLUE))),
+        ("no background", screen.camera_view(frame, background=None, fit="stretch")),
+        ("circle lens", scene.geometry.circle(0.5).camera_view(frame, background="canvas")),
+        ("no_camera_view", screen.no_camera_view()),
+    ):
+        if not isinstance(result, module.Drawable):
+            failures.append(f"Drawable.camera_view ({label}) did not return Drawable")
+    foreign = module.Scene(frame=(16, 9)).geometry.rect(1, 1)
+    for label, call in (
+        ("text screen", lambda: scene.text("zoom").camera_view(frame)),
+        ("group screen", lambda: scene.geometry.group([marker]).camera_view(frame)),
+        ("own frame", lambda: screen.camera_view(screen)),
+        ("foreign frame", lambda: screen.camera_view(foreign)),
+        ("foreign exclude", lambda: screen.camera_view(frame, exclude=[foreign])),
+        ("unknown fit", lambda: screen.camera_view(frame, fit="fill")),
+        ("unknown background", lambda: screen.camera_view(frame, background="scene")),
+    ):
+        try:
+            call()
+        except ValueError:
+            pass
+        else:
+            failures.append(f"Drawable.camera_view accepted a {label}")
+    return failures
+
+
 def validate_vector_geometry_contract(module) -> list[str]:
     """Exercise the public varargs, clipping, and fill-level contracts."""
     failures: list[str] = []
@@ -2165,6 +2202,7 @@ def main() -> int:
     missing.extend(validate_matrix_logical_units(module))
     missing.extend(validate_matrix_stub_typing())
     missing.extend(validate_vector_geometry_contract(module))
+    missing.extend(validate_camera_view_contract(module))
     missing.extend(validate_composition_contract(module))
     missing.extend(validate_composable_properties_contract(module))
     missing.extend(validate_easing_contract(module))

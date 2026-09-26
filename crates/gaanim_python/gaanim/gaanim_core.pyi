@@ -1988,6 +1988,55 @@ class Drawable:
             result = drawable.no_clip()
         """
         ...
+    def camera_view(
+        self,
+        frame: Drawable,
+        *,
+        fit: Literal["contain", "cover", "stretch"] = "contain",
+        background: Paint | Literal["canvas"] | None = "canvas",
+        exclude: Sequence[Drawable] = (),
+    ) -> Drawable:
+        """Show inside this shape what a second camera framing ``frame`` sees.
+
+        This drawable becomes a screen, like a picture-in-picture or a
+        magnifying lens. The camera sees the region of ``frame``'s bounds and
+        follows its transform every frame: moving ``frame`` pans the view,
+        scaling it down zooms in and rotating it turns the view the other way.
+        The zoom is the screen size divided by the frame size. ``fit`` maps
+        the frame onto the screen: ``"contain"`` keeps the whole frame
+        visible, ``"cover"`` fills the screen and ``"stretch"`` scales each
+        axis on its own.
+
+        The screen draws its own fill first, then ``background`` and the view
+        clipped to its outline, then its stroke on top; opacity and fades
+        apply to all of it. ``background="canvas"`` paints the scene
+        background as the camera sees it, a color or ``Brush`` paints the
+        screen, and ``None`` lets the screen's own fill show. The screen,
+        ``frame`` and every drawable in ``exclude`` (with its children) stay
+        out of the view; hide the frame with ``no_stroke()`` or
+        ``opacity(0)`` to use it only as the camera. Screens seen inside
+        another view show their own paint, not their view. A later call or
+        ``no_camera_view()`` replaces the view.
+
+        The screen must be a single closed 2D shape: a rect, square, rounded
+        rect, circle, dot, ellipse, polygon, star, sector, annulus, curve, SVG
+        path or boolean. Text, groups, images and 3D objects, a ``frame`` equal
+        to this drawable, drawables of another Scene, or an unknown ``fit`` or
+        ``background`` raise ``ValueError``.
+
+        Example:
+            frame = scene.geometry.rect(2, 1.125).no_fill().stroke(YELLOW, 0.04)
+            screen = scene.geometry.rounded_rect(6.4, 3.6, 0.2).move_to(-4, -1.5)
+            screen.camera_view(frame)
+            scene.play([frame.animate.scale_to(0.5)])  # zoom in twice as much
+        """
+        ...
+    def no_camera_view(self) -> Drawable:
+        """Remove the camera view shown inside this drawable and return it.
+
+        The drawable draws as a plain shape again.
+        """
+        ...
     def set_fill_level(self, level: ScalarSource) -> Drawable:
         """Set or bind this fill's normalized level and return the drawable.
 

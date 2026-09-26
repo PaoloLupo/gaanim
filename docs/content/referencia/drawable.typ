@@ -505,6 +505,40 @@ scene.render()
   none,
 )
 
+#api-entry(
+  name: "Drawable.camera_view",
+  kind: "method",
+  params: (
+    (name: "frame", type: "Drawable", default: none, desc: [Objeto cuyo recuadro encuadra la segunda cámara. Moverlo desplaza la vista, reducirlo acerca y girarlo gira la vista en sentido contrario.]),
+    (name: "fit", type: "str", default: "\"contain\"", desc: [Cómo ocupa el recuadro la pantalla: `"contain"` lo muestra entero, `"cover"` llena la pantalla y `"stretch"` escala cada eje por separado.]),
+    (name: "background", type: "Paint | str | None", default: "\"canvas\"", desc: [Fondo de la vista: `"canvas"` pinta el fondo de la escena tal como lo ve la cámara, un color o `Brush` pinta la pantalla y `None` deja ver el relleno propio de la pantalla.]),
+    (name: "exclude", type: "Sequence[Drawable]", default: "()", desc: [Objetos, con sus hijos, que la vista no muestra.]),
+  ),
+  desc: [Convierte esta figura en una pantalla que muestra lo que ve una segunda cámara, como un _picture-in-picture_ o una lupa. La cámara encuadra el recuadro de `frame` y lo sigue en cada fotograma, así que se anima como cualquier objeto; el aumento es el tamaño de la pantalla dividido entre el de `frame`. La pantalla dibuja su relleno, encima la vista recortada a su contorno y encima su trazo; la opacidad y los fundidos afectan a todo. La vista no muestra la pantalla, `frame` ni `exclude`; oculta `frame` con `no_stroke()` si solo debe hacer de cámara. Una pantalla que aparece dentro de otra vista muestra su pintura pero no su vista. Solo una figura cerrada 2D puede ser pantalla (rectángulo, cuadrado, círculo, punto, elipse, polígono, estrella, sector, anillo, curva, camino SVG o booleano); con texto, grupos, imágenes u objetos 3D, con `frame` igual a la propia pantalla, con objetos de otra escena o con un `fit` o `background` desconocido lanza `ValueError`. Una llamada posterior o `no_camera_view()` sustituye la vista.],
+)[
+```python
+# show-code: true
+from gaanim import BLUE, GOLD, WHITE, Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+for i in range(40):
+    scene.geometry.dot(0.04).fill(GOLD if i % 3 else BLUE).move_to(-6 + 0.15 * i, 0.4 * (i % 4) - 0.6)
+frame = scene.geometry.rect(1.6, 0.9).no_fill().stroke(GOLD, 0.03).move_to(-5, 0)
+screen = scene.geometry.rounded_rect(6.4, 3.6, 0.2).stroke(WHITE, 0.05).move_to(3.5, 0)
+screen.camera_view(frame)
+scene.play([frame.animate.move_to(-1.5, 0).duration(1.2)])
+scene.play([frame.animate.scale_to(0.5).duration(0.8)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Drawable.no_camera_view",
+  kind: "method",
+  desc: [Quita la vista de cámara y la figura vuelve a dibujarse como una forma normal.],
+  none,
+)
+
 == Animación
 
 El proxy que convierte los setters en animaciones y las acciones de modelos

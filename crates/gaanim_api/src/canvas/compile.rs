@@ -4588,6 +4588,35 @@ impl SceneModel {
                         }
                     }
                 }
+                Op::SetCameraView { target, view } => {
+                    let entity_of = |id: &ObjectId| {
+                        let id = id_map.get(id).copied()?;
+                        builder.states.get(id).map(|state| state.entity)
+                    };
+                    let Some(screen) = entity_of(target) else {
+                        continue;
+                    };
+                    let Some(view) = view else {
+                        builder
+                            .commands
+                            .entity(screen)
+                            .remove::<gaanim_renderer::effects::CameraView>();
+                        continue;
+                    };
+                    let Some(source) = entity_of(&view.source) else {
+                        continue;
+                    };
+                    let exclude = view.exclude.iter().filter_map(entity_of).collect();
+                    builder
+                        .commands
+                        .entity(screen)
+                        .insert(gaanim_renderer::effects::CameraView {
+                            source,
+                            fit: view.fit,
+                            background: view.background.clone(),
+                            exclude,
+                        });
+                }
                 Op::Stop => builder.stop(),
                 Op::Show(id) => {
                     if let Some(id) = id_map.get(id).copied()
@@ -10609,6 +10638,63 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn camera_views_bind_their_screen_to_the_framing_drawable() {
+        use crate::canvas::{CameraViewError, CameraViewFit, CameraViewOptions};
+        use gaanim_renderer::effects::CameraView;
+
+        let mut canvas = SceneModel::new(640, 360);
+        let frame = canvas.rect(2.0, 1.0).move_to(3.0, 2.0);
+        let marker = canvas.dot(0.1).move_to(2.5, 2.0);
+        let screen = canvas
+            .rounded_rect(4.0, 2.0, 0.2)
+            .move_to(-4.0, -1.0)
+            .camera_view_with(
+                &frame,
+                CameraViewOptions {
+                    fit: CameraViewFit::Cover,
+                    exclude: vec![marker.clone()],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let entity_of = |world: &mut World, handle: &DrawableHandle| {
+            let id = ObjectId::from_raw(handle.id.as_raw() - 1);
+            world
+                .query::<(Entity, &MobjectId)>()
+                .iter(world)
+                .find(|(_, object)| object.0 == id)
+                .unwrap()
+                .0
+        };
+
+        let (mut world, _) = compiled_world(&canvas);
+        let screen_entity = entity_of(&mut world, &screen);
+        let view = world.get::<CameraView>(screen_entity).unwrap().clone();
+        assert_eq!(view.source, entity_of(&mut world, &frame));
+        assert_eq!(view.exclude, vec![entity_of(&mut world, &marker)]);
+        assert_eq!(view.fit, CameraViewFit::Cover);
+
+        let label = canvas.text("zoom");
+        assert_eq!(
+            label.camera_view(&frame).unwrap_err(),
+            CameraViewError::UnsupportedScreen
+        );
+        assert_eq!(
+            screen.clone().camera_view(&screen).unwrap_err(),
+            CameraViewError::OwnSource
+        );
+        let foreign = SceneModel::new(640, 360).rect(1.0, 1.0);
+        assert_eq!(
+            screen.clone().camera_view(&foreign).unwrap_err(),
+            CameraViewError::ForeignScene
+        );
+
+        screen.no_camera_view();
+        let (mut world, _) = compiled_world(&canvas);
+        assert_eq!(world.query::<&CameraView>().iter(&world).count(), 0);
     }
 
     #[test]

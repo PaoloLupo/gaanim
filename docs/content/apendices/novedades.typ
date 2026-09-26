@@ -11,6 +11,22 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= Sin publicar
+
+No requiere cambios en tus escenas.
+
+== Cambios
+
+- `pantalla.camera_view(marco)` convierte una figura cerrada en una pantalla
+  que muestra lo que ve una segunda cámara, como un _picture-in-picture_ o una
+  lupa. La cámara encuadra el recuadro de `marco` y lo sigue en cada
+  fotograma: moverlo desplaza la vista, reducirlo acerca y girarlo gira la
+  vista, todo con las animaciones habituales. La vista se recorta al contorno
+  de la pantalla, entre su relleno y su trazo, y admite `fit`, `background` y
+  `exclude`; `no_camera_view()` la quita. Ver `Drawable.camera_view` en
+  #link("/referencia/drawable/")[Drawable] y las cámaras secundarias en
+  #link("/guias/camara-y-3d/")[Cámara y 3D].
+
 = 0.4.2
 
 Publicada el 26 de septiembre de 2026. No requiere cambios en tus escenas.

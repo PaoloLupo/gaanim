@@ -3,7 +3,7 @@
 
 #show: docs-chapter.with(
   title: "Cámara y 3D",
-  description: "Encuadres, zoom y seguimiento con la cámara 2D; primitivas, luces y cámara en perspectiva en 3D",
+  description: "Encuadres, zoom, seguimiento y cámaras secundarias en 2D; primitivas, luces y cámara en perspectiva en 3D",
   route: "/guias/camara-y-3d/",
 )
 
@@ -15,9 +15,9 @@
 ]
 
 En esta guía aprenderás a dirigir la mirada del espectador: acercarte a un
-detalle, volver al plano general, seguir a un objeto en movimiento y sacudir
-la imagen. Al final verás cómo montar una escena 3D sencilla y moverte
-alrededor de ella.
+detalle, volver al plano general, seguir a un objeto en movimiento, sacudir
+la imagen y mostrar un detalle ampliado con una cámara secundaria. Al final
+verás cómo montar una escena 3D sencilla y moverte alrededor de ella.
 
 ```python
 # output: preview.webp
@@ -146,6 +146,57 @@ y extremos.
 # continue
 scene.play([scene.camera.animate.shake(trauma=0.8, decay=1.5, seed=3)])
 ```
+
+== Cámaras secundarias
+
+`scene.camera` mueve toda la imagen. Para enseñar un detalle ampliado sin
+perder el plano general, convierte una figura en una pantalla con
+`pantalla.camera_view(marco)`: la pantalla muestra lo que ve una segunda
+cámara que encuadra `marco`. Es el _picture-in-picture_ de un vídeo o la lupa
+sobre un mapa.
+
+```python
+# output: preview.webp
+from gaanim import CYAN, GOLD, WHITE, Scene
+
+scene = Scene(frame=(16, 9), background="#0f172a")
+for i in range(60):
+    scene.geometry.dot(0.03).fill(CYAN if i % 2 else GOLD).move_to(-6.5 + 0.1 * i, 0.3 * (i % 5) - 0.6)
+scene.text("detalle", role="caption").scale_to(0.2).move_to(-4.5, -1.2)
+scene.text("letra pequeña bajo la lupa", role="caption").scale_to(0.3).move_to(-4, 1.8)
+
+marco = scene.geometry.rect(1.6, 0.9).no_fill().stroke(GOLD, 0.03).move_to(-4.5, -0.9)
+pantalla = scene.geometry.rounded_rect(6.4, 3.6, 0.2).stroke(GOLD, 0.05).move_to(3.5, 0)
+pantalla.camera_view(marco)
+
+lupa = scene.geometry.circle(0.7).stroke(WHITE, 0.04).move_to(-6, 1.8)
+foco = scene.geometry.circle(0.25).no_fill().no_stroke().move_to(-6, 1.8)
+lupa.camera_view(foco)
+
+scene.play([
+    marco.animate.move_to(-2, 0).scale_to(0.5).duration(1.5),
+    lupa.animate.move_to(-2, 1.8).duration(1.5),
+    foco.animate.move_to(-2, 1.8).duration(1.5),
+])
+scene.render()
+```
+
+- El marco es la cámara: moverlo desplaza la vista, reducirlo acerca y
+  girarlo gira la vista en sentido contrario. Se anima con `animate` como
+  cualquier objeto.
+- El aumento es el tamaño de la pantalla entre el del marco: una pantalla de
+  6,4 de ancho con un marco de 1,6 amplía cuatro veces. `fit="cover"` llena la
+  pantalla aunque las proporciones no coincidan y `fit="stretch"` deforma el
+  marco hasta encajarlo.
+- La pantalla dibuja su relleno, encima la vista recortada a su contorno y
+  encima su trazo. Cualquier figura cerrada sirve: un círculo hace de lupa.
+- La vista no muestra la pantalla ni el marco. Oculta más objetos con
+  `exclude=[...]`; si el marco solo debe hacer de cámara, quítale el trazo.
+- El fondo de la vista es el de la escena. Cámbialo con `background=` (un
+  color o un `Brush`), o pasa `background=None` para que se vea el relleno de
+  la pantalla.
+- La cámara ve la escena aunque la región quede fuera de la cámara
+  principal, así que puedes mostrar a la vez dos zonas alejadas.
 
 = Escenas 3D
 

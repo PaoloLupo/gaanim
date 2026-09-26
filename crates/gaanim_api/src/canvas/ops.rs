@@ -265,6 +265,15 @@ pub(crate) struct CameraBindingSpec {
 // Op
 // -----------------------------------------------------------------------
 
+/// A camera view recorded by [`Op::SetCameraView`].
+#[derive(Debug, Clone)]
+pub(crate) struct CameraViewSpec {
+    pub source: ObjectId,
+    pub fit: gaanim_renderer::effects::CameraViewFit,
+    pub background: gaanim_renderer::effects::CameraViewBackground,
+    pub exclude: Vec<ObjectId>,
+}
+
 /// A deferred operation accumulated by [`SceneModel`](super::SceneModel) and replayed
 /// into a [`SceneBuilder`](crate::builder::SceneBuilder) on compile.
 #[allow(dead_code)]
@@ -460,6 +469,11 @@ pub(crate) enum Op {
         mask: Option<ObjectId>,
         rule: gaanim_core::peniko::Fill,
         invert: bool,
+    },
+    /// Show another camera's view inside a closed vector shape, or end it.
+    SetCameraView {
+        target: ObjectId,
+        view: Option<CameraViewSpec>,
     },
     /// Insert an explicit zero-duration interactive stop.
     Stop,

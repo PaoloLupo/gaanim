@@ -1646,6 +1646,31 @@ mod tests {
     }
 }
 
+/// `background` of `Drawable.camera_view`: `"canvas"`, `None` or a paint.
+pub(crate) enum CameraViewBackgroundArg {
+    Canvas,
+    None,
+    Paint(gaanim_core::peniko::Brush),
+}
+
+impl<'a, 'py> FromPyObject<'a, 'py> for CameraViewBackgroundArg {
+    type Error = PyErr;
+
+    fn extract(obj: pyo3::Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
+        if obj.is_none() {
+            return Ok(Self::None);
+        }
+        if let Ok("canvas") = obj.extract::<&str>() {
+            return Ok(Self::Canvas);
+        }
+        PyPaint::extract(obj)
+            .map(|paint| Self::Paint(paint.0))
+            .map_err(|_| {
+                PyValueError::new_err("background must be 'canvas', None, a color or a Brush")
+            })
+    }
+}
+
 #[pyclass(name = "Drawable", module = "gaanim_core", subclass, from_py_object)]
 #[derive(Clone)]
 pub struct PyDrawable(pub gaanim_api::canvas::DrawableHandle);
@@ -2053,6 +2078,48 @@ impl PyDrawable {
     fn no_clip(&self) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         Ok(Self(self.0.clone().no_clip()))
+    }
+    /// Show inside this closed shape what a second camera framing `frame` sees.
+    #[pyo3(signature = (frame, *, fit="contain", background=CameraViewBackgroundArg::Canvas, exclude=Vec::new()))]
+    fn camera_view(
+        &self,
+        frame: &PyDrawable,
+        fit: &str,
+        background: CameraViewBackgroundArg,
+        exclude: Vec<PyDrawable>,
+    ) -> PyResult<Self> {
+        use gaanim_api::canvas::{CameraViewBackground, CameraViewFit, CameraViewOptions};
+        crate::custom::ensure_authoring_allowed()?;
+        let fit = match fit {
+            "contain" => CameraViewFit::Contain,
+            "cover" => CameraViewFit::Cover,
+            "stretch" => CameraViewFit::Stretch,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "fit must be 'contain', 'cover', or 'stretch', got {other:?}"
+                )))
+            }
+        };
+        let background = match background {
+            CameraViewBackgroundArg::Canvas => CameraViewBackground::Canvas,
+            CameraViewBackgroundArg::None => CameraViewBackground::None,
+            CameraViewBackgroundArg::Paint(brush) => CameraViewBackground::Brush(brush),
+        };
+        let options = CameraViewOptions {
+            fit,
+            background,
+            exclude: exclude.into_iter().map(|drawable| drawable.0).collect(),
+        };
+        self.0
+            .clone()
+            .camera_view_with(&frame.0, options)
+            .map(Self)
+            .map_err(|error| PyValueError::new_err(error.to_string()))
+    }
+    /// Remove the camera view shown inside this drawable.
+    fn no_camera_view(&self) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self(self.0.clone().no_camera_view()))
     }
     fn set_fill_level(&self, level: &Bound<'_, PyAny>) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
