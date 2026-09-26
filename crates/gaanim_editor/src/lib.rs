@@ -5,6 +5,8 @@ use gaanim_scene::{GltfModelRoot, Mesh3DMarker, RenderOrder, WorldBounds};
 use gaanim_timeline::timeline::{PlaybackStopPolicy, Timeline};
 use ui_kit::{ButtonTone, Icon, PRIMARY_SIZE, ToggleColor, divider, icon_button, palette};
 
+#[cfg(target_os = "linux")]
+pub mod alsa_errors;
 mod app_icon;
 pub mod export;
 mod fps_overlay;

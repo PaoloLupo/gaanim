@@ -233,7 +233,7 @@ pub fn reload_listener_system(world: &mut World) {
             width,
             height,
         );
-        eprintln!("[gaanim] {}", status.last_message);
+        gaanim_core::console::success("ready", &status.last_message);
         status.shown_at = Some(now);
     }
     // Éxito limpia el error previo
@@ -265,7 +265,7 @@ fn apply_segment_selection(world: &mut World) -> Option<String> {
         }
         Err(error) => {
             let message = format!("--sections/--from: {error}");
-            eprintln!("[gaanim] {message}");
+            gaanim_core::console::warn("sections", &message);
             Some(message)
         }
     }
@@ -285,11 +285,11 @@ fn reload_status_message(
         }
     };
     format!(
-        "Scene ready · Python {:.2}s · replay {:.2}s{} · total {:.2}s · {}x{}",
+        "Scene ready in {:.2}s · Python {:.2}s · replay {:.2}s{} · {}×{}",
+        python_duration + replay_duration,
         python_duration,
         replay_duration,
         reuse,
-        python_duration + replay_duration,
         width,
         height
     )
@@ -435,7 +435,7 @@ mod tests {
     fn reload_status_separates_python_from_scene_replay() {
         assert_eq!(
             reload_status_message(0.125, 1.5, runtime::ReplayKind::Full, 1920, 1080),
-            "Scene ready · Python 0.12s · replay 1.50s · total 1.62s · 1920x1080"
+            "Scene ready in 1.62s · Python 0.12s · replay 1.50s · 1920×1080"
         );
         assert_eq!(
             reload_status_message(
@@ -448,7 +448,7 @@ mod tests {
                 1920,
                 1080
             ),
-            "Scene ready · Python 0.12s · replay 0.25s (reused 37/40 segments) · total 0.38s · 1920x1080"
+            "Scene ready in 0.38s · Python 0.12s · replay 0.25s (reused 37/40 segments) · 1920×1080"
         );
     }
 

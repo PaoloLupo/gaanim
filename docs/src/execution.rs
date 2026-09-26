@@ -186,18 +186,28 @@ fn silent_failure(program: &str, success: bool, status: &str, stderr: &str) -> O
 /// What the cell printed, without the report `gaanim check` appends: readers
 /// care about their `print()` output, not the builder's validation.
 fn without_preflight_report(stdout: &str) -> &str {
-    match stdout.find("Scene preflight:") {
-        Some(start) if start == 0 || stdout[..start].ends_with('\n') => &stdout[..start],
-        _ => stdout,
+    let mut offset = 0;
+    for line in stdout.split_inclusive('\n') {
+        let text = line.trim_end_matches(['\r', '\n']);
+        let starts_report = text.starts_with("Scene preflight:")
+            || text.starts_with("Presentation preflight:")
+            || gaanim_core::console::status_label(text) == Some("check");
+        if starts_report {
+            return &stdout[..offset];
+        }
+        offset += line.len();
     }
+    stdout
 }
 
-/// Drop the runtime's tracing lines (`2026-01-01T00:00:00.000Z  INFO ...`)
-/// and ALSA's complaints about a build machine without a sound card.
+/// Drop the runtime's status lines (`  ▸ watch  ...`, or the older tracing format
+/// `2026-01-01T00:00:00.000Z  INFO ...`) and ALSA's complaints about a build
+/// machine without a sound card.
 fn without_runtime_logs(stderr: &str) -> String {
     stderr
         .lines()
         .filter(|line| !line.starts_with("ALSA lib "))
+        .filter(|line| !gaanim_core::console::is_status_line(line))
         .filter(|line| {
             let mut fields = line.split_whitespace();
             let timestamp = fields.next().unwrap_or("");
@@ -1022,6 +1032,12 @@ mod tests {
         assert_eq!(without_preflight_report(stdout), "hola\n");
         assert_eq!(without_preflight_report("Scene preflight: x\n"), "");
         assert_eq!(without_preflight_report("no report"), "no report");
+        let current = "hola\n  ▸ check     main.py · scene\n              2.0 seconds\n  ✓ pass      No problems found\n";
+        assert_eq!(without_preflight_report(current), "hola\n");
+        assert_eq!(
+            without_preflight_report("  ▸ checkpoint x\n"),
+            "  ▸ checkpoint x\n"
+        );
     }
 
     #[test]
@@ -1034,6 +1050,12 @@ mod tests {
         assert_eq!(without_runtime_logs(&strip_ansi_escape_codes(colored)), "");
         assert_eq!(
             without_runtime_logs("ALSA lib pcm.c:2721:(snd_pcm_open_noupdate) Unknown PCM default"),
+            ""
+        );
+        assert_eq!(
+            without_runtime_logs(
+                "  ▸ watch     examples\n  ! warning   bevy_asset: missing\n  ✓ ready     Scene ready"
+            ),
             ""
         );
         assert_eq!(

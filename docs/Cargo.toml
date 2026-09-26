@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 clap = { version = "4.6.1", features = ["derive"] }
+gaanim_core = { path = "../crates/gaanim_core" }
 typst-kit = { version ="0.15", features = ["http-server", "datetime", "timer", "emit-diagnostics", "bundle", "watcher"] }
 typst = { version ="0.15" }
 typst-utils = { version ="0.15" }

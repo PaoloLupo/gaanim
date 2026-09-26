@@ -809,7 +809,7 @@ fn sample_video_system(world: &mut World) {
                             playback.last_frame = Some(frame);
                         }
                     }
-                    Err(error) => eprintln!("[gaanim] {error}"),
+                    Err(error) => gaanim_core::console::warn("video", error),
                 }
             }
             VideoSamplingMode::Realtime => {
@@ -904,7 +904,10 @@ fn sync_preview_audio_system(world: &mut World) {
                     bytes
                 }
                 Err(error) => {
-                    eprintln!("[gaanim] preview audio is unavailable: {error}");
+                    gaanim_core::console::warn(
+                        "audio",
+                        format!("preview audio is unavailable: {error}"),
+                    );
                     registry.failed.insert(key);
                     continue;
                 }
@@ -917,9 +920,12 @@ fn sync_preview_audio_system(world: &mut World) {
             .map(|duration| duration.as_secs_f64())
             .filter(|duration| duration.is_finite() && *duration > 0.0);
         let Some(duration) = duration else {
-            eprintln!(
-                "[gaanim] preview audio duration is unavailable: {}",
-                track.path.display()
+            gaanim_core::console::warn(
+                "audio",
+                format!(
+                    "preview audio duration is unavailable: {}",
+                    track.path.display()
+                ),
             );
             registry.failed.insert(key);
             continue;
@@ -1007,9 +1013,12 @@ fn sync_preview_audio_system(world: &mut World) {
     for (index, error) in seek_errors {
         let key = PreviewAudioKey::new(&registry.tracks[index]);
         if registry.seek_warned.insert(key) {
-            eprintln!(
-                "[gaanim] preview audio cannot follow the playhead in {}: {error}",
-                registry.tracks[index].path.display()
+            gaanim_core::console::warn(
+                "audio",
+                format!(
+                    "preview audio cannot follow the playhead in {}: {error}",
+                    registry.tracks[index].path.display()
+                ),
             );
         }
     }

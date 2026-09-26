@@ -3,6 +3,7 @@ use bevy::camera::Viewport;
 use bevy::ecs::observer::On;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
+use gaanim_core::console;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, sync_channel};
@@ -27,12 +28,12 @@ pub struct CapturedFrame {
 }
 
 fn create_progress_bar(total_frames: u64) -> ProgressBar {
-    let pb = ProgressBar::new(total_frames);
+    let pb = ProgressBar::new(total_frames).with_prefix("render");
     pb.set_style(
         ProgressStyle::default_bar()
-            .template("{spinner:.green} 🦀 [gaanim] Exporting |{bar:40.cyan/blue}| {pos}/{len} frames ({percent}%) | Speed: {msg} | ETA: {eta}")
+            .template("  {spinner:.99} {prefix:<9.bold.99} {bar:32.99/238} {pos:>4}/{len} frames · {msg} · {eta} left")
             .unwrap()
-            .progress_chars("##-")
+            .progress_chars("━━─")
     );
     pb
 }
@@ -57,12 +58,54 @@ fn encoder_label(config: &ExportConfig) -> &'static str {
     }
 }
 
-fn export_log(telemetry: &Option<ExportTelemetry>, line: impl Into<String>) {
-    let line = line.into();
+/// Prints a status line on stdout and records it, without colour, in the
+/// telemetry the editor's export dialog shows.
+fn export_log(
+    telemetry: &Option<ExportTelemetry>,
+    level: console::Level,
+    label: &str,
+    message: impl Into<String>,
+) {
+    let message = message.into();
     if let Some(telemetry) = telemetry {
-        telemetry.push_log(line.clone());
+        telemetry.push_log(console::format_line(level, label, &message, false));
     }
-    println!("{line}");
+    let color = console::color_enabled(console::Stream::Stdout);
+    println!("{}", console::format_line(level, label, &message, color));
+}
+
+/// An export setting under the heading. `Encoder:` lines are also parsed by
+/// the editor and the export smoke test, so keys keep their colon.
+fn export_detail(telemetry: &Option<ExportTelemetry>, key: &str, value: impl std::fmt::Display) {
+    let value = value.to_string();
+    if let Some(telemetry) = telemetry {
+        telemetry.push_log(console::format_detail(key, &value, false));
+    }
+    let color = console::color_enabled(console::Stream::Stdout);
+    println!("{}", console::format_detail(key, &value, color));
+}
+
+/// The settings every export prints before rendering its first frame.
+fn export_summary(telemetry: &Option<ExportTelemetry>, config: &ExportConfig) {
+    export_log(
+        telemetry,
+        console::Level::Info,
+        "export",
+        config.output_path.clone(),
+    );
+    export_detail(
+        telemetry,
+        "Resolution",
+        format!("{}×{} at {} fps", config.width, config.height, config.fps),
+    );
+    export_detail(telemetry, "Format", format_label(&config.format));
+    export_detail(telemetry, "Encoder", encoder_label(config));
+    if config.transparent {
+        export_detail(telemetry, "Background", "transparent");
+    }
+    if let (Some(start), Some(end)) = (config.start_time, config.end_time) {
+        export_detail(telemetry, "Segment", format!("{start:.2}s to {end:.2}s"));
+    }
 }
 
 fn export_progress(telemetry: &Option<ExportTelemetry>, current: u64, total: u64) {
@@ -115,6 +158,7 @@ struct ExportPipeline {
     pub export_height: u32,
     pub resize_filter: image::imageops::FilterType,
     pub telemetry: Option<ExportTelemetry>,
+    pub output_path: String,
     pub result_tx: SyncSender<Result<()>>,
     pub result_sent: bool,
 }
@@ -190,7 +234,12 @@ fn export_pipeline_system(
         })
     {
         let pipeline = &mut *pipeline_res;
-        export_log(&pipeline.telemetry, format!("  ERROR: {message}"));
+        export_log(
+            &pipeline.telemetry,
+            console::Level::Error,
+            "error",
+            message.to_string(),
+        );
         publish_export_result(
             &pipeline.result_tx,
             &mut pipeline.result_sent,
@@ -208,7 +257,12 @@ fn export_pipeline_system(
         match rx.try_recv() {
             Ok(frame_data) => {
                 if let Err(e) = pipeline.encoder.push_frame(frame_data) {
-                    export_log(&pipeline.telemetry, format!("  ERROR: {e}"));
+                    export_log(
+                        &pipeline.telemetry,
+                        console::Level::Error,
+                        "error",
+                        e.to_string(),
+                    );
                     bevy::prelude::error!("Encoder error: {}", e);
                     publish_export_result(&pipeline.result_tx, &mut pipeline.result_sent, Err(e));
                     exit.write(AppExit::Success);
@@ -236,10 +290,20 @@ fn export_pipeline_system(
                 pipeline.waiting_for_gpu = false;
 
                 if pipeline.rendered_frames >= pipeline.total_frames {
-                    pipeline.progress_bar.finish_with_message("Done!");
-                    export_log(&pipeline.telemetry, "  Finalizing video file...");
+                    pipeline.progress_bar.finish_and_clear();
+                    export_log(
+                        &pipeline.telemetry,
+                        console::Level::Info,
+                        "encode",
+                        "Finalizing the file",
+                    );
                     if let Err(e) = pipeline.encoder.finalize() {
-                        export_log(&pipeline.telemetry, format!("  ERROR: {e}"));
+                        export_log(
+                            &pipeline.telemetry,
+                            console::Level::Error,
+                            "error",
+                            e.to_string(),
+                        );
                         bevy::prelude::error!("Encoder finalization error: {}", e);
                         publish_export_result(
                             &pipeline.result_tx,
@@ -253,18 +317,13 @@ fn export_pipeline_system(
                     let duration = pipeline.start_time.elapsed();
                     export_log(
                         &pipeline.telemetry,
-                        "------------------------------------------------------------",
-                    );
-                    export_log(
-                        &pipeline.telemetry,
+                        console::Level::Success,
+                        "done",
                         format!(
-                            "✓ Export successfully completed in {:.2}s!",
-                            duration.as_secs_f64()
+                            "Exported in {:.2}s: {}",
+                            duration.as_secs_f64(),
+                            pipeline.output_path
                         ),
-                    );
-                    export_log(
-                        &pipeline.telemetry,
-                        "------------------------------------------------------------",
                     );
 
                     publish_export_result(&pipeline.result_tx, &mut pipeline.result_sent, Ok(()));
@@ -280,7 +339,12 @@ fn export_pipeline_system(
             }
             Err(TryRecvError::Disconnected) => {
                 let error = ExportError::Capture("GPU frame channel disconnected".to_string());
-                export_log(&pipeline.telemetry, format!("  ERROR: {error}"));
+                export_log(
+                    &pipeline.telemetry,
+                    console::Level::Error,
+                    "error",
+                    error.to_string(),
+                );
                 bevy::prelude::error!("{error}");
                 publish_export_result(&pipeline.result_tx, &mut pipeline.result_sent, Err(error));
                 exit.write(AppExit::Success);
@@ -390,43 +454,7 @@ where
         telemetry.set_encoder(encoder_label(&config));
     }
 
-    export_log(
-        &telemetry,
-        "------------------------------------------------------------",
-    );
-    export_log(&telemetry, "🦀 gaanim — Export");
-    export_log(
-        &telemetry,
-        "------------------------------------------------------------",
-    );
-    export_log(
-        &telemetry,
-        format!("  Output file:   {}", config.output_path),
-    );
-    export_log(
-        &telemetry,
-        format!("  Resolution:    {}x{}", config.width, config.height),
-    );
-    export_log(&telemetry, format!("  Framerate:     {} FPS", config.fps));
-    export_log(
-        &telemetry,
-        format!("  Format:        {}", format_label(&config.format)),
-    );
-    export_log(
-        &telemetry,
-        format!("  Encoder:       {}", encoder_label(&config)),
-    );
-    export_log(
-        &telemetry,
-        format!("  Transparent:   {}", config.transparent),
-    );
-    if let (Some(s), Some(e)) = (config.start_time, config.end_time) {
-        export_log(&telemetry, format!("  Segment:       {s:.2}s to {e:.2}s"));
-    }
-    export_log(
-        &telemetry,
-        "------------------------------------------------------------",
-    );
+    export_summary(&telemetry, &config);
 
     let resize_filter = filter_for_quality(config.encoding_speed);
 
@@ -459,7 +487,8 @@ where
                 exit_condition: bevy::window::ExitCondition::DontExit,
                 ..default()
             })
-            .set(gaanim_scene::gaanim_asset_plugin()),
+            .set(gaanim_scene::gaanim_asset_plugin())
+            .set(gaanim_scene::logging::log_plugin()),
     )
     .add_plugins(gaanim_scene::GaanimScenePlugin)
     .add_plugins(gaanim_animation::GaanimAnimationPlugin)
@@ -536,6 +565,7 @@ where
         export_height: config.height,
         resize_filter,
         telemetry,
+        output_path: config.output_path.clone(),
         result_tx,
         result_sent: false,
     });
@@ -571,43 +601,7 @@ where
         telemetry.set_encoder(encoder_label(&config));
     }
 
-    export_log(
-        &telemetry,
-        "------------------------------------------------------------",
-    );
-    export_log(&telemetry, "🦀 gaanim v2 — Headless GPU-Direct Export");
-    export_log(
-        &telemetry,
-        "------------------------------------------------------------",
-    );
-    export_log(
-        &telemetry,
-        format!("  Output file:   {}", config.output_path),
-    );
-    export_log(
-        &telemetry,
-        format!("  Resolution:    {}x{}", config.width, config.height),
-    );
-    export_log(&telemetry, format!("  Framerate:     {} FPS", config.fps));
-    export_log(
-        &telemetry,
-        format!("  Format:        {}", format_label(&config.format)),
-    );
-    export_log(
-        &telemetry,
-        format!("  Encoder:       {}", encoder_label(&config)),
-    );
-    export_log(
-        &telemetry,
-        format!("  Transparent:   {}", config.transparent),
-    );
-    if let (Some(s), Some(e)) = (config.start_time, config.end_time) {
-        export_log(&telemetry, format!("  Segment:       {s:.2}s to {e:.2}s"));
-    }
-    export_log(
-        &telemetry,
-        "------------------------------------------------------------",
-    );
+    export_summary(&telemetry, &config);
 
     let mut gpu = GpuContext::new(config.width, config.height)?;
 
@@ -749,12 +743,17 @@ where
         current_time += frame_time_step;
     }
 
-    pb.finish_with_message("Done!");
-    export_log(&telemetry, "  Finalizing video file...");
+    pb.finish_and_clear();
+    export_log(
+        &telemetry,
+        console::Level::Info,
+        "encode",
+        "Finalizing the file",
+    );
 
     let finalize_started_at = Instant::now();
     let encode_active_time = encoder.finalize_with_timings().inspect_err(|e| {
-        export_log(&telemetry, format!("  ERROR: {e}"));
+        export_log(&telemetry, console::Level::Error, "error", e.to_string());
         bevy::prelude::error!("Encoder finalization error: {}", e);
     })?;
     let finalize_time = finalize_started_at.elapsed();
@@ -770,18 +769,13 @@ where
     );
     export_log(
         &telemetry,
-        "------------------------------------------------------------",
-    );
-    export_log(
-        &telemetry,
+        console::Level::Success,
+        "done",
         format!(
-            "✓ Export successfully completed in {:.2}s!",
-            duration.as_secs_f64()
+            "Exported in {:.2}s: {}",
+            duration.as_secs_f64(),
+            config.output_path
         ),
-    );
-    export_log(
-        &telemetry,
-        "------------------------------------------------------------",
     );
 
     Ok(())
@@ -1356,7 +1350,8 @@ where
                 exit_condition: bevy::window::ExitCondition::DontExit,
                 ..default()
             })
-            .set(gaanim_scene::gaanim_asset_plugin()),
+            .set(gaanim_scene::gaanim_asset_plugin())
+            .set(gaanim_scene::logging::log_plugin()),
     )
     .add_plugins(gaanim_scene::GaanimScenePlugin)
     .add_plugins(gaanim_animation::GaanimAnimationPlugin)

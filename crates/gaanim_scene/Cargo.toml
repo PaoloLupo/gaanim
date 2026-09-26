@@ -13,6 +13,7 @@ gaanim_math = { path = "../gaanim_math" }
 # Scene components and systems own glTF instances, materials, and 3D meshes.
 bevy = { workspace = true, features = [
     "bevy_asset",
+    "bevy_log",
     "bevy_world_serialization",
     "bevy_gltf",
     "bevy_animation",

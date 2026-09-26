@@ -85,8 +85,10 @@ pub struct GpuContext {
 
 impl GpuContext {
     pub fn new(width: u32, height: u32) -> Result<Self, GpuContextError> {
+        // `WGPU_BACKEND` (vulkan, dx12, metal, gl) narrows the search like it
+        // does for the preview window; CI uses it to skip broken adapters.
         let instance = Instance::new(InstanceDescriptor {
-            backends: Backends::all(),
+            backends: Backends::all().with_env(),
             ..InstanceDescriptor::new_without_display_handle()
         });
 
@@ -482,7 +484,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires a working GPU adapter; hosted Windows runners crash in the driver"]
     fn post_process_changes_only_the_camera_frame() {
         use bevy_vello::vello::{Scene, kurbo, peniko};
         use gaanim_renderer::post_process::{CanvasPostProcess, PostProcessShader};

@@ -270,7 +270,11 @@ impl NarrationPanel {
 
     fn notify(&mut self, kind: NoticeKind, message: impl Into<String>) {
         let message = message.into();
-        eprintln!("[gaanim] narration: {message}");
+        match kind {
+            NoticeKind::Info => gaanim_core::console::info("narration", &message),
+            NoticeKind::Success => gaanim_core::console::success("narration", &message),
+            NoticeKind::Error => gaanim_core::console::error("narration", &message),
+        }
         self.notice = Some((message, kind));
     }
 

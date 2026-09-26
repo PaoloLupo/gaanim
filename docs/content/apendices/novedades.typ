@@ -63,6 +63,31 @@ Cambios todavía sin publicar.
 - El texto de un SVG con la familia genérica `sans-serif` usa la DejaVu Sans
   que trae Gaanim en cualquier sistema. Antes salía en Arial si estaba
   instalada y desaparecía en los equipos Linux que no la tienen.
+- `gaanim check` imprime su informe con el nuevo formato de la terminal
+  (`pass`, `warning`, `error`, `fail`) en lugar de las líneas `PASS:`,
+  `WARN:` y `ERROR:`. Si un script leía ese texto, usa el código de salida,
+  que no cambia: `0` sin errores, `1` con problemas y `2` si el proyecto no
+  carga.
+
+== Cambios
+
+- La terminal muestra solo lo que te sirve, con color y columnas alineadas:
+  el logo de Gaanim al abrir la vista previa, exportar o pedir `--help`, y
+  una línea por evento con su etiqueta (`watch`, `ready`, `reload`, `export`,
+  `python`…), donde los detalles secundarios aparecen atenuados. Los mensajes
+  internos de Bevy, wgpu, winit y egui (adaptador, shaders, ventana) solo se
+  muestran si son errores; los de ALSA se resumen en un único aviso `audio`,
+  y las trazas de Python empiezan en tu código y resaltan el error.
+  `gaanim check` usa el mismo formato: `pass`, `warning`, `error` o `fail`.
+  Consulta
+  #link("/apendices/solucion-de-problemas/")[Solución de problemas]
+  para ver de nuevo todos los mensajes o quitar el color.
+- `gaanim --help` y la ayuda de cada comando están reescritas: incluyen
+  ejemplos, las teclas del modo presentación, las variables de entorno y el
+  enlace a esta documentación.
+- Las exportaciones respetan `WGPU_BACKEND` (`vulkan`, `dx12`, `metal`, `gl`)
+  igual que la vista previa, para elegir el backend de la GPU cuando el que
+  se elige por defecto falla.
 
 = 0.4.1
 

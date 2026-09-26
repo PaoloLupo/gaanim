@@ -116,8 +116,15 @@ gaanim check <SCRIPT_O_PROYECTO> [--strict]
 ```
 
 Ejecuta el script sin abrir ventana y revisa la escena resultante. Imprime la
-duración, el tamaño del marco y una línea por problema (`ERROR:` o `WARN:`), y
-termina con `PASS` o `FAIL`.
+duración y el tamaño del marco, una línea por problema (`error` o `warning`) y
+termina con `pass` o `fail`:
+
+```text
+  ▸ check     charla/main.py · presentation
+              3 segments · 5 stops · 42.0 seconds · 16×9
+  ! warning   segment `intro` contains unnamed stops; names improve Presenter View
+  ✓ pass      with 1 warning
+```
 
 - En toda escena: que la línea de tiempo dure algo, que no queden textos de
   plantilla que empiecen por `[` y, si quitaste el tema (`theme=None` o

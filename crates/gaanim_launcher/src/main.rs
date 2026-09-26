@@ -3,6 +3,8 @@
 //! It handles commands that do not need Python, discovers a compatible runtime
 //! for project/script launches, and then starts the `gaanim-core` binary.
 
+use gaanim_core::console;
+use gaanim_project::help::{self, Topic};
 use gaanim_project::{
     CreateProjectOptions, EnvironmentProbe, ProjectKind, activate_environment, core_environment,
     create_project, python_requirement,
@@ -24,11 +26,11 @@ fn main() {
     let hint = find_script_hint(&args);
     let probe = EnvironmentProbe::detect(hint.as_deref());
     if let Err(error) = activate_environment(&probe) {
-        eprintln!("gaanim: {error}");
-        eprintln!(
-            "Run `gaanim --help` for usage, or install {} (for example `uv python install 3.14`) and retry.",
+        console::error("python", error);
+        console::hint(format!(
+            "Install {} (for example `uv python install 3.14`) and retry, or run `gaanim --help`.",
             python_requirement()
-        );
+        ));
         std::process::exit(2);
     }
 
@@ -50,9 +52,9 @@ fn main() {
             })
         });
     if !core_exe.is_file() {
-        eprintln!(
-            "gaanim launcher: core binary not found at {}",
-            core_exe.display()
+        console::error(
+            "launch",
+            format!("core binary not found at {}", core_exe.display()),
         );
         std::process::exit(1);
     }
@@ -61,7 +63,10 @@ fn main() {
         .envs(core_environment(&probe))
         .status()
         .unwrap_or_else(|error| {
-            eprintln!("gaanim: failed to spawn {}: {error}", core_exe.display());
+            console::error(
+                "launch",
+                format!("failed to start {}: {error}", core_exe.display()),
+            );
             std::process::exit(1);
         });
     std::process::exit(status.code().unwrap_or(1));
@@ -74,15 +79,15 @@ fn handle_no_python_commands(args: &[String]) -> bool {
     }
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         if args.iter().any(|arg| arg == "init") {
-            print_init_help();
+            help::print(Topic::Init);
         } else if args.iter().any(|arg| arg == "check") {
-            print_check_help();
+            help::print(Topic::Check);
         } else if args.get(1).map(String::as_str) == Some("export") {
-            print_export_help();
+            help::print(Topic::Export);
         } else if args.iter().any(|arg| arg == "--diff") {
-            print_diff_help();
+            help::print(Topic::Diff);
         } else {
-            print_general_help();
+            help::print(Topic::General);
         }
         return true;
     }
@@ -90,36 +95,46 @@ fn handle_no_python_commands(args: &[String]) -> bool {
         return false;
     }
     let parsed = parse_init_args(&args[2..]).unwrap_or_else(|error| {
-        eprintln!("gaanim init: {error}");
-        eprintln!("Run `gaanim init --help` for usage.");
+        console::error("init", error);
+        console::hint("Run `gaanim init --help` for usage.");
         std::process::exit(2);
     });
     let project = create_project(&parsed).unwrap_or_else(|error| {
-        eprintln!("gaanim init: {error}");
+        console::error("init", error);
         std::process::exit(2);
     });
-    println!(
-        "Created {} project: {}",
-        parsed.kind.name(),
-        project.root.display()
-    );
-    println!("Edit: {}", project.entry.display());
-    match gaanim_project::provision_authoring_package(&project.root) {
-        Ok(venv) => println!("Python authoring environment: {}", venv.display()),
-        Err(error) => eprintln!("gaanim init: authoring environment not ready: {error}"),
-    }
-    println!("Preview: gaanim {}", project.root.display());
-    println!("Check: gaanim check {}", project.root.display());
-    if parsed.kind.is_slides() {
-        println!(
-            "Present: gaanim --present --monitor 1 {}",
+    let venv = gaanim_project::provision_authoring_package(&project.root);
+    console::success(
+        "init",
+        format!(
+            "Created {} project: {}",
+            parsed.kind.name(),
             project.root.display()
+        ),
+    );
+    console::detail("Edit", project.entry.display());
+    console::detail("Preview", format!("gaanim {}", project.root.display()));
+    console::detail("Check", format!("gaanim check {}", project.root.display()));
+    if parsed.kind.is_slides() {
+        console::detail(
+            "Present",
+            format!("gaanim --present --monitor 1 {}", project.root.display()),
         );
     } else {
-        println!(
-            "Export: gaanim export {} --output exports/video.mp4 --quality production",
-            project.root.display()
+        console::detail(
+            "Export",
+            format!(
+                "gaanim export {} --output exports/video.mp4 --quality production",
+                project.root.display()
+            ),
         );
+    }
+    match venv {
+        Ok(venv) => console::detail("Python", venv.display()),
+        Err(error) => console::warn(
+            "python",
+            format!("authoring environment not ready: {error}"),
+        ),
     }
     true
 }
@@ -174,124 +189,6 @@ fn find_script_hint(args: &[String]) -> Option<PathBuf> {
             None
         }
     })
-}
-
-fn print_general_help() {
-    println!("gaanim — GPU-accelerated vector animation engine");
-    println!();
-    println!("usage:");
-    println!("  gaanim");
-    println!(
-        "  gaanim [--present] [--monitor <INDEX>] [--sections <LIST>] [--from <NAME>] <SCRIPT_OR_PROJECT>"
-    );
-    println!("  gaanim init <video|slides> [DIRECTORY] [--force]");
-    println!(
-        "  gaanim export <SCRIPT_OR_PROJECT> --output <FILE> [--quality <PRESET>] [--encoder <ENCODER>] [--transparent]"
-    );
-    println!("  gaanim check <SCRIPT_OR_PROJECT> [--strict]");
-    println!("  gaanim --diff --example <SCRIPT_OR_PROJECT> [OPTIONS]");
-    println!("  gaanim --version");
-    println!();
-    println!("Run `gaanim <COMMAND> --help` for the options of init, export, check, or --diff.");
-}
-
-fn print_export_help() {
-    println!(
-        r#"gaanim export - render a script or project to a file
-
-USAGE:
-    gaanim export <SCRIPT_OR_PROJECT> --output <FILE> [OPTIONS]
-
-FORMATS (chosen by the --output extension):
-    .mp4                MP4 (H.264; needs FFmpeg)
-    .webm               WebM (VP9; needs FFmpeg; supports --transparent)
-    .webp               Animated WebP (needs FFmpeg; supports --transparent)
-    .gif                GIF (needs FFmpeg)
-    .png                PNG sequence, one file per frame (no FFmpeg; supports
-                        --transparent). A %d or %0Nd in the name is replaced by
-                        the frame number (frames/f_%04d.png -> f_0000.png, ...);
-                        otherwise the number is appended (frame.png -> frame_00000.png)
-
-OPTIONS:
-    -o, --output <FILE>          Output file (required)
-        --quality <PRESET>       draft (30 fps, fast encode), standard (60 fps,
-                                 default), or production (60 fps, best encode)
-        --width <PX>             Output width in pixels (default 1920)
-        --height <PX>            Output height in pixels (default 1080)
-        --fit <MODE>             When the output aspect differs from the scene
-                                 frame: error (default), contain (letterbox),
-                                 or cover (crop)
-        --encoder <ENCODER>      MP4 only: auto (default), libx264, nvenc, amf,
-                                 qsv, or vaapi. auto probes hardware encoders and
-                                 falls back to libx264; others never fall back
-        --transparent            Keep the alpha channel (WebM, WebP, PNG); the
-                                 scene needs a transparent background
-        --from <SECONDS|MARKER>  Start of the exported range (default 0); a
-                                 name uses the time of scene.marker(name)
-        --to <SECONDS|MARKER>    End of the exported range (default: scene end;
-                                 later values are clamped). Audio is trimmed to
-                                 the range and PNG frames are numbered from 0
-    -h, --help                   Print this help"#
-    );
-}
-
-fn print_init_help() {
-    println!(
-        r#"gaanim init - create a runnable Gaanim project
-
-USAGE:
-    gaanim init <KIND> [DIRECTORY] [--force]
-
-ARGUMENTS:
-    video               Animated-video starter
-    slides              Presentation segments starter
-    DIRECTORY           Project directory (defaults to gaanim-<kind>)
-
-OPTIONS:
-    Creates a bare uv project pinned to Python 3.14
-    --force             Update scaffold files without deleting user assets
-    -h, --help          Print this help"#
-    );
-}
-
-fn print_check_help() {
-    println!(
-        r#"gaanim check - validate a video or slides project
-
-USAGE:
-    gaanim check <SCRIPT_OR_PROJECT> [--strict]
-
-OPTIONS:
-    --strict            Return failure when warnings are present
-    -h, --help          Print this help"#
-    );
-}
-
-fn print_diff_help() {
-    println!(
-        r#"gaanim --diff - native egui visual regression viewer
-
-USAGE:
-    gaanim --diff --example <SCRIPT_OR_PROJECT> [OPTIONS]
-    gaanim --diff --baseline <DIR> --current <DIR> [OPTIONS]
-
-OPTIONS:
-    -e, --example <SCRIPT_OR_PROJECT>  Capture and compare one project
-        --tests-root <DIR>             Snapshot root (default: tests/visual)
-        --bless                        Capture as baseline and exit
-        --no-capture                   Reuse existing current snapshots
-    -b, --baseline <DIR>               Known-good snapshot directory
-    -c, --current <DIR>                Candidate snapshot directory
-    -o, --output <DIR>                 Override report directory
-        --capture-stops                Capture the frame at every scene.stop()
-        --stops <LIST>                 With --capture-stops, only these stops
-        --sections <LIST>              With --capture-stops, only these sections
-        --from <NAME>                  With --capture-stops, from this section on
-        --pixel-threshold <0..255>      Ignored per-channel difference
-        --max-changed-ratio <0..1>      Allowed changed-pixel fraction
-        --no-gui                        Generate reports without egui
-    -h, --help                          Print this help"#
-    );
 }
 
 #[cfg(test)]
