@@ -17,9 +17,10 @@ scene.wait(0.3)
 scene.stop("rectangle")
 
 finale = scene.segment("finale", notes="Close with the summary.", template=title_slide)
-scene.reuse(circle)
+# A drawable belongs to one layout, so the closing slide gets its own badge.
+badge = scene.geometry.circle(0.5).fill(BLUE)
 label = scene.text("Slide 3").fill(GOLD)
-finale.bind(title=label, subtitle=circle)
+finale.bind(title=label, subtitle=badge)
 scene.play([label.animate.write().duration(0.5)])
 scene.wait(0.3)
 scene.render()

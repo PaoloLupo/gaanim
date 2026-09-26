@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-24.04, windows-latest]
 
     steps:
       - uses: actions/checkout@v4
@@ -29,13 +29,26 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Install system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+
+      - name: Expose the embedded Python runtime
+        if: runner.os == 'Linux'
+        run: |
+          echo "PYO3_PYTHON=$(which python)" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=${pythonLocation}/lib" >> "$GITHUB_ENV"
+
       - name: Test agent plugin utilities
         run: |
           python -m unittest discover -s plugins/gaanim-dev/tests -v
           python -m unittest discover -s plugins/gaanim/tests -v
 
       - name: Check formatting
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         run: cargo fmt --all -- --check
 
       - name: Type-check workspace
@@ -47,9 +60,14 @@ jobs:
       - name: Lint workspace
         run: cargo clippy --workspace --all-targets
 
+  # Hosted Windows runners have no usable GPU adapter (wgpu crashes in the
+  # driver), so everything that renders runs on Ubuntu with Mesa's software
+  # Vulkan driver (lavapipe), the same setup that captured the baselines.
   visual-regression:
-    name: Visual regression (Windows)
-    runs-on: windows-latest
+    name: Visual regression (Ubuntu, lavapipe)
+    runs-on: ubuntu-24.04
+    env:
+      VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
     steps:
       - uses: actions/checkout@v4
 
@@ -59,46 +77,54 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Expose the embedded Python runtime
-        shell: pwsh
+      - name: Install system libraries
         run: |
-          $pythonHome = python -c "import sys; print(sys.base_prefix)"
-          $pythonHome | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev \
+            mesa-vulkan-drivers xvfb libxkbcommon-x11-0
+
+      - name: Expose the embedded Python runtime
+        run: |
+          echo "PYO3_PYTHON=$(which python)" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=${pythonLocation}/lib" >> "$GITHUB_ENV"
 
       - name: Build headless snapshot runner
         run: |
           cargo build -p gaanim_launcher --bin gaanim
           cargo build -p gaanim_editor --bin gaanim-core
 
+      # Native 3D scenes open a window even for headless captures, hence Xvfb.
       - name: Validate public Scene examples
-        shell: pwsh
-        run: .\tests\validate_scene_examples.ps1
+        run: xvfb-run -a pwsh ./tests/validate_scene_examples.ps1
 
       - name: Compare representative subsystem snapshots
-        shell: pwsh
+        shell: xvfb-run -a bash -e {0}
         run: |
-          $examples = @(
-            "transform_demo",
-            "image_demo",
-            "svg_demo",
-            "camera_demo",
-            "matrix_showcase",
-            "chart_marks_gallery",
-            "layout_reflow_demo",
-            "equation_step",
-            "primitives_3d_demo",
-            "gltf_animation_demo",
-            "vector_field_streamlines",
-            "presentation_demo"
+          examples=(
+            transform_demo
+            image_demo
+            svg_demo
+            camera_demo
+            matrix_showcase
+            chart_marks_gallery
+            layout_reflow_demo
+            equation_step
+            primitives_3d_demo
+            gltf_animation_demo
+            vector_field_streamlines
+            presentation_demo
           )
-          $hybridExamples = @("chart_marks_gallery", "primitives_3d_demo", "gltf_animation_demo")
-          foreach ($example in $examples) {
-            $pixelThreshold = if ($hybridExamples -contains $example) { "2" } else { "16" }
-            $maxChangedRatio = if ($hybridExamples -contains $example) { "0.001" } else { "0.00001" }
-            .\target\debug\gaanim.exe --diff --example "examples\$example.py" --no-gui `
-              --pixel-threshold $pixelThreshold --max-changed-ratio $maxChangedRatio
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
+          hybrid=" chart_marks_gallery primitives_3d_demo gltf_animation_demo "
+          for example in "${examples[@]}"; do
+            if [[ "$hybrid" == *" $example "* ]]; then
+              threshold=2 ratio=0.001
+            else
+              threshold=16 ratio=0.00001
+            fi
+            ./target/debug/gaanim --diff --example "examples/$example.py" --no-gui \
+              --pixel-threshold "$threshold" --max-changed-ratio "$ratio"
+          done
 
       - name: Upload visual diff report
         if: failure()
@@ -112,13 +138,10 @@ jobs:
           retention-days: 14
 
   export-smoke:
-    name: Export smoke (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-
+    name: Export smoke (Ubuntu, lavapipe)
+    runs-on: ubuntu-24.04
+    env:
+      VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
     steps:
       - uses: actions/checkout@v4
 
@@ -128,24 +151,37 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev \
+            mesa-vulkan-drivers ffmpeg xvfb libxkbcommon-x11-0
+
+      - name: Expose the embedded Python runtime
+        run: |
+          echo "PYO3_PYTHON=$(which python)" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=${pythonLocation}/lib" >> "$GITHUB_ENV"
+
       - name: Build executable runtime
         run: cargo build -p gaanim_editor --bin gaanim-core
 
+      # The isolated 3D worker exports through a window, hence Xvfb.
       - name: Export formats and isolated 3D smoke
-        run: python tests/validate_exports.py --output target/export-smoke
+        run: xvfb-run -a python tests/validate_exports.py --output target/export-smoke
 
       - name: Upload export diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: export-smoke-${{ matrix.os }}
+          name: export-smoke
           path: target/export-smoke
           if-no-files-found: warn
           retention-days: 14
 
   python-package:
     name: Python package (Ubuntu)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v4
@@ -155,6 +191,17 @@ jobs:
           python-version: "3.14"
 
       - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+
+      - name: Expose the embedded Python runtime
+        run: |
+          echo "PYO3_PYTHON=$(which python)" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=${pythonLocation}/lib" >> "$GITHUB_ENV"
 
       - name: Build and install the authoring wheel
         run: |
@@ -168,8 +215,10 @@ jobs:
 
   performance:
     name: Runtime performance (Ubuntu, informational)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     continue-on-error: true
+    env:
+      VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
     steps:
       - uses: actions/checkout@v4
 
@@ -182,13 +231,20 @@ jobs:
       - name: Install system libraries
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends             pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev \
+            mesa-vulkan-drivers ffmpeg xvfb libxkbcommon-x11-0
+
+      - name: Expose the embedded Python runtime
+        run: |
+          echo "PYO3_PYTHON=$(which python)" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=${pythonLocation}/lib" >> "$GITHUB_ENV"
 
       - name: Build release runtime
         run: cargo build -p gaanim_editor --bin gaanim-core --release
 
       - name: Measure versioned runtime budgets
-        run: python tests/benchmark_runtime.py --profile standard
+        run: xvfb-run -a python tests/benchmark_runtime.py --profile standard
 
       - name: Upload performance evidence
         if: always()
