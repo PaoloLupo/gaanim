@@ -157,8 +157,8 @@ disponibles:
 - presets de acabado listos para usar (grano, viñeta, aberración cromática,
   corrección de color o LUT), bloom de varios pasos, desenfoque de movimiento,
   ecos y estelas;
-- modos de fusión por objeto: el `blend="multiply"` del resaltador se acepta,
-  pero hoy se compone como `"normal"`;
+- modos de fusión por objeto en general (solo el resaltador de texto acepta
+  `blend="multiply"`);
 - fondos vivos predefinidos y transiciones entre segmentos basadas en shaders.
 
 Mientras tanto, escribe el acabado en tu propio shader, como el grano y la

@@ -358,8 +358,11 @@ impl SceneModel {
                     + self.x_tick_label_extra_offset(label, ticks.number_scale)),
             )
         } else {
+            // Right-aligned at the gap, like the authored y numbers.
             DVec2::new(
-                -(ticks.space.map.y.style_value().tick_length + NUMBER_GAP),
+                -(ticks.space.map.y.style_value().tick_length
+                    + NUMBER_GAP
+                    + self.tick_number_width(label, ticks.number_scale) * 0.5),
                 0.0,
             )
         }

@@ -108,13 +108,14 @@ con acceso a cada parte por su `id`.
 #api-entry(
   name: "MediaLibrary.svg",
   kind: "factory",
-  desc: [Importa geometría, degradados, transformaciones, `clipPath` y `feGaussianBlur` como caminos vectoriales normales. Hoy cada unidad del `viewBox` se importa como una unidad de escena, así que un SVG de 200 píxeles mide 200 unidades: dale tamaño con `scale_to`. Los anchos de trazo fluidos siguen en unidades lógicas de escena aunque el SVG se escale. Los detalles de compatibilidad están en #link("/referencia/assets/")[Recursos].],
+  desc: [Importa geometría, degradados, transformaciones, `clipPath` y `feGaussianBlur` como caminos vectoriales normales. La geometría se importa a una unidad de escena por píxel del tamaño del documento (`width`/`height`, o el `viewBox` si faltan), centrada en el origen. Como el marco mide 16 unidades de ancho, un SVG de 200 píxeles mide 200 unidades y hay que reducirlo: `scale_to(ancho / 200)` le da `ancho` unidades (por ejemplo, `scale_to(4 / 200)` para 4 unidades). Los anchos de trazo fluidos siguen en unidades lógicas de escena aunque el SVG se escale. Los detalles de compatibilidad están en #link("/referencia/assets/")[Recursos].],
 )[
 ```python
 # show-code: true
 from gaanim import BLUE, Scene
 scene = Scene(frame=(16, 9), background="#f8fafc")
-robot = scene.media.svg("assets/robot.svg").scale_to(0.025).move_to(0, 0)
+# robot.svg mide 200 px: 5 / 200 lo deja en 5 unidades de ancho
+robot = scene.media.svg("assets/robot.svg").scale_to(5 / 200).move_to(0, 0)
 robot.part("left-arm").fill(BLUE)
 scene.play([robot.animate.write().duration(0.8)])
 scene.play([robot.part("head").animate.shift_by(0, 0.4).duration(0.6)])

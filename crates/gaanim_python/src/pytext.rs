@@ -1115,7 +1115,7 @@ impl PyText {
         })
     }
 
-    #[pyo3(signature = (color, radius=16.0, intensity=1.0))]
+    #[pyo3(signature = (color, radius=0.16, intensity=1.0))]
     fn glow(
         slf: PyRef<'_, Self>,
         color: PyColor,
@@ -1135,7 +1135,7 @@ impl PyText {
         Ok(slf)
     }
 
-    #[pyo3(signature = (sigma=4.0))]
+    #[pyo3(signature = (sigma=0.04))]
     fn blur(slf: PyRef<'_, Self>, sigma: f64) -> PyResult<PyRef<'_, Self>> {
         crate::custom::ensure_authoring_allowed()?;
         if !sigma.is_finite() || sigma <= 0.0 {
@@ -1145,7 +1145,7 @@ impl PyText {
         Ok(slf)
     }
 
-    #[pyo3(signature = (color, x=8.0, y=-8.0, blur=6.0))]
+    #[pyo3(signature = (color, x=0.08, y=-0.08, blur=0.06))]
     fn shadow(
         slf: PyRef<'_, Self>,
         color: PyColor,
@@ -1408,7 +1408,7 @@ impl PyText {
         })
     }
 
-    #[pyo3(signature = (reference, direction, spacing=24.0, aligned_edge=None))]
+    #[pyo3(signature = (reference, direction, spacing=0.24, aligned_edge=None))]
     fn next_to<'py>(
         slf: PyRef<'py, Self>,
         reference: &PyDrawable,
@@ -1445,7 +1445,7 @@ impl PyText {
         Ok(slf)
     }
 
-    #[pyo3(signature = (direction, buff=24.0))]
+    #[pyo3(signature = (direction, buff=0.24))]
     fn to_edge<'py>(
         slf: PyRef<'py, Self>,
         direction: &PyDirection,
@@ -1457,7 +1457,7 @@ impl PyText {
         Ok(slf)
     }
 
-    #[pyo3(signature = (corner, buff=24.0))]
+    #[pyo3(signature = (corner, buff=0.24))]
     fn to_corner<'py>(
         slf: PyRef<'py, Self>,
         corner: &PyAnchor,

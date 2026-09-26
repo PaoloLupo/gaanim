@@ -1771,6 +1771,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         start: f64,
         duration: f64,
         mode: EquationTransitionMode,
+        rate_func: RateFunc,
     ) {
         let (Some(source_state), Some(target_state)) = (
             self.states.get(source).cloned(),
@@ -1805,7 +1806,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }
         };
         let track = self.ensure_track(moving);
-        let rate_func = gaanim_math::RateFunc::Smooth;
         let add = |timeline: &mut Timeline, lens: PropertyLensSpec, label: Option<String>| {
             timeline.add_clip(
                 track,
@@ -2051,6 +2051,30 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         mode: EquationTransitionMode,
         auto_match: bool,
     ) {
+        self.play_equation_transition_eased(
+            source_parent,
+            target_parent,
+            semantic_groups,
+            duration,
+            mode,
+            auto_match,
+            RateFunc::Smooth,
+        );
+    }
+
+    /// [`Self::play_equation_transition`] whose paired glyphs travel with
+    /// `rate_func` (the authored easing of a `transform_to`).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn play_equation_transition_eased(
+        &mut self,
+        source_parent: ObjectId,
+        target_parent: ObjectId,
+        semantic_groups: Vec<(Vec<ObjectId>, Vec<ObjectId>)>,
+        duration: f64,
+        mode: EquationTransitionMode,
+        auto_match: bool,
+        rate_func: RateFunc,
+    ) {
         if !duration.is_finite() || duration <= 0.0 {
             return;
         }
@@ -2080,7 +2104,14 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         let start = self.current_time;
         for (source, target) in plan.pairs {
-            self.schedule_equation_pair_morph(source, target, start, duration, mode);
+            self.schedule_equation_pair_morph(
+                source,
+                target,
+                start,
+                duration,
+                mode,
+                rate_func.clone(),
+            );
         }
         if mode == EquationTransitionMode::Replace {
             for source in plan.leaving {
@@ -2809,7 +2840,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 .collect();
             let cursor = self.current_time;
             self.current_time += anim.delay.max(0.0);
-            self.play_equation_transition(
+            let start = self.current_time;
+            self.play_equation_transition_eased(
                 anim.target,
                 target,
                 semantic_groups,
@@ -2820,7 +2852,29 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     EquationTransitionMode::Replace
                 },
                 true,
+                anim.rate_func.clone(),
             );
+            // A replacing transition hides its target like any transform
+            // target. The root draws nothing itself; it must be visible again
+            // from the start so entering glyphs can fade in under it.
+            if !copy && let Some(opacity) = self.states.get(target).map(|state| state.opacity) {
+                let track = self.ensure_track(target);
+                self.timeline.add_clip(
+                    track,
+                    start,
+                    0.0,
+                    ClipPayload::Animation(AnimationSpec {
+                        target,
+                        lens: PropertyLensSpec::Opacity {
+                            from: 0.0,
+                            to: opacity,
+                        },
+                        rate_func: gaanim_math::RateFunc::Linear,
+                        delay: 0.0,
+                        label: Some("EquationHandoff".to_string()),
+                    }),
+                );
+            }
             self.current_time = cursor;
             return;
         }
@@ -4271,6 +4325,13 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }
         }
 
+        // A hierarchy whose root draws nothing itself (a chart or a group)
+        // has no flattened proxy to morph; replace it leaf by leaf instead.
+        if is_replacement && source_state.path.elements().is_empty() && source_has_children {
+            self.play_hierarchy_replacement(&anim, target, parent_track);
+            return;
+        }
+
         // Treat the target as a state template: it should stay hidden while
         // the source morphs toward its final geometry and styling.
         self.hide_visuals_now(&target_state);
@@ -4742,7 +4803,23 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             );
             return;
         }
+        let start = self.current_time;
+        self.schedule_leaf_matching(source, target, mode, start, duration, rate_func);
+        self.current_time = start + duration;
+    }
 
+    /// Schedule the leaf morphs and fades of a matching between `source` and
+    /// `target` starting at `start`, without moving the playhead. Matched
+    /// target leaves stay hidden: their morphing source leaves stand in.
+    fn schedule_leaf_matching(
+        &mut self,
+        source: ObjectId,
+        target: ObjectId,
+        mode: MatchingMode,
+        start: f64,
+        duration: f64,
+        rate_func: gaanim_math::RateFunc,
+    ) {
         // Gather match data
         let (src_ids, src_items) = match mode {
             MatchingMode::Tex => {
@@ -4787,7 +4864,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         };
         let result = gaanim_math::matching::match_items(&src_items, &dst_items, &config);
 
-        let start = self.current_time;
         let end = start + duration;
 
         // Hide all dst leaves at start (zero-duration) — they will be revealed
@@ -4907,32 +4983,35 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     label: None,
                 }),
             );
-            // FillColor
-            let src_fill = src_state
-                .fill
-                .as_ref()
-                .and_then(extract_brush_color)
-                .unwrap_or(Color::WHITE);
-            let dst_fill = dst_state
-                .fill
-                .as_ref()
-                .and_then(extract_brush_color)
-                .unwrap_or(Color::WHITE);
-            self.timeline.add_clip(
-                track,
-                start,
-                duration,
-                ClipPayload::Animation(AnimationSpec {
-                    target: src_id,
-                    lens: PropertyLensSpec::FillColor {
-                        from: src_fill,
-                        to: dst_fill,
-                    },
-                    rate_func: rate_func.clone(),
-                    delay: 0.0,
-                    label: None,
-                }),
-            );
+            // FillColor. `FillColor` materializes a solid fill, so a
+            // stroke-only pair (axis lines, grids) must not get one; a
+            // missing side fades through the transparent present color.
+            let src_fill = src_state.fill.as_ref().and_then(extract_brush_color);
+            let dst_fill = dst_state.fill.as_ref().and_then(extract_brush_color);
+            let transparent = |color: Color| {
+                let rgba = color.to_rgba8();
+                Color::from_rgba8(rgba.r, rgba.g, rgba.b, 0)
+            };
+            let fill_colors = match (src_fill, dst_fill) {
+                (Some(from), Some(to)) => Some((from, to)),
+                (Some(from), None) => Some((from, transparent(from))),
+                (None, Some(to)) => Some((transparent(to), to)),
+                (None, None) => None,
+            };
+            if let Some((from, to)) = fill_colors {
+                self.timeline.add_clip(
+                    track,
+                    start,
+                    duration,
+                    ClipPayload::Animation(AnimationSpec {
+                        target: src_id,
+                        lens: PropertyLensSpec::FillColor { from, to },
+                        rate_func: rate_func.clone(),
+                        delay: 0.0,
+                        label: None,
+                    }),
+                );
+            }
             // Stroke
             let src_stroke = src_state
                 .stroke
@@ -5068,8 +5147,77 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 // Also ensure they become visible at end via schedule_show? opacity clip suffices
             }
         }
+    }
 
-        self.current_time = end;
+    /// `ReplacementTransform` between hierarchies whose source root has no
+    /// geometry of its own, such as charts and groups, so there is no
+    /// flattened proxy to morph. Matched visual leaves morph into their
+    /// counterparts, unmatched ones cross-fade, and the complete target
+    /// hierarchy takes over at the end.
+    fn play_hierarchy_replacement(
+        &mut self,
+        anim: &AnimationBuilder,
+        target: ObjectId,
+        parent_track: TrackId,
+    ) {
+        let Some(target_state) = self.states.get(target).cloned() else {
+            return;
+        };
+        let start = self.current_time + anim.delay.max(0.0);
+        let end = start + anim.duration.max(0.0);
+        let source_ids = self.hierarchy_ids(anim.target);
+        let target_ids = self.hierarchy_ids(target);
+        let zero_opacity_clip = |target: ObjectId, from: f32, to: f32| {
+            ClipPayload::Animation(AnimationSpec {
+                target,
+                lens: PropertyLensSpec::Opacity { from, to },
+                rate_func: gaanim_math::RateFunc::Linear,
+                delay: 0.0,
+                label: None,
+            })
+        };
+
+        // The target is a state template, hidden until the handoff. Only its
+        // containers appear at the start, so that unmatched target leaves can
+        // fade in through them; matched leaves stay hidden.
+        self.hide_visuals_now(&target_state);
+        for &id in &target_ids {
+            if let Some(state) = self.states.get(id) {
+                self.commands.entity(state.entity).insert(Opacity(0.0));
+            }
+        }
+        let (target_leaves, _) = self.collect_leaf_match_data(target);
+        for &id in &target_ids {
+            if target_leaves.contains(&id) {
+                continue;
+            }
+            if let Some(opacity) = self.states.get(id).map(|state| state.opacity) {
+                self.timeline
+                    .add_clip(parent_track, start, 0.0, zero_opacity_clip(id, 0.0, opacity));
+            }
+        }
+
+        self.schedule_leaf_matching(
+            anim.target,
+            target,
+            MatchingMode::Shapes,
+            start,
+            anim.duration.max(0.0),
+            anim.rate_func.clone(),
+        );
+
+        // Handoff: the source hierarchy ends where the target begins.
+        for &id in &source_ids {
+            let Some(from) = self.states.get(id).map(|state| state.opacity) else {
+                continue;
+            };
+            self.timeline
+                .add_clip(parent_track, end, 0.0, zero_opacity_clip(id, from, 0.0));
+            if let Some(state) = self.states.get_mut(id) {
+                state.opacity = 0.0;
+            }
+        }
+        self.schedule_show_hierarchy(target, &target_state, parent_track, end);
     }
 
     fn play_wiggle_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {

@@ -24,12 +24,11 @@ pub const DEFAULT_MARKER_OPACITY: f32 = 0.45;
 /// Default tilt in radians (about 2.9 degrees, rising to the right).
 pub const DEFAULT_MARKER_SKEW: f64 = 0.05;
 
-/// Compositing requested for a text marker.
+/// Compositing of a text marker band with what is drawn beneath it.
 ///
-/// Per-object blend modes (FX-07) are not implemented yet. `Multiply` is
-/// accepted and currently composited like `Normal`: the band is always drawn
-/// behind the glyphs, so text stays crisp and the result reads like a
-/// multiplied highlighter on light backgrounds.
+/// The band is always drawn behind the glyphs, so the text itself stays
+/// crisp. `Multiply` multiplies the band color with the background, cards or
+/// panels under it (darkening like ink on paper); `Normal` paints it over them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MarkerBlend {
     #[default]
@@ -44,6 +43,14 @@ impl MarkerBlend {
             "normal" => Some(Self::Normal),
             "multiply" => Some(Self::Multiply),
             _ => None,
+        }
+    }
+
+    /// Renderer blend mode; `None` is plain source-over.
+    pub fn blend_mode(self) -> Option<gaanim_core::peniko::BlendMode> {
+        match self {
+            Self::Normal => None,
+            Self::Multiply => Some(gaanim_core::peniko::Mix::Multiply.into()),
         }
     }
 }
@@ -322,6 +329,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     },
                     gaanim_scene::components::Path2D(std::sync::Arc::new(kurbo::BezPath::new())),
                 ));
+                if let Some(blend) = style.blend.blend_mode() {
+                    self.commands
+                        .entity(state.entity)
+                        .insert(gaanim_renderer::effects::ElementBlend(blend));
+                }
             }
             self.path_trims.insert(marker.id, ([0.0, 0.0, 0.0], false));
             self.play_internal(AnimationBuilder {
@@ -505,6 +517,31 @@ mod tests {
                 .iter()
                 .all(|(order, _, _)| order.creation_order < first_glyph)
         );
+    }
+
+    #[test]
+    fn multiply_marker_bands_carry_their_blend_mode() {
+        let blends = |blend| {
+            let (mut world, _) = compile_marker_scene(|canvas| {
+                let text = canvas.text("uno dos tres");
+                canvas.play(vec![text.select("dos").marker(
+                    TextMarkerStyle {
+                        blend,
+                        ..TextMarkerStyle::default()
+                    },
+                    1.0,
+                )]);
+            });
+            let mut query = world.query::<&gaanim_renderer::effects::ElementBlend>();
+            query.iter(&world).map(|blend| blend.0).collect::<Vec<_>>()
+        };
+        assert_eq!(
+            blends(MarkerBlend::Multiply),
+            vec![gaanim_core::peniko::BlendMode::from(
+                gaanim_core::peniko::Mix::Multiply
+            )]
+        );
+        assert!(blends(MarkerBlend::Normal).is_empty());
     }
 
     #[test]

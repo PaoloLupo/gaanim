@@ -37,8 +37,9 @@ están explicados en la sección de problemas de
   #link("/apendices/novedades/")[Novedades].
 - *No se encuentra una imagen, un SVG o un modelo:* las rutas relativas se
   resuelven desde el directorio de trabajo salvo que cargues el proyecto con
-  `scene.assets.load_project("gaanim.toml")` o fijes
-  `scene.assets.assets_dir("assets")`.
+  `scene.assets.load_project()` (lee el `gaanim.toml` junto al script) o fijes
+  una carpeta absoluta con
+  `scene.assets.assets_dir(str(Path(__file__).parent / "assets"))`.
 - *`script did not submit a scene`:* el script debe terminar llamando a
   `scene.render()`.
 
@@ -54,7 +55,11 @@ están explicados en la sección de problemas de
   las dos animaciones; combínalas en una o ponlas en secuencia.
 - *Los objetos son enormes o diminutos:* las medidas están en unidades
   lógicas, no en píxeles. El fotograma mide 16 × 9; un círculo de radio `1`
-  ocupa una octava parte del ancho.
+  ocupa una octava parte del ancho. Un SVG es la excepción: se importa a una
+  unidad por píxel del documento, así que dale tamaño con `scale_to`.
+- *Todo sale en blanco:* una escena sin tema tiene fondo blanco y el texto, las
+  formas y los ejes sin color propio también son blancos. Elige un tema
+  (`Scene(theme="technical")`) o un fondo; `gaanim check` lo avisa.
 - *Un texto o una tarjeta se salen de su sitio dentro de un layout:* no uses
   `move_to()` en objetos dentro de un layout; expresa la intención con
   `align`, `offset` o una restricción (ver #link("/guias/layout/")[Layout]).

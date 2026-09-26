@@ -10,7 +10,8 @@ scene = Scene(frame=(16, 9))
 asset = Path(__file__).resolve().parents[1] / "tests" / "assets" / "svg_demo.svg"
 
 title = scene.text("SVG vector import", role="title").fill(NAVY).move_to(0, 3.666667, anchor=Anchor.CENTER)
-art = scene.media.svg(str(asset)).scale_to(1.35).move_to(0, -0.25)
+# SVG pixels import as scene units: 1.35 * 360 px / 60 px per unit ≈ 8.1 units wide.
+art = scene.media.svg(str(asset)).scale_to(1.35 / 60).move_to(0, -0.25)
 orb = art.part("orb")
 top_spark = art.part("spark-top")
 caption = scene.text("gradients, text outlines, clipPath, filters and <use>").fill(GOLD).move_to(0, -3.416667, anchor=Anchor.CENTER)

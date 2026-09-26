@@ -1,8 +1,8 @@
 use crate::background::{BackgroundPaint, ShaderBackgroundRequest};
 use crate::background_gpu::ShaderBackgroundFrame;
 use crate::effects::{
-    BooleanBinding, ClipMask, DropShadow, FillLevelBinding, GaussianBlur, Glow, StrokeAlign,
-    VectorOutlineBinding,
+    BooleanBinding, ClipMask, DropShadow, ElementBlend, FillLevelBinding, GaussianBlur, Glow,
+    StrokeAlign, VectorOutlineBinding,
 };
 use crate::lottie::LottiePlayer;
 use crate::stroke::{draw_stroke, view_stroke_transform};
@@ -270,6 +270,9 @@ pub struct ExtractedElement {
     render_order: RenderOrder,
     scene: Arc<vello::Scene>,
     clip_mask: Option<ClipMask>,
+    /// Blend mode of an [`ElementBlend`] element, drawn in its own layer
+    /// clipped to `opacity_bounds`.
+    blend: Option<peniko::BlendMode>,
     /// Side of the active scene transition this element belongs to.
     transition_side: gaanim_scene::TransitionSide,
 }
@@ -384,6 +387,7 @@ fn opacity_run_end(elements: &[ExtractedElement], start: usize) -> usize {
     let mut end = start + 1;
     while let Some(element) = elements.get(end) {
         if element.clip_mask.is_some()
+            || element.blend.is_some()
             || element.opacity_group != elements[start].opacity_group
             || !element.opacity.is_finite()
             || element.opacity <= 0.0
@@ -563,7 +567,7 @@ fn append_element_run(main_scene: &mut vello::Scene, elements: &[ExtractedElemen
             continue;
         }
 
-        if elem.clip_mask.is_none() && elem.opacity < 1.0 {
+        if elem.clip_mask.is_none() && elem.blend.is_none() && elem.opacity < 1.0 {
             let end = opacity_run_end(elements, index);
             main_scene.push_layer(
                 peniko::Fill::NonZero,
@@ -594,17 +598,18 @@ fn append_element_run(main_scene: &mut vello::Scene, elements: &[ExtractedElemen
             if !clipped.opacity.is_finite() || clipped.opacity <= 0.0 {
                 continue;
             }
-            if clipped.opacity < 1.0 {
+            let layered = clipped.opacity < 1.0 || clipped.blend.is_some();
+            if layered {
                 main_scene.push_layer(
                     peniko::Fill::NonZero,
-                    peniko::BlendMode::default(),
+                    clipped.blend.unwrap_or_default(),
                     clipped.opacity.clamp(0.0, 1.0),
                     kurbo::Affine::IDENTITY,
                     &clipped.opacity_bounds,
                 );
             }
             main_scene.append(&clipped.scene, Some(clipped.transform));
-            if clipped.opacity < 1.0 {
+            if layered {
                 main_scene.pop_layer();
             }
         }
@@ -1426,6 +1431,7 @@ pub fn compile_scene_from_world(
 
     let mut child_query = world.query::<&ChildOf>();
     let mut order_query = world.query::<&RenderOrder>();
+    let mut blend_query = world.query::<&ElementBlend>();
 
     for (
         entity,
@@ -1649,9 +1655,10 @@ pub fn compile_scene_from_world(
         while let Ok(child_of) = child_query.get(world, opacity_group) {
             opacity_group = child_of.parent();
         }
-        // Only translucent elements open a layer; a Lottie draws geometry
-        // that `Path2D` does not describe.
-        let opacity_bounds = if global_opacity.0 >= 1.0 || lottie_opt.is_some() {
+        let blend = blend_query.get(world, entity).ok().map(|blend| blend.0);
+        // Only translucent or blended elements open a layer; a Lottie draws
+        // geometry that `Path2D` does not describe.
+        let opacity_bounds = if global_opacity.0 >= 1.0 && blend.is_none() || lottie_opt.is_some() {
             opacity_fallback
         } else {
             opacity_layer_bounds(
@@ -1687,6 +1694,7 @@ pub fn compile_scene_from_world(
             ),
             scene: Arc::new(scene),
             clip_mask: clip_opt.cloned(),
+            blend,
             transition_side: transition_frame
                 .as_ref()
                 .map_or_else(Default::default, |frame| {
@@ -1764,6 +1772,7 @@ pub fn gaanim_render_system(
     transition_frame: Option<Res<gaanim_scene::SceneTransitionFrame>>,
     child_query: Query<&ChildOf>,
     order_query: Query<&RenderOrder>,
+    blend_query: Query<&ElementBlend>,
     view_query: Query<(
         &gaanim_math::SpatialTransform,
         Option<&gaanim_scene::CoordinateViewRole>,
@@ -2164,9 +2173,10 @@ pub fn gaanim_render_system(
         while let Ok(child_of) = child_query.get(opacity_group) {
             opacity_group = child_of.parent();
         }
-        // Only translucent elements open a layer; a Lottie draws geometry
-        // that `Path2D` does not describe.
-        let opacity_bounds = if global_opacity.0 >= 1.0 || lottie_ref.is_some() {
+        let blend = blend_query.get(entity).ok().map(|blend| blend.0);
+        // Only translucent or blended elements open a layer; a Lottie draws
+        // geometry that `Path2D` does not describe.
+        let opacity_bounds = if global_opacity.0 >= 1.0 && blend.is_none() || lottie_ref.is_some() {
             opacity_fallback
         } else {
             let visible_path = if path_reveal_is_empty(tip_glow_ref.as_deref()) {
@@ -2209,6 +2219,7 @@ pub fn gaanim_render_system(
             ),
             scene: Arc::clone(fragment),
             clip_mask: clip_ref.as_ref().map(|c| (**c).clone()),
+            blend,
             transition_side: transition_frame
                 .as_deref()
                 .filter(|frame| !frame.is_empty())
@@ -2931,6 +2942,7 @@ mod tests {
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),
             clip_mask: None,
+            blend: None,
             transition_side: Default::default(),
         };
         let run = [
@@ -2953,12 +2965,34 @@ mod tests {
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),
             clip_mask: None,
+            blend: None,
             transition_side: Default::default(),
         };
         let elements = vec![element(0.5), element(0.5), element(0.5), element(0.75)];
 
         assert_eq!(opacity_run_end(&elements, 0), 3);
         assert_eq!(opacity_run_end(&elements, 3), 4);
+    }
+
+    #[test]
+    fn blended_elements_never_join_a_shared_opacity_layer() {
+        let element = |blend| ExtractedElement {
+            transform: kurbo::Affine::IDENTITY,
+            opacity: 0.5,
+            opacity_bounds: kurbo::Rect::new(0.0, 0.0, 10.0, 10.0),
+            opacity_group: Entity::PLACEHOLDER,
+            render_order: RenderOrder::default(),
+            scene: Arc::new(vello::Scene::new()),
+            clip_mask: None,
+            blend,
+            transition_side: Default::default(),
+        };
+        let multiply = Some(peniko::BlendMode::from(peniko::Mix::Multiply));
+        let elements = vec![element(None), element(multiply), element(None)];
+
+        // A shared source-over layer would composite the multiply band
+        // against the group instead of the backdrop.
+        assert_eq!(opacity_run_end(&elements, 0), 1);
     }
 
     #[test]
@@ -2976,6 +3010,7 @@ mod tests {
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),
             clip_mask,
+            blend: None,
             transition_side: Default::default(),
         };
         let elements = vec![

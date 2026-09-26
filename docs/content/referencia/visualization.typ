@@ -248,7 +248,7 @@ groups = Axis.category(["A", "B", "C"])
 #api-entry(
   name: "Axis.numbers",
   kind: "method",
-  desc: [Formato de los números: `auto`, `fixed`, `scientific`, `percent`, `fraction`, `pi` o `datetime`. `precision` se aplica a `fixed`, `scientific` y `percent`; `denominator`, a `fraction` y `pi`; `pattern`, a `datetime`.],
+  desc: [Formato de los números: `auto`, `fixed`, `scientific`, `percent`, `fraction`, `pi` o `datetime`. `precision` se aplica a `fixed`, `scientific` y `percent`; `denominator`, a `fraction` y `pi`; `pattern`, a `datetime`. `fraction` y `pi` redondean al múltiplo de `1/denominator` más cercano y simplifican la fracción: con `denominator=2`, `pi` rotula `π/2`, `π`, `3π/2` y `2π`, y `fraction` rotula `1/2`, `1` y `3/2`.],
 )[
 ```python
 >>>from gaanim import *
@@ -954,7 +954,7 @@ scene.play([chart.layer("axes").animate.create(), chart.layer("marks").animate.f
   name: "ChartAnimation.to",
   kind: "method",
   params: ((name: "target", type: "ChartSpec", default: none, desc: [Receta de destino.]), (name: "match_", type: "str", default: "\"key\"", desc: [`"key"` relaciona elementos por la columna de identidad (ambas recetas deben declararla); sin clave, pide `"index"`.]), (name: "fallback", type: "str", default: "\"error\"", desc: [Con familias de marca incompatibles: `"error"` o `"crossfade"`.])),
-  desc: [Transición accesible desde `chart.animate.to(...)`. `point`, `line` y `bar` pueden pasar entre 2D y 3D, y `heatmap` y `surface` comparten rejilla. Nunca mueve la cámara global.],
+  desc: [Transición accesible desde `chart.animate.to(...)`. Entre gráficos 2D, las marcas, ejes y etiquetas que se corresponden se transforman y el resto se funde; al terminar, el gráfico de destino sustituye al original. `point`, `line` y `bar` pueden pasar entre 2D y 3D (con un fundido), y `heatmap` y `surface` comparten rejilla. Nunca mueve la cámara global.],
 )[
 ```python
 >>>from gaanim import *

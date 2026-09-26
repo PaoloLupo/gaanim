@@ -54,6 +54,42 @@ fn default_project_manifest(py: Python<'_>) -> PyResult<PathBuf> {
         .unwrap_or_else(|| PathBuf::from("gaanim.toml")))
 }
 
+/// Folder used when `gaanim.toml` omits `assets_dir`; matches the default of
+/// `gaanim_project::resolve_project` and the `gaanim init` scaffold.
+const DEFAULT_ASSETS_DIR: &str = "assets";
+
+/// Read the top-level `assets_dir` string from a project manifest, falling
+/// back to [`DEFAULT_ASSETS_DIR`] when the key is absent. A present key whose
+/// value is not a single- or double-quoted string is an error rather than a
+/// silent fallback.
+fn manifest_assets_dir(source: &str) -> Result<String, String> {
+    for line in source.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            break;
+        }
+        let Some(value) = line
+            .strip_prefix("assets_dir")
+            .and_then(|rest| rest.trim_start().strip_prefix('='))
+        else {
+            continue;
+        };
+        let value = value.trim();
+        let parsed = value
+            .chars()
+            .next()
+            .filter(|quote| matches!(quote, '"' | '\''))
+            .and_then(|quote| {
+                let body = &value[1..];
+                let close = body.find(quote)?;
+                let rest = body[close + 1..].trim_start();
+                (rest.is_empty() || rest.starts_with('#')).then(|| body[..close].to_owned())
+            });
+        return parsed.ok_or_else(|| format!("assets_dir must be a quoted string, got `{value}`"));
+    }
+    Ok(DEFAULT_ASSETS_DIR.to_owned())
+}
+
 #[pyclass(name = "PointRef", module = "gaanim_core", frozen, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct PyPointRef(pub gaanim_api::canvas::PointRef);
@@ -2958,8 +2994,8 @@ impl PyAssetManager {
 
     /// Load the minimal project manifest. Without an explicit path, it reads
     /// `gaanim.toml` beside the Python script that called this method. It
-    /// currently accepts one setting: `assets_dir = "assets"`, resolved
-    /// relative to the manifest file.
+    /// reads one setting, `assets_dir`, resolved relative to the manifest
+    /// file; like the CLI and editor, a manifest without it uses `"assets"`.
     #[pyo3(signature = (path=None))]
     fn load_project(&self, py: Python<'_>, path: Option<&str>) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
@@ -2973,25 +3009,12 @@ impl PyAssetManager {
                 manifest.display()
             ))
         })?;
-        let assets_dir = source
-            .lines()
-            .find_map(|line| {
-                let line = line.trim();
-                let value = line
-                    .strip_prefix("assets_dir")?
-                    .trim_start()
-                    .strip_prefix('=')?
-                    .trim();
-                value
-                    .strip_prefix('"')?
-                    .strip_suffix('"')
-                    .map(str::to_owned)
-            })
-            .ok_or_else(|| {
-                pyo3::exceptions::PyValueError::new_err(
-                    "project manifest must declare assets_dir = \"...\"",
-                )
-            })?;
+        let assets_dir = manifest_assets_dir(&source).map_err(|message| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "{message} in project manifest {}",
+                manifest.display()
+            ))
+        })?;
         let root = manifest
             .parent()
             .unwrap_or_else(|| std::path::Path::new("."))
@@ -6837,6 +6860,25 @@ mod tests {
         assert_eq!(image_quality("medium").unwrap(), ImageQuality::Medium);
         assert_eq!(image_quality("high").unwrap(), ImageQuality::High);
         assert!(image_quality("bicubic").is_err());
+    }
+
+    #[test]
+    fn manifest_assets_dir_defaults_like_the_cli() {
+        assert_eq!(
+            manifest_assets_dir("kind = \"video\"\nentry = \"main.py\"\n").unwrap(),
+            "assets"
+        );
+        assert_eq!(
+            manifest_assets_dir("assets_dir = \"media\"  # comment\n").unwrap(),
+            "media"
+        );
+        assert_eq!(manifest_assets_dir("assets_dir='img'").unwrap(), "img");
+        assert_eq!(
+            manifest_assets_dir("kind = \"video\"\n[tool]\nassets_dir = \"other\"\n").unwrap(),
+            "assets"
+        );
+        assert!(manifest_assets_dir("assets_dir = media\n").is_err());
+        assert!(manifest_assets_dir("assets_dir = \"media\n").is_err());
     }
 
     #[pyfunction]

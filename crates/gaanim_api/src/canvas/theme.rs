@@ -1023,6 +1023,40 @@ pub(crate) fn spawn_name(kind: &SpawnKind) -> &'static str {
     }
 }
 
+/// Minimum contrast between the unthemed default foreground and the scene
+/// background below which `gaanim check` warns.
+const UNTHEMED_MINIMUM_CONTRAST: f64 = 1.5;
+
+impl crate::canvas::SceneModel {
+    /// Preflight warning for scenes whose unstyled objects would vanish.
+    ///
+    /// Without a theme, text, shapes and axes default to the text
+    /// configuration's white foreground, and the background defaults to white.
+    /// Returns a warning when that foreground is indistinguishable from the
+    /// scene background; `None` when a theme is active or the colors differ.
+    pub fn unthemed_contrast_warning(&self) -> Option<String> {
+        if self.theme.is_some() {
+            return None;
+        }
+        let foreground = gaanim_text::prelude::TextConfig::default()
+            .roles
+            .get(&TextRole::Body)
+            .map_or(Color::WHITE, |style| style.fill_color);
+        let background = self.background.unwrap_or(Color::WHITE);
+        let ratio = contrast_ratio(foreground, background);
+        (ratio < UNTHEMED_MINIMUM_CONTRAST).then(|| {
+            let rgba = background.to_rgba8();
+            format!(
+                "no theme is active and the background #{:02x}{:02x}{:02x} has {ratio:.2}:1 \
+                 contrast with the default white text, shapes and axes; objects without an \
+                 explicit color will be invisible. Use `Scene(theme=\"technical\")` (or \
+                 another theme) or a contrasting `background=`",
+                rgba.r, rgba.g, rgba.b
+            )
+        })
+    }
+}
+
 fn check_contrast(
     warnings: &mut Vec<String>,
     foreground_name: &str,
@@ -1097,6 +1131,25 @@ mod tests {
         assert_eq!(&*theme.fonts[0].bytes, &*bytes);
         assert!(theme.text_markup, "new themes keep markup on");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unthemed_white_scenes_warn_about_invisible_defaults() {
+        let mut canvas = crate::canvas::SceneModel::new(16.0, 9.0);
+        let warning = canvas
+            .unthemed_contrast_warning()
+            .expect("default scene is white on white");
+        assert!(
+            warning.contains("#ffffff") && warning.contains("theme"),
+            "{warning}"
+        );
+        canvas.background = Some(Color::from_rgb8(0xF4, 0xF4, 0xF4));
+        assert!(canvas.unthemed_contrast_warning().is_some());
+        canvas.background = Some(Color::from_rgb8(0x0F, 0x17, 0x2A));
+        assert!(canvas.unthemed_contrast_warning().is_none());
+        canvas.background = None;
+        canvas.set_theme("technical").unwrap();
+        assert!(canvas.unthemed_contrast_warning().is_none());
     }
 
     #[test]

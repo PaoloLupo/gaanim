@@ -898,6 +898,7 @@ fn presentation_preflight(
         duration: manifest.duration(),
         ..default()
     };
+    report.warnings.extend(canvas.unthemed_contrast_warning());
 
     if manifest.segments.is_empty() {
         report
@@ -960,6 +961,7 @@ fn scene_preflight(canvas: &gaanim_api::canvas::SceneModel, source: &str) -> Pre
         duration: canvas.current_time(),
         ..default()
     };
+    report.warnings.extend(canvas.unthemed_contrast_warning());
     if canvas.frame.validate().is_err() {
         report
             .errors
@@ -994,6 +996,7 @@ CHECKS:
     entry script and timeline duration
     semantic segments, notes and named stops when present
     16:9 projector aspect ratio for presentations
+    unthemed scenes whose default white objects match the background
     unresolved template placeholders
 
 OPTIONS:
@@ -1922,6 +1925,18 @@ mod tests {
                 .iter()
                 .any(|warning| warning.contains("placeholder"))
         );
+    }
+
+    #[test]
+    fn scene_preflight_warns_about_white_on_white_defaults() {
+        let mut canvas = gaanim_api::canvas::SceneModel::new(16.0, 9.0);
+        canvas.wait(1.0);
+        let report = scene_preflight(&canvas, "");
+        assert_eq!(report.warnings.len(), 1, "{:?}", report.warnings);
+        assert!(report.warnings[0].contains("no theme is active"));
+
+        canvas.set_theme("technical").unwrap();
+        assert!(scene_preflight(&canvas, "").warnings.is_empty());
     }
 
     #[test]

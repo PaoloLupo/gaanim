@@ -118,8 +118,10 @@ Ejecuta el script sin abrir ventana y revisa la escena resultante. Imprime la
 duración, el tamaño del marco y una línea por problema (`ERROR:` o `WARN:`), y
 termina con `PASS` o `FAIL`.
 
-- En toda escena: que la línea de tiempo dure algo y que no queden textos de
-  plantilla que empiecen por `[`.
+- En toda escena: que la línea de tiempo dure algo, que no queden textos de
+  plantilla que empiecen por `[` y, si no hay tema, que el fondo no sea blanco
+  o casi blanco, porque el texto, las formas y los ejes sin color propio
+  también son blancos y no se verían.
 - Si la escena usa segmentos (una presentación): que exista al menos un
   segmento, que ninguno dure cero segundos, que cada uno tenga notas y que
   las pausas tengan nombre; avisa si el marco no es 16:9 o si la escena dura

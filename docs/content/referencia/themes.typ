@@ -26,7 +26,9 @@ scene.render()
 Una escena empieza *sin tema*: `scene.canvas.theme` vale `None`, el fondo es
 blanco y el texto y las formas sin estilo propio también son blancos, así que
 no se ven. Elige siempre un tema (`Scene(theme=...)` o
-`scene.canvas.set_theme(...)`) o al menos un fondo (`Scene(background=...)`).
+`scene.canvas.set_theme(...)`) o al menos un fondo (`Scene(background=...)`);
+`gaanim check` avisa cuando una escena sin tema tiene un fondo blanco o casi
+blanco.
 Sin tema, `scene.canvas.color(...)` y `scene.canvas.validate_theme()` lanzan
 `ValueError`, y los componentes como `badge` o `card` usan colores propios
 parecidos a los de `technical`.

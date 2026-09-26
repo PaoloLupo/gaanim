@@ -352,22 +352,11 @@ inglés (Fase 4).
 Ejecutar todos los ejemplos destapó comportamientos del runtime que la
 documentación ahora describe tal como son, pero que conviene corregir en código:
 
-- `Text.next_to`, `to_edge` y `to_corner` usan un espaciado por defecto de
-  `24.0` (`crates/gaanim_python/src/pytext.rs`) frente al `0.24` del stub.
-- `animate.rotate_by(...).about_point(...)` ignora el punto
-  (`crates/gaanim_api/src/anim.rs:652`); `with_pivot` sí funciona.
-- `Geometry.transform_matching*` no avanza `scene.cursor` ni la línea de tiempo.
-- `Scene()` sin fondo ni tema dibuja blanco sobre blanco; no hay tema por
-  defecto aunque la documentación antigua decía `technical`.
-- Los formatos de eje `"pi"` y `"fraction"` no simplifican (`2π/2`).
-- `bind_y_from` ignora una fuente movida con `follow(PointRef)`.
-- `text.animate.transform_to` pierde los colores de `part()`.
-- Un `Text` con `wrap="auto"` en contenedores `hug` envuelve distinto de lo que
-  el layout midió; un `fade_in` dentro de `layout.column` se ve desde t=0.
-- `chart.animate.to(...)` deja un gráfico 2D invisible en la exportación.
-- `scene.media.svg` importa a una unidad por píxel SVG.
-- `marker(blend="multiply")` se dibuja igual que `"normal"`.
-- El stub declara `Canvas.theme` como escribible (es de solo lectura) y omite
-  `Color.r/g/b/a`; `load_project()` exige `assets_dir` aunque la CLI lo supone.
+- Decisión pendiente: `Scene()` sin fondo ni tema dibuja blanco sobre blanco.
+  Nunca hubo tema por defecto (los temas nacieron con `theme: None`), así que
+  no se cambió el valor visible; `gaanim check` ahora lo avisa.
+- Decisión pendiente: `scene.media.svg` importa a una unidad por píxel SVG
+  (el paso a unidades lógicas no tocó el importador). La escala está
+  documentada y `examples/svg_demo.py` usa `scale_to(1.35 / 60)`.
 - 3D (experimental): la exportación nativa necesita una ventana (Xvfb en CI),
   registra errores "use-after-free" de Bevy y un modelo `robot.glb` no apareció en la exportación.

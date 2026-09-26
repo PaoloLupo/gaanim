@@ -292,6 +292,44 @@ def validate_theme_typography_contract(module: object) -> list[str]:
     return failures
 
 
+def validate_stub_attribute_writability(module: object, tree: ast.Module) -> list[str]:
+    """Stub attributes declared writable must accept assignment at runtime.
+
+    ``name: T`` in a class body promises a settable attribute; read-only
+    runtime getters must be declared with ``@property`` instead. Also checks
+    that the RGBA channel getters stay declared and return 8-bit integers.
+    """
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    instances = {"Canvas": scene.canvas, "Color": module.Color(1, 2, 3, 4)}
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef) or node.name not in instances:
+            continue
+        instance = instances[node.name]
+        for child in node.body:
+            if not (isinstance(child, ast.AnnAssign) and isinstance(child.target, ast.Name)):
+                continue
+            name = child.target.id
+            try:
+                setattr(instance, name, getattr(instance, name))
+            except AttributeError:
+                failures.append(f"{node.name}.{name} is read-only; declare it as a @property")
+            except (TypeError, ValueError):
+                pass
+    color_members = next(
+        (declared_members(node) for node in tree.body
+         if isinstance(node, ast.ClassDef) and node.name == "Color"),
+        set(),
+    )
+    color = instances["Color"]
+    for channel, expected in zip("rgba", (1, 2, 3, 4)):
+        if channel not in color_members:
+            failures.append(f"Color.{channel} is missing from the stub")
+        if getattr(color, channel, None) != expected:
+            failures.append(f"Color.{channel} did not return {expected}")
+    return failures
+
+
 def validate_editorial_contract(module: object) -> list[str]:
     """Exercise the editorial kit without starting the renderer."""
     failures: list[str] = []
@@ -1927,6 +1965,35 @@ def validate_transition_contract(module: object) -> list[str]:
     return failures
 
 
+def validate_text_scene_unit_defaults(module: object) -> list[str]:
+    """Text placement and effect defaults are scene units, like Drawable's."""
+    failures: list[str] = []
+    expected = {
+        "next_to": {"spacing": 0.24},
+        "to_edge": {"buff": 0.24},
+        "to_corner": {"buff": 0.24},
+        "glow": {"radius": 0.16},
+        "blur": {"sigma": 0.04},
+        # PyO3 renders negative literals as ``...``; ``y`` mirrors ``x``.
+        "shadow": {"x": 0.08, "blur": 0.06},
+    }
+    for method, defaults in expected.items():
+        for owner in (module.Text, module.Drawable):
+            try:
+                parameters = inspect.signature(getattr(owner, method)).parameters
+            except (TypeError, ValueError):
+                failures.append(f"{owner.__name__}.{method} has no runtime signature")
+                continue
+            for name, value in defaults.items():
+                actual = parameters[name].default
+                if actual != value:
+                    failures.append(
+                        f"{owner.__name__}.{method}({name}=...) defaults to {actual!r}, "
+                        f"expected {value!r} scene units"
+                    )
+    return failures
+
+
 def main() -> int:
     tree = ast.parse(STUB.read_text(encoding="utf-8"), filename=str(STUB))
     module = importlib.import_module("gaanim.gaanim_core")
@@ -1989,11 +2056,13 @@ def main() -> int:
     missing.extend(validate_layout_card_ports_contract(module))
     missing.extend(validate_editorial_contract(module))
     missing.extend(validate_theme_typography_contract(module))
+    missing.extend(validate_stub_attribute_writability(module, tree))
     missing.extend(validate_timeline_cursor_contract(module))
     missing.extend(validate_timeline_labels_contract(module))
     missing.extend(validate_narration_contract(module))
     missing.extend(validate_text_animator_contract(module))
     missing.extend(validate_transition_contract(module))
+    missing.extend(validate_text_scene_unit_defaults(module))
     missing.extend(validate_runtime_type_aliases(module))
     missing.extend(documented_text_api_failures(tree))
     missing.extend(documented_editorial_api_failures(tree))
