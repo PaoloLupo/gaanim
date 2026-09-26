@@ -63,3 +63,11 @@ Regression checks:
 
 Keep this patch while Vello sizes these buffers statically (true in 0.9 and
 0.10).
+
+## Lint expectation on `encode_brush`
+
+Upstream marks `Encoding::encode_brush` with
+`#[expect(single_use_lifetimes)]` to silence a rustc false positive
+(rust-lang/rust#129255). Newer toolchains no longer report it, so the
+expectation itself warned as unfulfilled on every build. It is an `allow` here,
+which accepts both toolchains. Drop it with the other patches when upgrading.

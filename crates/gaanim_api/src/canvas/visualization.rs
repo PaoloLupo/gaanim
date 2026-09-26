@@ -5540,10 +5540,11 @@ mod tests {
             .scale_to(1.2)
             .rotate_to(0.2)
             .move_to(1.0, -0.5);
-        let pinned = canvas
+        // Two markers on the same data point; found again below by radius.
+        canvas
             .circle(0.05)
             .at_coordinate(space.coord(2.0, 1.5).unwrap());
-        let follower = canvas.circle(0.07).follow_endpoint(
+        canvas.circle(0.07).follow_endpoint(
             space.data_to_scene(2.0, 1.5).unwrap().0,
             DVec3::ZERO,
             gaanim_animation::FollowOffsetSpace::World,
