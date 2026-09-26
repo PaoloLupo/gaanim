@@ -3012,16 +3012,32 @@ fn apply_transition(
         TransitionType::ZoomThrough {
             center, max_zoom, ..
         } => {
-            let _ = (center, max_zoom);
-            if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
-                if let gaanim_math::Projection::Orthographic { ref mut zoom } = camera.projection {
-                    let zoom_factor = if t < 0.5 {
-                        1.0 + (max_zoom - 1.0) * (t * 2.0)
-                    } else {
-                        max_zoom - (max_zoom - 1.0) * ((t - 0.5) * 2.0)
-                    };
-                    *zoom = zoom_factor;
+            let t = t.clamp(0.0, 1.0);
+            // The outgoing segment alone is seen while zooming in, the
+            // incoming one alone while zooming back out; they swap at the peak.
+            // Only roots are touched; opacity propagation reaches children.
+            let shown = if t < 0.5 { from } else { to };
+            for (entity, scene_id) in scene_entities {
+                if *scene_id == shown
+                    || !(*scene_id == from || *scene_id == to)
+                    || world.get::<ChildOf>(*entity).is_some()
+                {
+                    continue;
                 }
+                if let Some(mut opacity) = world.get_mut::<Opacity>(*entity) {
+                    opacity.0 = 0.0;
+                }
+            }
+            // Zoom by `factor` about `center`, which stays fixed on screen.
+            let factor = 1.0 + (max_zoom - 1.0) * (1.0 - (2.0 * t - 1.0).abs());
+            if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>()
+                && let gaanim_math::Projection::Orthographic { ref mut zoom } = camera.projection
+            {
+                *zoom *= factor;
+                let position = camera.position.truncate();
+                let placed = *center + (position - *center) / factor;
+                camera.position.x = placed.x;
+                camera.position.y = placed.y;
             }
         }
         TransitionType::Morph { mappings, .. } => {
@@ -3424,6 +3440,79 @@ mod tests {
                 .0
                 .contains_key(&10)
         );
+    }
+
+    #[test]
+    fn zoom_through_shows_one_segment_per_half_and_zooms_about_its_center() {
+        use crate::scene::SceneMember;
+        use gaanim_core::glam::{DVec2, DVec3};
+        use gaanim_scene::Opacity;
+
+        let mut world = World::new();
+        world.insert_resource(gaanim_math::Camera::ortho_2d_frame(16.0, 9.0, 1600, 900));
+        let mut timeline = Timeline::default();
+        let track = timeline.add_track("main", 0);
+        let first = timeline.add_scene("first");
+        let second = timeline.add_scene("second");
+        timeline.index_scene(first, 0.0);
+        timeline.index_scene(second, 1.0);
+        timeline.add_clip(track, 0.0, 0.0, ClipPayload::SceneStart(first));
+        timeline.add_clip(track, 1.0, 0.0, ClipPayload::SceneEnd(first));
+        timeline.add_clip(track, 1.0, 0.0, ClipPayload::SceneStart(second));
+        timeline.add_clip(track, 3.0, 0.0, ClipPayload::SceneEnd(second));
+        timeline.connect(
+            first,
+            second,
+            crate::transition::TransitionType::ZoomThrough {
+                duration: 1.0,
+                center: DVec2::new(2.0, 1.0),
+                max_zoom: 4.0,
+            },
+        );
+        let mut spawn = |raw, scene| {
+            world
+                .spawn((
+                    MobjectId(ObjectId::from_raw(raw)),
+                    SpatialTransform::default(),
+                    Opacity(1.0),
+                    SceneMember(scene),
+                ))
+                .id()
+        };
+        let outgoing = spawn(1, first);
+        let incoming = spawn(2, second);
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        let opacities = |world: &World| {
+            (
+                world.get::<Opacity>(outgoing).unwrap().0,
+                world.get::<Opacity>(incoming).unwrap().0,
+            )
+        };
+        let camera = |world: &World| {
+            let camera = world.resource::<gaanim_math::Camera>();
+            let gaanim_math::Projection::Orthographic { zoom } = camera.projection else {
+                panic!("orthographic camera")
+            };
+            (camera.position, zoom)
+        };
+
+        timeline.seek(&mut world, 1.25);
+        assert_eq!(opacities(&world), (1.0, 0.0));
+        // Halfway into the zoom: 2.5×, with (2, 1) fixed on screen.
+        let (position, zoom) = camera(&world);
+        assert!((zoom - 2.5).abs() < 1e-9);
+        assert!((position - DVec3::new(1.2, 0.6, 0.0)).length() < 1e-9);
+
+        timeline.seek(&mut world, 1.75);
+        assert_eq!(opacities(&world), (0.0, 1.0));
+        assert!((camera(&world).1 - 2.5).abs() < 1e-9);
+
+        // Repeated seeks are exact, and the camera is back once it ends.
+        timeline.seek(&mut world, 1.25);
+        assert!((camera(&world).1 - 2.5).abs() < 1e-9);
+        timeline.seek(&mut world, 2.5);
+        assert_eq!(camera(&world), (DVec3::ZERO, 1.0));
+        assert_eq!(opacities(&world).1, 1.0);
     }
 
     #[test]
