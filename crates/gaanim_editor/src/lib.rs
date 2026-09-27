@@ -1,7 +1,9 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass, egui, input::EguiWantsInput};
 use gaanim_math::{Camera, CameraViewOverride, CameraViewport, ResolvedCamera};
-use gaanim_scene::{GltfModelRoot, Mesh3DMarker, RenderOrder, WorldBounds};
+use gaanim_scene::{
+    GlobalOpacity, GltfModelRoot, Mesh3DMarker, Path2D, RenderOrder, Visible, WorldBounds,
+};
 use gaanim_timeline::timeline::{PlaybackStopPolicy, Timeline};
 use ui_kit::{ButtonTone, Icon, PRIMARY_SIZE, ToggleColor, divider, icon_button, palette};
 
@@ -9,6 +11,7 @@ use ui_kit::{ButtonTone, Icon, PRIMARY_SIZE, ToggleColor, divider, icon_button, 
 pub mod alsa_errors;
 mod app_icon;
 pub mod export;
+pub mod feedback;
 mod fps_overlay;
 pub mod frame_profile;
 pub mod narration;
@@ -189,6 +192,7 @@ impl Plugin for GaanimEditorPlugin {
             .init_resource::<ViewportInset>()
             .init_resource::<ViewportFrame>()
             .init_resource::<PreviewInteractive>()
+            .init_resource::<PreviewDrag>()
             .init_resource::<overlays::EditorOverlays>()
             .init_resource::<narration::NarrationPanel>()
             .init_resource::<narration::NarrationSession>()
@@ -209,7 +213,7 @@ impl Plugin for GaanimEditorPlugin {
                     preview_interactive_input_system
                         .in_set(gaanim_scene::hierarchy::SceneSet::Input)
                         .after(preview_mode_keys_system),
-                    editor_picking_system,
+                    editor_picking_system.after(preview_interactive_input_system),
                     overlays::overlays_toggle_keys_system,
                     global_playback_keys_system,
                     editor_fullscreen_keys_system,
@@ -2278,13 +2282,21 @@ fn preview_mode_keys_system(
 /// Window pixels per second covered by the keyboard pan.
 const KEYBOARD_PAN_PIXELS_PER_SECOND: f64 = 400.0;
 
+/// Pointer travel, in window pixels, below which a press counts as a click.
+const CLICK_SLOP_PIXELS: f64 = 4.0;
+
 /// Pointer drag owned by the interactive preview.
-#[derive(Debug, Default)]
-struct PreviewDrag {
+#[derive(Resource, Debug, Default)]
+pub(crate) struct PreviewDrag {
     /// A drag that started over the preview, not over an egui panel.
     active: bool,
     /// Cursor position at the previous frame of the drag, in window pixels.
     cursor: Option<glam::DVec2>,
+    /// Pointer travel since the drag started, in window pixels.
+    travel: f64,
+    /// Set for one frame when a left press over the preview is released
+    /// without moving: a click that selects instead of panning.
+    clicked: bool,
 }
 
 impl PreviewDrag {
@@ -2312,8 +2324,23 @@ fn pan_for_screen_delta(
     (moved.position - camera.position).truncate()
 }
 
+/// Pan correction that keeps the world point under `cursor` fixed when the
+/// zoom is multiplied by `ratio`. `viewport` is the fit before the change.
+fn pan_for_zoom_at_cursor(
+    camera: &Camera,
+    viewport: CameraViewport,
+    window_size: glam::DVec2,
+    cursor: glam::DVec2,
+    ratio: f64,
+) -> glam::DVec2 {
+    let center = glam::DVec2::new(window_size.x * 0.5, window_size.y * 0.5 + viewport.offset_y);
+    // A drag by `d` moves the camera by the world span of `-d`, so the span of
+    // the cursor offset shrinking by `1 / ratio` is a drag of that difference.
+    pan_for_screen_delta(camera, viewport, (cursor - center) * (1.0 / ratio - 1.0))
+}
+
 /// Pan (drag) and zoom (wheel) when interactive mode is enabled.
-/// Wheel zooms; middle/right or left drag pans.
+/// Wheel zooms towards the cursor; any drag pans and a left click selects.
 /// Also updates the system cursor to Grab/Grabbing while interactive.
 /// For perspective cameras: Right-drag orbits, Middle/Shift+Left pan, Wheel dolly.
 /// `WASD` moves the camera; the arrows keep navigating stops and scenes.
@@ -2330,7 +2357,7 @@ fn preview_interactive_input_system(
     time: Res<Time>,
     scroll: Res<bevy::input::mouse::AccumulatedMouseScroll>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    mut drag: Local<PreviewDrag>,
+    mut drag: ResMut<PreviewDrag>,
     mut commands: Commands,
     window_entity: Query<Entity, With<bevy::window::PrimaryWindow>>,
 ) {
@@ -2349,10 +2376,16 @@ fn preview_interactive_input_system(
         return;
     }
     let pointer_over_ui = egui_wants.wants_any_pointer_input();
+    // A slow frame can hold both the press and the release of a quick click.
+    if mouse_button.any_just_pressed(DRAG_BUTTONS) && !pointer_over_ui {
+        drag.active = true;
+        drag.travel = 0.0;
+    }
+    drag.clicked = drag.active
+        && mouse_button.just_released(MouseButton::Left)
+        && drag.travel < CLICK_SLOP_PIXELS;
     if !mouse_button.any_pressed(DRAG_BUTTONS) {
         drag.active = false;
-    } else if mouse_button.any_just_pressed(DRAG_BUTTONS) && !pointer_over_ui {
-        drag.active = true;
     }
     let icon = if drag.active {
         bevy::window::CursorIcon::System(bevy::window::SystemCursorIcon::Grabbing)
@@ -2393,7 +2426,19 @@ fn preview_interactive_input_system(
             if is_perspective {
                 let _ = cam.dolly(factor);
             } else {
-                interactive.user_zoom = (interactive.user_zoom * factor).clamp(0.1, 20.0);
+                // `factor < 1` brings a perspective camera closer, so it zooms in.
+                let zoom = (interactive.user_zoom / factor).clamp(0.1, 20.0);
+                let ratio = zoom / interactive.user_zoom;
+                interactive.user_zoom = zoom;
+                if let Some(cursor) = window.cursor_position() {
+                    interactive.pan += pan_for_zoom_at_cursor(
+                        cam,
+                        *viewport,
+                        glam::DVec2::new(window.width() as f64, window.height() as f64),
+                        glam::DVec2::new(cursor.x as f64, cursor.y as f64),
+                        ratio,
+                    );
+                }
             }
         }
     }
@@ -2439,6 +2484,7 @@ fn preview_interactive_input_system(
     let is_panning_2d = !is_perspective && mouse_button.any_pressed(DRAG_BUTTONS);
 
     if let Some(delta) = delta.filter(|_| drag.active) {
+        drag.travel += delta.length();
         if is_orbiting {
             let _ = cam.orbit_around_target(delta.x * 0.005, -delta.y * 0.005);
         } else if is_panning_3d {
@@ -2452,6 +2498,42 @@ fn preview_interactive_input_system(
     }
 }
 
+/// Components that give an entity a world-space box to pick and outline.
+pub(crate) type PickBoundsQueryData = (
+    Option<&'static WorldBounds>,
+    Option<&'static Path2D>,
+    Option<&'static gaanim_math::GlobalSpatialTransform>,
+    Has<Visible>,
+    Option<&'static GlobalOpacity>,
+);
+
+/// World box of an entity for picking and the selection outline: its
+/// [`WorldBounds`], or the transformed box of a visible 2D path, which carries
+/// no `WorldBounds`.
+pub(crate) fn pick_bounds(
+    (world, path, global, visible, opacity): (
+        Option<&WorldBounds>,
+        Option<&Path2D>,
+        Option<&gaanim_math::GlobalSpatialTransform>,
+        bool,
+        Option<&GlobalOpacity>,
+    ),
+) -> Option<gaanim_math::Bounds3D> {
+    if let Some(world) = world {
+        return Some(world.0);
+    }
+    if !visible || opacity.is_some_and(|opacity| opacity.0 <= 0.001) {
+        return None;
+    }
+    let rect = global?
+        .affine_2d
+        .transform_rect_bbox(gaanim_core::kurbo::Shape::bounding_box(path?.0.as_ref()));
+    let finite = [rect.x0, rect.y0, rect.x1, rect.y1]
+        .iter()
+        .all(|value| value.is_finite());
+    finite.then(|| gaanim_math::Bounds3D::new_2d(rect.x0, rect.y0, rect.x1, rect.y1))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn editor_picking_system(
     egui_wants: Res<EguiWantsInput>,
@@ -2459,16 +2541,13 @@ fn editor_picking_system(
     viewport_frame: Res<ViewportFrame>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    entities: Query<(Entity, &WorldBounds, Option<&RenderOrder>)>,
+    entities: Query<(Entity, PickBoundsQueryData, Option<&RenderOrder>)>,
     mut state: ResMut<EditorState>,
     interactive: Res<PreviewInteractive>,
+    drag: Res<PreviewDrag>,
 ) {
     let Some(camera) = camera else { return };
     if egui_wants.wants_any_pointer_input() {
-        return;
-    }
-
-    if !mouse.just_pressed(MouseButton::Left) {
         return;
     }
 
@@ -2476,7 +2555,15 @@ fn editor_picking_system(
         camera.projection,
         gaanim_math::Projection::Perspective { .. }
     );
-    if !is_perspective && interactive.enabled {
+    // Interactive 2D pans with every button, so a selection is a left click
+    // released without moving; elsewhere the press selects.
+    let pans_2d = !is_perspective && interactive.enabled;
+    let selects = if pans_2d {
+        drag.clicked
+    } else {
+        mouse.just_pressed(MouseButton::Left)
+    };
+    if !selects {
         return;
     }
 
@@ -2492,6 +2579,7 @@ fn editor_picking_system(
         state.selected = None;
         return;
     };
+    let resolved = &*camera;
     let viewport = camera.viewport;
     let camera = &camera.camera;
 
@@ -2501,8 +2589,11 @@ fn editor_picking_system(
 
     if is_perspective {
         let (origin, dir) = camera.screen_to_ray(viewport_pos);
-        for (entity, bounds, render_order) in &entities {
-            if let Some(t) = ray_aabb_intersect(origin, dir, bounds.0) {
+        for (entity, data, render_order) in &entities {
+            let Some(bounds) = pick_bounds(data) else {
+                continue;
+            };
+            if let Some(t) = ray_aabb_intersect(origin, dir, bounds) {
                 if t < best_t {
                     best_t = t;
                     best_entity = Some(entity);
@@ -2517,17 +2608,26 @@ fn editor_picking_system(
             }
         }
     } else {
-        let mut picking_camera = *camera;
-        let fit_scale = (viewport_frame.size.x / viewport_frame.output_size.x.max(1.0)).max(1e-6);
-        if let gaanim_math::Projection::Orthographic { ref mut zoom } = picking_camera.projection {
-            *zoom *= viewport.scale / fit_scale;
-        }
-        let world_pos = picking_camera.screen_to_world(viewport_pos);
-        for (entity, bounds, render_order) in &entities {
-            if bounds
-                .0
-                .contains(glam::DVec3::new(world_pos.x, world_pos.y, 0.0))
+        let world_pos = if pans_2d {
+            // The same mapping the overlay coordinates show, including the
+            // inspection pan and zoom.
+            overlays::egui_to_world(resolved, window, egui::pos2(cursor_pos.x, cursor_pos.y))
+        } else {
+            let mut picking_camera = *camera;
+            let fit_scale =
+                (viewport_frame.size.x / viewport_frame.output_size.x.max(1.0)).max(1e-6);
+            if let gaanim_math::Projection::Orthographic { ref mut zoom } =
+                picking_camera.projection
             {
+                *zoom *= viewport.scale / fit_scale;
+            }
+            picking_camera.screen_to_world(viewport_pos)
+        };
+        for (entity, data, render_order) in &entities {
+            let Some(bounds) = pick_bounds(data) else {
+                continue;
+            };
+            if bounds.contains(glam::DVec3::new(world_pos.x, world_pos.y, 0.0)) {
                 let z = render_order.map(|ro| ro.z_index).unwrap_or(0);
                 if z >= best_z {
                     best_z = z;
@@ -3454,6 +3554,47 @@ mod tests {
         camera.rotation = glam::DQuat::from_rotation_z(std::f64::consts::FRAC_PI_2);
         let pan = pan_for_screen_delta(&camera, viewport, glam::DVec2::new(160.0, 0.0));
         assert!((pan - glam::DVec2::new(0.0, -1.0)).length() < 1e-9, "{pan}");
+    }
+
+    #[test]
+    fn wheel_zoom_keeps_the_point_under_the_cursor() {
+        let mut window = Window::default();
+        window.resolution.set(1280.0, 720.0);
+        let window_size = glam::DVec2::new(1280.0, 720.0);
+        let mut camera = Camera::ortho_2d_frame(16.0, 9.0, 1920, 1080);
+        camera.rotation = glam::DQuat::from_rotation_z(0.3);
+        let viewport = CameraViewport {
+            scale: 2.0 / 3.0,
+            offset_y: -40.0,
+        };
+        let cursor = egui::pos2(1000.0, 150.0);
+        let before =
+            overlays::egui_to_world(&ResolvedCamera::new(camera, viewport), &window, cursor);
+
+        for ratio in [1.25, 0.8] {
+            let mut zoomed = camera;
+            let pan = pan_for_zoom_at_cursor(
+                &camera,
+                viewport,
+                window_size,
+                glam::DVec2::new(cursor.x as f64, cursor.y as f64),
+                ratio,
+            );
+            zoomed.position += pan.extend(0.0);
+            let zoomed_viewport = CameraViewport {
+                scale: viewport.scale * ratio,
+                ..viewport
+            };
+            let after = overlays::egui_to_world(
+                &ResolvedCamera::new(zoomed, zoomed_viewport),
+                &window,
+                cursor,
+            );
+            assert!(
+                (after - before).length() < 1e-9,
+                "{ratio}: {before} -> {after}"
+            );
+        }
     }
 
     #[test]

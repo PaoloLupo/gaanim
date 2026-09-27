@@ -1480,14 +1480,16 @@ scene.play([scene.camera.animate.dolly(factor=0.85).duration(0.6)])
 
 El editor tiene una cámara de inspección separada de `scene.camera`, que
 nunca cambia las capturas, Presenter View ni la exportación. Empieza
-desactivada; cada vez que se activa con `I` (o con el indicador
-*Interactive* del panel de overlays, `O`) parte de una copia de la cámara de
-la escena en ese instante.
+desactivada; cada vez que se activa con `I` (o con el botón *Interactivo* de
+la barra de overlays, `O`) parte de una copia de la cámara de la escena en ese
+instante.
 
 - `Num0`: alterna entre *Free 3D* y *Camera View* (la cámara de la escena).
 - En 3D, arrastrar con el botón derecho: orbitar; con el central o Mayús +
   izquierdo: desplazar. En 2D, arrastrar con cualquier botón desplaza la vista
-  y la escena sigue al cursor. Rueda: acercar o alejar.
+  y la escena sigue al cursor; un clic sin arrastrar selecciona el objeto.
+- Rueda: hacia arriba acerca y hacia abajo aleja. En 2D acerca hacia el punto
+  bajo el cursor, que se queda quieto.
 - `W`, `A`, `S`, `D`: desplazan la cámara. Las flechas siguen navegando entre
   paradas y escenas.
 - Mientras la inspección está activa, un clic en la vista previa no avanza a la
@@ -1499,6 +1501,20 @@ la escena en ese instante.
 El marco de salida visible conserva el marco lógico y su proporción, y la
 selección con el ratón se limita a ese marco. Mientras la escena tiene
 contenido 3D, la barra de tiempo desactiva el ajuste magnético.
+
+=== Overlays del editor
+
+`O` muestra una barra con guías que se dibujan solo en el editor, nunca en las
+capturas ni en la exportación. `O` o `Esc` la ocultan.
+
+- *Límites* (`B`): el marco de salida y su tamaño en unidades lógicas.
+- *Coordenadas* (`C`): los ejes con sus marcas y el punto bajo el cursor en
+  unidades de la escena. Mantén Mayús para ajustarlo a la grilla y pulsa
+  `Ctrl+C` (`Cmd+C` en macOS) para copiarlo como tupla, lista para pegar en
+  `move_to((x, y))`. La etiqueta se oculta sobre los paneles del editor.
+- *Grilla* (`G`): líneas cada 1, 2 o 5 unidades (o sus potencias de diez),
+  según el zoom.
+- El objeto seleccionado se enmarca con su centro y su tamaño en unidades.
 
 == Recorte y máscaras
 
