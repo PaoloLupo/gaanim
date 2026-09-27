@@ -21,6 +21,27 @@ CurveControl: TypeAlias = CurvePoint | Literal["auto"] | None
 CurveCommand: TypeAlias = tuple[str, Sequence[CurvePoint | CurveControl]]
 """A ``Scene.path`` or ``Scene.curve`` command and its arguments."""
 
+BlendModeName: TypeAlias = Literal[
+    "normal",
+    "multiply",
+    "screen",
+    "overlay",
+    "darken",
+    "lighten",
+    "color_dodge",
+    "color_burn",
+    "hard_light",
+    "soft_light",
+    "difference",
+    "exclusion",
+    "hue",
+    "saturation",
+    "color",
+    "luminosity",
+    "add",
+]
+"""A ``Drawable.blend`` mode: a separable or non-separable mix, or ``"add"``."""
+
 ThemeName: TypeAlias = Literal[
     "technical",
     "presentation",
@@ -1155,7 +1176,8 @@ class Anim:
         live polyline (through every ``via`` waypoint) while its endpoints keep
         following their references; the head keeps its full size and turns at
         corners. Any other drawable, or an arrow reshaped by a transform, falls
-        back to ``create()``. ``Smooth`` is the default easing.
+        back to ``create()``; on a path with ``tip(...)`` the tips ride its
+        growing end. ``Smooth`` is the default easing.
         Raises ``TypeError`` on a text-selection proxy.
         """
         ...
@@ -1314,6 +1336,20 @@ class Anim:
 
         Example:
             scene.play(card.animate.shadow(BLACK, 0, -0.25, 0.4).scale_to(1.04))
+        """
+        ...
+    def dash_offset(self, offset: float) -> Anim:
+        """Animate the dash offset of every stroke to ``offset`` scene units.
+
+        The stroke needs dashes (``StrokeStyle(dashes=...)``). A larger offset
+        moves the pattern back toward the start of the path, so animating it
+        makes the dashes march. The next animation starts from ``offset``.
+        For endless flow use ``Updater.dash_flow``. A non-finite value raises
+        ``ValueError``.
+
+        Example:
+            border.stroke_style(StrokeStyle(WHITE, 0.04, dashes=[0.2, 0.1]))
+            scene.play(border.animate.dash_offset(2.0).duration(2))
         """
         ...
     def trim(self, start: Optional[float] = None, end: Optional[float] = None, offset: Optional[float] = None) -> Anim:
@@ -1831,6 +1867,22 @@ class Updater:
             result = Updater.pulse(1.0, 1.0, 1.0)
         """
         ...
+    @staticmethod
+    def dash_flow(speed: float = 0.5) -> Updater:
+        """Make the dashes of every stroke flow along their path ("marching ants").
+
+        The pattern travels ``speed`` scene units per second in the direction
+        of the path (a negative speed reverses it), on top of the authored
+        ``dash_offset``. The shift is a function of timeline time, so seeks
+        and exports match playback. ``remove_updater()`` stops it where it is.
+        The stroke needs dashes (``StrokeStyle(dashes=...)``). A non-finite
+        speed raises ``ValueError``.
+
+        Example:
+            pipe.stroke_style(StrokeStyle(CYAN, 0.05, dashes=[0.2, 0.15]))
+            pipe.add_updater(Updater.dash_flow(speed=0.8))
+        """
+        ...
 
 class Drawable:
     left: LayoutExpression
@@ -1973,6 +2025,51 @@ class Drawable:
 
         Example:
             result = drawable.no_effects()
+        """
+        ...
+    def tip(
+        self,
+        end: Optional[Literal["arrow", "dot"]] = "arrow",
+        start: Optional[Literal["arrow", "dot"]] = None,
+        *,
+        length: Optional[float] = None,
+        width: Optional[float] = None,
+    ) -> Drawable:
+        """Draw an arrowhead or a dot on the ends of any stroked path.
+
+        The tips are filled with the stroke paint and follow the path's
+        current ends, so they ride along trims, ``create()``, connectors and
+        regenerated curves; ``animate.grow_arrow()`` on a tipped path draws it
+        from its tail with the head in front. An arrowhead's apex is the end
+        of the path and the stroke stops under its base. ``length`` (default
+        five stroke widths, at least 0.15) and ``width`` (default 0.9 of the
+        length; a dot's diameter, default three stroke widths) are scene
+        units. A head shrinks with the path when the path is shorter than it.
+        ``tip(None)`` removes the tips. Raises ``ValueError`` for an unknown
+        kind or a non-positive size.
+
+        Example:
+            route = scene.geometry.polyline([(-4, -1), (0, 2), (4, -1)]).no_fill()
+            route.stroke(WHITE, 0.05).tip(end="arrow", start="dot")
+            scene.play([route.animate.grow_arrow()])
+        """
+        ...
+    def blend(self, mode: BlendModeName = "normal") -> Drawable:
+        """Composite this drawable with what is drawn beneath it using ``mode``.
+
+        ``"screen"`` and ``"add"`` brighten (lights, flares, glows),
+        ``"multiply"`` darkens like ink (highlighters, shadows) and
+        ``"overlay"``, ``"soft_light"`` and the rest follow the usual
+        compositing formulas. ``"normal"`` (default) paints plainly, also for a
+        group member whose group has another mode.
+        Like ``fill``, on a group or ``Text`` the mode reaches every member; a
+        member restyled afterwards keeps its own. The drawable is painted in its own layer, so inside
+        a clip, an opacity group or a transition it blends with that group's
+        content only. The mode is declaration state: it is not animated.
+        Raises ``ValueError`` for an unknown mode.
+
+        Example:
+            flare = scene.geometry.circle(1.2).fill(ORANGE).blend("screen")
         """
         ...
     def clip(
@@ -3008,6 +3105,15 @@ class Text(Drawable):
             title.no_effects().move_to(0.0, 0.0)
         """
         ...
+    def blend(self, mode: BlendModeName = "normal") -> Self:
+        """Blend every glyph with what is beneath, preserving Text chaining.
+
+        See ``Drawable.blend`` for the modes.
+
+        Example:
+            title.blend("overlay").move_to(0.0, 0.0)
+        """
+        ...
     @overload
     def __getitem__(self, name: str) -> TextSelection:
         """Select a top-level part by name, or else every literal occurrence of the text.
@@ -4027,6 +4133,81 @@ class RollingNumber(Drawable):
         settle on clean digits and ``current`` matches the display at the end,
         e.g. ``count_to(61.7956, snap=True)`` ends on 61.8 with ``decimals=1``.
         Raise ValueError for an out-of-range value or non-finite/negative duration.
+        """
+        ...
+
+class ProgressRing(Drawable):
+    """A progress ring or countdown: a track, an arc and a centered label.
+
+    The arc starts at 12 o'clock and fills clockwise with ``current / maximum``
+    of a full turn (clamped to ``[0, 1]``); its box is the whole ring, so
+    layout does not follow the sweep. Style or animate the parts through
+    ``arc``, ``track`` and ``label``, and the whole ring through ``visual``;
+    ``animate`` animates the value. The label settles on whole digits: it
+    rounds the percentage (a countdown rounds the seconds up) and rolls to
+    the next digit as the value crosses it.
+    """
+    @property
+    def visual(self) -> Drawable:
+        """The group of track, arc and label; use ``visual.animate`` to move or fade the ring."""
+        ...
+    def move_to(self, x: Any, y: Any = None, anchor: Anchor | None = None) -> ProgressRing:
+        """Position the ring by its center and return this ProgressRing."""
+        ...
+    def shift_by(self, dx: float, dy: float) -> ProgressRing:
+        """Move the ring and return this ProgressRing."""
+        ...
+    def opacity(self, op: ScalarSource) -> ProgressRing:
+        """Set or bind the ring's opacity and return this ProgressRing."""
+        ...
+    @property
+    def parameter(self) -> Parameter:
+        """Underlying scalar, usable in computed inputs, readouts and sampled drivers."""
+        ...
+    @property
+    def arc(self) -> Drawable:
+        """The progress arc, stroked with round caps."""
+        ...
+    @property
+    def track(self) -> Optional[Drawable]:
+        """The full faint circle behind the arc, or ``None`` with ``track=False``."""
+        ...
+    @property
+    def label(self) -> Optional[Drawable]:
+        """The rolling-number label, or ``None`` with ``label=False``."""
+        ...
+    @property
+    def maximum(self) -> float:
+        """Value that completes the ring: ``1.0`` for rings, the seconds for countdowns."""
+        ...
+    @property
+    def current(self) -> float:
+        """Return the authoring-side current value."""
+        ...
+    def set(self, value: float) -> ProgressRing:
+        """Set the value immediately and return self; after declaration this is a reversible cut.
+
+        Raise ValueError for a non-finite value.
+        """
+        ...
+    @property
+    def animate(self) -> Anim:
+        """Scalar animation proxy of the value: ``animate.set(value).duration(seconds)``.
+
+        Example:
+            scene.play([ring.animate.set(0.75).duration(1.2)])
+        """
+        ...
+    def count_down(self, duration: Optional[float] = None) -> Anim:
+        """Animate the value to zero at a constant speed.
+
+        ``duration`` defaults to the current value, so a countdown created
+        with ``countdown(10)`` runs in real time for ten seconds. Raise
+        ValueError for a negative or non-finite duration.
+
+        Example:
+            timer = scene.viz.countdown(10)
+            scene.play([timer.count_down()])
         """
         ...
 
@@ -5435,6 +5616,43 @@ class MediaLibrary:
 
 class Visualization:
     """Scene-owned API for reactive values, coordinate spaces, charts, and matrices."""
+    def progress_ring(
+        self, value: float = 0.0, *, radius: float = 1.0, width: float = 0.12,
+        color: Optional[Color] = None, track: bool = True, track_color: Optional[Color] = None,
+        label: bool = True, decimals: int = 0, label_color: Optional[Color] = None,
+        font_size: float = 0.5,
+    ) -> ProgressRing:
+        """Create a progress ring whose arc fills clockwise with ``value`` in ``[0, 1]``.
+
+        The arc has round caps and ``width`` scene units; ``color=None`` uses the
+        theme accent. ``track`` draws a faint full circle behind it
+        (``track_color`` overrides its color). ``label`` shows the value as a
+        rolling percentage with ``decimals`` (0..6) in the center; ``label_color``
+        defaults to the body text color. Sizes must be finite and positive and
+        ``value`` finite, or ValueError is raised.
+
+        Example:
+            ring = scene.viz.progress_ring(0.0, width=0.12)
+            scene.play([ring.animate.set(0.75)])
+        """
+        ...
+    def countdown(
+        self, seconds: float, *, radius: float = 1.0, width: float = 0.12,
+        color: Optional[Color] = None, track: bool = True, track_color: Optional[Color] = None,
+        label: bool = True, label_color: Optional[Color] = None, font_size: float = 0.6,
+    ) -> ProgressRing:
+        """Create a countdown timer: a full ring with ``seconds`` rolling in its center.
+
+        The ring's value starts at ``seconds`` (its ``maximum``) and the arc
+        empties as it falls; run it with ``count_down()``. The other options
+        match ``progress_ring``. Raise ValueError unless ``seconds`` and the
+        sizes are finite and positive.
+
+        Example:
+            timer = scene.viz.countdown(10)
+            scene.play([timer.count_down()])
+        """
+        ...
     def rolling_number(
         self, value: float = 0.0, *, decimals: int = 0, min_digits: int = 1,
         group_separator: str = "", decimal_separator: str = ".",

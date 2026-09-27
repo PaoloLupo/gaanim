@@ -1116,6 +1116,40 @@ impl DrawableHandle {
         })
     }
 
+    /// Composite this drawable with what is drawn beneath it using `mode`
+    /// (e.g. `Mix::Screen` for lights, `Mix::Multiply` for markers).
+    ///
+    /// Like `fill`, the mode of a group or text reaches every member; a
+    /// member restyled afterwards keeps its own, including the plain
+    /// `BlendMode::default()`. `None` clears the mode.
+    pub fn blend(self, mode: Option<gaanim_core::peniko::BlendMode>) -> Self {
+        self.update_style(|spec| spec.blend = mode)
+    }
+
+    /// Draw `start` and `end` tips on the path's ends, filled with its stroke
+    /// paint; both `None` removes them. Arrowheads shorten the stroke under
+    /// them and follow the path's current ends, so trims, `create` and
+    /// regenerated paths carry them. `length` and `width` default to sizes
+    /// that scale with the stroke width.
+    pub fn tip(
+        self,
+        start: Option<gaanim_animation::TipKind>,
+        end: Option<gaanim_animation::TipKind>,
+        length: Option<f64>,
+        width: Option<f64>,
+    ) -> Result<Self, String> {
+        if [length, width]
+            .into_iter()
+            .flatten()
+            .any(|size| !size.is_finite() || size <= 0.0)
+        {
+            return Err("tip length and width must be finite and positive".into());
+        }
+        let tips = (start.is_some() || end.is_some())
+            .then(|| gaanim_animation::StrokeTips::new(start, end, length, width));
+        Ok(self.update_style(|spec| spec.tips = tips.clone()))
+    }
+
     /// Remove all visual effects while preserving fill and stroke styling.
     pub fn no_effects(self) -> Self {
         self.update_style(|spec| {

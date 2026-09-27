@@ -2100,7 +2100,12 @@ pub fn compile_scene_from_world(
         while let Ok(child_of) = child_query.get(world, opacity_group) {
             opacity_group = child_of.parent();
         }
-        let blend = blend_query.get(world, entity).ok().map(|blend| blend.0);
+        let blend = blend_query
+            .get(world, entity)
+            .ok()
+            .map(|blend| blend.0)
+            // An explicit normal blend paints plainly, without its own layer.
+            .filter(|blend| *blend != peniko::BlendMode::default());
         // Only translucent or blended elements open a layer; a Lottie draws
         // geometry that `Path2D` does not describe.
         let opacity_bounds = if global_opacity.0 >= 1.0 && blend.is_none() || lottie_opt.is_some() {
@@ -2709,7 +2714,12 @@ pub fn gaanim_render_system(
         while let Ok(child_of) = child_query.get(opacity_group) {
             opacity_group = child_of.parent();
         }
-        let blend = blend_query.get(entity).ok().map(|blend| blend.0);
+        let blend = blend_query
+            .get(entity)
+            .ok()
+            .map(|blend| blend.0)
+            // An explicit normal blend paints plainly, without its own layer.
+            .filter(|blend| *blend != peniko::BlendMode::default());
         // Only translucent or blended elements open a layer; a Lottie draws
         // geometry that `Path2D` does not describe.
         let opacity_bounds = if global_opacity.0 >= 1.0 && blend.is_none() || lottie_ref.is_some() {

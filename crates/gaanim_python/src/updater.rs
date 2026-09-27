@@ -14,6 +14,7 @@ use gaanim_api::canvas::UpdaterPreset;
 /// - `Updater.bob(amplitude, frequency)`
 /// - `Updater.rotate(speed)`
 /// - `Updater.pulse(min_scale, max_scale, frequency)`
+/// - `Updater.dash_flow(speed)`
 #[pyclass(name = "Updater", module = "gaanim_core", from_py_object)]
 #[derive(Clone, Debug)]
 pub struct PyUpdater(pub UpdaterPreset);
@@ -159,6 +160,16 @@ impl PyUpdater {
                 phase,
             },
         )))
+    }
+
+    /// Dashes flowing along every stroke at `speed` scene units per second.
+    #[staticmethod]
+    #[pyo3(signature = (speed=0.5))]
+    fn dash_flow(speed: f64) -> PyResult<Self> {
+        if !speed.is_finite() {
+            return Err(PyValueError::new_err("speed must be finite"));
+        }
+        Ok(Self(UpdaterPreset::DashFlow { speed }))
     }
 
     /// Scale oscillation between min and max.

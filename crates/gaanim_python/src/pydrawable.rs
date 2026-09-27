@@ -27,6 +27,59 @@ pub(crate) fn parse_stroke_align(value: &str) -> PyResult<gaanim_api::canvas::St
     }
 }
 
+/// Public names of `Drawable.blend(...)`, in documentation order.
+pub(crate) const BLEND_MODE_NAMES: [&str; 17] = [
+    "normal",
+    "multiply",
+    "screen",
+    "overlay",
+    "darken",
+    "lighten",
+    "color_dodge",
+    "color_burn",
+    "hard_light",
+    "soft_light",
+    "difference",
+    "exclusion",
+    "hue",
+    "saturation",
+    "color",
+    "luminosity",
+    "add",
+];
+
+/// Parse the mode of `blend(...)`. `"normal"` is an explicit plain mode, so
+/// a member restyled with it keeps painting plainly inside a blended group.
+pub(crate) fn parse_blend_mode(value: &str) -> PyResult<Option<gaanim_core::peniko::BlendMode>> {
+    use gaanim_core::peniko::{BlendMode, Compose, Mix};
+    let mix = match value {
+        "normal" => Mix::Normal,
+        "add" => return Ok(Some(BlendMode::new(Mix::Normal, Compose::Plus))),
+        "multiply" => Mix::Multiply,
+        "screen" => Mix::Screen,
+        "overlay" => Mix::Overlay,
+        "darken" => Mix::Darken,
+        "lighten" => Mix::Lighten,
+        "color_dodge" => Mix::ColorDodge,
+        "color_burn" => Mix::ColorBurn,
+        "hard_light" => Mix::HardLight,
+        "soft_light" => Mix::SoftLight,
+        "difference" => Mix::Difference,
+        "exclusion" => Mix::Exclusion,
+        "hue" => Mix::Hue,
+        "saturation" => Mix::Saturation,
+        "color" => Mix::Color,
+        "luminosity" => Mix::Luminosity,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "unknown blend mode {other:?}; expected one of {}",
+                BLEND_MODE_NAMES.join(", ")
+            )));
+        }
+    };
+    Ok(Some(mix.into()))
+}
+
 fn scalar_for_anim(value: &Bound<'_, PyAny>, anim: &PyCanvasAnim) -> PyResult<ScalarSource> {
     let drawable = anim.inner.property_drawable().ok_or_else(|| {
         PyTypeError::new_err("reactive sources require a Drawable animation proxy")
@@ -346,6 +399,18 @@ impl PyCanvasAnim {
         });
         Ok(Self {
             inner: self.inner.clone().glow(glow),
+        })
+    }
+
+    fn dash_offset(&self, offset: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        self.require_drawable_effect("dash_offset")?;
+        if !offset.is_finite() {
+            return Err(PyValueError::new_err("dash offset must be finite"));
+        }
+        Ok(Self {
+            inner: self.inner.clone().dash_offset(offset),
         })
     }
 
@@ -2174,6 +2239,40 @@ impl PyDrawable {
         crate::custom::ensure_authoring_allowed()?;
         Ok(Self(self.0.clone().no_effects()))
     }
+    /// Draw arrowheads or dots on the ends of the path.
+    #[pyo3(signature = (end=Some("arrow"), start=None, *, length=None, width=None))]
+    fn tip(
+        &self,
+        end: Option<&str>,
+        start: Option<&str>,
+        length: Option<f64>,
+        width: Option<f64>,
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        let parse = |value: Option<&str>| -> PyResult<Option<gaanim_animation::TipKind>> {
+            match value {
+                None => Ok(None),
+                Some("arrow") => Ok(Some(gaanim_animation::TipKind::Arrow)),
+                Some("dot") => Ok(Some(gaanim_animation::TipKind::Dot)),
+                Some(other) => Err(PyValueError::new_err(format!(
+                    "tip must be 'arrow', 'dot' or None, got {other:?}"
+                ))),
+            }
+        };
+        let (start, end) = (parse(start)?, parse(end)?);
+        self.0
+            .clone()
+            .tip(start, end, length, width)
+            .map(Self)
+            .map_err(PyValueError::new_err)
+    }
+    /// Composite the drawable with what is drawn beneath it.
+    #[pyo3(signature = (mode="normal"))]
+    fn blend(&self, mode: &str) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        let mode = parse_blend_mode(mode)?;
+        Ok(Self(self.0.clone().blend(mode)))
+    }
     /// Clip this drawable to another drawable's vector outline.
     #[pyo3(signature = (mask, rule="nonzero", invert=false))]
     fn clip(&self, mask: &PyDrawable, rule: &str, invert: bool) -> PyResult<Self> {
@@ -3003,6 +3102,11 @@ macro_rules! media_drawable_methods {
 
     fn no_effects<'py>(slf: PyRef<'py, Self>) -> PyResult<PyRef<'py, Self>> {
         PyDrawable(slf.handle()).no_effects()?;
+        Ok(slf)
+    }
+    #[pyo3(signature = (mode="normal"))]
+    fn blend<'py>(slf: PyRef<'py, Self>, mode: &str) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).blend(mode)?;
         Ok(slf)
     }
     #[pyo3(signature = (mask, rule="nonzero", invert=false))]

@@ -518,6 +518,43 @@ card = scene.geometry.rounded_rect(4, 2, 0.2).fill("#18202E").shadow("#00000080"
 )
 
 #api-entry(
+  name: "Drawable.tip",
+  kind: "method",
+  params: ((name: "end / start", type: "\"arrow\" | \"dot\" | None", default: "\"arrow\" / None", desc: [Punta de cada extremo del camino.]), (name: "length", type: "float | None", default: "None", desc: [Largo de la punta de flecha; por defecto, cinco grosores de trazo y al menos 0.15.]), (name: "width", type: "float | None", default: "None", desc: [Ancho de la base de la flecha (0.9 del largo) o diámetro del punto (tres grosores de trazo).])),
+  desc: [Pone puntas de flecha o puntos en los extremos de cualquier trazo: polilíneas, curvas, arcos o conectores con `via`. Se rellenan con el color del trazo y siguen a los extremos actuales del camino, así que acompañan a `trim`, `create()` y a los caminos que se regeneran; `animate.grow_arrow()` dibuja el trazo desde la cola con la punta delante. El vértice de la flecha es el extremo del camino y el trazo termina bajo su base. Si el camino es más corto que la punta, esta se encoge con él. `tip(None)` las quita. Un tipo desconocido o un tamaño no positivo lanzan `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import CYAN, Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+route = scene.geometry.polyline([(-5, -1.5), (-2, 1.5), (2, -1.5), (5, 1.5)]).no_fill()
+route.stroke(CYAN, 0.06).tip(end="arrow", start="dot")
+scene.play([route.animate.grow_arrow().duration(1.5)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Drawable.blend",
+  kind: "method",
+  params: ((name: "mode", type: "str", default: "\"normal\"", desc: [`"normal"`, `"multiply"`, `"screen"`, `"overlay"`, `"darken"`, `"lighten"`, `"color_dodge"`, `"color_burn"`, `"hard_light"`, `"soft_light"`, `"difference"`, `"exclusion"`, `"hue"`, `"saturation"`, `"color"`, `"luminosity"` o `"add"`.]),),
+  desc: [Modo de fusión con lo que hay debajo. `"screen"` y `"add"` aclaran (luces, destellos), `"multiply"` oscurece como tinta (resaltadores) y `"normal"` vuelve a pintar encima, también en un miembro de un grupo con otro modo. Como `fill`, en un grupo o un `Text` llega a todos sus miembros; un miembro al que le cambias el modo después conserva el suyo. El objeto se pinta en su propia capa, así que dentro de un recorte, un grupo con opacidad o una transición solo se funde con el contenido de ese grupo. No se anima. Un modo desconocido lanza `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import Scene
+scene = Scene(frame=(16, 9), background="#101826")
+panel = scene.geometry.rect(9, 4).fill("#2B6CB0").move_to(0, 0)
+leak = scene.geometry.circle(1.6).fill("#F6AD55").move_to(-2.5, 0).blend("screen")
+ink = scene.geometry.circle(1.6).fill("#F6AD55").move_to(2.5, 0).blend("multiply")
+scene.play([leak.animate.move_to(-1, 0).duration(1.0), ink.animate.move_to(1, 0).duration(1.0)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
   name: "Drawable.trim",
   kind: "method",
   params: ((name: "start / end", type: "float | None", default: "None", desc: [Ventana visible del camino como fracción de su longitud; al principio valen 0 y 1.]), (name: "offset", type: "float | None", default: "None", desc: [Desplaza la ventana; da la vuelta al final del camino.]), (name: "mode", type: "str | None", default: "None", desc: [`"simultaneous"` (predeterminado) recorta cada subcamino a la vez; `"sequential"` recorta la longitud total y los subcaminos aparecen uno tras otro.])),

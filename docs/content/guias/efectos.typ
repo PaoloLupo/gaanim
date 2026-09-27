@@ -46,6 +46,9 @@ Los tres son setters fluidos de cualquier drawable, texto incluido:
   desenfocada. El alfa del color regula su opacidad; una sombra sutil separa
   una tarjeta del fondo.
 - `no_effects()` quita los tres sin tocar relleno ni trazo.
+- `blend(mode)` cambia cómo se funde el objeto con lo que hay debajo:
+  `"screen"` o `"add"` para luces y destellos, `"multiply"` para
+  resaltadores. No es un efecto, así que `no_effects()` no lo quita.
 
 ```python
 from gaanim import Scene

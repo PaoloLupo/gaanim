@@ -106,6 +106,28 @@ Ver `Drawable.camera_view` en #link("/referencia/drawable/")[Drawable], las
 vistas de cámara en #link("/referencia/scene/")[Escena] y las cámaras
 secundarias en #link("/guias/camara-y-3d/")[Cámara y 3D].
 
+- `drawable.blend("screen")` cambia cómo se funde un objeto con lo que hay
+  debajo: `"screen"` y `"add"` para luces y destellos, `"multiply"` para
+  resaltadores, y el resto de modos habituales (`"overlay"`, `"soft_light"`,
+  `"difference"`…).
+- `animate.dash_offset(valor)` anima el desplazamiento de los guiones de un
+  trazo, y `Updater.dash_flow(speed=)` los hace fluir sin fin, como hormigas
+  en marcha o el flujo de una tubería. Ambos respetan los seeks y la
+  exportación.
+- `drawable.tip(end="arrow", start="dot")` pone puntas de flecha o puntos en
+  los extremos de cualquier trazo (polilíneas, curvas, arcos). Siguen al
+  extremo actual del camino, así que `animate.grow_arrow()`, `create()` y
+  `trim` las llevan consigo.
+- `scene.viz.progress_ring(0.0)` crea un anillo de progreso con un porcentaje
+  rodante en el centro; se anima con `ring.animate.set(0.75)`.
+  `scene.viz.countdown(10)` crea un temporizador que `timer.count_down()`
+  vacía en tiempo real.
+
+Ver `Drawable.blend` y `Drawable.tip` en #link("/referencia/drawable/")[Drawable],
+`Anim.dash_offset` y `Updater.dash_flow` en
+#link("/referencia/animations/")[Animaciones] y los anillos en
+#link("/referencia/visualization/")[Visualización].
+
 == Correcciones
 
 - `.hud()` fija de verdad el objeto a la imagen también en 2D: antes se movía

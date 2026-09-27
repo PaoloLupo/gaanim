@@ -1478,6 +1478,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::FillLevelTo { .. } => "FillLevel",
             AnimationType::PathTrim { .. } => "Trim",
             AnimationType::EffectsTo { .. } => "Effects",
+            AnimationType::DashOffsetTo { .. } => "DashOffset",
             AnimationType::SurroundingRectRetarget { .. } => "Retarget",
             AnimationType::StrokeColorTo { .. } => "Stroke",
             AnimationType::StrokeWidthTo { .. } => "StrokeW",
@@ -2733,6 +2734,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             if let Some((from, to)) = properties.fill_level {
                 channels.push(AnimationType::FillLevelTo { from, to });
             }
+            if let Some(to) = properties.dash_offset {
+                channels.push(AnimationType::DashOffsetTo { to });
+            }
             if properties.glow.is_some() || properties.blur.is_some() || properties.shadow.is_some()
             {
                 channels.push(AnimationType::EffectsTo {
@@ -3118,6 +3122,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_effects_internal(anim, track);
             return;
         }
+        if matches!(anim.anim_type, AnimationType::DashOffsetTo { .. }) {
+            self.play_dash_offset_internal(anim, track);
+            return;
+        }
         if matches!(anim.anim_type, AnimationType::PathTrim { .. }) {
             self.play_path_trim_internal(anim, track);
             return;
@@ -3439,6 +3447,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::CameraViewPop { .. }
             | AnimationType::PathTrim { .. }
             | AnimationType::EffectsTo { .. }
+            | AnimationType::DashOffsetTo { .. }
             | AnimationType::DrawBorderThenFill { .. }
             | AnimationType::Flash { .. }
             | AnimationType::Circumscribe { .. }
@@ -5354,6 +5363,33 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     target,
                     lens: PropertyLensSpec::Dynamic(gaanim_animation::tween::DynamicLens(
                         std::sync::Arc::new(crate::effect_lens::EffectLens { from, to }),
+                    )),
+                    rate_func: anim.rate_func.clone(),
+                    delay: 0.0,
+                    label: self.current_label.clone(),
+                }),
+            );
+        }
+    }
+
+    fn play_dash_offset_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
+        let AnimationType::DashOffsetTo { to } = anim.anim_type else {
+            return;
+        };
+        for target in self.effect_targets(anim.target) {
+            let Some(state) = self.states.get_mut(target) else {
+                continue;
+            };
+            let from = state.stroke.style.dash_offset;
+            state.stroke.style.dash_offset = to;
+            self.timeline.add_clip(
+                parent_track,
+                self.current_time + anim.delay,
+                anim.duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target,
+                    lens: PropertyLensSpec::Dynamic(gaanim_animation::tween::DynamicLens(
+                        std::sync::Arc::new(crate::stroke_lens::DashOffsetLens { from, to }),
                     )),
                     rate_func: anim.rate_func.clone(),
                     delay: 0.0,

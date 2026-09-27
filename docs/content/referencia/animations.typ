@@ -617,7 +617,7 @@ scene.render()
   name: "Anim.grow_arrow",
   kind: "method",
   returns: (type: "Anim", desc: [Crecimiento de una flecha desde la cola.]),
-  desc: [La cola queda fija y la punta recorre el eje de la flecha, recto o curvo en `curved_arrow` y `curved_arrow_arc`. La cabeza aparece con sus proporciones durante la primera longitud de cabeza y luego conserva su tamaño mientras el cuerpo se alarga; el grosor no cambia nunca. Un `scene.geometry.connector` crece por su polilínea viva, pasando por cada punto `via`, mientras sus extremos siguen a sus referencias. Cualquier otro objeto, o una flecha deformada por una transformación, usa `create()`. Easing predeterminado: `Easing.SMOOTH`. En una selección de texto lanza `TypeError`.],
+  desc: [La cola queda fija y la punta recorre el eje de la flecha, recto o curvo en `curved_arrow` y `curved_arrow_arc`. La cabeza aparece con sus proporciones durante la primera longitud de cabeza y luego conserva su tamaño mientras el cuerpo se alarga; el grosor no cambia nunca. Un `scene.geometry.connector` crece por su polilínea viva, pasando por cada punto `via`, mientras sus extremos siguen a sus referencias. Cualquier otro objeto, o una flecha deformada por una transformación, usa `create()`; en un trazo con `tip(...)` la punta viaja con el extremo que crece. Easing predeterminado: `Easing.SMOOTH`. En una selección de texto lanza `TypeError`.],
 )[
 ```python
 # show-code: true
@@ -1082,6 +1082,26 @@ ring.trim(start=0.5, end=0.5)
 scene.play(ring.animate.trim(start=0.0, end=1.0))                # desde el centro
 orbit.trim(start=0.0, end=0.15)
 scene.play(orbit.animate.trim(offset=1.0).duration(2))           # segmento viajero
+```
+]
+
+#api-entry(
+  name: "Anim.dash_offset",
+  kind: "method",
+  params: (
+    (name: "offset", type: "float", default: none, desc: [Desplazamiento del patrón de guiones, en unidades de escena.]),
+  ),
+  returns: (type: "Anim", desc: [Desplazamiento animado de los guiones.]),
+  desc: [Anima el `dash_offset` de todos los trazos del objeto, incluidos los de un grupo o un texto. El trazo necesita guiones (`StrokeStyle(dashes=...)`). Un valor mayor lleva el patrón hacia el inicio del camino, así que animarlo hace marchar los guiones. La siguiente animación parte del valor final. Para un flujo sin fin usa `Updater.dash_flow`. Un valor no finito lanza `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import CYAN, Scene, StrokeStyle
+scene = Scene(frame=(16, 9), background="#0f172a")
+border = scene.geometry.rounded_rect(8, 4, 0.3).no_fill().stroke_style(StrokeStyle(CYAN, 0.06, dashes=[0.3, 0.2]))
+scene.play([border.animate.dash_offset(2.0).duration(2)])
+# output: preview.webp
+scene.render()
 ```
 ]
 
@@ -1868,6 +1888,28 @@ scene.play([logo.animate.move_to(3, 0).duration(2)])  # sigue temblando mientras
 light = scene.geometry.circle(0.3).fill(GOLD)
 light.add_updater(Updater.oscillate("opacity", waveform="triangle", frequency=0.5, low=0.4, high=1.0))
 scene.wait(2)
+```
+]
+
+#api-entry(
+  name: "Updater.dash_flow",
+  kind: "factory",
+  params: (
+    (name: "speed", type: "float", default: "0.5", desc: [Unidades de escena por segundo en el sentido del camino; un valor negativo lo invierte.]),
+  ),
+  returns: (type: "Updater", desc: [Un flujo de guiones.]),
+  desc: [Hace fluir los guiones de todos los trazos del objeto a lo largo de su camino, como hormigas en marcha o el flujo de una tubería. Se suma al `dash_offset` autorado y es función pura del tiempo, así que los seeks y la exportación coinciden con la reproducción. `remove_updater()` lo detiene donde está. El trazo necesita guiones (`StrokeStyle(dashes=...)`). Una velocidad no finita lanza `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import CYAN, Scene, StrokeStyle, Updater
+scene = Scene(frame=(16, 9), background="#0f172a")
+pipe = scene.geometry.polyline([(-5, -1), (-2, 1.5), (2, -1.5), (5, 1)])
+pipe.no_fill().stroke_style(StrokeStyle(CYAN, 0.08, cap="round", dashes=[0.2, 0.18]))
+pipe.add_updater(Updater.dash_flow(speed=0.8))
+scene.wait(2)
+# output: preview.webp
+scene.render()
 ```
 ]
 

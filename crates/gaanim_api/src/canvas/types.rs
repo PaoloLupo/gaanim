@@ -698,6 +698,13 @@ pub enum SpawnKind {
         font_weight: Option<u16>,
         rolling: Option<gaanim_animation::RollingNumberOptions>,
     },
+    /// A ring arc from 12 o'clock that sweeps clockwise through
+    /// `source / maximum` of a full turn as its source changes.
+    ProgressArc {
+        source: gaanim_animation::ScalarSource,
+        radius: f64,
+        maximum: f64,
+    },
     /// One table-backed mark regenerated natively when its DataSource changes.
     DataMark {
         map: gaanim_visualization::CoordinateMap2D,
@@ -948,6 +955,10 @@ pub struct ObjectSpec {
     pub glow: Option<gaanim_renderer::effects::Glow>,
     pub blur: Option<gaanim_renderer::effects::GaussianBlur>,
     pub shadow: Option<gaanim_renderer::effects::DropShadow>,
+    /// Compositing with what is drawn beneath; `None` is plain source-over.
+    pub blend: Option<gaanim_core::peniko::BlendMode>,
+    /// Arrowheads or dots drawn on the ends of the path.
+    pub tips: Option<gaanim_animation::StrokeTips>,
     pub opacity: f32,
     pub opacity_overridden: bool,
     /// Ordered theme classes. Later classes have higher cascade priority.
@@ -1010,6 +1021,8 @@ impl ObjectSpec {
             glow: None,
             blur: None,
             shadow: None,
+            blend: None,
+            tips: None,
             opacity: 1.0,
             opacity_overridden: false,
             style_classes: Vec::new(),
@@ -1778,6 +1791,11 @@ impl Anim {
     /// Animates the drop shadow; `None` fades it out.
     pub fn shadow(self, shadow: Option<gaanim_renderer::effects::DropShadow>) -> Self {
         self.update_properties(|properties| properties.shadow = Some(shadow))
+    }
+
+    /// Animates the dash offset of every stroke, in scene units.
+    pub fn dash_offset(self, offset: f64) -> Self {
+        self.update_properties(|properties| properties.dash_offset = Some(offset))
     }
 
     pub fn fill_level(self, level: f64) -> Self {
