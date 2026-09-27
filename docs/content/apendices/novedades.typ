@@ -11,9 +11,11 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
-= 0.5.3
+= 0.6.0
 
-Sin publicar todavía. No hace falta cambiar tus escenas.
+Publicada el 27 de septiembre de 2026. Llega el formato `.gaanim`: una
+escena o presentación en un solo archivo que se reproduce, presenta y exporta
+en cualquier equipo. No hace falta cambiar tus escenas.
 
 == Cambios
 
@@ -36,10 +38,40 @@ Sin publicar todavía. No hace falta cambiar tus escenas.
   paquete y lo compara con el resumen grabado, sin Python.
 - `gaanim --diff --example mi-charla.gaanim` captura y compara las pausas de un
   paquete, sin Python; coinciden con las de `--capture-stops` sobre el script.
-- El diálogo Exportar del editor ofrece el formato Paquete para grabar un
-  `.gaanim` del script abierto.
+- El inicio de Gaanim tiene la tarjeta Reproducir .gaanim (`Ctrl Shift O`),
+  que abre el archivo en la misma ventana; también acepta arrastrarlo. Los
+  archivos abiertos, desde el inicio o con `gaanim mi-charla.gaanim`,
+  aparecen en Recientes junto a los proyectos. Sin Python instalado, `gaanim`
+  abre igualmente el inicio para reproducir archivos `.gaanim`.
+- El diálogo Exportar del editor ofrece el formato Gaanim para grabar un
+  `.gaanim` del script abierto, con su barra de progreso; en la terminal,
+  `gaanim export` muestra la suya.
 - El `README.md` de los proyectos nuevos incluye cómo compartirlos como
   paquete.
+
+== Correcciones
+
+- `drawable.bounds()` sobre un objeto recién creado (antes del siguiente
+  `play` o `wait`, sin animaciones, grupos posteriores ni layouts que actúen
+  sobre él) ya no compila la escena entera: compila solo su declaración y
+  tarda alrededor de un milisegundo, con el mismo resultado. En una
+  presentación de 41 segmentos con 54 mediciones, `gaanim check` pasa de
+  27,7 s a 1,7 s. En los demás casos sigue compilando la escena escrita hasta el
+  cursor.
+- Las presentaciones largas se reproducen, exportan y graban más rápido. Una
+  presentación mantiene vivos los objetos de todos sus segmentos, y cada
+  fotograma animado recorría todos ellos varias veces para restaurar unos
+  pocos cientos: ahora el seek restaura en una sola pasada y la propagación de
+  transformaciones, opacidad y cajas solo recalcula lo que cambió. Grabar el
+  paquete de una presentación de 41 segmentos y 29 000 objetos pasa de 31 a 8½
+  minutos, con los mismos fotogramas.
+- Grabar un paquete ya no repite la línea de tiempo en un segundo mundo cuando
+  la escena no tiene estado que dependa de los instantes visitados (updaters,
+  trazos acumulados, ecos, squash o animaciones personalizadas).
+- En un vídeo, pulsar → (o el botón de escena siguiente) mientras sonaba la
+  transición de una escena volvía al inicio de esa misma escena en lugar de
+  pasar a la siguiente; ← tampoco reconocía la escena en curso durante la
+  transición. La navegación entre escenas ahora compara instantes exactos.
 
 = 0.5.2
 
@@ -180,7 +212,9 @@ etiquetas de cota: lee «Al actualizar».
 - `scene.text.measure(...)` desaparece: `drawable.bounds()` mide cualquier
   objeto ya creado. Crea el texto y mide su caja
   (`scene.text("PGA", role="label").bounds().width`) en lugar de repetir su
-  contenido y estilo.
+  contenido y estilo. Desde 0.6.0, medir un objeto recién creado cuesta
+  alrededor de un milisegundo; antes de esa versión cada llamada compilaba
+  toda la escena escrita hasta ese punto.
 
 == Cambios
 

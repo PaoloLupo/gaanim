@@ -356,8 +356,25 @@ pub fn reactive_readout_layout_system(
     baselines: Query<&TextBaseline>,
     mut transforms: Query<&mut SpatialTransform>,
 ) {
+    if layouts.is_empty() {
+        return;
+    }
+    // Map only the readout parts: a scene can hold tens of thousands of objects.
+    let wanted = layouts
+        .iter()
+        .flat_map(|layout| {
+            [
+                layout.label,
+                layout.equals,
+                Some(layout.number),
+                layout.unit,
+            ]
+        })
+        .flatten()
+        .collect::<std::collections::HashSet<_>>();
     let entities = ids
         .iter()
+        .filter(|(_, id)| wanted.contains(&id.0))
         .map(|(entity, id)| (id.0, entity))
         .collect::<HashMap<_, _>>();
 

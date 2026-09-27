@@ -1,6 +1,7 @@
 use bevy::animation::AnimationPlayer;
 use bevy::ecs::archetype::ArchetypeId;
 use bevy::ecs::change_detection::Tick;
+use bevy::ecs::entity::EntityHashMap;
 use bevy::ecs::world::WorldId;
 use bevy::prelude::{
     BuildChildrenTransformExt, Changed, ChildOf, Entity, Or, Resource, Transform, With, World,
@@ -13,7 +14,7 @@ use crate::clip::{
     Clip, ClipId, ClipPayload, GltfAnimationSpec, PropertyLensSpec, SceneId, Track, TrackId,
 };
 use crate::scene::{SceneMember, SceneMetadata};
-use crate::snapshot::WorldSnapshot;
+use crate::snapshot::{ObjectEntityMap, WorldSnapshot};
 use crate::transition::{SceneConnection, TransitionType};
 use gaanim_math::SpatialTransform;
 use gaanim_scene::{
@@ -54,7 +55,7 @@ struct ReplayBaseline {
     tick: Tick,
     /// Archetypes after replay; a different archetype means a component was
     /// added or removed, which change ticks alone cannot report.
-    archetypes: HashMap<Entity, ArchetypeId>,
+    archetypes: EntityHashMap<ArchetypeId>,
 }
 
 /// Change ticks older than this are not trusted against Bevy's tick clamping.
@@ -100,8 +101,8 @@ type RestoredComponentChanged = Or<(
 
 /// Entities that must be restored from the keyframe before an incremental replay.
 struct DirtyEntities {
-    objects: HashSet<gaanim_core::ObjectId>,
-    archetypes: HashMap<Entity, ArchetypeId>,
+    objects: bevy::platform::collections::HashSet<gaanim_core::ObjectId>,
+    archetypes: EntityHashMap<ArchetypeId>,
 }
 
 impl DirtyEntities {
@@ -802,6 +803,11 @@ impl Timeline {
         }
     }
 
+    /// Changes whenever clips, keyframes or cached bounds change.
+    pub(crate) fn property_revision(&self) -> u64 {
+        self.property_revision
+    }
+
     /// Adds a clip to the timeline under a specific track and time interval.
     pub fn add_clip(
         &mut self,
@@ -1027,7 +1033,7 @@ impl Timeline {
             return None;
         }
 
-        let mut objects = HashSet::new();
+        let mut objects = bevy::platform::collections::HashSet::new();
         let range = keyframe..=OrderedFloat(target_time);
         for id in self.clip_index.range(range).flat_map(|(_, ids)| ids) {
             let Some(clip) = self.clips.get(*id) else {
@@ -1201,7 +1207,7 @@ impl Timeline {
         let reactive_state = if preserve_reactive_state {
             capture_reactive_state(world)
         } else {
-            HashMap::new()
+            ReactiveStates::new()
         };
 
         // 1. Locate the nearest recorded keyframe <= target_time
@@ -1225,7 +1231,7 @@ impl Timeline {
                 let snapshot = &self.keyframes[&kf_time];
                 restored_entity_map = Some(match &dirty {
                     Some(dirty) => {
-                        let mut restored = HashSet::new();
+                        let mut restored = bevy::platform::collections::HashSet::new();
                         let entity_map = snapshot.restore_with_entity_map(
                             world,
                             restore_scene_visibility,
@@ -1262,7 +1268,7 @@ impl Timeline {
 
         // Map ObjectIds to current Bevy Entities dynamically
         let entity_map = restored_entity_map.unwrap_or_else(|| {
-            let mut entity_map = HashMap::new();
+            let mut entity_map = ObjectEntityMap::new();
             let mut query = world.query::<(Entity, &gaanim_scene::MobjectId)>();
             for (entity, mobj_id) in query.iter(world) {
                 entity_map.insert(mobj_id.0, entity);
@@ -1293,10 +1299,11 @@ impl Timeline {
             };
             // An entity kept from the previous seek still holds the initial
             // values its future clips wrote then.
-            if restored_objects
-                .as_ref()
-                .is_some_and(|restored: &HashSet<_>| !restored.contains(&anim.target))
-            {
+            if restored_objects.as_ref().is_some_and(
+                |restored: &bevy::platform::collections::HashSet<_>| {
+                    !restored.contains(&anim.target)
+                },
+            ) {
                 continue;
             }
             let channel = if let PropertyLensSpec::Dynamic(lens) = &anim.lens {
@@ -1873,11 +1880,7 @@ impl Timeline {
         Some(snapshot.parent)
     }
 
-    fn evaluate_gltf_animations(
-        &self,
-        world: &mut World,
-        entity_map: &HashMap<gaanim_core::ObjectId, Entity>,
-    ) {
+    fn evaluate_gltf_animations(&self, world: &mut World, entity_map: &ObjectEntityMap) {
         let mut actions =
             HashMap::<gaanim_core::ObjectId, Vec<(f64, f64, GltfAnimationSpec)>>::new();
         for clip in self.clips.values() {
@@ -1951,9 +1954,12 @@ impl Timeline {
     /// seeking skips intermediate frames, so resolve that anchor explicitly and
     /// restore reactive updaters to the requested time afterwards.
     fn restore_followed_shake_origin(&self, world: &mut World) {
-        let Some(shake_start) = self
-            .clips
-            .values()
+        let camera_clips: Vec<&Clip> = crate::camera_clip_ids(self, world)
+            .into_iter()
+            .filter_map(|id| self.clips.get(id))
+            .collect();
+        let Some(shake_start) = camera_clips
+            .iter()
             .filter_map(|clip| match &clip.payload {
                 ClipPayload::Animation(anim) => match &anim.lens {
                     PropertyLensSpec::CameraShake { .. } if clip.start <= self.current_time => {
@@ -1969,7 +1975,7 @@ impl Timeline {
         };
 
         // A later pan/frame/follow owns the camera position instead.
-        let has_later_position_control = self.clips.values().any(|clip| {
+        let has_later_position_control = camera_clips.iter().any(|clip| {
             clip.start > shake_start
                 && clip.start <= self.current_time
                 && matches!(
@@ -1988,9 +1994,8 @@ impl Timeline {
             return;
         }
 
-        let Some((follow_end, target)) = self
-            .clips
-            .values()
+        let Some((follow_end, target)) = camera_clips
+            .iter()
             .filter_map(|clip| match &clip.payload {
                 ClipPayload::Animation(anim) => match anim.lens {
                     PropertyLensSpec::CameraFollow { target } if clip.end() <= shake_start => {
@@ -2023,10 +2028,11 @@ impl Timeline {
     }
 }
 
-fn capture_reactive_state(
-    world: &mut World,
-) -> HashMap<gaanim_core::ObjectId, ReactiveEntityState> {
-    let mut state = HashMap::new();
+type ReactiveStates =
+    bevy::platform::collections::HashMap<gaanim_core::ObjectId, ReactiveEntityState>;
+
+fn capture_reactive_state(world: &mut World) -> ReactiveStates {
+    let mut state = ReactiveStates::new();
     let mut query = world.query::<(
         Entity,
         &gaanim_scene::MobjectId,
@@ -2060,17 +2066,19 @@ fn capture_reactive_state(
     state
 }
 
-fn restore_reactive_state(
-    world: &mut World,
-    reactive_state: &HashMap<gaanim_core::ObjectId, ReactiveEntityState>,
-) {
-    let mut entity_map = HashMap::new();
+fn restore_reactive_state(world: &mut World, reactive_state: &ReactiveStates) {
+    if reactive_state.is_empty() {
+        return;
+    }
+    let mut entity_map = ObjectEntityMap::with_capacity(reactive_state.len());
     let mut query = world.query::<(Entity, &gaanim_scene::MobjectId)>();
     for (entity, mobject_id) in query.iter(world) {
-        entity_map.insert(mobject_id.0, entity);
+        if reactive_state.contains_key(&mobject_id.0) {
+            entity_map.insert(mobject_id.0, entity);
+        }
     }
 
-    for (object_id, state) in reactive_state {
+    for (object_id, state) in reactive_state.iter() {
         let Some(&entity) = entity_map.get(object_id) else {
             continue;
         };

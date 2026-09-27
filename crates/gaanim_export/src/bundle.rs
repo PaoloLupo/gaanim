@@ -32,6 +32,10 @@ pub struct BundleConfig {
     pub width: u32,
     pub height: u32,
     pub telemetry: Option<ExportTelemetry>,
+    /// Record the instants between grid frames in a second world even when
+    /// the scene keeps no state that depends on the instants it visited.
+    /// Both recordings are identical; this exists to check that.
+    pub force_second_world: bool,
 }
 
 impl BundleConfig {
@@ -49,6 +53,7 @@ impl BundleConfig {
             width: 1920,
             height: 1080,
             telemetry: None,
+            force_second_world: false,
         }
     }
 }
@@ -105,6 +110,13 @@ impl RecordingPlan {
         Self { grid, extras }
     }
 
+    /// Grid instants the second world steps through before its last extra.
+    pub fn second_pass_steps(&self) -> usize {
+        self.extras
+            .last()
+            .map_or(0, |last| self.grid.partition_point(|time| time < last))
+    }
+
     /// Every recorded instant, in time order.
     pub fn times(&self) -> Vec<f64> {
         let mut times: Vec<f64> = self.grid.iter().chain(&self.extras).copied().collect();
@@ -117,6 +129,45 @@ impl RecordingPlan {
 /// [`RecordingPlan`].
 pub fn recording_times(timeline: &Timeline, fps: u32) -> Vec<f64> {
     RecordingPlan::new(timeline, fps).times()
+}
+
+/// Terminal bar, editor telemetry and export-worker marker for a recording.
+struct RecordingProgress {
+    bar: indicatif::ProgressBar,
+    telemetry: Option<ExportTelemetry>,
+    total: u64,
+    done: std::cell::Cell<u64>,
+    window: std::cell::Cell<Instant>,
+}
+
+impl RecordingProgress {
+    fn new(total: u64, telemetry: Option<ExportTelemetry>) -> Self {
+        let bar = crate::exporter::create_progress_bar(total);
+        bar.set_prefix("record");
+        Self {
+            bar,
+            telemetry,
+            total,
+            done: std::cell::Cell::new(0),
+            window: std::cell::Cell::new(Instant::now()),
+        }
+    }
+
+    fn advance(&self) {
+        let done = self.done.get() + 1;
+        self.done.set(done);
+        self.bar.inc(1);
+        if done.is_multiple_of(30) || done == self.total {
+            let elapsed = self.window.replace(Instant::now()).elapsed();
+            self.bar
+                .set_message(format!("{:.1} fps", 30.0 / elapsed.as_secs_f64().max(1e-9)));
+            crate::exporter::export_progress(&self.telemetry, done, self.total);
+        }
+    }
+
+    fn finish(&self) {
+        self.bar.finish_and_clear();
+    }
 }
 
 fn scene_spans(timeline: &Timeline) -> Vec<SceneSpan> {
@@ -277,6 +328,42 @@ where
     Ok(app)
 }
 
+/// Whether no state of the scene depends on the instants its timeline visited
+/// before the current one, so visiting an extra instant between two grid
+/// frames leaves the following grid frames unchanged.
+///
+/// Updaters advance by the seek deltas, traced paths and sampled series
+/// accumulate, echoes and squash read earlier frames, and custom animations
+/// and signal bindings run user code that may keep state; any of them keeps
+/// the second world. Reactive callables (value trackers, property bindings,
+/// redraw functions) must already be pure functions of their declared inputs
+/// and time, since the editor seeks anywhere, and built-in lenses that report
+/// [`history_free`](gaanim_animation::AnimatableLens::history_free) are pure.
+fn history_free(world: &mut World) -> bool {
+    use gaanim_animation as anim;
+    use gaanim_timeline::clip::{ClipPayload, PropertyLensSpec};
+    let mut stateful = world.query_filtered::<(), Or<(
+        With<anim::Updater>,
+        With<anim::SampledSeriesDrivers>,
+        With<anim::TracedPath>,
+        With<anim::TracedPath3D>,
+        With<anim::SurroundingRect>,
+        With<anim::SquashStretch>,
+        With<anim::EchoGhost>,
+        With<anim::SignalBinding>,
+    )>>();
+    if stateful.iter(world).next().is_some() {
+        return false;
+    }
+    !world.resource::<Timeline>().clips.values().any(|clip| {
+        matches!(
+            &clip.payload,
+            ClipPayload::Animation(animation)
+                if matches!(&animation.lens, PropertyLensSpec::Dynamic(lens) if !lens.0.history_free())
+        )
+    })
+}
+
 /// Seek `app` to `time`, update it, and capture what it draws. A motion
 /// blurred frame also steps and captures the sub-frames an export averages,
 /// in the order an export seeks them.
@@ -304,6 +391,23 @@ fn record_frame(
             .push(capture(app, sample, post_shaders, Some(&mut pins))?);
     }
     Ok(frame)
+}
+
+/// Step `app` through the frame at `time` like [`record_frame`] does, with
+/// its motion blur sub-frames, without capturing anything: only the state
+/// the steps leave behind matters.
+fn step_frame(app: &mut App, time: f64, fps: u32) -> Result<()> {
+    app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
+    app.update();
+    check_custom_animation_errors(app.world())?;
+    if let Some(blur) = crate::exporter::frame_motion_blur(app.world()) {
+        for sample in crate::exporter::motion_blur_times(app.world(), time, f64::from(fps), blur) {
+            app.world_mut().resource_mut::<Timeline>().seek_request = Some(sample);
+            app.update();
+            check_custom_animation_errors(app.world())?;
+        }
+    }
+    Ok(())
 }
 
 fn capture(
@@ -379,27 +483,38 @@ where
     let audio = audio_data(&mut writer, app.world())?;
 
     let total = plan.grid.len() + plan.extras.len();
+    // Without state that depends on the instants the timeline visits, the
+    // instants between grid frames can be recorded in the same world.
+    let single_world =
+        plan.extras.is_empty() || (!config.force_second_world && history_free(app.world_mut()));
+    // Progress counts every instant the recording visits, including the grid
+    // instants a second world steps through without recording them.
+    let work = if single_world {
+        total
+    } else {
+        total + plan.second_pass_steps()
+    } as u64;
     if let Some(telemetry) = &telemetry {
-        telemetry.set_total_frames(total as u64);
+        telemetry.set_total_frames(work);
     }
-    let progress = crate::exporter::create_progress_bar(total as u64);
+    let progress = RecordingProgress::new(work, telemetry);
     let mut fragments = gaanim_renderer::fragment::FragmentStore::default();
-    let mut recorded = 0_u64;
     let mut push = |writer: &mut BundleWriter<_>, frame: Frame| -> Result<()> {
         let digest = gaanim_bundle::frame_digest(&frame, background.as_ref(), &mut fragments);
         writer.push_frame(&frame, digest).map_err(bundle_error)?;
         fragments.end_frame();
-        recorded += 1;
-        progress.inc(1);
-        if let Some(telemetry) = &telemetry {
-            telemetry.set_current_frame(recorded);
-        }
         Ok(())
     };
 
-    for &time in &plan.grid {
+    let first_world_times = if single_world {
+        plan.times()
+    } else {
+        plan.grid.clone()
+    };
+    for time in first_world_times {
         let frame = record_frame(&mut app, time, config.fps, &post_shaders)?;
         push(&mut writer, frame)?;
+        progress.advance();
     }
     let clear_color = app.world().get_resource::<ClearColor>().map(|clear| {
         let rgba = clear.0.to_srgba();
@@ -411,7 +526,7 @@ where
         ]
     });
 
-    if !plan.extras.is_empty() {
+    if !single_world {
         drop(app);
         writer.start_pass().map_err(bundle_error)?;
         let mut app = recording_app(setup_world_fn)?;
@@ -422,13 +537,15 @@ where
         for &extra in &plan.extras {
             // Visit the grid up to the instant as the first world did.
             while let Some(time) = grid.next_if(|time| *time < extra) {
-                record_frame(&mut app, time, config.fps, &post_shaders)?;
+                step_frame(&mut app, time, config.fps)?;
+                progress.advance();
             }
             let frame = record_frame(&mut app, extra, config.fps, &post_shaders)?;
             push(&mut writer, frame)?;
+            progress.advance();
         }
     }
-    progress.finish_and_clear();
+    progress.finish();
 
     let scene = SceneData {
         clear_color,

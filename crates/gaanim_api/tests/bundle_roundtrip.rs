@@ -346,3 +346,65 @@ fn a_video_exported_from_the_bundle_matches_the_scene_export() {
         );
     }
 }
+
+/// Stops, a marker, typed text and a transition, without state that depends
+/// on the instants the timeline visited.
+fn history_free_scene() -> SceneModel {
+    let mut canvas = SceneModel::new(16.0, 9.0);
+    canvas.segment("typed", None).unwrap();
+    let title = canvas
+        .text("Stateless")
+        .fill(Color::WHITE)
+        .move_to(0.0, 2.0);
+    canvas.play(vec![
+        title
+            .animate()
+            .typewriter(14.0, Some("|"), 2.0, 0.3, 7, true)
+            .unwrap(),
+    ]);
+    canvas.marker("typed").unwrap();
+    canvas.stop(Some("title".into())).unwrap();
+    let dot = canvas.circle(0.6).fill(Color::from_rgb8(0xf5, 0x9e, 0x0b));
+    canvas.play(vec![dot.animate().shift_by(2.0, 0.0).duration(0.37)]);
+    canvas.stop(None).unwrap();
+    canvas
+        .segment("next", Some(TransitionType::CrossFade { duration: 0.3 }))
+        .unwrap();
+    let square = canvas
+        .rect(1.5, 1.5)
+        .fill(Color::from_rgb8(0x38, 0xbd, 0xf8));
+    canvas.play(vec![square.animate().rotate_by(1.0).duration(0.41)]);
+    canvas
+}
+
+#[test]
+fn a_history_free_scene_records_in_one_world_like_in_two() {
+    let directory = tempfile::tempdir().unwrap();
+    let record = |name: &str, force_second_world: bool| {
+        let path = directory.path().join(name);
+        let mut config = BundleConfig::new(&path);
+        config.fps = 24;
+        config.force_second_world = force_second_world;
+        record_canvas(history_free_scene(), config).expect("record the bundle");
+        Bundle::open(&path).expect("open the bundle")
+    };
+    let one = record("one.gaanim", false);
+    let two = record("two.gaanim", true);
+
+    // One world records every instant in time order; two record the grid first.
+    assert!(one.times().windows(2).all(|pair| pair[0] < pair[1]));
+    assert!(two.times().windows(2).any(|pair| pair[0] > pair[1]));
+    let by_time = |bundle: &Bundle| {
+        let mut frames: Vec<(u64, [u8; 32])> = (0..bundle.frame_count())
+            .map(|index| {
+                (
+                    bundle.times()[index].to_bits(),
+                    bundle.digest(index).unwrap(),
+                )
+            })
+            .collect();
+        frames.sort_by(|a, b| f64::from_bits(a.0).total_cmp(&f64::from_bits(b.0)));
+        frames
+    };
+    assert_eq!(by_time(&one), by_time(&two));
+}

@@ -291,10 +291,67 @@ fn project_readme(name: &str, kind: ProjectKind) -> String {
     )
 }
 
+/// Recently opened projects and playback bundles, newest first.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RecentProjects {
+    /// Project roots and `.gaanim` files in one list, so both keep a common
+    /// order. Versions that only know projects skip the bundle entries.
     #[serde(default)]
     paths: Vec<PathBuf>,
+}
+
+/// A playback bundle (`.gaanim`) opened recently.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecentBundle {
+    pub path: PathBuf,
+    /// The file name without its extension.
+    pub name: String,
+}
+
+/// One entry of [`RecentProjects`].
+#[derive(Debug, Clone)]
+pub enum RecentEntry {
+    Project(ResolvedProject),
+    Bundle(RecentBundle),
+}
+
+impl RecentEntry {
+    /// The path that identifies the entry: a project root or a bundle file.
+    pub fn path(&self) -> &Path {
+        match self {
+            Self::Project(project) => &project.root,
+            Self::Bundle(bundle) => &bundle.path,
+        }
+    }
+}
+
+/// Whether `path` names a playback bundle by its extension.
+pub fn is_bundle_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(OsStr::to_str)
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("gaanim"))
+}
+
+/// The bundle at `path`, if it still exists.
+fn resolve_bundle(path: &Path) -> Option<RecentBundle> {
+    if !is_bundle_path(path) || !path.is_file() {
+        return None;
+    }
+    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let name = path
+        .file_stem()
+        .and_then(OsStr::to_str)
+        .unwrap_or("Paquete")
+        .to_owned();
+    Some(RecentBundle { path, name })
+}
+
+fn resolve_entry_path(path: &Path) -> Option<RecentEntry> {
+    if is_bundle_path(path) {
+        resolve_bundle(path).map(RecentEntry::Bundle)
+    } else {
+        resolve_project(path).ok().map(RecentEntry::Project)
+    }
 }
 
 impl RecentProjects {
@@ -314,10 +371,10 @@ impl RecentProjects {
         let mut valid = Vec::new();
         let mut seen = HashSet::new();
         for candidate in stored.paths {
-            if let Ok(project) = resolve_project(&candidate)
-                && seen.insert(project.root.clone())
+            if let Some(entry) = resolve_entry_path(&candidate)
+                && seen.insert(entry.path().to_path_buf())
             {
-                valid.push(project.root);
+                valid.push(entry.path().to_path_buf());
             }
             if valid.len() == RECENTS_LIMIT {
                 break;
@@ -326,21 +383,45 @@ impl RecentProjects {
         Ok(Self { paths: valid })
     }
 
-    pub fn projects(&self) -> Vec<ResolvedProject> {
+    /// Projects and bundles that still exist, newest first.
+    pub fn entries(&self) -> Vec<RecentEntry> {
         self.paths
             .iter()
-            .filter_map(|path| resolve_project(path).ok())
+            .filter_map(|path| resolve_entry_path(path))
+            .collect()
+    }
+
+    /// The recent projects, newest first, without bundles.
+    pub fn projects(&self) -> Vec<ResolvedProject> {
+        self.entries()
+            .into_iter()
+            .filter_map(|entry| match entry {
+                RecentEntry::Project(project) => Some(project),
+                RecentEntry::Bundle(_) => None,
+            })
             .collect()
     }
 
     pub fn record(&mut self, project: &ResolvedProject) {
-        self.paths.retain(|path| path != &project.root);
-        self.paths.insert(0, project.root.clone());
+        self.record_path(project.root.clone());
+    }
+
+    /// Record the playback bundle at `path` as the newest entry.
+    pub fn record_bundle(&mut self, path: &Path) {
+        if let Some(bundle) = resolve_bundle(path) {
+            self.record_path(bundle.path);
+        }
+    }
+
+    fn record_path(&mut self, path: PathBuf) {
+        self.paths.retain(|existing| existing != &path);
+        self.paths.insert(0, path);
         self.paths.truncate(RECENTS_LIMIT);
     }
 
-    pub fn remove(&mut self, root: &Path) {
-        self.paths.retain(|path| path != root);
+    /// Forget a project root or bundle file.
+    pub fn remove(&mut self, path: &Path) {
+        self.paths.retain(|existing| existing != path);
     }
 
     pub fn clear(&mut self) {
@@ -363,6 +444,13 @@ impl RecentProjects {
         std::fs::write(path, source)
             .map_err(|error| format!("could not write {}: {error}", path.display()))
     }
+}
+
+/// Record the playback bundle at `path` in the saved recent list.
+pub fn record_recent_bundle(path: &Path) {
+    let mut recents = RecentProjects::load();
+    recents.record_bundle(path);
+    let _ = recents.save();
 }
 
 fn recent_projects_path() -> Option<PathBuf> {
@@ -982,6 +1070,46 @@ mod tests {
         let loaded = RecentProjects::load_from(&storage).unwrap();
         assert_eq!(loaded.projects().len(), RECENTS_LIMIT);
         assert_eq!(loaded.projects()[0].root, newest);
+    }
+
+    #[test]
+    fn recents_keep_bundles_and_projects_in_one_order() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = create_project(&CreateProjectOptions {
+            kind: ProjectKind::Slides,
+            directory: temp.path().join("talk"),
+            force: false,
+        })
+        .unwrap();
+        let bundle = temp.path().join("talk.gaanim");
+        std::fs::write(&bundle, b"bundle").unwrap();
+        let not_a_bundle = temp.path().join("notes.txt");
+        std::fs::write(&not_a_bundle, b"notes").unwrap();
+
+        let mut recents = RecentProjects::default();
+        recents.record(&project);
+        recents.record_bundle(&bundle);
+        recents.record_bundle(&not_a_bundle);
+        recents.record_bundle(&temp.path().join("missing.gaanim"));
+        let storage = temp.path().join("recent.json");
+        recents.save_to(&storage).unwrap();
+
+        let loaded = RecentProjects::load_from(&storage).unwrap();
+        let entries = loaded.entries();
+        assert_eq!(entries.len(), 2);
+        match &entries[0] {
+            RecentEntry::Bundle(recent) => assert_eq!(recent.name, "talk"),
+            other => panic!("expected the bundle first, got {other:?}"),
+        }
+        assert!(matches!(&entries[1], RecentEntry::Project(recent) if recent.root == project.root));
+        assert_eq!(loaded.projects().len(), 1);
+
+        // A bundle that disappears drops out of the list.
+        std::fs::remove_file(&bundle).unwrap();
+        assert_eq!(
+            RecentProjects::load_from(&storage).unwrap().entries().len(),
+            1
+        );
     }
 
     #[test]

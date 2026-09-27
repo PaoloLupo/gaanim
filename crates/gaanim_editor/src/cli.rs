@@ -327,6 +327,9 @@ pub fn bundle_config(
         config.fps = fps;
     }
     (config.width, config.height) = canvas.frame.preview_pixel_size();
+    // Verification switch: record a second world regardless of the scene, to
+    // compare it with the single-world recording.
+    config.force_second_world = std::env::var_os("GAANIM_BUNDLE_SECOND_WORLD").is_some();
     config
 }
 

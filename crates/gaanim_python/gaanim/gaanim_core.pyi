@@ -2575,9 +2575,15 @@ class Drawable:
         box includes descendants and reflects layout, transforms, text
         shaping and every animation that ended before ``scene.cursor``, as it
         would render there. Geometry that reactive updaters rebuild every
-        frame is measured as declared. Each call compiles the scene authored
-        so far, so measure once and reuse the result. Raises ``ValueError``
-        when the object has no geometry at the cursor.
+        frame is measured as declared. Raises ``ValueError`` when the object
+        has no geometry at the cursor.
+
+        Measuring an object declared since the last ``play``/``wait`` that
+        nothing else acts on yet (no animation, later group or layout) takes
+        about a millisecond: only its declaration, its members and its
+        ``next_to``/``align_to`` references are compiled. Otherwise each call
+        compiles the scene authored so far, so measure before animating or
+        reuse the result.
 
         Example:
             label = scene.text("PGA = 0.35 g", role="label").move_to(0, 1)

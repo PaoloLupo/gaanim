@@ -764,6 +764,10 @@ impl gaanim_animation::AnimatableLens for UnitMaskLens {
         "TextUnitMask"
     }
 
+    fn history_free(&self) -> bool {
+        true
+    }
+
     // Snapshots do not record these components.
     fn hold_channel(&self) -> Option<&'static str> {
         Some("ClipMask")

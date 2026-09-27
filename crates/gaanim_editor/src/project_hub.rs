@@ -18,9 +18,9 @@ use bevy_egui::{EguiPrimaryContextPass, egui};
 use crossbeam_channel::{Receiver, TryRecvError};
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 use gaanim_project::{
-    CreateProjectOptions, EnvironmentProbe, ProjectKind, PythonSource, RecentProjects,
-    ResolvedProject, create_project, default_project_parent, find_project_for_script,
-    resolve_project,
+    CreateProjectOptions, EnvironmentProbe, ProjectKind, PythonSource, RecentBundle, RecentEntry,
+    RecentProjects, ResolvedProject, create_project, default_project_parent,
+    find_project_for_script, is_bundle_path, resolve_project,
 };
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -37,7 +37,7 @@ impl Plugin for ProjectHubPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ProjectHubState>()
             .init_resource::<PendingProjectOpen>()
-            .add_systems(Update, hub_file_drop_system)
+            .add_systems(Update, (hub_file_drop_system, open_bundle_request_system))
             .add_systems(EguiPrimaryContextPass, project_hub_ui_system);
     }
 }
@@ -112,6 +112,12 @@ pub struct ProjectHubState {
     drop_hover: bool,
     dropped: Option<PathBuf>,
     was_focused: bool,
+    /// A playback bundle to open on the next frame; see
+    /// [`open_bundle_request_system`].
+    bundle_request: Option<PathBuf>,
+    /// Shown by `gaanim-play`, which has no Python: .gaanim files open, and
+    /// projects explain what they need.
+    without_python: bool,
 }
 
 impl Default for ProjectHubState {
@@ -130,6 +136,8 @@ impl Default for ProjectHubState {
             drop_hover: false,
             dropped: None,
             was_focused: true,
+            bundle_request: None,
+            without_python: false,
         }
     }
 }
@@ -138,6 +146,25 @@ impl ProjectHubState {
     pub fn show(&mut self) {
         self.active = true;
         self.check_tools();
+    }
+
+    /// Show Home in a process without Python, which plays .gaanim files only.
+    pub fn show_without_python(&mut self) {
+        self.without_python = true;
+        self.show();
+    }
+
+    /// Projects run Python; without it, say how to get it instead.
+    fn needs_python(&mut self) -> bool {
+        if self.without_python {
+            self.section = Section::Environment;
+            self.notice = Some(Notice::Info(
+                "Para crear o abrir proyectos, Gaanim necesita Python. Instálalo con uv \
+                 (abajo) y vuelve a abrir Gaanim."
+                    .into(),
+            ));
+        }
+        self.without_python
     }
 
     pub fn report_open_error(&mut self, error: String) {
@@ -227,6 +254,9 @@ impl ProjectHubState {
 
     /// Open a project, preparing its environment first when it needs one.
     fn open_project(&mut self, project: ResolvedProject, created: bool) {
+        if self.needs_python() {
+            return;
+        }
         self.notice = None;
         self.recents.record(&project);
         let _ = self.recents.save();
@@ -276,11 +306,48 @@ impl ProjectHubState {
     }
 
     fn busy(&self) -> bool {
-        self.preparing.is_some() || self.opening.is_some()
+        self.preparing.is_some() || self.opening.is_some() || self.bundle_request.is_some()
+    }
+
+    /// Ask for a playback bundle with the native picker and open it.
+    fn open_bundle_with_picker(&mut self) {
+        let directory = self
+            .recents
+            .entries()
+            .into_iter()
+            .find_map(|entry| match entry {
+                RecentEntry::Bundle(bundle) => bundle.path.parent().map(Path::to_path_buf),
+                RecentEntry::Project(_) => None,
+            })
+            .unwrap_or_else(default_project_parent);
+        if let Some(path) = rfd::FileDialog::new()
+            .set_title("Reproducir un archivo .gaanim")
+            .set_directory(directory)
+            .add_filter("Gaanim (.gaanim)", &[gaanim_bundle::EXTENSION])
+            .pick_file()
+        {
+            self.open_bundle(&path);
+        }
+    }
+
+    /// Play a bundle in this window. It needs neither Python nor its project.
+    fn open_bundle(&mut self, path: &Path) {
+        if !path.is_file() {
+            self.notice = Some(Notice::Error(format!(
+                "No se encontró «{}».",
+                display_path(path)
+            )));
+            return;
+        }
+        self.notice = None;
+        self.bundle_request = Some(path.to_path_buf());
     }
 
     /// Ask for a folder with the native picker and create the project there.
     fn create_with_picker(&mut self, kind: ProjectKind) {
+        if self.needs_python() {
+            return;
+        }
         let title = match kind {
             ProjectKind::Video => "Elige o crea una carpeta para el nuevo video",
             ProjectKind::Slides => "Elige o crea una carpeta para la nueva presentación",
@@ -313,6 +380,9 @@ impl ProjectHubState {
     }
 
     fn open_with_picker(&mut self) {
+        if self.needs_python() {
+            return;
+        }
         if let Some(path) = rfd::FileDialog::new()
             .set_title("Abrir un proyecto de Gaanim")
             .set_directory(default_project_parent())
@@ -322,8 +392,13 @@ impl ProjectHubState {
         }
     }
 
-    /// Open a dropped or picked path: a project folder or any file inside one.
+    /// Open a dropped or picked path: a playback bundle, a project folder or
+    /// any file inside one.
     fn open_path(&mut self, path: &Path) {
+        if is_bundle_path(path) {
+            self.open_bundle(path);
+            return;
+        }
         let project = if path.is_dir() {
             resolve_project(path).ok()
         } else {
@@ -333,8 +408,8 @@ impl ProjectHubState {
             Some(project) => self.open_project(project, false),
             None => {
                 self.notice = Some(Notice::Error(format!(
-                    "«{}» no es un proyecto de Gaanim (no tiene gaanim.toml). Usa «Nuevo \
-                     video» o «Nueva presentación» para crear uno.",
+                    "«{}» no es un proyecto de Gaanim (no tiene gaanim.toml) ni un archivo \
+                     .gaanim. Usa «Nuevo video» o «Nueva presentación» para crear uno.",
                     path.file_name()
                         .map(|name| name.to_string_lossy().into_owned())
                         .unwrap_or_else(|| path.display().to_string())
@@ -409,6 +484,14 @@ fn relative_age(elapsed: Duration) -> String {
         _ if days < 365 => format!("hace {} meses", days / 30),
         _ => "hace más de un año".into(),
     }
+}
+
+fn recorded_ago(bundle: &RecentBundle) -> Option<String> {
+    let modified = std::fs::metadata(&bundle.path).ok()?.modified().ok()?;
+    let elapsed = SystemTime::now()
+        .duration_since(modified)
+        .unwrap_or_default();
+    Some(format!("Grabado {}", relative_age(elapsed)))
 }
 
 fn edited_ago(project: &ResolvedProject) -> Option<String> {
@@ -549,6 +632,31 @@ fn hub_file_drop_system(
     }
 }
 
+/// Opens the bundle the hub asked for: [`crate::bundle_player::open_bundle`]
+/// needs the whole world.
+fn open_bundle_request_system(world: &mut World) {
+    let Some(path) = world
+        .get_resource_mut::<ProjectHubState>()
+        .and_then(|mut state| state.bundle_request.take())
+    else {
+        return;
+    };
+    let opened = crate::bundle_player::open_bundle(world, &path);
+    let mut state = world.resource_mut::<ProjectHubState>();
+    match opened {
+        Ok(()) => {
+            state.recents.record_bundle(&path);
+            let _ = state.recents.save();
+            state.active = false;
+        }
+        Err(error) => {
+            state.notice = Some(Notice::Error(format!(
+                "No se pudo reproducir el archivo: {error}"
+            )));
+        }
+    }
+}
+
 fn project_hub_ui_system(
     mut contexts: bevy_egui::EguiContexts,
     mut state: ResMut<ProjectHubState>,
@@ -612,13 +720,17 @@ fn project_hub_ui_system(
 
 fn handle_shortcuts(ctx: &egui::Context, state: &mut ProjectHubState) {
     use egui::{Key, KeyboardShortcut, Modifiers};
-    let (slides, video, open) = ctx.input_mut(|input| {
+    let (slides, video, bundle, open) = ctx.input_mut(|input| {
         (
             input.consume_shortcut(&KeyboardShortcut::new(
                 Modifiers::COMMAND | Modifiers::SHIFT,
                 Key::N,
             )),
             input.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::N)),
+            input.consume_shortcut(&KeyboardShortcut::new(
+                Modifiers::COMMAND | Modifiers::SHIFT,
+                Key::O,
+            )),
             input.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::O)),
         )
     });
@@ -626,6 +738,8 @@ fn handle_shortcuts(ctx: &egui::Context, state: &mut ProjectHubState) {
         state.create_with_picker(ProjectKind::Slides);
     } else if video {
         state.create_with_picker(ProjectKind::Video);
+    } else if bundle {
+        state.open_bundle_with_picker();
     } else if open {
         state.open_with_picker();
     }
@@ -904,6 +1018,7 @@ enum Start {
     Video,
     Slides,
     Open,
+    Bundle,
 }
 
 fn projects_ui(ui: &mut Ui, state: &mut ProjectHubState) {
@@ -916,7 +1031,11 @@ fn projects_ui(ui: &mut Ui, state: &mut ProjectHubState) {
 
     let busy = state.busy();
     let gap = 16.0;
-    let columns = if ui.available_width() >= 700.0 { 3 } else { 1 };
+    let columns = match ui.available_width() {
+        width if width >= 900.0 => 4,
+        width if width >= 460.0 => 2,
+        _ => 1,
+    };
     let card_w = (ui.available_width() - gap * (columns - 1) as f32) / columns as f32;
     let starts = [
         (
@@ -937,6 +1056,12 @@ fn projects_ui(ui: &mut Ui, state: &mut ProjectHubState) {
             "Elige su carpeta o arrástrala a esta ventana.",
             "Ctrl O",
         ),
+        (
+            Start::Bundle,
+            "Reproducir .gaanim",
+            "Reproduce, presenta o exporta un archivo .gaanim.",
+            "Ctrl Shift O",
+        ),
     ];
     let mut chosen = None;
     for row in starts.chunks(columns) {
@@ -954,6 +1079,7 @@ fn projects_ui(ui: &mut Ui, state: &mut ProjectHubState) {
         Some(Start::Video) => state.create_with_picker(ProjectKind::Video),
         Some(Start::Slides) => state.create_with_picker(ProjectKind::Slides),
         Some(Start::Open) => state.open_with_picker(),
+        Some(Start::Bundle) => state.open_bundle_with_picker(),
         None => {}
     }
 
@@ -983,6 +1109,7 @@ fn start_card(
         Start::Video => palette::ACCENT,
         Start::Slides => palette::STOP,
         Start::Open => palette::TEXT,
+        Start::Bundle => palette::LOOP,
     };
     if hovered {
         painter.rect_filled(
@@ -1020,14 +1147,17 @@ fn start_card(
     );
     painter.rect_filled(stage, 0.0, Color32::from_rgb(11, 12, 16));
     let time = ui.input(|input| input.time);
+    // Narrow cards must not let a scene spill onto their neighbours.
+    let stage_painter = painter.with_clip_rect(stage.intersect(painter.clip_rect()));
     match start {
-        Start::Video => paint_video_scene(painter, stage, hovered, time),
-        Start::Slides => paint_slides_scene(painter, stage, hovered, time),
-        Start::Open => paint_open_scene(painter, stage, hovered),
+        Start::Video => paint_video_scene(&stage_painter, stage, hovered, time),
+        Start::Slides => paint_slides_scene(&stage_painter, stage, hovered, time),
+        Start::Open => paint_open_scene(&stage_painter, stage, hovered),
+        Start::Bundle => paint_bundle_scene(&stage_painter, stage, hovered, time),
     }
 
     let text_left = rect.min.x + 18.0;
-    painter.text(
+    let title_rect = painter.text(
         pos2(text_left, stage.max.y + 22.0),
         Align2::LEFT_CENTER,
         title,
@@ -1045,11 +1175,23 @@ fn start_card(
         galley,
         palette::TEXT_MUTED,
     );
-    painter.text(
-        pos2(rect.max.x - 16.0, stage.max.y + 22.0),
-        Align2::RIGHT_CENTER,
-        shortcut,
+    // Beside the title when it fits, otherwise in the stage's corner.
+    let shortcut_galley = painter.layout_no_wrap(
+        shortcut.to_owned(),
         FontId::monospace(10.5),
+        palette::TEXT_FAINT,
+    );
+    let beside_title = title_rect.max.x + 12.0 + shortcut_galley.size().x <= rect.max.x - 16.0;
+    let shortcut_at = if beside_title {
+        pos2(rect.max.x - 16.0, stage.max.y + 22.0)
+    } else {
+        pos2(stage.max.x - 8.0, stage.min.y + 10.0)
+    };
+    painter.galley(
+        Align2::RIGHT_CENTER
+            .anchor_size(shortcut_at, shortcut_galley.size())
+            .min,
+        shortcut_galley,
         palette::TEXT_FAINT,
     );
     if hovered {
@@ -1224,14 +1366,53 @@ fn paint_open_scene(painter: &egui::Painter, stage: Rect, hovered: bool) {
     );
 }
 
+/// A sealed package over a finished track: every frame is already recorded,
+/// and the playhead only plays them back.
+fn paint_bundle_scene(painter: &egui::Painter, stage: Rect, playing: bool, time: f64) {
+    let t = if playing {
+        ((time * 0.35).fract()) as f32
+    } else {
+        0.38
+    };
+    let color = if playing {
+        palette::LOOP
+    } else {
+        palette::TEXT_MUTED
+    };
+    let icon = Rect::from_center_size(
+        pos2(
+            stage.center().x,
+            stage.min.y + (stage.height() - 26.0) / 2.0,
+        ),
+        Vec2::splat(38.0),
+    );
+    ui_kit::paint_icon(painter, icon, Icon::Package, color);
+    let track = Rect::from_center_size(
+        pos2(stage.center().x, stage.max.y - 14.0),
+        vec2(stage.width() - 40.0, 5.0),
+    );
+    paint_seek_track(
+        painter,
+        track,
+        &[0.3, 0.62],
+        1.0,
+        color.gamma_multiply(0.35),
+    );
+    paint_knob(
+        painter,
+        pos2(track.min.x + track.width() * t, track.center().y),
+        5.0,
+    );
+}
+
 fn recents_ui(ui: &mut Ui, state: &mut ProjectHubState) {
-    let projects = state.recents.projects();
+    let entries = state.recents.entries();
     ui.horizontal(|ui| {
         ui.label(caption("RECIENTES"));
-        if !projects.is_empty() {
+        if !entries.is_empty() {
             ui.add_space(8.0);
             ui.label(
-                egui::RichText::new(projects.len().to_string())
+                egui::RichText::new(entries.len().to_string())
                     .monospace()
                     .size(11.0)
                     .color(palette::TEXT_FAINT),
@@ -1257,25 +1438,34 @@ fn recents_ui(ui: &mut Ui, state: &mut ProjectHubState) {
     });
     ui.add_space(12.0);
 
-    if projects.is_empty() {
+    if entries.is_empty() {
         empty_recents(ui, state);
         return;
     }
     let busy = state.busy();
     let mut action = None;
-    for project in &projects {
-        if let Some(chosen) = recent_row(ui, project, !busy) {
-            action = Some((chosen, project.clone()));
+    for entry in &entries {
+        if let Some(chosen) = recent_row(ui, &RecentRow::of(entry), !busy) {
+            action = Some((chosen, entry.clone()));
         }
         ui.add_space(8.0);
     }
     match action {
-        Some((RowAction::Open, project)) => state.open_project(project, false),
-        Some((RowAction::ShowFolder, project)) => {
-            let _ = open::that_detached(&project.root);
+        Some((RowAction::Open, RecentEntry::Project(project))) => {
+            state.open_project(project, false)
         }
-        Some((RowAction::Remove, project)) => {
-            state.recents.remove(&project.root);
+        Some((RowAction::Open, RecentEntry::Bundle(bundle))) => state.open_bundle(&bundle.path),
+        Some((RowAction::ShowFolder, entry)) => {
+            let folder = match &entry {
+                RecentEntry::Project(project) => Some(project.root.as_path()),
+                RecentEntry::Bundle(bundle) => bundle.path.parent(),
+            };
+            if let Some(folder) = folder {
+                let _ = open::that_detached(folder);
+            }
+        }
+        Some((RowAction::Remove, entry)) => {
+            state.recents.remove(entry.path());
             let _ = state.recents.save();
         }
         None => {}
@@ -1288,7 +1478,43 @@ enum RowAction {
     Remove,
 }
 
-fn recent_row(ui: &mut Ui, project: &ResolvedProject, enabled: bool) -> Option<RowAction> {
+/// What a recent row shows for a project or a bundle.
+struct RecentRow {
+    name: String,
+    path: PathBuf,
+    icon: Icon,
+    color: Color32,
+    label: &'static str,
+    age: Option<String>,
+}
+
+impl RecentRow {
+    fn of(entry: &RecentEntry) -> Self {
+        match entry {
+            RecentEntry::Project(project) => Self {
+                name: project.manifest.name.clone(),
+                path: project.root.clone(),
+                icon: match project.manifest.kind {
+                    ProjectKind::Video => Icon::Play,
+                    ProjectKind::Slides => Icon::Present,
+                },
+                color: kind_color(project.manifest.kind),
+                label: kind_label(project.manifest.kind),
+                age: edited_ago(project),
+            },
+            RecentEntry::Bundle(bundle) => Self {
+                name: bundle.name.clone(),
+                path: bundle.path.clone(),
+                icon: Icon::Package,
+                color: palette::LOOP,
+                label: ".gaanim",
+                age: recorded_ago(bundle),
+            },
+        }
+    }
+}
+
+fn recent_row(ui: &mut Ui, row: &RecentRow, enabled: bool) -> Option<RowAction> {
     let (rect, response) = ui.allocate_exact_size(
         vec2(ui.available_width(), 66.0),
         if enabled {
@@ -1298,8 +1524,7 @@ fn recent_row(ui: &mut Ui, project: &ResolvedProject, enabled: bool) -> Option<R
         },
     );
     let hovered = enabled && ui.rect_contains_pointer(rect);
-    let kind = project.manifest.kind;
-    let color = kind_color(kind);
+    let color = row.color;
     let painter = ui.painter();
     painter.rect_filled(
         rect,
@@ -1324,24 +1549,17 @@ fn recent_row(ui: &mut Ui, project: &ResolvedProject, enabled: bool) -> Option<R
     ui_kit::paint_icon(
         painter,
         Rect::from_center_size(tile.center(), Vec2::splat(16.0)),
-        match kind {
-            ProjectKind::Video => Icon::Play,
-            ProjectKind::Slides => Icon::Present,
-        },
+        row.icon,
         color,
     );
 
     let text_left = tile.max.x + 14.0;
     let actions_w = if hovered { 200.0 } else { 150.0 };
     let text_w = (rect.max.x - actions_w - text_left).max(80.0);
-    let name = painter.layout_no_wrap(
-        project.manifest.name.clone(),
-        FontId::proportional(15.0),
-        palette::TEXT,
-    );
+    let name = painter.layout_no_wrap(row.name.clone(), FontId::proportional(15.0), palette::TEXT);
     painter.galley(pos2(text_left, rect.center().y - 19.0), name, palette::TEXT);
     let path = painter.layout(
-        display_path(&project.root),
+        display_path(&row.path),
         FontId::proportional(11.5),
         palette::TEXT_FAINT,
         f32::INFINITY,
@@ -1386,11 +1604,11 @@ fn recent_row(ui: &mut Ui, project: &ResolvedProject, enabled: bool) -> Option<R
         painter.text(
             pos2(meta_x, rect.center().y - 9.0),
             Align2::RIGHT_CENTER,
-            kind_label(kind),
+            row.label,
             FontId::proportional(12.0),
             color,
         );
-        if let Some(age) = edited_ago(project) {
+        if let Some(age) = &row.age {
             painter.text(
                 pos2(meta_x, rect.center().y + 10.0),
                 Align2::RIGHT_CENTER,
@@ -2050,7 +2268,7 @@ fn paint_drop_overlay(ctx: &egui::Context, area: Rect) {
     painter.text(
         zone.center() + vec2(0.0, 22.0),
         Align2::CENTER_CENTER,
-        "Suelta la carpeta del proyecto para abrirla",
+        "Suelta la carpeta de un proyecto o un archivo .gaanim para abrirlo",
         FontId::proportional(16.0),
         palette::TEXT,
     );

@@ -82,6 +82,10 @@ impl AnimatableLens for GlyphVisibilityLens {
         "Typewriter"
     }
 
+    fn history_free(&self) -> bool {
+        true
+    }
+
     fn hold_channel(&self) -> Option<&'static str> {
         Some(GLYPH_SHAPE)
     }
@@ -138,6 +142,10 @@ impl AnimatableLens for CursorLens {
 
     fn type_name(&self) -> &'static str {
         "TypewriterCursor"
+    }
+
+    fn history_free(&self) -> bool {
+        true
     }
 }
 
@@ -222,6 +230,10 @@ impl AnimatableLens for ScrambleGlyphLens {
 
     fn type_name(&self) -> &'static str {
         "Scramble"
+    }
+
+    fn history_free(&self) -> bool {
+        true
     }
 
     fn hold_channel(&self) -> Option<&'static str> {

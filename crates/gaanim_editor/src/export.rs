@@ -552,7 +552,7 @@ pub fn export_dialog_system(
                 (FormatChoice::Video(ExportFormat::Webm), "WebM", "Video VP9"),
                 (FormatChoice::Video(ExportFormat::Webp), "WebP", "Imagen animada"),
                 (FormatChoice::Video(ExportFormat::Gif), "GIF", "Imagen animada"),
-                (FormatChoice::Bundle, "Paquete", "Sin Python"),
+                (FormatChoice::Bundle, "Gaanim", "Escena completa"),
             ];
             let choices = if offers_bundle {
                 &videos[..]
@@ -564,7 +564,7 @@ pub fn export_dialog_system(
                 ui.add(
                     egui::Label::new(
                         egui::RichText::new(
-                            "Un archivo .gaanim con toda la escena: se reproduce, presenta y exporta a vídeo sin Python.",
+                            "Un archivo .gaanim con toda la escena: se reproduce, presenta y exporta a vídeo en cualquier equipo.",
                         )
                         .size(12.0)
                         .color(palette::TEXT_MUTED),
@@ -901,6 +901,9 @@ pub fn export_dialog_system(
                 if let Ok(mut lock) = progress_clone.lock() {
                     if let Some(ref mut p) = *lock {
                         p.result = Some(result);
+                        // A recording counts its own work, which can exceed
+                        // the dialog's frame estimate.
+                        p.total_frames = p.total_frames.max(p.telemetry.progress().1);
                         p.current_frame = p.total_frames;
                     }
                 }

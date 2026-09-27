@@ -71,6 +71,19 @@ fn main() {
         }
         return;
     }
+    if args.is_empty() {
+        // Home without Python: `gaanim` falls back here when no runtime is
+        // installed, so .gaanim files still open from the Home screen.
+        #[cfg(target_os = "linux")]
+        gaanim_editor::alsa_errors::route_alsa_errors();
+        console::banner("GPU-accelerated vector animation engine");
+        let mut app = host_app(&HostOptions::default());
+        app.world_mut()
+            .resource_mut::<gaanim_editor::project_hub::ProjectHubState>()
+            .show_without_python();
+        app.run();
+        return;
+    }
     let (bundle, options) = parse_play_args(&args).unwrap_or_else(|error| {
         console::error("usage", error);
         console::hint("Run `gaanim-play --help` for usage.");
@@ -89,6 +102,7 @@ fn main() {
         console::error("bundle", error);
         std::process::exit(2);
     }
+    gaanim_project::record_recent_bundle(&bundle);
     app.run();
 }
 

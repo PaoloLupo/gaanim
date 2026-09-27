@@ -298,16 +298,58 @@ pub fn camera_binding_system(world: &mut World) {
     world.insert_resource(gaanim_math::CameraRigCamera(evaluated));
 }
 
+/// Clips with the camera lenses that [`camera_rig_system`] and seeks resolve
+/// on every frame, cached until clips are added or removed. A presentation
+/// has thousands of clips and only a few of them drive the camera.
+#[derive(Resource, Default)]
+struct CameraClipIndex {
+    key: Option<(u64, usize)>,
+    ids: Vec<clip::ClipId>,
+}
+
+/// The camera clips of `timeline`, in arena order like `clips.values()`.
+pub(crate) fn camera_clip_ids(timeline: &Timeline, world: &mut World) -> Vec<clip::ClipId> {
+    let key = (timeline.property_revision(), timeline.clips.len());
+    let mut index = world.get_resource_or_insert_with(CameraClipIndex::default);
+    if index.key != Some(key) {
+        index.ids = timeline
+            .clips
+            .iter()
+            .filter(|(_, clip)| {
+                matches!(
+                    &clip.payload,
+                    clip::ClipPayload::Animation(anim) if matches!(
+                        anim.lens,
+                        clip::PropertyLensSpec::CameraFollow { .. }
+                            | clip::PropertyLensSpec::CameraFollowEndpoint { .. }
+                            | clip::PropertyLensSpec::CameraFrameDynamic { .. }
+                            | clip::PropertyLensSpec::CameraShake { .. }
+                            | clip::PropertyLensSpec::CameraPosition { .. }
+                            | clip::PropertyLensSpec::CameraPanZoom { .. }
+                            | clip::PropertyLensSpec::CameraState { .. }
+                    )
+                )
+            })
+            .map(|(id, _)| id)
+            .collect();
+        index.key = Some(key);
+    }
+    index.ids.clone()
+}
+
 /// Resolves temporary camera constraints and additive modifiers after reactive
 /// updaters/layout, immediately before the presentation camera is copied.
 pub fn camera_rig_system(world: &mut World) {
-    let Some(timeline) = world.get_resource::<Timeline>() else {
+    if !world.contains_resource::<Timeline>() {
         return;
-    };
+    }
+    let camera_clips =
+        world.resource_scope(|world, timeline: Mut<Timeline>| camera_clip_ids(&timeline, world));
+    let timeline = world.resource::<Timeline>();
     let current_time = timeline.current_time;
-    let follow = timeline
-        .clips
-        .values()
+    let follow = camera_clips
+        .iter()
+        .filter_map(|id| timeline.clips.get(*id))
         .filter(|clip| clip.start <= current_time && current_time < clip.end())
         .filter_map(|clip| match &clip.payload {
             clip::ClipPayload::Animation(anim) => match &anim.lens {
@@ -320,9 +362,9 @@ pub fn camera_rig_system(world: &mut World) {
             _ => None,
         })
         .max_by(|(left, ..), (right, ..)| left.total_cmp(right));
-    let dynamic_frame = timeline
-        .clips
-        .values()
+    let dynamic_frame = camera_clips
+        .iter()
+        .filter_map(|id| timeline.clips.get(*id))
         .filter(|clip| clip.start <= current_time && current_time < clip.end())
         .filter_map(|clip| match &clip.payload {
             clip::ClipPayload::Animation(anim) => match &anim.lens {
@@ -339,9 +381,9 @@ pub fn camera_rig_system(world: &mut World) {
         .max_by(|(left, ..), (right, ..)| left.total_cmp(right));
     let mut shake_offset = gaanim_core::glam::DVec3::ZERO;
     let mut shake_roll = 0.0;
-    for clip in timeline
-        .clips
-        .values()
+    for clip in camera_clips
+        .iter()
+        .filter_map(|id| timeline.clips.get(*id))
         .filter(|clip| clip.start <= current_time && current_time < clip.end())
     {
         let clip::ClipPayload::Animation(anim) = &clip.payload else {

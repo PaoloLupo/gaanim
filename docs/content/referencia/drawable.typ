@@ -285,7 +285,7 @@ scene.render()
   name: "Drawable.bounds",
   kind: "method",
   returns: (type: "Bounds", desc: [`x` e `y` (el centro), `left`, `right`, `bottom`, `top`, `width`, `height` y `center` en unidades de escena.]),
-  desc: [Mide la caja de cualquier objeto (figuras, texto, matemática, SVG, imágenes, grupos) en el cursor actual, tal como se dibujaría ahí: cuenta la maquetación, las transformaciones, la composición del texto y las animaciones que terminaron antes de `scene.cursor`, e incluye a los descendientes. La geometría que los objetos reactivos regeneran en cada fotograma se mide como se declaró. Cada llamada compila la escena escrita hasta ese punto: mide una vez y reutiliza el resultado. Lanza `ValueError` si el objeto no tiene geometría en el cursor. Sustituye a `scene.text.measure`.],
+  desc: [Mide la caja de cualquier objeto (figuras, texto, matemática, SVG, imágenes, grupos) en el cursor actual, tal como se dibujaría ahí: cuenta la maquetación, las transformaciones, la composición del texto y las animaciones que terminaron antes de `scene.cursor`, e incluye a los descendientes. La geometría que los objetos reactivos regeneran en cada fotograma se mide como se declaró. Medir un objeto recién creado, antes del siguiente `play` o `wait` y sin nada que actúe sobre él (animaciones, grupos posteriores, layouts), cuesta alrededor de un milisegundo: se compila solo su declaración y la de sus miembros o referencias de `next_to`/`align_to` que cumplan lo mismo. En cualquier otro caso se compila la escena escrita hasta ese punto, así que conviene medir antes de animar o reutilizar el resultado. Lanza `ValueError` si el objeto no tiene geometría en el cursor. Sustituye a `scene.text.measure`.],
 )[
 ```python
 # show-code: true
