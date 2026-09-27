@@ -12875,7 +12875,7 @@ mod tests {
         let mut vertices_at = |time: f64| {
             timeline.seek(&mut world, time);
             let path = world
-                .query::<(&MobjectId, &Path2D)>()
+                .query::<(&MobjectId, &gaanim_scene::Path2D)>()
                 .iter(&world)
                 .find(|(object, _)| object.0 == id)
                 .unwrap()
