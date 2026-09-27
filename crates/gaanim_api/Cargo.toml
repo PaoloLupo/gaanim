@@ -1,6 +1,6 @@
 [package]
 name = "gaanim_api"
-version = "0.4.2"
+version = "0.5.0"
 edition = "2024"
 description = "Premium fluent script API and animation builder for gaanim v2"
 
