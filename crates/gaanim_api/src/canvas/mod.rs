@@ -7,7 +7,10 @@ pub use gaanim_renderer::background::{BackgroundPaint, ShaderBackground, ShaderB
 pub use gaanim_renderer::effects::{
     CameraViewBackground, CameraViewFit, DropShadow, GaussianBlur, Glow, StrokeAlign,
 };
-pub use gaanim_renderer::post_process::{PostProcessError, PostProcessOverride, PostProcessShader};
+pub use gaanim_renderer::post_presets::{CubeLut, PostPreset};
+pub use gaanim_renderer::post_process::{
+    PostProcessError, PostProcessOverride, PostProcessPass, PostProcessShader,
+};
 pub use ops::{
     AnchorPoint, CanvasEndpoint, CanvasRay, FragmentRevealStyle, PointRef, UpdaterPreset,
 };

@@ -2022,8 +2022,9 @@ pub struct SceneModel {
     /// for theme contrast and native 3D clears.
     pub background_paint: Option<gaanim_renderer::background::BackgroundPaint>,
     pub(crate) background_overridden: bool,
-    /// WGSL post-processing applied to the rendered 2D scene inside the camera frame.
-    pub post_process: Option<gaanim_renderer::post_process::PostProcessShader>,
+    /// WGSL post-process passes applied in order to the rendered 2D scene
+    /// inside the camera frame; empty for none.
+    pub post_process: Vec<gaanim_renderer::post_process::PostProcessPass>,
     /// Canonical name of the selected theme.
     pub theme: Option<String>,
     /// Complete semantic colors and typography for the selected theme.
@@ -2068,7 +2069,7 @@ impl SceneModel {
             background: None,
             background_paint: None,
             background_overridden: false,
-            post_process: None,
+            post_process: Vec::new(),
             theme: None,
             theme_style: None,
             font_family_override: None,
@@ -2159,12 +2160,45 @@ impl SceneModel {
         self.background_overridden = true;
     }
 
-    /// Replace or remove the scene post-process.
+    /// Replace the scene post-process chain; an empty chain removes it.
+    ///
+    /// Uniform sources must read parameters, time or computed values of this
+    /// scene.
     pub fn set_post_process(
         &mut self,
-        shader: Option<gaanim_renderer::post_process::PostProcessShader>,
-    ) {
-        self.post_process = shader;
+        passes: Vec<gaanim_renderer::post_process::PostProcessPass>,
+    ) -> Result<(), String> {
+        self.validate_post_process_sources(&passes)?;
+        self.post_process = passes;
+        Ok(())
+    }
+
+    fn validate_post_process_sources(
+        &self,
+        passes: &[gaanim_renderer::post_process::PostProcessPass],
+    ) -> Result<(), String> {
+        for source in passes.iter().flat_map(|pass| &pass.values) {
+            if let gaanim_animation::ScalarSource::Constant(value) = source
+                && !value.is_finite()
+            {
+                return Err("post-process uniforms must be finite".into());
+            }
+            let foreign = {
+                let state = self.state.lock().expect("canvas state poisoned");
+                source
+                    .parameter_ids()
+                    .iter()
+                    .any(|id| !state.parameter_values.contains_key(id))
+            };
+            if foreign {
+                return Err("post-process uniform parameters must belong to this scene".into());
+            }
+            if let gaanim_animation::ScalarSource::Function(function) = source {
+                self.validate_reactive_function_owner(function)
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+        Ok(())
     }
 
     /// Override the post-process of one segment of this scene.
@@ -2175,6 +2209,10 @@ impl SceneModel {
     ) -> Result<(), SegmentError> {
         if !segment.belongs_to(&self.state) {
             return Err(SegmentError::ForeignSegment);
+        }
+        if let gaanim_renderer::post_process::PostProcessOverride::Passes(passes) = &post {
+            self.validate_post_process_sources(passes)
+                .map_err(SegmentError::InvalidPostProcess)?;
         }
         let mut guard = self.state.lock().expect("canvas state poisoned");
         let target = guard
@@ -10490,6 +10528,63 @@ mod tests {
     }
 
     #[test]
+    fn post_process_uniforms_resolve_their_parameters() {
+        use gaanim_renderer::post_process::{PostProcessPass, PostProcessShader};
+        let shader = PostProcessShader::with_uniforms(
+            "fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {\n\
+             return gaanim_scene(uv) * gaanim_uniforms.gain;\n}",
+            ["gain"],
+        )
+        .unwrap();
+        let mut canvas = SceneModel::new(640, 360);
+        let gain = canvas.parameter(0.5).unwrap();
+        let mut other = SceneModel::new(640, 360);
+        let foreign = other.parameter(1.0).unwrap();
+        assert!(
+            canvas
+                .set_post_process(vec![
+                    PostProcessPass::new(shader.clone(), vec![foreign.source()]).unwrap()
+                ])
+                .is_err()
+        );
+        assert!(
+            canvas
+                .set_post_process(vec![
+                    PostProcessPass::constant(shader.clone(), &[f64::NAN]).unwrap()
+                ])
+                .is_err()
+        );
+        canvas
+            .set_post_process(vec![
+                PostProcessPass::new(shader.clone(), vec![gain.source()]).unwrap(),
+                PostProcessPass::constant(shader, &[2.0]).unwrap(),
+            ])
+            .unwrap();
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        let post = world
+            .get_resource::<gaanim_renderer::post_process::CanvasPostProcess>()
+            .unwrap()
+            .clone();
+        assert_eq!(post.passes.len(), 2);
+        assert_eq!(post.parameters.len(), 1);
+        let frame = gaanim_core::kurbo::Rect::new(0.0, 0.0, 64.0, 36.0);
+        let request = post
+            .request_with(0.0, frame, |entity| {
+                world
+                    .get::<gaanim_animation::FloatSignal>(entity)
+                    .map(|signal| signal.value)
+            })
+            .unwrap();
+        assert_eq!(request.passes[0].1, [0.5]);
+        assert_eq!(request.passes[1].1, [2.0]);
+    }
+
+    #[test]
     fn segment_post_processes_compile_with_scene_inheritance() {
         use gaanim_renderer::post_process::{PostProcessOverride, PostProcessShader};
         let shader = |scale: &str| {
@@ -10500,7 +10595,7 @@ mod tests {
             .unwrap()
         };
         let mut canvas = SceneModel::new(640, 360);
-        canvas.set_post_process(Some(shader("0.5")));
+        canvas.set_post_process(vec![shader("0.5").into()]).unwrap();
         canvas.segment("inherits", None).unwrap();
         canvas.wait(1.0);
         let plain = canvas.segment("plain", None).unwrap();
@@ -10510,7 +10605,10 @@ mod tests {
         canvas.wait(1.0);
         let custom = canvas.segment("custom", None).unwrap();
         canvas
-            .set_segment_post_process(&custom, PostProcessOverride::Shader(shader("0.25")))
+            .set_segment_post_process(
+                &custom,
+                PostProcessOverride::Passes(vec![shader("0.25").into()]),
+            )
             .unwrap();
         canvas.wait(1.0);
         let foreign = SceneModel::new(640, 360).segment("other", None).unwrap();
@@ -10530,8 +10628,9 @@ mod tests {
             .expect("compiled canvas post-process");
 
         let source_at = |time| {
-            post.shader_at(time)
-                .map(|shader| shader.source().to_owned())
+            post.passes_at(time)
+                .first()
+                .map(|pass| pass.shader.source().to_owned())
         };
         assert!(source_at(0.5).unwrap().contains("* 0.5"));
         assert_eq!(source_at(1.5), None);

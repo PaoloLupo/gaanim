@@ -143,8 +143,8 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
 
 | ☐ | ID | Ítem | Coste | Impacto | Depende | Issue |
 |---|---|---|---|---|---|---|
-| ☐ | [FX-02](#fx-02--uniforms-enlazables-y-cadena-de-post-procesos) | Uniforms enlazables y cadena de post-procesos | M | ★★★ | — | [#140](https://github.com/PaoloLupo/gaanim/issues/140) |
-| ☐ | [FX-03](#fx-03--presets-de-acabado) | Presets de acabado: grain, viñeta, aberración, grading, LUT | S | ★★★ | FX-02 | [#141](https://github.com/PaoloLupo/gaanim/issues/141) |
+| ☑ | [FX-02](#fx-02--uniforms-enlazables-y-cadena-de-post-procesos) | Uniforms enlazables y cadena de post-procesos | M | ★★★ | — | [#140](https://github.com/PaoloLupo/gaanim/issues/140) |
+| ☑ | [FX-03](#fx-03--presets-de-acabado) | Presets de acabado: grain, viñeta, aberración, grading, LUT | S | ★★★ | FX-02 | [#141](https://github.com/PaoloLupo/gaanim/issues/141) |
 | ☐ | [FX-09](#fx-09--fondos-vivos) | Fondos vivos (mesh/noise gradient, aurora, rejilla) | S | ★★ | — | [#142](https://github.com/PaoloLupo/gaanim/issues/142) |
 | ☑ | [FX-07](#fx-07--modos-de-fusión-por-objeto) | Modos de fusión por objeto | S | ★★ | — | [#143](https://github.com/PaoloLupo/gaanim/issues/143) |
 | ☐ | [FX-04](#fx-04--bloom-multipaso) | Bloom multipaso | M | ★★★ | FX-02 | [#144](https://github.com/PaoloLupo/gaanim/issues/144) |

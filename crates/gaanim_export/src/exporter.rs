@@ -992,7 +992,11 @@ fn export_post_process(
     let time = world
         .get_resource::<gaanim_animation::PlaybackState>()
         .map_or(0.0, |state| state.current_time);
-    post.request(time, frame)
+    post.request_with(time, frame, |entity| {
+        world
+            .get::<gaanim_animation::FloatSignal>(entity)
+            .map(|signal| signal.value)
+    })
 }
 
 /// A `frame_width`x`frame_height` rectangle centered in the output and moved

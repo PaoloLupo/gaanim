@@ -382,9 +382,10 @@ exacto de la línea de tiempo.
   kind: "factory",
   params: (
     (name: "source", type: "str | os.PathLike[str]", default: none, desc: [WGSL en línea, o la ruta de un asset `.wgsl` que se lee al crear el objeto.]),
+    (name: "uniforms", type: "dict[str, float | Parameter | Computed] | None", default: "None", desc: [Valores que el shader lee como campos `f32` de `gaanim_uniforms` (`gaanim_uniforms.amount`). Un `Parameter`, `Variable`, `Computed` o `scene.time` se evalúa en cada fotograma, así que animarlo anima el efecto. Como máximo 32 por pasada, con nombres que sean identificadores WGSL.]),
   ),
   returns: (type: "PostProcess", desc: [Un postprocesado para `Scene(post=...)`, `scene.canvas.post` o `scene.segment(..., post=...)`.]),
-  desc: [WGSL inválido lanza `ValueError` y un asset ilegible, `RuntimeError`.],
+  desc: [WGSL inválido, un campo sin declarar, un nombre inválido o un número no finito lanzan `ValueError`, y un asset ilegible, `RuntimeError`.],
 )[
 ```python
 from gaanim import PostProcess, Scene
@@ -423,18 +424,113 @@ en perspectiva la escena se dibuja sin postprocesado, y tampoco se aplica a la
 salida SVG.
 
 #api-entry(
-  name: "PostProcess.source",
+  name: "PostProcess.source / uniforms",
   kind: "property",
-  returns: (type: "str", desc: [El código WGSL de la función.]),
+  signature: "source: str · uniforms: list[str]",
+  returns: (type: "str · list[str]", desc: [El código WGSL de la función y los nombres de sus uniforms, en orden.]),
+  none,
+)
+
+=== Uniforms animables y cadenas
+
+Un uniform enlazado a un `Parameter` se anima como cualquier valor, y el
+efecto se ve igual en el editor y en la exportación. Varias pasadas se
+encadenan con una lista: cada una lee con `gaanim_scene` lo que escribió la
+anterior.
+
+```python
+# show-code: true
+from gaanim import GOLD, PostProcess, Scene
+scene = Scene(frame=(16, 9), background="#0b1020")
+amount = scene.viz.parameter(0.0)
+split = PostProcess.shader("""
+fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
+    let shift = vec2<f32>(gaanim_uniforms.amount * 0.02, 0.0);
+    let base = gaanim_scene(uv);
+    return vec4<f32>(gaanim_scene(uv + shift).r, base.g, gaanim_scene(uv - shift).b, base.a);
+}
+""", uniforms={"amount": amount})
+scene.canvas.post = [split, PostProcess.vignette(0.5)]
+ring = scene.geometry.circle(2).no_fill().stroke(GOLD, 0.2)
+scene.play([amount.animate.set(1.0).duration(0.5).repeat(1, yoyo=True)])
+# output: preview.webp
+scene.render()
+```
+
+=== Presets de acabado
+
+Pasadas listas para usar, sin escribir WGSL. Sus valores aceptan un número o
+un `Parameter` para animarlos. Los tamaños se miden en píxeles de un cuadro de
+1080 de alto, así que se ven igual a cualquier resolución de salida, y el ruido
+cambia cada 1/24 s del tiempo de la línea de tiempo, así que un fotograma es
+siempre el mismo. Un número fuera de rango lanza `ValueError`.
+
+#api-entry(
+  name: "PostProcess.grain",
+  kind: "factory",
+  signature: "grain(amount=0.06, size=1.0, animated=True) -> PostProcess",
+  desc: [Grano de película: ruido de brillo de `amount` en celdas de `size` píxeles. Con `animated=False` el patrón queda fijo.],
   none,
 )
 
 #api-entry(
+  name: "PostProcess.vignette",
+  kind: "factory",
+  signature: "vignette(strength=0.35, softness=0.6) -> PostProcess",
+  desc: [Oscurece hacia las esquinas hasta `strength` (0 a 1). `softness` (0 a 1) marca desde dónde empieza la caída.],
+  none,
+)
+
+#api-entry(
+  name: "PostProcess.chromatic_aberration",
+  kind: "factory",
+  signature: "chromatic_aberration(amount=0.004) -> PostProcess",
+  desc: [Separa el rojo hacia fuera y el azul hacia dentro, `amount` del cuadro en las esquinas (0 a 0.5).],
+  none,
+)
+
+#api-entry(
+  name: "PostProcess.color_grade",
+  kind: "factory",
+  signature: "color_grade(exposure=0.0, contrast=1.0, saturation=1.0, temperature=0.0) -> PostProcess",
+  desc: [Corrección de color: `exposure` en pasos y `temperature` (-1 frío a 1 cálido) en luz lineal; después `contrast` alrededor del gris medio y `saturation` alrededor de la luminancia. `1.0` deja contraste y saturación igual.],
+  none,
+)
+
+#api-entry(
+  name: "PostProcess.lut",
+  kind: "factory",
+  signature: "lut(path, strength=1.0) -> PostProcess",
+  desc: [Aplica la tabla 3D de un archivo `.cube` (`LUT_3D_SIZE` de 2 a 65, con `DOMAIN_MIN`/`DOMAIN_MAX` opcionales), mezclada según `strength`. El archivo se lee al crear el objeto: si no se puede leer lanza `RuntimeError` y una tabla inválida, `ValueError`.],
+  none,
+)
+
+#api-entry(
+  name: "PostProcess.halftone / dither / crt / pixelate / glitch",
+  kind: "factory",
+  signature: "halftone(dot=6.0) · dither(levels=4) · crt(strength=1.0) · pixelate(size=8.0) · glitch(intensity=0.5, seed=0)",
+  desc: [`halftone`: puntos de imprenta en celdas de `dot` píxeles, más grandes cuanto más clara es la celda. `dither`: tramado ordenado (Bayer 4×4) a `levels` valores por canal. `crt`: pantalla curva, líneas de barrido y máscara RGB. `pixelate`: bloques de `size` píxeles. `glitch`: franjas que saltan de lado con separación RGB 12 veces por segundo; `seed` cambia el patrón y `intensity` se puede animar para dar golpes.],
+)[
+```python
+# show-code: true
+from gaanim import BLUE, GOLD, PostProcess, Scene
+scene = Scene(frame=(16, 9), background="#101826")
+burst = scene.viz.parameter(0.0)
+scene.canvas.post = [PostProcess.glitch(intensity=burst, seed=3), PostProcess.grain(0.05)]
+scene.geometry.circle(1.6).fill(GOLD).move_to(-3, 0)
+scene.geometry.rounded_rect(3, 3, 0.3).fill(BLUE).move_to(3, 0)
+scene.play([burst.animate.set(1.0).duration(0.3).repeat(1, yoyo=True)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
   name: "Canvas.post",
   kind: "property",
-  signature: "post: PostProcess | None",
-  returns: (type: "PostProcess | None", desc: [El postprocesado de la escena; se puede leer y asignar.]),
-  desc: [`None` lo quita. Un segmento puede cambiarlo mientras está activo: `post=otro` usa otro shader, `post=False` dibuja el segmento sin postprocesado y `post=None` (el predeterminado) hereda el de la escena.],
+  signature: "post: PostProcess | list[PostProcess] | None",
+  returns: (type: "PostProcess | list[PostProcess] | None", desc: [El postprocesado de la escena; se puede leer y asignar.]),
+  desc: [Una lista encadena las pasadas en orden. `None` o una lista vacía lo quitan. Un segmento puede cambiarlo mientras está activo: `post=otro` (o una lista) usa otra cadena, `post=False` dibuja el segmento sin postprocesado y `post=None` (el predeterminado) hereda el de la escena. Un uniform que lee un valor de otra escena lanza `ValueError` y cualquier otro valor, `TypeError`.],
 )[
 ```python
 >>>from gaanim import *

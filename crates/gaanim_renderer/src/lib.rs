@@ -7,6 +7,7 @@ pub mod diagnostics;
 pub mod effects;
 pub mod lottie;
 pub mod pipeline;
+pub mod post_presets;
 pub mod post_process;
 mod post_process_gpu;
 pub mod prelude;

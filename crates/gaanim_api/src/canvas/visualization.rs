@@ -3182,7 +3182,7 @@ impl SceneModel {
         Ok(handle)
     }
 
-    fn validate_reactive_function_owner(
+    pub(crate) fn validate_reactive_function_owner(
         &self,
         function: &ReactiveFunction,
     ) -> Result<(), VisualizationError> {

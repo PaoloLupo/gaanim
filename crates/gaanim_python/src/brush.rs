@@ -73,38 +73,233 @@ impl PyBackground {
 
 /// Custom WGSL post-processing of the rendered 2D scene inside the camera frame.
 #[pyclass(name = "PostProcess", module = "gaanim_core", skip_from_py_object)]
-#[derive(Clone, Debug)]
-pub struct PyPostProcess(pub gaanim_api::canvas::PostProcessShader);
+#[derive(Clone)]
+pub struct PyPostProcess {
+    pub(crate) shader: gaanim_api::canvas::PostProcessShader,
+    /// Value of each declared uniform, validated when a Scene uses the pass.
+    pub(crate) uniforms: Vec<crate::visualization::DeferredScalar>,
+}
+
+impl PyPostProcess {
+    pub(crate) fn new(
+        shader: gaanim_api::canvas::PostProcessShader,
+        uniforms: Vec<crate::visualization::DeferredScalar>,
+    ) -> Self {
+        Self { shader, uniforms }
+    }
+
+    /// The pass for `canvas`, rejecting uniforms read from another Scene.
+    pub(crate) fn pass(
+        &self,
+        canvas: &std::sync::Arc<std::sync::Mutex<gaanim_api::canvas::SceneModel>>,
+    ) -> PyResult<gaanim_api::canvas::PostProcessPass> {
+        for uniform in &self.uniforms {
+            uniform.validate(canvas)?;
+        }
+        gaanim_api::canvas::PostProcessPass::new(
+            self.shader.clone(),
+            self.uniforms.iter().map(|uniform| uniform.source.clone()).collect(),
+        )
+        .map_err(post_process_error)
+    }
+}
+
+pub(crate) fn post_process_error(error: gaanim_api::canvas::PostProcessError) -> PyErr {
+    match error {
+        gaanim_api::canvas::PostProcessError::ReadSource { .. } => {
+            pyo3::exceptions::PyRuntimeError::new_err(error.to_string())
+        }
+        _ => PyValueError::new_err(error.to_string()),
+    }
+}
 
 #[pymethods]
 impl PyPostProcess {
-    /// Build a post-process from inline WGSL or an os.PathLike asset.
+    /// Build a post-process from inline WGSL or an os.PathLike asset, with
+    /// optional named uniforms read as `gaanim_uniforms.<name>`.
     #[staticmethod]
-    fn shader(source: &Bound<'_, PyAny>) -> PyResult<Self> {
+    #[pyo3(signature = (source, *, uniforms=None))]
+    fn shader(
+        source: &Bound<'_, PyAny>,
+        uniforms: Option<&Bound<'_, pyo3::types::PyDict>>,
+    ) -> PyResult<Self> {
+        let mut names = Vec::new();
+        let mut values = Vec::new();
+        if let Some(uniforms) = uniforms {
+            for (name, value) in uniforms.iter() {
+                names.push(name.extract::<String>().map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err("uniform names must be strings")
+                })?);
+                values.push(crate::visualization::extract_deferred_scalar(value)?);
+            }
+        }
         let shader = if let Ok(source) = source.extract::<String>() {
-            gaanim_api::canvas::PostProcessShader::new(source)
+            gaanim_api::canvas::PostProcessShader::with_uniforms(source, &names)
         } else {
             let path = source.extract::<PathBuf>().map_err(|_| {
                 pyo3::exceptions::PyTypeError::new_err(
                     "source must be inline WGSL text or an os.PathLike .wgsl asset",
                 )
             })?;
-            gaanim_api::canvas::PostProcessShader::from_file(path)
+            gaanim_api::canvas::PostProcessShader::from_file_with_uniforms(path, &names)
         };
-        shader.map(Self).map_err(|error| match error {
-            gaanim_api::canvas::PostProcessError::ReadSource { .. } => {
-                pyo3::exceptions::PyRuntimeError::new_err(error.to_string())
-            }
-            gaanim_api::canvas::PostProcessError::InvalidWgsl(_) => {
-                PyValueError::new_err(error.to_string())
-            }
-        })
+        shader
+            .map(|shader| Self::new(shader, values))
+            .map_err(post_process_error)
+    }
+
+    /// Film grain: hashed noise per cell of `size` pixels (at 1080p).
+    #[staticmethod]
+    #[pyo3(signature = (amount=None, size=None, animated=true))]
+    fn grain(
+        amount: Option<&Bound<'_, PyAny>>,
+        size: Option<&Bound<'_, PyAny>>,
+        animated: bool,
+    ) -> PyResult<Self> {
+        preset(
+            gaanim_api::canvas::PostPreset::Grain,
+            vec![
+                preset_value("amount", amount, 0.06, 0.0..=f64::INFINITY)?,
+                preset_value("size", size, 1.0, 0.25..=f64::INFINITY)?,
+                crate::visualization::DeferredScalar::validated(
+                    gaanim_animation::ScalarSource::constant(if animated { 1.0 } else { 0.0 }),
+                ),
+            ],
+        )
+    }
+
+    /// Darken the frame toward its corners.
+    #[staticmethod]
+    #[pyo3(signature = (strength=None, softness=None))]
+    fn vignette(
+        strength: Option<&Bound<'_, PyAny>>,
+        softness: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
+        preset(
+            gaanim_api::canvas::PostPreset::Vignette,
+            vec![
+                preset_value("strength", strength, 0.35, 0.0..=1.0)?,
+                preset_value("softness", softness, 0.6, 0.0..=1.0)?,
+            ],
+        )
+    }
+
+    /// Split red and blue toward the frame corners.
+    #[staticmethod]
+    #[pyo3(signature = (amount=None))]
+    fn chromatic_aberration(amount: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
+        preset(
+            gaanim_api::canvas::PostPreset::ChromaticAberration,
+            vec![preset_value("amount", amount, 0.004, 0.0..=0.5)?],
+        )
+    }
+
+    /// Exposure (stops), contrast, saturation and white balance.
+    #[staticmethod]
+    #[pyo3(signature = (exposure=None, contrast=None, saturation=None, temperature=None))]
+    fn color_grade(
+        exposure: Option<&Bound<'_, PyAny>>,
+        contrast: Option<&Bound<'_, PyAny>>,
+        saturation: Option<&Bound<'_, PyAny>>,
+        temperature: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
+        preset(
+            gaanim_api::canvas::PostPreset::ColorGrade,
+            vec![
+                preset_value("exposure", exposure, 0.0, -10.0..=10.0)?,
+                preset_value("contrast", contrast, 1.0, 0.0..=f64::INFINITY)?,
+                preset_value("saturation", saturation, 1.0, 0.0..=f64::INFINITY)?,
+                preset_value("temperature", temperature, 0.0, -1.0..=1.0)?,
+            ],
+        )
+    }
+
+    /// Grade through a 3D lookup table from a `.cube` file.
+    #[staticmethod]
+    #[pyo3(signature = (path, strength=None))]
+    fn lut(path: PathBuf, strength: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
+        let lut = gaanim_api::canvas::CubeLut::from_file(path).map_err(post_process_error)?;
+        let shader = lut.shader().map_err(post_process_error)?;
+        Ok(Self::new(
+            shader,
+            vec![
+                crate::visualization::DeferredScalar::validated(
+                    gaanim_animation::ScalarSource::constant(lut.size as f64),
+                ),
+                preset_value("strength", strength, 1.0, 0.0..=1.0)?,
+            ],
+        ))
+    }
+
+    /// Print-style dots whose size follows the brightness of each cell.
+    #[staticmethod]
+    #[pyo3(signature = (dot=None))]
+    fn halftone(dot: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
+        preset(
+            gaanim_api::canvas::PostPreset::Halftone,
+            vec![preset_value("dot", dot, 6.0, 1.0..=f64::INFINITY)?],
+        )
+    }
+
+    /// Ordered (Bayer) dithering to `levels` values per channel.
+    #[staticmethod]
+    #[pyo3(signature = (levels=None))]
+    fn dither(levels: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
+        preset(
+            gaanim_api::canvas::PostPreset::Dither,
+            vec![preset_value("levels", levels, 4.0, 2.0..=256.0)?],
+        )
+    }
+
+    /// Curved screen, scanlines and an RGB mask.
+    #[staticmethod]
+    #[pyo3(signature = (strength=None))]
+    fn crt(strength: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
+        preset(
+            gaanim_api::canvas::PostPreset::Crt,
+            vec![preset_value("strength", strength, 1.0, 0.0..=1.0)?],
+        )
+    }
+
+    /// Blocks of `size` pixels (at 1080p).
+    #[staticmethod]
+    #[pyo3(signature = (size=None))]
+    fn pixelate(size: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
+        preset(
+            gaanim_api::canvas::PostPreset::Pixelate,
+            vec![preset_value("size", size, 8.0, 1.0..=f64::INFINITY)?],
+        )
+    }
+
+    /// Bands that jump sideways with an RGB split, seeded and deterministic.
+    #[staticmethod]
+    #[pyo3(signature = (intensity=None, seed=0))]
+    fn glitch(intensity: Option<&Bound<'_, PyAny>>, seed: u32) -> PyResult<Self> {
+        preset(
+            gaanim_api::canvas::PostPreset::Glitch,
+            vec![
+                preset_value("intensity", intensity, 0.5, 0.0..=1.0)?,
+                crate::visualization::DeferredScalar::validated(
+                    gaanim_animation::ScalarSource::constant(f64::from(seed % 10_000)),
+                ),
+            ],
+        )
     }
 
     /// Complete WGSL source of the post-process function.
     #[getter]
     fn source(&self) -> &str {
-        self.0.source()
+        self.shader.source()
+    }
+
+    /// Names of the declared uniforms, in declaration order.
+    #[getter]
+    fn uniforms(&self) -> Vec<String> {
+        self.shader
+            .uniforms()
+            .iter()
+            .map(|name| name.to_string())
+            .collect()
     }
 
     fn __repr__(&self) -> &'static str {
@@ -112,24 +307,135 @@ impl PyPostProcess {
     }
 }
 
-/// Accept `None` (inherit), `False` (disable), or a PostProcess for a segment.
-pub fn segment_post_process(
+fn preset(
+    preset: gaanim_api::canvas::PostPreset,
+    values: Vec<crate::visualization::DeferredScalar>,
+) -> PyResult<PyPostProcess> {
+    Ok(PyPostProcess::new(preset.shader(), values))
+}
+
+/// A preset amount: `default` when omitted, a number within `range`, or a
+/// reactive value (clamped by the shader instead).
+fn preset_value(
+    name: &str,
+    value: Option<&Bound<'_, PyAny>>,
+    default: f64,
+    range: std::ops::RangeInclusive<f64>,
+) -> PyResult<crate::visualization::DeferredScalar> {
+    let Some(value) = value.filter(|value| !value.is_none()) else {
+        return Ok(crate::visualization::DeferredScalar::validated(
+            gaanim_animation::ScalarSource::constant(default),
+        ));
+    };
+    let scalar = crate::visualization::extract_deferred_scalar(value.clone())?;
+    let out_of_range = scalar
+        .source
+        .constant_value()
+        .filter(|number| !range.contains(number));
+    if let Some(number) = out_of_range {
+        let upper = if range.end().is_infinite() {
+            String::new()
+        } else {
+            format!(" and at most {}", range.end())
+        };
+        return Err(PyValueError::new_err(format!(
+            "{name} must be at least {}{upper}, got {number}",
+            range.start()
+        )));
+    }
+    Ok(scalar)
+}
+
+/// Read `None`, one PostProcess or a sequence of them as a pass chain.
+pub fn post_process_passes(
     post: Option<&Bound<'_, PyAny>>,
-) -> PyResult<gaanim_api::canvas::PostProcessOverride> {
-    let Some(post) = post else {
-        return Ok(gaanim_api::canvas::PostProcessOverride::Inherit);
+    canvas: &std::sync::Arc<std::sync::Mutex<gaanim_api::canvas::SceneModel>>,
+) -> PyResult<Vec<gaanim_api::canvas::PostProcessPass>> {
+    let Some(post) = post.filter(|post| !post.is_none()) else {
+        return Ok(Vec::new());
     };
     if let Ok(post) = post.cast::<PyPostProcess>() {
-        return Ok(gaanim_api::canvas::PostProcessOverride::Shader(
-            post.borrow().0.clone(),
-        ));
+        return Ok(vec![post.borrow().pass(canvas)?]);
     }
-    if matches!(post.extract::<bool>(), Ok(false)) {
-        return Ok(gaanim_api::canvas::PostProcessOverride::Disabled);
+    let not_a_chain = || {
+        pyo3::exceptions::PyTypeError::new_err(
+            "post must be a PostProcess, a sequence of PostProcess, or None",
+        )
+    };
+    if post.is_instance_of::<pyo3::types::PyString>() {
+        return Err(not_a_chain());
     }
-    Err(pyo3::exceptions::PyTypeError::new_err(
-        "segment post must be a PostProcess, False to disable it, or None to inherit",
-    ))
+    let items = post.try_iter().map_err(|_| not_a_chain())?;
+    items
+        .map(|item| {
+            let item = item?;
+            let post = item.cast::<PyPostProcess>().map_err(|_| not_a_chain())?;
+            post.borrow().pass(canvas)
+        })
+        .collect()
+}
+
+/// The chain as Python values: None, one PostProcess, or a list of them.
+pub fn post_process_value(
+    py: Python<'_>,
+    passes: &[gaanim_api::canvas::PostProcessPass],
+) -> PyResult<Py<PyAny>> {
+    let post = |pass: &gaanim_api::canvas::PostProcessPass| PyPostProcess {
+        shader: pass.shader.clone(),
+        uniforms: pass
+            .values
+            .iter()
+            .cloned()
+            .map(crate::visualization::DeferredScalar::validated)
+            .collect(),
+    };
+    Ok(match passes {
+        [] => py.None(),
+        [pass] => Py::new(py, post(pass))?.into_any(),
+        passes => pyo3::types::PyList::new(
+            py,
+            passes
+                .iter()
+                .map(|pass| Py::new(py, post(pass)))
+                .collect::<PyResult<Vec<_>>>()?,
+        )?
+        .into_any()
+        .unbind(),
+    })
+}
+
+/// Accept `None` (inherit), `False` (disable), or a PostProcess or sequence
+/// of them for a segment.
+pub fn segment_post_process(
+    post: Option<&Bound<'_, PyAny>>,
+    canvas: &std::sync::Arc<std::sync::Mutex<gaanim_api::canvas::SceneModel>>,
+) -> PyResult<gaanim_api::canvas::PostProcessOverride> {
+    let Some(post) = post.filter(|post| !post.is_none()) else {
+        return Ok(gaanim_api::canvas::PostProcessOverride::Inherit);
+    };
+    if post.is_instance_of::<pyo3::types::PyBool>() {
+        return if post.extract::<bool>()? {
+            Err(pyo3::exceptions::PyTypeError::new_err(
+                "segment post must be a PostProcess, a sequence of them, False to disable it, or None to inherit",
+            ))
+        } else {
+            Ok(gaanim_api::canvas::PostProcessOverride::Disabled)
+        };
+    }
+    let passes = post_process_passes(Some(post), canvas).map_err(|error| {
+        if error.is_instance_of::<pyo3::exceptions::PyTypeError>(post.py()) {
+            pyo3::exceptions::PyTypeError::new_err(
+                "segment post must be a PostProcess, a sequence of them, False to disable it, or None to inherit",
+            )
+        } else {
+            error
+        }
+    })?;
+    Ok(if passes.is_empty() {
+        gaanim_api::canvas::PostProcessOverride::Disabled
+    } else {
+        gaanim_api::canvas::PostProcessOverride::Passes(passes)
+    })
 }
 
 /// A reusable solid or gradient paint accepted by drawables and scene backgrounds.

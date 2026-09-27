@@ -123,10 +123,20 @@ secundarias en #link("/guias/camara-y-3d/")[Cámara y 3D].
   `scene.viz.countdown(10)` crea un temporizador que `timer.count_down()`
   vacía en tiempo real.
 
+- `PostProcess.shader(src, uniforms={"amount": parametro})` enlaza valores
+  del shader a un `Parameter`, así que el efecto se anima como cualquier otro
+  valor. `scene.canvas.post` (y `post=` de `Scene` y de los segmentos) acepta
+  una lista de pasadas que se encadenan en orden.
+- Presets de acabado sin escribir WGSL: `PostProcess.grain`, `vignette`,
+  `chromatic_aberration`, `color_grade`, `lut` (archivos `.cube`), `halftone`,
+  `dither`, `crt`, `pixelate` y `glitch`. Sus valores también aceptan un
+  `Parameter`.
+
 Ver `Drawable.blend` y `Drawable.tip` en #link("/referencia/drawable/")[Drawable],
 `Anim.dash_offset` y `Updater.dash_flow` en
-#link("/referencia/animations/")[Animaciones] y los anillos en
-#link("/referencia/visualization/")[Visualización].
+#link("/referencia/animations/")[Animaciones], los anillos en
+#link("/referencia/visualization/")[Visualización] y el postprocesado en
+#link("/referencia/themes/")[Colores y temas].
 
 == Correcciones
 

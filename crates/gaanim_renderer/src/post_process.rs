@@ -1,7 +1,8 @@
 //! Custom WGSL post-processing of everything Vello draws inside the camera frame.
 
-use bevy::prelude::Resource;
-use gaanim_core::kurbo;
+use bevy::prelude::{Entity, Resource};
+use gaanim_animation::ScalarSource;
+use gaanim_core::{ObjectId, kurbo};
 use naga::valid::{Capabilities, ValidationFlags, Validator};
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -66,6 +67,9 @@ fn gaanim_apply_post(@builtin(global_invocation_id) id: vec3<u32>) {
 
 const PARAMS_SIZE: u64 = 48;
 
+/// Most named uniforms one post-process pass may declare.
+pub const MAX_POST_UNIFORMS: usize = 32;
+
 /// A WGSL function applied to the rendered 2D scene inside the camera frame.
 ///
 /// `source` must define
@@ -74,15 +78,25 @@ const PARAMS_SIZE: u64 = 48;
 /// normalized with (0, 0) at the top-left corner of the camera frame,
 /// `resolution` is the frame size in pixels and `time` is absolute timeline
 /// seconds. Colors are straight-alpha sRGB values as stored in the target.
+///
+/// Declared uniforms are `f32` fields of `gaanim_uniforms` (for example
+/// `gaanim_uniforms.amount`), and a shader built with data reads it from the
+/// storage array `gaanim_data: array<vec4<f32>>`.
 #[derive(Clone)]
 pub struct PostProcessShader {
     source: Arc<str>,
+    uniforms: Arc<[Arc<str>]>,
+    data: Option<Arc<[[f32; 4]]>>,
+    /// The complete module: the preamble, `source` and the entry point.
+    complete: Arc<str>,
 }
 
 impl fmt::Debug for PostProcessShader {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut debug = f.debug_struct("PostProcessShader");
         debug.field("source_len", &self.source.len());
+        debug.field("uniforms", &self.uniforms);
+        debug.field("data_len", &self.data.as_ref().map(|data| data.len()));
         if gaanim_core::fingerprint::identity_debug() {
             debug.field("source", &self.source);
         }
@@ -90,26 +104,88 @@ impl fmt::Debug for PostProcessShader {
     }
 }
 
+impl PartialEq for PostProcessShader {
+    fn eq(&self, other: &Self) -> bool {
+        self.complete == other.complete && self.data == other.data
+    }
+}
+
 impl PostProcessShader {
     pub fn new(source: impl Into<Arc<str>>) -> Result<Self, PostProcessError> {
-        let source = source.into();
-        validate_post_source(&source)?;
-        Ok(Self { source })
+        Self::with_uniforms(source, std::iter::empty::<&str>())
+    }
+
+    /// A shader that reads `f32` uniforms named `uniforms` from
+    /// `gaanim_uniforms`, in declaration order.
+    pub fn with_uniforms<N: AsRef<str>>(
+        source: impl Into<Arc<str>>,
+        uniforms: impl IntoIterator<Item = N>,
+    ) -> Result<Self, PostProcessError> {
+        Self::build(source.into(), uniforms, None)
+    }
+
+    /// A shader that also reads `data` from `gaanim_data`, such as a lookup
+    /// table. `data` must not be empty.
+    pub fn with_data<N: AsRef<str>>(
+        source: impl Into<Arc<str>>,
+        uniforms: impl IntoIterator<Item = N>,
+        data: impl Into<Arc<[[f32; 4]]>>,
+    ) -> Result<Self, PostProcessError> {
+        let data = data.into();
+        if data.is_empty() {
+            return Err(PostProcessError::InvalidWgsl(
+                "post-process data must not be empty".to_string(),
+            ));
+        }
+        Self::build(source.into(), uniforms, Some(data))
+    }
+
+    fn build<N: AsRef<str>>(
+        source: Arc<str>,
+        uniforms: impl IntoIterator<Item = N>,
+        data: Option<Arc<[[f32; 4]]>>,
+    ) -> Result<Self, PostProcessError> {
+        let uniforms = uniforms
+            .into_iter()
+            .map(|name| Arc::<str>::from(name.as_ref()))
+            .collect::<Arc<[_]>>();
+        validate_uniform_names(&uniforms)?;
+        let complete: Arc<str> = complete_shader(&source, &uniforms, data.is_some()).into();
+        validate_post_source(&source, &complete)?;
+        Ok(Self {
+            source,
+            uniforms,
+            data,
+            complete,
+        })
     }
 
     /// Load WGSL source from an asset file. Relative paths are resolved by the caller.
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self, PostProcessError> {
+        Self::from_file_with_uniforms(path, std::iter::empty::<&str>())
+    }
+
+    /// [`Self::from_file`] with named uniforms, as [`Self::with_uniforms`].
+    pub fn from_file_with_uniforms<N: AsRef<str>>(
+        path: impl AsRef<Path>,
+        uniforms: impl IntoIterator<Item = N>,
+    ) -> Result<Self, PostProcessError> {
         let path = path.as_ref().to_path_buf();
         let source =
             std::fs::read_to_string(&path).map_err(|error| PostProcessError::ReadSource {
                 path,
                 message: error.to_string(),
             })?;
-        Self::new(source)
+        Self::with_uniforms(source, uniforms)
     }
 
     pub fn source(&self) -> &str {
         &self.source
+    }
+
+    /// Names of the declared uniforms, in declaration order.
+    pub fn uniforms(&self) -> &[Arc<str>] {
+        &self.uniforms
     }
 }
 
@@ -119,6 +195,50 @@ pub enum PostProcessError {
     ReadSource { path: PathBuf, message: String },
     #[error("invalid post-process WGSL: {0}")]
     InvalidWgsl(String),
+    #[error("invalid post-process uniforms: {0}")]
+    InvalidUniforms(String),
+    #[error("invalid .cube LUT: {0}")]
+    InvalidLut(String),
+}
+
+/// One pass of a post-process chain: a shader and the value of each of its
+/// uniforms, in the shader's declaration order.
+#[derive(Clone, Debug)]
+pub struct PostProcessPass {
+    pub shader: PostProcessShader,
+    pub values: Vec<ScalarSource>,
+}
+
+impl PostProcessPass {
+    /// A pass with constant uniforms.
+    pub fn constant(shader: PostProcessShader, values: &[f64]) -> Result<Self, PostProcessError> {
+        Self::new(
+            shader,
+            values.iter().copied().map(ScalarSource::constant).collect(),
+        )
+    }
+
+    pub fn new(
+        shader: PostProcessShader,
+        values: Vec<ScalarSource>,
+    ) -> Result<Self, PostProcessError> {
+        if values.len() != shader.uniforms().len() {
+            return Err(PostProcessError::InvalidUniforms(format!(
+                "{} values for {} declared uniforms",
+                values.len(),
+                shader.uniforms().len()
+            )));
+        }
+        Ok(Self { shader, values })
+    }
+}
+
+impl From<PostProcessShader> for PostProcessPass {
+    /// A pass whose uniforms, if any, are all zero.
+    fn from(shader: PostProcessShader) -> Self {
+        let values = vec![ScalarSource::constant(0.0); shader.uniforms().len()];
+        Self { shader, values }
+    }
 }
 
 /// Post-processing selected by one authored segment.
@@ -130,7 +250,7 @@ pub enum PostProcessOverride {
     /// Draw this segment without post-processing.
     Disabled,
     /// Replace the scene post-process while this segment is active.
-    Shader(PostProcessShader),
+    Passes(Vec<PostProcessPass>),
 }
 
 /// Post-process override and time range of one authored segment.
@@ -143,46 +263,88 @@ pub struct SegmentPostProcess {
     pub post: PostProcessOverride,
 }
 
-/// Scene post-process and per-segment overrides, inserted by scene compilation.
+/// Scene post-process chain and per-segment overrides, inserted by scene
+/// compilation.
 #[derive(Resource, Clone, Debug, Default)]
 pub struct CanvasPostProcess {
-    pub shader: Option<PostProcessShader>,
+    pub passes: Vec<PostProcessPass>,
     pub segments: Vec<SegmentPostProcess>,
+    /// Entities holding the signals of the parameters that uniforms read.
+    pub parameters: Vec<(ObjectId, Entity)>,
 }
 
 impl CanvasPostProcess {
-    /// Post-process active at an exact timeline position.
-    pub fn shader_at(&self, time_seconds: f64) -> Option<&PostProcessShader> {
+    /// Post-process chain active at an exact timeline position; empty when
+    /// nothing applies.
+    pub fn passes_at(&self, time_seconds: f64) -> &[PostProcessPass] {
         let segment = crate::pipeline::active_segment(&self.segments, time_seconds, |segment| {
             (segment.start_time, segment.end_time, segment.hold_at_end)
         });
         match segment.map(|segment| &segment.post) {
-            None | Some(PostProcessOverride::Inherit) => self.shader.as_ref(),
-            Some(PostProcessOverride::Disabled) => None,
-            Some(PostProcessOverride::Shader(shader)) => Some(shader),
+            None | Some(PostProcessOverride::Inherit) => &self.passes,
+            Some(PostProcessOverride::Disabled) => &[],
+            Some(PostProcessOverride::Passes(passes)) => passes,
         }
     }
 
     /// Frame to post-process at `time_seconds`, with the camera frame in
-    /// target pixels. `None` when nothing applies.
-    pub fn request(&self, time_seconds: f64, frame: kurbo::Rect) -> Option<PostProcessRequest> {
+    /// target pixels, reading parameter uniforms through `signal` (the value
+    /// of the entity holding a parameter's signal). `None` when nothing
+    /// applies.
+    pub fn request_with(
+        &self,
+        time_seconds: f64,
+        frame: kurbo::Rect,
+        mut signal: impl FnMut(Entity) -> Option<f64>,
+    ) -> Option<PostProcessRequest> {
         let time = time_seconds as f32;
         if !time.is_finite() || !(frame.width() > 0.0 && frame.height() > 0.0) {
             return None;
         }
-        self.shader_at(time_seconds)
-            .map(|shader| PostProcessRequest {
-                shader: shader.clone(),
-                frame,
-                time,
+        let passes = self.passes_at(time_seconds);
+        if passes.is_empty() {
+            return None;
+        }
+        let mut resolve = |logical: ObjectId| {
+            let entity = self
+                .parameters
+                .iter()
+                .find_map(|(id, entity)| (*id == logical).then_some(*entity))?;
+            signal(entity)
+        };
+        let passes = passes
+            .iter()
+            .map(|pass| {
+                let values = pass
+                    .values
+                    .iter()
+                    .map(|source| {
+                        let value =
+                            source.evaluate(time_seconds, &mut resolve).unwrap_or(0.0) as f32;
+                        if value.is_finite() { value } else { 0.0 }
+                    })
+                    .collect();
+                (pass.shader.clone(), values)
             })
+            .collect();
+        Some(PostProcessRequest {
+            passes,
+            frame,
+            time,
+        })
+    }
+
+    /// [`Self::request_with`] for chains whose uniforms read no parameter.
+    pub fn request(&self, time_seconds: f64, frame: kurbo::Rect) -> Option<PostProcessRequest> {
+        self.request_with(time_seconds, frame, |_| None)
     }
 }
 
 /// One frame of post-processing for [`GpuPostProcess`].
 #[derive(Clone, Debug)]
 pub struct PostProcessRequest {
-    pub shader: PostProcessShader,
+    /// Passes in order, each with its uniform values.
+    pub passes: Vec<(PostProcessShader, Vec<f32>)>,
     /// Camera frame in target pixels (top-left origin).
     pub frame: kurbo::Rect,
     /// Timeline seconds.
@@ -194,26 +356,39 @@ struct PostPipeline {
     pipeline: wgpu::ComputePipeline,
 }
 
-struct PreparedFrame {
+struct PreparedPass {
     pipeline: Arc<PostPipeline>,
     bind_group: wgpu::BindGroup,
+}
+
+struct PreparedFrame {
+    passes: Vec<PreparedPass>,
     target: wgpu::Texture,
     /// Origin and size of the processed region in target pixels.
     region: [u32; 4],
 }
 
+/// Buffers of one pass, reused across frames while their sizes hold.
+#[derive(Default)]
+struct PassBuffers {
+    uniforms: Option<wgpu::Buffer>,
+    data: Option<(Arc<[[f32; 4]]>, wgpu::Buffer)>,
+}
+
 /// Applies a [`PostProcessRequest`] to a render target on the GPU.
 ///
-/// The shader writes a scratch texture the size of the camera frame, which is
-/// then copied back over the frame; pixels outside the frame are untouched.
-/// Used by both the interactive render world and the direct export.
+/// Each pass writes a scratch texture the size of the camera frame, which is
+/// then copied back over the frame, so the next pass reads its result; pixels
+/// outside the frame are untouched. Used by both the interactive render world
+/// and the direct export.
 #[derive(Default)]
 pub struct GpuPostProcess {
     device: Option<wgpu::Device>,
-    /// Pipelines by shader source; `None` records a failed build.
+    /// Pipelines by complete shader; `None` records a failed build.
     pipelines: HashMap<Arc<str>, Option<Arc<PostPipeline>>>,
     sampler: Option<wgpu::Sampler>,
     params: Option<wgpu::Buffer>,
+    buffers: Vec<PassBuffers>,
     scratch: Option<wgpu::Texture>,
     frame: Option<PreparedFrame>,
 }
@@ -221,7 +396,8 @@ pub struct GpuPostProcess {
 impl GpuPostProcess {
     /// Prepare `request` for `target`, which must be an `Rgba8Unorm` texture
     /// with `TEXTURE_BINDING` and `COPY_DST` usage. Returns whether
-    /// [`Self::encode`] will draw a pass.
+    /// [`Self::encode`] will draw a pass. A pass whose shader fails to build
+    /// is skipped.
     pub fn prepare(
         &mut self,
         device: &wgpu::Device,
@@ -242,9 +418,21 @@ impl GpuPostProcess {
         let Some(region) = frame_region(request.frame, target.width(), target.height()) else {
             return false;
         };
-        let Some(pipeline) = self.pipeline(device, &request.shader.source) else {
+        // Keep only the pipelines of the current chain; a hot reload replaces them.
+        self.pipelines.retain(|complete, _| {
+            request
+                .passes
+                .iter()
+                .any(|(shader, _)| shader.complete == *complete)
+        });
+        let pipelines: Vec<_> = request
+            .passes
+            .iter()
+            .map(|(shader, _)| self.pipeline(device, shader))
+            .collect();
+        if pipelines.iter().all(Option::is_none) {
             return false;
-        };
+        }
 
         let scratch = match &self.scratch {
             Some(scratch) if scratch.width() == region[2] && scratch.height() == region[3] => {
@@ -301,10 +489,19 @@ impl GpuPostProcess {
 
         let source_view = target.create_view(&Default::default());
         let output_view = scratch.create_view(&Default::default());
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("gaanim-post-process-bind-group"),
-            layout: &pipeline.layout,
-            entries: &[
+        self.buffers
+            .resize_with(request.passes.len(), PassBuffers::default);
+        let mut passes = Vec::with_capacity(request.passes.len());
+        for (((shader, values), pipeline), buffers) in request
+            .passes
+            .iter()
+            .zip(pipelines)
+            .zip(self.buffers.iter_mut())
+        {
+            let Some(pipeline) = pipeline else {
+                continue;
+            };
+            let mut entries = vec![
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::TextureView(&source_view),
@@ -321,11 +518,68 @@ impl GpuPostProcess {
                     binding: 3,
                     resource: params.as_entire_binding(),
                 },
-            ],
-        });
+            ];
+            let uniform_buffer = (!values.is_empty()).then(|| {
+                let bytes = uniform_bytes(values);
+                let buffer = match &buffers.uniforms {
+                    Some(buffer) if buffer.size() == bytes.len() as u64 => buffer.clone(),
+                    _ => {
+                        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                            label: Some("gaanim-post-process-uniforms"),
+                            size: bytes.len() as u64,
+                            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                            mapped_at_creation: false,
+                        });
+                        buffers.uniforms = Some(buffer.clone());
+                        buffer
+                    }
+                };
+                queue.write_buffer(&buffer, 0, &bytes);
+                buffer
+            });
+            if let Some(buffer) = &uniform_buffer {
+                entries.push(wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: buffer.as_entire_binding(),
+                });
+            }
+            let data_buffer = shader.data.as_ref().map(|data| match &buffers.data {
+                Some((uploaded, buffer)) if Arc::ptr_eq(uploaded, data) => buffer.clone(),
+                _ => {
+                    let bytes: Vec<u8> = data
+                        .iter()
+                        .flatten()
+                        .flat_map(|value| value.to_ne_bytes())
+                        .collect();
+                    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("gaanim-post-process-data"),
+                        size: bytes.len() as u64,
+                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    });
+                    queue.write_buffer(&buffer, 0, &bytes);
+                    buffers.data = Some((data.clone(), buffer.clone()));
+                    buffer
+                }
+            });
+            if let Some(buffer) = &data_buffer {
+                entries.push(wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: buffer.as_entire_binding(),
+                });
+            }
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("gaanim-post-process-bind-group"),
+                layout: &pipeline.layout,
+                entries: &entries,
+            });
+            passes.push(PreparedPass {
+                pipeline,
+                bind_group,
+            });
+        }
         self.frame = Some(PreparedFrame {
-            pipeline,
-            bind_group,
+            passes,
             target: target.clone(),
             region,
         });
@@ -337,45 +591,55 @@ impl GpuPostProcess {
         self.frame = None;
     }
 
-    /// Record the pass prepared by [`Self::prepare`], if any.
+    /// Record the passes prepared by [`Self::prepare`], if any.
     pub fn encode(&self, encoder: &mut wgpu::CommandEncoder) {
         let (Some(frame), Some(scratch)) = (&self.frame, &self.scratch) else {
             return;
         };
         let [x, y, width, height] = frame.region;
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("gaanim-post-process-pass"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&frame.pipeline.pipeline);
-            pass.set_bind_group(0, &frame.bind_group, &[]);
-            pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+        for pass in &frame.passes {
+            {
+                let mut compute = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("gaanim-post-process-pass"),
+                    timestamp_writes: None,
+                });
+                compute.set_pipeline(&pass.pipeline.pipeline);
+                compute.set_bind_group(0, &pass.bind_group, &[]);
+                compute.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+            }
+            // The next pass samples the target, so each result lands there.
+            encoder.copy_texture_to_texture(
+                scratch.as_image_copy(),
+                wgpu::TexelCopyTextureInfo {
+                    texture: &frame.target,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d { x, y, z: 0 },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+            );
         }
-        encoder.copy_texture_to_texture(
-            scratch.as_image_copy(),
-            wgpu::TexelCopyTextureInfo {
-                texture: &frame.target,
-                mip_level: 0,
-                origin: wgpu::Origin3d { x, y, z: 0 },
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-        );
     }
 
-    fn pipeline(&mut self, device: &wgpu::Device, source: &Arc<str>) -> Option<Arc<PostPipeline>> {
-        if let Some(cached) = self.pipelines.get(source) {
+    fn pipeline(
+        &mut self,
+        device: &wgpu::Device,
+        shader: &PostProcessShader,
+    ) -> Option<Arc<PostPipeline>> {
+        if let Some(cached) = self.pipelines.get(&shader.complete) {
             return cached.clone();
         }
-        // Keep only the current shader; a hot reload replaces it.
-        self.pipelines.clear();
         let error_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let pipeline = PostPipeline::new(device, source);
+        let pipeline = PostPipeline::new(
+            device,
+            &shader.complete,
+            !shader.uniforms.is_empty(),
+            shader.data.is_some(),
+        );
         let pipeline = match pollster::block_on(error_scope.pop()) {
             None => Some(Arc::new(pipeline)),
             Some(error) => {
@@ -383,16 +647,17 @@ impl GpuPostProcess {
                 None
             }
         };
-        self.pipelines.insert(source.clone(), pipeline.clone());
+        self.pipelines
+            .insert(shader.complete.clone(), pipeline.clone());
         pipeline
     }
 }
 
 impl PostPipeline {
-    fn new(device: &wgpu::Device, source: &str) -> Self {
+    fn new(device: &wgpu::Device, complete: &str, uniforms: bool, data: bool) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("gaanim-post-process-shader"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Owned(complete_shader(source))),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(complete)),
         });
         let entry = |binding, ty| wgpu::BindGroupLayoutEntry {
             binding,
@@ -400,38 +665,50 @@ impl PostPipeline {
             ty,
             count: None,
         };
+        let uniform = wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        };
+        let mut entries = vec![
+            entry(
+                0,
+                wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+            ),
+            entry(
+                1,
+                wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            ),
+            entry(
+                2,
+                wgpu::BindingType::StorageTexture {
+                    access: wgpu::StorageTextureAccess::WriteOnly,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                },
+            ),
+            entry(3, uniform),
+        ];
+        if uniforms {
+            entries.push(entry(4, uniform));
+        }
+        if data {
+            entries.push(entry(
+                5,
+                wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+            ));
+        }
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("gaanim-post-process-layout"),
-            entries: &[
-                entry(
-                    0,
-                    wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                ),
-                entry(
-                    1,
-                    wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                ),
-                entry(
-                    2,
-                    wgpu::BindingType::StorageTexture {
-                        access: wgpu::StorageTextureAccess::WriteOnly,
-                        format: wgpu::TextureFormat::Rgba8Unorm,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                    },
-                ),
-                entry(
-                    3,
-                    wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                ),
-            ],
+            entries: &entries,
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("gaanim-post-process-pipeline-layout"),
@@ -450,7 +727,6 @@ impl PostPipeline {
     }
 }
 
-/// Whole target pixels covered by `frame`, as origin and size.
 fn frame_region(frame: kurbo::Rect, width: u32, height: u32) -> Option<[u32; 4]> {
     let x0 = frame.x0.round().clamp(0.0, f64::from(width));
     let y0 = frame.y0.round().clamp(0.0, f64::from(height));
@@ -486,19 +762,72 @@ fn params_bytes(
     bytes
 }
 
-fn complete_shader(source: &str) -> String {
-    format!("{SHADER_PREAMBLE}\n{source}\n{SHADER_ENTRY_POINT}")
+/// Uniform values as `f32` fields, padded to the 16-byte struct alignment.
+fn uniform_bytes(values: &[f32]) -> Vec<u8> {
+    let mut bytes: Vec<u8> = values
+        .iter()
+        .flat_map(|value| value.to_ne_bytes())
+        .collect();
+    bytes.resize(bytes.len().div_ceil(16) * 16, 0);
+    bytes
 }
 
-fn validate_post_source(source: &str) -> Result<(), PostProcessError> {
+fn complete_shader(source: &str, uniforms: &[Arc<str>], data: bool) -> String {
+    let mut declarations = String::new();
+    if !uniforms.is_empty() {
+        declarations.push_str("struct GaanimUniforms {\n");
+        for name in uniforms {
+            declarations.push_str(&format!("    {name}: f32,\n"));
+        }
+        declarations.push_str(
+            "}\n\n@group(0) @binding(4)\nvar<uniform> gaanim_uniforms: GaanimUniforms;\n",
+        );
+    }
+    if data {
+        declarations.push_str(
+            "\n@group(0) @binding(5)\nvar<storage, read> gaanim_data: array<vec4<f32>>;\n",
+        );
+    }
+    format!("{SHADER_PREAMBLE}\n{declarations}\n{source}\n{SHADER_ENTRY_POINT}")
+}
+
+fn validate_uniform_names(names: &[Arc<str>]) -> Result<(), PostProcessError> {
+    if names.len() > MAX_POST_UNIFORMS {
+        return Err(PostProcessError::InvalidUniforms(format!(
+            "at most {MAX_POST_UNIFORMS} uniforms per pass, got {}",
+            names.len()
+        )));
+    }
+    for (index, name) in names.iter().enumerate() {
+        let mut chars = name.chars();
+        let valid = chars
+            .next()
+            .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+            && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+            && !name.starts_with("__")
+            && name.as_ref() != "_";
+        if !valid {
+            return Err(PostProcessError::InvalidUniforms(format!(
+                "{name:?} is not a WGSL identifier (letters, digits and '_', not starting with a digit)"
+            )));
+        }
+        if names[..index].contains(name) {
+            return Err(PostProcessError::InvalidUniforms(format!(
+                "uniform {name:?} is declared twice"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_post_source(source: &str, complete: &str) -> Result<(), PostProcessError> {
     if !source.contains("gaanim_post") {
         return Err(PostProcessError::InvalidWgsl(
             "source must define gaanim_post(uv, resolution, time)".to_string(),
         ));
     }
-    let complete = complete_shader(source);
-    let module = naga::front::wgsl::parse_str(&complete)
-        .map_err(|error| PostProcessError::InvalidWgsl(error.emit_to_string(&complete)))?;
+    let module = naga::front::wgsl::parse_str(complete)
+        .map_err(|error| PostProcessError::InvalidWgsl(error.emit_to_string(complete)))?;
     Validator::new(ValidationFlags::all(), Capabilities::all())
         .validate(&module)
         .map_err(|error| PostProcessError::InvalidWgsl(error.to_string()))?;
@@ -567,17 +896,27 @@ mod tests {
             post,
         };
         let post = CanvasPostProcess {
-            shader: Some(scene.clone()),
+            passes: vec![scene.clone().into()],
             segments: vec![
                 segment(0.0, 1.0, PostProcessOverride::Inherit),
                 segment(1.0, 2.0, PostProcessOverride::Disabled),
-                segment(2.0, 3.0, PostProcessOverride::Shader(other.clone())),
+                segment(
+                    2.0,
+                    3.0,
+                    PostProcessOverride::Passes(vec![other.clone().into()]),
+                ),
             ],
+            parameters: Vec::new(),
         };
-        assert_eq!(post.shader_at(0.5).unwrap().source(), scene.source());
-        assert!(post.shader_at(1.5).is_none());
-        assert_eq!(post.shader_at(2.5).unwrap().source(), other.source());
-        assert_eq!(post.shader_at(9.0).unwrap().source(), scene.source());
+        let source_at = |time| {
+            post.passes_at(time)
+                .first()
+                .map(|pass| pass.shader.source())
+        };
+        assert_eq!(source_at(0.5), Some(scene.source()));
+        assert!(post.passes_at(1.5).is_empty());
+        assert_eq!(source_at(2.5), Some(other.source()));
+        assert_eq!(source_at(9.0), Some(scene.source()));
 
         let frame = kurbo::Rect::new(0.0, 0.0, 16.0, 9.0);
         assert!(post.request(1.5, frame).is_none());
@@ -638,8 +977,8 @@ mod tests {
 
         let frame = kurbo::Rect::new(8.0, 4.0, 40.0, 28.0);
         let request = CanvasPostProcess {
-            shader: Some(shader()),
-            segments: Vec::new(),
+            passes: vec![shader().into()],
+            ..Default::default()
         }
         .request(1.0, frame)
         .unwrap();
@@ -661,5 +1000,149 @@ mod tests {
         assert_eq!(at(39, 27), &[255 - 156, 255 - 64, 255 - 200, 255]);
 
         assert!(!post.prepare(&gpu.device, &gpu.queue, &target, None));
+    }
+
+    const TINT: &str = "fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {\n\
+         let color = gaanim_scene(uv);\n\
+         return vec4<f32>(color.r + gaanim_uniforms.red, color.g * gaanim_uniforms.green, color.b, color.a);\n}";
+
+    #[test]
+    fn uniforms_are_declared_fields_with_valid_names() {
+        let tint = PostProcessShader::with_uniforms(TINT, ["red", "green"]).unwrap();
+        assert_eq!(tint.uniforms().len(), 2);
+        // A field the shader reads must be declared.
+        assert!(matches!(
+            PostProcessShader::with_uniforms(TINT, ["red"]),
+            Err(PostProcessError::InvalidWgsl(_))
+        ));
+        for bad in ["2x", "a-b", "", "_", "__x"] {
+            assert!(
+                matches!(
+                    PostProcessShader::with_uniforms(TINT, [bad, "red", "green"]),
+                    Err(PostProcessError::InvalidUniforms(_))
+                ),
+                "{bad:?}"
+            );
+        }
+        assert!(matches!(
+            PostProcessShader::with_uniforms(TINT, ["red", "green", "red"]),
+            Err(PostProcessError::InvalidUniforms(_))
+        ));
+        let many: Vec<String> = (0..=MAX_POST_UNIFORMS).map(|i| format!("u{i}")).collect();
+        assert!(matches!(
+            PostProcessShader::with_uniforms(TINT, &many),
+            Err(PostProcessError::InvalidUniforms(_))
+        ));
+        assert!(matches!(
+            PostProcessPass::constant(tint.clone(), &[1.0]),
+            Err(PostProcessError::InvalidUniforms(_))
+        ));
+        assert!(matches!(
+            PostProcessShader::with_data(INVERT, std::iter::empty::<&str>(), Vec::new()),
+            Err(PostProcessError::InvalidWgsl(_))
+        ));
+    }
+
+    #[test]
+    fn requests_evaluate_uniforms_from_parameter_signals() {
+        let tint = PostProcessShader::with_uniforms(TINT, ["red", "green"]).unwrap();
+        let parameter = ObjectId::from_raw(3);
+        let entity = Entity::from_raw_u32(7).unwrap();
+        let post = CanvasPostProcess {
+            passes: vec![
+                PostProcessPass::new(
+                    tint,
+                    vec![
+                        ScalarSource::signal(parameter),
+                        ScalarSource::constant(f64::NAN),
+                    ],
+                )
+                .unwrap(),
+                shader().into(),
+            ],
+            parameters: vec![(parameter, entity)],
+            ..Default::default()
+        };
+        let frame = kurbo::Rect::new(0.0, 0.0, 16.0, 9.0);
+        let request = post
+            .request_with(0.5, frame, |held| (held == entity).then_some(0.25))
+            .unwrap();
+        assert_eq!(request.passes.len(), 2);
+        // Non-finite values are sent as zero.
+        assert_eq!(request.passes[0].1, [0.25, 0.0]);
+        assert!(request.passes[1].1.is_empty());
+        // Without the signal the uniform falls back to zero.
+        assert_eq!(post.request(0.5, frame).unwrap().passes[0].1, [0.0, 0.0]);
+    }
+
+    #[test]
+    fn gpu_chains_passes_and_reads_uniforms_and_data() {
+        let Some(gpu) = test_gpu() else {
+            eprintln!("skipped: no GPU adapter");
+            return;
+        };
+        let (width, height) = (16_u32, 8_u32);
+        let pixels: Vec<u8> = (0..width * height)
+            .flat_map(|_| [40_u8, 200, 10, 255])
+            .collect();
+        let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        gpu.queue.write_texture(
+            target.as_image_copy(),
+            &pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: None,
+            },
+            target.size(),
+        );
+        let tint = PostProcessShader::with_uniforms(TINT, ["red", "green"]).unwrap();
+        let blue = PostProcessShader::with_data(
+            "fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {\n\
+             let color = gaanim_scene(uv);\n\
+             return vec4<f32>(color.rg, gaanim_data[1].z, color.a);\n}",
+            std::iter::empty::<&str>(),
+            vec![[0.0; 4], [0.0, 0.0, 1.0, 0.0]],
+        )
+        .unwrap();
+        let request = CanvasPostProcess {
+            passes: vec![
+                PostProcessPass::constant(tint, &[0.5, 0.5]).unwrap(),
+                blue.into(),
+                // The inversion reads what the tint and data passes wrote.
+                shader().into(),
+            ],
+            ..Default::default()
+        }
+        .request(0.0, kurbo::Rect::new(0.0, 0.0, 16.0, 8.0))
+        .unwrap();
+        let mut post = GpuPostProcess::default();
+        assert!(post.prepare(&gpu.device, &gpu.queue, &target, Some(&request)));
+        let mut encoder = gpu.device.create_command_encoder(&Default::default());
+        post.encode(&mut encoder);
+        gpu.queue.submit(Some(encoder.finish()));
+        let out = gpu.read(&target);
+        // red 40/255 + 0.5 = 168, green 200 * 0.5 = 100, blue from data = 255,
+        // then inverted.
+        let pixel = &out[..4];
+        assert!((i32::from(pixel[0]) - (255 - 168)).abs() <= 1, "{pixel:?}");
+        assert!((i32::from(pixel[1]) - (255 - 100)).abs() <= 1, "{pixel:?}");
+        assert_eq!(pixel[2], 0);
+        assert_eq!(pixel[3], 255);
     }
 }

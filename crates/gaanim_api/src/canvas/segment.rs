@@ -129,6 +129,8 @@ pub enum SegmentError {
     DuplicateStopTime { time: f64 },
     #[error("segment belongs to a different Scene")]
     ForeignSegment,
+    #[error("invalid segment post-process: {0}")]
+    InvalidPostProcess(String),
     #[error("segment links must point from an earlier segment to a later segment")]
     InvalidLink,
     #[error("segment {id:?} does not exist")]

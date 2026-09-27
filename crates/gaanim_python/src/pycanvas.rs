@@ -1357,27 +1357,29 @@ impl PyCanvas {
         })
     }
 
-    /// WGSL post-processing applied to the rendered 2D scene, or None.
+    /// WGSL post-processing applied to the rendered 2D scene: None, one
+    /// PostProcess, or a list of them applied in order.
     #[getter]
-    fn post(&self) -> PyResult<Option<crate::brush::PyPostProcess>> {
+    fn post(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok(self
+        let passes = self
             .inner
             .lock()
             .expect("scene canvas poisoned")
             .post_process
-            .clone()
-            .map(crate::brush::PyPostProcess))
+            .clone();
+        crate::brush::post_process_value(py, &passes)
     }
 
     #[setter]
-    fn set_post(&self, post: Option<PyRef<'_, crate::brush::PyPostProcess>>) -> PyResult<()> {
+    fn set_post(&self, post: Option<&Bound<'_, PyAny>>) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
+        let passes = crate::brush::post_process_passes(post, &self.inner)?;
         self.inner
             .lock()
             .expect("scene canvas poisoned")
-            .set_post_process(post.map(|post| post.0.clone()));
-        Ok(())
+            .set_post_process(passes)
+            .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 
     /// Name of the selected built-in or custom visual theme; `"technical"` by
@@ -2566,7 +2568,7 @@ impl PyScene {
         background: Option<crate::brush::PyBackgroundInput>,
         margin: Option<f64>,
         theme: Option<PyThemeInput>,
-        post: Option<PyRef<'_, crate::brush::PyPostProcess>>,
+        post: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         let frame = gaanim_api::canvas::SceneFrame::new(frame.0, frame.1)
@@ -2582,10 +2584,14 @@ impl PyScene {
         if let Some(margin) = margin {
             canvas.margin = gaanim_api::canvas::Margin::all(margin);
         }
-        canvas.set_post_process(post.map(|post| post.0.clone()));
-        Ok(Self {
-            inner: canvas.into_shared(),
-        })
+        let inner = canvas.into_shared();
+        let passes = crate::brush::post_process_passes(post, &inner)?;
+        inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .set_post_process(passes)
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        Ok(Self { inner })
     }
 
     /// The scene viewport and visual configuration.
@@ -5541,7 +5547,7 @@ impl PyScene {
         post: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<PySegment> {
         crate::custom::ensure_authoring_allowed()?;
-        let post = crate::brush::segment_post_process(post)?;
+        let post = crate::brush::segment_post_process(post, &slf.borrow().inner)?;
         let template_name = template.and_then(|template| {
             template
                 .getattr("__name__")
