@@ -98,7 +98,10 @@ impl PyPostProcess {
         }
         gaanim_api::canvas::PostProcessPass::new(
             self.shader.clone(),
-            self.uniforms.iter().map(|uniform| uniform.source.clone()).collect(),
+            self.uniforms
+                .iter()
+                .map(|uniform| uniform.source.clone())
+                .collect(),
         )
         .map_err(post_process_error)
     }
