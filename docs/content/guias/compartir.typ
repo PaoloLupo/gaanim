@@ -64,6 +64,14 @@ general y atajos de teclado (ver
 #link("/guias/presentaciones/")[Presentaciones]). Lo que no tiene sentido sin
 el script no está: la recarga al guardar y la narración.
 
+También puedes abrirlo desde el inicio de Gaanim (`gaanim` sin argumentos):
+la tarjeta *Reproducir .gaanim* (`Ctrl Shift O`) elige el archivo, y también
+puedes arrastrarlo a la ventana. Los archivos que abres aparecen en
+*Recientes* junto a tus proyectos. En un equipo sin Python, el inicio se abre
+igual y reproduce archivos `.gaanim`; para crear o abrir proyectos te indica
+cómo instalarlo. Sin FFmpeg, el paquete se reproduce sin audio y se exporta
+solo a secuencias PNG.
+
 `gaanim` reconoce el paquete y lo abre con `gaanim-play`, un ejecutable que se
 instala junto a `gaanim` y no enlaza Python. Si en el equipo solo copias
 `gaanim-play`, también puedes llamarlo directamente con las mismas opciones:

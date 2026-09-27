@@ -91,6 +91,7 @@ fn main() {
             console::error("bundle", error);
             std::process::exit(2);
         }
+        gaanim_project::record_recent_bundle(bundle);
         app.world_mut()
             .resource_mut::<gaanim_editor::project_hub::ProjectHubState>()
             .active = false;

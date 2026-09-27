@@ -3,7 +3,8 @@
 //! It handles commands that do not need Python, discovers a compatible runtime
 //! for project/script launches, and then starts the `gaanim-core` binary.
 //! Playback bundles (`.gaanim`) play and export through `gaanim-play`, which
-//! does not link Python, so they need no Python installation at all.
+//! does not link Python, so they need no Python installation at all; without
+//! Python, Home opens there too.
 
 use gaanim_core::console;
 use gaanim_project::help::{self, Topic};
@@ -20,18 +21,7 @@ fn main() {
         return;
     }
     if bundle_input(&args) {
-        let player = sibling_binary("gaanim-play");
-        let status = Command::new(&player)
-            .args(&args[1..])
-            .status()
-            .unwrap_or_else(|error| {
-                console::error(
-                    "launch",
-                    format!("failed to start {}: {error}", player.display()),
-                );
-                std::process::exit(1);
-            });
-        std::process::exit(status.code().unwrap_or(1));
+        run_player(&args[1..]);
     }
 
     // The core is linked against Python, including for the Home screen, so
@@ -42,6 +32,11 @@ fn main() {
     let hint = find_script_hint(&args);
     let probe = EnvironmentProbe::detect(hint.as_deref());
     if let Err(error) = activate_environment(&probe) {
+        // Home still opens without Python: it plays .gaanim files and
+        // explains how to install Python for projects.
+        if args.len() == 1 {
+            run_player(&[]);
+        }
         console::error("python", error);
         console::hint(format!(
             "Install {} (for example `uv python install 3.14`) and retry, or run `gaanim --help`.",
@@ -59,6 +54,22 @@ fn main() {
             console::error(
                 "launch",
                 format!("failed to start {}: {error}", core_exe.display()),
+            );
+            std::process::exit(1);
+        });
+    std::process::exit(status.code().unwrap_or(1));
+}
+
+/// Run `gaanim-play`, which needs no Python, and exit with its status.
+fn run_player(args: &[String]) -> ! {
+    let player = sibling_binary("gaanim-play");
+    let status = Command::new(&player)
+        .args(args)
+        .status()
+        .unwrap_or_else(|error| {
+            console::error(
+                "launch",
+                format!("failed to start {}: {error}", player.display()),
             );
             std::process::exit(1);
         });
