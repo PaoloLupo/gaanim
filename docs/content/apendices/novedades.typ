@@ -13,10 +13,10 @@ instalar una versión nueva, sigue
 
 = 0.5.0
 
-Sin publicar todavía. Cambian el pivote por defecto de las figuras declaradas
-con coordenadas de escena, la entrada y la salida de las vistas de cámara, los
-anchos de trazo fijados en un SVG y la separación de las etiquetas de cota: lee
-«Al actualizar».
+Publicada el 27 de septiembre de 2026. Cambian el pivote por defecto de las
+figuras declaradas con coordenadas de escena, la entrada y la salida de las
+vistas de cámara, los anchos de trazo fijados en un SVG y la separación de las
+etiquetas de cota: lee «Al actualizar».
 
 == Al actualizar
 
