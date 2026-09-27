@@ -8,7 +8,7 @@ from gaanim import CORAL, GOLD, TEAL, WHITE, Scene
 
 scene = Scene(frame=(16, 9), background="#101826")
 scene.text("Stroke profiles", role="title").fill(WHITE).move_to(0, 3.3)
-brush = scene.geometry.arc(-4.0, 0.0, 2.0, 0.3, 4.2).stroke(GOLD, 0.35).stroke_taper(0.35, 0.5)
+brush = scene.geometry.arc(-4.0, 0.0, 2.0, 0.3, 4.2).no_fill().stroke(GOLD, 0.35).stroke_taper(0.35, 0.5)
 wave_points = [(x / 10.0, 1.0 + 0.6 * math.sin(x / 4.0)) for x in range(-10, 61)]
 wave = scene.geometry.polyline(wave_points).stroke(TEAL, 0.3).stroke_profile([(0.0, 0.1), (0.5, 1.0), (1.0, 0.1)])
 flash_path = scene.geometry.polyline([(-1.0, -2.2), (2.0, -1.2), (5.0, -2.6), (7.0, -1.8)]).stroke(CORAL, 0.25)

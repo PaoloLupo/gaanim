@@ -305,12 +305,14 @@ impl SceneModel {
             return Err("opacities must be between 0 and 1".to_string());
         }
         self.check_owner(source)?;
+        // Copies start from the source as declared, not as copy 0 ends up.
+        let original = source.spec.lock().expect("object spec poisoned").clone();
         let mut copies = Vec::with_capacity(count);
         for index in 0..count {
             let mut copy = if index == 0 {
                 source.clone()
             } else {
-                self.clone_drawable(source)
+                self.clone_spec(&original)
             };
             let share = if count > 1 {
                 index as f32 / (count - 1) as f32
@@ -353,12 +355,14 @@ impl SceneModel {
         distribution.validate()?;
         self.check_owner(source)?;
         let placements = distribution.placements();
+        // Copies start from the source as declared, not as copy 0 ends up.
+        let original = source.spec.lock().expect("object spec poisoned").clone();
         let mut copies = Vec::with_capacity(placements.len());
         for (index, (position, rotation)) in placements.into_iter().enumerate() {
             let mut copy = if index == 0 {
                 source.clone()
             } else {
-                self.clone_drawable(source)
+                self.clone_spec(&original)
             };
             copy = copy.move_to_default(position.x, position.y);
             if rotation != 0.0 {
@@ -378,12 +382,7 @@ impl SceneModel {
         }
     }
 
-    /// A new drawable declared like `source`, with copies of its members.
-    fn clone_drawable(&mut self, source: &DrawableHandle) -> DrawableHandle {
-        let spec = source.spec.lock().expect("object spec poisoned").clone();
-        self.clone_spec(&spec)
-    }
-
+    /// A new drawable declared like `spec`, with copies of its members.
     fn clone_spec(&mut self, spec: &ObjectSpec) -> DrawableHandle {
         let mut members = Vec::new();
         let kind = match &spec.kind {
@@ -582,6 +581,35 @@ mod tests {
             _ => 0,
         };
         assert_eq!(count, 12);
+
+        // Copy 0's own placement does not leak into the other copies.
+        let chevron = canvas.square(0.2);
+        let trail = canvas
+            .duplicate(
+                &chevron,
+                &Distribution::Along {
+                    points: vec![DVec2::ZERO, DVec2::new(1.0, 1.0), DVec2::new(2.0, 0.0)],
+                    count: 3,
+                    orient: true,
+                },
+            )
+            .unwrap();
+        let members = match &trail.spec.lock().unwrap().kind {
+            SpawnKind::Group(ids) => ids.clone(),
+            _ => Vec::new(),
+        };
+        let rotations = |id: &ObjectId| {
+            canvas.state.lock().unwrap().object_specs[id]
+                .lock()
+                .unwrap()
+                .layout_ops
+                .iter()
+                .filter(|op| matches!(op, super::super::types::LayoutOp::RotateBy(_)))
+                .count()
+        };
+        assert_eq!(rotations(&members[0]), 1);
+        assert_eq!(rotations(&members[1]), 1);
+        assert_eq!(rotations(&members[2]), 1);
 
         let mut other = SceneModel::new(640, 360);
         assert!(other.repeat(&dot, 3, RepeatStep::default()).is_err());

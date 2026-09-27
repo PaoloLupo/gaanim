@@ -608,7 +608,7 @@ scene.render()
 import math
 from gaanim import CORAL, GOLD, TEAL, Scene
 scene = Scene(frame=(16, 9), background="#101826")
-brush = scene.geometry.arc(-4, 0, 2.0, 0.3, 4.2).stroke(GOLD, 0.35).stroke_taper(0.35, 0.5)
+brush = scene.geometry.arc(-4, 0, 2.0, 0.3, 4.2).no_fill().stroke(GOLD, 0.35).stroke_taper(0.35, 0.5)
 wave = scene.geometry.polyline([(x / 10, 1 + 0.6 * math.sin(x / 4)) for x in range(-10, 61)])
 wave.stroke(TEAL, 0.3).stroke_profile([(0.0, 0.1), (0.5, 1.0), (1.0, 0.1)])
 flash = scene.geometry.polyline([(-1, -2.2), (2, -1.2), (5, -2.6), (7, -1.8)]).stroke(CORAL, 0.25).stroke_taper(0.5, 0.5)

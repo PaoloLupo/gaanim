@@ -2321,7 +2321,7 @@ class Drawable:
         calligraphic arrows.
 
         Example:
-            stroke = scene.geometry.arc(0, 0, 2.0, 0.0, 3.0).stroke(GOLD, 0.2).stroke_taper(0.3, 0.5)
+            stroke = scene.geometry.arc(0, 0, 2.0, 0.0, 3.0).no_fill().stroke(GOLD, 0.2).stroke_taper(0.3, 0.5)
         """
         ...
     def squash_stretch(self, amount: float = 0.1, max_ratio: float = 1.6) -> Drawable:
