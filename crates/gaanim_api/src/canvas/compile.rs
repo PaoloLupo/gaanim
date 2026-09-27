@@ -10962,6 +10962,44 @@ mod tests {
     }
 
     #[test]
+    fn tips_stay_hidden_with_their_path_until_its_entry() {
+        use bevy::prelude::App;
+        use gaanim_animation::{StrokeTips, TipKind};
+        // A trim before a later grow keeps the path hidden until the grow.
+        let mut canvas = SceneModel::new(640, 360);
+        let route = canvas
+            .polyline(&[(0.0, 0.0), (1.0, 1.0), (2.0, 0.0)])
+            .tip(Some(TipKind::Dot), Some(TipKind::Arrow), None, None)
+            .unwrap();
+        canvas.play(vec![route.animate().trim(Some(0.2), None, None)]);
+        canvas.wait(0.5);
+        canvas.play(vec![route.animate().grow_arrow()]);
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        let entity = entity_of(app.world_mut(), &route);
+        for (time, shown) in [(0.5, false), (1.2, false), (2.0, true), (0.3, false)] {
+            app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
+            app.update();
+            let world = app.world();
+            let tips = world.get::<StrokeTips>(entity).unwrap();
+            for tip in [tips.start_entity, tips.end_entity] {
+                let shape = world.get::<gaanim_scene::Path2D>(tip.unwrap()).unwrap();
+                assert_eq!(!shape.0.elements().is_empty(), shown, "tip at {time}");
+            }
+        }
+    }
+
+    #[test]
     fn tipped_paths_spawn_their_tips_as_children() {
         use gaanim_animation::{StrokeTip, StrokeTips, TipKind};
         let mut canvas = SceneModel::new(640, 360);

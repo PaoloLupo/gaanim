@@ -14,6 +14,8 @@ use bevy::prelude::*;
 use gaanim_core::kurbo::{self, BezPath, PathEl, Point, Shape, Vec2};
 use gaanim_scene::{FillBrush, Path2D, RenderOrder, StrokeBrush, Visible};
 
+use crate::writing::WriteTipGlow;
+
 /// Shape drawn on one end of a stroke.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TipKind {
@@ -50,6 +52,8 @@ pub struct StrokeTips {
     /// Authored and shortened paths while the shortened one is shown.
     applied: Option<(Arc<BezPath>, Arc<BezPath>)>,
     cache: Option<TipCache>,
+    /// Stand-in for a path that its pending entry hides.
+    hidden: Arc<BezPath>,
 }
 
 impl StrokeTips {
@@ -68,6 +72,7 @@ impl StrokeTips {
             end_entity: None,
             applied: None,
             cache: None,
+            hidden: Arc::new(BezPath::new()),
         }
     }
 
@@ -199,6 +204,7 @@ pub fn apply_stroke_tips_system(
             &mut Path2D,
             &StrokeBrush,
             Option<&FillBrush>,
+            Option<&WriteTipGlow>,
             &RenderOrder,
             Has<Visible>,
         ),
@@ -206,8 +212,15 @@ pub fn apply_stroke_tips_system(
     >,
     mut tips: TipQuery,
 ) {
-    for (mut stroke_tips, mut path, stroke, fill, order, visible) in &mut paths {
-        let source = path.0.clone();
+    for (mut stroke_tips, mut path, stroke, fill, write, order, visible) in &mut paths {
+        // The renderer draws nothing of a path whose entry has not started
+        // (a Write at zero completion), so neither do its tips.
+        let hidden = write.is_some_and(|write| write.completion <= f64::EPSILON);
+        let source = if hidden {
+            stroke_tips.hidden.clone()
+        } else {
+            path.0.clone()
+        };
         let width = stroke.style.width;
         let cache = match &stroke_tips.cache {
             Some(cache) if Arc::ptr_eq(&cache.source, &source) && cache.stroke_width == width => {
@@ -228,7 +241,11 @@ pub fn apply_stroke_tips_system(
         };
         // Shortening a filled shape would cut its fill: its heads sit on top.
         let filled = fill.is_some_and(|fill| fill.0.is_some());
-        if !filled && !Arc::ptr_eq(&cache.shortened, &source) && *cache.shortened != *source {
+        if !hidden
+            && !filled
+            && !Arc::ptr_eq(&cache.shortened, &source)
+            && *cache.shortened != *source
+        {
             path.0 = cache.shortened.clone();
             stroke_tips.applied = Some((source, cache.shortened.clone()));
         }
