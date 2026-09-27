@@ -11,6 +11,44 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.5.1
+
+Sin publicar todavía. No hace falta cambiar tus escenas.
+
+== Cambios
+
+- La previsualización del editor ajusta su resolución para mantener la
+  fluidez: si al reproducir no llega a 60 fps porque dibujar la escena cuesta
+  demasiado, pasa al 75 % y luego al 50 % de los píxeles, y al pausar vuelve
+  a la resolución completa, así que un fotograma detenido siempre se ve
+  nítido. Si bajarla no acelera la reproducción (el límite está en la escena,
+  no en el dibujo), deshace el cambio. El panel de `F12` muestra la
+  resolución actual y `GAANIM_PREVIEW_RESOLUTION=full` la mantiene siempre
+  completa (ver #link("/referencia/cli/")[Línea de comandos]). Las
+  exportaciones no cambian.
+- La previsualización ya no vuelve a rasterizar un fotograma idéntico al que
+  muestra: en pausa, durante un `scene.wait()` o en una parada de la
+  presentación, la GPU queda libre y el editor responde con más holgura. Los
+  fotogramas con postprocesado o con un fondo de shader se siguen dibujando
+  siempre, porque cambian fuera de la escena vectorial.
+- Un objeto semitransparente pintado con un único color sólido (solo relleno o
+  solo trazo; por ejemplo, las líneas de `connect` o las copias de un `repeat`
+  con `opacity=(a, b)` cuando la figura solo tiene relleno) recibe la opacidad
+  en su color en lugar de abrir una capa de opacidad. La imagen es la misma y
+  dibujarlo cuesta mucho menos: con 89 círculos semitransparentes en
+  movimiento y render por software, cada fotograma pasó de 152 a 41 ms. Se
+  aplica a la previsualización y a las exportaciones. Los objetos con relleno
+  y trazo a la vez siguen usando una capa, que evita que el trazo se mezcle
+  con el relleno.
+- `animate.custom` reutiliza el último resultado de tu función cuando se le
+  pide el mismo progreso: como la función debe ser pura, los clips que ya
+  terminaron (y los glifos de un texto que comparten la animación) no vuelven
+  a llamar a Python en cada fotograma.
+- Un número rodante en reposo ya no marca su contorno como cambiado en cada
+  fotograma, así que el renderer no vuelve a compararlo.
+- El editor muestra el primer fotograma algo antes: la previsualización solo
+  prepara el antialiasing que usa.
+
 = 0.5.0
 
 Publicada el 27 de septiembre de 2026. Cambian el pivote por defecto de las

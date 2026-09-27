@@ -1,5 +1,7 @@
 pub use crate::background::{BackgroundPaint, ShaderBackground, ShaderBackgroundError};
-pub use crate::canvas::{VelloCanvas, VelloScene2d, VelloView};
+pub use crate::canvas::{
+    PREVIEW_RESOLUTION_ENV, PreviewResolution, VelloCanvas, VelloScene2d, VelloView,
+};
 pub use crate::diagnostics::{
     RenderFailure, RenderFailureKind, RenderHealth, VelloDiagnostics,
     collect_vello_diagnostics_system,

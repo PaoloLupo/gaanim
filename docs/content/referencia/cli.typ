@@ -274,4 +274,6 @@ gaanim --diff --example mi-charla --capture-stops --stops 3-7 --capture-only
   [*Variable*], [*Efecto*],
   [`GAANIM_SNAPSHOTS`], [La define `gaanim --diff` con la carpeta donde `scene.snapshots` debe capturar. No la definas a mano.],
   [`GAANIM_INCREMENTAL=0`], [Desactiva la recompilación incremental del hot reload: cada guardado recompila la escena entera.],
+  [`GAANIM_PREVIEW_RESOLUTION`], [Resolución de la previsualización del editor. Con `auto` (por defecto), si al reproducir no llega a 60 fps porque dibujar cuesta demasiado, baja al 75 % y luego al 50 % de los píxeles, y vuelve a la resolución completa al pausar. `full` la mantiene siempre completa; una fracción como `0.5` la fija. Nunca afecta a las exportaciones.],
+  [`GAANIM_FRAME_PROFILE=1`], [Reproduce la línea de tiempo entera sin detenerse en las pausas y escribe en la terminal, una vez por segundo, el coste del seek, de la composición y del render, y la resolución de la previsualización. Al terminar lista los segundos más lentos y cierra el editor.],
 )

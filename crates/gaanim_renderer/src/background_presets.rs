@@ -72,6 +72,8 @@ pub enum BackgroundPresetError {
 }
 
 /// Smooth color blobs drifting on seeded orbits, blended like a mesh gradient.
+// The seeded layout uses 6.283, not `TAU`; the approved look depends on it.
+#[allow(clippy::approx_constant)]
 pub fn mesh_gradient(
     colors: &[Color],
     speed: f64,
