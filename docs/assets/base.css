@@ -1170,6 +1170,21 @@ table th, .code-header, .code-cell-anim .anim-preview::before, .api-badge, .kind
 .home-hero-cta a.primary { background: var(--hero-cta-bg); color: var(--hero-cta-text) !important; }
 .home-hero-cta a.secondary { color: var(--hero-cta2-text) !important; background: var(--hero-cta2-bg); border: 1px solid var(--hero-cta2-border); }
 .home-hero-cta a.secondary:hover { background: var(--hero-cta2-hover); }
+#home-download { gap: 8px; }
+.home-download-icon {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    background: currentColor;
+    -webkit-mask: var(--os-icon) center / contain no-repeat;
+    mask: var(--os-icon) center / contain no-repeat;
+}
+.os-windows { --os-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M0 2.3 6.5 1.4v6.1H0zM7.3 1.3 16 0v7.5H7.3zM0 8.3h6.5v6.2L0 13.6zM7.3 8.3H16V16l-8.7-1.2z'/%3E%3C/svg%3E"); }
+.os-linux { --os-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='5' fill='none' stroke='%23000' stroke-width='1.7'/%3E%3Ccircle cx='13.2' cy='8' r='2'/%3E%3Ccircle cx='5.4' cy='3.5' r='2'/%3E%3Ccircle cx='5.4' cy='12.5' r='2'/%3E%3C/svg%3E"); }
+.os-macos .home-download-icon { display: none; }
+.home-download-format { font-weight: 500; opacity: 0.75; }
+.home-download-meta { margin-top: 10px; font-size: 0.8rem; color: var(--hero-muted); }
+.home-download-meta a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 
 /* The landing column is wider than reading pages so the hero has room to play. */
 .main-grid > main.page-home, .main-grid > main.page-home ~ .site-footer { max-width: 1080px; }

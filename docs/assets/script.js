@@ -51,6 +51,62 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 // ============================================================================
+// Home download button: the latest release's package for this system
+// ============================================================================
+const RELEASES = "https://github.com/PaoloLupo/gaanim/releases";
+const PACKAGES = {
+    windows: { system: "Windows", suffix: "-windows-x64.zip", format: ".zip" },
+    linux: { system: "Ubuntu", suffix: "-linux-x64.tar.gz", format: ".tar.gz" },
+};
+
+const detectOs = () => {
+    const ua = navigator.userAgent;
+    if (/Windows/.test(ua)) return "windows";
+    if (/Android|iPhone|iPad/.test(ua)) return null;
+    if (/Macintosh|Mac OS X/.test(ua)) return "macos";
+    if (/Linux|X11/.test(ua)) return "linux";
+    return null;
+};
+
+document.addEventListener("DOMContentLoaded", () => {
+    const button = document.getElementById("home-download");
+    if (!button) return;
+    const label = button.querySelector(".home-download-label");
+    const format = button.querySelector(".home-download-format");
+    // Unknown systems and phones keep the page's Windows zip.
+    const os = detectOs() || "windows";
+    button.classList.remove("os-windows");
+    button.classList.add(`os-${os}`);
+
+    if (os === "macos") {
+        button.href = new URL("empezar/instalacion/", SITE_ROOT).href;
+        label.textContent = "macOS: aún sin paquete";
+        format.textContent = "compila desde el código";
+        return;
+    }
+
+    const target = PACKAGES[os];
+    const version = button.dataset.version;
+    button.href = `${RELEASES}/download/v${version}/gaanim-v${version}${target.suffix}`;
+    label.textContent = `Descargar para ${target.system}`;
+    format.textContent = `x64 · ${target.format}`;
+
+    // Point at the newest release; without an answer the build's version stays.
+    fetch("https://api.github.com/repos/PaoloLupo/gaanim/releases/latest", {
+        headers: { Accept: "application/vnd.github+json" },
+    })
+        .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
+        .then((release) => {
+            const asset = (release.assets || []).find((a) => a.name.endsWith(target.suffix));
+            if (!asset) return;
+            button.href = asset.browser_download_url;
+            const info = document.querySelector(".home-download-info");
+            if (info) info.textContent = `${release.tag_name} · ${Math.round(asset.size / 1048576)} MB`;
+        })
+        .catch(() => {});
+});
+
+// ============================================================================
 // Copy buttons on code blocks
 // ============================================================================
 document.addEventListener("DOMContentLoaded", () => {
