@@ -6,6 +6,7 @@ use crate::components::{
 use bevy::animation::AnimationPlayer;
 use bevy::animation::graph::{AnimationGraph, AnimationGraphHandle};
 use bevy::color::Alpha;
+use bevy::ecs::entity::EntityHashSet;
 use bevy::prelude::{
     Added, AssetServer, Assets, Camera, Camera3d, Changed, ChildOf, Children, Commands,
     DirectionalLight, Entity, GlobalAmbientLight, Handle, Local, MeshMaterial3d, Name, Or,
@@ -58,30 +59,90 @@ pub fn has_transform_changes(
 ///
 /// Descendants are updated recursively in parent-before-child order. This prevents
 /// grandchildren (for example text glyphs inside a grouped text object) from using
-/// their parent's transform from the previous frame.
+/// their parent's transform from the previous frame. Only the subtrees below
+/// entities whose inputs changed since the last run are visited.
 pub fn transform_propagation_system(
-    roots: Query<Entity, (Without<ChildOf>, With<SpatialTransform>)>,
-    children_query: Query<&Children>,
-    mut transforms: Query<(
-        &SpatialTransform,
-        &mut GlobalSpatialTransform,
-        Option<&crate::ShapeDeform>,
+    mut queries: ParamSet<(
+        Query<Entity, StaleTransformFilter>,
+        Query<(
+            &SpatialTransform,
+            &mut GlobalSpatialTransform,
+            Option<&crate::ShapeDeform>,
+        )>,
     )>,
-    view_roles: Query<&CoordinateViewRole>,
-    label_offsets: Query<&CoordinateLabelOffset>,
-    parents: Query<&ChildOf>,
+    mut removed: (
+        RemovedComponents<ChildOf>,
+        RemovedComponents<crate::ShapeDeform>,
+        RemovedComponents<CoordinateViewRole>,
+        RemovedComponents<CoordinateLabelOffset>,
+    ),
+    children_query: Query<&'static Children>,
+    view_roles: Query<&'static CoordinateViewRole>,
+    label_offsets: Query<&'static CoordinateLabelOffset>,
+    parents: Query<&'static ChildOf>,
 ) {
-    for root in &roots {
-        propagate_transforms_recursive(
-            root,
-            None,
-            &children_query,
-            &mut transforms,
-            &view_roles,
-            &label_offsets,
-            &parents,
-        );
+    // A presentation keeps every object of every segment alive, so recomputing
+    // the whole hierarchy would cost the full scene on every animated frame.
+    let mut stale_set: EntityHashSet = queries.p0().iter().collect();
+    stale_set.extend(removed.0.read());
+    stale_set.extend(removed.1.read());
+    stale_set.extend(removed.2.read());
+    stale_set.extend(removed.3.read());
+    let propagation = Propagation {
+        children_query: &children_query,
+        view_roles: &view_roles,
+        label_offsets: &label_offsets,
+        parents: &parents,
+        stale: Some(&stale_set),
+    };
+    let mut transforms = queries.p1();
+    for &entity in &stale_set {
+        // A stale ancestor's subtree already covers this entity.
+        let mut ancestor = parents.get(entity).ok().map(ChildOf::parent);
+        let mut covered = false;
+        while let Some(current) = ancestor {
+            if stale_set.contains(&current) {
+                covered = true;
+                break;
+            }
+            ancestor = parents.get(current).ok().map(ChildOf::parent);
+        }
+        if covered {
+            continue;
+        }
+        let parent_global = match parents.get(entity) {
+            // A parent without a transform never reaches its children.
+            Ok(parent) => match transforms.get(parent.parent()) {
+                Ok((_, global, _)) => Some(*global),
+                Err(_) => continue,
+            },
+            Err(_) => None,
+        };
+        propagate_transforms_recursive(entity, parent_global, true, &mut transforms, &propagation);
     }
+}
+
+/// Entities whose world transform may differ from what propagation last
+/// wrote: their own inputs changed, or another system wrote their world
+/// transform (HUD pinning, billboards).
+type StaleTransformFilter = Or<(
+    Changed<SpatialTransform>,
+    Changed<GlobalSpatialTransform>,
+    Changed<ChildOf>,
+    Changed<crate::ShapeDeform>,
+    Changed<CoordinateViewRole>,
+    Changed<CoordinateLabelOffset>,
+)>;
+
+/// Read-only inputs of [`propagate_transforms_recursive`].
+struct Propagation<'a, 'w1, 's1, 'w2, 's2, 'w3, 's3, 'w4, 's4> {
+    children_query: &'a Query<'w1, 's1, &'static Children>,
+    view_roles: &'a Query<'w2, 's2, &'static CoordinateViewRole>,
+    label_offsets: &'a Query<'w3, 's3, &'static CoordinateLabelOffset>,
+    parents: &'a Query<'w4, 's4, &'static ChildOf>,
+    /// Entities to recompute even when their parent did not change; `None`
+    /// recomputes the whole subtree.
+    stale: Option<&'a EntityHashSet>,
 }
 
 /// `local` with `deform` applied about its position, in the parent's space.
@@ -106,23 +167,69 @@ fn deformed_local(
 fn propagate_transforms_recursive(
     entity: Entity,
     parent_global: Option<GlobalSpatialTransform>,
-    children_query: &Query<&Children>,
+    parent_changed: bool,
     transforms: &mut Query<(
         &SpatialTransform,
         &mut GlobalSpatialTransform,
         Option<&crate::ShapeDeform>,
     )>,
-    view_roles: &Query<&CoordinateViewRole>,
-    label_offsets: &Query<&CoordinateLabelOffset>,
-    parents: &Query<&ChildOf>,
+    propagation: &Propagation,
 ) {
-    let Ok((local, mut global, deform)) = transforms.get_mut(entity) else {
-        return;
+    let recompute = parent_changed
+        || propagation
+            .stale
+            .is_none_or(|stale| stale.contains(&entity));
+    let (current_global, changed) = if recompute {
+        let Some(computed) =
+            computed_global(entity, parent_global.as_ref(), transforms, propagation)
+        else {
+            return;
+        };
+        let Ok((_, mut global, _)) = transforms.get_mut(entity) else {
+            return;
+        };
+        // Leave an unchanged value alone so change detection stays precise.
+        let changed = *global != computed;
+        if changed {
+            *global = computed;
+        }
+        (computed, changed)
+    } else {
+        let Ok((_, global, _)) = transforms.get(entity) else {
+            return;
+        };
+        (*global, false)
     };
+
+    if let Ok(children) = propagation.children_query.get(entity) {
+        for child in children.iter() {
+            propagate_transforms_recursive(
+                *child,
+                Some(current_global),
+                changed || propagation.stale.is_none(),
+                transforms,
+                propagation,
+            );
+        }
+    }
+}
+
+/// World transform of `entity` under `parent_global`.
+fn computed_global(
+    entity: Entity,
+    parent_global: Option<&GlobalSpatialTransform>,
+    transforms: &Query<(
+        &SpatialTransform,
+        &mut GlobalSpatialTransform,
+        Option<&crate::ShapeDeform>,
+    )>,
+    propagation: &Propagation,
+) -> Option<GlobalSpatialTransform> {
+    let (local, _, deform) = transforms.get(entity).ok()?;
     let deformed = deform
         .filter(|deform| deform.0 != gaanim_core::kurbo::Affine::IDENTITY)
         .map(|deform| deformed_local(local, deform.0));
-    *global = match (parent_global.as_ref(), deformed) {
+    let mut current_global = match (parent_global, deformed) {
         (Some(parent), Some(local)) => GlobalSpatialTransform {
             affine_2d: parent.affine_2d * local.affine_2d,
             mat4: parent.mat4 * local.mat4,
@@ -131,10 +238,10 @@ fn propagate_transforms_recursive(
         (Some(parent), None) => GlobalSpatialTransform::from_parent_and_local(parent, local),
         (None, None) => GlobalSpatialTransform::from_local(local),
     };
-    let mut current_global = *global;
-    drop(global);
-
-    if matches!(view_roles.get(entity), Ok(CoordinateViewRole::Label)) {
+    if matches!(
+        propagation.view_roles.get(entity),
+        Ok(CoordinateViewRole::Label)
+    ) {
         // Only text roots need this alternate linear transform. Keep the fully
         // transformed origin, but omit domain-view scale from the glyph basis.
         // Apply before descending so every glyph gets the correction this frame.
@@ -149,7 +256,10 @@ fn propagate_transforms_recursive(
                 break;
             };
             let mut local = *local;
-            if matches!(view_roles.get(ancestor), Ok(CoordinateViewRole::View)) {
+            if matches!(
+                propagation.view_roles.get(ancestor),
+                Ok(CoordinateViewRole::View)
+            ) {
                 needs_compensation |= local.scale != gaanim_core::glam::DVec3::ONE;
                 local.scale = gaanim_core::glam::DVec3::ONE;
             }
@@ -158,7 +268,7 @@ fn propagate_transforms_recursive(
             if ancestor != entity {
                 parent_basis = local.to_affine_2d() * parent_basis;
             }
-            let Ok(parent) = parents.get(ancestor) else {
+            let Ok(parent) = propagation.parents.get(ancestor) else {
                 break;
             };
             ancestor = parent.parent();
@@ -170,7 +280,8 @@ fn propagate_transforms_recursive(
             // Place the label at its zoomed data point plus an unzoomed offset:
             // swap the parent's zoomed linear map for its unzoomed one on the offset.
             let (mut dx, mut dy) = (0.0, 0.0);
-            if let (Ok(offset), Some(parent)) = (label_offsets.get(entity), parent_global.as_ref())
+            if let (Ok(offset), Some(parent)) =
+                (propagation.label_offsets.get(entity), parent_global)
             {
                 let [pa, pb, pc, pd, _, _] = parent.affine_2d.as_coeffs();
                 let [ua, ub, uc, ud, _, _] = parent_basis.as_coeffs();
@@ -184,25 +295,10 @@ fn propagate_transforms_recursive(
             basis.mat4.w_axis.x += dx;
             basis.mat4.w_axis.y += dy;
             current_global.mat4 = basis.mat4;
-            if let Ok((_, mut global, _)) = transforms.get_mut(entity) {
-                *global = current_global;
-            }
         }
     }
 
-    if let Ok(children) = children_query.get(entity) {
-        for child in children.iter() {
-            propagate_transforms_recursive(
-                *child,
-                Some(current_global),
-                children_query,
-                transforms,
-                view_roles,
-                label_offsets,
-                parents,
-            );
-        }
-    }
+    Some(current_global)
 }
 
 /// World transform that keeps HUD overlays fixed on the output frame while an
@@ -250,15 +346,15 @@ pub fn world_hud_pin(world: &bevy::prelude::World) -> Option<gaanim_core::kurbo:
 pub fn pin_hud_overlays_system(
     camera: Option<Res<gaanim_math::ResolvedCamera>>,
     hud: Query<Entity, With<crate::components::HudOverlay>>,
-    children_query: Query<&Children>,
+    children_query: Query<&'static Children>,
     mut transforms: Query<(
         &SpatialTransform,
         &mut GlobalSpatialTransform,
         Option<&crate::ShapeDeform>,
     )>,
-    view_roles: Query<&CoordinateViewRole>,
-    label_offsets: Query<&CoordinateLabelOffset>,
-    parents: Query<&ChildOf>,
+    view_roles: Query<&'static CoordinateViewRole>,
+    label_offsets: Query<&'static CoordinateLabelOffset>,
+    parents: Query<&'static ChildOf>,
     mut pinned: Local<bool>,
 ) {
     let pin = camera.as_deref().and_then(|camera| hud_pin(camera));
@@ -284,11 +380,15 @@ pub fn pin_hud_overlays_system(
         propagate_transforms_recursive(
             root,
             Some(pinned_parent),
-            &children_query,
+            true,
             &mut transforms,
-            &view_roles,
-            &label_offsets,
-            &parents,
+            &Propagation {
+                children_query: &children_query,
+                view_roles: &view_roles,
+                label_offsets: &label_offsets,
+                parents: &parents,
+                stale: None,
+            },
         );
     }
 }
@@ -303,66 +403,124 @@ pub fn has_opacity_changes(
 }
 
 /// System: Propagate opacity cascade down the hierarchy using Bevy 0.19's `ChildOf` relation.
+///
+/// Only subtrees below an entity whose opacity inputs changed are visited.
 pub fn opacity_propagation_system(
-    roots: Query<(Entity, Option<&ChildOf>), With<Opacity>>,
-    children_query: Query<&Children>,
-    local_opacities: Query<&Opacity>,
-    parents: Query<&ChildOf>,
-    mut opacities: Query<(&Opacity, &mut GlobalOpacity)>,
-    presences: Query<&crate::Presence>,
+    mut queries: ParamSet<(
+        Query<Entity, StaleOpacityFilter>,
+        Query<(&Opacity, &mut GlobalOpacity)>,
+    )>,
+    mut removed: (
+        RemovedComponents<ChildOf>,
+        RemovedComponents<crate::Presence>,
+        RemovedComponents<Opacity>,
+    ),
+    children_query: Query<&'static Children>,
+    local_opacities: Query<&'static Opacity>,
+    parents: Query<&'static ChildOf>,
+    presences: Query<&'static crate::Presence>,
 ) {
-    for (root, parent) in &roots {
-        // Text and imported assets can contain structural grouping entities
-        // without an Opacity component. Such an entity must not cut the
-        // cascade: an opacity-bearing child below it is a propagation root.
-        if parent
-            .is_none_or(|parent| !has_opacity_ancestor(parent.parent(), &parents, &local_opacities))
-        {
-            propagate_opacities_recursive(root, 1.0, &children_query, &mut opacities, &presences);
+    let mut stale: EntityHashSet = queries.p0().iter().collect();
+    stale.extend(removed.0.read());
+    stale.extend(removed.1.read());
+    stale.extend(removed.2.read());
+    let mut opacities = queries.p1();
+    let propagation = OpacityPropagation {
+        children_query: &children_query,
+        presences: &presences,
+        stale: &stale,
+    };
+    for &entity in &stale {
+        let mut ancestor = parents.get(entity).ok().map(ChildOf::parent);
+        let mut covered = false;
+        while let Some(current) = ancestor {
+            if stale.contains(&current) {
+                covered = true;
+                break;
+            }
+            ancestor = parents.get(current).ok().map(ChildOf::parent);
         }
+        if covered {
+            continue;
+        }
+        let parent_opacity =
+            inherited_opacity(entity, &parents, &local_opacities, &opacities, &presences);
+        propagate_opacities_recursive(entity, parent_opacity, true, &mut opacities, &propagation);
     }
 }
 
-fn has_opacity_ancestor(
-    mut entity: Entity,
-    parents: &Query<&ChildOf>,
-    opacities: &Query<&Opacity>,
-) -> bool {
-    loop {
-        if opacities.get(entity).is_ok() {
-            return true;
+/// Entities whose world opacity may differ from what propagation last wrote.
+type StaleOpacityFilter = Or<(
+    Changed<Opacity>,
+    Changed<GlobalOpacity>,
+    Changed<crate::Presence>,
+    Changed<ChildOf>,
+)>;
+
+struct OpacityPropagation<'a, 'w1, 's1, 'w2, 's2> {
+    children_query: &'a Query<'w1, 's1, &'static Children>,
+    presences: &'a Query<'w2, 's2, &'static crate::Presence>,
+    stale: &'a EntityHashSet,
+}
+
+/// The opacity the cascade hands to `entity`: that of the nearest ancestor
+/// with a world opacity, times the presence of the structural entities in
+/// between. Text and imported assets can contain structural grouping entities
+/// without an `Opacity`; they never cut the cascade, and the cascade starts at
+/// the topmost entity with an `Opacity`.
+fn inherited_opacity(
+    entity: Entity,
+    parents: &Query<&'static ChildOf>,
+    local_opacities: &Query<&'static Opacity>,
+    opacities: &Query<(&Opacity, &mut GlobalOpacity)>,
+    presences: &Query<&'static crate::Presence>,
+) -> f32 {
+    let mut product = 1.0;
+    let mut cascade = 1.0;
+    let mut ancestor = parents.get(entity).ok().map(ChildOf::parent);
+    while let Some(current) = ancestor {
+        if let Ok((_, global)) = opacities.get(current) {
+            return product * global.0;
         }
-        let Ok(parent) = parents.get(entity) else {
-            return false;
-        };
-        entity = parent.parent();
+        product *= presences.get(current).map_or(1.0, |presence| presence.0);
+        if local_opacities.contains(current) {
+            cascade = product;
+        }
+        ancestor = parents.get(current).ok().map(ChildOf::parent);
     }
+    cascade
 }
 
 fn propagate_opacities_recursive(
     entity: Entity,
     parent_opacity: f32,
-    children_query: &Query<&Children>,
+    parent_changed: bool,
     opacities: &mut Query<(&Opacity, &mut GlobalOpacity)>,
-    presences: &Query<&crate::Presence>,
+    propagation: &OpacityPropagation,
 ) {
-    let presence = presences.get(entity).map_or(1.0, |presence| presence.0);
-    let current_opacity = if let Ok((local, mut global)) = opacities.get_mut(entity) {
-        global.0 = local.0 * parent_opacity * presence;
-        global.0
-    } else {
-        parent_opacity * presence
+    let recompute = parent_changed || propagation.stale.contains(&entity);
+    let presence = || {
+        propagation
+            .presences
+            .get(entity)
+            .map_or(1.0, |presence| presence.0)
+    };
+    let (current_opacity, changed) = match opacities.get_mut(entity) {
+        Ok((local, mut global)) if recompute => {
+            let value = local.0 * parent_opacity * presence();
+            let changed = global.0 != value;
+            if changed {
+                global.0 = value;
+            }
+            (value, changed)
+        }
+        Ok((_, global)) => (global.0, false),
+        Err(_) => (parent_opacity * presence(), recompute),
     };
 
-    if let Ok(children) = children_query.get(entity) {
+    if let Ok(children) = propagation.children_query.get(entity) {
         for child in children.iter() {
-            propagate_opacities_recursive(
-                *child,
-                current_opacity,
-                children_query,
-                opacities,
-                presences,
-            );
+            propagate_opacities_recursive(*child, current_opacity, changed, opacities, propagation);
         }
     }
 }

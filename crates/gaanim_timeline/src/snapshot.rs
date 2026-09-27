@@ -11,6 +11,10 @@ use gaanim_scene::{
 use std::collections::HashMap;
 
 use crate::clip::SceneId;
+
+/// `ObjectId` to entity map with a fast hasher: seeks look up every
+/// Mobject of the scene on each frame.
+pub(crate) type ObjectEntityMap = bevy::platform::collections::HashMap<ObjectId, Entity>;
 use crate::scene::SceneMember;
 
 /// Authored camera poses captured by timeline events and referenced by later clips.
@@ -115,7 +119,8 @@ pub struct EntitySnapshot {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct WorldSnapshot {
     /// A map from unique object IDs to their captured snapshots.
-    pub entities: HashMap<ObjectId, EntitySnapshot>,
+    /// Boxed so the map stays small: seeks look up every Mobject per frame.
+    pub entities: bevy::platform::collections::HashMap<ObjectId, Box<EntitySnapshot>>,
     /// Complete authored camera state. Presentation viewport fit is excluded.
     #[cfg_attr(feature = "serde", serde(default))]
     pub camera: Option<gaanim_math::Camera>,
@@ -318,7 +323,7 @@ impl WorldSnapshot {
     /// Camera state is always captured in full.
     pub fn capture_spawned_after(world: &mut World, tick: Option<Tick>) -> Self {
         let this_run = world.change_tick();
-        let mut entities = HashMap::new();
+        let mut entities = bevy::platform::collections::HashMap::new();
         let camera = world.get_resource::<gaanim_math::Camera>().copied();
         let camera_states = world
             .get_resource::<CapturedCameraStates>()
@@ -447,7 +452,7 @@ impl WorldSnapshot {
         }
 
         for (id, snapshot) in captured_data {
-            entities.insert(id, snapshot);
+            entities.insert(id, Box::new(snapshot));
         }
 
         Self {
@@ -474,38 +479,53 @@ impl WorldSnapshot {
         world: &mut World,
         restore_scene_visibility: bool,
         mut needs_restore: impl FnMut(&World, ObjectId, Entity) -> bool,
-    ) -> HashMap<ObjectId, Entity> {
+    ) -> ObjectEntityMap {
         if let Some(camera) = self.camera {
             if world.get_resource::<gaanim_math::Camera>() != Some(&camera) {
                 world.insert_resource(camera);
             }
         }
         world.insert_resource(CapturedCameraStates(self.camera_states.clone()));
-        // 1. Gather all existing entities and build a dynamic mapping of ObjectIds to Bevy Entities
-        let mut existing_entities = Vec::new();
-        let mut entity_map = HashMap::new();
+        // 1. Map every existing Mobject in one pass: hide the ones missing from
+        //    the snapshot and select the ones to restore.
+        let mut entity_map = ObjectEntityMap::with_capacity(self.entities.len());
+        let mut hidden = Vec::new();
+        let mut restored = Vec::new();
+        let mut matched = 0;
         {
-            let mut query = world.query::<(Entity, &MobjectId)>();
-            for (entity, mobj_id) in query.iter(world) {
-                if world.get::<gaanim_animation::EchoGhost>(entity).is_some() {
+            let mut query = world.query_filtered::<
+                (Entity, &MobjectId, bevy::prelude::Has<Visible>),
+                bevy::prelude::Without<gaanim_animation::EchoGhost>,
+            >();
+            for (entity, mobj_id, visible) in query.iter(world) {
+                let id = mobj_id.0;
+                let previous = entity_map.insert(id, entity);
+                if let Some(previous) = previous {
+                    // The last entity with an id wins, as a map rebuild would.
+                    restored.retain(|&(_, restored_entity)| restored_entity != previous);
+                }
+                match self.entities.get(&id) {
+                    None if visible => hidden.push(entity),
+                    None => {}
+                    Some(snap) => {
+                        matched += usize::from(previous.is_none());
+                        if needs_restore(world, id, entity) {
+                            restored.push((snap, entity));
+                        }
+                    }
+                }
+            }
+        }
+        for entity in hidden {
+            world.entity_mut(entity).remove::<Visible>();
+        }
+
+        // 2. Spawn the snapshot's missing entities; they are always restored.
+        if matched < self.entities.len() {
+            for (obj_id, snap) in &self.entities {
+                if entity_map.contains_key(obj_id) {
                     continue;
                 }
-                existing_entities.push((entity, mobj_id.0));
-                entity_map.insert(mobj_id.0, entity);
-            }
-        }
-
-        // 2. Hide any active Mobjects that do not exist in the snapshot
-        for (entity, obj_id) in &existing_entities {
-            if !self.entities.contains_key(obj_id) && world.get::<Visible>(*entity).is_some() {
-                world.entity_mut(*entity).remove::<Visible>();
-            }
-        }
-
-        // 3. Spawn any missing entities first so they exist in entity_map
-        let mut spawned = Vec::new();
-        for (obj_id, snap) in &self.entities {
-            if !entity_map.contains_key(obj_id) {
                 let mut entity = world.spawn((
                     MobjectId(*obj_id),
                     snap.transform,
@@ -516,22 +536,14 @@ impl WorldSnapshot {
                     entity.insert(FillBrush(snap.fill.clone()));
                 }
                 let new_entity = entity.id();
-
                 entity_map.insert(*obj_id, new_entity);
-                spawned.push(new_entity);
+                // Report the new entity to the caller's restore bookkeeping.
+                let _ = needs_restore(world, *obj_id, new_entity);
+                restored.push((snap, new_entity));
             }
         }
-        let restored: Vec<_> = self
-            .entities
-            .iter()
-            .filter_map(|(obj_id, snap)| {
-                let entity = *entity_map.get(obj_id)?;
-                (needs_restore(world, *obj_id, entity) || spawned.contains(&entity))
-                    .then_some((snap, entity))
-            })
-            .collect();
 
-        // 4. Pass 1: Set parent-child relationships for restored entities
+        // 3. Set parent-child relationships for restored entities
         for &(snap, entity) in &restored {
             if let Some(parent_id) = snap.parent {
                 if let Some(&parent_entity) = entity_map.get(&parent_id) {
@@ -542,7 +554,7 @@ impl WorldSnapshot {
             }
         }
 
-        // 5. Pass 2: Overwrite all properties (including transforms) with correct snapshot values
+        // 4. Overwrite all properties (including transforms) with correct snapshot values
         for &(snap, entity) in &restored {
             let mut entity_mut = world.entity_mut(entity);
             insert_snapshot_components(&mut entity_mut, snap, restore_scene_visibility);
@@ -560,10 +572,10 @@ impl WorldSnapshot {
         for (id, target_entity) in &target.entities {
             if let Some(self_entity) = self.entities.get(id) {
                 if self_entity != target_entity {
-                    updates.push(target_entity.clone());
+                    updates.push((**target_entity).clone());
                 }
             } else {
-                updates.push(target_entity.clone());
+                updates.push((**target_entity).clone());
             }
         }
 
