@@ -49,6 +49,20 @@ Sin publicar todavía. No hace falta cambiar tus escenas.
 - El editor muestra el primer fotograma algo antes: la previsualización solo
   prepara el antialiasing que usa.
 
+== Correcciones
+
+- En la inspección 2D del editor (`I`), arrastrar desplazaba la escena mucho
+  más que el cursor: con el marco por defecto de 16 × 9 unidades, un píxel
+  movía más de una unidad. Ahora la escena sigue al cursor al mismo ritmo en
+  cualquier marco, zoom o rotación de cámara, y `W`, `A`, `S`, `D` la
+  desplazan a una velocidad constante en pantalla.
+- El arrastre ya no cuenta el mismo movimiento dos veces (el cursor y el
+  movimiento bruto del ratón) ni salta al volver a entrar en la ventana.
+- En la inspección, el clic que empieza un arrastre ya no avanza a la
+  siguiente parada, y las flechas solo navegan entre paradas y escenas en
+  lugar de mover también la cámara. Arrastrar o usar la rueda sobre la línea
+  de tiempo, los paneles o la barra de overlays ya no mueve la cámara.
+
 = 0.5.0
 
 Publicada el 27 de septiembre de 2026. Cambian el pivote por defecto de las

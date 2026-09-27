@@ -1485,8 +1485,14 @@ desactivada; cada vez que se activa con `I` (o con el indicador
 la escena en ese instante.
 
 - `Num0`: alterna entre *Free 3D* y *Camera View* (la cámara de la escena).
-- Arrastrar con el botón derecho: orbitar; con el central o Mayús + izquierdo:
-  desplazar; rueda: acercar o alejar.
+- En 3D, arrastrar con el botón derecho: orbitar; con el central o Mayús +
+  izquierdo: desplazar. En 2D, arrastrar con cualquier botón desplaza la vista
+  y la escena sigue al cursor. Rueda: acercar o alejar.
+- `W`, `A`, `S`, `D`: desplazan la cámara. Las flechas siguen navegando entre
+  paradas y escenas.
+- Mientras la inspección está activa, un clic en la vista previa no avanza a la
+  siguiente parada; `Enter` y las flechas sí. Arrastrar o usar la rueda sobre
+  los paneles del editor no mueve la cámara.
 - `F`: encuadra la selección, o toda la escena si no hay nada seleccionado.
 - `R`: restablece y encuadra; `I`: activa o desactiva la inspección.
 

@@ -22,9 +22,12 @@ fn sync_editor_input_ignore_system(
     presentation_mode: Res<PresentationMode>,
     editor_state: Res<EditorState>,
     narration: Option<Res<narration::NarrationSession>>,
+    interactive: Option<Res<PreviewInteractive>>,
     mut timeline: ResMut<Timeline>,
     mut stop_policy: ResMut<PlaybackStopPolicy>,
 ) {
+    // In interactive mode a left click starts a camera drag, not the next stop.
+    timeline.ignore_pointer = interactive.is_some_and(|interactive| interactive.enabled);
     // While recording narration, the recorder owns the keyboard and playback.
     if let Some(policy) = narration.as_ref().and_then(|session| session.stop_policy()) {
         timeline.ignore_input = true;
@@ -2272,24 +2275,68 @@ fn preview_mode_keys_system(
     }
 }
 
+/// Window pixels per second covered by the keyboard pan.
+const KEYBOARD_PAN_PIXELS_PER_SECOND: f64 = 400.0;
+
+/// Pointer drag owned by the interactive preview.
+#[derive(Debug, Default)]
+struct PreviewDrag {
+    /// A drag that started over the preview, not over an egui panel.
+    active: bool,
+    /// Cursor position at the previous frame of the drag, in window pixels.
+    cursor: Option<glam::DVec2>,
+}
+
+impl PreviewDrag {
+    /// Returns the cursor movement since the previous frame of the drag.
+    ///
+    /// Only window cursor positions are compared: the raw device motion uses
+    /// other units and would count the same movement twice. Leaving the window
+    /// forgets the position, so coming back does not jump.
+    fn cursor_delta(&mut self, cursor: Option<glam::DVec2>) -> Option<glam::DVec2> {
+        let previous = std::mem::replace(&mut self.cursor, cursor);
+        let delta = cursor? - previous?;
+        (delta.length_squared() > 1e-9).then_some(delta)
+    }
+}
+
+/// Converts a pointer movement in window pixels into the world offset that
+/// keeps the scene under the cursor.
+fn pan_for_screen_delta(
+    camera: &Camera,
+    viewport: CameraViewport,
+    delta: glam::DVec2,
+) -> glam::DVec2 {
+    let mut moved = *camera;
+    moved.pan_screen_delta_with_viewport(delta, viewport);
+    (moved.position - camera.position).truncate()
+}
+
 /// Pan (drag) and zoom (wheel) when interactive mode is enabled.
-/// Wheel zooms; middle/right or left drag pans (left only in interactive mode).
+/// Wheel zooms; middle/right or left drag pans.
 /// Also updates the system cursor to Grab/Grabbing while interactive.
 /// For perspective cameras: Right-drag orbits, Middle/Shift+Left pan, Wheel dolly.
+/// `WASD` moves the camera; the arrows keep navigating stops and scenes.
+/// Drags and the wheel over egui panels belong to those panels.
+#[allow(clippy::too_many_arguments)]
 fn preview_interactive_input_system(
+    egui_wants: Res<EguiWantsInput>,
     mut interactive: ResMut<PreviewInteractive>,
     authored_camera: Option<Res<Camera>>,
+    rig: Option<Res<gaanim_math::CameraRigCamera>>,
     viewport: Res<CameraViewport>,
     mouse_button: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     scroll: Res<bevy::input::mouse::AccumulatedMouseScroll>,
-    motion: Res<bevy::input::mouse::AccumulatedMouseMotion>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    mut prev_cursor: Local<Option<glam::DVec2>>,
+    mut drag: Local<PreviewDrag>,
     mut commands: Commands,
     window_entity: Query<Entity, With<bevy::window::PrimaryWindow>>,
 ) {
+    const DRAG_BUTTONS: [MouseButton; 3] =
+        [MouseButton::Left, MouseButton::Middle, MouseButton::Right];
+
     // Cursor feedback: hand when interactive, grabbing while dragging.
     let Ok(win_entity) = window_entity.single() else {
         return;
@@ -2298,13 +2345,16 @@ fn preview_interactive_input_system(
         commands
             .entity(win_entity)
             .remove::<bevy::window::CursorIcon>();
-        *prev_cursor = None;
+        *drag = PreviewDrag::default();
         return;
     }
-    let is_panning_now = mouse_button.pressed(MouseButton::Middle)
-        || mouse_button.pressed(MouseButton::Right)
-        || mouse_button.pressed(MouseButton::Left);
-    let icon = if is_panning_now {
+    let pointer_over_ui = egui_wants.wants_any_pointer_input();
+    if !mouse_button.any_pressed(DRAG_BUTTONS) {
+        drag.active = false;
+    } else if mouse_button.any_just_pressed(DRAG_BUTTONS) && !pointer_over_ui {
+        drag.active = true;
+    }
+    let icon = if drag.active {
         bevy::window::CursorIcon::System(bevy::window::SystemCursorIcon::Grabbing)
     } else {
         bevy::window::CursorIcon::System(bevy::window::SystemCursorIcon::Grab)
@@ -2313,21 +2363,25 @@ fn preview_interactive_input_system(
 
     let mut cam = match interactive.view {
         PreviewView::Free3D => interactive.free_camera,
-        PreviewView::CameraView => authored_camera.as_deref().copied(),
+        // The rig camera, when present, is the one the preview shows.
+        PreviewView::CameraView => rig
+            .as_deref()
+            .map(|rig| rig.0)
+            .or_else(|| authored_camera.as_deref().copied()),
     };
     let Some(ref mut cam) = cam else {
-        *prev_cursor = None;
+        drag.cursor = None;
         return;
     };
     let Ok(window) = windows.single() else {
-        *prev_cursor = None;
+        drag.cursor = None;
         return;
     };
 
     let is_perspective = matches!(cam.projection, gaanim_math::Projection::Perspective { .. });
 
     // --- Zoom / Dolly with mouse wheel ---
-    let wheel_delta = scroll.delta.y;
+    let wheel_delta = if pointer_over_ui { 0.0 } else { scroll.delta.y };
     if wheel_delta.abs() > f32::EPSILON {
         let step = match scroll.unit {
             bevy::input::mouse::MouseScrollUnit::Line => wheel_delta * 0.12,
@@ -2344,106 +2398,54 @@ fn preview_interactive_input_system(
         }
     }
 
-    // --- Keyboard pan fallback ---
-    {
-        if is_perspective {
-            let mut kdelta = glam::DVec2::ZERO;
-            let speed = 5.0;
-            if keys.pressed(KeyCode::ArrowLeft) || keys.pressed(KeyCode::KeyA) {
-                kdelta.x -= speed;
-            }
-            if keys.pressed(KeyCode::ArrowRight) || keys.pressed(KeyCode::KeyD) {
-                kdelta.x += speed;
-            }
-            if keys.pressed(KeyCode::ArrowUp) || keys.pressed(KeyCode::KeyW) {
-                kdelta.y += speed;
-            }
-            if keys.pressed(KeyCode::ArrowDown) || keys.pressed(KeyCode::KeyS) {
-                kdelta.y -= speed;
-            }
-            if kdelta.length_squared() > 1e-9 {
-                cam.pan_screen_delta_with_viewport(kdelta, *viewport);
-            }
-        } else {
-            let proj_zoom = match cam.projection {
-                gaanim_math::Projection::Orthographic { zoom } => zoom,
-                _ => 1.0,
-            };
-            let effective = (viewport.scale * proj_zoom).max(0.1);
-            let speed = 400.0 / effective * time.delta_secs_f64();
-            let mut kdelta = glam::DVec2::ZERO;
-            if keys.pressed(KeyCode::ArrowLeft) || keys.pressed(KeyCode::KeyA) {
-                kdelta.x -= speed;
-            }
-            if keys.pressed(KeyCode::ArrowRight) || keys.pressed(KeyCode::KeyD) {
-                kdelta.x += speed;
-            }
-            if keys.pressed(KeyCode::ArrowUp) || keys.pressed(KeyCode::KeyW) {
-                kdelta.y += speed;
-            }
-            if keys.pressed(KeyCode::ArrowDown) || keys.pressed(KeyCode::KeyS) {
-                kdelta.y -= speed;
-            }
-            if kdelta.length_squared() > 1e-9 {
-                interactive.pan += kdelta;
+    // --- Keyboard pan: WASD moves the camera at a constant screen speed ---
+    if !egui_wants.wants_keyboard_input() {
+        let mut direction = glam::DVec2::ZERO;
+        if keys.pressed(KeyCode::KeyA) {
+            direction.x -= 1.0;
+        }
+        if keys.pressed(KeyCode::KeyD) {
+            direction.x += 1.0;
+        }
+        if keys.pressed(KeyCode::KeyW) {
+            direction.y += 1.0;
+        }
+        if keys.pressed(KeyCode::KeyS) {
+            direction.y -= 1.0;
+        }
+        if direction != glam::DVec2::ZERO {
+            // Moving the camera right is dragging the scene left.
+            let speed = KEYBOARD_PAN_PIXELS_PER_SECOND * time.delta_secs_f64();
+            let delta = glam::DVec2::new(-direction.x, direction.y) * speed;
+            if is_perspective {
+                cam.pan_screen_delta_with_viewport(delta, *viewport);
+            } else {
+                interactive.pan += pan_for_screen_delta(cam, *viewport, delta);
             }
         }
     }
 
     // --- Mouse drag: orbit / pan ---
-    let cur = window
+    let cursor = window
         .cursor_position()
         .map(|p| glam::DVec2::new(p.x as f64, p.y as f64));
+    let delta = drag.cursor_delta(cursor);
 
+    let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
     let is_orbiting = is_perspective && mouse_button.pressed(MouseButton::Right);
     let is_panning_3d = is_perspective
         && (mouse_button.pressed(MouseButton::Middle)
-            || (mouse_button.pressed(MouseButton::Left)
-                && (keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight))));
-    let is_panning_2d = !is_perspective
-        && (mouse_button.pressed(MouseButton::Middle)
-            || mouse_button.pressed(MouseButton::Right)
-            || mouse_button.pressed(MouseButton::Left));
-    let is_dragging = is_orbiting || is_panning_3d || is_panning_2d;
+            || (mouse_button.pressed(MouseButton::Left) && shift));
+    let is_panning_2d = !is_perspective && mouse_button.any_pressed(DRAG_BUTTONS);
 
-    if !is_dragging {
-        if interactive.view == PreviewView::Free3D {
-            interactive.free_camera = Some(*cam);
-        }
-        *prev_cursor = cur;
-        return;
-    }
-    let mut delta_opt: Option<glam::DVec2> = None;
-    if let (Some(cur_pos), Some(prev)) = (cur, *prev_cursor) {
-        let d = cur_pos - prev;
-        if d.length_squared() > 1e-9 {
-            delta_opt = Some(d);
-        }
-        *prev_cursor = Some(cur_pos);
-    } else if let Some(cur_pos) = cur {
-        *prev_cursor = Some(cur_pos);
-    }
-    if delta_opt.is_none() && motion.delta.length_squared() > 1e-9 {
-        let m = motion.delta;
-        delta_opt = Some(glam::DVec2::new(m.x as f64, m.y as f64));
-    }
-    let Some(delta) = delta_opt else {
-        return;
-    };
-    if is_perspective {
+    if let Some(delta) = delta.filter(|_| drag.active) {
         if is_orbiting {
             let _ = cam.orbit_around_target(delta.x * 0.005, -delta.y * 0.005);
         } else if is_panning_3d {
             cam.pan_screen_delta_with_viewport(delta, *viewport);
+        } else if is_panning_2d {
+            interactive.pan += pan_for_screen_delta(cam, *viewport, delta);
         }
-    } else {
-        let proj_zoom = match cam.projection {
-            gaanim_math::Projection::Orthographic { zoom } => zoom,
-            _ => 1.0,
-        };
-        let effective = (viewport.scale * proj_zoom).max(0.1);
-        interactive.pan.x -= delta.x / effective;
-        interactive.pan.y += delta.y / effective;
     }
     if interactive.view == PreviewView::Free3D {
         interactive.free_camera = Some(*cam);
@@ -3430,6 +3432,49 @@ mod tests {
             pbr.clear_color,
             bevy::camera::ClearColorConfig::None
         ));
+    }
+
+    #[test]
+    fn dragging_a_logical_frame_moves_the_scene_with_the_cursor() {
+        // 16 × 9 units at 1920 × 1080: 120 output pixels per unit, shown at
+        // 2/3 in a 1280-pixel-wide preview, so one unit spans 80 window pixels.
+        let mut camera = Camera::ortho_2d_frame(16.0, 9.0, 1920, 1080);
+        let viewport = CameraViewport {
+            scale: 2.0 / 3.0,
+            ..CameraViewport::default()
+        };
+        let pan = pan_for_screen_delta(&camera, viewport, glam::DVec2::new(80.0, -40.0));
+        assert!(
+            (pan - glam::DVec2::new(-1.0, -0.5)).length() < 1e-9,
+            "{pan}"
+        );
+
+        // An authored zoom and a rotated camera keep the grab under the cursor.
+        camera.projection = gaanim_math::Projection::Orthographic { zoom: 2.0 };
+        camera.rotation = glam::DQuat::from_rotation_z(std::f64::consts::FRAC_PI_2);
+        let pan = pan_for_screen_delta(&camera, viewport, glam::DVec2::new(160.0, 0.0));
+        assert!((pan - glam::DVec2::new(0.0, -1.0)).length() < 1e-9, "{pan}");
+    }
+
+    #[test]
+    fn preview_drag_uses_cursor_steps_and_does_not_jump_after_leaving_the_window() {
+        let mut drag = PreviewDrag::default();
+        assert_eq!(drag.cursor_delta(Some(glam::DVec2::new(10.0, 10.0))), None);
+        assert_eq!(
+            drag.cursor_delta(Some(glam::DVec2::new(13.0, 6.0))),
+            Some(glam::DVec2::new(3.0, -4.0))
+        );
+        assert_eq!(drag.cursor_delta(Some(glam::DVec2::new(13.0, 6.0))), None);
+        assert_eq!(drag.cursor_delta(None), None);
+        assert_eq!(
+            drag.cursor_delta(Some(glam::DVec2::new(600.0, 400.0))),
+            None,
+            "re-entering the window starts a new step"
+        );
+        assert_eq!(
+            drag.cursor_delta(Some(glam::DVec2::new(601.0, 400.0))),
+            Some(glam::DVec2::new(1.0, 0.0))
+        );
     }
 
     #[test]

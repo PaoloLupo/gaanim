@@ -214,10 +214,12 @@ pub fn interactive_stop_input_system(
             .as_ref()
             .is_some_and(|keyboard| keyboard.just_pressed(key))
     };
+    let ignore_pointer = timeline.ignore_pointer;
     let mouse_pressed = |button| {
-        mouse
-            .as_ref()
-            .is_some_and(|mouse| mouse.just_pressed(button))
+        !ignore_pointer
+            && mouse
+                .as_ref()
+                .is_some_and(|mouse| mouse.just_pressed(button))
     };
 
     if key_pressed(KeyCode::Home) {
@@ -756,6 +758,47 @@ mod tests {
         assert!(!app.world().contains_resource::<ButtonInput<KeyCode>>());
         assert!(!app.world().contains_resource::<ButtonInput<MouseButton>>());
         app.update();
+    }
+
+    #[test]
+    fn hosts_can_reserve_clicks_without_losing_keyboard_stops() {
+        let mut timeline = Timeline::new();
+        timeline.cached_duration = 2.0;
+        timeline.current_time = 1.0;
+        timeline.set_segments(vec![timeline::SegmentMetadata {
+            id: 1,
+            name: "slide".to_owned(),
+            notes: None,
+            start_time: 0.0,
+            end_time: 2.0,
+            stops: vec![timeline::SegmentStop {
+                name: None,
+                time: 1.0,
+                ambient: None,
+            }],
+        }]);
+        timeline.ignore_pointer = true;
+        let mut app = App::new();
+        app.insert_resource(timeline)
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .add_systems(Update, interactive_stop_input_system);
+        let advanced = |app: &App| {
+            let timeline = app.world().resource::<Timeline>();
+            timeline.is_playing || timeline.seek_request.is_some()
+        };
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        app.update();
+        assert!(!advanced(&app), "a reserved click does not leave the stop");
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Enter);
+        app.update();
+        assert!(advanced(&app), "Enter still advances");
     }
 
     #[test]
