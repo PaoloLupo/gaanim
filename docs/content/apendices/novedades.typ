@@ -11,6 +11,18 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.6.1
+
+Sin publicar todavía. No hace falta cambiar tus escenas.
+
+== Cambios
+
+- Gaanim tiene licencia: se distribuye bajo MIT OR Apache-2.0, a elección de
+  quien lo usa. Los vídeos, imágenes, archivos `.gaanim` y scripts que creas
+  con Gaanim son tuyos y no están sujetos a esa licencia. Las descargas
+  incluyen `LICENSE-MIT`, `LICENSE-APACHE` y `THIRD-PARTY-NOTICES.txt` con los
+  avisos de las bibliotecas y fuentes de terceros.
+
 = 0.6.0
 
 Publicada el 27 de septiembre de 2026. Llega el formato `.gaanim`: una

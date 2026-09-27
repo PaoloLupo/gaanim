@@ -60,6 +60,9 @@ jobs:
           Copy-Item target/dist/gaanim-play.exe "$stage/gaanim-play.exe"
           Copy-Item target/wheels/gaanim-*-py3-none-any.whl "$stage/"
           if (Test-Path README.md) { Copy-Item README.md "$stage/" }
+          Copy-Item LICENSE-MIT, LICENSE-APACHE "$stage/"
+          python scripts/third_party_licenses.py --output "$stage/THIRD-PARTY-NOTICES.txt"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           @"
           Gaanim $ver — Windows x64
           
@@ -70,6 +73,7 @@ jobs:
             3. Verifica: gaanim --help  (launcher detecta automaticamente .venv sin necesidad de PATH/VIRTUAL_ENV)
           
           Contenido: gaanim.exe + gaanim-core.exe + gaanim-play.exe + wheel ligero para autocompletado
+          Licencia: MIT OR Apache-2.0 (LICENSE-MIT, LICENSE-APACHE); componentes de terceros en THIRD-PARTY-NOTICES.txt
           Los paquetes .gaanim se reproducen, presentan y exportan sin Python:
             gaanim --present charla.gaanim
             gaanim export charla.gaanim --output charla.mp4
@@ -163,7 +167,8 @@ jobs:
           stage="dist/stage"
           mkdir -p "$stage"
           install -m 755 target/dist/gaanim target/dist/gaanim-core target/dist/gaanim-play "$stage/"
-          install -m 644 target/wheels/gaanim-*-py3-none-any.whl README.md "$stage/"
+          install -m 644 target/wheels/gaanim-*-py3-none-any.whl README.md LICENSE-MIT LICENSE-APACHE "$stage/"
+          python scripts/third_party_licenses.py --output "$stage/THIRD-PARTY-NOTICES.txt"
           tar -C "$stage" -czf "dist/$archive" .
           (cd dist && sha256sum "$archive" > "$archive.sha256")
 
