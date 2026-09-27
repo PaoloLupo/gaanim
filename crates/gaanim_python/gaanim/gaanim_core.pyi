@@ -3397,8 +3397,9 @@ class CameraViewAnimation:
 
         Shrunk over that region, the screen shows the scene at its real size,
         so the view pops out of the scene without a jump. Played first, it is
-        the screen's entry: until then the screen waits over the region.
-        After ``pop_in`` it returns the screen to where it rested.
+        the view's entry: the screen, and an inset's frame and connectors, stay
+        hidden until it starts. After ``pop_in`` it returns the screen to where
+        it rested and shows them again.
 
         Example:
             scene.play([view.animate.pop_out().duration(0.8)])
@@ -3407,9 +3408,10 @@ class CameraViewAnimation:
     def pop_in(self) -> Anim:
         """Shrink the screen back into the region its camera sees.
 
-        The screen hides when it lands, so a view layer stops showing over
-        the scene; the next ``pop_out`` shows it again. The frame and any
-        connectors keep their own visibility.
+        The screen, and an inset's frame and connectors, hide when it lands,
+        so a view layer stops showing over the scene; the next ``pop_out``
+        shows them again. The frame of a ``camera_view`` belongs to you and
+        keeps its visibility.
         """
         ...
 
@@ -5354,8 +5356,8 @@ class MediaLibrary:
         360x220 px SVG spans 3.6x2.2 units of the 16x9 frame. Stroke widths,
         gradients, clip paths, text outlines and filter lengths scale with the
         geometry. ``scale_to(factor)`` resizes the whole import; fluent stroke
-        widths set on the root stay in logical scene units and are not
-        affected by that scale.
+        widths set on the root or on a ``part(id)``, fixed or animated, stay in
+        logical scene units and are not affected by that scale.
 
         Example:
             logo = scene.media.svg("assets/logo.svg")  # 120 px -> 1.2 units
@@ -6006,9 +6008,9 @@ class Mechanics:
         distance and ``scale`` while the dimension geometry keeps following its
         endpoints.
         ``label_orientation`` keeps text horizontal or aligned while avoiding
-        upside-down labels. Upright labels on steep lines move outward by the
-        part of their width that exceeds their height, keeping the
-        ``label_gap`` clearance of horizontal dimensions. ``color`` initializes the extension lines,
+        upside-down labels. ``label_gap`` separates the line from the nearest
+        edge of the annotation, so an upright label on a steep line moves out
+        by its half width. ``color`` initializes the extension lines,
         solid triangular arrowheads and the complete annotation, including its
         reactive value. Math labels and reactive values share one 0.48-unit typographic baseline by default, including
         subscripted formulas. ``line_width`` controls the filled line geometry

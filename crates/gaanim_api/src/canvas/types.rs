@@ -942,6 +942,9 @@ pub struct ObjectSpec {
     pub stroke_align: Option<gaanim_renderer::effects::StrokeAlign>,
     /// This group is the public root of an imported SVG hierarchy.
     pub(crate) svg_root: bool,
+    /// Root of the imported SVG this group or path belongs to. Stroke widths
+    /// set on it are in scene units, like those set on the root.
+    pub(crate) svg_owner: Option<ObjectId>,
     pub glow: Option<gaanim_renderer::effects::Glow>,
     pub blur: Option<gaanim_renderer::effects::GaussianBlur>,
     pub shadow: Option<gaanim_renderer::effects::DropShadow>,
@@ -1003,6 +1006,7 @@ impl ObjectSpec {
             stroke_overridden: false,
             stroke_align: None,
             svg_root: false,
+            svg_owner: None,
             glow: None,
             blur: None,
             shadow: None,
@@ -2074,12 +2078,14 @@ impl Anim {
         focus: Option<(ObjectId, DVec3, DVec3)>,
         zoom: Option<(ObjectId, bool)>,
         out: bool,
+        companions: Vec<ObjectId>,
     ) -> Self {
         self.effect(AnimationType::CameraViewPop {
             frame,
             focus,
             zoom,
             out,
+            companions,
         })
     }
 

@@ -694,6 +694,16 @@ impl DrawableHandle {
 
     pub(crate) fn with_svg_parts(mut self, parts: HashMap<String, DrawableHandle>) -> Self {
         self.spec.lock().expect("object spec poisoned").svg_root = true;
+        let owned = self
+            .style_targets
+            .iter()
+            .chain(parts.values().map(|part| &part.spec));
+        for spec in owned {
+            let mut spec = spec.lock().expect("object spec poisoned");
+            if !spec.svg_root {
+                spec.svg_owner = Some(self.id);
+            }
+        }
         self.named_parts = Some(Arc::new(parts));
         self
     }

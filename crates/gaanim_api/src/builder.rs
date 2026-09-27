@@ -57,6 +57,14 @@ pub(crate) enum EquationTransitionMode {
     Copy,
 }
 
+/// Where a camera view screen rests, and how opaque it and its companions
+/// were before a `pop_in` hid them.
+#[derive(Clone, Debug)]
+pub(crate) struct CameraViewRest {
+    transform: SpatialTransform,
+    opacities: Vec<(ObjectId, f32)>,
+}
+
 #[derive(Clone, Debug, Default)]
 struct EquationTransitionPlan {
     pairs: Vec<(ObjectId, ObjectId)>,
@@ -811,7 +819,7 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub(crate) text_tracking: HashMap<ObjectId, f64>,
     /// Resting transforms and opacities of camera view screens hidden by
     /// `pop_in`, which the next `pop_out` returns to.
-    pub(crate) camera_view_rests: HashMap<ObjectId, (SpatialTransform, f32)>,
+    pub(crate) camera_view_rests: HashMap<ObjectId, CameraViewRest>,
     /// Typing state of Texts animated by typewriter/scramble motions.
     pub(crate) text_motion: crate::text_motion::TextMotionState,
     /// Objects whose scene membership is intentionally global at the current authoring cursor.
@@ -857,7 +865,7 @@ pub(crate) struct SceneBuilderState {
     arrow_shapes: HashMap<ObjectId, gaanim_math::ArrowShape>,
     connectors: HashSet<ObjectId>,
     text_tracking: HashMap<ObjectId, f64>,
-    camera_view_rests: HashMap<ObjectId, (SpatialTransform, f32)>,
+    camera_view_rests: HashMap<ObjectId, CameraViewRest>,
     text_motion: crate::text_motion::TextMotionState,
     persistent_objects: HashSet<ObjectId>,
     membership_managed_objects: HashSet<ObjectId>,
@@ -5581,8 +5589,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     ///
     /// Shrunk over that region, the screen shows the scene at its real size,
     /// so the view starts or ends without a jump. An outgoing pop that does
-    /// not follow a `pop_in` is the screen's entry: before it the screen
-    /// waits over the region.
+    /// not follow a `pop_in` is the view's entry: the screen and its
+    /// companions stay hidden until it starts. A `pop_in` hides them once the
+    /// screen lands, so a view layer stops showing over the scene.
     fn play_camera_view_pop_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         use gaanim_core::glam::DVec3;
         use gaanim_core::kurbo::{Affine, Point};
@@ -5591,6 +5600,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             focus,
             zoom,
             out,
+            companions,
         } = anim.anim_type
         else {
             return;
@@ -5601,8 +5611,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             return;
         };
         let (entity, bounds, current) = (state.entity, state.bounds, state.transform);
-        let popped_in = self.camera_view_rests.get(&screen).copied();
-        let rest = popped_in.map_or(current, |(rest, _)| rest);
+        let popped_in = self.camera_view_rests.get(&screen).cloned();
+        let rest = popped_in.as_ref().map_or(current, |rest| rest.transform);
         let parent = state.parent.map_or(Affine::IDENTITY, |parent| {
             self.get_world_transform(parent).to_affine_2d()
         });
@@ -5645,17 +5655,19 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         start.translation.x = target.x - center.x;
         start.translation.y = target.y - center.y;
 
-        // A popped-in screen hides once it lands on the region, so a view
-        // layer no longer shows over the scene; the next `pop_out` shows it
-        // again as it leaves.
-        let mut visibility = None;
+        let hidden: Vec<ObjectId> = std::iter::once(screen).chain(companions).collect();
+        // (object, time, opacity from, opacity to) switches of the screen and
+        // its companions.
+        let mut visibility = Vec::new();
         let (from, to) = if out {
             self.camera_view_rests.remove(&screen);
-            if let Some((_, opacity)) = popped_in {
-                visibility = Some((self.current_time, 0.0, opacity));
-            }
-            if popped_in.is_none() {
-                // The screen's entry: it waits over the region until then.
+            if let Some(rest) = popped_in {
+                for (object, opacity) in rest.opacities {
+                    visibility.push((object, self.current_time, 0.0, opacity));
+                }
+                (current, rest.transform)
+            } else {
+                // The view's entry: hidden until it starts, over the region.
                 let declared = start;
                 self.commands.entity(entity).queue(
                     move |mut entity: bevy::prelude::EntityWorldMut<'_>| {
@@ -5665,32 +5677,48 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         }
                     },
                 );
+                for object in &hidden {
+                    if let Some(state) = self.states.get(*object).cloned() {
+                        self.hide_visuals_now(&state);
+                        visibility.push((*object, self.current_time, 0.0, state.opacity));
+                    }
+                }
                 (start, rest)
-            } else {
-                (current, rest)
             }
         } else {
-            let opacity = self.states.get(screen).map_or(1.0, |state| state.opacity);
             if !self.camera_view_rests.contains_key(&screen) {
-                self.camera_view_rests.insert(screen, (current, opacity));
-                visibility = Some((self.current_time + anim.duration, opacity, 0.0));
+                let opacities: Vec<(ObjectId, f32)> = hidden
+                    .iter()
+                    .filter_map(|object| Some((*object, self.states.get(*object)?.opacity)))
+                    .collect();
+                let time = self.current_time + anim.duration;
+                for (object, opacity) in &opacities {
+                    visibility.push((*object, time, *opacity, 0.0));
+                }
+                self.camera_view_rests.insert(
+                    screen,
+                    CameraViewRest {
+                        transform: current,
+                        opacities,
+                    },
+                );
             }
             (current, start)
         };
         if let Some(state) = self.states.get_mut(screen) {
             state.transform.scale = to.scale;
             state.transform.translation = to.translation;
-            if let Some((_, _, opacity)) = visibility {
-                state.opacity = opacity;
-            }
         }
-        if let Some((time, from, to)) = visibility {
+        for (object, time, from, to) in visibility {
+            if let Some(state) = self.states.get_mut(object) {
+                state.opacity = to;
+            }
             self.timeline.add_clip(
                 parent_track,
                 time,
                 0.0,
                 ClipPayload::Animation(AnimationSpec {
-                    target: screen,
+                    target: object,
                     lens: PropertyLensSpec::Opacity { from, to },
                     rate_func: gaanim_math::RateFunc::Linear,
                     delay: 0.0,

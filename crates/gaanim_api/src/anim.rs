@@ -499,12 +499,14 @@ pub enum AnimationType {
     /// view's explicit zoom and whether it holds its natural logarithm; without
     /// it the region is `frame`'s bounds. `focus` is the anchor the frame
     /// follows (object, normalized bounds point, local offset), which sets the
-    /// region's center instead of the frame's authored place.
+    /// region's center instead of the frame's authored place. `companions`
+    /// (an inset's frame and connectors) enter and leave with the screen.
     CameraViewPop {
         frame: ObjectId,
         focus: Option<(ObjectId, DVec3, DVec3)>,
         zoom: Option<(ObjectId, bool)>,
         out: bool,
+        companions: Vec<ObjectId>,
     },
     /// Draw the outline first (like Write) then fill in.
     DrawBorderThenFill {

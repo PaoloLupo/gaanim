@@ -13,8 +13,10 @@ instalar una versión nueva, sigue
 
 = Sin publicar
 
-Cambia el pivote por defecto de las figuras declaradas con coordenadas de
-escena y el final de `pop_in`: lee «Al actualizar».
+Cambian el pivote por defecto de las figuras declaradas con coordenadas de
+escena, la entrada y la salida de las vistas de cámara, los anchos de trazo
+fijados en un SVG y la separación de las etiquetas de cota: lee «Al
+actualizar».
 
 == Al actualizar
 
@@ -27,11 +29,30 @@ escena y el final de `pop_in`: lee «Al actualizar».
   origen, añade `.with_pivot(0, 0)`; si ya usabas `with_pivot` como remedio,
   puedes quitarlo cuando el pivote era el centro de la figura. Las figuras
   centradas en su origen, como `circle`, `rect` o `text`, no cambian.
-- `CameraView.animate.pop_in()` oculta la pantalla al llegar a la región que
-  ve su cámara, y el siguiente `pop_out()` la vuelve a mostrar. Antes seguía
-  visible sobre la región y, con una capa de vista, mostraba su contenido
-  encima de la escena. Si fundías la pantalla tras `pop_in` para ocultarla,
-  ya no hace falta; fundir el marco y los conectores sigue funcionando igual.
+- `CameraView.animate.pop_in()` es la salida simétrica de `pop_out()`:
+  al llegar a la región oculta la pantalla y, en un `scene.camera.inset`,
+  también el marco y los conectores; el siguiente `pop_out()` los vuelve a
+  mostrar. Antes la pantalla seguía visible sobre la región (con una capa de
+  vista, su contenido se veía encima de la escena) y el marco quedaba
+  dibujado. Si los fundías tras `pop_in`, ya no hace falta; el fundido sigue
+  funcionando sin parpadeos.
+- Un `pop_out()` que hace de entrada deja la pantalla, y en un inset el marco
+  y los conectores, ocultos hasta que empieza. Antes la pantalla esperaba
+  visible sobre la región y el marco y los conectores de un inset se veían
+  desde su declaración. Si querías ver el marco antes, anímalo aparte o usa
+  `pop_out()` más tarde.
+- El ancho fijado con `.stroke(color, ancho)` en un SVG importado, o en una
+  de sus partes, se mide en unidades de escena aunque el SVG tenga
+  `scale_to` o `scale_by`, igual que al animarlo con `animate.stroke(...)`.
+  Antes se multiplicaba por esa escala, así que `.stroke(c, 1.6)` con
+  `scale_to(0.58)` dibujaba 0.93 unidades mientras que el mismo ancho animado
+  dibujaba 1.6. Escribe el ancho que quieres ver: `.stroke(c, 0.0093)` para
+  el trazo fino de antes. Los trazos propios del archivo siguen escalando con
+  el dibujo.
+- `label_gap` de `mechanics.dimension_between` es la separación entre la
+  línea y el borde más cercano de la anotación. Antes se medía hasta su
+  centro, así que con los valores por defecto la etiqueta montaba sobre la
+  línea. Si subías `label_gap` para despegarla, bájalo o quítalo.
 
 == Cambios
 
@@ -175,12 +196,10 @@ un proyecto existente.
   escalan igual. Es un cambio incompatible: si tus escenas compensaban la
   escala anterior con `scale_to(f)` o `scale_by(f)`, multiplica ese factor por
   100 (`scale_to(0.025)` pasa a `scale_to(2.5)`) o quítalo si el tamaño
-  natural te sirve. El ancho fijado con `.stroke(color, ancho)` se mide en
-  las unidades del SVG y escala con `scale_to`, así que si compensabas la
-  escala divídelo también entre 100: con `scale_to(0.0058)` y
-  `.stroke(c, 1.6)`, que dibujaba un trazo de 0.0093 unidades, pasa a
-  `scale_to(0.58)` y `.stroke(c, 0.016)`. Sin `scale_to`, el ancho se lee en
-  unidades de escena y no cambia.
+  natural te sirve. En esta versión el ancho fijado con `.stroke(color,
+  ancho)` escalaba con `scale_to`, así que también había que dividirlo entre
+  100; a partir de la siguiente se mide en unidades de escena (ver «Sin
+  publicar»).
 - El texto de un SVG con la familia genérica `sans-serif` usa la DejaVu Sans
   que trae Gaanim en cualquier sistema. Antes salía en Arial si estaba
   instalada y desaparecía en los equipos Linux que no la tienen.

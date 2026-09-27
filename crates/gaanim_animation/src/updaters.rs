@@ -1959,25 +1959,6 @@ pub fn dimension_label_placement_system(world: &mut World) {
             to.truncate(),
         );
         let side = if offset < 0.0 { -1.0 } else { 1.0 };
-        // `gap` is measured to the label center across the label height. An
-        // upright label on a steep line is wider across the line than it is
-        // tall, so push it out by that excess to keep the same clearance.
-        let upright_clearance = match placement.orientation {
-            DimensionLabelOrientation::Upright if placement.clear_label_width => {
-                resolve_entity_bounds(placement.label, world)
-                    .map(|bounds| {
-                        let (half_width, half_height) =
-                            (bounds.width() * 0.5, bounds.height() * 0.5);
-                        (normal.x.abs() * half_width + normal.y.abs() * half_height - half_height)
-                            .max(0.0)
-                    })
-                    .unwrap_or(0.0)
-            }
-            _ => 0.0,
-        };
-        let displacement = offset + side * (placement.gap + upright_clearance);
-        let midpoint =
-            (from + to) * 0.5 + DVec3::new(normal.x * displacement, normal.y * displacement, 0.0);
         let mut angle = match placement.orientation {
             DimensionLabelOrientation::Upright => 0.0,
             DimensionLabelOrientation::Aligned => direction.y.atan2(direction.x),
@@ -1990,7 +1971,30 @@ pub fn dimension_label_placement_system(world: &mut World) {
         } else if angle < -std::f64::consts::PI {
             angle += std::f64::consts::TAU;
         }
-        updates.push((placement.label, midpoint, angle));
+        // Dimension labels keep `gap` between the line and their nearest
+        // edge: their box center moves out by the half extent across the
+        // line, which for an upright label on a steep line is its half width.
+        // Other placements (force labels) measure `gap` to the label origin.
+        let (extent, center) = if placement.clear_label_width {
+            label_box(placement.label, world)
+                .map(|(half, center)| {
+                    let extent = match placement.orientation {
+                        DimensionLabelOrientation::Upright => {
+                            normal.x.abs() * half.x + normal.y.abs() * half.y
+                        }
+                        DimensionLabelOrientation::Aligned => half.y,
+                    };
+                    (extent, center)
+                })
+                .unwrap_or((0.0, DVec2::ZERO))
+        } else {
+            (0.0, DVec2::ZERO)
+        };
+        let displacement = offset + side * (placement.gap + extent);
+        let target =
+            (from + to) * 0.5 + DVec3::new(normal.x * displacement, normal.y * displacement, 0.0);
+        let center = DQuat::from_rotation_z(angle) * center.extend(0.0);
+        updates.push((placement.label, target - center, angle));
     }
 
     for (label, world_position, world_angle) in updates {
@@ -2013,6 +2017,30 @@ pub fn dimension_label_placement_system(world: &mut World) {
             transform.rotation = DQuat::from_rotation_z(local_angle);
         }
     }
+}
+
+/// Half size and center of `label`'s box in its own frame: rotated with it
+/// and placed at its origin, at world scale.
+fn label_box(label: Entity, world: &World) -> Option<(DVec2, DVec2)> {
+    let (_, rotation, translation) =
+        entity_world_matrix(label, world)?.to_scale_rotation_translation();
+    let frame = DMat4::from_rotation_translation(rotation, translation).inverse();
+    let bounds = bounds_in_frame(label, &frame, world)?;
+    Some((bounds.size().truncate() * 0.5, bounds.center().truncate()))
+}
+
+fn bounds_in_frame(entity: Entity, frame: &DMat4, world: &World) -> Option<gaanim_math::Bounds3D> {
+    let own = world.get::<LocalBounds>(entity).and_then(|local| {
+        entity_world_matrix(entity, world).map(|matrix| local.0.transform_mat4(&(*frame * matrix)))
+    });
+    let descendants = world
+        .get::<Children>(entity)
+        .into_iter()
+        .flat_map(|children| children.iter())
+        .filter_map(|child| bounds_in_frame(*child, frame, world));
+    own.into_iter()
+        .chain(descendants)
+        .reduce(|left, right| left.union(&right))
 }
 
 /// Follow arbitrary endpoints after authored transforms and custom updaters.
@@ -3046,21 +3074,70 @@ mod tests {
         }
         dimension_label_placement_system(&mut world);
 
-        // A bottom-to-top line puts positive offsets on its left. The label
-        // center moves out by its half width minus the half height `gap` covers.
+        // A bottom-to-top line puts positive offsets on its left. `gap`
+        // separates the line from the label's nearest edge: its half width
+        // on a steep line, its half height on a flat one.
         let vertical = world.get::<SpatialTransform>(vertical).unwrap().translation;
-        assert!((vertical.x + (0.35 + 0.1 + 0.5 - 0.1)).abs() < 1e-9);
+        assert!((vertical.x + (0.35 + 0.1 + 0.5)).abs() < 1e-9);
         assert!((vertical.y - 1.0).abs() < 1e-9);
-        assert!(vertical.x + 0.5 <= -(0.35 + 0.1 - 0.1) + 1e-9);
-        // Horizontal lines keep their established placement.
         let horizontal = world
             .get::<SpatialTransform>(horizontal)
             .unwrap()
             .translation;
         assert!((horizontal.x - 1.0).abs() < 1e-9);
-        assert!((horizontal.y - 0.45).abs() < 1e-9);
+        assert!((horizontal.y - (0.35 + 0.1 + 0.1)).abs() < 1e-9);
         let force = world.get::<SpatialTransform>(force).unwrap().translation;
         assert!((force.x + 0.45).abs() < 1e-9);
+    }
+
+    #[test]
+    fn dimension_labels_clear_the_line_by_the_gap_from_their_box() {
+        // A label box that is off-center from its origin, as text sitting on
+        // its baseline is.
+        let bounds =
+            gaanim_math::Bounds3D::new(DVec3::new(-0.5, -0.05, 0.0), DVec3::new(0.5, 0.25, 0.0));
+        let mut world = World::new();
+        let upright = world
+            .spawn((SpatialTransform::default(), LocalBounds(bounds)))
+            .id();
+        let aligned = world
+            .spawn((SpatialTransform::default(), LocalBounds(bounds)))
+            .id();
+        for (label, orientation, to) in [
+            (
+                upright,
+                DimensionLabelOrientation::Upright,
+                DVec3::new(2.0, 0.0, 0.0),
+            ),
+            (
+                aligned,
+                DimensionLabelOrientation::Aligned,
+                DVec3::new(0.0, 2.0, 0.0),
+            ),
+        ] {
+            world.spawn(DimensionLabelPlacement {
+                label,
+                from: TrackingEndpoint::Static(DVec3::ZERO),
+                to: TrackingEndpoint::Static(to),
+                offset: 0.3,
+                side: None,
+                gap: 0.1,
+                orientation,
+                clear_label_width: true,
+            });
+        }
+        dimension_label_placement_system(&mut world);
+        let world_box = |world: &World, label: Entity| {
+            bounds.transform_mat4(&world.get::<SpatialTransform>(label).unwrap().to_mat4())
+        };
+        let upright = world_box(&world, upright);
+        assert!((upright.min.y - 0.4).abs() < 1e-9, "{upright:?}");
+        assert!((upright.center().x - 1.0).abs() < 1e-9, "{upright:?}");
+        // Along a bottom-to-top line the label turns a quarter and sits on
+        // its left, clear of the line by the gap.
+        let aligned = world_box(&world, aligned);
+        assert!((aligned.max.x + 0.4).abs() < 1e-9, "{aligned:?}");
+        assert!((aligned.center().y - 1.0).abs() < 1e-9, "{aligned:?}");
     }
 
     #[test]

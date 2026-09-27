@@ -2598,7 +2598,7 @@ impl SceneModel {
     ) {
         let scene_start = builder.current_time;
         let transform_targets = Self::transform_targets(&seg.ops);
-        let fade_in_targets: HashSet<ObjectId> = seg
+        let mut fade_in_targets: HashSet<ObjectId> = seg
             .ops
             .iter()
             .flat_map(|op| {
@@ -2616,6 +2616,7 @@ impl SceneModel {
                 })
             })
             .collect();
+        fade_in_targets.extend(Self::camera_view_entries(&seg.ops));
         for (op_index, op) in seg.ops.iter().enumerate() {
             match op {
                 Op::Spawn(spec) => {
@@ -2677,6 +2678,9 @@ impl SceneModel {
                         }
                     }
                     id_map.insert(spec.id, actual.id);
+                    if spec.svg_root {
+                        Self::scene_unit_svg_strokes(builder, spec.id, &object_specs, id_map);
+                    }
                     object_scopes.insert(spec.id, CompiledObjectScope::Segment(scene_id));
                     // Compilation creates every entity up front so arbitrary timeline seeks
                     // remain possible. An object declared after earlier animations must still
@@ -6088,6 +6092,32 @@ impl SceneModel {
         }
     }
 
+    /// Screens whose first pop in `ops` is a `pop_out`, with their companions:
+    /// that pop is their entry, so their declaration does not show them.
+    fn camera_view_entries(ops: &[Op]) -> Vec<ObjectId> {
+        let mut seen = HashSet::new();
+        let mut entries = Vec::new();
+        for op in ops {
+            let anims: &[AnimationBuilder] = match op {
+                Op::Animate { anim, active: true } => std::slice::from_ref(anim),
+                Op::Play(anims) => anims,
+                _ => &[],
+            };
+            for anim in anims {
+                if let AnimationType::CameraViewPop {
+                    out, companions, ..
+                } = &anim.anim_type
+                    && seen.insert(anim.target)
+                    && *out
+                {
+                    entries.push(anim.target);
+                    entries.extend(companions.iter().copied());
+                }
+            }
+        }
+        entries
+    }
+
     /// Whether `target`'s first fade-in in this segment comes after the op at
     /// `index`, i.e. the object is still waiting for that entry animation.
     fn fade_in_pending(ops: &[Op], index: usize, target: ObjectId) -> bool {
@@ -6643,6 +6673,56 @@ impl SceneModel {
         }
     }
 
+    /// Uniform scale an imported SVG root declares through its layout.
+    fn svg_declared_scale(spec: &ObjectSpec) -> f64 {
+        let mut scale = DVec3::ONE;
+        for op in &spec.layout_ops {
+            match op {
+                LayoutOp::SetScale(factor) => scale = DVec3::splat(*factor),
+                LayoutOp::SetScale3D(value) => scale = *value,
+                LayoutOp::ScaleBy(value) => scale *= *value,
+                _ => {}
+            }
+        }
+        (scale.x.abs() * scale.y.abs()).sqrt()
+    }
+
+    /// Keep the stroke widths set on an imported SVG's paths in scene units:
+    /// they are drawn under the root's scale, so divide them by it. The
+    /// file's own strokes scale with the drawing.
+    fn scene_unit_svg_strokes(
+        builder: &mut SceneBuilder,
+        root: ObjectId,
+        object_specs: &HashMap<ObjectId, ObjectSpec>,
+        id_map: &HashMap<ObjectId, ObjectId>,
+    ) {
+        let Some(root_spec) = object_specs.get(&root) else {
+            return;
+        };
+        let scale = Self::svg_declared_scale(root_spec);
+        if !scale.is_finite() || scale <= 1.0e-12 || (scale - 1.0).abs() < 1.0e-12 {
+            return;
+        }
+        let paths: Vec<ObjectId> = object_specs
+            .values()
+            .filter(|spec| {
+                spec.svg_owner == Some(root)
+                    && spec.stroke_overridden
+                    && matches!(spec.kind, SpawnKind::SvgPath(_))
+            })
+            .filter_map(|spec| id_map.get(&spec.id).copied())
+            .collect();
+        for path in paths {
+            if let Some(state) = builder.states.get_mut(path) {
+                state.stroke.style.width /= scale;
+                builder
+                    .commands
+                    .entity(state.entity)
+                    .insert(state.stroke.clone());
+            }
+        }
+    }
+
     fn remap_anim(
         anim: &AnimationBuilder,
         id_map: &HashMap<ObjectId, ObjectId>,
@@ -6713,6 +6793,7 @@ impl SceneModel {
                 focus,
                 zoom,
                 out,
+                companions,
             } => AnimationType::CameraViewPop {
                 frame: *id_map.get(frame)?,
                 focus: match focus {
@@ -6726,6 +6807,10 @@ impl SceneModel {
                     None => None,
                 },
                 out: *out,
+                companions: companions
+                    .iter()
+                    .filter_map(|id| id_map.get(id).copied())
+                    .collect(),
             },
             AnimationType::FadeTransform { target } => AnimationType::FadeTransform {
                 target: *id_map.get(target)?,
@@ -6811,17 +6896,17 @@ impl SceneModel {
             }
             other => other.clone(),
         };
-        if let Some(spec) = object_specs.get(&anim.target).filter(|spec| spec.svg_root) {
-            let mut scale = DVec3::ONE;
-            for op in &spec.layout_ops {
-                match op {
-                    LayoutOp::SetScale(factor) => scale = DVec3::splat(*factor),
-                    LayoutOp::SetScale3D(value) => scale = *value,
-                    LayoutOp::ScaleBy(value) => scale *= *value,
-                    _ => {}
-                }
+        // Stroke widths set on an imported SVG, or on one of its parts, are
+        // in scene units: undo the root's declared scale.
+        let svg_root = object_specs.get(&anim.target).and_then(|spec| {
+            if spec.svg_root {
+                Some(spec)
+            } else {
+                object_specs.get(&spec.svg_owner?)
             }
-            let scale = (scale.x.abs() * scale.y.abs()).sqrt();
+        });
+        if let Some(spec) = svg_root {
+            let scale = Self::svg_declared_scale(spec);
             if scale.is_finite() && scale > 1.0e-12 {
                 match &mut anim_type {
                     AnimationType::StrokeWidthTo { to } => *to /= scale,
@@ -12750,6 +12835,57 @@ mod tests {
         }
         timeline.seek(&mut world, 1.5);
         assert!((opacity_of(&mut world, view.screen()) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn inset_frames_and_connectors_enter_and_leave_with_their_screen() {
+        use crate::canvas::{CameraInsetOptions, CanvasEndpoint};
+
+        let mut canvas = SceneModel::new(640, 360);
+        let target = CanvasEndpoint::Static(DVec3::new(-3.0, -1.0, 0.0));
+        let inset = canvas
+            .camera_inset(target.clone(), CameraInsetOptions::default())
+            .unwrap();
+        canvas.wait(0.5);
+        // Declared mid-scene, it still waits for its entry.
+        let late = canvas
+            .camera_inset(target, CameraInsetOptions::default())
+            .unwrap();
+        canvas.wait(0.5);
+        canvas.play(vec![
+            inset.pop_out().duration(1.0),
+            late.pop_out().duration(1.0),
+        ]);
+        canvas.play(vec![inset.pop_in().duration(1.0)]);
+        canvas.wait(1.0);
+        canvas.play(vec![inset.pop_out().duration(1.0)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+
+        let parts = |view: &crate::canvas::CameraViewHandle| {
+            let mut parts = vec![view.screen().clone(), view.frame().clone()];
+            parts.extend(view.connectors().iter().cloned());
+            parts
+        };
+        for (time, shown) in [
+            (0.25, false),
+            (1.5, true),
+            (2.5, true),
+            (3.5, false),
+            (4.5, true),
+        ] {
+            timeline.seek(&mut world, time);
+            for part in parts(&inset) {
+                let opacity = opacity_of(&mut world, &part);
+                assert_eq!(opacity > 0.5, shown, "{time}: {opacity}");
+            }
+        }
+        for (time, shown) in [(0.75, false), (1.5, true)] {
+            timeline.seek(&mut world, time);
+            for part in parts(&late) {
+                let opacity = opacity_of(&mut world, &part);
+                assert_eq!(opacity > 0.5, shown, "{time}: {opacity}");
+            }
+        }
     }
 
     #[test]

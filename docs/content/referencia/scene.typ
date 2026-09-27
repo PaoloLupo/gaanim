@@ -1314,7 +1314,7 @@ label = scene.viz.readout(view.zoom, format=".1f", prefix="x")
   name: "CameraViewAnimation.pop_out",
   kind: "method",
   returns: (type: "Anim", desc: [La animación.]),
-  desc: [La pantalla sale de la región que ve su cámara y crece hasta su sitio. Encogida sobre esa región muestra la escena a tamaño real, así que la vista brota de la escena sin saltos. Si es la primera animación de la pantalla, hace de entrada: hasta entonces la pantalla espera sobre la región. Tras `pop_in`, la devuelve a donde estaba.],
+  desc: [La pantalla sale de la región que ve su cámara y crece hasta su sitio. Encogida sobre esa región muestra la escena a tamaño real, así que la vista brota de la escena sin saltos. Si es la primera animación de la pantalla, hace de entrada: hasta que empieza, la pantalla (y en un inset, el marco y los conectores) está oculta. Tras `pop_in`, la devuelve a donde estaba y los vuelve a mostrar.],
   none,
 )
 
@@ -1322,7 +1322,7 @@ label = scene.viz.readout(view.zoom, format=".1f", prefix="x")
   name: "CameraViewAnimation.pop_in",
   kind: "method",
   returns: (type: "Anim", desc: [La animación.]),
-  desc: [Encoge la pantalla de vuelta a la región que ve su cámara y la oculta al llegar, así que una capa de vista deja de verse sobre la escena. El siguiente `pop_out` la vuelve a mostrar. El marco y los conectores conservan su visibilidad; retíralos con `fade_out` si hace falta.],
+  desc: [Encoge la pantalla de vuelta a la región que ve su cámara y, al llegar, la oculta junto con el marco y los conectores de un inset, así que una capa de vista deja de verse sobre la escena. Es la salida simétrica de `pop_out`; el siguiente `pop_out` los vuelve a mostrar. En una vista de `camera_view`, el marco es tuyo y conserva su visibilidad.],
   none,
 )
 

@@ -184,6 +184,9 @@ pub struct CameraViewHandle {
     zoom: ViewZoom,
     fit: CameraViewFit,
     connectors: Vec<DrawableHandle>,
+    /// Whether the view created its frame, as an inset does; the frame then
+    /// enters and leaves with the screen.
+    owns_frame: bool,
     /// Shared by every clone, so animation proxies see a later `follow`.
     focus: Arc<Mutex<Option<ViewFocus>>>,
 }
@@ -285,18 +288,31 @@ impl CameraViewHandle {
 
     fn pop(&self, out: bool) -> Anim {
         let focus = *self.focus.lock().expect("camera view focus poisoned");
-        self.screen
-            .animate()
-            .camera_view_pop(self.frame.id, focus, self.zoom.signal(), out)
+        let companions = self
+            .owns_frame
+            .then_some(self.frame.id)
+            .into_iter()
+            .chain(self.connectors.iter().map(|connector| connector.id))
+            .collect();
+        self.screen.animate().camera_view_pop(
+            self.frame.id,
+            focus,
+            self.zoom.signal(),
+            out,
+            companions,
+        )
     }
 
     /// Grow the screen out of the region the camera sees into its place.
+    /// Played first, it is the view's entry: the screen, and an inset's frame
+    /// and connectors, stay hidden until it starts.
     pub fn pop_out(&self) -> Anim {
         self.pop(true)
     }
 
-    /// Shrink the screen back into the region the camera sees. It hides when
-    /// it lands there, until the next [`Self::pop_out`].
+    /// Shrink the screen back into the region the camera sees. The screen,
+    /// and an inset's frame and connectors, hide when it lands there, until
+    /// the next [`Self::pop_out`].
     pub fn pop_in(&self) -> Anim {
         self.pop(false)
     }
@@ -428,6 +444,7 @@ impl DrawableHandle {
             zoom,
             fit: options.fit,
             connectors: Vec::new(),
+            owns_frame: false,
             focus: Arc::new(Mutex::new(None)),
         })
     }
@@ -701,6 +718,7 @@ impl SceneModel {
             view.follow(target, DVec3::ZERO);
         }
         view.connectors = connectors;
+        view.owns_frame = true;
         Ok(view)
     }
 }
