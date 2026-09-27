@@ -580,7 +580,7 @@ scene.render()
   name: "Drawable.motion_blur",
   kind: "method",
   params: ((name: "enabled", type: "bool", default: "True", desc: [`False` mantiene nítido el objeto y sus miembros.]),),
-  desc: [Si el #link("/referencia/scene/#api-scene-motion_blur")[desenfoque de movimiento] de la escena lo difumina. Con `False`, cada subcuadro lo dibuja como está en el tiempo del cuadro, por ejemplo para un título o un HUD que no deben emborronarse mientras todo lo demás se mueve. Las copias de `echo` heredan el ajuste.],
+  desc: [Si el #link("/referencia/themes/#api-canvas-motion_blur")[desenfoque de movimiento] de la escena lo difumina. Con `False`, cada subcuadro lo dibuja como está en el tiempo del cuadro, por ejemplo para un título o un HUD que no deben emborronarse mientras todo lo demás se mueve. Las copias de `echo` heredan el ajuste.],
   none,
 )
 

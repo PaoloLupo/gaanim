@@ -6,7 +6,7 @@ from gaanim import BLUE, CORAL, GOLD, WHITE, Scene
 
 
 scene = Scene(frame=(16, 9), background="#101826")
-scene.motion_blur(180, samples=12)
+scene.canvas.motion_blur(180, samples=12)
 
 scene.segment("fast")
 # The title moves too, but stays sharp: it is exempt from the blur.

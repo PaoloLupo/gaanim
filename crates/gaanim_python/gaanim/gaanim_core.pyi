@@ -2225,11 +2225,14 @@ class Drawable:
         """
         ...
     def motion_blur(self, enabled: bool = True) -> Drawable:
-        """Whether ``Scene.motion_blur`` smears this drawable (the default).
+        """Whether ``Canvas.motion_blur`` smears this drawable (the default).
 
         With ``False`` the drawable and its members draw in every sub-frame as
         they are at the frame time, e.g. a title or HUD that must stay sharp
         while everything else moves. Echo copies inherit the setting.
+
+        Example:
+            hud = scene.text("t = 0").move_to(-6, 4).motion_blur(False)
         """
         ...
     def echo(self, count: int = 5, *, delay: float = 0.04, decay: float = 0.6) -> Drawable:
@@ -3294,9 +3297,12 @@ class Text(Drawable):
         """
         ...
     def motion_blur(self, enabled: bool = True) -> Self:
-        """Whether ``Scene.motion_blur`` smears the text, preserving Text chaining.
+        """Whether ``Canvas.motion_blur`` smears the text, preserving Text chaining.
 
         See ``Drawable.motion_blur``.
+
+        Example:
+            title.motion_blur(False).move_to(0.0, 3.0)
         """
         ...
     def echo(self, count: int = 5, *, delay: float = 0.04, decay: float = 0.6) -> Self:
@@ -3304,6 +3310,10 @@ class Text(Drawable):
 
         See ``Drawable.echo``; each glyph's copy replays that glyph's own
         animations, so per-glyph reveals echo glyph by glyph.
+
+        Example:
+            title.echo(3, delay=0.1, decay=0.5)
+            scene.play([title.animate.write()])
         """
         ...
     @overload
@@ -3439,6 +3449,26 @@ class Canvas:
         """Logical height remaining after top and bottom safe-area margins."""
         ...
     background: Optional[BackgroundLike]
+    def motion_blur(self, shutter_angle: Optional[float] = 180.0, samples: int = 8, *, phase: Optional[float] = None) -> None:
+        """Blur motion in exported frames and snapshots like a film camera.
+
+        Every frame averages ``samples`` (2-64) sub-frames spread over the time
+        its shutter is open: ``shutter_angle`` degrees of a frame (180 is the
+        film standard, 360 blurs across the whole frame, up to 720). ``phase``
+        is where the shutter opens relative to the frame time, in degrees of a
+        frame; by default the shutter is centered on it. Sub-frames are exact
+        timeline seeks averaged in linear light, so blurred exports are
+        deterministic, and they never cross a segment cut. The shutter length
+        follows the export frame rate (snapshots use 60 fps). ``None`` turns
+        the blur off. The interactive preview and native 3D scenes stay sharp;
+        rendering costs ``samples`` times as much. Keep a drawable sharp with
+        ``drawable.motion_blur(False)``.
+
+        Example:
+            scene.canvas.motion_blur(180, samples=12)
+            title.motion_blur(False)
+        """
+        ...
     @property
     def post(self) -> Optional[PostProcess | list[PostProcess]]:
         """Return the scene post-process: ``None``, one ``PostProcess``, or a
@@ -6834,26 +6864,6 @@ class Scene:
 
         Raises:
             ValueError: If any drawable belongs to another ``Scene``.
-        """
-        ...
-    def motion_blur(self, shutter_angle: Optional[float] = 180.0, samples: int = 8, *, phase: Optional[float] = None) -> None:
-        """Blur motion in exported frames and snapshots like a film camera.
-
-        Every frame averages ``samples`` (2-64) sub-frames spread over the time
-        its shutter is open: ``shutter_angle`` degrees of a frame (180 is the
-        film standard, 360 blurs across the whole frame, up to 720). ``phase``
-        is where the shutter opens relative to the frame time, in degrees of a
-        frame; by default the shutter is centered on it. Sub-frames are exact
-        timeline seeks averaged in linear light, so blurred exports are
-        deterministic, and they never cross a segment cut. The shutter length
-        follows the export frame rate (snapshots use 60 fps). ``None`` turns
-        the blur off. The interactive preview and native 3D scenes stay sharp;
-        rendering costs ``samples`` times as much. Keep a drawable sharp with
-        ``drawable.motion_blur(False)``.
-
-        Example:
-            scene.motion_blur(180, samples=12)
-            title.motion_blur(False)
         """
         ...
     def wait(self, seconds: float) -> None:
