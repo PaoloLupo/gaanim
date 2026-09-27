@@ -108,7 +108,7 @@ fn export_summary(telemetry: &Option<ExportTelemetry>, config: &ExportConfig) {
     }
 }
 
-fn export_progress(telemetry: &Option<ExportTelemetry>, current: u64, total: u64) {
+pub(crate) fn export_progress(telemetry: &Option<ExportTelemetry>, current: u64, total: u64) {
     if let Some(telemetry) = telemetry {
         telemetry.set_current_frame(current);
     }

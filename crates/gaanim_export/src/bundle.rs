@@ -105,6 +105,13 @@ impl RecordingPlan {
         Self { grid, extras }
     }
 
+    /// Grid instants the second world steps through before its last extra.
+    pub fn second_pass_steps(&self) -> usize {
+        self.extras.last().map_or(0, |last| {
+            self.grid.partition_point(|time| time < last)
+        })
+    }
+
     /// Every recorded instant, in time order.
     pub fn times(&self) -> Vec<f64> {
         let mut times: Vec<f64> = self.grid.iter().chain(&self.extras).copied().collect();
@@ -117,6 +124,45 @@ impl RecordingPlan {
 /// [`RecordingPlan`].
 pub fn recording_times(timeline: &Timeline, fps: u32) -> Vec<f64> {
     RecordingPlan::new(timeline, fps).times()
+}
+
+/// Terminal bar, editor telemetry and export-worker marker for a recording.
+struct RecordingProgress {
+    bar: indicatif::ProgressBar,
+    telemetry: Option<ExportTelemetry>,
+    total: u64,
+    done: std::cell::Cell<u64>,
+    window: std::cell::Cell<Instant>,
+}
+
+impl RecordingProgress {
+    fn new(total: u64, telemetry: Option<ExportTelemetry>) -> Self {
+        let bar = crate::exporter::create_progress_bar(total);
+        bar.set_prefix("record");
+        Self {
+            bar,
+            telemetry,
+            total,
+            done: std::cell::Cell::new(0),
+            window: std::cell::Cell::new(Instant::now()),
+        }
+    }
+
+    fn advance(&self) {
+        let done = self.done.get() + 1;
+        self.done.set(done);
+        self.bar.inc(1);
+        if done.is_multiple_of(30) || done == self.total {
+            let elapsed = self.window.replace(Instant::now()).elapsed();
+            self.bar
+                .set_message(format!("{:.1} fps", 30.0 / elapsed.as_secs_f64().max(1e-9)));
+            crate::exporter::export_progress(&self.telemetry, done, self.total);
+        }
+    }
+
+    fn finish(&self) {
+        self.bar.finish_and_clear();
+    }
 }
 
 fn scene_spans(timeline: &Timeline) -> Vec<SceneSpan> {
@@ -396,27 +442,25 @@ where
     let audio = audio_data(&mut writer, app.world())?;
 
     let total = plan.grid.len() + plan.extras.len();
+    // Progress counts every instant the recording visits, including the grid
+    // instants the second world steps through without recording them.
+    let work = (total + plan.second_pass_steps()) as u64;
     if let Some(telemetry) = &telemetry {
-        telemetry.set_total_frames(total as u64);
+        telemetry.set_total_frames(work);
     }
-    let progress = crate::exporter::create_progress_bar(total as u64);
+    let progress = RecordingProgress::new(work, telemetry);
     let mut fragments = gaanim_renderer::fragment::FragmentStore::default();
-    let mut recorded = 0_u64;
     let mut push = |writer: &mut BundleWriter<_>, frame: Frame| -> Result<()> {
         let digest = gaanim_bundle::frame_digest(&frame, background.as_ref(), &mut fragments);
         writer.push_frame(&frame, digest).map_err(bundle_error)?;
         fragments.end_frame();
-        recorded += 1;
-        progress.inc(1);
-        if let Some(telemetry) = &telemetry {
-            telemetry.set_current_frame(recorded);
-        }
         Ok(())
     };
 
     for &time in &plan.grid {
         let frame = record_frame(&mut app, time, config.fps, &post_shaders)?;
         push(&mut writer, frame)?;
+        progress.advance();
     }
     let clear_color = app.world().get_resource::<ClearColor>().map(|clear| {
         let rgba = clear.0.to_srgba();
@@ -440,12 +484,14 @@ where
             // Visit the grid up to the instant as the first world did.
             while let Some(time) = grid.next_if(|time| *time < extra) {
                 step_frame(&mut app, time, config.fps)?;
+                progress.advance();
             }
             let frame = record_frame(&mut app, extra, config.fps, &post_shaders)?;
             push(&mut writer, frame)?;
+            progress.advance();
         }
     }
-    progress.finish_and_clear();
+    progress.finish();
 
     let scene = SceneData {
         clear_color,

@@ -37,7 +37,8 @@ Sin publicar todavía. No hace falta cambiar tus escenas.
 - `gaanim --diff --example mi-charla.gaanim` captura y compara las pausas de un
   paquete, sin Python; coinciden con las de `--capture-stops` sobre el script.
 - El diálogo Exportar del editor ofrece el formato Paquete para grabar un
-  `.gaanim` del script abierto.
+  `.gaanim` del script abierto, con su barra de progreso; en la terminal,
+  `gaanim export` muestra la suya.
 - El `README.md` de los proyectos nuevos incluye cómo compartirlos como
   paquete.
 

@@ -901,6 +901,9 @@ pub fn export_dialog_system(
                 if let Ok(mut lock) = progress_clone.lock() {
                     if let Some(ref mut p) = *lock {
                         p.result = Some(result);
+                        // A recording counts its own work, which can exceed
+                        // the dialog's frame estimate.
+                        p.total_frames = p.total_frames.max(p.telemetry.progress().1);
                         p.current_frame = p.total_frames;
                     }
                 }
