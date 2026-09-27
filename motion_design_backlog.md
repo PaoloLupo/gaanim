@@ -146,7 +146,7 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
 | ☐ | [FX-02](#fx-02--uniforms-enlazables-y-cadena-de-post-procesos) | Uniforms enlazables y cadena de post-procesos | M | ★★★ | — | [#140](https://github.com/PaoloLupo/gaanim/issues/140) |
 | ☐ | [FX-03](#fx-03--presets-de-acabado) | Presets de acabado: grain, viñeta, aberración, grading, LUT | S | ★★★ | FX-02 | [#141](https://github.com/PaoloLupo/gaanim/issues/141) |
 | ☐ | [FX-09](#fx-09--fondos-vivos) | Fondos vivos (mesh/noise gradient, aurora, rejilla) | S | ★★ | — | [#142](https://github.com/PaoloLupo/gaanim/issues/142) |
-| ☐ | [FX-07](#fx-07--modos-de-fusión-por-objeto) | Modos de fusión por objeto | S | ★★ | — | [#143](https://github.com/PaoloLupo/gaanim/issues/143) |
+| ☑ | [FX-07](#fx-07--modos-de-fusión-por-objeto) | Modos de fusión por objeto | S | ★★ | — | [#143](https://github.com/PaoloLupo/gaanim/issues/143) |
 | ☐ | [FX-04](#fx-04--bloom-multipaso) | Bloom multipaso | M | ★★★ | FX-02 | [#144](https://github.com/PaoloLupo/gaanim/issues/144) |
 | ☐ | [FX-05](#fx-05--motion-blur-por-sub-frames) | Motion blur por sub-frames | M | ★★★ | — | [#145](https://github.com/PaoloLupo/gaanim/issues/145) |
 | ☐ | [FX-06](#fx-06--echo-y-estelas) | Echo y estelas | M | ★★ | — | [#146](https://github.com/PaoloLupo/gaanim/issues/146) |
@@ -161,7 +161,7 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
 | ☐ | [PR-06](#pr-06--conexiones-tipo-plexus) | Conexiones tipo plexus | S | ★ | PR-04 | [#150](https://github.com/PaoloLupo/gaanim/issues/150) |
 | ☐ | [PR-07](#pr-07--emisor-de-partículas-determinista) | Emisor de partículas determinista | M | ★★★ | PR-02 | [#151](https://github.com/PaoloLupo/gaanim/issues/151) |
 | ☐ | [PR-08](#pr-08--física-analítica-ligera) | Física analítica ligera (`throw`, `inertia`) | M | ★★ | — | [#152](https://github.com/PaoloLupo/gaanim/issues/152) |
-| ☐ | [TR-02](#tr-02--dash-offset-animado) | Dash offset animado | S | ★★ | — | [#153](https://github.com/PaoloLupo/gaanim/issues/153) |
+| ☑ | [TR-02](#tr-02--dash-offset-animado) | Dash offset animado | S | ★★ | — | [#153](https://github.com/PaoloLupo/gaanim/issues/153) |
 | ☐ | [TR-04](#tr-04--modificadores-de-path) | Modificadores de path no destructivos | M | ★★ | — | [#154](https://github.com/PaoloLupo/gaanim/issues/154) |
 | ☐ | [TR-05](#tr-05--trazo-con-grosor-variable) | Trazo con grosor variable (taper) | M | ★★ | — | [#155](https://github.com/PaoloLupo/gaanim/issues/155) |
 | ☐ | [TM-04](#tm-04--keyframes-multicanal) | Keyframes multicanal | M | ★★ | — | [#156](https://github.com/PaoloLupo/gaanim/issues/156) |
@@ -182,10 +182,10 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
 | ☐ | [TX-06](#tx-06--texto-sobre-trayectoria) | Texto sobre trayectoria | M | ★★ | TR-03 | [#166](https://github.com/PaoloLupo/gaanim/issues/166) |
 | ☐ | [TS-03](#ts-03--magic-move-por-claves) | Magic move por claves | M | ★★★ | QW-04 | [#167](https://github.com/PaoloLupo/gaanim/issues/167) |
 | ☐ | [AN-01](#an-01--anotaciones-a-mano-alzada) | Anotaciones a mano alzada | M | ★★★ | TR-01, PR-02 | [#168](https://github.com/PaoloLupo/gaanim/issues/168) |
-| ☐ | [AN-03](#an-03--puntas-de-flecha-en-cualquier-trazo) | Puntas de flecha en cualquier trazo | S | ★ | TR-01 | [#169](https://github.com/PaoloLupo/gaanim/issues/169) |
+| ☑ | [AN-03](#an-03--puntas-de-flecha-en-cualquier-trazo) | Puntas de flecha en cualquier trazo | S | ★ | TR-01 | [#169](https://github.com/PaoloLupo/gaanim/issues/169) |
 | ☐ | [AN-04](#an-04--énfasis-adicionales) | Énfasis adicionales (broadcast, spotlight…) | S | ★★ | — | [#170](https://github.com/PaoloLupo/gaanim/issues/170) |
 | ☐ | [AN-05](#an-05--carrera-de-barras) | Carrera de barras (bar chart race) | M | ★★ | — | [#171](https://github.com/PaoloLupo/gaanim/issues/171) |
-| ☐ | [AN-07](#an-07--anillos-de-progreso-y-temporizadores) | Anillos de progreso y temporizadores | S | ★ | TR-01 | [#172](https://github.com/PaoloLupo/gaanim/issues/172) |
+| ☑ | [AN-07](#an-07--anillos-de-progreso-y-temporizadores) | Anillos de progreso y temporizadores | S | ★ | TR-01 | [#172](https://github.com/PaoloLupo/gaanim/issues/172) |
 
 ### Ola 6: apuestas grandes
 

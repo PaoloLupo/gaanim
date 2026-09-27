@@ -2887,6 +2887,7 @@ impl SceneModel {
         target.glow = source.glow;
         target.blur = source.blur;
         target.shadow = source.shadow;
+        target.blend = source.blend;
         drop(target);
         Ok(result)
     }

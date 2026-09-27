@@ -899,6 +899,9 @@ pub enum UpdaterPreset {
     /// Additive procedural layer evaluated from timeline time (wiggle,
     /// oscillators); see [`gaanim_animation::ProceduralMotion`].
     Procedural(gaanim_animation::ProceduralLayer),
+    /// Dashes flowing along every stroke of the target at `speed` scene
+    /// units per second; see [`gaanim_animation::DashFlow`].
+    DashFlow { speed: f64 },
 }
 
 impl UpdaterPreset {
@@ -922,8 +925,10 @@ impl UpdaterPreset {
                 max_scale,
                 frequency,
             } => gaanim_animation::pulse_updater(min_scale, max_scale, frequency),
-            // Procedural layers compile to `ProceduralMotion`, not an updater.
-            UpdaterPreset::Procedural(_) => gaanim_animation::Updater::new(|_, _, _, _| false),
+            // Procedural layers and dash flows compile to components, not an updater.
+            UpdaterPreset::Procedural(_) | UpdaterPreset::DashFlow { .. } => {
+                gaanim_animation::Updater::new(|_, _, _, _| false)
+            }
         }
     }
 }

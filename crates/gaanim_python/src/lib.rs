@@ -13,6 +13,7 @@ mod composition;
 mod custom;
 mod easing;
 mod procedural;
+mod progress_ring;
 mod py3d;
 mod pycamera_view;
 mod pycanvas;
@@ -134,6 +135,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<visualization::PyReadout>()?;
     m.add_class::<visualization::PyVariable>()?;
     m.add_class::<rolling_number::PyRollingNumber>()?;
+    m.add_class::<progress_ring::PyProgressRing>()?;
     m.add_class::<visualization::PyCoordinateRef>()?;
     m.add_class::<visualization::PyCoordinateSpace>()?;
     m.add_class::<visualization::PyCoordinateSpaceAnimation>()?;

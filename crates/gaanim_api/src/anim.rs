@@ -119,6 +119,8 @@ pub struct PropertyAnimation {
     pub blur: Option<Option<gaanim_renderer::effects::GaussianBlur>>,
     /// Target drop shadow (`Some(None)` removes it).
     pub shadow: Option<Option<gaanim_renderer::effects::DropShadow>>,
+    /// Target dash offset of every stroke, in scene units.
+    pub dash_offset: Option<f64>,
 }
 
 impl PropertyAnimation {
@@ -142,6 +144,7 @@ impl PropertyAnimation {
             && self.material.is_none()
             && self.fill_level.is_none()
             && self.media_frame.is_none()
+            && self.dash_offset.is_none()
             && !self.has_effects()
     }
 
@@ -159,6 +162,7 @@ impl PropertyAnimation {
             && self.material.is_none()
             && self.fill_level.is_none()
             && self.media_frame.is_none()
+            && self.dash_offset.is_none()
             && !self.has_effects()
     }
 }
@@ -370,6 +374,10 @@ pub enum AnimationType {
         glow: Option<Option<gaanim_renderer::effects::Glow>>,
         blur: Option<Option<gaanim_renderer::effects::GaussianBlur>>,
         shadow: Option<Option<gaanim_renderer::effects::DropShadow>>,
+    },
+    /// Move the dash pattern of every drawn stroke to `to` (scene units).
+    DashOffsetTo {
+        to: f64,
     },
     /// Trim the drawn path (and its descendants') to `[start, end]` shifted
     /// by `offset`; `None` keeps the current value. `sequential` measures

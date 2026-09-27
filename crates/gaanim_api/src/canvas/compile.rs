@@ -4799,6 +4799,29 @@ impl SceneModel {
                         );
                     }
                 }
+                Op::AttachUpdater {
+                    target,
+                    preset: crate::canvas::UpdaterPreset::DashFlow { speed },
+                } => {
+                    if let Some(target_id) = id_map.get(target).copied() {
+                        let (speed, start) = (*speed, builder.current_time);
+                        for (entity, _) in Self::hierarchy_entities(builder, target_id) {
+                            builder.commands.entity(entity).queue(
+                                move |mut entity: bevy::prelude::EntityWorldMut| {
+                                    if let Some(mut flow) =
+                                        entity.get_mut::<gaanim_animation::DashFlow>()
+                                    {
+                                        flow.push(speed, start);
+                                    } else {
+                                        let mut flow = gaanim_animation::DashFlow::default();
+                                        flow.push(speed, start);
+                                        entity.insert(flow);
+                                    }
+                                },
+                            );
+                        }
+                    }
+                }
                 Op::AttachUpdater { target, preset } => {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(st) = builder.states.get(target_id)
@@ -4814,6 +4837,18 @@ impl SceneModel {
                 Op::RemoveUpdater(target) => {
                     if let Some(target_id) = id_map.get(target).copied() {
                         builder.schedule_remove_updater(target_id);
+                        let end = builder.current_time;
+                        for (entity, _) in Self::hierarchy_entities(builder, target_id) {
+                            builder.commands.entity(entity).queue(
+                                move |mut entity: bevy::prelude::EntityWorldMut| {
+                                    if let Some(mut flow) =
+                                        entity.get_mut::<gaanim_animation::DashFlow>()
+                                    {
+                                        flow.stop_at(end);
+                                    }
+                                },
+                            );
+                        }
                         if let Some(st) = builder.states.get(target_id) {
                             let end = builder.current_time;
                             builder.commands.entity(st.entity).queue(
@@ -7963,6 +7998,47 @@ impl SceneModel {
                 }
                 mr
             }
+            SpawnKind::ProgressArc {
+                source,
+                radius,
+                maximum,
+            } => {
+                let parameters: Vec<(gaanim_core::ObjectId, bevy::prelude::Entity)> = source
+                    .parameter_ids()
+                    .into_iter()
+                    .filter_map(|logical| {
+                        let actual = id_map.get(&logical).copied()?;
+                        Some((logical, builder.states.get(actual)?.entity))
+                    })
+                    .collect();
+                let value = source
+                    .evaluate(builder.current_time, |logical| {
+                        let actual = id_map.get(&logical).copied()?;
+                        builder.float_signals.get(&actual).copied()
+                    })
+                    .unwrap_or(f64::NAN);
+                let arc = gaanim_animation::ProgressArc::new(
+                    source.clone(),
+                    parameters,
+                    *radius,
+                    *maximum,
+                );
+                // The box is the whole ring, so layout does not follow the sweep.
+                let svg_path = gaanim_objects::prelude::SvgPath {
+                    id: "ProgressArc".to_owned(),
+                    path: gaanim_animation::progress_arc_path(*radius, arc.fraction(value)),
+                    bounds: Bounds3D::new_2d(-radius, -radius, *radius, *radius),
+                    fill: None,
+                    stroke: StrokeBrush::transparent(),
+                };
+                let b = builder.svg_path(&svg_path);
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                if let Some(state) = builder.states.get(mr.id) {
+                    builder.commands.entity(state.entity).insert(arc);
+                }
+                mr
+            }
             SpawnKind::DataMark { map, source, kind } => {
                 let path = gaanim_visualization::data_mark_path(map, &source.snapshot(), kind)
                     .unwrap_or_default();
@@ -8544,6 +8620,12 @@ impl SceneModel {
                 builder.commands.entity(entity).insert(align);
             }
         }
+        if let Some(blend) = spec.blend {
+            Self::apply_blend(builder, mref.id, blend);
+        }
+        if let Some(tips) = &spec.tips {
+            Self::attach_tips(builder, mref.id, tips.clone());
+        }
         if let Some(role) = spec.coordinate_view_role
             && let Some(state) = builder.states.get(mref.id)
         {
@@ -8570,6 +8652,73 @@ impl SceneModel {
             }
         }
         mref
+    }
+
+    /// Entities of `id`, its glyph spans and its descendants, each flagged
+    /// with whether it belongs to `id` itself.
+    fn hierarchy_entities(
+        builder: &SceneBuilder,
+        id: ObjectId,
+    ) -> Vec<(bevy::prelude::Entity, bool)> {
+        let mut entities = Vec::new();
+        let mut pending = vec![(id, true)];
+        while let Some((id, own)) = pending.pop() {
+            let Some(state) = builder.states.get(id) else {
+                continue;
+            };
+            entities.push((state.entity, own));
+            entities.extend(state.child_spans.iter().map(|child| (child.entity, own)));
+            pending.extend(state.children.iter().map(|child| (*child, false)));
+        }
+        entities
+    }
+
+    /// Spawns the tip entities of `id`'s path as its children.
+    fn attach_tips(
+        builder: &mut SceneBuilder,
+        id: ObjectId,
+        mut tips: gaanim_animation::StrokeTips,
+    ) {
+        let Some(route) = builder.states.get(id).map(|state| state.entity) else {
+            return;
+        };
+        let spawn_tip = |builder: &mut SceneBuilder| {
+            let tip_id = builder.next_id();
+            let mut bundle = gaanim_objects::primitives::MobjectBundle::new(
+                tip_id,
+                BezPath::new(),
+                Bounds3D::default(),
+            );
+            bundle.fill = FillBrush(None);
+            bundle.stroke = StrokeBrush::transparent();
+            builder
+                .commands
+                .spawn((bundle, gaanim_animation::StrokeTip, ChildOf(route)))
+                .id()
+        };
+        tips.start_entity = tips.start.map(|_| spawn_tip(builder));
+        tips.end_entity = tips.end.map(|_| spawn_tip(builder));
+        builder.commands.entity(route).insert(tips);
+    }
+
+    /// Composites `id` and its drawn descendants with `blend`.
+    ///
+    /// Members of a group are compiled before it, so a member restyled after
+    /// grouping already carries its own blend and keeps it.
+    fn apply_blend(
+        builder: &mut SceneBuilder,
+        id: ObjectId,
+        blend: gaanim_core::peniko::BlendMode,
+    ) {
+        let blend = gaanim_renderer::effects::ElementBlend(blend);
+        for (entity, own) in Self::hierarchy_entities(builder, id) {
+            let mut commands = builder.commands.entity(entity);
+            if own {
+                commands.insert(blend);
+            } else {
+                commands.insert_if_new(blend);
+            }
+        }
     }
 
     fn finish_spawn_builder<'b, 'w, 's, 'a>(
@@ -10810,6 +10959,80 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn tipped_paths_spawn_their_tips_as_children() {
+        use gaanim_animation::{StrokeTip, StrokeTips, TipKind};
+        let mut canvas = SceneModel::new(640, 360);
+        let route = canvas
+            .polyline(&[(0.0, 0.0), (1.0, 1.0), (2.0, 0.0)])
+            .tip(None, Some(TipKind::Arrow), Some(0.3), None)
+            .unwrap();
+        let plain = canvas.circle(1.0);
+        assert!(
+            plain
+                .clone()
+                .tip(None, Some(TipKind::Dot), Some(-1.0), None)
+                .is_err()
+        );
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+        let mut world = world;
+        queue.apply(&mut world);
+
+        let entity = entity_of(&mut world, &route);
+        let tips = world.get::<StrokeTips>(entity).unwrap();
+        assert_eq!((tips.start, tips.end), (None, Some(TipKind::Arrow)));
+        assert!(tips.start_entity.is_none());
+        let tip = tips.end_entity.unwrap();
+        assert!(world.get::<StrokeTip>(tip).is_some());
+        assert_eq!(world.get::<ChildOf>(tip).unwrap().parent(), entity);
+        let plain = entity_of(&mut world, &plain);
+        assert!(world.get::<StrokeTips>(plain).is_none());
+    }
+
+    #[test]
+    fn group_blend_modes_reach_members_that_can_override_them() {
+        use gaanim_core::peniko::{BlendMode, Mix};
+        let mut canvas = SceneModel::new(640, 360);
+        let plain = canvas.circle(1.0);
+        let own = canvas.square(1.0);
+        let group = canvas
+            .group(&[&plain, &own])
+            .blend(Some(Mix::Screen.into()));
+        // Like fill, a member restyled after grouping keeps its own mode.
+        let own = own.blend(Some(Mix::Multiply.into()));
+        let lone = canvas.circle(0.5);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+        let mut world = world;
+        queue.apply(&mut world);
+
+        let mut blend_of = |handle: &DrawableHandle| {
+            let entity = entity_of(&mut world, handle);
+            world
+                .get::<gaanim_renderer::effects::ElementBlend>(entity)
+                .map(|blend| blend.0)
+        };
+        assert_eq!(blend_of(&plain), Some(BlendMode::from(Mix::Screen)));
+        assert_eq!(blend_of(&own), Some(BlendMode::from(Mix::Multiply)));
+        assert_eq!(blend_of(&group), Some(BlendMode::from(Mix::Screen)));
+        assert_eq!(blend_of(&lone), None);
     }
 
     fn entity_of(world: &mut World, handle: &DrawableHandle) -> Entity {
@@ -13193,6 +13416,69 @@ mod tests {
             ]
         );
         assert_eq!(trims[0].1, 0.0);
+    }
+
+    #[test]
+    fn dash_offset_animations_continue_from_the_current_offset() {
+        let mut canvas = SceneModel::new(640, 360);
+        let style = gaanim_core::kurbo::Stroke::new(0.05).with_dashes(0.5, [0.2, 0.1]);
+        let ring = canvas
+            .circle(1.0)
+            .stroke_with_style(Brush::Solid(PenikoColor::WHITE), style);
+        canvas.play(vec![ring.animate().dash_offset(2.0)]);
+        canvas.play(vec![ring.animate().dash_offset(3.0)]);
+        let timeline = compiled_timeline(&canvas);
+        let mut lenses: Vec<_> = timeline
+            .clips
+            .values()
+            .filter_map(|clip| match &clip.payload {
+                gaanim_timeline::clip::ClipPayload::Animation(
+                    gaanim_timeline::clip::AnimationSpec {
+                        lens: gaanim_timeline::clip::PropertyLensSpec::Dynamic(lens),
+                        ..
+                    },
+                ) => Some((clip.start, format!("{lens:?}"))),
+                _ => None,
+            })
+            .collect();
+        lenses.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let lenses: Vec<_> = lenses.into_iter().map(|(_, lens)| lens).collect();
+        assert_eq!(
+            lenses,
+            [
+                "DashOffsetLens { from: 0.5, to: 2.0 }",
+                "DashOffsetLens { from: 2.0, to: 3.0 }",
+            ]
+        );
+    }
+
+    #[test]
+    fn dash_flow_updaters_reach_every_drawn_member() {
+        let mut canvas = SceneModel::new(640, 360);
+        let first = canvas.circle(1.0);
+        let second = canvas.square(1.0);
+        let pipes = canvas.group(&[&first, &second]);
+        canvas.wait(1.0);
+        pipes.add_updater(crate::canvas::UpdaterPreset::DashFlow { speed: 0.5 });
+        canvas.wait(2.0);
+        pipes.remove_updater();
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        drop(commands);
+        let mut world = world;
+        queue.apply(&mut world);
+
+        for member in [&first, &second] {
+            let entity = entity_of(&mut world, member);
+            let flow = world.get::<gaanim_animation::DashFlow>(entity).unwrap();
+            assert_eq!(flow.runs, [(0.5, 1.0, Some(3.0))]);
+        }
     }
 
     #[test]

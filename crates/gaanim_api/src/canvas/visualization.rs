@@ -137,6 +137,87 @@ impl Parameter {
     }
 }
 
+/// What the center of a [`ProgressRing`] shows.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ProgressLabel {
+    None,
+    /// The completed fraction as a percentage.
+    Percent {
+        decimals: usize,
+    },
+    /// The parameter value itself, e.g. the seconds left on a countdown.
+    Value {
+        decimals: usize,
+    },
+}
+
+/// Appearance of a [`SceneModel::progress_ring`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProgressRingOptions {
+    pub radius: f64,
+    /// Stroke width of the track and the arc, in scene units.
+    pub width: f64,
+    /// Parameter value that completes the ring.
+    pub maximum: f64,
+    /// Arc color; `None` uses the theme accent.
+    pub color: Option<Color>,
+    /// Track color; `None` draws no track.
+    pub track: Option<Color>,
+    pub label: ProgressLabel,
+    /// Label color; `None` uses the body text color.
+    pub label_color: Option<Color>,
+    pub font_size: f64,
+}
+
+impl Default for ProgressRingOptions {
+    fn default() -> Self {
+        Self {
+            radius: 1.0,
+            width: 0.12,
+            maximum: 1.0,
+            color: None,
+            track: Some(Color::from_rgba8(0x94, 0xa3, 0xb8, 0x40)),
+            label: ProgressLabel::Percent { decimals: 0 },
+            label_color: None,
+            font_size: 0.5,
+        }
+    }
+}
+
+impl ProgressRingOptions {
+    pub fn validate(&self) -> Result<(), String> {
+        for (name, value) in [
+            ("radius", self.radius),
+            ("width", self.width),
+            ("maximum", self.maximum),
+            ("font_size", self.font_size),
+        ] {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(format!("progress ring {name} must be finite and positive"));
+            }
+        }
+        if let ProgressLabel::Percent { decimals } | ProgressLabel::Value { decimals } = self.label
+            && decimals > 6
+        {
+            return Err("progress ring decimals must be 0..6".into());
+        }
+        Ok(())
+    }
+}
+
+/// A ring whose arc and label follow one [`Parameter`]; see
+/// [`SceneModel::progress_ring`].
+#[derive(Debug, Clone)]
+pub struct ProgressRing {
+    /// Group of the track, the arc and the label, in that order.
+    pub group: DrawableHandle,
+    pub track: Option<DrawableHandle>,
+    pub arc: DrawableHandle,
+    pub label: Option<DrawableHandle>,
+    pub parameter: Parameter,
+    pub maximum: f64,
+}
+
 /// Typed coordinate-space handle. Its layers and plots are real child
 /// drawables, so root layout transforms remain coherent.
 #[derive(Debug, Clone)]
@@ -3329,6 +3410,112 @@ impl SceneModel {
         }))
     }
 
+    /// A ring arc from 12 o'clock that sweeps clockwise through
+    /// `source / maximum` of a full turn, following its source every frame.
+    /// Its box is the whole ring. Style it with `stroke_with_style`.
+    pub fn progress_arc(
+        &mut self,
+        source: ScalarSource,
+        radius: f64,
+        maximum: f64,
+    ) -> Result<DrawableHandle, String> {
+        if !radius.is_finite() || radius <= 0.0 {
+            return Err("progress radius must be finite and positive".into());
+        }
+        if !maximum.is_finite() || maximum <= 0.0 {
+            return Err("progress maximum must be finite and positive".into());
+        }
+        {
+            let state = self.state.lock().expect("canvas state poisoned");
+            if source
+                .parameter_ids()
+                .iter()
+                .any(|id| !state.parameter_values.contains_key(id))
+            {
+                return Err("progress source parameters must belong to this scene".into());
+            }
+        }
+        if let ScalarSource::Function(function) = &source {
+            self.validate_reactive_function_owner(function)
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(self.spawn(SpawnKind::ProgressArc {
+            source,
+            radius,
+            maximum,
+        }))
+    }
+
+    /// A progress ring: a faint track, a round-capped arc that fills
+    /// clockwise from 12 o'clock and an optional centered label, driven by
+    /// one parameter that starts at `value`.
+    pub fn progress_ring(
+        &mut self,
+        value: f64,
+        options: ProgressRingOptions,
+    ) -> Result<ProgressRing, String> {
+        options.validate()?;
+        if !value.is_finite() {
+            return Err("progress value must be finite".into());
+        }
+        let parameter = self.parameter(value).map_err(|error| error.to_string())?;
+        let accent = options
+            .color
+            .or_else(|| self.theme_color("accent").ok())
+            .unwrap_or(Color::from_rgb8(0x38, 0xbd, 0xf8));
+        let mut members = Vec::new();
+        let track = options.track.map(|color| {
+            self.circle(options.radius)
+                .no_fill()
+                .stroke(color, options.width)
+        });
+        members.extend(track.clone());
+        let style = gaanim_core::kurbo::Stroke::new(options.width)
+            .with_caps(gaanim_core::kurbo::Cap::Round);
+        let arc = self
+            .progress_arc(parameter.source(), options.radius, options.maximum)?
+            .no_fill()
+            .stroke_with_style(gaanim_core::peniko::Brush::Solid(accent), style);
+        members.push(arc.clone());
+        let label = match options.label {
+            ProgressLabel::None => None,
+            ProgressLabel::Percent { decimals } => Some(self.rolling_number(
+                parameter.source().scaled(100.0 / options.maximum),
+                gaanim_animation::RollingNumberOptions {
+                    decimals,
+                    suffix: "%".into(),
+                    font_size: options.font_size,
+                    ..Default::default()
+                },
+            )?),
+            ProgressLabel::Value { decimals } => Some(self.rolling_number(
+                parameter.source(),
+                gaanim_animation::RollingNumberOptions {
+                    decimals,
+                    font_size: options.font_size,
+                    ..Default::default()
+                },
+            )?),
+        };
+        let label = label.map(|label| {
+            let label = match options.label_color {
+                Some(color) => label.fill(color),
+                None => label,
+            };
+            label.move_to(0.0, 0.0)
+        });
+        members.extend(label.clone());
+        let group = self.group(&members.iter().collect::<Vec<_>>());
+        Ok(ProgressRing {
+            group,
+            track,
+            arc,
+            label,
+            parameter,
+            maximum: options.maximum,
+        })
+    }
+
     pub fn function_plot(
         &mut self,
         space: &CoordinateSpaceHandle,
@@ -4429,6 +4616,63 @@ impl SceneModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn progress_rings_compile_an_arc_that_follows_their_parameter() {
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        let mut other = SceneModel::new(16.0, 9.0);
+        let foreign = other.parameter(1.0).unwrap();
+        assert!(canvas.progress_arc(foreign.source(), 1.0, 1.0).is_err());
+        assert!(
+            canvas
+                .progress_arc(ScalarSource::constant(0.5), 0.0, 1.0)
+                .is_err()
+        );
+        let invalid = ProgressRingOptions {
+            width: -1.0,
+            ..Default::default()
+        };
+        assert!(canvas.progress_ring(0.0, invalid).is_err());
+
+        let ring = canvas
+            .progress_ring(
+                0.25,
+                ProgressRingOptions {
+                    radius: 2.0,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(ring.track.is_some() && ring.label.is_some());
+        let mut world = bevy::prelude::World::new();
+        world.insert_resource(gaanim_timeline::timeline::Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        let (arc, path, bounds, stroke) = world
+            .query::<(
+                &gaanim_animation::ProgressArc,
+                &gaanim_scene::Path2D,
+                &gaanim_scene::LocalBounds,
+                &gaanim_scene::StrokeBrush,
+            )>()
+            .single(&world)
+            .unwrap();
+        assert_eq!(arc.maximum, 1.0);
+        assert_eq!(*path.0, gaanim_animation::progress_arc_path(2.0, 0.25));
+        assert_eq!(
+            bounds.0,
+            gaanim_math::Bounds3D::new_2d(-2.0, -2.0, 2.0, 2.0)
+        );
+        assert_eq!(stroke.style.start_cap, gaanim_core::kurbo::Cap::Round);
+        // The percentage label is a rolling number of the scaled parameter.
+        let rolling = world
+            .query::<&gaanim_animation::RollingNumber>()
+            .single(&world)
+            .unwrap();
+        assert_eq!(rolling.options.suffix, "%");
+    }
 
     #[test]
     fn rolling_number_compiles_native_geometry_and_validates_sources() {

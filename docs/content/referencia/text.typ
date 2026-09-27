@@ -353,10 +353,10 @@ corner = scene.text("esquina").move_to(-7, 4, Anchor.TOP_LEFT)
 conserva su tipo al encadenarlos.
 
 #api-entry(
-  name: "Text.glow / blur / shadow / no_effects",
+  name: "Text.glow / blur / shadow / no_effects / blend",
   kind: "method",
-  signature: "glow(color, radius=0.16, intensity=1.0) · blur(sigma=0.04) · shadow(color, x=0.08, y=-0.08, blur=0.06) · no_effects() -> Text",
-  desc: [Los efectos de `Drawable`, redefinidos para devolver el `Text` y conservar el anclaje tipográfico de un `move_to` posterior.],
+  signature: "glow(color, radius=0.16, intensity=1.0) · blur(sigma=0.04) · shadow(color, x=0.08, y=-0.08, blur=0.06) · no_effects() · blend(mode=\"normal\") -> Text",
+  desc: [Los efectos y el modo de fusión de `Drawable`, redefinidos para devolver el `Text` y conservar el anclaje tipográfico de un `move_to` posterior.],
 )[
 ```python
 >>>from gaanim import *

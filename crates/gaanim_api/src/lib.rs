@@ -7,6 +7,7 @@ pub mod host;
 pub mod matrix;
 pub mod prelude;
 pub mod runtime;
+pub mod stroke_lens;
 pub mod text_motion;
 
 use bevy::prelude::*;

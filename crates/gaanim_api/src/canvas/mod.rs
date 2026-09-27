@@ -54,8 +54,8 @@ pub use gaanim_visualization::{
 pub use visualization::{
     ArrowFieldOptions, ArrowVectorFieldHandle, ChartHandle, CoordinateRef, CoordinateSpace3DHandle,
     CoordinateSpaceHandle, FlowParticleOptions, FlowParticlesHandle, NumberLineHandle, Parameter,
-    PolarSpaceHandle, StreamLinesHandle, StreamLinesStyle, VectorField2DHandle,
-    VectorField3DHandle, VisualizationError,
+    PolarSpaceHandle, ProgressLabel, ProgressRing, ProgressRingOptions, StreamLinesHandle,
+    StreamLinesStyle, VectorField2DHandle, VectorField3DHandle, VisualizationError,
 };
 mod canvas_impl;
 mod narration;

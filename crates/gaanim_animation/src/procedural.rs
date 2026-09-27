@@ -10,7 +10,7 @@
 use bevy::prelude::*;
 use gaanim_core::glam::{DQuat, DVec3};
 use gaanim_math::{Noise, SpatialTransform};
-use gaanim_scene::Opacity;
+use gaanim_scene::{Opacity, StrokeBrush};
 
 use crate::updaters::PlaybackState;
 
@@ -218,6 +218,71 @@ pub fn restore_procedural_motion_system(
     }
 }
 
+/// Dashes that flow along a stroke at a constant speed ("marching ants").
+///
+/// Each run advances the dash pattern by `speed` scene units per second
+/// from its start until it stops, where the pattern stays. The shift is a
+/// pure function of timeline time, added to the stroke's authored
+/// `dash_offset` only while the renderer extracts it.
+#[derive(Component, Debug, Clone, Default)]
+pub struct DashFlow {
+    /// `(speed, start, end)` of every run, in timeline seconds.
+    pub runs: Vec<(f64, f64, Option<f64>)>,
+    applied: Option<f64>,
+}
+
+impl DashFlow {
+    pub fn push(&mut self, speed: f64, start: f64) {
+        self.runs.push((speed, start, None));
+    }
+
+    /// Stops every open run at `time`.
+    pub fn stop_at(&mut self, time: f64) {
+        for (_, start, end) in &mut self.runs {
+            if end.is_none() && *start <= time {
+                *end = Some(time);
+            }
+        }
+    }
+
+    /// Distance the dashes have travelled along the path by `time`.
+    pub fn travel_at(&self, time: f64) -> f64 {
+        self.runs
+            .iter()
+            .map(|(speed, start, end)| {
+                let until = end.map_or(time, |end| time.min(end));
+                speed * (until - start).max(0.0)
+            })
+            .sum()
+    }
+}
+
+/// Adds the travelled distance to the stroke right before extraction.
+pub fn apply_dash_flow_system(
+    playback: Option<Res<PlaybackState>>,
+    mut query: Query<(&mut DashFlow, &mut StrokeBrush)>,
+) {
+    let time = playback.map_or(0.0, |state| state.current_time);
+    for (mut flow, mut stroke) in &mut query {
+        // A larger dash offset moves the pattern back toward the start, so
+        // a positive speed subtracts to flow forward along the path.
+        let shift = -flow.travel_at(time);
+        if shift != 0.0 {
+            stroke.style.dash_offset += shift;
+            flow.applied = Some(shift);
+        }
+    }
+}
+
+/// Restores the authored dash offset after extraction.
+pub fn restore_dash_flow_system(mut query: Query<(&mut DashFlow, &mut StrokeBrush)>) {
+    for (mut flow, mut stroke) in &mut query {
+        if let Some(shift) = flow.applied.take() {
+            stroke.style.dash_offset -= shift;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -311,6 +376,38 @@ mod tests {
         assert_eq!(
             world.get::<SpatialTransform>(entity).unwrap().translation.x,
             3.0
+        );
+    }
+
+    #[test]
+    fn dash_flow_travels_with_time_and_touches_only_extracted_state() {
+        let mut flow = DashFlow::default();
+        flow.push(0.5, 1.0);
+        assert_eq!(flow.travel_at(0.5), 0.0);
+        assert!((flow.travel_at(3.0) - 1.0).abs() < 1e-12);
+        flow.stop_at(2.0);
+        // A stopped run keeps the dashes where they were.
+        assert!((flow.travel_at(9.0) - 0.5).abs() < 1e-12);
+
+        let mut world = World::new();
+        world.insert_resource(PlaybackState {
+            current_time: 9.0,
+            ..Default::default()
+        });
+        let mut stroke = StrokeBrush::new(gaanim_core::peniko::Color::WHITE, 0.1);
+        stroke.style = stroke.style.with_dashes(0.25, [0.2, 0.1]);
+        let entity = world.spawn((flow, stroke)).id();
+        let mut apply = IntoSystem::into_system(apply_dash_flow_system);
+        apply.initialize(&mut world);
+        apply.run((), &mut world).unwrap();
+        let offset = world.get::<StrokeBrush>(entity).unwrap().style.dash_offset;
+        assert!((offset + 0.25).abs() < 1e-12);
+        let mut restore = IntoSystem::into_system(restore_dash_flow_system);
+        restore.initialize(&mut world);
+        restore.run((), &mut world).unwrap();
+        assert_eq!(
+            world.get::<StrokeBrush>(entity).unwrap().style.dash_offset,
+            0.25
         );
     }
 }

@@ -1176,6 +1176,14 @@ impl PyText {
         })
     }
 
+    #[pyo3(signature = (mode="normal"))]
+    fn blend<'py>(slf: PyRef<'py, Self>, mode: &str) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let mode = crate::pydrawable::parse_blend_mode(mode)?;
+        slf.handle.clone().blend(mode);
+        Ok(slf)
+    }
+
     fn opacity<'py>(slf: PyRef<'py, Self>, value: &Bound<'_, PyAny>) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
         PyDrawable(slf.handle.clone()).opacity(value)?;

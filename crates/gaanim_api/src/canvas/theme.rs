@@ -950,6 +950,7 @@ fn spawn_family(kind: &SpawnKind) -> &'static str {
         | SpawnKind::DoubleArrow { .. }
         | SpawnKind::Brace { .. }
         | SpawnKind::Arc { .. }
+        | SpawnKind::ProgressArc { .. }
         | SpawnKind::CurvedArrow { .. }
         | SpawnKind::CurvedArrowArc { .. }
         | SpawnKind::Dimension { .. }
@@ -1012,6 +1013,7 @@ pub(crate) fn spawn_name(kind: &SpawnKind) -> &'static str {
         SpawnKind::ReactiveSurface3D { .. } => "surface",
         SpawnKind::ReactiveReadout { .. } => "expression_readout",
         SpawnKind::DataMark { .. } => "data_mark",
+        SpawnKind::ProgressArc { .. } => "progress_arc",
         SpawnKind::Axes { .. } => "axes",
         SpawnKind::Axes3D { .. } => "axes_3d",
         SpawnKind::SurfaceMesh { .. } => "surface",

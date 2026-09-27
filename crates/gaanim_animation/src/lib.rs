@@ -3,14 +3,18 @@ pub mod custom;
 pub mod paint;
 pub mod prelude;
 pub mod procedural;
+pub mod progress_arc;
 pub mod property_bindings;
 pub mod reactive;
 pub use procedural::{
-    OscillatedChannel, ProceduralLayer, ProceduralMotion, ProceduralOffset, ScheduledLayer,
-    Waveform,
+    DashFlow, OscillatedChannel, ProceduralLayer, ProceduralMotion, ProceduralOffset,
+    ScheduledLayer, Waveform,
 };
+pub use progress_arc::{ProgressArc, progress_arc_path};
 pub use property_bindings::*;
 pub mod signals;
+pub mod stroke_tips;
+pub use stroke_tips::{StrokeTip, StrokeTips, TipKind};
 pub mod text_motion;
 pub mod tween;
 pub mod updaters;
@@ -95,6 +99,7 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
             (
                 reactive_readout_update_system,
                 reactive_readout_layout_system.after(reactive_readout_update_system),
+                progress_arc::progress_arc_system,
             )
                 .in_set(SceneSet::Visualization),
         );
@@ -167,6 +172,26 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
                     .after(gaanim_scene::opacity_propagation_system),
             )
                 .in_set(SceneSet::Propagation),
+        );
+        // Flowing dashes are added to the stroke only while the renderer
+        // extracts it, so tweens, snapshots and seeks see the authored offset.
+        app.add_systems(
+            Update,
+            procedural::apply_dash_flow_system.in_set(SceneSet::Bounds),
+        );
+        app.add_systems(
+            Update,
+            (
+                procedural::restore_dash_flow_system,
+                stroke_tips::restore_stroke_tips_system,
+            )
+                .in_set(SceneSet::Interaction),
+        );
+        // Tipped paths are shortened after regenerated geometry settles and
+        // before bounds, so their tips are culled with the frame's shapes.
+        app.add_systems(
+            Update,
+            stroke_tips::apply_stroke_tips_system.in_set(SceneSet::DerivedGeometry),
         );
         app.add_systems(
             Update,

@@ -667,6 +667,73 @@ scene.text("Objetivos", size=1).move_to(-3.5, 1.12, TextAnchor.BASELINE_LEFT)
   none,
 )
 
+== Anillos de progreso y temporizadores
+
+Un arco que se llena en el sentido del reloj desde las 12, con una pista tenue
+detrás y un contador rodante en el centro. Todo sigue a un único `Parameter`.
+
+#api-entry(
+  name: "Visualization.progress_ring",
+  kind: "factory",
+  params: (
+    (name: "value", type: "float", default: "0.0", desc: [Progreso inicial; el anillo muestra `value` recortado a `[0, 1]`.]),
+    (name: "radius / width", type: "float", default: "1.0 / 0.12", desc: [Radio del anillo y grosor del trazo, en unidades de escena.]),
+    (name: "color", type: "Color | None", default: "None", desc: [Color del arco; sin él, el acento del tema.]),
+    (name: "track / track_color", type: "bool / Color | None", default: "True / None", desc: [Dibuja un círculo tenue completo detrás del arco, con otro color si se indica.]),
+    (name: "label / decimals", type: "bool / int", default: "True / 0", desc: [Muestra el porcentaje con un contador rodante de 0 a 6 decimales.]),
+    (name: "label_color / font_size", type: "Color | None / float", default: "None / 0.5", desc: [Color y tamaño del porcentaje; sin color, el del texto.]),
+  ),
+  desc: [El arco tiene extremos redondeados y su caja es el anillo completo, así que la maquetación no sigue al barrido. Anima el valor con `animate.set(...)`; la geometría depende solo del valor actual, así que reproducción, seeks y exportación coinciden. `arc`, `track` y `label` dan acceso a cada parte. Tamaños no positivos o un valor no finito lanzan `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+ring = scene.viz.progress_ring(0.0, radius=1.6, width=0.18)
+scene.play([ring.animate.set(0.75).duration(1.5)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Visualization.countdown",
+  kind: "factory",
+  params: (
+    (name: "seconds", type: "float", default: none, desc: [Duración de la cuenta; también es el máximo del anillo.]),
+  ),
+  desc: [Un `ProgressRing` que empieza lleno, con los segundos restantes rodando en el centro. `count_down()` lo vacía a velocidad constante. El resto de opciones son las de `progress_ring`. Unos `seconds` no positivos lanzan `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+timer = scene.viz.countdown(3, radius=1.6, width=0.18)
+scene.play([timer.count_down()])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "ProgressRing.count_down",
+  kind: "method",
+  params: (
+    (name: "duration", type: "float | None", default: "None", desc: [Segundos de la animación; por defecto, el valor actual.]),
+  ),
+  returns: (type: "Anim", desc: [El valor bajando hasta cero con easing lineal.]),
+  desc: [Con `countdown(10)` dura diez segundos reales. Una duración negativa lanza `ValueError`.],
+  none,
+)
+
+#api-entry(
+  name: "ProgressRing.parameter / arc / track / label / maximum / current / set / animate",
+  kind: "property",
+  signature: "parameter: Parameter · arc: Drawable · track: Drawable | None · label: Drawable | None · maximum: float · current: float · set(value) · animate",
+  desc: [`parameter` es el escalar que mueve el arco y la etiqueta, reutilizable en `computed` o lecturas. `maximum` es `1.0` en un anillo y los segundos en una cuenta atrás. `set` fija el valor al instante (un corte reversible tras la declaración) y `animate.set(value)` lo anima. Mover o animar el anillo mueve sus tres partes juntas.],
+  none,
+)
+
 == Recta numérica, plano polar y plano complejo
 
 Espacios tipados de una dimensión, polares y complejos.
