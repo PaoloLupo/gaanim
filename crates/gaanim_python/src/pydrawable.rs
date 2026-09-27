@@ -416,6 +416,19 @@ impl PyCanvasAnim {
         })
     }
 
+    fn count(&self, count: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        self.require_drawable_effect("count")?;
+        Ok(Self {
+            inner: self
+                .inner
+                .clone()
+                .count(count)
+                .map_err(PyValueError::new_err)?,
+        })
+    }
+
     fn points(&self, points: Vec<(f64, f64)>) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
@@ -2316,6 +2329,15 @@ impl PyDrawable {
         self.0
             .clone()
             .stroke_taper(start, end)
+            .map(Self)
+            .map_err(PyValueError::new_err)
+    }
+    /// Show the first `count` copies of a `repeat` or `duplicate` group.
+    fn count(&self, count: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.0
+            .clone()
+            .count(count)
             .map(Self)
             .map_err(PyValueError::new_err)
     }

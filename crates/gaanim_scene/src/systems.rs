@@ -9,8 +9,8 @@ use bevy::color::Alpha;
 use bevy::prelude::{
     Added, AssetServer, Assets, Camera, Camera3d, Changed, ChildOf, Children, Commands,
     DirectionalLight, Entity, GlobalAmbientLight, Handle, Local, MeshMaterial3d, Name, Or,
-    ParamSet, PointLight, Query, Res, ResMut, SpotLight, StandardMaterial, Transform, Visibility,
-    With, Without,
+    ParamSet, PointLight, Query, RemovedComponents, Res, ResMut, SpotLight, StandardMaterial,
+    Transform, Visibility, With, Without,
 };
 use bevy::world_serialization::{WorldAssetRoot, WorldInstance, WorldInstanceSpawner};
 use gaanim_math::{GlobalSpatialTransform, SpatialTransform};
@@ -294,8 +294,12 @@ pub fn pin_hud_overlays_system(
 }
 
 /// Run condition: skip opacity propagation when no local opacity has changed.
-pub fn has_opacity_changes(query: Query<&Opacity, Or<(Changed<Opacity>, Added<Opacity>)>>) -> bool {
-    !query.is_empty()
+pub fn has_opacity_changes(
+    query: Query<&Opacity, Or<(Changed<Opacity>, Added<Opacity>)>>,
+    presences: Query<(), Changed<crate::Presence>>,
+    mut removed: RemovedComponents<crate::Presence>,
+) -> bool {
+    !query.is_empty() || !presences.is_empty() || removed.read().next().is_some()
 }
 
 /// System: Propagate opacity cascade down the hierarchy using Bevy 0.19's `ChildOf` relation.
@@ -305,6 +309,7 @@ pub fn opacity_propagation_system(
     local_opacities: Query<&Opacity>,
     parents: Query<&ChildOf>,
     mut opacities: Query<(&Opacity, &mut GlobalOpacity)>,
+    presences: Query<&crate::Presence>,
 ) {
     for (root, parent) in &roots {
         // Text and imported assets can contain structural grouping entities
@@ -313,7 +318,7 @@ pub fn opacity_propagation_system(
         if parent
             .is_none_or(|parent| !has_opacity_ancestor(parent.parent(), &parents, &local_opacities))
         {
-            propagate_opacities_recursive(root, 1.0, &children_query, &mut opacities);
+            propagate_opacities_recursive(root, 1.0, &children_query, &mut opacities, &presences);
         }
     }
 }
@@ -339,17 +344,25 @@ fn propagate_opacities_recursive(
     parent_opacity: f32,
     children_query: &Query<&Children>,
     opacities: &mut Query<(&Opacity, &mut GlobalOpacity)>,
+    presences: &Query<&crate::Presence>,
 ) {
+    let presence = presences.get(entity).map_or(1.0, |presence| presence.0);
     let current_opacity = if let Ok((local, mut global)) = opacities.get_mut(entity) {
-        global.0 = local.0 * parent_opacity;
+        global.0 = local.0 * parent_opacity * presence;
         global.0
     } else {
-        parent_opacity
+        parent_opacity * presence
     };
 
     if let Ok(children) = children_query.get(entity) {
         for child in children.iter() {
-            propagate_opacities_recursive(*child, current_opacity, children_query, opacities);
+            propagate_opacities_recursive(
+                *child,
+                current_opacity,
+                children_query,
+                opacities,
+                presences,
+            );
         }
     }
 }
@@ -2002,6 +2015,30 @@ mod tests {
             .as_coeffs()[4];
         assert!((tx - 15.0).abs() < f64::EPSILON);
         assert!((world.get::<GlobalOpacity>(glyph).unwrap().0 - 0.05).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn presence_scales_the_cascade_without_touching_local_opacity() {
+        let mut world = World::new();
+        let group = world.spawn((Opacity(0.5), GlobalOpacity::default())).id();
+        let copy = world
+            .spawn((
+                Opacity(0.8),
+                GlobalOpacity::default(),
+                crate::Presence(0.25),
+            ))
+            .id();
+        let leaf = world.spawn((Opacity(1.0), GlobalOpacity::default())).id();
+        world.entity_mut(copy).set_parent_in_place(group);
+        world.entity_mut(leaf).set_parent_in_place(copy);
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(opacity_propagation_system);
+        schedule.run(&mut world);
+
+        assert!((world.get::<GlobalOpacity>(copy).unwrap().0 - 0.1).abs() < 1e-6);
+        assert!((world.get::<GlobalOpacity>(leaf).unwrap().0 - 0.1).abs() < 1e-6);
+        assert_eq!(world.get::<Opacity>(copy).unwrap().0, 0.8);
     }
 
     #[test]

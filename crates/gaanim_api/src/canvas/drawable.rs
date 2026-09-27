@@ -1442,6 +1442,32 @@ impl DrawableHandle {
         })
     }
 
+    /// Shows the first `count` copies of a `repeat` or `duplicate` group; a
+    /// fractional count fades the next copy. Declared before the first
+    /// `play`, it is the initial count; later it cuts at the cursor.
+    pub fn count(self, count: f64) -> Result<Self, String> {
+        let (copies, from) = self
+            .spec
+            .lock()
+            .expect("object spec poisoned")
+            .repeat_count
+            .ok_or("count() requires a group made by repeat() or duplicate()")?;
+        super::duplicate::check_count(count, copies)?;
+        self.update_spec(|spec| {
+            if let Some((_, cursor)) = &mut spec.repeat_count {
+                *cursor = count;
+            }
+        });
+        if from != count {
+            let properties = PropertyAnimation {
+                count: Some((from, count)),
+                ..PropertyAnimation::default()
+            };
+            self.push_immediate(self.id, AnimationType::Properties(properties));
+        }
+        Ok(self)
+    }
+
     pub fn z_index(self, z: i32) -> Self {
         self.update_spec(|spec| spec.z_index = z)
     }

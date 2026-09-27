@@ -1563,6 +1563,22 @@ class Anim:
             scene.play([tri.animate.points([(-1, 1), (1, 1), (0, -1)]).duration(1.0)])
         """
         ...
+    def count(self, count: float) -> Anim:
+        """Animate how many copies of a ``repeat`` or ``duplicate`` group show.
+
+        Copies appear in order, from the first: copy ``i`` is visible once the
+        count passes ``i``, and the fractional part fades the next copy in or
+        out, so ``count(24)`` from 0 builds the pattern one copy at a time.
+        The count goes from 0 to the copies the group was made with; to grow
+        a pattern, create it with every copy and lower its count first with
+        ``Drawable.count``. The opacity of each copy is kept. A value out of
+        range, or a drawable that is not such a group, raises ``ValueError``.
+
+        Example:
+            petals = scene.geometry.repeat(petal, 24, rotate=math.tau / 24).count(0)
+            scene.play([petals.animate.count(24).duration(2.0)])
+        """
+        ...
     def dash_offset(self, offset: float) -> Anim:
         """Animate the dash offset of every stroke to ``offset`` scene units.
 
@@ -2322,6 +2338,20 @@ class Drawable:
 
         Example:
             stroke = scene.geometry.arc(0, 0, 2.0, 0.0, 3.0).no_fill().stroke(GOLD, 0.2).stroke_taper(0.3, 0.5)
+        """
+        ...
+    def count(self, count: float) -> Drawable:
+        """Show the first ``count`` copies of a ``repeat`` or ``duplicate`` group.
+
+        Copies stay in the group but hide from the last one down; a fractional
+        count fades the next copy (``2.5`` shows two copies and half of the
+        third). Before the first ``scene.play`` it sets the initial count; later
+        it changes at the cursor. Animate it with ``animate.count``. A value
+        outside ``0`` to the number of copies, or a drawable that is not such a
+        group, raises ``ValueError``.
+
+        Example:
+            ring = scene.geometry.duplicate(dot, Distribution.circle(16, 2.5)).count(4)
         """
         ...
     def squash_stretch(self, amount: float = 0.1, max_ratio: float = 1.6) -> Drawable:

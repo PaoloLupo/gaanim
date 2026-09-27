@@ -577,6 +577,21 @@ scene.render()
 ]
 
 #api-entry(
+  name: "Drawable.count",
+  kind: "method",
+  params: (
+    (name: "count", type: "float", default: none, desc: [Copias visibles, de 0 al número de copias del grupo.]),
+  ),
+  desc: [Muestra las primeras `count` copias de un grupo creado con `Geometry.repeat` o `Geometry.duplicate`; las demás siguen en el grupo pero ocultas, de la última hacia atrás. Un recuento fraccionario funde la siguiente copia: `2.5` muestra dos copias y media tercera. Antes del primer `scene.play` fija el recuento inicial; después lo cambia en el cursor. Para animarlo usa `animate.count`. Un valor fuera de rango, o un objeto que no sea uno de esos grupos, lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+ring = scene.geometry.duplicate(scene.geometry.dot(0.1), Distribution.circle(16, 2.5)).count(4)
+```
+]
+
+#api-entry(
   name: "Drawable.squash_stretch",
   kind: "method",
   params: (

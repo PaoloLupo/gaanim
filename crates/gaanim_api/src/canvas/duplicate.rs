@@ -10,6 +10,29 @@ use super::{DrawableHandle, SceneModel};
 /// Most copies one repeat or duplicate creates.
 pub const MAX_COPIES: usize = 10_000;
 
+/// `Ok` when `count` copies of a repeater with `copies` copies can show.
+pub(crate) fn check_count(count: f64, copies: usize) -> Result<(), String> {
+    if count.is_finite() && (0.0..=copies as f64).contains(&count) {
+        Ok(())
+    } else {
+        Err(format!(
+            "count must be between 0 and the {copies} copies of the group, got {count}"
+        ))
+    }
+}
+
+/// The group of `copies`, remembering them for `count`.
+fn repeater(model: &mut SceneModel, copies: &[DrawableHandle]) -> DrawableHandle {
+    let refs: Vec<&DrawableHandle> = copies.iter().collect();
+    let group = model.group(&refs);
+    group
+        .spec
+        .lock()
+        .expect("object spec poisoned")
+        .repeat_count = Some((copies.len(), copies.len() as f64));
+    group
+}
+
 /// Where the copies of a duplicated drawable go.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Distribution {
@@ -340,8 +363,7 @@ impl SceneModel {
             }
             copies.push(copy);
         }
-        let refs: Vec<&DrawableHandle> = copies.iter().collect();
-        Ok(self.group(&refs))
+        Ok(repeater(self, &copies))
     }
 
     /// Copies of `source` at every placement of `distribution`, `source`
@@ -370,8 +392,7 @@ impl SceneModel {
             }
             copies.push(copy);
         }
-        let refs: Vec<&DrawableHandle> = copies.iter().collect();
-        Ok(self.group(&refs))
+        Ok(repeater(self, &copies))
     }
 
     fn check_owner(&self, source: &DrawableHandle) -> Result<(), String> {

@@ -3,7 +3,7 @@
 import math
 import os
 
-from gaanim import BLUE, CORAL, CYAN, GOLD, PINK, WHITE, Distribution, Scene
+from gaanim import BLUE, CORAL, CYAN, GOLD, PINK, WHITE, Distribution, Easing, Scene
 
 
 scene = Scene(frame=(16, 9), background="#0d1322")
@@ -50,7 +50,15 @@ seed = scene.geometry.circle(0.08).fill(BLUE)
 scene.geometry.duplicate(seed, Distribution.phyllotaxis(320, 0.17))
 scene.wait(0.5)
 
+scene.segment("count")
+title("animate.count")
+leaf = scene.geometry.ellipse(0.12, 0.34).fill(GOLD).move_to(0, 2.4)
+spiral = scene.geometry.repeat(leaf, 36, rotate=0.5, scale=0.95, about=(0, 0)).count(0)
+scene.play([spiral.animate.count(36).duration(1.2).easing(Easing.LINEAR)])
+scene.wait(0.3)
+
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
-    scene.snapshots(snapshots, [0.25 + 0.5 * index for index in range(6)])
+    seeks = [0.25 + 0.5 * index for index in range(6)]
+    scene.snapshots(snapshots, seeks + [3.0, 3.55, 4.4])
 else:
     scene.render()

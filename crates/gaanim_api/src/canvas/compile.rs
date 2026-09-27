@@ -8706,6 +8706,24 @@ impl SceneModel {
                 .entity(state.entity)
                 .insert(gaanim_animation::SquashStretch::new(amount, max_ratio));
         }
+        if let Some((_, count)) = spec.repeat_count
+            && let Some(state) = builder.states.get(mref.id)
+        {
+            let members: Vec<_> = state
+                .children
+                .iter()
+                .filter_map(|member| builder.states.get(*member).map(|state| state.entity))
+                .collect();
+            for (index, entity) in members.into_iter().enumerate() {
+                let presence = crate::count_lens::presence(count, index);
+                if presence < 1.0 {
+                    builder
+                        .commands
+                        .entity(entity)
+                        .insert(gaanim_scene::Presence(presence));
+                }
+            }
+        }
         if spec.motion_blur_exempt {
             for (entity, _) in Self::hierarchy_entities(builder, mref.id) {
                 builder
@@ -12954,6 +12972,49 @@ mod tests {
         assert!((moving[3] - 1.0 / 1.5).abs() < 1e-9, "{moving:?}");
         assert_eq!(deform_at(1.8), kurbo::Affine::IDENTITY);
         assert!((deform_at(0.5).as_coeffs()[0] - 1.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn repeater_count_shows_copies_in_order_and_seeks_back() {
+        let mut canvas = SceneModel::new(640, 360);
+        let dot = canvas.circle(0.1);
+        let step = crate::canvas::RepeatStep {
+            offset: DVec2::new(0.5, 0.0),
+            ..crate::canvas::RepeatStep::default()
+        };
+        let row = canvas.repeat(&dot, 4, step).unwrap().count(1.0).unwrap();
+        assert!(row.clone().count(4.5).is_err());
+        assert!(canvas.circle(0.1).count(1.0).is_err());
+        assert!(canvas.circle(0.1).animate().count(1.0).is_err());
+        canvas.play(vec![
+            row.animate()
+                .count(4.0)
+                .unwrap()
+                .duration(1.0)
+                .rate_func(gaanim_math::RateFunc::Linear),
+        ]);
+        canvas.wait(0.5);
+        row.clone().count(2.0).unwrap();
+        canvas.wait(0.5);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let mut presences = |time: f64| {
+            timeline.seek(&mut world, time);
+            // Copies are declared in order, so their ids are increasing.
+            let mut copies: Vec<(u64, f32)> = world
+                .query::<(&gaanim_scene::Presence, &MobjectId)>()
+                .iter(&world)
+                .map(|(presence, object)| (object.0.as_raw(), presence.0))
+                .collect();
+            copies.sort_by_key(|copy| copy.0);
+            copies
+                .into_iter()
+                .map(|(_, presence)| presence)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(presences(0.5), [1.0, 1.0, 0.5, 0.0]);
+        assert_eq!(presences(1.2), [1.0; 4]);
+        assert_eq!(presences(1.8), [1.0, 1.0, 0.0, 0.0]);
+        assert_eq!(presences(0.0), [1.0, 0.0, 0.0, 0.0]);
     }
 
     #[test]

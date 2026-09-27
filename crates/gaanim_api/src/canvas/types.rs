@@ -974,6 +974,9 @@ pub struct ObjectSpec {
     pub motion_blur_exempt: bool,
     /// Squash and stretch along the velocity: `(amount, max_ratio)`.
     pub squash_stretch: Option<(f64, f64)>,
+    /// Repeater groups: `(copies, count)`, the copies declared and how many
+    /// are shown at the declaration cursor.
+    pub repeat_count: Option<(usize, f64)>,
     /// Stroke width multipliers along the path, as `(position, factor)`.
     pub stroke_profile: Option<std::sync::Arc<[(f64, f64)]>>,
     pub opacity: f32,
@@ -1113,6 +1116,7 @@ impl ObjectSpec {
             layout_ops: Vec::new(),
             reactive_readout_layout: None,
             fill_level_cursor: None,
+            repeat_count: None,
             typed_text: None,
             media_frame: None,
             coordinate_view_cursor: None,
@@ -1504,6 +1508,11 @@ impl Anim {
                     if let Some((_, level)) = properties.fill_level {
                         spec.fill_level_cursor = Some(level);
                     }
+                    if let (Some((_, count)), Some((_, cursor))) =
+                        (properties.count, spec.repeat_count.as_mut())
+                    {
+                        *cursor = count;
+                    }
                     if spec.coordinate_view_role == Some(gaanim_scene::CoordinateViewRole::View)
                         && let (
                             Some(crate::anim::PropertyScale::To(scale)),
@@ -1887,6 +1896,22 @@ impl Anim {
             return Err("points must be finite".to_string());
         }
         Ok(self.update_properties(|properties| properties.points = Some(points)))
+    }
+
+    /// Shows `count` copies of a `repeat` or `duplicate` group, from the
+    /// first; a fractional count fades the next copy in or out.
+    pub fn count(self, count: f64) -> Result<Self, String> {
+        let spec = self
+            .property_spec
+            .as_ref()
+            .ok_or("count() requires Drawable.animate()")?;
+        let (copies, from) = spec
+            .lock()
+            .expect("object spec poisoned")
+            .repeat_count
+            .ok_or("count() requires a group made by repeat() or duplicate()")?;
+        crate::canvas::duplicate::check_count(count, copies)?;
+        Ok(self.update_properties(|properties| properties.count = Some((from, count))))
     }
 
     /// Animates the dash offset of every stroke, in scene units.

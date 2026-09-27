@@ -1106,6 +1106,27 @@ scene.render()
 ]
 
 #api-entry(
+  name: "Anim.count",
+  kind: "method",
+  params: (
+    (name: "count", type: "float", default: none, desc: [Copias visibles al terminar, de 0 al número de copias del grupo.]),
+  ),
+  returns: (type: "Anim", desc: [Recuento animado de las copias.]),
+  desc: [Anima cuántas copias de un grupo creado con `Geometry.repeat` o `Geometry.duplicate` se ven. Las copias aparecen en orden desde la primera: la copia `i` se ve cuando el recuento supera `i` y la parte fraccionaria funde la siguiente, así que `count(24)` desde 0 construye el patrón copia a copia. La opacidad de cada copia se conserva. El máximo es el número de copias con que se creó el grupo; para hacer crecer un patrón, créalo con todas y baja antes su recuento con `Drawable.count`. Un valor fuera de rango, o un objeto que no sea uno de esos grupos, lanza `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import GOLD, Easing, Scene
+scene = Scene(frame=(16, 9), background="#0d1322")
+leaf = scene.geometry.ellipse(0.12, 0.34).fill(GOLD).move_to(0, 2.4)
+spiral = scene.geometry.repeat(leaf, 36, rotate=0.5, scale=0.95, about=(0, 0)).count(0)
+scene.play([spiral.animate.count(36).duration(2.0).easing(Easing.LINEAR)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
   name: "Anim.points",
   kind: "method",
   params: (

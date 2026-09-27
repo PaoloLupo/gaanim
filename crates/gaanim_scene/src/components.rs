@@ -178,6 +178,12 @@ pub struct LocalBounds(pub Bounds3D);
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
 pub struct ShapeDeform(pub gaanim_core::kurbo::Affine);
 
+/// Extra opacity factor, between zero and one, that a repeater's `count`
+/// gives each of its copies. It multiplies into the propagated opacity on
+/// top of the authored `Opacity`, so opacity animations stay independent.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct Presence(pub f32);
+
 /// Local Y coordinate of a text object's typographic baseline.
 ///
 /// Unlike visual bounds, this metric is stable across ascenders, descenders,
