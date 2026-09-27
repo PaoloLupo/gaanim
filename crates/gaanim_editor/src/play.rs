@@ -19,6 +19,8 @@ Usage:
   gaanim-play export <BUNDLE.gaanim> --output <FILE> [--quality Q] [--width W]
               [--height H] [--fit error|contain|cover] [--from T] [--to T]
               [--transparent] [--encoder E]
+  gaanim-play check <BUNDLE.gaanim>   Recompose every frame and compare it
+                                      with the digest recorded for it
 
 Record a bundle with `gaanim export scene.py --output scene.gaanim`.";
 
@@ -42,6 +44,18 @@ fn main() {
         }
         return;
     }
+    if args.first().map(String::as_str) == Some("check") {
+        match args.get(1..).unwrap_or_default() {
+            [bundle] if bundle_player::is_bundle_path(std::path::Path::new(bundle)) => {
+                check_bundle(std::path::Path::new(bundle))
+                    .unwrap_or_else(|error| error.exit("check"));
+            }
+            _ => {
+                CommandError::Usage("usage: gaanim-play check <BUNDLE.gaanim>".into()).exit("check")
+            }
+        }
+        return;
+    }
     let (bundle, options) = parse_play_args(&args).unwrap_or_else(|error| {
         console::error("usage", error);
         console::hint("Run `gaanim-play --help` for usage.");
@@ -61,6 +75,51 @@ fn main() {
         std::process::exit(2);
     }
     app.run();
+}
+
+/// Open `path`, describe it, and recompose every frame against its digest.
+fn check_bundle(path: &std::path::Path) -> Result<(), CommandError> {
+    let mut bundle = gaanim_bundle::Bundle::open(path)
+        .map_err(|error| CommandError::Failed(format!("{}: {error}", path.display())))?;
+    let scene = &bundle.scene;
+    let stops: usize = scene
+        .segments
+        .iter()
+        .map(|segment| segment.stops.len())
+        .sum();
+    console::info("check", format!("{} · {}", path.display(), scene.title));
+    console::detail(
+        "Frames",
+        format!(
+            "{} at {} fps · {:.2} seconds · {}×{}",
+            bundle.frame_count(),
+            scene.fps,
+            scene.duration,
+            scene.output_size.0,
+            scene.output_size.1
+        ),
+    );
+    console::detail(
+        "Structure",
+        format!(
+            "{} segments · {stops} stops · {} markers · {} audio tracks",
+            scene.segments.len(),
+            scene.markers.len(),
+            scene.audio.len()
+        ),
+    );
+    let mismatched = bundle
+        .verify()
+        .map_err(|error| CommandError::Failed(error.to_string()))?;
+    if let Some((index, time)) = mismatched.first() {
+        return Err(CommandError::Failed(format!(
+            "{} of {} frames differ from the recording, first frame {index} at {time:.3}s",
+            mismatched.len(),
+            bundle.frame_count()
+        )));
+    }
+    console::success("pass", "every frame composes as it was recorded");
+    Ok(())
 }
 
 fn parse_play_args(args: &[String]) -> Result<(PathBuf, HostOptions), String> {

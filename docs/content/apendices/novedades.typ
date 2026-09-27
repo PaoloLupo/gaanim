@@ -23,7 +23,7 @@ Sin publicar todavía. No hace falta cambiar tus escenas.
   recursos. Los callbacks, updaters y funciones reactivas quedan grabados como
   los fotogramas que produjeron, y un vídeo exportado desde el paquete es
   idéntico, píxel a píxel, al que exporta el script con la misma frecuencia y
-  el mismo tamaño. Aún no admite 3D, Lottie ni clips de vídeo (ver
+  el mismo tamaño. Aún no admite 3D ni clips de vídeo (ver
   #link("/guias/compartir/")[Compartir sin Python]).
 - `gaanim mi-charla.gaanim` y `gaanim --present mi-charla.gaanim` abren un
   paquete con el nuevo ejecutable `gaanim-play`, que se instala junto a
@@ -32,6 +32,10 @@ Sin publicar todavía. No hace falta cambiar tus escenas.
   en vídeo con los formatos y opciones de siempre, y el botón Exportar del
   editor hace lo mismo con el paquete abierto. `--fps` elige la frecuencia al
   grabar un paquete.
+- `gaanim check mi-charla.gaanim` vuelve a componer cada fotograma de un
+  paquete y lo compara con el resumen grabado, sin Python.
+- El `README.md` de los proyectos nuevos incluye cómo compartirlos como
+  paquete.
 
 = 0.5.2
 

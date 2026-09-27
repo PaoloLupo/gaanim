@@ -708,6 +708,142 @@ pub fn read_blend(r: &mut Reader<'_>) -> Result<peniko::BlendMode> {
     Ok(peniko::BlendMode { mix, compose })
 }
 
+/// Write a composed Vello scene, such as the frame of a Lottie animation:
+/// its encoded streams as they are, and its gradients and images late bound.
+/// Glyph runs are not written; Gaanim draws text as paths.
+pub fn write_scene(
+    w: &mut Writer,
+    tables: &mut impl Interner,
+    scene: &vello::Scene,
+) -> std::result::Result<(), &'static str> {
+    use vello_encoding::Patch;
+    let encoding = scene.encoding();
+    let resources = &encoding.resources;
+    if !resources.glyph_runs.is_empty() || !resources.glyphs.is_empty() {
+        return Err("glyph runs");
+    }
+    for count in [
+        encoding.n_paths,
+        encoding.n_path_segments,
+        encoding.n_clips,
+        encoding.n_open_clips,
+        encoding.flags,
+    ] {
+        w.var(u64::from(count));
+    }
+    w.bytes(bytemuck::cast_slice(&encoding.path_tags));
+    w.bytes(bytemuck::cast_slice(&encoding.path_data));
+    w.bytes(bytemuck::cast_slice(&encoding.draw_tags));
+    w.bytes(bytemuck::cast_slice(&encoding.draw_data));
+    w.bytes(bytemuck::cast_slice(&encoding.transforms));
+    w.bytes(bytemuck::cast_slice(&encoding.styles));
+    w.len(resources.color_stops.len());
+    for stop in &resources.color_stops {
+        w.f32(stop.offset);
+        write_dynamic_color(w, &stop.color);
+    }
+    w.len(resources.patches.len());
+    for patch in &resources.patches {
+        match patch {
+            Patch::Ramp {
+                draw_data_offset,
+                stops,
+                extend,
+            } => {
+                w.u8(0);
+                w.len(*draw_data_offset);
+                w.len(stops.start);
+                w.len(stops.end);
+                write_extend(w, *extend);
+            }
+            Patch::Image {
+                draw_data_offset,
+                image,
+            } => {
+                w.u8(1);
+                w.len(*draw_data_offset);
+                w.var(u64::from(tables.image(image)));
+            }
+            Patch::GlyphRun { .. } => return Err("glyph runs"),
+        }
+    }
+    Ok(())
+}
+
+fn read_pod<T: bytemuck::Pod>(r: &mut Reader<'_>) -> Result<Vec<T>> {
+    let bytes = r.bytes()?;
+    if bytes.len() % std::mem::size_of::<T>() != 0 {
+        return Err(corrupt("scene stream has a partial element"));
+    }
+    Ok(bytemuck::pod_collect_to_vec(bytes))
+}
+
+/// Read a scene written by [`write_scene`].
+pub fn read_scene(r: &mut Reader<'_>, tables: &impl Resolver) -> Result<vello::Scene> {
+    use vello_encoding::Patch;
+    let mut scene = vello::Scene::new();
+    let encoding = scene.encoding_mut();
+    encoding.n_paths = r.u32()?;
+    encoding.n_path_segments = r.u32()?;
+    encoding.n_clips = r.u32()?;
+    encoding.n_open_clips = r.u32()?;
+    encoding.flags = r.u32()?;
+    encoding.path_tags = read_pod(r)?;
+    encoding.path_data = read_pod(r)?;
+    encoding.draw_tags = read_pod(r)?;
+    encoding.draw_data = read_pod(r)?;
+    encoding.transforms = read_pod(r)?;
+    encoding.styles = read_pod(r)?;
+    let draw_bytes = encoding.draw_data.len() * 4;
+    let stops = r.len()?;
+    let mut color_stops = Vec::with_capacity(stops.min(1 << 16));
+    for _ in 0..stops {
+        let offset = r.f32()?;
+        let color = read_dynamic_color(r)?;
+        color_stops.push(peniko::ColorStop { offset, color });
+    }
+    let patches = r.len()?;
+    let mut resolved = Vec::with_capacity(patches.min(1 << 16));
+    for _ in 0..patches {
+        let patch = match r.u8()? {
+            0 => {
+                let draw_data_offset = r.len()?;
+                let start = r.len()?;
+                let end = r.len()?;
+                if start > end || end > color_stops.len() {
+                    return Err(corrupt("gradient stops out of range"));
+                }
+                Patch::Ramp {
+                    draw_data_offset,
+                    stops: start..end,
+                    extend: read_extend(r)?,
+                }
+            }
+            1 => Patch::Image {
+                draw_data_offset: r.len()?,
+                image: tables.image(r.u32()?)?,
+            },
+            _ => return Err(corrupt("unknown scene resource")),
+        };
+        let offset = match &patch {
+            Patch::Ramp {
+                draw_data_offset, ..
+            }
+            | Patch::Image {
+                draw_data_offset, ..
+            } => *draw_data_offset,
+            Patch::GlyphRun { .. } => 0,
+        };
+        if offset >= draw_bytes.max(1) {
+            return Err(corrupt("scene resource outside the draw data"));
+        }
+        resolved.push(patch);
+    }
+    encoding.resources.color_stops = color_stops;
+    encoding.resources.patches = resolved;
+    Ok(scene)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -819,5 +955,56 @@ mod tests {
             peniko::BlendMode::new(peniko::Mix::Screen, peniko::Compose::DestIn)
         );
         assert!(r.is_empty());
+    }
+
+    #[test]
+    fn composed_scenes_round_trip_to_the_same_drawing() {
+        let mut scene = vello::Scene::new();
+        let gradient = peniko::Gradient::new_linear((0.0, 0.0), (4.0, 1.0)).with_stops([
+            peniko::Color::from_rgba8(255, 0, 0, 200),
+            peniko::Color::from_rgba8(0, 80, 255, 255),
+        ]);
+        let circle = kurbo::Circle::new((1.0, 1.0), 2.0);
+        scene.fill(
+            peniko::Fill::EvenOdd,
+            kurbo::Affine::rotate(0.3),
+            &gradient,
+            None,
+            &circle,
+        );
+        scene.push_clip_layer(
+            peniko::Fill::NonZero,
+            kurbo::Affine::IDENTITY,
+            &kurbo::Rect::new(-1.0, -1.0, 3.0, 2.0),
+        );
+        scene.stroke(
+            &kurbo::Stroke::new(0.25),
+            kurbo::Affine::translate((0.5, 0.0)),
+            peniko::Color::WHITE,
+            None,
+            &kurbo::Line::new((0.0, 0.0), (3.0, 2.0)),
+        );
+        let image = peniko::ImageData {
+            data: peniko::Blob::new(Arc::new(vec![9u8, 8, 7, 255, 1, 2, 3, 255])),
+            format: peniko::ImageFormat::Rgba8,
+            alpha_type: peniko::ImageAlphaType::Alpha,
+            width: 2,
+            height: 1,
+        };
+        scene.draw_image(&peniko::ImageBrush::new(image), kurbo::Affine::scale(0.5));
+        scene.pop_layer();
+
+        let mut tables = Tables(Vec::new());
+        let mut w = Writer::new();
+        write_scene(&mut w, &mut tables, &scene).unwrap();
+        let bytes = w.into_bytes();
+        let mut r = Reader::new(&bytes);
+        let decoded = read_scene(&mut r, &tables).unwrap();
+        assert!(r.is_empty());
+        assert_eq!(
+            crate::digest::scene_digest(&scene),
+            crate::digest::scene_digest(&decoded)
+        );
+        assert!(!scene.encoding().resources.patches.is_empty());
     }
 }

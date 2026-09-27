@@ -143,6 +143,10 @@ termina con `pass` o `fail`:
   las pausas tengan nombre; avisa si el marco no es 16:9 o si la escena dura
   menos de un segundo.
 
+Con un paquete `.gaanim`, `check` no necesita Python: describe el paquete y
+vuelve a componer cada fotograma para compararlo con el resumen grabado
+(ver #link("/guias/compartir/")[Compartir sin Python]).
+
 Los errores devuelven el código `1`. `--strict` también devuelve `1` cuando
 solo hay advertencias. Si el script lanza una excepción o no termina con
 `scene.render()`, `check` lo informa y devuelve `2`.

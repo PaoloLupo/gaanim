@@ -25,7 +25,9 @@ Por eso cualquier código que la escena ejecuta mientras se reproduce queda
 _horneado_ en el paquete: updaters, animaciones personalizadas, funciones
 reactivas, `always_redraw`, números aleatorios y cualquier otro callback de
 Python o de Rust. Al reproducir no se ejecuta nada de tu código; solo se
-componen los fotogramas grabados.
+componen los fotogramas grabados. Las animaciones Lottie y dotLottie también
+se graban así: cada fotograma distinto que dibujan se guarda como escena
+vectorial, así que el paquete no necesita el archivo Lottie ni sus imágenes.
 
 = Grabar
 
@@ -112,7 +114,16 @@ fotograma:
   vista previa del script.
 - *Integridad.* Cada archivo interno lleva su hash BLAKE3 en el manifiesto, y
   cada fotograma, un resumen de lo que compone. Un paquete dañado o
-  modificado se rechaza en lugar de mostrarse mal.
+  modificado se rechaza en lugar de mostrarse mal. `gaanim check
+  mi-charla.gaanim` vuelve a componer todos los fotogramas y los compara con
+  sus resúmenes, sin Python:
+
+  ```text
+    ▸ check     mi-charla.gaanim · mi-charla
+                Frames:     262 at 60 fps · 4.35 seconds · 1920×1080
+                Structure:  5 segments · 8 stops · 0 markers · 0 audio tracks
+    ✓ pass      every frame composes as it was recorded
+  ```
 
 Entre dos fotogramas grabados, el reproductor mantiene el último. A velocidad
 normal eso equivale al vídeo; a cámara lenta verás los fotogramas de la
@@ -124,7 +135,6 @@ La grabación se niega, con un mensaje, cuando la escena contiene algo que el
 paquete aún no puede reproducir exactamente. En esos casos exporta un vídeo:
 
 - contenido 3D (mallas, superficies, modelos glTF y ejes 3D);
-- animaciones Lottie;
 - clips de vídeo (`scene.media.video`).
 
 Los paquetes son de un solo uso: no se pueden editar ni volver a convertir en
@@ -142,6 +152,7 @@ Un `.gaanim` es un ZIP con estas entradas:
   [`scene.bin`], [Título, fondo, color de borrado, posprocesados, segmentos con notas y pausas, marcadores, escenas y pistas de audio.],
   [`tables/*.bin`], [Trazados, imágenes, recetas de fragmentos y cadenas, cada uno guardado una sola vez.],
   [`frames/NNNNNN.bin`], [Bloques de 60 fotogramas; cada bloque empieza con un fotograma completo y el resto guarda solo lo que cambió.],
+  [`scenes/NNNNNN.bin`], [Cada fotograma distinto de una animación Lottie, como escena vectorial de Vello.],
   [`index.bin`, `digests.bin`], [Instante y resumen BLAKE3 de cada fotograma.],
   [`media/*`], [Archivos de audio, direccionados por contenido.],
 )

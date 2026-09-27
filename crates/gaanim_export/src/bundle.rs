@@ -211,14 +211,6 @@ fn unsupported_content(world: &mut World) -> Option<&'static str> {
         return Some("3D content (meshes, surfaces and glTF models)");
     }
     if world
-        .query_filtered::<(), With<gaanim_renderer::lottie::LottiePlayer>>()
-        .iter(world)
-        .next()
-        .is_some()
-    {
-        return Some("Lottie animations");
-    }
-    if world
         .query_filtered::<(), With<gaanim_media::VideoPlayback>>()
         .iter(world)
         .next()
@@ -397,9 +389,7 @@ where
     let mut recorded = 0_u64;
     let mut push = |writer: &mut BundleWriter<_>, frame: Frame| -> Result<()> {
         let digest = gaanim_bundle::frame_digest(&frame, background.as_ref(), &mut fragments);
-        writer
-            .push_frame(&frame, digest, |_| None)
-            .map_err(bundle_error)?;
+        writer.push_frame(&frame, digest).map_err(bundle_error)?;
         fragments.end_frame();
         recorded += 1;
         progress.inc(1);

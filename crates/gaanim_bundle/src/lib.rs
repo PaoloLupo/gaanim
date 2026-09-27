@@ -432,6 +432,10 @@ pub struct BundleWriter<W: Write + Seek> {
     last_time: f64,
     entries: std::collections::BTreeMap<String, String>,
     media: HashMap<blake3::Hash, String>,
+    /// Recorded Lottie frames: by content, and by the scenes of the current
+    /// chunk (held so their addresses stay unique).
+    scenes: HashMap<blake3::Hash, u32>,
+    scene_by_ptr: HashMap<usize, (Arc<vello::Scene>, u32)>,
     generator: String,
 }
 
@@ -466,6 +470,8 @@ impl<W: Write + Seek> BundleWriter<W> {
             last_time: f64::NEG_INFINITY,
             entries: Default::default(),
             media: HashMap::new(),
+            scenes: HashMap::new(),
+            scene_by_ptr: HashMap::new(),
             generator: generator.into(),
         }
     }
@@ -513,31 +519,54 @@ impl<W: Write + Seek> BundleWriter<W> {
         Ok(())
     }
 
+    /// Store the Lottie frame `scene` once and return its index.
+    fn intern_scene(&mut self, scene: &Arc<vello::Scene>) -> Result<u32> {
+        let ptr = Arc::as_ptr(scene) as usize;
+        if let Some((_, index)) = self.scene_by_ptr.get(&ptr) {
+            return Ok(*index);
+        }
+        let mut w = Writer::new();
+        codec::write_scene(&mut w, &mut self.tables, scene)
+            .map_err(|what| BundleError::Unsupported(format!("a Lottie frame draws {what}")))?;
+        let bytes = w.into_bytes();
+        let hash = blake3::hash(&bytes);
+        let index = match self.scenes.get(&hash) {
+            Some(index) => *index,
+            None => {
+                let index = self.scenes.len() as u32;
+                self.write_entry(&scene_entry(index), &bytes)?;
+                self.scenes.insert(hash, index);
+                index
+            }
+        };
+        self.scene_by_ptr.insert(ptr, (Arc::clone(scene), index));
+        Ok(index)
+    }
+
     /// Append the next frame. Within a pass (see [`Self::start_pass`]),
     /// frames must come in increasing time order.
-    /// `digest` is [`frame_digest`] of the frame as the scene drew it, and
-    /// `lottie` names the recorded Lottie frame an element draws, if any.
-    pub fn push_frame(
-        &mut self,
-        frame: &Frame,
-        digest: [u8; 32],
-        lottie: impl Fn(&CapturedElement) -> Option<u32>,
-    ) -> Result<()> {
+    /// `digest` is [`frame_digest`] of the frame as the scene drew it.
+    pub fn push_frame(&mut self, frame: &Frame, digest: [u8; 32]) -> Result<()> {
         if frame.time.is_nan() || frame.time <= self.last_time {
             return Err(BundleError::Unsupported(format!(
                 "frames must be recorded in increasing time order ({} after {})",
                 frame.time, self.last_time
             )));
         }
-        if std::iter::once(frame)
+        let mut lottie = HashMap::new();
+        for element in std::iter::once(frame)
             .chain(&frame.motion_blur)
             .flat_map(|frame| &frame.capture.elements)
-            .any(|element| element.recipe.lottie && lottie(element).is_none())
         {
-            return Err(BundleError::Unsupported(
-                "a Lottie animation could not be recorded into the bundle".into(),
-            ));
+            if let Some(scene) = &element.lottie {
+                let index = self.intern_scene(scene)?;
+                lottie.insert(Arc::as_ptr(scene) as usize, index);
+            }
         }
+        let lottie = |element: &CapturedElement| {
+            let scene = element.lottie.as_ref()?;
+            lottie.get(&(Arc::as_ptr(scene) as usize)).copied()
+        };
         self.last_time = frame.time;
         self.times.push(frame.time);
         self.digests.push(digest);
@@ -571,6 +600,7 @@ impl<W: Write + Seek> BundleWriter<W> {
         self.chunk_frames = 0;
         self.delta.reset();
         self.tables.release_unused_recipes();
+        self.scene_by_ptr.clear();
         Ok(())
     }
 
@@ -663,6 +693,12 @@ pub struct Bundle {
     digests: Vec<[u8; 32]>,
     /// Decoded chunk: index and its frames.
     cached: Option<(usize, Vec<FrameRecord>)>,
+    /// Decoded Lottie frames of the cached chunk.
+    scenes: HashMap<u32, Arc<vello::Scene>>,
+}
+
+fn scene_entry(index: u32) -> String {
+    format!("scenes/{index:06}.bin")
 }
 
 fn read_entry<R: Read + Seek>(
@@ -783,6 +819,7 @@ impl Bundle {
             by_time,
             digests,
             cached: None,
+            scenes: HashMap::new(),
         })
     }
 
@@ -846,16 +883,33 @@ impl Bundle {
         {
             let frames = self.decode_chunk(chunk)?;
             self.cached = Some((chunk, frames));
+            self.scenes.clear();
         }
         let (_, frames) = self.cached.as_ref().expect("chunk decoded");
         let first = self.manifest.chunks[chunk].first_frame;
         let record = frames
             .get(index - first)
             .ok_or_else(|| BundleError::Corrupt("frame index out of range".into()))?;
-        record.resolve(&self.tables, &mut |_| {
-            Err(BundleError::Unsupported(
-                "this bundle draws Lottie animations, which this player cannot show yet".into(),
-            ))
+        let (archive, manifest, tables, scenes) = (
+            &mut self.archive,
+            &self.manifest,
+            &self.tables,
+            &mut self.scenes,
+        );
+        record.resolve(tables, &mut |index| {
+            if let Some(scene) = scenes.get(&index) {
+                return Ok(Some(Arc::clone(scene)));
+            }
+            let bytes = read_entry(archive, Some(manifest), &scene_entry(index))?;
+            let mut r = Reader::new(&bytes);
+            let scene = Arc::new(codec::read_scene(&mut r, tables)?);
+            if !r.is_empty() {
+                return Err(BundleError::Corrupt(
+                    "a Lottie frame has trailing data".into(),
+                ));
+            }
+            scenes.insert(index, Arc::clone(&scene));
+            Ok(Some(scene))
         })
     }
 

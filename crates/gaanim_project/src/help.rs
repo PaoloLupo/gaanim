@@ -298,7 +298,13 @@ const EXPORT: Page = Page {
 const CHECK: Page = Page {
     summary: "Validate a scene or presentation without opening a window.",
     blocks: &[
-        Block::Lines("Usage", &["gaanim check <SCRIPT_OR_PROJECT> [--strict]"]),
+        Block::Lines(
+            "Usage",
+            &[
+                "gaanim check <SCRIPT_OR_PROJECT> [--strict]",
+                "gaanim check <BUNDLE.gaanim>",
+            ],
+        ),
         Block::Lines(
             "Checks",
             &[
@@ -307,6 +313,7 @@ const CHECK: Page = Page {
                 "a 16:9 frame for presentations",
                 "unthemed scenes whose default white objects match the background",
                 "unresolved template placeholders",
+                "for a bundle: every frame recomposes to its recorded digest",
             ],
         ),
         Block::Rows(

@@ -90,7 +90,9 @@ fn sibling_binary(name: &str) -> PathBuf {
 /// its `--output`) is a `.gaanim` file.
 fn bundle_input(args: &[String]) -> bool {
     let (rest, takes_value): (&[String], &[&str]) =
-        if args.get(1).map(String::as_str) == Some("export") {
+        if args.get(1).map(String::as_str) == Some("check") {
+            (&args[2..], &[])
+        } else if args.get(1).map(String::as_str) == Some("export") {
             (
                 &args[2..],
                 &[
@@ -329,6 +331,8 @@ mod tests {
             "talk.gaanim"
         ])));
         assert!(!bundle_input(&args(&["--from", "intro.gaanim", "talk.py"])));
+        assert!(bundle_input(&args(&["check", "talk.gaanim"])));
+        assert!(!bundle_input(&args(&["check", "talk.py"])));
         assert!(!bundle_input(&args(&[])));
     }
 
