@@ -1513,8 +1513,18 @@ capturas ni en la exportación. `O` o `Esc` la ocultan.
   `Ctrl+C` (`Cmd+C` en macOS) para copiarlo como tupla, lista para pegar en
   `move_to((x, y))`. La etiqueta se oculta sobre los paneles del editor.
 - *Grilla* (`G`): líneas cada 1, 2 o 5 unidades (o sus potencias de diez),
-  según el zoom.
+  según el zoom. Durante la inspección cubren toda la vista, no solo el marco.
+  En 3D es una grilla sobre el plano XZ alrededor del punto que mira la cámara,
+  con el eje X en rojo y el Z en azul.
+- *Guías* (`M`): márgenes seguros de acción (90 %) y de títulos (80 %), y los
+  tercios del marco.
 - El objeto seleccionado se enmarca con su centro y su tamaño en unidades.
+- Con la inspección activa, la barra muestra el zoom de la vista (o *3D libre*)
+  en azul cuando ya no coincide con la cámara de la escena, y un botón para
+  restablecerla (`R`). El icono de teclado lista todos los atajos.
+
+El editor recuerda qué overlays dejaste activados entre sesiones; el modo en
+sí siempre empieza oculto.
 
 == Recorte y máscaras
 

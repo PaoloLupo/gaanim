@@ -11,6 +11,30 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.5.2
+
+Sin publicar todavía. No hace falta cambiar tus escenas.
+
+== Cambios
+
+- Nuevas guías de composición en los overlays del editor (`M`): márgenes
+  seguros al 90 % y al 80 % y tercios del marco.
+- Durante la inspección (`I`), la grilla y los ejes cubren toda la vista y no
+  solo el marco de salida. En escenas 3D, la grilla se dibuja sobre el plano
+  XZ alrededor del punto que mira la cámara, con el eje X en rojo y el Z en
+  azul (ver #link("/referencia/scene/")[Escena]).
+- Con la inspección activa, la barra de overlays muestra el zoom de la vista,
+  en azul cuando ya no coincide con la cámara de la escena, junto a un botón
+  para restablecerla (`R`). El icono de teclado lista todos los atajos.
+- El editor recuerda qué overlays dejaste activados entre sesiones; el modo
+  en sí sigue empezando oculto.
+
+== Correcciones
+
+- En escenas 3D, el recuadro de selección y las coordenadas de los overlays se
+  calculaban sobre el marco de salida en lugar de la ventana, así que quedaban
+  desplazados respecto al objeto.
+
 = 0.5.1
 
 Publicada el 27 de septiembre de 2026. No hace falta cambiar tus escenas.
