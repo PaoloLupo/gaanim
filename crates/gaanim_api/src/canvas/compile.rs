@@ -775,6 +775,13 @@ pub(crate) struct CompileCheckpoint {
     pub(crate) timeline: Timeline,
 }
 
+impl CompileCursor {
+    /// The compiled object that stands for authored object `id`.
+    pub(crate) fn runtime_id(&self, id: ObjectId) -> Option<ObjectId> {
+        self.id_map.get(&id).copied()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CompiledObjectScope {
     Segment(SceneId),
@@ -2297,6 +2304,7 @@ impl SceneModel {
                     .map(|stop| SegmentStop {
                         name: stop.name,
                         time: stop.time,
+                        ambient: stop.ambient,
                     })
                     .collect(),
             })
@@ -2598,7 +2606,7 @@ impl SceneModel {
     ) {
         let scene_start = builder.current_time;
         let transform_targets = Self::transform_targets(&seg.ops);
-        let fade_in_targets: HashSet<ObjectId> = seg
+        let mut fade_in_targets: HashSet<ObjectId> = seg
             .ops
             .iter()
             .flat_map(|op| {
@@ -2616,6 +2624,7 @@ impl SceneModel {
                 })
             })
             .collect();
+        fade_in_targets.extend(Self::camera_view_entries(&seg.ops));
         for (op_index, op) in seg.ops.iter().enumerate() {
             match op {
                 Op::Spawn(spec) => {
@@ -2677,6 +2686,9 @@ impl SceneModel {
                         }
                     }
                     id_map.insert(spec.id, actual.id);
+                    if spec.svg_root {
+                        Self::scene_unit_svg_strokes(builder, spec.id, object_specs, id_map);
+                    }
                     object_scopes.insert(spec.id, CompiledObjectScope::Segment(scene_id));
                     // Compilation creates every entity up front so arbitrary timeline seeks
                     // remain possible. An object declared after earlier animations must still
@@ -6088,6 +6100,32 @@ impl SceneModel {
         }
     }
 
+    /// Screens whose first pop in `ops` is a `pop_out`, with their companions:
+    /// that pop is their entry, so their declaration does not show them.
+    fn camera_view_entries(ops: &[Op]) -> Vec<ObjectId> {
+        let mut seen = HashSet::new();
+        let mut entries = Vec::new();
+        for op in ops {
+            let anims: &[AnimationBuilder] = match op {
+                Op::Animate { anim, active: true } => std::slice::from_ref(anim),
+                Op::Play(anims) => anims,
+                _ => &[],
+            };
+            for anim in anims {
+                if let AnimationType::CameraViewPop {
+                    out, companions, ..
+                } = &anim.anim_type
+                    && seen.insert(anim.target)
+                    && *out
+                {
+                    entries.push(anim.target);
+                    entries.extend(companions.iter().copied());
+                }
+            }
+        }
+        entries
+    }
+
     /// Whether `target`'s first fade-in in this segment comes after the op at
     /// `index`, i.e. the object is still waiting for that entry animation.
     fn fade_in_pending(ops: &[Op], index: usize, target: ObjectId) -> bool {
@@ -6643,6 +6681,56 @@ impl SceneModel {
         }
     }
 
+    /// Uniform scale an imported SVG root declares through its layout.
+    fn svg_declared_scale(spec: &ObjectSpec) -> f64 {
+        let mut scale = DVec3::ONE;
+        for op in &spec.layout_ops {
+            match op {
+                LayoutOp::SetScale(factor) => scale = DVec3::splat(*factor),
+                LayoutOp::SetScale3D(value) => scale = *value,
+                LayoutOp::ScaleBy(value) => scale *= *value,
+                _ => {}
+            }
+        }
+        (scale.x.abs() * scale.y.abs()).sqrt()
+    }
+
+    /// Keep the stroke widths set on an imported SVG's paths in scene units:
+    /// they are drawn under the root's scale, so divide them by it. The
+    /// file's own strokes scale with the drawing.
+    fn scene_unit_svg_strokes(
+        builder: &mut SceneBuilder,
+        root: ObjectId,
+        object_specs: &HashMap<ObjectId, ObjectSpec>,
+        id_map: &HashMap<ObjectId, ObjectId>,
+    ) {
+        let Some(root_spec) = object_specs.get(&root) else {
+            return;
+        };
+        let scale = Self::svg_declared_scale(root_spec);
+        if !scale.is_finite() || scale <= 1.0e-12 || (scale - 1.0).abs() < 1.0e-12 {
+            return;
+        }
+        let paths: Vec<ObjectId> = object_specs
+            .values()
+            .filter(|spec| {
+                spec.svg_owner == Some(root)
+                    && spec.stroke_overridden
+                    && matches!(spec.kind, SpawnKind::SvgPath(_))
+            })
+            .filter_map(|spec| id_map.get(&spec.id).copied())
+            .collect();
+        for path in paths {
+            if let Some(state) = builder.states.get_mut(path) {
+                state.stroke.style.width /= scale;
+                builder
+                    .commands
+                    .entity(state.entity)
+                    .insert(state.stroke.clone());
+            }
+        }
+    }
+
     fn remap_anim(
         anim: &AnimationBuilder,
         id_map: &HashMap<ObjectId, ObjectId>,
@@ -6713,6 +6801,7 @@ impl SceneModel {
                 focus,
                 zoom,
                 out,
+                companions,
             } => AnimationType::CameraViewPop {
                 frame: *id_map.get(frame)?,
                 focus: match focus {
@@ -6726,6 +6815,10 @@ impl SceneModel {
                     None => None,
                 },
                 out: *out,
+                companions: companions
+                    .iter()
+                    .filter_map(|id| id_map.get(id).copied())
+                    .collect(),
             },
             AnimationType::FadeTransform { target } => AnimationType::FadeTransform {
                 target: *id_map.get(target)?,
@@ -6811,17 +6904,17 @@ impl SceneModel {
             }
             other => other.clone(),
         };
-        if let Some(spec) = object_specs.get(&anim.target).filter(|spec| spec.svg_root) {
-            let mut scale = DVec3::ONE;
-            for op in &spec.layout_ops {
-                match op {
-                    LayoutOp::SetScale(factor) => scale = DVec3::splat(*factor),
-                    LayoutOp::SetScale3D(value) => scale = *value,
-                    LayoutOp::ScaleBy(value) => scale *= *value,
-                    _ => {}
-                }
+        // Stroke widths set on an imported SVG, or on one of its parts, are
+        // in scene units: undo the root's declared scale.
+        let svg_root = object_specs.get(&anim.target).and_then(|spec| {
+            if spec.svg_root {
+                Some(spec)
+            } else {
+                object_specs.get(&spec.svg_owner?)
             }
-            let scale = (scale.x.abs() * scale.y.abs()).sqrt();
+        });
+        if let Some(spec) = svg_root {
+            let scale = Self::svg_declared_scale(spec);
             if scale.is_finite() && scale > 1.0e-12 {
                 match &mut anim_type {
                     AnimationType::StrokeWidthTo { to } => *to /= scale,
@@ -8733,6 +8826,30 @@ impl SceneModel {
         }
     }
 
+    /// Shapes whose geometry is authored at absolute scene positions, such
+    /// as lines, polygons and arcs, rather than around their own origin.
+    fn declared_in_scene_coordinates(kind: &SpawnKind) -> bool {
+        matches!(
+            kind,
+            SpawnKind::Line(..)
+                | SpawnKind::Arrow(..)
+                | SpawnKind::SizedArrow { .. }
+                | SpawnKind::DashedLine { .. }
+                | SpawnKind::DoubleArrow { .. }
+                | SpawnKind::Polygon(_)
+                | SpawnKind::Points { .. }
+                | SpawnKind::Sector { .. }
+                | SpawnKind::Brace { .. }
+                | SpawnKind::Arc { .. }
+                | SpawnKind::CurvedArrow { .. }
+                | SpawnKind::CurvedArrowArc { .. }
+                | SpawnKind::Dimension { .. }
+                | SpawnKind::Polyline(_)
+                | SpawnKind::Bezier { .. }
+                | SpawnKind::Curve(_)
+        )
+    }
+
     fn apply_layout(
         builder: &mut SceneBuilder,
         id: ObjectId,
@@ -8741,7 +8858,12 @@ impl SceneModel {
         frame_bounds: Bounds3D,
     ) {
         let uses_default_text_anchor = matches!(spec.kind, SpawnKind::Text(_));
-        if spec.layout_ops.is_empty() && !uses_default_text_anchor {
+        let pivots_on_box_center = Self::declared_in_scene_coordinates(&spec.kind)
+            && !spec
+                .layout_ops
+                .iter()
+                .any(|op| matches!(op, LayoutOp::SetPivot(_)));
+        if spec.layout_ops.is_empty() && !uses_default_text_anchor && !pivots_on_box_center {
             return;
         }
 
@@ -8752,6 +8874,13 @@ impl SceneModel {
         let original_transform = state.transform;
         let entity = state.entity;
         let mut transform = original_transform;
+        // Geometry declared in scene coordinates keeps its local origin at the
+        // scene origin. Its default pivot is its box center instead, so
+        // rotations, scales and skews turn it in place. The anchor does not
+        // move an untransformed shape.
+        if pivots_on_box_center && transform.anchor == DVec3::ZERO {
+            transform.anchor = bounds.center();
+        }
         let mut pivot_in_scene = None;
         let mut pending_text_anchor = uses_default_text_anchor.then_some((
             DVec3::ZERO,
@@ -12582,6 +12711,412 @@ mod tests {
                     assert!(transform.scale.x > 1.0, "visible while scaling at {time}");
                 }
             }
+        }
+    }
+
+    fn opacity_of(world: &mut World, handle: &DrawableHandle) -> f32 {
+        let id = ObjectId::from_raw(handle.id.as_raw() - 1);
+        world
+            .query::<(&MobjectId, &Opacity)>()
+            .iter(world)
+            .find(|(object, _)| object.0 == id)
+            .unwrap()
+            .1
+            .0
+    }
+
+    #[test]
+    fn absolute_geometry_turns_scales_and_skews_about_its_box_center() {
+        use std::f64::consts::PI;
+
+        let mut canvas = SceneModel::new(640, 360);
+        // Box center (4, 2); the local origin stays at the scene origin.
+        let triangle = canvas.polygon(vec![(3.0, 1.0), (5.0, 1.0), (4.0, 3.0)]);
+        let arc = canvas.curved_arrow_arc(0.0, -2.5, 0.38, 1.9, 5.2);
+        let line = canvas.line(1.0, 1.0, 3.0, 1.0).rotate_to(PI / 2.0);
+        canvas.play(vec![
+            triangle.animate().rotate_by(2.0 * PI).duration(1.0),
+            arc.animate().rotate_by(PI).duration(1.0),
+        ]);
+        canvas.play(vec![
+            triangle.animate().scale_to(2.0).duration(1.0),
+            arc.animate().skew_to(0.4, 0.0).duration(1.0),
+        ]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+
+        let world_point = |world: &mut World, handle: &DrawableHandle, local: DVec3| {
+            transform_of(world, handle)
+                .to_mat4()
+                .transform_point3(local)
+        };
+        timeline.seek(&mut world, 0.0);
+        let arc_center =
+            transform_of(&mut world, &arc).translation + transform_of(&mut world, &arc).anchor;
+        for time in [0.0, 0.3, 0.5, 1.0, 1.5, 2.0] {
+            timeline.seek(&mut world, time);
+            let center = world_point(&mut world, &triangle, DVec3::new(4.0, 2.0, 0.0));
+            assert!(
+                center.distance(DVec3::new(4.0, 2.0, 0.0)) < 1e-6,
+                "{time}: {center:?}"
+            );
+            let pivot =
+                transform_of(&mut world, &arc).translation + transform_of(&mut world, &arc).anchor;
+            assert!(pivot.distance(arc_center) < 1e-6, "{time}: {pivot:?}");
+        }
+        assert!(arc_center.distance(DVec3::ZERO) > 1.0, "{arc_center:?}");
+        // The declared rotation also turns the line about its midpoint.
+        let start = world_point(&mut world, &line, DVec3::new(1.0, 1.0, 0.0));
+        let end = world_point(&mut world, &line, DVec3::new(3.0, 1.0, 0.0));
+        assert!(
+            start.distance(DVec3::new(2.0, 0.0, 0.0)) < 1e-9,
+            "{start:?}"
+        );
+        assert!(end.distance(DVec3::new(2.0, 2.0, 0.0)) < 1e-9, "{end:?}");
+    }
+
+    #[test]
+    fn pivot_turns_of_a_rotated_object_start_from_its_pose() {
+        let mut canvas = SceneModel::new(640, 360);
+        let bar = canvas
+            .rect(2.0, 0.4)
+            .move_to(1.0, 0.0)
+            .with_pivot(0.0, 0.0)
+            .rotate_to(0.5);
+        canvas.wait(1.0);
+        canvas.play(vec![bar.animate().rotate_by(1.0).duration(1.0)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let tip = |world: &mut World| {
+            transform_of(world, &bar)
+                .to_mat4()
+                .transform_point3(DVec3::new(2.0, 0.0, 0.0))
+        };
+        let radius = |point: DVec3| point.truncate().length();
+        timeline.seek(&mut world, 0.5);
+        let declared = tip(&mut world);
+        timeline.seek(&mut world, 1.0);
+        let started = tip(&mut world);
+        assert!(
+            started.distance(declared) < 1e-6,
+            "{started:?} vs {declared:?}"
+        );
+        // The swing follows a polyline with one-degree steps.
+        for time in [1.3, 1.7, 2.0] {
+            timeline.seek(&mut world, time);
+            let point = tip(&mut world);
+            assert!(
+                (radius(point) - radius(declared)).abs() < 1e-4,
+                "{time}: {point:?}"
+            );
+        }
+        let angle = |point: DVec3| point.y.atan2(point.x);
+        assert!((angle(tip(&mut world)) - angle(declared) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn pop_in_hides_the_screen_until_the_next_pop_out() {
+        let mut canvas = SceneModel::new(640, 360);
+        let frame = canvas.rect(2.0, 1.0).move_to(3.0, 2.0);
+        let view = canvas
+            .rect(4.0, 2.0)
+            .move_to(-4.0, -1.0)
+            .camera_view(&frame)
+            .unwrap();
+        canvas.play(vec![view.pop_out().duration(1.0)]);
+        canvas.play(vec![view.pop_in().duration(1.0)]);
+        canvas.wait(1.0);
+        canvas.play(vec![view.pop_out().duration(1.0)]);
+        canvas.play(vec![view.screen().animate().fade_out().duration(1.0)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        for (time, expected) in [
+            (0.5, 1.0),
+            (1.5, 1.0),
+            (2.0, 0.0),
+            (2.5, 0.0),
+            (3.0, 1.0),
+            (3.5, 1.0),
+            (4.0, 1.0),
+            (5.0, 0.0),
+        ] {
+            timeline.seek(&mut world, time);
+            let opacity = opacity_of(&mut world, view.screen());
+            assert!((opacity - expected).abs() < 1e-6, "{time}: {opacity}");
+        }
+        timeline.seek(&mut world, 1.5);
+        assert!((opacity_of(&mut world, view.screen()) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn stops_record_their_ambient_loop_length() {
+        let mut canvas = SceneModel::new(640, 360);
+        let dot = canvas.dot(0.1);
+        canvas.wait(1.0);
+        canvas
+            .stop_with_loop(
+                Some("placas".into()),
+                crate::canvas::Composition::leaf(dot.animate().shift_by(1.0, 0.0).duration(1.5)),
+            )
+            .unwrap();
+        canvas.wait(0.5);
+        canvas.stop(None).unwrap();
+        let stops = &canvas.segment_manifest().segments[0].stops;
+        assert_eq!(stops.len(), 2);
+        assert_eq!((stops[0].time, stops[0].ambient), (1.0, Some(1.5)));
+        assert_eq!((stops[1].time, stops[1].ambient), (3.0, None));
+        canvas.wait(1.0);
+        assert!(matches!(
+            canvas.stop_with_loop(
+                None,
+                crate::canvas::Composition::leaf(dot.animate().shift_by(1.0, 0.0).duration(0.0)),
+            ),
+            Err(crate::canvas::StopLoopError::Empty)
+        ));
+    }
+
+    #[test]
+    fn bounds_measure_any_drawable_at_the_cursor() {
+        let mut canvas = SceneModel::new(640, 360);
+        let rect = canvas.rect(2.0, 1.0).move_to(3.0, -1.0);
+        let group = {
+            let a = canvas.square(1.0).move_to(-4.0, 0.0);
+            let b = canvas.circle(0.5).move_to(-1.0, 2.0);
+            canvas.group(&[&a, &b])
+        };
+        canvas.play(vec![rect.animate().move_to(0.0, 0.0).duration(1.0)]);
+        let canvas = canvas.into_shared();
+        let (rect_box, group_box) = {
+            let _guard = canvas.lock().unwrap();
+            (rect.clone(), group.clone())
+        };
+        let rect_box = rect_box.bounds().unwrap();
+        assert!((rect_box.width() - 2.0).abs() < 1e-9 && (rect_box.height() - 1.0).abs() < 1e-9);
+        // Measured at the cursor, after the move ended.
+        assert!(rect_box.center().truncate().length() < 1e-9, "{rect_box:?}");
+        let group_box = group_box.bounds().unwrap();
+        assert!((group_box.min.x + 4.5).abs() < 1e-9 && (group_box.max.y - 2.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn pixels_map_onto_the_displayed_image() {
+        use gaanim_objects::primitives::ImageView;
+        let mut canvas = SceneModel::new(640, 360);
+        let image = gaanim_core::peniko::ImageData {
+            data: gaanim_core::peniko::Blob::new(std::sync::Arc::new(vec![255u8; 4 * 200 * 100])),
+            format: gaanim_core::peniko::ImageFormat::Rgba8,
+            alpha_type: gaanim_core::peniko::ImageAlphaType::Alpha,
+            width: 200,
+            height: 100,
+        };
+        // 200x100 px shown 4 units wide: 50 px per unit.
+        let view = ImageView {
+            source_x: 0.0,
+            source_y: 0.0,
+            source_width: 200.0,
+            source_height: 100.0,
+            display_width: 4.0,
+            display_height: 2.0,
+            scale_x: 0.02,
+            scale_y: 0.02,
+            quality: gaanim_core::peniko::ImageQuality::Medium,
+        };
+        let picture = canvas
+            .spawn(SpawnKind::Image { image, view })
+            .move_to(1.0, 1.0);
+        let corner = picture.pixel(0.0, 0.0).unwrap();
+        let inner = picture.pixel(150.0, 25.0).unwrap();
+        assert!(canvas.rect(1.0, 1.0).pixel(0.0, 0.0).is_err());
+        let marker = canvas.dot(0.05).at_anchor_point(inner);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        timeline.seek(&mut world, 0.0);
+        let at = transform_of(&mut world, &marker).translation;
+        // Pixel (150, 25): x = -2 + 3 = 1, y = 1 - 0.5 = 0.5, then moved by (1, 1).
+        assert!(at.distance(DVec3::new(2.0, 1.5, 0.0)) < 1e-9, "{at:?}");
+        assert_eq!(corner.offset, DVec3::new(-2.0, 1.0, 0.0));
+    }
+
+    #[test]
+    fn matrix_to_applies_a_linear_map_about_the_pivot() {
+        use crate::canvas::{LinearMap2D, LinearMapError};
+        assert_eq!(
+            LinearMap2D::new([[1.0, 2.0], [2.0, 4.0]]),
+            Err(LinearMapError::Singular)
+        );
+        let rows = [[0.8, 0.3], [-0.5, 1.2]];
+        let map = LinearMap2D::new(rows).unwrap();
+        let mut canvas = SceneModel::new(640, 360);
+        let square = canvas.square(2.0).move_to(1.0, 1.0).matrix_to(map);
+        let mirrored = canvas
+            .square(2.0)
+            .matrix_to(LinearMap2D::new([[-1.0, 0.0], [0.0, 1.0]]).unwrap());
+        let animated = canvas.square(2.0);
+        canvas.play(vec![animated.animate().matrix_to(map).duration(1.0)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        timeline.seek(&mut world, 1.0);
+        let apply = |local: DVec3| {
+            DVec3::new(
+                rows[0][0] * local.x + rows[0][1] * local.y,
+                rows[1][0] * local.x + rows[1][1] * local.y,
+                0.0,
+            )
+        };
+        for local in [DVec3::new(1.0, 1.0, 0.0), DVec3::new(-1.0, 0.5, 0.0)] {
+            let point = transform_of(&mut world, &square)
+                .to_mat4()
+                .transform_point3(local);
+            assert!(
+                point.distance(DVec3::new(1.0, 1.0, 0.0) + apply(local)) < 1e-9,
+                "{point:?}"
+            );
+            let point = transform_of(&mut world, &animated)
+                .to_mat4()
+                .transform_point3(local);
+            assert!(point.distance(apply(local)) < 1e-6, "{point:?}");
+        }
+        let point = transform_of(&mut world, &mirrored)
+            .to_mat4()
+            .transform_point3(DVec3::new(1.0, 0.5, 0.0));
+        assert!(
+            point.distance(DVec3::new(-1.0, 0.5, 0.0)) < 1e-9,
+            "{point:?}"
+        );
+    }
+
+    #[test]
+    fn rectangular_insets_take_their_own_aspect() {
+        use crate::canvas::{
+            CameraInsetOptions, CameraInsetShape, CameraViewError, CanvasEndpoint,
+        };
+        let mut canvas = SceneModel::new(640, 360);
+        let target = CanvasEndpoint::Static(DVec3::new(-3.0, 0.0, 0.0));
+        let tall = canvas
+            .camera_inset(
+                target.clone(),
+                CameraInsetOptions {
+                    size: Some(2.0),
+                    aspect: Some(0.5),
+                    shape: CameraInsetShape::Rect,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            canvas.camera_inset(
+                target,
+                CameraInsetOptions {
+                    aspect: Some(2.0),
+                    shape: CameraInsetShape::Circle,
+                    ..Default::default()
+                },
+            ),
+            Err(CameraViewError::InvalidAspect)
+        ));
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        timeline.seek(&mut world, 0.0);
+        for part in [tall.screen(), tall.frame()] {
+            let id = ObjectId::from_raw(part.id.as_raw() - 1);
+            let bounds = world
+                .query::<(&MobjectId, &gaanim_scene::LocalBounds)>()
+                .iter(&world)
+                .find(|(object, _)| object.0 == id)
+                .unwrap()
+                .1
+                .0;
+            assert!(
+                (bounds.width() / bounds.height() - 0.5).abs() < 1e-9,
+                "{bounds:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn inset_frames_and_connectors_enter_and_leave_with_their_screen() {
+        use crate::canvas::{CameraInsetOptions, CanvasEndpoint};
+
+        let mut canvas = SceneModel::new(640, 360);
+        let target = CanvasEndpoint::Static(DVec3::new(-3.0, -1.0, 0.0));
+        let inset = canvas
+            .camera_inset(target.clone(), CameraInsetOptions::default())
+            .unwrap();
+        canvas.wait(0.5);
+        // Declared mid-scene, it still waits for its entry.
+        let late = canvas
+            .camera_inset(target, CameraInsetOptions::default())
+            .unwrap();
+        canvas.wait(0.5);
+        canvas.play(vec![
+            inset.pop_out().duration(1.0),
+            late.pop_out().duration(1.0),
+        ]);
+        canvas.play(vec![inset.pop_in().duration(1.0)]);
+        canvas.wait(1.0);
+        canvas.play(vec![inset.pop_out().duration(1.0)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+
+        let parts = |view: &crate::canvas::CameraViewHandle| {
+            let mut parts = vec![view.screen().clone(), view.frame().clone()];
+            parts.extend(view.connectors().iter().cloned());
+            parts
+        };
+        for (time, shown) in [
+            (0.25, false),
+            (1.5, true),
+            (2.5, true),
+            (3.5, false),
+            (4.5, true),
+        ] {
+            timeline.seek(&mut world, time);
+            for part in parts(&inset) {
+                let opacity = opacity_of(&mut world, &part);
+                assert_eq!(opacity > 0.5, shown, "{time}: {opacity}");
+            }
+        }
+        for (time, shown) in [(0.75, false), (1.5, true)] {
+            timeline.seek(&mut world, time);
+            for part in parts(&late) {
+                let opacity = opacity_of(&mut world, &part);
+                assert_eq!(opacity > 0.5, shown, "{time}: {opacity}");
+            }
+        }
+    }
+
+    #[test]
+    fn dimensions_are_visible_from_their_declaration_without_an_entry() {
+        use crate::canvas::{CanvasEndpoint, DimensionOptions};
+
+        let mut canvas = SceneModel::new(640, 360);
+        let endpoint = |x: f64, y: f64| CanvasEndpoint::Static(DVec3::new(x, y, 0.0));
+        // Declared before the labelled one: `opacity_of` maps handle ids to
+        // runtime ids, which the label's glyphs shift.
+        let entering = canvas
+            .dimension_between_with_options(
+                endpoint(1.0, 0.0),
+                endpoint(4.0, 0.0),
+                0.3,
+                DimensionOptions::default(),
+            )
+            .unwrap();
+        let still = canvas
+            .dimension_between_with_options(
+                endpoint(-5.5, 0.1),
+                endpoint(-2.5, 0.1),
+                0.3,
+                DimensionOptions {
+                    label: Some("control".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        canvas.wait(1.0);
+        canvas.play(vec![entering.drawable.animate().fade_in().duration(1.0)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        // Opacity is inherited, so the entry fades the group itself.
+        timeline.seek(&mut world, 0.5);
+        for part in [&still.line, &still.extensions] {
+            assert!(opacity_of(&mut world, part) > 0.99);
+        }
+        assert!(opacity_of(&mut world, &entering.drawable) < 1e-6);
+        timeline.seek(&mut world, 2.0);
+        for part in [&entering.drawable, &entering.extensions] {
+            assert!(opacity_of(&mut world, part) > 0.99);
         }
     }
 

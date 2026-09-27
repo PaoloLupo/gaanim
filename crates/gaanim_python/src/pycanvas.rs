@@ -1560,10 +1560,16 @@ pub struct PySceneStop {
     name: Option<String>,
     time: f64,
     segment: String,
+    loop_duration: Option<f64>,
 }
 
 #[pymethods]
 impl PySceneStop {
+    #[getter]
+    fn loop_duration(&self) -> Option<f64> {
+        self.loop_duration
+    }
+
     #[getter]
     fn name(&self) -> Option<String> {
         self.name.clone()
@@ -1836,14 +1842,15 @@ impl PyCamera {
 impl PyCamera {
     /// Show an enlarged detail of the scene in an inset screen.
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (target, *, zoom=None, at=None, size=None, shape="rounded", follow=false, connectors=true, color=None, fixed=false, background=crate::pydrawable::CameraViewBackgroundArg::Canvas, exclude=Vec::new(), layers=Vec::new()))]
+    #[pyo3(signature = (target, *, zoom=None, at=None, size=None, aspect=None, shape="rounded", follow=false, connectors=true, color=None, fixed=false, background=crate::pydrawable::CameraViewBackgroundArg::Canvas, exclude=Vec::new(), layers=Vec::new()))]
     fn inset(
         &self,
         py: Python<'_>,
         target: Bound<'_, PyAny>,
         zoom: Option<Bound<'_, PyAny>>,
         at: Option<Bound<'_, PyAny>>,
-        size: Option<f64>,
+        size: Option<Bound<'_, PyAny>>,
+        aspect: Option<f64>,
         shape: &str,
         follow: bool,
         connectors: bool,
@@ -1867,7 +1874,8 @@ impl PyCamera {
             &target,
             &zoom,
             &at,
-            size,
+            size.as_ref(),
+            aspect,
             shape,
             follow,
             connectors,
@@ -2576,7 +2584,7 @@ impl PyScene {
         }
         canvas.set_post_process(post.map(|post| post.0.clone()));
         Ok(Self {
-            inner: Arc::new(Mutex::new(canvas)),
+            inner: canvas.into_shared(),
         })
     }
 
@@ -4765,71 +4773,6 @@ impl PyGeometry {
 }
 
 #[pymethods]
-impl PyTypography {
-    /// Measure laid-out text without spawning it, through the same pipeline
-    /// that renders ``scene.text`` (role defaults from the active theme and
-    /// Typst shaping). Returns ``(width, height)`` in scene units.
-    ///
-    /// ```python
-    /// w, h = scene.text.measure("PGA = 0.35 g", role="label")
-    /// box = scene.geometry.rounded_rect(w + 0.56, h + 0.32, 0.14)
-    /// ```
-    #[pyo3(signature = (content, *, role=None, size=None, font=None, color=None, wrap=None, weight=None, style=None, markup=None, flow=None, line_spacing=None))]
-    #[pyo3(name = "measure")]
-    #[allow(clippy::too_many_arguments)]
-    fn measure_text_py(
-        &self,
-        content: &str,
-        role: Option<&str>,
-        size: Option<f64>,
-        font: Option<String>,
-        color: Option<PyColor>,
-        wrap: Option<f64>,
-        weight: Option<u16>,
-        style: Option<PyTextStyle>,
-        markup: Option<bool>,
-        flow: Option<crate::pytext::PyTextFlow>,
-        line_spacing: Option<f64>,
-    ) -> PyResult<(f64, f64)> {
-        use gaanim_text::prelude::{TextFlow, TextRole, TextSpec, TextWrap};
-
-        crate::custom::ensure_authoring_allowed()?;
-        let markup = markup.unwrap_or_else(|| self.default_markup());
-        if content.is_empty() {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "measure_text content must not be empty",
-            ));
-        }
-        let role = crate::pytext::parse_role(role)?.unwrap_or(TextRole::Body);
-        let style = label_text_style(style, font, weight, size, color);
-        // Without an explicit flow, measure one unwrapped block as before.
-        let mut flow = flow.map(|flow| flow.0).unwrap_or(TextFlow {
-            wrap: TextWrap::NoWrap,
-            ..TextFlow::default()
-        });
-        if let Some(width) = wrap {
-            flow.wrap = TextWrap::Width(width.max(1.0e-6));
-        }
-        if let Some(value) = line_spacing {
-            flow.line_spacing = value;
-        }
-        let spec = TextSpec::new_with_markup(
-            vec![content.to_owned().into()],
-            Some(role),
-            style,
-            flow,
-            markup,
-        )
-        .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .measure_text_spec(&spec)
-            .map_err(pyo3::exceptions::PyValueError::new_err)
-    }
-}
-
-#[pymethods]
 impl PySlideKit {
     /// Create an auto-sized editorial badge.
     #[pyo3(signature = (text, *, variant="neutral", appearance="soft", padding=(0.18, 0.10), radius=None, font_size=None, min_width=None, color=None, background=None, border=None, font=None, weight=None, style=None, markup=None))]
@@ -5690,16 +5633,26 @@ impl PyScene {
         })
     }
 
-    /// Insert an explicit zero-duration interactive stop.
+    /// Insert an explicit zero-duration interactive stop, optionally with an
+    /// ambient loop that repeats while the presentation rests there.
     ///
     /// A terminal stop holds the completed segment until playback advances.
-    #[pyo3(signature = (name=None))]
-    fn stop(&self, name: Option<String>) -> PyResult<()> {
+    #[pyo3(signature = (name=None, *, r#loop=None))]
+    fn stop(&self, name: Option<String>, r#loop: Option<&Bound<'_, PyAny>>) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
+        let Some(ambient) = r#loop else {
+            return self
+                .inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .stop(name)
+                .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()));
+        };
+        let composition = crate::composition::extract_play_root(ambient)?;
         self.inner
             .lock()
             .expect("scene canvas poisoned")
-            .stop(name)
+            .stop_with_loop(name, composition)
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
 
@@ -5790,6 +5743,7 @@ impl PyScene {
                     name: stop.name,
                     time: stop.time,
                     segment: name.clone(),
+                    loop_duration: stop.ambient,
                 })
             })
             .collect())

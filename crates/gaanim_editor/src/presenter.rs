@@ -534,26 +534,8 @@ fn apply_presentation_action(
     overview: &mut PresenterOverviewState,
 ) {
     match action {
-        PresentationAction::Advance => {
-            if timeline.is_playing {
-                timeline.seek_request = Some(
-                    timeline
-                        .next_stop(timeline.current_time)
-                        .unwrap_or_else(|| timeline.playback_end()),
-                );
-                timeline.is_playing = false;
-            } else {
-                timeline.is_playing = true;
-            }
-        }
-        PresentationAction::Previous => {
-            timeline.is_playing = false;
-            timeline.seek_request = Some(
-                timeline
-                    .previous_stop(timeline.current_time)
-                    .unwrap_or_else(|| timeline.playback_start()),
-            );
-        }
+        PresentationAction::Advance => timeline.advance(),
+        PresentationAction::Previous => timeline.go_back(),
         PresentationAction::TogglePlayback => timeline.is_playing = !timeline.is_playing,
         PresentationAction::Home => {
             timeline.is_playing = false;
@@ -2148,6 +2130,7 @@ mod tests {
         SegmentStop {
             name: name.map(str::to_owned),
             time,
+            ambient: None,
         }
     }
 

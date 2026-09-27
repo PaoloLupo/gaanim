@@ -67,6 +67,8 @@ pub enum CameraViewError {
     ComputedZoom,
     #[error("camera inset size must be finite and greater than zero")]
     InvalidSize,
+    #[error("camera inset aspect must be finite and greater than zero, and circles have none")]
+    InvalidAspect,
     #[error(
         "a camera inset can only be placed at a point, a drawable or an anchor point; pass follow=True for other endpoints"
     )]
@@ -184,6 +186,9 @@ pub struct CameraViewHandle {
     zoom: ViewZoom,
     fit: CameraViewFit,
     connectors: Vec<DrawableHandle>,
+    /// Whether the view created its frame, as an inset does; the frame then
+    /// enters and leaves with the screen.
+    owns_frame: bool,
     /// Shared by every clone, so animation proxies see a later `follow`.
     focus: Arc<Mutex<Option<ViewFocus>>>,
 }
@@ -285,17 +290,31 @@ impl CameraViewHandle {
 
     fn pop(&self, out: bool) -> Anim {
         let focus = *self.focus.lock().expect("camera view focus poisoned");
-        self.screen
-            .animate()
-            .camera_view_pop(self.frame.id, focus, self.zoom.signal(), out)
+        let companions = self
+            .owns_frame
+            .then_some(self.frame.id)
+            .into_iter()
+            .chain(self.connectors.iter().map(|connector| connector.id))
+            .collect();
+        self.screen.animate().camera_view_pop(
+            self.frame.id,
+            focus,
+            self.zoom.signal(),
+            out,
+            companions,
+        )
     }
 
     /// Grow the screen out of the region the camera sees into its place.
+    /// Played first, it is the view's entry: the screen, and an inset's frame
+    /// and connectors, stay hidden until it starts.
     pub fn pop_out(&self) -> Anim {
         self.pop(true)
     }
 
-    /// Shrink the screen back into the region the camera sees.
+    /// Shrink the screen back into the region the camera sees. The screen,
+    /// and an inset's frame and connectors, hide when it lands there, until
+    /// the next [`Self::pop_out`].
     pub fn pop_in(&self) -> Anim {
         self.pop(false)
     }
@@ -427,6 +446,7 @@ impl DrawableHandle {
             zoom,
             fit: options.fit,
             connectors: Vec::new(),
+            owns_frame: false,
             focus: Arc::new(Mutex::new(None)),
         })
     }
@@ -490,6 +510,9 @@ pub struct CameraInsetOptions {
     /// Screen width, or diameter for a circle; `None` uses 30% of the scene
     /// width (20% for a circle).
     pub size: Option<f64>,
+    /// Width over height of a rectangular screen and its frame; `None` uses
+    /// the scene's proportion. Circles take none.
+    pub aspect: Option<f64>,
     pub shape: CameraInsetShape,
     /// Keep the frame on the target as it moves.
     pub follow: bool,
@@ -510,6 +533,7 @@ impl Default for CameraInsetOptions {
             zoom: CameraViewZoom::Value(2.0),
             placement: CameraInsetPlacement::Anchor(Anchor::TopRight),
             size: None,
+            aspect: None,
             shape: CameraInsetShape::default(),
             follow: false,
             connectors: true,
@@ -564,10 +588,18 @@ impl SceneModel {
         if !size.is_finite() || size <= 0.0 {
             return Err(CameraViewError::InvalidSize);
         }
+        if let Some(aspect) = options.aspect
+            && (circle || !aspect.is_finite() || aspect <= 0.0)
+        {
+            return Err(CameraViewError::InvalidAspect);
+        }
         let (width, height) = if circle {
             (size, size)
         } else {
-            (size, size * frame_size.height / frame_size.width)
+            let aspect = options
+                .aspect
+                .unwrap_or(frame_size.width / frame_size.height);
+            (size, size / aspect)
         };
         let color = options
             .color
@@ -700,6 +732,7 @@ impl SceneModel {
             view.follow(target, DVec3::ZERO);
         }
         view.connectors = connectors;
+        view.owns_frame = true;
         Ok(view)
     }
 }

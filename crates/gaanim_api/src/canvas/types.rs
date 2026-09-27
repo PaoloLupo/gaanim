@@ -942,6 +942,9 @@ pub struct ObjectSpec {
     pub stroke_align: Option<gaanim_renderer::effects::StrokeAlign>,
     /// This group is the public root of an imported SVG hierarchy.
     pub(crate) svg_root: bool,
+    /// Root of the imported SVG this group or path belongs to. Stroke widths
+    /// set on it are in scene units, like those set on the root.
+    pub(crate) svg_owner: Option<ObjectId>,
     pub glow: Option<gaanim_renderer::effects::Glow>,
     pub blur: Option<gaanim_renderer::effects::GaussianBlur>,
     pub shadow: Option<gaanim_renderer::effects::DropShadow>,
@@ -1003,6 +1006,7 @@ impl ObjectSpec {
             stroke_overridden: false,
             stroke_align: None,
             svg_root: false,
+            svg_owner: None,
             glow: None,
             blur: None,
             shadow: None,
@@ -1925,6 +1929,16 @@ impl Anim {
         self.update_properties(|properties| properties.skew = Some(DVec2::new(x, y)))
     }
 
+    /// Target a general 2D linear map about the drawable's pivot; see
+    /// [`LinearMap2D`]. The rotation, shear and scale it decomposes into
+    /// animate together.
+    pub fn matrix_to(self, map: LinearMap2D) -> Self {
+        let parts = map.parts();
+        self.rotate_to(parts.angle)
+            .skew_to(parts.skew, 0.0)
+            .scale_to_3d(parts.scale_x, parts.scale_y, 1.0)
+    }
+
     pub fn rotate_by(self, radians: f64) -> Self {
         let pivot = self.configured_pivot();
         self.update_properties(|properties| {
@@ -2074,12 +2088,14 @@ impl Anim {
         focus: Option<(ObjectId, DVec3, DVec3)>,
         zoom: Option<(ObjectId, bool)>,
         out: bool,
+        companions: Vec<ObjectId>,
     ) -> Self {
         self.effect(AnimationType::CameraViewPop {
             frame,
             focus,
             zoom,
             out,
+            companions,
         })
     }
 
@@ -2500,6 +2516,65 @@ impl OptDuration for f64 {
 impl OptDuration for Option<f64> {
     fn into_opt(self) -> Option<f64> {
         self
+    }
+}
+
+/// A 2D linear map `(x, y) -> (a x + b y, c x + d y)`, given by its rows
+/// `[[a, b], [c, d]]`, that a drawable applies about its pivot.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LinearMap2D {
+    rows: [[f64; 2]; 2],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum LinearMapError {
+    #[error("transform matrix entries must be finite")]
+    NonFinite,
+    #[error("transform matrix must be invertible (its determinant is zero)")]
+    Singular,
+}
+
+/// Rotation, horizontal shear and scale that compose a [`LinearMap2D`] as
+/// `rotate(angle) * skew(skew, 0) * scale(scale_x, scale_y)`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct LinearParts {
+    pub angle: f64,
+    pub skew: f64,
+    pub scale_x: f64,
+    pub scale_y: f64,
+}
+
+impl LinearMap2D {
+    pub fn new(rows: [[f64; 2]; 2]) -> Result<Self, LinearMapError> {
+        if rows.iter().flatten().any(|value| !value.is_finite()) {
+            return Err(LinearMapError::NonFinite);
+        }
+        let [[a, b], [c, d]] = rows;
+        let det = a * d - b * c;
+        let norm = (a * a + b * b + c * c + d * d).max(1.0e-300);
+        if det.abs() <= 1.0e-12 * norm {
+            return Err(LinearMapError::Singular);
+        }
+        Ok(Self { rows })
+    }
+
+    pub fn rows(&self) -> [[f64; 2]; 2] {
+        self.rows
+    }
+
+    pub(crate) fn parts(&self) -> LinearParts {
+        let [[a, b], [c, d]] = self.rows;
+        // kurbo stores columns: x' = a x + b y, y' = c x + d y.
+        let transform =
+            gaanim_math::SpatialTransform::from_affine_2d(&gaanim_core::kurbo::Affine::new([
+                a, c, b, d, 0.0, 0.0,
+            ]));
+        LinearParts {
+            angle: transform.z_angle(),
+            skew: transform.skew.x,
+            scale_x: transform.scale.x,
+            scale_y: transform.scale.y,
+        }
     }
 }
 

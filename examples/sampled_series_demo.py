@@ -5,7 +5,7 @@ Cubre, en orden de aparición:
 - plot_data / scatter_data sobre un cartesian_2d en coordenadas de datos,
 - drive_from_samples: serie muestreada nativa que anima sin callbacks,
 - sequence / stagger / parallel para componer animaciones,
-- measure_text para dimensionar cajas a partir del texto.
+- bounds() para dimensionar cajas a partir del texto.
 
 Set GAANIM_SNAPSHOTS to capture this scene before opening the viewer.
 """
@@ -38,7 +38,7 @@ SWAY = damped_response(1.4)
 # Segmento 1: kicker + badges
 # ---------------------------------------------------------------------------
 
-scene.segment("Novedades", notes="Rol kicker, badges y measure_text.")
+scene.segment("Novedades", notes="Rol kicker, badges y bounds().")
 kicker = scene.text("GAANIM · PLOT DE DATOS Y DRIVERS NATIVOS", role="kicker").move_to(0, 3.583333)
 title = scene.text("Una serie medida conduce la escena", role="title").move_to(0, 2.833333)
 tag_source = scene.slides.badge("serie muestreada nativa", color=CYAN).move_to(-2.75, 1.5)
@@ -96,14 +96,14 @@ scene.play([curve.animate.create().duration(2.2), peaks.animate.fade_in().durati
 scene.wait(2.0)
 
 # ---------------------------------------------------------------------------
-# Segmento 3: measure_text dimensiona una caja exactamente al pie
+# Segmento 3: bounds() dimensiona una caja exactamente al pie
 # ---------------------------------------------------------------------------
 
-scene.segment("Medición", notes="measure_text reemplaza anchos a ojo.")
+scene.segment("Medición", notes="bounds() reemplaza anchos a ojo.")
 footnote = "u(t) = e^{-ζ ω t}·sin Δ t = 0.02 s"
-width, height = scene.text.measure(footnote, role="caption")
-box = scene.geometry.rounded_rect(width, height + 0.3, 0.133333).fill(GOLD).opacity(0.12).move_to(0, -3.166667)
 label = scene.text.equation(footnote, role="caption").move_to(0, -3.166667)
+size = label.bounds()
+box = scene.geometry.rounded_rect(size.width + 0.4, size.height + 0.3, 0.133333).fill(GOLD).opacity(0.12).move_to(0, -3.166667).z_index(-1)
 scene.play(parallel(box.animate.grow_from_center().duration(0.5), label.animate.write().duration(0.6)))
 scene.wait(1.2)
 

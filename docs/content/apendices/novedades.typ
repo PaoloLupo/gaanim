@@ -13,9 +13,72 @@ instalar una versión nueva, sigue
 
 = Sin publicar
 
-No requiere cambios en tus escenas.
+Cambian el pivote por defecto de las figuras declaradas con coordenadas de
+escena, la entrada y la salida de las vistas de cámara, los anchos de trazo
+fijados en un SVG y la separación de las etiquetas de cota: lee «Al
+actualizar».
+
+== Al actualizar
+
+- Las figuras declaradas con coordenadas de escena (`line`, `polygon`,
+  `polyline`, flechas, arcos, `curved_arrow_arc`, curvas, llaves y cotas
+  estáticas) giran, escalan y se sesgan alrededor del centro de su caja cuando
+  no tienen `with_pivot`. Antes su pivote era el origen de la escena, así que
+  `arco.animate.rotate_by(...)` lo hacía orbitar alrededor de `(0, 0)` en vez
+  de girar sobre sí mismo. Si una escena contaba con ese giro alrededor del
+  origen, añade `.with_pivot(0, 0)`; si ya usabas `with_pivot` como remedio,
+  puedes quitarlo cuando el pivote era el centro de la figura. Las figuras
+  centradas en su origen, como `circle`, `rect` o `text`, no cambian.
+- `CameraView.animate.pop_in()` es la salida simétrica de `pop_out()`:
+  al llegar a la región oculta la pantalla y, en un `scene.camera.inset`,
+  también el marco y los conectores; el siguiente `pop_out()` los vuelve a
+  mostrar. Antes la pantalla seguía visible sobre la región (con una capa de
+  vista, su contenido se veía encima de la escena) y el marco quedaba
+  dibujado. Si los fundías tras `pop_in`, ya no hace falta; el fundido sigue
+  funcionando sin parpadeos.
+- Un `pop_out()` que hace de entrada deja la pantalla, y en un inset el marco
+  y los conectores, ocultos hasta que empieza. Antes la pantalla esperaba
+  visible sobre la región y el marco y los conectores de un inset se veían
+  desde su declaración. Si querías ver el marco antes, anímalo aparte o usa
+  `pop_out()` más tarde.
+- El ancho fijado con `.stroke(color, ancho)` en un SVG importado, o en una
+  de sus partes, se mide en unidades de escena aunque el SVG tenga
+  `scale_to` o `scale_by`, igual que al animarlo con `animate.stroke(...)`.
+  Antes se multiplicaba por esa escala, así que `.stroke(c, 1.6)` con
+  `scale_to(0.58)` dibujaba 0.93 unidades mientras que el mismo ancho animado
+  dibujaba 1.6. Escribe el ancho que quieres ver: `.stroke(c, 0.0093)` para
+  el trazo fino de antes. Los trazos propios del archivo siguen escalando con
+  el dibujo.
+- `label_gap` de `mechanics.dimension_between` es la separación entre la
+  línea y el borde más cercano de la anotación. Antes se medía hasta su
+  centro, así que con los valores por defecto la etiqueta montaba sobre la
+  línea. Si subías `label_gap` para despegarla, bájalo o quítalo.
+- `scene.text.measure(...)` desaparece: `drawable.bounds()` mide cualquier
+  objeto ya creado. Crea el texto y mide su caja
+  (`scene.text("PGA", role="label").bounds().width`) en lugar de repetir su
+  contenido y estilo.
 
 == Cambios
+
+- `drawable.bounds()` devuelve la caja de cualquier objeto (texto, fórmulas,
+  SVG, imágenes, grupos, figuras transformadas) en unidades de escena y en el
+  cursor actual, con `x`, `y`, `left`, `right`, `bottom`, `top`, `width`,
+  `height` y `center`. Sirve para tachar un valor o ajustar una caja a su
+  contenido sin repetir el texto.
+- `scene.stop("nombre", loop=anim)` añade un bucle ambiental: mientras la
+  presentación descansa en la pausa, la animación se repite en lugar de
+  congelar la imagen, así que un movimiento continuo sigue mientras hablas. El
+  siguiente paso sale del bucle; al exportar se reproduce una vez.
+  `scene.stops` informa de su duración en `loop_duration`.
+- `scene.camera.inset(..., aspect=)` o `size=(ancho, alto)` da a un inset
+  rectangular su propia proporción, para encuadrar entero un panel alto o una
+  barra de herramientas en lugar de recortarlo a 16:9.
+- `imagen.pixel(px, py)` convierte un píxel del archivo original (desde la
+  esquina superior izquierda) en un punto de anclaje que sirve en `move_to`,
+  `scene.camera.inset`, `pan_to` o conectores y sigue a la imagen.
+- `drawable.matrix_to(((a, b), (c, d)))` y `animate.matrix_to(...)` aplican
+  una transformación lineal 2D cualquiera alrededor del pivote, por ejemplo
+  para llevar una cara a una proyección isométrica sin trocearla.
 
 - Cámaras secundarias: `pantalla.camera_view(marco)` convierte una figura
   cerrada en una pantalla que muestra lo que ve una segunda cámara, como un
@@ -60,6 +123,13 @@ secundarias en #link("/guias/camara-y-3d/")[Cámara y 3D].
   cuando el objeto tiene un pivote propio con `with_pivot`.
 - Tras `grow_from_edge` o `grow_from_point`, un `scale_by` o `scale_to`
   posterior parte del tamaño declarado en lugar de escala cero.
+- `scene.mechanics.dimension_between` se ve desde su declaración, como
+  cualquier otro objeto sin animación de entrada. Antes la línea y las
+  extensiones solo aparecían con una entrada en `scene.play` y, si tenía
+  etiqueta, esta se veía sola. Con `fade_in` o `create` sigue oculta hasta
+  que la entrada empieza.
+- Un `rotate_by` con pivote (`with_pivot` o `.pivot(x, y)`) sobre un objeto ya
+  girado empieza desde su pose actual; antes saltaba al empezar el giro.
 
 = 0.4.2
 
@@ -150,7 +220,10 @@ un proyecto existente.
   escalan igual. Es un cambio incompatible: si tus escenas compensaban la
   escala anterior con `scale_to(f)` o `scale_by(f)`, multiplica ese factor por
   100 (`scale_to(0.025)` pasa a `scale_to(2.5)`) o quítalo si el tamaño
-  natural te sirve. Los anchos fijados con `.stroke(color, ancho)` no cambian.
+  natural te sirve. En esta versión el ancho fijado con `.stroke(color,
+  ancho)` escalaba con `scale_to`, así que también había que dividirlo entre
+  100; a partir de la siguiente se mide en unidades de escena (ver «Sin
+  publicar»).
 - El texto de un SVG con la familia genérica `sans-serif` usa la DejaVu Sans
   que trae Gaanim en cualquier sistema. Antes salía en Arial si estaba
   instalada y desaparecía en los equipos Linux que no la tienen.

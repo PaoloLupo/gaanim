@@ -275,7 +275,7 @@ def validate_theme_typography_contract(module: object) -> list[str]:
     scene = module.Scene(frame=(16, 9), theme=literal)
     # Unbalanced markers are only valid when markup is off.
     scene.text("tb:dist_comp *x")
-    scene.text.measure("_a")
+    scene.text("_a").bounds()
     scene.slides.badge("_vel_max")
     try:
         scene.text("*x", markup=True)
@@ -447,17 +447,30 @@ def validate_editorial_contract(module: object) -> list[str]:
             pass
         else:
             failures.append("badge/chip accepted unbalanced markup or an invalid weight")
-    plain = scene.text.measure("Ready", role="label")
-    bold = scene.text.measure("Ready", role="label", weight=700)
-    tracked = scene.text.measure(
-        "Ready", role="label", style=module.TextStyle(letter_spacing=0.1)
+    def width(text):
+        return text.bounds().width
+
+    plain = width(scene.text("Ready", role="label"))
+    bold = width(scene.text("Ready", role="label", weight=700))
+    tracked = width(
+        scene.text("Ready", role="label", style=module.TextStyle(letter_spacing=0.1))
     )
-    literal = scene.text.measure("*Ready*", role="label", markup=False)
-    if not (tracked[0] > plain[0] and literal[0] > bold[0] > 0.0):
+    literal = width(scene.text("*Ready*", role="label", markup=False))
+    if not (tracked > plain and literal > bold > 0.0):
         failures.append(
-            f"Typography.measure ignored weight, style or markup: "
+            f"Drawable.bounds ignored text weight, style or markup: "
             f"{plain} {bold} {tracked} {literal}"
         )
+    if hasattr(module.Typography, "measure"):
+        failures.append("removed Typography.measure remains public")
+    box = scene.geometry.rect(2, 1).move_to(3, -1).bounds()
+    if not (
+        math.isclose(box.width, 2)
+        and math.isclose(box.height, 1)
+        and math.isclose(box.x, 3)
+        and math.isclose(box.y, -1)
+    ):
+        failures.append(f"Drawable.bounds measured a 2x1 rect at (3, -1) as {box!r}")
     if hasattr(module.Scene, "caption"):
         failures.append("removed Scene.caption remains public")
     try:
@@ -1301,13 +1314,17 @@ def validate_matrix_logical_units(module: object) -> list[str]:
                     failures.append(
                         f"matrix default {name}={options[name]} differs from the documented {expected}"
                     )
-            delimiter_width, delimiter_height = scene.text.measure(
-                glyph, size=matrix_module._default_delimiter_size(size)
+            def measure(text):
+                bounds = text.bounds()
+                return bounds.width, bounds.height
+
+            delimiter_width, delimiter_height = measure(
+                scene.text(glyph, size=matrix_module._default_delimiter_size(size))
             )
-            cells = [scene.text.measure(f"${value}$") for row in data for value in row]
+            cells = [measure(scene.text(f"${value}$")) for row in data for value in row]
             cell_width = max(width for width, _ in cells)
             cell_height = max(height for _, height in cells)
-            label_width = scene.text.measure("$r_0$")[0]
+            label_width = measure(scene.text("$r_0$"))[0]
             extent_width = (
                 label_width + 2 * delimiter_width + size * cell_width + (size + 2) * options["column_gap"]
             )

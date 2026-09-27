@@ -154,13 +154,21 @@ pub fn timeline_playback_system(
         // Segment boundaries are continuous. Only explicitly authored stops
         // pause real-time playback.
         let current = timeline.current_time;
-        let hit_stop = (*stop_policy == PlaybackStopPolicy::Respect)
+        let respect = *stop_policy == PlaybackStopPolicy::Respect;
+        let ambient = respect.then(|| timeline.ambient_loop_at(current)).flatten();
+        let hit_stop = (respect && ambient.is_none())
             .then(|| timeline.next_playback_stop(current, next_time))
             .flatten();
 
-        if let Some(stop) = hit_stop {
-            timeline.seek_request = Some(stop);
-            timeline.is_playing = false;
+        if let Some((start, end)) = ambient {
+            // A stop's ambient loop keeps playing while the presenter talks.
+            timeline.seek_request = Some(if next_time >= end {
+                start + (next_time - end) % (end - start)
+            } else {
+                next_time
+            });
+        } else if let Some(stop) = hit_stop {
+            timeline.rest_at(stop);
         } else if let Some((start, end)) = timeline.loop_range {
             if next_time >= end {
                 // Loop back around
@@ -243,23 +251,9 @@ pub fn interactive_stop_input_system(
     }
 
     if should_advance {
-        if !timeline.is_playing {
-            timeline.is_playing = true;
-        } else {
-            if let Some(stop) = timeline.next_stop(timeline.current_time) {
-                timeline.seek_request = Some(stop);
-                timeline.is_playing = false;
-            } else {
-                timeline.seek_request = Some(timeline.playback_end());
-                timeline.is_playing = false;
-            }
-        }
+        timeline.advance();
     } else if should_go_back {
-        let target = timeline
-            .previous_stop(timeline.current_time)
-            .unwrap_or_else(|| timeline.playback_start());
-        timeline.seek_request = Some(target);
-        timeline.is_playing = false;
+        timeline.go_back();
     }
 }
 
@@ -779,6 +773,7 @@ mod tests {
             stops: vec![timeline::SegmentStop {
                 name: None,
                 time: 1.0,
+                ambient: None,
             }],
         }]);
         let mut app = App::new();
@@ -825,6 +820,7 @@ mod tests {
                 stops: vec![timeline::SegmentStop {
                     name: Some("pause".to_owned()),
                     time: 1.2,
+                    ambient: None,
                 }],
             },
         ]);
@@ -856,6 +852,7 @@ mod tests {
             stops: vec![timeline::SegmentStop {
                 name: Some("pause".to_owned()),
                 time: 1.2,
+                ambient: None,
             }],
         }]);
 
@@ -888,6 +885,7 @@ mod tests {
             stops: vec![timeline::SegmentStop {
                 name: None,
                 time: 1.5,
+                ambient: None,
             }],
         }]);
 
@@ -915,6 +913,7 @@ mod tests {
             stops: vec![timeline::SegmentStop {
                 name: None,
                 time: stop,
+                ambient: None,
             }],
         };
         timeline.set_segments(vec![
@@ -938,6 +937,90 @@ mod tests {
             (timeline.playback_start(), timeline.playback_end()),
             (0.0, 6.0)
         );
+    }
+
+    fn ambient_deck() -> Timeline {
+        let mut timeline = Timeline::new();
+        timeline.cached_duration = 6.0;
+        timeline.set_segments(vec![timeline::SegmentMetadata {
+            id: 1,
+            name: "slide".to_owned(),
+            notes: None,
+            start_time: 0.0,
+            end_time: 6.0,
+            stops: vec![
+                timeline::SegmentStop {
+                    name: None,
+                    time: 1.0,
+                    ambient: None,
+                },
+                timeline::SegmentStop {
+                    name: Some("placas".to_owned()),
+                    time: 2.0,
+                    ambient: Some(1.5),
+                },
+                timeline::SegmentStop {
+                    name: None,
+                    time: 5.0,
+                    ambient: None,
+                },
+            ],
+        }]);
+        timeline
+    }
+
+    fn play_step(timeline: Timeline, policy: PlaybackStopPolicy, dt: f64) -> Timeline {
+        let mut app = App::new();
+        app.insert_resource(timeline)
+            .insert_resource(policy)
+            .insert_resource(gaanim_animation::DeltaTime { dt })
+            .add_systems(Update, timeline_playback_system);
+        app.update();
+        app.world_mut().remove_resource::<Timeline>().unwrap()
+    }
+
+    #[test]
+    fn ambient_stops_loop_until_the_presentation_advances() {
+        let mut timeline = ambient_deck();
+        timeline.current_time = 1.8;
+        timeline.is_playing = true;
+        // Reaching the stop keeps playing inside its loop instead of pausing.
+        let mut timeline = play_step(timeline, PlaybackStopPolicy::Respect, 0.5);
+        assert_eq!(timeline.seek_request, Some(2.0));
+        assert!(timeline.is_playing);
+        timeline.seek_request = None;
+        timeline.current_time = 3.2;
+        let mut timeline = play_step(timeline, PlaybackStopPolicy::Respect, 0.5);
+        let wrapped = timeline.seek_request.unwrap();
+        assert!((wrapped - 2.2).abs() < 1e-9, "{wrapped}");
+        assert!(timeline.is_playing);
+
+        // The next step leaves the loop from its end and plays on.
+        timeline.seek_request = None;
+        timeline.current_time = 2.7;
+        timeline.advance();
+        assert_eq!(timeline.seek_request, Some(3.5));
+        assert!(timeline.is_playing);
+        // Going back skips the looping stop itself.
+        timeline.seek_request = None;
+        timeline.go_back();
+        assert_eq!(timeline.seek_request, Some(1.0));
+        assert!(!timeline.is_playing);
+        // Arriving at the stop from anywhere starts its loop.
+        timeline.current_time = 1.0;
+        timeline.is_playing = true;
+        timeline.advance();
+        assert_eq!(timeline.seek_request, Some(2.0));
+        assert!(timeline.is_playing);
+    }
+
+    #[test]
+    fn exports_play_an_ambient_loop_once() {
+        let mut timeline = ambient_deck();
+        timeline.current_time = 3.2;
+        timeline.is_playing = true;
+        let timeline = play_step(timeline, PlaybackStopPolicy::Ignore, 0.5);
+        assert_eq!(timeline.seek_request, Some(3.7));
     }
 
     #[test]

@@ -1368,6 +1368,14 @@ impl PyText {
         Ok(slf)
     }
 
+    fn matrix_to<'py>(
+        slf: PyRef<'py, Self>,
+        matrix: ((f64, f64), (f64, f64)),
+    ) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle.clone()).matrix_to(matrix)?;
+        Ok(slf)
+    }
+
     fn rotate_to_3d<'py>(
         slf: PyRef<'py, Self>,
         x: &Bound<'_, PyAny>,

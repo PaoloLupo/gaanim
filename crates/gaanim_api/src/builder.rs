@@ -57,6 +57,14 @@ pub(crate) enum EquationTransitionMode {
     Copy,
 }
 
+/// Where a camera view screen rests, and how opaque it and its companions
+/// were before a `pop_in` hid them.
+#[derive(Clone, Debug)]
+pub(crate) struct CameraViewRest {
+    transform: SpatialTransform,
+    opacities: Vec<(ObjectId, f32)>,
+}
+
 #[derive(Clone, Debug, Default)]
 struct EquationTransitionPlan {
     pairs: Vec<(ObjectId, ObjectId)>,
@@ -809,9 +817,9 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub(crate) connectors: HashSet<ObjectId>,
     /// Extra glyph tracking of Text roots set by `tracking(...)`, in scene units.
     pub(crate) text_tracking: HashMap<ObjectId, f64>,
-    /// Resting transforms of camera view screens shrunk by `pop_in`, which
-    /// the next `pop_out` returns to.
-    pub(crate) camera_view_rests: HashMap<ObjectId, SpatialTransform>,
+    /// Resting transforms and opacities of camera view screens hidden by
+    /// `pop_in`, which the next `pop_out` returns to.
+    pub(crate) camera_view_rests: HashMap<ObjectId, CameraViewRest>,
     /// Typing state of Texts animated by typewriter/scramble motions.
     pub(crate) text_motion: crate::text_motion::TextMotionState,
     /// Objects whose scene membership is intentionally global at the current authoring cursor.
@@ -857,7 +865,7 @@ pub(crate) struct SceneBuilderState {
     arrow_shapes: HashMap<ObjectId, gaanim_math::ArrowShape>,
     connectors: HashSet<ObjectId>,
     text_tracking: HashMap<ObjectId, f64>,
-    camera_view_rests: HashMap<ObjectId, SpatialTransform>,
+    camera_view_rests: HashMap<ObjectId, CameraViewRest>,
     text_motion: crate::text_motion::TextMotionState,
     persistent_objects: HashSet<ObjectId>,
     membership_managed_objects: HashSet<ObjectId>,
@@ -5581,8 +5589,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     ///
     /// Shrunk over that region, the screen shows the scene at its real size,
     /// so the view starts or ends without a jump. An outgoing pop that does
-    /// not follow a `pop_in` is the screen's entry: before it the screen
-    /// waits over the region.
+    /// not follow a `pop_in` is the view's entry: the screen and its
+    /// companions stay hidden until it starts. A `pop_in` hides them once the
+    /// screen lands, so a view layer stops showing over the scene.
     fn play_camera_view_pop_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         use gaanim_core::glam::DVec3;
         use gaanim_core::kurbo::{Affine, Point};
@@ -5591,6 +5600,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             focus,
             zoom,
             out,
+            companions,
         } = anim.anim_type
         else {
             return;
@@ -5601,8 +5611,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             return;
         };
         let (entity, bounds, current) = (state.entity, state.bounds, state.transform);
-        let popped_in = self.camera_view_rests.get(&screen).copied();
-        let rest = popped_in.unwrap_or(current);
+        let popped_in = self.camera_view_rests.get(&screen).cloned();
+        let rest = popped_in.as_ref().map_or(current, |rest| rest.transform);
         let parent = state.parent.map_or(Affine::IDENTITY, |parent| {
             self.get_world_transform(parent).to_affine_2d()
         });
@@ -5645,10 +5655,19 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         start.translation.x = target.x - center.x;
         start.translation.y = target.y - center.y;
 
+        let hidden: Vec<ObjectId> = std::iter::once(screen).chain(companions).collect();
+        // (object, time, opacity from, opacity to) switches of the screen and
+        // its companions.
+        let mut visibility = Vec::new();
         let (from, to) = if out {
             self.camera_view_rests.remove(&screen);
-            if popped_in.is_none() {
-                // The screen's entry: it waits over the region until then.
+            if let Some(rest) = popped_in {
+                for (object, opacity) in rest.opacities {
+                    visibility.push((object, self.current_time, 0.0, opacity));
+                }
+                (current, rest.transform)
+            } else {
+                // The view's entry: hidden until it starts, over the region.
                 let declared = start;
                 self.commands.entity(entity).queue(
                     move |mut entity: bevy::prelude::EntityWorldMut<'_>| {
@@ -5658,17 +5677,54 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         }
                     },
                 );
+                for object in &hidden {
+                    if let Some(state) = self.states.get(*object).cloned() {
+                        self.hide_visuals_now(&state);
+                        visibility.push((*object, self.current_time, 0.0, state.opacity));
+                    }
+                }
                 (start, rest)
-            } else {
-                (current, rest)
             }
         } else {
-            self.camera_view_rests.entry(screen).or_insert(current);
+            if !self.camera_view_rests.contains_key(&screen) {
+                let opacities: Vec<(ObjectId, f32)> = hidden
+                    .iter()
+                    .filter_map(|object| Some((*object, self.states.get(*object)?.opacity)))
+                    .collect();
+                let time = self.current_time + anim.duration;
+                for (object, opacity) in &opacities {
+                    visibility.push((*object, time, *opacity, 0.0));
+                }
+                self.camera_view_rests.insert(
+                    screen,
+                    CameraViewRest {
+                        transform: current,
+                        opacities,
+                    },
+                );
+            }
             (current, start)
         };
         if let Some(state) = self.states.get_mut(screen) {
             state.transform.scale = to.scale;
             state.transform.translation = to.translation;
+        }
+        for (object, time, from, to) in visibility {
+            if let Some(state) = self.states.get_mut(object) {
+                state.opacity = to;
+            }
+            self.timeline.add_clip(
+                parent_track,
+                time,
+                0.0,
+                ClipPayload::Animation(AnimationSpec {
+                    target: object,
+                    lens: PropertyLensSpec::Opacity { from, to },
+                    rate_func: gaanim_math::RateFunc::Linear,
+                    delay: 0.0,
+                    label: self.current_label.clone(),
+                }),
+            );
         }
         for lens in [
             PropertyLensSpec::Scale {
@@ -6004,7 +6060,16 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         let from_rot = state.transform.rotation;
         let to_rot = from_rot * gaanim_core::glam::DQuat::from_rotation_z(angle_radians);
-        let from_trans = state.transform.translation;
+        // A pivot turn clears the anchor, so it starts from the translation
+        // that places the same pose without one.
+        let from_trans = if pivot.is_some() {
+            state
+                .transform
+                .to_mat4()
+                .transform_point3(gaanim_core::glam::DVec3::ZERO)
+        } else {
+            state.transform.translation
+        };
         let to_trans = if let Some(p) = pivot {
             let rot = gaanim_core::glam::DQuat::from_rotation_z(angle_radians);
             p + rot * (from_trans - p)

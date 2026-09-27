@@ -44,6 +44,14 @@ pub struct DrawableHandle {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ImagePixelError {
+    #[error("pixel() needs an image or a video drawable")]
+    NotImage,
+    #[error("pixel coordinates must be finite")]
+    NonFinite,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SvgPartError {
     #[error("this drawable has no named SVG or glTF parts")]
     NotSvg,
@@ -224,6 +232,28 @@ impl DrawableHandle {
             normalized: DVec3::new(normalized.x, normalized.y, 0.0),
             offset,
         }
+    }
+
+    /// The point of an image or video at pixel `(px, py)` of its source file,
+    /// measured from the top-left corner with y growing downwards, as image
+    /// editors report it. Crops and display sizes are taken into account, and
+    /// the point follows the drawable when it moves, scales or turns.
+    pub fn pixel(&self, px: f64, py: f64) -> Result<AnchorPoint, ImagePixelError> {
+        if !px.is_finite() || !py.is_finite() {
+            return Err(ImagePixelError::NonFinite);
+        }
+        let view = match &self.spec.lock().expect("object spec poisoned").kind {
+            SpawnKind::Image { view, .. } | SpawnKind::Video { view, .. } => *view,
+            _ => return Err(ImagePixelError::NotImage),
+        };
+        // The same mapping that draws the image (see `primitives::image`):
+        // top-left/Y-down pixels onto the centred, Y-up box.
+        let local = DVec3::new(
+            (px - view.source_x) * view.scale_x - view.display_width * 0.5,
+            view.display_height * 0.5 - (py - view.source_y) * view.scale_y,
+            0.0,
+        );
+        Ok(self.anchor_point(Anchor::Center, local))
     }
 
     /// Define a unique named anchor; existing point references remain immutable.
@@ -694,6 +724,16 @@ impl DrawableHandle {
 
     pub(crate) fn with_svg_parts(mut self, parts: HashMap<String, DrawableHandle>) -> Self {
         self.spec.lock().expect("object spec poisoned").svg_root = true;
+        let owned = self
+            .style_targets
+            .iter()
+            .chain(parts.values().map(|part| &part.spec));
+        for spec in owned {
+            let mut spec = spec.lock().expect("object spec poisoned");
+            if !spec.svg_root {
+                spec.svg_owner = Some(self.id);
+            }
+        }
         self.named_parts = Some(Arc::new(parts));
         self
     }
@@ -1380,6 +1420,17 @@ impl DrawableHandle {
         self.push_layout(LayoutOp::ScaleBy(DVec3::splat(factor)))
     }
 
+    /// Apply a general 2D linear map about the pivot, replacing the current
+    /// rotation, skew and scale: `(x, y) -> (a x + b y, c x + d y)` for rows
+    /// `[[a, b], [c, d]]`. It can draw a face in any oblique or isometric
+    /// projection without cutting it up.
+    pub fn matrix_to(self, map: super::LinearMap2D) -> Self {
+        let parts = map.parts();
+        self.rotate_to(parts.angle)
+            .skew_to(parts.skew, 0.0)
+            .scale_to_3d(parts.scale_x, parts.scale_y, 1.0)
+    }
+
     pub fn scale_by_3d(self, x: f64, y: f64, z: f64) -> Self {
         self.push_layout(LayoutOp::ScaleBy(DVec3::new(x, y, z)))
     }
@@ -1457,7 +1508,11 @@ impl DrawableHandle {
         self.push_layout(LayoutOp::SetRotation3D(DVec3::new(x, y, z)))
     }
 
-    /// Set the scene-space pivot used by rotations and uniform scaling.
+    /// Set the scene-space pivot used by rotations, scales and skews.
+    ///
+    /// Without one, shapes declared in scene coordinates (lines, polygons,
+    /// arcs, arrows, curves) turn about their box center, and other shapes
+    /// about their origin.
     ///
     /// This is the natural way to rotate a mechanism around a known hinge or
     /// disk center. The engine converts the point to the group's local anchor

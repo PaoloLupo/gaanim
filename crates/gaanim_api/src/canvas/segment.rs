@@ -45,6 +45,8 @@ pub struct SegmentStop {
     pub name: Option<String>,
     /// Absolute time on the compiled canvas timeline.
     pub time: f64,
+    /// Length of the ambient loop that plays while the stop rests.
+    pub ambient: Option<f64>,
 }
 
 /// A named instant on the global timeline authored with `scene.marker`.

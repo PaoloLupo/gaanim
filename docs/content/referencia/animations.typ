@@ -227,11 +227,26 @@ scene.play(frame.animate.skew_to(0.15, 0).duration(0.4))
 ]
 
 #api-entry(
+  name: "Anim.matrix_to",
+  kind: "method",
+  params: ((name: "matrix", type: "tuple[tuple[float, float], tuple[float, float]]", default: none, desc: [Filas `((a, b), (c, d))` de la transformación lineal de destino.]),),
+  returns: (type: "Anim", desc: [Transformación hasta la matriz dada.]),
+  desc: [Anima hasta una transformación lineal 2D alrededor del pivote, como `Drawable.matrix_to`. Se descompone en giro, sesgo y escala, que se interpolan juntos. Lanza `ValueError` con una matriz no finita o no invertible.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>face = scene.geometry.rect(3, 2)
+scene.play(face.animate.matrix_to(((0.87, 0), (-0.5, 1))).duration(0.6))
+```
+]
+
+#api-entry(
   name: "Anim.rotate_by",
   kind: "method",
   params: ((name: "radians", type: "float", default: none, desc: [Ángulo relativo en radianes; positivo es antihorario.]),),
   returns: (type: "Anim", desc: [Giro relativo.]),
-  desc: [Gira alrededor del pivote del objeto. Para una bisagra o una órbita, fija el pivote antes con `with_pivot(x, y)`. Un giro de cualquier tamaño, incluidas varias vueltas, sigue un solo easing durante toda la duración y el pivote queda fijo.],
+  desc: [Gira alrededor del pivote del objeto: el que fija `with_pivot` o, sin él, el centro de su caja en las figuras declaradas con coordenadas de escena, como `line`, `polygon` o `curved_arrow_arc`. Para una bisagra o una órbita, fija el pivote antes con `with_pivot(x, y)`. Un giro de cualquier tamaño, incluidas varias vueltas, sigue un solo easing durante toda la duración y el pivote queda fijo.],
 )[
 ```python
 # show-code: true

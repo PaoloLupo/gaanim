@@ -51,6 +51,9 @@ pub(crate) struct CanvasState {
     pub object_specs: HashMap<ObjectId, SharedObjectSpec>,
     /// Frozen birth state. Once present, later setters must become timeline cuts.
     pub frozen_spawn_specs: HashMap<ObjectId, ObjectSpec>,
+    /// The shared scene that owns this state, which drawables compile to
+    /// measure themselves.
+    pub(crate) owner: Option<std::sync::Weak<Mutex<crate::canvas::SceneModel>>>,
 }
 
 impl CanvasState {
@@ -73,6 +76,7 @@ impl CanvasState {
             parameter_values: HashMap::new(),
             object_specs: HashMap::new(),
             frozen_spawn_specs: HashMap::new(),
+            owner: None,
         }
     }
 
@@ -933,6 +937,8 @@ impl UpdaterPreset {
 pub(crate) struct LocalSegmentStop {
     pub name: Option<String>,
     pub time: f64,
+    /// Length of the ambient loop authored right after the stop.
+    pub ambient: Option<f64>,
 }
 
 /// A named segment (≈ scene) within a [`SceneModel`](super::SceneModel).

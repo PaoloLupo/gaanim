@@ -228,6 +228,11 @@ fn sample_gltf_action(spec: &GltfAnimationSpec, elapsed: f64) -> f64 {
 pub struct SegmentStop {
     pub name: Option<String>,
     pub time: f64,
+    /// Length of the ambient loop that follows the stop: while a presentation
+    /// rests here, playback repeats `[time, time + ambient]` until it
+    /// advances. Exports play it once.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub ambient: Option<f64>,
 }
 
 /// Semantic metadata for one authored segment.
@@ -534,6 +539,55 @@ impl Timeline {
         self.interactive_stops()
             .into_iter()
             .find(|stop| *stop > time + 1e-5)
+    }
+
+    /// The ambient loop `(start, end)` whose range contains `time`: a stop
+    /// with a loop rests inside it until the presentation advances.
+    pub fn ambient_loop_at(&self, time: f64) -> Option<(f64, f64)> {
+        const EPSILON: f64 = 1e-5;
+        self.segments
+            .iter()
+            .flat_map(|segment| segment.stops.iter())
+            .filter(|stop| self.is_playable(stop.time))
+            .find_map(|stop| {
+                let end = stop.time + stop.ambient.filter(|length| *length > EPSILON)?;
+                (time >= stop.time - EPSILON && time < end - EPSILON).then_some((stop.time, end))
+            })
+    }
+
+    /// Move to the next resting point, as a presenter's "next" does. Inside
+    /// an ambient loop it leaves the loop and plays on from its end; while
+    /// playing it jumps to the next stop; paused, it resumes playback.
+    pub fn advance(&mut self) {
+        if let Some((_, end)) = self.ambient_loop_at(self.current_time) {
+            self.seek_request = Some(end);
+            self.is_playing = true;
+        } else if self.is_playing {
+            let target = self
+                .next_stop(self.current_time)
+                .unwrap_or_else(|| self.playback_end());
+            self.rest_at(target);
+        } else {
+            self.is_playing = true;
+        }
+    }
+
+    /// Move to the previous stop, skipping the one whose ambient loop is
+    /// playing.
+    pub fn go_back(&mut self) {
+        let from = self
+            .ambient_loop_at(self.current_time)
+            .map_or(self.current_time, |(start, _)| start);
+        let target = self
+            .previous_stop(from)
+            .unwrap_or_else(|| self.playback_start());
+        self.rest_at(target);
+    }
+
+    /// Seek to a resting point: paused, or looping its ambient animation.
+    pub fn rest_at(&mut self, time: f64) {
+        self.seek_request = Some(time);
+        self.is_playing = self.ambient_loop_at(time).is_some();
     }
 
     /// Return the earliest explicit interactive stop crossed during playback.
@@ -4326,6 +4380,7 @@ mod tests {
                 stops: vec![SegmentStop {
                     name: Some("señal".to_string()),
                     time: 1.0,
+                    ambient: None,
                 }],
             },
             SegmentMetadata {
@@ -4338,10 +4393,12 @@ mod tests {
                     SegmentStop {
                         name: None,
                         time: 4.0,
+                        ambient: None,
                     },
                     SegmentStop {
                         name: Some("nearby".to_string()),
                         time: 4.1,
+                        ambient: None,
                     },
                 ],
             },

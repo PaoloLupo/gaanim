@@ -421,16 +421,26 @@ scene.link(overview, detail, Transition.morph(0.8, pairs=[(card, panel)]))
 #api-entry(
   name: "Scene.stop",
   kind: "method",
-  params: ((name: "name", type: "str | None", default: "None", desc: [Etiqueta de la pausa en Presenter View.]),),
-  returns: (type: "None", desc: [No añade duración ni cambia la imagen.]),
-  desc: [Pausa la reproducción interactiva cuando el cursor llega a este instante. En el límite de un segmento, el segmento saliente sigue visible hasta que se avanza, así que no hace falta un `wait()` final. La exportación, las capturas y los seeks ignoran las pausas. Después de un `live_take()` grabado, la pausa espera tanto como la pausa real del orador (ver #link("/referencia/audio/")[Audio]). Un nombre vacío o una segunda pausa en el mismo instante del segmento lanzan `ValueError`.],
+  params: (
+    (name: "name", type: "str | None", default: "None", desc: [Etiqueta de la pausa en Presenter View.]),
+    (name: "loop", type: "Anim | list | None", default: "None", desc: [Animación ambiental, con la misma forma que `scene.play`, que se repite mientras la presentación descansa en la pausa.]),
+  ),
+  returns: (type: "None", desc: [Sin `loop`, no añade duración ni cambia la imagen; con `loop`, avanza el cursor lo que dura el bucle.]),
+  desc: [Pausa la reproducción interactiva cuando el cursor llega a este instante. En el límite de un segmento, el segmento saliente sigue visible hasta que se avanza, así que no hace falta un `wait()` final. La exportación, las capturas y los seeks ignoran las pausas. Después de un `live_take()` grabado, la pausa espera tanto como la pausa real del orador (ver #link("/referencia/audio/")[Audio]). Con `loop`, la animación se coloca justo después de la pausa y, en lugar de congelar la imagen, se repite mientras el orador habla: el siguiente paso sale del bucle y sigue desde su final, y retroceder lo salta. Al exportar se reproduce una vez. Para que la repetición no salte, haz que el bucle termine como empieza. Un nombre vacío, una segunda pausa en el mismo instante del segmento o un bucle sin duración lanzan `ValueError`.],
 )[
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
 >>>result = scene.text("$x = 2$")
+>>>arrow = scene.geometry.arrow(-1, -2, 1, -2)
 scene.play([result.animate.write().duration(0.6)])
 scene.stop("resultado")
+scene.wait(0.5)
+# Las flechas siguen moviéndose mientras se explica la pausa.
+scene.stop("dos-placas", loop=sequence(
+    arrow.animate.shift_by(0.5, 0).duration(0.75),
+    arrow.animate.shift_by(-0.5, 0).duration(0.75),
+))
 ```
 ]
 
@@ -1191,7 +1201,8 @@ una vez la pantalla, el marco y los conectores. Ambos devuelven un
     (name: "target", type: "Endpoint", default: none, desc: [Qué ampliar: un punto, un objeto o un punto de anclaje. Con `follow=True`, cualquier extremo reactivo.]),
     (name: "zoom", type: "float | Parameter", default: "2.0", desc: [Aumento de la pantalla en reposo.]),
     (name: "at", type: "Anchor | tuple[float, float]", default: "Anchor.TOP_RIGHT", desc: [Esquina o borde del fotograma donde va la pantalla (`Anchor.CENTER` la centra), o punto donde se centra.]),
-    (name: "size", type: "float | None", default: "None", desc: [Ancho de la pantalla, o diámetro si es un círculo; por defecto, el 30 % del ancho de la escena (20 % para un círculo). Los rectángulos toman la proporción del fotograma.]),
+    (name: "size", type: "float | tuple[float, float] | None", default: "None", desc: [Ancho de la pantalla, o diámetro si es un círculo; por defecto, el 30 % del ancho de la escena (20 % para un círculo). `size=(ancho, alto)` fija ambos lados de un rectángulo.]),
+    (name: "aspect", type: "float | None", default: "None", desc: [Proporción ancho / alto de un rectángulo y su marco; por defecto, la del fotograma. Úsala para encuadrar entero un panel alto o una barra de herramientas. Un círculo no admite `aspect`.]),
     (name: "shape", type: "str", default: "\"rounded\"", desc: [`"rect"`, `"rounded"` o `"circle"`.]),
     (name: "follow", type: "bool", default: "False", desc: [El marco sigue a `target` mientras se mueve.]),
     (name: "connectors", type: "bool", default: "True", desc: [Dos líneas que unen las esquinas enfrentadas del marco y la pantalla.]),
@@ -1314,7 +1325,7 @@ label = scene.viz.readout(view.zoom, format=".1f", prefix="x")
   name: "CameraViewAnimation.pop_out",
   kind: "method",
   returns: (type: "Anim", desc: [La animación.]),
-  desc: [La pantalla sale de la región que ve su cámara y crece hasta su sitio. Encogida sobre esa región muestra la escena a tamaño real, así que la vista brota de la escena sin saltos. Si es la primera animación de la pantalla, hace de entrada: hasta entonces la pantalla espera sobre la región. Tras `pop_in`, la devuelve a donde estaba.],
+  desc: [La pantalla sale de la región que ve su cámara y crece hasta su sitio. Encogida sobre esa región muestra la escena a tamaño real, así que la vista brota de la escena sin saltos. Si es la primera animación de la pantalla, hace de entrada: hasta que empieza, la pantalla (y en un inset, el marco y los conectores) está oculta. Tras `pop_in`, la devuelve a donde estaba y los vuelve a mostrar.],
   none,
 )
 
@@ -1322,7 +1333,7 @@ label = scene.viz.readout(view.zoom, format=".1f", prefix="x")
   name: "CameraViewAnimation.pop_in",
   kind: "method",
   returns: (type: "Anim", desc: [La animación.]),
-  desc: [Encoge la pantalla de vuelta a la región que ve su cámara.],
+  desc: [Encoge la pantalla de vuelta a la región que ve su cámara y, al llegar, la oculta junto con el marco y los conectores de un inset, así que una capa de vista deja de verse sobre la escena. Es la salida simétrica de `pop_out`; el siguiente `pop_out` los vuelve a mostrar. En una vista de `camera_view`, el marco es tuyo y conserva su visibilidad.],
   none,
 )
 

@@ -1267,6 +1267,16 @@ impl From<LottieClip> for PlayItem {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum StopLoopError {
+    #[error(transparent)]
+    Stop(#[from] SegmentError),
+    #[error(transparent)]
+    Play(#[from] PlayError),
+    #[error("a stop's loop must last longer than zero seconds")]
+    Empty,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PlayError {
     #[error(
@@ -5247,8 +5257,44 @@ impl SceneModel {
         {
             return Err(SegmentError::DuplicateStopTime { time });
         }
-        segment.stops.push(LocalSegmentStop { name, time });
+        segment.stops.push(LocalSegmentStop {
+            name,
+            time,
+            ambient: None,
+        });
         segment.ops.push(Op::Stop);
+        Ok(())
+    }
+
+    /// Pause like [`Self::stop`], with an ambient loop: `composition` plays
+    /// right after the stop and, while a presentation rests there, repeats
+    /// until it advances, so a continuous motion keeps going while the
+    /// speaker talks. An export plays it once. The loop should end where it
+    /// starts for a seamless repeat.
+    pub fn stop_with_loop(
+        &mut self,
+        name: Option<String>,
+        composition: Composition,
+    ) -> Result<(), StopLoopError> {
+        let stops = self
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .active()
+            .stops
+            .len();
+        self.stop(name)?;
+        let start = self.current_time();
+        self.play_composition_configured(composition, None, None)?;
+        let length = self.current_time() - start;
+        if length <= 1.0e-9 {
+            return Err(StopLoopError::Empty);
+        }
+        let mut state = self.state.lock().expect("canvas state poisoned");
+        // A live narration take holds instead of stopping; it has no loop.
+        if let Some(stop) = state.active_mut().stops.get_mut(stops) {
+            stop.ambient = Some(length);
+        }
         Ok(())
     }
 
@@ -5329,6 +5375,7 @@ impl SceneModel {
                         .map(|stop| SegmentStop {
                             name: stop.name.clone(),
                             time: start_time + stop.time,
+                            ambient: stop.ambient,
                         })
                         .collect(),
                 };
@@ -6909,10 +6956,10 @@ impl SceneModel {
         extension_dash: Option<(f64, f64)>,
         color: Color,
     ) -> (DrawableHandle, DrawableHandle, DrawableHandle) {
+        // Like any annotation, a dimension is visible from its declaration
+        // unless an entry animation reveals it.
         let line = self.spawn(SpawnKind::TrackingLine).fill(color).no_stroke();
         let extensions = self.spawn(SpawnKind::TrackingLine).fill(color).no_stroke();
-        line.defer_visibility_until_play();
-        extensions.defer_visibility_until_play();
         self.state
             .lock()
             .expect("canvas state poisoned")
@@ -7665,7 +7712,9 @@ mod tests {
 
         assert_eq!(opacity_for(&mut world, anchor.id), 1.0);
         assert_eq!(opacity_for(&mut world, spring.id), 0.0);
-        assert_eq!(opacity_for(&mut world, dimension.id), 0.0);
+        // A dimension is an annotation: its `create` draws it in, but it is
+        // not hidden by opacity like the spring.
+        assert_eq!(opacity_for(&mut world, dimension.id), 1.0);
         assert_eq!(opacity_for(&mut world, label.id), 0.0);
 
         let snapshot = WorldSnapshot::capture(&mut world);
@@ -8663,10 +8712,67 @@ mod tests {
         app.finish();
         app.cleanup();
         app.update();
+        let effective_width = |app: &mut bevy::prelude::App| {
+            app.world_mut()
+                .query::<(
+                    &gaanim_scene::ObjectTag,
+                    &gaanim_scene::StrokeBrush,
+                    &gaanim_math::GlobalSpatialTransform,
+                )>()
+                .iter(app.world())
+                .find_map(|(tag, stroke, transform)| {
+                    (tag.0 == "SvgPath#body").then(|| {
+                        let [a, b, c, d, _, _] = transform.affine_2d.as_coeffs();
+                        let scale = ((a.hypot(b)) * (c.hypot(d))).sqrt();
+                        stroke.style.width * scale
+                    })
+                })
+                .expect("compiled SVG body")
+        };
+        // The declared stroke and the animated one are both in scene units.
+        app.world_mut().resource_mut::<Timeline>().seek_request = Some(0.0);
+        app.update();
+        let declared = effective_width(&mut app);
+        assert!((declared - 0.025).abs() < 1.0e-9, "{declared}");
         app.world_mut().resource_mut::<Timeline>().seek_request = Some(1.0);
         app.update();
+        let animated = effective_width(&mut app);
+        assert!((animated - 0.0167).abs() < 1.0e-9, "{animated}");
+    }
 
-        let effective_width = app
+    #[test]
+    fn scaled_svg_part_strokes_are_in_scene_units() {
+        let temp = std::env::temp_dir().join(format!(
+            "gaanim_svg_part_stroke_test_{}.svg",
+            std::process::id()
+        ));
+        std::fs::write(
+            &temp,
+            r##"<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">
+                <rect id="body" x="10" y="10" width="80" height="80" fill="#ffffff" stroke="#000000" stroke-width="4"/>
+                <rect id="lid" x="10" y="0" width="80" height="10" fill="#ffffff" stroke="#000000" stroke-width="4"/>
+              </svg>"##,
+        )
+        .unwrap();
+
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        let svg = canvas.svg(&temp).unwrap().scale_to(0.5);
+        svg.part("body").unwrap().stroke(Color::BLACK, 0.02);
+        std::fs::remove_file(temp).unwrap();
+
+        let mut app = bevy::prelude::App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin);
+        canvas.compile(app.world_mut());
+        app.finish();
+        app.cleanup();
+        app.update();
+
+        let mut widths = std::collections::HashMap::new();
+        for (tag, stroke, transform) in app
             .world_mut()
             .query::<(
                 &gaanim_scene::ObjectTag,
@@ -8674,15 +8780,15 @@ mod tests {
                 &gaanim_math::GlobalSpatialTransform,
             )>()
             .iter(app.world())
-            .find_map(|(tag, stroke, transform)| {
-                (tag.0 == "SvgPath#body").then(|| {
-                    let [a, b, c, d, _, _] = transform.affine_2d.as_coeffs();
-                    let scale = ((a.hypot(b)) * (c.hypot(d))).sqrt();
-                    stroke.style.width * scale
-                })
-            })
-            .expect("compiled SVG body");
-        assert!((effective_width - 0.0167).abs() < 1.0e-9);
+        {
+            let [a, b, c, d, _, _] = transform.affine_2d.as_coeffs();
+            let scale = ((a.hypot(b)) * (c.hypot(d))).sqrt();
+            widths.insert(tag.0.clone(), stroke.style.width * scale);
+        }
+        // The width set on the part is in scene units; the file's own stroke
+        // (4 px = 0.04 units) scales with the drawing.
+        assert!((widths["SvgPath#body"] - 0.02).abs() < 1.0e-9, "{widths:?}");
+        assert!((widths["SvgPath#lid"] - 0.02).abs() < 1.0e-9, "{widths:?}");
     }
 
     #[test]

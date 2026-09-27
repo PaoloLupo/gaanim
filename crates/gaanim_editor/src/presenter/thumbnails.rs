@@ -547,6 +547,7 @@ mod tests {
                 stops: vec![SegmentStop {
                     name: Some("ready".into()),
                     time: 2.0,
+                    ambient: None,
                 }],
             },
             SegmentMetadata {
@@ -559,6 +560,7 @@ mod tests {
                     name: None,
                     // A terminal stop accumulated past the clip duration.
                     time: 4.0 + 4.0 * f64::EPSILON,
+                    ambient: None,
                 }],
             },
         ]);

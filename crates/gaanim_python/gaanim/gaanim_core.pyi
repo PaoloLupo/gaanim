@@ -1053,6 +1053,15 @@ class Anim:
         Raises ``ValueError`` for non-finite factors.
         """
         ...
+    def matrix_to(self, matrix: tuple[tuple[float, float], tuple[float, float]]) -> Anim:
+        """Animate to a general 2D linear map about the drawable's pivot.
+
+        ``matrix`` holds the rows ``((a, b), (c, d))`` of the map
+        ``(x, y) -> (a x + b y, c x + d y)``, like ``Drawable.matrix_to``. It
+        decomposes into rotation, shear and scale, which animate together.
+        Raises ``ValueError`` for a non-finite or non-invertible matrix.
+        """
+        ...
     def rotate_by(self, radians: float) -> Anim:
         """Target a relative Z rotation in radians."""
         ...
@@ -2133,6 +2142,40 @@ class Drawable:
         linked; direct animation or relative writes to this channel error.
         """
         ...
+    def bounds(self) -> Bounds:
+        """Measure this drawable's box in scene units at the current cursor.
+
+        Works for any object (shapes, text, math, SVG, images, groups): the
+        box includes descendants and reflects layout, transforms, text
+        shaping and every animation that ended before ``scene.cursor``, as it
+        would render there. Geometry that reactive updaters rebuild every
+        frame is measured as declared. Each call compiles the scene authored
+        so far, so measure once and reuse the result. Raises ``ValueError``
+        when the object has no geometry at the cursor.
+
+        Example:
+            label = scene.text("PGA = 0.35 g", role="label").move_to(0, 1)
+            box = label.bounds()
+            frame = scene.geometry.rounded_rect(box.width + 0.56, box.height + 0.32, 0.14)
+            frame.move_to(*box.center)
+        """
+        ...
+    def pixel(self, px: float, py: float) -> AnchorPoint:
+        """Point of an image or video at pixel ``(px, py)`` of its source file.
+
+        Pixels count from the top-left corner with y growing downwards, as in
+        an image editor, in the file's own resolution: crops, ``width=`` and
+        fit modes are accounted for, so measure on the original file rather
+        than on a reduced screenshot. The point follows the drawable when it
+        moves, scales or turns, and works wherever an anchor point does
+        (``move_to``, ``camera.inset``, ``pan_to``, connectors). Raises
+        ``ValueError`` on other drawables or non-finite coordinates.
+
+        Example:
+            ui = scene.media.image("alba.png", width=12)
+            scene.camera.inset(ui.pixel(812, 240), zoom=3)
+        """
+        ...
     def anchor_point(
         self,
         anchor: Optional[Anchor] = None,
@@ -2255,6 +2298,24 @@ class Drawable:
             house = scene.geometry.rect(2, 3).with_pivot(0, -1.5).skew_to(0.2, 0)
         """
         ...
+    def matrix_to(self, matrix: tuple[tuple[float, float], tuple[float, float]]) -> Self:
+        """Apply a general 2D linear map about the pivot at the current cursor.
+
+        ``matrix`` holds the rows ``((a, b), (c, d))`` of the map
+        ``(x, y) -> (a x + b y, c x + d y)`` applied to the drawable's own
+        geometry; it replaces the current rotation, skew and scale. Unlike
+        ``skew_to``, it can send the x and y axes anywhere, so a face drawn
+        flat maps onto an isometric or oblique projection without being cut
+        up. Animate it with ``drawable.animate.matrix_to(...)``. Raises
+        ``ValueError`` for a non-finite or non-invertible matrix.
+
+        Example:
+            import math
+            c, s = math.cos(math.pi / 6), math.sin(math.pi / 6)
+            # Unit x to the right-down isometric axis, unit y straight up.
+            face = scene.geometry.rect(2, 1).matrix_to(((c, 0), (-s, 1))).move_to(2, 0)
+        """
+        ...
     def rotate_by(self, radians: float) -> Self:
         """Apply a relative Z rotation immediately at the current cursor."""
         ...
@@ -2288,7 +2349,11 @@ class Drawable:
         """
         ...
     def with_pivot(self, x: float, y: float) -> Self:
-        """Apply with pivot to this drawable and return the result.
+        """Set the scene-space pivot of rotations, scales and skews.
+
+        Without a pivot, shapes turn about their own origin; shapes declared
+        in scene coordinates (``line``, ``polygon``, arcs, arrows, curves)
+        turn about the center of their box instead.
 
         Example:
             result = drawable.with_pivot(1.0, 1.0)
@@ -3185,6 +3250,37 @@ class Segment:
         """
         ...
 
+class Bounds:
+    """A drawable's box in scene units, returned by ``Drawable.bounds()``."""
+    @property
+    def x(self) -> float:
+        """x of the box center."""
+        ...
+    @property
+    def y(self) -> float:
+        """y of the box center."""
+        ...
+    @property
+    def left(self) -> float: ...
+    @property
+    def right(self) -> float: ...
+    @property
+    def bottom(self) -> float: ...
+    @property
+    def top(self) -> float: ...
+    @property
+    def width(self) -> float:
+        """``right - left``."""
+        ...
+    @property
+    def height(self) -> float:
+        """``top - bottom``."""
+        ...
+    @property
+    def center(self) -> tuple[float, float]:
+        """Middle of the box, usable with ``move_to(*box.center)``."""
+        ...
+
 class SceneStop:
     """An interactive stop authored with ``scene.stop``."""
     @property
@@ -3196,6 +3292,10 @@ class SceneStop:
     @property
     def segment(self) -> str:
         """Name of the segment containing the stop."""
+        ...
+    @property
+    def loop_duration(self) -> Optional[float]:
+        """Length of the ambient loop set with ``stop(loop=...)``, if any."""
         ...
 
 class SceneMarker:
@@ -3258,7 +3358,8 @@ class Camera:
         *,
         zoom: float | Parameter = 2.0,
         at: Anchor | tuple[float, float] = Anchor.TOP_RIGHT,
-        size: Optional[float] = None,
+        size: float | tuple[float, float] | None = None,
+        aspect: Optional[float] = None,
         shape: Literal["rect", "rounded", "circle"] = "rounded",
         follow: bool = False,
         connectors: bool = True,
@@ -3278,7 +3379,11 @@ class Camera:
         centers it) or centers it on a point; the connectors join the corners
         that face each other from that side. ``size`` is the screen width, or
         the diameter of a circle, and defaults to 30% of the scene width (20%
-        for a circle); rectangles take the scene frame's proportions.
+        for a circle). Rectangles take the scene frame's proportions unless
+        ``aspect`` (width over height) or ``size=(width, height)`` sets
+        their own, so a tall panel or a toolbar can be framed whole; a
+        circle with an aspect, or ``size=(w, h)`` together with ``aspect``,
+        raises ``ValueError``.
 
         ``follow=True`` keeps the frame on a moving ``target``; without it the
         frame is placed once and ``target`` must be a point, a drawable or an
@@ -3393,15 +3498,22 @@ class CameraViewAnimation:
 
         Shrunk over that region, the screen shows the scene at its real size,
         so the view pops out of the scene without a jump. Played first, it is
-        the screen's entry: until then the screen waits over the region.
-        After ``pop_in`` it returns the screen to where it rested.
+        the view's entry: the screen, and an inset's frame and connectors, stay
+        hidden until it starts. After ``pop_in`` it returns the screen to where
+        it rested and shows them again.
 
         Example:
             scene.play([view.animate.pop_out().duration(0.8)])
         """
         ...
     def pop_in(self) -> Anim:
-        """Shrink the screen back into the region its camera sees."""
+        """Shrink the screen back into the region its camera sees.
+
+        The screen, and an inset's frame and connectors, hide when it lands,
+        so a view layer stops showing over the scene; the next ``pop_out``
+        shows them again. The frame of a ``camera_view`` belongs to you and
+        keeps its visibility.
+        """
         ...
 
 class CameraAnimation:
@@ -5096,42 +5208,6 @@ class Typography:
             result = scene.typst(Path("assets/title.typ"))
         """
         ...
-    def measure(
-        self,
-        content: str,
-        *,
-        role: Optional[TextRole] = None,
-        size: Optional[float] = None,
-        font: Optional[str] = None,
-        color: Optional[Color] = None,
-        wrap: Optional[float] = None,
-        weight: Optional[int] = None,
-        style: Optional[TextStyle] = None,
-        markup: Optional[bool] = None,
-        flow: Optional[TextFlow] = None,
-        line_spacing: Optional[float] = None,
-    ) -> tuple[float, float]:
-        """Measure laid-out text without spawning it.
-
-        Uses the same pipeline that renders ``scene.text`` (role defaults from
-        the active theme and Typst shaping) and returns ``(width, height)`` in
-        scene units. ``wrap`` composes at a fixed line width; ``None``
-        measures a single unwrapped block. ``style`` overlays a ``TextStyle``
-        (weight, italic, spacing, …); ``size``, ``font``, ``weight`` and
-        ``color`` override it. ``markup`` matches ``scene.text``: with markup
-        on, ``*`` and ``_`` are markup and are not measured as characters;
-        ``None`` uses the theme's ``text_markup``. ``flow`` measures with a
-        ``TextFlow`` (alignment, line spacing, hyphenation, …); its ``"auto"``
-        wrap measures unwrapped because no layout width is offered. ``wrap``
-        and ``line_spacing`` override the flow. Empty content, an invalid
-        weight, an invalid line spacing or unbalanced markup raise
-        ``ValueError``.
-
-        Example:
-            width, height = scene.text.measure("PGA = 0.35 g", role="label")
-            box = scene.geometry.rounded_rect(width + 0.56, height + 0.32, 0.14)
-        """
-        ...
     def code(
         self,
         source: str,
@@ -5345,8 +5421,8 @@ class MediaLibrary:
         360x220 px SVG spans 3.6x2.2 units of the 16x9 frame. Stroke widths,
         gradients, clip paths, text outlines and filter lengths scale with the
         geometry. ``scale_to(factor)`` resizes the whole import; fluent stroke
-        widths set on the root stay in logical scene units and are not
-        affected by that scale.
+        widths set on the root or on a ``part(id)``, fixed or animated, stay in
+        logical scene units and are not affected by that scale.
 
         Example:
             logo = scene.media.svg("assets/logo.svg")  # 120 px -> 1.2 units
@@ -5997,9 +6073,9 @@ class Mechanics:
         distance and ``scale`` while the dimension geometry keeps following its
         endpoints.
         ``label_orientation`` keeps text horizontal or aligned while avoiding
-        upside-down labels. Upright labels on steep lines move outward by the
-        part of their width that exceeds their height, keeping the
-        ``label_gap`` clearance of horizontal dimensions. ``color`` initializes the extension lines,
+        upside-down labels. ``label_gap`` separates the line from the nearest
+        edge of the annotation, so an upright label on a steep line moves out
+        by its half width. ``color`` initializes the extension lines,
         solid triangular arrowheads and the complete annotation, including its
         reactive value. Math labels and reactive values share one 0.48-unit typographic baseline by default, including
         subscripted formulas. ``line_width`` controls the filled line geometry
@@ -6013,6 +6089,10 @@ class Mechanics:
         endpoints swap or move past each other. When the line runs along the
         requested direction (``"above"`` on a vertical dimension), the
         offset is used as a positive distance.
+
+        Like other annotations, the dimension is visible from its
+        declaration; an entry animation such as ``fade_in`` or ``create``
+        keeps it hidden until it starts.
 
         ``label_style`` overlays a ``TextStyle`` on the label, the value and
         the unit; ``font`` and ``weight`` override it, and ``font_size``
@@ -6344,7 +6424,12 @@ class Scene:
             scene.wait(1.0)
         """
         ...
-    def stop(self, name: Optional[str] = None) -> None:
+    def stop(
+        self,
+        name: Optional[str] = None,
+        *,
+        loop: Optional[Playable | Sequence[Playable]] = None,
+    ) -> None:
         """Pause interactive playback at the current timeline position.
 
         At a segment boundary, the completed outgoing segment remains visible
@@ -6352,6 +6437,21 @@ class Scene:
         Export ignores stops and renders the timeline continuously. After a
         recorded ``live_take`` starts, a stop instead waits for as long as the
         speaker paused there while recording.
+
+        ``loop`` adds an ambient animation, accepted like ``scene.play``: it
+        is played right after the stop, advancing the cursor by its length,
+        and while a presentation rests on the stop it repeats instead of
+        freezing, so a continuous motion keeps going as the speaker talks.
+        The next step leaves the loop and plays on from its end; going back
+        skips it. Export and ``gaanim --diff`` play it once. Make the loop end
+        where it starts for a seamless repeat. Raises ``ValueError`` for an
+        empty loop.
+
+        Example:
+            scene.stop("dos-placas", loop=sequence(
+                arrow.animate.shift_by(0.6, 0).duration(0.75),
+                arrow.animate.shift_by(-0.6, 0).duration(0.75),
+            ))
         """
         ...
     def voiceover(

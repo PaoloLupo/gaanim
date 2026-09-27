@@ -60,7 +60,6 @@ width_dimension = scene.mechanics.dimension_between(
     show_value=True,
     format=".0f",
     unit="$u$",
-    label_gap=0.225,
     color=BLACK,
     line_width=0.0375,
     extension_style="dashed",

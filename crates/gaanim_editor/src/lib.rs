@@ -2909,6 +2909,7 @@ mod tests {
             stops: vec![gaanim_timeline::timeline::SegmentStop {
                 name: Some("pause".into()),
                 time: 1.5,
+                ambient: None,
             }],
         }]);
         let mut app = App::new();
