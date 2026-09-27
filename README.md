@@ -376,7 +376,7 @@ encuentra en [`engine_improvements.md`](engine_improvements.md).
 
 ## Licencia
 
-Copyright (c) 2026 Paolo Guillén Lupo.
+Copyright (c) 2026 Paolo Guillen Lupo.
 
 Gaanim se distribuye bajo cualquiera de estas dos licencias, a tu elección:
 
