@@ -373,3 +373,32 @@ Gaanim está en fase alfa (`0.6.0`). La base de render, timeline, texto y
 ecuaciones es funcional; la cobertura de API, pruebas de exportación y
 capacidades multimedia continúan en desarrollo. El plan de evolución se
 encuentra en [`engine_improvements.md`](engine_improvements.md).
+
+## Licencia
+
+Copyright (c) 2026 Paolo Guillén Lupo.
+
+Gaanim se distribuye bajo cualquiera de estas dos licencias, a tu elección:
+
+- MIT ([`LICENSE-MIT`](LICENSE-MIT))
+- Apache 2.0 ([`LICENSE-APACHE`](LICENSE-APACHE))
+
+Salvo que indiques lo contrario, cualquier contribución que envíes para su
+inclusión en Gaanim, tal como define la licencia Apache 2.0, se distribuye bajo
+estas dos licencias, sin términos ni condiciones adicionales.
+
+**Lo que creas es tuyo.** Los vídeos, imágenes, archivos `.gaanim` y demás
+salidas que generes con Gaanim, y los scripts de tus escenas, te pertenecen y
+no están sujetos a la licencia de Gaanim. Puedes usarlos, publicarlos y
+venderlos libremente.
+
+**Marca.** La licencia cubre el código, no el nombre «Gaanim» ni su logotipo.
+Puedes usar el nombre para describir con veracidad que tu trabajo usa Gaanim o
+deriva de él, pero una versión modificada o un fork no debe presentarse como
+Gaanim oficial.
+
+**Componentes de terceros.** Gaanim usa bibliotecas y fuentes de terceros con
+sus propias licencias. Las descargas incluyen sus avisos en
+`THIRD-PARTY-NOTICES.txt`, generado con `python scripts/third_party_licenses.py`.
+Las fuentes de la documentación tienen los suyos en
+[`docs/assets/fonts/`](docs/assets/fonts/README.md).
