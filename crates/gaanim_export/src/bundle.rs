@@ -306,6 +306,23 @@ fn record_frame(
     Ok(frame)
 }
 
+/// Step `app` through the frame at `time` like [`record_frame`] does, with
+/// its motion blur sub-frames, without capturing anything: only the state
+/// the steps leave behind matters.
+fn step_frame(app: &mut App, time: f64, fps: u32) -> Result<()> {
+    app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
+    app.update();
+    check_custom_animation_errors(app.world())?;
+    if let Some(blur) = crate::exporter::frame_motion_blur(app.world()) {
+        for sample in crate::exporter::motion_blur_times(app.world(), time, f64::from(fps), blur) {
+            app.world_mut().resource_mut::<Timeline>().seek_request = Some(sample);
+            app.update();
+            check_custom_animation_errors(app.world())?;
+        }
+    }
+    Ok(())
+}
+
 fn capture(
     app: &mut App,
     time: f64,
@@ -422,7 +439,7 @@ where
         for &extra in &plan.extras {
             // Visit the grid up to the instant as the first world did.
             while let Some(time) = grid.next_if(|time| *time < extra) {
-                record_frame(&mut app, time, config.fps, &post_shaders)?;
+                step_frame(&mut app, time, config.fps)?;
             }
             let frame = record_frame(&mut app, extra, config.fps, &post_shaders)?;
             push(&mut writer, frame)?;
