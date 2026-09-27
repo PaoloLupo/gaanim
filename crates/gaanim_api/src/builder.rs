@@ -1479,6 +1479,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::PathTrim { .. } => "Trim",
             AnimationType::EffectsTo { .. } => "Effects",
             AnimationType::DashOffsetTo { .. } => "DashOffset",
+            AnimationType::PathPointsTo { .. } => "Points",
             AnimationType::SurroundingRectRetarget { .. } => "Retarget",
             AnimationType::StrokeColorTo { .. } => "Stroke",
             AnimationType::StrokeWidthTo { .. } => "StrokeW",
@@ -2737,6 +2738,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             if let Some(to) = properties.dash_offset {
                 channels.push(AnimationType::DashOffsetTo { to });
             }
+            if let Some(points) = properties.points.clone() {
+                channels.push(AnimationType::PathPointsTo { points });
+            }
             if properties.glow.is_some() || properties.blur.is_some() || properties.shadow.is_some()
             {
                 channels.push(AnimationType::EffectsTo {
@@ -3126,6 +3130,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_dash_offset_internal(anim, track);
             return;
         }
+        if matches!(anim.anim_type, AnimationType::PathPointsTo { .. }) {
+            self.play_path_points_internal(anim, track);
+            return;
+        }
         if matches!(anim.anim_type, AnimationType::PathTrim { .. }) {
             self.play_path_trim_internal(anim, track);
             return;
@@ -3448,6 +3456,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::PathTrim { .. }
             | AnimationType::EffectsTo { .. }
             | AnimationType::DashOffsetTo { .. }
+            | AnimationType::PathPointsTo { .. }
             | AnimationType::DrawBorderThenFill { .. }
             | AnimationType::Flash { .. }
             | AnimationType::Circumscribe { .. }
@@ -5397,6 +5406,41 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 }),
             );
         }
+    }
+
+    fn play_path_points_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
+        let AnimationType::PathPointsTo { points } = anim.anim_type else {
+            return;
+        };
+        let Some(state) = self.states.get_mut(anim.target) else {
+            return;
+        };
+        let Some(to) = crate::stroke_lens::with_vertices(&state.path, &points) else {
+            bevy::prelude::warn!(
+                "points() skipped: {} points do not match the vertices of {:?}",
+                points.len(),
+                anim.target
+            );
+            return;
+        };
+        let from = std::mem::replace(&mut state.path, std::sync::Arc::new(to));
+        let to = state.path.clone();
+        let rect = kurbo::Shape::bounding_box(&*to);
+        state.bounds = Bounds3D::new_2d(rect.x0, rect.y0, rect.x1, rect.y1);
+        self.timeline.add_clip(
+            parent_track,
+            self.current_time + anim.delay,
+            anim.duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Dynamic(gaanim_animation::tween::DynamicLens(
+                    std::sync::Arc::new(crate::stroke_lens::PathPointsLens { from, to }),
+                )),
+                rate_func: anim.rate_func.clone(),
+                delay: 0.0,
+                label: self.current_label.clone(),
+            }),
+        );
     }
 
     fn play_path_trim_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {

@@ -416,6 +416,19 @@ impl PyCanvasAnim {
         })
     }
 
+    fn points(&self, points: Vec<(f64, f64)>) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        self.require_drawable_effect("points")?;
+        Ok(Self {
+            inner: self
+                .inner
+                .clone()
+                .points(points)
+                .map_err(PyValueError::new_err)?,
+        })
+    }
+
     fn dash_offset(&self, offset: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;

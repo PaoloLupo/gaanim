@@ -12854,6 +12854,58 @@ mod tests {
     }
 
     #[test]
+    fn points_move_each_vertex_straight_and_seek_exactly() {
+        let mut canvas = SceneModel::new(640, 360);
+        let square = canvas.polygon(vec![(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)]);
+        let target = vec![(1.0, -1.0), (3.0, 1.0), (1.0, 3.0), (-1.0, 1.0)];
+        assert!(square.animate().points(vec![(0.0, 0.0)]).is_err());
+        assert!(square.animate().points(vec![(f64::NAN, 0.0); 4]).is_err());
+        assert!(canvas.circle(1.0).animate().points(target.clone()).is_err());
+        canvas.play(vec![
+            square
+                .animate()
+                .points(target)
+                .unwrap()
+                .duration(1.0)
+                .rate_func(gaanim_math::RateFunc::Linear),
+        ]);
+        canvas.wait(0.5);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let id = ObjectId::from_raw(square.id.as_raw() - 1);
+        let mut vertices_at = |time: f64| {
+            timeline.seek(&mut world, time);
+            let path = world
+                .query::<(&MobjectId, &Path2D)>()
+                .iter(&world)
+                .find(|(object, _)| object.0 == id)
+                .unwrap()
+                .1
+                .0
+                .clone();
+            path.elements()
+                .iter()
+                .filter_map(|element| match element {
+                    gaanim_core::kurbo::PathEl::MoveTo(point)
+                    | gaanim_core::kurbo::PathEl::LineTo(point) => Some((point.x, point.y)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            vertices_at(1.2),
+            [(1.0, -1.0), (3.0, 1.0), (1.0, 3.0), (-1.0, 1.0)]
+        );
+        assert_eq!(
+            vertices_at(0.5),
+            [(0.5, -0.5), (2.5, 0.5), (1.5, 2.5), (-0.5, 1.5)]
+        );
+        assert_eq!(
+            vertices_at(0.0),
+            [(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)]
+        );
+    }
+
+    #[test]
     fn echo_copies_trail_their_drawable_through_seeks() {
         let mut canvas = SceneModel::new(640, 360);
         let ball = canvas.circle(0.5).move_to(-3.0, 0.0).echo(Some(

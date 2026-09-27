@@ -1490,6 +1490,23 @@ class Anim:
             scene.play(card.animate.shadow(BLACK, 0, -0.25, 0.4).scale_to(1.04))
         """
         ...
+    def points(self, points: Sequence[tuple[float, float]]) -> Anim:
+        """Move every vertex of a polygon or polyline straight to ``points``.
+
+        Vertex ``i`` travels to ``points[i]``, in the coordinates the shape was
+        declared in (later ``move_to``/``shift`` still apply on top). Unlike
+        ``transform_to`` nothing is resampled, so every frame is the exact blend
+        of both outlines and pixel-art or technical shapes keep their corners.
+        The shape keeps its number of vertices: a different count, a shape that
+        is not a polygon or polyline, or a non-finite point raises
+        ``ValueError``. Combine with ``fill``, ``move_to`` and the other
+        property targets in one ``Anim``.
+
+        Example:
+            tri = scene.geometry.polygon([(-1, -1), (1, -1), (0, 1)])
+            scene.play([tri.animate.points([(-1, 1), (1, 1), (0, -1)]).duration(1.0)])
+        """
+        ...
     def dash_offset(self, offset: float) -> Anim:
         """Animate the dash offset of every stroke to ``offset`` scene units.
 

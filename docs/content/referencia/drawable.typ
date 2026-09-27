@@ -560,7 +560,7 @@ scene.render()
   params: (
     (name: "count", type: "int", default: "5", desc: [Copias, de 1 a 32; `0` quita el eco.]),
     (name: "delay", type: "float", default: "0.04", desc: [Segundos entre copias; positivo.]),
-    (name: "decay", type: "float", default: "0.6", desc: [Opacidad de cada copia respecto a la anterior, en (0, 1].]),
+    (name: "decay", type: "float", default: "0.6", desc: [Opacidad de cada copia respecto a la anterior, en `(0, 1]`.]),
   ),
   desc: [Copias que siguen al objeto en el tiempo, como el efecto Echo de After Effects: la copia `k` lo muestra como estaba hace `k * delay` segundos, con `decay ** k` de su opacidad y debajo de él. Cada copia repite las animaciones del propio objeto (`animate`, `create`, fundidos, color y forma) con ese retraso, así que es exacta en cualquier búsqueda y en todas las exportaciones, SVG incluido. Se ocultan mientras el objeto está oculto y no cruzan un corte de segmento. No retrasan el movimiento de los _updaters_, de las posiciones reactivas ni de un grupo padre que se mueve, ni copian Lottie o vídeo. En un `Text`, cada glifo repite sus propias animaciones. Se declara una vez y vale para toda la línea de tiempo.],
 )[
