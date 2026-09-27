@@ -21,7 +21,7 @@ scene.play([glow.animate.set(1.4).duration(0.8).repeat(1, yoyo=True)])
 scene.wait(0.3)
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
-    # Mid-draw, at the dimmest and brightest glow, and back.
-    scene.snapshots(snapshots, [0.5, 1.05, 1.8, 2.6])
+    # Mid-draw, before the pulse, at its brightest, and settled back.
+    scene.snapshots(snapshots, [0.5, 1.0, 1.4, 2.0])
 else:
     scene.render()
