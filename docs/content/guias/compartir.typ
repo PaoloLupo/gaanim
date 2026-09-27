@@ -46,7 +46,7 @@ del vídeo que quieras obtener después. `--from`, `--to`, `--transparent` y
 Grabar no rasteriza nada, así que suele ser rápido: una presentación de un
 minuto tarda unos segundos. Una presentación larga con decenas de miles de
 objetos tarda más, porque cada fotograma recorre la escena completa; una
-tesis de 41 segmentos, 29 000 objetos y 4½ minutos se graba en unos 8
+presentación de 41 segmentos, 29 000 objetos y 4½ minutos se graba en unos 8
 minutos y ocupa 42 MB. Los paquetes de los ejemplos de Gaanim ocupan entre 20 y
 500 KB; una escena con mil instancias animadas, unos 11 MB.
 
@@ -101,7 +101,7 @@ abierto.
 = Desde el editor
 
 Con un script o proyecto abierto, el botón Exportar ofrece el formato
-*Paquete*: graba la escena en un `.gaanim` sin salir del editor. La calidad
+*Gaanim*: graba la escena en un `.gaanim` sin salir del editor. La calidad
 elige la frecuencia (Borrador, 30 fps; Estándar y Producción, 60 fps); la
 resolución no se aplica, porque el paquete es vectorial.
 

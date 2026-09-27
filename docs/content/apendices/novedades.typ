@@ -11,9 +11,11 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
-= 0.5.3
+= 0.6.0
 
-Sin publicar todavía. No hace falta cambiar tus escenas.
+Publicada el 27 de septiembre de 2026. Llega el formato `.gaanim`: una
+escena o presentación en un solo archivo que se reproduce, presenta y exporta
+en cualquier equipo. No hace falta cambiar tus escenas.
 
 == Cambios
 
@@ -41,7 +43,7 @@ Sin publicar todavía. No hace falta cambiar tus escenas.
   archivos abiertos, desde el inicio o con `gaanim mi-charla.gaanim`,
   aparecen en Recientes junto a los proyectos. Sin Python instalado, `gaanim`
   abre igualmente el inicio para reproducir archivos `.gaanim`.
-- El diálogo Exportar del editor ofrece el formato Paquete para grabar un
+- El diálogo Exportar del editor ofrece el formato Gaanim para grabar un
   `.gaanim` del script abierto, con su barra de progreso; en la terminal,
   `gaanim export` muestra la suya.
 - El `README.md` de los proyectos nuevos incluye cómo compartirlos como
@@ -61,7 +63,7 @@ Sin publicar todavía. No hace falta cambiar tus escenas.
   fotograma animado recorría todos ellos varias veces para restaurar unos
   pocos cientos: ahora el seek restaura en una sola pasada y la propagación de
   transformaciones, opacidad y cajas solo recalcula lo que cambió. Grabar el
-  paquete de una tesis de 41 segmentos y 29 000 objetos pasa de 31 a 8½
+  paquete de una presentación de 41 segmentos y 29 000 objetos pasa de 31 a 8½
   minutos, con los mismos fotogramas.
 - Grabar un paquete ya no repite la línea de tiempo en un segundo mundo cuando
   la escena no tiene estado que dependa de los instantes visitados (updaters,
@@ -210,7 +212,7 @@ etiquetas de cota: lee «Al actualizar».
 - `scene.text.measure(...)` desaparece: `drawable.bounds()` mide cualquier
   objeto ya creado. Crea el texto y mide su caja
   (`scene.text("PGA", role="label").bounds().width`) en lugar de repetir su
-  contenido y estilo. Desde 0.5.3, medir un objeto recién creado cuesta
+  contenido y estilo. Desde 0.6.0, medir un objeto recién creado cuesta
   alrededor de un milisegundo; antes de esa versión cada llamada compilaba
   toda la escena escrita hasta ese punto.
 
