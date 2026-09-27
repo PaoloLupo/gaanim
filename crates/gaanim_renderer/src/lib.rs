@@ -6,6 +6,7 @@ pub mod background_presets;
 pub mod canvas;
 pub mod diagnostics;
 pub mod effects;
+pub mod fragment;
 pub mod lottie;
 pub mod pipeline;
 mod post_bloom;

@@ -17,6 +17,7 @@ gaanim_layout = { path = "../gaanim_layout" }
 gaanim_visualization = { path = "../gaanim_visualization" }
 gaanim_text = { path = "../gaanim_text" }
 gaanim_renderer = { path = "../gaanim_renderer" }
+gaanim_bundle = { path = "../gaanim_bundle" }
 gaanim_export = { path = "../gaanim_export" }
 
 # Third-party dependencies from workspace
@@ -37,6 +38,7 @@ serde = { version = "1.0", features = ["derive"], optional = true }
 dev-dynamic = [
     "bevy/dynamic_linking",
     "gaanim_animation/dev-dynamic",
+    "gaanim_bundle/dev-dynamic",
     "gaanim_export/dev-dynamic",
     "gaanim_layout/dev-dynamic",
     "gaanim_math/dev-dynamic",
@@ -67,3 +69,4 @@ serde = [
 [dev-dependencies]
 gaanim_renderer = { path = "../gaanim_renderer" }
 tempfile = "3"
+zip = { version = "2.4", default-features = false, features = ["deflate"] }

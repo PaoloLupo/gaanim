@@ -27,7 +27,7 @@ pub struct CapturedFrame {
     pub rgba: Vec<u8>,
 }
 
-fn create_progress_bar(total_frames: u64) -> ProgressBar {
+pub(crate) fn create_progress_bar(total_frames: u64) -> ProgressBar {
     let pb = ProgressBar::new(total_frames).with_prefix("render");
     pb.set_style(
         ProgressStyle::default_bar()
@@ -173,7 +173,7 @@ fn frame_render_error(error: crate::gpu::GpuContextError, time: f64) -> ExportEr
     }
 }
 
-fn check_custom_animation_errors(world: &World) -> Result<()> {
+pub(crate) fn check_custom_animation_errors(world: &World) -> Result<()> {
     match world
         .get_resource::<gaanim_animation::CustomAnimationDiagnostics>()
         .and_then(|errors| errors.first_error())
@@ -200,7 +200,13 @@ fn publish_export_result(
 }
 
 #[derive(Resource)]
-struct SetupCallback(Option<Box<dyn FnOnce(&mut World) + Send + Sync>>);
+pub(crate) struct SetupCallback(Option<Box<dyn FnOnce(&mut World) + Send + Sync>>);
+
+impl SetupCallback {
+    pub(crate) fn new(setup: impl FnOnce(&mut World) + Send + Sync + 'static) -> Self {
+        Self(Some(Box::new(setup)))
+    }
+}
 
 #[derive(Resource, Clone, Copy)]
 struct WindowRenderSize {
@@ -406,7 +412,7 @@ fn export_pipeline_system(
     pipeline.waiting_for_gpu = true;
 }
 
-fn setup_scene_system(world: &mut World) {
+pub(crate) fn setup_scene_system(world: &mut World) {
     if let Some(mut callback_res) = world.get_resource_mut::<SetupCallback>()
         && let Some(callback) = callback_res.0.take()
     {
@@ -1260,7 +1266,7 @@ fn output_fit_scale(
 /// [`capture_camera_to_vello_transform`].
 /// The camera a frame is rendered through: the resolved camera, which adds
 /// bindings, follow, dynamic framing, and shake to the authored camera.
-fn frame_camera(world: &World) -> Option<gaanim_math::ResolvedCamera> {
+pub(crate) fn frame_camera(world: &World) -> Option<gaanim_math::ResolvedCamera> {
     world
         .get_resource::<gaanim_math::ResolvedCamera>()
         .copied()
