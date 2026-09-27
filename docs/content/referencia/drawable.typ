@@ -295,6 +295,7 @@ label = scene.text("PGA = 0.35 g", role="label").move_to(-2, 1)
 box = label.bounds()
 frame = scene.geometry.rounded_rect(box.width + 0.56, box.height + 0.32, 0.14)
 frame.no_fill().stroke(GOLD, 0.04).move_to(*box.center)
+scene.play([frame.animate.create().duration(0.6)])
 # output: preview.webp
 scene.render()
 ```

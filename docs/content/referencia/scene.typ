@@ -435,6 +435,7 @@ scene.link(overview, detail, Transition.morph(0.8, pairs=[(card, panel)]))
 >>>arrow = scene.geometry.arrow(-1, -2, 1, -2)
 scene.play([result.animate.write().duration(0.6)])
 scene.stop("resultado")
+scene.wait(0.5)
 # Las flechas siguen moviéndose mientras se explica la pausa.
 scene.stop("dos-placas", loop=sequence(
     arrow.animate.shift_by(0.5, 0).duration(0.75),
