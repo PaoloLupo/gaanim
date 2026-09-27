@@ -504,8 +504,8 @@ mod tests {
         )
         .unwrap();
         let request = CanvasPostProcess {
-            shader: Some(shader),
-            segments: Vec::new(),
+            passes: vec![shader.into()],
+            ..Default::default()
         }
         .request(0.0, kurbo::Rect::new(8.0, 4.0, 24.0, 12.0))
         .unwrap();

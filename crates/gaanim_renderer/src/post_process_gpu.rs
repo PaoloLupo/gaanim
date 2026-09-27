@@ -54,6 +54,7 @@ fn update_post_process_frame(
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
     canvas: Res<VelloCanvas>,
+    signals: Query<&gaanim_animation::FloatSignal>,
     mut frame: ResMut<PostProcessFrame>,
 ) {
     frame.0 = (|| {
@@ -86,9 +87,10 @@ fn update_post_process_frame(
         let origin = viewport.physical_position.as_dvec2() - target_origin.as_dvec2();
         let size = viewport.physical_size.as_dvec2();
         let time = playback.map_or(0.0, |state| state.current_time);
-        let request = post.request(
+        let request = post.request_with(
             time,
             kurbo::Rect::new(origin.x, origin.y, origin.x + size.x, origin.y + size.y),
+            |entity| signals.get(entity).ok().map(|signal| signal.value),
         )?;
         (canvas.image != Handle::default()).then(|| (request, canvas.image.id()))
     })();

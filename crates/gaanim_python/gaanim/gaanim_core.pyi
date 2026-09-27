@@ -360,7 +360,11 @@ BackgroundLike: TypeAlias = Paint | Background
 
 class PostProcess:
     @staticmethod
-    def shader(source: str | os.PathLike[str]) -> PostProcess:
+    def shader(
+        source: str | os.PathLike[str],
+        *,
+        uniforms: Optional[dict[str, float | Parameter | Variable | Computed | TimeInput]] = None,
+    ) -> PostProcess:
         """Create a WGSL post-process applied to the rendered 2D scene.
 
         A string is inline WGSL; an ``os.PathLike`` value loads a WGSL asset
@@ -372,13 +376,103 @@ class PostProcess:
         pixels, and ``time`` is absolute timeline seconds. Sampled colors are
         straight-alpha sRGB values and the result is clamped to ``[0, 1]``.
         Only the camera frame is processed; perspective 3D scenes and SVG
-        output are drawn without it. Invalid WGSL raises ``ValueError`` and an
-        unreadable asset raises ``RuntimeError``.
+        output are drawn without it.
+
+        ``uniforms`` maps names to values the shader reads as ``f32`` fields of
+        ``gaanim_uniforms`` (``gaanim_uniforms.amount``). A value is a number
+        or a ``Parameter``, ``Variable``, ``Computed`` or ``scene.time`` of
+        the scene that uses the post-process, evaluated every frame, so
+        animating a ``Parameter`` animates the effect in the preview and in
+        exports alike. Names must be WGSL identifiers (at most 32 per pass).
+        Invalid WGSL, an undeclared field or a bad name raises ``ValueError``,
+        a non-finite number raises ``ValueError`` and an unreadable asset
+        raises ``RuntimeError``.
+
+        Example:
+            amount = scene.viz.parameter(0.0)
+            scene.canvas.post = PostProcess.shader(split_src, uniforms={"amount": amount})
+            scene.play([amount.animate.set(1.0).duration(0.3)])
+        """
+        ...
+    @staticmethod
+    def grain(amount: float | Parameter | Computed = 0.06, size: float | Parameter | Computed = 1.0, animated: bool = True) -> PostProcess:
+        """Film grain: brightness noise of ``amount`` in cells of ``size`` pixels.
+
+        Sizes are pixels of a frame 1080 pixels tall, so grain looks the same
+        at any export resolution. ``animated`` renews the noise every 1/24 s
+        of timeline time (deterministic); ``False`` keeps one still pattern.
+        Numbers must be ``amount >= 0`` and ``size >= 0.25``, else ``ValueError``.
+        """
+        ...
+    @staticmethod
+    def vignette(strength: float | Parameter | Computed = 0.35, softness: float | Parameter | Computed = 0.6) -> PostProcess:
+        """Darken toward the corners by up to ``strength`` (0..1).
+
+        ``softness`` (0..1) is how far from the corners the falloff starts.
+        """
+        ...
+    @staticmethod
+    def chromatic_aberration(amount: float | Parameter | Computed = 0.004) -> PostProcess:
+        """Shift red outward and blue inward by ``amount`` of the frame at its corners (0..0.5)."""
+        ...
+    @staticmethod
+    def color_grade(
+        exposure: float | Parameter | Computed = 0.0,
+        contrast: float | Parameter | Computed = 1.0,
+        saturation: float | Parameter | Computed = 1.0,
+        temperature: float | Parameter | Computed = 0.0,
+    ) -> PostProcess:
+        """Grade colors: ``exposure`` in stops and ``temperature`` (-1 cool to 1
+        warm) in linear light, then ``contrast`` about mid-gray and
+        ``saturation`` about luma (1 keeps them)."""
+        ...
+    @staticmethod
+    def lut(path: str | os.PathLike[str], strength: float | Parameter | Computed = 1.0) -> PostProcess:
+        """Grade through the 3D lookup table of a ``.cube`` file, blended by ``strength`` (0..1).
+
+        The table (``LUT_3D_SIZE`` 2..65, optional ``DOMAIN_MIN``/``DOMAIN_MAX``)
+        is read immediately. An unreadable file raises ``RuntimeError`` and an
+        invalid table raises ``ValueError``.
+        """
+        ...
+    @staticmethod
+    def halftone(dot: float | Parameter | Computed = 6.0) -> PostProcess:
+        """Print-style dots in cells of ``dot`` pixels (at 1080p): brighter cells
+        draw larger dots of their own color on black."""
+        ...
+    @staticmethod
+    def dither(levels: float | Parameter | Computed = 4) -> PostProcess:
+        """Ordered (Bayer 4×4) dithering to ``levels`` values per channel (2..256)."""
+        ...
+    @staticmethod
+    def crt(strength: float | Parameter | Computed = 1.0) -> PostProcess:
+        """A CRT look: curved screen, scanlines and an RGB mask, scaled by ``strength`` (0..1)."""
+        ...
+    @staticmethod
+    def pixelate(size: float | Parameter | Computed = 8.0) -> PostProcess:
+        """Blocks of ``size`` pixels (at 1080p, at least 1)."""
+        ...
+    @staticmethod
+    def glitch(intensity: float | Parameter | Computed = 0.5, seed: int = 0) -> PostProcess:
+        """Bands that jump sideways with an RGB split, 12 times per second.
+
+        ``intensity`` (0..1) sets how many bands jump and how far; ``seed``
+        picks another deterministic pattern. Animate ``intensity`` with a
+        ``Parameter`` for bursts.
+
+        Example:
+            burst = scene.viz.parameter(0.0)
+            scene.canvas.post = PostProcess.glitch(intensity=burst, seed=3)
+            scene.play([burst.animate.set(1.0).duration(0.2).repeat(1, yoyo=True)])
         """
         ...
     @property
     def source(self) -> str:
         """Return the WGSL source of the post-process function."""
+        ...
+    @property
+    def uniforms(self) -> list[str]:
+        """Names of the declared uniforms, in declaration order."""
         ...
 
 class StrokeStyle:
@@ -3248,14 +3342,21 @@ class Canvas:
         ...
     background: Optional[BackgroundLike]
     @property
-    def post(self) -> Optional[PostProcess]:
-        """Return the scene post-process, or ``None`` when the scene has none."""
+    def post(self) -> Optional[PostProcess | list[PostProcess]]:
+        """Return the scene post-process: ``None``, one ``PostProcess``, or a
+        list of them when several are chained."""
         ...
     @post.setter
-    def post(self, value: Optional[PostProcess]) -> None:
-        """Replace the scene post-process; ``None`` removes it.
+    def post(self, value: Optional[PostProcess | Sequence[PostProcess]]) -> None:
+        """Replace the scene post-process; ``None`` or an empty list removes it.
 
-        Segments that set their own ``post`` keep their override.
+        A sequence chains the passes in order: each one samples, through
+        ``gaanim_scene``, what the previous pass wrote. Segments that set
+        their own ``post`` keep their override. Uniforms that read values of
+        another Scene raise ``ValueError``; anything else raises ``TypeError``.
+
+        Example:
+            scene.canvas.post = [PostProcess.grain(0.06), PostProcess.vignette(0.35)]
         """
         ...
     @property
@@ -6529,14 +6630,15 @@ class Scene:
         background: Optional[BackgroundLike] = None,
         margin: Optional[float] = None,
         theme: ThemeName | Theme | None = "technical",
-        post: Optional[PostProcess] = None,
+        post: Optional[PostProcess | Sequence[PostProcess]] = None,
     ) -> None:
         """Create a resolution-independent scene in logical units.
 
         ``frame`` is ``(16, 9)`` by default, centered at the origin. Geometry,
         margins, text sizes, strokes, and effects use the same logical unit;
         output pixels are selected by the editor or exporter. ``post`` applies
-        a ``PostProcess`` to every segment that does not override it.
+        a ``PostProcess``, or a sequence chained in order, to every segment
+        that does not override it.
 
         Scenes use the ``"technical"`` theme by default: a neutral near-black
         background (``#121212``) with light text and axes and accent-filled
@@ -6575,15 +6677,16 @@ class Scene:
         notes: Optional[str] = None,
         template: Optional[Callable[..., Layout]] = None,
         background: Optional[BackgroundLike] = None,
-        post: Optional[PostProcess | Literal[False]] = None,
+        post: Optional[PostProcess | Sequence[PostProcess] | Literal[False]] = None,
     ) -> Segment:
         """Create and activate a named structural segment.
 
         ``background`` accepts the same color, brush, or shader background as
         ``Scene`` and only applies while this segment is active. When omitted,
         the segment uses the scene background. ``post`` replaces the scene
-        post-process while this segment is active; ``False`` draws the segment
-        without post-processing and ``None`` inherits ``scene.canvas.post``. Any other
+        post-process while this segment is active (a sequence chains passes, an
+        empty one disables it); ``False`` draws the segment without
+        post-processing and ``None`` inherits ``scene.canvas.post``. Any other
         value raises ``TypeError``. Empty or duplicate names, and a transition
         on the first segment, raise ``ValueError``.
 

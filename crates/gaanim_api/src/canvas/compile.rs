@@ -2533,12 +2533,13 @@ impl SceneModel {
                 pixel_size: self.frame.preview_pixel_size(),
                 bounds: raw_bounds,
             });
-        builder
-            .commands
-            .insert_resource(gaanim_renderer::post_process::CanvasPostProcess {
-                shader: self.post_process.clone(),
-                segments: segment_post_processes,
-            });
+        let post_process = Self::compiled_post_process(
+            &builder,
+            &id_map,
+            self.post_process.clone(),
+            segment_post_processes,
+        );
+        builder.commands.insert_resource(post_process);
 
         // Clear with the canvas color as well. The drawable background is
         // world-space geometry and can be rotated by the camera; using the
@@ -8671,6 +8672,39 @@ impl SceneModel {
             pending.extend(state.children.iter().map(|child| (*child, false)));
         }
         entities
+    }
+
+    /// The scene and segment post-process chains, with the entities that
+    /// hold the signals of the parameters their uniforms read.
+    fn compiled_post_process(
+        builder: &SceneBuilder,
+        id_map: &HashMap<ObjectId, ObjectId>,
+        passes: Vec<gaanim_renderer::post_process::PostProcessPass>,
+        segments: Vec<gaanim_renderer::post_process::SegmentPostProcess>,
+    ) -> gaanim_renderer::post_process::CanvasPostProcess {
+        let segment_passes = segments.iter().flat_map(|segment| match &segment.post {
+            gaanim_renderer::post_process::PostProcessOverride::Passes(passes) => passes.as_slice(),
+            _ => &[],
+        });
+        let mut parameters: Vec<(ObjectId, bevy::prelude::Entity)> = Vec::new();
+        for pass in passes.iter().chain(segment_passes) {
+            for logical in pass.values.iter().flat_map(|source| source.parameter_ids()) {
+                if parameters.iter().any(|(id, _)| *id == logical) {
+                    continue;
+                }
+                if let Some(state) = id_map
+                    .get(&logical)
+                    .and_then(|actual| builder.states.get(*actual))
+                {
+                    parameters.push((logical, state.entity));
+                }
+            }
+        }
+        gaanim_renderer::post_process::CanvasPostProcess {
+            passes,
+            segments,
+            parameters,
+        }
     }
 
     /// Spawns the tip entities of `id`'s path as its children.

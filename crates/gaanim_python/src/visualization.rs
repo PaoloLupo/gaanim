@@ -271,11 +271,31 @@ pub(crate) fn extract_scalar_source(
     }
 }
 
-/// Resolve a source for an existing handle without exposing its canvas internals.
-pub(crate) fn extract_scalar_source_for_drawable(
-    value: Bound<'_, PyAny>,
-    target: &gaanim_api::canvas::DrawableHandle,
-) -> PyResult<ScalarSource> {
+/// A reactive scalar and the scene objects it reads, for values accepted
+/// before a Scene is known (such as post-process uniforms).
+#[derive(Clone)]
+pub(crate) struct DeferredScalar {
+    pub(crate) source: ScalarSource,
+    owners: Vec<ReactiveOwner>,
+}
+
+impl DeferredScalar {
+    /// A source already validated for its Scene.
+    pub(crate) fn validated(source: ScalarSource) -> Self {
+        Self {
+            source,
+            owners: Vec::new(),
+        }
+    }
+
+    /// Reject inputs that belong to another Scene than `canvas`.
+    pub(crate) fn validate(&self, canvas: &Arc<Mutex<ApiCanvas>>) -> PyResult<()> {
+        validate_owners(&self.owners, canvas)
+    }
+}
+
+/// Read a float, Parameter, Variable, Computed, or `scene.time`.
+pub(crate) fn extract_deferred_scalar(value: Bound<'_, PyAny>) -> PyResult<DeferredScalar> {
     let (source, owners) = if let Ok(computed) = value.extract::<PyRef<'_, PyComputed>>() {
         (computed.source.clone(), computed.owners.clone())
     } else if let Ok(parameter) = value.extract::<PyRef<'_, PyParameter>>() {
@@ -299,12 +319,21 @@ pub(crate) fn extract_scalar_source_for_drawable(
         if !number.is_finite() {
             return Err(value_error("reactive scalars must be finite"));
         }
-        return Ok(ScalarSource::constant(number));
+        (ScalarSource::constant(number), Vec::new())
     } else {
         return Err(PyTypeError::new_err(
             "expected float, Parameter, Variable, Computed, or scene.time",
         ));
     };
+    Ok(DeferredScalar { source, owners })
+}
+
+/// Resolve a source for an existing handle without exposing its canvas internals.
+pub(crate) fn extract_scalar_source_for_drawable(
+    value: Bound<'_, PyAny>,
+    target: &gaanim_api::canvas::DrawableHandle,
+) -> PyResult<ScalarSource> {
+    let DeferredScalar { source, owners } = extract_deferred_scalar(value)?;
     for owner in owners {
         let valid = match owner {
             ReactiveOwner::Drawable(handle) => target.same_canvas(&handle),
