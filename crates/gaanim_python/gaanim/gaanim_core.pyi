@@ -2060,7 +2060,8 @@ class Drawable:
         ``"screen"`` and ``"add"`` brighten (lights, flares, glows),
         ``"multiply"`` darkens like ink (highlighters, shadows) and
         ``"overlay"``, ``"soft_light"`` and the rest follow the usual
-        compositing formulas. ``"normal"`` (default) restores plain painting.
+        compositing formulas. ``"normal"`` (default) paints plainly, also for a
+        group member whose group has another mode.
         Like ``fill``, on a group or ``Text`` the mode reaches every member; a
         member restyled afterwards keeps its own. The drawable is painted in its own layer, so inside
         a clip, an opacity group or a transition it blends with that group's
@@ -4141,8 +4142,24 @@ class ProgressRing(Drawable):
     The arc starts at 12 o'clock and fills clockwise with ``current / maximum``
     of a full turn (clamped to ``[0, 1]``); its box is the whole ring, so
     layout does not follow the sweep. Style or animate the parts through
-    ``arc``, ``track`` and ``label``; the ring itself moves them together.
+    ``arc``, ``track`` and ``label``, and the whole ring through ``visual``;
+    ``animate`` animates the value. The label settles on whole digits: it
+    rounds the percentage (a countdown rounds the seconds up) and rolls to
+    the next digit as the value crosses it.
     """
+    @property
+    def visual(self) -> Drawable:
+        """The group of track, arc and label; use ``visual.animate`` to move or fade the ring."""
+        ...
+    def move_to(self, x: Any, y: Any = None, anchor: Anchor | None = None) -> ProgressRing:
+        """Position the ring by its center and return this ProgressRing."""
+        ...
+    def shift_by(self, dx: float, dy: float) -> ProgressRing:
+        """Move the ring and return this ProgressRing."""
+        ...
+    def opacity(self, op: ScalarSource) -> ProgressRing:
+        """Set or bind the ring's opacity and return this ProgressRing."""
+        ...
     @property
     def parameter(self) -> Parameter:
         """Underlying scalar, usable in computed inputs, readouts and sampled drivers."""

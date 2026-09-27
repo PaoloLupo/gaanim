@@ -1120,8 +1120,8 @@ impl DrawableHandle {
     /// (e.g. `Mix::Screen` for lights, `Mix::Multiply` for markers).
     ///
     /// Like `fill`, the mode of a group or text reaches every member; a
-    /// member restyled afterwards keeps its own. `None` restores plain
-    /// source-over.
+    /// member restyled afterwards keeps its own, including the plain
+    /// `BlendMode::default()`. `None` clears the mode.
     pub fn blend(self, mode: Option<gaanim_core::peniko::BlendMode>) -> Self {
         self.update_style(|spec| spec.blend = mode)
     }

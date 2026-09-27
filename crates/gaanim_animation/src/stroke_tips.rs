@@ -141,16 +141,23 @@ fn first_point(path: &BezPath) -> Option<Point> {
     }
 }
 
+/// Where the stroke ends: a closing segment returns to its sub-path's start.
 fn last_point(path: &BezPath) -> Option<Point> {
-    path.elements()
-        .iter()
-        .rev()
-        .find_map(|element| match element {
-            PathEl::MoveTo(_) | PathEl::ClosePath => None,
-            PathEl::LineTo(point) | PathEl::QuadTo(_, point) | PathEl::CurveTo(_, _, point) => {
-                Some(*point)
+    let (mut start, mut current, mut drawn) = (None, None, false);
+    for element in path.elements() {
+        match element {
+            PathEl::MoveTo(point) => {
+                start = Some(*point);
+                current = Some(*point);
             }
-        })
+            PathEl::LineTo(point) | PathEl::QuadTo(_, point) | PathEl::CurveTo(_, _, point) => {
+                current = Some(*point);
+                drawn = true;
+            }
+            PathEl::ClosePath => current = start,
+        }
+    }
+    current.filter(|_| drawn)
 }
 
 /// Triangle with its apex at `apex` and its base centered on `base`.
@@ -189,6 +196,7 @@ pub fn apply_stroke_tips_system(
             &mut StrokeTips,
             &mut Path2D,
             &StrokeBrush,
+            Option<&FillBrush>,
             &RenderOrder,
             Has<Visible>,
         ),
@@ -196,7 +204,7 @@ pub fn apply_stroke_tips_system(
     >,
     mut tips: TipQuery,
 ) {
-    for (mut stroke_tips, mut path, stroke, order, visible) in &mut paths {
+    for (mut stroke_tips, mut path, stroke, fill, order, visible) in &mut paths {
         let source = path.0.clone();
         let width = stroke.style.width;
         let cache = match &stroke_tips.cache {
@@ -216,7 +224,9 @@ pub fn apply_stroke_tips_system(
                 cache
             }
         };
-        if !Arc::ptr_eq(&cache.shortened, &source) && *cache.shortened != *source {
+        // Shortening a filled shape would cut its fill: its heads sit on top.
+        let filled = fill.is_some_and(|fill| fill.0.is_some());
+        if !filled && !Arc::ptr_eq(&cache.shortened, &source) && *cache.shortened != *source {
             path.0 = cache.shortened.clone();
             stroke_tips.applied = Some(source);
         }
@@ -353,5 +363,87 @@ mod tests {
             &world.get::<Path2D>(route).unwrap().0,
             &authored
         ));
+    }
+
+    #[test]
+    fn odd_paths_place_tips_on_their_drawn_ends() {
+        let tips = StrokeTips::new(
+            Some(TipKind::Dot),
+            Some(TipKind::Arrow),
+            Some(0.2),
+            Some(0.2),
+        );
+        // A closed triangle ends where it started.
+        let mut triangle = BezPath::new();
+        triangle.move_to((0.0, 0.0));
+        triangle.line_to((2.0, 0.0));
+        triangle.line_to((2.0, 2.0));
+        triangle.close_path();
+        assert_eq!(last_point(&triangle), Some(Point::ORIGIN));
+        let (_, _, head) = tips.geometry(&triangle, 0.05);
+        let apex_distance = head
+            .elements()
+            .iter()
+            .filter_map(|element| match element {
+                PathEl::LineTo(point) => Some(point.distance(Point::ORIGIN)),
+                _ => None,
+            })
+            .fold(f64::INFINITY, f64::min);
+        assert!(apex_distance < 1e-6, "{apex_distance}");
+
+        // Separate sub-paths: tips go on the first start and the last end.
+        let mut two = line(1.0);
+        two.move_to((0.0, 3.0));
+        two.line_to((1.0, 3.0));
+        let (_, start, end) = tips.geometry(&two, 0.05);
+        assert!(start.bounding_box().center().distance(Point::ORIGIN) < 1e-6);
+        assert!((end.bounding_box().x1 - 1.0).abs() < 1e-6);
+        assert!((end.bounding_box().center().y - 3.0).abs() < 1e-6);
+
+        // Degenerate paths draw no tips and keep their geometry.
+        let mut dot = BezPath::new();
+        dot.move_to((1.0, 1.0));
+        dot.line_to((1.0, 1.0));
+        let mut lone_move = BezPath::new();
+        lone_move.move_to((1.0, 1.0));
+        for path in [dot, lone_move, BezPath::new()] {
+            let (kept, start, end) = tips.geometry(&path, 0.05);
+            assert_eq!(kept, path);
+            assert!(start.elements().is_empty() && end.elements().is_empty());
+        }
+    }
+
+    #[test]
+    fn filled_shapes_keep_their_outline_under_tips() {
+        let mut world = World::new();
+        let tip = world
+            .spawn((
+                StrokeTip,
+                Path2D(Arc::new(BezPath::new())),
+                FillBrush(None),
+                RenderOrder::default(),
+            ))
+            .id();
+        let mut tips = StrokeTips::new(None, Some(TipKind::Arrow), Some(0.5), None);
+        tips.end_entity = Some(tip);
+        let authored = Arc::new(line(3.0));
+        let route = world
+            .spawn((
+                tips,
+                Path2D(authored.clone()),
+                StrokeBrush::new(gaanim_core::peniko::Color::WHITE, 0.05),
+                FillBrush::color(gaanim_core::peniko::Color::BLACK),
+                RenderOrder::default(),
+                Visible,
+            ))
+            .id();
+        let mut apply = IntoSystem::into_system(apply_stroke_tips_system);
+        apply.initialize(&mut world);
+        apply.run((), &mut world).unwrap();
+        assert!(Arc::ptr_eq(
+            &world.get::<Path2D>(route).unwrap().0,
+            &authored
+        ));
+        assert!(!world.get::<Path2D>(tip).unwrap().0.elements().is_empty());
     }
 }

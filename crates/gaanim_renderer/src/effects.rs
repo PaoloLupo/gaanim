@@ -29,6 +29,8 @@ impl Default for DropShadow {
 /// The element is drawn in its own layer, so inside an isolated group (an
 /// opacity group, a clip or a transition reveal) it blends with that group's
 /// content only.
+/// The default (normal) mode paints plainly; it lets a group member opt out
+/// of the mode its group gives its members.
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
 pub struct ElementBlend(pub gaanim_core::peniko::BlendMode);
 
@@ -155,6 +157,48 @@ pub struct CameraView {
 #[derive(Component, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ViewLayer(pub std::sync::Arc<str>);
 
+/// System: the tips of a stroked path (see [`gaanim_animation::StrokeTips`])
+/// draw in their path's view layer and, for HUD paths, over the screen.
+pub fn sync_stroke_tip_layers_system(
+    mut commands: bevy::prelude::Commands,
+    tips: bevy::prelude::Query<
+        (
+            Entity,
+            &gaanim_scene::prelude::ChildOf,
+            Option<&ViewLayer>,
+            bevy::prelude::Has<gaanim_scene::HudOverlay>,
+        ),
+        bevy::prelude::With<gaanim_animation::StrokeTip>,
+    >,
+    paths: bevy::prelude::Query<(
+        Option<&ViewLayer>,
+        bevy::prelude::Has<gaanim_scene::HudOverlay>,
+    )>,
+) {
+    for (tip, child_of, layer, hud) in &tips {
+        let Ok((path_layer, path_hud)) = paths.get(child_of.parent()) else {
+            continue;
+        };
+        if layer != path_layer {
+            match path_layer {
+                Some(path_layer) => {
+                    commands.entity(tip).insert(path_layer.clone());
+                }
+                None => {
+                    commands.entity(tip).remove::<ViewLayer>();
+                }
+            }
+        }
+        if hud != path_hud {
+            if path_hud {
+                commands.entity(tip).insert(gaanim_scene::HudOverlay);
+            } else {
+                commands.entity(tip).remove::<gaanim_scene::HudOverlay>();
+            }
+        }
+    }
+}
+
 /// A retained reactive vector boolean. Sources are vector leaves in world
 /// space; the result path is rebuilt in `SceneSet::DerivedGeometry`.
 #[derive(Component, Debug, Clone)]
@@ -185,5 +229,39 @@ impl Default for ClipMask {
             sources: Vec::new(),
             invert: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::prelude::{IntoSystem, System, World};
+
+    #[test]
+    fn stroke_tips_follow_their_path_into_hud_and_view_layers() {
+        let mut world = World::new();
+        let path = world
+            .spawn((ViewLayer("xray".into()), gaanim_scene::HudOverlay))
+            .id();
+        let tip = world
+            .spawn((
+                gaanim_animation::StrokeTip,
+                gaanim_scene::prelude::ChildOf(path),
+            ))
+            .id();
+        let mut sync = IntoSystem::into_system(sync_stroke_tip_layers_system);
+        sync.initialize(&mut world);
+        sync.run((), &mut world).unwrap();
+        sync.apply_deferred(&mut world);
+        assert_eq!(world.get::<ViewLayer>(tip), Some(&ViewLayer("xray".into())));
+        assert!(world.get::<gaanim_scene::HudOverlay>(tip).is_some());
+
+        world
+            .entity_mut(path)
+            .remove::<(ViewLayer, gaanim_scene::HudOverlay)>();
+        sync.run((), &mut world).unwrap();
+        sync.apply_deferred(&mut world);
+        assert!(world.get::<ViewLayer>(tip).is_none());
+        assert!(world.get::<gaanim_scene::HudOverlay>(tip).is_none());
     }
 }

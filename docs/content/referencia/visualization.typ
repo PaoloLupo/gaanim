@@ -727,10 +727,10 @@ scene.render()
 )
 
 #api-entry(
-  name: "ProgressRing.parameter / arc / track / label / maximum / current / set / animate",
+  name: "ProgressRing.parameter / visual / arc / track / label / maximum / current / set / animate",
   kind: "property",
-  signature: "parameter: Parameter · arc: Drawable · track: Drawable | None · label: Drawable | None · maximum: float · current: float · set(value) · animate",
-  desc: [`parameter` es el escalar que mueve el arco y la etiqueta, reutilizable en `computed` o lecturas. `maximum` es `1.0` en un anillo y los segundos en una cuenta atrás. `set` fija el valor al instante (un corte reversible tras la declaración) y `animate.set(value)` lo anima. Mover o animar el anillo mueve sus tres partes juntas.],
+  signature: "parameter: Parameter · visual: Drawable · arc: Drawable · track: Drawable | None · label: Drawable | None · maximum: float · current: float · set(value) · animate",
+  desc: [`parameter` es el escalar que mueve el arco y la etiqueta, reutilizable en `computed` o lecturas. `maximum` es `1.0` en un anillo y los segundos en una cuenta atrás. `set` fija el valor al instante (un corte reversible tras la declaración) y `animate.set(value)` lo anima. `visual` es el grupo de las tres partes: usa `visual.animate` para moverlo o desvanecerlo. `move_to`, `shift_by` y `opacity` devuelven el anillo. La etiqueta se asienta en cifras enteras: redondea el porcentaje (la cuenta atrás redondea los segundos hacia arriba) y gira a la cifra siguiente cuando el valor la cruza, así que un valor como `1/3` muestra `33%` sin quedarse entre dos cifras.],
   none,
 )
 

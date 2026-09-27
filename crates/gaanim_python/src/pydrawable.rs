@@ -48,11 +48,12 @@ pub(crate) const BLEND_MODE_NAMES: [&str; 17] = [
     "add",
 ];
 
-/// Parse the mode of `blend(...)`; `"normal"` is plain source-over (`None`).
+/// Parse the mode of `blend(...)`. `"normal"` is an explicit plain mode, so
+/// a member restyled with it keeps painting plainly inside a blended group.
 pub(crate) fn parse_blend_mode(value: &str) -> PyResult<Option<gaanim_core::peniko::BlendMode>> {
     use gaanim_core::peniko::{BlendMode, Compose, Mix};
     let mix = match value {
-        "normal" => return Ok(None),
+        "normal" => Mix::Normal,
         "add" => return Ok(Some(BlendMode::new(Mix::Normal, Compose::Plus))),
         "multiply" => Mix::Multiply,
         "screen" => Mix::Screen,

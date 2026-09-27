@@ -539,7 +539,7 @@ scene.render()
   name: "Drawable.blend",
   kind: "method",
   params: ((name: "mode", type: "str", default: "\"normal\"", desc: [`"normal"`, `"multiply"`, `"screen"`, `"overlay"`, `"darken"`, `"lighten"`, `"color_dodge"`, `"color_burn"`, `"hard_light"`, `"soft_light"`, `"difference"`, `"exclusion"`, `"hue"`, `"saturation"`, `"color"`, `"luminosity"` o `"add"`.])),
-  desc: [Modo de fusión con lo que hay debajo. `"screen"` y `"add"` aclaran (luces, destellos), `"multiply"` oscurece como tinta (resaltadores) y `"normal"` vuelve a pintar encima. Como `fill`, en un grupo o un `Text` llega a todos sus miembros; un miembro al que le cambias el modo después conserva el suyo. El objeto se pinta en su propia capa, así que dentro de un recorte, un grupo con opacidad o una transición solo se funde con el contenido de ese grupo. No se anima. Un modo desconocido lanza `ValueError`.],
+  desc: [Modo de fusión con lo que hay debajo. `"screen"` y `"add"` aclaran (luces, destellos), `"multiply"` oscurece como tinta (resaltadores) y `"normal"` vuelve a pintar encima, también en un miembro de un grupo con otro modo. Como `fill`, en un grupo o un `Text` llega a todos sus miembros; un miembro al que le cambias el modo después conserva el suyo. El objeto se pinta en su propia capa, así que dentro de un recorte, un grupo con opacidad o una transición solo se funde con el contenido de ese grupo. No se anima. Un modo desconocido lanza `ValueError`.],
 )[
 ```python
 # show-code: true

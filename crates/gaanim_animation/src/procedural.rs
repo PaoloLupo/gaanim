@@ -228,6 +228,7 @@ pub fn restore_procedural_motion_system(
 pub struct DashFlow {
     /// `(speed, start, end)` of every run, in timeline seconds.
     pub runs: Vec<(f64, f64, Option<f64>)>,
+    /// Authored dash offset while the shifted one is being extracted.
     applied: Option<f64>,
 }
 
@@ -268,8 +269,9 @@ pub fn apply_dash_flow_system(
         // a positive speed subtracts to flow forward along the path.
         let shift = -flow.travel_at(time);
         if shift != 0.0 {
-            stroke.style.dash_offset += shift;
-            flow.applied = Some(shift);
+            let authored = stroke.style.dash_offset;
+            stroke.style.dash_offset = authored + shift;
+            flow.applied = Some(authored);
         }
     }
 }
@@ -277,8 +279,9 @@ pub fn apply_dash_flow_system(
 /// Restores the authored dash offset after extraction.
 pub fn restore_dash_flow_system(mut query: Query<(&mut DashFlow, &mut StrokeBrush)>) {
     for (mut flow, mut stroke) in &mut query {
-        if let Some(shift) = flow.applied.take() {
-            stroke.style.dash_offset -= shift;
+        // The exact authored value: subtracting the shift could drift.
+        if let Some(authored) = flow.applied.take() {
+            stroke.style.dash_offset = authored;
         }
     }
 }
@@ -409,5 +412,28 @@ mod tests {
             world.get::<StrokeBrush>(entity).unwrap().style.dash_offset,
             0.25
         );
+    }
+
+    #[test]
+    fn dash_flow_restores_the_authored_offset_bit_for_bit() {
+        let mut world = World::new();
+        world.insert_resource(PlaybackState::default());
+        let mut flow = DashFlow::default();
+        flow.push(0.3, 0.0);
+        flow.push(-0.7, 0.5);
+        let mut stroke = StrokeBrush::new(gaanim_core::peniko::Color::WHITE, 0.1);
+        stroke.style = stroke.style.with_dashes(0.1, [0.2, 0.1]);
+        let entity = world.spawn((flow, stroke)).id();
+        let mut apply = IntoSystem::into_system(apply_dash_flow_system);
+        apply.initialize(&mut world);
+        let mut restore = IntoSystem::into_system(restore_dash_flow_system);
+        restore.initialize(&mut world);
+        for frame in 0..10_000 {
+            world.resource_mut::<PlaybackState>().current_time = frame as f64 / 60.0;
+            apply.run((), &mut world).unwrap();
+            restore.run((), &mut world).unwrap();
+            let offset = world.get::<StrokeBrush>(entity).unwrap().style.dash_offset;
+            assert_eq!(offset.to_bits(), 0.1f64.to_bits(), "frame {frame}");
+        }
     }
 }

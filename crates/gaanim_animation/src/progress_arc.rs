@@ -9,7 +9,7 @@ use gaanim_scene::{Path2D, PathSource};
 
 use crate::reactive::ScalarSource;
 use crate::signals::FloatSignal;
-use crate::writing::{PathReveal, path_at_reveal};
+use crate::writing::{PathReveal, PathTrimWindow, visible_path};
 
 /// Tolerance of the flattened arc, in scene units.
 const ARC_TOLERANCE: f64 = 1e-3;
@@ -79,11 +79,12 @@ pub fn progress_arc_system(
         &mut Path2D,
         Option<&mut PathSource>,
         Option<&PathReveal>,
+        Option<&PathTrimWindow>,
     )>,
     signals: Query<&FloatSignal>,
 ) {
     let time = playback.map_or(0.0, |state| state.current_time);
-    for (mut arc, mut path, source, reveal) in &mut query {
+    for (mut arc, mut path, source, reveal, trim) in &mut query {
         let value = arc
             .source
             .evaluate(time, |logical| {
@@ -108,9 +109,12 @@ pub fn progress_arc_system(
         {
             source.0 = full.clone();
         }
-        let shown = match reveal {
-            Some(reveal) => path_at_reveal(&full, reveal.0.clamp(0.0, 1.0)),
-            None => full,
+        // Draw-on progress and trim windows apply to the regenerated arc.
+        let reveal = reveal.map_or(1.0, |reveal| reveal.0.clamp(0.0, 1.0));
+        let shown = if trim.is_none() && reveal >= 1.0 {
+            full
+        } else {
+            visible_path(&full, reveal, trim)
         };
         if !Arc::ptr_eq(&path.0, &shown) {
             path.0 = shown;

@@ -205,6 +205,39 @@ impl ProgressRingOptions {
     }
 }
 
+/// Fraction of a unit over which a progress label rolls to its next digit.
+const LABEL_ROLL: f64 = 0.15;
+
+/// `value` rounded to whole `unit`s, rolling to the next one while it
+/// crosses the half unit, so a settled label never rests between digits.
+pub fn rounded_label_value(value: f64, unit: f64) -> f64 {
+    let units = value / unit;
+    let whole = units.floor();
+    (whole + ((units - whole - 0.5) / LABEL_ROLL + 0.5).clamp(0.0, 1.0)) * unit
+}
+
+/// `value` rounded up to a whole unit, rolling down to it over the last
+/// [`LABEL_ROLL`] of each unit, as a countdown shows the seconds left.
+pub fn countdown_label_value(value: f64) -> f64 {
+    let whole = value.floor();
+    whole + ((value - whole) / LABEL_ROLL).clamp(0.0, 1.0)
+}
+
+fn map_label_source(
+    source: ScalarSource,
+    map: impl Fn(f64) -> f64 + Send + Sync + 'static,
+) -> ScalarSource {
+    match source {
+        ScalarSource::Function(function) => ScalarSource::Function(
+            function
+                .map_scalar(map)
+                .expect("parameter sources are scalar functions"),
+        ),
+        ScalarSource::Constant(value) => ScalarSource::Constant(map(value)),
+        other => other,
+    }
+}
+
 /// A ring whose arc and label follow one [`Parameter`]; see
 /// [`SceneModel::progress_ring`].
 #[derive(Debug, Clone)]
@@ -3480,7 +3513,10 @@ impl SceneModel {
         let label = match options.label {
             ProgressLabel::None => None,
             ProgressLabel::Percent { decimals } => Some(self.rolling_number(
-                parameter.source().scaled(100.0 / options.maximum),
+                map_label_source(
+                    parameter.source().scaled(100.0 / options.maximum),
+                    move |value| rounded_label_value(value, 10f64.powi(-(decimals as i32))),
+                ),
                 gaanim_animation::RollingNumberOptions {
                     decimals,
                     suffix: "%".into(),
@@ -3489,7 +3525,10 @@ impl SceneModel {
                 },
             )?),
             ProgressLabel::Value { decimals } => Some(self.rolling_number(
-                parameter.source(),
+                map_label_source(parameter.source(), move |value| {
+                    let unit = 10f64.powi(-(decimals as i32));
+                    countdown_label_value(value / unit) * unit
+                }),
                 gaanim_animation::RollingNumberOptions {
                     decimals,
                     font_size: options.font_size,
@@ -4616,6 +4655,26 @@ impl SceneModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn progress_labels_settle_on_whole_digits() {
+        // Float noise and repeating fractions never leave a wheel between digits.
+        assert_eq!(rounded_label_value(0.29 * 100.0, 1.0), 29.0);
+        assert_eq!(rounded_label_value(100.0 / 3.0, 1.0), 33.0);
+        assert_eq!(rounded_label_value(66.7, 1.0), 67.0);
+        assert!((rounded_label_value(92.5, 0.1) - 92.5).abs() < 1e-9);
+        let rolling = rounded_label_value(12.5, 1.0);
+        assert!(rolling > 12.0 && rolling < 13.0);
+        // A countdown shows the seconds left and rolls into the next one.
+        assert_eq!(countdown_label_value(10.0), 10.0);
+        assert_eq!(countdown_label_value(9.99), 10.0);
+        assert_eq!(countdown_label_value(9.5), 10.0);
+        assert_eq!(countdown_label_value(9.0), 9.0);
+        assert_eq!(countdown_label_value(0.0), 0.0);
+        let rolling = countdown_label_value(9.05);
+        assert!(rolling > 9.0 && rolling < 10.0);
+        assert!(countdown_label_value(f64::NAN).is_nan());
+    }
 
     #[test]
     fn progress_rings_compile_an_arc_that_follows_their_parameter() {

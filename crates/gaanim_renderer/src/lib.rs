@@ -41,6 +41,10 @@ impl Plugin for GaanimDerivedGeometryPlugin {
                 .chain()
                 .in_set(gaanim_scene::SceneSet::DerivedGeometry),
         );
+        app.add_systems(
+            Update,
+            effects::sync_stroke_tip_layers_system.in_set(gaanim_scene::SceneSet::DerivedGeometry),
+        );
     }
 }
 

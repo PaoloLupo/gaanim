@@ -11005,11 +11005,14 @@ mod tests {
         let mut canvas = SceneModel::new(640, 360);
         let plain = canvas.circle(1.0);
         let own = canvas.square(1.0);
+        let opted = canvas.circle(0.3);
         let group = canvas
-            .group(&[&plain, &own])
+            .group(&[&plain, &own, &opted])
             .blend(Some(Mix::Screen.into()));
-        // Like fill, a member restyled after grouping keeps its own mode.
+        // Like fill, a member restyled after grouping keeps its own mode,
+        // including an explicit normal one.
         let own = own.blend(Some(Mix::Multiply.into()));
+        let opted = opted.blend(Some(BlendMode::default()));
         let lone = canvas.circle(0.5);
 
         let world = World::new();
@@ -11031,6 +11034,7 @@ mod tests {
         };
         assert_eq!(blend_of(&plain), Some(BlendMode::from(Mix::Screen)));
         assert_eq!(blend_of(&own), Some(BlendMode::from(Mix::Multiply)));
+        assert_eq!(blend_of(&opted), Some(BlendMode::default()));
         assert_eq!(blend_of(&group), Some(BlendMode::from(Mix::Screen)));
         assert_eq!(blend_of(&lone), None);
     }

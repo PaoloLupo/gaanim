@@ -51,6 +51,35 @@ fn label_decimals(decimals: i64) -> PyResult<usize> {
 
 #[pymethods]
 impl PyProgressRing {
+    /// The group of the track, the arc and the label.
+    #[getter]
+    fn visual(&self) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyDrawable(self.ring.group.clone()))
+    }
+
+    /// Position the ring and keep the ProgressRing for fluent chaining.
+    #[pyo3(signature = (x, y=None, anchor=None))]
+    fn move_to<'py>(
+        slf: PyRef<'py, Self>,
+        x: &Bound<'_, PyAny>,
+        y: Option<&Bound<'_, PyAny>>,
+        anchor: Option<&crate::pylayout::PyAnchor>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.ring.group.clone()).move_to(x, y, anchor)?;
+        Ok(slf)
+    }
+
+    fn shift_by<'py>(slf: PyRef<'py, Self>, dx: f64, dy: f64) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.ring.group.clone()).shift_by(dx, dy)?;
+        Ok(slf)
+    }
+
+    fn opacity<'py>(slf: PyRef<'py, Self>, op: &Bound<'_, PyAny>) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.ring.group.clone()).opacity(op)?;
+        Ok(slf)
+    }
+
     /// Underlying scalar, usable in computed inputs, readouts and sampled drivers.
     #[getter]
     fn parameter(&self) -> PyResult<PyParameter> {
