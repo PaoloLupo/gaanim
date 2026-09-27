@@ -69,6 +69,10 @@ pub(crate) enum Icon {
     Move,
     /// Ring with ticks: a point and its coordinates.
     Crosshair,
+    /// Counter-clockwise arrow: back to the starting view.
+    Reset,
+    /// Frame split in thirds: composition guides.
+    Thirds,
 }
 
 /// How an icon button presents its state.
@@ -491,6 +495,44 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color:
                     ],
                     stroke,
                 );
+            }
+        }
+        Icon::Reset => {
+            // Open circle whose arrowhead turns counter-clockwise.
+            let radius = 0.34;
+            let start = 240.0_f32.to_radians();
+            let sweep = -290.0_f32.to_radians();
+            let points: Vec<Pos2> = (0..=28)
+                .map(|i| {
+                    let a = start + sweep * i as f32 / 28.0;
+                    p(radius * a.cos(), radius * a.sin())
+                })
+                .collect();
+            let tip = *points.last().expect("arc has points");
+            painter.line(points, stroke);
+            let end = start + sweep;
+            let tangent = vec2(end.sin(), -end.cos());
+            let normal = vec2(end.cos(), end.sin());
+            let head = s * 0.2;
+            fill_poly(vec![
+                tip + tangent * head * 0.9,
+                tip - normal * head * 0.75,
+                tip + normal * head * 0.75,
+            ]);
+        }
+        Icon::Thirds => {
+            painter.rect_stroke(
+                Rect::from_min_max(p(-0.42, -0.32), p(0.42, 0.32)),
+                0.0,
+                stroke,
+                egui::StrokeKind::Middle,
+            );
+            let thin = Stroke::new(stroke.width * 0.7, color);
+            for x in [-0.14, 0.14] {
+                painter.line_segment([p(x, -0.32), p(x, 0.32)], thin);
+            }
+            for y in [-0.107, 0.107] {
+                painter.line_segment([p(-0.42, y), p(0.42, y)], thin);
             }
         }
         Icon::Crosshair => {

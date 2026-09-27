@@ -110,6 +110,14 @@ fn main() {
         active: launch.present,
     })
     .insert_resource(launch.selection.clone())
+    // The overlay toggles the user left on come back in every session.
+    .insert_resource(gaanim_editor::overlays::EditorOverlays::with_preferences(
+        gaanim_editor::overlays::OverlayPreferences::load(),
+    ))
+    .add_systems(
+        Update,
+        gaanim_editor::overlays::save_overlay_preferences_system,
+    )
     .insert_resource(ReloadStatus::default())
     .insert_resource(ScriptError::default())
     .add_systems(

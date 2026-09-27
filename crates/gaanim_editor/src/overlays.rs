@@ -2,11 +2,12 @@ use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
 use gaanim_math::{Camera, ResolvedCamera};
 use gaanim_renderer::pipeline::CanvasBackground;
+use serde::{Deserialize, Serialize};
 
 use crate::ui_kit::{
-    ButtonTone, Icon, divider, icon_button_sized, paint_icon, palette, pill_toggle,
+    ButtonTone, Icon, caption, divider, icon_button_sized, paint_icon, palette, pill_toggle,
 };
-use crate::{EditorState, PresentationMode, PreviewInteractive};
+use crate::{EditorState, PresentationMode, PreviewInteractive, PreviewView};
 
 /// Configuración de overlays del editor.
 ///
@@ -20,8 +21,10 @@ pub struct EditorOverlays {
     pub show_bounds: bool,
     /// Mostrar ejes y coordenadas.
     pub show_coords: bool,
-    /// Mostrar grilla dentro del canvas.
+    /// Mostrar grilla dentro del canvas (en 3D, sobre el plano XZ).
     pub show_grid: bool,
+    /// Mostrar márgenes seguros y tercios.
+    pub show_guides: bool,
     /// Momento (segundos de la app) en que se copiaron las coordenadas del cursor.
     pub copied_at: Option<f64>,
 }
@@ -33,8 +36,97 @@ impl Default for EditorOverlays {
             show_bounds: true,
             show_coords: true,
             show_grid: false,
+            show_guides: false,
             copied_at: None,
         }
+    }
+}
+
+const PREFERENCES_FILE: &str = "overlays.json";
+
+/// Overlays que el usuario dejó activados, recordados entre sesiones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OverlayPreferences {
+    #[serde(default = "enabled")]
+    pub show_bounds: bool,
+    #[serde(default = "enabled")]
+    pub show_coords: bool,
+    #[serde(default)]
+    pub show_grid: bool,
+    #[serde(default)]
+    pub show_guides: bool,
+}
+
+fn enabled() -> bool {
+    true
+}
+
+impl Default for OverlayPreferences {
+    fn default() -> Self {
+        EditorOverlays::default().preferences()
+    }
+}
+
+impl OverlayPreferences {
+    fn path() -> Option<std::path::PathBuf> {
+        gaanim_project::user_data_dir().map(|dir| dir.join(PREFERENCES_FILE))
+    }
+
+    /// Las preferencias guardadas, o las de fábrica si no hay o no se leen.
+    pub fn load() -> Self {
+        Self::path()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .and_then(|source| serde_json::from_str(&source).ok())
+            .unwrap_or_default()
+    }
+
+    fn save(&self) -> Result<(), String> {
+        let path = Self::path().ok_or("no se encontró la carpeta de datos de Gaanim")?;
+        let source = serde_json::to_string_pretty(self).map_err(|error| error.to_string())?;
+        gaanim_media::narration::write_atomically(&path, source.as_bytes())
+            .map_err(|error| error.to_string())
+    }
+}
+
+impl EditorOverlays {
+    /// Overlays ocultos, con los interruptores de `preferences`.
+    pub fn with_preferences(preferences: OverlayPreferences) -> Self {
+        Self {
+            show_bounds: preferences.show_bounds,
+            show_coords: preferences.show_coords,
+            show_grid: preferences.show_grid,
+            show_guides: preferences.show_guides,
+            ..Self::default()
+        }
+    }
+
+    pub fn preferences(&self) -> OverlayPreferences {
+        OverlayPreferences {
+            show_bounds: self.show_bounds,
+            show_coords: self.show_coords,
+            show_grid: self.show_grid,
+            show_guides: self.show_guides,
+        }
+    }
+}
+
+/// Guarda los interruptores de overlays cuando cambian.
+pub fn save_overlay_preferences_system(
+    overlays: Res<EditorOverlays>,
+    mut saved: Local<Option<OverlayPreferences>>,
+) {
+    let current = overlays.preferences();
+    let Some(previous) = *saved else {
+        // The first run records what was loaded; nothing changed yet.
+        *saved = Some(current);
+        return;
+    };
+    if previous == current {
+        return;
+    }
+    *saved = Some(current);
+    if let Err(error) = current.save() {
+        warn!("no se pudieron guardar las preferencias de overlays: {error}");
     }
 }
 
@@ -52,8 +144,14 @@ fn logical_grid_step(pixels_per_unit: f64) -> f64 {
     if !pixels_per_unit.is_finite() || pixels_per_unit <= 0.0 {
         return 1.0;
     }
+    nice_step(TARGET_SPACING_PX / pixels_per_unit)
+}
 
-    let raw_step = TARGET_SPACING_PX / pixels_per_unit;
+/// The 1, 2 or 5 times a power of ten at or above `raw_step`.
+fn nice_step(raw_step: f64) -> f64 {
+    if !raw_step.is_finite() || raw_step <= 0.0 {
+        return 1.0;
+    }
     let magnitude = 10.0_f64.powf(raw_step.log10().floor());
     let normalized = raw_step / magnitude;
     let nice = if normalized <= 1.0 {
@@ -102,14 +200,75 @@ fn cursor_label_position(cursor: egui::Pos2, viewport: egui::Rect) -> egui::Pos2
     )
 }
 
+/// Window pixel of the output frame's center, where the camera looks.
+fn window_center(cam: &ResolvedCamera, window: &Window) -> glam::DVec2 {
+    glam::DVec2::new(
+        window.width() as f64 * 0.5,
+        window.height() as f64 * 0.5 + cam.viewport.offset_y,
+    )
+}
+
+/// Output-frame pixel (what `Camera::world_to_screen` returns) to window pixel.
+fn output_to_window(cam: &ResolvedCamera, window: &Window, output: glam::DVec2) -> egui::Pos2 {
+    let center = glam::DVec2::new(
+        cam.viewport_width as f64 * 0.5,
+        cam.viewport_height as f64 * 0.5,
+    );
+    let point = window_center(cam, window) + (output - center) * cam.viewport.scale;
+    egui::pos2(point.x as f32, point.y as f32)
+}
+
+/// Clip-space `w` below which a point counts as behind a perspective camera.
+const NEAR_W: f64 = 1e-3;
+
+/// Window pixel of a clip-space point in front of the camera.
+fn clip_to_window(cam: &ResolvedCamera, window: &Window, clip: glam::DVec4) -> egui::Pos2 {
+    let ndc = clip.truncate() / clip.w;
+    let output = glam::DVec2::new(
+        (ndc.x + 1.0) * 0.5 * cam.viewport_width as f64,
+        (1.0 - ndc.y) * 0.5 * cam.viewport_height as f64,
+    );
+    output_to_window(cam, window, output)
+}
+
+/// Window segment of `a`–`b`, cut where it passes behind the camera.
+fn project_segment(
+    cam: &ResolvedCamera,
+    window: &Window,
+    a: glam::DVec3,
+    b: glam::DVec3,
+) -> Option<[egui::Pos2; 2]> {
+    let view_projection = cam.projection_matrix() * cam.view_matrix();
+    let mut clip_a = view_projection * a.extend(1.0);
+    let mut clip_b = view_projection * b.extend(1.0);
+    if clip_a.w < NEAR_W && clip_b.w < NEAR_W {
+        return None;
+    }
+    let cut = |front: glam::DVec4, behind: glam::DVec4| {
+        front + (behind - front) * ((front.w - NEAR_W) / (front.w - behind.w))
+    };
+    if clip_a.w < NEAR_W {
+        clip_a = cut(clip_b, clip_a);
+    } else if clip_b.w < NEAR_W {
+        clip_b = cut(clip_a, clip_b);
+    }
+    Some([
+        clip_to_window(cam, window, clip_a),
+        clip_to_window(cam, window, clip_b),
+    ])
+}
+
 pub(crate) fn world_to_egui(
     cam: &ResolvedCamera,
     window: &Window,
     world: glam::DVec3,
 ) -> egui::Pos2 {
     if matches!(cam.projection, gaanim_math::Projection::Perspective { .. }) {
-        let s = cam.world_to_screen(world);
-        return egui::pos2(s.x as f32, s.y as f32);
+        let clip = cam.projection_matrix() * cam.view_matrix() * world.extend(1.0);
+        if clip.w < NEAR_W {
+            return egui::pos2(f32::NAN, f32::NAN);
+        }
+        return clip_to_window(cam, window, clip);
     }
     let eff = effective_zoom(cam);
     let hw = window.width() as f64 * 0.5;
@@ -130,7 +289,13 @@ pub(crate) fn egui_to_world(
     screen: egui::Pos2,
 ) -> glam::DVec3 {
     if matches!(cam.projection, gaanim_math::Projection::Perspective { .. }) {
-        return cam.screen_to_world(glam::DVec2::new(screen.x as f64, screen.y as f64));
+        let offset =
+            glam::DVec2::new(screen.x as f64, screen.y as f64) - window_center(cam, window);
+        let output = glam::DVec2::new(
+            cam.viewport_width as f64 * 0.5,
+            cam.viewport_height as f64 * 0.5,
+        ) + offset / cam.viewport.scale.max(1e-9);
+        return cam.screen_to_world(output);
     }
     let eff = effective_zoom(cam);
     let hw = window.width() as f64 * 0.5;
@@ -153,6 +318,7 @@ mod colors {
     pub const BOUNDS: Color32 = palette::STOP;
     pub const AXIS_X: Color32 = palette::DANGER;
     pub const AXIS_Y: Color32 = palette::LOOP;
+    pub const AXIS_Z: Color32 = palette::ACCENT;
     pub const SELECTION: Color32 = palette::ACCENT;
     pub const GRID: Color32 = Color32::from_rgba_premultiplied(22, 22, 24, 24);
     pub const TICK_LABEL: Color32 = palette::TEXT_MUTED;
@@ -250,12 +416,64 @@ pub fn overlays_settings_ui_system(
                             palette::ACCENT,
                             HEIGHT,
                         )
-                        .on_hover_text("Grilla en unidades lógicas · G")
+                        .on_hover_text(
+                            "Grilla en unidades lógicas · G\nEn 3D, sobre el plano XZ.",
+                        )
                         .clicked()
                         {
                             overlays.show_grid = !overlays.show_grid;
                         }
+                        if pill_toggle(
+                            ui,
+                            Icon::Thirds,
+                            Some("Guías"),
+                            overlays.show_guides,
+                            palette::TEXT,
+                            HEIGHT,
+                        )
+                        .on_hover_text("Márgenes seguros (90 % y 80 %) y tercios · M")
+                        .clicked()
+                        {
+                            overlays.show_guides = !overlays.show_guides;
+                        }
+                        if interactive.enabled {
+                            divider(ui);
+                            let free_3d = interactive.view == PreviewView::Free3D;
+                            let moved = free_3d
+                                || interactive.pan != glam::DVec2::ZERO
+                                || (interactive.user_zoom - 1.0).abs() > 1e-9;
+                            let zoom = if free_3d {
+                                "3D libre".to_owned()
+                            } else {
+                                format!("{:.0} %", interactive.user_zoom * 100.0)
+                            };
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(zoom).size(12.5).color(if moved {
+                                        palette::ACCENT
+                                    } else {
+                                        palette::TEXT_MUTED
+                                    }),
+                                )
+                                .selectable(false),
+                            )
+                            .on_hover_text(if moved {
+                                "La vista no coincide con la cámara de la escena"
+                            } else {
+                                "La vista coincide con la cámara de la escena"
+                            });
+                            if icon_button_sized(ui, Icon::Reset, ButtonTone::Ghost, moved, HEIGHT)
+                                .on_hover_text("Restablecer la vista · R")
+                                .clicked()
+                            {
+                                interactive.reset();
+                            }
+                        }
                         divider(ui);
+                        let keyboard =
+                            icon_button_sized(ui, Icon::Keyboard, ButtonTone::Ghost, true, HEIGHT)
+                                .on_hover_text("Atajos de teclado");
+                        egui::Popup::menu(&keyboard).show(show_shortcuts);
                         if icon_button_sized(ui, Icon::Close, ButtonTone::Ghost, true, HEIGHT)
                             .on_hover_text("Ocultar overlays · O o Esc")
                             .clicked()
@@ -264,6 +482,53 @@ pub fn overlays_settings_ui_system(
                         }
                     });
                 });
+        });
+}
+
+/// Atajos del modo overlays y de la inspección.
+const SHORTCUTS: &[(&str, &str)] = &[
+    ("O · Esc", "Mostrar u ocultar los overlays"),
+    ("I", "Inspección: mover la vista sin tocar la cámara"),
+    ("B · C · G · M", "Límites, coordenadas, grilla y guías"),
+    (
+        "Arrastrar",
+        "Desplazar la vista (en 3D, orbitar con el derecho)",
+    ),
+    ("Clic", "Seleccionar el objeto bajo el cursor"),
+    ("Rueda", "Acercar o alejar hacia el cursor"),
+    ("W A S D", "Mover la cámara"),
+    ("R · F", "Restablecer la vista · encuadrar en 3D"),
+    ("Mayús", "Ajustar el punto a la grilla"),
+    ("Ctrl+C", "Copiar el punto bajo el cursor"),
+];
+
+fn show_shortcuts(ui: &mut egui::Ui) {
+    ui.set_min_width(360.0);
+    ui.label(caption("ATAJOS DE TECLADO"));
+    ui.add_space(6.0);
+    egui::Grid::new("overlay-shortcuts")
+        .num_columns(2)
+        .spacing([16.0, 7.0])
+        .show(ui, |ui| {
+            for (keys, action) in SHORTCUTS {
+                egui::Frame::new()
+                    .fill(palette::FIELD)
+                    .inner_margin(egui::Margin::symmetric(7, 2))
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new(*keys)
+                                .monospace()
+                                .size(12.0)
+                                .color(palette::TEXT),
+                        );
+                    });
+                ui.label(
+                    egui::RichText::new(*action)
+                        .size(13.0)
+                        .color(palette::TEXT_MUTED),
+                );
+                ui.end_row();
+            }
         });
 }
 
@@ -360,6 +625,7 @@ pub fn scene_overlays_system(
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     presentation: Res<PresentationMode>,
     state: Res<EditorState>,
+    interactive: Res<PreviewInteractive>,
     pickable: Query<crate::PickBoundsQueryData>,
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
@@ -423,6 +689,13 @@ pub fn scene_overlays_system(
         .collect()
     };
     let step = logical_grid_step(effective_zoom(&cam));
+    // While inspecting, the preview shows more than the output frame, so the
+    // grid and the axes cover the whole visible area.
+    let (lo, hi) = if interactive.enabled && !is_perspective {
+        visible_world_range(&cam, window)
+    } else {
+        (bmin, bmax)
+    };
     let selected = state
         .selected
         .and_then(|entity| pickable.get(entity).ok())
@@ -438,27 +711,33 @@ pub fn scene_overlays_system(
             let painter = ui.painter();
 
             // --- Grilla (debajo de todo lo demás) ---
-            // En perspectiva la grilla 2D no tiene sentido (el mundo es 3D); solo mostrar en ortho
-            if overlays.show_grid && !is_perspective {
+            if overlays.show_grid && is_perspective {
+                paint_ground_grid(painter, &cam, window);
+            } else if overlays.show_grid {
                 let grid_stroke = egui::Stroke::new(1.0, colors::GRID);
-                let mut x = (bmin.x / step).ceil() * step;
-                while x <= bmax.x + 1e-6 {
+                let mut x = (lo.x / step).ceil() * step;
+                while x <= hi.x + 1e-6 {
                     if x.abs() > 1e-6 || !overlays.show_coords {
-                        let a = world_to_egui(&cam, window, glam::DVec3::new(x, bmin.y, 0.0));
-                        let b = world_to_egui(&cam, window, glam::DVec3::new(x, bmax.y, 0.0));
+                        let a = world_to_egui(&cam, window, glam::DVec3::new(x, lo.y, 0.0));
+                        let b = world_to_egui(&cam, window, glam::DVec3::new(x, hi.y, 0.0));
                         painter.line_segment([a, b], grid_stroke);
                     }
                     x += step;
                 }
-                let mut y = (bmin.y / step).ceil() * step;
-                while y <= bmax.y + 1e-6 {
+                let mut y = (lo.y / step).ceil() * step;
+                while y <= hi.y + 1e-6 {
                     if y.abs() > 1e-6 || !overlays.show_coords {
-                        let a = world_to_egui(&cam, window, glam::DVec3::new(bmin.x, y, 0.0));
-                        let b = world_to_egui(&cam, window, glam::DVec3::new(bmax.x, y, 0.0));
+                        let a = world_to_egui(&cam, window, glam::DVec3::new(lo.x, y, 0.0));
+                        let b = world_to_egui(&cam, window, glam::DVec3::new(hi.x, y, 0.0));
                         painter.line_segment([a, b], grid_stroke);
                     }
                     y += step;
                 }
+            }
+
+            // --- Guías de composición ---
+            if overlays.show_guides {
+                paint_guides(painter, &corners_screen);
             }
 
             // --- Límites del área real (canvas) ---
@@ -499,9 +778,9 @@ pub fn scene_overlays_system(
             }
 
             // --- Ejes X/Y (solo ortho; en perspectiva los ejes 3D ya existen) ---
-            let origin_visible = bmin.x <= 0.0 && bmax.x >= 0.0 && bmin.y <= 0.0 && bmax.y >= 0.0;
+            let origin_visible = lo.x <= 0.0 && hi.x >= 0.0 && lo.y <= 0.0 && hi.y >= 0.0;
             if overlays.show_coords && !is_perspective && origin_visible {
-                paint_axes(painter, &cam, window, bmin, bmax, step);
+                paint_axes(painter, &cam, window, lo, hi, step);
             }
 
             // --- Selección ---
@@ -625,6 +904,113 @@ pub fn scene_overlays_system(
                     });
                 });
         });
+}
+
+/// World box covering the whole window in an orthographic view.
+fn visible_world_range(cam: &ResolvedCamera, window: &Window) -> (glam::DVec2, glam::DVec2) {
+    let (width, height) = (window.width(), window.height());
+    let corners = [
+        egui::pos2(0.0, 0.0),
+        egui::pos2(width, 0.0),
+        egui::pos2(width, height),
+        egui::pos2(0.0, height),
+    ]
+    .map(|corner| egui_to_world(cam, window, corner).truncate());
+    let lo = corners
+        .iter()
+        .copied()
+        .reduce(glam::DVec2::min)
+        .unwrap_or_default();
+    let hi = corners
+        .iter()
+        .copied()
+        .reduce(glam::DVec2::max)
+        .unwrap_or_default();
+    (lo, hi)
+}
+
+/// Point at fractions `(u, v)` of the frame quad (`corners` clockwise from
+/// the top left), which may be rotated.
+fn frame_point(corners: &[egui::Pos2], u: f32, v: f32) -> egui::Pos2 {
+    corners[0] + (corners[1] - corners[0]) * u + (corners[3] - corners[0]) * v
+}
+
+/// Márgenes seguros de acción (90 %) y de títulos (80 %), y tercios.
+fn paint_guides(painter: &egui::Painter, corners: &[egui::Pos2]) {
+    let color = palette::TEXT_MUTED;
+    for (inset, alpha) in [(0.05, 0.55), (0.10, 0.4)] {
+        let (a, b) = (inset, 1.0 - inset);
+        let mut outline = vec![
+            frame_point(corners, a, a),
+            frame_point(corners, b, a),
+            frame_point(corners, b, b),
+            frame_point(corners, a, b),
+        ];
+        outline.push(outline[0]);
+        painter.extend(egui::Shape::dashed_line(
+            &outline,
+            egui::Stroke::new(1.0, color.gamma_multiply(alpha)),
+            6.0,
+            4.0,
+        ));
+    }
+    let thirds = egui::Stroke::new(1.0, color.gamma_multiply(0.3));
+    for t in [1.0 / 3.0, 2.0 / 3.0] {
+        painter.line_segment(
+            [frame_point(corners, t, 0.0), frame_point(corners, t, 1.0)],
+            thirds,
+        );
+        painter.line_segment(
+            [frame_point(corners, 0.0, t), frame_point(corners, 1.0, t)],
+            thirds,
+        );
+    }
+}
+
+/// Lines drawn on each side of the ground grid's center.
+const GROUND_GRID_HALF_LINES: i32 = 10;
+
+/// Grilla del plano XZ (Y = 0) alrededor del punto que mira la cámara, con
+/// el eje X en rojo y el Z en azul.
+fn paint_ground_grid(painter: &egui::Painter, cam: &ResolvedCamera, window: &Window) {
+    let distance = (cam.position - cam.target).length();
+    let step = nice_step(distance / 8.0);
+    let center_x = snap_to_step(cam.target.x, step);
+    let center_z = snap_to_step(cam.target.z, step);
+    let reach = step * GROUND_GRID_HALF_LINES as f64;
+    let grid = egui::Stroke::new(1.0, egui::Color32::from_white_alpha(30));
+    for k in -GROUND_GRID_HALF_LINES..=GROUND_GRID_HALF_LINES {
+        let offset = step * k as f64;
+        // A line of constant z runs along X; z = 0 is the X axis.
+        let z = center_z + offset;
+        let stroke = if z.abs() < step * 1e-6 {
+            egui::Stroke::new(1.4, colors::AXIS_X.gamma_multiply(0.85))
+        } else {
+            grid
+        };
+        if let Some(segment) = project_segment(
+            cam,
+            window,
+            glam::DVec3::new(center_x - reach, 0.0, z),
+            glam::DVec3::new(center_x + reach, 0.0, z),
+        ) {
+            painter.line_segment(segment, stroke);
+        }
+        let x = center_x + offset;
+        let stroke = if x.abs() < step * 1e-6 {
+            egui::Stroke::new(1.4, colors::AXIS_Z.gamma_multiply(0.85))
+        } else {
+            grid
+        };
+        if let Some(segment) = project_segment(
+            cam,
+            window,
+            glam::DVec3::new(x, 0.0, center_z - reach),
+            glam::DVec3::new(x, 0.0, center_z + reach),
+        ) {
+            painter.line_segment(segment, stroke);
+        }
+    }
 }
 
 /// Ejes X/Y con marcas y valores en el mismo paso lógico adaptativo que la grilla.
@@ -756,6 +1142,9 @@ pub fn overlays_toggle_keys_system(
     if keys.just_pressed(KeyCode::KeyG) {
         overlays.show_grid = !overlays.show_grid;
     }
+    if keys.just_pressed(KeyCode::KeyM) {
+        overlays.show_guides = !overlays.show_guides;
+    }
 }
 
 #[cfg(test)]
@@ -774,6 +1163,113 @@ mod tests {
         assert_eq!(format_logical_value(2.0, 1.0), "2");
         assert_eq!(format_logical_value(0.5, 0.5), "0.5");
         assert_eq!(format_logical_value(-0.05, 0.05), "-0.05");
+    }
+
+    #[test]
+    fn preferences_default_to_bounds_and_coordinates_and_round_trip() {
+        let stored: OverlayPreferences = serde_json::from_str("{}").unwrap();
+        assert_eq!(stored, OverlayPreferences::default());
+        assert!(stored.show_bounds && stored.show_coords);
+        assert!(!stored.show_grid && !stored.show_guides);
+
+        let chosen = OverlayPreferences {
+            show_bounds: false,
+            show_coords: true,
+            show_grid: true,
+            show_guides: true,
+        };
+        let overlays = EditorOverlays::with_preferences(chosen);
+        assert!(!overlays.enabled, "the mode itself always starts hidden");
+        assert_eq!(overlays.preferences(), chosen);
+    }
+
+    #[test]
+    fn nice_steps_are_one_two_or_five_times_a_power_of_ten() {
+        assert_eq!(nice_step(0.8), 1.0);
+        assert_eq!(nice_step(1.3), 2.0);
+        assert_eq!(nice_step(30.0), 50.0);
+        assert!((nice_step(0.004) - 0.005).abs() < 1e-12);
+        assert_eq!(nice_step(0.0), 1.0);
+    }
+
+    fn perspective_view() -> (ResolvedCamera, Window) {
+        let mut window = Window::default();
+        window.resolution.set(1280.0, 720.0);
+        let mut camera = Camera::perspective_3d(1920, 1080, 0.8);
+        camera
+            .look_at(
+                glam::DVec3::new(0.0, 4.0, 10.0),
+                glam::DVec3::ZERO,
+                glam::DVec3::Y,
+            )
+            .unwrap();
+        let viewport = gaanim_math::CameraViewport {
+            scale: 0.5,
+            offset_y: -30.0,
+        };
+        (ResolvedCamera::new(camera, viewport), window)
+    }
+
+    #[test]
+    fn perspective_points_map_to_the_window_frame_and_back() {
+        let (camera, window) = perspective_view();
+        // The look-at target sits at the center of the fitted frame.
+        let target = world_to_egui(&camera, &window, glam::DVec3::ZERO);
+        assert!((target.x - 640.0).abs() < 1e-3 && (target.y - 330.0).abs() < 1e-3);
+
+        let point = glam::DVec3::new(1.5, 0.0, -2.0);
+        let screen = world_to_egui(&camera, &window, point);
+        // `screen_to_world` lands on the z = 0 plane, so compare along that ray.
+        let back = egui_to_world(&camera, &window, screen);
+        let again = world_to_egui(&camera, &window, back);
+        assert!((again - screen).length() < 1e-3, "{screen:?} -> {again:?}");
+
+        let behind = world_to_egui(&camera, &window, glam::DVec3::new(0.0, 4.0, 20.0));
+        assert!(behind.x.is_nan(), "points behind the camera do not project");
+    }
+
+    #[test]
+    fn segments_behind_the_camera_are_cut_or_skipped() {
+        let (camera, window) = perspective_view();
+        let ahead = glam::DVec3::new(0.0, 0.0, 0.0);
+        let behind = glam::DVec3::new(0.0, 0.0, 30.0);
+        let [a, b] = project_segment(&camera, &window, ahead, behind).expect("half visible");
+        assert!(a.x.is_finite() && a.y.is_finite() && b.x.is_finite() && b.y.is_finite());
+        assert_eq!(a, world_to_egui(&camera, &window, ahead));
+        assert!(
+            project_segment(&camera, &window, behind, behind + glam::DVec3::X).is_none(),
+            "a segment fully behind the camera is not drawn"
+        );
+    }
+
+    #[test]
+    fn inspection_grid_covers_the_visible_window() {
+        let mut window = Window::default();
+        window.resolution.set(1280.0, 720.0);
+        let mut camera = ResolvedCamera::new(
+            Camera::ortho_2d_frame(16.0, 9.0, 1920, 1080),
+            gaanim_math::CameraViewport {
+                scale: 1280.0 / 1920.0 * 0.5,
+                offset_y: 0.0,
+            },
+        );
+        camera.camera.position = glam::DVec3::new(3.0, 1.0, 0.0);
+        // Zoomed out to 50 %, the window shows twice the frame around (3, 1).
+        let (lo, hi) = visible_world_range(&camera, &window);
+        assert!((lo - glam::DVec2::new(-13.0, -8.0)).length() < 1e-9, "{lo}");
+        assert!((hi - glam::DVec2::new(19.0, 10.0)).length() < 1e-9, "{hi}");
+    }
+
+    #[test]
+    fn guides_follow_the_frame_quad() {
+        let corners = [
+            egui::pos2(100.0, 50.0),
+            egui::pos2(400.0, 50.0),
+            egui::pos2(400.0, 250.0),
+            egui::pos2(100.0, 250.0),
+        ];
+        assert_eq!(frame_point(&corners, 0.5, 0.5), egui::pos2(250.0, 150.0));
+        assert_eq!(frame_point(&corners, 0.1, 0.9), egui::pos2(130.0, 230.0));
     }
 
     #[test]
