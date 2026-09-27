@@ -640,6 +640,7 @@ fn editor_ui_system(
                                 let name = timeline.scenes.get(scene_id)?.name.clone();
                                 Some(SceneSegment {
                                     name,
+                                    start: s,
                                     start_frac: (s as f32 / total_f32).clamp(0.0, 1.0),
                                     end_frac: (e as f32 / total_f32).clamp(0.0, 1.0),
                                 })
@@ -695,8 +696,11 @@ fn editor_ui_system(
                         state.seek_bar_hover = seek_resp.hover_time;
 
                         // Row 2: transport · time · scene | toggles · window actions
-                        let prev_scene = adjacent_scene_time(&scene_segs, frac, total, false);
-                        let next_scene = adjacent_scene_time(&scene_segs, frac, total, true);
+                        let scene_starts: Vec<f64> =
+                            scene_segs.iter().map(|scene| scene.start).collect();
+                        let now = timeline.current_time.clamp(0.0, total);
+                        let prev_scene = adjacent_scene_start(&scene_starts, now, false);
+                        let next_scene = adjacent_scene_start(&scene_starts, now, true);
                         let has_scenes = !scene_segs.is_empty();
                         let scene_text = presentation_name
                             .clone()
@@ -1183,38 +1187,31 @@ fn toggle_scene_loop_range(
 /// A scene's time range, precomputed for the seek bar.
 struct SceneSegment {
     name: String,
+    /// Exact start, in seconds, that scene navigation seeks to.
+    start: f64,
     start_frac: f32,
     end_frac: f32,
 }
 
-fn adjacent_scene_time(
-    scenes: &[SceneSegment],
-    fraction: f32,
-    total: f64,
-    next: bool,
-) -> Option<f64> {
-    let first = scenes.first()?;
-    let last = scenes.last()?;
-    let current = scenes
-        .iter()
-        .position(|scene| fraction >= scene.start_frac && fraction < scene.end_frac + 0.005);
-    let target = if next {
-        if fraction < first.start_frac {
-            Some(first.start_frac)
-        } else {
-            current
-                .and_then(|index| scenes.get(index + 1))
-                .map(|scene| scene.start_frac)
-        }
-    } else if fraction >= last.end_frac - 0.005 {
-        Some(last.start_frac)
+/// Start of the scene after (or before) the one playing at `time`, given the
+/// scenes' starts in ascending order.
+///
+/// The playing scene is the last one that has started: during a transition,
+/// where two scenes overlap, it is the incoming one, so "next" moves on to
+/// the scene after it instead of back to its own start. "Previous" goes to
+/// the start of the scene before the playing one. Times compare in seconds
+/// with a microsecond tolerance, so a seek to a scene's start lands in it.
+fn adjacent_scene_start(starts: &[f64], time: f64, next: bool) -> Option<f64> {
+    const EPSILON: f64 = 1e-6;
+    let started = starts.partition_point(|start| *start <= time + EPSILON);
+    if next {
+        starts.get(started).copied()
     } else {
-        current
-            .and_then(|index| index.checked_sub(1))
-            .and_then(|index| scenes.get(index))
-            .map(|scene| scene.start_frac)
-    };
-    target.map(|fraction| fraction as f64 * total)
+        started
+            .checked_sub(2)
+            .and_then(|index| starts.get(index))
+            .copied()
+    }
 }
 
 /// Result from painting the custom seek bar.
@@ -2105,59 +2102,14 @@ fn global_playback_keys_system(
     // Prev / Next scene via arrow keys
     if keys.just_pressed(KeyCode::ArrowLeft) || keys.just_pressed(KeyCode::ArrowRight) {
         let go_next = keys.just_pressed(KeyCode::ArrowRight);
-        let current = timeline.current_time.clamp(0.0, total);
-        let total_f32 = total.max(0.001) as f32;
-        let frac = (current as f32 / total_f32).clamp(0.0, 1.0);
-
-        let scene_segs: Vec<(f32, f32)> = timeline
+        let starts: Vec<f64> = timeline
             .scene_index
-            .iter()
-            .filter_map(|(&_start_time, &scene_id)| {
-                let (s, e) = timeline.scene_bounds(scene_id)?;
-                Some((
-                    (s as f32 / total_f32).clamp(0.0, 1.0),
-                    (e as f32 / total_f32).clamp(0.0, 1.0),
-                ))
-            })
+            .values()
+            .filter_map(|&scene_id| timeline.scene_bounds(scene_id).map(|(start, _)| start))
             .collect();
-
-        if !scene_segs.is_empty() {
-            let cur_scene_idx = scene_segs
-                .iter()
-                .position(|(s, e)| frac >= *s && frac < *e + 0.005);
-            let before_first = frac < scene_segs[0].0;
-            let after_last = frac >= scene_segs.last().unwrap().1 - 0.005;
-
-            let target = if go_next {
-                if before_first {
-                    Some(scene_segs[0].0 as f64 * total)
-                } else if let Some(idx) = cur_scene_idx {
-                    if idx + 1 < scene_segs.len() {
-                        Some(scene_segs[idx + 1].0 as f64 * total)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            } else {
-                // prev
-                if after_last {
-                    scene_segs.last().map(|(s, _)| *s as f64 * total)
-                } else if let Some(idx) = cur_scene_idx {
-                    if idx > 0 {
-                        Some(scene_segs[idx - 1].0 as f64 * total)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            };
-
-            if let Some(t) = target {
-                timeline.seek_request = Some(t);
-            }
+        let current = timeline.current_time.clamp(0.0, total);
+        if let Some(target) = adjacent_scene_start(&starts, current, go_next) {
+            timeline.seek_request = Some(target);
         }
     }
 }
@@ -3252,9 +3204,28 @@ mod tests {
     }
 
     #[test]
+    fn scene_navigation_moves_on_during_a_transition() {
+        // Scene starts of a 60 s video; a transition overlaps each boundary.
+        let starts = [0.0, 20.0, 40.0];
+        // Just after "next" landed on 20 s, while the transition plays.
+        assert_eq!(adjacent_scene_start(&starts, 20.2, true), Some(40.0));
+        assert_eq!(adjacent_scene_start(&starts, 20.2, false), Some(0.0));
+        // Seeking exactly to a start lands in that scene, even a hair early.
+        assert_eq!(adjacent_scene_start(&starts, 20.0 - 1e-9, true), Some(40.0));
+        assert_eq!(adjacent_scene_start(&starts, 0.0, true), Some(20.0));
+        assert_eq!(adjacent_scene_start(&starts, 45.0, true), None);
+        assert_eq!(adjacent_scene_start(&starts, 45.0, false), Some(20.0));
+        assert_eq!(adjacent_scene_start(&starts, 5.0, false), None);
+        // Before the first scene.
+        assert_eq!(adjacent_scene_start(&[2.0, 5.0], 1.0, true), Some(2.0));
+        assert_eq!(adjacent_scene_start(&[], 1.0, true), None);
+    }
+
+    #[test]
     fn dense_chapters_are_grouped_by_their_leading_name() {
         let scene = |name: &str| SceneSegment {
             name: name.into(),
+            start: 0.0,
             start_frac: 0.0,
             end_frac: 0.0,
         };
@@ -3291,6 +3262,7 @@ mod tests {
     fn compact_seek_snapping_is_bypassed_for_3d_content() {
         let scenes = [SceneSegment {
             name: "scene".into(),
+            start: 0.25,
             start_frac: 0.25,
             end_frac: 0.75,
         }];

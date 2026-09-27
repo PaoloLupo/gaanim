@@ -50,6 +50,10 @@ Sin publicar todavía. No hace falta cambiar tus escenas.
   presentación de 41 segmentos con 54 mediciones, `gaanim check` pasa de
   27,7 s a 1,7 s. En los demás casos sigue compilando la escena escrita hasta el
   cursor.
+- En un vídeo, pulsar → (o el botón de escena siguiente) mientras sonaba la
+  transición de una escena volvía al inicio de esa misma escena en lugar de
+  pasar a la siguiente; ← tampoco reconocía la escena en curso durante la
+  transición. La navegación entre escenas ahora compara instantes exactos.
 
 = 0.5.2
 
