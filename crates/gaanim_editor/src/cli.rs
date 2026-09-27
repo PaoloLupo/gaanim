@@ -299,6 +299,37 @@ pub fn video_config(
     config
 }
 
+/// Frames per second a bundle records for an export `quality`: the rate a
+/// video of that quality has.
+pub fn bundle_fps(quality: &str) -> u32 {
+    match quality {
+        "draft" => 30,
+        _ => 60,
+    }
+}
+
+/// The recording of `canvas` into a bundle at `output`, named after `script`
+/// and sized like the scene's preview.
+pub fn bundle_config(
+    script: Option<&Path>,
+    canvas: &gaanim_api::canvas::SceneModel,
+    output: &str,
+    fps: Option<u32>,
+) -> gaanim_api::export::BundleConfig {
+    let mut config = gaanim_api::export::BundleConfig::new(output);
+    if let Some(title) = script
+        .and_then(|script| script.file_stem())
+        .and_then(|stem| stem.to_str())
+    {
+        config.title = title.to_owned();
+    }
+    if let Some(fps) = fps {
+        config.fps = fps;
+    }
+    (config.width, config.height) = canvas.frame.preview_pixel_size();
+    config
+}
+
 /// Why a command stopped: bad arguments (exit status 2) or a failed run (1).
 #[derive(Debug, Clone, PartialEq)]
 pub enum CommandError {

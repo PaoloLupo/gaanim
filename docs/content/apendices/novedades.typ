@@ -34,6 +34,10 @@ Sin publicar todavía. No hace falta cambiar tus escenas.
   grabar un paquete.
 - `gaanim check mi-charla.gaanim` vuelve a componer cada fotograma de un
   paquete y lo compara con el resumen grabado, sin Python.
+- `gaanim --diff --example mi-charla.gaanim` captura y compara las pausas de un
+  paquete, sin Python; coinciden con las de `--capture-stops` sobre el script.
+- El diálogo Exportar del editor ofrece el formato Paquete para grabar un
+  `.gaanim` del script abierto.
 - El `README.md` de los proyectos nuevos incluye cómo compartirlos como
   paquete.
 

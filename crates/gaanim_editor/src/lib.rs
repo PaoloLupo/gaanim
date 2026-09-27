@@ -12,6 +12,7 @@ pub mod alsa_errors;
 mod app_icon;
 pub mod bundle_player;
 pub mod cli;
+pub mod diff_cli;
 pub mod export;
 pub mod feedback;
 mod fps_overlay;

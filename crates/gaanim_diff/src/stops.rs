@@ -212,6 +212,79 @@ pub fn capture_stops(
     Ok(StopCapture { manifest, stops })
 }
 
+/// [`capture_stops`] for a playback bundle, without running the scene:
+/// each selected stop is the frame the bundle recorded at its exact time,
+/// rendered at the bundle's frame size. `sections` narrows the stops like
+/// `--sections` / `--from`.
+pub fn capture_bundle_stops(
+    bundle_path: impl AsRef<Path>,
+    output_dir: impl AsRef<Path>,
+    selection: Option<&[usize]>,
+    sections: &gaanim_timeline::selection::SegmentSelection,
+) -> Result<StopCapture> {
+    let bundle_path = bundle_path.as_ref();
+    let output_dir = output_dir.as_ref();
+    let bundle = gaanim_bundle::Bundle::open(bundle_path)
+        .map_err(|error| DiffError::InvalidInput(format!("{}: {error}", bundle_path.display())))?;
+    let segments = &bundle.scene.segments;
+    let chosen;
+    let selection = if sections.is_empty() {
+        selection
+    } else {
+        let spans: Vec<(&str, f64, f64, usize)> = segments
+            .iter()
+            .map(|segment| {
+                (
+                    segment.name.as_str(),
+                    segment.start_time,
+                    segment.end_time,
+                    segment.stops.len(),
+                )
+            })
+            .collect();
+        chosen = select_stop_numbers(&spans, sections, selection)?;
+        Some(chosen.as_slice())
+    };
+    let authored = segments
+        .iter()
+        .flat_map(|segment| {
+            segment
+                .stops
+                .iter()
+                .map(|stop| (segment.name.clone(), stop.name.clone(), stop.time))
+        })
+        .collect();
+    let (total, stops) = select_stops(authored, selection)?;
+    let times: Vec<f64> = stops.iter().map(|stop| stop.time_seconds).collect();
+    let ids: Vec<String> = stops.iter().map(|stop| stop.id.clone()).collect();
+    let size = bundle.scene.output_size;
+    drop(bundle);
+
+    fs::create_dir_all(output_dir)?;
+    let mut frames = Vec::with_capacity(times.len());
+    gaanim_export::prelude::capture_bundle_streaming(
+        bundle_path,
+        size.0,
+        size.1,
+        &times,
+        |frame| {
+            frames.push(frame);
+            std::ops::ControlFlow::Continue(())
+        },
+    )?;
+    let manifest = crate::write_snapshots(output_dir, frames, &ids, size)?;
+    let stops = StopsManifest {
+        schema_version: 1,
+        total,
+        stops,
+    };
+    fs::write(
+        output_dir.join(STOPS_FILE),
+        serde_json::to_vec_pretty(&stops)?,
+    )?;
+    Ok(StopCapture { manifest, stops })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

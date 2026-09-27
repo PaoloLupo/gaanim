@@ -273,7 +273,7 @@ en el navegador. Las capturas de
   columns: (auto, 1fr),
   inset: 7pt,
   [*Opción*], [*Efecto*],
-  [`-e`, `--example <SCRIPT_O_PROYECTO>`], [Captura la escena y la compara con su baseline.],
+  [`-e`, `--example <SCRIPT_O_PROYECTO>`], [Captura la escena y la compara con su baseline. Con un paquete `.gaanim` captura sus pausas sin Python, como `--capture-stops`.],
   [`--bless`], [Guarda la captura como baseline y termina. Sobrescribe el baseline anterior.],
   [`--capture-only`], [Escribe solo `current/` y termina, sin comparar.],
   [`--no-capture`], [Compara los PNG que ya están en `current/`.],

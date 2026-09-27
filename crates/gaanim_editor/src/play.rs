@@ -21,6 +21,9 @@ Usage:
               [--transparent] [--encoder E]
   gaanim-play check <BUNDLE.gaanim>   Recompose every frame and compare it
                                       with the digest recorded for it
+  gaanim-play --diff --example <BUNDLE.gaanim> [--bless] [--stops LIST] ...
+                                      Capture every stop and compare it with
+                                      the approved baseline (see gaanim --diff)
 
 Record a bundle with `gaanim export scene.py --output scene.gaanim`.";
 
@@ -43,6 +46,18 @@ fn main() {
             error.exit("export");
         }
         return;
+    }
+    if args.first().map(String::as_str) == Some("--diff") {
+        gaanim_editor::diff_cli::run_diff(&args[1..], |_, example, _| {
+            console::error(
+                "diff",
+                format!(
+                    "{} is not a playback bundle; scripts and projects are captured with `gaanim --diff`",
+                    example.display()
+                ),
+            );
+            std::process::exit(2);
+        });
     }
     if args.first().map(String::as_str) == Some("check") {
         match args.get(1..).unwrap_or_default() {

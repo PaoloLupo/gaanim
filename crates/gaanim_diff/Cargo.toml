@@ -11,12 +11,14 @@ path = "src/main.rs"
 [features]
 dev-dynamic = [
     "gaanim_api/dev-dynamic",
+    "gaanim_bundle/dev-dynamic",
     "gaanim_export/dev-dynamic",
     "gaanim_timeline/dev-dynamic",
 ]
 
 [dependencies]
 gaanim_api = { path = "../gaanim_api" }
+gaanim_bundle = { path = "../gaanim_bundle" }
 gaanim_export = { path = "../gaanim_export" }
 gaanim_timeline = { path = "../gaanim_timeline" }
 image = { version = "0.25", default-features = false, features = ["png"] }

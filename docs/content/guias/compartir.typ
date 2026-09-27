@@ -87,6 +87,20 @@ frecuencia del vídeo es siempre la del paquete; `--quality` elige la
 compresión. El botón Exportar del editor hace lo mismo con el paquete
 abierto.
 
+= Desde el editor
+
+Con un script o proyecto abierto, el botón Exportar ofrece el formato
+*Paquete*: graba la escena en un `.gaanim` sin salir del editor. La calidad
+elige la frecuencia (Borrador, 30 fps; Estándar y Producción, 60 fps); la
+resolución no se aplica, porque el paquete es vectorial.
+
+= Comparar capturas
+
+`gaanim --diff --example mi-charla.gaanim` captura el fotograma de cada pausa
+del paquete y lo compara con la versión aprobada, sin Python (ver
+#link("/guias/capturas-y-comparacion/")[Capturas y comparación visual]). Las
+capturas son idénticas a las que `--capture-stops` obtiene del script.
+
 = Reproducibilidad
 
 Un paquete reproduce la escena tal como la exportación la dibuja, fotograma a

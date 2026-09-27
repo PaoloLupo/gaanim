@@ -306,11 +306,12 @@ fn a_video_exported_from_the_bundle_matches_the_scene_export() {
         3,
         "grid frames carry their sub-frames"
     );
-    // The stop between grid frames is recorded exactly, without sub-frames.
+    // The stop between grid frames is recorded exactly, blurred like a
+    // snapshot of the scene at that instant.
     let stop = bundle.scene.segments[0].stops[0].time;
     let at_stop = bundle.frame(bundle.frame_index_at(stop)).unwrap();
     assert_eq!(at_stop.time, stop);
-    assert!(at_stop.motion_blur.is_empty());
+    assert_eq!(at_stop.motion_blur.len(), 3);
 
     let output = |name: &str| {
         let directory = directory.path().join(name);

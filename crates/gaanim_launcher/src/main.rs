@@ -89,6 +89,12 @@ fn sibling_binary(name: &str) -> PathBuf {
 /// Whether the command plays or exports a playback bundle: its input (not
 /// its `--output`) is a `.gaanim` file.
 fn bundle_input(args: &[String]) -> bool {
+    if args.get(1).map(String::as_str) == Some("--diff") {
+        return args
+            .windows(2)
+            .find(|pair| matches!(pair[0].as_str(), "--example" | "-e"))
+            .is_some_and(|pair| is_bundle(&pair[1]));
+    }
     let (rest, takes_value): (&[String], &[&str]) =
         if args.get(1).map(String::as_str) == Some("check") {
             (&args[2..], &[])
@@ -122,14 +128,18 @@ fn bundle_input(args: &[String]) -> bool {
             continue;
         }
         if !arg.starts_with('-') {
-            return Path::new(arg)
-                .extension()
-                .and_then(|extension| extension.to_str())
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("gaanim"));
+            return is_bundle(arg);
         }
         index += 1;
     }
     false
+}
+
+fn is_bundle(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("gaanim"))
 }
 
 fn handle_no_python_commands(args: &[String]) -> bool {
@@ -332,6 +342,14 @@ mod tests {
         ])));
         assert!(!bundle_input(&args(&["--from", "intro.gaanim", "talk.py"])));
         assert!(bundle_input(&args(&["check", "talk.gaanim"])));
+        assert!(bundle_input(&args(&[
+            "--diff",
+            "--example",
+            "talk.gaanim",
+            "--bless"
+        ])));
+        assert!(!bundle_input(&args(&["--diff", "-e", "talk.py"])));
+        assert!(!bundle_input(&args(&["--diff", "-b", "a", "-c", "b"])));
         assert!(!bundle_input(&args(&["check", "talk.py"])));
         assert!(!bundle_input(&args(&[])));
     }

@@ -285,13 +285,11 @@ fn record_frame(
     time: f64,
     fps: u32,
     post_shaders: &[PostProcessShader],
-    motion_blur: bool,
 ) -> Result<Frame> {
     app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
     app.update();
     check_custom_animation_errors(app.world())?;
-    let blur = crate::exporter::frame_motion_blur(app.world()).filter(|_| motion_blur);
-    let Some(blur) = blur else {
+    let Some(blur) = crate::exporter::frame_motion_blur(app.world()) else {
         return capture(app, time, post_shaders, None);
     };
     let mut pins = gaanim_renderer::pipeline::PinnedElements::default();
@@ -400,7 +398,7 @@ where
     };
 
     for &time in &plan.grid {
-        let frame = record_frame(&mut app, time, config.fps, &post_shaders, true)?;
+        let frame = record_frame(&mut app, time, config.fps, &post_shaders)?;
         push(&mut writer, frame)?;
     }
     let clear_color = app.world().get_resource::<ClearColor>().map(|clear| {
@@ -424,9 +422,9 @@ where
         for &extra in &plan.extras {
             // Visit the grid up to the instant as the first world did.
             while let Some(time) = grid.next_if(|time| *time < extra) {
-                record_frame(&mut app, time, config.fps, &post_shaders, true)?;
+                record_frame(&mut app, time, config.fps, &post_shaders)?;
             }
-            let frame = record_frame(&mut app, extra, config.fps, &post_shaders, false)?;
+            let frame = record_frame(&mut app, extra, config.fps, &post_shaders)?;
             push(&mut writer, frame)?;
         }
     }

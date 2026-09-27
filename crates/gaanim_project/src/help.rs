@@ -353,7 +353,7 @@ const DIFF: Page = Page {
             &[
                 (
                     "-e, --example <SCRIPT>",
-                    "Capture and compare one script; it calls\nscene.snapshots(...) when GAANIM_SNAPSHOTS is set",
+                    "Capture and compare one script; it calls\nscene.snapshots(...) when GAANIM_SNAPSHOTS is set.\nA playback bundle (.gaanim) captures its stops,\nwithout Python",
                 ),
                 (
                     "--tests-root <DIR>",
