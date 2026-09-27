@@ -806,10 +806,7 @@ impl Bundle {
                 "frame digests are inconsistent".into(),
             ));
         }
-        let digests = digest_bytes
-            .chunks_exact(32)
-            .map(|digest| digest.try_into().expect("32-byte digest"))
-            .collect();
+        let digests = digest_bytes.as_chunks::<32>().0.to_vec();
         Ok(Self {
             archive,
             manifest,
