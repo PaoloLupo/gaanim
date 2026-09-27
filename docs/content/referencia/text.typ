@@ -219,7 +219,7 @@ scene.render()
   sigue siendo matemática. `text.become(...)` conserva el modo salvo que pases
   `markup=`.
 - `Theme(text_markup=False)` lo hace predeterminado para `scene.text`,
-  `scene.text.measure`, `badge` y `chip`.
+  `badge` y `chip`.
 
 ```python
 >>>from gaanim import *
@@ -714,27 +714,6 @@ title = scene.text.typst(Path("assets/title.typ"))
 >>>scene = Scene(frame=(16, 9))
 snippet = scene.text.code("result = mass * acceleration", language="python", width=6, height=1.2)
 scene.play([snippet.animate.fade_in().duration(0.5)])
-```
-]
-
-#api-entry(
-  name: "Typography.measure",
-  kind: "method",
-  params: (
-    (name: "content", type: "str", default: none, desc: [Texto no vacío.]),
-    (name: "role", type: "str | None", default: "None", desc: [Rol cuyos valores del tema resuelven tamaño, familia y color (`body` si se omite).]),
-    (name: "size / font / color / weight", type: "—", default: "None", desc: [Ajustes explícitos, resueltos igual que en `scene.text`.]),
-    (name: "wrap", type: "float | None", default: "None", desc: [Ancho fijo de composición; `None` mide un bloque sin ajuste.]),
-    (name: "style / flow / line_spacing / markup", type: "—", default: "None", desc: [Como en `scene.text`. El `wrap="auto"` de un `flow` mide sin ajuste porque no hay ancho ofrecido.]),
-  ),
-  desc: [Devuelve `(ancho, alto)` en unidades de escena sin crear el texto. Usa el mismo proceso Typst que `scene.text` y comparte su caché. Úsalo para dimensionar cajas al contenido en lugar de adivinar.],
-)[
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-width, height = scene.text.measure("PGA = 0.35 g", role="label")
-_, paragraph_height = scene.text.measure("Primera línea\nSegunda línea", line_spacing=1.6)
-box = scene.geometry.rounded_rect(width + 0.56, height + 0.32, 0.14).move_to(0, -4.14)
 ```
 ]
 

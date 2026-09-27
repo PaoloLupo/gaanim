@@ -53,8 +53,32 @@ actualizar».
   línea y el borde más cercano de la anotación. Antes se medía hasta su
   centro, así que con los valores por defecto la etiqueta montaba sobre la
   línea. Si subías `label_gap` para despegarla, bájalo o quítalo.
+- `scene.text.measure(...)` desaparece: `drawable.bounds()` mide cualquier
+  objeto ya creado. Crea el texto y mide su caja
+  (`scene.text("PGA", role="label").bounds().width`) en lugar de repetir su
+  contenido y estilo.
 
 == Cambios
+
+- `drawable.bounds()` devuelve la caja de cualquier objeto (texto, fórmulas,
+  SVG, imágenes, grupos, figuras transformadas) en unidades de escena y en el
+  cursor actual, con `x`, `y`, `left`, `right`, `bottom`, `top`, `width`,
+  `height` y `center`. Sirve para tachar un valor o ajustar una caja a su
+  contenido sin repetir el texto.
+- `scene.stop("nombre", loop=anim)` añade un bucle ambiental: mientras la
+  presentación descansa en la pausa, la animación se repite en lugar de
+  congelar la imagen, así que un movimiento continuo sigue mientras hablas. El
+  siguiente paso sale del bucle; al exportar se reproduce una vez.
+  `scene.stops` informa de su duración en `loop_duration`.
+- `scene.camera.inset(..., aspect=)` o `size=(ancho, alto)` da a un inset
+  rectangular su propia proporción, para encuadrar entero un panel alto o una
+  barra de herramientas en lugar de recortarlo a 16:9.
+- `imagen.pixel(px, py)` convierte un píxel del archivo original (desde la
+  esquina superior izquierda) en un punto de anclaje que sirve en `move_to`,
+  `scene.camera.inset`, `pan_to` o conectores y sigue a la imagen.
+- `drawable.matrix_to(((a, b), (c, d)))` y `animate.matrix_to(...)` aplican
+  una transformación lineal 2D cualquiera alrededor del pivote, por ejemplo
+  para llevar una cara a una proyección isométrica sin trocearla.
 
 - Cámaras secundarias: `pantalla.camera_view(marco)` convierte una figura
   cerrada en una pantalla que muestra lo que ve una segunda cámara, como un

@@ -134,7 +134,8 @@ pub(crate) fn camera_inset(
     target: &Bound<'_, PyAny>,
     zoom: &Bound<'_, PyAny>,
     at: &Bound<'_, PyAny>,
-    size: Option<f64>,
+    size: Option<&Bound<'_, PyAny>>,
+    aspect: Option<f64>,
     shape: &str,
     follow: bool,
     connectors: bool,
@@ -157,10 +158,34 @@ pub(crate) fn camera_inset(
     if exclude.iter().any(|drawable| !canvas.owns(&drawable.0)) {
         return Err(view_error(CameraViewError::ForeignScene));
     }
+    // `size=(w, h)` fixes both sides; a number is the width.
+    let (size, aspect) = match size {
+        None => (None, aspect),
+        Some(size) => {
+            if let Ok((width, height)) = size.extract::<(f64, f64)>() {
+                if aspect.is_some() {
+                    return Err(PyValueError::new_err(
+                        "pass either size=(width, height) or aspect=, not both",
+                    ));
+                }
+                if !height.is_finite() || height <= 0.0 {
+                    return Err(view_error(CameraViewError::InvalidSize));
+                }
+                (Some(width), Some(width / height))
+            } else if let Ok(width) = size.extract::<f64>() {
+                (Some(width), aspect)
+            } else {
+                return Err(pyo3::exceptions::PyTypeError::new_err(
+                    "an inset size must be a number or a (width, height) tuple",
+                ));
+            }
+        }
+    };
     let options = CameraInsetOptions {
         zoom,
         placement: parse_placement(at)?,
         size,
+        aspect,
         shape: parse_shape(shape)?,
         follow,
         connectors,

@@ -22,8 +22,9 @@ pub use segment::{
 pub use types::{
     Anim, Axes3DConfig, AxesConfig, BooleanOperation, BooleanRule, CurveControl, CurveElement,
     FillLevelDirection, ImageCrop, ImageFit, ImageOptions, ImageOptionsError, LabelMode,
-    LayoutMemberSpec, LayoutOp, LayoutSpec, LayoutTreeSnapshot, LayoutWithin, LottieOptions,
-    Margin, ObjectSpec, OptDuration, SceneFrame, SpawnKind, VideoOptions,
+    LayoutMemberSpec, LayoutOp, LayoutSpec, LayoutTreeSnapshot, LayoutWithin, LinearMap2D,
+    LinearMapError, LottieOptions, Margin, ObjectSpec, OptDuration, SceneFrame, SpawnKind,
+    VideoOptions,
 };
 /// Raster image handle; remains compatible with every DrawableHandle consumer.
 pub type ImageHandle = DrawableHandle;
@@ -36,8 +37,8 @@ pub use camera_view::{
     CameraViewOptions, CameraViewZoom,
 };
 pub use drawable::{
-    ClipOptions, DrawableHandle, FragmentSelection, GltfAnimationError, LayoutOwnershipError,
-    Primitive3DHandleError, RotationAxisError, SvgPartError,
+    ClipOptions, DrawableHandle, FragmentSelection, GltfAnimationError, ImagePixelError,
+    LayoutOwnershipError, Primitive3DHandleError, RotationAxisError, SvgPartError,
 };
 mod editorial;
 pub use editorial::{
@@ -66,8 +67,8 @@ pub use canvas_impl::{
     Composition, DEFAULT_REACTIVE_TEXT_SIZE, DimensionExtensionStyle, DimensionHandle,
     DimensionOptions, ForceVectorHandle, ImageLoadError, LottieClip, LottieLoadError, PlayError,
     PlayItem, SceneModel, SceneObjectError, Schedule, ScheduleEntry, StaggerLayout, StaggerOrigin,
-    SupportHandle, SurroundingRectError, SurroundingRectHandle, ThemeError, TypstAssetError,
-    VideoClip, VideoLoadError, VideoSegment, stagger_weights,
+    StopLoopError, SupportHandle, SurroundingRectError, SurroundingRectHandle, ThemeError,
+    TypstAssetError, VideoClip, VideoLoadError, VideoSegment, stagger_weights,
 };
 pub use canvas_impl::{InsertPosition, ScheduleLabel};
 pub use gaanim_media::narration::{MarkerSource, ScriptSection, TakeFiles};
@@ -85,6 +86,8 @@ pub(crate) use compile::{
     CompileCheckpoint, SegmentMarker, split_text_math, text_inline_typst_source,
 };
 mod incremental;
+mod measure;
+pub use measure::BoundsError;
 mod text_motion;
 pub(crate) use incremental::SceneFingerprints;
 pub mod text_animator;

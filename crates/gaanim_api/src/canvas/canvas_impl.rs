@@ -1267,6 +1267,16 @@ impl From<LottieClip> for PlayItem {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum StopLoopError {
+    #[error(transparent)]
+    Stop(#[from] SegmentError),
+    #[error(transparent)]
+    Play(#[from] PlayError),
+    #[error("a stop's loop must last longer than zero seconds")]
+    Empty,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PlayError {
     #[error(
@@ -5247,8 +5257,44 @@ impl SceneModel {
         {
             return Err(SegmentError::DuplicateStopTime { time });
         }
-        segment.stops.push(LocalSegmentStop { name, time });
+        segment.stops.push(LocalSegmentStop {
+            name,
+            time,
+            ambient: None,
+        });
         segment.ops.push(Op::Stop);
+        Ok(())
+    }
+
+    /// Pause like [`Self::stop`], with an ambient loop: `composition` plays
+    /// right after the stop and, while a presentation rests there, repeats
+    /// until it advances, so a continuous motion keeps going while the
+    /// speaker talks. An export plays it once. The loop should end where it
+    /// starts for a seamless repeat.
+    pub fn stop_with_loop(
+        &mut self,
+        name: Option<String>,
+        composition: Composition,
+    ) -> Result<(), StopLoopError> {
+        let stops = self
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .active()
+            .stops
+            .len();
+        self.stop(name)?;
+        let start = self.current_time();
+        self.play_composition_configured(composition, None, None)?;
+        let length = self.current_time() - start;
+        if length <= 1.0e-9 {
+            return Err(StopLoopError::Empty);
+        }
+        let mut state = self.state.lock().expect("canvas state poisoned");
+        // A live narration take holds instead of stopping; it has no loop.
+        if let Some(stop) = state.active_mut().stops.get_mut(stops) {
+            stop.ambient = Some(length);
+        }
         Ok(())
     }
 
@@ -5329,6 +5375,7 @@ impl SceneModel {
                         .map(|stop| SegmentStop {
                             name: stop.name.clone(),
                             time: start_time + stop.time,
+                            ambient: stop.ambient,
                         })
                         .collect(),
                 };

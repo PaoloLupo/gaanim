@@ -775,6 +775,13 @@ pub(crate) struct CompileCheckpoint {
     pub(crate) timeline: Timeline,
 }
 
+impl CompileCursor {
+    /// The compiled object that stands for authored object `id`.
+    pub(crate) fn runtime_id(&self, id: ObjectId) -> Option<ObjectId> {
+        self.id_map.get(&id).copied()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CompiledObjectScope {
     Segment(SceneId),
@@ -2297,6 +2304,7 @@ impl SceneModel {
                     .map(|stop| SegmentStop {
                         name: stop.name,
                         time: stop.time,
+                        ambient: stop.ambient,
                     })
                     .collect(),
             })
@@ -2679,7 +2687,7 @@ impl SceneModel {
                     }
                     id_map.insert(spec.id, actual.id);
                     if spec.svg_root {
-                        Self::scene_unit_svg_strokes(builder, spec.id, &object_specs, id_map);
+                        Self::scene_unit_svg_strokes(builder, spec.id, object_specs, id_map);
                     }
                     object_scopes.insert(spec.id, CompiledObjectScope::Segment(scene_id));
                     // Compilation creates every entity up front so arbitrary timeline seeks
@@ -12835,6 +12843,188 @@ mod tests {
         }
         timeline.seek(&mut world, 1.5);
         assert!((opacity_of(&mut world, view.screen()) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn stops_record_their_ambient_loop_length() {
+        let mut canvas = SceneModel::new(640, 360);
+        let dot = canvas.dot(0.1);
+        canvas.wait(1.0);
+        canvas
+            .stop_with_loop(
+                Some("placas".into()),
+                crate::canvas::Composition::leaf(dot.animate().shift_by(1.0, 0.0).duration(1.5)),
+            )
+            .unwrap();
+        canvas.wait(0.5);
+        canvas.stop(None).unwrap();
+        let stops = &canvas.segment_manifest().segments[0].stops;
+        assert_eq!(stops.len(), 2);
+        assert_eq!((stops[0].time, stops[0].ambient), (1.0, Some(1.5)));
+        assert_eq!((stops[1].time, stops[1].ambient), (3.0, None));
+        canvas.wait(1.0);
+        assert!(matches!(
+            canvas.stop_with_loop(
+                None,
+                crate::canvas::Composition::leaf(dot.animate().shift_by(1.0, 0.0).duration(0.0)),
+            ),
+            Err(crate::canvas::StopLoopError::Empty)
+        ));
+    }
+
+    #[test]
+    fn bounds_measure_any_drawable_at_the_cursor() {
+        let mut canvas = SceneModel::new(640, 360);
+        let rect = canvas.rect(2.0, 1.0).move_to(3.0, -1.0);
+        let group = {
+            let a = canvas.square(1.0).move_to(-4.0, 0.0);
+            let b = canvas.circle(0.5).move_to(-1.0, 2.0);
+            canvas.group(&[&a, &b])
+        };
+        canvas.play(vec![rect.animate().move_to(0.0, 0.0).duration(1.0)]);
+        let canvas = canvas.into_shared();
+        let (rect_box, group_box) = {
+            let _guard = canvas.lock().unwrap();
+            (rect.clone(), group.clone())
+        };
+        let rect_box = rect_box.bounds().unwrap();
+        assert!((rect_box.width() - 2.0).abs() < 1e-9 && (rect_box.height() - 1.0).abs() < 1e-9);
+        // Measured at the cursor, after the move ended.
+        assert!(rect_box.center().truncate().length() < 1e-9, "{rect_box:?}");
+        let group_box = group_box.bounds().unwrap();
+        assert!((group_box.min.x + 4.5).abs() < 1e-9 && (group_box.max.y - 2.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn pixels_map_onto_the_displayed_image() {
+        use gaanim_objects::primitives::ImageView;
+        let mut canvas = SceneModel::new(640, 360);
+        let image = gaanim_core::peniko::ImageData {
+            data: gaanim_core::peniko::Blob::new(std::sync::Arc::new(vec![255u8; 4 * 200 * 100])),
+            format: gaanim_core::peniko::ImageFormat::Rgba8,
+            alpha_type: gaanim_core::peniko::ImageAlphaType::Alpha,
+            width: 200,
+            height: 100,
+        };
+        // 200x100 px shown 4 units wide: 50 px per unit.
+        let view = ImageView {
+            source_x: 0.0,
+            source_y: 0.0,
+            source_width: 200.0,
+            source_height: 100.0,
+            display_width: 4.0,
+            display_height: 2.0,
+            scale_x: 0.02,
+            scale_y: 0.02,
+            quality: gaanim_core::peniko::ImageQuality::Medium,
+        };
+        let picture = canvas
+            .spawn(SpawnKind::Image { image, view })
+            .move_to(1.0, 1.0);
+        let corner = picture.pixel(0.0, 0.0).unwrap();
+        let inner = picture.pixel(150.0, 25.0).unwrap();
+        assert!(canvas.rect(1.0, 1.0).pixel(0.0, 0.0).is_err());
+        let marker = canvas.dot(0.05).at_anchor_point(inner);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        timeline.seek(&mut world, 0.0);
+        let at = transform_of(&mut world, &marker).translation;
+        // Pixel (150, 25): x = -2 + 3 = 1, y = 1 - 0.5 = 0.5, then moved by (1, 1).
+        assert!(at.distance(DVec3::new(2.0, 1.5, 0.0)) < 1e-9, "{at:?}");
+        assert_eq!(corner.offset, DVec3::new(-2.0, 1.0, 0.0));
+    }
+
+    #[test]
+    fn matrix_to_applies_a_linear_map_about_the_pivot() {
+        use crate::canvas::{LinearMap2D, LinearMapError};
+        assert_eq!(
+            LinearMap2D::new([[1.0, 2.0], [2.0, 4.0]]),
+            Err(LinearMapError::Singular)
+        );
+        let rows = [[0.8, 0.3], [-0.5, 1.2]];
+        let map = LinearMap2D::new(rows).unwrap();
+        let mut canvas = SceneModel::new(640, 360);
+        let square = canvas.square(2.0).move_to(1.0, 1.0).matrix_to(map);
+        let mirrored = canvas
+            .square(2.0)
+            .matrix_to(LinearMap2D::new([[-1.0, 0.0], [0.0, 1.0]]).unwrap());
+        let animated = canvas.square(2.0);
+        canvas.play(vec![animated.animate().matrix_to(map).duration(1.0)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        timeline.seek(&mut world, 1.0);
+        let apply = |local: DVec3| {
+            DVec3::new(
+                rows[0][0] * local.x + rows[0][1] * local.y,
+                rows[1][0] * local.x + rows[1][1] * local.y,
+                0.0,
+            )
+        };
+        for local in [DVec3::new(1.0, 1.0, 0.0), DVec3::new(-1.0, 0.5, 0.0)] {
+            let point = transform_of(&mut world, &square)
+                .to_mat4()
+                .transform_point3(local);
+            assert!(
+                point.distance(DVec3::new(1.0, 1.0, 0.0) + apply(local)) < 1e-9,
+                "{point:?}"
+            );
+            let point = transform_of(&mut world, &animated)
+                .to_mat4()
+                .transform_point3(local);
+            assert!(point.distance(apply(local)) < 1e-6, "{point:?}");
+        }
+        let point = transform_of(&mut world, &mirrored)
+            .to_mat4()
+            .transform_point3(DVec3::new(1.0, 0.5, 0.0));
+        assert!(
+            point.distance(DVec3::new(-1.0, 0.5, 0.0)) < 1e-9,
+            "{point:?}"
+        );
+    }
+
+    #[test]
+    fn rectangular_insets_take_their_own_aspect() {
+        use crate::canvas::{
+            CameraInsetOptions, CameraInsetShape, CameraViewError, CanvasEndpoint,
+        };
+        let mut canvas = SceneModel::new(640, 360);
+        let target = CanvasEndpoint::Static(DVec3::new(-3.0, 0.0, 0.0));
+        let tall = canvas
+            .camera_inset(
+                target.clone(),
+                CameraInsetOptions {
+                    size: Some(2.0),
+                    aspect: Some(0.5),
+                    shape: CameraInsetShape::Rect,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            canvas.camera_inset(
+                target,
+                CameraInsetOptions {
+                    aspect: Some(2.0),
+                    shape: CameraInsetShape::Circle,
+                    ..Default::default()
+                },
+            ),
+            Err(CameraViewError::InvalidAspect)
+        ));
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        timeline.seek(&mut world, 0.0);
+        for part in [tall.screen(), tall.frame()] {
+            let id = ObjectId::from_raw(part.id.as_raw() - 1);
+            let bounds = world
+                .query::<(&MobjectId, &gaanim_scene::LocalBounds)>()
+                .iter(&world)
+                .find(|(object, _)| object.0 == id)
+                .unwrap()
+                .1
+                .0;
+            assert!(
+                (bounds.width() / bounds.height() - 0.5).abs() < 1e-9,
+                "{bounds:?}"
+            );
+        }
     }
 
     #[test]

@@ -258,6 +258,64 @@ scene.render()
 ]
 
 #api-entry(
+  name: "Drawable.matrix_to",
+  kind: "method",
+  params: ((name: "matrix", type: "tuple[tuple[float, float], tuple[float, float]]", default: none, desc: [Filas `((a, b), (c, d))` de la aplicación `(x, y) → (a x + b y, c x + d y)`.]),),
+  desc: [Aplica una transformación lineal 2D cualquiera alrededor del pivote y sustituye el giro, el sesgo y la escala actuales. A diferencia de `skew_to`, lleva los ejes x e y a cualquier dirección, así que una cara dibujada de frente pasa a una proyección isométrica u oblicua sin trocearla. `animate.matrix_to(...)` la anima: se descompone en giro, sesgo y escala, que se interpolan juntos. Lanza `ValueError` con una matriz no finita o no invertible.],
+)[
+```python
+# show-code: true
+import math
+from gaanim import BLUE, GOLD, GRAY, Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+c, s = math.cos(math.pi / 6), math.sin(math.pi / 6)
+# Las caras giran sobre su centro: el eje x baja o sube 30°, el y sigue vertical.
+side = scene.geometry.rect(3, 2).fill(BLUE).stroke(GRAY, 0.03).move_to(-1.3, 0)
+front = scene.geometry.rect(3, 2).fill(GOLD).stroke(GRAY, 0.03).move_to(1.3, 0)
+scene.play([
+    side.animate.matrix_to(((c, 0), (-s, 1))).duration(0.8),
+    front.animate.matrix_to(((c, 0), (s, 1))).duration(0.8),
+])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Drawable.bounds",
+  kind: "method",
+  returns: (type: "Bounds", desc: [`x` e `y` (el centro), `left`, `right`, `bottom`, `top`, `width`, `height` y `center` en unidades de escena.]),
+  desc: [Mide la caja de cualquier objeto (figuras, texto, matemática, SVG, imágenes, grupos) en el cursor actual, tal como se dibujaría ahí: cuenta la maquetación, las transformaciones, la composición del texto y las animaciones que terminaron antes de `scene.cursor`, e incluye a los descendientes. La geometría que los objetos reactivos regeneran en cada fotograma se mide como se declaró. Cada llamada compila la escena escrita hasta ese punto: mide una vez y reutiliza el resultado. Lanza `ValueError` si el objeto no tiene geometría en el cursor. Sustituye a `scene.text.measure`.],
+)[
+```python
+# show-code: true
+from gaanim import GOLD, Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+label = scene.text("PGA = 0.35 g", role="label").move_to(-2, 1)
+box = label.bounds()
+frame = scene.geometry.rounded_rect(box.width + 0.56, box.height + 0.32, 0.14)
+frame.no_fill().stroke(GOLD, 0.04).move_to(*box.center)
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Drawable.pixel",
+  kind: "method",
+  params: ((name: "px, py", type: "float", default: none, desc: [Píxel del archivo original, contado desde la esquina superior izquierda con y hacia abajo, como en un editor de imágenes.]),),
+  returns: (type: "AnchorPoint", desc: [El punto de la imagen o el vídeo en ese píxel.]),
+  desc: [Convierte un píxel de una imagen o un vídeo en un punto de anclaje que sirve en `move_to`, `scene.camera.inset`, `pan_to` o conectores, y que sigue a la imagen si se mueve, escala o gira. Tiene en cuenta el recorte, `width=` y el modo de ajuste; mide sobre el archivo original, no sobre una captura reducida. Lanza `ValueError` en otros objetos o con coordenadas no finitas.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+ui = scene.media.image("assets/cover.png", width=12)
+view = scene.camera.inset(ui.pixel(812, 240), zoom=3)
+```
+]
+
+#api-entry(
   name: "Drawable.with_pivot",
   kind: "method",
   desc: [Fija el pivote de rotación, escala y sesgo en coordenadas de escena. Úsalo para bisagras y brazos que giran alrededor de un extremo. Sin él, el pivote es el centro de la caja en las figuras declaradas con coordenadas de escena (`line`, `polygon`, arcos, flechas y curvas) y el origen propio en las demás, que en `circle`, `rect` o `text` también es su centro. `pivot(x, y)` es un alias.],

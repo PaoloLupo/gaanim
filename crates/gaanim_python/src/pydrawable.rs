@@ -648,6 +648,22 @@ impl PyCanvasAnim {
         })
     }
 
+    fn matrix_to(&self, matrix: ((f64, f64), (f64, f64))) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "TextSelection.animate supports only fill and opacity targets",
+            ));
+        }
+        self.require_transformable()?;
+        self.require_property_slot("matrix_to")?;
+        let map = linear_map(matrix)?;
+        Ok(Self {
+            inner: self.inner.clone().matrix_to(map),
+        })
+    }
+
     fn rotate_by_3d(&self, axis: &str, radians: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
@@ -1753,6 +1769,13 @@ impl PyDrawable {
     }
 }
 
+/// Validates the rows `((a, b), (c, d))` of a 2D linear map.
+fn linear_map(rows: ((f64, f64), (f64, f64))) -> PyResult<gaanim_api::canvas::LinearMap2D> {
+    let ((a, b), (c, d)) = rows;
+    gaanim_api::canvas::LinearMap2D::new([[a, b], [c, d]])
+        .map_err(|error| PyValueError::new_err(error.to_string()))
+}
+
 /// Shear factors are tangents; infinities or NaN would collapse the shape.
 fn finite_skew(x: f64, y: f64) -> PyResult<()> {
     if x.is_finite() && y.is_finite() {
@@ -1762,8 +1785,92 @@ fn finite_skew(x: f64, y: f64) -> PyResult<()> {
     }
 }
 
+/// A drawable's box in scene units, measured with `Drawable.bounds()`.
+#[pyclass(name = "Bounds", module = "gaanim_core", frozen)]
+pub struct PyBounds {
+    left: f64,
+    bottom: f64,
+    right: f64,
+    top: f64,
+}
+
+#[pymethods]
+impl PyBounds {
+    #[getter]
+    fn left(&self) -> f64 {
+        self.left
+    }
+
+    #[getter]
+    fn right(&self) -> f64 {
+        self.right
+    }
+
+    #[getter]
+    fn bottom(&self) -> f64 {
+        self.bottom
+    }
+
+    #[getter]
+    fn top(&self) -> f64 {
+        self.top
+    }
+
+    #[getter]
+    fn width(&self) -> f64 {
+        self.right - self.left
+    }
+
+    #[getter]
+    fn height(&self) -> f64 {
+        self.top - self.bottom
+    }
+
+    /// Center x.
+    #[getter]
+    fn x(&self) -> f64 {
+        (self.left + self.right) * 0.5
+    }
+
+    /// Center y.
+    #[getter]
+    fn y(&self) -> f64 {
+        (self.bottom + self.top) * 0.5
+    }
+
+    #[getter]
+    fn center(&self) -> (f64, f64) {
+        (
+            (self.left + self.right) * 0.5,
+            (self.bottom + self.top) * 0.5,
+        )
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Bounds(left={}, bottom={}, right={}, top={})",
+            self.left, self.bottom, self.right, self.top
+        )
+    }
+}
+
 #[pymethods]
 impl PyDrawable {
+    /// Scene-space box at the current cursor.
+    fn bounds(&self) -> PyResult<PyBounds> {
+        crate::custom::ensure_authoring_allowed()?;
+        let bounds = self
+            .0
+            .bounds()
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Ok(PyBounds {
+            left: bounds.min.x,
+            bottom: bounds.min.y,
+            right: bounds.max.x,
+            top: bounds.max.y,
+        })
+    }
+
     #[pyo3(signature = (anchor=None, *, offset=(0.0, 0.0)))]
     fn anchor_point(
         &self,
@@ -1778,6 +1885,15 @@ impl PyDrawable {
             anchor.map(|value| value.0).unwrap_or_default(),
             gaanim_core::glam::DVec3::new(offset.0, offset.1, 0.0),
         )))
+    }
+
+    /// Anchor point at pixel `(px, py)` of an image or video source.
+    fn pixel(&self, px: f64, py: f64) -> PyResult<PyAnchorPoint> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.0
+            .pixel(px, py)
+            .map(PyAnchorPoint)
+            .map_err(|error| PyValueError::new_err(error.to_string()))
     }
 
     #[pyo3(signature = (name, anchor, *, offset=(0.0, 0.0)))]
@@ -2328,6 +2444,14 @@ impl PyDrawable {
         self.require_free_position("skew_to")?;
         finite_skew(x, y)?;
         Ok(Self(self.0.clone().skew_to(x, y)))
+    }
+    pub(crate) fn matrix_to(&self, matrix: ((f64, f64), (f64, f64))) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_free_position("matrix_to")?;
+        free_channel(&self.0, PropertyChannel::Rotation)?;
+        free_channel(&self.0, PropertyChannel::Scale)?;
+        let map = linear_map(matrix)?;
+        Ok(Self(self.0.clone().matrix_to(map)))
     }
     pub(crate) fn rotate_by_3d(&self, axis: &str, radians: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
@@ -2982,6 +3106,11 @@ macro_rules! media_drawable_methods {
 
     fn skew_to<'py>(slf: PyRef<'py, Self>, x: f64, y: f64) -> PyResult<PyRef<'py, Self>> {
         PyDrawable(slf.handle()).skew_to(x, y)?;
+        Ok(slf)
+    }
+
+    fn matrix_to<'py>(slf: PyRef<'py, Self>, matrix: ((f64, f64), (f64, f64))) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).matrix_to(matrix)?;
         Ok(slf)
     }
 

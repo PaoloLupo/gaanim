@@ -67,6 +67,8 @@ pub enum CameraViewError {
     ComputedZoom,
     #[error("camera inset size must be finite and greater than zero")]
     InvalidSize,
+    #[error("camera inset aspect must be finite and greater than zero, and circles have none")]
+    InvalidAspect,
     #[error(
         "a camera inset can only be placed at a point, a drawable or an anchor point; pass follow=True for other endpoints"
     )]
@@ -508,6 +510,9 @@ pub struct CameraInsetOptions {
     /// Screen width, or diameter for a circle; `None` uses 30% of the scene
     /// width (20% for a circle).
     pub size: Option<f64>,
+    /// Width over height of a rectangular screen and its frame; `None` uses
+    /// the scene's proportion. Circles take none.
+    pub aspect: Option<f64>,
     pub shape: CameraInsetShape,
     /// Keep the frame on the target as it moves.
     pub follow: bool,
@@ -528,6 +533,7 @@ impl Default for CameraInsetOptions {
             zoom: CameraViewZoom::Value(2.0),
             placement: CameraInsetPlacement::Anchor(Anchor::TopRight),
             size: None,
+            aspect: None,
             shape: CameraInsetShape::default(),
             follow: false,
             connectors: true,
@@ -582,10 +588,18 @@ impl SceneModel {
         if !size.is_finite() || size <= 0.0 {
             return Err(CameraViewError::InvalidSize);
         }
+        if let Some(aspect) = options.aspect
+            && (circle || !aspect.is_finite() || aspect <= 0.0)
+        {
+            return Err(CameraViewError::InvalidAspect);
+        }
         let (width, height) = if circle {
             (size, size)
         } else {
-            (size, size * frame_size.height / frame_size.width)
+            let aspect = options
+                .aspect
+                .unwrap_or(frame_size.width / frame_size.height);
+            (size, size / aspect)
         };
         let color = options
             .color
