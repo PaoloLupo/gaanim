@@ -71,6 +71,160 @@ pub(crate) fn draw_stroke(
     }
 }
 
+/// Filled outline of `path` stroked with a half width of `half_width` times
+/// `profile`'s factor at each point's share of its sub-path's arc length.
+///
+/// Each sub-path is flattened and offset along mitred normals; an open
+/// sub-path becomes one closed contour, a closed one two opposite contours,
+/// so the band fills with the non-zero rule.
+pub(crate) fn profiled_outline(
+    path: &BezPath,
+    half_width: f64,
+    profile: &crate::effects::StrokeProfile,
+) -> BezPath {
+    let mut outline = BezPath::new();
+    let tolerance = (half_width * 0.05).clamp(1e-4, 0.02);
+    let mut polylines: Vec<(Vec<gaanim_core::kurbo::Point>, bool)> = Vec::new();
+    gaanim_core::kurbo::flatten(path, tolerance, |element| match element {
+        gaanim_core::kurbo::PathEl::MoveTo(point) => polylines.push((vec![point], false)),
+        gaanim_core::kurbo::PathEl::LineTo(point) => {
+            if let Some((points, _)) = polylines.last_mut()
+                && points.last() != Some(&point)
+            {
+                points.push(point);
+            }
+        }
+        gaanim_core::kurbo::PathEl::ClosePath => {
+            if let Some((points, closed)) = polylines.last_mut() {
+                if points.len() > 1 && points.first() == points.last() {
+                    points.pop();
+                }
+                *closed = true;
+            }
+        }
+        _ => {}
+    });
+    for (points, closed) in polylines {
+        if points.len() < 2 {
+            continue;
+        }
+        let count = points.len();
+        let mut lengths = Vec::with_capacity(count);
+        let mut total = 0.0;
+        for index in 0..count {
+            lengths.push(total);
+            if index + 1 < count {
+                total += (points[index + 1] - points[index]).hypot();
+            }
+        }
+        if closed {
+            total += (points[0] - points[count - 1]).hypot();
+        }
+        if total <= f64::EPSILON {
+            continue;
+        }
+        let direction = |from: gaanim_core::kurbo::Point, to: gaanim_core::kurbo::Point| {
+            let delta = to - from;
+            let length = delta.hypot();
+            (length > f64::EPSILON).then(|| delta / length)
+        };
+        let mut left = Vec::with_capacity(count);
+        let mut right = Vec::with_capacity(count);
+        for index in 0..count {
+            let previous = if index > 0 {
+                Some(points[index - 1])
+            } else if closed {
+                Some(points[count - 1])
+            } else {
+                None
+            };
+            let next = if index + 1 < count {
+                Some(points[index + 1])
+            } else if closed {
+                Some(points[0])
+            } else {
+                None
+            };
+            let incoming = previous.and_then(|previous| direction(previous, points[index]));
+            let outgoing = next.and_then(|next| direction(points[index], next));
+            let (normal, scale) = match (incoming, outgoing) {
+                (Some(a), Some(b)) => {
+                    let na = gaanim_core::kurbo::Vec2::new(-a.y, a.x);
+                    let nb = gaanim_core::kurbo::Vec2::new(-b.y, b.x);
+                    let sum = na + nb;
+                    if sum.hypot() <= 1e-9 {
+                        (na, 1.0)
+                    } else {
+                        let miter = sum / sum.hypot();
+                        // Keep the band's width across corners, up to a miter limit.
+                        (miter, 1.0 / miter.dot(na).max(0.25))
+                    }
+                }
+                (Some(a), None) | (None, Some(a)) => {
+                    (gaanim_core::kurbo::Vec2::new(-a.y, a.x), 1.0)
+                }
+                (None, None) => continue,
+            };
+            let width = half_width * profile.factor_at(lengths[index] / total).max(0.0) * scale;
+            left.push(points[index] + normal * width);
+            right.push(points[index] - normal * width);
+        }
+        if closed {
+            for contour in [left, right.into_iter().rev().collect()] {
+                let mut contour: Vec<_> = contour;
+                if let Some(first) = contour.first().copied() {
+                    outline.move_to(first);
+                    for point in contour.drain(1..) {
+                        outline.line_to(point);
+                    }
+                    outline.close_path();
+                }
+            }
+        } else if let Some(first) = left.first().copied() {
+            outline.move_to(first);
+            for point in left.into_iter().skip(1).chain(right.into_iter().rev()) {
+                outline.line_to(point);
+            }
+            outline.close_path();
+        }
+    }
+    outline
+}
+
+/// Draw `path` with `style`'s width shaped by `profile`, filled with `brush`.
+pub(crate) fn draw_profiled_stroke(
+    scene: &mut vello::Scene,
+    style: &Stroke,
+    brush: &Brush,
+    view: Option<Affine>,
+    path: &BezPath,
+    profile: &crate::effects::StrokeProfile,
+) {
+    let half_width = style.width.abs() * 0.5;
+    match view {
+        Some(view) => {
+            let outline = profiled_outline(&(view * path), half_width, profile);
+            scene.fill(
+                gaanim_core::peniko::Fill::NonZero,
+                view.inverse(),
+                brush,
+                Some(view),
+                &outline,
+            );
+        }
+        None => {
+            let outline = profiled_outline(path, half_width, profile);
+            scene.fill(
+                gaanim_core::peniko::Fill::NonZero,
+                Affine::IDENTITY,
+                brush,
+                None,
+                &outline,
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,6 +316,33 @@ mod tests {
             resolve(&world),
             None,
             "a collapsed object must not encode NaNs"
+        );
+    }
+
+    #[test]
+    fn profiled_outlines_taper_open_and_closed_paths() {
+        let profile =
+            crate::effects::StrokeProfile(vec![(0.0, 0.0), (0.5, 1.0), (1.0, 0.0)].into());
+        let mut line = BezPath::new();
+        line.move_to((0.0, 0.0));
+        line.line_to((4.0, 0.0));
+        let outline = profiled_outline(&line, 0.5, &profile);
+        let bounds = outline.bounding_box();
+        assert!((bounds.x0 - 0.0).abs() < 1e-9 && (bounds.x1 - 4.0).abs() < 1e-9);
+        // Widest at the middle, zero at both ends.
+        assert!((bounds.y1 - 0.5).abs() < 0.05 && (bounds.y0 + 0.5).abs() < 0.05);
+        assert!(outline.contains(gaanim_core::kurbo::Point::new(2.0, 0.4)));
+        assert!(!outline.contains(gaanim_core::kurbo::Point::new(0.2, 0.2)));
+
+        let square = gaanim_core::kurbo::Rect::new(0.0, 0.0, 2.0, 2.0).to_path(0.1);
+        let uniform = crate::effects::StrokeProfile(vec![(0.0, 1.0)].into());
+        let band = profiled_outline(&square, 0.1, &uniform);
+        assert!(band.contains(gaanim_core::kurbo::Point::new(1.0, 0.05)));
+        assert!(!band.contains(gaanim_core::kurbo::Point::new(1.0, 1.0)));
+        assert!(
+            profiled_outline(&BezPath::new(), 0.1, &uniform)
+                .elements()
+                .is_empty()
         );
     }
 }

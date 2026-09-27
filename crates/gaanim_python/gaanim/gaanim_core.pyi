@@ -400,6 +400,62 @@ class Background:
 
 BackgroundLike: TypeAlias = Paint | Background
 
+class Distribution:
+    """Where ``Geometry.duplicate`` places copies: a grid, circle, path, random cloud or spiral.
+
+    Every factory raises ``ValueError`` for fewer than 1 or more than 10000
+    points or non-finite values.
+    """
+    @staticmethod
+    def grid(columns: int, rows: int, spacing: float | tuple[float, float] | None = None, *, center: tuple[float, float] = (0.0, 0.0)) -> Distribution:
+        """``columns`` x ``rows`` points ``spacing`` apart (0.5 by default), centered on ``center``, row by row from the top left.
+
+        Example:
+            dots = scene.geometry.duplicate(scene.geometry.dot(0.05), Distribution.grid(12, 7, 0.5))
+        """
+        ...
+    @staticmethod
+    def circle(count: int, radius: float = 2.0, *, center: tuple[float, float] = (0.0, 0.0), start: float = 0.0, orient: bool = False) -> Distribution:
+        """``count`` points on a circle, counter-clockwise from ``start`` radians.
+
+        With ``orient`` each copy turns by its angle, so it faces outward.
+
+        Example:
+            ring = scene.geometry.duplicate(icon, Distribution.circle(16, 2.5, orient=True))
+        """
+        ...
+    @staticmethod
+    def along(points: Sequence[tuple[float, float]], count: int, *, orient: bool = False) -> Distribution:
+        """``count`` points evenly spaced by length along a polyline, both ends included.
+
+        With ``orient`` each copy turns to follow the direction of its segment.
+
+        Example:
+            trail = scene.geometry.duplicate(chevron, Distribution.along([(-6, 0), (0, 2), (6, 0)], 20, orient=True))
+        """
+        ...
+    @staticmethod
+    def random(count: int, bounds: tuple[float, float, float, float] = (-6.0, -3.0, 6.0, 3.0), *, seed: int = 0) -> Distribution:
+        """``count`` uniform points inside ``(xmin, ymin, xmax, ymax)``; the same ``seed`` gives the same cloud.
+
+        Example:
+            cloud = scene.geometry.duplicate(star, Distribution.random(60, seed=3))
+        """
+        ...
+    @staticmethod
+    def phyllotaxis(count: int, spacing: float = 0.2, *, center: tuple[float, float] = (0.0, 0.0)) -> Distribution:
+        """``count`` points on a sunflower spiral: point ``i`` at ``spacing * sqrt(i)``, turned by the golden angle.
+
+        Example:
+            seeds = scene.geometry.duplicate(scene.geometry.dot(0.04), Distribution.phyllotaxis(300, 0.15))
+        """
+        ...
+    @property
+    def points(self) -> list[tuple[float, float]]:
+        """Positions of the copies, in order."""
+        ...
+    def __len__(self) -> int: ...
+
 class PostProcess:
     @staticmethod
     def shader(
@@ -2239,6 +2295,50 @@ class Drawable:
 
         Example:
             flare = scene.geometry.circle(1.2).fill(ORANGE).blend("screen")
+        """
+        ...
+    def stroke_profile(self, profile: Optional[Sequence[tuple[float, float]]]) -> Drawable:
+        """Shape the stroke width along the path with ``(position, factor)`` pairs.
+
+        Positions are fractions of the visible path's arc length in [0, 1];
+        factors scale the stroke width and are interpolated linearly, so
+        ``[(0, 0), (0.5, 1), (1, 0)]`` swells in the middle and ends in points.
+        The stroke is drawn as a filled outline: dashes do not apply, while
+        ``trim``, ``create`` and ``show_passing_flash`` shape the visible part,
+        so a tapered flash stays pointed. On a group or ``Text`` it reaches
+        every member. ``None`` restores the plain pen; a position outside
+        [0, 1] or a negative factor raises ``ValueError``.
+
+        Example:
+            wave = scene.geometry.polyline(points).stroke(WHITE, 0.12).stroke_profile([(0, 0.2), (0.5, 1), (1, 0.2)])
+        """
+        ...
+    def stroke_taper(self, start: float = 0.2, end: float = 0.2) -> Drawable:
+        """Taper the stroke to a point over the first ``start`` and last ``end`` of the path.
+
+        Fractions of the visible arc length, with ``start + end <= 1``. A
+        shorthand for ``stroke_profile``, e.g. for brush strokes and
+        calligraphic arrows.
+
+        Example:
+            stroke = scene.geometry.arc(0, 0, 2.0, 0.0, 3.0).stroke(GOLD, 0.2).stroke_taper(0.3, 0.5)
+        """
+        ...
+    def squash_stretch(self, amount: float = 0.1, max_ratio: float = 1.6) -> Drawable:
+        """Stretch along the velocity and squash across it, keeping the area.
+
+        The stretch is ``1 + amount * speed`` (scene units per second), at
+        most ``max_ratio``, and the squash its reciprocal. The velocity comes
+        from the drawable's own animations (``animate``, ``move_along``...)
+        measured at ``t ± 1/60`` s, so a drawable at rest is never deformed
+        and seeks are exact. Members of a group deform with it. Motion from
+        updaters, reactive positions or a moving parent does not count.
+        ``amount=0`` removes the effect; a negative ``amount`` or a
+        ``max_ratio`` below 1 raises ``ValueError``.
+
+        Example:
+            ball = scene.geometry.circle(0.4).squash_stretch(0.08, max_ratio=1.8)
+            scene.play([ball.animate.move_to(5, 0).duration(0.5)])
         """
         ...
     def motion_blur(self, enabled: bool = True) -> Drawable:
@@ -5362,6 +5462,77 @@ class Geometry:
 
         Example:
             result = scene.group([drawable])
+        """
+        ...
+    def repeat(
+        self,
+        shape: Drawable,
+        count: int,
+        *,
+        rotate: float = 0.0,
+        scale: float = 1.0,
+        offset: tuple[float, float] = (0.0, 0.0),
+        opacity: tuple[float, float] = (1.0, 1.0),
+        about: Optional[tuple[float, float]] = None,
+    ) -> Drawable:
+        """``count`` copies of ``shape``, each one step further, like After Effects' Repeater.
+
+        Copy ``i`` is shifted by ``i * offset``, turned by ``i * rotate``
+        radians and scaled by ``scale ** i``, about ``about`` when given (so
+        petals orbit a flower's center) or about its own pivot. Its opacity
+        runs from ``opacity[0]`` for the first copy to ``opacity[1]`` for the
+        last. ``shape`` itself becomes copy 0; the copies are the members of
+        the returned group, in order, so ``group[i]`` and animations such as
+        ``stagger`` address them. Group and text shapes are copied with their
+        members. ``count`` must be 1-10000; non-finite values, a non-positive
+        ``scale``, opacities outside [0, 1] or a shape of another scene raise
+        ``ValueError``.
+
+        Example:
+            petal = scene.geometry.ellipse(0.25, 0.9).fill(PINK).move_to(0, 1.2)
+            flower = scene.geometry.repeat(petal, 12, rotate=math.tau / 12, about=(0, 0), opacity=(1.0, 0.4))
+        """
+        ...
+    def duplicate(self, shape: Drawable, distribution: Distribution) -> Drawable:
+        """Copies of ``shape`` at every point of ``distribution``, like Cavalry's Duplicator.
+
+        ``shape`` itself moves to the first point; each copy is centered on
+        its point and, for oriented distributions, turned to follow it. The
+        copies are the members of the returned group, in order, ready for
+        ``stagger``, ``connect`` or per-member styling. A shape of another scene
+        raises ``ValueError``.
+
+        Example:
+            star = scene.geometry.star(5, 0.12, 0.05).fill(GOLD)
+            sky = scene.geometry.duplicate(star, Distribution.random(60, (-7, -3.5, 7, 3.5), seed=3))
+        """
+        ...
+    def connect(
+        self,
+        points: Drawable | Sequence[Drawable],
+        max_distance: float = 1.5,
+        *,
+        mode: Literal["range", "nearest", "sequential"] = "range",
+        neighbors: int = 2,
+        fade_by_distance: bool = True,
+    ) -> Drawable:
+        """Live plexus lines between points, like Cavalry's Connect Shape.
+
+        ``points`` is a group (its members) or a sequence of drawables; each
+        point is the center of its bounds, and the lines follow the points as
+        they move, in every frame and seek. ``mode`` picks the pairs no longer
+        than ``max_distance``: ``"range"`` joins every such pair,
+        ``"nearest"`` each point to its ``neighbors`` nearest and
+        ``"sequential"`` each point to the next. Hidden points are skipped
+        and the pairs come in a fixed order. With ``fade_by_distance`` longer
+        links are fainter. The result is a group of thin white lines by default
+        (or the theme's line style); restyle it with ``stroke``. Fewer than two
+        points, a non-positive ``max_distance`` or ``neighbors`` below 1 raise
+        ``ValueError``.
+
+        Example:
+            dots = scene.geometry.group([scene.geometry.dot(0.06).move_to(x, y) for x, y in positions])
+            links = scene.geometry.connect(dots, max_distance=2.0).stroke(CYAN, 0.02)
         """
         ...
     def union(self, *operands: Drawable, live: bool = False, tolerance: float = 0.0025, rule: Literal["nonzero", "evenodd"] = "nonzero") -> Drawable:

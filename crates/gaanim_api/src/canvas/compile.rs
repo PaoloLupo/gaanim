@@ -810,6 +810,9 @@ fn typst_foreground_for_background(background: gaanim_core::peniko::Color) -> &'
     if luminance > 0.5 { "000000" } else { "ffffff" }
 }
 
+/// Opacity layers of a fading plexus: links split into this many length ranges.
+const CONNECT_FADE_LAYERS: usize = 6;
+
 pub(crate) fn split_text_math(text: &str) -> Vec<(bool, String)> {
     let mut segments: Vec<(bool, String)> = Vec::new();
     let mut buf = String::new();
@@ -7138,6 +7141,54 @@ impl SceneModel {
                 }
                 mr
             }
+            SpawnKind::Connect {
+                sources,
+                max_distance,
+                mode,
+                neighbors,
+                fade,
+            } => {
+                let source_entities: Vec<Entity> = sources
+                    .iter()
+                    .filter_map(|source| id_map.get(source))
+                    .filter_map(|id| builder.states.get(*id).map(|state| state.entity))
+                    .collect();
+                let layers = if *fade { CONNECT_FADE_LAYERS } else { 1 };
+                let mut layer_spec = spec.clone();
+                layer_spec.fill = None;
+                layer_spec.fill_overridden = true;
+                layer_spec.stroke_overridden = spec.stroke.is_some();
+                let mut refs = Vec::with_capacity(layers);
+                for layer in 0..layers {
+                    // Longer links fall in later, fainter layers.
+                    layer_spec.opacity = 1.0 - layer as f32 / layers as f32;
+                    let path = gaanim_objects::prelude::SvgPath {
+                        id: "Connect".into(),
+                        path: BezPath::new(),
+                        bounds: Bounds3D::default(),
+                        fill: None,
+                        stroke: StrokeBrush::transparent(),
+                    };
+                    let layer_ref =
+                        Self::finish_spawn_builder(builder.svg_path(&path), &layer_spec);
+                    if let Some(state) = builder.states.get(layer_ref.id) {
+                        builder.commands.entity(state.entity).insert(
+                            gaanim_renderer::effects::ConnectBinding {
+                                sources: source_entities.clone(),
+                                max_distance: *max_distance,
+                                mode: *mode,
+                                neighbors: *neighbors,
+                                layer,
+                                layers,
+                            },
+                        );
+                    }
+                    refs.push(layer_ref);
+                }
+                let mr = builder.group(&refs);
+                Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
+                mr
+            }
             SpawnKind::Boolean {
                 sources,
                 op,
@@ -8641,6 +8692,20 @@ impl SceneModel {
         if let Some(blend) = spec.blend {
             Self::apply_blend(builder, mref.id, blend);
         }
+        if let Some(profile) = &spec.stroke_profile {
+            let profile = gaanim_renderer::effects::StrokeProfile(profile.clone());
+            for (entity, _) in Self::hierarchy_entities(builder, mref.id) {
+                builder.commands.entity(entity).insert(profile.clone());
+            }
+        }
+        if let Some((amount, max_ratio)) = spec.squash_stretch
+            && let Some(state) = builder.states.get(mref.id)
+        {
+            builder
+                .commands
+                .entity(state.entity)
+                .insert(gaanim_animation::SquashStretch::new(amount, max_ratio));
+        }
         if spec.motion_blur_exempt {
             for (entity, _) in Self::hierarchy_entities(builder, mref.id) {
                 builder
@@ -8806,6 +8871,7 @@ impl SceneModel {
                             gaanim_renderer::effects::ElementBlend,
                             gaanim_renderer::effects::ViewLayer,
                             gaanim_renderer::effects::MotionBlurExempt,
+                            gaanim_renderer::effects::StrokeProfile,
                         )>();
                     })
                     .insert((
@@ -12851,6 +12917,67 @@ mod tests {
             .find(|(object, _)| object.0 == id)
             .unwrap()
             .1
+    }
+
+    #[test]
+    fn squash_stretch_deforms_along_velocity_only_while_moving() {
+        let mut canvas = SceneModel::new(640, 360);
+        let ball = canvas
+            .circle(0.5)
+            .move_to(-3.0, 0.0)
+            .squash_stretch(0.1, 1.5)
+            .unwrap();
+        assert!(canvas.circle(0.5).squash_stretch(-1.0, 1.5).is_err());
+        assert!(canvas.circle(0.5).squash_stretch(0.1, 0.5).is_err());
+        canvas.play(vec![
+            ball.animate()
+                .move_to(3.0, 0.0)
+                .duration(1.0)
+                .rate_func(gaanim_math::RateFunc::Linear),
+        ]);
+        canvas.wait(1.0);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let id = ObjectId::from_raw(ball.id.as_raw() - 1);
+        let mut deform_at = |time: f64| {
+            timeline.seek(&mut world, time);
+            world
+                .query::<(&MobjectId, Option<&gaanim_scene::ShapeDeform>)>()
+                .iter(&world)
+                .find(|(object, _)| object.0 == id)
+                .unwrap()
+                .1
+                .map_or(kurbo::Affine::IDENTITY, |deform| deform.0)
+        };
+        // 6 units per second, so the stretch is capped at 1.5 along x.
+        let moving = deform_at(0.5).as_coeffs();
+        assert!((moving[0] - 1.5).abs() < 1e-9, "{moving:?}");
+        assert!((moving[3] - 1.0 / 1.5).abs() < 1e-9, "{moving:?}");
+        assert_eq!(deform_at(1.8), kurbo::Affine::IDENTITY);
+        assert!((deform_at(0.5).as_coeffs()[0] - 1.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn connect_validates_its_points() {
+        let mut canvas = SceneModel::new(640, 360);
+        let a = canvas.circle(0.1);
+        let b = canvas.circle(0.1).move_to(1.0, 0.0);
+        let mode = gaanim_renderer::effects::ConnectMode::Range;
+        assert!(canvas.connect(&[&a], 1.0, mode, 1, true).is_err());
+        assert!(canvas.connect(&[&a, &b], 0.0, mode, 1, true).is_err());
+        assert!(canvas.connect(&[&a, &b], 1.0, mode, 0, true).is_err());
+        let group = canvas.group(&[&a, &b]);
+        let links = canvas.connect(&[&group], 2.0, mode, 1, true).unwrap();
+        assert!(matches!(
+            &links.spec.lock().unwrap().kind,
+            SpawnKind::Connect { sources, fade: true, .. } if sources.len() == 2
+        ));
+        let (world, _) = compiled_world(&canvas);
+        let mut world = world;
+        let layers = world
+            .query::<&gaanim_renderer::effects::ConnectBinding>()
+            .iter(&world)
+            .count();
+        assert_eq!(layers, CONNECT_FADE_LAYERS);
     }
 
     #[test]

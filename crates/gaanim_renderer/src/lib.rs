@@ -40,6 +40,7 @@ impl Plugin for GaanimDerivedGeometryPlugin {
                 pipeline::resolve_dynamic_boolean_system,
                 pipeline::resolve_fill_level_system,
                 pipeline::resolve_vector_outline_system,
+                pipeline::resolve_connect_system,
             )
                 .chain()
                 .in_set(gaanim_scene::SceneSet::DerivedGeometry),

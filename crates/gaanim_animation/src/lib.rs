@@ -2,6 +2,8 @@ pub mod camera;
 pub mod custom;
 pub mod echo;
 pub use echo::EchoGhost;
+pub mod squash;
+pub use squash::{SQUASH_STEP, SquashStretch};
 pub mod paint;
 pub mod prelude;
 pub mod procedural;

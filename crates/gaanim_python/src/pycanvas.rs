@@ -4680,6 +4680,84 @@ impl PyGeometry {
         })
     }
 
+    /// `count` copies of `shape`, each turned, scaled and shifted by one more
+    /// step than the one before; `shape` itself is copy 0.
+    #[pyo3(signature = (shape, count, *, rotate=0.0, scale=1.0, offset=(0.0, 0.0), opacity=(1.0, 1.0), about=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn repeat(
+        &self,
+        shape: PyDrawable,
+        count: usize,
+        rotate: f64,
+        scale: f64,
+        offset: (f64, f64),
+        opacity: (f32, f32),
+        about: Option<(f64, f64)>,
+    ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        crate::pyduplicate::repeat(
+            &self.inner,
+            &shape,
+            count,
+            gaanim_api::canvas::RepeatStep {
+                rotate,
+                scale,
+                offset: gaanim_core::glam::DVec2::new(offset.0, offset.1),
+                opacity,
+                about: about.map(|(x, y)| gaanim_core::glam::DVec2::new(x, y)),
+            },
+        )
+    }
+
+    /// Copies of `shape` at every point of `distribution`; `shape` itself
+    /// moves to the first one.
+    fn duplicate(
+        &self,
+        shape: PyDrawable,
+        distribution: PyRef<'_, crate::pyduplicate::PyDistribution>,
+    ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        crate::pyduplicate::duplicate(&self.inner, &shape, &distribution)
+    }
+
+    /// Live plexus lines between points that follow them as they move.
+    #[pyo3(signature = (points, max_distance=1.5, *, mode="range", neighbors=2, fade_by_distance=true))]
+    fn connect(
+        &self,
+        points: &Bound<'_, PyAny>,
+        max_distance: f64,
+        mode: &str,
+        neighbors: usize,
+        fade_by_distance: bool,
+    ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        let points: Vec<PyDrawable> = match points.extract::<PyDrawable>() {
+            Ok(group) => vec![group],
+            Err(_) => points.extract().map_err(|_| {
+                pyo3::exceptions::PyTypeError::new_err(
+                    "points must be a Drawable group or a sequence of Drawables",
+                )
+            })?,
+        };
+        let mode = match mode {
+            "range" => gaanim_api::canvas::ConnectMode::Range,
+            "nearest" => gaanim_api::canvas::ConnectMode::Nearest,
+            "sequential" => gaanim_api::canvas::ConnectMode::Sequential,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "mode must be 'range', 'nearest' or 'sequential'",
+                ));
+            }
+        };
+        let refs: Vec<_> = points.iter().map(|drawable| &drawable.0).collect();
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .connect(&refs, max_distance, mode, neighbors, fade_by_distance)
+            .map(PyDrawable)
+            .map_err(pyo3::exceptions::PyValueError::new_err)
+    }
+
     #[pyo3(signature = (*operands, live=false, tolerance=0.0025, rule="nonzero"))]
     fn union(
         &self,

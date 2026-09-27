@@ -1642,7 +1642,7 @@ impl Timeline {
         self.update_segment_position();
         self.restore_followed_shake_origin(world);
         gaanim_animation::apply_property_bindings(world, self.current_time);
-        self.evaluate_echoes(world);
+        self.evaluate_delayed_states(world);
         if let Some(mut playback_state) =
             world.get_resource_mut::<gaanim_animation::PlaybackState>()
         {
@@ -1651,20 +1651,31 @@ impl Timeline {
     }
 
     /// Show every [`gaanim_animation::EchoGhost`] as its source was `lag`
-    /// seconds before the current time.
+    /// seconds before the current time, and deform every
+    /// [`gaanim_animation::SquashStretch`] drawable along its velocity.
     ///
-    /// A copy takes its source's keyframe state and replays the source's own
-    /// animation clips up to that time, exactly as a seek rebuilds the
-    /// source, so it needs no history and matches at any time. A copy is
-    /// hidden while its source is, before the timeline starts and when its
-    /// time falls in another segment.
-    fn evaluate_echoes(&self, world: &mut World) {
+    /// Both evaluate a drawable at another time the same way: restore its
+    /// keyframe state onto another entity and replay the drawable's own
+    /// animation clips up to that time, exactly as a seek rebuilds it. That
+    /// needs no history, so the result matches at any time. A copy is hidden
+    /// while its source is, before the timeline starts and when its time
+    /// falls in another segment.
+    fn evaluate_delayed_states(&self, world: &mut World) {
         let ghosts: Vec<(Entity, gaanim_animation::EchoGhost)> = world
             .query::<(Entity, &gaanim_animation::EchoGhost)>()
             .iter(world)
             .map(|(entity, echo)| (entity, echo.clone()))
             .collect();
-        if ghosts.is_empty() {
+        let squashes: Vec<(
+            Entity,
+            gaanim_core::ObjectId,
+            gaanim_animation::SquashStretch,
+        )> = world
+            .query::<(Entity, &MobjectId, &gaanim_animation::SquashStretch)>()
+            .iter(world)
+            .map(|(entity, id, squash)| (entity, id.0, squash.clone()))
+            .collect();
+        if ghosts.is_empty() && squashes.is_empty() {
             return;
         }
         let entity_map: HashMap<gaanim_core::ObjectId, Entity> = world
@@ -1673,7 +1684,11 @@ impl Timeline {
             .map(|(entity, id)| (id.0, entity))
             .collect();
         // Each source's animation clips, in start order.
-        let sources: HashSet<_> = ghosts.iter().map(|(_, echo)| echo.source).collect();
+        let sources: HashSet<_> = ghosts
+            .iter()
+            .map(|(_, echo)| echo.source)
+            .chain(squashes.iter().map(|(_, id, _)| *id))
+            .collect();
         let mut source_clips: HashMap<gaanim_core::ObjectId, Vec<&Clip>> = HashMap::new();
         for clip in self
             .clip_index
@@ -1687,6 +1702,12 @@ impl Timeline {
                 source_clips.entry(anim.target).or_default().push(clip);
             }
         }
+        let clips_of = |source: &gaanim_core::ObjectId| {
+            source_clips
+                .get(source)
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+        };
         let segment = |time: f64| {
             self.segment_position_at(time)
                 .map(|position| position.segment_id)
@@ -1698,79 +1719,153 @@ impl Timeline {
             let source_visible = entity_map
                 .get(&echo.source)
                 .is_some_and(|&source| world.get::<gaanim_scene::Visible>(source).is_some());
-            let keyframe = (source_visible && time >= 0.0 && segment(time) == current_segment)
-                .then(|| self.keyframes.range(..=OrderedFloat(time)).next_back())
-                .flatten()
-                .and_then(|(keyframe_time, snapshot)| {
-                    Some((keyframe_time.0, snapshot.entities.get(&echo.source)?))
-                });
-            let Some((keyframe_time, snapshot)) = keyframe else {
+            let parent = (source_visible && time >= 0.0 && segment(time) == current_segment)
+                .then(|| {
+                    // Copies stay out of scene membership: their visibility is decided here.
+                    self.replay_source_into(
+                        world,
+                        echo.source,
+                        clips_of(&echo.source),
+                        time,
+                        ghost,
+                        |state| {
+                            state.scene = None;
+                            state.visible = true;
+                        },
+                    )
+                })
+                .flatten();
+            let Some(parent) = parent else {
                 if world.get::<gaanim_scene::Visible>(ghost).is_some() {
                     world.entity_mut(ghost).remove::<gaanim_scene::Visible>();
                 }
                 continue;
             };
-            let parent = echo.parent.or_else(|| {
-                snapshot
-                    .parent
-                    .and_then(|parent| entity_map.get(&parent).copied())
-            });
+            let parent = echo
+                .parent
+                .or_else(|| parent.and_then(|parent| entity_map.get(&parent).copied()));
             crate::snapshot::restore_parent(world, ghost, parent);
-            // Copies stay out of scene membership: their visibility is decided here.
-            let mut state = snapshot.clone();
-            state.scene = None;
-            state.visible = true;
-            crate::snapshot::insert_snapshot_components(&mut world.entity_mut(ghost), &state, true);
-
-            let clips = source_clips
-                .get(&echo.source)
-                .map(Vec::as_slice)
-                .unwrap_or_default();
-            // As in a restoring seek, a clip that has not started yet still
-            // holds its channel at the clip's initial value.
-            let mut initials: HashMap<AbsoluteLensChannel, (&PropertyLensSpec, f64)> =
-                HashMap::new();
-            for clip in clips.iter().rev().filter(|clip| clip.start > time) {
-                let ClipPayload::Animation(anim) = &clip.payload else {
-                    continue;
-                };
-                let channel = if let PropertyLensSpec::Dynamic(lens) = &anim.lens {
-                    lens.0.hold_channel().map(AbsoluteLensChannel::Held)
-                } else {
-                    restored_future_channel(&anim.lens)
-                };
-                if let Some(channel) = channel {
-                    // Later clips come first, so the earliest one wins.
-                    initials.insert(channel, (&anim.lens, anim.rate_func.evaluate(0.0)));
-                }
-            }
-            for (lens, initial_t) in initials.into_values() {
-                match lens {
-                    PropertyLensSpec::Dynamic(lens) => lens.0.hold(world, ghost, initial_t),
-                    _ => apply_lens_spec(world, ghost, lens, initial_t, false),
-                }
-            }
-            for clip in clips
-                .iter()
-                .filter(|clip| clip.start >= keyframe_time && clip.start <= time)
-            {
-                let ClipPayload::Animation(anim) = &clip.payload else {
-                    continue;
-                };
-                if clip.end() <= time {
-                    let final_t = anim.rate_func.evaluate(1.0);
-                    apply_lens_spec(world, ghost, &anim.lens, final_t, true);
-                } else {
-                    let progress = ((time - clip.start) / clip.duration).clamp(0.0, 1.0);
-                    let t = anim.rate_func.evaluate(progress);
-                    apply_lens_spec(world, ghost, &anim.lens, t, false);
-                }
-            }
-
             if let Some(mut opacity) = world.get_mut::<Opacity>(ghost) {
                 opacity.0 *= echo.opacity;
             }
         }
+
+        for (entity, id, squash) in squashes {
+            let probe = match squash
+                .probe
+                .filter(|probe| world.get_entity(*probe).is_ok())
+            {
+                Some(probe) => probe,
+                None => {
+                    let probe = world.spawn_empty().id();
+                    if let Some(mut stored) =
+                        world.get_mut::<gaanim_animation::SquashStretch>(entity)
+                    {
+                        stored.probe = Some(probe);
+                    }
+                    probe
+                }
+            };
+            // A centred difference inside the current segment and timeline.
+            let (low, high) = self
+                .segments
+                .iter()
+                .rev()
+                .find(|segment| {
+                    segment.start_time <= self.current_time + 1e-9
+                        && self.current_time <= segment.end_time + 1e-9
+                })
+                .map_or((0.0, self.cached_duration), |segment| {
+                    (segment.start_time, segment.end_time)
+                });
+            let before = (self.current_time - gaanim_animation::SQUASH_STEP)
+                .max(low)
+                .max(0.0);
+            let after = (self.current_time + gaanim_animation::SQUASH_STEP).min(high);
+            let mut position_at = |time: f64| {
+                self.replay_source_into(world, id, clips_of(&id), time, probe, |state| {
+                    state.scene = None;
+                    state.visible = false;
+                })?;
+                world
+                    .get::<SpatialTransform>(probe)
+                    .map(|transform| transform.translation.truncate())
+            };
+            let velocity = match (position_at(before), position_at(after)) {
+                (Some(from), Some(to)) if after > before => (to - from) / (after - before),
+                _ => gaanim_core::glam::DVec2::ZERO,
+            };
+            let deform = gaanim_scene::ShapeDeform(squash.deform(velocity));
+            if world.get::<gaanim_scene::ShapeDeform>(entity) != Some(&deform) {
+                world.entity_mut(entity).insert(deform);
+            }
+        }
+    }
+
+    /// Restore `source`'s keyframe state at `time`, adjusted by `prepare`,
+    /// onto `target` and replay `clips`, the source's animation clips, up to
+    /// `time`. Returns the source's parent at the keyframe, or `None` when
+    /// the source has no keyframe state at `time`.
+    fn replay_source_into(
+        &self,
+        world: &mut World,
+        source: gaanim_core::ObjectId,
+        clips: &[&Clip],
+        time: f64,
+        target: Entity,
+        prepare: impl FnOnce(&mut crate::snapshot::EntitySnapshot),
+    ) -> Option<Option<gaanim_core::ObjectId>> {
+        let (keyframe_time, snapshot) = self
+            .keyframes
+            .range(..=OrderedFloat(time))
+            .next_back()
+            .and_then(|(keyframe_time, snapshot)| {
+                Some((keyframe_time.0, snapshot.entities.get(&source)?))
+            })?;
+        let mut state = snapshot.clone();
+        prepare(&mut state);
+        crate::snapshot::insert_snapshot_components(&mut world.entity_mut(target), &state, true);
+
+        // As in a restoring seek, a clip that has not started yet still
+        // holds its channel at the clip's initial value.
+        let mut initials: HashMap<AbsoluteLensChannel, (&PropertyLensSpec, f64)> = HashMap::new();
+        for clip in clips.iter().rev().filter(|clip| clip.start > time) {
+            let ClipPayload::Animation(anim) = &clip.payload else {
+                continue;
+            };
+            let channel = if let PropertyLensSpec::Dynamic(lens) = &anim.lens {
+                lens.0.hold_channel().map(AbsoluteLensChannel::Held)
+            } else {
+                restored_future_channel(&anim.lens)
+            };
+            if let Some(channel) = channel {
+                // Later clips come first, so the earliest one wins.
+                initials.insert(channel, (&anim.lens, anim.rate_func.evaluate(0.0)));
+            }
+        }
+        for (lens, initial_t) in initials.into_values() {
+            match lens {
+                PropertyLensSpec::Dynamic(lens) => lens.0.hold(world, target, initial_t),
+                _ => apply_lens_spec(world, target, lens, initial_t, false),
+            }
+        }
+        for clip in clips
+            .iter()
+            .filter(|clip| clip.start >= keyframe_time && clip.start <= time)
+        {
+            let ClipPayload::Animation(anim) = &clip.payload else {
+                continue;
+            };
+            if clip.end() <= time {
+                let final_t = anim.rate_func.evaluate(1.0);
+                apply_lens_spec(world, target, &anim.lens, final_t, true);
+            } else {
+                let progress = ((time - clip.start) / clip.duration).clamp(0.0, 1.0);
+                let t = anim.rate_func.evaluate(progress);
+                apply_lens_spec(world, target, &anim.lens, t, false);
+            }
+        }
+        Some(snapshot.parent)
     }
 
     fn evaluate_gltf_animations(

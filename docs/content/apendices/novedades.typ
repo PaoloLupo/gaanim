@@ -141,6 +141,15 @@ secundarias en #link("/guias/camara-y-3d/")[Cámara y 3D].
 - `animate.points([...])` mueve cada vértice de un polígono o una polilínea en
   línea recta a su nueva posición, sin remuestrear el contorno: con `echo`
   reproduce el símbolo de Gaanim fotograma a fotograma.
+- `drawable.squash_stretch(0.1)` estira un objeto en la dirección de su
+  velocidad y lo aplasta en la perpendicular, conservando el área.
+- `drawable.stroke_profile([...])` y `stroke_taper(start, end)` dan trazos de
+  grosor variable que se afinan en los extremos, también en `create` y
+  `show_passing_flash`.
+- `scene.geometry.repeat(...)` y `scene.geometry.duplicate(shape,
+  Distribution.grid/circle/along/random/phyllotaxis(...))` crean copias
+  agrupadas de una figura; `scene.geometry.connect(...)` une puntos con líneas
+  vivas que se desvanecen con la distancia (plexus).
 - `scene.canvas.motion_blur(180, samples=8)` difumina el movimiento en las
   exportaciones y capturas promediando subcuadros; `drawable.motion_blur(False)`
   mantiene nítido un objeto.

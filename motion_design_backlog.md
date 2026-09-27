@@ -156,18 +156,18 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
 
 | ☐ | ID | Ítem | Coste | Impacto | Depende | Issue |
 |---|---|---|---|---|---|---|
-| ☐ | [PR-04](#pr-04--duplicador-y-repeater-con-distribuciones) | Duplicador/Repeater con distribuciones | M | ★★★ | — | [#148](https://github.com/PaoloLupo/gaanim/issues/148) |
+| ☑ | [PR-04](#pr-04--duplicador-y-repeater-con-distribuciones) | Duplicador/Repeater con distribuciones | M | ★★★ | — | [#148](https://github.com/PaoloLupo/gaanim/issues/148) |
 | ☐ | [PR-05](#pr-05--campos-y-falloffs) | Campos y falloffs estilo Cavalry | M | ★★★ | PR-02, PR-04 | [#149](https://github.com/PaoloLupo/gaanim/issues/149) |
-| ☐ | [PR-06](#pr-06--conexiones-tipo-plexus) | Conexiones tipo plexus | S | ★ | PR-04 | [#150](https://github.com/PaoloLupo/gaanim/issues/150) |
+| ☑ | [PR-06](#pr-06--conexiones-tipo-plexus) | Conexiones tipo plexus | S | ★ | PR-04 | [#150](https://github.com/PaoloLupo/gaanim/issues/150) |
 | ☐ | [PR-07](#pr-07--emisor-de-partículas-determinista) | Emisor de partículas determinista | M | ★★★ | PR-02 | [#151](https://github.com/PaoloLupo/gaanim/issues/151) |
 | ☐ | [PR-08](#pr-08--física-analítica-ligera) | Física analítica ligera (`throw`, `inertia`) | M | ★★ | — | [#152](https://github.com/PaoloLupo/gaanim/issues/152) |
 | ☑ | [TR-02](#tr-02--dash-offset-animado) | Dash offset animado | S | ★★ | — | [#153](https://github.com/PaoloLupo/gaanim/issues/153) |
 | ☐ | [TR-04](#tr-04--modificadores-de-path) | Modificadores de path no destructivos | M | ★★ | — | [#154](https://github.com/PaoloLupo/gaanim/issues/154) |
-| ☐ | [TR-05](#tr-05--trazo-con-grosor-variable) | Trazo con grosor variable (taper) | M | ★★ | — | [#155](https://github.com/PaoloLupo/gaanim/issues/155) |
+| ☑ | [TR-05](#tr-05--trazo-con-grosor-variable) | Trazo con grosor variable (taper) | M | ★★ | — | [#155](https://github.com/PaoloLupo/gaanim/issues/155) |
 | ☐ | [TM-04](#tm-04--keyframes-multicanal) | Keyframes multicanal | M | ★★ | — | [#156](https://github.com/PaoloLupo/gaanim/issues/156) |
 | ☐ | [TM-06](#tm-06--rampas-de-velocidad-y-time-remap) | Rampas de velocidad y time remap | M | ★★ | — | [#157](https://github.com/PaoloLupo/gaanim/issues/157) |
 | ☐ | [TM-07](#tm-07--follow-through-settle-y-cadenas-con-retardo) | Follow-through: `settle` y `follow(delay=)` | M | ★★ | — | [#158](https://github.com/PaoloLupo/gaanim/issues/158) |
-| ☐ | [TM-08](#tm-08--squash-and-stretch-por-velocidad) | Squash & stretch por velocidad | S | ★ | — | [#159](https://github.com/PaoloLupo/gaanim/issues/159) |
+| ☑ | [TM-08](#tm-08--squash-and-stretch-por-velocidad) | Squash & stretch por velocidad | S | ★ | — | [#159](https://github.com/PaoloLupo/gaanim/issues/159) |
 
 ### Ola 5: narrativa, audio y explicación
 

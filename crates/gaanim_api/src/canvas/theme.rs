@@ -955,6 +955,7 @@ fn spawn_family(kind: &SpawnKind) -> &'static str {
         | SpawnKind::CurvedArrowArc { .. }
         | SpawnKind::Dimension { .. }
         | SpawnKind::Polyline(_)
+        | SpawnKind::Connect { .. }
         | SpawnKind::Bezier { .. }
         | SpawnKind::Curve(_)
         | SpawnKind::TracedPathLine
@@ -979,6 +980,7 @@ pub(crate) fn spawn_name(kind: &SpawnKind) -> &'static str {
         SpawnKind::FillLevelOutline { .. } => "fill_level_outline",
         SpawnKind::FillLevel { .. } => "fill_level",
         SpawnKind::Boolean { .. } => "boolean",
+        SpawnKind::Connect { .. } => "connect",
         SpawnKind::Circle(_) => "circle",
         SpawnKind::Rect(_, _) => "rect",
         SpawnKind::RoundedRect(_, _, _) => "rounded_rect",

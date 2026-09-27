@@ -539,6 +539,15 @@ pub enum SpawnKind {
         level: f64,
         direction: FillLevelDirection,
     },
+    /// Live plexus lines between the positions of `sources`.
+    Connect {
+        sources: Vec<ObjectId>,
+        max_distance: f64,
+        mode: gaanim_renderer::effects::ConnectMode,
+        neighbors: usize,
+        /// Draw longer links fainter.
+        fade: bool,
+    },
     /// A materialized vector boolean. Sources remain visible and independent.
     Boolean {
         sources: Vec<ObjectId>,
@@ -963,6 +972,10 @@ pub struct ObjectSpec {
     pub echo: Option<EchoSpec>,
     /// Keep the drawable sharp under the scene's motion blur.
     pub motion_blur_exempt: bool,
+    /// Squash and stretch along the velocity: `(amount, max_ratio)`.
+    pub squash_stretch: Option<(f64, f64)>,
+    /// Stroke width multipliers along the path, as `(position, factor)`.
+    pub stroke_profile: Option<std::sync::Arc<[(f64, f64)]>>,
     pub opacity: f32,
     pub opacity_overridden: bool,
     /// Ordered theme classes. Later classes have higher cascade priority.
@@ -1078,6 +1091,8 @@ impl ObjectSpec {
             tips: None,
             echo: None,
             motion_blur_exempt: false,
+            squash_stretch: None,
+            stroke_profile: None,
             opacity: 1.0,
             opacity_overridden: false,
             style_classes: Vec::new(),

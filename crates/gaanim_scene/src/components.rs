@@ -172,6 +172,12 @@ pub enum FillDirection {
 #[derive(Default)]
 pub struct LocalBounds(pub Bounds3D);
 
+/// A linear deformation, in the parent's space, applied about the drawable's
+/// position on top of its local transform, e.g. squash and stretch. Its
+/// members inherit it; the authored `SpatialTransform` is left unchanged.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct ShapeDeform(pub gaanim_core::kurbo::Affine);
+
 /// Local Y coordinate of a text object's typographic baseline.
 ///
 /// Unlike visual bounds, this metric is stable across ascenders, descenders,
