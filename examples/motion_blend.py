@@ -30,6 +30,6 @@ scene.wait(0.4)
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     # Swatches above the panel, swatches over it, and the leaks after crossing it.
-    scene.snapshots(snapshots, [0.2, 1.4, 2.0, 3.0])
+    scene.snapshots(snapshots, [0.2, 1.4, 2.0, 2.8])
 else:
     scene.render()
