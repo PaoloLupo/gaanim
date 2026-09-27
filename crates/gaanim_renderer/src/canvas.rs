@@ -130,8 +130,10 @@ impl VelloRenderer {
             device,
             vello::RendererOptions {
                 use_cpu,
-                // Vello cannot add antialiasing modes after initialization.
-                antialiasing_support: AaSupport::all(),
+                // Vello cannot add antialiasing modes after initialization,
+                // and building each one delays the first frame, so only the
+                // canvas mode is built. Change both together.
+                antialiasing_support: AaSupport::area_only(),
                 num_init_threads: None,
                 pipeline_cache: None,
             },
@@ -140,7 +142,8 @@ impl VelloRenderer {
     }
 }
 
-/// Antialiasing of the interactive canvas; exports choose their own.
+/// Antialiasing of the interactive canvas, the only mode its renderer
+/// supports; exports choose their own.
 const CANVAS_ANTIALIASING: AaConfig = AaConfig::Area;
 
 /// Environment variable that sets the preview resolution: `auto` (the

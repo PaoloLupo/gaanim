@@ -1,4 +1,4 @@
-use bevy::prelude::{Changed, Commands, Component, Entity, Query, Res, World};
+use bevy::prelude::{Changed, Commands, Component, DetectChangesMut, Entity, Query, Res, World};
 use gaanim_core::glam::DVec3;
 use gaanim_core::kurbo::{Affine, BezPath, PathEl, Point, Shape};
 use gaanim_core::peniko::Color;
@@ -276,13 +276,20 @@ pub fn reactive_readout_update_system(
                 readout.last_bounds = new_bounds;
                 rolling.last_value = Some((value, continuous));
             }
-            // Snapshot replay can restore the old path while retaining this cache.
-            if let Some(mut source) = path_source {
+            // Snapshot replay can restore the old path while retaining this
+            // cache. Write only what differs: an unchanged counter must not
+            // mark its geometry changed and make the renderer compare it.
+            if let Some(mut source) = path_source
+                && !Arc::ptr_eq(&source.0, &readout.last_path)
+            {
                 source.0 = readout.last_path.clone();
             }
-            path.0 = crate::writing::path_at_reveal(&readout.last_path, reveal);
-            bounds.0 = readout.last_bounds;
-            baseline.0 = rolling.baseline();
+            let revealed = crate::writing::path_at_reveal(&readout.last_path, reveal);
+            if !Arc::ptr_eq(&path.0, &revealed) {
+                path.0 = revealed;
+            }
+            bounds.set_if_neq(LocalBounds(readout.last_bounds));
+            baseline.set_if_neq(TextBaseline(rolling.baseline()));
             continue;
         }
         let number = localize_decimal_separator(

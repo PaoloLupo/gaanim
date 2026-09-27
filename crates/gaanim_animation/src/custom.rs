@@ -125,6 +125,10 @@ type Callback = Arc<dyn Fn(f64) -> Result<CustomValues, String> + Send + Sync + 
 pub struct CustomAnimation {
     channels: Arc<[CustomChannel]>,
     callback: Callback,
+    /// Values of the latest successful evaluation and its progress bits. The
+    /// callback is pure, so repeating the same progress (a finished clip on
+    /// every later frame and seek) reuses them without calling it again.
+    last: Arc<std::sync::Mutex<Option<(u64, CustomValues)>>>,
 }
 
 impl std::fmt::Debug for CustomAnimation {
@@ -157,6 +161,7 @@ impl CustomAnimation {
         Ok(Self {
             channels: channels.into(),
             callback: Arc::new(callback),
+            last: Arc::default(),
         })
     }
 
@@ -168,8 +173,15 @@ impl CustomAnimation {
         if !alpha.is_finite() {
             return Err("custom progress must be finite".into());
         }
+        let key = alpha.to_bits();
+        if let Some((last, values)) = &*self.last.lock().expect("custom cache poisoned")
+            && *last == key
+        {
+            return Ok(values.clone());
+        }
         let values = (self.callback)(alpha)?;
         values.validate(&self.channels)?;
+        *self.last.lock().expect("custom cache poisoned") = Some((key, values.clone()));
         Ok(values)
     }
 }
@@ -371,6 +383,27 @@ impl AnimatableLens for CustomPropertyLens {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeating_the_same_progress_reuses_the_pure_callback_result() {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = Arc::clone(&calls);
+        let animation = CustomAnimation::new(vec![CustomChannel::Opacity], move |alpha| {
+            counted.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(CustomValues {
+                opacity: Some(alpha as f32),
+                ..Default::default()
+            })
+        })
+        .unwrap();
+        let copy = animation.clone();
+
+        assert_eq!(animation.evaluate(1.0).unwrap().opacity, Some(1.0));
+        assert_eq!(copy.evaluate(1.0).unwrap().opacity, Some(1.0));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 1);
+        assert_eq!(animation.evaluate(0.5).unwrap().opacity, Some(0.5));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 2);
+    }
 
     #[test]
     fn callback_validation_is_atomic_and_requires_exact_channels() {
