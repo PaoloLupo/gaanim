@@ -307,6 +307,10 @@ pub struct Timeline {
     /// Flag to ignore interactive stop inputs (e.g. when GUI has focus).
     #[cfg_attr(feature = "serde", serde(skip))]
     pub ignore_input: bool,
+    /// Flag to ignore only pointer stop inputs, for hosts where a click on the
+    /// preview means something else (e.g. dragging an inspection camera).
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub ignore_pointer: bool,
     /// Active loop range (start_time, end_time) if loop playback is enabled.
     pub loop_range: Option<(f64, f64)>,
     /// Ordered time ranges that playback and stop navigation are limited to,
@@ -360,6 +364,7 @@ impl Default for Timeline {
             segments: Vec::new(),
             segment_position: None,
             ignore_input: false,
+            ignore_pointer: false,
             loop_range: None,
             play_ranges: Vec::new(),
             seek_request: None,

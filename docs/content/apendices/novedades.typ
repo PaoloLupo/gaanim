@@ -13,9 +13,23 @@ instalar una versión nueva, sigue
 
 = 0.5.1
 
-Sin publicar todavía. No hace falta cambiar tus escenas.
+Publicada el 27 de septiembre de 2026. No hace falta cambiar tus escenas.
 
 == Cambios
+
+- La barra de overlays (`O`) y sus guías usan el mismo estilo que el resto del
+  editor, con iconos, colores de la paleta y los atajos en cada botón. El
+  punto bajo el cursor se ajusta a la grilla con Mayús, se copia con `Ctrl+C`
+  como tupla lista para pegar y se oculta sobre los paneles. El objeto
+  seleccionado se enmarca con su centro y su tamaño en unidades (ver
+  #link("/referencia/scene/")[Escena]).
+- En la inspección 2D (`I`), un clic sin arrastrar selecciona el objeto bajo
+  el cursor, y la rueda acerca hacia el punto bajo el cursor en lugar del
+  centro de la vista.
+- El panel de error del script usa el estilo del editor: muestra arriba la
+  excepción y el archivo y la línea donde se produjo, y debajo el traceback
+  completo con el botón *Copiar*. El aviso de recarga también adopta el estilo
+  del editor.
 
 - La previsualización del editor ajusta su resolución para mantener la
   fluidez: si al reproducir no llega a 60 fps porque dibujar la escena cuesta
@@ -48,6 +62,24 @@ Sin publicar todavía. No hace falta cambiar tus escenas.
   fotograma, así que el renderer no vuelve a compararlo.
 - El editor muestra el primer fotograma algo antes: la previsualización solo
   prepara el antialiasing que usa.
+
+== Correcciones
+
+- En la inspección 2D del editor (`I`), arrastrar desplazaba la escena mucho
+  más que el cursor: con el marco por defecto de 16 × 9 unidades, un píxel
+  movía más de una unidad. Ahora la escena sigue al cursor al mismo ritmo en
+  cualquier marco, zoom o rotación de cámara, y `W`, `A`, `S`, `D` la
+  desplazan a una velocidad constante en pantalla.
+- El arrastre ya no cuenta el mismo movimiento dos veces (el cursor y el
+  movimiento bruto del ratón) ni salta al volver a entrar en la ventana.
+- En la inspección 2D, la rueda iba al revés que en 3D: hacia arriba alejaba.
+  Ahora en ambos casos hacia arriba acerca.
+- La selección con el ratón ya funciona con las figuras 2D de las escenas de
+  Python, que antes no se podían seleccionar.
+- En la inspección, el clic que empieza un arrastre ya no avanza a la
+  siguiente parada, y las flechas solo navegan entre paradas y escenas en
+  lugar de mover también la cámara. Arrastrar o usar la rueda sobre la línea
+  de tiempo, los paneles o la barra de overlays ya no mueve la cámara.
 
 = 0.5.0
 

@@ -65,6 +65,10 @@ pub(crate) enum Icon {
     Package,
     Mic,
     Record,
+    /// Four-way arrows: move the view.
+    Move,
+    /// Ring with ticks: a point and its coordinates.
+    Crosshair,
 }
 
 /// How an icon button presents its state.
@@ -471,6 +475,35 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color:
         }
         Icon::Record => {
             painter.circle_filled(c, s * 0.3, color);
+        }
+        Icon::Move => {
+            painter.line_segment([p(-0.42, 0.0), p(0.42, 0.0)], stroke);
+            painter.line_segment([p(0.0, -0.42), p(0.0, 0.42)], stroke);
+            let head = 0.13;
+            for (dx, dy) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
+                let tip = (dx * 0.42, dy * 0.42);
+                let back = (tip.0 - dx * head, tip.1 - dy * head);
+                painter.line(
+                    vec![
+                        p(back.0 - dy * head, back.1 - dx * head),
+                        p(tip.0, tip.1),
+                        p(back.0 + dy * head, back.1 + dx * head),
+                    ],
+                    stroke,
+                );
+            }
+        }
+        Icon::Crosshair => {
+            painter.circle_stroke(c, s * 0.24, stroke);
+            for (from, to) in [
+                ((-0.44, 0.0), (-0.24, 0.0)),
+                ((0.24, 0.0), (0.44, 0.0)),
+                ((0.0, -0.44), (0.0, -0.24)),
+                ((0.0, 0.24), (0.0, 0.44)),
+            ] {
+                painter.line_segment([p(from.0, from.1), p(to.0, to.1)], stroke);
+            }
+            painter.circle_filled(c, s * 0.06, color);
         }
     }
 }
