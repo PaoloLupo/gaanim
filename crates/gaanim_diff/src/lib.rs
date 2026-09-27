@@ -7,8 +7,8 @@ pub use model::{
     DiffReport, FrameDiff, FrameStatus, MANIFEST_FILE, REPORT_FILE, SnapshotEntry, SnapshotManifest,
 };
 pub use stops::{
-    STOPS_FILE, StopCapture, StopEntry, StopsManifest, capture_stops, parse_stop_selection,
-    stops_in_selection,
+    STOPS_FILE, StopCapture, StopEntry, StopsManifest, capture_bundle_stops, capture_stops,
+    parse_stop_selection, stops_in_selection,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -103,7 +103,16 @@ pub(crate) fn capture_canvas_as(
             gaanim_api::runtime::replay_canvas_into(world, canvas)
         })?
     };
+    write_snapshots(output_dir, frames, ids, (width, height))
+}
 
+/// Write captured `frames` as the PNG snapshots `ids` plus their manifest.
+pub(crate) fn write_snapshots(
+    output_dir: &Path,
+    frames: Vec<gaanim_export::prelude::CapturedFrame>,
+    ids: &[String],
+    (width, height): (u32, u32),
+) -> Result<SnapshotManifest> {
     let png_started = Instant::now();
     let mut snapshots = Vec::with_capacity(frames.len());
     for (frame, id) in frames.into_iter().zip(ids) {

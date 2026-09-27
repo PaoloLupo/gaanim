@@ -42,6 +42,10 @@ const GENERAL: Page = Page {
                     "gaanim [OPTIONS] <SCRIPT_OR_PROJECT>",
                     "Preview a script or project; it reloads on every save",
                 ),
+                (
+                    "gaanim [OPTIONS] <BUNDLE.gaanim>",
+                    "Play a recorded bundle; needs no Python",
+                ),
                 ("gaanim <COMMAND> [ARGS]", "Run one of the commands below"),
             ],
         ),
@@ -58,7 +62,7 @@ const GENERAL: Page = Page {
                 ),
                 (
                     "export <SCRIPT_OR_PROJECT>",
-                    "Render to MP4, WebM, WebP, GIF, or a PNG sequence",
+                    "Render to MP4, WebM, WebP, GIF, a PNG sequence, or a\nplayback bundle (.gaanim)",
                 ),
                 (
                     "--diff --example <SCRIPT>",
@@ -121,6 +125,14 @@ const GENERAL: Page = Page {
                     "gaanim --present --monitor 1 talk",
                     "Present the slides project in ./talk",
                 ),
+                (
+                    "gaanim export talk -o talk.gaanim",
+                    "Record it into one file to share",
+                ),
+                (
+                    "gaanim --present talk.gaanim",
+                    "Present the recording, without Python",
+                ),
             ],
         ),
         Block::Rows(
@@ -181,11 +193,14 @@ const INIT: Page = Page {
 };
 
 const EXPORT: Page = Page {
-    summary: "Render a script or project to a video, an animated image, or PNG frames.",
+    summary: "Render a script or project to a video, an animated image, PNG frames, or a\nplayback bundle; or render a bundle to a video without Python.",
     blocks: &[
         Block::Lines(
             "Usage",
-            &["gaanim export <SCRIPT_OR_PROJECT> --output <FILE> [OPTIONS]"],
+            &[
+                "gaanim export <SCRIPT_OR_PROJECT> --output <FILE> [OPTIONS]",
+                "gaanim export <BUNDLE.gaanim> --output <VIDEO> [OPTIONS]",
+            ],
         ),
         Block::Rows(
             "Formats (chosen by the --output extension)",
@@ -203,6 +218,10 @@ const EXPORT: Page = Page {
                 (
                     ".png",
                     "One PNG per frame (no FFmpeg; supports --transparent). A %d\nor %0Nd in the name becomes the frame number\n(frames/f_%04d.png -> f_0000.png); otherwise it is appended\n(frame.png -> frame_00000.png)",
+                ),
+                (
+                    ".gaanim",
+                    "Playback bundle: every frame the scene draws, with its\nslides, stops, markers and audio, in one file that plays,\npresents and exports without Python. Callbacks and\nupdaters are recorded as the frames they produced",
                 ),
             ],
         ),
@@ -236,6 +255,10 @@ const EXPORT: Page = Page {
                     "--to <SECONDS|MARKER>",
                     "End of the range (default: the end of the scene). Audio\nis trimmed to the range and PNG frames start at 0",
                 ),
+                (
+                    "--fps <N>",
+                    "Bundles only: frames recorded per second (default 60).\nA video exported from a bundle runs at this rate",
+                ),
                 ("-h, --help", "Print this help"),
             ],
         ),
@@ -258,6 +281,14 @@ const EXPORT: Page = Page {
                     "gaanim export . -o intro.gif --from 0 --to intro_end",
                     "Only up to scene.marker(\"intro_end\")",
                 ),
+                (
+                    "gaanim export . -o talk.gaanim",
+                    "Record a playback bundle to share",
+                ),
+                (
+                    "gaanim export talk.gaanim -o talk.mp4",
+                    "Render the bundle to video, without Python",
+                ),
             ],
         ),
     ],
@@ -267,7 +298,13 @@ const EXPORT: Page = Page {
 const CHECK: Page = Page {
     summary: "Validate a scene or presentation without opening a window.",
     blocks: &[
-        Block::Lines("Usage", &["gaanim check <SCRIPT_OR_PROJECT> [--strict]"]),
+        Block::Lines(
+            "Usage",
+            &[
+                "gaanim check <SCRIPT_OR_PROJECT> [--strict]",
+                "gaanim check <BUNDLE.gaanim>",
+            ],
+        ),
         Block::Lines(
             "Checks",
             &[
@@ -276,6 +313,7 @@ const CHECK: Page = Page {
                 "a 16:9 frame for presentations",
                 "unthemed scenes whose default white objects match the background",
                 "unresolved template placeholders",
+                "for a bundle: every frame recomposes to its recorded digest",
             ],
         ),
         Block::Rows(
@@ -315,7 +353,7 @@ const DIFF: Page = Page {
             &[
                 (
                     "-e, --example <SCRIPT>",
-                    "Capture and compare one script; it calls\nscene.snapshots(...) when GAANIM_SNAPSHOTS is set",
+                    "Capture and compare one script; it calls\nscene.snapshots(...) when GAANIM_SNAPSHOTS is set.\nA playback bundle (.gaanim) captures its stops,\nwithout Python",
                 ),
                 (
                     "--tests-root <DIR>",

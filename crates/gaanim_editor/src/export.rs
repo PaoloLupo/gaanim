@@ -31,14 +31,26 @@ pub struct ProjectPaths {
 #[derive(Resource, Clone, Default)]
 pub struct StashedReplay {
     pub canvas: Option<SceneModel>,
+    /// The playback bundle shown instead of a script's scene: Presenter View
+    /// previews its recorded frames.
+    pub bundle: Option<StashedBundle>,
     /// Changes on every replay, even when segment names and timings stay equal.
     pub revision: u64,
+}
+
+/// An open playback bundle and the pixel size of its frame.
+#[derive(Clone, Debug)]
+pub struct StashedBundle {
+    pub path: PathBuf,
+    pub size: (u32, u32),
 }
 
 #[derive(Resource)]
 pub struct ExportState {
     pub dialog_open: bool,
     pub format: ExportFormat,
+    /// Record a playback bundle (`.gaanim`) instead of a video.
+    pub bundle: bool,
     pub quality: ExportQuality,
     pub video_encoder: VideoEncoder,
     pub output_path: String,
@@ -110,11 +122,19 @@ impl ExportQuality {
     }
 }
 
+/// What the export dialog writes: a video format or a playback bundle.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum FormatChoice {
+    Video(ExportFormat),
+    Bundle,
+}
+
 impl Default for ExportState {
     fn default() -> Self {
         Self {
             dialog_open: false,
             format: ExportFormat::Mp4,
+            bundle: false,
             quality: ExportQuality::Standard,
             video_encoder: VideoEncoder::Auto,
             output_path: "output.mp4".to_string(),
@@ -141,6 +161,7 @@ pub fn export_dialog_system(
     timeline: ResMut<Timeline>,
     replay_stash: Res<StashedReplay>,
     project_paths: Option<Res<ProjectPaths>>,
+    bundle: Option<Res<crate::bundle_player::BundlePlayback>>,
 ) {
     let Ok(ctx) = ctx.ctx_mut() else { return };
 
@@ -446,22 +467,44 @@ pub fn export_dialog_system(
 
     // Collect all values BEFORE the button handlers (to avoid borrow issues)
     let mut current_format = state.format;
+    let mut current_choice = if state.bundle {
+        FormatChoice::Bundle
+    } else {
+        FormatChoice::Video(state.format)
+    };
     let mut current_quality = state.quality;
     let mut current_encoder = state.video_encoder;
     let mut current_output = state.output_path.clone();
     let mut current_width = state.width;
     let mut current_height = state.height;
     let mut current_fit = state.fit;
-    let has_replay = replay_stash.canvas.is_some();
-    let scene_resolution = replay_stash
-        .canvas
-        .as_ref()
-        .map(|canvas| (canvas.frame.width, canvas.frame.height));
+    // A playback bundle exports its recorded frames, at its recorded rate.
+    let bundle_source = bundle.as_ref().map(|bundle| bundle.path().to_path_buf());
+    let has_replay = replay_stash.canvas.is_some() || bundle_source.is_some();
+    let scene_resolution = match &bundle {
+        Some(bundle) => {
+            let (width, height) = bundle.output_size();
+            Some((f64::from(width), f64::from(height)))
+        }
+        None => replay_stash
+            .canvas
+            .as_ref()
+            .map(|canvas| (canvas.frame.width, canvas.frame.height)),
+    };
     let dur = timeline.cached_duration;
-    let fps = current_quality.fps();
+    let fps = bundle
+        .as_ref()
+        .map(|bundle| bundle.fps())
+        .unwrap_or_else(|| current_quality.fps());
     let total = (dur * fps as f64).ceil() as u64;
+    // An open bundle exports video; a script's scene can also be recorded
+    // into a bundle.
+    let offers_bundle = bundle_source.is_none();
+    if !offers_bundle {
+        current_choice = FormatChoice::Video(current_format);
+    }
 
-    let previous_format = current_format;
+    let previous_choice = current_choice;
     // Enter submits unless a field is using it (text or number entry).
     let enter_submits = ctx.input(|input| input.key_pressed(egui::Key::Enter))
         && ctx.memory(|memory| memory.focused().is_none());
@@ -486,7 +529,7 @@ pub fn export_dialog_system(
                             "{} · {} frames a {} fps",
                             crate::format_time(dur),
                             total,
-                            current_quality.fps(),
+                            fps,
                         ))
                         .size(12.0)
                         .color(palette::TEXT_MUTED),
@@ -504,17 +547,31 @@ pub fn export_dialog_system(
             ui.add_space(8.0);
 
             section_label(ui, "Formato");
-            segmented(
-                ui,
-                "export_format",
-                &mut current_format,
-                &[
-                    (ExportFormat::Mp4, "MP4", "Video H.264"),
-                    (ExportFormat::Webm, "WebM", "Video VP9"),
-                    (ExportFormat::Webp, "WebP", "Imagen animada"),
-                    (ExportFormat::Gif, "GIF", "Imagen animada"),
-                ],
-            );
+            let videos = [
+                (FormatChoice::Video(ExportFormat::Mp4), "MP4", "Video H.264"),
+                (FormatChoice::Video(ExportFormat::Webm), "WebM", "Video VP9"),
+                (FormatChoice::Video(ExportFormat::Webp), "WebP", "Imagen animada"),
+                (FormatChoice::Video(ExportFormat::Gif), "GIF", "Imagen animada"),
+                (FormatChoice::Bundle, "Paquete", "Sin Python"),
+            ];
+            let choices = if offers_bundle {
+                &videos[..]
+            } else {
+                &videos[..4]
+            };
+            segmented(ui, "export_format", &mut current_choice, choices);
+            if current_choice == FormatChoice::Bundle {
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(
+                            "Un archivo .gaanim con toda la escena: se reproduce, presenta y exporta a vídeo sin Python.",
+                        )
+                        .size(12.0)
+                        .color(palette::TEXT_MUTED),
+                    )
+                    .wrap(),
+                );
+            }
             ui.add_space(6.0);
 
             section_label(ui, "Calidad");
@@ -529,7 +586,8 @@ pub fn export_dialog_system(
                 ],
             );
 
-            if current_format == ExportFormat::Mp4 {
+            let recording = current_choice == FormatChoice::Bundle;
+            if current_choice == FormatChoice::Video(ExportFormat::Mp4) {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
                     section_label(ui, "Codificador");
@@ -565,6 +623,7 @@ pub fn export_dialog_system(
             }
             ui.add_space(6.0);
 
+            if !recording {
             section_label(ui, "Resolución");
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
@@ -639,6 +698,7 @@ pub fn export_dialog_system(
                 }
             }
             ui.add_space(6.0);
+            }
 
             section_label(ui, "Archivo");
             ui.add(
@@ -652,11 +712,13 @@ pub fn export_dialog_system(
             ui.add_space(14.0);
 
             ui.horizontal(|ui| {
+                let summary = if recording {
+                    format!("paquete · {} fps", current_quality.fps())
+                } else {
+                    format!("{current_width}×{current_height} · {fps} fps")
+                };
                 ui.label(
-                    egui::RichText::new(format!(
-                        "{current_width}×{current_height} · {} fps",
-                        current_quality.fps()
-                    ))
+                    egui::RichText::new(summary)
                     .size(12.0)
                     .color(palette::TEXT_FAINT),
                 );
@@ -680,12 +742,22 @@ pub fn export_dialog_system(
     if enter_submits && !trigger_cancel {
         trigger_export = true;
     }
-    if current_format != previous_format {
-        current_output = with_format_extension(&current_output, current_format);
+    if let FormatChoice::Video(format) = current_choice {
+        current_format = format;
+    }
+    if current_choice != previous_choice {
+        current_output = with_output_extension(
+            &current_output,
+            match current_choice {
+                FormatChoice::Video(format) => export_format_arg(format),
+                FormatChoice::Bundle => gaanim_bundle::EXTENSION,
+            },
+        );
     }
 
     // Apply state changes AFTER the egui closures (no borrow conflicts)
     state.format = current_format;
+    state.bundle = current_choice == FormatChoice::Bundle && offers_bundle;
     state.quality = current_quality;
     state.video_encoder = current_encoder;
     state.output_path = current_output;
@@ -725,6 +797,7 @@ pub fn export_dialog_system(
             };
             let out = out_path.to_string_lossy().into_owned();
             let fmt = state.format;
+            let record_bundle = state.bundle;
             let qual = state.quality;
             let video_encoder = if fmt == ExportFormat::Mp4 {
                 state.video_encoder
@@ -736,11 +809,14 @@ pub fn export_dialog_system(
             let progress = state.progress_shared.clone();
             let cancel_requested = state.cancel_requested.clone();
             let telemetry = ExportTelemetry::new();
-            let canvas = replay_stash.canvas.clone().unwrap();
+            let canvas = replay_stash.canvas.clone();
             let worker_paths = project_paths
                 .as_ref()
+                .filter(|_| bundle_source.is_none())
                 .map(|paths| (paths.script_path.clone(), paths.project_dir.clone()));
-            let needs_worker = canvas.has_native_3d_content();
+            let needs_worker = canvas
+                .as_ref()
+                .is_some_and(|canvas| canvas.has_native_3d_content());
 
             state.active = true;
             state.dialog_open = false;
@@ -767,12 +843,33 @@ pub fn export_dialog_system(
                         &project_dir,
                         &out,
                         qual,
-                        (fmt, video_encoder),
+                        (
+                            if record_bundle {
+                                gaanim_bundle::EXTENSION
+                            } else {
+                                export_format_arg(fmt)
+                            },
+                            video_encoder,
+                        ),
                         output_size,
                         output_fit,
                         telemetry.clone(),
                         cancel_requested,
                     ),
+                    None if record_bundle => match canvas {
+                        Some(canvas) => {
+                            let mut config = crate::cli::bundle_config(
+                                None,
+                                &canvas,
+                                &out,
+                                Some(crate::cli::bundle_fps(qual.arg())),
+                            );
+                            config.telemetry = Some(telemetry.clone());
+                            gaanim_api::export::record_canvas(canvas, config)
+                                .map_err(|error| error.to_string())
+                        }
+                        None => Err("No replay data available".to_string()),
+                    },
                     None if needs_worker => Err(
                         "3D export requires an open project script so it can run in an isolated process"
                             .to_string(),
@@ -790,7 +887,15 @@ pub fn export_dialog_system(
                         config.video_encoder = video_encoder;
                         config.headless = true;
                         config.telemetry = Some(telemetry.clone());
-                        export_canvas(canvas, config).map_err(|error| error.to_string())
+                        match (bundle_source, canvas) {
+                            (Some(bundle), _) => {
+                                gaanim_export::prelude::export_bundle(&bundle, config)
+                                    .map_err(|error| error.to_string())
+                            }
+                            (None, Some(canvas)) => export_canvas(canvas, config)
+                                .map_err(|error| error.to_string()),
+                            (None, None) => Err("No replay data available".to_string()),
+                        }
                     }
                 };
                 if let Ok(mut lock) = progress_clone.lock() {
@@ -942,7 +1047,7 @@ fn run_export_worker(
     project_dir: &std::path::Path,
     output_path: &str,
     quality: ExportQuality,
-    encoding: (ExportFormat, VideoEncoder),
+    encoding: (&'static str, VideoEncoder),
     output_size: (u32, u32),
     fit: OutputFit,
     telemetry: ExportTelemetry,
@@ -957,7 +1062,7 @@ fn run_export_worker(
         .arg(script_path)
         .arg(output_path)
         .arg(quality.arg())
-        .arg(export_format_arg(format))
+        .arg(format)
         .arg("--encoder")
         .arg(video_encoder.arg_name())
         .arg("--width")
@@ -1079,12 +1184,18 @@ fn aspect_label(width: f64, height: f64) -> String {
 
 /// Keep the output extension in step with the chosen format, leaving custom
 /// extensions alone.
+#[cfg(test)]
 fn with_format_extension(path: &str, format: ExportFormat) -> String {
-    const KNOWN: [&str; 4] = ["mp4", "webm", "webp", "gif"];
+    with_output_extension(path, export_format_arg(format))
+}
+
+/// `path` with the extension `extension` when it has a known export one.
+fn with_output_extension(path: &str, extension: &str) -> String {
+    const KNOWN: [&str; 5] = ["mp4", "webm", "webp", "gif", "gaanim"];
     let as_path = Path::new(path);
     match as_path.extension().and_then(|ext| ext.to_str()) {
         Some(ext) if KNOWN.contains(&ext.to_ascii_lowercase().as_str()) => as_path
-            .with_extension(export_format_arg(format))
+            .with_extension(extension)
             .to_string_lossy()
             .into_owned(),
         _ => path.to_string(),

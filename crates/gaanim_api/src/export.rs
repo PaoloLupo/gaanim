@@ -10,6 +10,7 @@ use gaanim_export::prelude::{ExportError, export_scene, export_scene_direct};
 use crate::canvas::SceneModel;
 use crate::runtime::replay_canvas_into;
 
+pub use gaanim_export::bundle::BundleConfig;
 pub use gaanim_export::encoder::{EncodingSpeed, VideoEncoder, detect_best_encoder};
 pub use gaanim_export::prelude::{
     AspectRatioPreset, AudioTrack, AudioTrackError, ExportConfig, ExportFormat, OutputFit,
@@ -54,6 +55,23 @@ pub fn export_canvas(canvas: SceneModel, mut config: ExportConfig) -> Result<(),
     } else {
         export_scene(config, move |world| replay_canvas_into(world, canvas))
     }
+}
+
+/// Record a SceneModel into a playback bundle (`.gaanim`) that replays
+/// without Python.
+pub fn record_canvas(canvas: SceneModel, config: BundleConfig) -> Result<(), ExportError> {
+    // The recording builds the scene in two worlds; see `record_bundle`.
+    gaanim_export::bundle::record_bundle(config, move |world| {
+        replay_canvas_into(world, canvas.clone())
+    })
+}
+
+/// Whether `path` names a playback bundle.
+pub fn is_bundle_path(path: &str) -> bool {
+    std::path::Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case(gaanim_bundle::EXTENSION))
 }
 
 /// Export one segment while preserving all other export settings.
@@ -182,6 +200,16 @@ pub fn export_canvas_to_path(
     fps: Option<u32>,
     transparent: Option<bool>,
 ) -> Result<(), ExportError> {
+    if is_bundle_path(output_path) {
+        let mut config = BundleConfig::new(output_path);
+        if let Some(fps) = fps {
+            config.fps = fps;
+        }
+        let (width, height) = canvas.frame.preview_pixel_size();
+        config.width = width;
+        config.height = height;
+        return record_canvas(canvas, config);
+    }
     let mut config = ExportConfig::new(output_path);
     config.headless = true;
     if let Some(fps) = fps {

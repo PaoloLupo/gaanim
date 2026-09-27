@@ -330,6 +330,7 @@ fn replay(
         .map_or(1, |stash| stash.revision.wrapping_add(1).max(1));
     world.insert_resource(StashedReplay {
         canvas: Some(canvas.clone()),
+        bundle: None,
         revision,
     });
     let kind = runtime::replay_canvas_incremental(world, canvas, allow_reuse, clear_scene_entities);

@@ -2,6 +2,8 @@
 //!
 //! It handles commands that do not need Python, discovers a compatible runtime
 //! for project/script launches, and then starts the `gaanim-core` binary.
+//! Playback bundles (`.gaanim`) play and export through `gaanim-play`, which
+//! does not link Python, so they need no Python installation at all.
 
 use gaanim_core::console;
 use gaanim_project::help::{self, Topic};
@@ -9,13 +11,27 @@ use gaanim_project::{
     CreateProjectOptions, EnvironmentProbe, ProjectKind, activate_environment, core_environment,
     create_project, python_requirement,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if handle_no_python_commands(&args) {
         return;
+    }
+    if bundle_input(&args) {
+        let player = sibling_binary("gaanim-play");
+        let status = Command::new(&player)
+            .args(&args[1..])
+            .status()
+            .unwrap_or_else(|error| {
+                console::error(
+                    "launch",
+                    format!("failed to start {}: {error}", player.display()),
+                );
+                std::process::exit(1);
+            });
+        std::process::exit(status.code().unwrap_or(1));
     }
 
     // The core is linked against Python, including for the Home screen, so
@@ -34,30 +50,7 @@ fn main() {
         std::process::exit(2);
     }
 
-    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("gaanim.exe"));
-    let core_exe = exe
-        .parent()
-        .map(|parent| {
-            parent.join(if cfg!(windows) {
-                "gaanim-core.exe"
-            } else {
-                "gaanim-core"
-            })
-        })
-        .unwrap_or_else(|| {
-            PathBuf::from(if cfg!(windows) {
-                "gaanim-core.exe"
-            } else {
-                "gaanim-core"
-            })
-        });
-    if !core_exe.is_file() {
-        console::error(
-            "launch",
-            format!("core binary not found at {}", core_exe.display()),
-        );
-        std::process::exit(1);
-    }
+    let core_exe = sibling_binary("gaanim-core");
     let status = Command::new(&core_exe)
         .args(&args[1..])
         .envs(core_environment(&probe))
@@ -70,6 +63,83 @@ fn main() {
             std::process::exit(1);
         });
     std::process::exit(status.code().unwrap_or(1));
+}
+
+/// The binary `name` installed next to this launcher.
+fn sibling_binary(name: &str) -> PathBuf {
+    let file = if cfg!(windows) {
+        format!("{name}.exe")
+    } else {
+        name.to_string()
+    };
+    let path = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|parent| parent.join(&file)))
+        .unwrap_or_else(|| PathBuf::from(&file));
+    if !path.is_file() {
+        console::error(
+            "launch",
+            format!("{name} binary not found at {}", path.display()),
+        );
+        std::process::exit(1);
+    }
+    path
+}
+
+/// Whether the command plays or exports a playback bundle: its input (not
+/// its `--output`) is a `.gaanim` file.
+fn bundle_input(args: &[String]) -> bool {
+    if args.get(1).map(String::as_str) == Some("--diff") {
+        return args
+            .windows(2)
+            .find(|pair| matches!(pair[0].as_str(), "--example" | "-e"))
+            .is_some_and(|pair| is_bundle(&pair[1]));
+    }
+    let (rest, takes_value): (&[String], &[&str]) =
+        if args.get(1).map(String::as_str) == Some("check") {
+            (&args[2..], &[])
+        } else if args.get(1).map(String::as_str) == Some("export") {
+            (
+                &args[2..],
+                &[
+                    "--output",
+                    "-o",
+                    "--quality",
+                    "--encoder",
+                    "--width",
+                    "--height",
+                    "--fit",
+                    "--from",
+                    "--to",
+                    "--fps",
+                ],
+            )
+        } else {
+            (
+                args.get(1..).unwrap_or_default(),
+                &["--monitor", "--sections", "--from"],
+            )
+        };
+    let mut index = 0;
+    while index < rest.len() {
+        let arg = rest[index].as_str();
+        if takes_value.contains(&arg) {
+            index += 2;
+            continue;
+        }
+        if !arg.starts_with('-') {
+            return is_bundle(arg);
+        }
+        index += 1;
+    }
+    false
+}
+
+fn is_bundle(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("gaanim"))
 }
 
 fn handle_no_python_commands(args: &[String]) -> bool {
@@ -240,6 +310,48 @@ mod tests {
     #[test]
     fn bare_launch_is_not_consumed_by_no_python_dispatch() {
         assert!(!handle_no_python_commands(&["gaanim".into()]));
+    }
+
+    #[test]
+    fn bundles_play_and_export_without_python() {
+        let args = |values: &[&str]| -> Vec<String> {
+            std::iter::once("gaanim")
+                .chain(values.iter().copied())
+                .map(str::to_string)
+                .collect()
+        };
+        assert!(bundle_input(&args(&["talk.gaanim"])));
+        assert!(bundle_input(&args(&[
+            "--present",
+            "--monitor",
+            "1",
+            "talk.GAANIM"
+        ])));
+        assert!(bundle_input(&args(&[
+            "export",
+            "-o",
+            "talk.mp4",
+            "talk.gaanim"
+        ])));
+        // Recording a bundle runs the script.
+        assert!(!bundle_input(&args(&[
+            "export",
+            "talk.py",
+            "--output",
+            "talk.gaanim"
+        ])));
+        assert!(!bundle_input(&args(&["--from", "intro.gaanim", "talk.py"])));
+        assert!(bundle_input(&args(&["check", "talk.gaanim"])));
+        assert!(bundle_input(&args(&[
+            "--diff",
+            "--example",
+            "talk.gaanim",
+            "--bless"
+        ])));
+        assert!(!bundle_input(&args(&["--diff", "-e", "talk.py"])));
+        assert!(!bundle_input(&args(&["--diff", "-b", "a", "-c", "b"])));
+        assert!(!bundle_input(&args(&["check", "talk.py"])));
+        assert!(!bundle_input(&args(&[])));
     }
 
     #[test]

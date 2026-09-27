@@ -1,0 +1,32 @@
+[package]
+name = "gaanim_bundle"
+version = "0.5.2"
+edition = "2024"
+description = "Playback bundles: scenes and presentations recorded into one file that replays without Python"
+
+[dependencies]
+gaanim_core = { path = "../gaanim_core" }
+gaanim_math = { path = "../gaanim_math" }
+gaanim_scene = { path = "../gaanim_scene" }
+gaanim_renderer = { path = "../gaanim_renderer" }
+gaanim_timeline = { path = "../gaanim_timeline" }
+
+bevy = { workspace = true }
+blake3 = "1.8"
+bytemuck = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+vello = "0.9.0"
+# Patched in vendor/vello_encoding; hashed to verify replayed frames.
+vello_encoding = "0.9.0"
+zip = { version = "2.4", default-features = false, features = ["deflate"] }
+
+[features]
+dev-dynamic = [
+    "bevy/dynamic_linking",
+    "gaanim_math/dev-dynamic",
+    "gaanim_renderer/dev-dynamic",
+    "gaanim_scene/dev-dynamic",
+    "gaanim_timeline/dev-dynamic",
+]

@@ -10,10 +10,14 @@ use ui_kit::{ButtonTone, Icon, PRIMARY_SIZE, ToggleColor, divider, icon_button, 
 #[cfg(target_os = "linux")]
 pub mod alsa_errors;
 mod app_icon;
+pub mod bundle_player;
+pub mod cli;
+pub mod diff_cli;
 pub mod export;
 pub mod feedback;
 mod fps_overlay;
 pub mod frame_profile;
+pub mod host;
 pub mod narration;
 pub mod overlays;
 mod presenter;
@@ -175,6 +179,7 @@ impl Plugin for GaanimEditorPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(EguiPlugin::default())
             .add_plugins(app_icon::AppIconPlugin)
+            .add_plugins(bundle_player::BundlePlayerPlugin)
             .add_plugins(project_hub::ProjectHubPlugin)
             .add_systems(PreUpdate, square_egui_corners_system)
             .init_resource::<EditorState>()
@@ -463,10 +468,11 @@ fn editor_ui_system(
     mut ctx: bevy_egui::EguiContexts,
     mut presentation_mode: ResMut<PresentationMode>,
     mut state: ResMut<EditorState>,
-    (mut export_state, mut narration_panel, narration_session): (
+    (mut export_state, mut narration_panel, narration_session, bundle_playback): (
         ResMut<export::ExportState>,
         ResMut<narration::NarrationPanel>,
         Res<narration::NarrationSession>,
+        Option<Res<bundle_player::BundlePlayback>>,
     ),
     mut fullscreen_state: ResMut<EditorFullscreenState>,
     mut timeline: ResMut<Timeline>,
@@ -509,6 +515,8 @@ fn editor_ui_system(
         return;
     }
     let narration_open = narration_panel.open;
+    // A playback bundle has no script to narrate.
+    let narration_available = bundle_playback.is_none();
 
     let is_exporting = export_state.active;
     let (export_progress_pct, export_current, export_total) = if is_exporting {
@@ -840,9 +848,12 @@ fn editor_ui_system(
                                         } else {
                                             ButtonTone::Ghost
                                         };
-                                        if icon_button(ui, Icon::Mic, narration_tone, true)
-                                            .on_hover_text("Narración: grabar la voz de la escena")
-                                            .clicked()
+                                        if narration_available
+                                            && icon_button(ui, Icon::Mic, narration_tone, true)
+                                                .on_hover_text(
+                                                    "Narración: grabar la voz de la escena",
+                                                )
+                                                .clicked()
                                         {
                                             actions.push(PlaybackAction::ToggleNarration);
                                         }
@@ -980,9 +991,10 @@ fn editor_ui_system(
                                             if ui.button("Presentar").clicked() {
                                                 actions.push(PlaybackAction::Present);
                                             }
-                                            if ui
-                                                .selectable_label(narration_open, "Narración")
-                                                .clicked()
+                                            if narration_available
+                                                && ui
+                                                    .selectable_label(narration_open, "Narración")
+                                                    .clicked()
                                             {
                                                 actions.push(PlaybackAction::ToggleNarration);
                                             }

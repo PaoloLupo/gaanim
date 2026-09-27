@@ -9,7 +9,10 @@
 use bevy::prelude::*;
 use bevy_egui::egui;
 use crossbeam_channel::{Receiver, TryRecvError, unbounded};
-use gaanim_export::prelude::{AspectRatioPreset, ExportConfig, capture_scene_direct_streaming};
+use gaanim_export::prelude::{
+    AspectRatioPreset, CapturedFrame, ExportConfig, capture_bundle_streaming,
+    capture_scene_direct_streaming,
+};
 use gaanim_timeline::timeline::Timeline;
 use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
@@ -17,7 +20,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use crate::export::StashedReplay;
+use crate::export::{StashedBundle, StashedReplay};
 
 /// Growing the presenter window re-renders every cue, so wait until a drag
 /// resize has settled before starting that work.
@@ -33,6 +36,14 @@ pub(crate) enum ThumbnailMoment {
 }
 
 pub(crate) type ThumbnailKey = (u32, ThumbnailMoment);
+
+/// What cue previews are rendered from.
+enum PreviewSource {
+    /// A script's scene, replayed in a headless world.
+    Scene(gaanim_api::canvas::SceneModel),
+    /// A playback bundle's recorded frames.
+    Bundle(StashedBundle),
+}
 
 #[derive(Debug)]
 struct ThumbnailPixels {
@@ -117,15 +128,22 @@ impl PresenterThumbnailCache {
         now: Instant,
     ) {
         self.poll();
-        let Some(canvas) = stash.canvas.as_ref() else {
-            return;
+        let source = match (&stash.canvas, &stash.bundle) {
+            (Some(canvas), _) => PreviewSource::Scene(canvas.clone()),
+            (None, Some(bundle)) => PreviewSource::Bundle(bundle.clone()),
+            (None, None) => return,
         };
         let revision = stash.revision;
         if revision == 0 || timeline.segments.is_empty() {
             return;
         }
         if self.native_3d.is_none_or(|(known, _)| known != revision) {
-            self.native_3d = Some((revision, canvas.has_native_3d_content()));
+            let native_3d = match &source {
+                PreviewSource::Scene(canvas) => canvas.has_native_3d_content(),
+                // A bundle holds only what the 2D renderer draws.
+                PreviewSource::Bundle(_) => false,
+            };
+            self.native_3d = Some((revision, native_3d));
         }
 
         let edge = self.target_edge(revision, desired_edge, now);
@@ -148,7 +166,7 @@ impl PresenterThumbnailCache {
             return;
         }
         self.attempts += 1;
-        self.spawn(canvas.clone(), revision, edge, timeline, priority);
+        self.spawn(source, revision, edge, timeline, priority);
     }
 
     fn target_edge(&mut self, revision: u64, desired: u32, now: Instant) -> u32 {
@@ -188,13 +206,16 @@ impl PresenterThumbnailCache {
 
     fn spawn(
         &mut self,
-        canvas: gaanim_api::canvas::SceneModel,
+        source: PreviewSource,
         revision: u64,
         edge: u32,
         timeline: &Timeline,
         priority: &[ThumbnailKey],
     ) {
-        let (preview_width, preview_height) = canvas.frame.preview_pixel_size();
+        let (preview_width, preview_height) = match &source {
+            PreviewSource::Scene(canvas) => canvas.frame.preview_pixel_size(),
+            PreviewSource::Bundle(bundle) => bundle.size,
+        };
         let (width, height) = thumbnail_dimensions(preview_width, preview_height, edge);
         let captures = capture_plan(timeline, priority);
         let keys = captures
@@ -209,44 +230,52 @@ impl PresenterThumbnailCache {
         let spawn_result = std::thread::Builder::new()
             .name("gaanim-presenter-thumbnails".to_string())
             .spawn(move || {
-                let mut config = ExportConfig::new("presenter-thumbnails.png");
-                config.width = width;
-                config.height = height;
-                config.aspect_ratio = AspectRatioPreset::Custom;
-                config.headless = true;
                 let mut groups = captures.into_iter().map(|(_, keys)| keys);
-                let result = capture_scene_direct_streaming(
-                    config,
-                    &times,
-                    move |world| gaanim_api::runtime::replay_canvas_into(world, canvas),
-                    |frame| {
-                        let Some(keys) = groups.next() else {
-                            return ControlFlow::Break(());
+                let on_frame = |frame: CapturedFrame| {
+                    let Some(keys) = groups.next() else {
+                        return ControlFlow::Break(());
+                    };
+                    if worker_cancel.load(Ordering::Acquire) {
+                        return ControlFlow::Break(());
+                    }
+                    let last = keys.len().saturating_sub(1);
+                    let mut rgba = Some(frame.rgba);
+                    for (index, key) in keys.into_iter().enumerate() {
+                        let rgba = if index == last {
+                            rgba.take().unwrap_or_default()
+                        } else {
+                            rgba.clone().unwrap_or_default()
                         };
-                        if worker_cancel.load(Ordering::Acquire) {
+                        let pixels = ThumbnailPixels {
+                            key,
+                            width: frame.width,
+                            height: frame.height,
+                            rgba,
+                        };
+                        if sender.send(WorkerEvent::Frame(pixels)).is_err() {
                             return ControlFlow::Break(());
                         }
-                        let last = keys.len().saturating_sub(1);
-                        let mut rgba = Some(frame.rgba);
-                        for (index, key) in keys.into_iter().enumerate() {
-                            let rgba = if index == last {
-                                rgba.take().unwrap_or_default()
-                            } else {
-                                rgba.clone().unwrap_or_default()
-                            };
-                            let pixels = ThumbnailPixels {
-                                key,
-                                width: frame.width,
-                                height: frame.height,
-                                rgba,
-                            };
-                            if sender.send(WorkerEvent::Frame(pixels)).is_err() {
-                                return ControlFlow::Break(());
-                            }
-                        }
-                        ControlFlow::Continue(())
-                    },
-                )
+                    }
+                    ControlFlow::Continue(())
+                };
+                let result = match source {
+                    PreviewSource::Scene(canvas) => {
+                        let mut config = ExportConfig::new("presenter-thumbnails.png");
+                        config.width = width;
+                        config.height = height;
+                        config.aspect_ratio = AspectRatioPreset::Custom;
+                        config.headless = true;
+                        capture_scene_direct_streaming(
+                            config,
+                            &times,
+                            move |world| gaanim_api::runtime::replay_canvas_into(world, canvas),
+                            on_frame,
+                        )
+                    }
+                    PreviewSource::Bundle(bundle) => {
+                        capture_bundle_streaming(&bundle.path, width, height, &times, on_frame)
+                    }
+                }
                 .map_err(|error| error.to_string());
                 let _ = sender.send(WorkerEvent::Finished(result));
             });
@@ -650,6 +679,7 @@ mod tests {
         cache.job = Some(job);
         let stash = StashedReplay {
             canvas: Some(gaanim_api::canvas::SceneModel::new(1920, 1080)),
+            bundle: None,
             revision: 2,
         };
 

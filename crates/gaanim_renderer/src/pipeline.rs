@@ -5,6 +5,7 @@ use crate::effects::{
     ElementBlend, FillLevelBinding, GaussianBlur, Glow, MotionBlurExempt, StrokeAlign,
     StrokeProfile, VectorOutlineBinding, ViewLayer,
 };
+use crate::fragment::{FragmentParts, FragmentRecipe, build_fragment, fragment_recipe};
 use crate::lottie::LottiePlayer;
 use crate::stroke::{draw_stroke, view_stroke_transform};
 use bevy::prelude::*;
@@ -283,9 +284,19 @@ impl PartialEq for FragmentInputs {
 
 #[derive(Clone)]
 pub struct ExtractedElement {
+    /// The drawable, as a stable key within the frame.
+    entity: Entity,
+    /// What `scene` was built from, when the frame is being captured.
+    recipe: Option<Arc<FragmentRecipe>>,
+    /// Lottie scene drawn first by `recipe`, when the frame is being captured.
+    lottie: Option<Arc<vello::Scene>>,
     transform: kurbo::Affine,
     opacity: f32,
     opacity_bounds: kurbo::Rect,
+    /// `opacity_bounds` before the antialiasing margin, which depends on the
+    /// output resolution: the rectangle and the reach of strokes and effects.
+    /// `None` when `opacity_bounds` takes no margin.
+    opacity_extent: Option<(kurbo::Rect, f64)>,
     opacity_group: Entity,
     render_order: RenderOrder,
     scene: Arc<vello::Scene>,
@@ -376,9 +387,13 @@ impl ExtractedElement {
     /// the screen.
     fn seen_through(&self, content: kurbo::Affine) -> Self {
         Self {
+            entity: self.entity,
+            recipe: self.recipe.clone(),
+            lottie: self.lottie.clone(),
             transform: content * self.transform,
             opacity: self.opacity,
             opacity_bounds: content.transform_rect_bbox(self.opacity_bounds),
+            opacity_extent: None,
             opacity_group: self.opacity_group,
             render_order: self.render_order,
             scene: Arc::clone(&self.scene),
@@ -619,7 +634,18 @@ fn opacity_layer_bounds(
     fallback: kurbo::Rect,
     margin: f64,
 ) -> kurbo::Rect {
-    let (rect, reach) = extent.unwrap_or_else(|| {
+    let (rect, reach) = opacity_layer_extent(extent, world_bounds, fallback);
+    pad_opacity_layer(rect, reach, margin, fallback)
+}
+
+/// What an opacity layer covers before its antialiasing margin: a world
+/// rectangle and how far strokes and effects reach beyond it.
+fn opacity_layer_extent(
+    extent: Option<(kurbo::Rect, f64)>,
+    world_bounds: Option<&WorldBounds>,
+    fallback: kurbo::Rect,
+) -> (kurbo::Rect, f64) {
+    extent.unwrap_or_else(|| {
         let rect = world_bounds
             .map(|bounds| {
                 kurbo::Rect::new(
@@ -632,12 +658,33 @@ fn opacity_layer_bounds(
             .filter(|rect| rect.width().is_finite() && rect.height().is_finite())
             .unwrap_or(fallback);
         (rect, 0.0)
-    });
+    })
+}
+
+/// An opacity layer's rectangle with its reach and antialiasing `margin`.
+fn pad_opacity_layer(
+    rect: kurbo::Rect,
+    reach: f64,
+    margin: f64,
+    fallback: kurbo::Rect,
+) -> kurbo::Rect {
     let padding = reach + margin;
     if !padding.is_finite() {
         return fallback;
     }
     rect.inflate(padding, padding)
+}
+
+/// Output pixels per world unit of an orthographic `camera` rendered
+/// `output_width` pixels wide; `None` in perspective. Opacity layers keep an
+/// antialiasing margin of two such pixels.
+pub fn output_pixels_per_unit(camera: &gaanim_math::Camera, output_width: u32) -> Option<f64> {
+    match camera.projection {
+        gaanim_math::Projection::Orthographic { zoom } => {
+            Some(f64::from(output_width) * zoom / camera.frame_width)
+        }
+        _ => None,
+    }
 }
 
 /// World bounding box of a fragment's visible path, and how far its strokes
@@ -1131,7 +1178,7 @@ fn aligned_pen(style: &kurbo::Stroke, align: StrokeAlign) -> std::borrow::Cow<'_
 /// Stroke `path` aligned to its closed contour (see [`StrokeAlign`]).
 /// `source_path` is the untrimmed contour while a draw animation reveals
 /// `path`; open contours are always stroked on their centerline.
-fn draw_aligned_stroke(
+pub(crate) fn draw_aligned_stroke(
     scene: &mut vello::Scene,
     style: &kurbo::Stroke,
     brush: &peniko::Brush,
@@ -1546,7 +1593,7 @@ fn blur_taps(sigma: f64, alpha: f32) -> impl Iterator<Item = ((f64, f64), f32)> 
     })
 }
 
-fn draw_soft_fill(
+pub(crate) fn draw_soft_fill(
     scene: &mut vello::Scene,
     path: &kurbo::BezPath,
     brush: &peniko::Brush,
@@ -1568,7 +1615,7 @@ fn draw_soft_fill(
 /// every tap instead quantized the color per tap (brushes are 8-bit): alphas
 /// below about 24/255 vanished, larger ones all looked alike, and light warm
 /// tones drifted in hue.
-fn draw_shadow(scene: &mut vello::Scene, path: &kurbo::BezPath, shadow: &DropShadow) {
+pub(crate) fn draw_shadow(scene: &mut vello::Scene, path: &kurbo::BezPath, shadow: &DropShadow) {
     let offset = kurbo::Affine::translate((shadow.offset.x, shadow.offset.y));
     let sharp = shadow.blur_radius.is_nan() || shadow.blur_radius <= 0.0;
     if sharp {
@@ -1601,7 +1648,7 @@ fn draw_shadow(scene: &mut vello::Scene, path: &kurbo::BezPath, shadow: &DropSha
     scene.pop_layer();
 }
 
-fn draw_soft_stroke(
+pub(crate) fn draw_soft_stroke(
     scene: &mut vello::Scene,
     path: &kurbo::BezPath,
     brush: &peniko::Brush,
@@ -1622,7 +1669,7 @@ fn draw_soft_stroke(
     }
 }
 
-fn draw_glow(
+pub(crate) fn draw_glow(
     scene: &mut vello::Scene,
     path: &kurbo::BezPath,
     glow: &Glow,
@@ -1940,8 +1987,40 @@ pub fn compile_scene_pinned(
 fn compile_scene_with_pins(
     world: &mut World,
     camera: Option<&gaanim_math::Camera>,
-    mut pins: Option<&mut PinnedElements>,
+    pins: Option<&mut PinnedElements>,
 ) -> vello::Scene {
+    let extraction = extract_world(world, camera, pins, true);
+    let is_perspective = camera
+        .is_some_and(|cam| matches!(cam.projection, gaanim_math::Projection::Perspective { .. }));
+    let background = world.get_resource::<CanvasBackground>();
+    compose_elements(
+        &extraction.elements,
+        extraction.transition.as_ref(),
+        (!is_perspective)
+            .then_some(background)
+            .flatten()
+            .map(|background| (background, background.pixel_size)),
+        extraction.background_time,
+        None,
+    )
+}
+
+/// The drawables of a frame, sorted in draw order, with the transition and
+/// background time they are composited with.
+struct WorldExtraction {
+    elements: Vec<ExtractedElement>,
+    transition: Option<gaanim_scene::SceneTransitionFrame>,
+    background_time: f64,
+}
+
+/// Extract every drawable the world shows. `cull` leaves out drawables the
+/// camera cannot see.
+fn extract_world(
+    world: &mut World,
+    camera: Option<&gaanim_math::Camera>,
+    mut pins: Option<&mut PinnedElements>,
+    cull: bool,
+) -> WorldExtraction {
     let replaying_pins = pins.as_ref().is_some_and(|pins| pins.recorded);
     let background_time = world
         .get_resource::<gaanim_animation::PlaybackState>()
@@ -1965,15 +2044,14 @@ fn compile_scene_with_pins(
         .unwrap_or_else(|| kurbo::Rect::new(-4096.0, -4096.0, 4096.0, 4096.0));
     let output_width = world
         .get_resource::<CanvasBackground>()
-        .map(|background| f64::from(background.pixel_size.0));
-    let antialias = antialias_margin(camera.and_then(|cam| match cam.projection {
-        gaanim_math::Projection::Orthographic { zoom } => {
-            output_width.map(|width| width * zoom / cam.frame_width)
-        }
-        _ => None,
-    }));
+        .map(|background| background.pixel_size.0);
+    let antialias = antialias_margin(
+        camera
+            .zip(output_width)
+            .and_then(|(cam, width)| output_pixels_per_unit(cam, width)),
+    );
 
-    let cam_bounds = camera.and_then(|cam| {
+    let cam_bounds = camera.filter(|_| cull).and_then(|cam| {
         if let gaanim_math::Projection::Orthographic { zoom } = cam.projection {
             let effective = zoom;
             let hw = cam.frame_width / (2.0 * effective);
@@ -2117,22 +2195,12 @@ fn compile_scene_with_pins(
         }
         let camera_view = camera_views.get(&entity);
 
-        let fill_alpha = fill_progress_opt
-            .map(|f| f.0.clamp(0.0, 1.0))
-            .unwrap_or(1.0);
-
-        let mut scene = vello::Scene::new();
-        if let Some(lottie) = lottie_opt {
-            scene.append(lottie.scene(), None);
-        }
         let empty_bez = kurbo::BezPath::new();
         let elem_path = if path_reveal_is_empty(tip_glow_opt) {
             &empty_bez
         } else {
             path_opt.map(|p| p.0.as_ref()).unwrap_or(&empty_bez)
         };
-        let source_path = path_source_opt.map(|p| p.0.as_ref());
-        let elem_fill = fill_opt.and_then(|f| f.0.as_ref());
         let elem_stroke = stroke_opt.and_then(|s| s.brush.as_ref());
         let elem_stroke_style = stroke_opt.map(|s| &s.style);
         let stroke_view = if elem_stroke.is_some() || glow_opt.is_some() {
@@ -2149,127 +2217,26 @@ fn compile_scene_with_pins(
             None
         };
 
-        if let Some(shadow) = shadow_opt {
-            draw_shadow(&mut scene, elem_path, shadow);
-        }
-
-        if let Some(glow) = glow_opt {
-            draw_glow(&mut scene, elem_path, glow, stroke_view);
-        }
-
-        let is_trimmed_closed = source_path.is_some_and(|src| {
-            src != elem_path && src.elements().contains(&kurbo::PathEl::ClosePath)
-        });
-        let blur_sigma = blur_opt
-            .map(|blur| blur.sigma)
-            .filter(|sigma| sigma.is_finite() && *sigma > 0.0);
-        let blurred_vector = if let Some(sigma) = blur_sigma {
-            if let Some(fill_brush) = elem_fill
-                && !is_trimmed_closed
-            {
-                draw_soft_fill(
-                    &mut scene,
-                    elem_path,
-                    fill_brush,
-                    sigma,
-                    fill_alpha,
-                    kurbo::Affine::IDENTITY,
-                );
-            }
-            if let (Some(stroke_brush), Some(style)) = (elem_stroke, elem_stroke_style) {
-                draw_soft_stroke(
-                    &mut scene,
-                    elem_path,
-                    stroke_brush,
-                    style,
-                    sigma,
-                    stroke_view,
-                );
-            }
-            if is_trimmed_closed {
-                elem_stroke.is_some()
-            } else {
-                elem_fill.is_some() || elem_stroke.is_some()
-            }
-        } else {
-            false
-        };
-
-        let completion_alpha = tip_glow_opt.map(|t| t.completion).unwrap_or(1.0);
-        let anim_wave = if fill_alpha > 0.0 && fill_alpha < 1.0 {
-            (fill_alpha as f64 * std::f64::consts::PI).sin()
-        } else if completion_alpha > 0.0 && completion_alpha < 1.0 {
-            (completion_alpha * std::f64::consts::PI).sin()
-        } else {
-            0.0
-        };
-
-        if !blurred_vector
-            && let Some(raster_image) = raster_image_opt
-            && let Some(image) = raster_image.image.as_ref()
-        {
-            scene.push_clip_layer(peniko::Fill::NonZero, kurbo::Affine::IDENTITY, elem_path);
-            scene.draw_image(image.as_ref(), raster_image.local_transform);
-            scene.pop_layer();
-        } else if !blurred_vector && fill_alpha < 1.0 {
-            if let Some(fill_brush) = elem_fill {
-                if fill_alpha > 0.0 && !is_trimmed_closed {
-                    // Push clip layer so ALL fill illumination is STRICTLY CLIPPED inside the character contour!
-                    scene.push_clip_layer(
-                        peniko::Fill::NonZero,
-                        kurbo::Affine::IDENTITY,
-                        elem_path,
-                    );
-
-                    // Keep the authored paint intact and reveal it only through
-                    // alpha. Adding white illumination here made the fill flash
-                    // as it entered instead of behaving like a true fade-in.
-                    let modulated = modulate_brush_alpha(fill_brush, fill_alpha);
-                    if let Some(ref brush) = modulated {
-                        scene.fill(
-                            peniko::Fill::NonZero,
-                            kurbo::Affine::IDENTITY,
-                            brush,
-                            None,
-                            elem_path,
-                        );
-                    }
-
-                    scene.pop_layer();
-                }
-            }
-        } else if !blurred_vector
-            && let Some(fill_brush) = elem_fill
-            && !is_trimmed_closed
-        {
-            scene.fill(
-                peniko::Fill::NonZero,
-                kurbo::Affine::IDENTITY,
-                fill_brush,
-                None,
-                elem_path,
-            );
-        }
-
-        // A screen draws its stroke above what its camera sees.
-        let mut overlay = camera_view.map(|_| vello::Scene::new());
-        if !blurred_vector
-            && let Some(stroke_brush) = elem_stroke
-            && let Some(style) = elem_stroke_style
-        {
-            let (effective_stroke_brush, effective_style) =
-                animated_stroke_paint(stroke_brush, style, anim_wave);
-            draw_aligned_stroke(
-                overlay.as_mut().unwrap_or(&mut scene),
-                &effective_style,
-                &effective_stroke_brush,
-                stroke_view,
-                elem_path,
-                source_path,
-                stroke_align_opt.copied().unwrap_or_default(),
-                stroke_profile_opt,
-            );
-        }
+        let recipe = Arc::new(fragment_recipe(FragmentParts {
+            path: path_opt,
+            source: path_source_opt,
+            fill: fill_opt,
+            stroke: stroke_opt,
+            raster: raster_image_opt,
+            lottie: lottie_opt.is_some(),
+            shadow: shadow_opt,
+            glow: glow_opt,
+            blur: blur_opt,
+            fill_progress: fill_progress_opt,
+            tip_glow: tip_glow_opt,
+            stroke_align: stroke_align_opt,
+            stroke_profile: stroke_profile_opt,
+            stroke_view,
+            screen: camera_view.is_some(),
+        }));
+        let built = build_fragment(&recipe, lottie_opt.map(|lottie| lottie.scene().as_ref()));
+        let scene = built.scene;
+        let overlay = built.overlay;
 
         let mut opacity_group = entity;
         while let Ok(child_of) = child_query.get(world, opacity_group) {
@@ -2283,10 +2250,10 @@ fn compile_scene_with_pins(
             .filter(|blend| *blend != peniko::BlendMode::default());
         // Only translucent or blended elements open a layer; a Lottie draws
         // geometry that `Path2D` does not describe.
-        let opacity_bounds = if global_opacity.0 >= 1.0 && blend.is_none() || lottie_opt.is_some() {
-            opacity_fallback
+        let opacity_extent = if global_opacity.0 >= 1.0 && blend.is_none() || lottie_opt.is_some() {
+            None
         } else {
-            opacity_layer_bounds(
+            Some(opacity_layer_extent(
                 fragment_extent(
                     elem_path,
                     transform.affine_2d,
@@ -2303,17 +2270,26 @@ fn compile_scene_with_pins(
                 ),
                 world_bounds_opt,
                 opacity_fallback,
-                antialias,
-            )
+            ))
         };
+        let opacity_bounds = opacity_extent.map_or(opacity_fallback, |(rect, reach)| {
+            pad_opacity_layer(rect, reach, antialias, opacity_fallback)
+        });
+        // A capture keeps the extent, so a replay at another resolution pads
+        // the layer for its own pixels; an unbounded reach keeps the fallback.
+        let opacity_extent = opacity_extent.filter(|(_, reach)| reach.is_finite());
         let exempt = pins.is_some() && world.get::<MotionBlurExempt>(entity).is_some();
         if exempt && replaying_pins {
             continue;
         }
         extracted.push(ExtractedElement {
+            entity,
+            recipe: Some(recipe),
+            lottie: lottie_opt.map(|lottie| Arc::clone(lottie.scene())),
             transform: transform.affine_2d,
             opacity: global_opacity.0,
             opacity_bounds,
+            opacity_extent,
             opacity_group,
             render_order: stacked_render_order(
                 *render_order,
@@ -2364,43 +2340,341 @@ fn compile_scene_with_pins(
 
     extracted.sort_by(ExtractedElement::draw_order);
 
-    let mut main_scene = vello::Scene::new();
+    WorldExtraction {
+        elements: extracted,
+        transition: transition_frame,
+        background_time,
+    }
+}
 
-    // Draw canvas background as a filled rectangle at the frame bounds,
-    // so the canvas area is visually distinct from the window background.
-    // In perspective mode the 3D camera already clears to this color and the
-    // Vello scene is rendered AFTER the 3D pass (order 1 vs 0) so that labels
-    // appear on top of meshes. Skipping the opaque rect in that case prevents
-    // the 2D background from occluding the 3D meshes behind it.
-    let is_perspective = camera
-        .is_some_and(|cam| matches!(cam.projection, gaanim_math::Projection::Perspective { .. }));
+/// Composite sorted drawables over the canvas background.
+///
+/// In perspective the 3D camera already clears to the background color and
+/// the Vello scene is drawn after the 3D pass (order 1 vs 0) so labels stay
+/// above meshes; callers then pass no background, so an opaque rectangle
+/// does not hide the meshes. With `gpu`, a shader background records its
+/// request there instead of rasterizing on the CPU.
+fn compose_elements(
+    elements: &[ExtractedElement],
+    transition: Option<&gaanim_scene::SceneTransitionFrame>,
+    background: Option<(&CanvasBackground, (u32, u32))>,
+    time_seconds: f64,
+    gpu: Option<&mut Option<ShaderBackgroundRequest>>,
+) -> vello::Scene {
+    let transition = transition.filter(|frame| !frame.is_empty());
+    let mut main_scene = vello::Scene::new();
     let mut canvas_paint = None;
-    if !is_perspective {
-        if let Some(canvas_bg) = world.get_resource::<CanvasBackground>() {
-            canvas_paint = Some(fill_canvas_background(
-                &mut main_scene,
-                canvas_bg,
-                canvas_bg.pixel_size,
-                transition_background_time(transition_frame.as_ref(), background_time),
-                None,
-            ));
-            fill_transition_background(
-                &mut main_scene,
-                canvas_bg,
-                canvas_bg.pixel_size,
-                transition_frame.as_ref(),
-            );
+    if let Some((canvas_bg, pixel_size)) = background {
+        canvas_paint = Some(fill_canvas_background(
+            &mut main_scene,
+            canvas_bg,
+            pixel_size,
+            transition_background_time(transition, time_seconds),
+            gpu,
+        ));
+        fill_transition_background(&mut main_scene, canvas_bg, pixel_size, transition);
+    }
+    append_extracted_elements(&mut main_scene, elements, transition, canvas_paint.as_ref());
+    main_scene
+}
+
+/// One drawable of a [`FrameCapture`]: what its fragment is built from and
+/// how the frame composites it.
+#[derive(Clone)]
+pub struct CapturedElement {
+    /// The drawable, a key that stays the same across the frames of a run.
+    pub entity: Entity,
+    pub recipe: Arc<FragmentRecipe>,
+    /// Lottie scene the recipe draws first.
+    pub lottie: Option<Arc<vello::Scene>>,
+    pub transform: kurbo::Affine,
+    pub opacity: f32,
+    /// Clip of the element's opacity or blend layer; with `opacity_reach`,
+    /// before the reach and antialiasing margin the replay pads it with.
+    pub opacity_bounds: kurbo::Rect,
+    /// How far strokes and effects reach beyond `opacity_bounds`, for an
+    /// element drawn in its own layer. The layer adds two output pixels of
+    /// antialiasing, so it fits whatever resolution the frame is replayed at.
+    pub opacity_reach: Option<f64>,
+    /// Root ancestor: translucent siblings share one layer.
+    pub opacity_group: Entity,
+    /// Render order with the ancestors' z-indices stacked.
+    pub render_order: RenderOrder,
+    pub clip_mask: Option<ClipMask>,
+    pub blend: Option<peniko::BlendMode>,
+    pub transition_side: gaanim_scene::TransitionSide,
+    /// The element and its ancestors, while camera views exist.
+    pub lineage: Vec<Entity>,
+    pub view_bounds: Option<kurbo::Rect>,
+    pub in_views: bool,
+    pub layer: Option<Arc<str>>,
+    pub screen: Option<CapturedView>,
+    pub echo_rank: u32,
+}
+
+/// A camera view screen resolved against a captured frame.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CapturedView {
+    /// Screen outline in its local coordinates.
+    pub clip: Arc<kurbo::BezPath>,
+    /// Maps the world the camera sees onto the screen.
+    pub content: Option<kurbo::Affine>,
+    /// World region the camera sees, with its culling margin.
+    pub region: kurbo::Rect,
+    /// Roots of the subtrees the view leaves out.
+    pub excluded: Vec<Entity>,
+    pub layers: Vec<Arc<str>>,
+    pub background: CameraViewBackground,
+}
+
+/// The transition masks and overlays of a captured frame.
+#[derive(Clone, Debug, Default)]
+pub struct CapturedTransition {
+    pub outgoing_mask: Option<gaanim_scene::TransitionMask>,
+    pub incoming_mask: Option<gaanim_scene::TransitionMask>,
+    pub backgrounds: Option<(f64, f64)>,
+    pub overlays: Vec<gaanim_scene::TransitionOverlayLayer>,
+}
+
+impl CapturedTransition {
+    fn frame(&self) -> gaanim_scene::SceneTransitionFrame {
+        gaanim_scene::SceneTransitionFrame {
+            outgoing_mask: self.outgoing_mask.clone(),
+            incoming_mask: self.incoming_mask.clone(),
+            backgrounds: self.backgrounds,
+            overlays: self.overlays.clone(),
+            ..Default::default()
         }
     }
+}
 
-    append_extracted_elements(
-        &mut main_scene,
-        &extracted,
-        transition_frame.as_ref(),
-        canvas_paint.as_ref(),
+/// Everything the 2D renderer draws in one frame, independent of the world
+/// that produced it. See [`capture_frame`] and [`compose_captured`].
+#[derive(Clone, Default)]
+pub struct FrameCapture {
+    /// Timeline seconds the canvas background is drawn at.
+    pub background_time: f64,
+    /// Drawables in draw order.
+    pub elements: Vec<CapturedElement>,
+    pub transition: Option<CapturedTransition>,
+}
+
+/// Capture the drawables of the world as it stands, without culling, for a
+/// replay that composites the same frame with [`compose_captured`].
+pub fn capture_frame(world: &mut World, camera: Option<&gaanim_math::Camera>) -> FrameCapture {
+    capture_extraction(extract_world(world, camera, None, false))
+}
+
+/// [`capture_frame`] for a motion blur sub-frame: like
+/// [`compile_scene_pinned`], the first call with fresh `pins` records the
+/// [`MotionBlurExempt`] drawables and later calls draw them as recorded.
+pub fn capture_frame_pinned(
+    world: &mut World,
+    camera: Option<&gaanim_math::Camera>,
+    pins: &mut PinnedElements,
+) -> FrameCapture {
+    capture_extraction(extract_world(world, camera, Some(pins), false))
+}
+
+fn capture_extraction(extraction: WorldExtraction) -> FrameCapture {
+    FrameCapture {
+        background_time: extraction.background_time,
+        transition: extraction
+            .transition
+            .filter(|frame| !frame.is_empty())
+            .map(|frame| CapturedTransition {
+                outgoing_mask: frame.outgoing_mask,
+                incoming_mask: frame.incoming_mask,
+                backgrounds: frame.backgrounds,
+                overlays: frame.overlays,
+            }),
+        elements: extraction
+            .elements
+            .into_iter()
+            .map(|element| CapturedElement {
+                entity: element.entity,
+                recipe: element
+                    .recipe
+                    .expect("world extraction records every recipe"),
+                lottie: element.lottie,
+                transform: element.transform,
+                opacity: element.opacity,
+                opacity_bounds: element
+                    .opacity_extent
+                    .map_or(element.opacity_bounds, |(rect, _)| rect),
+                opacity_reach: element.opacity_extent.map(|(_, reach)| reach),
+                opacity_group: element.opacity_group,
+                render_order: element.render_order,
+                clip_mask: element.clip_mask,
+                blend: element.blend,
+                transition_side: element.transition_side,
+                lineage: element.lineage,
+                view_bounds: element.view_bounds,
+                in_views: element.in_views,
+                layer: element.layer,
+                screen: element.screen.map(|screen| {
+                    let view = &screen.view;
+                    CapturedView {
+                        clip: Arc::clone(&view.clip),
+                        content: view.content,
+                        region: view.region,
+                        excluded: view.excluded.clone(),
+                        layers: view.layers.clone(),
+                        background: view.background.clone(),
+                    }
+                }),
+                echo_rank: element.echo_rank,
+            })
+            .collect(),
+    }
+}
+
+/// Composite a captured frame over `background`, building its fragments
+/// through `store`. `pixels_per_unit` is the output density (see
+/// [`output_pixels_per_unit`]) that sizes the antialiasing margin of opacity
+/// layers, as the scene sizes it when it renders at that resolution. With
+/// `gpu`, a shader background records its request there instead of
+/// rasterizing on the CPU.
+pub fn compose_captured(
+    frame: &FrameCapture,
+    store: &mut crate::fragment::FragmentStore,
+    background: Option<(&CanvasBackground, (u32, u32))>,
+    pixels_per_unit: Option<f64>,
+    gpu: Option<&mut Option<ShaderBackgroundRequest>>,
+) -> vello::Scene {
+    let margin = antialias_margin(pixels_per_unit);
+    let elements: Vec<ExtractedElement> = frame
+        .elements
+        .iter()
+        .map(|element| {
+            let (scene, overlay) = store.get(&element.recipe, element.lottie.as_ref());
+            ExtractedElement {
+                entity: element.entity,
+                recipe: None,
+                lottie: None,
+                transform: element.transform,
+                opacity: element.opacity,
+                opacity_bounds: element
+                    .opacity_reach
+                    .map_or(element.opacity_bounds, |reach| {
+                        pad_opacity_layer(
+                            element.opacity_bounds,
+                            reach,
+                            margin,
+                            element.opacity_bounds,
+                        )
+                    }),
+                opacity_extent: None,
+                opacity_group: element.opacity_group,
+                render_order: element.render_order,
+                scene,
+                clip_mask: element.clip_mask.clone(),
+                blend: element.blend,
+                transition_side: element.transition_side,
+                lineage: element.lineage.clone(),
+                view_bounds: element.view_bounds,
+                in_views: element.in_views,
+                layer: element.layer.clone(),
+                screen: element.screen.as_ref().map(|view| ExtractedScreen {
+                    view: Arc::new(ExtractedCameraView {
+                        clip: Arc::clone(&view.clip),
+                        content: view.content,
+                        region: view.region,
+                        excluded: view.excluded.clone(),
+                        layers: view.layers.clone(),
+                        background: view.background.clone(),
+                    }),
+                    overlay,
+                }),
+                echo_rank: element.echo_rank,
+            }
+        })
+        .collect();
+    let transition = frame.transition.as_ref().map(CapturedTransition::frame);
+    compose_elements(
+        &elements,
+        transition.as_ref(),
+        background,
+        frame.background_time,
+        gpu,
+    )
+}
+
+/// Resource: a captured frame to show instead of the world's drawables.
+///
+/// While it exists, [`gaanim_render_system`] stands down and
+/// [`external_frame_system`] composites this frame with the same code, so
+/// a recorded frame draws exactly what the scene drew. Playback bundles
+/// set it.
+#[derive(Resource, Default)]
+pub struct ExternalFrame {
+    pub frame: Option<Arc<FrameCapture>>,
+    store: crate::fragment::FragmentStore,
+}
+
+/// System: composites the [`ExternalFrame`] into the main Vello scene.
+pub fn external_frame_system(
+    mut commands: Commands,
+    mut external: ResMut<ExternalFrame>,
+    gaanim_camera: Option<Res<gaanim_math::ResolvedCamera>>,
+    canvas_bg: Option<Res<CanvasBackground>>,
+    (mut shader_frame, preview): (
+        Option<ResMut<ShaderBackgroundFrame>>,
+        Option<Res<crate::canvas::PreviewResolution>>,
+    ),
+    mut query_vello_scene: Query<&mut VelloScene2d, With<MainVelloScene>>,
+) {
+    let external = &mut *external;
+    let Some(frame) = external.frame.clone() else {
+        return;
+    };
+    let is_perspective = gaanim_camera
+        .as_ref()
+        .is_some_and(|cam| matches!(cam.projection, gaanim_math::Projection::Perspective { .. }));
+    let background = canvas_bg
+        .as_deref()
+        .filter(|_| !is_perspective)
+        .map(|canvas_bg| {
+            (
+                canvas_bg,
+                interactive_background_pixel_size(
+                    canvas_bg,
+                    gaanim_camera.as_deref(),
+                    preview.as_deref(),
+                ),
+            )
+        });
+    // Viewport pixels per world unit, as the interactive preview pads layers.
+    let pixels_per_unit = gaanim_camera.as_ref().and_then(|cam| match cam.projection {
+        gaanim_math::Projection::Orthographic { zoom } => Some(zoom * cam.viewport.scale),
+        _ => None,
+    });
+    let mut shader_request = None;
+    let main_scene = compose_captured(
+        &frame,
+        &mut external.store,
+        background,
+        pixels_per_unit,
+        shader_frame.is_some().then_some(&mut shader_request),
     );
-
-    main_scene
+    external.store.end_frame();
+    if let Some(frame) = shader_frame.as_mut() {
+        frame.0 = shader_request;
+    }
+    if let Some(mut scene) = query_vello_scene.iter_mut().next() {
+        if scene
+            .bypass_change_detection()
+            .replace_if_different(main_scene)
+        {
+            scene.set_changed();
+        }
+    } else {
+        commands.spawn((
+            MainVelloScene,
+            VelloScene2d::from(main_scene),
+            Transform::from_scale(Vec3::new(1.0, -1.0, 1.0)),
+        ));
+    }
 }
 
 /// Visible camera view screens and what resolving their views reads.
@@ -2716,22 +2990,6 @@ pub fn gaanim_render_system(
             continue;
         }
 
-        // Read the current fill progress. If the component is absent
-        // (the common case for non-Writing entities) the fill is
-        // rendered at full opacity, preserving legacy behavior.
-        let fill_alpha = fill_progress_ref
-            .as_ref()
-            .map(|f| f.0.clamp(0.0, 1.0))
-            .unwrap_or(1.0);
-        let completion_alpha = tip_glow_ref.as_ref().map(|t| t.completion).unwrap_or(1.0);
-        let anim_wave = if fill_alpha > 0.0 && fill_alpha < 1.0 {
-            (fill_alpha as f64 * std::f64::consts::PI).sin()
-        } else if completion_alpha > 0.0 && completion_alpha < 1.0 {
-            (completion_alpha * std::f64::consts::PI).sin()
-        } else {
-            0.0
-        };
-
         if !cache.fragment_cache.contains_key(&mobj_id.0) {
             let inputs = current_inputs.unwrap_or_else(|| {
                 FragmentInputs::capture(
@@ -2748,146 +3006,29 @@ pub fn gaanim_render_system(
         }
         let mut rebuilt_overlay = None;
         let fragment = cache.fragment_cache.entry(mobj_id.0).or_insert_with(|| {
-            let mut scene = vello::Scene::new();
-
-            if let Some(lottie) = lottie_ref.as_deref() {
-                scene.append(lottie.scene(), None);
-            }
-
-            let empty_bez = kurbo::BezPath::new();
-            let elem_path = if path_reveal_is_empty(tip_glow_ref.as_deref()) {
-                &empty_bez
-            } else {
-                path_ref
-                    .as_ref()
-                    .map(|p| p.0.as_ref())
-                    .unwrap_or(&empty_bez)
-            };
-            let source_path = path_source_ref.as_ref().map(|p| p.0.as_ref());
-            let elem_fill = fill_ref.as_ref().and_then(|f| f.0.as_ref());
-            let elem_stroke = stroke_ref.as_ref().and_then(|s| s.brush.as_ref());
-            let elem_stroke_style = stroke_ref.as_ref().map(|s| &s.style);
-            let elem_raster_image = raster_image_ref.as_deref();
-            let elem_shadow = shadow_ref.as_deref();
-            let elem_glow = glow_ref.as_deref();
-            let elem_blur = blur_ref.as_deref();
-
-            // 1. Draw Drop Shadow (rendered under the geometry with custom translation offset)
-            if let Some(shadow) = elem_shadow {
-                draw_shadow(&mut scene, elem_path, shadow);
-            }
-
-            if let Some(glow) = elem_glow {
-                draw_glow(&mut scene, elem_path, glow, stroke_view);
-            }
-
-            let is_trimmed_closed = source_path.is_some_and(|src| {
-                src != elem_path && src.elements().contains(&kurbo::PathEl::ClosePath)
+            let recipe = fragment_recipe(FragmentParts {
+                path: path_ref.as_deref(),
+                source: path_source_ref.as_deref(),
+                fill: fill_ref.as_deref(),
+                stroke: stroke_ref.as_deref(),
+                raster: raster_image_ref.as_deref(),
+                lottie: lottie_ref.is_some(),
+                shadow: shadow_ref.as_deref(),
+                glow: glow_ref.as_deref(),
+                blur: blur_ref.as_deref(),
+                fill_progress: fill_progress_ref.as_deref(),
+                tip_glow: tip_glow_ref.as_deref(),
+                stroke_align: stroke_align_ref.as_deref(),
+                stroke_profile: stroke_profile_ref.as_deref(),
+                stroke_view,
+                screen: camera_view.is_some(),
             });
-            let blur_sigma = elem_blur
-                .map(|blur| blur.sigma)
-                .filter(|sigma| sigma.is_finite() && *sigma > 0.0);
-            let blurred_vector = if let Some(sigma) = blur_sigma {
-                if let Some(fill_brush) = elem_fill
-                    && !is_trimmed_closed
-                {
-                    draw_soft_fill(
-                        &mut scene,
-                        elem_path,
-                        fill_brush,
-                        sigma,
-                        fill_alpha,
-                        kurbo::Affine::IDENTITY,
-                    );
-                }
-                if let (Some(stroke_brush), Some(style)) = (elem_stroke, elem_stroke_style) {
-                    draw_soft_stroke(
-                        &mut scene,
-                        elem_path,
-                        stroke_brush,
-                        style,
-                        sigma,
-                        stroke_view,
-                    );
-                }
-                if is_trimmed_closed {
-                    elem_stroke.is_some()
-                } else {
-                    elem_fill.is_some() || elem_stroke.is_some()
-                }
-            } else {
-                false
-            };
-
-            // 2. Draw Fill
-            if !blurred_vector
-                && let Some(raster_image) = elem_raster_image
-                && let Some(image) = raster_image.image.as_ref()
-            {
-                scene.push_clip_layer(peniko::Fill::NonZero, kurbo::Affine::IDENTITY, elem_path);
-                scene.draw_image(image.as_ref(), raster_image.local_transform);
-                scene.pop_layer();
-            } else if !blurred_vector && fill_alpha < 1.0 {
-                if let Some(fill_brush) = elem_fill {
-                    if fill_alpha > 0.0 && !is_trimmed_closed {
-                        // Push clip layer so ALL fill illumination is STRICTLY CLIPPED inside the character contour!
-                        scene.push_clip_layer(
-                            peniko::Fill::NonZero,
-                            kurbo::Affine::IDENTITY,
-                            elem_path,
-                        );
-
-                        // Fade the authored paint directly; a temporary white
-                        // illumination pass made the fill appear abruptly.
-                        let modulated = modulate_brush_alpha(fill_brush, fill_alpha);
-                        if let Some(ref brush) = modulated {
-                            scene.fill(
-                                peniko::Fill::NonZero,
-                                kurbo::Affine::IDENTITY,
-                                brush,
-                                None,
-                                elem_path,
-                            );
-                        }
-
-                        scene.pop_layer();
-                    }
-                }
-            } else if !blurred_vector
-                && let Some(fill_brush) = elem_fill
-                && !is_trimmed_closed
-            {
-                scene.fill(
-                    peniko::Fill::NonZero,
-                    kurbo::Affine::IDENTITY,
-                    fill_brush,
-                    None,
-                    elem_path,
-                );
-            }
-
-            // 3. Draw Stroke. A screen draws it above what its camera sees.
-            let mut overlay = camera_view.map(|_| vello::Scene::new());
-            if !blurred_vector
-                && let Some(stroke_brush) = elem_stroke
-                && let Some(style) = elem_stroke_style
-            {
-                let (effective_stroke_brush, effective_style) =
-                    animated_stroke_paint(stroke_brush, style, anim_wave);
-                draw_aligned_stroke(
-                    overlay.as_mut().unwrap_or(&mut scene),
-                    &effective_style,
-                    &effective_stroke_brush,
-                    stroke_view,
-                    elem_path,
-                    source_path,
-                    stroke_align_ref.as_deref().copied().unwrap_or_default(),
-                    stroke_profile_ref.as_deref(),
-                );
-            }
-            rebuilt_overlay = Some(overlay);
-
-            Arc::new(scene)
+            let built = build_fragment(
+                &recipe,
+                lottie_ref.as_deref().map(|lottie| lottie.scene().as_ref()),
+            );
+            rebuilt_overlay = Some(built.overlay);
+            Arc::new(built.scene)
         });
         let fragment = Arc::clone(fragment);
         match rebuilt_overlay {
@@ -2943,9 +3084,13 @@ pub fn gaanim_render_system(
             )
         };
         local_extracted.push(ExtractedElement {
+            entity,
+            recipe: None,
+            lottie: None,
             transform: transform.affine_2d,
             opacity: global_opacity.0,
             opacity_bounds,
+            opacity_extent: None,
             opacity_group,
             render_order: stacked_render_order(
                 *render_order,
@@ -2984,55 +3129,35 @@ pub fn gaanim_render_system(
     // Sort elements deterministically by RenderOrder to ensure correct layering
     local_extracted.sort_by(ExtractedElement::draw_order);
 
-    // Assemble the global composited Scene in Bevy world coordinates
-    let mut main_scene = vello::Scene::new();
-
-    // Draw canvas background as a filled rectangle at the frame bounds,
-    // so the canvas area is visually distinct from the window background.
-    // Skip when perspective (see compile_scene_from_world comment).
+    // Assemble the global composited Scene in Bevy world coordinates. In
+    // perspective the canvas background is left out (see `compose_elements`).
     let is_perspective = gaanim_camera
         .as_ref()
         .is_some_and(|cam| matches!(cam.projection, gaanim_math::Projection::Perspective { .. }));
     let mut shader_request = None;
-    let mut canvas_paint = None;
-    if !is_perspective {
-        if let Some(ref canvas_bg) = canvas_bg {
-            let pixel_size = interactive_background_pixel_size(
+    let background = canvas_bg
+        .as_deref()
+        .filter(|_| !is_perspective)
+        .map(|canvas_bg| {
+            (
                 canvas_bg,
-                gaanim_camera.as_deref(),
-                preview.as_deref(),
-            );
-            let time_seconds = playback_state
-                .as_ref()
-                .map_or(0.0, |state| state.current_time);
-            canvas_paint = Some(fill_canvas_background(
-                &mut main_scene,
-                canvas_bg,
-                pixel_size,
-                transition_background_time(transition_frame.as_deref(), time_seconds),
-                shader_frame.is_some().then_some(&mut shader_request),
-            ));
-            fill_transition_background(
-                &mut main_scene,
-                canvas_bg,
-                pixel_size,
-                transition_frame.as_deref(),
-            );
-        }
-    }
-
+                interactive_background_pixel_size(
+                    canvas_bg,
+                    gaanim_camera.as_deref(),
+                    preview.as_deref(),
+                ),
+            )
+        });
+    let mut main_scene = compose_elements(
+        local_extracted.as_slice(),
+        transition_frame.as_deref(),
+        background,
+        time_seconds,
+        shader_frame.is_some().then_some(&mut shader_request),
+    );
     if let Some(frame) = shader_frame.as_mut() {
         frame.0 = shader_request;
     }
-
-    append_extracted_elements(
-        &mut main_scene,
-        local_extracted.as_slice(),
-        transition_frame
-            .as_deref()
-            .filter(|frame| !frame.is_empty()),
-        canvas_paint.as_ref(),
-    );
     local_extracted.clear();
 
     // Hand the composited encoding to the single global scene entity.
@@ -3061,7 +3186,7 @@ pub fn gaanim_render_system(
 /// without changing the underlying brush. Delegates to `peniko::Brush`'s
 /// built-in `multiply_alpha`, which handles `Solid`, `Gradient`, and
 /// `Image` brush variants uniformly (with overflow saturation).
-fn modulate_brush_alpha(brush: &peniko::Brush, alpha: f32) -> Option<peniko::Brush> {
+pub(crate) fn modulate_brush_alpha(brush: &peniko::Brush, alpha: f32) -> Option<peniko::Brush> {
     if alpha >= 1.0 {
         return None; // caller can use the original brush unmodified
     }
@@ -3069,7 +3194,7 @@ fn modulate_brush_alpha(brush: &peniko::Brush, alpha: f32) -> Option<peniko::Bru
     Some(brush.clone().multiply_alpha(alpha))
 }
 
-fn animated_stroke_paint(
+pub(crate) fn animated_stroke_paint(
     brush: &peniko::Brush,
     style: &kurbo::Stroke,
     wave: f64,
@@ -3985,9 +4110,13 @@ mod tests {
     #[test]
     fn opacity_runs_clip_to_their_own_elements_not_the_frame() {
         let element = |rect| ExtractedElement {
+            entity: Entity::PLACEHOLDER,
+            recipe: None,
+            lottie: None,
             transform: kurbo::Affine::IDENTITY,
             opacity: 0.5,
             opacity_bounds: rect,
+            opacity_extent: None,
             opacity_group: Entity::PLACEHOLDER,
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),
@@ -4014,9 +4143,13 @@ mod tests {
     #[test]
     fn consecutive_glyphs_with_the_same_opacity_share_one_compositor_run() {
         let element = |opacity| ExtractedElement {
+            entity: Entity::PLACEHOLDER,
+            recipe: None,
+            lottie: None,
             transform: kurbo::Affine::IDENTITY,
             opacity,
             opacity_bounds: kurbo::Rect::new(0.0, 0.0, 10.0, 10.0),
+            opacity_extent: None,
             opacity_group: Entity::PLACEHOLDER,
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),
@@ -4039,9 +4172,13 @@ mod tests {
     #[test]
     fn a_translucent_single_solid_paint_is_faded_without_a_layer() {
         let element = |scene: vello::Scene| ExtractedElement {
+            entity: Entity::PLACEHOLDER,
+            recipe: None,
+            lottie: None,
             transform: kurbo::Affine::translate((2.0, 0.0)),
             opacity: 0.5,
             opacity_bounds: kurbo::Rect::new(0.0, 0.0, 10.0, 10.0),
+            opacity_extent: None,
             opacity_group: Entity::PLACEHOLDER,
             render_order: RenderOrder::default(),
             scene: Arc::new(scene),
@@ -4093,9 +4230,13 @@ mod tests {
     #[test]
     fn blended_elements_never_join_a_shared_opacity_layer() {
         let element = |blend| ExtractedElement {
+            entity: Entity::PLACEHOLDER,
+            recipe: None,
+            lottie: None,
             transform: kurbo::Affine::IDENTITY,
             opacity: 0.5,
             opacity_bounds: kurbo::Rect::new(0.0, 0.0, 10.0, 10.0),
+            opacity_extent: None,
             opacity_group: Entity::PLACEHOLDER,
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),
@@ -4125,9 +4266,13 @@ mod tests {
             ..ClipMask::default()
         };
         let element = |clip_mask| ExtractedElement {
+            entity: Entity::PLACEHOLDER,
+            recipe: None,
+            lottie: None,
             transform: kurbo::Affine::IDENTITY,
             opacity: 1.0,
             opacity_bounds: kurbo::Rect::new(0.0, 0.0, 10.0, 10.0),
+            opacity_extent: None,
             opacity_group: Entity::PLACEHOLDER,
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),

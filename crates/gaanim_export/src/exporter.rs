@@ -27,7 +27,7 @@ pub struct CapturedFrame {
     pub rgba: Vec<u8>,
 }
 
-fn create_progress_bar(total_frames: u64) -> ProgressBar {
+pub(crate) fn create_progress_bar(total_frames: u64) -> ProgressBar {
     let pb = ProgressBar::new(total_frames).with_prefix("render");
     pb.set_style(
         ProgressStyle::default_bar()
@@ -173,7 +173,7 @@ fn frame_render_error(error: crate::gpu::GpuContextError, time: f64) -> ExportEr
     }
 }
 
-fn check_custom_animation_errors(world: &World) -> Result<()> {
+pub(crate) fn check_custom_animation_errors(world: &World) -> Result<()> {
     match world
         .get_resource::<gaanim_animation::CustomAnimationDiagnostics>()
         .and_then(|errors| errors.first_error())
@@ -200,7 +200,13 @@ fn publish_export_result(
 }
 
 #[derive(Resource)]
-struct SetupCallback(Option<Box<dyn FnOnce(&mut World) + Send + Sync>>);
+pub(crate) struct SetupCallback(Option<Box<dyn FnOnce(&mut World) + Send + Sync>>);
+
+impl SetupCallback {
+    pub(crate) fn new(setup: impl FnOnce(&mut World) + Send + Sync + 'static) -> Self {
+        Self(Some(Box::new(setup)))
+    }
+}
 
 #[derive(Resource, Clone, Copy)]
 struct WindowRenderSize {
@@ -406,7 +412,7 @@ fn export_pipeline_system(
     pipeline.waiting_for_gpu = true;
 }
 
-fn setup_scene_system(world: &mut World) {
+pub(crate) fn setup_scene_system(world: &mut World) {
     if let Some(mut callback_res) = world.get_resource_mut::<SetupCallback>()
         && let Some(callback) = callback_res.0.take()
     {
@@ -804,6 +810,277 @@ where
     Ok(())
 }
 
+/// Export a video from a recorded playback bundle, without Python.
+///
+/// The video runs at the bundle's recorded frame rate, so every output frame
+/// is a recorded frame: the very frame an export of the scene at that rate
+/// renders, and the video matches it pixel for pixel.
+pub fn export_bundle(bundle_path: &std::path::Path, config: ExportConfig) -> Result<()> {
+    let start_time = Instant::now();
+    let telemetry = config.telemetry.clone();
+    let mut bundle = gaanim_bundle::Bundle::open(bundle_path)
+        .map_err(|error| ExportError::General(error.to_string()))?;
+    let mut config = config.apply_presets();
+    // Every output frame is a recorded frame: the video runs at the rate
+    // the bundle was recorded at, whatever the quality preset.
+    config.fps = bundle.scene.fps;
+    let (frame_width, frame_height) = bundle.scene.output_size;
+    if config.fit == crate::config::OutputFit::Error && frame_width > 0 && frame_height > 0 {
+        let aspect = f64::from(frame_width) / f64::from(frame_height);
+        let expected_height = f64::from(config.width) / aspect;
+        let expected_width = f64::from(config.height) * aspect;
+        if (expected_height - f64::from(config.height)).abs() > 1.0
+            && (expected_width - f64::from(config.width)).abs() > 1.0
+        {
+            return Err(ExportError::General(format!(
+                "output {}x{} does not match the bundle's {frame_width}x{frame_height} frame; choose a matching resolution or set fit to contain/cover",
+                config.width, config.height
+            )));
+        }
+    }
+    config.video_encoder = resolve_video_encoder(config.format, config.video_encoder);
+    if let Some(telemetry) = &telemetry {
+        telemetry.set_encoder(encoder_label(&config));
+    }
+    if !bundle.scene.audio.is_empty() {
+        let dir = std::env::temp_dir().join("gaanim-bundle-media");
+        let files = bundle
+            .extract_media(&dir)
+            .map_err(|error| ExportError::General(error.to_string()))?;
+        for audio in &bundle.scene.audio {
+            if let Some(path) = files.get(&audio.media) {
+                config.audio_tracks.push(crate::config::AudioTrack {
+                    path: path.clone(),
+                    start_time: audio.start_time,
+                    duration: audio.duration,
+                    volume: audio.volume,
+                    fade_in: audio.fade_in,
+                    fade_out: audio.fade_out,
+                    source_offset: audio.source_offset,
+                    source_duration: audio.source_duration,
+                    speed: audio.speed,
+                    looping: audio.looping,
+                });
+            }
+        }
+    }
+    export_summary(&telemetry, &config);
+
+    let duration = bundle.scene.duration;
+    let render_start = config.start_time.unwrap_or(0.0).max(0.0);
+    let render_end = config.end_time.unwrap_or(duration).min(duration);
+    let render_length = render_end - render_start;
+    validate_render_range(render_start, render_end, duration)?;
+    let mut renderer = BundleRenderer::new(bundle, config.width, config.height, config.fit)?;
+
+    let mut encoder = ParallelEncoder::new(EncoderConfig {
+        output_path: config.output_path.clone(),
+        width: config.width,
+        height: config.height,
+        fps: config.fps,
+        format: config.format,
+        transparent: config.transparent,
+        crf: config.crf,
+        encoding_speed: config.encoding_speed,
+        video_encoder: config.video_encoder,
+        audio_tracks: config.audio_tracks.clone(),
+        render_start,
+        render_duration: render_length,
+    })?;
+    let total_frames = (render_length * config.fps as f64).ceil() as u64;
+    if let Some(telemetry) = &telemetry {
+        telemetry.set_total_frames(total_frames);
+    }
+    let frame_time_step = 1.0 / config.fps as f64;
+    let pb = create_progress_bar(total_frames);
+    let mut current_time = render_start;
+    for frame_idx in 0..total_frames {
+        let frame_data = renderer.render(current_time)?;
+        encoder.push_frame(frame_data).map_err(|e| match e {
+            ExportError::FFmpeg(_) => e,
+            other => ExportError::Capture(format!("Encoder push error: {}", other)),
+        })?;
+        pb.inc(1);
+        export_progress(&telemetry, frame_idx + 1, total_frames);
+        current_time += frame_time_step;
+    }
+    pb.finish_and_clear();
+    encoder.finalize_with_timings()?;
+    export_log(
+        &telemetry,
+        console::Level::Success,
+        "done",
+        format!(
+            "Exported in {:.2}s: {}",
+            start_time.elapsed().as_secs_f64(),
+            config.output_path
+        ),
+    );
+    Ok(())
+}
+
+/// Renders the frames of a playback bundle, as an export of the scene renders
+/// them at the same size.
+pub struct BundleRenderer {
+    bundle: gaanim_bundle::Bundle,
+    gpu: GpuContext,
+    background: Option<gaanim_renderer::pipeline::CanvasBackground>,
+    bg_color: vello::peniko::Color,
+    store: gaanim_renderer::fragment::FragmentStore,
+    width: u32,
+    height: u32,
+    fit: crate::config::OutputFit,
+}
+
+impl BundleRenderer {
+    pub fn new(
+        bundle: gaanim_bundle::Bundle,
+        width: u32,
+        height: u32,
+        fit: crate::config::OutputFit,
+    ) -> Result<Self> {
+        let gpu = GpuContext::new(width, height)?;
+        let background = bundle.scene.background.clone().map(|mut background| {
+            background.pixel_size = (width, height);
+            background
+        });
+        let bg_color = bundle
+            .scene
+            .clear_color
+            .map(|[r, g, b, a]| vello::peniko::Color::from_rgba8(r, g, b, a))
+            .unwrap_or(vello::peniko::Color::BLACK);
+        Ok(Self {
+            bundle,
+            gpu,
+            background,
+            bg_color,
+            store: gaanim_renderer::fragment::FragmentStore::default(),
+            width,
+            height,
+            fit,
+        })
+    }
+
+    /// RGBA pixels of the recorded frame shown at `time`; a motion-blurred
+    /// frame averages its sub-frames as an export does.
+    pub fn render(&mut self, time: f64) -> Result<Vec<u8>> {
+        let index = self.bundle.frame_index_at(time);
+        let frame = self
+            .bundle
+            .frame(index)
+            .map_err(|error| ExportError::General(error.to_string()))?;
+        if frame.motion_blur.is_empty() {
+            return self.render_frame(&frame, time);
+        }
+        let mut average = LinearAverage::new(self.width as usize * self.height as usize);
+        for sample in &frame.motion_blur {
+            average.add(&self.render_frame(sample, sample.time)?);
+        }
+        Ok(average.finish())
+    }
+
+    fn render_frame(&mut self, frame: &gaanim_bundle::Frame, time: f64) -> Result<Vec<u8>> {
+        let resolved =
+            gaanim_math::ResolvedCamera::new(frame.camera, gaanim_math::CameraViewport::default());
+        let perspective = matches!(
+            frame.camera.projection,
+            gaanim_math::Projection::Perspective { .. }
+        );
+        // Pad opacity layers for this output, as a direct export does.
+        let pixels_per_unit = self.background.as_ref().and_then(|background| {
+            gaanim_renderer::pipeline::output_pixels_per_unit(
+                &frame.camera,
+                background.pixel_size.0,
+            )
+        });
+        let raw_scene = gaanim_renderer::pipeline::compose_captured(
+            &frame.capture,
+            &mut self.store,
+            self.background
+                .as_ref()
+                .filter(|_| !perspective)
+                .map(|background| (background, background.pixel_size)),
+            pixels_per_unit,
+            None,
+        );
+        self.store.end_frame();
+        let mut scene = vello::Scene::new();
+        scene.append(
+            &raw_scene,
+            Some(capture_camera_to_vello_transform(
+                Some(&resolved),
+                self.width,
+                self.height,
+                self.fit,
+            )),
+        );
+        let post = (!perspective && !frame.post.is_empty())
+            .then(|| {
+                let passes = frame
+                    .post
+                    .iter()
+                    .filter_map(|pass| {
+                        let shader = self
+                            .bundle
+                            .scene
+                            .post_shaders
+                            .get(pass.shader as usize)?
+                            .clone();
+                        let values: Vec<f64> =
+                            pass.values.iter().map(|value| f64::from(*value)).collect();
+                        gaanim_renderer::post_process::PostProcessPass::constant(shader, &values)
+                            .ok()
+                    })
+                    .collect();
+                gaanim_renderer::post_process::CanvasPostProcess {
+                    passes,
+                    ..Default::default()
+                }
+                .request(
+                    frame.time,
+                    capture_camera_frame(Some(&resolved), self.width, self.height, self.fit),
+                )
+            })
+            .flatten();
+        self.gpu
+            .render_frame(&scene, self.bg_color, post.as_ref())
+            .map_err(|error| frame_render_error(error, time))
+    }
+}
+
+/// Render the frames of the bundle at `bundle_path` shown at `times`, handing
+/// each to `on_frame` as soon as it is read back; see
+/// [`capture_scene_direct_streaming`].
+pub fn capture_bundle_streaming<C>(
+    bundle_path: &std::path::Path,
+    width: u32,
+    height: u32,
+    times: &[f64],
+    mut on_frame: C,
+) -> Result<()>
+where
+    C: FnMut(CapturedFrame) -> std::ops::ControlFlow<()>,
+{
+    let bundle = gaanim_bundle::Bundle::open(bundle_path)
+        .map_err(|error| ExportError::General(error.to_string()))?;
+    let mut renderer =
+        BundleRenderer::new(bundle, width, height, crate::config::OutputFit::Contain)?;
+    for &time in times {
+        let rgba = renderer.render(time)?;
+        if on_frame(CapturedFrame {
+            time,
+            width,
+            height,
+            rgba,
+        })
+        .is_break()
+        {
+            break;
+        }
+    }
+    Ok(())
+}
+
 /// Reject a time range that selects no frames, naming the scene duration.
 fn validate_render_range(start: f64, end: f64, duration: f64) -> Result<()> {
     if end - start <= 0.0 {
@@ -1025,7 +1302,7 @@ where
 }
 
 /// The scene's motion blur, if it has one.
-fn frame_motion_blur(world: &World) -> Option<gaanim_renderer::effects::MotionBlur> {
+pub(crate) fn frame_motion_blur(world: &World) -> Option<gaanim_renderer::effects::MotionBlur> {
     world
         .get_resource::<gaanim_renderer::effects::MotionBlur>()
         .copied()
@@ -1093,16 +1370,16 @@ fn render_updated_world(
 ///
 /// Sub-frames stay inside the segment that shows the frame, so a cut never
 /// bleeds into it, and motion-blur-exempt drawables keep their look at `time`.
-fn render_motion_blurred(
-    app: &mut App,
-    gpu: &mut GpuContext,
-    config: &ExportConfig,
+/// Sub-frame times a motion-blurred frame at `time` averages, kept inside
+/// its segment.
+pub(crate) fn motion_blur_times(
+    world: &World,
     time: f64,
     fps: f64,
     blur: gaanim_renderer::effects::MotionBlur,
-) -> Result<Vec<u8>> {
+) -> Vec<f64> {
     let (start, end) = {
-        let timeline = app.world().resource::<Timeline>();
+        let timeline = world.resource::<Timeline>();
         let duration = timeline.cached_duration;
         timeline
             .segments
@@ -1114,6 +1391,17 @@ fn render_motion_blurred(
                 (segment.start_time, (segment.end_time - 1e-6).min(duration))
             })
     };
+    blur.sample_times(time, fps, start, end.max(start))
+}
+
+fn render_motion_blurred(
+    app: &mut App,
+    gpu: &mut GpuContext,
+    config: &ExportConfig,
+    time: f64,
+    fps: f64,
+    blur: gaanim_renderer::effects::MotionBlur,
+) -> Result<Vec<u8>> {
     let mut pins = gaanim_renderer::pipeline::PinnedElements::default();
     {
         let resolved_camera = frame_camera(app.world());
@@ -1123,7 +1411,7 @@ fn render_motion_blurred(
             &mut pins,
         );
     }
-    let times = blur.sample_times(time, fps, start, end.max(start));
+    let times = motion_blur_times(app.world(), time, fps, blur);
     let mut average = LinearAverage::new(config.width as usize * config.height as usize);
     for &sample in &times {
         app.world_mut().resource_mut::<Timeline>().seek_request = Some(sample);
@@ -1260,7 +1548,7 @@ fn output_fit_scale(
 /// [`capture_camera_to_vello_transform`].
 /// The camera a frame is rendered through: the resolved camera, which adds
 /// bindings, follow, dynamic framing, and shake to the authored camera.
-fn frame_camera(world: &World) -> Option<gaanim_math::ResolvedCamera> {
+pub(crate) fn frame_camera(world: &World) -> Option<gaanim_math::ResolvedCamera> {
     world
         .get_resource::<gaanim_math::ResolvedCamera>()
         .copied()

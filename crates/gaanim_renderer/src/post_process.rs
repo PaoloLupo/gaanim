@@ -216,6 +216,27 @@ impl PostProcessShader {
         &self.uniforms
     }
 
+    /// Storage data the shader reads as `gaanim_data`, e.g. a LUT.
+    pub fn data(&self) -> Option<&Arc<[[f32; 4]]>> {
+        self.data.as_ref()
+    }
+
+    /// Whether the pass composites a bloom of its input.
+    pub fn bloom(&self) -> bool {
+        self.bloom
+    }
+
+    /// Rebuild a shader from the parts [`Self::source`], [`Self::uniforms`],
+    /// [`Self::data`] and [`Self::bloom`] return.
+    pub fn from_parts(
+        source: impl Into<Arc<str>>,
+        uniforms: &[Arc<str>],
+        data: Option<Arc<[[f32; 4]]>>,
+        bloom: bool,
+    ) -> Result<Self, PostProcessError> {
+        Self::build(source.into(), uniforms.iter(), data, bloom)
+    }
+
     /// Value of the uniform `name` among `values`, given in declaration order.
     fn uniform_value(&self, values: &[f32], name: &str) -> Option<f32> {
         let index = self

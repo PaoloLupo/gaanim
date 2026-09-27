@@ -282,7 +282,11 @@ fn project_readme(name: &str, kind: ProjectKind) -> String {
         "# {name}\n\nProyecto `{}` generado por Gaanim.\n\n## Editar y previsualizar\n\n\
          Edita `main.py` y ejecuta:\n\n```powershell\ngaanim .\n```\n\n\
          Los recursos van en `assets/`; las salidas generadas van en `exports/`.\n\
-         {extra}\n## Validar\n\n```powershell\ngaanim check .\n```\n",
+         {extra}\n## Validar\n\n```powershell\ngaanim check .\n```\n\n\
+         ## Compartir\n\nGraba la escena en un solo archivo que se reproduce, presenta y \
+         exporta a video sin Python:\n\n```powershell\n\
+         gaanim export . --output exports/escena.gaanim\n\
+         gaanim --present exports/escena.gaanim\n```\n",
         kind.name()
     )
 }
@@ -941,6 +945,8 @@ mod tests {
             if kind == ProjectKind::Video {
                 assert!(readme.contains("gaanim export"));
             }
+            assert!(readme.contains("\n## Compartir\n"));
+            assert!(readme.contains("\ngaanim --present exports/escena.gaanim\n"));
         }
     }
 

@@ -10,6 +10,7 @@ gaanim_core = { path = "../gaanim_core" }
 gaanim_math = { path = "../gaanim_math" }
 gaanim_scene = { path = "../gaanim_scene" }
 gaanim_animation = { path = "../gaanim_animation" }
+gaanim_bundle = { path = "../gaanim_bundle" }
 gaanim_timeline = { path = "../gaanim_timeline" }
 gaanim_media = { path = "../gaanim_media" }
 gaanim_renderer = { path = "../gaanim_renderer" }
@@ -34,6 +35,7 @@ crossbeam-channel = "0.5"
 dev-dynamic = [
     "bevy/dynamic_linking",
     "gaanim_animation/dev-dynamic",
+    "gaanim_bundle/dev-dynamic",
     "gaanim_math/dev-dynamic",
     "gaanim_media/dev-dynamic",
     "gaanim_renderer/dev-dynamic",

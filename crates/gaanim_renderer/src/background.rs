@@ -446,6 +446,16 @@ impl ShaderBackgroundRequest {
         &self.image
     }
 
+    /// Timeline seconds the shader draws.
+    pub fn time(&self) -> f32 {
+        self.time
+    }
+
+    /// Scene frame, in world units, reported to the shader.
+    pub fn frame(&self) -> [f32; 2] {
+        self.frame
+    }
+
     /// Report a scene frame `frame` world units wide and tall to the shader.
     pub fn in_frame(mut self, frame: (f64, f64)) -> Self {
         self.frame = frame_size(frame);

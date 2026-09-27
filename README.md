@@ -61,8 +61,8 @@ el archivo recarga la escena.
 
 | Plataforma | CI | Artefacto instalable | Estado declarado |
 | --- | --- | --- | --- |
-| Windows 10/11 x64 | Sí | Zip con launcher, core y wheel de autoría | Soportada en `0.2.x` |
-| Ubuntu 24.04 x64 | Sí | Tarball con launcher, core y wheel de autoría | Soportada en `0.2.x` |
+| Windows 10/11 x64 | Sí | Zip con launcher, core, reproductor y wheel de autoría | Soportada en `0.2.x` |
+| Ubuntu 24.04 x64 | Sí | Tarball con launcher, core, reproductor y wheel de autoría | Soportada en `0.2.x` |
 | macOS | No | No | Experimental, sin garantía de release |
 
 El wheel `py3-none-any` es el mismo en todas las plataformas porque no contiene
@@ -75,7 +75,7 @@ salen de `.github/release-notes/v<versión>.md`: la primera línea,
 archivo el release se llama como el tag y lleva las notas que genera GitHub.
 
 En Ubuntu, descargue `gaanim-v<versión>-linux-x64.tar.gz`, extráigalo y copie
-`gaanim` y `gaanim-core` juntos a una carpeta de `PATH`, por ejemplo
+`gaanim`, `gaanim-core` y `gaanim-play` juntos a una carpeta de `PATH`, por ejemplo
 `~/.local/bin`. Requiere exactamente Python 3.14 (el core de Linux enlaza
 `libpython3.14.so`; por ejemplo `uv python install 3.14`) y las bibliotecas de
 sistema de Ubuntu 24.04; FFmpeg sigue siendo opcional salvo para video y audio.
@@ -232,6 +232,21 @@ porque un fallo del driver puede bloquear la GPU completa, fuera del aislamiento
 que puede ofrecer Gaanim.
 `--transparent` está disponible para WebM, WebP y PNG; MP4 y GIF se rechazan
 explícitamente porque no forman parte del contrato alpha de Gaanim.
+
+Para compartir una escena o presentación con alguien que no tiene Python,
+grábela en un paquete `.gaanim`: un solo archivo con todos los fotogramas que
+dibuja la escena (callbacks incluidos), sus segmentos, notas, pausas,
+marcadores y audio. `gaanim-play`, que se distribuye junto a `gaanim` y no
+enlaza Python, lo reproduce, lo presenta y lo exporta a vídeo con los mismos
+píxeles que la exportación del script:
+
+```powershell
+gaanim export . --output charla.gaanim
+gaanim --present charla.gaanim
+gaanim export charla.gaanim --output charla.mp4
+```
+
+Consulte `docs/content/guias/compartir.typ`.
 
 También puede colocar un MP4 dentro de la escena. El clip es un `Drawable`,
 responde al seek del editor y permite trim, loop, velocidad y audio embebido:

@@ -11,6 +11,36 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.5.3
+
+Sin publicar todavía. No hace falta cambiar tus escenas.
+
+== Cambios
+
+- Paquetes de reproducción: `gaanim export mi-charla --output mi-charla.gaanim`
+  graba la escena o presentación completa en un solo archivo que se
+  reproduce, presenta y exporta a vídeo sin Python, sin el proyecto y sin sus
+  recursos. Los callbacks, updaters y funciones reactivas quedan grabados como
+  los fotogramas que produjeron, y un vídeo exportado desde el paquete es
+  idéntico, píxel a píxel, al que exporta el script con la misma frecuencia y
+  el mismo tamaño. Aún no admite 3D ni clips de vídeo (ver
+  #link("/guias/compartir/")[Compartir sin Python]).
+- `gaanim mi-charla.gaanim` y `gaanim --present mi-charla.gaanim` abren un
+  paquete con el nuevo ejecutable `gaanim-play`, que se instala junto a
+  `gaanim` y no enlaza Python. Presenter View muestra sus notas y miniaturas.
+- `gaanim export mi-charla.gaanim --output mi-charla.mp4` convierte un paquete
+  en vídeo con los formatos y opciones de siempre, y el botón Exportar del
+  editor hace lo mismo con el paquete abierto. `--fps` elige la frecuencia al
+  grabar un paquete.
+- `gaanim check mi-charla.gaanim` vuelve a componer cada fotograma de un
+  paquete y lo compara con el resumen grabado, sin Python.
+- `gaanim --diff --example mi-charla.gaanim` captura y compara las pausas de un
+  paquete, sin Python; coinciden con las de `--capture-stops` sobre el script.
+- El diálogo Exportar del editor ofrece el formato Paquete para grabar un
+  `.gaanim` del script abierto.
+- El `README.md` de los proyectos nuevos incluye cómo compartirlos como
+  paquete.
+
 = 0.5.2
 
 Publicada el 27 de septiembre de 2026. No hace falta cambiar tus escenas.

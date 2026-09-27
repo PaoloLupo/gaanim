@@ -103,6 +103,23 @@ gaanim --diff --example mi-charla --capture-stops --stops 12,30 --capture-only
   reemplaza el `manifest.json` aprobado: no lo uses sobre una versión de
   `scene.snapshots` que quieras conservar.
 
+== Paquetes de reproducción
+
+Un paquete `.gaanim` (ver #link("/guias/compartir/")[Compartir sin Python])
+también se compara, sin Python: `--example` con un paquete captura siempre sus
+pausas, así que no hace falta `--capture-stops`, y admite `--stops`,
+`--sections` y `--from`.
+
+```bash
+gaanim --diff --example mi-charla.gaanim --bless
+gaanim --diff --example mi-charla.gaanim
+```
+
+Las capturas de un paquete son idénticas a las de `--capture-stops` sobre el
+script que lo grabó, así que puedes comparar la versión aprobada de uno con la
+actual del otro usando `--baseline` y `--current`, por ejemplo para comprobar
+que un paquete compartido muestra lo mismo que el proyecto.
+
 = Automatizar y tolerar diferencias
 
 ```bash
