@@ -62,14 +62,7 @@ pub fn has_transform_changes(
 /// their parent's transform from the previous frame. Only the subtrees below
 /// entities whose inputs changed since the last run are visited.
 pub fn transform_propagation_system(
-    mut queries: ParamSet<(
-        Query<Entity, StaleTransformFilter>,
-        Query<(
-            &SpatialTransform,
-            &mut GlobalSpatialTransform,
-            Option<&crate::ShapeDeform>,
-        )>,
-    )>,
+    mut queries: ParamSet<(Query<Entity, StaleTransformFilter>, TransformTargets)>,
     mut removed: (
         RemovedComponents<ChildOf>,
         RemovedComponents<crate::ShapeDeform>,
@@ -121,6 +114,17 @@ pub fn transform_propagation_system(
         propagate_transforms_recursive(entity, parent_global, true, &mut transforms, &propagation);
     }
 }
+
+/// Local inputs and world transform of every entity propagation writes.
+type TransformTargets<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static SpatialTransform,
+        &'static mut GlobalSpatialTransform,
+        Option<&'static crate::ShapeDeform>,
+    ),
+>;
 
 /// Entities whose world transform may differ from what propagation last
 /// wrote: their own inputs changed, or another system wrote their world
@@ -175,10 +179,10 @@ fn propagate_transforms_recursive(
     )>,
     propagation: &Propagation,
 ) {
-    let recompute = parent_changed
-        || propagation
-            .stale
-            .is_none_or(|stale| stale.contains(&entity));
+    let stale = propagation
+        .stale
+        .is_none_or(|stale| stale.contains(&entity));
+    let recompute = parent_changed || stale;
     let (current_global, changed) = if recompute {
         let Some(computed) =
             computed_global(entity, parent_global.as_ref(), transforms, propagation)
@@ -206,7 +210,10 @@ fn propagate_transforms_recursive(
             propagate_transforms_recursive(
                 *child,
                 Some(current_global),
-                changed || propagation.stale.is_none(),
+                // Another writer may already have stored this entity's new
+                // value, so an unchanged value does not prove its children
+                // are current.
+                changed || stale,
                 transforms,
                 propagation,
             );
@@ -406,10 +413,7 @@ pub fn has_opacity_changes(
 ///
 /// Only subtrees below an entity whose opacity inputs changed are visited.
 pub fn opacity_propagation_system(
-    mut queries: ParamSet<(
-        Query<Entity, StaleOpacityFilter>,
-        Query<(&Opacity, &mut GlobalOpacity)>,
-    )>,
+    mut queries: ParamSet<(Query<Entity, StaleOpacityFilter>, OpacityTargets)>,
     mut removed: (
         RemovedComponents<ChildOf>,
         RemovedComponents<crate::Presence>,
@@ -448,6 +452,9 @@ pub fn opacity_propagation_system(
         propagate_opacities_recursive(entity, parent_opacity, true, &mut opacities, &propagation);
     }
 }
+
+/// Local and world opacity of every entity propagation writes.
+type OpacityTargets<'w, 's> = Query<'w, 's, (&'static Opacity, &'static mut GlobalOpacity)>;
 
 /// Entities whose world opacity may differ from what propagation last wrote.
 type StaleOpacityFilter = Or<(
@@ -498,7 +505,8 @@ fn propagate_opacities_recursive(
     opacities: &mut Query<(&Opacity, &mut GlobalOpacity)>,
     propagation: &OpacityPropagation,
 ) {
-    let recompute = parent_changed || propagation.stale.contains(&entity);
+    let stale = propagation.stale.contains(&entity);
+    let recompute = parent_changed || stale;
     let presence = || {
         propagation
             .presences
@@ -520,7 +528,14 @@ fn propagate_opacities_recursive(
 
     if let Ok(children) = propagation.children_query.get(entity) {
         for child in children.iter() {
-            propagate_opacities_recursive(*child, current_opacity, changed, opacities, propagation);
+            // A restored snapshot may already hold this entity's new value.
+            propagate_opacities_recursive(
+                *child,
+                current_opacity,
+                changed || stale,
+                opacities,
+                propagation,
+            );
         }
     }
 }
@@ -620,8 +635,18 @@ pub fn has_bounds_changes(
 ///
 /// Runs in the `Bounds` phase after transform propagation so that `GlobalSpatialTransform`
 /// already contains the full hierarchy matrix for each entity.
+///
+/// Only entities whose local bounds or world transform changed, or whose world
+/// bounds another system wrote (a snapshot restore), are recomputed.
 pub fn world_bounds_propagation_system(
-    mut query: Query<(&LocalBounds, &GlobalSpatialTransform, &mut WorldBounds)>,
+    mut query: Query<
+        (&LocalBounds, &GlobalSpatialTransform, &mut WorldBounds),
+        Or<(
+            Changed<LocalBounds>,
+            Changed<GlobalSpatialTransform>,
+            Changed<WorldBounds>,
+        )>,
+    >,
 ) {
     for (local, global, mut world) in &mut query {
         // Use full 3D transform so that rotated/scaled 3D objects get correct AABB.
@@ -2197,6 +2222,106 @@ mod tests {
         assert!((world.get::<GlobalOpacity>(copy).unwrap().0 - 0.1).abs() < 1e-6);
         assert!((world.get::<GlobalOpacity>(leaf).unwrap().0 - 0.1).abs() < 1e-6);
         assert_eq!(world.get::<Opacity>(copy).unwrap().0, 0.8);
+    }
+
+    #[test]
+    fn children_follow_a_parent_whose_new_value_was_already_written() {
+        // A snapshot restore writes both local and world values; the children
+        // must still receive the parent's new world value.
+        let mut world = World::new();
+        let parent = world
+            .spawn((
+                Opacity(0.2),
+                GlobalOpacity::default(),
+                SpatialTransform::default(),
+                GlobalSpatialTransform::default(),
+            ))
+            .id();
+        let child = world
+            .spawn((
+                Opacity(1.0),
+                GlobalOpacity::default(),
+                SpatialTransform::default(),
+                GlobalSpatialTransform::default(),
+            ))
+            .id();
+        world.entity_mut(child).set_parent_in_place(parent);
+        let mut schedule = Schedule::default();
+        schedule.add_systems((opacity_propagation_system, transform_propagation_system));
+        schedule.run(&mut world);
+        assert!((world.get::<GlobalOpacity>(child).unwrap().0 - 0.2).abs() < 1e-6);
+
+        let moved = SpatialTransform {
+            translation: gaanim_core::glam::DVec3::new(3.0, 0.0, 0.0),
+            ..Default::default()
+        };
+        world.entity_mut(parent).insert((
+            Opacity(0.8),
+            GlobalOpacity(0.8),
+            moved,
+            GlobalSpatialTransform::from_local(&moved),
+        ));
+        schedule.run(&mut world);
+
+        assert!((world.get::<GlobalOpacity>(child).unwrap().0 - 0.8).abs() < 1e-6);
+        let global = world.get::<GlobalSpatialTransform>(child).unwrap();
+        assert_eq!(global.affine_2d.translation().x, 3.0);
+    }
+
+    #[test]
+    fn propagation_revisits_only_changed_subtrees_and_keeps_the_rest() {
+        let mut world = World::new();
+        let spawn = |world: &mut World, x: f64| {
+            world
+                .spawn((
+                    Opacity(0.5),
+                    GlobalOpacity::default(),
+                    SpatialTransform {
+                        translation: gaanim_core::glam::DVec3::new(x, 0.0, 0.0),
+                        ..Default::default()
+                    },
+                    GlobalSpatialTransform::default(),
+                ))
+                .id()
+        };
+        let still = spawn(&mut world, 1.0);
+        let still_child = spawn(&mut world, 1.0);
+        let moving = spawn(&mut world, 2.0);
+        let moving_child = spawn(&mut world, 1.0);
+        world.entity_mut(still_child).set_parent_in_place(still);
+        world.entity_mut(moving_child).set_parent_in_place(moving);
+        let mut schedule = Schedule::default();
+        schedule.add_systems((opacity_propagation_system, transform_propagation_system));
+        schedule.run(&mut world);
+        let x = |world: &World, entity| {
+            world
+                .get::<GlobalSpatialTransform>(entity)
+                .unwrap()
+                .affine_2d
+                .translation()
+                .x
+        };
+        assert_eq!(x(&world, still_child), 2.0);
+        assert_eq!(x(&world, moving_child), 3.0);
+
+        world
+            .get_mut::<SpatialTransform>(moving)
+            .unwrap()
+            .translation
+            .x = 5.0;
+        world.get_mut::<Opacity>(moving).unwrap().0 = 1.0;
+        let before = world.change_tick();
+        schedule.run(&mut world);
+
+        assert_eq!(x(&world, moving_child), 6.0);
+        assert!((world.get::<GlobalOpacity>(moving_child).unwrap().0 - 0.5).abs() < 1e-6);
+        assert_eq!(x(&world, still_child), 2.0);
+        // The untouched subtree keeps its change ticks.
+        let ticks = world
+            .entity(still_child)
+            .get_change_ticks::<GlobalSpatialTransform>()
+            .unwrap();
+        assert!(!ticks.is_changed(before, world.change_tick()));
     }
 
     #[test]

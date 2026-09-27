@@ -803,6 +803,11 @@ impl Timeline {
         }
     }
 
+    /// Changes whenever clips, keyframes or cached bounds change.
+    pub(crate) fn property_revision(&self) -> u64 {
+        self.property_revision
+    }
+
     /// Adds a clip to the timeline under a specific track and time interval.
     pub fn add_clip(
         &mut self,
@@ -1949,9 +1954,12 @@ impl Timeline {
     /// seeking skips intermediate frames, so resolve that anchor explicitly and
     /// restore reactive updaters to the requested time afterwards.
     fn restore_followed_shake_origin(&self, world: &mut World) {
-        let Some(shake_start) = self
-            .clips
-            .values()
+        let camera_clips: Vec<&Clip> = crate::camera_clip_ids(self, world)
+            .into_iter()
+            .filter_map(|id| self.clips.get(id))
+            .collect();
+        let Some(shake_start) = camera_clips
+            .iter()
             .filter_map(|clip| match &clip.payload {
                 ClipPayload::Animation(anim) => match &anim.lens {
                     PropertyLensSpec::CameraShake { .. } if clip.start <= self.current_time => {
@@ -1967,7 +1975,7 @@ impl Timeline {
         };
 
         // A later pan/frame/follow owns the camera position instead.
-        let has_later_position_control = self.clips.values().any(|clip| {
+        let has_later_position_control = camera_clips.iter().any(|clip| {
             clip.start > shake_start
                 && clip.start <= self.current_time
                 && matches!(
@@ -1986,9 +1994,8 @@ impl Timeline {
             return;
         }
 
-        let Some((follow_end, target)) = self
-            .clips
-            .values()
+        let Some((follow_end, target)) = camera_clips
+            .iter()
             .filter_map(|clip| match &clip.payload {
                 ClipPayload::Animation(anim) => match anim.lens {
                     PropertyLensSpec::CameraFollow { target } if clip.end() <= shake_start => {

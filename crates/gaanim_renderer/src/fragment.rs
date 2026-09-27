@@ -271,6 +271,12 @@ struct StoredFragment {
 /// Frames a fragment stays built after it was last drawn.
 const FRAGMENT_KEEP_FRAMES: u64 = 240;
 
+/// Frames between eviction sweeps. A sweep visits every stored fragment, and
+/// a scene with thousands of them would pay that on every frame. The store
+/// holds each recipe it keys by address, so a late sweep never confuses a
+/// freed recipe with a new one.
+const FRAGMENT_SWEEP_FRAMES: u64 = 60;
+
 impl FragmentStore {
     /// The fragment and screen overlay of `recipe`, built once per shared
     /// recipe allocation.
@@ -309,10 +315,13 @@ impl FragmentStore {
         });
     }
 
-    /// Finish a frame: forget fragments not drawn for a while, and those
-    /// whose recipes nothing else holds.
+    /// Finish a frame: every [`FRAGMENT_SWEEP_FRAMES`], forget fragments not
+    /// drawn for a while, and those whose recipes nothing else holds.
     pub fn end_frame(&mut self) {
         self.generation += 1;
+        if !self.generation.is_multiple_of(FRAGMENT_SWEEP_FRAMES) {
+            return;
+        }
         let oldest = self.generation.saturating_sub(FRAGMENT_KEEP_FRAMES);
         self.built.retain(|_, stored| {
             stored.last_used >= oldest
