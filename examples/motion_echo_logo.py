@@ -30,7 +30,7 @@ def outline(widths, cx):
         y0, y1 = top - row * PIXEL, top - (row + 1) * PIXEL
         half = width * PIXEL / 2
         right += [(cx + half, y0), (cx + half, y1)]
-        left += [(cx - half, y1), (cx - half, y0)]
+        left += [(cx - half, y0), (cx - half, y1)]
     return right + left[::-1]
 
 

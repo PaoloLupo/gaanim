@@ -1126,7 +1126,7 @@ def outline(widths, cx, pixel=0.5):
     for row, width in enumerate(widths):
         y0, y1, half = top - row * pixel, top - (row + 1) * pixel, width * pixel / 2
         right += [(cx + half, y0), (cx + half, y1)]
-        left += [(cx - half, y1), (cx - half, y0)]
+        left += [(cx - half, y0), (cx - half, y1)]
     return right + left[::-1]
 
 scene = Scene(frame=(16, 9), background="#1A1A1A")
