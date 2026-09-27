@@ -17,7 +17,14 @@ use crate::post_process::{CanvasPostProcess, GpuPostProcess, PostProcessRequest}
 struct PostProcessFrame(Option<(PostProcessRequest, AssetId<Image>)>);
 
 #[derive(Resource, Default)]
-struct ExtractedPostProcess(Option<(PostProcessRequest, AssetId<Image>)>);
+pub(crate) struct ExtractedPostProcess(Option<(PostProcessRequest, AssetId<Image>)>);
+
+impl ExtractedPostProcess {
+    /// Whether this frame post-processes the canvas texture.
+    pub(crate) fn is_active(&self) -> bool {
+        self.0.is_some()
+    }
+}
 
 #[derive(Resource, Default)]
 struct RenderPostProcess(GpuPostProcess);

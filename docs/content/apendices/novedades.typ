@@ -11,6 +11,27 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.5.1
+
+Sin publicar todavía. No hace falta cambiar tus escenas.
+
+== Cambios
+
+- La previsualización ya no vuelve a rasterizar un fotograma idéntico al que
+  muestra: en pausa, durante un `scene.wait()` o en una parada de la
+  presentación, la GPU queda libre y el editor responde con más holgura. Los
+  fotogramas con postprocesado o con un fondo de shader se siguen dibujando
+  siempre, porque cambian fuera de la escena vectorial.
+- Un objeto semitransparente pintado con un único color sólido (solo relleno o
+  solo trazo; por ejemplo, las líneas de `connect` o las copias de un `repeat`
+  con `opacity=(a, b)` cuando la figura solo tiene relleno) recibe la opacidad
+  en su color en lugar de abrir una capa de opacidad. La imagen es la misma y
+  dibujarlo cuesta mucho menos: con 89 círculos semitransparentes en
+  movimiento y render por software, cada fotograma pasó de 152 a 41 ms. Se
+  aplica a la previsualización y a las exportaciones. Los objetos con relleno
+  y trazo a la vez siguen usando una capa, que evita que el trazo se mezcle
+  con el relleno.
+
 = 0.5.0
 
 Publicada el 27 de septiembre de 2026. Cambian el pivote por defecto de las

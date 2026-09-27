@@ -23,7 +23,7 @@ use bevy::render::render_resource::{
     BlendState, ColorTargetState, ColorWrites, Extent3d, MultisampleState, PrimitiveState,
     RawFragmentState, RawRenderPipelineDescriptor, RawVertexState, RenderPassDescriptor,
     RenderPipeline, ShaderStages, TextureDimension, TextureFormat, TextureSampleType,
-    TextureUsages, TextureViewDimension,
+    TextureUsages, TextureViewDimension, TextureViewId,
 };
 use bevy::render::renderer::{RenderContext, RenderDevice, RenderQueue, ViewQuery, render_system};
 use bevy::render::texture::GpuImage;
@@ -50,6 +50,72 @@ pub struct VelloScene2d(Arc<Scene>);
 impl From<Scene> for VelloScene2d {
     fn from(scene: Scene) -> Self {
         Self(Arc::new(scene))
+    }
+}
+
+/// Whether two scenes draw exactly the same pixels: equal command streams and
+/// equal late-bound resources. Images compare by their shared data, which
+/// cannot change in place. Glyph runs are not compared (Gaanim draws text as
+/// paths), so scenes that use them always differ.
+pub fn draws_same(a: &Scene, b: &Scene) -> bool {
+    use vello_encoding::Patch;
+    let (a, b) = (a.encoding(), b.encoding());
+    let (resources_a, resources_b) = (&a.resources, &b.resources);
+    let same_patches = resources_a.patches.len() == resources_b.patches.len()
+        && resources_a
+            .patches
+            .iter()
+            .zip(&resources_b.patches)
+            .all(|patches| match patches {
+                (
+                    Patch::Ramp {
+                        draw_data_offset: offset_a,
+                        stops: stops_a,
+                        extend: extend_a,
+                    },
+                    Patch::Ramp {
+                        draw_data_offset: offset_b,
+                        stops: stops_b,
+                        extend: extend_b,
+                    },
+                ) => offset_a == offset_b && stops_a == stops_b && extend_a == extend_b,
+                (
+                    Patch::Image {
+                        draw_data_offset: offset_a,
+                        image: image_a,
+                    },
+                    Patch::Image {
+                        draw_data_offset: offset_b,
+                        image: image_b,
+                    },
+                ) => offset_a == offset_b && image_a == image_b,
+                _ => false,
+            });
+    a.n_paths == b.n_paths
+        && a.n_path_segments == b.n_path_segments
+        && a.n_clips == b.n_clips
+        && a.n_open_clips == b.n_open_clips
+        && resources_a.glyph_runs.is_empty()
+        && resources_b.glyph_runs.is_empty()
+        && a.path_tags == b.path_tags
+        && a.path_data == b.path_data
+        && a.draw_tags == b.draw_tags
+        && a.draw_data == b.draw_data
+        && a.transforms == b.transforms
+        && a.styles == b.styles
+        && resources_a.color_stops == resources_b.color_stops
+        && same_patches
+}
+
+impl VelloScene2d {
+    /// Show `scene` unless it draws the same frame as the current one. Keeping
+    /// the shared scene lets the canvas skip rasterizing an unchanged frame.
+    pub fn replace_if_different(&mut self, scene: Scene) -> bool {
+        if draws_same(&self.0, &scene) {
+            return false;
+        }
+        self.0 = Arc::new(scene);
+        true
     }
 }
 
@@ -121,12 +187,40 @@ struct ExtractedCanvas {
     scene: Option<(Arc<Scene>, Mat4)>,
 }
 
+/// The frame the canvas texture holds, so an identical frame is not
+/// rasterized again (while paused, holding a pose, or resting on a stop).
+#[derive(Resource, Default)]
+struct RenderedCanvas(Option<CanvasFrame>);
+
+struct CanvasFrame {
+    /// The texture view drawn into; a recreated texture starts out blank.
+    view: TextureViewId,
+    size: Extent3d,
+    /// Holding the scene keeps its address from being reused by another one.
+    scene: Option<(Arc<Scene>, Affine)>,
+}
+
+impl CanvasFrame {
+    fn same(&self, other: &Self) -> bool {
+        self.view == other.view
+            && self.size == other.size
+            && match (&self.scene, &other.scene) {
+                (None, None) => true,
+                (Some((scene, affine)), Some((other_scene, other_affine))) => {
+                    Arc::ptr_eq(scene, other_scene) && affine == other_affine
+                }
+                _ => false,
+            }
+    }
+}
+
 #[derive(Resource)]
 struct CompositePipelines {
     layout: BindGroupLayout,
     shader: vello::wgpu::ShaderModule,
     pipelines: Vec<((TextureFormat, u32), RenderPipeline)>,
-    bind_group: Option<BindGroup>,
+    /// Bind group of the canvas texture view it was created for.
+    bind_group: Option<(TextureViewId, BindGroup)>,
 }
 
 pub(crate) struct VelloCanvasPlugin;
@@ -145,6 +239,7 @@ impl Plugin for VelloCanvasPlugin {
         render_app
             .insert_resource(stats)
             .init_resource::<ExtractedCanvas>()
+            .init_resource::<RenderedCanvas>()
             .add_systems(ExtractSchedule, extract_canvas)
             .add_systems(
                 Render,
@@ -281,7 +376,8 @@ type CanvasViews<'w, 's> = Query<
 >;
 
 /// Rasterizes the extracted scene into the canvas texture before the camera
-/// passes sample it.
+/// passes sample it. A frame identical to the one the texture holds is skipped.
+#[allow(clippy::too_many_arguments)]
 fn render_canvas(
     extracted: Res<ExtractedCanvas>,
     views: CanvasViews,
@@ -290,20 +386,39 @@ fn render_canvas(
     queue: Res<RenderQueue>,
     renderer: Res<VelloRenderer>,
     stats: Res<VelloFrameStats>,
+    effects: (
+        Option<Res<crate::post_process_gpu::ExtractedPostProcess>>,
+        Option<Res<crate::background_gpu::ExtractedShaderBackground>>,
+    ),
+    mut rendered: ResMut<RenderedCanvas>,
 ) {
     let Some(target) = extracted.image.and_then(|image| images.get(image)) else {
         return;
     };
 
+    let placed = extracted.scene.as_ref().and_then(|(scene, model)| {
+        let (camera, view) = views.iter().last()?;
+        Some((Arc::clone(scene), scene_to_pixels(*model, camera, view)?))
+    });
+    let current = CanvasFrame {
+        view: target.texture_view.id(),
+        size: target.texture_descriptor.size,
+        scene: placed,
+    };
+    // Post-processing rewrites the texture in place, and shader backgrounds
+    // animate outside the scene encoding: frames with either are always drawn.
+    let (post, shader) = effects;
+    let volatile = post.is_some_and(|post| post.is_active())
+        || shader.is_some_and(|shader| shader.is_active());
+    if !volatile && rendered.0.as_ref().is_some_and(|last| last.same(&current)) {
+        return;
+    }
+    rendered.0 = None;
+
     let mut frame = Scene::new();
     let mut scenes = 0;
-    if let Some((scene, model)) = &extracted.scene
-        && let Some(affine) = views
-            .iter()
-            .last()
-            .and_then(|(camera, view)| scene_to_pixels(*model, camera, view))
-    {
-        frame.append(scene, Some(affine));
+    if let Some((scene, affine)) = &current.scene {
+        frame.append(scene, Some(*affine));
         scenes = 1;
     }
 
@@ -324,7 +439,7 @@ fn render_canvas(
     let Ok(mut renderer) = renderer.lock() else {
         return;
     };
-    if let Err(error) = renderer.render_to_texture(
+    match renderer.render_to_texture(
         device.wgpu_device(),
         &queue,
         &frame,
@@ -336,7 +451,8 @@ fn render_canvas(
             antialiasing_method: CANVAS_ANTIALIASING,
         },
     ) {
-        error!("Vello failed to render the canvas: {error}");
+        Ok(()) => rendered.0 = (!volatile).then_some(current),
+        Err(error) => error!("Vello failed to render the canvas: {error}"),
     }
 }
 
@@ -429,19 +545,27 @@ fn prepare_composite(
     for (target, msaa) in &views {
         composite.ensure_pipeline(&device, target.main_texture_format(), msaa.samples());
     }
-    composite.bind_group = extracted
-        .image
-        .and_then(|image| images.get(image))
-        .map(|image| {
-            device.create_bind_group(
-                "gaanim_canvas_composite",
-                &composite.layout,
-                &[BindGroupEntry {
-                    binding: 0,
-                    resource: BindingResource::TextureView(&image.texture_view),
-                }],
-            )
-        });
+    let Some(image) = extracted.image.and_then(|image| images.get(image)) else {
+        composite.bind_group = None;
+        return;
+    };
+    let view = image.texture_view.id();
+    if composite
+        .bind_group
+        .as_ref()
+        .is_some_and(|(bound, _)| *bound == view)
+    {
+        return;
+    }
+    let bind_group = device.create_bind_group(
+        "gaanim_canvas_composite",
+        &composite.layout,
+        &[BindGroupEntry {
+            binding: 0,
+            resource: BindingResource::TextureView(&image.texture_view),
+        }],
+    );
+    composite.bind_group = Some((view, bind_group));
 }
 
 /// Draws the canvas texture over the camera's main 2D pass.
@@ -454,7 +578,7 @@ fn composite_canvas(
     let Some(composite) = composite else {
         return;
     };
-    let (Some(bind_group), Some(pipeline)) = (
+    let (Some((_, bind_group)), Some(pipeline)) = (
         composite.bind_group.as_ref(),
         composite.pipeline(target.main_texture_format(), msaa.samples()),
     ) else {
@@ -515,3 +639,67 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     return linear_from_srgba(textureLoad(canvas, texel, 0));
 }
 ";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vello::kurbo::{Circle, Rect};
+    use vello::peniko::{Color, Fill};
+
+    fn scene(radius: f64) -> Scene {
+        let mut scene = Scene::new();
+        scene.fill(
+            Fill::NonZero,
+            Affine::IDENTITY,
+            Color::WHITE,
+            None,
+            &Circle::new((0.0, 0.0), radius),
+        );
+        scene
+    }
+
+    #[test]
+    fn an_identical_frame_keeps_the_shared_scene() {
+        let mut shown = VelloScene2d::from(scene(1.0));
+        let before = Arc::clone(&shown.0);
+
+        assert!(!shown.replace_if_different(scene(1.0)));
+        assert!(Arc::ptr_eq(&before, &shown.0));
+
+        assert!(shown.replace_if_different(scene(2.0)));
+        assert!(!Arc::ptr_eq(&before, &shown.0));
+    }
+
+    #[test]
+    fn frames_differing_only_in_a_layer_or_a_gradient_are_different() {
+        let mut layered = scene(1.0);
+        layered.push_layer(
+            Fill::NonZero,
+            vello::peniko::BlendMode::default(),
+            0.5,
+            Affine::IDENTITY,
+            &Rect::new(0.0, 0.0, 1.0, 1.0),
+        );
+        layered.pop_layer();
+        assert!(!draws_same(&scene(1.0), &layered));
+
+        let gradient = |end: Color| {
+            let mut scene = Scene::new();
+            let brush = vello::peniko::Gradient::new_linear((0.0, 0.0), (1.0, 0.0))
+                .with_stops([Color::BLACK, end]);
+            scene.fill(
+                Fill::NonZero,
+                Affine::IDENTITY,
+                &brush,
+                None,
+                &Rect::new(0.0, 0.0, 1.0, 1.0),
+            );
+            scene
+        };
+        assert!(draws_same(&gradient(Color::WHITE), &gradient(Color::WHITE)));
+        assert!(!draws_same(
+            &gradient(Color::WHITE),
+            &gradient(Color::from_rgb8(255, 0, 0))
+        ));
+    }
+}

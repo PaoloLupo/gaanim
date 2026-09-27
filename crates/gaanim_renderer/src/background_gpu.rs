@@ -17,7 +17,14 @@ use crate::canvas::VelloRenderer;
 pub struct ShaderBackgroundFrame(pub(crate) Option<ShaderBackgroundRequest>);
 
 #[derive(Resource, Default)]
-struct ExtractedShaderBackground(Option<ShaderBackgroundRequest>);
+pub(crate) struct ExtractedShaderBackground(Option<ShaderBackgroundRequest>);
+
+impl ExtractedShaderBackground {
+    /// Whether this frame draws a shader background.
+    pub(crate) fn is_active(&self) -> bool {
+        self.0.is_some()
+    }
+}
 
 #[derive(Resource, Default)]
 struct RenderShaderBackgrounds {

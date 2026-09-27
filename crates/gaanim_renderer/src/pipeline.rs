@@ -904,6 +904,10 @@ fn append_element_run(
 
         if elem.clip_mask.is_none() && elem.blend.is_none() && elem.opacity < 1.0 {
             let end = opacity_run_end(elements, index);
+            if end == index + 1 && append_faded_solid(main_scene, elem) {
+                index = end;
+                continue;
+            }
             main_scene.push_layer(
                 peniko::Fill::NonZero,
                 peniko::BlendMode::default(),
@@ -953,6 +957,38 @@ fn append_element_run(
         }
         index = end;
     }
+}
+
+/// Append a fragment that paints a single solid color, with the element's
+/// opacity folded into that color instead of an opacity layer. One paint
+/// covers each pixel once, so the result matches the layer (up to 8-bit
+/// rounding) without its rasterization cost. Appends nothing and returns
+/// `false` for any other fragment.
+fn append_faded_solid(scene: &mut vello::Scene, elem: &ExtractedElement) -> bool {
+    let encoding = elem.scene.encoding();
+    let single_solid = encoding.n_paths == 1
+        && encoding.n_clips == 0
+        && encoding.draw_tags.as_slice() == [vello_encoding::DrawTag::COLOR]
+        && encoding.draw_data.len() == 1
+        && encoding.resources.patches.is_empty();
+    if !single_solid {
+        return false;
+    }
+    let offset = scene.encoding().draw_data.len();
+    scene.append(&elem.scene, Some(elem.transform));
+    if let Some(rgba) = scene.encoding_mut().draw_data.get_mut(offset) {
+        *rgba = fade_premultiplied_rgba(*rgba, elem.opacity);
+    }
+    true
+}
+
+/// Scale a packed premultiplied RGBA8 color by `opacity`.
+fn fade_premultiplied_rgba(rgba: u32, opacity: f32) -> u32 {
+    let opacity = opacity.clamp(0.0, 1.0);
+    u32::from_le_bytes(
+        rgba.to_le_bytes()
+            .map(|channel| (f32::from(channel) * opacity).round() as u8),
+    )
 }
 
 /// Draw a camera view screen: its paint, then what its camera sees clipped
@@ -2991,7 +3027,14 @@ pub fn gaanim_render_system(
 
     // Hand the composited encoding to the single global scene entity.
     if let Some(mut scene) = query_vello_scene.iter_mut().next() {
-        *scene = VelloScene2d::from(std::mem::take(&mut main_scene));
+        // An unchanged frame keeps the shared scene, so the canvas is not
+        // rasterized again.
+        if scene
+            .bypass_change_detection()
+            .replace_if_different(std::mem::take(&mut main_scene))
+        {
+            scene.set_changed();
+        }
     } else {
         commands.spawn((
             MainVelloScene,
@@ -3981,6 +4024,60 @@ mod tests {
 
         assert_eq!(opacity_run_end(&elements, 0), 3);
         assert_eq!(opacity_run_end(&elements, 3), 4);
+    }
+
+    #[test]
+    fn a_translucent_single_solid_paint_is_faded_without_a_layer() {
+        let element = |scene: vello::Scene| ExtractedElement {
+            transform: kurbo::Affine::translate((2.0, 0.0)),
+            opacity: 0.5,
+            opacity_bounds: kurbo::Rect::new(0.0, 0.0, 10.0, 10.0),
+            opacity_group: Entity::PLACEHOLDER,
+            render_order: RenderOrder::default(),
+            scene: Arc::new(scene),
+            clip_mask: None,
+            blend: None,
+            transition_side: Default::default(),
+            lineage: Vec::new(),
+            view_bounds: None,
+            in_views: true,
+            layer: None,
+            screen: None,
+            echo_rank: 0,
+        };
+        let circle = kurbo::Circle::new((0.0, 0.0), 1.0);
+        let red = peniko::Color::from_rgba8(200, 0, 0, 255);
+        let mut fill = vello::Scene::new();
+        fill.fill(
+            peniko::Fill::NonZero,
+            kurbo::Affine::IDENTITY,
+            red,
+            None,
+            &circle,
+        );
+        let mut outlined = fill.clone();
+        outlined.stroke(
+            &kurbo::Stroke::new(0.1),
+            kurbo::Affine::IDENTITY,
+            peniko::Color::WHITE,
+            None,
+            &circle,
+        );
+
+        let mut composed = vello::Scene::new();
+        append_element_run(&mut composed, &[element(fill)], None);
+        let encoding = composed.encoding();
+        assert_eq!(encoding.n_clips, 0);
+        assert_eq!(
+            encoding.draw_data,
+            vec![u32::from_le_bytes([100, 0, 0, 128])]
+        );
+
+        // Fill and stroke overlap, so only a layer composites them correctly.
+        let mut composed = vello::Scene::new();
+        append_element_run(&mut composed, &[element(outlined)], None);
+        // The begin and end markers of one layer.
+        assert_eq!(composed.encoding().n_clips, 2);
     }
 
     #[test]
