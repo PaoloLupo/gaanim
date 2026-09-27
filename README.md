@@ -69,6 +69,11 @@ El wheel `py3-none-any` es el mismo en todas las plataformas porque no contiene
 runtime. Esta tabla se refiere al ejecutable, que es lo necesario para abrir o
 exportar una escena.
 
+Cada release se publica al subir un tag `v<versión>`. Su título y sus notas
+salen de `.github/release-notes/v<versión>.md`: la primera línea,
+`# Título`, nombra el release y el resto es el texto que se muestra. Sin ese
+archivo el release se llama como el tag y lleva las notas que genera GitHub.
+
 En Ubuntu, descargue `gaanim-v<versión>-linux-x64.tar.gz`, extráigalo y copie
 `gaanim` y `gaanim-core` juntos a una carpeta de `PATH`, por ejemplo
 `~/.local/bin`. Requiere exactamente Python 3.14 (el core de Linux enlaza

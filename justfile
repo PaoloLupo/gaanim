@@ -111,11 +111,6 @@ benchmark profile="smoke" encoder="libx264":
     cargo build -p gaanim_editor --bin gaanim-core --release
     {{ python }} tests/benchmark_runtime.py --executable {{ release_runtime }} --profile {{ profile }} --encoder {{ encoder }}
 
-# Same harness on 1000 duplicated instances that enter with animate.count.
-benchmark-repeater profile="smoke" encoder="libx264":
-    cargo build -p gaanim_editor --bin gaanim-core --release
-    {{ python }} tests/benchmark_runtime.py --executable {{ release_runtime }} --profile {{ profile }} --encoder {{ encoder }} --scene examples/performance_repeater.py --output target/performance/repeater
-
 # ---- Run --------------------------------------------------------------------
 
 # Run an example script inside the Gaanim application. Usage: just run my_example

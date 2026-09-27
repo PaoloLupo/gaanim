@@ -1,8 +1,8 @@
 """1000 duplicated instances for the runtime performance harness.
 
-Run it with `just benchmark-repeater smoke` (or `standard`). The copies enter
-with `animate.count`, then the whole group turns and breathes, so every frame
-redraws all 1000 instances.
+The copies enter with `animate.count`, then the whole group turns and
+shrinks, so every frame redraws all 1000 instances. Pass it to
+`tests/benchmark_runtime.py --scene examples/performance_repeater.py`.
 """
 
 import os

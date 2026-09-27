@@ -11,12 +11,6 @@ Both recipes build and invoke the native `gaanim-core` release executable.
 Results live in `target/performance/runtime-benchmark.json`; command logs and
 generated artifacts remain under `target/performance/artifacts/`.
 
-`just benchmark-repeater smoke` (or `standard`) runs the same scenarios on
-`examples/performance_repeater.py`: 1000 copies from `Geometry.duplicate`
-that enter with `animate.count` and then turn and scale as one group. Its
-report lives in `target/performance/repeater/`. It shares the budgets of the
-default scene.
-
 ## Profiles and semantics
 
 | Scenario | Current observable operation |

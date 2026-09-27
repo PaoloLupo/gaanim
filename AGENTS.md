@@ -66,7 +66,6 @@ All commands assume `just` is installed. Do not run `cargo build` at the workspa
 | Validate installed Python API | `just validate-python-api` |
 | Validate all export formats | `just test-exports` |
 | Measure runtime budgets | `just benchmark smoke` (or `standard`) |
-| Measure 1000 repeater instances | `just benchmark-repeater smoke` (or `standard`) |
 | Build documentation | `just docs` |
 | Sanity check | `just doctor` — checks workspace, builds application binaries, and runs `--help` |
 | Bootstrap venv | `just bootstrap` — creates `.venv` and installs `build`/`hatchling` |
