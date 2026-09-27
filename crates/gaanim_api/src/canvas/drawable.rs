@@ -1138,6 +1138,71 @@ impl DrawableHandle {
         self.update_style(|spec| spec.echo = echo)
     }
 
+    /// Stretch the drawable along its velocity and squash it across, keeping
+    /// its area: the stretch is `1 + amount * speed` (scene units per
+    /// second), at most `max_ratio`. The velocity comes from the drawable's
+    /// own animations, so a drawable at rest is never deformed; members of
+    /// a group deform with it. `amount = 0` removes the effect.
+    pub fn squash_stretch(self, amount: f64, max_ratio: f64) -> Result<Self, String> {
+        if !(amount.is_finite() && amount >= 0.0) {
+            return Err(format!("amount must be a finite number >= 0, got {amount}"));
+        }
+        if !(max_ratio.is_finite() && max_ratio >= 1.0) {
+            return Err(format!(
+                "max_ratio must be a finite number >= 1, got {max_ratio}"
+            ));
+        }
+        let squash = (amount > 0.0).then_some((amount, max_ratio));
+        Ok(self.update_style(|spec| spec.squash_stretch = squash))
+    }
+
+    /// Shape the stroke width along the visible path with `(position,
+    /// factor)` pairs: positions in `[0, 1]` of the arc length, factors that
+    /// scale the stroke width, interpolated linearly. The stroke is drawn as
+    /// a filled outline, so dashes do not apply; trims and `create` shape the
+    /// visible part. `None` restores the plain pen. Applies to every member
+    /// of a group or text.
+    pub fn stroke_profile(self, profile: Option<Vec<(f64, f64)>>) -> Result<Self, String> {
+        let profile = match profile {
+            None => None,
+            Some(mut points) => {
+                if points.is_empty() {
+                    return Err("a stroke profile needs at least one point".to_string());
+                }
+                if points.iter().any(|&(position, factor)| {
+                    !(0.0..=1.0).contains(&position) || !factor.is_finite() || factor < 0.0
+                }) {
+                    return Err(
+                        "profile positions must be in [0, 1] and factors finite and >= 0"
+                            .to_string(),
+                    );
+                }
+                points.sort_by(|a, b| a.0.total_cmp(&b.0));
+                Some(std::sync::Arc::<[(f64, f64)]>::from(points))
+            }
+        };
+        Ok(self.update_style(|spec| spec.stroke_profile = profile.clone()))
+    }
+
+    /// Taper the stroke to a point over the first `start` and last `end`
+    /// fractions of the visible path, like a brush stroke.
+    pub fn stroke_taper(self, start: f64, end: f64) -> Result<Self, String> {
+        if !(0.0..=1.0).contains(&start) || !(0.0..=1.0).contains(&end) || start + end > 1.0 {
+            return Err(format!(
+                "start and end must be in [0, 1] with start + end <= 1, got {start} and {end}"
+            ));
+        }
+        let mut points = vec![(0.0, if start > 0.0 { 0.0 } else { 1.0 })];
+        if start > 0.0 {
+            points.push((start, 1.0));
+        }
+        if end > 0.0 {
+            points.push((1.0 - end, 1.0));
+        }
+        points.push((1.0, if end > 0.0 { 0.0 } else { 1.0 }));
+        self.stroke_profile(Some(points))
+    }
+
     /// Whether the scene's motion blur smears this drawable (the default).
     /// A drawable with `false`, and its members, draws in every sub-frame as
     /// it is at the frame time, e.g. to keep a title or HUD sharp while the
@@ -1375,6 +1440,32 @@ impl DrawableHandle {
             spec.opacity = op;
             spec.opacity_overridden = true;
         })
+    }
+
+    /// Shows the first `count` copies of a `repeat` or `duplicate` group; a
+    /// fractional count fades the next copy. Declared before the first
+    /// `play`, it is the initial count; later it cuts at the cursor.
+    pub fn count(self, count: f64) -> Result<Self, String> {
+        let (copies, from) = self
+            .spec
+            .lock()
+            .expect("object spec poisoned")
+            .repeat_count
+            .ok_or("count() requires a group made by repeat() or duplicate()")?;
+        super::duplicate::check_count(count, copies)?;
+        self.update_spec(|spec| {
+            if let Some((_, cursor)) = &mut spec.repeat_count {
+                *cursor = count;
+            }
+        });
+        if from != count {
+            let properties = PropertyAnimation {
+                count: Some((from, count)),
+                ..PropertyAnimation::default()
+            };
+            self.push_immediate(self.id, AnimationType::Properties(properties));
+        }
+        Ok(self)
     }
 
     pub fn z_index(self, z: i32) -> Self {

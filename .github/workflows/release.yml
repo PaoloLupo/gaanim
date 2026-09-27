@@ -171,6 +171,38 @@ jobs:
     needs: [release-windows, release-linux]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/release-notes
+
+      # .github/release-notes/<tag>.md: its first line, "# Title", names the
+      # release and the rest is its body. Without the file the release keeps
+      # the tag as its name and GitHub's generated notes.
+      - name: Read release notes
+        id: notes
+        run: |
+          file=".github/release-notes/${GITHUB_REF_NAME}.md"
+          if [[ -f "$file" ]]; then
+            title=$(sed -n '1s/^# \+//p' "$file")
+            if [[ -z "$title" ]]; then
+              echo "::error file=$file::the first line must be '# <release title>'"
+              exit 1
+            fi
+            tail -n +2 "$file" | sed '/./,$!d' > "$RUNNER_TEMP/release-body.md"
+            {
+              echo "name=$title"
+              echo "body=$RUNNER_TEMP/release-body.md"
+              echo "generate=false"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::$file not found; using the tag as the release title"
+            {
+              echo "name=$GITHUB_REF_NAME"
+              echo "body="
+              echo "generate=true"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -180,5 +212,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          name: ${{ steps.notes.outputs.name }}
+          body_path: ${{ steps.notes.outputs.body }}
           files: dist/*
-          generate_release_notes: true
+          generate_release_notes: ${{ steps.notes.outputs.generate == 'true' }}

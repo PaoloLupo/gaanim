@@ -1,6 +1,7 @@
 pub mod anim;
 pub mod builder;
 pub mod canvas;
+pub mod count_lens;
 pub mod effect_lens;
 pub mod export;
 pub mod host;

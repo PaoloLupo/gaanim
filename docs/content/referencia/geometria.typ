@@ -546,6 +546,88 @@ scene.play([frame.retarget(equation["result"]).duration(0.9).easing(Easing.sprin
 ```
 ]
 
+== Repetidores y distribuciones
+
+Copias de una figura colocadas por una transformación acumulada o por una
+distribución, como el Repeater de After Effects o el Duplicator de Cavalry. El
+resultado es un grupo cuyos miembros son las copias, en orden: `group[i]`,
+`stagger` y `connect` las recorren. La figura original es la copia 0; los
+grupos y textos se copian con sus miembros. `count` y `animate.count` muestran
+solo las primeras copias y funden la siguiente con la parte fraccionaria, para
+construir el patrón copia a copia.
+
+#api-entry(
+  name: "Geometry.repeat",
+  kind: "factory",
+  signature: "repeat(shape, count, *, rotate=0.0, scale=1.0, offset=(0.0, 0.0), opacity=(1.0, 1.0), about=None) -> Drawable",
+  desc: [`count` copias (1 a 10 000): la copia `i` se desplaza `i * offset`, gira `i * rotate` radianes y escala `scale ** i`, alrededor de `about` si se da (así los pétalos orbitan el centro de la flor) o de su propio pivote. Su opacidad va de `opacity[0]` en la primera a `opacity[1]` en la última. Valores no finitos, una escala no positiva, opacidades fuera de [0, 1] o una figura de otra escena lanzan `ValueError`.],
+)[
+```python
+# show-code: true
+import math
+from gaanim import CYAN, PINK, Scene
+scene = Scene(frame=(16, 9), background="#0d1322")
+petal = scene.geometry.ellipse(0.28, 1.0).fill(PINK).move_to(-3.5, 1.3)
+flower = scene.geometry.repeat(petal, 12, rotate=math.tau / 12, about=(-3.5, 0), opacity=(1.0, 0.35))
+square = scene.geometry.square(5.0).no_fill().stroke(CYAN, 0.05).move_to(3.5, 0)
+tunnel = scene.geometry.repeat(square, 8, rotate=0.12, scale=0.82, opacity=(1.0, 0.2))
+scene.play([flower.animate.rotate_by(1.0).duration(1.5), tunnel.animate.rotate_by(-0.6).duration(1.5)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Geometry.duplicate",
+  kind: "factory",
+  signature: "duplicate(shape, distribution) -> Drawable",
+  desc: [Una copia de `shape` centrada en cada punto de `distribution`; la figura original va al primero. Con una distribución orientada, cada copia gira para seguirla. Una figura de otra escena lanza `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import GOLD, Distribution, Scene
+scene = Scene(frame=(16, 9), background="#0d1322")
+arrow = scene.geometry.polygon([(-0.3, -0.2), (0.35, 0.0), (-0.3, 0.2)]).fill(GOLD)
+ring = scene.geometry.duplicate(arrow, Distribution.circle(16, 2.6, orient=True))
+scene.play([ring.animate.rotate_by(1.2).duration(1.5)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Distribution",
+  kind: "class",
+  signature: "Distribution.grid(columns, rows, spacing=0.5, *, center=(0, 0)) · circle(count, radius=2.0, *, center=(0, 0), start=0.0, orient=False) · along(points, count, *, orient=False) · random(count, bounds=(-6, -3, 6, 3), *, seed=0) · phyllotaxis(count, spacing=0.2, *, center=(0, 0))",
+  desc: [Dónde van las copias de `Geometry.duplicate`. `grid`: `columns` × `rows` puntos separados `spacing` (un número o `(x, y)`), fila a fila desde arriba a la izquierda. `circle`: puntos en una circunferencia desde `start` radianes en sentido antihorario; con `orient` cada copia mira hacia fuera. `along`: puntos repartidos por longitud a lo largo de una polilínea, extremos incluidos; con `orient` siguen su dirección. `random`: puntos uniformes dentro de `(xmin, ymin, xmax, ymax)`, iguales para la misma `seed`. `phyllotaxis`: espiral de girasol, el punto `i` a `spacing * sqrt(i)` girado por el ángulo áureo. `points` devuelve las posiciones. Menos de 1 o más de 10 000 puntos, o valores no finitos, lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+grid = Distribution.grid(12, 7, 0.5)
+seeds = scene.geometry.duplicate(scene.geometry.dot(0.04), Distribution.phyllotaxis(300, 0.15))
+print(len(grid), grid.points[0])
+```
+]
+
+#api-entry(
+  name: "Geometry.connect",
+  kind: "factory",
+  signature: "connect(points, max_distance=1.5, *, mode=\"range\", neighbors=2, fade_by_distance=True) -> Drawable",
+  desc: [Líneas vivas entre puntos, como el Connect Shape de Cavalry (efecto _plexus_). `points` es un grupo (sus miembros) o una lista de objetos; cada punto es el centro de sus límites y las líneas los siguen al moverse, en cada fotograma y búsqueda. `mode` elige los pares no más largos que `max_distance`: `"range"` une todos, `"nearest"` cada punto con sus `neighbors` más cercanos y `"sequential"` cada punto con el siguiente. Los puntos ocultos se saltan y los pares salen en un orden fijo. Con `fade_by_distance` las conexiones largas son más tenues. Por defecto son líneas blancas finas (o el estilo de línea del tema); cámbialas con `stroke`. Menos de dos puntos, un `max_distance` no positivo o `neighbors` menor que 1 lanzan `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import CYAN, Distribution, Scene
+scene = Scene(frame=(16, 9), background="#060b16")
+cloud = scene.geometry.duplicate(scene.geometry.dot(0.06).fill(CYAN), Distribution.random(40, (-6.5, -3.0, 6.5, 3.0), seed=7))
+links = scene.geometry.connect(cloud, max_distance=2.2).stroke(CYAN, 0.025)
+scene.play([cloud.animate.rotate_by(0.6).duration(2.0)])
+# output: preview.webp
+scene.render()
+```
+]
+
 == Operaciones booleanas
 
 Unión, intersección, diferencia y diferencia simétrica de áreas vectoriales

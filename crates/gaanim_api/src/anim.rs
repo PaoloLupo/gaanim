@@ -123,6 +123,8 @@ pub struct PropertyAnimation {
     pub dash_offset: Option<f64>,
     /// Target vertices of a polygon or polyline, reached vertex by vertex.
     pub points: Option<Vec<(f64, f64)>>,
+    /// Copies of a repeater shown, `(from, to)`; a fraction fades the last.
+    pub count: Option<(f64, f64)>,
 }
 
 impl PropertyAnimation {
@@ -148,6 +150,7 @@ impl PropertyAnimation {
             && self.media_frame.is_none()
             && self.dash_offset.is_none()
             && self.points.is_none()
+            && self.count.is_none()
             && !self.has_effects()
     }
 
@@ -167,6 +170,7 @@ impl PropertyAnimation {
             && self.media_frame.is_none()
             && self.dash_offset.is_none()
             && self.points.is_none()
+            && self.count.is_none()
             && !self.has_effects()
     }
 }
@@ -383,6 +387,12 @@ pub enum AnimationType {
     /// position, in the coordinates the shape was declared in.
     PathPointsTo {
         points: Vec<(f64, f64)>,
+    },
+    /// Show `to` copies of a repeater group instead of `from`; the
+    /// fractional part fades the next copy.
+    CountTo {
+        from: f64,
+        to: f64,
     },
     /// Move the dash pattern of every drawn stroke to `to` (scene units).
     DashOffsetTo {

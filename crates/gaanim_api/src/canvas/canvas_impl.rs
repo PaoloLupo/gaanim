@@ -2939,6 +2939,57 @@ impl SceneModel {
         Ok(result)
     }
 
+    /// Live plexus lines between `points`, drawables of this scene: the
+    /// members of a single group, or the drawables themselves. They follow
+    /// the points as they move; `mode` picks the pairs within
+    /// `max_distance` (every pair, the `neighbors` nearest of each point, or
+    /// each point and the next) and `fade` draws longer links fainter.
+    pub fn connect(
+        &mut self,
+        points: &[&DrawableHandle],
+        max_distance: f64,
+        mode: gaanim_renderer::effects::ConnectMode,
+        neighbors: usize,
+        fade: bool,
+    ) -> Result<DrawableHandle, String> {
+        if points
+            .iter()
+            .any(|point| !Arc::ptr_eq(&point.state, &self.state))
+        {
+            return Err("connect() points must belong to this scene".to_string());
+        }
+        let sources: Vec<gaanim_core::ObjectId> = match points {
+            [group] => match &group.spec.lock().expect("object spec poisoned").kind {
+                SpawnKind::Group(members) | SpawnKind::GroupNoCenter(members) => members.clone(),
+                _ => vec![group.id],
+            },
+            _ => points.iter().map(|point| point.id).collect(),
+        };
+        if sources.len() < 2 {
+            return Err("connect() needs at least two points or a group of them".to_string());
+        }
+        if max_distance.is_nan() || max_distance <= 0.0 {
+            return Err(format!("max_distance must be positive, got {max_distance}"));
+        }
+        if neighbors == 0 {
+            return Err("neighbors must be at least 1".to_string());
+        }
+        let result = self.spawn(SpawnKind::Connect {
+            sources,
+            max_distance,
+            mode,
+            neighbors,
+            fade,
+        });
+        {
+            // A thin default pen; themes restyle it like any line.
+            let mut spec = result.spec.lock().expect("object spec poisoned");
+            spec.stroke = Some((Brush::Solid(Color::WHITE), 0.02));
+            spec.fill = None;
+        }
+        Ok(result)
+    }
+
     pub fn union(
         &mut self,
         operands: &[&DrawableHandle],

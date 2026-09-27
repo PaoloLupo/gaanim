@@ -9,8 +9,8 @@ use bevy::color::Alpha;
 use bevy::prelude::{
     Added, AssetServer, Assets, Camera, Camera3d, Changed, ChildOf, Children, Commands,
     DirectionalLight, Entity, GlobalAmbientLight, Handle, Local, MeshMaterial3d, Name, Or,
-    ParamSet, PointLight, Query, Res, ResMut, SpotLight, StandardMaterial, Transform, Visibility,
-    With, Without,
+    ParamSet, PointLight, Query, RemovedComponents, Res, ResMut, SpotLight, StandardMaterial,
+    Transform, Visibility, With, Without,
 };
 use bevy::world_serialization::{WorldAssetRoot, WorldInstance, WorldInstanceSpawner};
 use gaanim_math::{GlobalSpatialTransform, SpatialTransform};
@@ -42,8 +42,9 @@ use std::collections::HashSet;
 /// condition correctly detects every scenario where propagation is needed.
 pub fn has_transform_changes(
     query: Query<&SpatialTransform, Or<(Changed<SpatialTransform>, Added<SpatialTransform>)>>,
+    deforms: Query<(), Changed<crate::ShapeDeform>>,
 ) -> bool {
-    !query.is_empty()
+    !query.is_empty() || !deforms.is_empty()
 }
 
 /// System: Propagate spatial transforms hierarchically using Bevy 0.19's `ChildOf` relation.
@@ -61,7 +62,11 @@ pub fn has_transform_changes(
 pub fn transform_propagation_system(
     roots: Query<Entity, (Without<ChildOf>, With<SpatialTransform>)>,
     children_query: Query<&Children>,
-    mut transforms: Query<(&SpatialTransform, &mut GlobalSpatialTransform)>,
+    mut transforms: Query<(
+        &SpatialTransform,
+        &mut GlobalSpatialTransform,
+        Option<&crate::ShapeDeform>,
+    )>,
     view_roles: Query<&CoordinateViewRole>,
     label_offsets: Query<&CoordinateLabelOffset>,
     parents: Query<&ChildOf>,
@@ -79,22 +84,53 @@ pub fn transform_propagation_system(
     }
 }
 
+/// `local` with `deform` applied about its position, in the parent's space.
+fn deformed_local(
+    local: &SpatialTransform,
+    deform: gaanim_core::kurbo::Affine,
+) -> GlobalSpatialTransform {
+    let position = local.translation;
+    let about = gaanim_core::kurbo::Affine::translate((position.x, position.y))
+        * deform
+        * gaanim_core::kurbo::Affine::translate((-position.x, -position.y));
+    let [a, b, c, d, e, f] = about.as_coeffs();
+    let about_mat4 = gaanim_core::glam::DMat4::from_cols_array(&[
+        a, b, 0.0, 0.0, c, d, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, e, f, 0.0, 1.0,
+    ]);
+    GlobalSpatialTransform {
+        affine_2d: about * local.to_affine_2d(),
+        mat4: about_mat4 * local.to_mat4(),
+    }
+}
+
 fn propagate_transforms_recursive(
     entity: Entity,
     parent_global: Option<GlobalSpatialTransform>,
     children_query: &Query<&Children>,
-    transforms: &mut Query<(&SpatialTransform, &mut GlobalSpatialTransform)>,
+    transforms: &mut Query<(
+        &SpatialTransform,
+        &mut GlobalSpatialTransform,
+        Option<&crate::ShapeDeform>,
+    )>,
     view_roles: &Query<&CoordinateViewRole>,
     label_offsets: &Query<&CoordinateLabelOffset>,
     parents: &Query<&ChildOf>,
 ) {
-    let Ok((local, mut global)) = transforms.get_mut(entity) else {
+    let Ok((local, mut global, deform)) = transforms.get_mut(entity) else {
         return;
     };
-    *global = parent_global
-        .as_ref()
-        .map(|parent| GlobalSpatialTransform::from_parent_and_local(parent, local))
-        .unwrap_or_else(|| GlobalSpatialTransform::from_local(local));
+    let deformed = deform
+        .filter(|deform| deform.0 != gaanim_core::kurbo::Affine::IDENTITY)
+        .map(|deform| deformed_local(local, deform.0));
+    *global = match (parent_global.as_ref(), deformed) {
+        (Some(parent), Some(local)) => GlobalSpatialTransform {
+            affine_2d: parent.affine_2d * local.affine_2d,
+            mat4: parent.mat4 * local.mat4,
+        },
+        (None, Some(local)) => local,
+        (Some(parent), None) => GlobalSpatialTransform::from_parent_and_local(parent, local),
+        (None, None) => GlobalSpatialTransform::from_local(local),
+    };
     let mut current_global = *global;
     drop(global);
 
@@ -109,7 +145,7 @@ fn propagate_transforms_recursive(
         let mut ancestor = entity;
         let mut needs_compensation = false;
         loop {
-            let Ok((local, _)) = transforms.get(ancestor) else {
+            let Ok((local, _, _)) = transforms.get(ancestor) else {
                 break;
             };
             let mut local = *local;
@@ -148,7 +184,7 @@ fn propagate_transforms_recursive(
             basis.mat4.w_axis.x += dx;
             basis.mat4.w_axis.y += dy;
             current_global.mat4 = basis.mat4;
-            if let Ok((_, mut global)) = transforms.get_mut(entity) {
+            if let Ok((_, mut global, _)) = transforms.get_mut(entity) {
                 *global = current_global;
             }
         }
@@ -215,7 +251,11 @@ pub fn pin_hud_overlays_system(
     camera: Option<Res<gaanim_math::ResolvedCamera>>,
     hud: Query<Entity, With<crate::components::HudOverlay>>,
     children_query: Query<&Children>,
-    mut transforms: Query<(&SpatialTransform, &mut GlobalSpatialTransform)>,
+    mut transforms: Query<(
+        &SpatialTransform,
+        &mut GlobalSpatialTransform,
+        Option<&crate::ShapeDeform>,
+    )>,
     view_roles: Query<&CoordinateViewRole>,
     label_offsets: Query<&CoordinateLabelOffset>,
     parents: Query<&ChildOf>,
@@ -235,7 +275,8 @@ pub fn pin_hud_overlays_system(
         if parent.is_some_and(|parent| hud.contains(parent)) {
             continue;
         }
-        let parent_global = parent.and_then(|parent| transforms.get(parent).ok().map(|(_, g)| *g));
+        let parent_global =
+            parent.and_then(|parent| transforms.get(parent).ok().map(|(_, g, _)| *g));
         let pinned_parent = parent_global.map_or(pin, |parent| GlobalSpatialTransform {
             affine_2d: pin.affine_2d * parent.affine_2d,
             mat4: pin.mat4 * parent.mat4,
@@ -253,8 +294,12 @@ pub fn pin_hud_overlays_system(
 }
 
 /// Run condition: skip opacity propagation when no local opacity has changed.
-pub fn has_opacity_changes(query: Query<&Opacity, Or<(Changed<Opacity>, Added<Opacity>)>>) -> bool {
-    !query.is_empty()
+pub fn has_opacity_changes(
+    query: Query<&Opacity, Or<(Changed<Opacity>, Added<Opacity>)>>,
+    presences: Query<(), Changed<crate::Presence>>,
+    mut removed: RemovedComponents<crate::Presence>,
+) -> bool {
+    !query.is_empty() || !presences.is_empty() || removed.read().next().is_some()
 }
 
 /// System: Propagate opacity cascade down the hierarchy using Bevy 0.19's `ChildOf` relation.
@@ -264,6 +309,7 @@ pub fn opacity_propagation_system(
     local_opacities: Query<&Opacity>,
     parents: Query<&ChildOf>,
     mut opacities: Query<(&Opacity, &mut GlobalOpacity)>,
+    presences: Query<&crate::Presence>,
 ) {
     for (root, parent) in &roots {
         // Text and imported assets can contain structural grouping entities
@@ -272,7 +318,7 @@ pub fn opacity_propagation_system(
         if parent
             .is_none_or(|parent| !has_opacity_ancestor(parent.parent(), &parents, &local_opacities))
         {
-            propagate_opacities_recursive(root, 1.0, &children_query, &mut opacities);
+            propagate_opacities_recursive(root, 1.0, &children_query, &mut opacities, &presences);
         }
     }
 }
@@ -298,17 +344,25 @@ fn propagate_opacities_recursive(
     parent_opacity: f32,
     children_query: &Query<&Children>,
     opacities: &mut Query<(&Opacity, &mut GlobalOpacity)>,
+    presences: &Query<&crate::Presence>,
 ) {
+    let presence = presences.get(entity).map_or(1.0, |presence| presence.0);
     let current_opacity = if let Ok((local, mut global)) = opacities.get_mut(entity) {
-        global.0 = local.0 * parent_opacity;
+        global.0 = local.0 * parent_opacity * presence;
         global.0
     } else {
-        parent_opacity
+        parent_opacity * presence
     };
 
     if let Ok(children) = children_query.get(entity) {
         for child in children.iter() {
-            propagate_opacities_recursive(*child, current_opacity, children_query, opacities);
+            propagate_opacities_recursive(
+                *child,
+                current_opacity,
+                children_query,
+                opacities,
+                presences,
+            );
         }
     }
 }
@@ -1961,6 +2015,30 @@ mod tests {
             .as_coeffs()[4];
         assert!((tx - 15.0).abs() < f64::EPSILON);
         assert!((world.get::<GlobalOpacity>(glyph).unwrap().0 - 0.05).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn presence_scales_the_cascade_without_touching_local_opacity() {
+        let mut world = World::new();
+        let group = world.spawn((Opacity(0.5), GlobalOpacity::default())).id();
+        let copy = world
+            .spawn((
+                Opacity(0.8),
+                GlobalOpacity::default(),
+                crate::Presence(0.25),
+            ))
+            .id();
+        let leaf = world.spawn((Opacity(1.0), GlobalOpacity::default())).id();
+        world.entity_mut(copy).set_parent_in_place(group);
+        world.entity_mut(leaf).set_parent_in_place(copy);
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(opacity_propagation_system);
+        schedule.run(&mut world);
+
+        assert!((world.get::<GlobalOpacity>(copy).unwrap().0 - 0.1).abs() < 1e-6);
+        assert!((world.get::<GlobalOpacity>(leaf).unwrap().0 - 0.1).abs() < 1e-6);
+        assert_eq!(world.get::<Opacity>(copy).unwrap().0, 0.8);
     }
 
     #[test]

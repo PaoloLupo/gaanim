@@ -3,7 +3,7 @@ use crate::background_gpu::ShaderBackgroundFrame;
 use crate::effects::{
     BooleanBinding, CameraView, CameraViewBackground, CameraViewFit, ClipMask, DropShadow,
     ElementBlend, FillLevelBinding, GaussianBlur, Glow, MotionBlurExempt, StrokeAlign,
-    VectorOutlineBinding, ViewLayer,
+    StrokeProfile, VectorOutlineBinding, ViewLayer,
 };
 use crate::lottie::LottiePlayer;
 use crate::stroke::{draw_stroke, view_stroke_transform};
@@ -1100,7 +1100,12 @@ fn draw_aligned_stroke(
     path: &kurbo::BezPath,
     source_path: Option<&kurbo::BezPath>,
     align: StrokeAlign,
+    profile: Option<&StrokeProfile>,
 ) {
+    if let Some(profile) = profile {
+        crate::stroke::draw_profiled_stroke(scene, style, brush, view, path, profile);
+        return;
+    }
     let clip = match align {
         StrokeAlign::Center => None,
         StrokeAlign::Inside | StrokeAlign::Outside => stroke_clip_path(path, source_path),
@@ -1335,6 +1340,81 @@ pub fn resolve_fill_level_system(
     let mut results = queries.p2();
     for (entity, output) in resolved_jobs {
         let Ok((mut path, mut source_path, mut bounds)) = results.get_mut(entity) else {
+            continue;
+        };
+        if *path.0 != output {
+            let rect = output.bounding_box();
+            *bounds = LocalBounds(gaanim_math::Bounds3D::new_2d(
+                rect.x0, rect.y0, rect.x1, rect.y1,
+            ));
+            let output = Arc::new(output);
+            *path = Path2D(output.clone());
+            *source_path = PathSource(output);
+        }
+    }
+}
+
+/// Rebuild every [`crate::effects::ConnectBinding`] from the current world
+/// position of its sources: the centre of each visible source's local bounds.
+pub fn resolve_connect_system(
+    mut queries: ParamSet<(
+        Query<(
+            Entity,
+            &crate::effects::ConnectBinding,
+            &GlobalSpatialTransform,
+        )>,
+        Query<(&GlobalSpatialTransform, Option<&LocalBounds>), With<Visible>>,
+        Query<
+            (&mut Path2D, &mut PathSource, &mut LocalBounds),
+            With<crate::effects::ConnectBinding>,
+        >,
+    )>,
+) {
+    let jobs = queries
+        .p0()
+        .iter()
+        .map(|(entity, binding, transform)| (entity, binding.clone(), *transform))
+        .collect::<Vec<_>>();
+    if jobs.is_empty() {
+        return;
+    }
+    let mut resolved_jobs = Vec::with_capacity(jobs.len());
+    {
+        let sources = queries.p1();
+        for (entity, binding, transform) in jobs {
+            let points: Vec<Option<kurbo::Point>> = binding
+                .sources
+                .iter()
+                .map(|source| {
+                    let (global, bounds) = sources.get(*source).ok()?;
+                    let center = bounds.map_or(kurbo::Point::ORIGIN, |bounds| {
+                        let center = bounds.0.center();
+                        kurbo::Point::new(center.x, center.y)
+                    });
+                    Some(global.affine_2d * center)
+                })
+                .collect();
+            let mut output = kurbo::BezPath::new();
+            for (a, b, length) in crate::effects::ConnectBinding::connections(
+                binding.mode,
+                &points,
+                binding.max_distance,
+                binding.neighbors,
+            ) {
+                if binding.owns(length)
+                    && let (Some(from), Some(to)) = (points[a], points[b])
+                {
+                    output.move_to(from);
+                    output.line_to(to);
+                }
+            }
+            output.apply_affine(transform.affine_2d.inverse());
+            resolved_jobs.push((entity, output));
+        }
+    }
+    let mut outputs = queries.p2();
+    for (entity, output) in resolved_jobs {
+        let Ok((mut path, mut source_path, mut bounds)) = outputs.get_mut(entity) else {
             continue;
         };
         if *path.0 != output {
@@ -1921,6 +2001,7 @@ fn compile_scene_with_pins(
         Option<&gaanim_scene::GroupMarker>,
         Option<&WriteTipGlow>,
         Option<&StrokeAlign>,
+        Option<&StrokeProfile>,
     )>();
 
     let mut child_query = world.query::<&ChildOf>();
@@ -1960,6 +2041,7 @@ fn compile_scene_with_pins(
             is_group_opt,
             tip_glow_opt,
             stroke_align_opt,
+            stroke_profile_opt,
         )) = query_effects.get(world, entity)
         else {
             continue;
@@ -2146,6 +2228,7 @@ fn compile_scene_with_pins(
                 elem_path,
                 source_path,
                 stroke_align_opt.copied().unwrap_or_default(),
+                stroke_profile_opt,
             );
         }
 
@@ -2376,6 +2459,7 @@ pub fn gaanim_render_system(
         Option<Ref<WriteTipGlow>>,
         Option<Ref<Visible>>,
         Option<Ref<StrokeAlign>>,
+        Option<Ref<StrokeProfile>>,
     )>,
     mut query_vello_scene: Query<&mut VelloScene2d, With<MainVelloScene>>,
     mut shader_frame: Option<ResMut<ShaderBackgroundFrame>>,
@@ -2471,9 +2555,10 @@ pub fn gaanim_render_system(
             tip_glow_ref,
             visible_ref,
             stroke_align_ref,
-        ) = query_effects
-            .get(entity)
-            .unwrap_or((None, None, None, None, None, None, None, None, None, None));
+            stroke_profile_ref,
+        ) = query_effects.get(entity).unwrap_or((
+            None, None, None, None, None, None, None, None, None, None, None,
+        ));
         let camera_view = camera_views.get(&entity);
 
         // Invalidate before skipping hidden or culled objects. Their new geometry
@@ -2539,6 +2624,7 @@ pub fn gaanim_render_system(
             || blur_ref.as_ref().is_some_and(|r| r.is_changed())
             || clip_ref.as_ref().is_some_and(|r| r.is_changed())
             || stroke_align_ref.as_ref().is_some_and(|r| r.is_changed())
+            || stroke_profile_ref.as_ref().is_some_and(|r| r.is_changed())
             // Becoming or ceasing to be a screen moves the stroke.
             || cache.screen_overlays.contains_key(&mobj_id.0) != camera_view.is_some();
 
@@ -2754,6 +2840,7 @@ pub fn gaanim_render_system(
                     elem_path,
                     source_path,
                     stroke_align_ref.as_deref().copied().unwrap_or_default(),
+                    stroke_profile_ref.as_deref(),
                 );
             }
             rebuilt_overlay = Some(overlay);

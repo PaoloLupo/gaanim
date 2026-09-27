@@ -416,6 +416,19 @@ impl PyCanvasAnim {
         })
     }
 
+    fn count(&self, count: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        self.require_drawable_effect("count")?;
+        Ok(Self {
+            inner: self
+                .inner
+                .clone()
+                .count(count)
+                .map_err(PyValueError::new_err)?,
+        })
+    }
+
     fn points(&self, points: Vec<(f64, f64)>) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
@@ -2299,6 +2312,44 @@ impl PyDrawable {
         crate::custom::ensure_authoring_allowed()?;
         let mode = parse_blend_mode(mode)?;
         Ok(Self(self.0.clone().blend(mode)))
+    }
+    /// Shape the stroke width along the path; None restores the plain pen.
+    fn stroke_profile(&self, profile: Option<Vec<(f64, f64)>>) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.0
+            .clone()
+            .stroke_profile(profile)
+            .map(Self)
+            .map_err(PyValueError::new_err)
+    }
+    /// Taper the stroke to a point at its start and end.
+    #[pyo3(signature = (start=0.2, end=0.2))]
+    fn stroke_taper(&self, start: f64, end: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.0
+            .clone()
+            .stroke_taper(start, end)
+            .map(Self)
+            .map_err(PyValueError::new_err)
+    }
+    /// Show the first `count` copies of a `repeat` or `duplicate` group.
+    fn count(&self, count: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.0
+            .clone()
+            .count(count)
+            .map(Self)
+            .map_err(PyValueError::new_err)
+    }
+    /// Stretch the drawable along its velocity and squash it across.
+    #[pyo3(signature = (amount=0.1, max_ratio=1.6))]
+    fn squash_stretch(&self, amount: f64, max_ratio: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.0
+            .clone()
+            .squash_stretch(amount, max_ratio)
+            .map(Self)
+            .map_err(PyValueError::new_err)
     }
     /// Whether the scene's motion blur smears this drawable.
     #[pyo3(signature = (enabled=true))]

@@ -376,3 +376,197 @@ mod motion_blur_tests {
         assert!(MotionBlur::new(180.0, 8, Some(f64::INFINITY)).is_err());
     }
 }
+
+/// Width of a stroke along its visible path: `(position, factor)` pairs with
+/// positions in `[0, 1]` of the arc length, sorted, and factors that scale
+/// the stroke width, interpolated linearly. The stroke is drawn as a filled
+/// outline instead of a pen, so dashes do not apply.
+#[derive(Component, Debug, Clone, PartialEq)]
+pub struct StrokeProfile(pub std::sync::Arc<[(f64, f64)]>);
+
+impl StrokeProfile {
+    /// Width factor at `position` along the path.
+    pub fn factor_at(&self, position: f64) -> f64 {
+        let points = &self.0;
+        let Some(&(first_at, first)) = points.first() else {
+            return 1.0;
+        };
+        if position <= first_at {
+            return first;
+        }
+        for pair in points.windows(2) {
+            let ((a, wa), (b, wb)) = (pair[0], pair[1]);
+            if position <= b {
+                let span = b - a;
+                return if span <= f64::EPSILON {
+                    wb
+                } else {
+                    wa + (wb - wa) * (position - a) / span
+                };
+            }
+        }
+        points.last().map_or(1.0, |&(_, last)| last)
+    }
+}
+
+#[cfg(test)]
+mod stroke_profile_tests {
+    use super::*;
+
+    #[test]
+    fn factors_interpolate_between_sorted_points() {
+        let profile = StrokeProfile(vec![(0.0, 0.0), (0.5, 1.0), (1.0, 0.25)].into());
+        assert_eq!(profile.factor_at(-1.0), 0.0);
+        assert_eq!(profile.factor_at(0.25), 0.5);
+        assert_eq!(profile.factor_at(0.75), 0.625);
+        assert_eq!(profile.factor_at(2.0), 0.25);
+        assert_eq!(StrokeProfile(Vec::new().into()).factor_at(0.3), 1.0);
+    }
+}
+
+/// Which pairs of points a [`ConnectBinding`] joins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ConnectMode {
+    /// Every pair closer than the maximum distance.
+    Range,
+    /// Each point to its `neighbors` nearest points within the distance.
+    Nearest,
+    /// Each point to the next one in order, within the distance.
+    Sequential,
+}
+
+/// Live plexus lines between the positions of `sources`, rebuilt in
+/// `SceneSet::DerivedGeometry` as they move.
+///
+/// A connection draws in the binding whose `layer` covers its length: the
+/// lengths up to `max_distance` are split into `layers` equal ranges, so
+/// layers with decreasing opacity fade long links out.
+#[derive(Component, Debug, Clone, PartialEq)]
+pub struct ConnectBinding {
+    pub sources: Vec<Entity>,
+    pub max_distance: f64,
+    pub mode: ConnectMode,
+    pub neighbors: usize,
+    pub layer: usize,
+    pub layers: usize,
+}
+
+impl ConnectBinding {
+    /// Index pairs to join among `points`, in a deterministic order, with
+    /// their lengths.
+    pub fn connections(
+        mode: ConnectMode,
+        points: &[Option<gaanim_core::kurbo::Point>],
+        max_distance: f64,
+        neighbors: usize,
+    ) -> Vec<(usize, usize, f64)> {
+        let distance = |a: usize, b: usize| Some(points[a]?.distance(points[b]?));
+        let within = |length: f64| length <= max_distance;
+        let mut links = Vec::new();
+        match mode {
+            ConnectMode::Range => {
+                for a in 0..points.len() {
+                    for b in a + 1..points.len() {
+                        if let Some(length) = distance(a, b).filter(|length| within(*length)) {
+                            links.push((a, b, length));
+                        }
+                    }
+                }
+            }
+            ConnectMode::Sequential => {
+                for a in 0..points.len().saturating_sub(1) {
+                    if let Some(length) = distance(a, a + 1).filter(|length| within(*length)) {
+                        links.push((a, a + 1, length));
+                    }
+                }
+            }
+            ConnectMode::Nearest => {
+                let mut chosen = std::collections::BTreeMap::new();
+                for a in 0..points.len() {
+                    let mut candidates: Vec<(f64, usize)> = (0..points.len())
+                        .filter(|&b| b != a)
+                        .filter_map(|b| Some((distance(a, b)?, b)))
+                        .filter(|(length, _)| within(*length))
+                        .collect();
+                    candidates.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)));
+                    for (length, b) in candidates.into_iter().take(neighbors) {
+                        chosen.insert((a.min(b), a.max(b)), length);
+                    }
+                }
+                links.extend(chosen.into_iter().map(|((a, b), length)| (a, b, length)));
+            }
+        }
+        links
+    }
+
+    /// Whether a connection of `length` draws in this binding's layer.
+    pub fn owns(&self, length: f64) -> bool {
+        let layers = self.layers.max(1);
+        let share = if self.max_distance > 0.0 && self.max_distance.is_finite() {
+            (length / self.max_distance).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        ((share * layers as f64) as usize).min(layers - 1) == self.layer
+    }
+}
+
+#[cfg(test)]
+mod connect_tests {
+    use super::*;
+    use gaanim_core::kurbo::Point;
+
+    #[test]
+    fn modes_join_deterministic_pairs() {
+        let points = [
+            Some(Point::new(0.0, 0.0)),
+            Some(Point::new(1.0, 0.0)),
+            Some(Point::new(3.0, 0.0)),
+            None,
+            Some(Point::new(1.0, 1.5)),
+        ];
+        let pairs = |links: Vec<(usize, usize, f64)>| {
+            links
+                .into_iter()
+                .map(|(a, b, _)| (a, b))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            pairs(ConnectBinding::connections(
+                ConnectMode::Range,
+                &points,
+                2.0,
+                1
+            )),
+            [(0, 1), (0, 4), (1, 2), (1, 4)]
+        );
+        assert_eq!(
+            pairs(ConnectBinding::connections(
+                ConnectMode::Sequential,
+                &points,
+                2.0,
+                1
+            )),
+            [(0, 1), (1, 2)]
+        );
+        assert_eq!(
+            pairs(ConnectBinding::connections(
+                ConnectMode::Nearest,
+                &points,
+                10.0,
+                1
+            )),
+            [(0, 1), (1, 2), (1, 4)]
+        );
+        let layer = |layer| ConnectBinding {
+            sources: Vec::new(),
+            max_distance: 2.0,
+            mode: ConnectMode::Range,
+            neighbors: 1,
+            layer,
+            layers: 4,
+        };
+        assert!(layer(0).owns(0.1) && layer(1).owns(0.6) && layer(3).owns(2.0));
+        assert!(!layer(0).owns(1.9));
+    }
+}

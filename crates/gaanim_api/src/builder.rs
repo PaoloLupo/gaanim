@@ -1480,6 +1480,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::EffectsTo { .. } => "Effects",
             AnimationType::DashOffsetTo { .. } => "DashOffset",
             AnimationType::PathPointsTo { .. } => "Points",
+            AnimationType::CountTo { .. } => "Count",
             AnimationType::SurroundingRectRetarget { .. } => "Retarget",
             AnimationType::StrokeColorTo { .. } => "Stroke",
             AnimationType::StrokeWidthTo { .. } => "StrokeW",
@@ -2741,6 +2742,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             if let Some(points) = properties.points.clone() {
                 channels.push(AnimationType::PathPointsTo { points });
             }
+            if let Some((from, to)) = properties.count {
+                channels.push(AnimationType::CountTo { from, to });
+            }
             if properties.glow.is_some() || properties.blur.is_some() || properties.shadow.is_some()
             {
                 channels.push(AnimationType::EffectsTo {
@@ -3134,6 +3138,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_path_points_internal(anim, track);
             return;
         }
+        if matches!(anim.anim_type, AnimationType::CountTo { .. }) {
+            self.play_count_internal(anim, track);
+            return;
+        }
         if matches!(anim.anim_type, AnimationType::PathTrim { .. }) {
             self.play_path_trim_internal(anim, track);
             return;
@@ -3457,6 +3465,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::EffectsTo { .. }
             | AnimationType::DashOffsetTo { .. }
             | AnimationType::PathPointsTo { .. }
+            | AnimationType::CountTo { .. }
             | AnimationType::DrawBorderThenFill { .. }
             | AnimationType::Flash { .. }
             | AnimationType::Circumscribe { .. }
@@ -5399,6 +5408,33 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     target,
                     lens: PropertyLensSpec::Dynamic(gaanim_animation::tween::DynamicLens(
                         std::sync::Arc::new(crate::stroke_lens::DashOffsetLens { from, to }),
+                    )),
+                    rate_func: anim.rate_func.clone(),
+                    delay: 0.0,
+                    label: self.current_label.clone(),
+                }),
+            );
+        }
+    }
+
+    /// One clip per member of a repeater group: copy `i` shows while the
+    /// count passes `i` and fades with its fractional part.
+    fn play_count_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
+        let AnimationType::CountTo { from, to } = anim.anim_type else {
+            return;
+        };
+        let Some(state) = self.states.get(anim.target) else {
+            return;
+        };
+        for (index, member) in state.children.clone().into_iter().enumerate() {
+            self.timeline.add_clip(
+                parent_track,
+                self.current_time + anim.delay,
+                anim.duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: member,
+                    lens: PropertyLensSpec::Dynamic(gaanim_animation::tween::DynamicLens(
+                        std::sync::Arc::new(crate::count_lens::CountLens { index, from, to }),
                     )),
                     rate_func: anim.rate_func.clone(),
                     delay: 0.0,

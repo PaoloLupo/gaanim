@@ -577,6 +577,72 @@ scene.render()
 ]
 
 #api-entry(
+  name: "Drawable.count",
+  kind: "method",
+  params: (
+    (name: "count", type: "float", default: none, desc: [Copias visibles, de 0 al número de copias del grupo.]),
+  ),
+  desc: [Muestra las primeras `count` copias de un grupo creado con `Geometry.repeat` o `Geometry.duplicate`; las demás siguen en el grupo pero ocultas, de la última hacia atrás. Un recuento fraccionario funde la siguiente copia: `2.5` muestra dos copias y media tercera. Antes del primer `scene.play` fija el recuento inicial; después lo cambia en el cursor. Para animarlo usa `animate.count`. Un valor fuera de rango, o un objeto que no sea uno de esos grupos, lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+ring = scene.geometry.duplicate(scene.geometry.dot(0.1), Distribution.circle(16, 2.5)).count(4)
+```
+]
+
+#api-entry(
+  name: "Drawable.squash_stretch",
+  kind: "method",
+  params: (
+    (name: "amount", type: "float", default: "0.1", desc: [Estiramiento por unidad de velocidad (unidades de escena por segundo); `0` quita el efecto.]),
+    (name: "max_ratio", type: "float", default: "1.6", desc: [Estiramiento máximo, al menos 1.]),
+  ),
+  desc: [Estira el objeto en la dirección de su velocidad y lo aplasta en la perpendicular, conservando el área: el estiramiento es `1 + amount * velocidad`, como mucho `max_ratio`, y el aplastamiento su inverso. La velocidad sale de las animaciones del propio objeto medidas en `t ± 1/60` s, así que un objeto quieto nunca se deforma y las búsquedas son exactas. Los miembros de un grupo se deforman con él. No cuentan el movimiento de los _updaters_, las posiciones reactivas ni un padre que se mueve. Un `amount` negativo o un `max_ratio` menor que 1 lanzan `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import CORAL, Scene
+scene = Scene(frame=(16, 9), background="#0f1729")
+ball = scene.geometry.circle(0.5).fill(CORAL).move_to(-6, 0).squash_stretch(0.08, max_ratio=1.8)
+scene.play([ball.animate.move_to(6, 0).duration(1.0)])
+scene.play([ball.animate.move_to(0, -2.5).duration(0.5)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Drawable.stroke_profile",
+  kind: "method",
+  params: ((name: "profile", type: "Sequence[tuple[float, float]] | None", default: none, desc: [Pares `(posición, factor)`: posición en [0, 1] de la longitud visible y factor del ancho del trazo; `None` vuelve al trazo normal.]),),
+  desc: [Trazo de grosor variable, como los perfiles de ancho de Illustrator: el ancho se interpola linealmente entre los puntos, así que `[(0, 0), (0.5, 1), (1, 0)]` se ensancha en el centro y termina en punta. El trazo se dibuja como un contorno relleno: no admite guiones, pero `trim`, `create` y `show_passing_flash` recortan la parte visible y el perfil se ajusta a ella, así que un destello afinado sigue acabando en punta. En un grupo o un `Text` llega a todos sus miembros. Una posición fuera de [0, 1] o un factor negativo lanzan `ValueError`.],
+)[
+```python
+# show-code: true
+import math
+from gaanim import CORAL, GOLD, TEAL, Scene
+scene = Scene(frame=(16, 9), background="#101826")
+brush = scene.geometry.arc(-4, 0, 2.0, 0.3, 4.2).no_fill().stroke(GOLD, 0.35).stroke_taper(0.35, 0.5)
+wave = scene.geometry.polyline([(x / 10, 1 + 0.6 * math.sin(x / 4)) for x in range(-10, 61)])
+wave.stroke(TEAL, 0.3).stroke_profile([(0.0, 0.1), (0.5, 1.0), (1.0, 0.1)])
+flash = scene.geometry.polyline([(-1, -2.2), (2, -1.2), (5, -2.6), (7, -1.8)]).stroke(CORAL, 0.25).stroke_taper(0.5, 0.5)
+scene.play([brush.animate.create(), wave.animate.create()])
+scene.play([flash.animate.show_passing_flash(time_width=0.5)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Drawable.stroke_taper",
+  kind: "method",
+  params: ((name: "start / end", type: "float", default: "0.2", desc: [Fracción de la longitud visible en la que el trazo se afina hasta una punta, al principio y al final; `start + end <= 1`.]),),
+  desc: [Atajo de `stroke_profile` para pinceladas y flechas caligráficas.],
+  none,
+)
+
+#api-entry(
   name: "Drawable.motion_blur",
   kind: "method",
   params: ((name: "enabled", type: "bool", default: "True", desc: [`False` mantiene nítido el objeto y sus miembros.]),),

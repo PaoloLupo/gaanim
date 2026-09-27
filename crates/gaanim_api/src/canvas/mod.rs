@@ -6,7 +6,8 @@ pub use gaanim_animation::{RollingMode, RollingNumberOptions};
 pub use gaanim_renderer::background::{BackgroundPaint, ShaderBackground, ShaderBackgroundError};
 pub use gaanim_renderer::background_presets;
 pub use gaanim_renderer::effects::{
-    CameraViewBackground, CameraViewFit, DropShadow, GaussianBlur, Glow, MotionBlur, StrokeAlign,
+    CameraViewBackground, CameraViewFit, ConnectMode, DropShadow, GaussianBlur, Glow, MotionBlur,
+    StrokeAlign, StrokeProfile,
 };
 pub use gaanim_renderer::post_presets::{CubeLut, PostPreset};
 pub use gaanim_renderer::post_process::{
@@ -35,6 +36,8 @@ pub type ImageHandle = DrawableHandle;
 
 mod camera_view;
 mod drawable;
+mod duplicate;
+pub use duplicate::{Distribution, MAX_COPIES, RepeatStep};
 mod property_bindings;
 pub use camera_view::{
     CameraInsetOptions, CameraInsetPlacement, CameraInsetShape, CameraViewError, CameraViewHandle,

@@ -192,6 +192,9 @@ impl CanvasState {
                         if incoming.fill_level.is_some() {
                             previous.fill_level = incoming.fill_level;
                         }
+                        if let Some((from, to)) = incoming.count {
+                            previous.count = Some((previous.count.map_or(from, |pair| pair.0), to));
+                        }
                     } else if let (
                         AnimationType::PathTrim {
                             start,

@@ -172,6 +172,18 @@ pub enum FillDirection {
 #[derive(Default)]
 pub struct LocalBounds(pub Bounds3D);
 
+/// A linear deformation, in the parent's space, applied about the drawable's
+/// position on top of its local transform, e.g. squash and stretch. Its
+/// members inherit it; the authored `SpatialTransform` is left unchanged.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct ShapeDeform(pub gaanim_core::kurbo::Affine);
+
+/// Extra opacity factor, between zero and one, that a repeater's `count`
+/// gives each of its copies. It multiplies into the propagated opacity on
+/// top of the authored `Opacity`, so opacity animations stay independent.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct Presence(pub f32);
+
 /// Local Y coordinate of a text object's typographic baseline.
 ///
 /// Unlike visual bounds, this metric is stable across ascenders, descenders,
