@@ -111,6 +111,8 @@ pub struct SceneData {
     pub duration: f64,
     /// Authored output size in pixels.
     pub output_size: (u32, u32),
+    /// Color outside the frame, as an 8-bit sRGB RGBA value.
+    pub clear_color: Option<[u8; 4]>,
     pub background: Option<CanvasBackground>,
     /// Shaders that post-process passes reference by index.
     pub post_shaders: Vec<PostProcessShader>,
@@ -159,6 +161,11 @@ impl SceneData {
         w.f64(self.duration);
         w.var(u64::from(self.output_size.0));
         w.var(u64::from(self.output_size.1));
+        w.option(self.clear_color, |w, rgba| {
+            for channel in rgba {
+                w.u8(channel);
+            }
+        });
         w.option(self.background.as_ref(), |w, background| {
             write_paint(w, tables, &background.paint);
             w.len(background.segment_paints.len());
@@ -246,6 +253,7 @@ impl SceneData {
         let fps = r.u32()?;
         let duration = r.f64()?;
         let output_size = (r.u32()?, r.u32()?);
+        let clear_color = r.option(|r| Ok([r.u8()?, r.u8()?, r.u8()?, r.u8()?]))?;
         let background = r.option(|r| {
             let paint = read_paint(r, tables)?;
             let count = r.len()?;
@@ -361,6 +369,7 @@ impl SceneData {
             fps,
             duration,
             output_size,
+            clear_color,
             background,
             post_shaders,
             segments,
@@ -847,7 +856,7 @@ impl Bundle {
             if frame_digest(&frame, background.as_ref(), &mut store) != self.digests[index] {
                 mismatched.push((index, frame.time));
             }
-            store.retain_shared();
+            store.end_frame();
         }
         Ok(mismatched)
     }
@@ -886,6 +895,8 @@ impl Bundle {
 
 /// Composite a frame as the preview draws it: over `background` (left out
 /// in perspective), with a shader background returned as a GPU request.
+/// Opacity layers are padded for the background's pixel size, as the scene
+/// pads them when it renders at that size.
 pub fn compose_frame(
     frame: &Frame,
     background: Option<&CanvasBackground>,
@@ -896,12 +907,16 @@ pub fn compose_frame(
         gaanim_math::Projection::Perspective { .. }
     );
     let mut request = None;
+    let pixels_per_unit = background.and_then(|background| {
+        gaanim_renderer::pipeline::output_pixels_per_unit(&frame.camera, background.pixel_size.0)
+    });
     let scene = compose_captured(
         &frame.capture,
         store,
         background
             .filter(|_| !perspective)
             .map(|background| (background, background.pixel_size)),
+        pixels_per_unit,
         Some(&mut request),
     );
     (scene, request)

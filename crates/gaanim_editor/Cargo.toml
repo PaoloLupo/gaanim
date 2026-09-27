@@ -12,11 +12,17 @@ path = "src/lib.rs"
 name = "gaanim-core"
 path = "src/main.rs"
 
+# Plays and exports playback bundles; it does not link Python.
+[[bin]]
+name = "gaanim-play"
+path = "src/play.rs"
+
 [dependencies]
 gaanim_core = { path = "../gaanim_core" }
 gaanim_math = { path = "../gaanim_math" }
 gaanim_scene = { path = "../gaanim_scene" }
 gaanim_api = { path = "../gaanim_api" }
+gaanim_bundle = { path = "../gaanim_bundle" }
 gaanim_animation = { path = "../gaanim_animation" }
 gaanim_timeline = { path = "../gaanim_timeline" }
 gaanim_media = { path = "../gaanim_media" }
@@ -58,6 +64,7 @@ dev-dynamic = [
     "bevy/dynamic_linking",
     "gaanim_animation/dev-dynamic",
     "gaanim_api/dev-dynamic",
+    "gaanim_bundle/dev-dynamic",
     "gaanim_diff/dev-dynamic",
     "gaanim_export/dev-dynamic",
     "gaanim_math/dev-dynamic",

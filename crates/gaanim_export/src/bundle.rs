@@ -59,9 +59,15 @@ impl BundleConfig {
 /// rest shows exactly the frame the editor shows.
 pub fn recording_times(timeline: &Timeline, fps: u32) -> Vec<f64> {
     let duration = timeline.cached_duration.max(0.0);
-    let fps = f64::from(fps.max(1));
-    let grid = (duration * fps).floor() as u64;
-    let mut times: Vec<f64> = (0..=grid).map(|frame| frame as f64 / fps).collect();
+    // Step the grid exactly like an export does, so a video exported from
+    // the bundle finds every frame it would have rendered from the scene.
+    let step = 1.0 / f64::from(fps.max(1));
+    let mut times = Vec::new();
+    let mut time = 0.0;
+    while time <= duration {
+        times.push(time);
+        time += step;
+    }
     times.push(duration);
     for segment in &timeline.segments {
         times.push(segment.start_time);
@@ -320,7 +326,7 @@ where
             .push_frame(&frame, digest, |_| None)
             .map_err(bundle_error)?;
         drop(frame);
-        fragments.retain_shared();
+        fragments.end_frame();
         progress.inc(1);
         if let Some(telemetry) = &telemetry {
             telemetry.set_current_frame(index as u64 + 1);
@@ -329,7 +335,17 @@ where
     progress.finish_and_clear();
 
     let background = app.world().get_resource::<CanvasBackground>().cloned();
+    let clear_color = app.world().get_resource::<ClearColor>().map(|clear| {
+        let rgba = clear.0.to_srgba();
+        [
+            (rgba.red * 255.0) as u8,
+            (rgba.green * 255.0) as u8,
+            (rgba.blue * 255.0) as u8,
+            (rgba.alpha * 255.0) as u8,
+        ]
+    });
     let scene = SceneData {
+        clear_color,
         title: config.title.clone(),
         fps: config.fps,
         duration,
@@ -394,11 +410,13 @@ mod tests {
             time: 0.333,
         }];
         let times = recording_times(&timeline, 10);
-        assert_eq!(
-            times,
-            vec![
-                0.0, 0.1, 0.2, 0.3, 0.333, 0.4, 0.5, 0.512, 0.6, 0.7, 0.762, 0.8, 0.9, 1.0, 1.05
-            ]
-        );
+        let expected = [
+            0.0, 0.1, 0.2, 0.3, 0.333, 0.4, 0.5, 0.512, 0.6, 0.7, 0.762, 0.8, 0.9, 1.0, 1.05,
+        ];
+        assert_eq!(times.len(), expected.len(), "{times:?}");
+        for (time, expected) in times.iter().zip(expected) {
+            assert!((time - expected).abs() < 1e-12, "{times:?}");
+        }
+        assert!(times.windows(2).all(|pair| pair[0] < pair[1]));
     }
 }

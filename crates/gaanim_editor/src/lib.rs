@@ -10,10 +10,13 @@ use ui_kit::{ButtonTone, Icon, PRIMARY_SIZE, ToggleColor, divider, icon_button, 
 #[cfg(target_os = "linux")]
 pub mod alsa_errors;
 mod app_icon;
+pub mod bundle_player;
+pub mod cli;
 pub mod export;
 pub mod feedback;
 mod fps_overlay;
 pub mod frame_profile;
+pub mod host;
 pub mod narration;
 pub mod overlays;
 mod presenter;
@@ -175,6 +178,7 @@ impl Plugin for GaanimEditorPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(EguiPlugin::default())
             .add_plugins(app_icon::AppIconPlugin)
+            .add_plugins(bundle_player::BundlePlayerPlugin)
             .add_plugins(project_hub::ProjectHubPlugin)
             .add_systems(PreUpdate, square_egui_corners_system)
             .init_resource::<EditorState>()

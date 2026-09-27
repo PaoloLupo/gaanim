@@ -293,6 +293,10 @@ pub struct ExtractedElement {
     transform: kurbo::Affine,
     opacity: f32,
     opacity_bounds: kurbo::Rect,
+    /// `opacity_bounds` before the antialiasing margin, which depends on the
+    /// output resolution: the rectangle and the reach of strokes and effects.
+    /// `None` when `opacity_bounds` takes no margin.
+    opacity_extent: Option<(kurbo::Rect, f64)>,
     opacity_group: Entity,
     render_order: RenderOrder,
     scene: Arc<vello::Scene>,
@@ -389,6 +393,7 @@ impl ExtractedElement {
             transform: content * self.transform,
             opacity: self.opacity,
             opacity_bounds: content.transform_rect_bbox(self.opacity_bounds),
+            opacity_extent: None,
             opacity_group: self.opacity_group,
             render_order: self.render_order,
             scene: Arc::clone(&self.scene),
@@ -629,7 +634,18 @@ fn opacity_layer_bounds(
     fallback: kurbo::Rect,
     margin: f64,
 ) -> kurbo::Rect {
-    let (rect, reach) = extent.unwrap_or_else(|| {
+    let (rect, reach) = opacity_layer_extent(extent, world_bounds, fallback);
+    pad_opacity_layer(rect, reach, margin, fallback)
+}
+
+/// What an opacity layer covers before its antialiasing margin: a world
+/// rectangle and how far strokes and effects reach beyond it.
+fn opacity_layer_extent(
+    extent: Option<(kurbo::Rect, f64)>,
+    world_bounds: Option<&WorldBounds>,
+    fallback: kurbo::Rect,
+) -> (kurbo::Rect, f64) {
+    extent.unwrap_or_else(|| {
         let rect = world_bounds
             .map(|bounds| {
                 kurbo::Rect::new(
@@ -642,12 +658,33 @@ fn opacity_layer_bounds(
             .filter(|rect| rect.width().is_finite() && rect.height().is_finite())
             .unwrap_or(fallback);
         (rect, 0.0)
-    });
+    })
+}
+
+/// An opacity layer's rectangle with its reach and antialiasing `margin`.
+fn pad_opacity_layer(
+    rect: kurbo::Rect,
+    reach: f64,
+    margin: f64,
+    fallback: kurbo::Rect,
+) -> kurbo::Rect {
     let padding = reach + margin;
     if !padding.is_finite() {
         return fallback;
     }
     rect.inflate(padding, padding)
+}
+
+/// Output pixels per world unit of an orthographic `camera` rendered
+/// `output_width` pixels wide; `None` in perspective. Opacity layers keep an
+/// antialiasing margin of two such pixels.
+pub fn output_pixels_per_unit(camera: &gaanim_math::Camera, output_width: u32) -> Option<f64> {
+    match camera.projection {
+        gaanim_math::Projection::Orthographic { zoom } => {
+            Some(f64::from(output_width) * zoom / camera.frame_width)
+        }
+        _ => None,
+    }
 }
 
 /// World bounding box of a fragment's visible path, and how far its strokes
@@ -2007,13 +2044,12 @@ fn extract_world(
         .unwrap_or_else(|| kurbo::Rect::new(-4096.0, -4096.0, 4096.0, 4096.0));
     let output_width = world
         .get_resource::<CanvasBackground>()
-        .map(|background| f64::from(background.pixel_size.0));
-    let antialias = antialias_margin(camera.and_then(|cam| match cam.projection {
-        gaanim_math::Projection::Orthographic { zoom } => {
-            output_width.map(|width| width * zoom / cam.frame_width)
-        }
-        _ => None,
-    }));
+        .map(|background| background.pixel_size.0);
+    let antialias = antialias_margin(
+        camera
+            .zip(output_width)
+            .and_then(|(cam, width)| output_pixels_per_unit(cam, width)),
+    );
 
     let cam_bounds = camera.filter(|_| cull).and_then(|cam| {
         if let gaanim_math::Projection::Orthographic { zoom } = cam.projection {
@@ -2214,10 +2250,10 @@ fn extract_world(
             .filter(|blend| *blend != peniko::BlendMode::default());
         // Only translucent or blended elements open a layer; a Lottie draws
         // geometry that `Path2D` does not describe.
-        let opacity_bounds = if global_opacity.0 >= 1.0 && blend.is_none() || lottie_opt.is_some() {
-            opacity_fallback
+        let opacity_extent = if global_opacity.0 >= 1.0 && blend.is_none() || lottie_opt.is_some() {
+            None
         } else {
-            opacity_layer_bounds(
+            Some(opacity_layer_extent(
                 fragment_extent(
                     elem_path,
                     transform.affine_2d,
@@ -2234,9 +2270,14 @@ fn extract_world(
                 ),
                 world_bounds_opt,
                 opacity_fallback,
-                antialias,
-            )
+            ))
         };
+        let opacity_bounds = opacity_extent.map_or(opacity_fallback, |(rect, reach)| {
+            pad_opacity_layer(rect, reach, antialias, opacity_fallback)
+        });
+        // A capture keeps the extent, so a replay at another resolution pads
+        // the layer for its own pixels; an unbounded reach keeps the fallback.
+        let opacity_extent = opacity_extent.filter(|(_, reach)| reach.is_finite());
         let exempt = pins.is_some() && world.get::<MotionBlurExempt>(entity).is_some();
         if exempt && replaying_pins {
             continue;
@@ -2248,6 +2289,7 @@ fn extract_world(
             transform: transform.affine_2d,
             opacity: global_opacity.0,
             opacity_bounds,
+            opacity_extent,
             opacity_group,
             render_order: stacked_render_order(
                 *render_order,
@@ -2347,8 +2389,13 @@ pub struct CapturedElement {
     pub lottie: Option<Arc<vello::Scene>>,
     pub transform: kurbo::Affine,
     pub opacity: f32,
-    /// Clip of the element's opacity or blend layer.
+    /// Clip of the element's opacity or blend layer; with `opacity_reach`,
+    /// before the reach and antialiasing margin the replay pads it with.
     pub opacity_bounds: kurbo::Rect,
+    /// How far strokes and effects reach beyond `opacity_bounds`, for an
+    /// element drawn in its own layer. The layer adds two output pixels of
+    /// antialiasing, so it fits whatever resolution the frame is replayed at.
+    pub opacity_reach: Option<f64>,
     /// Root ancestor: translucent siblings share one layer.
     pub opacity_group: Entity,
     /// Render order with the ancestors' z-indices stacked.
@@ -2438,7 +2485,10 @@ pub fn capture_frame(world: &mut World, camera: Option<&gaanim_math::Camera>) ->
                 lottie: element.lottie,
                 transform: element.transform,
                 opacity: element.opacity,
-                opacity_bounds: element.opacity_bounds,
+                opacity_bounds: element
+                    .opacity_extent
+                    .map_or(element.opacity_bounds, |(rect, _)| rect),
+                opacity_reach: element.opacity_extent.map(|(_, reach)| reach),
                 opacity_group: element.opacity_group,
                 render_order: element.render_order,
                 clip_mask: element.clip_mask,
@@ -2466,14 +2516,19 @@ pub fn capture_frame(world: &mut World, camera: Option<&gaanim_math::Camera>) ->
 }
 
 /// Composite a captured frame over `background`, building its fragments
-/// through `store`. With `gpu`, a shader background records its request
-/// there instead of rasterizing on the CPU.
+/// through `store`. `pixels_per_unit` is the output density (see
+/// [`output_pixels_per_unit`]) that sizes the antialiasing margin of opacity
+/// layers, as the scene sizes it when it renders at that resolution. With
+/// `gpu`, a shader background records its request there instead of
+/// rasterizing on the CPU.
 pub fn compose_captured(
     frame: &FrameCapture,
     store: &mut crate::fragment::FragmentStore,
     background: Option<(&CanvasBackground, (u32, u32))>,
+    pixels_per_unit: Option<f64>,
     gpu: Option<&mut Option<ShaderBackgroundRequest>>,
 ) -> vello::Scene {
+    let margin = antialias_margin(pixels_per_unit);
     let elements: Vec<ExtractedElement> = frame
         .elements
         .iter()
@@ -2485,7 +2540,17 @@ pub fn compose_captured(
                 lottie: None,
                 transform: element.transform,
                 opacity: element.opacity,
-                opacity_bounds: element.opacity_bounds,
+                opacity_bounds: element
+                    .opacity_reach
+                    .map_or(element.opacity_bounds, |reach| {
+                        pad_opacity_layer(
+                            element.opacity_bounds,
+                            reach,
+                            margin,
+                            element.opacity_bounds,
+                        )
+                    }),
+                opacity_extent: None,
                 opacity_group: element.opacity_group,
                 render_order: element.render_order,
                 scene,
@@ -2519,6 +2584,83 @@ pub fn compose_captured(
         frame.background_time,
         gpu,
     )
+}
+
+/// Resource: a captured frame to show instead of the world's drawables.
+///
+/// While it exists, [`gaanim_render_system`] stands down and
+/// [`external_frame_system`] composites this frame with the same code, so
+/// a recorded frame draws exactly what the scene drew. Playback bundles
+/// set it.
+#[derive(Resource, Default)]
+pub struct ExternalFrame {
+    pub frame: Option<Arc<FrameCapture>>,
+    store: crate::fragment::FragmentStore,
+}
+
+/// System: composites the [`ExternalFrame`] into the main Vello scene.
+pub fn external_frame_system(
+    mut commands: Commands,
+    mut external: ResMut<ExternalFrame>,
+    gaanim_camera: Option<Res<gaanim_math::ResolvedCamera>>,
+    canvas_bg: Option<Res<CanvasBackground>>,
+    (mut shader_frame, preview): (
+        Option<ResMut<ShaderBackgroundFrame>>,
+        Option<Res<crate::canvas::PreviewResolution>>,
+    ),
+    mut query_vello_scene: Query<&mut VelloScene2d, With<MainVelloScene>>,
+) {
+    let external = &mut *external;
+    let Some(frame) = external.frame.clone() else {
+        return;
+    };
+    let is_perspective = gaanim_camera
+        .as_ref()
+        .is_some_and(|cam| matches!(cam.projection, gaanim_math::Projection::Perspective { .. }));
+    let background = canvas_bg
+        .as_deref()
+        .filter(|_| !is_perspective)
+        .map(|canvas_bg| {
+            (
+                canvas_bg,
+                interactive_background_pixel_size(
+                    canvas_bg,
+                    gaanim_camera.as_deref(),
+                    preview.as_deref(),
+                ),
+            )
+        });
+    // Viewport pixels per world unit, as the interactive preview pads layers.
+    let pixels_per_unit = gaanim_camera.as_ref().and_then(|cam| match cam.projection {
+        gaanim_math::Projection::Orthographic { zoom } => Some(zoom * cam.viewport.scale),
+        _ => None,
+    });
+    let mut shader_request = None;
+    let main_scene = compose_captured(
+        &frame,
+        &mut external.store,
+        background,
+        pixels_per_unit,
+        shader_frame.is_some().then_some(&mut shader_request),
+    );
+    external.store.end_frame();
+    if let Some(frame) = shader_frame.as_mut() {
+        frame.0 = shader_request;
+    }
+    if let Some(mut scene) = query_vello_scene.iter_mut().next() {
+        if scene
+            .bypass_change_detection()
+            .replace_if_different(main_scene)
+        {
+            scene.set_changed();
+        }
+    } else {
+        commands.spawn((
+            MainVelloScene,
+            VelloScene2d::from(main_scene),
+            Transform::from_scale(Vec3::new(1.0, -1.0, 1.0)),
+        ));
+    }
 }
 
 /// Visible camera view screens and what resolving their views reads.
@@ -2934,6 +3076,7 @@ pub fn gaanim_render_system(
             transform: transform.affine_2d,
             opacity: global_opacity.0,
             opacity_bounds,
+            opacity_extent: None,
             opacity_group,
             render_order: stacked_render_order(
                 *render_order,
@@ -3959,6 +4102,7 @@ mod tests {
             transform: kurbo::Affine::IDENTITY,
             opacity: 0.5,
             opacity_bounds: rect,
+            opacity_extent: None,
             opacity_group: Entity::PLACEHOLDER,
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),
@@ -3991,6 +4135,7 @@ mod tests {
             transform: kurbo::Affine::IDENTITY,
             opacity,
             opacity_bounds: kurbo::Rect::new(0.0, 0.0, 10.0, 10.0),
+            opacity_extent: None,
             opacity_group: Entity::PLACEHOLDER,
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),
@@ -4019,6 +4164,7 @@ mod tests {
             transform: kurbo::Affine::translate((2.0, 0.0)),
             opacity: 0.5,
             opacity_bounds: kurbo::Rect::new(0.0, 0.0, 10.0, 10.0),
+            opacity_extent: None,
             opacity_group: Entity::PLACEHOLDER,
             render_order: RenderOrder::default(),
             scene: Arc::new(scene),
@@ -4076,6 +4222,7 @@ mod tests {
             transform: kurbo::Affine::IDENTITY,
             opacity: 0.5,
             opacity_bounds: kurbo::Rect::new(0.0, 0.0, 10.0, 10.0),
+            opacity_extent: None,
             opacity_group: Entity::PLACEHOLDER,
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),
@@ -4111,6 +4258,7 @@ mod tests {
             transform: kurbo::Affine::IDENTITY,
             opacity: 1.0,
             opacity_bounds: kurbo::Rect::new(0.0, 0.0, 10.0, 10.0),
+            opacity_extent: None,
             opacity_group: Entity::PLACEHOLDER,
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),

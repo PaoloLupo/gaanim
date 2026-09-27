@@ -79,12 +79,13 @@ build-release-install: build-dist wheel
     New-Item -ItemType Directory -Force -Path "C:\Tools\gaanim" | Out-Null
     Copy-Item -Path "./target/dist/gaanim.exe" -Destination "C:\Tools\gaanim\" -Force
     Copy-Item -Path "./target/dist/gaanim-core.exe" -Destination "C:\Tools\gaanim\" -Force
+    Copy-Item -Path "./target/dist/gaanim-play.exe" -Destination "C:\Tools\gaanim\" -Force
     Copy-Item -Path (Get-ChildItem "./target/wheels/gaanim-*-py3-none-any.whl" | Select-Object -First 1).FullName -Destination "C:\Tools\gaanim\" -Force
 
 [unix]
 build-release-install: build-dist wheel
     mkdir -p "$HOME/.local/bin" "$HOME/.local/share/gaanim"
-    install -m 755 ./target/dist/gaanim ./target/dist/gaanim-core "$HOME/.local/bin/"
+    install -m 755 ./target/dist/gaanim ./target/dist/gaanim-core ./target/dist/gaanim-play "$HOME/.local/bin/"
     install -m 644 ./target/wheels/gaanim-*-py3-none-any.whl "$HOME/.local/share/gaanim/"
 
 # Install the lightweight authoring package in the local virtual environment.

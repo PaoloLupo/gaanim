@@ -478,6 +478,7 @@ pub(crate) struct ElementRecord {
     pub transform: kurbo::Affine,
     pub opacity: f32,
     pub opacity_bounds: kurbo::Rect,
+    pub opacity_reach: Option<f64>,
     pub opacity_group: u32,
     pub render_order: RenderOrder,
     pub clip: Option<ClipRecord>,
@@ -549,6 +550,7 @@ impl ElementRecord {
             transform: element.transform,
             opacity: element.opacity,
             opacity_bounds: element.opacity_bounds,
+            opacity_reach: element.opacity_reach,
             opacity_group: key_of(element.opacity_group),
             render_order: element.render_order,
             clip: element.clip_mask.as_ref().map(|clip| ClipRecord {
@@ -598,6 +600,7 @@ impl ElementRecord {
         w.affine(self.transform);
         w.f32(self.opacity);
         w.rect(self.opacity_bounds);
+        w.option(self.opacity_reach, Writer::f64);
         w.var(u64::from(self.opacity_group));
         w.ivar(i64::from(self.render_order.z_index));
         w.var(self.render_order.creation_order);
@@ -643,6 +646,7 @@ impl ElementRecord {
             transform: r.affine()?,
             opacity: r.f32()?,
             opacity_bounds: r.rect()?,
+            opacity_reach: r.option(Reader::f64)?,
             opacity_group: r.u32()?,
             render_order: RenderOrder {
                 z_index: i32::try_from(r.ivar()?).map_err(|_| corrupt("z-index out of range"))?,
@@ -705,6 +709,7 @@ impl ElementRecord {
             transform: self.transform,
             opacity: self.opacity,
             opacity_bounds: self.opacity_bounds,
+            opacity_reach: self.opacity_reach,
             opacity_group: key_entity(self.opacity_group)?,
             render_order: self.render_order,
             clip_mask: self

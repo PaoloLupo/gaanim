@@ -141,6 +141,7 @@ pub fn export_dialog_system(
     timeline: ResMut<Timeline>,
     replay_stash: Res<StashedReplay>,
     project_paths: Option<Res<ProjectPaths>>,
+    bundle: Option<Res<crate::bundle_player::BundlePlayback>>,
 ) {
     let Ok(ctx) = ctx.ctx_mut() else { return };
 
@@ -452,13 +453,24 @@ pub fn export_dialog_system(
     let mut current_width = state.width;
     let mut current_height = state.height;
     let mut current_fit = state.fit;
-    let has_replay = replay_stash.canvas.is_some();
-    let scene_resolution = replay_stash
-        .canvas
-        .as_ref()
-        .map(|canvas| (canvas.frame.width, canvas.frame.height));
+    // A playback bundle exports its recorded frames, at its recorded rate.
+    let bundle_source = bundle.as_ref().map(|bundle| bundle.path().to_path_buf());
+    let has_replay = replay_stash.canvas.is_some() || bundle_source.is_some();
+    let scene_resolution = match &bundle {
+        Some(bundle) => {
+            let (width, height) = bundle.output_size();
+            Some((f64::from(width), f64::from(height)))
+        }
+        None => replay_stash
+            .canvas
+            .as_ref()
+            .map(|canvas| (canvas.frame.width, canvas.frame.height)),
+    };
     let dur = timeline.cached_duration;
-    let fps = current_quality.fps();
+    let fps = bundle
+        .as_ref()
+        .map(|bundle| bundle.fps())
+        .unwrap_or_else(|| current_quality.fps());
     let total = (dur * fps as f64).ceil() as u64;
 
     let previous_format = current_format;
@@ -736,11 +748,14 @@ pub fn export_dialog_system(
             let progress = state.progress_shared.clone();
             let cancel_requested = state.cancel_requested.clone();
             let telemetry = ExportTelemetry::new();
-            let canvas = replay_stash.canvas.clone().unwrap();
+            let canvas = replay_stash.canvas.clone();
             let worker_paths = project_paths
                 .as_ref()
+                .filter(|_| bundle_source.is_none())
                 .map(|paths| (paths.script_path.clone(), paths.project_dir.clone()));
-            let needs_worker = canvas.has_native_3d_content();
+            let needs_worker = canvas
+                .as_ref()
+                .is_some_and(|canvas| canvas.has_native_3d_content());
 
             state.active = true;
             state.dialog_open = false;
@@ -790,7 +805,15 @@ pub fn export_dialog_system(
                         config.video_encoder = video_encoder;
                         config.headless = true;
                         config.telemetry = Some(telemetry.clone());
-                        export_canvas(canvas, config).map_err(|error| error.to_string())
+                        match (bundle_source, canvas) {
+                            (Some(bundle), _) => {
+                                gaanim_export::prelude::export_bundle(&bundle, config)
+                                    .map_err(|error| error.to_string())
+                            }
+                            (None, Some(canvas)) => export_canvas(canvas, config)
+                                .map_err(|error| error.to_string()),
+                            (None, None) => Err("No replay data available".to_string()),
+                        }
                     }
                 };
                 if let Ok(mut lock) = progress_clone.lock() {

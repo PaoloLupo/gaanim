@@ -97,9 +97,16 @@ impl Plugin for GaanimRendererPlugin {
         );
 
         // Register the extraction and composition system in the scene extraction phase
+        // A playback bundle shows recorded frames through the same
+        // composition instead of the world's drawables.
         app.add_systems(
             Update,
-            pipeline::gaanim_render_system.in_set(gaanim_scene::SceneSet::Extraction),
+            (
+                pipeline::gaanim_render_system
+                    .run_if(not(resource_exists::<pipeline::ExternalFrame>)),
+                pipeline::external_frame_system.run_if(resource_exists::<pipeline::ExternalFrame>),
+            )
+                .in_set(gaanim_scene::SceneSet::Extraction),
         );
         app.add_systems(
             Update,

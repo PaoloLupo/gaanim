@@ -13,6 +13,7 @@
 use bevy::prelude::*;
 use gaanim_api::host::ReloadPayload;
 use gaanim_core::console;
+use gaanim_editor::cli::{ExportBound, ExportCommand, parse_export_seconds, validate_export_range};
 use gaanim_export::encoder::VideoEncoder;
 use pyo3::prelude::*;
 use std::path::{Path, PathBuf};
@@ -61,88 +62,39 @@ fn main() {
     } else {
         "GPU-accelerated vector animation engine"
     });
-    let mut app = App::new();
-    app.add_plugins(
-        DefaultPlugins
-            .set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: if launch.present {
-                        "Gaanim — Presentation".to_string()
-                    } else {
-                        "Gaanim".to_string()
-                    },
-                    resolution: (1280, 720).into(),
-                    present_mode: bevy::window::PresentMode::AutoVsync,
-                    mode: if launch.present {
-                        bevy::window::WindowMode::BorderlessFullscreen(
-                            launch
-                                .monitor
-                                .map(bevy::window::MonitorSelection::Index)
-                                .unwrap_or(bevy::window::MonitorSelection::Primary),
-                        )
-                    } else {
-                        bevy::window::WindowMode::Windowed
-                    },
-                    ..default()
-                }),
-                ..default()
-            })
-            .set(gaanim_scene::gaanim_asset_plugin())
-            .set(gaanim_scene::logging::log_plugin()),
-    )
-    .add_plugins(gaanim_scene::GaanimScenePlugin)
-    .add_plugins(gaanim_animation::GaanimAnimationPlugin)
-    .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
-    .add_plugins(gaanim_media::GaanimMediaPlugin)
-    .add_plugins(gaanim_text::GaanimTextPlugin)
-    .add_plugins(gaanim_api::GaanimApiPlugin)
-    .add_plugins(gaanim_renderer::GaanimRendererPlugin)
-    .add_plugins(gaanim_editor::GaanimEditorPlugin)
-    .insert_resource(gaanim_media::VideoSamplingMode::Realtime)
-    .insert_resource(gaanim_media::PreviewAudioEnabled(true))
-    // Only the interactive preview may lower its resolution while playing.
-    .insert_resource(gaanim_renderer::prelude::PreviewResolution::from_setting(
-        std::env::var(gaanim_renderer::prelude::PREVIEW_RESOLUTION_ENV)
-            .ok()
-            .as_deref(),
-    ))
-    .insert_resource(gaanim_editor::PresentationMode {
-        active: launch.present,
-    })
-    .insert_resource(launch.selection.clone())
-    // The overlay toggles the user left on come back in every session.
-    .insert_resource(gaanim_editor::overlays::EditorOverlays::with_preferences(
-        gaanim_editor::overlays::OverlayPreferences::load(),
-    ))
-    .add_systems(
-        Update,
-        gaanim_editor::overlays::save_overlay_preferences_system,
-    )
-    .insert_resource(ReloadStatus::default())
-    .insert_resource(ScriptError::default())
-    .add_systems(
-        Update,
-        (
-            script_error_listener_system.in_set(gaanim_scene::hierarchy::SceneSet::Input),
-            reload_listener_system.in_set(gaanim_scene::hierarchy::SceneSet::Input),
-        ),
-    )
-    .add_systems(
-        bevy_egui::EguiPrimaryContextPass,
-        (reload_status_overlay_system, script_error_overlay_system),
-    )
-    .add_systems(Update, open_project_request_system);
-    if gaanim_editor::frame_profile::enabled() {
-        app.add_plugins(gaanim_editor::frame_profile::FrameProfilePlugin);
-    }
+    let mut app = gaanim_editor::host::host_app(&gaanim_editor::host::HostOptions {
+        present: launch.present,
+        monitor: launch.monitor,
+        selection: launch.selection.clone(),
+    });
+    app.insert_resource(ReloadStatus::default())
+        .insert_resource(ScriptError::default())
+        .add_systems(
+            Update,
+            (
+                script_error_listener_system.in_set(gaanim_scene::hierarchy::SceneSet::Input),
+                reload_listener_system.in_set(gaanim_scene::hierarchy::SceneSet::Input),
+            ),
+        )
+        .add_systems(
+            bevy_egui::EguiPrimaryContextPass,
+            (reload_status_overlay_system, script_error_overlay_system),
+        )
+        .add_systems(Update, open_project_request_system);
 
-    // bevy_egui creates its primary context when the application starts. Keep
-    // this camera alive for both the project hub and script launches, so a
-    // script payload can reuse it instead of creating the egui camera after
-    // the first frame.
-    spawn_host_camera(app.world_mut());
-
-    if let Some(script_path) = launch.script_path {
+    if let Some(bundle) = launch
+        .script_path
+        .as_deref()
+        .filter(|path| gaanim_editor::bundle_player::is_bundle_path(path))
+    {
+        if let Err(error) = gaanim_editor::bundle_player::open_bundle(app.world_mut(), bundle) {
+            console::error("bundle", error);
+            std::process::exit(2);
+        }
+        app.world_mut()
+            .resource_mut::<gaanim_editor::project_hub::ProjectHubState>()
+            .active = false;
+    } else if let Some(script_path) = launch.script_path {
         if let Err(error) = start_script_session(app.world_mut(), script_path, launch.project) {
             console::error("project", error);
             std::process::exit(2);
@@ -161,135 +113,55 @@ fn dispatch_export_mode() -> bool {
     if args.first().map(String::as_str) != Some("export") {
         return false;
     }
-    let mut script = None;
-    let mut output = None;
-    let mut quality = "standard".to_string();
-    let mut encoder = VideoEncoder::Auto;
-    let mut transparent = false;
-    let mut width = 1920_u32;
-    let mut height = 1080_u32;
-    let mut fit = gaanim_export::prelude::OutputFit::Error;
-    let mut from = None;
-    let mut to = None;
-    let mut index = 1;
-    while index < args.len() {
-        match args[index].as_str() {
-            flag @ ("--from" | "--to") => {
-                index += 1;
-                let seconds = parse_export_seconds(flag, args.get(index)).unwrap_or_else(|error| {
-                    console::error("export", error);
-                    std::process::exit(2);
-                });
-                if flag == "--from" {
-                    from = Some(seconds);
-                } else {
-                    to = Some(seconds);
-                }
-            }
-            "--output" | "-o" => {
-                index += 1;
-                output = args.get(index).cloned();
-            }
-            "--quality" => {
-                index += 1;
-                quality = args.get(index).cloned().unwrap_or_default();
-            }
-            "--encoder" => {
-                index += 1;
-                encoder = args
-                    .get(index)
-                    .and_then(|value| VideoEncoder::parse_arg(value))
-                    .unwrap_or_else(|| {
-                        console::error(
-                            "export",
-                            format!("encoder must be {}", VideoEncoder::ARG_VALUES.join(", ")),
-                        );
-                        std::process::exit(2);
-                    });
-            }
-            "--transparent" => transparent = true,
-            "--width" => {
-                index += 1;
-                width = args
-                    .get(index)
-                    .and_then(|value| value.parse().ok())
-                    .filter(|value| *value > 0)
-                    .unwrap_or_else(|| {
-                        console::error("export", "--width requires a positive integer");
-                        std::process::exit(2);
-                    });
-            }
-            "--height" => {
-                index += 1;
-                height = args
-                    .get(index)
-                    .and_then(|value| value.parse().ok())
-                    .filter(|value| *value > 0)
-                    .unwrap_or_else(|| {
-                        console::error("export", "--height requires a positive integer");
-                        std::process::exit(2);
-                    });
-            }
-            "--fit" => {
-                index += 1;
-                fit = match args.get(index).map(String::as_str) {
-                    Some("error") => gaanim_export::prelude::OutputFit::Error,
-                    Some("contain") => gaanim_export::prelude::OutputFit::Contain,
-                    Some("cover") => gaanim_export::prelude::OutputFit::Cover,
-                    _ => {
-                        console::error("export", "--fit must be error, contain, or cover");
-                        std::process::exit(2);
-                    }
-                };
-            }
-            value if value.starts_with('-') => {
-                console::error("export", format!("unknown option `{value}`"));
-                std::process::exit(2);
-            }
-            value if script.is_none() => script = Some(PathBuf::from(value)),
-            value => {
-                console::error("export", format!("unexpected argument `{value}`"));
-                std::process::exit(2);
-            }
+    let command = ExportCommand::parse(&args[1..]).unwrap_or_else(|error| {
+        console::error("export", error);
+        std::process::exit(2);
+    });
+    // A playback bundle exports to video without running Python.
+    if command
+        .input
+        .as_deref()
+        .is_some_and(gaanim_editor::bundle_player::is_bundle_path)
+    {
+        console::banner("Export");
+        if let Err(error) = gaanim_editor::cli::export_bundle_video(&command) {
+            error.exit("export");
         }
-        index += 1;
+        return true;
     }
-    let script = script
-        .and_then(|path| gaanim_project::resolve_entry(&path).ok())
+    let script = command
+        .input
+        .as_deref()
+        .and_then(|path| gaanim_project::resolve_entry(path).ok())
         .unwrap_or_else(|| {
             console::error("export", "a script or project to export is required");
             console::hint("Run `gaanim export --help` for the options.");
             std::process::exit(2);
         });
-    let output = output.unwrap_or_else(|| {
-        console::error("export", "--output is required");
+    let (output, format) = command.output_format().unwrap_or_else(|error| {
+        console::error("export", error);
         std::process::exit(2);
     });
-    if !matches!(quality.as_str(), "draft" | "standard" | "production") {
-        console::error("export", "quality must be draft, standard, or production");
-        std::process::exit(2);
-    }
-    let format = Path::new(&output)
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(str::to_ascii_lowercase)
-        .filter(|format| matches!(format.as_str(), "mp4" | "webm" | "webp" | "gif" | "png"))
-        .unwrap_or_else(|| {
+    if format == gaanim_bundle::EXTENSION {
+        if command.from.is_some()
+            || command.to.is_some()
+            || command.transparent
+            || command.encoder != VideoEncoder::Auto
+        {
             console::error(
                 "export",
-                "output extension must be mp4, webm, webp, gif, or png",
+                "a playback bundle records the whole scene; --from, --to, --transparent and --encoder do not apply",
             );
             std::process::exit(2);
-        });
-    if transparent && !matches!(format.as_str(), "webm" | "webp" | "png") {
-        console::error("export", "--transparent requires WebM, WebP, or PNG output");
-        std::process::exit(2);
+        }
+        console::banner("Bundle");
+        if let Err(error) = run_bundle_export(&script, &output, command.fps) {
+            console::error("export", error);
+            std::process::exit(1);
+        }
+        return true;
     }
-    if format != "mp4" && encoder != VideoEncoder::Auto {
-        console::error("export", "--encoder requires MP4 output");
-        std::process::exit(2);
-    }
-    if let Err(error) = validate_export_range(from.as_ref(), to.as_ref()) {
+    if let Err(error) = command.validate_video(&format) {
         console::error("export", error);
         std::process::exit(2);
     }
@@ -297,20 +169,43 @@ fn dispatch_export_mode() -> bool {
     if let Err(error) = run_export_worker(ExportWorkerArgs {
         script,
         output,
-        quality,
+        quality: command.quality,
         format,
-        encoder,
-        transparent,
-        width,
-        height,
-        fit,
-        from,
-        to,
+        encoder: command.encoder,
+        transparent: command.transparent,
+        width: command.width,
+        height: command.height,
+        fit: command.fit,
+        from: command.from,
+        to: command.to,
     }) {
         console::error("export", error);
         std::process::exit(1);
     }
     true
+}
+
+/// Record `script` into a playback bundle at `output`.
+fn run_bundle_export(script: &Path, output: &str, fps: Option<u32>) -> Result<(), String> {
+    let probe = gaanim_project::EnvironmentProbe::detect(Some(script));
+    let venv_root = gaanim_project::activate_environment(&probe)?;
+    gaanim_python::register_inittab();
+    Python::initialize();
+    if let Some(ref venv) = venv_root {
+        python_home::inject_venv_site_packages(venv);
+    }
+    let canvas = script_runner::load_script_canvas(script)?;
+    let mut config = gaanim_api::export::BundleConfig::new(output);
+    if let Some(title) = script.file_stem().and_then(|stem| stem.to_str()) {
+        config.title = title.to_owned();
+    }
+    if let Some(fps) = fps {
+        config.fps = fps;
+    }
+    let (width, height) = canvas.frame.preview_pixel_size();
+    config.width = width;
+    config.height = height;
+    gaanim_api::export::record_canvas(canvas, config).map_err(|error| error.to_string())
 }
 
 fn dispatch_python_api_validation_mode() -> bool {
@@ -329,83 +224,6 @@ fn dispatch_python_api_validation_mode() -> bool {
         std::process::exit(1);
     }
     true
-}
-
-/// One end of an export range: seconds, or a `scene.marker` name resolved
-/// after the script runs.
-#[derive(Debug, Clone, PartialEq)]
-enum ExportBound {
-    Seconds(f64),
-    Marker(String),
-}
-
-impl std::fmt::Display for ExportBound {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Seconds(seconds) => write!(formatter, "{seconds}"),
-            Self::Marker(name) => write!(formatter, "{name}"),
-        }
-    }
-}
-
-/// `--from` / `--to`: finite non-negative seconds, or a marker name.
-fn parse_export_seconds(flag: &str, value: Option<&String>) -> Result<ExportBound, String> {
-    let value = value
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| format!("{flag} requires seconds or a marker name"))?;
-    match value.parse::<f64>() {
-        Ok(seconds) if seconds.is_finite() && seconds >= 0.0 => Ok(ExportBound::Seconds(seconds)),
-        Ok(_) => Err(format!(
-            "{flag} requires a non-negative number of seconds or a marker name"
-        )),
-        Err(_) if value.starts_with('-') => Err(format!(
-            "{flag} requires a non-negative number of seconds or a marker name"
-        )),
-        Err(_) => Ok(ExportBound::Marker(value.to_string())),
-    }
-}
-
-fn validate_export_range(
-    from: Option<&ExportBound>,
-    to: Option<&ExportBound>,
-) -> Result<(), String> {
-    match (from, to) {
-        (Some(ExportBound::Seconds(from)), Some(ExportBound::Seconds(to))) if to <= from => {
-            Err(format!("--to ({to}) must be greater than --from ({from})"))
-        }
-        _ => Ok(()),
-    }
-}
-
-/// Resolve marker bounds against the markers the script authored.
-fn resolve_export_bound(
-    flag: &str,
-    bound: Option<&ExportBound>,
-    markers: &[gaanim_api::canvas::SceneMarker],
-) -> Result<Option<f64>, String> {
-    match bound {
-        None => Ok(None),
-        Some(ExportBound::Seconds(seconds)) => Ok(Some(*seconds)),
-        Some(ExportBound::Marker(name)) => markers
-            .iter()
-            .find(|marker| marker.name == *name)
-            .map(|marker| Some(marker.time))
-            .ok_or_else(|| {
-                let known = markers
-                    .iter()
-                    .map(|marker| format!("{:?}", marker.name))
-                    .collect::<Vec<_>>();
-                format!(
-                    "{flag}: unknown marker {name:?}; the script defines {}",
-                    if known.is_empty() {
-                        "no markers (use scene.marker(\"name\"))".to_string()
-                    } else {
-                        known.join(", ")
-                    }
-                )
-            }),
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -540,53 +358,27 @@ fn run_export_worker(worker: ExportWorkerArgs) -> Result<(), String> {
 
     let canvas = script_runner::load_script_canvas(&worker.script)?;
     let markers = canvas.markers();
-    let from = resolve_export_bound("--from", worker.from.as_ref(), &markers)?;
-    let to = resolve_export_bound("--to", worker.to.as_ref(), &markers)?;
-    if let (Some(from), Some(to)) = (from, to)
-        && to <= from
-    {
-        return Err(format!(
-            "--to ({}) resolves to {to}s, which must be after --from ({}) at {from}s",
-            worker
-                .to
-                .as_ref()
-                .map(ToString::to_string)
-                .unwrap_or_default(),
-            worker
-                .from
-                .as_ref()
-                .map(ToString::to_string)
-                .unwrap_or_default(),
-        ));
-    }
-    let quality = match worker.quality.as_str() {
-        "draft" => gaanim_export::prelude::QualityPreset::Draft,
-        "standard" => gaanim_export::prelude::QualityPreset::Standard,
-        "production" => gaanim_export::prelude::QualityPreset::Production,
-        _ => unreachable!("validated export quality"),
+    let markers: Vec<(&str, f64)> = markers
+        .iter()
+        .map(|marker| (marker.name.as_str(), marker.time))
+        .collect();
+    let range = gaanim_editor::cli::resolve_export_range(
+        worker.from.as_ref(),
+        worker.to.as_ref(),
+        &markers,
+    )?;
+    let format =
+        gaanim_editor::cli::export_format(&worker.format).expect("validated export format");
+    let command = ExportCommand {
+        quality: worker.quality.clone(),
+        encoder: worker.encoder,
+        transparent: worker.transparent,
+        width: worker.width,
+        height: worker.height,
+        fit: worker.fit,
+        ..Default::default()
     };
-    let format = match worker.format.as_str() {
-        "mp4" => gaanim_export::encoder::ExportFormat::Mp4,
-        "webm" => gaanim_export::encoder::ExportFormat::Webm,
-        "webp" => gaanim_export::encoder::ExportFormat::Webp,
-        "gif" => gaanim_export::encoder::ExportFormat::Gif,
-        "png" => gaanim_export::encoder::ExportFormat::PngSequence,
-        _ => unreachable!("validated export format"),
-    };
-    let mut config =
-        gaanim_export::prelude::ExportConfig::new(&worker.output).with_quality(quality);
-    config.width = worker.width;
-    config.height = worker.height;
-    config.fit = worker.fit;
-    config.start_time = from;
-    config.end_time = to;
-    config.aspect_ratio = gaanim_export::prelude::AspectRatioPreset::Custom;
-    config.format = format;
-    config.video_encoder = worker.encoder;
-    if worker.transparent {
-        config.transparent = true;
-    }
-    config.headless = true;
+    let config = gaanim_editor::cli::video_config(&command, &worker.output, format, range);
     gaanim_api::export::export_canvas(canvas, config).map_err(|error| error.to_string())
 }
 
@@ -594,19 +386,6 @@ fn run_export_worker(worker: ExportWorkerArgs) -> Result<(), String> {
 ///
 /// Canvas replay reuses this Vello camera; creating it during replay is too
 /// late for `bevy_egui` to attach its primary context on script launches.
-fn spawn_host_camera(world: &mut World) {
-    world.spawn((
-        Camera2d,
-        gaanim_renderer::prelude::VelloView,
-        bevy::prelude::Camera {
-            order: 1,
-            clear_color: bevy::camera::ClearColorConfig::None,
-            ..default()
-        },
-        bevy::core_pipeline::tonemapping::Tonemapping::None,
-    ));
-}
-
 fn start_script_session(
     world: &mut World,
     script_path: PathBuf,
@@ -1447,6 +1226,10 @@ fn parse_args() -> LaunchArgs {
     let Some(raw_path) = parsed.script_path.as_ref() else {
         return parsed;
     };
+    // A playback bundle replays without Python or a project.
+    if gaanim_editor::bundle_player::is_bundle_path(raw_path) {
+        return parsed;
+    }
     let (path, project) = if raw_path.is_dir() {
         let project = gaanim_project::resolve_project(raw_path).unwrap_or_else(|error| {
             console::error("project", error);
@@ -1572,30 +1355,6 @@ mod tests {
         std::fs::write(baseline.join(gaanim_diff::STOPS_FILE), "{}").unwrap();
         assert_eq!(comparison_blocker(&baseline, true), None);
         std::fs::remove_dir_all(&root).unwrap();
-    }
-
-    #[test]
-    fn export_bounds_resolve_scene_markers() {
-        let markers = vec![gaanim_api::canvas::SceneMarker {
-            name: "climax".into(),
-            time: 2.5,
-            segment: "_default".into(),
-        }];
-        let climax = ExportBound::Marker("climax".into());
-        assert_eq!(
-            resolve_export_bound("--from", Some(&climax), &markers),
-            Ok(Some(2.5))
-        );
-        assert_eq!(
-            resolve_export_bound("--to", Some(&ExportBound::Seconds(4.0)), &markers),
-            Ok(Some(4.0))
-        );
-        let error =
-            resolve_export_bound("--to", Some(&ExportBound::Marker("fin".into())), &markers)
-                .unwrap_err();
-        assert!(error.contains("unknown marker \"fin\"") && error.contains("\"climax\""));
-        // Marker ranges are only ordered once the script has run.
-        assert!(validate_export_range(Some(&climax), Some(&ExportBound::Seconds(0.1))).is_ok());
     }
 
     #[test]
@@ -1822,19 +1581,6 @@ mod tests {
                 monitor: None,
                 selection: Default::default(),
             }
-        );
-    }
-
-    #[test]
-    fn host_installs_a_primary_2d_camera_for_egui_before_script_replay() {
-        let mut world = World::new();
-        spawn_host_camera(&mut world);
-        assert!(
-            world
-                .query_filtered::<Entity, With<Camera2d>>()
-                .iter(&world)
-                .next()
-                .is_some()
         );
     }
 

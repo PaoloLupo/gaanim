@@ -226,19 +226,33 @@ fn a_captured_frame_composes_exactly_like_an_export_frame() {
             .seek_request = Some(time);
         app.update();
         let camera = app.world().resource::<gaanim_math::ResolvedCamera>().camera;
-        let exported =
-            gaanim_renderer::pipeline::compile_scene_from_world(app.world_mut(), Some(&camera));
         let capture = gaanim_renderer::pipeline::capture_frame(app.world_mut(), Some(&camera));
-        let background = app
-            .world()
-            .get_resource::<gaanim_renderer::pipeline::CanvasBackground>()
-            .map(|background| (background, background.pixel_size));
-        let composed =
-            gaanim_renderer::pipeline::compose_captured(&capture, &mut store, background, None);
-        assert!(
-            gaanim_renderer::canvas::draws_same(&exported, &composed),
-            "the capture at {time}s composes differently from the export"
-        );
+        // One capture replays at any output size exactly as the scene
+        // renders at that size.
+        for size in [(1920, 1080), (480, 270)] {
+            app.world_mut()
+                .resource_mut::<gaanim_renderer::pipeline::CanvasBackground>()
+                .pixel_size = size;
+            let exported =
+                gaanim_renderer::pipeline::compile_scene_from_world(app.world_mut(), Some(&camera));
+            let background = app
+                .world()
+                .get_resource::<gaanim_renderer::pipeline::CanvasBackground>()
+                .map(|background| (background, background.pixel_size));
+            let pixels_per_unit =
+                gaanim_renderer::pipeline::output_pixels_per_unit(&camera, size.0);
+            let composed = gaanim_renderer::pipeline::compose_captured(
+                &capture,
+                &mut store,
+                background,
+                pixels_per_unit,
+                None,
+            );
+            assert!(
+                gaanim_renderer::canvas::draws_same(&exported, &composed),
+                "the capture at {time}s composes differently from the export at {size:?}"
+            );
+        }
         store.retain_shared();
     }
 }

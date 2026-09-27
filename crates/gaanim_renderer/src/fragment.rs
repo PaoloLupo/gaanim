@@ -256,6 +256,8 @@ pub fn build_fragment(recipe: &FragmentRecipe, lottie: Option<&vello::Scene>) ->
 #[derive(Default)]
 pub struct FragmentStore {
     built: std::collections::HashMap<(usize, usize), StoredFragment>,
+    /// Frames composed so far, for evicting fragments no longer drawn.
+    generation: u64,
 }
 
 struct StoredFragment {
@@ -263,7 +265,11 @@ struct StoredFragment {
     lottie: Option<Arc<vello::Scene>>,
     scene: Arc<vello::Scene>,
     overlay: Option<Arc<vello::Scene>>,
+    last_used: u64,
 }
+
+/// Frames a fragment stays built after it was last drawn.
+const FRAGMENT_KEEP_FRAMES: u64 = 240;
 
 impl FragmentStore {
     /// The fragment and screen overlay of `recipe`, built once per shared
@@ -277,6 +283,7 @@ impl FragmentStore {
             Arc::as_ptr(recipe) as usize,
             lottie.map_or(0, |scene| Arc::as_ptr(scene) as usize),
         );
+        let generation = self.generation;
         let entry = self.built.entry(key).or_insert_with(|| {
             let built = build_fragment(recipe, lottie.map(Arc::as_ref));
             StoredFragment {
@@ -284,8 +291,10 @@ impl FragmentStore {
                 lottie: lottie.cloned(),
                 scene: Arc::new(built.scene),
                 overlay: built.overlay.map(Arc::new),
+                last_used: generation,
             }
         });
+        entry.last_used = generation;
         (Arc::clone(&entry.scene), entry.overlay.clone())
     }
 
@@ -293,6 +302,21 @@ impl FragmentStore {
     pub fn retain_shared(&mut self) {
         self.built.retain(|_, stored| {
             Arc::strong_count(&stored.recipe) > 1
+                && stored
+                    .lottie
+                    .as_ref()
+                    .is_none_or(|scene| Arc::strong_count(scene) > 1)
+        });
+    }
+
+    /// Finish a frame: forget fragments not drawn for a while, and those
+    /// whose recipes nothing else holds.
+    pub fn end_frame(&mut self) {
+        self.generation += 1;
+        let oldest = self.generation.saturating_sub(FRAGMENT_KEEP_FRAMES);
+        self.built.retain(|_, stored| {
+            stored.last_used >= oldest
+                && Arc::strong_count(&stored.recipe) > 1
                 && stored
                     .lottie
                     .as_ref()
