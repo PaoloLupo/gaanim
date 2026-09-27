@@ -108,6 +108,7 @@ pub(crate) fn profiled_outline(
         if points.len() < 2 {
             continue;
         }
+        let points = subdivided(&points, closed);
         let count = points.len();
         let mut lengths = Vec::with_capacity(count);
         let mut total = 0.0;
@@ -189,6 +190,44 @@ pub(crate) fn profiled_outline(
         }
     }
     outline
+}
+
+/// Samples along a flattened sub-path this many times at least, so the
+/// profile shapes long straight segments too.
+const PROFILE_SAMPLES: f64 = 96.0;
+
+/// `points` with long segments split so none exceeds 1/[`PROFILE_SAMPLES`]
+/// of the sub-path's length.
+fn subdivided(
+    points: &[gaanim_core::kurbo::Point],
+    closed: bool,
+) -> Vec<gaanim_core::kurbo::Point> {
+    let segments = points.len() - 1 + usize::from(closed);
+    let segment = |index: usize| (points[index], points[(index + 1) % points.len()]);
+    let total: f64 = (0..segments)
+        .map(|index| {
+            let (a, b) = segment(index);
+            (b - a).hypot()
+        })
+        .sum();
+    let step = total / PROFILE_SAMPLES;
+    let mut out = Vec::with_capacity(points.len() + PROFILE_SAMPLES as usize);
+    for index in 0..segments {
+        let (a, b) = segment(index);
+        out.push(a);
+        let pieces = if step > 0.0 {
+            ((b - a).hypot() / step).ceil() as usize
+        } else {
+            1
+        };
+        for piece in 1..pieces {
+            out.push(a.lerp(b, piece as f64 / pieces as f64));
+        }
+    }
+    if !closed && let Some(last) = points.last() {
+        out.push(*last);
+    }
+    out
 }
 
 /// Draw `path` with `style`'s width shaped by `profile`, filled with `brush`.
