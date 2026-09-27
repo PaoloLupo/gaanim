@@ -43,8 +43,11 @@ vídeo exportado desde el paquete tiene esa misma frecuencia, así que elige la
 del vídeo que quieras obtener después. `--from`, `--to`, `--transparent` y
 `--encoder` no se aplican a un paquete: siempre se graba la escena completa.
 
-Grabar es rápido porque no se rasteriza nada: una presentación de un minuto
-tarda unos segundos. Los paquetes de los ejemplos de Gaanim ocupan entre 20 y
+Grabar no rasteriza nada, así que suele ser rápido: una presentación de un
+minuto tarda unos segundos. Una presentación larga con decenas de miles de
+objetos tarda más, porque cada fotograma recorre la escena completa; una
+tesis de 41 segmentos, 29 000 objetos y 4½ minutos se graba en unos 8
+minutos y ocupa 42 MB. Los paquetes de los ejemplos de Gaanim ocupan entre 20 y
 500 KB; una escena con mil instancias animadas, unos 11 MB.
 
 = Reproducir y presentar
@@ -115,9 +118,14 @@ fotograma:
   que visita exactamente los instantes que visita una exportación, así que su
   estado evoluciona igual. Los instantes que caen entre fotogramas de la
   rejilla (el final, los límites de segmento, las pausas, los finales de los
-  bucles ambientales y los marcadores) se graban aparte, en un segundo mundo
-  que sigue la misma rejilla, para que una presentación en pausa muestre
-  exactamente el instante de la pausa sin alterar los demás fotogramas.
+  bucles ambientales y los marcadores) también se graban, para que una
+  presentación en pausa muestre exactamente el instante de la pausa. Si la
+  escena tiene updaters, trazos acumulados, ecos, squash o animaciones
+  personalizadas, cuyo estado depende de los instantes visitados, esos
+  instantes se graban aparte,
+  en un segundo mundo que sigue la misma rejilla, sin alterar los demás
+  fotogramas; si no, se graban en el mismo mundo y la grabación tarda la
+  mitad.
 - *Cualquier resolución.* Los fotogramas son vectoriales y guardan qué
   márgenes dependen de la resolución de salida, así que exportar el paquete a
   cualquier tamaño da los mismos píxeles que exportar el script a ese tamaño.

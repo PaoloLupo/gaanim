@@ -848,8 +848,9 @@ impl Bundle {
         self.times.len()
     }
 
-    /// Time of every recorded frame, by frame index. The frame grid comes
-    /// first, then the instants recorded between grid frames.
+    /// Time of every recorded frame, by frame index, in recording order: a
+    /// recording in two passes stores the frame grid first, then the instants
+    /// between grid frames.
     pub fn times(&self) -> &[f64] {
         &self.times
     }

@@ -34,6 +34,10 @@ impl gaanim_animation::AnimatableLens for CountLens {
         "Count"
     }
 
+    fn history_free(&self) -> bool {
+        true
+    }
+
     fn hold_channel(&self) -> Option<&'static str> {
         Some("Count")
     }

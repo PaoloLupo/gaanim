@@ -432,6 +432,13 @@ pub trait AnimatableLens: Send + Sync + std::fmt::Debug + 'static {
     fn hold(&self, world: &mut bevy::prelude::World, entity: Entity, initial: f64) {
         self.interpolate(world, entity, initial);
     }
+    /// Whether [`Self::interpolate`] writes a value that depends only on `t`
+    /// and keeps no state between calls, so the instants a timeline visits
+    /// before this one cannot change what it draws. User callbacks may keep
+    /// state, so this defaults to `false`.
+    fn history_free(&self) -> bool {
+        false
+    }
 }
 
 /// Rotation reached `t` of the way through a [`PropertyLens::RotationZ`] turn.

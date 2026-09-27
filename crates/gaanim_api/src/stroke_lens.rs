@@ -32,6 +32,10 @@ impl gaanim_animation::AnimatableLens for DashOffsetLens {
     fn type_name(&self) -> &'static str {
         "DashOffset"
     }
+
+    fn history_free(&self) -> bool {
+        true
+    }
 }
 
 /// `path` with its vertices, the points of its `MoveTo` and `LineTo`
@@ -104,6 +108,10 @@ impl gaanim_animation::AnimatableLens for PathPointsLens {
 
     fn type_name(&self) -> &'static str {
         "PathPoints"
+    }
+
+    fn history_free(&self) -> bool {
+        true
     }
 }
 

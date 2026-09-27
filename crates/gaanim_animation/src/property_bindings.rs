@@ -560,6 +560,11 @@ impl AnimatableLens for PropertySourceLens {
     fn type_name(&self) -> &'static str {
         "PropertySource"
     }
+
+    /// Property sources are pure functions of their declared inputs and time.
+    fn history_free(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]

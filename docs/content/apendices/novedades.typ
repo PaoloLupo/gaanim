@@ -51,6 +51,16 @@ Sin publicar todavía. No hace falta cambiar tus escenas.
   presentación de 41 segmentos con 54 mediciones, `gaanim check` pasa de
   27,7 s a 1,7 s. En los demás casos sigue compilando la escena escrita hasta el
   cursor.
+- Las presentaciones largas se reproducen, exportan y graban más rápido. Una
+  presentación mantiene vivos los objetos de todos sus segmentos, y cada
+  fotograma animado recorría todos ellos varias veces para restaurar unos
+  pocos cientos: ahora el seek restaura en una sola pasada y la propagación de
+  transformaciones, opacidad y cajas solo recalcula lo que cambió. Grabar el
+  paquete de una tesis de 41 segmentos y 29 000 objetos pasa de 31 a 8½
+  minutos, con los mismos fotogramas.
+- Grabar un paquete ya no repite la línea de tiempo en un segundo mundo cuando
+  la escena no tiene estado que dependa de los instantes visitados (updaters,
+  trazos acumulados, ecos, squash o animaciones personalizadas).
 - En un vídeo, pulsar → (o el botón de escena siguiente) mientras sonaba la
   transición de una escena volvía al inicio de esa misma escena en lugar de
   pasar a la siguiente; ← tampoco reconocía la escena en curso durante la

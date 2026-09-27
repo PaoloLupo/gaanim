@@ -32,6 +32,10 @@ pub struct BundleConfig {
     pub width: u32,
     pub height: u32,
     pub telemetry: Option<ExportTelemetry>,
+    /// Record the instants between grid frames in a second world even when
+    /// the scene keeps no state that depends on the instants it visited.
+    /// Both recordings are identical; this exists to check that.
+    pub force_second_world: bool,
 }
 
 impl BundleConfig {
@@ -49,6 +53,7 @@ impl BundleConfig {
             width: 1920,
             height: 1080,
             telemetry: None,
+            force_second_world: false,
         }
     }
 }
@@ -107,9 +112,9 @@ impl RecordingPlan {
 
     /// Grid instants the second world steps through before its last extra.
     pub fn second_pass_steps(&self) -> usize {
-        self.extras.last().map_or(0, |last| {
-            self.grid.partition_point(|time| time < last)
-        })
+        self.extras
+            .last()
+            .map_or(0, |last| self.grid.partition_point(|time| time < last))
     }
 
     /// Every recorded instant, in time order.
@@ -323,6 +328,42 @@ where
     Ok(app)
 }
 
+/// Whether no state of the scene depends on the instants its timeline visited
+/// before the current one, so visiting an extra instant between two grid
+/// frames leaves the following grid frames unchanged.
+///
+/// Updaters advance by the seek deltas, traced paths and sampled series
+/// accumulate, echoes and squash read earlier frames, and custom animations
+/// and signal bindings run user code that may keep state; any of them keeps
+/// the second world. Reactive callables (value trackers, property bindings,
+/// redraw functions) must already be pure functions of their declared inputs
+/// and time, since the editor seeks anywhere, and built-in lenses that report
+/// [`history_free`](gaanim_animation::AnimatableLens::history_free) are pure.
+fn history_free(world: &mut World) -> bool {
+    use gaanim_animation as anim;
+    use gaanim_timeline::clip::{ClipPayload, PropertyLensSpec};
+    let mut stateful = world.query_filtered::<(), Or<(
+        With<anim::Updater>,
+        With<anim::SampledSeriesDrivers>,
+        With<anim::TracedPath>,
+        With<anim::TracedPath3D>,
+        With<anim::SurroundingRect>,
+        With<anim::SquashStretch>,
+        With<anim::EchoGhost>,
+        With<anim::SignalBinding>,
+    )>>();
+    if stateful.iter(world).next().is_some() {
+        return false;
+    }
+    !world.resource::<Timeline>().clips.values().any(|clip| {
+        matches!(
+            &clip.payload,
+            ClipPayload::Animation(animation)
+                if matches!(&animation.lens, PropertyLensSpec::Dynamic(lens) if !lens.0.history_free())
+        )
+    })
+}
+
 /// Seek `app` to `time`, update it, and capture what it draws. A motion
 /// blurred frame also steps and captures the sub-frames an export averages,
 /// in the order an export seeks them.
@@ -442,9 +483,17 @@ where
     let audio = audio_data(&mut writer, app.world())?;
 
     let total = plan.grid.len() + plan.extras.len();
+    // Without state that depends on the instants the timeline visits, the
+    // instants between grid frames can be recorded in the same world.
+    let single_world =
+        plan.extras.is_empty() || (!config.force_second_world && history_free(app.world_mut()));
     // Progress counts every instant the recording visits, including the grid
-    // instants the second world steps through without recording them.
-    let work = (total + plan.second_pass_steps()) as u64;
+    // instants a second world steps through without recording them.
+    let work = if single_world {
+        total
+    } else {
+        total + plan.second_pass_steps()
+    } as u64;
     if let Some(telemetry) = &telemetry {
         telemetry.set_total_frames(work);
     }
@@ -457,7 +506,12 @@ where
         Ok(())
     };
 
-    for &time in &plan.grid {
+    let first_world_times = if single_world {
+        plan.times()
+    } else {
+        plan.grid.clone()
+    };
+    for time in first_world_times {
         let frame = record_frame(&mut app, time, config.fps, &post_shaders)?;
         push(&mut writer, frame)?;
         progress.advance();
@@ -472,7 +526,7 @@ where
         ]
     });
 
-    if !plan.extras.is_empty() {
+    if !single_world {
         drop(app);
         writer.start_pass().map_err(bundle_error)?;
         let mut app = recording_app(setup_world_fn)?;
