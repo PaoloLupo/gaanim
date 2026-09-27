@@ -295,7 +295,8 @@ impl CameraViewHandle {
         self.pop(true)
     }
 
-    /// Shrink the screen back into the region the camera sees.
+    /// Shrink the screen back into the region the camera sees. It hides when
+    /// it lands there, until the next [`Self::pop_out`].
     pub fn pop_in(&self) -> Anim {
         self.pop(false)
     }

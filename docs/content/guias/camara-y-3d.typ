@@ -209,7 +209,7 @@ como el de la cámara principal.
 
 `animate.pop_out()` hace brotar la pantalla de la región que ve su cámara:
 empieza encogida sobre esa región, mostrando la escena a tamaño real, y crece
-hasta su sitio. `animate.pop_in()` la devuelve.
+hasta su sitio. `animate.pop_in()` la devuelve y la oculta al llegar.
 
 ```python
 # continue

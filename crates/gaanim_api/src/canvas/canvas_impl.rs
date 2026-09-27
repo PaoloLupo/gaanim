@@ -6909,10 +6909,10 @@ impl SceneModel {
         extension_dash: Option<(f64, f64)>,
         color: Color,
     ) -> (DrawableHandle, DrawableHandle, DrawableHandle) {
+        // Like any annotation, a dimension is visible from its declaration
+        // unless an entry animation reveals it.
         let line = self.spawn(SpawnKind::TrackingLine).fill(color).no_stroke();
         let extensions = self.spawn(SpawnKind::TrackingLine).fill(color).no_stroke();
-        line.defer_visibility_until_play();
-        extensions.defer_visibility_until_play();
         self.state
             .lock()
             .expect("canvas state poisoned")
@@ -7665,7 +7665,9 @@ mod tests {
 
         assert_eq!(opacity_for(&mut world, anchor.id), 1.0);
         assert_eq!(opacity_for(&mut world, spring.id), 0.0);
-        assert_eq!(opacity_for(&mut world, dimension.id), 0.0);
+        // A dimension is an annotation: its `create` draws it in, but it is
+        // not hidden by opacity like the spring.
+        assert_eq!(opacity_for(&mut world, dimension.id), 1.0);
         assert_eq!(opacity_for(&mut world, label.id), 0.0);
 
         let snapshot = WorldSnapshot::capture(&mut world);

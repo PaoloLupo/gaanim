@@ -8733,6 +8733,30 @@ impl SceneModel {
         }
     }
 
+    /// Shapes whose geometry is authored at absolute scene positions, such
+    /// as lines, polygons and arcs, rather than around their own origin.
+    fn declared_in_scene_coordinates(kind: &SpawnKind) -> bool {
+        matches!(
+            kind,
+            SpawnKind::Line(..)
+                | SpawnKind::Arrow(..)
+                | SpawnKind::SizedArrow { .. }
+                | SpawnKind::DashedLine { .. }
+                | SpawnKind::DoubleArrow { .. }
+                | SpawnKind::Polygon(_)
+                | SpawnKind::Points { .. }
+                | SpawnKind::Sector { .. }
+                | SpawnKind::Brace { .. }
+                | SpawnKind::Arc { .. }
+                | SpawnKind::CurvedArrow { .. }
+                | SpawnKind::CurvedArrowArc { .. }
+                | SpawnKind::Dimension { .. }
+                | SpawnKind::Polyline(_)
+                | SpawnKind::Bezier { .. }
+                | SpawnKind::Curve(_)
+        )
+    }
+
     fn apply_layout(
         builder: &mut SceneBuilder,
         id: ObjectId,
@@ -8741,7 +8765,12 @@ impl SceneModel {
         frame_bounds: Bounds3D,
     ) {
         let uses_default_text_anchor = matches!(spec.kind, SpawnKind::Text(_));
-        if spec.layout_ops.is_empty() && !uses_default_text_anchor {
+        let pivots_on_box_center = Self::declared_in_scene_coordinates(&spec.kind)
+            && !spec
+                .layout_ops
+                .iter()
+                .any(|op| matches!(op, LayoutOp::SetPivot(_)));
+        if spec.layout_ops.is_empty() && !uses_default_text_anchor && !pivots_on_box_center {
             return;
         }
 
@@ -8752,6 +8781,13 @@ impl SceneModel {
         let original_transform = state.transform;
         let entity = state.entity;
         let mut transform = original_transform;
+        // Geometry declared in scene coordinates keeps its local origin at the
+        // scene origin. Its default pivot is its box center instead, so
+        // rotations, scales and skews turn it in place. The anchor does not
+        // move an untransformed shape.
+        if pivots_on_box_center && transform.anchor == DVec3::ZERO {
+            transform.anchor = bounds.center();
+        }
         let mut pivot_in_scene = None;
         let mut pending_text_anchor = uses_default_text_anchor.then_some((
             DVec3::ZERO,
@@ -12582,6 +12618,179 @@ mod tests {
                     assert!(transform.scale.x > 1.0, "visible while scaling at {time}");
                 }
             }
+        }
+    }
+
+    fn opacity_of(world: &mut World, handle: &DrawableHandle) -> f32 {
+        let id = ObjectId::from_raw(handle.id.as_raw() - 1);
+        world
+            .query::<(&MobjectId, &Opacity)>()
+            .iter(world)
+            .find(|(object, _)| object.0 == id)
+            .unwrap()
+            .1
+            .0
+    }
+
+    #[test]
+    fn absolute_geometry_turns_scales_and_skews_about_its_box_center() {
+        use std::f64::consts::PI;
+
+        let mut canvas = SceneModel::new(640, 360);
+        // Box center (4, 2); the local origin stays at the scene origin.
+        let triangle = canvas.polygon(vec![(3.0, 1.0), (5.0, 1.0), (4.0, 3.0)]);
+        let arc = canvas.curved_arrow_arc(0.0, -2.5, 0.38, 1.9, 5.2);
+        let line = canvas.line(1.0, 1.0, 3.0, 1.0).rotate_to(PI / 2.0);
+        canvas.play(vec![
+            triangle.animate().rotate_by(2.0 * PI).duration(1.0),
+            arc.animate().rotate_by(PI).duration(1.0),
+        ]);
+        canvas.play(vec![
+            triangle.animate().scale_to(2.0).duration(1.0),
+            arc.animate().skew_to(0.4, 0.0).duration(1.0),
+        ]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+
+        let world_point = |world: &mut World, handle: &DrawableHandle, local: DVec3| {
+            transform_of(world, handle)
+                .to_mat4()
+                .transform_point3(local)
+        };
+        timeline.seek(&mut world, 0.0);
+        let arc_center =
+            transform_of(&mut world, &arc).translation + transform_of(&mut world, &arc).anchor;
+        for time in [0.0, 0.3, 0.5, 1.0, 1.5, 2.0] {
+            timeline.seek(&mut world, time);
+            let center = world_point(&mut world, &triangle, DVec3::new(4.0, 2.0, 0.0));
+            assert!(
+                center.distance(DVec3::new(4.0, 2.0, 0.0)) < 1e-6,
+                "{time}: {center:?}"
+            );
+            let pivot =
+                transform_of(&mut world, &arc).translation + transform_of(&mut world, &arc).anchor;
+            assert!(pivot.distance(arc_center) < 1e-6, "{time}: {pivot:?}");
+        }
+        assert!(arc_center.distance(DVec3::ZERO) > 1.0, "{arc_center:?}");
+        // The declared rotation also turns the line about its midpoint.
+        let start = world_point(&mut world, &line, DVec3::new(1.0, 1.0, 0.0));
+        let end = world_point(&mut world, &line, DVec3::new(3.0, 1.0, 0.0));
+        assert!(
+            start.distance(DVec3::new(2.0, 0.0, 0.0)) < 1e-9,
+            "{start:?}"
+        );
+        assert!(end.distance(DVec3::new(2.0, 2.0, 0.0)) < 1e-9, "{end:?}");
+    }
+
+    #[test]
+    fn pivot_turns_of_a_rotated_object_start_from_its_pose() {
+        let mut canvas = SceneModel::new(640, 360);
+        let bar = canvas
+            .rect(2.0, 0.4)
+            .move_to(1.0, 0.0)
+            .with_pivot(0.0, 0.0)
+            .rotate_to(0.5);
+        canvas.wait(1.0);
+        canvas.play(vec![bar.animate().rotate_by(1.0).duration(1.0)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let tip = |world: &mut World| {
+            transform_of(world, &bar)
+                .to_mat4()
+                .transform_point3(DVec3::new(2.0, 0.0, 0.0))
+        };
+        let radius = |point: DVec3| point.truncate().length();
+        timeline.seek(&mut world, 0.5);
+        let declared = tip(&mut world);
+        timeline.seek(&mut world, 1.0);
+        let started = tip(&mut world);
+        assert!(
+            started.distance(declared) < 1e-6,
+            "{started:?} vs {declared:?}"
+        );
+        // The swing follows a polyline with one-degree steps.
+        for time in [1.3, 1.7, 2.0] {
+            timeline.seek(&mut world, time);
+            let point = tip(&mut world);
+            assert!(
+                (radius(point) - radius(declared)).abs() < 1e-4,
+                "{time}: {point:?}"
+            );
+        }
+        let angle = |point: DVec3| point.y.atan2(point.x);
+        assert!((angle(tip(&mut world)) - angle(declared) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn pop_in_hides_the_screen_until_the_next_pop_out() {
+        let mut canvas = SceneModel::new(640, 360);
+        let frame = canvas.rect(2.0, 1.0).move_to(3.0, 2.0);
+        let view = canvas
+            .rect(4.0, 2.0)
+            .move_to(-4.0, -1.0)
+            .camera_view(&frame)
+            .unwrap();
+        canvas.play(vec![view.pop_out().duration(1.0)]);
+        canvas.play(vec![view.pop_in().duration(1.0)]);
+        canvas.wait(1.0);
+        canvas.play(vec![view.pop_out().duration(1.0)]);
+        canvas.play(vec![view.screen().animate().fade_out().duration(1.0)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        for (time, expected) in [
+            (0.5, 1.0),
+            (1.5, 1.0),
+            (2.0, 0.0),
+            (2.5, 0.0),
+            (3.0, 1.0),
+            (3.5, 1.0),
+            (4.0, 1.0),
+            (5.0, 0.0),
+        ] {
+            timeline.seek(&mut world, time);
+            let opacity = opacity_of(&mut world, view.screen());
+            assert!((opacity - expected).abs() < 1e-6, "{time}: {opacity}");
+        }
+        timeline.seek(&mut world, 1.5);
+        assert!((opacity_of(&mut world, view.screen()) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn dimensions_are_visible_from_their_declaration_without_an_entry() {
+        use crate::canvas::{CanvasEndpoint, DimensionOptions};
+
+        let mut canvas = SceneModel::new(640, 360);
+        let endpoint = |x: f64, y: f64| CanvasEndpoint::Static(DVec3::new(x, y, 0.0));
+        // Declared before the labelled one: `opacity_of` maps handle ids to
+        // runtime ids, which the label's glyphs shift.
+        let entering = canvas
+            .dimension_between_with_options(
+                endpoint(1.0, 0.0),
+                endpoint(4.0, 0.0),
+                0.3,
+                DimensionOptions::default(),
+            )
+            .unwrap();
+        let still = canvas
+            .dimension_between_with_options(
+                endpoint(-5.5, 0.1),
+                endpoint(-2.5, 0.1),
+                0.3,
+                DimensionOptions {
+                    label: Some("control".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        canvas.wait(1.0);
+        canvas.play(vec![entering.drawable.animate().fade_in().duration(1.0)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        // Opacity is inherited, so the entry fades the group itself.
+        timeline.seek(&mut world, 0.5);
+        for part in [&still.line, &still.extensions] {
+            assert!(opacity_of(&mut world, part) > 0.99);
+        }
+        assert!(opacity_of(&mut world, &entering.drawable) < 1e-6);
+        timeline.seek(&mut world, 2.0);
+        for part in [&entering.drawable, &entering.extensions] {
+            assert!(opacity_of(&mut world, part) > 0.99);
         }
     }
 

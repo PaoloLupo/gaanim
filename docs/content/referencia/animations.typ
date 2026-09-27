@@ -231,7 +231,7 @@ scene.play(frame.animate.skew_to(0.15, 0).duration(0.4))
   kind: "method",
   params: ((name: "radians", type: "float", default: none, desc: [Ángulo relativo en radianes; positivo es antihorario.]),),
   returns: (type: "Anim", desc: [Giro relativo.]),
-  desc: [Gira alrededor del pivote del objeto. Para una bisagra o una órbita, fija el pivote antes con `with_pivot(x, y)`. Un giro de cualquier tamaño, incluidas varias vueltas, sigue un solo easing durante toda la duración y el pivote queda fijo.],
+  desc: [Gira alrededor del pivote del objeto: el que fija `with_pivot` o, sin él, el centro de su caja en las figuras declaradas con coordenadas de escena, como `line`, `polygon` o `curved_arrow_arc`. Para una bisagra o una órbita, fija el pivote antes con `with_pivot(x, y)`. Un giro de cualquier tamaño, incluidas varias vueltas, sigue un solo easing durante toda la duración y el pivote queda fijo.],
 )[
 ```python
 # show-code: true

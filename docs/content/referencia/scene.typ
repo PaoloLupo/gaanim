@@ -1322,7 +1322,7 @@ label = scene.viz.readout(view.zoom, format=".1f", prefix="x")
   name: "CameraViewAnimation.pop_in",
   kind: "method",
   returns: (type: "Anim", desc: [La animación.]),
-  desc: [Encoge la pantalla de vuelta a la región que ve su cámara.],
+  desc: [Encoge la pantalla de vuelta a la región que ve su cámara y la oculta al llegar, así que una capa de vista deja de verse sobre la escena. El siguiente `pop_out` la vuelve a mostrar. El marco y los conectores conservan su visibilidad; retíralos con `fade_out` si hace falta.],
   none,
 )
 

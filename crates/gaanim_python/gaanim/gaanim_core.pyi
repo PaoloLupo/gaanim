@@ -2288,7 +2288,11 @@ class Drawable:
         """
         ...
     def with_pivot(self, x: float, y: float) -> Self:
-        """Apply with pivot to this drawable and return the result.
+        """Set the scene-space pivot of rotations, scales and skews.
+
+        Without a pivot, shapes turn about their own origin; shapes declared
+        in scene coordinates (``line``, ``polygon``, arcs, arrows, curves)
+        turn about the center of their box instead.
 
         Example:
             result = drawable.with_pivot(1.0, 1.0)
@@ -3401,7 +3405,12 @@ class CameraViewAnimation:
         """
         ...
     def pop_in(self) -> Anim:
-        """Shrink the screen back into the region its camera sees."""
+        """Shrink the screen back into the region its camera sees.
+
+        The screen hides when it lands, so a view layer stops showing over
+        the scene; the next ``pop_out`` shows it again. The frame and any
+        connectors keep their own visibility.
+        """
         ...
 
 class CameraAnimation:
@@ -6013,6 +6022,10 @@ class Mechanics:
         endpoints swap or move past each other. When the line runs along the
         requested direction (``"above"`` on a vertical dimension), the
         offset is used as a positive distance.
+
+        Like other annotations, the dimension is visible from its
+        declaration; an entry animation such as ``fade_in`` or ``create``
+        keeps it hidden until it starts.
 
         ``label_style`` overlays a ``TextStyle`` on the label, the value and
         the unit; ``font`` and ``weight`` override it, and ``font_size``

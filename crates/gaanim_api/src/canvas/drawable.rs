@@ -1457,7 +1457,11 @@ impl DrawableHandle {
         self.push_layout(LayoutOp::SetRotation3D(DVec3::new(x, y, z)))
     }
 
-    /// Set the scene-space pivot used by rotations and uniform scaling.
+    /// Set the scene-space pivot used by rotations, scales and skews.
+    ///
+    /// Without one, shapes declared in scene coordinates (lines, polygons,
+    /// arcs, arrows, curves) turn about their box center, and other shapes
+    /// about their origin.
     ///
     /// This is the natural way to rotate a mechanism around a known hinge or
     /// disk center. The engine converts the point to the group's local anchor

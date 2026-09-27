@@ -198,7 +198,7 @@ dot.shift_by(1, 0.5)
 #api-entry(
   name: "Drawable.scale_to",
   kind: "method",
-  desc: [Fija la escala uniforme absoluta alrededor del pivote. Acepta fuentes reactivas.],
+  desc: [Fija la escala uniforme absoluta alrededor del pivote (ver `with_pivot`). Acepta fuentes reactivas.],
 )[
 ```python
 >>>from gaanim import *
@@ -217,7 +217,7 @@ logo = scene.media.svg("assets/logo.svg").scale_to(2.5)
 #api-entry(
   name: "Drawable.rotate_to",
   kind: "method",
-  desc: [Fija la rotación absoluta en radianes alrededor del pivote; los valores positivos giran en sentido antihorario. Acepta fuentes reactivas.],
+  desc: [Fija la rotación absoluta en radianes alrededor del pivote (ver `with_pivot`); los valores positivos giran en sentido antihorario. Acepta fuentes reactivas.],
 )[
 ```python
 >>>from gaanim import *
@@ -260,7 +260,7 @@ scene.render()
 #api-entry(
   name: "Drawable.with_pivot",
   kind: "method",
-  desc: [Fija el pivote de rotación, escala y sesgo en coordenadas de escena. Úsalo para bisagras y brazos que giran alrededor de un extremo. `pivot(x, y)` es un alias.],
+  desc: [Fija el pivote de rotación, escala y sesgo en coordenadas de escena. Úsalo para bisagras y brazos que giran alrededor de un extremo. Sin él, el pivote es el centro de la caja en las figuras declaradas con coordenadas de escena (`line`, `polygon`, arcos, flechas y curvas) y el origen propio en las demás, que en `circle`, `rect` o `text` también es su centro. `pivot(x, y)` es un alias.],
 )[
 ```python
 # show-code: true

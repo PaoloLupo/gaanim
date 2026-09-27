@@ -13,7 +13,25 @@ instalar una versión nueva, sigue
 
 = Sin publicar
 
-No requiere cambios en tus escenas.
+Cambia el pivote por defecto de las figuras declaradas con coordenadas de
+escena y el final de `pop_in`: lee «Al actualizar».
+
+== Al actualizar
+
+- Las figuras declaradas con coordenadas de escena (`line`, `polygon`,
+  `polyline`, flechas, arcos, `curved_arrow_arc`, curvas, llaves y cotas
+  estáticas) giran, escalan y se sesgan alrededor del centro de su caja cuando
+  no tienen `with_pivot`. Antes su pivote era el origen de la escena, así que
+  `arco.animate.rotate_by(...)` lo hacía orbitar alrededor de `(0, 0)` en vez
+  de girar sobre sí mismo. Si una escena contaba con ese giro alrededor del
+  origen, añade `.with_pivot(0, 0)`; si ya usabas `with_pivot` como remedio,
+  puedes quitarlo cuando el pivote era el centro de la figura. Las figuras
+  centradas en su origen, como `circle`, `rect` o `text`, no cambian.
+- `CameraView.animate.pop_in()` oculta la pantalla al llegar a la región que
+  ve su cámara, y el siguiente `pop_out()` la vuelve a mostrar. Antes seguía
+  visible sobre la región y, con una capa de vista, mostraba su contenido
+  encima de la escena. Si fundías la pantalla tras `pop_in` para ocultarla,
+  ya no hace falta; fundir el marco y los conectores sigue funcionando igual.
 
 == Cambios
 
@@ -60,6 +78,13 @@ secundarias en #link("/guias/camara-y-3d/")[Cámara y 3D].
   cuando el objeto tiene un pivote propio con `with_pivot`.
 - Tras `grow_from_edge` o `grow_from_point`, un `scale_by` o `scale_to`
   posterior parte del tamaño declarado en lugar de escala cero.
+- `scene.mechanics.dimension_between` se ve desde su declaración, como
+  cualquier otro objeto sin animación de entrada. Antes la línea y las
+  extensiones solo aparecían con una entrada en `scene.play` y, si tenía
+  etiqueta, esta se veía sola. Con `fade_in` o `create` sigue oculta hasta
+  que la entrada empieza.
+- Un `rotate_by` con pivote (`with_pivot` o `.pivot(x, y)`) sobre un objeto ya
+  girado empieza desde su pose actual; antes saltaba al empezar el giro.
 
 = 0.4.2
 
@@ -150,7 +175,12 @@ un proyecto existente.
   escalan igual. Es un cambio incompatible: si tus escenas compensaban la
   escala anterior con `scale_to(f)` o `scale_by(f)`, multiplica ese factor por
   100 (`scale_to(0.025)` pasa a `scale_to(2.5)`) o quítalo si el tamaño
-  natural te sirve. Los anchos fijados con `.stroke(color, ancho)` no cambian.
+  natural te sirve. El ancho fijado con `.stroke(color, ancho)` se mide en
+  las unidades del SVG y escala con `scale_to`, así que si compensabas la
+  escala divídelo también entre 100: con `scale_to(0.0058)` y
+  `.stroke(c, 1.6)`, que dibujaba un trazo de 0.0093 unidades, pasa a
+  `scale_to(0.58)` y `.stroke(c, 0.016)`. Sin `scale_to`, el ancho se lee en
+  unidades de escena y no cambia.
 - El texto de un SVG con la familia genérica `sans-serif` usa la DejaVu Sans
   que trae Gaanim en cualquier sistema. Antes salía en Arial si estaba
   instalada y desaparecía en los equipos Linux que no la tienen.

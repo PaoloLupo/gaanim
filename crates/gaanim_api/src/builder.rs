@@ -809,9 +809,9 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub(crate) connectors: HashSet<ObjectId>,
     /// Extra glyph tracking of Text roots set by `tracking(...)`, in scene units.
     pub(crate) text_tracking: HashMap<ObjectId, f64>,
-    /// Resting transforms of camera view screens shrunk by `pop_in`, which
-    /// the next `pop_out` returns to.
-    pub(crate) camera_view_rests: HashMap<ObjectId, SpatialTransform>,
+    /// Resting transforms and opacities of camera view screens hidden by
+    /// `pop_in`, which the next `pop_out` returns to.
+    pub(crate) camera_view_rests: HashMap<ObjectId, (SpatialTransform, f32)>,
     /// Typing state of Texts animated by typewriter/scramble motions.
     pub(crate) text_motion: crate::text_motion::TextMotionState,
     /// Objects whose scene membership is intentionally global at the current authoring cursor.
@@ -857,7 +857,7 @@ pub(crate) struct SceneBuilderState {
     arrow_shapes: HashMap<ObjectId, gaanim_math::ArrowShape>,
     connectors: HashSet<ObjectId>,
     text_tracking: HashMap<ObjectId, f64>,
-    camera_view_rests: HashMap<ObjectId, SpatialTransform>,
+    camera_view_rests: HashMap<ObjectId, (SpatialTransform, f32)>,
     text_motion: crate::text_motion::TextMotionState,
     persistent_objects: HashSet<ObjectId>,
     membership_managed_objects: HashSet<ObjectId>,
@@ -5602,7 +5602,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         };
         let (entity, bounds, current) = (state.entity, state.bounds, state.transform);
         let popped_in = self.camera_view_rests.get(&screen).copied();
-        let rest = popped_in.unwrap_or(current);
+        let rest = popped_in.map_or(current, |(rest, _)| rest);
         let parent = state.parent.map_or(Affine::IDENTITY, |parent| {
             self.get_world_transform(parent).to_affine_2d()
         });
@@ -5645,8 +5645,15 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         start.translation.x = target.x - center.x;
         start.translation.y = target.y - center.y;
 
+        // A popped-in screen hides once it lands on the region, so a view
+        // layer no longer shows over the scene; the next `pop_out` shows it
+        // again as it leaves.
+        let mut visibility = None;
         let (from, to) = if out {
             self.camera_view_rests.remove(&screen);
+            if let Some((_, opacity)) = popped_in {
+                visibility = Some((self.current_time, 0.0, opacity));
+            }
             if popped_in.is_none() {
                 // The screen's entry: it waits over the region until then.
                 let declared = start;
@@ -5663,12 +5670,33 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 (current, rest)
             }
         } else {
-            self.camera_view_rests.entry(screen).or_insert(current);
+            let opacity = self.states.get(screen).map_or(1.0, |state| state.opacity);
+            if !self.camera_view_rests.contains_key(&screen) {
+                self.camera_view_rests.insert(screen, (current, opacity));
+                visibility = Some((self.current_time + anim.duration, opacity, 0.0));
+            }
             (current, start)
         };
         if let Some(state) = self.states.get_mut(screen) {
             state.transform.scale = to.scale;
             state.transform.translation = to.translation;
+            if let Some((_, _, opacity)) = visibility {
+                state.opacity = opacity;
+            }
+        }
+        if let Some((time, from, to)) = visibility {
+            self.timeline.add_clip(
+                parent_track,
+                time,
+                0.0,
+                ClipPayload::Animation(AnimationSpec {
+                    target: screen,
+                    lens: PropertyLensSpec::Opacity { from, to },
+                    rate_func: gaanim_math::RateFunc::Linear,
+                    delay: 0.0,
+                    label: self.current_label.clone(),
+                }),
+            );
         }
         for lens in [
             PropertyLensSpec::Scale {
@@ -6004,7 +6032,16 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         let from_rot = state.transform.rotation;
         let to_rot = from_rot * gaanim_core::glam::DQuat::from_rotation_z(angle_radians);
-        let from_trans = state.transform.translation;
+        // A pivot turn clears the anchor, so it starts from the translation
+        // that places the same pose without one.
+        let from_trans = if pivot.is_some() {
+            state
+                .transform
+                .to_mat4()
+                .transform_point3(gaanim_core::glam::DVec3::ZERO)
+        } else {
+            state.transform.translation
+        };
         let to_trans = if let Some(p) = pivot {
             let rot = gaanim_core::glam::DQuat::from_rotation_z(angle_radians);
             p + rot * (from_trans - p)
