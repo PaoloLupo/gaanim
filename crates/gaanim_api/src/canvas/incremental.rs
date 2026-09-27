@@ -56,6 +56,7 @@ impl SceneModel {
             background_paint,
             background_overridden,
             post_process,
+            motion_blur,
             theme,
             theme_style,
             font_family_override,
@@ -78,6 +79,7 @@ impl SceneModel {
         global.add(background_paint);
         global.add(background_overridden);
         global.add(post_process);
+        global.add(motion_blur);
         global.add(theme);
         match theme_style {
             Some(theme) => add_theme(&mut global, theme),

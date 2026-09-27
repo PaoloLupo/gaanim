@@ -555,6 +555,36 @@ scene.render()
 ]
 
 #api-entry(
+  name: "Drawable.echo",
+  kind: "method",
+  params: (
+    (name: "count", type: "int", default: "5", desc: [Copias, de 1 a 32; `0` quita el eco.]),
+    (name: "delay", type: "float", default: "0.04", desc: [Segundos entre copias; positivo.]),
+    (name: "decay", type: "float", default: "0.6", desc: [Opacidad de cada copia respecto a la anterior, en (0, 1].]),
+  ),
+  desc: [Copias que siguen al objeto en el tiempo, como el efecto Echo de After Effects: la copia `k` lo muestra como estaba hace `k * delay` segundos, con `decay ** k` de su opacidad y debajo de él. Cada copia repite las animaciones del propio objeto (`animate`, `create`, fundidos, color y forma) con ese retraso, así que es exacta en cualquier búsqueda y en todas las exportaciones, SVG incluido. Se ocultan mientras el objeto está oculto y no cruzan un corte de segmento. No retrasan el movimiento de los _updaters_, de las posiciones reactivas ni de un grupo padre que se mueve, ni copian Lottie o vídeo. En un `Text`, cada glifo repite sus propias animaciones. Se declara una vez y vale para toda la línea de tiempo.],
+)[
+```python
+# show-code: true
+from gaanim import CORAL, GOLD, Scene
+scene = Scene(frame=(16, 9), background="#0e1422")
+ball = scene.geometry.circle(0.45).fill(CORAL).move_to(-6, 0).echo(6, delay=0.05, decay=0.7)
+scene.play([ball.animate.move_to(6, 0).duration(1.2)])
+scene.play([ball.animate.move_to(0, 0).fill(GOLD).duration(0.6)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Drawable.motion_blur",
+  kind: "method",
+  params: ((name: "enabled", type: "bool", default: "True", desc: [`False` mantiene nítido el objeto y sus miembros.]),),
+  desc: [Si el #link("/referencia/scene/#api-scene-motion_blur")[desenfoque de movimiento] de la escena lo difumina. Con `False`, cada subcuadro lo dibuja como está en el tiempo del cuadro, por ejemplo para un título o un HUD que no deben emborronarse mientras todo lo demás se mueve. Las copias de `echo` heredan el ajuste.],
+  none,
+)
+
+#api-entry(
   name: "Drawable.trim",
   kind: "method",
   params: ((name: "start / end", type: "float | None", default: "None", desc: [Ventana visible del camino como fracción de su longitud; al principio valen 0 y 1.]), (name: "offset", type: "float | None", default: "None", desc: [Desplaza la ventana; da la vuelta al final del camino.]), (name: "mode", type: "str | None", default: "None", desc: [`"simultaneous"` (predeterminado) recorta cada subcamino a la vez; `"sequential"` recorta la longitud total y los subcaminos aparecen uno tras otro.])),

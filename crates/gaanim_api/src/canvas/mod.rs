@@ -4,8 +4,9 @@ pub use crate::anim::BoundsTarget;
 pub use gaanim_animation::AxisMask;
 pub use gaanim_animation::{RollingMode, RollingNumberOptions};
 pub use gaanim_renderer::background::{BackgroundPaint, ShaderBackground, ShaderBackgroundError};
+pub use gaanim_renderer::background_presets;
 pub use gaanim_renderer::effects::{
-    CameraViewBackground, CameraViewFit, DropShadow, GaussianBlur, Glow, StrokeAlign,
+    CameraViewBackground, CameraViewFit, DropShadow, GaussianBlur, Glow, MotionBlur, StrokeAlign,
 };
 pub use gaanim_renderer::post_presets::{CubeLut, PostPreset};
 pub use gaanim_renderer::post_process::{
@@ -24,10 +25,10 @@ pub use segment::{
 };
 pub use types::{
     Anim, Axes3DConfig, AxesConfig, BooleanOperation, BooleanRule, CurveControl, CurveElement,
-    FillLevelDirection, ImageCrop, ImageFit, ImageOptions, ImageOptionsError, LabelMode,
+    EchoSpec, FillLevelDirection, ImageCrop, ImageFit, ImageOptions, ImageOptionsError, LabelMode,
     LayoutMemberSpec, LayoutOp, LayoutSpec, LayoutTreeSnapshot, LayoutWithin, LinearMap2D,
-    LinearMapError, LottieOptions, Margin, ObjectSpec, OptDuration, SceneFrame, SpawnKind,
-    VideoOptions,
+    LinearMapError, LottieOptions, MAX_ECHO_COUNT, Margin, ObjectSpec, OptDuration, SceneFrame,
+    SpawnKind, VideoOptions,
 };
 /// Raster image handle; remains compatible with every DrawableHandle consumer.
 pub type ImageHandle = DrawableHandle;

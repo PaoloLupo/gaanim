@@ -348,7 +348,49 @@ class Background:
         Legacy two-argument shaders remain accepted as static backgrounds.
         Invalid WGSL raises ``ValueError`` and an unreadable asset raises
         ``RuntimeError``. ``fallback`` is used outside the scene bounds, by
-        native 3D clears, and if rasterization is unavailable.
+        native 3D clears, and if rasterization is unavailable. The shader may
+        call ``gaanim_frame_size(resolution)`` for the scene frame size in
+        world units, e.g. to draw a grid in scene units.
+        """
+        ...
+    @staticmethod
+    def mesh_gradient(colors: Sequence[ColorLike], *, speed: float = 0.1, seed: int = 0) -> Background:
+        """Soft blobs of 2-8 ``colors`` drifting on seeded orbits, blended like a mesh gradient.
+
+        ``speed`` scales the drift (0 freezes it); ``seed`` picks another
+        deterministic layout. Colors blend in linear light.
+        """
+        ...
+    @staticmethod
+    def noise_gradient(colors: Sequence[ColorLike], *, scale: float = 1.5, speed: float = 0.05, seed: int = 0) -> Background:
+        """Domain-warped noise mapped across a ramp of 2-8 ``colors``.
+
+        ``scale`` is the number of noise features per frame height; ``speed``
+        animates the warp and ``seed`` picks another deterministic pattern.
+        """
+        ...
+    @staticmethod
+    def aurora(colors: Sequence[ColorLike], *, sky: Optional[ColorLike] = None, speed: float = 0.2, seed: int = 0) -> Background:
+        """Northern-lights curtains, one per color (1-8), over a dark ``sky``.
+
+        ``sky`` defaults to a deep night blue. ``speed`` animates the folds and
+        ``seed`` picks other curtain positions.
+        """
+        ...
+    @staticmethod
+    def dot_grid(
+        spacing: float = 0.4,
+        *,
+        radius: float = 0.03,
+        color: Optional[ColorLike] = None,
+        background: Optional[ColorLike] = None,
+        drift: tuple[float, float] = (0.0, 0.0),
+    ) -> Background:
+        """Round dots every ``spacing`` scene units, one on the origin.
+
+        ``radius`` is in scene units and at most half the spacing. ``color``
+        defaults to translucent white (its alpha is honored) over a dark
+        ``background``; ``drift`` scrolls the grid in units per second.
         """
         ...
     @property
@@ -451,6 +493,22 @@ class PostProcess:
     @staticmethod
     def pixelate(size: float | Parameter | Computed = 8.0) -> PostProcess:
         """Blocks of ``size`` pixels (at 1080p, at least 1)."""
+        ...
+    @staticmethod
+    def bloom(
+        threshold: float | Parameter | Computed = 0.8,
+        intensity: float | Parameter | Computed = 0.6,
+        radius: float | Parameter | Computed = 0.5,
+    ) -> PostProcess:
+        """Multipass bloom: everything brighter than ``threshold`` glows.
+
+        ``threshold`` (0..1) is the sRGB brightness where the glow starts, with
+        a soft knee; ``intensity`` scales the added light and ``radius``
+        (0..1) spreads it from a tight halo to a wide haze. The glow is added
+        in linear light and turns hot cores white instead of clipping. Its
+        spread is a fraction of the camera frame, so it looks the same at any
+        export resolution; all three accept a ``Parameter`` to animate.
+        """
         ...
     @staticmethod
     def glitch(intensity: float | Parameter | Computed = 0.5, seed: int = 0) -> PostProcess:
@@ -2166,6 +2224,33 @@ class Drawable:
             flare = scene.geometry.circle(1.2).fill(ORANGE).blend("screen")
         """
         ...
+    def motion_blur(self, enabled: bool = True) -> Drawable:
+        """Whether ``Scene.motion_blur`` smears this drawable (the default).
+
+        With ``False`` the drawable and its members draw in every sub-frame as
+        they are at the frame time, e.g. a title or HUD that must stay sharp
+        while everything else moves. Echo copies inherit the setting.
+        """
+        ...
+    def echo(self, count: int = 5, *, delay: float = 0.04, decay: float = 0.6) -> Drawable:
+        """Trail this drawable with ``count`` copies of itself as it was earlier.
+
+        Copy ``k`` shows the drawable ``k * delay`` seconds ago with ``decay ** k``
+        of its opacity, beneath it. Copies replay the drawable's own animations
+        (``animate``, ``create``, fades, color and path changes) with that delay,
+        so they are exact at any seek and in every export, SVG included. They
+        are hidden while the drawable is hidden and never reach back across a
+        segment cut. Motion from updaters, reactive positions and a moving
+        parent group is not delayed. ``count`` is 1-32 (0 removes the echo),
+        ``delay`` is positive and ``decay`` is in (0, 1]. Echo is declaration
+        state: it applies for the whole timeline. Lottie and video frames are
+        not copied.
+
+        Example:
+            ball = scene.geometry.circle(0.4).fill(CORAL).echo(6, delay=0.05)
+            scene.play([ball.animate.move_to(4, 0).duration(1.0)])
+        """
+        ...
     def clip(
         self,
         mask: Drawable,
@@ -3206,6 +3291,19 @@ class Text(Drawable):
 
         Example:
             title.blend("overlay").move_to(0.0, 0.0)
+        """
+        ...
+    def motion_blur(self, enabled: bool = True) -> Self:
+        """Whether ``Scene.motion_blur`` smears the text, preserving Text chaining.
+
+        See ``Drawable.motion_blur``.
+        """
+        ...
+    def echo(self, count: int = 5, *, delay: float = 0.04, decay: float = 0.6) -> Self:
+        """Trail the text with fading copies of itself, preserving Text chaining.
+
+        See ``Drawable.echo``; each glyph's copy replays that glyph's own
+        animations, so per-glyph reveals echo glyph by glyph.
         """
         ...
     @overload
@@ -6736,6 +6834,26 @@ class Scene:
 
         Raises:
             ValueError: If any drawable belongs to another ``Scene``.
+        """
+        ...
+    def motion_blur(self, shutter_angle: Optional[float] = 180.0, samples: int = 8, *, phase: Optional[float] = None) -> None:
+        """Blur motion in exported frames and snapshots like a film camera.
+
+        Every frame averages ``samples`` (2-64) sub-frames spread over the time
+        its shutter is open: ``shutter_angle`` degrees of a frame (180 is the
+        film standard, 360 blurs across the whole frame, up to 720). ``phase``
+        is where the shutter opens relative to the frame time, in degrees of a
+        frame; by default the shutter is centered on it. Sub-frames are exact
+        timeline seeks averaged in linear light, so blurred exports are
+        deterministic, and they never cross a segment cut. The shutter length
+        follows the export frame rate (snapshots use 60 fps). ``None`` turns
+        the blur off. The interactive preview and native 3D scenes stay sharp;
+        rendering costs ``samples`` times as much. Keep a drawable sharp with
+        ``drawable.motion_blur(False)``.
+
+        Example:
+            scene.motion_blur(180, samples=12)
+            title.motion_blur(False)
         """
         ...
     def wait(self, seconds: float) -> None:

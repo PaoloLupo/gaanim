@@ -959,6 +959,10 @@ pub struct ObjectSpec {
     pub blend: Option<gaanim_core::peniko::BlendMode>,
     /// Arrowheads or dots drawn on the ends of the path.
     pub tips: Option<gaanim_animation::StrokeTips>,
+    /// Fading copies that trail the drawable in time.
+    pub echo: Option<EchoSpec>,
+    /// Keep the drawable sharp under the scene's motion blur.
+    pub motion_blur_exempt: bool,
     pub opacity: f32,
     pub opacity_overridden: bool,
     /// Ordered theme classes. Later classes have higher cascade priority.
@@ -1003,6 +1007,55 @@ pub struct ObjectSpec {
     pub(crate) coordinate_view_cursor: Option<(DVec3, DVec3)>,
 }
 
+/// Most copies one [`EchoSpec`] draws.
+pub const MAX_ECHO_COUNT: u32 = 32;
+
+/// Copies of a drawable as it was `delay`, `2 * delay`, ... seconds earlier,
+/// each `decay` times as opaque as the one before.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EchoSpec {
+    count: u32,
+    delay: f64,
+    decay: f32,
+}
+
+impl EchoSpec {
+    /// `count` copies (1 to [`MAX_ECHO_COUNT`]) spaced by a positive `delay`
+    /// in seconds, with an opacity ratio `decay` in (0, 1].
+    pub fn new(count: u32, delay: f64, decay: f64) -> Result<Self, String> {
+        if !(1..=MAX_ECHO_COUNT).contains(&count) {
+            return Err(format!(
+                "echo count must be between 1 and {MAX_ECHO_COUNT}, got {count}"
+            ));
+        }
+        if !(delay.is_finite() && delay > 0.0) {
+            return Err(format!(
+                "echo delay must be a positive number of seconds, got {delay}"
+            ));
+        }
+        if !(decay.is_finite() && decay > 0.0 && decay <= 1.0) {
+            return Err(format!("echo decay must be in (0, 1], got {decay}"));
+        }
+        Ok(Self {
+            count,
+            delay,
+            decay: decay as f32,
+        })
+    }
+
+    pub fn count(&self) -> u32 {
+        self.count
+    }
+
+    pub fn delay(&self) -> f64 {
+        self.delay
+    }
+
+    pub fn decay(&self) -> f32 {
+        self.decay
+    }
+}
+
 impl ObjectSpec {
     pub(crate) fn new(id: ObjectId, kind: SpawnKind) -> Self {
         Self {
@@ -1023,6 +1076,8 @@ impl ObjectSpec {
             shadow: None,
             blend: None,
             tips: None,
+            echo: None,
+            motion_blur_exempt: false,
             opacity: 1.0,
             opacity_overridden: false,
             style_classes: Vec::new(),

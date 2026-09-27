@@ -1,6 +1,6 @@
 //! Built-in finishing passes for the post-process chain: film grain,
 //! vignette, chromatic aberration, color grading, lookup tables, halftone,
-//! ordered dithering, CRT, pixelation and glitch.
+//! ordered dithering, CRT, pixelation, glitch and bloom.
 //!
 //! Each preset is a [`PostProcessShader`] with named uniforms, so its
 //! amounts can be constants or animated parameters. Sizes are measured in
@@ -34,6 +34,9 @@ pub enum PostPreset {
     Pixelate,
     /// `intensity`, `seed`.
     Glitch,
+    /// `threshold` (sRGB brightness where glow starts), `intensity`,
+    /// `radius` (0..1 spread).
+    Bloom,
 }
 
 const HELPERS: &str = r#"
@@ -49,6 +52,39 @@ fn gaanim_preset_scale(resolution: vec2<f32>) -> f32 {
 
 fn gaanim_preset_luma(color: vec3<f32>) -> f32 {
     return dot(color, vec3<f32>(0.2126, 0.7152, 0.0722));
+}
+"#;
+
+// Additive glow in linear light. Where the sum overflows white, the excess
+// spills into the other channels, so hot cores turn white instead of clipping
+// to a saturated hue.
+const BLOOM: &str = r#"
+fn gaanim_bloom_linear(color: vec3<f32>) -> vec3<f32> {
+    return select(
+        pow((color + vec3<f32>(0.055)) / 1.055, vec3<f32>(2.4)),
+        color / 12.92,
+        color <= vec3<f32>(0.04045),
+    );
+}
+
+fn gaanim_bloom_srgb(linear: vec3<f32>) -> vec3<f32> {
+    let c = clamp(linear, vec3<f32>(0.0), vec3<f32>(1.0));
+    return select(
+        1.055 * pow(c, vec3<f32>(1.0 / 2.4)) - vec3<f32>(0.055),
+        12.92 * c,
+        c <= vec3<f32>(0.0031308),
+    );
+}
+
+fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
+    let scene = gaanim_scene(uv);
+    let glow = gaanim_bloom(uv) * max(gaanim_uniforms.intensity, 0.0);
+    var color = gaanim_bloom_linear(scene.rgb) * scene.a + glow;
+    let alpha = clamp(scene.a + max(glow.r, max(glow.g, glow.b)), 0.0, 1.0);
+    color = color / max(alpha, 1e-4);
+    let over = max(max(color.r, max(color.g, color.b)) - 1.0, 0.0);
+    color = min(color + vec3<f32>(0.6 * over), vec3<f32>(1.0));
+    return vec4<f32>(gaanim_bloom_srgb(color), alpha);
 }
 "#;
 
@@ -206,7 +242,7 @@ fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
 "#;
 
 impl PostPreset {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Grain,
         Self::Vignette,
         Self::ChromaticAberration,
@@ -216,6 +252,7 @@ impl PostPreset {
         Self::Crt,
         Self::Pixelate,
         Self::Glitch,
+        Self::Bloom,
     ];
 
     /// Uniform names, in the order the preset's values are given.
@@ -230,6 +267,7 @@ impl PostPreset {
             Self::Crt => &["strength"],
             Self::Pixelate => &["size"],
             Self::Glitch => &["intensity", "seed"],
+            Self::Bloom => &["threshold", "intensity", "radius"],
         }
     }
 
@@ -244,6 +282,7 @@ impl PostPreset {
             Self::Crt => CRT,
             Self::Pixelate => PIXELATE,
             Self::Glitch => GLITCH,
+            Self::Bloom => BLOOM,
         }
     }
 
@@ -254,10 +293,12 @@ impl PostPreset {
             Self::ALL
                 .iter()
                 .map(|preset| {
-                    PostProcessShader::with_uniforms(
-                        format!("{HELPERS}{}", preset.body()),
-                        preset.uniforms(),
-                    )
+                    let source = format!("{HELPERS}{}", preset.body());
+                    if *preset == Self::Bloom {
+                        PostProcessShader::with_bloom(source, preset.uniforms())
+                    } else {
+                        PostProcessShader::with_uniforms(source, preset.uniforms())
+                    }
                     .expect("built-in post-process presets are valid WGSL")
                 })
                 .collect()

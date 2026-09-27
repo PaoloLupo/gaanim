@@ -269,6 +269,31 @@ scene.wait(1.0)
 ]
 
 #api-entry(
+  name: "Scene.motion_blur",
+  kind: "method",
+  params: (
+    (name: "shutter_angle", type: "float | None", default: "180.0", desc: [Grados de un cuadro que el obturador está abierto, de 0 a 720: 180 es el estándar del cine y 360 difumina todo el cuadro. `None` lo desactiva.]),
+    (name: "samples", type: "int", default: "8", desc: [Subcuadros promediados por cuadro, de 2 a 64.]),
+    (name: "phase", type: "float | None", default: "None", desc: [Dónde se abre el obturador respecto al tiempo del cuadro, en grados de un cuadro; por defecto se centra en él.]),
+  ),
+  returns: (type: "None"),
+  desc: [Desenfoque de movimiento como el de una cámara de cine en las exportaciones y las capturas: cada cuadro promedia en luz lineal `samples` búsquedas exactas repartidas por el obturador, así que es determinista, y nunca mezcla dos segmentos. La duración del obturador sigue los fps de la exportación (las capturas usan 60). El visor interactivo y las escenas 3D nativas se ven nítidos, y renderizar cuesta `samples` veces más. Un valor fuera de rango lanza `ValueError`. Usa `drawable.motion_blur(False)` para mantener nítido un objeto.],
+)[
+```python
+# show-code: true
+from gaanim import CORAL, GOLD, WHITE, Scene
+scene = Scene(frame=(16, 9), background="#101826")
+scene.motion_blur(180, samples=6)
+title = scene.text("Motion blur", role="title").fill(WHITE).move_to(0, 3).motion_blur(False)
+ball = scene.geometry.circle(0.5).fill(CORAL).move_to(-6, 0)
+bar = scene.geometry.rect(4, 0.35).fill(GOLD).move_to(0, -2)
+scene.play([ball.animate.move_to(6, 0).duration(0.6), bar.animate.rotate_by(6.2832).duration(1.0)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
   name: "Scene.fade_out_all",
   kind: "method",
   params: ((name: "seconds", type: "float", default: none, desc: [Duración del fundido.]),),

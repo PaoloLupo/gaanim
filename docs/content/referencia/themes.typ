@@ -357,6 +357,9 @@ fn gaanim_background(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f3
 - `resolution` es el tamaño efectivo en píxeles.
 - `time` es la posición absoluta de la línea de tiempo en segundos, así que
   las búsquedas, las capturas y la exportación son deterministas.
+- `gaanim_frame_size(resolution)` devuelve el tamaño del marco en unidades de
+  la escena (por ejemplo `(16, 9)`), para dibujar en las mismas unidades que
+  las formas.
 
 El shader cubre el mismo rectángulo de escena que muestra el editor. En el
 visor se ejecuta en la misma GPU que dibuja la escena y solo se repite cuando
@@ -369,6 +372,62 @@ producen los mismos píxeles.
   returns: (type: "Color", desc: [El color representativo del fondo, usado para limpiar y para el contraste.]),
   none,
 )
+
+=== Fondos vivos
+
+Fondos procedurales listos para usar, construidos sobre `Background.shader`:
+se mueven con el tiempo de la línea de tiempo y la misma semilla da siempre la
+misma imagen. Los colores se mezclan en luz lineal. Un valor inválido lanza
+`ValueError`.
+
+#api-entry(
+  name: "Background.mesh_gradient",
+  kind: "factory",
+  signature: "mesh_gradient(colors, *, speed=0.1, seed=0) -> Background",
+  desc: [Manchas suaves de 2 a 8 `colors` que derivan por órbitas y se mezclan como un _mesh gradient_. `speed` escala el movimiento (`0` lo congela) y `seed` elige otra disposición.],
+)[
+```python
+# show-code: true
+from gaanim import WHITE, Background, Scene
+scene = Scene(frame=(16, 9))
+scene.canvas.background = Background.mesh_gradient(
+    ["#0b1040", "#6a2cc8", "#12b8a6", "#f25f8b"], speed=0.3, seed=4
+)
+scene.text("Mesh gradient", role="title").fill(WHITE)
+scene.wait(2.0)
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Background.noise_gradient",
+  kind: "factory",
+  signature: "noise_gradient(colors, *, scale=1.5, speed=0.05, seed=0) -> Background",
+  desc: [Ruido fBm con dominio deformado, al estilo de los gradientes de Stripe, recorriendo una rampa de 2 a 8 `colors`. `scale` es el número de rasgos por altura del cuadro.],
+  none,
+)
+
+#api-entry(
+  name: "Background.aurora",
+  kind: "factory",
+  signature: "aurora(colors, *, sky=None, speed=0.2, seed=0) -> Background",
+  desc: [Cortinas de aurora boreal, una por color (1 a 8), sobre un cielo `sky` oscuro (azul noche si se omite).],
+  none,
+)
+
+#api-entry(
+  name: "Background.dot_grid",
+  kind: "factory",
+  signature: "dot_grid(spacing=0.4, *, radius=0.03, color=None, background=None, drift=(0.0, 0.0)) -> Background",
+  desc: [Puntos cada `spacing` unidades de la escena, con uno en el origen. `radius` está en unidades y es como mucho la mitad de `spacing`; `color` (blanco translúcido por defecto, respeta su alfa) sobre `background` oscuro. `drift` desplaza la rejilla en unidades por segundo.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.canvas.background = Background.dot_grid(0.5, radius=0.05, color="#8fa3ff80", drift=(0.25, 0.0))
+```
+]
 
 == Postprocesado
 
@@ -520,6 +579,27 @@ scene.canvas.post = [PostProcess.glitch(intensity=burst, seed=3), PostProcess.gr
 scene.geometry.circle(1.6).fill(GOLD).move_to(-3, 0)
 scene.geometry.rounded_rect(3, 3, 0.3).fill(BLUE).move_to(3, 0)
 scene.play([burst.animate.set(1.0).duration(0.3).repeat(1, yoyo=True)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "PostProcess.bloom",
+  kind: "factory",
+  signature: "bloom(threshold=0.8, intensity=0.6, radius=0.5) -> PostProcess",
+  desc: [Bloom multipaso: lo que supera `threshold` (brillo sRGB de 0 a 1, con rodilla suave) brilla. Extrae las zonas claras, las reduce en una cadena de mips y las vuelve a sumar con un filtro tienda, como el bloom de Blender. `intensity` escala la luz añadida y `radius` (0 a 1) la extiende de un halo ceñido a una neblina amplia. La luz se suma en luz lineal y los núcleos muy brillantes se vuelven blancos en vez de saturarse. Su alcance es una fracción del cuadro, así que se ve igual a cualquier resolución. Complementa el `glow` vectorial de cada objeto.],
+)[
+```python
+# show-code: true
+from gaanim import PostProcess, Scene
+scene = Scene(frame=(16, 9), background="#05060d")
+glow = scene.viz.parameter(0.3)
+scene.canvas.post = PostProcess.bloom(threshold=0.55, intensity=glow, radius=0.6)
+ring = scene.geometry.circle(1.6).no_fill().stroke("#ff4fd8", 0.12).move_to(-3, 0)
+star = scene.geometry.regular_polygon(5, 1.6).no_fill().stroke("#ffe45c", 0.12).move_to(3, 0)
+scene.play([ring.animate.create(), star.animate.create()])
+scene.play([glow.animate.set(1.4).duration(0.6).repeat(1, yoyo=True)])
 # output: preview.webp
 scene.render()
 ```

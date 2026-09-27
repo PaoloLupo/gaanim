@@ -58,6 +58,62 @@ impl PyBackground {
             })
     }
 
+    /// Soft color blobs drifting on seeded orbits, blended like a mesh gradient.
+    #[staticmethod]
+    #[pyo3(signature = (colors, *, speed=0.1, seed=0))]
+    fn mesh_gradient(colors: Vec<PyColor>, speed: f64, seed: u32) -> PyResult<Self> {
+        living_background(gaanim_api::canvas::background_presets::mesh_gradient(
+            &colors_of(colors),
+            speed,
+            seed,
+        ))
+    }
+
+    /// Domain-warped noise mapped across a color ramp, like a Stripe gradient.
+    #[staticmethod]
+    #[pyo3(signature = (colors, *, scale=1.5, speed=0.05, seed=0))]
+    fn noise_gradient(colors: Vec<PyColor>, scale: f64, speed: f64, seed: u32) -> PyResult<Self> {
+        living_background(gaanim_api::canvas::background_presets::noise_gradient(
+            &colors_of(colors),
+            scale,
+            speed,
+            seed,
+        ))
+    }
+
+    /// Northern-lights curtains, one per color, over a dark `sky`.
+    #[staticmethod]
+    #[pyo3(signature = (colors, *, sky=None, speed=0.2, seed=0))]
+    fn aurora(colors: Vec<PyColor>, sky: Option<PyColor>, speed: f64, seed: u32) -> PyResult<Self> {
+        let sky = sky.map_or(peniko::Color::from_rgb8(0x05, 0x08, 0x14), |sky| sky.0);
+        living_background(gaanim_api::canvas::background_presets::aurora(
+            &colors_of(colors),
+            sky,
+            speed,
+            seed,
+        ))
+    }
+
+    /// Dots every `spacing` scene units, drifting by `drift` units per second.
+    #[staticmethod]
+    #[pyo3(signature = (spacing=0.4, *, radius=0.03, color=None, background=None, drift=(0.0, 0.0)))]
+    fn dot_grid(
+        spacing: f64,
+        radius: f64,
+        color: Option<PyColor>,
+        background: Option<PyColor>,
+        drift: (f64, f64),
+    ) -> PyResult<Self> {
+        let color = color.map_or(peniko::Color::from_rgba8(0xff, 0xff, 0xff, 0x40), |c| c.0);
+        let background = background
+            .map_or(peniko::Color::from_rgb8(0x0b, 0x10, 0x20), |background| {
+                background.0
+            });
+        living_background(gaanim_api::canvas::background_presets::dot_grid(
+            spacing, radius, color, background, drift,
+        ))
+    }
+
     #[getter]
     fn fallback(&self) -> PyColor {
         PyColor(self.0.fallback_color())
@@ -69,6 +125,21 @@ impl PyBackground {
             gaanim_api::canvas::BackgroundPaint::Shader(_) => "Background.shader(...)",
         }
     }
+}
+
+fn colors_of(colors: Vec<PyColor>) -> Vec<peniko::Color> {
+    colors.into_iter().map(|color| color.0).collect()
+}
+
+fn living_background(
+    shader: Result<
+        gaanim_api::canvas::ShaderBackground,
+        gaanim_api::canvas::background_presets::BackgroundPresetError,
+    >,
+) -> PyResult<PyBackground> {
+    shader
+        .map(|shader| PyBackground(gaanim_api::canvas::BackgroundPaint::Shader(shader)))
+        .map_err(|error| PyValueError::new_err(error.to_string()))
 }
 
 /// Custom WGSL post-processing of the rendered 2D scene inside the camera frame.
@@ -232,6 +303,25 @@ impl PyPostProcess {
                 preset_value("strength", strength, 1.0, 0.0..=1.0)?,
             ],
         ))
+    }
+
+    /// Multipass bloom: pixels brighter than `threshold` glow by `intensity`,
+    /// spreading by `radius` (0..1).
+    #[staticmethod]
+    #[pyo3(signature = (threshold=None, intensity=None, radius=None))]
+    fn bloom(
+        threshold: Option<&Bound<'_, PyAny>>,
+        intensity: Option<&Bound<'_, PyAny>>,
+        radius: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
+        preset(
+            gaanim_api::canvas::PostPreset::Bloom,
+            vec![
+                preset_value("threshold", threshold, 0.8, 0.0..=1.0)?,
+                preset_value("intensity", intensity, 0.6, 0.0..=f64::INFINITY)?,
+                preset_value("radius", radius, 0.5, 0.0..=1.0)?,
+            ],
+        )
     }
 
     /// Print-style dots whose size follows the brightness of each cell.

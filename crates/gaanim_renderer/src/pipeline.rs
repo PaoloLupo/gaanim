@@ -2,8 +2,8 @@ use crate::background::{BackgroundPaint, ShaderBackgroundRequest};
 use crate::background_gpu::ShaderBackgroundFrame;
 use crate::effects::{
     BooleanBinding, CameraView, CameraViewBackground, CameraViewFit, ClipMask, DropShadow,
-    ElementBlend, FillLevelBinding, GaussianBlur, Glow, StrokeAlign, VectorOutlineBinding,
-    ViewLayer,
+    ElementBlend, FillLevelBinding, GaussianBlur, Glow, MotionBlurExempt, StrokeAlign,
+    VectorOutlineBinding, ViewLayer,
 };
 use crate::lottie::LottiePlayer;
 use crate::stroke::{draw_stroke, view_stroke_transform};
@@ -96,12 +96,18 @@ fn resolve_canvas_background_brush(
     let resolved = match (paint, gpu) {
         (BackgroundPaint::Shader(shader), Some(gpu)) => shader
             .gpu_request(pixel_size.0, pixel_size.1, time_seconds)
+            .map(|request| request.in_frame((rect.width(), rect.height())))
             .map(|request| {
                 let brush = peniko::Brush::Image(peniko::ImageBrush::new(request.image().clone()));
                 *gpu = Some(request);
                 brush
             }),
-        _ => paint.resolve_brush(pixel_size.0, pixel_size.1, time_seconds),
+        _ => paint.resolve_brush(
+            pixel_size.0,
+            pixel_size.1,
+            time_seconds,
+            (rect.width(), rect.height()),
+        ),
     };
     match resolved {
         Ok(brush) => {
@@ -297,6 +303,9 @@ pub struct ExtractedElement {
     layer: Option<Arc<str>>,
     /// Set when the element is a camera view screen.
     screen: Option<ExtractedScreen>,
+    /// [`gaanim_animation::EchoGhost::rank`] of an echo copy, 0 otherwise:
+    /// copies of one source draw beneath it, the farthest first.
+    echo_rank: u32,
 }
 
 /// A camera view screen: its view and the stroke drawn above it.
@@ -346,6 +355,20 @@ impl ExtractedCameraView {
 }
 
 impl ExtractedElement {
+    /// Deterministic layering: z-index, then creation order, then echo copies
+    /// beneath their source.
+    fn draw_order(a: &Self, b: &Self) -> std::cmp::Ordering {
+        a.render_order
+            .z_index
+            .cmp(&b.render_order.z_index)
+            .then(
+                a.render_order
+                    .creation_order
+                    .cmp(&b.render_order.creation_order),
+            )
+            .then(b.echo_rank.cmp(&a.echo_rank))
+    }
+
     /// This element as the camera of a view sees it: `content` maps it onto
     /// the screen.
     fn seen_through(&self, content: kurbo::Affine) -> Self {
@@ -364,6 +387,7 @@ impl ExtractedElement {
             in_views: self.in_views,
             layer: self.layer.clone(),
             screen: self.screen.clone(),
+            echo_rank: self.echo_rank,
         }
     }
 }
@@ -1771,6 +1795,35 @@ pub fn compile_scene_from_world(
     world: &mut World,
     camera: Option<&gaanim_math::Camera>,
 ) -> vello::Scene {
+    compile_scene_with_pins(world, camera, None)
+}
+
+/// Elements of [`MotionBlurExempt`] drawables frozen at a frame's own time,
+/// drawn unchanged in each of its motion blur sub-frames.
+#[derive(Default)]
+pub struct PinnedElements {
+    elements: Vec<ExtractedElement>,
+    recorded: bool,
+}
+
+/// [`compile_scene_from_world`] for a frame under motion blur.
+///
+/// The first call with fresh `pins` records the exempt drawables as the world
+/// shows them; later calls draw those recordings in their place.
+pub fn compile_scene_pinned(
+    world: &mut World,
+    camera: Option<&gaanim_math::Camera>,
+    pins: &mut PinnedElements,
+) -> vello::Scene {
+    compile_scene_with_pins(world, camera, Some(pins))
+}
+
+fn compile_scene_with_pins(
+    world: &mut World,
+    camera: Option<&gaanim_math::Camera>,
+    mut pins: Option<&mut PinnedElements>,
+) -> vello::Scene {
+    let replaying_pins = pins.as_ref().is_some_and(|pins| pins.recorded);
     let background_time = world
         .get_resource::<gaanim_animation::PlaybackState>()
         .map_or(0.0, |state| state.current_time);
@@ -2131,6 +2184,10 @@ pub fn compile_scene_from_world(
                 antialias,
             )
         };
+        let exempt = pins.is_some() && world.get::<MotionBlurExempt>(entity).is_some();
+        if exempt && replaying_pins {
+            continue;
+        }
         extracted.push(ExtractedElement {
             transform: transform.affine_2d,
             opacity: global_opacity.0,
@@ -2168,18 +2225,22 @@ pub fn compile_scene_from_world(
                 view: Arc::clone(view),
                 overlay: overlay.map(Arc::new),
             }),
+            echo_rank: world
+                .get::<gaanim_animation::EchoGhost>(entity)
+                .map_or(0, |echo| echo.rank),
         });
+        if exempt && let (Some(pins), Some(element)) = (pins.as_deref_mut(), extracted.last()) {
+            pins.elements.push(element.clone());
+        }
+    }
+    if let Some(pins) = pins {
+        if replaying_pins {
+            extracted.extend(pins.elements.iter().cloned());
+        }
+        pins.recorded = true;
     }
 
-    extracted.sort_by(
-        |a, b| match a.render_order.z_index.cmp(&b.render_order.z_index) {
-            std::cmp::Ordering::Equal => a
-                .render_order
-                .creation_order
-                .cmp(&b.render_order.creation_order),
-            other => other,
-        },
-    );
+    extracted.sort_by(ExtractedElement::draw_order);
 
     let mut main_scene = vello::Scene::new();
 
@@ -2279,7 +2340,7 @@ pub fn gaanim_render_system(
     transition_frame: Option<Res<gaanim_scene::SceneTransitionFrame>>,
     child_query: Query<&ChildOf>,
     order_query: Query<&RenderOrder>,
-    blend_query: Query<&ElementBlend>,
+    (blend_query, echo_query): (Query<&ElementBlend>, Query<&gaanim_animation::EchoGhost>),
     view_query: Query<(
         &gaanim_math::SpatialTransform,
         Option<&gaanim_scene::CoordinateViewRole>,
@@ -2787,19 +2848,12 @@ pub fn gaanim_render_system(
                 view: Arc::clone(view),
                 overlay: cache.screen_overlays.get(&mobj_id.0).cloned(),
             }),
+            echo_rank: echo_query.get(entity).map_or(0, |echo| echo.rank),
         });
     }
 
     // Sort elements deterministically by RenderOrder to ensure correct layering
-    local_extracted.sort_by(
-        |a, b| match a.render_order.z_index.cmp(&b.render_order.z_index) {
-            std::cmp::Ordering::Equal => a
-                .render_order
-                .creation_order
-                .cmp(&b.render_order.creation_order),
-            other => other,
-        },
-    );
+    local_extracted.sort_by(ExtractedElement::draw_order);
 
     // Assemble the global composited Scene in Bevy world coordinates
     let mut main_scene = vello::Scene::new();
@@ -3805,6 +3859,7 @@ mod tests {
             in_views: true,
             layer: None,
             screen: None,
+            echo_rank: 0,
         };
         let run = [
             element(kurbo::Rect::new(-6.0, 1.0, -3.0, 1.2)),
@@ -3833,6 +3888,7 @@ mod tests {
             in_views: true,
             layer: None,
             screen: None,
+            echo_rank: 0,
         };
         let elements = vec![element(0.5), element(0.5), element(0.5), element(0.75)];
 
@@ -3857,6 +3913,7 @@ mod tests {
             in_views: true,
             layer: None,
             screen: None,
+            echo_rank: 0,
         };
         let multiply = Some(peniko::BlendMode::from(peniko::Mix::Multiply));
         let elements = vec![element(None), element(multiply), element(None)];
@@ -3888,6 +3945,7 @@ mod tests {
             in_views: true,
             layer: None,
             screen: None,
+            echo_rank: 0,
         };
         let elements = vec![
             element(Some(mask(1, false))),

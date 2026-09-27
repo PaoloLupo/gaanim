@@ -5629,6 +5629,27 @@ impl PyScene {
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
 
+    /// Blur exported frames and snapshots over a shutter of `shutter_angle`
+    /// degrees sampled `samples` times; `None` turns it off.
+    #[pyo3(signature = (shutter_angle=Some(180.0), samples=8, *, phase=None))]
+    fn motion_blur(
+        &self,
+        shutter_angle: Option<f64>,
+        samples: u32,
+        phase: Option<f64>,
+    ) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        let blur = shutter_angle
+            .map(|angle| gaanim_api::canvas::MotionBlur::new(angle, samples, phase))
+            .transpose()
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .set_motion_blur(blur);
+        Ok(())
+    }
+
     fn wait(&self, seconds: f64) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
         Ok({

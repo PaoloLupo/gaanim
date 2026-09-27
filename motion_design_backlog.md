@@ -145,11 +145,11 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
 |---|---|---|---|---|---|---|
 | ☑ | [FX-02](#fx-02--uniforms-enlazables-y-cadena-de-post-procesos) | Uniforms enlazables y cadena de post-procesos | M | ★★★ | — | [#140](https://github.com/PaoloLupo/gaanim/issues/140) |
 | ☑ | [FX-03](#fx-03--presets-de-acabado) | Presets de acabado: grain, viñeta, aberración, grading, LUT | S | ★★★ | FX-02 | [#141](https://github.com/PaoloLupo/gaanim/issues/141) |
-| ☐ | [FX-09](#fx-09--fondos-vivos) | Fondos vivos (mesh/noise gradient, aurora, rejilla) | S | ★★ | — | [#142](https://github.com/PaoloLupo/gaanim/issues/142) |
+| ☑ | [FX-09](#fx-09--fondos-vivos) | Fondos vivos (mesh/noise gradient, aurora, rejilla) | S | ★★ | — | [#142](https://github.com/PaoloLupo/gaanim/issues/142) |
 | ☑ | [FX-07](#fx-07--modos-de-fusión-por-objeto) | Modos de fusión por objeto | S | ★★ | — | [#143](https://github.com/PaoloLupo/gaanim/issues/143) |
-| ☐ | [FX-04](#fx-04--bloom-multipaso) | Bloom multipaso | M | ★★★ | FX-02 | [#144](https://github.com/PaoloLupo/gaanim/issues/144) |
-| ☐ | [FX-05](#fx-05--motion-blur-por-sub-frames) | Motion blur por sub-frames | M | ★★★ | — | [#145](https://github.com/PaoloLupo/gaanim/issues/145) |
-| ☐ | [FX-06](#fx-06--echo-y-estelas) | Echo y estelas | M | ★★ | — | [#146](https://github.com/PaoloLupo/gaanim/issues/146) |
+| ☑ | [FX-04](#fx-04--bloom-multipaso) | Bloom multipaso | M | ★★★ | FX-02 | [#144](https://github.com/PaoloLupo/gaanim/issues/144) |
+| ☑ | [FX-05](#fx-05--motion-blur-por-sub-frames) | Motion blur por sub-frames | M | ★★★ | — | [#145](https://github.com/PaoloLupo/gaanim/issues/145) |
+| ☑ | [FX-06](#fx-06--echo-y-estelas) | Echo y estelas | M | ★★ | — | [#146](https://github.com/PaoloLupo/gaanim/issues/146) |
 | ☐ | [TS-02](#ts-02--transiciones-por-shader) | Transiciones por shader (estilo gl-transitions) | L | ★★ | FX-02 | [#147](https://github.com/PaoloLupo/gaanim/issues/147) |
 
 ### Ola 4: sistemas procedurales, formas y tiempo avanzado

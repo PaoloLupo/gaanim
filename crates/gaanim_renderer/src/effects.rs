@@ -265,3 +265,114 @@ mod tests {
         assert!(world.get::<gaanim_scene::HudOverlay>(tip).is_none());
     }
 }
+
+/// Motion blur of exported frames and snapshots: each frame averages
+/// `samples` sub-frames spread over the time its shutter is open.
+#[derive(bevy::prelude::Resource, Debug, Clone, Copy, PartialEq)]
+pub struct MotionBlur {
+    /// Fraction of a frame's duration the shutter stays open, times 360;
+    /// 180 is the film standard.
+    shutter_angle: f64,
+    /// Sub-frames averaged per frame.
+    samples: u32,
+    /// Where the shutter opens relative to the frame time, in degrees of a
+    /// frame; `-shutter_angle / 2` centers the blur on the frame.
+    phase: f64,
+}
+
+/// Most sub-frames [`MotionBlur`] averages per frame.
+pub const MAX_MOTION_BLUR_SAMPLES: u32 = 64;
+
+impl MotionBlur {
+    /// A shutter of `shutter_angle` degrees (0 to 720 exclusive of 0) sampled
+    /// `samples` times (2 to [`MAX_MOTION_BLUR_SAMPLES`]). `phase` defaults
+    /// to centering the shutter on the frame time.
+    pub fn new(shutter_angle: f64, samples: u32, phase: Option<f64>) -> Result<Self, String> {
+        if !(shutter_angle.is_finite() && shutter_angle > 0.0 && shutter_angle <= 720.0) {
+            return Err(format!(
+                "shutter_angle must be in (0, 720] degrees, got {shutter_angle}"
+            ));
+        }
+        if !(2..=MAX_MOTION_BLUR_SAMPLES).contains(&samples) {
+            return Err(format!(
+                "samples must be between 2 and {MAX_MOTION_BLUR_SAMPLES}, got {samples}"
+            ));
+        }
+        let phase = phase.unwrap_or(-shutter_angle / 2.0);
+        if !(phase.is_finite() && phase.abs() <= 720.0) {
+            return Err(format!("phase must be in [-720, 720] degrees, got {phase}"));
+        }
+        Ok(Self {
+            shutter_angle,
+            samples,
+            phase,
+        })
+    }
+
+    pub fn shutter_angle(&self) -> f64 {
+        self.shutter_angle
+    }
+
+    pub fn samples(&self) -> u32 {
+        self.samples
+    }
+
+    pub fn phase(&self) -> f64 {
+        self.phase
+    }
+
+    /// Sub-frame times of the frame at `time` in a `fps` export, evenly
+    /// spread over the open shutter and clamped to `[start, end]`, e.g. the
+    /// segment that shows the frame.
+    pub fn sample_times(&self, time: f64, fps: f64, start: f64, end: f64) -> Vec<f64> {
+        let frame = 1.0 / fps.max(1.0);
+        let open = time + self.phase / 360.0 * frame;
+        let shutter = self.shutter_angle / 360.0 * frame;
+        let samples = f64::from(self.samples);
+        (0..self.samples)
+            .map(|index| {
+                let sample = open + (f64::from(index) + 0.5) / samples * shutter;
+                sample.clamp(start, end.max(start))
+            })
+            .collect()
+    }
+}
+
+/// Keeps a drawable sharp under [`MotionBlur`]: every sub-frame draws it as
+/// it is at the frame's own time.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MotionBlurExempt;
+
+#[cfg(test)]
+mod motion_blur_tests {
+    use super::*;
+
+    #[test]
+    fn sub_frames_center_on_the_frame_and_stay_in_bounds() {
+        let blur = MotionBlur::new(180.0, 4, None).unwrap();
+        let times = blur.sample_times(1.0, 10.0, 0.0, 10.0);
+        // A 0.05 s shutter centered on 1.0.
+        let expected = [0.98125, 0.99375, 1.00625, 1.01875];
+        for (time, expected) in times.iter().zip(expected) {
+            assert!((time - expected).abs() < 1e-12, "{times:?}");
+        }
+        let clamped = blur.sample_times(1.0, 10.0, 1.0, 1.01);
+        assert_eq!(clamped.first(), Some(&1.0));
+        assert_eq!(clamped.last(), Some(&1.01));
+        let trailing = MotionBlur::new(360.0, 2, Some(0.0)).unwrap();
+        assert_eq!(
+            trailing.sample_times(0.0, 4.0, 0.0, 9.0),
+            vec![0.0625, 0.1875]
+        );
+    }
+
+    #[test]
+    fn invalid_shutters_are_rejected() {
+        assert!(MotionBlur::new(0.0, 8, None).is_err());
+        assert!(MotionBlur::new(f64::NAN, 8, None).is_err());
+        assert!(MotionBlur::new(900.0, 8, None).is_err());
+        assert!(MotionBlur::new(180.0, 1, None).is_err());
+        assert!(MotionBlur::new(180.0, MAX_MOTION_BLUR_SAMPLES + 1, None).is_err());
+        assert!(MotionBlur::new(180.0, 8, Some(f64::INFINITY)).is_err());
+    }
+}
