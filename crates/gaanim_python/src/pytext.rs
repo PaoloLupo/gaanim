@@ -1184,6 +1184,26 @@ impl PyText {
         Ok(slf)
     }
 
+    #[pyo3(signature = (enabled=true))]
+    fn motion_blur<'py>(slf: PyRef<'py, Self>, enabled: bool) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        slf.handle.clone().motion_blur(enabled);
+        Ok(slf)
+    }
+
+    #[pyo3(signature = (count=5, *, delay=0.04, decay=0.6))]
+    fn echo<'py>(
+        slf: PyRef<'py, Self>,
+        count: u32,
+        delay: f64,
+        decay: f64,
+    ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let echo = crate::pydrawable::echo_spec(count, delay, decay)?;
+        slf.handle.clone().echo(echo);
+        Ok(slf)
+    }
+
     fn opacity<'py>(slf: PyRef<'py, Self>, value: &Bound<'_, PyAny>) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
         PyDrawable(slf.handle.clone()).opacity(value)?;

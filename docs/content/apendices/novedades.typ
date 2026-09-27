@@ -131,12 +131,25 @@ secundarias en #link("/guias/camara-y-3d/")[Cámara y 3D].
   `chromatic_aberration`, `color_grade`, `lut` (archivos `.cube`), `halftone`,
   `dither`, `crt`, `pixelate` y `glitch`. Sus valores también aceptan un
   `Parameter`.
+- `PostProcess.bloom(threshold, intensity, radius)` hace brillar lo que supera
+  el umbral con una cadena de mips, igual en el visor y en la exportación.
+- Fondos vivos: `Background.mesh_gradient`, `noise_gradient`, `aurora` y
+  `dot_grid`. Los shaders de fondo propios pueden llamar a
+  `gaanim_frame_size(resolution)` para trabajar en unidades de la escena.
+- `drawable.echo(5, delay=0.04, decay=0.6)` deja copias que siguen al objeto
+  en el tiempo; son exactas en cualquier búsqueda y también salen en SVG.
+- `animate.points([...])` mueve cada vértice de un polígono o una polilínea en
+  línea recta a su nueva posición, sin remuestrear el contorno: con `echo`
+  reproduce el símbolo de Gaanim fotograma a fotograma.
+- `scene.canvas.motion_blur(180, samples=8)` difumina el movimiento en las
+  exportaciones y capturas promediando subcuadros; `drawable.motion_blur(False)`
+  mantiene nítido un objeto.
 
-Ver `Drawable.blend` y `Drawable.tip` en #link("/referencia/drawable/")[Drawable],
-`Anim.dash_offset` y `Updater.dash_flow` en
+Ver `Drawable.blend`, `Drawable.tip`, `Drawable.echo` y `Drawable.motion_blur`
+en #link("/referencia/drawable/")[Drawable], `Anim.dash_offset`, `Anim.points` y `Updater.dash_flow` en
 #link("/referencia/animations/")[Animaciones], los anillos en
-#link("/referencia/visualization/")[Visualización] y el postprocesado en
-#link("/referencia/themes/")[Colores y temas].
+#link("/referencia/visualization/")[Visualización] y los fondos, el
+postprocesado y `Canvas.motion_blur` en #link("/referencia/themes/")[Colores y temas].
 
 == Correcciones
 

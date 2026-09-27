@@ -1,5 +1,7 @@
 pub mod camera;
 pub mod custom;
+pub mod echo;
+pub use echo::EchoGhost;
 pub mod paint;
 pub mod prelude;
 pub mod procedural;

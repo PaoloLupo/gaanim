@@ -171,6 +171,23 @@ fn absolute_lens_channel(lens: &PropertyLensSpec) -> Option<AbsoluteLensChannel>
     })
 }
 
+/// The channel a not-yet-started clip holds at its initial value when a seek
+/// restores its target from a keyframe.
+fn restored_future_channel(lens: &PropertyLensSpec) -> Option<AbsoluteLensChannel> {
+    match lens {
+        // A future passing flash starts from an empty window, so
+        // the drawable stays hidden until it passes, like Create.
+        PropertyLensSpec::PathCompletion { .. }
+        | PropertyLensSpec::PathTrim { .. }
+        | PropertyLensSpec::PathRange { .. } => Some(AbsoluteLensChannel::PathCompletion),
+        PropertyLensSpec::FillLevel { .. } => Some(AbsoluteLensChannel::FillLevel),
+        // A future grow keeps its arrow hidden until the clip starts.
+        PropertyLensSpec::ArrowGrow { .. } => Some(AbsoluteLensChannel::PathMorph),
+        PropertyLensSpec::ConnectorGrow { .. } => Some(AbsoluteLensChannel::ConnectorGrow),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod gltf_action_tests {
     use super::*;
@@ -1282,22 +1299,7 @@ impl Timeline {
             } else if replay_without_restore {
                 absolute_lens_channel(&anim.lens)
             } else {
-                match anim.lens {
-                    // A future passing flash starts from an empty window, so
-                    // the drawable stays hidden until it passes, like Create.
-                    PropertyLensSpec::PathCompletion { .. }
-                    | PropertyLensSpec::PathTrim { .. }
-                    | PropertyLensSpec::PathRange { .. } => {
-                        Some(AbsoluteLensChannel::PathCompletion)
-                    }
-                    PropertyLensSpec::FillLevel { .. } => Some(AbsoluteLensChannel::FillLevel),
-                    // A future grow keeps its arrow hidden until the clip starts.
-                    PropertyLensSpec::ArrowGrow { .. } => Some(AbsoluteLensChannel::PathMorph),
-                    PropertyLensSpec::ConnectorGrow { .. } => {
-                        Some(AbsoluteLensChannel::ConnectorGrow)
-                    }
-                    _ => None,
-                }
+                restored_future_channel(&anim.lens)
             };
             let Some(channel) = channel else { continue };
             let initial_t = anim.rate_func.evaluate(0.0);
@@ -1640,10 +1642,134 @@ impl Timeline {
         self.update_segment_position();
         self.restore_followed_shake_origin(world);
         gaanim_animation::apply_property_bindings(world, self.current_time);
+        self.evaluate_echoes(world);
         if let Some(mut playback_state) =
             world.get_resource_mut::<gaanim_animation::PlaybackState>()
         {
             playback_state.current_time = self.current_time;
+        }
+    }
+
+    /// Show every [`gaanim_animation::EchoGhost`] as its source was `lag`
+    /// seconds before the current time.
+    ///
+    /// A copy takes its source's keyframe state and replays the source's own
+    /// animation clips up to that time, exactly as a seek rebuilds the
+    /// source, so it needs no history and matches at any time. A copy is
+    /// hidden while its source is, before the timeline starts and when its
+    /// time falls in another segment.
+    fn evaluate_echoes(&self, world: &mut World) {
+        let ghosts: Vec<(Entity, gaanim_animation::EchoGhost)> = world
+            .query::<(Entity, &gaanim_animation::EchoGhost)>()
+            .iter(world)
+            .map(|(entity, echo)| (entity, echo.clone()))
+            .collect();
+        if ghosts.is_empty() {
+            return;
+        }
+        let entity_map: HashMap<gaanim_core::ObjectId, Entity> = world
+            .query::<(Entity, &MobjectId)>()
+            .iter(world)
+            .map(|(entity, id)| (id.0, entity))
+            .collect();
+        // Each source's animation clips, in start order.
+        let sources: HashSet<_> = ghosts.iter().map(|(_, echo)| echo.source).collect();
+        let mut source_clips: HashMap<gaanim_core::ObjectId, Vec<&Clip>> = HashMap::new();
+        for clip in self
+            .clip_index
+            .values()
+            .flatten()
+            .filter_map(|id| self.clips.get(*id))
+        {
+            if let ClipPayload::Animation(anim) = &clip.payload
+                && sources.contains(&anim.target)
+            {
+                source_clips.entry(anim.target).or_default().push(clip);
+            }
+        }
+        let segment = |time: f64| {
+            self.segment_position_at(time)
+                .map(|position| position.segment_id)
+        };
+        let current_segment = segment(self.current_time);
+
+        for (ghost, echo) in ghosts {
+            let time = self.current_time - echo.lag;
+            let source_visible = entity_map
+                .get(&echo.source)
+                .is_some_and(|&source| world.get::<gaanim_scene::Visible>(source).is_some());
+            let keyframe = (source_visible && time >= 0.0 && segment(time) == current_segment)
+                .then(|| self.keyframes.range(..=OrderedFloat(time)).next_back())
+                .flatten()
+                .and_then(|(keyframe_time, snapshot)| {
+                    Some((keyframe_time.0, snapshot.entities.get(&echo.source)?))
+                });
+            let Some((keyframe_time, snapshot)) = keyframe else {
+                if world.get::<gaanim_scene::Visible>(ghost).is_some() {
+                    world.entity_mut(ghost).remove::<gaanim_scene::Visible>();
+                }
+                continue;
+            };
+            let parent = echo.parent.or_else(|| {
+                snapshot
+                    .parent
+                    .and_then(|parent| entity_map.get(&parent).copied())
+            });
+            crate::snapshot::restore_parent(world, ghost, parent);
+            // Copies stay out of scene membership: their visibility is decided here.
+            let mut state = snapshot.clone();
+            state.scene = None;
+            state.visible = true;
+            crate::snapshot::insert_snapshot_components(&mut world.entity_mut(ghost), &state, true);
+
+            let clips = source_clips
+                .get(&echo.source)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            // As in a restoring seek, a clip that has not started yet still
+            // holds its channel at the clip's initial value.
+            let mut initials: HashMap<AbsoluteLensChannel, (&PropertyLensSpec, f64)> =
+                HashMap::new();
+            for clip in clips.iter().rev().filter(|clip| clip.start > time) {
+                let ClipPayload::Animation(anim) = &clip.payload else {
+                    continue;
+                };
+                let channel = if let PropertyLensSpec::Dynamic(lens) = &anim.lens {
+                    lens.0.hold_channel().map(AbsoluteLensChannel::Held)
+                } else {
+                    restored_future_channel(&anim.lens)
+                };
+                if let Some(channel) = channel {
+                    // Later clips come first, so the earliest one wins.
+                    initials.insert(channel, (&anim.lens, anim.rate_func.evaluate(0.0)));
+                }
+            }
+            for (lens, initial_t) in initials.into_values() {
+                match lens {
+                    PropertyLensSpec::Dynamic(lens) => lens.0.hold(world, ghost, initial_t),
+                    _ => apply_lens_spec(world, ghost, lens, initial_t, false),
+                }
+            }
+            for clip in clips
+                .iter()
+                .filter(|clip| clip.start >= keyframe_time && clip.start <= time)
+            {
+                let ClipPayload::Animation(anim) = &clip.payload else {
+                    continue;
+                };
+                if clip.end() <= time {
+                    let final_t = anim.rate_func.evaluate(1.0);
+                    apply_lens_spec(world, ghost, &anim.lens, final_t, true);
+                } else {
+                    let progress = ((time - clip.start) / clip.duration).clamp(0.0, 1.0);
+                    let t = anim.rate_func.evaluate(progress);
+                    apply_lens_spec(world, ghost, &anim.lens, t, false);
+                }
+            }
+
+            if let Some(mut opacity) = world.get_mut::<Opacity>(ghost) {
+                opacity.0 *= echo.opacity;
+            }
         }
     }
 
@@ -3370,6 +3496,77 @@ mod tests {
             }),
         );
         (world, timeline, entity)
+    }
+
+    /// The absolute seek fixture with a visible source, as a scene shows it.
+    fn visible_echo_fixture() -> (World, Timeline, Entity) {
+        let (mut world, _, entity) = absolute_seek_fixture();
+        world.entity_mut(entity).insert(gaanim_scene::Visible);
+        let (_, mut timeline, _) = absolute_seek_fixture();
+        timeline.keyframes.clear();
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        (world, timeline, entity)
+    }
+
+    #[test]
+    fn echo_ghosts_show_their_source_at_delayed_times() {
+        let source_id = ObjectId::from_raw(404);
+        let (mut world, mut timeline, source) = visible_echo_fixture();
+        let ghost = |world: &mut World, raw: u64, lag: f64, opacity: f32, rank: u32| {
+            world
+                .spawn((
+                    MobjectId(ObjectId::from_raw(raw)),
+                    gaanim_animation::EchoGhost {
+                        source: source_id,
+                        lag,
+                        opacity,
+                        parent: None,
+                        rank,
+                    },
+                ))
+                .id()
+        };
+        let near = ghost(&mut world, 900, 0.25, 0.5, 1);
+        let far = ghost(&mut world, 901, 1.0, 0.25, 2);
+
+        for target in [1.2, 0.3, 1.9, 0.0, 1.2, 1.75] {
+            timeline.seek(&mut world, target);
+            for (copy, lag, factor) in [(near, 0.25, 0.5), (far, 1.0, 0.25)] {
+                let visible = world.get::<gaanim_scene::Visible>(copy).is_some();
+                if target - lag < 0.0 {
+                    assert!(!visible, "{target} - {lag} is before the timeline");
+                    continue;
+                }
+                let (mut reference_world, mut reference, reference_entity) = visible_echo_fixture();
+                reference.seek(&mut reference_world, target - lag);
+                assert!(visible, "copy {lag} at {target}");
+                assert_eq!(
+                    world.get::<SpatialTransform>(copy),
+                    reference_world.get::<SpatialTransform>(reference_entity),
+                    "transform of copy {lag} at {target}"
+                );
+                assert_eq!(
+                    world.get::<Path2D>(copy).map(|path| path.0.clone()),
+                    reference_world
+                        .get::<Path2D>(reference_entity)
+                        .map(|path| path.0.clone()),
+                    "path of copy {lag} at {target}"
+                );
+                let expected = reference_world.get::<Opacity>(reference_entity).unwrap().0 * factor;
+                assert!((world.get::<Opacity>(copy).unwrap().0 - expected).abs() < 1e-6);
+            }
+        }
+
+        // Copies are not keyframed and disappear with their source.
+        let snapshot = WorldSnapshot::capture(&mut world);
+        assert!(!snapshot.entities.contains_key(&ObjectId::from_raw(900)));
+        world.entity_mut(source).remove::<gaanim_scene::Visible>();
+        let mut hidden = timeline.keyframes[&OrderedFloat(0.0)].clone();
+        hidden.entities.get_mut(&source_id).unwrap().visible = false;
+        timeline.add_keyframe(0.0, hidden);
+        timeline.seek(&mut world, 1.5);
+        assert!(world.get::<gaanim_scene::Visible>(near).is_none());
+        assert!(world.get::<gaanim_scene::Visible>(far).is_none());
     }
 
     #[test]

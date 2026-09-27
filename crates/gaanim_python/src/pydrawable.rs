@@ -50,6 +50,20 @@ pub(crate) const BLEND_MODE_NAMES: [&str; 17] = [
 
 /// Parse the mode of `blend(...)`. `"normal"` is an explicit plain mode, so
 /// a member restyled with it keeps painting plainly inside a blended group.
+/// The echo of `count` copies, or none for a count of 0.
+pub(crate) fn echo_spec(
+    count: u32,
+    delay: f64,
+    decay: f64,
+) -> PyResult<Option<gaanim_api::canvas::EchoSpec>> {
+    if count == 0 {
+        return Ok(None);
+    }
+    gaanim_api::canvas::EchoSpec::new(count, delay, decay)
+        .map(Some)
+        .map_err(PyValueError::new_err)
+}
+
 pub(crate) fn parse_blend_mode(value: &str) -> PyResult<Option<gaanim_core::peniko::BlendMode>> {
     use gaanim_core::peniko::{BlendMode, Compose, Mix};
     let mix = match value {
@@ -399,6 +413,19 @@ impl PyCanvasAnim {
         });
         Ok(Self {
             inner: self.inner.clone().glow(glow),
+        })
+    }
+
+    fn points(&self, points: Vec<(f64, f64)>) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        self.require_drawable_effect("points")?;
+        Ok(Self {
+            inner: self
+                .inner
+                .clone()
+                .points(points)
+                .map_err(PyValueError::new_err)?,
         })
     }
 
@@ -2272,6 +2299,18 @@ impl PyDrawable {
         crate::custom::ensure_authoring_allowed()?;
         let mode = parse_blend_mode(mode)?;
         Ok(Self(self.0.clone().blend(mode)))
+    }
+    /// Whether the scene's motion blur smears this drawable.
+    #[pyo3(signature = (enabled=true))]
+    fn motion_blur(&self, enabled: bool) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self(self.0.clone().motion_blur(enabled)))
+    }
+    /// Trail the drawable with fading copies of itself as it was earlier.
+    #[pyo3(signature = (count=5, *, delay=0.04, decay=0.6))]
+    fn echo(&self, count: u32, delay: f64, decay: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self(self.0.clone().echo(echo_spec(count, delay, decay)?)))
     }
     /// Clip this drawable to another drawable's vector outline.
     #[pyo3(signature = (mask, rule="nonzero", invert=false))]

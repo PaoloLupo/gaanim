@@ -2522,6 +2522,17 @@ impl SceneModel {
             }
         }
 
+        // Echo copies clone their sources once every segment has been
+        // compiled, so they carry every component the sources ended up with.
+        let mut echoes: Vec<_> = object_specs
+            .iter()
+            .filter_map(|(logical, spec)| Some((*id_map.get(logical)?, spec.echo?)))
+            .collect();
+        echoes.sort_by_key(|(id, _)| *id);
+        for (id, echo) in echoes {
+            Self::attach_echo(&mut builder, id, echo);
+        }
+
         // Insert canvas background resource so the renderer draws a visible
         // canvas boundary, distinguishing the canvas area from the window.
         // Uses raw_bounds (no margin) — the visual background covers the full canvas.
@@ -2540,6 +2551,12 @@ impl SceneModel {
             segment_post_processes,
         );
         builder.commands.insert_resource(post_process);
+        match self.motion_blur {
+            Some(blur) => builder.commands.insert_resource(blur),
+            None => builder
+                .commands
+                .remove_resource::<gaanim_renderer::effects::MotionBlur>(),
+        }
 
         // Clear with the canvas color as well. The drawable background is
         // world-space geometry and can be rotated by the camera; using the
@@ -8624,6 +8641,14 @@ impl SceneModel {
         if let Some(blend) = spec.blend {
             Self::apply_blend(builder, mref.id, blend);
         }
+        if spec.motion_blur_exempt {
+            for (entity, _) in Self::hierarchy_entities(builder, mref.id) {
+                builder
+                    .commands
+                    .entity(entity)
+                    .insert(gaanim_renderer::effects::MotionBlurExempt);
+            }
+        }
         if let Some(tips) = &spec.tips {
             Self::attach_tips(builder, mref.id, tips.clone());
         }
@@ -8733,6 +8758,74 @@ impl SceneModel {
         tips.start_entity = tips.start.map(|_| spawn_tip(builder));
         tips.end_entity = tips.end.map(|_| spawn_tip(builder));
         builder.commands.entity(route).insert(tips);
+    }
+
+    /// Spawn `echo`'s copies of `id` and its descendants: render-only
+    /// entities that the timeline re-evaluates at delayed times.
+    fn attach_echo(builder: &mut SceneBuilder, id: ObjectId, echo: super::types::EchoSpec) {
+        // Each node with its parent inside the echoed subtree, parents first.
+        let mut nodes = Vec::new();
+        let mut pending = vec![(id, None)];
+        while let Some((node, parent)) = pending.pop() {
+            let Some(state) = builder.states.get(node) else {
+                continue;
+            };
+            nodes.push((node, state.entity, parent));
+            nodes.extend(
+                state
+                    .child_spans
+                    .iter()
+                    .map(|child| (child.id, child.entity, Some(node))),
+            );
+            pending.extend(
+                state
+                    .children
+                    .iter()
+                    .rev()
+                    .map(|child| (*child, Some(node))),
+            );
+        }
+        for copy in 1..=echo.count() {
+            let mut copies: HashMap<ObjectId, bevy::prelude::Entity> = HashMap::new();
+            for &(node, entity, parent) in &nodes {
+                let ghost_id = builder.next_id();
+                let parent = parent.and_then(|parent| copies.get(&parent).copied());
+                let root = parent.is_none();
+                let ghost = builder
+                    .commands
+                    .entity(entity)
+                    .clone_and_spawn_with_opt_in(|cloner| {
+                        cloner.allow::<(
+                            gaanim_scene::RasterImage,
+                            gaanim_scene::HudOverlay,
+                            gaanim_renderer::effects::DropShadow,
+                            gaanim_renderer::effects::Glow,
+                            gaanim_renderer::effects::GaussianBlur,
+                            gaanim_renderer::effects::ClipMask,
+                            gaanim_renderer::effects::StrokeAlign,
+                            gaanim_renderer::effects::ElementBlend,
+                            gaanim_renderer::effects::ViewLayer,
+                            gaanim_renderer::effects::MotionBlurExempt,
+                        )>();
+                    })
+                    .insert((
+                        gaanim_scene::MobjectId(ghost_id),
+                        gaanim_animation::EchoGhost {
+                            source: node,
+                            lag: echo.delay() * f64::from(copy),
+                            opacity: if root {
+                                echo.decay().powi(copy as i32)
+                            } else {
+                                1.0
+                            },
+                            parent,
+                            rank: copy,
+                        },
+                    ))
+                    .id();
+                copies.insert(node, ghost);
+            }
+        }
     }
 
     /// Composites `id` and its drawn descendants with `blend`.
@@ -12758,6 +12851,113 @@ mod tests {
             .find(|(object, _)| object.0 == id)
             .unwrap()
             .1
+    }
+
+    #[test]
+    fn points_move_each_vertex_straight_and_seek_exactly() {
+        let mut canvas = SceneModel::new(640, 360);
+        let square = canvas.polygon(vec![(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)]);
+        let target = vec![(1.0, -1.0), (3.0, 1.0), (1.0, 3.0), (-1.0, 1.0)];
+        assert!(square.animate().points(vec![(0.0, 0.0)]).is_err());
+        assert!(square.animate().points(vec![(f64::NAN, 0.0); 4]).is_err());
+        assert!(canvas.circle(1.0).animate().points(target.clone()).is_err());
+        canvas.play(vec![
+            square
+                .animate()
+                .points(target)
+                .unwrap()
+                .duration(1.0)
+                .rate_func(gaanim_math::RateFunc::Linear),
+        ]);
+        canvas.wait(0.5);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let id = ObjectId::from_raw(square.id.as_raw() - 1);
+        let mut vertices_at = |time: f64| {
+            timeline.seek(&mut world, time);
+            let path = world
+                .query::<(&MobjectId, &gaanim_scene::Path2D)>()
+                .iter(&world)
+                .find(|(object, _)| object.0 == id)
+                .unwrap()
+                .1
+                .0
+                .clone();
+            path.elements()
+                .iter()
+                .filter_map(|element| match element {
+                    gaanim_core::kurbo::PathEl::MoveTo(point)
+                    | gaanim_core::kurbo::PathEl::LineTo(point) => Some((point.x, point.y)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            vertices_at(1.2),
+            [(1.0, -1.0), (3.0, 1.0), (1.0, 3.0), (-1.0, 1.0)]
+        );
+        assert_eq!(
+            vertices_at(0.5),
+            [(0.5, -0.5), (2.5, 0.5), (1.5, 2.5), (-0.5, 1.5)]
+        );
+        assert_eq!(
+            vertices_at(0.0),
+            [(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)]
+        );
+    }
+
+    #[test]
+    fn echo_copies_trail_their_drawable_through_seeks() {
+        let mut canvas = SceneModel::new(640, 360);
+        let ball = canvas.circle(0.5).move_to(-3.0, 0.0).echo(Some(
+            super::super::types::EchoSpec::new(3, 0.1, 0.5).unwrap(),
+        ));
+        canvas.play(vec![ball.animate().move_to(3.0, 0.0).duration(1.0)]);
+        canvas.wait(0.5);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+
+        let mut copies: Vec<(Entity, gaanim_animation::EchoGhost)> = world
+            .query::<(Entity, &gaanim_animation::EchoGhost)>()
+            .iter(&world)
+            .map(|(entity, echo)| (entity, echo.clone()))
+            .collect();
+        copies.sort_by_key(|(_, echo)| echo.rank);
+        let ranks: Vec<_> = copies.iter().map(|(_, echo)| echo.rank).collect();
+        assert_eq!(ranks, [1, 2, 3]);
+        for ((_, echo), (lag, opacity)) in
+            copies.iter().zip([(0.1, 0.5), (0.2, 0.25), (0.3, 0.125)])
+        {
+            assert!((echo.lag - lag).abs() < 1e-12);
+            assert!((echo.opacity - opacity).abs() < 1e-6);
+        }
+
+        for time in [0.6, 0.25, 1.4, 0.05] {
+            let expected: Vec<Option<f64>> = copies
+                .iter()
+                .map(|(_, echo)| {
+                    let earlier = time - echo.lag;
+                    (earlier >= 0.0).then(|| {
+                        timeline.seek(&mut world, earlier);
+                        transform_of(&mut world, &ball).translation.x
+                    })
+                })
+                .collect();
+            timeline.seek(&mut world, time);
+            for ((copy, echo), expected) in copies.iter().zip(expected) {
+                let visible = world.get::<gaanim_scene::Visible>(*copy).is_some();
+                match expected {
+                    None => assert!(!visible, "copy {} at {time}", echo.rank),
+                    Some(x) => {
+                        assert!(visible, "copy {} at {time}", echo.rank);
+                        let actual = world.get::<SpatialTransform>(*copy).unwrap().translation.x;
+                        assert!(
+                            (actual - x).abs() < 1e-9,
+                            "copy {} at {time}: {actual} vs {x}",
+                            echo.rank
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

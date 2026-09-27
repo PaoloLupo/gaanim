@@ -1126,6 +1126,26 @@ impl DrawableHandle {
         self.update_style(|spec| spec.blend = mode)
     }
 
+    /// Trail this drawable with fading copies of itself as it was earlier
+    /// (see [`EchoSpec`]); `None` removes them.
+    ///
+    /// Each copy replays the drawable's own animations with a delay, so it
+    /// is exact at any seek, in every export format and in SVG. Copies share
+    /// the drawable's parent and draw beneath it; they are hidden while the
+    /// drawable is hidden and do not reach back across a segment cut. Motion
+    /// from updaters, reactive positions and parent groups is not delayed.
+    pub fn echo(self, echo: Option<super::types::EchoSpec>) -> Self {
+        self.update_style(|spec| spec.echo = echo)
+    }
+
+    /// Whether the scene's motion blur smears this drawable (the default).
+    /// A drawable with `false`, and its members, draws in every sub-frame as
+    /// it is at the frame time, e.g. to keep a title or HUD sharp while the
+    /// camera moves.
+    pub fn motion_blur(self, enabled: bool) -> Self {
+        self.update_style(|spec| spec.motion_blur_exempt = !enabled)
+    }
+
     /// Draw `start` and `end` tips on the path's ends, filled with its stroke
     /// paint; both `None` removes them. Arrowheads shorten the stroke under
     /// them and follow the path's current ends, so trims, `create` and

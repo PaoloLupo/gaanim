@@ -154,7 +154,7 @@ fn sync_optional<T: Component + PartialEq>(entity_mut: &mut EntityWorldMut<'_>, 
 /// Reconcile the native local pose without re-registering an unchanged parent.
 /// Repeated ChildOf insertion runs relationship hooks for every text glyph,
 /// even when its parent and native transforms already match the snapshot.
-fn restore_parent(world: &mut World, entity: Entity, parent: Option<Entity>) {
+pub(crate) fn restore_parent(world: &mut World, entity: Entity, parent: Option<Entity>) {
     use bevy::prelude::{ChildOf, GlobalTransform, Transform};
 
     if world.get::<ChildOf>(entity).map(ChildOf::parent) != parent {
@@ -190,7 +190,7 @@ fn restore_parent(world: &mut World, entity: Entity, parent: Option<Entity>) {
 ///
 /// Restoration remains complete and deterministic, while equal renderer-invalidating
 /// values are left untouched so Bevy does not report false geometry/style changes.
-fn insert_snapshot_components(
+pub(crate) fn insert_snapshot_components(
     entity_mut: &mut EntityWorldMut<'_>,
     snap: &EntitySnapshot,
     restore_scene_visibility: bool,
@@ -331,6 +331,10 @@ impl WorldSnapshot {
         let mut captured_data = Vec::new();
 
         for (entity, mobj_id) in query.iter(world) {
+            // Echo copies are re-evaluated from their sources after every seek.
+            if world.get::<gaanim_animation::EchoGhost>(entity).is_some() {
+                continue;
+            }
             if let Some(tick) = tick
                 && !world
                     .entity(entity)
@@ -483,6 +487,9 @@ impl WorldSnapshot {
         {
             let mut query = world.query::<(Entity, &MobjectId)>();
             for (entity, mobj_id) in query.iter(world) {
+                if world.get::<gaanim_animation::EchoGhost>(entity).is_some() {
+                    continue;
+                }
                 existing_entities.push((entity, mobj_id.0));
                 entity_map.insert(mobj_id.0, entity);
             }

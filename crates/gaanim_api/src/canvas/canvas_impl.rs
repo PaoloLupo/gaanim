@@ -2025,6 +2025,8 @@ pub struct SceneModel {
     /// WGSL post-process passes applied in order to the rendered 2D scene
     /// inside the camera frame; empty for none.
     pub post_process: Vec<gaanim_renderer::post_process::PostProcessPass>,
+    /// Motion blur of exported frames and snapshots; `None` for sharp frames.
+    pub motion_blur: Option<gaanim_renderer::effects::MotionBlur>,
     /// Canonical name of the selected theme.
     pub theme: Option<String>,
     /// Complete semantic colors and typography for the selected theme.
@@ -2070,6 +2072,7 @@ impl SceneModel {
             background_paint: None,
             background_overridden: false,
             post_process: Vec::new(),
+            motion_blur: None,
             theme: None,
             theme_style: None,
             font_family_override: None,
@@ -2158,6 +2161,12 @@ impl SceneModel {
         self.background = paint.as_ref().map(|paint| paint.fallback_color());
         self.background_paint = paint;
         self.background_overridden = true;
+    }
+
+    /// Blur exported frames and snapshots over their shutter, or `None` for
+    /// sharp frames. The interactive preview always stays sharp.
+    pub fn set_motion_blur(&mut self, blur: Option<gaanim_renderer::effects::MotionBlur>) {
+        self.motion_blur = blur;
     }
 
     /// Replace the scene post-process chain; an empty chain removes it.

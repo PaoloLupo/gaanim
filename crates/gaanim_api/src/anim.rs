@@ -121,6 +121,8 @@ pub struct PropertyAnimation {
     pub shadow: Option<Option<gaanim_renderer::effects::DropShadow>>,
     /// Target dash offset of every stroke, in scene units.
     pub dash_offset: Option<f64>,
+    /// Target vertices of a polygon or polyline, reached vertex by vertex.
+    pub points: Option<Vec<(f64, f64)>>,
 }
 
 impl PropertyAnimation {
@@ -145,6 +147,7 @@ impl PropertyAnimation {
             && self.fill_level.is_none()
             && self.media_frame.is_none()
             && self.dash_offset.is_none()
+            && self.points.is_none()
             && !self.has_effects()
     }
 
@@ -163,6 +166,7 @@ impl PropertyAnimation {
             && self.fill_level.is_none()
             && self.media_frame.is_none()
             && self.dash_offset.is_none()
+            && self.points.is_none()
             && !self.has_effects()
     }
 }
@@ -374,6 +378,11 @@ pub enum AnimationType {
         glow: Option<Option<gaanim_renderer::effects::Glow>>,
         blur: Option<Option<gaanim_renderer::effects::GaussianBlur>>,
         shadow: Option<Option<gaanim_renderer::effects::DropShadow>>,
+    },
+    /// Move each vertex of a polygon or polyline straight to its new
+    /// position, in the coordinates the shape was declared in.
+    PathPointsTo {
+        points: Vec<(f64, f64)>,
     },
     /// Move the dash pattern of every drawn stroke to `to` (scene units).
     DashOffsetTo {

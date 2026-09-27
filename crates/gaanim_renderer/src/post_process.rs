@@ -12,6 +12,10 @@ use std::sync::Arc;
 use thiserror::Error;
 use vello::wgpu;
 
+use crate::post_bloom::{
+    self, BLOOM_COMPOSITE_PREAMBLE, BloomChain, BloomDispatch, BloomPipelines,
+};
+
 const SHADER_PREAMBLE: &str = r#"
 struct GaanimPostParams {
     // Camera frame origin (xy) and size (zw) in target pixels.
@@ -87,6 +91,9 @@ pub struct PostProcessShader {
     source: Arc<str>,
     uniforms: Arc<[Arc<str>]>,
     data: Option<Arc<[[f32; 4]]>>,
+    /// Whether the pass first builds a bloom mip chain from its input and
+    /// reads it with `gaanim_bloom(uv)`.
+    bloom: bool,
     /// The complete module: the preamble, `source` and the entry point.
     complete: Arc<str>,
 }
@@ -121,7 +128,26 @@ impl PostProcessShader {
         source: impl Into<Arc<str>>,
         uniforms: impl IntoIterator<Item = N>,
     ) -> Result<Self, PostProcessError> {
-        Self::build(source.into(), uniforms, None)
+        Self::build(source.into(), uniforms, None, false)
+    }
+
+    /// A shader that composites a bloom of its input, read with
+    /// `gaanim_bloom(uv)` in linear light. The chain reads the uniforms
+    /// `threshold` (sRGB brightness where glow starts) and `radius` (0..1
+    /// spread), which `uniforms` must declare.
+    pub(crate) fn with_bloom<N: AsRef<str>>(
+        source: impl Into<Arc<str>>,
+        uniforms: impl IntoIterator<Item = N>,
+    ) -> Result<Self, PostProcessError> {
+        let shader = Self::build(source.into(), uniforms, None, true)?;
+        for name in ["threshold", "radius"] {
+            if !shader.uniforms.iter().any(|uniform| &**uniform == name) {
+                return Err(PostProcessError::InvalidUniforms(format!(
+                    "a bloom pass must declare the uniform {name:?}"
+                )));
+            }
+        }
+        Ok(shader)
     }
 
     /// A shader that also reads `data` from `gaanim_data`, such as a lookup
@@ -137,25 +163,27 @@ impl PostProcessShader {
                 "post-process data must not be empty".to_string(),
             ));
         }
-        Self::build(source.into(), uniforms, Some(data))
+        Self::build(source.into(), uniforms, Some(data), false)
     }
 
     fn build<N: AsRef<str>>(
         source: Arc<str>,
         uniforms: impl IntoIterator<Item = N>,
         data: Option<Arc<[[f32; 4]]>>,
+        bloom: bool,
     ) -> Result<Self, PostProcessError> {
         let uniforms = uniforms
             .into_iter()
             .map(|name| Arc::<str>::from(name.as_ref()))
             .collect::<Arc<[_]>>();
         validate_uniform_names(&uniforms)?;
-        let complete: Arc<str> = complete_shader(&source, &uniforms, data.is_some()).into();
+        let complete: Arc<str> = complete_shader(&source, &uniforms, data.is_some(), bloom).into();
         validate_post_source(&source, &complete)?;
         Ok(Self {
             source,
             uniforms,
             data,
+            bloom,
             complete,
         })
     }
@@ -186,6 +214,15 @@ impl PostProcessShader {
     /// Names of the declared uniforms, in declaration order.
     pub fn uniforms(&self) -> &[Arc<str>] {
         &self.uniforms
+    }
+
+    /// Value of the uniform `name` among `values`, given in declaration order.
+    fn uniform_value(&self, values: &[f32], name: &str) -> Option<f32> {
+        let index = self
+            .uniforms
+            .iter()
+            .position(|uniform| &**uniform == name)?;
+        values.get(index).copied()
     }
 }
 
@@ -359,6 +396,8 @@ struct PostPipeline {
 struct PreparedPass {
     pipeline: Arc<PostPipeline>,
     bind_group: wgpu::BindGroup,
+    /// Bloom chain stages recorded before the pass, if it composites one.
+    bloom: Vec<BloomDispatch>,
 }
 
 struct PreparedFrame {
@@ -373,6 +412,7 @@ struct PreparedFrame {
 struct PassBuffers {
     uniforms: Option<wgpu::Buffer>,
     data: Option<(Arc<[[f32; 4]]>, wgpu::Buffer)>,
+    bloom: Option<BloomChain>,
 }
 
 /// Applies a [`PostProcessRequest`] to a render target on the GPU.
@@ -389,6 +429,7 @@ pub struct GpuPostProcess {
     sampler: Option<wgpu::Sampler>,
     params: Option<wgpu::Buffer>,
     buffers: Vec<PassBuffers>,
+    bloom: Option<BloomPipelines>,
     scratch: Option<wgpu::Texture>,
     frame: Option<PreparedFrame>,
 }
@@ -568,6 +609,35 @@ impl GpuPostProcess {
                     resource: buffer.as_entire_binding(),
                 });
             }
+            let mut bloom = Vec::new();
+            let bloom_view = shader.bloom.then(|| {
+                let pipelines = self
+                    .bloom
+                    .get_or_insert_with(|| BloomPipelines::new(device));
+                let chain = match buffers.bloom.take() {
+                    Some(chain) if chain.fits(region[2], region[3]) => chain,
+                    _ => BloomChain::new(device, region[2], region[3]),
+                };
+                bloom = chain.prepare(
+                    device,
+                    queue,
+                    pipelines,
+                    &sampler,
+                    target,
+                    region,
+                    shader.uniform_value(values, "threshold").unwrap_or(0.8),
+                    shader.uniform_value(values, "radius").unwrap_or(0.5),
+                );
+                let view = chain.result().create_view(&Default::default());
+                buffers.bloom = Some(chain);
+                view
+            });
+            if let Some(view) = &bloom_view {
+                entries.push(wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(view),
+                });
+            }
             let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("gaanim-post-process-bind-group"),
                 layout: &pipeline.layout,
@@ -576,6 +646,7 @@ impl GpuPostProcess {
             passes.push(PreparedPass {
                 pipeline,
                 bind_group,
+                bloom,
             });
         }
         self.frame = Some(PreparedFrame {
@@ -598,6 +669,9 @@ impl GpuPostProcess {
         };
         let [x, y, width, height] = frame.region;
         for pass in &frame.passes {
+            if let Some(pipelines) = &self.bloom {
+                post_bloom::encode(encoder, pipelines, &pass.bloom);
+            }
             {
                 let mut compute = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("gaanim-post-process-pass"),
@@ -639,6 +713,7 @@ impl GpuPostProcess {
             &shader.complete,
             !shader.uniforms.is_empty(),
             shader.data.is_some(),
+            shader.bloom,
         );
         let pipeline = match pollster::block_on(error_scope.pop()) {
             None => Some(Arc::new(pipeline)),
@@ -654,7 +729,7 @@ impl GpuPostProcess {
 }
 
 impl PostPipeline {
-    fn new(device: &wgpu::Device, complete: &str, uniforms: bool, data: bool) -> Self {
+    fn new(device: &wgpu::Device, complete: &str, uniforms: bool, data: bool, bloom: bool) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("gaanim-post-process-shader"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(complete)),
@@ -703,6 +778,16 @@ impl PostPipeline {
                     ty: wgpu::BufferBindingType::Storage { read_only: true },
                     has_dynamic_offset: false,
                     min_binding_size: None,
+                },
+            ));
+        }
+        if bloom {
+            entries.push(entry(
+                6,
+                wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
                 },
             ));
         }
@@ -772,7 +857,7 @@ fn uniform_bytes(values: &[f32]) -> Vec<u8> {
     bytes
 }
 
-fn complete_shader(source: &str, uniforms: &[Arc<str>], data: bool) -> String {
+fn complete_shader(source: &str, uniforms: &[Arc<str>], data: bool, bloom: bool) -> String {
     let mut declarations = String::new();
     if !uniforms.is_empty() {
         declarations.push_str("struct GaanimUniforms {\n");
@@ -787,6 +872,9 @@ fn complete_shader(source: &str, uniforms: &[Arc<str>], data: bool) -> String {
         declarations.push_str(
             "\n@group(0) @binding(5)\nvar<storage, read> gaanim_data: array<vec4<f32>>;\n",
         );
+    }
+    if bloom {
+        declarations.push_str(BLOOM_COMPOSITE_PREAMBLE);
     }
     format!("{SHADER_PREAMBLE}\n{declarations}\n{source}\n{SHADER_ENTRY_POINT}")
 }
@@ -1144,5 +1232,92 @@ mod tests {
         assert!((i32::from(pixel[1]) - (255 - 100)).abs() <= 1, "{pixel:?}");
         assert_eq!(pixel[2], 0);
         assert_eq!(pixel[3], 255);
+    }
+
+    #[test]
+    fn gpu_bloom_spreads_light_around_bright_pixels_only() {
+        let Some(gpu) = test_gpu() else {
+            eprintln!("skipped: no GPU adapter");
+            return;
+        };
+        let (width, height) = (256_u32, 64_u32);
+        // Black with a white 8x8 square on the left and a dim gray one far to
+        // the right, below the threshold.
+        let pixels: Vec<u8> = (0..width * height)
+            .flat_map(|index| {
+                let (x, y) = (index % width, index / width);
+                let inside = |x0: u32| (x0..x0 + 8).contains(&x) && (28..36).contains(&y);
+                if inside(28) {
+                    [255, 255, 255, 255]
+                } else if inside(220) {
+                    [90, 90, 90, 255]
+                } else {
+                    [0, 0, 0, 255]
+                }
+            })
+            .collect();
+        let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        gpu.queue.write_texture(
+            target.as_image_copy(),
+            &pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: None,
+            },
+            target.size(),
+        );
+        let bloom = crate::post_presets::PostPreset::Bloom.shader();
+        let request = CanvasPostProcess {
+            passes: vec![PostProcessPass::constant(bloom, &[0.8, 1.0, 0.6]).unwrap()],
+            ..Default::default()
+        }
+        .request(0.0, kurbo::Rect::new(0.0, 0.0, 256.0, 64.0))
+        .unwrap();
+        let mut post = GpuPostProcess::default();
+        // Twice, to reuse the chain's textures on the second frame.
+        for _ in 0..2 {
+            assert!(post.prepare(&gpu.device, &gpu.queue, &target, Some(&request)));
+            let mut encoder = gpu.device.create_command_encoder(&Default::default());
+            post.encode(&mut encoder);
+            gpu.queue.submit(Some(encoder.finish()));
+            gpu.queue.write_texture(
+                target.as_image_copy(),
+                &pixels,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(width * 4),
+                    rows_per_image: None,
+                },
+                target.size(),
+            );
+        }
+        assert!(post.prepare(&gpu.device, &gpu.queue, &target, Some(&request)));
+        let mut encoder = gpu.device.create_command_encoder(&Default::default());
+        post.encode(&mut encoder);
+        gpu.queue.submit(Some(encoder.finish()));
+        let out = gpu.read(&target);
+        let red = |x: u32, y: u32| out[((y * width + x) * 4) as usize];
+        assert_eq!(red(31, 31), 255, "the bright square stays white");
+        assert!(red(40, 32) > 20, "light spreads next to the bright square");
+        assert!(red(40, 32) > red(50, 32), "and fades with distance");
+        assert!(red(224, 32).abs_diff(90) <= 2, "dim pixels do not bloom");
+        assert!(red(212, 32) <= 3, "nothing glows around dim pixels");
+        assert!(red(252, 2) <= 3, "far corners stay dark");
     }
 }

@@ -2,11 +2,13 @@ use bevy::prelude::*;
 
 pub mod background;
 mod background_gpu;
+pub mod background_presets;
 pub mod canvas;
 pub mod diagnostics;
 pub mod effects;
 pub mod lottie;
 pub mod pipeline;
+mod post_bloom;
 pub mod post_presets;
 pub mod post_process;
 mod post_process_gpu;

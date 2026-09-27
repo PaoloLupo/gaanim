@@ -1105,6 +1105,40 @@ scene.render()
 ```
 ]
 
+#api-entry(
+  name: "Anim.points",
+  kind: "method",
+  params: (
+    (name: "points", type: "Sequence[tuple[float, float]]", default: none, desc: [Posición final de cada vértice, en las coordenadas en que se declaró la figura.]),
+  ),
+  returns: (type: "Anim", desc: [Morph vértice a vértice.]),
+  desc: [Lleva cada vértice de un polígono o una polilínea en línea recta a su nueva posición: el vértice `i` va a `points[i]`. A diferencia de `transform_to` no remuestrea el contorno, así que cada fotograma es la mezcla exacta de los dos y las figuras de píxel o técnicas conservan sus esquinas. Un `move_to` o `shift` posterior se sigue aplicando encima. La figura conserva su número de vértices: otro número de puntos, una figura que no sea polígono o polilínea, o un punto no finito lanzan `ValueError`. Se combina con `fill`, `move_to` y los demás destinos de propiedades en un mismo `Anim`, y `echo` repite el morph en sus copias.],
+)[
+```python
+# show-code: true
+from gaanim import Easing, Scene
+# El símbolo de Gaanim: un fotograma de píxeles que avanza y deja los anteriores con echo.
+FRAMES = ((8,) * 8, (6,) + (8,) * 6 + (6,), (4, 6, 8, 8, 8, 8, 6, 4))
+COLORS = ("#3F37A8", "#7C6CFF", "#FFC933")
+
+def outline(widths, cx, pixel=0.5):
+    top, right, left = len(widths) * pixel / 2, [], []
+    for row, width in enumerate(widths):
+        y0, y1, half = top - row * pixel, top - (row + 1) * pixel, width * pixel / 2
+        right += [(cx + half, y0), (cx + half, y1)]
+        left += [(cx - half, y0), (cx - half, y1)]
+    return right + left[::-1]
+
+scene = Scene(frame=(16, 9), background="#1A1A1A")
+symbol = scene.geometry.polygon(outline(FRAMES[0], -1)).fill(COLORS[0]).echo(2, delay=0.6, decay=1.0)
+for index in (1, 2):
+    scene.play([symbol.animate.points(outline(FRAMES[index], index - 1)).fill(COLORS[index]).duration(0.6).easing(Easing.LINEAR)])
+scene.wait(1.0)
+# output: preview.webp
+scene.render()
+```
+]
+
 == Tiempo
 
 #api-entry(

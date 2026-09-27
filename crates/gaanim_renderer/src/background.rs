@@ -15,6 +15,16 @@ var gaanim_output: texture_storage_2d<rgba8unorm, write>;
 
 @group(0) @binding(1)
 var<uniform> gaanim_background_params: vec4<f32>;
+
+// Scene frame size in world units, or the output aspect at unit height when
+// the host did not report the frame.
+fn gaanim_frame_size(resolution: vec2<f32>) -> vec2<f32> {
+    let frame = gaanim_background_params.yz;
+    if (frame.x > 0.0 && frame.y > 0.0) {
+        return frame;
+    }
+    return vec2<f32>(resolution.x / resolution.y, 1.0);
+}
 "#;
 
 const ANIMATED_SHADER_ENTRY_POINT: &str = r#"
@@ -74,15 +84,18 @@ impl BackgroundPaint {
         }
     }
 
+    /// Resolve the paint for a `width`x`height` raster of a scene frame
+    /// `frame` world units wide and tall.
     pub fn resolve_brush(
         &self,
         width: u32,
         height: u32,
         time_seconds: f64,
+        frame: (f64, f64),
     ) -> Result<Brush, ShaderBackgroundError> {
         match self {
             Self::Brush(brush) => Ok(brush.clone()),
-            Self::Shader(shader) => shader.resolve(width, height, time_seconds),
+            Self::Shader(shader) => shader.resolve_in_frame(width, height, time_seconds, frame),
         }
     }
 
@@ -108,7 +121,7 @@ pub struct ShaderBackground {
     gpu_image: Arc<Mutex<Option<ImageData>>>,
 }
 
-type CachedShaderRaster = ((u32, u32, u32), Result<Brush, ShaderBackgroundError>);
+type CachedShaderRaster = ([u32; 5], Result<Brush, ShaderBackgroundError>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ShaderContract {
@@ -188,18 +201,37 @@ impl ShaderBackground {
         height: u32,
         time_seconds: f64,
     ) -> Result<Brush, ShaderBackgroundError> {
+        self.resolve_in_frame(width, height, time_seconds, (0.0, 0.0))
+    }
+
+    /// [`Self::resolve`] for a scene frame `frame` world units wide and tall,
+    /// which the shader reads with `gaanim_frame_size`.
+    pub fn resolve_in_frame(
+        &self,
+        width: u32,
+        height: u32,
+        time_seconds: f64,
+        frame: (f64, f64),
+    ) -> Result<Brush, ShaderBackgroundError> {
         if width == 0 || height == 0 {
             return Err(ShaderBackgroundError::InvalidSize { width, height });
         }
         let time = shader_time(time_seconds, self.contract)?;
-        let key = (width, height, time.to_bits());
+        let frame = frame_size(frame);
+        let key = [
+            width,
+            height,
+            time.to_bits(),
+            frame[0].to_bits(),
+            frame[1].to_bits(),
+        ];
         let mut cache = self.cache.lock().expect("shader background cache poisoned");
         if let Some((cached_key, cached)) = &*cache
             && *cached_key == key
         {
             return cached.clone();
         }
-        let rendered = rasterize_shader(self, width, height, time)
+        let rendered = rasterize_shader(self, width, height, time, frame)
             .map(|image| Brush::Image(ImageBrush::new(image)));
         if let Err(error) = &rendered {
             bevy::log::error!("background shader failed; using its fallback color: {error}");
@@ -223,6 +255,7 @@ impl ShaderBackground {
             shader: self.clone(),
             image: self.gpu_image(width, height),
             time: shader_time(time_seconds, self.contract)?,
+            frame: [0.0; 2],
         })
     }
 
@@ -380,10 +413,22 @@ fn shader_output_texture(
     })
 }
 
-fn time_uniform_bytes(time: f32) -> [u8; 16] {
+fn time_uniform_bytes(time: f32, frame: [f32; 2]) -> [u8; 16] {
     let mut bytes = [0_u8; 16];
     bytes[..4].copy_from_slice(&time.to_ne_bytes());
+    bytes[4..8].copy_from_slice(&frame[0].to_ne_bytes());
+    bytes[8..12].copy_from_slice(&frame[1].to_ne_bytes());
     bytes
+}
+
+/// A positive finite frame size in `f32`, or zeros for an unknown frame.
+fn frame_size(frame: (f64, f64)) -> [f32; 2] {
+    let size = [frame.0 as f32, frame.1 as f32];
+    if size.iter().all(|value| value.is_finite() && *value > 0.0) {
+        size
+    } else {
+        [0.0; 2]
+    }
 }
 
 /// One shader background frame to draw with [`GpuShaderBackgrounds`].
@@ -392,12 +437,19 @@ pub struct ShaderBackgroundRequest {
     shader: ShaderBackground,
     image: ImageData,
     time: f32,
+    frame: [f32; 2],
 }
 
 impl ShaderBackgroundRequest {
     /// Placeholder image to draw with an image brush.
     pub fn image(&self) -> &ImageData {
         &self.image
+    }
+
+    /// Report a scene frame `frame` world units wide and tall to the shader.
+    pub fn in_frame(mut self, frame: (f64, f64)) -> Self {
+        self.frame = frame_size(frame);
+        self
     }
 }
 
@@ -421,7 +473,8 @@ struct GpuShaderTarget {
     time: wgpu::Buffer,
     /// `None` when the pipeline failed to build; the texture holds the fallback.
     pipeline: Option<(Arc<CompiledShader>, wgpu::BindGroup)>,
-    rendered_time: Option<u32>,
+    /// Time and frame size bits of the texture contents.
+    rendered_time: Option<[u32; 3]>,
 }
 
 impl GpuShaderTarget {
@@ -488,12 +541,20 @@ impl GpuShaderBackgrounds {
                 renderer.override_image(&target.image, Some(target.texture_copy()));
                 target
             });
-        let time = request.time.to_bits();
+        let time = [
+            request.time.to_bits(),
+            request.frame[0].to_bits(),
+            request.frame[1].to_bits(),
+        ];
         if target.rendered_time == Some(time) {
             return;
         }
         if let Some((compiled, bind_group)) = &target.pipeline {
-            queue.write_buffer(&target.time, 0, &time_uniform_bytes(request.time));
+            queue.write_buffer(
+                &target.time,
+                0,
+                &time_uniform_bytes(request.time, request.frame),
+            );
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("gaanim-background-shader-commands"),
             });
@@ -697,6 +758,7 @@ fn rasterize_shader(
     width: u32,
     height: u32,
     time: f32,
+    frame: [f32; 2],
 ) -> Result<ImageData, ShaderBackgroundError> {
     let gpu = shader_gpu()?;
     let _operation = gpu
@@ -711,7 +773,7 @@ fn rasterize_shader(
     let texture = shader_output_texture(device, width, height, wgpu::TextureUsages::COPY_SRC);
     let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("gaanim-background-shader-time"),
-        contents: &time_uniform_bytes(time),
+        contents: &time_uniform_bytes(time, frame),
         usage: wgpu::BufferUsages::UNIFORM,
     });
     let bind_group = compiled.bind_group(device, &texture, &uniform);

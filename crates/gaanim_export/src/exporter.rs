@@ -674,6 +674,29 @@ where
         app.update();
         check_custom_animation_errors(app.world())?;
 
+        if let Some(blur) = frame_motion_blur(app.world()) {
+            let render_started_at = Instant::now();
+            let frame_data = render_motion_blurred(
+                &mut app,
+                &mut gpu,
+                &config,
+                current_time,
+                f64::from(config.fps),
+                blur,
+            )?;
+            render_gpu_time += render_started_at.elapsed();
+            let encoder_wait_started_at = Instant::now();
+            encoder.push_frame(frame_data).map_err(|e| match e {
+                ExportError::FFmpeg(_) => e,
+                other => ExportError::Capture(format!("Encoder push error: {}", other)),
+            })?;
+            encoder_wait_time += encoder_wait_started_at.elapsed();
+            pb.inc(1);
+            export_progress(&telemetry, frame_idx + 1, total_frames);
+            current_time += frame_time_step;
+            continue;
+        }
+
         let (vello_scene, post_process) = {
             let resolved_camera = frame_camera(app.world());
             let raw_scene = gaanim_renderer::pipeline::compile_scene_from_world(
@@ -902,6 +925,29 @@ where
         check_custom_animation_errors(app.world())?;
         timeline_update += phase_started.elapsed();
 
+        if let Some(blur) = frame_motion_blur(app.world()) {
+            let phase_started = Instant::now();
+            let rgba = render_motion_blurred(
+                &mut app,
+                &mut gpu,
+                &config,
+                seek_time,
+                f64::from(config.fps),
+                blur,
+            )?;
+            render_readback += phase_started.elapsed();
+            let flow = on_frame(CapturedFrame {
+                time,
+                width: config.width,
+                height: config.height,
+                rgba,
+            });
+            if flow.is_break() {
+                break;
+            }
+            continue;
+        }
+
         let phase_started = Instant::now();
         let resolved_camera = frame_camera(app.world());
         let raw_scene = gaanim_renderer::pipeline::compile_scene_from_world(
@@ -976,6 +1022,186 @@ where
     }
 
     Ok(())
+}
+
+/// The scene's motion blur, if it has one.
+fn frame_motion_blur(world: &World) -> Option<gaanim_renderer::effects::MotionBlur> {
+    world
+        .get_resource::<gaanim_renderer::effects::MotionBlur>()
+        .copied()
+}
+
+/// Compile and render the frame the world was just updated to.
+fn render_updated_world(
+    app: &mut App,
+    gpu: &mut GpuContext,
+    config: &ExportConfig,
+    time: f64,
+    pins: &mut gaanim_renderer::pipeline::PinnedElements,
+) -> Result<Vec<u8>> {
+    let resolved_camera = frame_camera(app.world());
+    let raw_scene = gaanim_renderer::pipeline::compile_scene_pinned(
+        app.world_mut(),
+        resolved_camera.as_ref().map(|resolved| &resolved.camera),
+        pins,
+    );
+    let mut scene = vello::Scene::new();
+    scene.append(
+        &raw_scene,
+        Some(capture_camera_to_vello_transform(
+            resolved_camera.as_ref(),
+            config.width,
+            config.height,
+            config.fit,
+        )),
+    );
+    let perspective = resolved_camera.as_ref().is_some_and(|resolved| {
+        matches!(
+            resolved.camera.projection,
+            gaanim_math::Projection::Perspective { .. }
+        )
+    });
+    let post_process = export_post_process(
+        app.world(),
+        perspective,
+        capture_camera_frame(
+            resolved_camera.as_ref(),
+            config.width,
+            config.height,
+            config.fit,
+        ),
+    );
+    let background = app
+        .world()
+        .get_resource::<ClearColor>()
+        .map(|clear| {
+            let rgba = clear.0.to_srgba();
+            vello::peniko::Color::from_rgba8(
+                (rgba.red * 255.0) as u8,
+                (rgba.green * 255.0) as u8,
+                (rgba.blue * 255.0) as u8,
+                (rgba.alpha * 255.0) as u8,
+            )
+        })
+        .unwrap_or(vello::peniko::Color::BLACK);
+    gpu.render_frame(&scene, background, post_process.as_ref())
+        .map_err(|error| frame_render_error(error, time))
+}
+
+/// Render the frame at `time`, which the world was just updated to, as the
+/// average of its motion blur sub-frames in linear light.
+///
+/// Sub-frames stay inside the segment that shows the frame, so a cut never
+/// bleeds into it, and motion-blur-exempt drawables keep their look at `time`.
+fn render_motion_blurred(
+    app: &mut App,
+    gpu: &mut GpuContext,
+    config: &ExportConfig,
+    time: f64,
+    fps: f64,
+    blur: gaanim_renderer::effects::MotionBlur,
+) -> Result<Vec<u8>> {
+    let (start, end) = {
+        let timeline = app.world().resource::<Timeline>();
+        let duration = timeline.cached_duration;
+        timeline
+            .segments
+            .iter()
+            .rev()
+            .find(|segment| segment.start_time <= time + 1e-9 && time <= segment.end_time + 1e-9)
+            // The end of a segment is the first instant of the next one.
+            .map_or((0.0, duration), |segment| {
+                (segment.start_time, (segment.end_time - 1e-6).min(duration))
+            })
+    };
+    let mut pins = gaanim_renderer::pipeline::PinnedElements::default();
+    {
+        let resolved_camera = frame_camera(app.world());
+        gaanim_renderer::pipeline::compile_scene_pinned(
+            app.world_mut(),
+            resolved_camera.as_ref().map(|resolved| &resolved.camera),
+            &mut pins,
+        );
+    }
+    let times = blur.sample_times(time, fps, start, end.max(start));
+    let mut average = LinearAverage::new(config.width as usize * config.height as usize);
+    for &sample in &times {
+        app.world_mut().resource_mut::<Timeline>().seek_request = Some(sample);
+        app.update();
+        check_custom_animation_errors(app.world())?;
+        let rgba = render_updated_world(app, gpu, config, sample, &mut pins)?;
+        average.add(&rgba);
+    }
+    Ok(average.finish())
+}
+
+/// Running sum of RGBA8 frames as premultiplied linear light.
+struct LinearAverage {
+    sum: Vec<f32>,
+    frames: u32,
+}
+
+impl LinearAverage {
+    fn new(pixels: usize) -> Self {
+        Self {
+            sum: vec![0.0; pixels * 4],
+            frames: 0,
+        }
+    }
+
+    fn add(&mut self, rgba: &[u8]) {
+        let linear = srgb_to_linear_table();
+        for (sum, pixel) in self.sum.chunks_exact_mut(4).zip(rgba.chunks_exact(4)) {
+            let alpha = f32::from(pixel[3]) / 255.0;
+            for channel in 0..3 {
+                sum[channel] += linear[usize::from(pixel[channel])] * alpha;
+            }
+            sum[3] += alpha;
+        }
+        self.frames += 1;
+    }
+
+    fn finish(self) -> Vec<u8> {
+        let frames = self.frames.max(1) as f32;
+        let mut rgba = Vec::with_capacity(self.sum.len());
+        for sum in self.sum.chunks_exact(4) {
+            let alpha = sum[3] / frames;
+            for channel in 0..3 {
+                let straight = if sum[3] > 0.0 {
+                    sum[channel] / sum[3]
+                } else {
+                    0.0
+                };
+                rgba.push(linear_to_srgb_u8(straight));
+            }
+            rgba.push((alpha.clamp(0.0, 1.0) * 255.0).round() as u8);
+        }
+        rgba
+    }
+}
+
+fn srgb_to_linear_table() -> &'static [f32; 256] {
+    static TABLE: std::sync::OnceLock<[f32; 256]> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        std::array::from_fn(|value| {
+            let c = value as f32 / 255.0;
+            if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        })
+    })
+}
+
+fn linear_to_srgb_u8(linear: f32) -> u8 {
+    let c = linear.clamp(0.0, 1.0);
+    let encoded = if c <= 0.003_130_8 {
+        c * 12.92
+    } else {
+        1.055 * c.powf(1.0 / 2.4) - 0.055
+    };
+    (encoded * 255.0).round() as u8
 }
 
 /// Post-process of the frame just updated in `world`, with the camera frame
@@ -1405,6 +1631,22 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn linear_average_blends_in_linear_light() {
+        let mut average = LinearAverage::new(2);
+        average.add(&[0, 0, 0, 255, 255, 255, 255, 255]);
+        average.add(&[255, 255, 255, 255, 255, 255, 255, 0]);
+        let out = average.finish();
+        // Black and white average to linear 0.5, sRGB 188.
+        assert_eq!(&out[..4], &[188, 188, 188, 255]);
+        // A transparent sample adds coverage, not color.
+        assert_eq!(&out[4..], &[255, 255, 255, 128]);
+        for value in [0_u8, 1, 17, 128, 254, 255] {
+            let linear = srgb_to_linear_table()[usize::from(value)];
+            assert_eq!(linear_to_srgb_u8(linear), value);
+        }
+    }
 
     #[test]
     fn export_rejects_custom_callback_diagnostics() {
