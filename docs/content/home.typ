@@ -28,10 +28,29 @@
       #html.div(class: "home-hero-desc", [Gaanim describe escenas en Python, las
         muestra en vivo mientras escribes y las renderiza con trazos vectoriales en la
         GPU, listas para exportar a video.])
+      // The button downloads this version's Windows zip; assets/script.js
+      // switches it to the visitor's system and to the latest release's package
+      // when GitHub answers.
+      #let windows-zip = (
+        "https://github.com/PaoloLupo/gaanim/releases/download/v" + stdx.version
+          + "/gaanim-v" + stdx.version + "-windows-x64.zip"
+      )
       #html.div(class: "home-hero-cta", [
-        #html.a(href: "empezar/primera-animacion/", class: "primary", [Primera animación →])
-        #html.a(href: "empezar/instalacion/", class: "secondary", [Instalar])
+        #html.elem(
+          "a",
+          attrs: (id: "home-download", href: windows-zip, class: "primary os-windows", "data-version": stdx.version),
+          {
+            html.elem("span", attrs: (class: "home-download-icon", "aria-hidden": "true"))
+            html.span(class: "home-download-label", [Descargar para Windows])
+            html.span(class: "home-download-format", [x64 · .zip])
+          },
+        )
+        #html.a(href: "empezar/primera-animacion/", class: "secondary", [Primera animación →])
         #html.a(href: "tutorial/antes-de-empezar/", class: "secondary", [Tutorial])
+      ])
+      #html.div(class: "home-download-meta", [
+        #html.span(class: "home-download-info", [v#stdx.version]) ·
+        #html.a(href: "empezar/instalacion/", [Instalación y otras plataformas])
       ])
       #html.div(class: "home-search", {
         html.elem(
