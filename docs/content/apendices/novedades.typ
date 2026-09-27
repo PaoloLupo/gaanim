@@ -41,6 +41,16 @@ Sin publicar todavía. No hace falta cambiar tus escenas.
 - El `README.md` de los proyectos nuevos incluye cómo compartirlos como
   paquete.
 
+== Correcciones
+
+- `drawable.bounds()` sobre un objeto recién creado (antes del siguiente
+  `play` o `wait`, sin animaciones, grupos posteriores ni layouts que actúen
+  sobre él) ya no compila la escena entera: compila solo su declaración y
+  tarda alrededor de un milisegundo, con el mismo resultado. En una
+  presentación de 41 segmentos con 54 mediciones, `gaanim check` pasa de
+  27,7 s a 1,7 s. En los demás casos sigue compilando la escena escrita hasta el
+  cursor.
+
 = 0.5.2
 
 Publicada el 27 de septiembre de 2026. No hace falta cambiar tus escenas.
@@ -180,7 +190,9 @@ etiquetas de cota: lee «Al actualizar».
 - `scene.text.measure(...)` desaparece: `drawable.bounds()` mide cualquier
   objeto ya creado. Crea el texto y mide su caja
   (`scene.text("PGA", role="label").bounds().width`) en lugar de repetir su
-  contenido y estilo.
+  contenido y estilo. Desde 0.5.3, medir un objeto recién creado cuesta
+  alrededor de un milisegundo; antes de esa versión cada llamada compilaba
+  toda la escena escrita hasta ese punto.
 
 == Cambios
 
