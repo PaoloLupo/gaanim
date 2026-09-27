@@ -3536,15 +3536,26 @@ impl SceneModel {
                 },
             )?),
         };
-        let label = label.map(|label| {
-            let label = match options.label_color {
-                Some(color) => label.fill(color),
-                None => label,
-            };
-            label.move_to(0.0, 0.0)
+        let label = label.map(|label| match options.label_color {
+            Some(color) => label.fill(color),
+            None => label,
         });
         members.extend(label.clone());
         let group = self.group(&members.iter().collect::<Vec<_>>());
+        if let Some(label) = &label {
+            // Keep the number centered in the ring as its width changes.
+            group
+                .spec
+                .lock()
+                .expect("progress ring spec poisoned")
+                .reactive_readout_layout = Some(super::types::ReactiveReadoutLayoutSpec {
+                label: None,
+                equals: None,
+                number: label.id,
+                unit: None,
+                spacing: 0.0,
+            });
+        }
         Ok(ProgressRing {
             group,
             track,

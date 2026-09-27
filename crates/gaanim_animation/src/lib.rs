@@ -173,25 +173,23 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
             )
                 .in_set(SceneSet::Propagation),
         );
-        // Flowing dashes are added to the stroke only while the renderer
-        // extracts it, so tweens, snapshots and seeks see the authored offset.
-        app.add_systems(
-            Update,
-            procedural::apply_dash_flow_system.in_set(SceneSet::Bounds),
-        );
+        // Flowing dashes and tipped paths change what the renderer extracts.
+        // They stay applied until the start of the next frame, because
+        // exports extract after the frame, and are restored in `First`, before
+        // seeks, tweens and snapshots read the authored values.
         app.add_systems(
             Update,
             (
+                stroke_tips::apply_stroke_tips_system.in_set(SceneSet::DerivedGeometry),
+                procedural::apply_dash_flow_system.in_set(SceneSet::Bounds),
+            ),
+        );
+        app.add_systems(
+            First,
+            (
                 procedural::restore_dash_flow_system,
                 stroke_tips::restore_stroke_tips_system,
-            )
-                .in_set(SceneSet::Interaction),
-        );
-        // Tipped paths are shortened after regenerated geometry settles and
-        // before bounds, so their tips are culled with the frame's shapes.
-        app.add_systems(
-            Update,
-            stroke_tips::apply_stroke_tips_system.in_set(SceneSet::DerivedGeometry),
+            ),
         );
         app.add_systems(
             Update,

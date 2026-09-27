@@ -1,11 +1,12 @@
 //! Arrowheads and dots on the ends of any stroked path.
 //!
-//! A [`StrokeTips`] path keeps its authored geometry. Right before the
-//! renderer extracts it, the path is shortened under its arrowheads and the
-//! tip entities (children of the path) receive their shapes, taken from the
-//! path's current ends; right after, the authored path is restored. Tips
-//! therefore follow trims, `create`, connectors and any regenerated path, and
-//! timeline animations, snapshots and seeks never see the shortened path.
+//! A [`StrokeTips`] path keeps its authored geometry. After derived geometry
+//! settles, the path is shortened under its arrowheads and the tip entities
+//! (children of the path) receive their shapes, taken from the path's current
+//! ends; at the start of the next frame, the authored path is restored. Both
+//! the live renderer and exports, which extract after the frame, see the
+//! shortened path, while tips follow trims, `create`, connectors and any
+//! regenerated path, and timeline animations and seeks see authored geometry.
 
 use std::sync::Arc;
 
@@ -46,7 +47,8 @@ pub struct StrokeTips {
     pub width: Option<f64>,
     pub start_entity: Option<Entity>,
     pub end_entity: Option<Entity>,
-    applied: Option<Arc<BezPath>>,
+    /// Authored and shortened paths while the shortened one is shown.
+    applied: Option<(Arc<BezPath>, Arc<BezPath>)>,
     cache: Option<TipCache>,
 }
 
@@ -228,7 +230,7 @@ pub fn apply_stroke_tips_system(
         let filled = fill.is_some_and(|fill| fill.0.is_some());
         if !filled && !Arc::ptr_eq(&cache.shortened, &source) && *cache.shortened != *source {
             path.0 = cache.shortened.clone();
-            stroke_tips.applied = Some(source);
+            stroke_tips.applied = Some((source, cache.shortened.clone()));
         }
         for (entity, shape) in [
             (stroke_tips.start_entity, &cache.start),
@@ -260,10 +262,14 @@ pub fn apply_stroke_tips_system(
     }
 }
 
-/// Restores the authored paths after extraction.
+/// Restores the authored paths at the start of the next frame, unless
+/// something rewrote the shortened path in between (a seek outside the
+/// schedule, for instance).
 pub fn restore_stroke_tips_system(mut paths: Query<(&mut StrokeTips, &mut Path2D)>) {
     for (mut stroke_tips, mut path) in &mut paths {
-        if let Some(source) = stroke_tips.applied.take() {
+        if let Some((source, shortened)) = stroke_tips.applied.take()
+            && Arc::ptr_eq(&path.0, &shortened)
+        {
             path.0 = source;
         }
     }

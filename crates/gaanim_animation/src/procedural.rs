@@ -223,13 +223,14 @@ pub fn restore_procedural_motion_system(
 /// Each run advances the dash pattern by `speed` scene units per second
 /// from its start until it stops, where the pattern stays. The shift is a
 /// pure function of timeline time, added to the stroke's authored
-/// `dash_offset` only while the renderer extracts it.
+/// `dash_offset` from bounds until the start of the next frame, so both the
+/// live renderer and exports that extract after the frame see it.
 #[derive(Component, Debug, Clone, Default)]
 pub struct DashFlow {
     /// `(speed, start, end)` of every run, in timeline seconds.
     pub runs: Vec<(f64, f64, Option<f64>)>,
-    /// Authored dash offset while the shifted one is being extracted.
-    applied: Option<f64>,
+    /// Authored and shifted dash offsets while the shifted one is shown.
+    applied: Option<(f64, f64)>,
 }
 
 impl DashFlow {
@@ -270,17 +271,24 @@ pub fn apply_dash_flow_system(
         let shift = -flow.travel_at(time);
         if shift != 0.0 {
             let authored = stroke.style.dash_offset;
-            stroke.style.dash_offset = authored + shift;
-            flow.applied = Some(authored);
+            let shifted = authored + shift;
+            stroke.style.dash_offset = shifted;
+            flow.applied = Some((authored, shifted));
         }
     }
 }
 
-/// Restores the authored dash offset after extraction.
+/// Restores the authored dash offset at the start of the next frame, before
+/// seeks and tweens read it.
+///
+/// The exact authored value is restored (subtracting the shift could drift),
+/// and only when nothing rewrote the shifted one in between, such as a seek
+/// issued outside the schedule.
 pub fn restore_dash_flow_system(mut query: Query<(&mut DashFlow, &mut StrokeBrush)>) {
     for (mut flow, mut stroke) in &mut query {
-        // The exact authored value: subtracting the shift could drift.
-        if let Some(authored) = flow.applied.take() {
+        if let Some((authored, shifted)) = flow.applied.take()
+            && stroke.style.dash_offset.to_bits() == shifted.to_bits()
+        {
             stroke.style.dash_offset = authored;
         }
     }
@@ -435,5 +443,43 @@ mod tests {
             let offset = world.get::<StrokeBrush>(entity).unwrap().style.dash_offset;
             assert_eq!(offset.to_bits(), 0.1f64.to_bits(), "frame {frame}");
         }
+    }
+
+    #[test]
+    fn dash_flow_keeps_an_offset_rewritten_between_frames() {
+        let mut world = World::new();
+        world.insert_resource(PlaybackState {
+            current_time: 2.0,
+            ..Default::default()
+        });
+        let mut flow = DashFlow::default();
+        flow.push(1.0, 0.0);
+        let entity = world
+            .spawn((
+                flow,
+                StrokeBrush::new(gaanim_core::peniko::Color::WHITE, 0.1),
+            ))
+            .id();
+        let mut apply = IntoSystem::into_system(apply_dash_flow_system);
+        apply.initialize(&mut world);
+        let mut restore = IntoSystem::into_system(restore_dash_flow_system);
+        restore.initialize(&mut world);
+        apply.run((), &mut world).unwrap();
+        // The shifted offset stays for extraction after the frame.
+        assert_eq!(
+            world.get::<StrokeBrush>(entity).unwrap().style.dash_offset,
+            -2.0
+        );
+        // A seek outside the schedule restores another authored offset.
+        world
+            .get_mut::<StrokeBrush>(entity)
+            .unwrap()
+            .style
+            .dash_offset = 0.75;
+        restore.run((), &mut world).unwrap();
+        assert_eq!(
+            world.get::<StrokeBrush>(entity).unwrap().style.dash_offset,
+            0.75
+        );
     }
 }
