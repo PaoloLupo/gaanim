@@ -128,6 +128,15 @@ pub fn open_bundle(world: &mut World, path: &Path) -> Result<(), String> {
     world.insert_resource(CanvasPostProcess::default());
     world.insert_resource(gaanim_media::PreviewAudioTracks(audio));
     world.insert_resource(ExternalFrame::default());
+    // Presenter View previews the recorded frames.
+    world.insert_resource(crate::export::StashedReplay {
+        canvas: None,
+        bundle: Some(crate::export::StashedBundle {
+            path: path.to_path_buf(),
+            size: bundle.scene.output_size,
+        }),
+        revision: 1,
+    });
     if let Some(mut window) = world
         .query_filtered::<&mut Window, With<bevy::window::PrimaryWindow>>()
         .iter_mut(world)

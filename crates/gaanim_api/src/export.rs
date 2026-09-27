@@ -60,7 +60,10 @@ pub fn export_canvas(canvas: SceneModel, mut config: ExportConfig) -> Result<(),
 /// Record a SceneModel into a playback bundle (`.gaanim`) that replays
 /// without Python.
 pub fn record_canvas(canvas: SceneModel, config: BundleConfig) -> Result<(), ExportError> {
-    gaanim_export::bundle::record_bundle(config, move |world| replay_canvas_into(world, canvas))
+    // The recording builds the scene in two worlds; see `record_bundle`.
+    gaanim_export::bundle::record_bundle(config, move |world| {
+        replay_canvas_into(world, canvas.clone())
+    })
 }
 
 /// Whether `path` names a playback bundle.

@@ -44,6 +44,9 @@ pub struct Frame {
     pub capture: FrameCapture,
     /// Active post-process passes, evaluated at `time`.
     pub post: Vec<PostPass>,
+    /// Sub-frames a motion-blurred export averages into this frame, in
+    /// order; empty without motion blur. A preview shows the frame itself.
+    pub motion_blur: Vec<Frame>,
 }
 
 // ---------------------------------------------------------------------------
@@ -773,6 +776,8 @@ pub(crate) struct FrameRecord {
     pub transition: Option<Vec<u8>>,
     pub post: Vec<PostPass>,
     pub elements: Vec<ElementRecord>,
+    /// Motion blur sub-frames, each without sub-frames of its own.
+    pub motion_blur: Vec<FrameRecord>,
 }
 
 impl FrameRecord {
@@ -780,7 +785,7 @@ impl FrameRecord {
         frame: &Frame,
         tables: &mut Tables,
         keys: &mut EntityKeys,
-        lottie: impl Fn(&CapturedElement) -> Option<u32>,
+        lottie: &dyn Fn(&CapturedElement) -> Option<u32>,
     ) -> Self {
         Self {
             time: frame.time,
@@ -798,19 +803,28 @@ impl FrameRecord {
                 .iter()
                 .map(|element| ElementRecord::capture(element, tables, keys, lottie(element)))
                 .collect(),
+            motion_blur: frame
+                .motion_blur
+                .iter()
+                .map(|sample| Self::capture(sample, tables, keys, lottie))
+                .collect(),
         }
     }
 
     pub fn resolve(
         &self,
         tables: &DecodedTables,
-        mut lottie_scene: impl FnMut(u32) -> Result<Option<Arc<vello::Scene>>>,
+        lottie_scene: &mut dyn FnMut(u32) -> Result<Option<Arc<vello::Scene>>>,
     ) -> Result<Frame> {
         let elements = self
             .elements
             .iter()
             .map(|element| {
-                let scene = element.lottie.map(&mut lottie_scene).transpose()?.flatten();
+                let scene = element
+                    .lottie
+                    .map(&mut *lottie_scene)
+                    .transpose()?
+                    .flatten();
                 element.resolve(tables, scene)
             })
             .collect::<Result<Vec<_>>>()?;
@@ -827,6 +841,11 @@ impl FrameRecord {
                     .transpose()?,
             },
             post: self.post.clone(),
+            motion_blur: self
+                .motion_blur
+                .iter()
+                .map(|sample| sample.resolve(tables, &mut *lottie_scene))
+                .collect::<Result<Vec<_>>>()?,
         })
     }
 }
@@ -846,7 +865,21 @@ impl DeltaEncoder {
         self.previous = None;
     }
 
-    pub fn write(&mut self, w: &mut Writer, frame: FrameRecord) {
+    /// Write `frame`, then its motion blur sub-frames, each against the one
+    /// before it.
+    pub fn write(&mut self, w: &mut Writer, mut frame: FrameRecord) {
+        let samples = std::mem::take(&mut frame.motion_blur);
+        self.write_frame(w, frame);
+        w.len(samples.len());
+        let mut sub = DeltaEncoder {
+            previous: self.previous.clone(),
+        };
+        for sample in samples {
+            sub.write_frame(w, sample);
+        }
+    }
+
+    fn write_frame(&mut self, w: &mut Writer, frame: FrameRecord) {
         w.f64(frame.time);
         w.f64(frame.background_time);
         write_camera(w, &frame.camera);
@@ -910,6 +943,18 @@ pub(crate) struct DeltaDecoder {
 
 impl DeltaDecoder {
     pub fn read(&mut self, r: &mut Reader<'_>) -> Result<FrameRecord> {
+        let mut frame = self.read_frame(r)?;
+        let count = r.len()?;
+        let mut sub = DeltaDecoder {
+            previous: self.previous.clone(),
+        };
+        frame.motion_blur = (0..count)
+            .map(|_| sub.read_frame(r))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(frame)
+    }
+
+    fn read_frame(&mut self, r: &mut Reader<'_>) -> Result<FrameRecord> {
         let time = r.f64()?;
         let background_time = r.f64()?;
         let camera = read_camera(r)?;
@@ -979,6 +1024,7 @@ impl DeltaDecoder {
             transition,
             post,
             elements,
+            motion_blur: Vec::new(),
         };
         self.previous = Some(frame.clone());
         Ok(frame)

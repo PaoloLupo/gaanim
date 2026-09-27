@@ -256,3 +256,92 @@ fn a_captured_frame_composes_exactly_like_an_export_frame() {
         store.retain_shared();
     }
 }
+
+/// Motion blur, a drawable exempt from it, a stateful updater, and a stop
+/// and a marker between frames of the grid.
+fn blurred() -> SceneModel {
+    let mut canvas = SceneModel::new(16.0, 9.0);
+    canvas.set_motion_blur(Some(
+        gaanim_renderer::effects::MotionBlur::new(180.0, 3, None).unwrap(),
+    ));
+    canvas.segment("drift", None).unwrap();
+    let dot = canvas
+        .circle(0.8)
+        .fill(Color::from_rgb8(0xff, 0x6b, 0x6b))
+        .move_to(-4.0, 0.0);
+    dot.add_updater(gaanim_api::canvas::UpdaterPreset::AdvanceX { speed: 3.0 });
+    let hud = canvas
+        .rect(3.0, 0.6)
+        .fill(Color::from_rgba8(255, 255, 255, 180))
+        .move_to(0.0, 3.5)
+        .motion_blur(false);
+    canvas.play(vec![hud.animate().fade_in().duration(0.3)]);
+    canvas.wait(0.137);
+    canvas.marker("between").unwrap();
+    canvas.stop(Some("off-grid".into())).unwrap();
+    canvas.play(vec![dot.animate().shift_by(0.0, 2.0).duration(0.4)]);
+    canvas
+}
+
+#[test]
+fn a_video_exported_from_the_bundle_matches_the_scene_export() {
+    if gaanim_export::prelude::GpuContext::new(16, 16).is_err() {
+        eprintln!("skipped: no GPU adapter");
+        return;
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let bundle_path = directory.path().join("blurred.gaanim");
+    let mut config = BundleConfig::new(&bundle_path);
+    // The rate of a draft export.
+    config.fps = 30;
+    config.width = 160;
+    config.height = 90;
+    record_canvas(blurred(), config).unwrap();
+
+    let mut bundle = Bundle::open(&bundle_path).unwrap();
+    assert!(bundle.verify().unwrap().is_empty());
+    let first = bundle.frame(0).unwrap();
+    assert_eq!(
+        first.motion_blur.len(),
+        3,
+        "grid frames carry their sub-frames"
+    );
+    // The stop between grid frames is recorded exactly, without sub-frames.
+    let stop = bundle.scene.segments[0].stops[0].time;
+    let at_stop = bundle.frame(bundle.frame_index_at(stop)).unwrap();
+    assert_eq!(at_stop.time, stop);
+    assert!(at_stop.motion_blur.is_empty());
+
+    let output = |name: &str| {
+        let directory = directory.path().join(name);
+        std::fs::create_dir_all(&directory).unwrap();
+        let mut export =
+            gaanim_export::prelude::ExportConfig::new(&directory.join("f.png").to_string_lossy())
+                .with_quality(gaanim_export::prelude::QualityPreset::Draft);
+        export.width = 160;
+        export.height = 90;
+        export.aspect_ratio = gaanim_export::prelude::AspectRatioPreset::Custom;
+        export.format = gaanim_export::prelude::ExportFormat::PngSequence;
+        export.headless = true;
+        (directory, export)
+    };
+    let (direct, config) = output("direct");
+    gaanim_api::export::export_canvas(blurred(), config).unwrap();
+    let (replayed, config) = output("bundle");
+    gaanim_export::prelude::export_bundle(&bundle_path, config).unwrap();
+
+    let mut frames: Vec<_> = std::fs::read_dir(&direct)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    frames.sort();
+    assert!(frames.len() > 10);
+    assert_eq!(frames.len(), std::fs::read_dir(&replayed).unwrap().count());
+    for frame in frames {
+        assert!(
+            std::fs::read(direct.join(&frame)).unwrap()
+                == std::fs::read(replayed.join(&frame)).unwrap(),
+            "{frame:?} differs between the scene and the bundle"
+        );
+    }
+}

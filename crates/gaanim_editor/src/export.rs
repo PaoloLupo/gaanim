@@ -31,8 +31,18 @@ pub struct ProjectPaths {
 #[derive(Resource, Clone, Default)]
 pub struct StashedReplay {
     pub canvas: Option<SceneModel>,
+    /// The playback bundle shown instead of a script's scene: Presenter View
+    /// previews its recorded frames.
+    pub bundle: Option<StashedBundle>,
     /// Changes on every replay, even when segment names and timings stay equal.
     pub revision: u64,
+}
+
+/// An open playback bundle and the pixel size of its frame.
+#[derive(Clone, Debug)]
+pub struct StashedBundle {
+    pub path: PathBuf,
+    pub size: (u32, u32),
 }
 
 #[derive(Resource)]

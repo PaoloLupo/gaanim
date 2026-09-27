@@ -30,6 +30,7 @@
 #include "guias/camara-y-3d.typ"
 #include "guias/presentaciones.typ"
 #include "guias/proyectos.typ"
+#include "guias/compartir.typ"
 #include "guias/capturas-y-comparacion.typ"
 
 #book-part("IV", "Ejemplos", description: "Escenas completas listas para copiar y ejecutar")

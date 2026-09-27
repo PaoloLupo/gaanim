@@ -2462,7 +2462,21 @@ pub struct FrameCapture {
 /// Capture the drawables of the world as it stands, without culling, for a
 /// replay that composites the same frame with [`compose_captured`].
 pub fn capture_frame(world: &mut World, camera: Option<&gaanim_math::Camera>) -> FrameCapture {
-    let extraction = extract_world(world, camera, None, false);
+    capture_extraction(extract_world(world, camera, None, false))
+}
+
+/// [`capture_frame`] for a motion blur sub-frame: like
+/// [`compile_scene_pinned`], the first call with fresh `pins` records the
+/// [`MotionBlurExempt`] drawables and later calls draw them as recorded.
+pub fn capture_frame_pinned(
+    world: &mut World,
+    camera: Option<&gaanim_math::Camera>,
+    pins: &mut PinnedElements,
+) -> FrameCapture {
+    capture_extraction(extract_world(world, camera, Some(pins), false))
+}
+
+fn capture_extraction(extraction: WorldExtraction) -> FrameCapture {
     FrameCapture {
         background_time: extraction.background_time,
         transition: extraction

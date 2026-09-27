@@ -20,7 +20,7 @@ This file guides repository work; model selection belongs to the calling client.
 
 ## Repo layout
 
-- **Workspace root:** `Cargo.toml` defines 19 workspace members: 18 crates under
+- **Workspace root:** `Cargo.toml` defines 20 workspace members: 19 crates under
   `crates/` plus the `docs` application.
 - **Key crates (bottom-up):**
   - `gaanim_core` — re-exports `peniko`/`kurbo`/`glam`, error types.
@@ -40,6 +40,10 @@ This file guides repository work; model selection belongs to the calling client.
   - `gaanim_python` — PyO3 0.28 module embedded by the editor plus the pure-Python authoring wheel.
   - `gaanim_project` — shared project scaffolding, manifests, recent-project state,
     and side-effect-free Python/uv environment discovery.
+  - `gaanim_bundle` — the `.gaanim` playback bundle format: lossless frame
+    captures, delta-encoded chunks, per-frame digests. `gaanim_export::bundle`
+    records it; the editor's `gaanim-play` binary (no libpython) plays,
+    presents, and exports it.
   - `gaanim_editor`, `gaanim_launcher`, `gaanim_export`, and `gaanim_diff` — application hosting, launch, export, and visual comparison tools.
 - **Repository overview:** `README.md` is the current user/developer entry point.
   `engine_improvements.md` is aspirational; verify proposals against code and tests.

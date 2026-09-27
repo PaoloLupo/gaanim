@@ -11,7 +11,7 @@ use std::time::Instant;
 use bevy::prelude::*;
 use gaanim_bundle::{AudioData, BundleWriter, Frame, PostPass, SceneData, SceneSpan};
 use gaanim_core::console;
-use gaanim_renderer::pipeline::{CanvasBackground, capture_frame};
+use gaanim_renderer::pipeline::{CanvasBackground, capture_frame, capture_frame_pinned};
 use gaanim_renderer::post_process::{CanvasPostProcess, PostProcessShader};
 use gaanim_timeline::timeline::Timeline;
 
@@ -53,37 +53,70 @@ impl BundleConfig {
     }
 }
 
-/// Times a bundle records: the frame grid from 0 to the end of the
-/// timeline, plus every instant playback can rest on or jump to (stops,
-/// ambient loop ends, segment boundaries and markers), so a presentation at
-/// rest shows exactly the frame the editor shows.
-pub fn recording_times(timeline: &Timeline, fps: u32) -> Vec<f64> {
-    let duration = timeline.cached_duration.max(0.0);
-    // Step the grid exactly like an export does, so a video exported from
-    // the bundle finds every frame it would have rendered from the scene.
-    let step = 1.0 / f64::from(fps.max(1));
-    let mut times = Vec::new();
-    let mut time = 0.0;
-    while time <= duration {
-        times.push(time);
-        time += step;
-    }
-    times.push(duration);
-    for segment in &timeline.segments {
-        times.push(segment.start_time);
-        times.push(segment.end_time);
-        for stop in &segment.stops {
-            times.push(stop.time);
-            if let Some(ambient) = stop.ambient {
-                times.push(stop.time + ambient);
+/// Instants a bundle records.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RecordingPlan {
+    /// The frame grid of an export at the recording rate, stepped exactly as
+    /// an export steps it, so a video exported from the bundle renders the
+    /// very frames it would have rendered from the scene.
+    pub grid: Vec<f64>,
+    /// Instants off the grid that playback rests on or jumps to (the end,
+    /// segment boundaries, stops, ambient loop ends and markers), so a
+    /// presentation at rest shows exactly the frame the editor shows.
+    pub extras: Vec<f64>,
+}
+
+impl RecordingPlan {
+    pub fn new(timeline: &Timeline, fps: u32) -> Self {
+        let duration = timeline.cached_duration.max(0.0);
+        let fps = fps.max(1);
+        let step = 1.0 / f64::from(fps);
+        let frames = (duration * f64::from(fps)).ceil() as u64;
+        let mut grid = Vec::with_capacity(frames as usize);
+        let mut time = 0.0;
+        for _ in 0..frames {
+            grid.push(time);
+            time += step;
+        }
+        let mut extras = vec![duration];
+        for segment in &timeline.segments {
+            extras.push(segment.start_time);
+            extras.push(segment.end_time);
+            for stop in &segment.stops {
+                extras.push(stop.time);
+                if let Some(ambient) = stop.ambient {
+                    extras.push(stop.time + ambient);
+                }
             }
         }
+        extras.extend(timeline.markers.iter().map(|marker| marker.time));
+        extras.retain(|time| time.is_finite() && (0.0..=duration).contains(time));
+        extras.sort_by(f64::total_cmp);
+        extras.dedup_by(|a, b| (*a - *b).abs() <= 1e-9);
+        // The grid already shows an instant this close to one of its frames.
+        extras.retain(|time| {
+            let next = grid.partition_point(|frame| frame < time);
+            let near = |index: usize| {
+                grid.get(index)
+                    .is_some_and(|frame| (frame - time).abs() <= 1e-9)
+            };
+            !near(next) && !(next > 0 && near(next - 1))
+        });
+        Self { grid, extras }
     }
-    times.extend(timeline.markers.iter().map(|marker| marker.time));
-    times.retain(|time| time.is_finite() && (0.0..=duration).contains(time));
-    times.sort_by(f64::total_cmp);
-    times.dedup_by(|a, b| (*a - *b).abs() <= 1e-9);
-    times
+
+    /// Every recorded instant, in time order.
+    pub fn times(&self) -> Vec<f64> {
+        let mut times: Vec<f64> = self.grid.iter().chain(&self.extras).copied().collect();
+        times.sort_by(f64::total_cmp);
+        times
+    }
+}
+
+/// Every instant a bundle records at `fps`, in time order; see
+/// [`RecordingPlan`].
+pub fn recording_times(timeline: &Timeline, fps: u32) -> Vec<f64> {
+    RecordingPlan::new(timeline, fps).times()
 }
 
 fn scene_spans(timeline: &Timeline) -> Vec<SceneSpan> {
@@ -252,15 +285,73 @@ where
     Ok(app)
 }
 
+/// Seek `app` to `time`, update it, and capture what it draws. A motion
+/// blurred frame also steps and captures the sub-frames an export averages,
+/// in the order an export seeks them.
+fn record_frame(
+    app: &mut App,
+    time: f64,
+    fps: u32,
+    post_shaders: &[PostProcessShader],
+    motion_blur: bool,
+) -> Result<Frame> {
+    app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
+    app.update();
+    check_custom_animation_errors(app.world())?;
+    let blur = crate::exporter::frame_motion_blur(app.world()).filter(|_| motion_blur);
+    let Some(blur) = blur else {
+        return capture(app, time, post_shaders, None);
+    };
+    let mut pins = gaanim_renderer::pipeline::PinnedElements::default();
+    // The first pinned capture records the drawables exempt from the blur.
+    let mut frame = capture(app, time, post_shaders, Some(&mut pins))?;
+    for sample in crate::exporter::motion_blur_times(app.world(), time, f64::from(fps), blur) {
+        app.world_mut().resource_mut::<Timeline>().seek_request = Some(sample);
+        app.update();
+        check_custom_animation_errors(app.world())?;
+        frame
+            .motion_blur
+            .push(capture(app, sample, post_shaders, Some(&mut pins))?);
+    }
+    Ok(frame)
+}
+
+fn capture(
+    app: &mut App,
+    time: f64,
+    post_shaders: &[PostProcessShader],
+    pins: Option<&mut gaanim_renderer::pipeline::PinnedElements>,
+) -> Result<Frame> {
+    let camera = frame_camera(app.world())
+        .map(|resolved| resolved.camera)
+        .ok_or_else(|| ExportError::Capture("the scene has no camera".into()))?;
+    let capture = match pins {
+        Some(pins) => capture_frame_pinned(app.world_mut(), Some(&camera), pins),
+        None => capture_frame(app.world_mut(), Some(&camera)),
+    };
+    Ok(Frame {
+        time,
+        camera,
+        capture,
+        post: post_passes(app.world(), post_shaders, time)?,
+        motion_blur: Vec::new(),
+    })
+}
+
 /// Record the scene that `setup_world_fn` builds into a bundle.
+///
+/// Callbacks and updaters can keep state that depends on every instant the
+/// timeline visits, so the frame grid is recorded in a world that visits
+/// exactly the instants an export visits. The instants between grid frames
+/// are recorded afterwards in a second world that follows the same grid.
 pub fn record_bundle<F>(config: BundleConfig, setup_world_fn: F) -> Result<()>
 where
-    F: FnOnce(&mut World) + Send + Sync + 'static,
+    F: Fn(&mut World) + Clone + Send + Sync + 'static,
 {
     let started = Instant::now();
     let telemetry = config.telemetry.clone();
 
-    let mut app = recording_app(setup_world_fn)?;
+    let mut app = recording_app(setup_world_fn.clone())?;
 
     if let Some(what) = unsupported_content(app.world_mut()) {
         return Err(ExportError::General(format!(
@@ -271,10 +362,10 @@ where
         background.pixel_size = (config.width, config.height);
     }
 
-    let (times, segments, markers, scenes, duration) = {
+    let (plan, segments, markers, scenes, duration) = {
         let timeline = app.world().resource::<Timeline>();
         (
-            recording_times(timeline, config.fps),
+            RecordingPlan::new(timeline, config.fps),
             timeline.segments.clone(),
             timeline.markers.clone(),
             scene_spans(timeline),
@@ -282,6 +373,7 @@ where
         )
     };
     let post_shaders = post_shader_table(app.world().get_resource::<CanvasPostProcess>());
+    let background = app.world().get_resource::<CanvasBackground>().cloned();
 
     if let Some(parent) = config
         .output_path
@@ -296,45 +388,31 @@ where
             .map_err(bundle_error)?;
     let audio = audio_data(&mut writer, app.world())?;
 
+    let total = plan.grid.len() + plan.extras.len();
     if let Some(telemetry) = &telemetry {
-        telemetry.set_total_frames(times.len() as u64);
+        telemetry.set_total_frames(total as u64);
     }
-    let progress = crate::exporter::create_progress_bar(times.len() as u64);
+    let progress = crate::exporter::create_progress_bar(total as u64);
     let mut fragments = gaanim_renderer::fragment::FragmentStore::default();
-    for (index, time) in times.iter().copied().enumerate() {
-        app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
-        app.update();
-        check_custom_animation_errors(app.world())?;
-
-        let camera = frame_camera(app.world())
-            .map(|resolved| resolved.camera)
-            .ok_or_else(|| ExportError::Capture("the scene has no camera".into()))?;
-        let capture = capture_frame(app.world_mut(), Some(&camera));
-        let post = post_passes(app.world(), &post_shaders, time)?;
-        let frame = Frame {
-            time,
-            camera,
-            capture,
-            post,
-        };
-        let digest = gaanim_bundle::frame_digest(
-            &frame,
-            app.world().get_resource::<CanvasBackground>(),
-            &mut fragments,
-        );
+    let mut recorded = 0_u64;
+    let mut push = |writer: &mut BundleWriter<_>, frame: Frame| -> Result<()> {
+        let digest = gaanim_bundle::frame_digest(&frame, background.as_ref(), &mut fragments);
         writer
             .push_frame(&frame, digest, |_| None)
             .map_err(bundle_error)?;
-        drop(frame);
         fragments.end_frame();
+        recorded += 1;
         progress.inc(1);
         if let Some(telemetry) = &telemetry {
-            telemetry.set_current_frame(index as u64 + 1);
+            telemetry.set_current_frame(recorded);
         }
-    }
-    progress.finish_and_clear();
+        Ok(())
+    };
 
-    let background = app.world().get_resource::<CanvasBackground>().cloned();
+    for &time in &plan.grid {
+        let frame = record_frame(&mut app, time, config.fps, &post_shaders, true)?;
+        push(&mut writer, frame)?;
+    }
     let clear_color = app.world().get_resource::<ClearColor>().map(|clear| {
         let rgba = clear.0.to_srgba();
         [
@@ -344,6 +422,26 @@ where
             (rgba.alpha * 255.0) as u8,
         ]
     });
+
+    if !plan.extras.is_empty() {
+        drop(app);
+        writer.start_pass().map_err(bundle_error)?;
+        let mut app = recording_app(setup_world_fn)?;
+        if let Some(mut background) = app.world_mut().get_resource_mut::<CanvasBackground>() {
+            background.pixel_size = (config.width, config.height);
+        }
+        let mut grid = plan.grid.iter().copied().peekable();
+        for &extra in &plan.extras {
+            // Visit the grid up to the instant as the first world did.
+            while let Some(time) = grid.next_if(|time| *time < extra) {
+                record_frame(&mut app, time, config.fps, &post_shaders, true)?;
+            }
+            let frame = record_frame(&mut app, extra, config.fps, &post_shaders, false)?;
+            push(&mut writer, frame)?;
+        }
+    }
+    progress.finish_and_clear();
+
     let scene = SceneData {
         clear_color,
         title: config.title.clone(),
@@ -362,8 +460,7 @@ where
     console::success(
         "done",
         format!(
-            "Recorded {} frames in {:.2}s: {}",
-            times.len(),
+            "Recorded {total} frames in {:.2}s: {}",
             started.elapsed().as_secs_f64(),
             config.output_path.display()
         ),

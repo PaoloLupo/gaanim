@@ -467,10 +467,11 @@ fn editor_ui_system(
     mut ctx: bevy_egui::EguiContexts,
     mut presentation_mode: ResMut<PresentationMode>,
     mut state: ResMut<EditorState>,
-    (mut export_state, mut narration_panel, narration_session): (
+    (mut export_state, mut narration_panel, narration_session, bundle_playback): (
         ResMut<export::ExportState>,
         ResMut<narration::NarrationPanel>,
         Res<narration::NarrationSession>,
+        Option<Res<bundle_player::BundlePlayback>>,
     ),
     mut fullscreen_state: ResMut<EditorFullscreenState>,
     mut timeline: ResMut<Timeline>,
@@ -513,6 +514,8 @@ fn editor_ui_system(
         return;
     }
     let narration_open = narration_panel.open;
+    // A playback bundle has no script to narrate.
+    let narration_available = bundle_playback.is_none();
 
     let is_exporting = export_state.active;
     let (export_progress_pct, export_current, export_total) = if is_exporting {
@@ -844,9 +847,12 @@ fn editor_ui_system(
                                         } else {
                                             ButtonTone::Ghost
                                         };
-                                        if icon_button(ui, Icon::Mic, narration_tone, true)
-                                            .on_hover_text("Narración: grabar la voz de la escena")
-                                            .clicked()
+                                        if narration_available
+                                            && icon_button(ui, Icon::Mic, narration_tone, true)
+                                                .on_hover_text(
+                                                    "Narración: grabar la voz de la escena",
+                                                )
+                                                .clicked()
                                         {
                                             actions.push(PlaybackAction::ToggleNarration);
                                         }
@@ -984,9 +990,10 @@ fn editor_ui_system(
                                             if ui.button("Presentar").clicked() {
                                                 actions.push(PlaybackAction::Present);
                                             }
-                                            if ui
-                                                .selectable_label(narration_open, "Narración")
-                                                .clicked()
+                                            if narration_available
+                                                && ui
+                                                    .selectable_label(narration_open, "Narración")
+                                                    .clicked()
                                             {
                                                 actions.push(PlaybackAction::ToggleNarration);
                                             }

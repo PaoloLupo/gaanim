@@ -20,15 +20,19 @@ gaanim mi-video                          # previsualiza con hot reload
 gaanim init video mi-video               # crea un proyecto
 gaanim check mi-video                    # valida sin abrir ventana
 gaanim export mi-video --output exports/video.mp4
+gaanim export mi-charla --output mi-charla.gaanim   # graba un paquete
 gaanim --present --monitor 1 mi-charla   # presenta a pantalla completa
+gaanim --present mi-charla.gaanim        # presenta un paquete, sin Python
 gaanim --diff --example mi-video         # compara capturas con un baseline
 gaanim --version
 ```
 
 `gaanim --help` resume el uso y `gaanim <comando> --help` lista las opciones de
 `init`, `check`, `export` y `--diff`. `--help` y `--version` funcionan aunque
-no haya un Python compatible instalado; el resto de comandos necesita el
-entorno de Python que Gaanim detecta junto al proyecto (ver
+no haya un Python compatible instalado, igual que reproducir, presentar y
+exportar un paquete `.gaanim` (ver
+#link("/guias/compartir/")[Compartir sin Python]); el resto de comandos
+necesita el entorno de Python que Gaanim detecta junto al proyecto (ver
 #link("/guias/proyectos/")[Proyectos]).
 
 == Códigos de salida
@@ -46,12 +50,15 @@ entorno de Python que Gaanim detecta junto al proyecto (ver
 
 ```bash
 gaanim [--present] [--monitor <ÍNDICE>] [--sections <LISTA>] [--from <NOMBRE>] <SCRIPT_O_PROYECTO>
+gaanim [--present] [--monitor <ÍNDICE>] [--sections <LISTA>] [--from <NOMBRE>] <PAQUETE.gaanim>
 ```
 
 Sin argumentos, `gaanim` abre el Inicio: crear un proyecto, abrir una carpeta o
 volver a uno de los diez proyectos recientes. Con un script o proyecto abre el
 editor, que vuelve a ejecutar el script al guardar (hot reload) y recarga la
-escena cuando cambia un asset del proyecto.
+escena cuando cambia un asset del proyecto. Con un paquete `.gaanim`, `gaanim`
+lo abre con `gaanim-play`, que no necesita Python, y reproduce los fotogramas
+grabados con las mismas opciones.
 
 #table(
   columns: (auto, 1fr),
@@ -148,6 +155,7 @@ gaanim check mi-charla --strict
 
 ```bash
 gaanim export <SCRIPT_O_PROYECTO> --output <ARCHIVO> [OPCIONES]
+gaanim export <PAQUETE.gaanim> --output <VÍDEO> [OPCIONES]
 ```
 
 Renderiza la escena completa, o un tramo, a un archivo. El script no cambia:
@@ -167,6 +175,7 @@ La extensión de `--output` elige el formato.
   [`.webp`], [WebP animado. Necesita FFmpeg.], [Sí],
   [`.gif`], [GIF. Necesita FFmpeg.], [No],
   [`.png`], [Secuencia de PNG, un archivo por fotograma. No necesita FFmpeg.], [Sí],
+  [`.gaanim`], [Paquete de reproducción: todos los fotogramas que dibuja la escena, con sus segmentos, pausas, marcadores y audio, en un archivo que se reproduce, presenta y exporta sin Python.], [No],
 )
 
 En una secuencia PNG, un patrón `%d` o `%0Nd` en el nombre se sustituye por el
@@ -189,6 +198,7 @@ número de fotograma desde 0 (`frames/f_%04d.png` escribe `f_0000.png`,
   [`--transparent`], [desactivado], [Conserva el canal alfa en WebM, WebP y PNG. MP4 y GIF lo rechazan.],
   [`--from <SEGUNDOS|MARCADOR>`], [`0`], [Inicio del tramo exportado.],
   [`--to <SEGUNDOS|MARCADOR>`], [fin de la escena], [Fin del tramo exportado.],
+  [`--fps <N>`], [`60`], [Solo al grabar un paquete: fotogramas por segundo grabados, de 1 a 240.],
 )
 
 La composición se define en unidades lógicas, así que `--width` y `--height`
@@ -223,6 +233,23 @@ gaanim export mi-video --output exports/tramo.mp4 --from 12 --to 15
 gaanim export mi-video --output exports/climax.mp4 --from climax --to fin
 gaanim export mi-video --output frames/f_%04d.png --quality draft
 ```
+
+== Paquetes
+
+Con `--output` terminado en `.gaanim`, `export` graba un paquete de la escena
+completa; `--from`, `--to`, `--transparent` y `--encoder` no se aplican. Con un
+paquete como entrada, `export` lo renderiza a vídeo sin ejecutar Python: acepta
+los demás formatos y opciones, incluidos los tramos con marcadores, y el vídeo
+tiene la frecuencia con la que se grabó el paquete. El resultado es idéntico,
+píxel a píxel, a exportar el script con esa frecuencia y el mismo tamaño.
+
+```bash
+gaanim export mi-charla --output mi-charla.gaanim --fps 30
+gaanim export mi-charla.gaanim --output mi-charla.mp4 --quality production
+```
+
+La guía #link("/guias/compartir/")[Compartir sin Python] explica qué guarda
+un paquete, cómo se reproducen los callbacks y sus límites.
 
 = `gaanim --diff`
 

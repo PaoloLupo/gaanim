@@ -505,7 +505,16 @@ impl<W: Write + Seek> BundleWriter<W> {
         Ok(entry)
     }
 
-    /// Append the next frame. Frames must come in increasing time order.
+    /// Start another pass: its frames come in increasing time order again and
+    /// may fall between the frames of earlier passes, but never on one.
+    pub fn start_pass(&mut self) -> Result<()> {
+        self.flush_chunk()?;
+        self.last_time = f64::NEG_INFINITY;
+        Ok(())
+    }
+
+    /// Append the next frame. Within a pass (see [`Self::start_pass`]),
+    /// frames must come in increasing time order.
     /// `digest` is [`frame_digest`] of the frame as the scene drew it, and
     /// `lottie` names the recorded Lottie frame an element draws, if any.
     pub fn push_frame(
@@ -520,10 +529,9 @@ impl<W: Write + Seek> BundleWriter<W> {
                 frame.time, self.last_time
             )));
         }
-        if frame
-            .capture
-            .elements
-            .iter()
+        if std::iter::once(frame)
+            .chain(&frame.motion_blur)
+            .flat_map(|frame| &frame.capture.elements)
             .any(|element| element.recipe.lottie && lottie(element).is_none())
         {
             return Err(BundleError::Unsupported(
@@ -533,7 +541,7 @@ impl<W: Write + Seek> BundleWriter<W> {
         self.last_time = frame.time;
         self.times.push(frame.time);
         self.digests.push(digest);
-        let record = FrameRecord::capture(frame, &mut self.tables, &mut self.keys, lottie);
+        let record = FrameRecord::capture(frame, &mut self.tables, &mut self.keys, &lottie);
         if self.chunk_frames == 0 {
             self.chunks.push(ChunkInfo {
                 entry: format!("frames/{:06}.bin", self.chunks.len()),
@@ -647,8 +655,10 @@ pub struct Bundle {
     pub manifest: Manifest,
     pub scene: SceneData,
     tables: DecodedTables,
-    /// Time of every frame, in order.
+    /// Time of every frame, in recording order.
     times: Vec<f64>,
+    /// Frame indices by increasing time.
+    by_time: Vec<usize>,
     /// [`frame_digest`] of every frame as the scene drew it while recording.
     digests: Vec<[u8; 32]>,
     /// Decoded chunk: index and its frames.
@@ -743,9 +753,14 @@ impl Bundle {
             times.push(r.f64()?);
         }
         let chunked: usize = manifest.chunks.iter().map(|chunk| chunk.frames).sum();
+        let mut by_time: Vec<usize> = (0..times.len()).collect();
+        by_time.sort_by(|a, b| times[*a].total_cmp(&times[*b]));
         if times.len() != manifest.frames
             || chunked != manifest.frames
-            || times.windows(2).any(|pair| pair[0] >= pair[1])
+            || times.iter().any(|time| !time.is_finite())
+            || by_time
+                .windows(2)
+                .any(|pair| times[pair[0]] >= times[pair[1]])
         {
             return Err(BundleError::Corrupt("frame index is inconsistent".into()));
         }
@@ -765,6 +780,7 @@ impl Bundle {
             scene,
             tables,
             times,
+            by_time,
             digests,
             cached: None,
         })
@@ -798,7 +814,8 @@ impl Bundle {
         self.times.len()
     }
 
-    /// Time of every recorded frame, in order.
+    /// Time of every recorded frame, by frame index. The frame grid comes
+    /// first, then the instants recorded between grid frames.
     pub fn times(&self) -> &[f64] {
         &self.times
     }
@@ -807,9 +824,11 @@ impl Bundle {
     pub fn frame_index_at(&self, time: f64) -> usize {
         // Tolerate the rounding of accumulated frame steps.
         let time = time + 1e-9;
-        self.times
-            .partition_point(|frame_time| *frame_time <= time)
-            .saturating_sub(1)
+        let position = self
+            .by_time
+            .partition_point(|index| self.times[*index] <= time)
+            .saturating_sub(1);
+        self.by_time.get(position).copied().unwrap_or(0)
     }
 
     /// Decode frame `index`.
@@ -833,7 +852,7 @@ impl Bundle {
         let record = frames
             .get(index - first)
             .ok_or_else(|| BundleError::Corrupt("frame index out of range".into()))?;
-        record.resolve(&self.tables, |_| {
+        record.resolve(&self.tables, &mut |_| {
             Err(BundleError::Unsupported(
                 "this bundle draws Lottie animations, which this player cannot show yet".into(),
             ))
@@ -948,6 +967,11 @@ pub fn frame_digest(
         for value in &pass.values {
             hasher.update(&value.to_bits().to_le_bytes());
         }
+    }
+    hasher.update(&(frame.motion_blur.len() as u64).to_le_bytes());
+    for sample in &frame.motion_blur {
+        hasher.update(&sample.time.to_bits().to_le_bytes());
+        hasher.update(&frame_digest(sample, background, store));
     }
     *hasher.finalize().as_bytes()
 }
