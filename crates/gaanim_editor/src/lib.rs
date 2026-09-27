@@ -468,7 +468,10 @@ fn editor_ui_system(
     mut commands: Commands,
     fps_overlay: Res<fps_overlay::FpsOverlay>,
     mut render_health: Option<ResMut<gaanim_renderer::prelude::RenderHealth>>,
-    vello_diagnostics: Option<Res<gaanim_renderer::prelude::VelloDiagnostics>>,
+    (vello_diagnostics, preview_resolution): (
+        Option<Res<gaanim_renderer::prelude::VelloDiagnostics>>,
+        Option<Res<gaanim_renderer::prelude::PreviewResolution>>,
+    ),
     interactive: Res<PreviewInteractive>,
     viewport_frame: Res<ViewportFrame>,
     hub: Option<Res<project_hub::ProjectHubState>>,
@@ -1086,7 +1089,11 @@ fn editor_ui_system(
     {
         health.request_retry();
     }
-    fps_overlay.render(ctx, vello_diagnostics.as_deref());
+    fps_overlay.render(
+        ctx,
+        vello_diagnostics.as_deref(),
+        preview_resolution.as_deref(),
+    );
 }
 
 /// Format seconds as `M:SS.ss` for the playback overlay.

@@ -9,7 +9,7 @@ use bevy::render::{Extract, ExtractSchedule, Render, RenderApp, RenderSystems};
 use bevy::window::PrimaryWindow;
 use gaanim_core::kurbo;
 
-use crate::canvas::{VelloCanvas, VelloView};
+use crate::canvas::{PreviewResolution, VelloCanvas, VelloView, scaled_canvas_size};
 use crate::post_process::{CanvasPostProcess, GpuPostProcess, PostProcessRequest};
 
 /// Post-process of the next frame and the canvas texture it applies to.
@@ -60,7 +60,7 @@ fn update_post_process_frame(
     views: Query<(&Camera, Option<&bevy::camera::RenderTarget>), With<VelloView>>,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
-    canvas: Res<VelloCanvas>,
+    (canvas, preview): (Res<VelloCanvas>, Option<Res<PreviewResolution>>),
     signals: Query<&gaanim_animation::FloatSignal>,
     mut frame: ResMut<PostProcessFrame>,
 ) {
@@ -91,8 +91,12 @@ fn update_post_process_frame(
             .viewport
             .as_ref()
             .map_or(UVec2::ZERO, |viewport| viewport.physical_position);
-        let origin = viewport.physical_position.as_dvec2() - target_origin.as_dvec2();
-        let size = viewport.physical_size.as_dvec2();
+        // A reduced preview rasterizes the viewport into part of the texture.
+        let full = canvas.size().max(UVec2::ONE);
+        let scale = preview.as_ref().map_or(1.0, |preview| preview.scale);
+        let used = scaled_canvas_size(full, scale).as_dvec2() / full.as_dvec2();
+        let origin = (viewport.physical_position.as_dvec2() - target_origin.as_dvec2()) * used;
+        let size = viewport.physical_size.as_dvec2() * used;
         let time = playback.map_or(0.0, |state| state.current_time);
         let request = post.request_with(
             time,

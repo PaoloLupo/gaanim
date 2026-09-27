@@ -172,12 +172,15 @@ pub fn sync_canvas_background_clear_system(
 fn interactive_background_pixel_size(
     background: &CanvasBackground,
     camera: Option<&gaanim_math::ResolvedCamera>,
+    preview: Option<&crate::canvas::PreviewResolution>,
 ) -> (u32, u32) {
     const MAX_SHADER_TEXTURE_DIMENSION: f64 = 8192.0;
     let scale = camera
         .map(|camera| camera.viewport.scale)
         .filter(|scale| scale.is_finite() && *scale > 0.0)
-        .unwrap_or(1.0);
+        .unwrap_or(1.0)
+        // A reduced preview rasterizes fewer pixels; so does its background.
+        * preview.map_or(1.0, |preview| f64::from(preview.scale));
     let width = f64::from(background.pixel_size.0) * scale;
     let height = f64::from(background.pixel_size.1) * scale;
     let limit_scale = (MAX_SHADER_TEXTURE_DIMENSION / width.max(height)).min(1.0);
@@ -2498,7 +2501,10 @@ pub fn gaanim_render_system(
         Option<Ref<StrokeProfile>>,
     )>,
     mut query_vello_scene: Query<&mut VelloScene2d, With<MainVelloScene>>,
-    mut shader_frame: Option<ResMut<ShaderBackgroundFrame>>,
+    (mut shader_frame, preview): (
+        Option<ResMut<ShaderBackgroundFrame>>,
+        Option<Res<crate::canvas::PreviewResolution>>,
+    ),
     (camera_screens, camera_sources, hud_query, layer_query, float_signals): CameraViewQueries,
     mut scratch: Local<(Vec<ExtractedElement>, std::collections::HashSet<Entity>)>,
 ) {
@@ -2991,7 +2997,11 @@ pub fn gaanim_render_system(
     let mut canvas_paint = None;
     if !is_perspective {
         if let Some(ref canvas_bg) = canvas_bg {
-            let pixel_size = interactive_background_pixel_size(canvas_bg, gaanim_camera.as_deref());
+            let pixel_size = interactive_background_pixel_size(
+                canvas_bg,
+                gaanim_camera.as_deref(),
+                preview.as_deref(),
+            );
             let time_seconds = playback_state
                 .as_ref()
                 .map_or(0.0, |state| state.current_time);
@@ -4188,7 +4198,7 @@ mod tests {
         );
 
         assert_eq!(
-            interactive_background_pixel_size(&background, Some(&camera)),
+            interactive_background_pixel_size(&background, Some(&camera), None),
             (640, 360)
         );
 
@@ -4200,7 +4210,7 @@ mod tests {
             },
         );
         assert_eq!(
-            interactive_background_pixel_size(&background, Some(&high_zoom_camera)),
+            interactive_background_pixel_size(&background, Some(&high_zoom_camera), None),
             (8192, 4608)
         );
     }

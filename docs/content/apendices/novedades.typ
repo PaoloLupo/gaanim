@@ -17,6 +17,15 @@ Sin publicar todavía. No hace falta cambiar tus escenas.
 
 == Cambios
 
+- La previsualización del editor ajusta su resolución para mantener la
+  fluidez: si al reproducir no llega a 60 fps porque dibujar la escena cuesta
+  demasiado, pasa al 75 % y luego al 50 % de los píxeles, y al pausar vuelve
+  a la resolución completa, así que un fotograma detenido siempre se ve
+  nítido. Si bajarla no acelera la reproducción (el límite está en la escena,
+  no en el dibujo), deshace el cambio. El panel de `F12` muestra la
+  resolución actual y `GAANIM_PREVIEW_RESOLUTION=full` la mantiene siempre
+  completa (ver #link("/referencia/cli/")[Línea de comandos]). Las
+  exportaciones no cambian.
 - La previsualización ya no vuelve a rasterizar un fotograma idéntico al que
   muestra: en pausa, durante un `scene.wait()` o en una parada de la
   presentación, la GPU queda libre y el editor responde con más holgura. Los

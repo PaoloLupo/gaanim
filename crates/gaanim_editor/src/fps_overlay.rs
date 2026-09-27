@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_egui::egui::{self, Color32};
-use gaanim_renderer::prelude::{RenderHealth, VelloDiagnostics};
+use gaanim_renderer::prelude::{PreviewResolution, RenderHealth, VelloDiagnostics};
 
 const HISTORY_LEN: usize = 120;
 
@@ -46,13 +46,18 @@ impl FpsOverlay {
         self.count = (self.count + 1).min(HISTORY_LEN);
     }
 
-    pub fn render(&self, ctx: &egui::Context, diagnostics: Option<&VelloDiagnostics>) {
+    pub fn render(
+        &self,
+        ctx: &egui::Context,
+        diagnostics: Option<&VelloDiagnostics>,
+        preview: Option<&PreviewResolution>,
+    ) {
         if !self.visible {
             return;
         }
 
         let area_w = 260.0;
-        let area_h = 120.0;
+        let area_h = 130.0;
         let graph_h = 70.0;
         let bar_w = area_w / HISTORY_LEN as f32;
 
@@ -117,10 +122,25 @@ impl FpsOverlay {
                     );
                 }
 
+                if let Some(preview) = preview {
+                    let mode = if preview.adaptive {
+                        "automática: baja al reproducir si no llega a 60 fps"
+                    } else {
+                        "fija"
+                    };
+                    p.text(
+                        egui::Pos2::new(rect.min.x + 6.0, rect.min.y + 33.0),
+                        egui::Align2::LEFT_TOP,
+                        format!("Preview {:.0} %  ·  {mode}", preview.scale * 100.0),
+                        egui::FontId::proportional(9.0),
+                        Color32::from_rgb(230, 210, 150),
+                    );
+                }
+
                 // Bar graph area
                 let graph_rect = egui::Rect::from_min_max(
-                    egui::Pos2::new(rect.min.x + 4.0, rect.min.y + 38.0),
-                    egui::Pos2::new(rect.max.x - 4.0, rect.min.y + 38.0 + graph_h),
+                    egui::Pos2::new(rect.min.x + 4.0, rect.min.y + 48.0),
+                    egui::Pos2::new(rect.max.x - 4.0, rect.min.y + 48.0 + graph_h),
                 );
                 let p = ui.painter_at(graph_rect);
 

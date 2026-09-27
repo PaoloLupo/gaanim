@@ -14,6 +14,7 @@ use bevy::render::view::window::prepare_windows;
 use bevy::render::{Render, RenderApp, RenderSystems};
 use gaanim_core::ObjectId;
 use gaanim_renderer::pipeline::{GaanimRenderCache, gaanim_render_system};
+use gaanim_renderer::prelude::PreviewResolution;
 use gaanim_timeline::timeline::Timeline;
 use gaanim_timeline::{timeline_playback_system, timeline_seek_system};
 use std::collections::HashMap;
@@ -97,6 +98,8 @@ struct Window {
     compile: Phase,
     rebuilt: u64,
     fragments: usize,
+    /// Lowest preview resolution scale used in the window.
+    preview_scale: f32,
     timeline_start: f64,
     timeline_end: f64,
     segment: Option<String>,
@@ -113,6 +116,7 @@ impl Window {
             compile: Phase::ZERO,
             rebuilt: 0,
             fragments: 0,
+            preview_scale: 1.0,
             timeline_start: timeline_time,
             timeline_end: timeline_time,
             segment: None,
@@ -251,7 +255,11 @@ fn compile_end(mut profile: ResMut<FrameProfile>, cache: Option<Res<GaanimRender
     }
 }
 
-fn main_frame_end(mut profile: ResMut<FrameProfile>, timeline: Option<Res<Timeline>>) {
+fn main_frame_end(
+    mut profile: ResMut<FrameProfile>,
+    timeline: Option<Res<Timeline>>,
+    preview: Option<Res<PreviewResolution>>,
+) {
     let now = Instant::now();
     let main = profile.main_start.take().map(|start| now - start);
     let dt = profile.last_frame.replace(now).map(|last| now - last);
@@ -262,6 +270,9 @@ fn main_frame_end(mut profile: ResMut<FrameProfile>, timeline: Option<Res<Timeli
         return;
     };
     window.frames += 1;
+    if let Some(preview) = preview {
+        window.preview_scale = window.preview_scale.min(preview.scale);
+    }
     if let Some(main) = main {
         window.main.add(main);
     }
@@ -295,7 +306,7 @@ fn flush_window(profile: &mut FrameProfile) {
     let frames = window.frames;
     let avg_dt_ms = window.frame_dt.avg_ms(frames);
     let line = format!(
-        "t={:6.2}-{:6.2}s {:>3} fps | frame {:5.1} [{:5.1}] | main {:5.1} [{:5.1}] seek {:5.1} [{:5.1}] compile {:5.1} [{:5.1}] rebuilt {:5.1}/{:<5} | render {:5.1} [{:5.1}] acquire {:5.1} [{:5.1}] graph+present {:5.1} [{:5.1}] | {}",
+        "t={:6.2}-{:6.2}s {:>3} fps | frame {:5.1} [{:5.1}] | main {:5.1} [{:5.1}] seek {:5.1} [{:5.1}] compile {:5.1} [{:5.1}] rebuilt {:5.1}/{:<5} | render {:5.1} [{:5.1}] acquire {:5.1} [{:5.1}] graph+present {:5.1} [{:5.1}] preview {:3.0}% | {}",
         window.timeline_start,
         window.timeline_end,
         (f64::from(frames) / window.started.elapsed().as_secs_f64()).round(),
@@ -315,6 +326,7 @@ fn flush_window(profile: &mut FrameProfile) {
         render.acquire.max_ms(),
         render.graph.avg_ms(render.frames),
         render.graph.max_ms(),
+        window.preview_scale * 100.0,
         window.segment.as_deref().unwrap_or("-"),
     );
     eprintln!("GAANIM_FRAME_PROFILE {line}");
