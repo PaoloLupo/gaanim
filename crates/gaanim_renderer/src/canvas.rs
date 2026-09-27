@@ -165,11 +165,13 @@ const SLOW_FRAME_SECONDS: f64 = 1.2 / 60.0;
 const ADAPT_WINDOW_SECONDS: f64 = 0.5;
 
 /// Resolution of the interactive canvas relative to the physical pixels of
-/// its viewport. Exports never read it.
+/// its viewport.
 ///
 /// While `adaptive` is set, playback lowers `scale` when frames miss 60 fps
 /// because of rasterization, and a pause restores full resolution, so a
-/// paused or resting frame is always sharp.
+/// paused or resting frame is always sharp. Without this resource the
+/// canvas draws every pixel: windowed captures and exports of 3D scenes
+/// also draw through the canvas, so only the interactive editor inserts it.
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
 pub struct PreviewResolution {
     /// Whether playback may change `scale`.
@@ -181,30 +183,36 @@ pub struct PreviewResolution {
 
 impl Default for PreviewResolution {
     fn default() -> Self {
-        Self {
-            adaptive: true,
-            scale: 1.0,
-        }
+        Self::FULL
     }
 }
 
 impl PreviewResolution {
-    /// Resolution for a [`PREVIEW_RESOLUTION_ENV`] value; `None` or anything
-    /// unrecognized is `auto`.
+    /// Every pixel, always.
+    pub const FULL: Self = Self {
+        adaptive: false,
+        scale: 1.0,
+    };
+
+    /// Full resolution that playback lowers while it runs slow.
+    pub const AUTO: Self = Self {
+        adaptive: true,
+        scale: 1.0,
+    };
+
+    /// Interactive resolution for a [`PREVIEW_RESOLUTION_ENV`] value; `None`
+    /// or anything unrecognized is [`Self::AUTO`].
     pub fn from_setting(setting: Option<&str>) -> Self {
         let setting = setting.map(str::trim).unwrap_or("auto");
         if setting.eq_ignore_ascii_case("full") {
-            return Self {
-                adaptive: false,
-                scale: 1.0,
-            };
+            return Self::FULL;
         }
         match setting.parse::<f32>() {
             Ok(fixed) if fixed.is_finite() && fixed > 0.0 => Self {
                 adaptive: false,
                 scale: fixed.clamp(MIN_PREVIEW_SCALE, 1.0),
             },
-            _ => Self::default(),
+            _ => Self::AUTO,
         }
     }
 }
@@ -307,17 +315,18 @@ impl ResolutionAdapter {
 }
 
 /// Lowers the preview resolution while playback runs slow and restores it
-/// when playback stops.
+/// when playback stops. Does nothing unless a host inserted an adaptive
+/// [`PreviewResolution`].
 fn adapt_preview_resolution(
     time: Res<Time<Real>>,
     playback: Option<Res<gaanim_animation::PlaybackState>>,
-    mut preview: ResMut<PreviewResolution>,
+    preview: Option<ResMut<PreviewResolution>>,
     mut adapter: Local<ResolutionAdapter>,
 ) {
-    if !preview.adaptive {
+    let Some(mut preview) = preview.filter(|preview| preview.adaptive) else {
         *adapter = ResolutionAdapter::default();
         return;
-    }
+    };
     let playing = playback.is_some_and(|state| state.is_playing);
     let scale = adapter.update(playing, time.delta_secs_f64(), preview.scale);
     if scale != preview.scale {
@@ -425,10 +434,6 @@ pub(crate) struct VelloCanvasPlugin;
 impl Plugin for VelloCanvasPlugin {
     fn build(&self, app: &mut App) {
         let stats = VelloFrameStats::default();
-        if !app.world().contains_resource::<PreviewResolution>() {
-            let setting = std::env::var(PREVIEW_RESOLUTION_ENV).ok();
-            app.insert_resource(PreviewResolution::from_setting(setting.as_deref()));
-        }
         app.add_plugins(ExtractComponentPlugin::<VelloView>::default())
             .init_resource::<VelloCanvas>()
             .insert_resource(stats.clone())
@@ -540,8 +545,8 @@ fn extract_canvas(
         .map(|(scene, transform)| (scene.0.clone(), transform.to_matrix()));
 }
 
-/// Maps the scene from world space to the canvas pixels of `view`, when the
-/// camera viewport is rasterized into `pixels`.
+/// Maps the scene from world space to the canvas pixels of `view`, with the
+/// viewport rasterized at `scale` of its pixels per axis.
 ///
 /// Same chain as bevy_vello 0.14: world → view → projection → NDC → pixels,
 /// with Y flipped into Vello's Y-down space.
@@ -549,10 +554,10 @@ fn scene_to_pixels(
     model: Mat4,
     camera: &ExtractedCamera,
     view: &ExtractedView,
-    pixels: UVec2,
+    scale: Vec2,
 ) -> Option<Affine> {
-    camera.physical_viewport_size?;
-    let (pixels_x, pixels_y) = (pixels.x as f32, pixels.y as f32);
+    let size = camera.physical_viewport_size?;
+    let (pixels_x, pixels_y) = (size.x as f32 * scale.x, size.y as f32 * scale.y);
     let ndc_to_pixels = Mat4::from_cols_array_2d(&[
         [pixels_x / 2.0, 0.0, 0.0, pixels_x / 2.0],
         [0.0, pixels_y / 2.0, 0.0, pixels_y / 2.0],
@@ -607,12 +612,15 @@ fn render_canvas(
     };
 
     let full = target.texture_descriptor.size;
-    let pixels = scaled_canvas_size(UVec2::new(full.width, full.height), extracted.scale);
+    let full = UVec2::new(full.width, full.height);
+    let pixels = scaled_canvas_size(full, extracted.scale);
+    // Exactly one at full resolution, which keeps the historical mapping.
+    let rasterized = pixels.as_vec2() / full.max(UVec2::ONE).as_vec2();
     let placed = extracted.scene.as_ref().and_then(|(scene, model)| {
         let (camera, view) = views.iter().last()?;
         Some((
             Arc::clone(scene),
-            scene_to_pixels(*model, camera, view, pixels)?,
+            scene_to_pixels(*model, camera, view, rasterized)?,
         ))
     });
     let current = CanvasFrame {
@@ -993,9 +1001,11 @@ mod tests {
             adaptive: false,
             scale,
         };
+        // Captures and exports that draw through the canvas keep every pixel.
+        assert_eq!(PreviewResolution::default(), PreviewResolution::FULL);
         assert_eq!(
             PreviewResolution::from_setting(None),
-            PreviewResolution::default()
+            PreviewResolution::AUTO
         );
         assert!(PreviewResolution::from_setting(Some("auto")).adaptive);
         assert!(PreviewResolution::from_setting(Some("blurry")).adaptive);

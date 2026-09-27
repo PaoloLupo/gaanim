@@ -40,6 +40,14 @@ Sin publicar todavía. No hace falta cambiar tus escenas.
   aplica a la previsualización y a las exportaciones. Los objetos con relleno
   y trazo a la vez siguen usando una capa, que evita que el trazo se mezcle
   con el relleno.
+- `animate.custom` reutiliza el último resultado de tu función cuando se le
+  pide el mismo progreso: como la función debe ser pura, los clips que ya
+  terminaron (y los glifos de un texto que comparten la animación) no vuelven
+  a llamar a Python en cada fotograma.
+- Un número rodante en reposo ya no marca su contorno como cambiado en cada
+  fotograma, así que el renderer no vuelve a compararlo.
+- El editor muestra el primer fotograma algo antes: la previsualización solo
+  prepara el antialiasing que usa.
 
 = 0.5.0
 

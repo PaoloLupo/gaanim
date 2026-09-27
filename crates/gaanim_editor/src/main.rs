@@ -100,6 +100,12 @@ fn main() {
     .add_plugins(gaanim_editor::GaanimEditorPlugin)
     .insert_resource(gaanim_media::VideoSamplingMode::Realtime)
     .insert_resource(gaanim_media::PreviewAudioEnabled(true))
+    // Only the interactive preview may lower its resolution while playing.
+    .insert_resource(gaanim_renderer::prelude::PreviewResolution::from_setting(
+        std::env::var(gaanim_renderer::prelude::PREVIEW_RESOLUTION_ENV)
+            .ok()
+            .as_deref(),
+    ))
     .insert_resource(gaanim_editor::PresentationMode {
         active: launch.present,
     })
