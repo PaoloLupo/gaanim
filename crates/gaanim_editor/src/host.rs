@@ -84,10 +84,14 @@ pub fn host_app(options: &HostOptions) -> App {
     if crate::frame_profile::enabled() {
         app.add_plugins(crate::frame_profile::FrameProfilePlugin);
     }
-    // bevy_egui creates its primary context when the application starts. Keep
-    // this camera alive for both the project hub and scene launches, so a
-    // payload can reuse it instead of creating the egui camera after the
-    // first frame.
+    // The canvas camera owns the primary egui context from the start, for
+    // both the project hub and scene launches, so a payload reuses it. It is
+    // named rather than left to bevy_egui, which takes the first new camera
+    // its query yields: with the clear camera spawned alongside, that was
+    // sometimes the clear camera, and no UI was drawn at all.
+    app.world_mut()
+        .resource_mut::<bevy_egui::EguiGlobalSettings>()
+        .auto_create_primary_context = false;
     spawn_host_camera(app.world_mut());
     app
 }
@@ -102,11 +106,12 @@ fn spawn_host_camera(world: &mut World) {
             ..default()
         },
         bevy::core_pipeline::tonemapping::Tonemapping::None,
+        bevy_egui::PrimaryEguiContext,
     ));
     // The canvas composites over the window without clearing it. A script
     // replay spawns this clear itself, but a bundle does not: without it the
     // area around the frame kept every earlier frame while the interactive
-    // view zoomed out. Spawned second, so egui keeps the camera above.
+    // view zoomed out.
     world.spawn((
         Camera2d,
         gaanim_renderer::pipeline::GaanimFullWindowClearCamera,
@@ -127,11 +132,15 @@ mod tests {
     fn host_installs_a_primary_2d_camera_for_egui_before_scene_replay() {
         let mut world = World::new();
         spawn_host_camera(&mut world);
+        // Only the canvas camera draws egui; the clear camera must not.
+        let primary = world
+            .query_filtered::<Entity, With<bevy_egui::PrimaryEguiContext>>()
+            .iter(&world)
+            .collect::<Vec<_>>();
+        assert_eq!(primary.len(), 1);
         assert!(
             world
-                .query_filtered::<Entity, With<Camera2d>>()
-                .iter(&world)
-                .next()
+                .get::<gaanim_renderer::prelude::VelloView>(primary[0])
                 .is_some()
         );
     }
