@@ -129,7 +129,7 @@ partes mueves: lee «Al actualizar».
   Con `?src=` abre un archivo publicado en otro sitio. Todavía no reproduce el
   audio ni abre la ventana del Presenter View (ver
   #link("/guias/compartir/")[Compartir sin Python]). El sitio de la
-  documentación lo enlaza desde la cabecera, la barra lateral y la portada.
+  documentación lo enlaza desde la cabecera y la portada.
 - Controles táctiles en el reproductor, al estilo de los reproductores de vídeo
   del móvil: un toque muestra u oculta los controles, con botones grandes para
   la pausa anterior, reproducir y la siguiente; dos toques en un lado, o
