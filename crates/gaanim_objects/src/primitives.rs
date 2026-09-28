@@ -355,23 +355,41 @@ pub fn regular_polygon(id: ObjectId, n_sides: u32, radius: f64) -> MobjectBundle
     bundle
 }
 
-/// Creates a checkmark ✓ Mobject bundle (drawn stroke-only by default).
+/// Creates a checkmark ✓ Mobject bundle.
+///
+/// The mark is a closed outline whose thickness is proportional to `size`, so
+/// it is a filled shape: `.fill()` colours it and no stroke is required.
 pub fn checkmark(id: ObjectId, size: f64) -> MobjectBundle {
-    let mut path = kurbo::BezPath::new();
-    path.move_to(kurbo::Point::new(-0.4 * size, -0.1 * size));
-    path.line_to(kurbo::Point::new(-0.15 * size, -0.35 * size));
-    path.line_to(kurbo::Point::new(0.4 * size, 0.4 * size));
-    let bounds = Bounds3D::new_2d(-0.4 * size, -0.35 * size, 0.4 * size, 0.4 * size);
-    let mut bundle = MobjectBundle::new(id, path, bounds);
+    let start = kurbo::Point::new(-0.4 * size, -0.1 * size);
+    let elbow = kurbo::Point::new(-0.15 * size, -0.35 * size);
+    let end = kurbo::Point::new(0.4 * size, 0.4 * size);
+    let thickness = 0.12 * size;
+    let half = thickness * 0.5;
 
-    // Checkmarks default to stroke-only
-    bundle.fill = FillBrush(None);
-    bundle.stroke = StrokeBrush {
-        brush: Some(gaanim_core::peniko::Brush::Solid(
-            gaanim_core::peniko::Color::WHITE,
-        )),
-        style: kurbo::Stroke::new(3.0),
+    // Offset the two-segment centerline by hand (butt caps, mitered elbow):
+    // a stroked outline self-intersects at the inner corner, which shows up
+    // as a stray loop as soon as the mark gets an explicit stroke.
+    let normal = |from: kurbo::Point, to: kurbo::Point| {
+        let d = (to - from).normalize();
+        kurbo::Vec2::new(-d.y, d.x)
     };
+    let (n1, n2) = (normal(start, elbow), normal(elbow, end));
+    let miter = (n1 + n2) * (half / (1.0 + n1.dot(n2)));
+    let mut path = kurbo::BezPath::new();
+    path.move_to(start + n1 * half);
+    path.line_to(elbow + miter);
+    path.line_to(end + n2 * half);
+    path.line_to(end - n2 * half);
+    path.line_to(elbow - miter);
+    path.line_to(start - n1 * half);
+    path.close_path();
+    let bounds = Bounds3D::new_2d(
+        -0.4 * size - half,
+        -0.35 * size - half,
+        0.4 * size + half,
+        0.4 * size + half,
+    );
+    let mut bundle = MobjectBundle::new(id, path, bounds);
     bundle.tag = ObjectTag("Checkmark".into());
     bundle
 }
@@ -1359,6 +1377,13 @@ mod arrow_tests {
     use super::*;
     use gaanim_core::ObjectId;
     use kurbo::Shape;
+
+    #[test]
+    fn checkmark_stays_proportional_to_its_size() {
+        // Regression: a 3-unit world-space stroke drew a disc around the mark.
+        let bounds = checkmark(ObjectId::from_raw(0), 0.3).path.0.bounding_box();
+        assert!(bounds.width() < 0.3 && bounds.height() < 0.3);
+    }
 
     #[test]
     fn dimensioned_arrow_uses_scene_unit_defaults_and_rotates_geometry() {
