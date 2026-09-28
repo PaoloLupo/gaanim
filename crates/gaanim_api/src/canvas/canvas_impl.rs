@@ -2062,6 +2062,9 @@ pub struct SceneModel {
     /// Channels driven by launched animations (`play(advance=False)`), with
     /// their absolute span, so a later play cannot drive them at once.
     pub(crate) launched_channels: Vec<LaunchedChannel>,
+    /// Timeline instant of a playback bundle's cover image, set with
+    /// [`Self::set_thumbnail`].
+    pub(crate) thumbnail_time: Option<f64>,
     /// Voiceover blocks and the live take, for timing and the editor recorder.
     pub(crate) narration: super::narration::NarrationState,
     /// Reusable logo/footer treatment generated for every explicit segment.
@@ -2104,6 +2107,7 @@ impl SceneModel {
             audio_tracks: Vec::new(),
             tempo: None,
             launched_channels: Vec::new(),
+            thumbnail_time: None,
             narration: Default::default(),
             branding: None,
             camera_position: gaanim_core::glam::DVec3::ZERO,
@@ -4963,6 +4967,24 @@ impl SceneModel {
             return Err(format!("beats must be finite, got {beats}"));
         }
         Ok(beats * tempo.beat())
+    }
+
+    /// Choose the instant a playback bundle shows as its cover image; `None`
+    /// takes the cursor.
+    pub fn set_thumbnail(&mut self, time: Option<f64>) -> Result<(), String> {
+        let time = time.unwrap_or_else(|| self.current_time());
+        if !time.is_finite() || time < 0.0 {
+            return Err(format!(
+                "thumbnail time must be a non-negative number of seconds, got {time}"
+            ));
+        }
+        self.thumbnail_time = Some(time);
+        Ok(())
+    }
+
+    /// The instant chosen with [`Self::set_thumbnail`].
+    pub fn thumbnail_time(&self) -> Option<f64> {
+        self.thumbnail_time
     }
 
     /// A warning when a launched animation still runs where the scene ends:
@@ -9346,6 +9368,20 @@ mod tests {
         );
         canvas.wait(2.0);
         assert_eq!(canvas.launched_past_end_warning(), None);
+    }
+
+    #[test]
+    fn thumbnail_takes_the_cursor_or_an_instant() {
+        let mut canvas = SceneModel::new(1280, 720);
+        assert_eq!(canvas.thumbnail_time(), None);
+        canvas.wait(2.5);
+        canvas.set_thumbnail(None).unwrap();
+        assert_eq!(canvas.thumbnail_time(), Some(2.5));
+        canvas.set_thumbnail(Some(0.75)).unwrap();
+        assert_eq!(canvas.thumbnail_time(), Some(0.75));
+        assert!(canvas.set_thumbnail(Some(-1.0)).is_err());
+        assert!(canvas.set_thumbnail(Some(f64::NAN)).is_err());
+        assert_eq!(canvas.thumbnail_time(), Some(0.75));
     }
 
     #[test]

@@ -68,6 +68,14 @@ const GENERAL: Page = Page {
                     "--diff --example <SCRIPT>",
                     "Compare snapshots with approved baselines",
                 ),
+                (
+                    "thumbnail <BUNDLE> <PNG> [SIZE]",
+                    "Write the cover image of a .gaanim file, at most SIZE\npixels on its longest edge (default 512)",
+                ),
+                (
+                    "register",
+                    "Open .gaanim files with Gaanim on double click, with a\nPresent action and cover images; unregister undoes it",
+                ),
             ],
         ),
         Block::Rows(

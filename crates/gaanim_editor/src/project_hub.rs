@@ -118,6 +118,9 @@ pub struct ProjectHubState {
     /// Shown by `gaanim-play`, which has no Python: .gaanim files open, and
     /// projects explain what they need.
     without_python: bool,
+    /// Whether `.gaanim` files open with Gaanim; read when the environment
+    /// page first shows it.
+    associated: Option<bool>,
 }
 
 impl Default for ProjectHubState {
@@ -138,6 +141,7 @@ impl Default for ProjectHubState {
             was_focused: true,
             bundle_request: None,
             without_python: false,
+            associated: None,
         }
     }
 }
@@ -1822,6 +1826,109 @@ fn environment_ui(ui: &mut Ui, state: &mut ProjectHubState) {
         (!tools.ffmpeg).then(ffmpeg_help),
         &["Cuando termine, cierra y vuelve a abrir Gaanim si al exportar sigue sin encontrarlo."],
     );
+    if !crate::WEB {
+        ui.add_space(12.0);
+        association_card(ui, state);
+    }
+}
+
+/// Open `.gaanim` files with a double click, as `gaanim register` does.
+fn association_card(ui: &mut Ui, state: &mut ProjectHubState) {
+    use gaanim_project::association;
+    let associated = *state
+        .associated
+        .get_or_insert_with(association::is_registered);
+    let (color, icon, badge) = if associated {
+        (palette::LOOP, Icon::Check, "Asociados")
+    } else {
+        (palette::TEXT_MUTED, Icon::Warning, "Opcional")
+    };
+    let mut clicked = false;
+    egui::Frame::new()
+        .fill(palette::SURFACE)
+        .stroke(Stroke::new(1.0, Color32::from_white_alpha(12)))
+        .inner_margin(egui::Margin::same(18))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+            ui.horizontal(|ui| {
+                ui_kit::status_badge(ui, icon, color);
+                ui.add_space(14.0);
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new("Archivos .gaanim")
+                                .size(16.0)
+                                .color(palette::TEXT),
+                        );
+                        ui.add_space(10.0);
+                        ui.label(egui::RichText::new(badge).size(11.5).color(color));
+                    });
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new(
+                            "Ábrelos con doble clic, preséntalos desde el menú contextual y ve \
+                             su portada en el explorador de archivos. Solo para tu usuario.",
+                        )
+                        .size(12.5)
+                        .color(palette::TEXT_MUTED),
+                    );
+                    ui.add_space(10.0);
+                    clicked = ui_kit::secondary_button(
+                        ui,
+                        if associated {
+                            "Quitar la asociación"
+                        } else {
+                            "Asociar archivos .gaanim"
+                        },
+                        true,
+                    )
+                    .clicked();
+                });
+            });
+        });
+    if !clicked {
+        return;
+    }
+    let result = if associated {
+        association::unregister()
+    } else {
+        std::env::current_exe()
+            .map_err(|error| error.to_string())
+            .and_then(|exe| association::register(&association::launcher_next_to(&exe)))
+    };
+    state.associated = Some(association::is_registered());
+    state.notice = Some(match result {
+        Ok(report) if report.warnings.is_empty() => Notice::Info(
+            if associated {
+                "Los archivos .gaanim ya no se abren con Gaanim."
+            } else {
+                "Listo: los archivos .gaanim se abren con Gaanim."
+            }
+            .into(),
+        ),
+        Ok(_) if associated => {
+            Notice::Info("Los archivos .gaanim ya no se abren con Gaanim.".into())
+        }
+        Ok(report)
+            if report
+                .warnings
+                .iter()
+                .any(|warning| warning.contains(association::THUMBNAIL_HANDLER_DLL)) =>
+        {
+            Notice::Info(format!(
+                "Los archivos .gaanim se abren con Gaanim, pero sin portada en el \
+                 Explorador: falta {} junto a gaanim.exe.",
+                association::THUMBNAIL_HANDLER_DLL
+            ))
+        }
+        Ok(_) => Notice::Info(
+            "Listo: los archivos .gaanim se abren con Gaanim. Si el explorador de \
+             archivos aún no lo muestra, cierra la sesión y vuelve a entrar."
+                .into(),
+        ),
+        Err(error) => Notice::Error(format!("No se pudo cambiar la asociación: {error}")),
+    });
 }
 
 fn tool_card(

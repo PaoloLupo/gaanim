@@ -58,6 +58,9 @@ pub const VERSION: u32 = 2;
 const ZSTD_LEVEL: i32 = 17;
 /// File extension of playback bundles.
 pub const EXTENSION: &str = "gaanim";
+/// Optional cover image: a PNG stored as-is, which file managers show
+/// without decoding the bundle (the `gaanim_thumbnail` crate reads it).
+pub const THUMBNAIL: &str = "thumbnail.png";
 /// Frames per chunk: one second at the default rate.
 const CHUNK_FRAMES: usize = 60;
 
@@ -538,6 +541,21 @@ impl<W: Write + Seek> BundleWriter<W> {
         Ok(entry)
     }
 
+    /// Store `png` as the bundle's cover image ([`THUMBNAIL`]).
+    pub fn set_thumbnail(&mut self, png: &[u8]) -> Result<()> {
+        if self.entries.contains_key(THUMBNAIL) {
+            return Err(BundleError::Unsupported(
+                "the bundle already has a cover image".into(),
+            ));
+        }
+        // PNG is compressed already, and readers load it in one piece.
+        self.zip.start_file(THUMBNAIL, stored_options())?;
+        self.zip.write_all(png)?;
+        self.entries
+            .insert(THUMBNAIL.to_owned(), blake3::hash(png).to_hex().to_string());
+        Ok(())
+    }
+
     /// Start another pass: its frames come in increasing time order again and
     /// may fall between the frames of earlier passes, but never on one.
     pub fn start_pass(&mut self) -> Result<()> {
@@ -758,7 +776,7 @@ fn decompress(name: &str, bytes: &[u8]) -> Result<Vec<u8>> {
 
 /// Whether the bundle stores `name` as a Zstandard frame.
 fn zstd_entry(name: &str) -> bool {
-    name != "manifest.json" && !name.starts_with("media/")
+    name != "manifest.json" && name != THUMBNAIL && !name.starts_with("media/")
 }
 
 fn read_entry<R: Read + Seek>(
@@ -994,6 +1012,14 @@ impl Bundle {
             store.end_frame();
         }
         Ok(mismatched)
+    }
+
+    /// The cover PNG, when the bundle has one.
+    pub fn thumbnail(&mut self) -> Result<Option<Vec<u8>>> {
+        if !self.manifest.entries.contains_key(THUMBNAIL) {
+            return Ok(None);
+        }
+        read_entry(&mut self.archive, Some(&self.manifest), THUMBNAIL).map(Some)
     }
 
     /// Bytes of an embedded media entry.

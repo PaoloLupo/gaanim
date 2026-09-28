@@ -21,6 +21,8 @@ members = [
   "crates/gaanim_bundle",
   "crates/gaanim_project",
   "crates/gaanim_launcher",
+  "crates/gaanim_thumbnail",
+  "crates/gaanim_thumbnail_handler",
   "crates/gaanim_web",
   "docs"
 ]

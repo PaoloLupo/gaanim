@@ -7,6 +7,7 @@ use std::ffi::{OsStr, OsString};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output};
 
+pub mod association;
 pub mod help;
 
 const VIDEO_PROJECT_TEMPLATE: &str = include_str!("../../../templates/video_project.py");

@@ -11,6 +11,25 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.6.2
+
+Sin publicar todavía. No hace falta cambiar tus escenas.
+
+== Cambios
+
+- Los archivos `.gaanim` se comportan como documentos del sistema:
+  `gaanim register` (o el botón *Asociar archivos .gaanim* del inicio) hace
+  que el doble clic los reproduzca, añade *Presentar* al menú contextual y
+  muestra su portada en el Explorador de Windows y en Nautilus, Nemo, Caja y
+  Thunar. `gaanim unregister` lo deshace; ninguno pide permisos de
+  administrador. Ver #link("/guias/compartir/")[Compartir sin Python].
+- Cada `.gaanim` guarda una portada: el fotograma de la primera pausa o, sin
+  pausas, el del primer segmento que más muestra. `scene.thumbnail()` elige
+  otro, y `gaanim thumbnail archivo.gaanim portada.png` la extrae sin GPU. Los
+  paquetes de 0.6.1 se siguen abriendo, sin portada.
+- La instalación en Ubuntu copia también `gaanim-play`, que reproduce los
+  `.gaanim`.
+
 = 0.6.1
 
 Publicada el 28 de septiembre de 2026. Llegan el reproductor web, la

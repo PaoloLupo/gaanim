@@ -234,6 +234,8 @@ fn data_entries_are_zstd_frames_and_version_1_bundles_are_refused() {
                 let mut manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
                 manifest["version"] = 1.into();
                 bytes = serde_json::to_vec(&manifest).unwrap();
+            } else if name == gaanim_bundle::THUMBNAIL {
+                assert_eq!(&bytes[..4], b"\x89PNG", "the cover is a plain PNG");
             } else if !name.starts_with("media/") {
                 assert_eq!(
                     entry.compression(),
@@ -304,6 +306,73 @@ fn a_bundle_from_a_newer_format_names_its_generator() {
         .err()
         .expect("a newer format is rejected");
     assert!(error.to_string().contains("gaanim 9.9.9"), "{error}");
+}
+
+/// A 16:9 scene where a white disc fades in over its first second.
+fn fading_disc() -> SceneModel {
+    let mut canvas = SceneModel::new(16.0, 9.0);
+    let disc = canvas.circle(3.0).fill(Color::WHITE);
+    canvas.play(vec![disc.animate().fade_in().duration(1.0)]);
+    canvas.wait(0.5);
+    canvas
+}
+
+fn cover_of(canvas: SceneModel, name: &str) -> image::RgbaImage {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join(name);
+    let mut config = BundleConfig::new(&path);
+    config.fps = 10;
+    config.width = 1280;
+    config.height = 720;
+    record_canvas(canvas, config).unwrap();
+    let png = Bundle::open(&path)
+        .unwrap()
+        .thumbnail()
+        .unwrap()
+        .expect("the bundle has a cover");
+    image::load_from_memory_with_format(&png, image::ImageFormat::Png)
+        .unwrap()
+        .into_rgba8()
+}
+
+/// Mean brightness of the red channel, 0..255.
+fn brightness(image: &image::RgbaImage) -> f64 {
+    image.pixels().map(|pixel| f64::from(pixel[0])).sum::<f64>() / image.pixels().len() as f64
+}
+
+#[test]
+fn bundles_carry_a_cover_of_the_fullest_or_the_chosen_frame() {
+    // Without stops: the frame that shows the most, once the disc is in.
+    let full = cover_of(fading_disc(), "full.gaanim");
+    assert_eq!(full.dimensions(), (512, 288));
+    assert!(brightness(&full) > 40.0, "{}", brightness(&full));
+
+    // An explicit instant: the empty first frame.
+    let mut canvas = fading_disc();
+    canvas.set_thumbnail(Some(0.0)).unwrap();
+    let empty = cover_of(canvas, "empty.gaanim");
+    assert!(
+        brightness(&empty) + 20.0 < brightness(&full),
+        "{} {}",
+        brightness(&empty),
+        brightness(&full)
+    );
+
+    // A stop wins over the fullest frame: one disc shows at the stop, a
+    // second one joins after it.
+    let two_discs = |stop: bool| {
+        let mut canvas = fading_disc();
+        if stop {
+            canvas.stop(None).unwrap();
+        }
+        let second = canvas.circle(2.0).fill(Color::WHITE).move_to(5.5, 0.0);
+        canvas.play(vec![second.animate().fade_in().duration(1.0)]);
+        canvas
+    };
+    let at_stop = cover_of(two_discs(true), "stop.gaanim");
+    let fullest = cover_of(two_discs(false), "fullest.gaanim");
+    assert!((brightness(&at_stop) - brightness(&full)).abs() < 2.0);
+    assert!(brightness(&fullest) > brightness(&at_stop) + 10.0);
 }
 
 #[test]
