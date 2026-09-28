@@ -69,7 +69,7 @@ badge = scene.geometry.square(1).fill("#f97316").move_to(3, 0)
 #api-entry(
   name: "Drawable.stroke",
   kind: "method",
-  params: ((name: "paint", type: "Paint", default: none, desc: [`Color` o `Brush`.]), (name: "width", type: "float", default: none, desc: [Ancho en unidades lógicas de escena, también en SVG escalados.]), (name: "align", type: "str | None", default: "None", desc: [`"inside"`, `"center"` u `"outside"` respecto a los contornos cerrados; `None` deja el trazo dentro.])),
+  params: ((name: "paint", type: "Paint", default: none, desc: [`Color` o `Brush`.]), (name: "width", type: "float", default: none, desc: [Ancho en unidades lógicas de escena. No sigue la escala de la figura: `scale_to`, `scale_to_3d`, `matrix_to`, las inclinaciones, la escala de sus grupos y sus animaciones cambian la forma, no el pincel, que queda redondo e igual de ancho en todos los lados. También en SVG escalados.]), (name: "align", type: "str | None", default: "None", desc: [`"inside"`, `"center"` u `"outside"` respecto a los contornos cerrados; `None` deja el trazo dentro.])),
   desc: [En contornos cerrados, incluidos los glifos de un texto, el trazo queda dentro por defecto, así `write` dibuja un ancho constante. `"center"` lo reparte a ambos lados y `"outside"` lo dibuja entero por fuera, por ejemplo como halo bajo una etiqueta que tapa líneas. Los caminos abiertos siempre centran su trazo. La alineación es estado de declaración y no se anima; otros valores lanzan `ValueError`.],
 )[
 ```python

@@ -1,55 +1,46 @@
-//! Stroke geometry in a Cartesian domain view, independent of its zoom.
+//! Stroke geometry in scene units, independent of a drawable's scale.
 
 use gaanim_core::{
-    glam::DVec3,
     kurbo::{Affine, BezPath, Stroke},
     peniko::Brush,
 };
-use gaanim_math::SpatialTransform;
-use gaanim_scene::{CoordinateViewRole, prelude::Entity};
 
-fn linear(transform: &SpatialTransform) -> Affine {
-    let [a, b, c, d, _, _] = transform.to_affine_2d().as_coeffs();
-    Affine::new([a, b, c, d, 0.0, 0.0])
-}
-
-/// Factor the domain scale out of the stroke pen, preserving authored scales
-/// and rotations below/above the view. Translation never invalidates a fragment.
-pub(crate) fn view_stroke_transform(
-    mut entity: Entity,
-    mut lookup: impl FnMut(
-        Entity,
-    )
-        -> Option<(SpatialTransform, Option<Entity>, Option<CoordinateViewRole>)>,
-) -> Option<Affine> {
-    let mut geometry = Affine::IDENTITY;
-    let mut pen = Affine::IDENTITY;
-    let mut has_zoom = false;
-    let mut correction = None;
-    while let Some((local, parent, role)) = lookup(entity) {
-        // Text already omits view scale during hierarchy propagation.
-        if role == Some(CoordinateViewRole::Label) {
-            return None;
-        }
-        geometry = linear(&local) * geometry;
-        let mut pen_local = local;
-        if role == Some(CoordinateViewRole::View) {
-            has_zoom |= local.scale != DVec3::ONE;
-            pen_local.scale = DVec3::ONE;
-        }
-        pen = linear(&pen_local) * pen;
-        if role == Some(CoordinateViewRole::View) && has_zoom {
-            // Compute at the view: enclosing layout transforms cancel, so
-            // moving/scaling/rotating the whole chart can reuse its fragment.
-            let mapped = pen.inverse() * geometry;
-            correction = (mapped.as_coeffs().iter().all(|v| v.is_finite())
-                && mapped.inverse().as_coeffs().iter().all(|v| v.is_finite()))
-            .then_some(mapped);
-        }
-        let Some(parent) = parent else { break };
-        entity = parent;
+/// Correction that keeps a stroke pen in scene units under `world`, the
+/// transform that places the drawable's fragment.
+///
+/// Returns the stretch `S` of the polar decomposition `world = Q S` (`Q`
+/// orthogonal, `S` symmetric positive definite). The fragment strokes
+/// `S * path` with the authored pen and returns through `S⁻¹`, so the
+/// placed stroke is `Q` applied to a scene-unit pen: no scale or skew of
+/// the drawable, its groups or a coordinate view widens or distorts it.
+/// Rotations and translations leave `S` unchanged and reuse the fragment.
+/// `None` when no correction is needed or `world` is singular.
+pub(crate) fn scene_unit_stroke_transform(world: Affine) -> Option<Affine> {
+    let [a, b, c, d, _, _] = world.as_coeffs();
+    let determinant = (a * d - b * c).abs();
+    // sqrt(P) = (P + sqrt(det P) I) / sqrt(tr P + 2 sqrt(det P)), P = AᵀA.
+    let (p, q, r) = (a * a + b * b, a * c + b * d, c * c + d * d);
+    let norm = (p + r + 2.0 * determinant).sqrt();
+    if !determinant.is_finite() || determinant <= 1.0e-12 || !norm.is_finite() {
+        return None;
     }
-    correction
+    let stretch = [
+        (p + determinant) / norm,
+        q / norm,
+        q / norm,
+        (r + determinant) / norm,
+    ];
+    let identity = [1.0, 0.0, 0.0, 1.0];
+    if stretch
+        .iter()
+        .zip(identity)
+        .all(|(value, unit)| (value - unit).abs() <= 1.0e-9)
+    {
+        return None;
+    }
+    Some(Affine::new([
+        stretch[0], stretch[1], stretch[2], stretch[3], 0.0, 0.0,
+    ]))
 }
 
 pub(crate) fn draw_stroke(
@@ -268,55 +259,59 @@ pub(crate) fn draw_profiled_stroke(
 mod tests {
     use super::*;
     use gaanim_core::kurbo::Shape;
-    use gaanim_scene::prelude::{ChildOf, World};
+
+    /// Whether `affine`'s linear part is orthogonal: it keeps a round pen
+    /// round and its width unchanged.
+    fn is_orthogonal(affine: Affine) -> bool {
+        let [a, b, c, d, _, _] = affine.as_coeffs();
+        (a * a + b * b - 1.0).abs() < 1e-9
+            && (c * c + d * d - 1.0).abs() < 1e-9
+            && (a * c + b * d).abs() < 1e-9
+    }
 
     #[test]
-    fn coordinate_view_preserves_authored_pen_transforms_and_brush_coordinates() {
-        let mut world = World::new();
-        let root_local = SpatialTransform::new_2d(4.0, -2.0)
-            .with_rotation_2d(0.3)
-            .scale_uniform(1.5);
-        let root = world.spawn(root_local).id();
-        let view_local = SpatialTransform::new_2d(2.0, 1.0).with_scale_2d(3.0, 0.5);
-        let view = world
-            .spawn((view_local, CoordinateViewRole::View, ChildOf(root)))
-            .id();
-        let leaf_local = SpatialTransform::new_2d(1.0, 2.0)
-            .with_rotation_2d(0.7)
-            .with_scale_2d(0.8, 1.2);
-        let leaf = world.spawn((leaf_local, ChildOf(view))).id();
-        let resolve = |world: &World| {
-            view_stroke_transform(leaf, |entity| {
-                Some((
-                    *world.get::<SpatialTransform>(entity)?,
-                    world.get::<ChildOf>(entity).map(|parent| parent.parent()),
-                    world.get::<CoordinateViewRole>(entity).copied(),
-                ))
-            })
-        };
-        let correction = resolve(&world).unwrap();
-        let full =
-            root_local.to_affine_2d() * view_local.to_affine_2d() * leaf_local.to_affine_2d();
-        let expected_pen = linear(&root_local) * linear(&leaf_local);
-        let actual_pen = full * correction.inverse();
-        for (actual, expected) in actual_pen.as_coeffs()[..4]
-            .iter()
-            .zip(&expected_pen.as_coeffs()[..4])
-        {
-            assert!((actual - expected).abs() < 1e-9);
+    fn strokes_keep_a_scene_unit_pen_under_any_scale_or_skew() {
+        let placements = [
+            Affine::scale_non_uniform(5.5, 2.8),
+            Affine::translate((3.0, -1.0)) * Affine::rotate(0.7) * Affine::scale(2.0),
+            Affine::rotate(-0.4) * Affine::skew(0.6, 0.0) * Affine::scale_non_uniform(0.3, 1.7),
+            // A mirrored placement, like the y-up flip of a chart.
+            Affine::scale_non_uniform(2.0, -3.0),
+        ];
+        for world in placements {
+            let correction = scene_unit_stroke_transform(world).expect("scaled placement");
+            // The pen is drawn through world * S⁻¹: only a rotation or mirror.
+            assert!(is_orthogonal(world * correction.inverse()), "{world:?}");
+            let point = gaanim_core::kurbo::Point::new(2.0, 3.0);
+            let placed = world * correction.inverse() * (correction * point);
+            assert!(placed.distance(world * point) < 1e-9);
         }
-        let point = gaanim_core::kurbo::Point::new(2.0, 3.0);
-        assert!((actual_pen * (correction * point)).distance(full * point) < 1e-9);
 
-        // Enclosing chart transforms and panning do not change cached geometry.
-        world
-            .entity_mut(root)
-            .insert(root_local.with_rotation_2d(-0.4).scale_uniform(2.0));
-        world
-            .entity_mut(view)
-            .insert(view_local.shift_2d(10.0, 20.0));
-        assert_eq!(resolve(&world), Some(correction));
+        // Rotating or moving a scaled drawable reuses its stroke geometry.
+        let scaled = Affine::scale_non_uniform(5.5, 2.8);
+        let turned = Affine::translate((4.0, 2.0)) * Affine::rotate(1.1) * scaled;
+        let (a, b) = (
+            scene_unit_stroke_transform(scaled).unwrap(),
+            scene_unit_stroke_transform(turned).unwrap(),
+        );
+        for (a, b) in a.as_coeffs().into_iter().zip(b.as_coeffs()) {
+            assert!((a - b).abs() < 1e-9);
+        }
 
+        // No correction without scale, and none that encodes NaNs.
+        for world in [
+            Affine::IDENTITY,
+            Affine::translate((2.0, 1.0)) * Affine::rotate(0.3),
+            Affine::scale(0.0),
+            Affine::scale_non_uniform(1.0, 0.0),
+        ] {
+            assert_eq!(scene_unit_stroke_transform(world), None, "{world:?}");
+        }
+    }
+
+    #[test]
+    fn scene_unit_strokes_keep_brush_coordinates() {
+        let correction = scene_unit_stroke_transform(Affine::scale_non_uniform(3.0, 0.5)).unwrap();
         let path = gaanim_core::kurbo::Line::new((0.0, 0.0), (2.0, 3.0)).to_path(0.01);
         let brush = Brush::Gradient(
             gaanim_core::peniko::Gradient::new_linear((0.0, 0.0), (2.0, 3.0)).with_stops([
@@ -341,21 +336,6 @@ mod tests {
         {
             assert!((actual - expected).abs() < 1e-6);
         }
-
-        world.entity_mut(view).insert(SpatialTransform::default());
-        assert_eq!(resolve(&world), None);
-        world.entity_mut(view).insert(view_local);
-        world.entity_mut(leaf).insert(CoordinateViewRole::Label);
-        assert_eq!(resolve(&world), None, "text already has scale compensation");
-        world.entity_mut(leaf).remove::<CoordinateViewRole>();
-        world
-            .entity_mut(leaf)
-            .insert(leaf_local.with_scale_2d(0.0, 0.0));
-        assert_eq!(
-            resolve(&world),
-            None,
-            "a collapsed object must not encode NaNs"
-        );
     }
 
     #[test]

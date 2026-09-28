@@ -13,7 +13,37 @@ instalar una versión nueva, sigue
 
 = 0.6.1
 
-Sin publicar todavía. No hace falta cambiar tus escenas.
+Sin publicar todavía. Cambian el ancho de los trazos escalados y la opacidad
+tras `transform_to`: lee «Al actualizar».
+
+== Al actualizar
+
+- El ancho de `.stroke(color, ancho)` se mide siempre en unidades de escena,
+  como promete su referencia: `scale_to`, `scale_to_3d`, `matrix_to`, las
+  inclinaciones, la escala de un grupo y sus animaciones cambian la forma,
+  no el pincel. Antes la escala también ensanchaba el trazo, y una escala
+  distinta por eje lo deformaba: `rect(1, 1).stroke(c, 0.03).scale_to_3d(5.5,
+  2.8, 1)` dibujaba los lados verticales el doble de gruesos que los
+  horizontales. Si una escena contaba con que la escala engrosara el trazo,
+  escribe el ancho que quieres ver: `.stroke(c, 0.09)` para el trazo de antes
+  con `scale_to(3)`. Una figura que crece desde cero muestra ya su trazo
+  completo. Los trazos propios de un SVG importado siguen escalando con su
+  `scale_to`, pero no con una animación de escala posterior. El ancho de un
+  resplandor (`glow`) también queda en unidades de escena.
+- `animate.transform_to(destino)` conserva la opacidad del objeto. Antes
+  tomaba la del destino, así que un destino declarado con `.opacity(0)` dejaba
+  invisible al objeto. Si usabas un grupo con `.opacity(0)` para esconder los
+  destinos, ya no hace falta: se ocultan solos. Para cambiar la opacidad
+  durante el morph, combínalo con `animate.opacity`. `replacement_transform_to`
+  no cambia.
+
+== Correcciones
+
+- Una vista de cámara (`camera_view`) cuya pantalla o marco se transforma con
+  `transform_to` en otra figura ajusta el aumento y el encuadre a la forma
+  nueva. Antes el recorte seguía el contorno nuevo, pero el aumento y el
+  encuadre se calculaban con el tamaño original, así que la vista salía
+  estirada o miraba otra región.
 
 == Cambios
 

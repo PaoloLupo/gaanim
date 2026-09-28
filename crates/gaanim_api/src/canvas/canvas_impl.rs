@@ -8811,21 +8811,12 @@ mod tests {
         app.finish();
         app.cleanup();
         app.update();
+        // Strokes are drawn in scene units whatever the drawable's scale.
         let effective_width = |app: &mut bevy::prelude::App| {
             app.world_mut()
-                .query::<(
-                    &gaanim_scene::ObjectTag,
-                    &gaanim_scene::StrokeBrush,
-                    &gaanim_math::GlobalSpatialTransform,
-                )>()
+                .query::<(&gaanim_scene::ObjectTag, &gaanim_scene::StrokeBrush)>()
                 .iter(app.world())
-                .find_map(|(tag, stroke, transform)| {
-                    (tag.0 == "SvgPath#body").then(|| {
-                        let [a, b, c, d, _, _] = transform.affine_2d.as_coeffs();
-                        let scale = ((a.hypot(b)) * (c.hypot(d))).sqrt();
-                        stroke.style.width * scale
-                    })
-                })
+                .find_map(|(tag, stroke)| (tag.0 == "SvgPath#body").then_some(stroke.style.width))
                 .expect("compiled SVG body")
         };
         // The declared stroke and the animated one are both in scene units.
@@ -8870,19 +8861,14 @@ mod tests {
         app.cleanup();
         app.update();
 
+        // Strokes are drawn in scene units whatever the drawable's scale.
         let mut widths = std::collections::HashMap::new();
-        for (tag, stroke, transform) in app
+        for (tag, stroke) in app
             .world_mut()
-            .query::<(
-                &gaanim_scene::ObjectTag,
-                &gaanim_scene::StrokeBrush,
-                &gaanim_math::GlobalSpatialTransform,
-            )>()
+            .query::<(&gaanim_scene::ObjectTag, &gaanim_scene::StrokeBrush)>()
             .iter(app.world())
         {
-            let [a, b, c, d, _, _] = transform.affine_2d.as_coeffs();
-            let scale = ((a.hypot(b)) * (c.hypot(d))).sqrt();
-            widths.insert(tag.0.clone(), stroke.style.width * scale);
+            widths.insert(tag.0.clone(), stroke.style.width);
         }
         // The width set on the part is in scene units; the file's own stroke
         // (4 px = 0.04 units) scales with the drawing.

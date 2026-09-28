@@ -6751,9 +6751,10 @@ impl SceneModel {
         (scale.x.abs() * scale.y.abs()).sqrt()
     }
 
-    /// Keep the stroke widths set on an imported SVG's paths in scene units:
-    /// they are drawn under the root's scale, so divide them by it. The
-    /// file's own strokes scale with the drawing.
+    /// Strokes are drawn in scene units whatever the drawable's scale, so
+    /// the widths an imported SVG declares itself are multiplied by its
+    /// root's declared scale: they keep scaling with the drawing. Widths set
+    /// with `stroke` on the SVG or one of its parts are already in scene units.
     fn scene_unit_svg_strokes(
         builder: &mut SceneBuilder,
         root: ObjectId,
@@ -6771,14 +6772,14 @@ impl SceneModel {
             .values()
             .filter(|spec| {
                 spec.svg_owner == Some(root)
-                    && spec.stroke_overridden
+                    && !spec.stroke_overridden
                     && matches!(spec.kind, SpawnKind::SvgPath(_))
             })
             .filter_map(|spec| id_map.get(&spec.id).copied())
             .collect();
         for path in paths {
             if let Some(state) = builder.states.get_mut(path) {
-                state.stroke.style.width /= scale;
+                state.stroke.style.width *= scale;
                 builder
                     .commands
                     .entity(state.entity)
@@ -6797,7 +6798,7 @@ impl SceneModel {
         } else {
             *id_map.get(&anim.target)?
         };
-        let mut anim_type = match &anim.anim_type {
+        let anim_type = match &anim.anim_type {
             AnimationType::Properties(properties) => {
                 let mut properties = properties.clone();
                 if let Some(crate::anim::PropertyTranslation::ToAnchorPoint(point)) =
@@ -6960,29 +6961,6 @@ impl SceneModel {
             }
             other => other.clone(),
         };
-        // Stroke widths set on an imported SVG, or on one of its parts, are
-        // in scene units: undo the root's declared scale.
-        let svg_root = object_specs.get(&anim.target).and_then(|spec| {
-            if spec.svg_root {
-                Some(spec)
-            } else {
-                object_specs.get(&spec.svg_owner?)
-            }
-        });
-        if let Some(spec) = svg_root {
-            let scale = Self::svg_declared_scale(spec);
-            if scale.is_finite() && scale > 1.0e-12 {
-                match &mut anim_type {
-                    AnimationType::StrokeWidthTo { to } => *to /= scale,
-                    AnimationType::Properties(properties) => {
-                        if let Some(width) = &mut properties.stroke_width {
-                            *width /= scale;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
         Some(AnimationBuilder {
             target,
             anim_type,
@@ -9171,19 +9149,6 @@ impl SceneModel {
             }
         }
         Self::apply_layout(builder, id, spec, id_map, frame_bounds);
-        if spec.svg_root
-            && spec.stroke_overridden
-            && let Some(state) = builder.states.get_mut(id)
-        {
-            let scale = (state.transform.scale.x.abs() * state.transform.scale.y.abs()).sqrt();
-            if scale.is_finite() && scale > 1.0e-12 {
-                state.stroke.style.width /= scale;
-                builder
-                    .commands
-                    .entity(state.entity)
-                    .insert(state.stroke.clone());
-            }
-        }
     }
 
     /// Shapes whose geometry is authored at absolute scene positions, such

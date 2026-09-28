@@ -1285,6 +1285,28 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     }
 
     /// Return a root and every visual descendant in its compiled hierarchy.
+    /// A text transform continues the source on its target, which is only a
+    /// template: show the target, root and glyphs, at the source's opacity
+    /// even when it was declared hidden. Glyphs with their own opacity keep it.
+    fn adopt_source_opacity(&mut self, source: ObjectId, target: ObjectId) {
+        let (Some(opacity), Some(template)) = (
+            self.states.get(source).map(|state| state.opacity),
+            self.states.get(target).map(|state| state.opacity),
+        ) else {
+            return;
+        };
+        if opacity == template {
+            return;
+        }
+        for id in self.hierarchy_ids(target) {
+            if let Some(state) = self.states.get_mut(id)
+                && state.opacity == template
+            {
+                state.opacity = opacity;
+            }
+        }
+    }
+
     pub(crate) fn hierarchy_ids(&self, root_id: ObjectId) -> Vec<ObjectId> {
         let mut ids = Vec::new();
         let mut stack = vec![root_id];
@@ -2880,6 +2902,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     },
                 )
                 .collect();
+            if !copy {
+                self.adopt_source_opacity(anim.target, target);
+            }
             let cursor = self.current_time;
             self.current_time += anim.delay.max(0.0);
             let start = self.current_time;
@@ -4639,21 +4664,26 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             );
         }
 
-        self.timeline.add_clip(
-            parent_track,
-            morph_start_time,
-            anim.duration,
-            ClipPayload::Animation(AnimationSpec {
-                target: anim.target,
-                lens: PropertyLensSpec::Opacity {
-                    from: source_state.opacity,
-                    to: target_visual_opacity,
-                },
-                rate_func: anim.rate_func.clone(),
-                delay: 0.0,
-                label: None,
-            }),
-        );
+        // A transform keeps the source's own opacity: the target is only a
+        // template (often declared hidden) and is hidden anyway. A
+        // replacement fades toward the target it reveals at the end.
+        if is_replacement {
+            self.timeline.add_clip(
+                parent_track,
+                morph_start_time,
+                anim.duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: anim.target,
+                    lens: PropertyLensSpec::Opacity {
+                        from: source_state.opacity,
+                        to: target_visual_opacity,
+                    },
+                    rate_func: anim.rate_func.clone(),
+                    delay: 0.0,
+                    label: None,
+                }),
+            );
+        }
 
         // Zero-duration PathMorph at morph end: locks the source entity's path
         // to the target geometry. Without this, the seek-based snapshot restore
@@ -4729,11 +4759,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         if let Some(state) = self.states.get_mut(anim.target) {
             state.transform = target_state.transform;
             state.bounds = target_state.bounds;
-            state.opacity = if is_replacement {
-                0.0
-            } else {
-                target_visual_opacity
-            };
+            if is_replacement {
+                state.opacity = 0.0;
+            }
             state.fill = target_state.fill.clone();
             state.stroke = target_state.stroke.clone();
             state.path = target_state.path.clone();
@@ -9047,6 +9075,48 @@ mod tests {
                     lens: PropertyLensSpec::FillColor { .. },
                     ..
                 }) if *target == source_id || *target == replacement_source_id
+            )
+        }));
+    }
+
+    #[test]
+    fn transform_keeps_the_source_opacity_over_a_hidden_target() {
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        let mut builder = SceneBuilder::new(&mut commands, &mut timeline, &fonts, &text_config);
+
+        let source_id = builder.next_id();
+        let target_id = builder.next_id();
+        let source_entity = builder.commands.spawn_empty().id();
+        let target_entity = builder.commands.spawn_empty().id();
+        let mut source = hierarchy_state(source_entity, square_path(0.0), Vec::new());
+        source.opacity = 0.8;
+        let mut target = hierarchy_state(target_entity, square_path(40.0), Vec::new());
+        target.opacity = 0.0;
+        builder.states.insert(source_id, source);
+        builder.states.insert(target_id, target);
+
+        builder.play(AnimationBuilder {
+            target: source_id,
+            anim_type: AnimationType::Transform { target: target_id },
+            duration: 1.0,
+            delay: 0.0,
+            rate_func: gaanim_math::RateFunc::Linear,
+        });
+
+        assert_eq!(builder.states.get(source_id).unwrap().opacity, 0.8);
+        assert!(!builder.timeline.clips.values().any(|clip| {
+            matches!(
+                &clip.payload,
+                ClipPayload::Animation(AnimationSpec {
+                    target,
+                    lens: PropertyLensSpec::Opacity { .. },
+                    ..
+                }) if *target == source_id
             )
         }));
     }
