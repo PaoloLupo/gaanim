@@ -26,6 +26,7 @@ jobs:
         run: |
           cargo build -p gaanim_launcher --profile dist --bin gaanim
           cargo build -p gaanim_editor --profile dist --bin gaanim-core --bin gaanim-play
+          cargo build -p gaanim_thumbnail_handler --profile dist
 
       - name: Build authoring wheel
         run: |
@@ -58,6 +59,7 @@ jobs:
           Copy-Item target/dist/gaanim.exe "$stage/gaanim.exe"
           Copy-Item target/dist/gaanim-core.exe "$stage/gaanim-core.exe"
           Copy-Item target/dist/gaanim-play.exe "$stage/gaanim-play.exe"
+          Copy-Item target/dist/gaanim_thumbnail_handler.dll "$stage/gaanim_thumbnail_handler.dll"
           Copy-Item target/wheels/gaanim-*-py3-none-any.whl "$stage/"
           if (Test-Path README.md) { Copy-Item README.md "$stage/" }
           Copy-Item LICENSE-MIT, LICENSE-APACHE "$stage/"
@@ -72,11 +74,13 @@ jobs:
             2. Añade esa carpeta a PATH (Panel > Sistema > Variables de entorno).
             3. Verifica: gaanim --help  (launcher detecta automaticamente .venv sin necesidad de PATH/VIRTUAL_ENV)
           
-          Contenido: gaanim.exe + gaanim-core.exe + gaanim-play.exe + wheel ligero para autocompletado
+          Contenido: gaanim.exe + gaanim-core.exe + gaanim-play.exe + gaanim_thumbnail_handler.dll (miniaturas en el Explorador) + wheel ligero para autocompletado
           Licencia: MIT OR Apache-2.0 (LICENSE-MIT, LICENSE-APACHE); componentes de terceros en THIRD-PARTY-NOTICES.txt
           Los paquetes .gaanim se reproducen, presentan y exportan sin Python:
             gaanim --present charla.gaanim
             gaanim export charla.gaanim --output charla.mp4
+          Para abrirlos con doble clic y ver su portada en el Explorador (solo tu usuario):
+            gaanim register           # gaanim unregister lo deshace
           Uso con uv (recomendado, creas proyectos manualmente):
             uv venv --python 3.14
             .\.venv\Scripts\Activate.ps1

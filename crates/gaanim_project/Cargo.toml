@@ -11,6 +11,15 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
 directories = { workspace = true }
+gaanim_thumbnail = { path = "../gaanim_thumbnail" }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_Registry",
+  "Win32_UI_Shell",
+] }
 
 [dev-dependencies]
 tempfile = "3"

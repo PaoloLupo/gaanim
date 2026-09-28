@@ -172,8 +172,12 @@ fn handle_no_python_commands(args: &[String]) -> bool {
         }
         return true;
     }
-    if args.get(1).map(String::as_str) != Some("init") {
-        return false;
+    match args.get(1).map(String::as_str) {
+        Some("thumbnail") => run_thumbnail(&args[2..]),
+        Some("register") => run_association(true),
+        Some("unregister") => run_association(false),
+        Some("init") => {}
+        _ => return false,
     }
     let parsed = parse_init_args(&args[2..]).unwrap_or_else(|error| {
         console::error("init", error);
@@ -218,6 +222,71 @@ fn handle_no_python_commands(args: &[String]) -> bool {
         ),
     }
     true
+}
+
+/// `gaanim thumbnail <BUNDLE> <OUTPUT.png> [SIZE]`: write the cover image of
+/// a bundle, scaled so its longest edge is at most SIZE pixels. Needs no GPU
+/// or Python, so file managers can run it for every file they list.
+fn run_thumbnail(args: &[String]) -> ! {
+    let usage = || -> ! {
+        console::error(
+            "thumbnail",
+            "usage: gaanim thumbnail <BUNDLE.gaanim> <OUTPUT.png> [SIZE]",
+        );
+        std::process::exit(2);
+    };
+    let (input, output) = match args {
+        [input, output] | [input, output, _] => (Path::new(input), Path::new(output)),
+        _ => usage(),
+    };
+    let size = match args.get(2) {
+        Some(size) => match size.parse::<u32>() {
+            Ok(size) if size > 0 => size,
+            _ => usage(),
+        },
+        None => gaanim_thumbnail::SIZE,
+    };
+    if let Err(error) = gaanim_thumbnail::extract(input, output, size) {
+        console::error("thumbnail", error);
+        std::process::exit(1);
+    }
+    std::process::exit(0);
+}
+
+/// `gaanim register` / `gaanim unregister`: associate `.gaanim` files with
+/// this Gaanim for the current user, or undo it.
+fn run_association(register: bool) -> ! {
+    let result = if register {
+        std::env::current_exe()
+            .map_err(|error| error.to_string())
+            .and_then(|exe| gaanim_project::association::register(&exe))
+    } else {
+        gaanim_project::association::unregister()
+    };
+    let label = if register { "register" } else { "unregister" };
+    match result {
+        Ok(report) => {
+            for line in &report.done {
+                console::detail("Done", line);
+            }
+            for warning in &report.warnings {
+                console::warn(label, warning);
+            }
+            console::success(
+                label,
+                if register {
+                    ".gaanim files open with Gaanim; right-click one to present it"
+                } else {
+                    ".gaanim files are no longer associated with Gaanim"
+                },
+            );
+            std::process::exit(0);
+        }
+        Err(error) => {
+            console::error(label, error);
+            std::process::exit(1);
+        }
+    }
 }
 
 fn parse_init_args(args: &[String]) -> Result<CreateProjectOptions, String> {

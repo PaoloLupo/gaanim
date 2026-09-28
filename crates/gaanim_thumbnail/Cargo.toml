@@ -1,0 +1,13 @@
+[package]
+name = "gaanim_thumbnail"
+version = "0.6.1"
+license = "MIT OR Apache-2.0"
+edition = "2024"
+description = "Reads and scales the cover image of a .gaanim bundle without a GPU"
+
+[dependencies]
+blake3 = "1.8"
+image = { version = "0.25", default-features = false, features = ["png"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+zip = { version = "2.4", default-features = false, features = ["deflate"] }

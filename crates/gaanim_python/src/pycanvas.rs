@@ -5757,6 +5757,17 @@ impl PyScene {
             .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 
+    /// Choose the instant a playback bundle shows as its cover image.
+    #[pyo3(signature = (time=None))]
+    fn thumbnail(&self, time: Option<f64>) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .set_thumbnail(time)
+            .map_err(pyo3::exceptions::PyValueError::new_err)
+    }
+
     /// Seconds that `n` beats last at the scene's tempo.
     fn beats(&self, n: f64) -> PyResult<f64> {
         crate::custom::ensure_authoring_allowed()?;

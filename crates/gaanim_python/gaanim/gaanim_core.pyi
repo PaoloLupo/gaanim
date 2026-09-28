@@ -7140,6 +7140,21 @@ class Scene:
             scene.wait(1.0)
         """
         ...
+    def thumbnail(self, time: Optional[float] = None) -> None:
+        """Choose the frame a ``.gaanim`` file shows as its cover image.
+
+        ``time`` is an instant of the timeline in seconds; ``None`` takes the
+        cursor, so calling it right after building the key shot marks that
+        shot. Without it the cover is the frame shown at the first
+        ``scene.stop()``, or the fullest frame of the first segment. File
+        managers show the cover once ``gaanim register`` has associated the
+        files. A negative or non-finite ``time`` raises ``ValueError``.
+
+        Example:
+            scene.play(diagram.animate.create())
+            scene.thumbnail()
+        """
+        ...
     def tempo(self, bpm: float, offset: float = 0.0, *, beats_per_bar: int = 4) -> None:
         """Set a musical tempo for cutting on the beat.
 

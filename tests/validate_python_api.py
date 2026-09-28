@@ -1759,7 +1759,7 @@ def validate_scene_capability_surface(module) -> list[str]:
         "play", "release", "render", "reuse", "sections", "segment", "snapshots", "stop",
         "wait", "time", "cursor", "stops", "random", "noise",
         "voiceover", "live_take", "narration_script", "marker", "markers",
-        "launch", "tempo", "beats", "wait_until",
+        "launch", "tempo", "beats", "wait_until", "thumbnail",
     }
     actual = {name for name in dir(module.Scene) if not name.startswith("_")}
     failures = []

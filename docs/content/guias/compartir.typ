@@ -83,6 +83,50 @@ gaanim-play --present mi-charla.gaanim
 La inspección (`I`) sigue funcionando: los fotogramas son vectoriales, así que
 el zoom los redibuja nítidos.
 
+= Abrir con doble clic
+
+`gaanim register` asocia los archivos `.gaanim` con Gaanim para tu usuario,
+sin permisos de administrador:
+
+- el doble clic reproduce el archivo;
+- el menú contextual ofrece *Presentar*;
+- el explorador de archivos muestra su portada.
+
+El botón *Asociar archivos .gaanim* de la sección _Entorno_ del inicio hace lo
+mismo, y `gaanim unregister` lo deshace. La asociación apunta al `gaanim` desde
+el que la creas: si mueves la carpeta de Gaanim, vuelve a registrarla.
+
+- *Windows*: escribe en `HKCU\Software\Classes`. Si antes elegiste otra
+  aplicación para los `.gaanim`, Windows pregunta una vez con cuál abrirlos.
+  La portada la dibuja `gaanim_thumbnail_handler.dll`, que viene en el zip
+  junto a `gaanim.exe`; debe quedarse en esa carpeta.
+- *Linux*: instala en `~/.local/share` el tipo MIME `application/x-gaanim`, la
+  entrada `gaanim.desktop`, un miniaturizador y los iconos. Las portadas se ven
+  en Nautilus, Nemo, Caja y Thunar (con tumbler); Dolphin (KDE) todavía no.
+
+== Portada
+
+Al grabar, Gaanim guarda en el paquete una portada de 512 píxeles de ancho: el
+fotograma que se ve en la primera pausa (`scene.stop()`), porque el primer
+fotograma suele estar vacío, o, sin pausas, el fotograma del primer segmento
+que más muestra. Para elegir otro, llama a `scene.thumbnail()` justo después del
+plano que quieres, o pásale un instante de la línea de tiempo:
+
+```python
+scene.play(diagrama.animate.create())
+scene.thumbnail()        # la portada es este plano
+scene.thumbnail(12.5)    # o el fotograma de los 12,5 s
+```
+
+La portada se dibuja con la GPU, como una exportación; sin GPU el paquete se
+graba igual, sin portada. Los paquetes grabados con 0.6.1 no la tienen y el
+explorador muestra el icono de Gaanim. Para extraerla, sin GPU:
+
+```bash
+gaanim thumbnail mi-charla.gaanim portada.png       # 512 px
+gaanim thumbnail mi-charla.gaanim portada.png 256   # lado mayor de 256 px
+```
+
 = En el navegador y el teléfono
 
 El reproductor web abre un `.gaanim` sin instalar nada, en la PC o en el
@@ -218,12 +262,13 @@ Un `.gaanim` es un ZIP con estas entradas:
   [`scenes/NNNNNN.bin`], [Cada fotograma distinto de una animación Lottie, como escena vectorial de Vello.],
   [`index.bin`, `digests.bin`], [Instante y resumen BLAKE3 de cada fotograma.],
   [`media/*`], [Archivos de audio, direccionados por contenido.],
+  [`thumbnail.png`], [Portada opcional de 512 píxeles de ancho, que el explorador de archivos lee sin decodificar el resto.],
 )
 
 Los números se guardan sin pérdida: los reales conservan todos sus bits, de
 modo que el paquete compone exactamente lo que compuso la escena.
 
-Salvo `manifest.json` y `media/*`, cada entrada guarda sus datos comprimidos
+Salvo `manifest.json`, `media/*` y `thumbnail.png`, cada entrada guarda sus datos comprimidos
 con Zstandard. En una presentación larga ocupa menos de la mitad que con la
 compresión propia del ZIP; en un paquete pequeño, alrededor de un 10 % menos.
 Este es el formato 2, que escribe y lee Gaanim 0.6.1 (y el reproductor web

@@ -36,6 +36,12 @@ pub struct BundleConfig {
     /// the scene keeps no state that depends on the instants it visited.
     /// Both recordings are identical; this exists to check that.
     pub force_second_world: bool,
+    /// Timeline instant of the cover image (`scene.thumbnail(t)`); `None`
+    /// picks the first stop, or the fullest frame of the first segment.
+    pub thumbnail_time: Option<f64>,
+    /// Render and store the cover image. Without a GPU the bundle is still
+    /// recorded, without one.
+    pub thumbnail: bool,
 }
 
 impl BundleConfig {
@@ -54,6 +60,8 @@ impl BundleConfig {
             height: 1080,
             telemetry: None,
             force_second_world: false,
+            thumbnail_time: None,
+            thumbnail: true,
         }
     }
 }
@@ -498,9 +506,20 @@ where
         telemetry.set_total_frames(work);
     }
     let progress = RecordingProgress::new(work, telemetry);
+    let mut cover = config.thumbnail.then(|| {
+        ThumbnailPicker::new(ThumbnailPick::new(
+            config.thumbnail_time,
+            &segments,
+            &plan,
+            duration,
+        ))
+    });
     let mut fragments = gaanim_renderer::fragment::FragmentStore::default();
     let mut push = |writer: &mut BundleWriter<_>, frame: Frame| -> Result<()> {
         let digest = gaanim_bundle::frame_digest(&frame, background.as_ref(), &mut fragments);
+        if let Some(cover) = &mut cover {
+            cover.offer(&frame);
+        }
         writer.push_frame(&frame, digest).map_err(bundle_error)?;
         fragments.end_frame();
         Ok(())
@@ -560,6 +579,15 @@ where
         scenes,
         audio,
     };
+    if let Some(frame) = cover.and_then(ThumbnailPicker::into_frame) {
+        match render_thumbnail(&scene, &frame) {
+            Ok(png) => writer.set_thumbnail(&png).map_err(bundle_error)?,
+            Err(error) => console::warn(
+                "thumbnail",
+                format!("the bundle is recorded without a cover image: {error}"),
+            ),
+        }
+    }
     writer.finish(&scene).map_err(bundle_error)?;
     std::fs::rename(&temporary, &config.output_path)?;
     console::success(
@@ -571,6 +599,153 @@ where
         ),
     );
     Ok(())
+}
+
+/// Longest edge of the cover image, in pixels (as `gaanim_thumbnail::SIZE`).
+const THUMBNAIL_SIZE: u32 = 512;
+
+/// Which recorded frame becomes the cover image.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ThumbnailPick {
+    /// The frame recorded at this instant.
+    At(f64),
+    /// The frame of this span that shows the most, the earliest of equals:
+    /// the moment the first segment is fully built.
+    Fullest { start: f64, end: f64 },
+}
+
+impl ThumbnailPick {
+    /// `scene.thumbnail(t)` when set; otherwise the frame a presentation
+    /// first rests on, since the first frame is usually empty; otherwise
+    /// the fullest frame of the first segment.
+    fn new(
+        explicit: Option<f64>,
+        segments: &[gaanim_timeline::timeline::SegmentMetadata],
+        plan: &RecordingPlan,
+        duration: f64,
+    ) -> Self {
+        let target = explicit
+            .filter(|time| time.is_finite())
+            .map(|time| time.clamp(0.0, duration))
+            .or_else(|| {
+                segments
+                    .iter()
+                    .flat_map(|segment| segment.stops.iter().map(|stop| stop.time))
+                    .filter(|time| time.is_finite())
+                    .min_by(f64::total_cmp)
+            });
+        if let Some(target) = target {
+            // The frame a player shows at `target`: the last one at or before it.
+            let times = plan.times();
+            let shown = times
+                .iter()
+                .rev()
+                .find(|time| **time <= target + 1e-9)
+                .or(times.first())
+                .copied()
+                .unwrap_or(0.0);
+            return Self::At(shown);
+        }
+        match segments.first() {
+            Some(segment) => Self::Fullest {
+                start: segment.start_time,
+                end: segment.end_time,
+            },
+            None => Self::Fullest {
+                start: 0.0,
+                end: duration,
+            },
+        }
+    }
+}
+
+/// Keeps the recorded frame that becomes the cover image.
+struct ThumbnailPicker {
+    pick: ThumbnailPick,
+    chosen: Option<Frame>,
+    score: f64,
+}
+
+impl ThumbnailPicker {
+    fn new(pick: ThumbnailPick) -> Self {
+        Self {
+            pick,
+            chosen: None,
+            score: f64::NEG_INFINITY,
+        }
+    }
+
+    fn offer(&mut self, frame: &Frame) {
+        match self.pick {
+            ThumbnailPick::At(time) => {
+                if self.chosen.is_none() && (frame.time - time).abs() <= 1e-9 {
+                    self.chosen = Some(frame.clone());
+                }
+            }
+            ThumbnailPick::Fullest { start, end } => {
+                if frame.time < start - 1e-9 || frame.time > end + 1e-9 {
+                    return;
+                }
+                let score = visible_amount(frame);
+                // Frames of a second pass fall between grid frames: an equal
+                // score keeps the earlier one.
+                let better = score > self.score + 1e-6
+                    || ((score - self.score).abs() <= 1e-6
+                        && self
+                            .chosen
+                            .as_ref()
+                            .is_some_and(|chosen| frame.time < chosen.time));
+                if better {
+                    self.score = score;
+                    self.chosen = Some(frame.clone());
+                }
+            }
+        }
+    }
+
+    fn into_frame(self) -> Option<Frame> {
+        self.chosen
+    }
+}
+
+/// How much a frame shows: the summed opacity of what it draws.
+fn visible_amount(frame: &Frame) -> f64 {
+    frame
+        .capture
+        .elements
+        .iter()
+        .map(|element| f64::from(element.opacity.clamp(0.0, 1.0)))
+        .sum()
+}
+
+/// PNG of `frame` rendered as an export renders it, its longest edge
+/// [`THUMBNAIL_SIZE`] pixels.
+fn render_thumbnail(scene: &SceneData, frame: &Frame) -> Result<Vec<u8>> {
+    let (width, height) = scene.output_size;
+    let longest = width.max(height).max(1);
+    let edge = |value: u32| {
+        ((u64::from(value) * u64::from(THUMBNAIL_SIZE) + u64::from(longest) / 2)
+            / u64::from(longest))
+        .max(1) as u32
+    };
+    let (width, height) = (edge(width), edge(height));
+    let mut rasterizer = crate::exporter::FrameRasterizer::new(
+        scene,
+        width,
+        height,
+        crate::config::OutputFit::Contain,
+    )?;
+    let rgba = rasterizer.render(frame, frame.time)?;
+    let mut png = Vec::new();
+    image::ImageEncoder::write_image(
+        image::codecs::png::PngEncoder::new(&mut png),
+        &rgba,
+        width,
+        height,
+        image::ExtendedColorType::Rgba8,
+    )
+    .map_err(|error| ExportError::General(error.to_string()))?;
+    Ok(png)
 }
 
 fn temporary_path(path: &Path) -> PathBuf {
@@ -620,5 +795,57 @@ mod tests {
             assert!((time - expected).abs() < 1e-12, "{times:?}");
         }
         assert!(times.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+
+    fn segment(start: f64, end: f64, stops: &[f64]) -> SegmentMetadata {
+        SegmentMetadata {
+            id: 0,
+            name: "s".into(),
+            notes: None,
+            start_time: start,
+            end_time: end,
+            stops: stops
+                .iter()
+                .map(|time| SegmentStop {
+                    name: None,
+                    time: *time,
+                    ambient: None,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn the_cover_is_the_chosen_instant_then_the_first_stop_then_the_fullest_frame() {
+        let mut timeline = Timeline::default();
+        timeline.cached_duration = 4.0;
+        timeline.segments = vec![segment(0.0, 2.0, &[1.512]), segment(2.0, 4.0, &[0.7])];
+        let plan = RecordingPlan::new(&timeline, 10);
+        let at = |explicit| match ThumbnailPick::new(explicit, &timeline.segments, &plan, 4.0) {
+            ThumbnailPick::At(time) => time,
+            other => panic!("{other:?}"),
+        };
+        // The earliest stop of any segment, as recorded (a grid frame here).
+        assert!((at(None) - 0.7).abs() < 1e-9);
+        // An explicit instant shows the frame recorded at or before it.
+        assert_eq!(at(Some(1.55)), 1.512);
+        assert_eq!(at(Some(99.0)), 4.0);
+        assert_eq!(at(Some(-1.0)), 0.0);
+        timeline.segments = vec![segment(0.0, 2.0, &[]), segment(2.0, 4.0, &[])];
+        let plan = RecordingPlan::new(&timeline, 10);
+        assert_eq!(
+            ThumbnailPick::new(None, &timeline.segments, &plan, 4.0),
+            ThumbnailPick::Fullest {
+                start: 0.0,
+                end: 2.0
+            }
+        );
+        assert_eq!(
+            ThumbnailPick::new(None, &[], &plan, 4.0),
+            ThumbnailPick::Fullest {
+                start: 0.0,
+                end: 4.0
+            }
+        );
     }
 }

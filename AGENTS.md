@@ -20,7 +20,7 @@ This file guides repository work; model selection belongs to the calling client.
 
 ## Repo layout
 
-- **Workspace root:** `Cargo.toml` defines 21 workspace members: 20 crates under
+- **Workspace root:** `Cargo.toml` defines 23 workspace members: 22 crates under
   `crates/` plus the `docs` application.
 - **Key crates (bottom-up):**
   - `gaanim_core` — re-exports `peniko`/`kurbo`/`glam`, error types.
@@ -43,7 +43,11 @@ This file guides repository work; model selection belongs to the calling client.
   - `gaanim_bundle` — the `.gaanim` playback bundle format: lossless frame
     captures, delta-encoded chunks, per-frame digests. `gaanim_export::bundle`
     records it; the editor's `gaanim-play` binary (no libpython) plays,
-    presents, and exports it.
+    presents, and exports it. A bundle stores an optional `thumbnail.png` cover.
+  - `gaanim_thumbnail` — reads and scales a bundle's cover without a GPU (used by
+    `gaanim thumbnail` and the Linux thumbnailer); `gaanim_thumbnail_handler` is
+    the Windows Explorer thumbnail handler DLL (a cdylib, empty off Windows).
+    `gaanim_project::association` implements `gaanim register`/`unregister`.
   - `gaanim_editor`, `gaanim_launcher`, `gaanim_export`, and `gaanim_diff` — application hosting, launch, export, and visual comparison tools.
     `gaanim_editor`'s default `python` feature adds the Python host behind
     `gaanim-core`; the library and `gaanim-play` build without it.

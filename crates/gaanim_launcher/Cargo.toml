@@ -12,3 +12,4 @@ path = "src/main.rs"
 [dependencies]
 gaanim_core = { path = "../gaanim_core" }
 gaanim_project = { path = "../gaanim_project" }
+gaanim_thumbnail = { path = "../gaanim_thumbnail" }

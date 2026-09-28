@@ -740,6 +740,24 @@ if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
 ```
 ]
 
+#api-entry(
+  name: "Scene.thumbnail",
+  kind: "method",
+  params: (
+    (name: "time", type: "float | None", default: "None", desc: [Instante de la línea de tiempo, en segundos; `None` toma el cursor.]),
+  ),
+  returns: (type: "None", desc: [Solo marca el instante.]),
+  desc: [Elige el fotograma que un archivo `.gaanim` guarda como portada, la imagen que el explorador de archivos muestra tras `gaanim register`. Sin llamarlo, la portada es el fotograma de la primera pausa o, sin pausas, el del primer segmento que más muestra. Un `time` negativo o no finito lanza `ValueError`. Consulta #link("/guias/compartir/")[Compartir sin Python].],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+titulo = scene.text("Resultados").scale_by(2)
+scene.play(titulo.animate.write())
+scene.thumbnail()
+```
+]
+
 == Variación reproducible
 
 #api-entry(

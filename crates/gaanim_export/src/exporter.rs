@@ -923,13 +923,7 @@ pub fn export_bundle(bundle_path: &std::path::Path, config: ExportConfig) -> Res
 /// them at the same size.
 pub struct BundleRenderer {
     bundle: gaanim_bundle::Bundle,
-    gpu: GpuContext,
-    background: Option<gaanim_renderer::pipeline::CanvasBackground>,
-    bg_color: vello::peniko::Color,
-    store: gaanim_renderer::fragment::FragmentStore,
-    width: u32,
-    height: u32,
-    fit: crate::config::OutputFit,
+    frames: FrameRasterizer,
 }
 
 impl BundleRenderer {
@@ -939,26 +933,8 @@ impl BundleRenderer {
         height: u32,
         fit: crate::config::OutputFit,
     ) -> Result<Self> {
-        let gpu = GpuContext::new(width, height)?;
-        let background = bundle.scene.background.clone().map(|mut background| {
-            background.pixel_size = (width, height);
-            background
-        });
-        let bg_color = bundle
-            .scene
-            .clear_color
-            .map(|[r, g, b, a]| vello::peniko::Color::from_rgba8(r, g, b, a))
-            .unwrap_or(vello::peniko::Color::BLACK);
-        Ok(Self {
-            bundle,
-            gpu,
-            background,
-            bg_color,
-            store: gaanim_renderer::fragment::FragmentStore::default(),
-            width,
-            height,
-            fit,
-        })
+        let frames = FrameRasterizer::new(&bundle.scene, width, height, fit)?;
+        Ok(Self { bundle, frames })
     }
 
     /// RGBA pixels of the recorded frame shown at `time`; a motion-blurred
@@ -969,8 +945,56 @@ impl BundleRenderer {
             .bundle
             .frame(index)
             .map_err(|error| ExportError::General(error.to_string()))?;
+        self.frames.render(&frame, time)
+    }
+}
+
+/// Rasterizes captured frames of a scene, as an export of the scene renders
+/// them at the same size.
+pub struct FrameRasterizer {
+    gpu: GpuContext,
+    background: Option<gaanim_renderer::pipeline::CanvasBackground>,
+    bg_color: vello::peniko::Color,
+    post_shaders: Vec<gaanim_renderer::post_process::PostProcessShader>,
+    store: gaanim_renderer::fragment::FragmentStore,
+    width: u32,
+    height: u32,
+    fit: crate::config::OutputFit,
+}
+
+impl FrameRasterizer {
+    pub fn new(
+        scene: &gaanim_bundle::SceneData,
+        width: u32,
+        height: u32,
+        fit: crate::config::OutputFit,
+    ) -> Result<Self> {
+        let gpu = GpuContext::new(width, height)?;
+        let background = scene.background.clone().map(|mut background| {
+            background.pixel_size = (width, height);
+            background
+        });
+        let bg_color = scene
+            .clear_color
+            .map(|[r, g, b, a]| vello::peniko::Color::from_rgba8(r, g, b, a))
+            .unwrap_or(vello::peniko::Color::BLACK);
+        Ok(Self {
+            gpu,
+            background,
+            bg_color,
+            post_shaders: scene.post_shaders.clone(),
+            store: gaanim_renderer::fragment::FragmentStore::default(),
+            width,
+            height,
+            fit,
+        })
+    }
+
+    /// RGBA pixels of `frame`; a motion-blurred frame averages its
+    /// sub-frames as an export does.
+    pub fn render(&mut self, frame: &gaanim_bundle::Frame, time: f64) -> Result<Vec<u8>> {
         if frame.motion_blur.is_empty() {
-            return self.render_frame(&frame, time);
+            return self.render_frame(frame, time);
         }
         let mut average = LinearAverage::new(self.width as usize * self.height as usize);
         for sample in &frame.motion_blur {
@@ -1020,12 +1044,7 @@ impl BundleRenderer {
                     .post
                     .iter()
                     .filter_map(|pass| {
-                        let shader = self
-                            .bundle
-                            .scene
-                            .post_shaders
-                            .get(pass.shader as usize)?
-                            .clone();
+                        let shader = self.post_shaders.get(pass.shader as usize)?.clone();
                         let values: Vec<f64> =
                             pass.values.iter().map(|value| f64::from(*value)).collect();
                         gaanim_renderer::post_process::PostProcessPass::constant(shader, &values)

@@ -100,6 +100,9 @@ $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 ```
 
 3. Abre una terminal nueva para que tome el `PATH` actualizado.
+4. Opcional: `gaanim register` abre los archivos `.gaanim` con doble clic y
+   muestra su portada en el Explorador (ver
+   #link("/guias/compartir/")[Compartir sin Python]).
 
 `gaanim.exe` arranca aunque Python no esté en el `PATH`: solo lo busca cuando
 abres una escena o un proyecto.
@@ -111,8 +114,9 @@ donde el lanzador lo busca:
 
 ```bash
 tar -xzf gaanim-v*-linux-x64.tar.gz
-install -Dm755 -t ~/.local/bin gaanim gaanim-core
+install -Dm755 -t ~/.local/bin gaanim gaanim-core gaanim-play
 install -Dm644 -t ~/.local/share/gaanim gaanim-*-py3-none-any.whl
+~/.local/bin/gaanim register   # opcional: doble clic y portadas de los .gaanim
 ```
 
 Ubuntu añade `~/.local/bin` al `PATH` si la carpeta existe al iniciar sesión.

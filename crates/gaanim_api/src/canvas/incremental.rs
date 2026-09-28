@@ -69,6 +69,7 @@ impl SceneModel {
             // Editor metadata: its timing already lives in the segment waits
             // and `audio_tracks`, and it is never compiled.
             launched_channels: _,
+            thumbnail_time: _,
             narration: _,
             branding,
             camera_position,
