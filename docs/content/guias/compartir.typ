@@ -160,9 +160,19 @@ del móvil:
   anterior.
 - Arrastra la barra para moverte por la presentación.
 
+Para presentar, pulsa el botón de presentar de la barra: se abre el
+Presenter View en otra ventana, el mismo que en el escritorio, con la
+diapositiva actual y la siguiente, las notas y el cronómetro. Lleva la página
+de la presentación al proyector y ponla en pantalla completa (`F11` o el
+botón de la barra); deja el Presenter View en tu pantalla. Las teclas, los clics y el dock mueven las
+dos ventanas a la vez, desde cualquiera de ellas; si cierras el Presenter
+View, `P` lo vuelve a abrir. Si el navegador bloquea la ventana, permite las
+ventanas emergentes de la página y pulsa `P`.
+
 Es experimental: necesita un navegador con WebGPU (Chrome o Edge recientes,
 Safari 26, Firefox en Windows), descarga unos 25 MB la primera vez y todavía
-no reproduce el audio ni abre la ventana del Presenter View.
+no reproduce el audio. En las miniaturas del Presenter View web no se ven los
+postprocesos ni los fondos animados por shader.
 
 = Exportar el paquete a vídeo
 

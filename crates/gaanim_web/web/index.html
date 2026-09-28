@@ -50,6 +50,11 @@
     progress::-webkit-progress-value { background: var(--loop); }
     progress::-moz-progress-bar { background: var(--loop); }
     progress[hidden] { display: none; }
+    #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+      width: max-content; max-width: calc(100% - 32px); padding: 10px 16px;
+      background: var(--surface); border: 1px solid rgba(255,255,255,.12); color: var(--text);
+      font-size: 14px; z-index: 10; }
+    #toast[hidden] { display: none; }
     /* Wording for mouse or touch screens. */
     .drop strong.touch, .drop span.touch { display: none; }
     @media (pointer: coarse) {
@@ -78,6 +83,7 @@
       <p class="links"><a href="../">Documentación de Gaanim</a> · <a href="../guias/compartir/">Cómo compartir un .gaanim</a></p>
     </div>
   </div>
+  <div id="toast" role="status" hidden></div>
   <script type="module" src="main.js"></script>
 </body>
 </html>

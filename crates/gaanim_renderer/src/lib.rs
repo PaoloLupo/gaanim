@@ -8,6 +8,7 @@ pub mod diagnostics;
 pub mod effects;
 pub mod fragment;
 pub mod lottie;
+pub mod offscreen;
 pub mod pipeline;
 mod post_bloom;
 pub mod post_presets;
@@ -58,6 +59,8 @@ impl Plugin for GaanimRendererPlugin {
     fn build(&self, app: &mut App) {
         // Rasterize the composed scene with Vello and draw it in the window.
         app.add_plugins(canvas::VelloCanvasPlugin);
+        // Scenes rendered into images (the web Presenter View's previews).
+        app.add_plugins(offscreen::VelloImagePlugin);
 
         // Shader backgrounds render on the render device when one exists.
         background_gpu::build(app);

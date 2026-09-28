@@ -26,6 +26,7 @@ pub mod platform;
 /// pinning, exporting and the separate Presenter View window are left out.
 pub(crate) const WEB: bool = cfg!(target_arch = "wasm32");
 mod presenter;
+pub mod presenter_link;
 pub mod project_hub;
 mod touch;
 mod ui_kit;
@@ -187,6 +188,7 @@ impl Plugin for GaanimEditorPlugin {
             .add_plugins(app_icon::AppIconPlugin)
             .add_plugins(bundle_player::BundlePlayerPlugin)
             .add_plugins(project_hub::ProjectHubPlugin)
+            .add_plugins(presenter_link::PresenterLinkPlugin)
             .add_systems(PreUpdate, square_egui_corners_system)
             .init_resource::<EditorState>()
             .init_resource::<touch::TouchControls>()
@@ -247,6 +249,10 @@ impl Plugin for GaanimEditorPlugin {
                     .before(bevy::window::close_when_requested),
             )
             .add_systems(Update, presenter::sync_presenter_camera_system)
+            .add_systems(
+                Update,
+                presenter::render_previews_in_world_system.run_if(|| WEB),
+            )
             .add_systems(
                 Update,
                 (
@@ -2229,6 +2235,13 @@ fn presentation_escape_system(
     mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
     presenter_windows: Query<Entity, With<presenter::PresenterWindow>>,
     presenter_cameras: Query<Entity, With<presenter::PresenterCamera>>,
+    presenter_page: Query<
+        (),
+        (
+            With<bevy::window::PrimaryWindow>,
+            With<presenter::PresenterWindow>,
+        ),
+    >,
     mut commands: Commands,
 ) {
     if !presentation_mode.active || !keys.just_pressed(KeyCode::Escape) {
@@ -2241,6 +2254,10 @@ fn presentation_escape_system(
     }
     if *blank != AudienceBlank::None {
         *blank = AudienceBlank::None;
+        return;
+    }
+    // The web player's Presenter View page is nothing but Presenter View.
+    if !presenter_page.is_empty() {
         return;
     }
     if let Ok(mut window) = windows.single_mut() {

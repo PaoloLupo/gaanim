@@ -16,7 +16,7 @@ use bevy_egui::{EguiContext, EguiSchedule, egui, input::EguiWantsInput};
 use gaanim_timeline::timeline::{SegmentMetadata, Timeline};
 use std::time::Duration;
 
-pub(crate) use thumbnails::PresenterThumbnailCache;
+pub(crate) use thumbnails::{PresenterThumbnailCache, render_previews_in_world_system};
 use thumbnails::{
     PreviewStatus, ThumbnailKey, ThumbnailMoment, desired_thumbnail_edge, entry_segment_time,
 };
@@ -437,10 +437,16 @@ pub(crate) fn spawn_presenter_window_system(
 
 /// Spawn the speaker-facing window from either startup or an editor command.
 ///
-/// The web player presents in its page alone: a browser opens further
-/// windows as separate pages, which do not share this app's world.
+/// A browser opens further windows as separate pages, which do not share
+/// this app's world: the web player asks its page to open one that runs
+/// Presenter View alone, kept in step through [`crate::presenter_link`].
 pub(crate) fn spawn_presenter_window(commands: &mut Commands) {
     if crate::WEB {
+        commands.queue(|world: &mut World| {
+            if let Some(page) = world.get_resource::<crate::host::WebPage>() {
+                (page.open_presenter)();
+            }
+        });
         return;
     }
     commands.spawn((
@@ -581,7 +587,7 @@ pub(crate) fn presentation_input_system(
     mouse: Res<ButtonInput<MouseButton>>,
     egui_wants: Res<EguiWantsInput>,
     presentation_mode: Res<PresentationMode>,
-    primary_window: Query<&Window, With<PrimaryWindow>>,
+    primary_window: Query<(&Window, Has<PresenterWindow>), With<PrimaryWindow>>,
     presenter_windows: Query<&Window, With<PresenterWindow>>,
     audience_controls: Res<AudienceControlsState>,
     timeline: Option<ResMut<Timeline>>,
@@ -596,7 +602,11 @@ pub(crate) fn presentation_input_system(
         return;
     };
 
-    let primary_focused = primary_window.single().is_ok_and(|window| window.focused);
+    // On the web player's Presenter View page the primary window is the
+    // presenter's, not the audience's.
+    let primary_focused = primary_window
+        .single()
+        .is_ok_and(|(window, presenter)| window.focused && !presenter);
     let presenter_focused = presenter_windows.iter().any(|window| window.focused);
     if !primary_focused && !presenter_focused {
         return;

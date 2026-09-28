@@ -66,6 +66,7 @@ fn main() {
         present: launch.present,
         monitor: launch.monitor,
         selection: launch.selection.clone(),
+        ..Default::default()
     });
     app.insert_resource(ReloadStatus::default())
         .insert_resource(ScriptError::default())

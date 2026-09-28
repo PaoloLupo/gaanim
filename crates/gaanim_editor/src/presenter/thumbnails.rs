@@ -15,7 +15,7 @@ use gaanim_export::prelude::{
     capture_scene_direct_streaming,
 };
 use gaanim_timeline::timeline::Timeline;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -115,6 +115,21 @@ pub(crate) struct PresenterThumbnailCache {
     error: Option<String>,
     native_3d: Option<(u64, bool)>,
     textures: TextureSet,
+    /// Captures the web player renders in its own world, lacking threads.
+    in_world: Option<InWorldPlan>,
+}
+
+/// A capture plan rendered in the app's world, one capture at a time, by
+/// [`render_previews_in_world_system`]; its frames reach the job like a
+/// worker's.
+struct InWorldPlan {
+    captures: VecDeque<(f64, Vec<ThumbnailKey>)>,
+    width: u32,
+    height: u32,
+    sender: crossbeam_channel::Sender<WorkerEvent>,
+    cancel: Arc<AtomicBool>,
+    /// A capture is rendering and reading back.
+    busy: Arc<AtomicBool>,
 }
 
 impl PresenterThumbnailCache {
@@ -227,6 +242,33 @@ impl PresenterThumbnailCache {
         let cancel = Arc::new(AtomicBool::new(false));
         let worker_cancel = cancel.clone();
         let (sender, receiver) = unbounded();
+
+        if crate::WEB {
+            // No threads: the world renders the plan itself. The web player
+            // only plays bundles.
+            if !matches!(source, PreviewSource::Bundle(_)) {
+                self.error = Some("previews need the desktop app".to_string());
+                return;
+            }
+            self.in_world = Some(InWorldPlan {
+                captures: captures.into(),
+                width,
+                height,
+                sender,
+                cancel: cancel.clone(),
+                busy: Arc::new(AtomicBool::new(false)),
+            });
+            self.error = None;
+            self.job = Some(ThumbnailJob {
+                revision,
+                edge,
+                keys,
+                completed: 0,
+                cancel,
+                receiver,
+            });
+            return;
+        }
 
         let spawn_result = std::thread::Builder::new()
             .name("gaanim-presenter-thumbnails".to_string())
@@ -471,6 +513,75 @@ impl PresenterThumbnailCache {
             .is_some_and(|thumbnail| thumbnail.revision != revision);
         Some((texture.clone(), stale))
     }
+}
+
+/// Render the next capture of an [`InWorldPlan`] with the canvas's renderer
+/// and read its pixels back; one capture is in flight at a time.
+pub(crate) fn render_previews_in_world_system(
+    mut cache: ResMut<PresenterThumbnailCache>,
+    playback: Option<ResMut<crate::bundle_player::BundlePlayback>>,
+    mut images: ResMut<Assets<Image>>,
+    mut commands: Commands,
+) {
+    use bevy::render::gpu_readback::{Readback, ReadbackComplete};
+    use gaanim_renderer::offscreen::{VelloImageRender, unpad_rgba_rows, vello_target_image};
+
+    let Some(plan) = cache.in_world.as_mut() else {
+        return;
+    };
+    if plan.busy.load(Ordering::Acquire) {
+        return;
+    }
+    if plan.cancel.load(Ordering::Acquire) || plan.captures.is_empty() {
+        if let Some(plan) = cache.in_world.take() {
+            let _ = plan.sender.send(WorkerEvent::Finished(Ok(())));
+        }
+        return;
+    }
+    let Some(mut playback) = playback else {
+        return;
+    };
+    let (width, height) = (plan.width, plan.height);
+    let Some((time, keys)) = plan.captures.pop_front() else {
+        return;
+    };
+    let Some((scene, base_color)) = playback.preview_scene(time, width, height) else {
+        if let Some(plan) = cache.in_world.take() {
+            let _ = plan.sender.send(WorkerEvent::Finished(Err(
+                "could not read the bundle's frame".to_string(),
+            )));
+        }
+        return;
+    };
+    let image = images.add(vello_target_image(width, height));
+    plan.busy.store(true, Ordering::Release);
+    let sender = plan.sender.clone();
+    let busy = plan.busy.clone();
+    commands
+        .spawn((
+            VelloImageRender {
+                scene: Arc::new(scene),
+                image: image.clone(),
+                base_color,
+            },
+            Readback::texture(image),
+        ))
+        .observe(move |event: On<ReadbackComplete>, mut commands: Commands| {
+            if !busy.swap(false, Ordering::AcqRel) {
+                return;
+            }
+            let rgba = unpad_rgba_rows(&event.data, width, height);
+            for &key in &keys {
+                let pixels = ThumbnailPixels {
+                    key,
+                    width,
+                    height,
+                    rgba: rgba.clone(),
+                };
+                let _ = sender.send(WorkerEvent::Frame(pixels));
+            }
+            commands.entity(event.entity).despawn();
+        });
 }
 
 /// Every cue preview for the timeline, ordered so the `priority` keys render

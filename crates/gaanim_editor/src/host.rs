@@ -12,6 +12,17 @@ pub struct HostOptions {
     pub monitor: Option<usize>,
     /// Segments to rehearse with `--sections` / `--from`.
     pub selection: gaanim_timeline::selection::SegmentSelection,
+    /// Show Presenter View alone in the window: the web player's second
+    /// page, which follows the audience page through
+    /// [`crate::presenter_link`].
+    pub presenter_page: bool,
+}
+
+/// What the web page does for the player.
+#[derive(Resource, Clone, Copy)]
+pub struct WebPage {
+    /// Open the Presenter View page next to this one.
+    pub open_presenter: fn(),
 }
 
 /// Selector of the canvas the web player renders into.
@@ -26,7 +37,9 @@ pub fn host_app(options: &HostOptions) -> App {
         DefaultPlugins
             .set(WindowPlugin {
                 primary_window: Some(Window {
-                    title: if options.present {
+                    title: if options.presenter_page {
+                        "Gaanim — Presenter View".to_string()
+                    } else if options.present {
                         "Gaanim — Presentation".to_string()
                     } else {
                         "Gaanim".to_string()
@@ -73,7 +86,7 @@ pub fn host_app(options: &HostOptions) -> App {
             .as_deref(),
     ))
     .insert_resource(crate::PresentationMode {
-        active: options.present,
+        active: options.present || options.presenter_page,
     })
     .insert_resource(options.selection.clone())
     // The overlay toggles the user left on come back in every session.
@@ -92,8 +105,39 @@ pub fn host_app(options: &HostOptions) -> App {
     app.world_mut()
         .resource_mut::<bevy_egui::EguiGlobalSettings>()
         .auto_create_primary_context = false;
-    spawn_host_camera(app.world_mut());
+    if options.presenter_page {
+        show_presenter_view_alone(app.world_mut());
+    } else {
+        spawn_host_camera(app.world_mut());
+    }
     app
+}
+
+/// The window shows Presenter View and nothing else: the primary window is
+/// the presenter's (its camera and egui context follow when it is created)
+/// and the canvas camera, which draws the slides and the editor's UI, stays
+/// off.
+fn show_presenter_view_alone(world: &mut World) {
+    let primary = world
+        .query_filtered::<Entity, With<bevy::window::PrimaryWindow>>()
+        .iter(world)
+        .next();
+    if let Some(primary) = primary {
+        world
+            .entity_mut(primary)
+            .insert(crate::presenter::PresenterWindow);
+    }
+    world.spawn((
+        Camera2d,
+        gaanim_renderer::prelude::VelloView,
+        bevy::prelude::Camera {
+            order: 1,
+            is_active: false,
+            clear_color: bevy::camera::ClearColorConfig::None,
+            ..default()
+        },
+    ));
+    spawn_clear_camera(world);
 }
 
 fn spawn_host_camera(world: &mut World) {
@@ -108,6 +152,10 @@ fn spawn_host_camera(world: &mut World) {
         bevy::core_pipeline::tonemapping::Tonemapping::None,
         bevy_egui::PrimaryEguiContext,
     ));
+    spawn_clear_camera(world);
+}
+
+fn spawn_clear_camera(world: &mut World) {
     // The canvas composites over the window without clearing it. A script
     // replay spawns this clear itself, but a bundle does not: without it the
     // area around the frame kept every earlier frame while the interactive
