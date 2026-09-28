@@ -17,7 +17,9 @@ thread_local! { static PURE_CALLBACK_DEPTH: Cell<usize> = const { Cell::new(0) }
 /// All authoring mutation entrypoints use this check before touching state.
 pub(crate) fn ensure_authoring_allowed() -> PyResult<()> {
     if PURE_CALLBACK_DEPTH.with(|depth| depth.get() != 0) {
-        Err(PyRuntimeError::new_err("animation and reactive callbacks must be pure; scene, drawable, parameter and timeline access is not allowed"))
+        Err(PyRuntimeError::new_err(
+            "animation and reactive callbacks must be pure; scene, drawable, parameter and timeline access is not allowed",
+        ))
     } else {
         Ok(())
     }
@@ -51,7 +53,11 @@ fn parse_channel(value: &str) -> PyResult<CustomChannel> {
         "fill" => CustomChannel::Fill,
         "stroke" => CustomChannel::Stroke,
         "stroke_width" => CustomChannel::StrokeWidth,
-        _ => return Err(PyValueError::new_err("custom channels must be position, rotation, scale, opacity, fill, stroke, or stroke_width")),
+        _ => {
+            return Err(PyValueError::new_err(
+                "custom channels must be position, rotation, scale, opacity, fill, stroke, or stroke_width",
+            ));
+        }
     })
 }
 

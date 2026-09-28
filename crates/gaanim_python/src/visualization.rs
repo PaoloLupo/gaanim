@@ -7,10 +7,10 @@ use gaanim_animation::{ReactiveFunction, ScalarSource};
 use gaanim_api::canvas::{
     ArrowFieldOptions, ArrowVectorFieldHandle, Cartesian3DVisibility, CartesianVisibility,
     ChartHandle, CoordinateRef, CoordinateSpace3DHandle, CoordinateSpaceHandle,
-    FlowParticleOptions, FlowParticlesHandle, NumberLineHandle, NumberLineVisibility,
-    Parameter as NativeParameter, PolarSpaceHandle, PolarVisibility, SceneModel as ApiCanvas,
-    StreamLinesHandle, StreamLinesStyle, VectorField2DHandle, VectorField3DHandle,
-    DEFAULT_REACTIVE_TEXT_SIZE,
+    DEFAULT_REACTIVE_TEXT_SIZE, FlowParticleOptions, FlowParticlesHandle, NumberLineHandle,
+    NumberLineVisibility, Parameter as NativeParameter, PolarSpaceHandle, PolarVisibility,
+    SceneModel as ApiCanvas, StreamLinesHandle, StreamLinesStyle, VectorField2DHandle,
+    VectorField3DHandle,
 };
 use gaanim_visualization::{
     Axis as NativeAxis, AxisLabelPosition, AxisStylePatch, Channel, ChartSpec as NativeChartSpec,
@@ -618,7 +618,7 @@ impl PyAxis {
                 _ => {
                     return Err(value_error(
                         "crossing must be auto, zero, min, max, or a number",
-                    ))
+                    ));
                 }
             }
         };
@@ -637,20 +637,20 @@ impl PyAxis {
         label_color: Option<PyColor>,
     ) -> PyResult<Self> {
         let color = color.map(|value| value.0);
-        if let Some(value) = width {
-            if !value.is_finite() || value < 0.0 {
-                return Err(value_error("width must be finite and non-negative"));
-            }
+        if let Some(value) = width
+            && (!value.is_finite() || value < 0.0)
+        {
+            return Err(value_error("width must be finite and non-negative"));
         }
-        if let Some(value) = tick_length {
-            if !value.is_finite() || value < 0.0 {
-                return Err(value_error("tick_length must be finite and non-negative"));
-            }
+        if let Some(value) = tick_length
+            && (!value.is_finite() || value < 0.0)
+        {
+            return Err(value_error("tick_length must be finite and non-negative"));
         }
-        if let Some(value) = tick_width {
-            if !value.is_finite() || value < 0.0 {
-                return Err(value_error("tick_width must be finite and non-negative"));
-            }
+        if let Some(value) = tick_width
+            && (!value.is_finite() || value < 0.0)
+        {
+            return Err(value_error("tick_width must be finite and non-negative"));
         }
         Ok(Self(self.0.clone().style_patch(AxisStylePatch {
             color,
@@ -978,10 +978,10 @@ impl PyParameter {
         if !Python::attach(|py| callback.bind(py).is_callable()) {
             return Err(PyValueError::new_err("callback must be callable"));
         }
-        if let Some(reset) = reset.as_ref() {
-            if !Python::attach(|py| reset.bind(py).is_callable()) {
-                return Err(PyValueError::new_err("reset must be callable"));
-            }
+        if let Some(reset) = reset.as_ref()
+            && !Python::attach(|py| reset.bind(py).is_callable())
+        {
+            return Err(PyValueError::new_err("reset must be callable"));
         }
         match (reset.is_some(), fixed_dt.is_some()) {
             (true, false) => {

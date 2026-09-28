@@ -366,20 +366,20 @@ impl PyEasing {
                 return Ok(Self::new(
                     RateFunc::Steps(count),
                     format!("Easing.steps({count})"),
-                ))
+                ));
             }
             "start" => StepJump::Start,
             "none" if count >= 2 => StepJump::None,
             "none" => {
                 return Err(PyValueError::new_err(
                     "jump=\"none\" needs at least 2 steps",
-                ))
+                ));
             }
             "both" => StepJump::Both,
             other => {
                 return Err(PyValueError::new_err(format!(
                     "unknown jump {other:?}; expected \"start\", \"end\", \"none\" or \"both\""
-                )))
+                )));
             }
         };
         Ok(Self::new(
@@ -641,8 +641,11 @@ mod tests {
                 8
             )));
             assert!(is_value_error(PyEasing::custom(&eval("lambda t: t"), 1)));
-            assert!(PyEasing::custom(&eval("1.0"), 8)
-                .is_err_and(|error| { error.is_instance_of::<pyo3::exceptions::PyTypeError>(py) }));
+            assert!(
+                PyEasing::custom(&eval("1.0"), 8).is_err_and(|error| {
+                    error.is_instance_of::<pyo3::exceptions::PyTypeError>(py)
+                })
+            );
             assert!(PyEasing::custom(&eval("lambda t: 1 / 0"), 8).is_err());
         });
     }

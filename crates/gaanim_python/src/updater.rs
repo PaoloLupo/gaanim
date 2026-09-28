@@ -113,7 +113,7 @@ impl PyUpdater {
             other => {
                 return Err(PyValueError::new_err(format!(
                     "unknown channel {other:?}; expected \"x\", \"y\", \"rotation\", \"scale\" or \"opacity\""
-                )))
+                )));
             }
         };
         let waveform = match waveform {
@@ -124,7 +124,7 @@ impl PyUpdater {
             other => {
                 return Err(PyValueError::new_err(format!(
                     "unknown waveform {other:?}; expected \"sine\", \"square\", \"triangle\" or \"saw\""
-                )))
+                )));
             }
         };
         for (name, value) in [

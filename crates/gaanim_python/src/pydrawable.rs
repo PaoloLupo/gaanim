@@ -8,7 +8,7 @@ use crate::brush::PyPaint;
 use crate::color::PyColor;
 use crate::easing::PyEasing;
 use crate::py3d::PyMaterial3D;
-use crate::pylayout::{expression_for, PyAnchor, PyDirection, PyLayoutExpression};
+use crate::pylayout::{PyAnchor, PyDirection, PyLayoutExpression, expression_for};
 use crate::pystyle::PyStrokeStyle;
 use crate::updater::PyUpdater;
 use crate::visualization::extract_scalar_source_for_drawable;
@@ -177,7 +177,9 @@ impl PyCanvasAnim {
             self.inner.inner.anim_type,
             gaanim_api::anim::AnimationType::CustomProperties(_)
         ) {
-            Err(PyValueError::new_err("custom() cannot be combined with property setters or native effects in one Anim; combine separate animations with parallel()"))
+            Err(PyValueError::new_err(
+                "custom() cannot be combined with property setters or native effects in one Anim; combine separate animations with parallel()",
+            ))
         } else {
             Ok(())
         }
@@ -885,12 +887,12 @@ impl PyCanvasAnim {
                 "order must be forward, reverse, center, or random",
             ));
         }
-        if let Some(stagger) = stagger {
-            if !stagger.is_finite() || stagger < 0.0 {
-                return Err(PyValueError::new_err(
-                    "stagger must be finite and non-negative",
-                ));
-            }
+        if let Some(stagger) = stagger
+            && (!stagger.is_finite() || stagger < 0.0)
+        {
+            return Err(PyValueError::new_err(
+                "stagger must be finite and non-negative",
+            ));
         }
         self.require_effect_slot("write")?;
         use gaanim_api::anim::DrawOrder;
@@ -1265,7 +1267,7 @@ impl PyCanvasAnim {
             other => {
                 return Err(PyValueError::new_err(format!(
                     "unknown reveal style {other:?}; expected \"fade\", \"wipe\" or \"from_below\""
-                )))
+                )));
             }
         };
         self.require_selection_effect_slot("reveal")?;
@@ -1409,7 +1411,7 @@ impl PyCanvasAnim {
             other => {
                 return Err(PyValueError::new_err(format!(
                     "unknown loop mode {other:?}; expected \"cycle\", \"pingpong\" or \"offset\""
-                )))
+                )));
             }
         };
         if !until.is_finite() || until <= 0.0 {
@@ -2243,7 +2245,7 @@ impl PyDrawable {
             Some(other) => {
                 return Err(PyValueError::new_err(format!(
                     "unknown trim mode {other:?}; expected \"simultaneous\" or \"sequential\""
-                )))
+                )));
             }
         };
         Ok(Self(self.0.clone().trim(start, end, offset, sequential)))
@@ -2771,10 +2773,10 @@ impl PyDrawable {
         if !Python::attach(|py| callback.bind(py).is_callable()) {
             return Err(PyValueError::new_err("callback must be callable"));
         }
-        if let Some(reset) = reset.as_ref() {
-            if !Python::attach(|py| reset.bind(py).is_callable()) {
-                return Err(PyValueError::new_err("reset must be callable"));
-            }
+        if let Some(reset) = reset.as_ref()
+            && !Python::attach(|py| reset.bind(py).is_callable())
+        {
+            return Err(PyValueError::new_err("reset must be callable"));
         }
         match (reset.is_some(), fixed_dt.is_some()) {
             (true, false) => {
@@ -3025,7 +3027,7 @@ impl PyDrawable {
             _ => {
                 return Err(PyValueError::new_err(
                     "offset_space must be 'world' or 'local'",
-                ))
+                ));
             }
         };
         Ok(Self(self.0.follow_endpoint(
