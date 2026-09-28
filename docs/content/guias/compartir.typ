@@ -47,7 +47,7 @@ Grabar no rasteriza nada, así que suele ser rápido: una presentación de un
 minuto tarda unos segundos. Una presentación larga con decenas de miles de
 objetos tarda más, porque cada fotograma recorre la escena completa; una
 presentación de 41 segmentos, 29 000 objetos y 4½ minutos se graba en unos 8
-minutos y ocupa 42 MB. Los paquetes de los ejemplos de Gaanim ocupan entre 20 y
+minutos y ocupa 18 MB. Los paquetes de los ejemplos de Gaanim ocupan entre 20 y
 500 KB; una escena con mil instancias animadas, unos 11 MB.
 
 = Reproducir y presentar
@@ -222,3 +222,10 @@ Un `.gaanim` es un ZIP con estas entradas:
 
 Los números se guardan sin pérdida: los reales conservan todos sus bits, de
 modo que el paquete compone exactamente lo que compuso la escena.
+
+Salvo `manifest.json` y `media/*`, cada entrada guarda sus datos comprimidos
+con Zstandard. En una presentación larga ocupa menos de la mitad que con la
+compresión propia del ZIP; en un paquete pequeño, alrededor de un 10 % menos.
+Este es el formato 2, que escribe Gaanim 0.6.1: un paquete grabado con 0.6.1
+necesita Gaanim 0.6.1 o posterior (y el reproductor web actual), y los
+paquetes grabados con 0.6.0 se siguen abriendo.

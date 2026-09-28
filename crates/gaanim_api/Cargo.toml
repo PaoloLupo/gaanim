@@ -69,5 +69,7 @@ serde = [
 
 [dev-dependencies]
 gaanim_renderer = { path = "../gaanim_renderer" }
+ruzstd = "0.8"
+serde_json = { workspace = true }
 tempfile = "3"
 zip = { version = "2.4", default-features = false, features = ["deflate"] }

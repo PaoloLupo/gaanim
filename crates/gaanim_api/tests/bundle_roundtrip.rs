@@ -207,6 +207,102 @@ fn a_damaged_bundle_is_rejected() {
 }
 
 #[test]
+fn data_entries_are_zstd_frames_and_version_1_bundles_still_open() {
+    use std::io::{Read, Write};
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("small.gaanim");
+    let mut canvas = SceneModel::new(16.0, 9.0);
+    let circle = canvas.circle(1.0).fill(Color::WHITE);
+    canvas.play(vec![circle.animate().fade_in().duration(0.3)]);
+    let mut config = BundleConfig::new(&path);
+    config.fps = 10;
+    record_canvas(canvas, config).unwrap();
+    let recorded = Bundle::open(&path).unwrap();
+    assert_eq!(recorded.manifest.version, gaanim_bundle::VERSION);
+
+    // Rewrite it the way version 1 stored it: plain entries, archive Deflate.
+    let legacy = directory.path().join("legacy.gaanim");
+    {
+        let mut source = zip::ZipArchive::new(std::fs::File::open(&path).unwrap()).unwrap();
+        let mut target = zip::ZipWriter::new(std::fs::File::create(&legacy).unwrap());
+        for index in 0..source.len() {
+            let mut entry = source.by_index(index).unwrap();
+            let name = entry.name().to_owned();
+            let mut bytes = Vec::new();
+            entry.read_to_end(&mut bytes).unwrap();
+            if name == "manifest.json" {
+                let mut manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                manifest["version"] = 1.into();
+                bytes = serde_json::to_vec(&manifest).unwrap();
+            } else if !name.starts_with("media/") {
+                assert_eq!(
+                    entry.compression(),
+                    zip::CompressionMethod::Stored,
+                    "{name} holds its own compression"
+                );
+                assert_eq!(
+                    &bytes[..4],
+                    &[0x28, 0xb5, 0x2f, 0xfd],
+                    "{name} is a zstd frame"
+                );
+                let mut decoder = ruzstd::decoding::StreamingDecoder::new(&bytes[..]).unwrap();
+                let mut plain = Vec::new();
+                decoder.read_to_end(&mut plain).unwrap();
+                bytes = plain;
+            }
+            target
+                .start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            target.write_all(&bytes).unwrap();
+        }
+        target.finish().unwrap();
+    }
+    let mut bundle = Bundle::open(&legacy).expect("a version 1 bundle opens");
+    assert_eq!(bundle.manifest.version, 1);
+    assert_eq!(bundle.frame_count(), recorded.frame_count());
+    assert!(bundle.verify().unwrap().is_empty());
+}
+
+#[test]
+fn a_bundle_from_a_newer_format_names_its_generator() {
+    use std::io::{Read, Write};
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("small.gaanim");
+    let mut canvas = SceneModel::new(16.0, 9.0);
+    let circle = canvas.circle(1.0).fill(Color::WHITE);
+    canvas.play(vec![circle.animate().fade_in().duration(0.1)]);
+    let mut config = BundleConfig::new(&path);
+    config.fps = 10;
+    record_canvas(canvas, config).unwrap();
+    let future = directory.path().join("future.gaanim");
+    {
+        let mut source = zip::ZipArchive::new(std::fs::File::open(&path).unwrap()).unwrap();
+        let mut target = zip::ZipWriter::new(std::fs::File::create(&future).unwrap());
+        for index in 0..source.len() {
+            let mut entry = source.by_index(index).unwrap();
+            let name = entry.name().to_owned();
+            let mut bytes = Vec::new();
+            entry.read_to_end(&mut bytes).unwrap();
+            if name == "manifest.json" {
+                let mut manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                manifest["version"] = (gaanim_bundle::VERSION + 1).into();
+                manifest["generator"] = "gaanim 9.9.9".into();
+                bytes = serde_json::to_vec(&manifest).unwrap();
+            }
+            target
+                .start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            target.write_all(&bytes).unwrap();
+        }
+        target.finish().unwrap();
+    }
+    let error = Bundle::open(&future)
+        .err()
+        .expect("a newer format is rejected");
+    assert!(error.to_string().contains("gaanim 9.9.9"), "{error}");
+}
+
+#[test]
 fn a_captured_frame_composes_exactly_like_an_export_frame() {
     let canvas = showcase();
     let mut app = gaanim_export::bundle::recording_app(move |world| {
