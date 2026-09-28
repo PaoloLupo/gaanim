@@ -12,7 +12,7 @@ use gaanim_api::canvas::{
 use crate::color::PyColor;
 use crate::pydrawable::{CameraViewBackgroundArg, PyCanvasAnim, PyDrawable};
 use crate::pylayout::PyAnchor;
-use crate::visualization::{extract_scalar_source_for_drawable, PyComputed, PyParameter};
+use crate::visualization::{PyComputed, PyParameter, extract_scalar_source_for_drawable};
 
 fn view_error(error: CameraViewError) -> PyErr {
     PyValueError::new_err(error.to_string())
@@ -55,14 +55,14 @@ fn coordinates<'py>(
     x: &Bound<'py, PyAny>,
     y: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<(Bound<'py, PyAny>, Option<Bound<'py, PyAny>>)> {
-    if y.is_none() {
-        if let Ok((px, py)) = x.extract::<(f64, f64)>() {
-            let python = x.py();
-            return Ok((
-                px.into_pyobject(python)?.into_any(),
-                Some(py.into_pyobject(python)?.into_any()),
-            ));
-        }
+    if y.is_none()
+        && let Ok((px, py)) = x.extract::<(f64, f64)>()
+    {
+        let python = x.py();
+        return Ok((
+            px.into_pyobject(python)?.into_any(),
+            Some(py.into_pyobject(python)?.into_any()),
+        ));
     }
     Ok((x.clone(), y.cloned()))
 }
@@ -106,10 +106,11 @@ fn parse_placement(at: &Bound<'_, PyAny>) -> PyResult<CameraInsetPlacement> {
     if let Ok(anchor) = at.extract::<PyRef<'_, PyAnchor>>() {
         return Ok(CameraInsetPlacement::Anchor(anchor.0));
     }
-    if let Ok((x, y)) = at.extract::<(f64, f64)>() {
-        if x.is_finite() && y.is_finite() {
-            return Ok(CameraInsetPlacement::Point(x, y));
-        }
+    if let Ok((x, y)) = at.extract::<(f64, f64)>()
+        && x.is_finite()
+        && y.is_finite()
+    {
+        return Ok(CameraInsetPlacement::Point(x, y));
     }
     Err(PyValueError::new_err(
         "at must be an Anchor or a finite (x, y) point",

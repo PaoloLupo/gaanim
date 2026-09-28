@@ -22,13 +22,13 @@ use crate::color::{PyColor, PyColorMapArg};
 use crate::py3d::{PyMaterial3D, PyPrimitive3D};
 use crate::pydrawable::{PyAnchorPoint, PyCanvasAnim, PyDrawable};
 use crate::pylayout::{
-    column_kind, grid_kind, layout_item_from_python, layout_spec, parse_grid_tracks, row_kind,
-    stack_kind, PyAnchor, PyConstraintSet, PyLayout, PyLayoutConstraint, PyLayoutItem,
+    PyAnchor, PyConstraintSet, PyLayout, PyLayoutConstraint, PyLayoutItem, column_kind, grid_kind,
+    layout_item_from_python, layout_spec, parse_grid_tracks, row_kind, stack_kind,
 };
 use crate::pystyle::{PyAxesStyle, PyStyle};
-use crate::pytext::{build_text_spec, PyText, PyTextFlow, PyTextSelection, PyTextStyle};
+use crate::pytext::{PyText, PyTextFlow, PyTextSelection, PyTextStyle, build_text_spec};
 use crate::transition::PyTransitionType;
-use crate::visualization::{extract_scalar_source, PyParameter, PyVariable};
+use crate::visualization::{PyParameter, PyVariable, extract_scalar_source};
 
 pub(crate) fn image_quality(value: &str) -> PyResult<gaanim_core::peniko::ImageQuality> {
     match value {
@@ -846,7 +846,7 @@ impl PyTheme {
                     _ => {
                         return Err(pyo3::exceptions::PyValueError::new_err(format!(
                             "unknown theme text role '{role_name}'"
-                        )))
+                        )));
                     }
                 };
                 overlays.insert(role, style.extract::<PyTextStyle>()?.0);
@@ -1736,7 +1736,7 @@ impl PyGeometry {
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(
                     "rule must be 'nonzero' or 'evenodd'",
-                ))
+                ));
             }
         };
         let refs: Vec<_> = operands.iter().map(|drawable| &drawable.0).collect();
@@ -1966,12 +1966,12 @@ impl PyCameraAnimation {
     fn zoom_to(&self, zoom: Bound<'_, PyAny>, interpolation: &str) -> PyResult<PyCanvasAnim> {
         crate::custom::ensure_authoring_allowed()?;
         let interpolation = parse_zoom_interpolation(interpolation)?;
-        if let Ok(value) = zoom.extract::<f64>() {
-            if !value.is_finite() || value <= 0.0 {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "zoom must be finite and positive",
-                ));
-            }
+        if let Ok(value) = zoom.extract::<f64>()
+            && (!value.is_finite() || value <= 0.0)
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "zoom must be finite and positive",
+            ));
         }
         let zoom = extract_scalar_source(zoom, &self.inner)?;
         let inner = self
@@ -2173,10 +2173,10 @@ impl PyCameraAnimation {
         up: Option<(f64, f64, f64)>,
     ) -> PyResult<PyCanvasAnim> {
         crate::custom::ensure_authoring_allowed()?;
-        if let Some(up) = up {
-            if ![up.0, up.1, up.2].iter().all(|v| v.is_finite()) {
-                return Err(pyo3::exceptions::PyValueError::new_err("up must be finite"));
-            }
+        if let Some(up) = up
+            && ![up.0, up.1, up.2].iter().all(|v| v.is_finite())
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err("up must be finite"));
         }
         let up_tuple = up.unwrap_or((0.0, 1.0, 0.0));
         let up_vec = gaanim_core::glam::DVec3::new(up_tuple.0, up_tuple.1, up_tuple.2);
@@ -2786,7 +2786,7 @@ impl PyLayoutBuilder {
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(
                     "card direction must be column, row or stack",
-                ))
+                ));
             }
         };
         if !radius.is_finite() || radius < 0.0 || !border_width.is_finite() || border_width < 0.0 {
@@ -4860,7 +4860,7 @@ impl PyGeometry {
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(
                     "direction must be 'up', 'down', 'left', or 'right'",
-                ))
+                ));
             }
         };
         let result = self
@@ -6137,19 +6137,19 @@ impl PyGeometry {
                 "min_distance must be finite and non-negative",
             ));
         }
-        if let Some(n) = max_points {
-            if n == 0 {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "max_points must be positive when provided",
-                ));
-            }
+        if let Some(n) = max_points
+            && n == 0
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "max_points must be positive when provided",
+            ));
         }
-        if let Some(duration) = dissipating_time {
-            if !duration.is_finite() || duration <= 0.0 {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "dissipating_time must be finite and greater than zero",
-                ));
-            }
+        if let Some(duration) = dissipating_time
+            && (!duration.is_finite() || duration <= 0.0)
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "dissipating_time must be finite and greater than zero",
+            ));
         }
         Ok(PyDrawable(
             self.inner
@@ -6176,19 +6176,19 @@ impl PyGeometry {
                 "min_distance must be finite and non-negative",
             ));
         }
-        if let Some(n) = max_points {
-            if n == 0 {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "max_points must be positive when provided",
-                ));
-            }
+        if let Some(n) = max_points
+            && n == 0
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "max_points must be positive when provided",
+            ));
         }
-        if let Some(duration) = dissipating_time {
-            if !duration.is_finite() || duration <= 0.0 {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "dissipating_time must be finite and greater than zero",
-                ));
-            }
+        if let Some(duration) = dissipating_time
+            && (!duration.is_finite() || duration <= 0.0)
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "dissipating_time must be finite and greater than zero",
+            ));
         }
         Ok(PyDrawable(
             self.inner
@@ -6423,7 +6423,7 @@ impl PyMechanics {
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(
                     "extension_style must be 'solid' or 'dashed'",
-                ))
+                ));
             }
         };
         let orientation = match label_orientation {
@@ -6533,7 +6533,7 @@ impl PyMechanics {
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(
                     "sweep must be 'minor', 'major', 'cw', or 'ccw'",
-                ))
+                ));
             }
         };
         let arrowheads = match arrowheads {
@@ -6544,7 +6544,7 @@ impl PyMechanics {
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(
                     "arrowheads must be 'none', 'start', 'end', or 'both'",
-                ))
+                ));
             }
         };
         let orientation = match label_orientation {
@@ -6553,7 +6553,7 @@ impl PyMechanics {
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(
                     "label_orientation must be 'upright' or 'aligned'",
-                ))
+                ));
             }
         };
         let handle = self
@@ -6955,7 +6955,7 @@ impl PyMechanics {
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(
                     "direction must be 'cw' or 'ccw'",
-                ))
+                ));
             }
         };
         let handle = self
@@ -7012,7 +7012,7 @@ pub(crate) fn resolve_endpoint(obj: &Bound<'_, PyAny>) -> PyResult<CanvasEndpoin
     } else if let Ok(anchor) = obj.extract::<PyRef<PyAnchorPoint>>() {
         Ok(CanvasEndpoint::Anchor(anchor.0))
     } else if let Ok(point) = obj.extract::<PyRef<PyPointRef>>() {
-        Ok(point.0 .0.clone())
+        Ok(point.0.0.clone())
     } else if let Ok(tuple) = obj.extract::<(f64, f64, f64)>() {
         Ok(CanvasEndpoint::Static(gaanim_core::glam::DVec3::new(
             tuple.0, tuple.1, tuple.2,
@@ -7036,7 +7036,7 @@ fn resolve_endpoint_3d(obj: &Bound<'_, PyAny>) -> PyResult<CanvasEndpoint> {
     } else if let Ok(anchor) = obj.extract::<PyRef<PyAnchorPoint>>() {
         Ok(CanvasEndpoint::Anchor(anchor.0))
     } else if let Ok(point) = obj.extract::<PyRef<PyPointRef>>() {
-        Ok(point.0 .0.clone())
+        Ok(point.0.0.clone())
     } else if let Ok(tuple) = obj.extract::<(f64, f64, f64)>() {
         Ok(CanvasEndpoint::Static(gaanim_core::glam::DVec3::new(
             tuple.0, tuple.1, tuple.2,

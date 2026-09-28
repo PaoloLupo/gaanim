@@ -187,7 +187,7 @@ impl PyVisualization {
                 _ => {
                     return Err(PyValueError::new_err(
                         "mode must be 'odometer' or 'continuous'",
-                    ))
+                    ));
                 }
             },
             roll_up: match direction {

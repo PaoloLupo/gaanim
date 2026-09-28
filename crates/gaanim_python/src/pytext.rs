@@ -5,14 +5,14 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyMapping, PySlice, PyTuple};
 
 use gaanim_text::prelude::{
-    flatten_content, TextAlign, TextAnchor, TextContent, TextDirection, TextFlow, TextOverflow,
-    TextPart, TextRole, TextSpec, TextStyle, TextWrap,
+    TextAlign, TextAnchor, TextContent, TextDirection, TextFlow, TextOverflow, TextPart, TextRole,
+    TextSpec, TextStyle, TextWrap, flatten_content,
 };
 
 use crate::brush::PyPaint;
 use crate::color::PyColor;
 use crate::pydrawable::{
-    resolve_at_target, validate_at_target_owner, PyAtTarget, PyCanvasAnim, PyDrawable,
+    PyAtTarget, PyCanvasAnim, PyDrawable, resolve_at_target, validate_at_target_owner,
 };
 use crate::pylayout::{PyAnchor, PyDirection};
 
@@ -92,10 +92,11 @@ fn parse_wrap(value: &Bound<'_, PyAny>) -> PyResult<TextWrap> {
             ))
         };
     }
-    if let Ok(value) = value.extract::<f64>() {
-        if value.is_finite() && value > 0.0 {
-            return Ok(TextWrap::Width(value));
-        }
+    if let Ok(value) = value.extract::<f64>()
+        && value.is_finite()
+        && value > 0.0
+    {
+        return Ok(TextWrap::Width(value));
     }
     Err(PyValueError::new_err(
         "wrap must be 'auto', False, or a finite positive number",
@@ -1050,20 +1051,26 @@ bb",))?;
 
             let mixed = parts.call((&mapping,), Some(&kwargs)).unwrap_err();
             assert!(mixed.is_instance_of::<PyValueError>(py));
-            assert!(parts
-                .call1((PyDict::new(py),))
-                .unwrap_err()
-                .is_instance_of::<PyValueError>(py));
-            assert!(parts
-                .call1((vec![("a", "b")],))
-                .unwrap_err()
-                .is_instance_of::<PyTypeError>(py));
+            assert!(
+                parts
+                    .call1((PyDict::new(py),))
+                    .unwrap_err()
+                    .is_instance_of::<PyValueError>(py)
+            );
+            assert!(
+                parts
+                    .call1((vec![("a", "b")],))
+                    .unwrap_err()
+                    .is_instance_of::<PyTypeError>(py)
+            );
             let bad_name = PyDict::new(py);
             bad_name.set_item(1, "b")?;
-            assert!(parts
-                .call1((&bad_name,))
-                .unwrap_err()
-                .is_instance_of::<PyTypeError>(py));
+            assert!(
+                parts
+                    .call1((&bad_name,))
+                    .unwrap_err()
+                    .is_instance_of::<PyTypeError>(py)
+            );
             Ok(())
         })
         .unwrap();

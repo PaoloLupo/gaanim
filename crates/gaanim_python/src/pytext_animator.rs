@@ -25,7 +25,7 @@ pub(crate) fn parse_unit(by: &str) -> PyResult<TextRevealUnit> {
         _ => {
             return Err(PyValueError::new_err(
                 "by must be grapheme, word, line, or part",
-            ))
+            ));
         }
     })
 }
@@ -39,7 +39,7 @@ fn parse_order(order: &str) -> PyResult<DrawOrder> {
         _ => {
             return Err(PyValueError::new_err(
                 "order must be forward, reverse, center, or random",
-            ))
+            ));
         }
     })
 }
@@ -143,12 +143,12 @@ impl PyTextAnimator {
             require_finite("offset", x)?;
             require_finite("offset", y)?;
         }
-        if let Some(opacity) = opacity {
-            if !opacity.is_finite() || !(0.0..=1.0).contains(&opacity) {
-                return Err(PyValueError::new_err(
-                    "opacity must be between zero and one",
-                ));
-            }
+        if let Some(opacity) = opacity
+            && (!opacity.is_finite() || !(0.0..=1.0).contains(&opacity))
+        {
+            return Err(PyValueError::new_err(
+                "opacity must be between zero and one",
+            ));
         }
         if let Some(scale) = scale {
             require_non_negative("scale", scale)?;

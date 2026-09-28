@@ -1,4 +1,4 @@
-use gaanim_api::matrix::{order_indices, MatrixIndex, MatrixOrder, MatrixShape};
+use gaanim_api::matrix::{MatrixIndex, MatrixOrder, MatrixShape, order_indices};
 use pyo3::prelude::*;
 
 /// Native deterministic ordering helper used by the Python matrix facade.

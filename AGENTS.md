@@ -102,7 +102,7 @@ all use the application host, which owns the native runtime.
 
 - **Bevy 0.19** is the current ECS target. Do not import `bevy::ecs::*` directly outside `gaanim_scene` — use re-exports from `gaanim_scene` or `gaanim_core`.
 - **Vello 0.9**, **bevy_egui 0.42.0**, **PyO3 0.28**.
-- Rust editions vary: most crates use **2024**; `gaanim_python` uses **2021**.
+- All workspace crates use Rust edition **2024**.
 - `Cargo.lock` exists locally but is **gitignored** (library/workspace convention).
 - Workspace profiles: `dev` uses `opt-level = 1` for workspace crates, `opt-level = 3` for dependencies.
 - Development debug info is limited to line tables for workspace crates and
