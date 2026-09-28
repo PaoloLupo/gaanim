@@ -17,6 +17,18 @@ Sin publicar todavía. No hace falta cambiar tus escenas.
 
 == Cambios
 
+- Reproductor web (experimental): abre un `.gaanim` en el navegador de la PC o
+  del teléfono, sin instalar nada, con la misma barra de reproducción que el
+  escritorio, en
+  #link("https://paololupo.github.io/gaanim/reproductor/")[paololupo.github.io/gaanim/reproductor].
+  Con `?src=` abre un archivo publicado en otro sitio. Todavía no reproduce el
+  audio ni abre la ventana del Presenter View (ver
+  #link("/guias/compartir/")[Compartir sin Python]).
+- Controles táctiles en el reproductor, al estilo de los reproductores de vídeo
+  del móvil: un toque muestra u oculta los controles, con botones grandes para
+  la pausa anterior, reproducir y la siguiente; dos toques en un lado, o
+  deslizar, van a la pausa siguiente o anterior. También funcionan en el
+  editor con una pantalla táctil.
 - Gaanim tiene licencia: se distribuye bajo MIT OR Apache-2.0, a elección de
   quien lo usa. Los vídeos, imágenes, archivos `.gaanim` y scripts que creas
   con Gaanim son tuyos y no están sujetos a esa licencia. Las descargas

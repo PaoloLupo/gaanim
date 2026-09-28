@@ -1,7 +1,8 @@
 name: Docs
 
 # Build the Typst documentation site, rendering every example preview with the
-# real runtime, and publish it to GitHub Pages.
+# real runtime, and publish it to GitHub Pages together with the web player
+# for .gaanim files (/reproductor/).
 on:
   push:
     branches: [main]
@@ -9,6 +10,7 @@ on:
       - "docs/**"
       - "crates/**"
       - "Cargo.toml"
+      - "scripts/build_web.py"
       - ".github/workflows/docs.yml"
   # Pull requests use the same paths as main: an API change that breaks an
   # example must fail before it merges.
@@ -17,6 +19,7 @@ on:
       - "docs/**"
       - "crates/**"
       - "Cargo.toml"
+      - "scripts/build_web.py"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
@@ -80,6 +83,22 @@ jobs:
       # Scenes with native 3D content export through a window, hence Xvfb.
       - name: Build documentation
         run: xvfb-run -a cargo run -p docs -- compile
+
+      # The web player shares the runtime crates; it builds into the site so
+      # a .gaanim opens at https://<pages>/reproductor/?src=<url>.
+      - name: Add the WebAssembly target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Read the pinned wasm-bindgen version
+        id: wasm-bindgen
+        run: echo "version=$(sed -n 's/^wasm-bindgen = "=\(.*\)"/\1/p' crates/gaanim_web/Cargo.toml)" >> "$GITHUB_OUTPUT"
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@${{ steps.wasm-bindgen.outputs.version }}
+
+      - name: Build the web player
+        run: python scripts/build_web.py --out dist/site/reproductor
 
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -15,5 +15,7 @@ bevy = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 bevy = { workspace = true, features = ["webgpu"] }
-wasm-bindgen = "0.2.129"
+# Pinned: the wasm-bindgen CLI that generates the bindings must match it
+# (scripts/build_web.py checks, and the docs workflow installs this version).
+wasm-bindgen = "=0.2.129"
 console_error_panic_hook = "0.1"

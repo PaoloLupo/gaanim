@@ -27,6 +27,7 @@ pub mod platform;
 pub(crate) const WEB: bool = cfg!(target_arch = "wasm32");
 mod presenter;
 pub mod project_hub;
+mod touch;
 mod ui_kit;
 
 fn sync_editor_input_ignore_system(
@@ -188,6 +189,7 @@ impl Plugin for GaanimEditorPlugin {
             .add_plugins(project_hub::ProjectHubPlugin)
             .add_systems(PreUpdate, square_egui_corners_system)
             .init_resource::<EditorState>()
+            .init_resource::<touch::TouchControls>()
             .init_resource::<export::ExportState>()
             .init_resource::<export::StashedReplay>()
             .init_resource::<presenter::PresenterThumbnailCache>()
@@ -258,6 +260,11 @@ impl Plugin for GaanimEditorPlugin {
                     .before(gaanim_scene::systems::resolve_camera_system),
             )
             .add_systems(EguiPrimaryContextPass, editor_ui_system)
+            .add_systems(EguiPrimaryContextPass, touch::touch_overlay_system)
+            .add_systems(
+                Update,
+                touch::touch_gesture_system.run_if(resource_exists::<bevy::input::touch::Touches>),
+            )
             .add_systems(
                 EguiPrimaryContextPass,
                 presenter::audience_playback_controls_system.after(editor_ui_system),
@@ -380,6 +387,10 @@ pub struct EditorState {
     /// Interaction target selected when a seek-bar drag starts.
     seek_bar_drag_target: Option<SeekBarDragTarget>,
     segment_loop: SegmentLoopState,
+    /// A tap asked for the controls; see [`touch`].
+    pub(crate) touch_reveal: bool,
+    /// Where the playback bar was drawn last frame, in egui points.
+    pub(crate) bar_rect: Option<egui::Rect>,
 }
 
 impl Default for EditorState {
@@ -393,6 +404,8 @@ impl Default for EditorState {
             bar_hovered: false,
             seek_bar_drag_target: None,
             segment_loop: SegmentLoopState::default(),
+            touch_reveal: false,
+            bar_rect: None,
         }
     }
 }
@@ -562,7 +575,7 @@ fn editor_ui_system(
     let vp = ctx.viewport_rect();
     let pointer = ctx.input(|i| i.pointer.hover_pos());
     let pointer_near_bottom = pointer.map(|p| p.y > vp.height() - 60.0).unwrap_or(false);
-    let should_show = pointer_near_bottom || state.bar_hovered;
+    let should_show = pointer_near_bottom || state.bar_hovered || state.touch_reveal;
     let dt = ctx.input(|i| i.unstable_dt);
     let target_vis = if should_show { 1.0_f32 } else { 0.0_f32 };
     let speed = if should_show { 10.0_f32 } else { 4.0_f32 };
@@ -573,6 +586,7 @@ fn editor_ui_system(
     let vis = state.bar_visibility;
     // El playback es un overlay flotante y nunca reduce el viewport.
     inset.bottom = 0.0;
+    state.bar_rect = None;
 
     if vis > 0.01 {
         let slide_offset = (1.0 - vis) * 10.0;
@@ -1112,6 +1126,7 @@ fn editor_ui_system(
         // Keep the bar visible while the pointer is over it.
         let hover_pos = ctx.input(|i| i.pointer.hover_pos());
         state.bar_hovered = hover_pos.is_some_and(|p| area_resp.response.rect.contains(p));
+        state.bar_rect = Some(area_resp.response.rect);
     }
 
     if fps_overlay::render_render_health(ctx, render_health.as_deref())
