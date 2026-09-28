@@ -13,9 +13,10 @@ instalar una versión nueva, sigue
 
 = 0.6.1
 
-Sin publicar todavía. Cambian el ancho de los trazos escalados, la opacidad
-tras `transform_to` y la colocación de un SVG cuyas partes mueves: lee «Al
-actualizar».
+Publicada el 28 de septiembre de 2026. Llegan el reproductor web y la
+licencia MIT OR Apache-2.0. Cambian el ancho de los trazos escalados, la
+opacidad tras `transform_to` y la colocación de un SVG cuyas partes mueves:
+lee «Al actualizar».
 
 == Al actualizar
 
@@ -60,7 +61,6 @@ actualizar».
   color que aceptan una cadena o una tupla (`glow`, `Overlay.flash`,
   `mechanics.gear`, `rolling_number`, `marker`...), así que un comprobador de
   tipos ya no marca como error código correcto.
-
 - Una vista de cámara (`camera_view`) cuya pantalla o marco se transforma con
   `transform_to` en otra figura ajusta el aumento y el encuadre a la forma
   nueva. Antes el recorte seguía el contorno nuevo, pero el aumento y el
