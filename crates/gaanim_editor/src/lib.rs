@@ -28,6 +28,8 @@ pub(crate) const WEB: bool = cfg!(target_arch = "wasm32");
 mod presenter;
 pub mod presenter_link;
 pub mod project_hub;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod python_plugin;
 mod touch;
 mod ui_kit;
 

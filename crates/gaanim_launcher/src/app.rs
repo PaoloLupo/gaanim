@@ -1,38 +1,30 @@
-//! `gaanim` application entry point.
+//! Everything `gaanim` does beyond the commands in `main.rs`: the editor and
+//! Home, and the commands that run scripts (`export`, `check`, `--diff`).
 //!
-//! Gaanim is a native binary that embeds a CPython interpreter. The user's
-//! animation script (a `.py` that imports `gaanim`) is executed inside this
-//! interpreter; the script *describes* the scene via the fluent API and calls
-//! `.render()`, which pushes the deferred-op queue to this host's Bevy event
-//! loop instead of opening its own window.
-//!
-//! A file watcher observes the script: on save, the script is re-run in the
-//! same interpreter and the scene is rebuilt in place — hot-reload without
-//! restarting the window.
+//! A script runs in an embedded CPython interpreter, loaded with the Python
+//! plugin (see `python.rs`) the first time one runs. The script *describes*
+//! the scene through the fluent API and calls `.render()`, which sends the
+//! scene to this process's Bevy event loop instead of opening a window of its
+//! own. A file watcher observes the script: on save, the script runs again in
+//! the same interpreter and the scene is rebuilt in place, without restarting
+//! the window.
 
 use bevy::prelude::*;
 use gaanim_api::host::ReloadPayload;
 use gaanim_core::console;
 use gaanim_editor::cli::{ExportBound, ExportCommand, parse_export_seconds, validate_export_range};
 use gaanim_export::encoder::VideoEncoder;
-use pyo3::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 
-mod file_watcher;
-mod hot_reload;
-mod python_home;
-mod runtime_benchmark;
-mod script_runner;
-
-use hot_reload::{
+use crate::hot_reload::{
     ReloadReceiver, ReloadStatus, ScriptError, ScriptErrorReceiver, reload_listener_system,
     reload_status_overlay_system, script_error_listener_system, script_error_overlay_system,
 };
 
-fn main() {
-    if runtime_benchmark::dispatch_reload_benchmark_mode() {
+pub fn run() {
+    if crate::runtime_benchmark::dispatch_reload_benchmark_mode() {
         return;
     }
     if dispatch_python_api_validation_mode() {
@@ -44,9 +36,6 @@ fn main() {
     if dispatch_export_mode() {
         return;
     }
-    if dispatch_init_mode() {
-        return;
-    }
     if dispatch_check_mode() {
         return;
     }
@@ -55,6 +44,18 @@ fn main() {
     }
 
     let launch = parse_args();
+    // Load Python before the app starts its threads (see `python::runtime`).
+    let python = launch
+        .script_path
+        .as_deref()
+        .filter(|path| !gaanim_editor::bundle_player::is_bundle_path(path))
+        .map(|script| {
+            load_python(script, launch.project.as_ref()).unwrap_or_else(|error| {
+                console::error("python", error);
+                console::hint(crate::python::install_hint());
+                std::process::exit(2);
+            })
+        });
     #[cfg(target_os = "linux")]
     gaanim_editor::alsa_errors::route_alsa_errors();
     console::banner(if launch.present {
@@ -96,8 +97,10 @@ fn main() {
         app.world_mut()
             .resource_mut::<gaanim_editor::project_hub::ProjectHubState>()
             .active = false;
-    } else if let Some(script_path) = launch.script_path {
-        if let Err(error) = start_script_session(app.world_mut(), script_path, launch.project) {
+    } else if let (Some(script_path), Some(python)) = (launch.script_path, python) {
+        if let Err(error) =
+            start_script_session(app.world_mut(), python, script_path, launch.project)
+        {
             console::error("project", error);
             std::process::exit(2);
         }
@@ -189,14 +192,8 @@ fn dispatch_export_mode() -> bool {
 
 /// Record `script` into a playback bundle at `output`.
 fn run_bundle_export(script: &Path, output: &str, fps: Option<u32>) -> Result<(), String> {
-    let probe = gaanim_project::EnvironmentProbe::detect(Some(script));
-    let venv_root = gaanim_project::activate_environment(&probe)?;
-    gaanim_python::register_inittab();
-    Python::initialize();
-    if let Some(ref venv) = venv_root {
-        python_home::inject_venv_site_packages(venv);
-    }
-    let canvas = script_runner::load_script_canvas(script)?;
+    let python = crate::python::runtime(script)?;
+    let canvas = (python.load_script_canvas)(script)?;
     let config = gaanim_editor::cli::bundle_config(Some(script), &canvas, output, fps);
     gaanim_api::export::record_canvas(canvas, config).map_err(|error| error.to_string())
 }
@@ -207,12 +204,16 @@ fn dispatch_python_api_validation_mode() -> bool {
         return false;
     }
     if args.len() != 2 {
-        eprintln!("usage: gaanim-core --validate-python-api <validator.py>");
+        eprintln!("usage: gaanim --validate-python-api <validator.py>");
         std::process::exit(2);
     }
-    gaanim_python::register_inittab();
-    Python::initialize();
-    if let Err(error) = script_runner::validate_python_api(Path::new(&args[1])) {
+    let validator = Path::new(&args[1]);
+    let python = crate::python::runtime(validator).unwrap_or_else(|error| {
+        console::error("python", error);
+        console::hint(crate::python::install_hint());
+        std::process::exit(2);
+    });
+    if let Err(error) = (python.validate_python_api)(validator) {
         console::error("python", format!("API validation failed: {error}"));
         std::process::exit(1);
     }
@@ -344,15 +345,8 @@ fn dispatch_export_worker_mode() -> bool {
 }
 
 fn run_export_worker(worker: ExportWorkerArgs) -> Result<(), String> {
-    let probe = gaanim_project::EnvironmentProbe::detect(Some(&worker.script));
-    let venv_root = gaanim_project::activate_environment(&probe)?;
-    gaanim_python::register_inittab();
-    Python::initialize();
-    if let Some(ref venv) = venv_root {
-        python_home::inject_venv_site_packages(venv);
-    }
-
-    let canvas = script_runner::load_script_canvas(&worker.script)?;
+    let python = crate::python::runtime(&worker.script)?;
+    let canvas = (python.load_script_canvas)(&worker.script)?;
     if worker.format == gaanim_bundle::EXTENSION {
         let fps = gaanim_editor::cli::bundle_fps(&worker.quality);
         let config = gaanim_editor::cli::bundle_config(
@@ -389,16 +383,12 @@ fn run_export_worker(worker: ExportWorkerArgs) -> Result<(), String> {
     gaanim_api::export::export_canvas(canvas, config).map_err(|error| error.to_string())
 }
 
-/// Install the persistent primary camera before the Bevy event loop begins.
-///
-/// Canvas replay reuses this Vello camera; creating it during replay is too
-/// late for `bevy_egui` to attach its primary context on script launches.
-fn start_script_session(
-    world: &mut World,
-    script_path: PathBuf,
-    project: Option<gaanim_project::ResolvedProject>,
-) -> Result<(), String> {
-    if let Some(project) = &project
+/// Prepare a project's authoring environment and load Python for a script.
+fn load_python(
+    script_path: &Path,
+    project: Option<&gaanim_project::ResolvedProject>,
+) -> Result<&'static gaanim_editor::python_plugin::PythonPlugin, String> {
+    if let Some(project) = project
         && let Err(error) = gaanim_project::provision_authoring_package(&project.root)
     {
         console::warn(
@@ -407,32 +397,36 @@ fn start_script_session(
         );
     }
     let hint = project
-        .as_ref()
         .map(|project| project.root.as_path())
-        .unwrap_or(script_path.as_path());
-    let probe = gaanim_project::EnvironmentProbe::detect(Some(hint));
-    let venv_root = gaanim_project::activate_environment(&probe)?;
-    gaanim_python::register_inittab();
-    Python::initialize();
-    if let Some(ref venv) = venv_root {
-        python_home::inject_venv_site_packages(venv);
-    }
+        .unwrap_or(script_path);
+    crate::python::runtime(hint)
+}
 
+/// Install the persistent primary camera before the Bevy event loop begins.
+///
+/// Canvas replay reuses this Vello camera; creating it during replay is too
+/// late for `bevy_egui` to attach its primary context on script launches.
+fn start_script_session(
+    world: &mut World,
+    python: &gaanim_editor::python_plugin::PythonPlugin,
+    script_path: PathBuf,
+    project: Option<gaanim_project::ResolvedProject>,
+) -> Result<(), String> {
     let (payload_tx, payload_rx) = crossbeam_channel::unbounded::<ReloadPayload>();
     let (error_tx, error_rx) = crossbeam_channel::unbounded::<String>();
-    let runner = script_runner::ScriptRunner::spawn(script_path.clone(), payload_tx, error_tx);
-    world.insert_resource(gaanim_editor::narration::ScriptReload(std::sync::Arc::new(
-        runner.asset_reload_handle(),
-    )));
-    let file_watcher::FileWatcher { changed_rx, stop } =
-        file_watcher::FileWatcher::spawn(script_path.clone());
+    let runner = (python.spawn_script)(script_path.clone(), payload_tx, error_tx);
+    world.insert_resource(gaanim_editor::narration::ScriptReload(
+        runner.asset_reload_handle().into(),
+    ));
+    let crate::file_watcher::FileWatcher { changed_rx, stop } =
+        crate::file_watcher::FileWatcher::spawn(script_path.clone());
     std::thread::Builder::new()
         .name("gaanim-watcher-bridge".into())
         .spawn(move || {
             while !stop.load(Ordering::SeqCst) {
                 match changed_rx.recv_timeout(std::time::Duration::from_millis(250)) {
-                    Ok(file_watcher::ProjectChange::Source) => runner.request_rerun(),
-                    Ok(file_watcher::ProjectChange::Assets) => runner.request_asset_reload(),
+                    Ok(crate::file_watcher::ProjectChange::Source) => runner.request_rerun(),
+                    Ok(crate::file_watcher::ProjectChange::Assets) => runner.request_asset_reload(),
                     Err(mpsc::RecvTimeoutError::Timeout) => {}
                     Err(_) => break,
                 }
@@ -473,94 +467,14 @@ fn open_project_request_system(world: &mut World) {
     let Some(project) = request else {
         return;
     };
-    if let Err(error) = start_script_session(world, project.entry.clone(), Some(project)) {
+    let session = load_python(&project.entry, Some(&project)).and_then(|python| {
+        start_script_session(world, python, project.entry.clone(), Some(project))
+    });
+    if let Err(error) = session {
         world
             .resource_mut::<gaanim_editor::project_hub::ProjectHubState>()
             .report_open_error(error);
     }
-}
-
-/// Generate a runnable project starter without initializing Python or Bevy.
-fn dispatch_init_mode() -> bool {
-    let mut args = std::env::args().skip(1);
-    if args.next().as_deref() != Some("init") {
-        return false;
-    }
-
-    let args: Vec<_> = args.collect();
-    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
-        gaanim_project::help::print(gaanim_project::help::Topic::Init);
-        return true;
-    }
-    let parsed = parse_init_args(&args).unwrap_or_else(|error| {
-        console::error("init", error);
-        console::hint("Run `gaanim init --help` for usage.");
-        std::process::exit(2);
-    });
-
-    let project = gaanim_project::create_project(&parsed).unwrap_or_else(|error| {
-        console::error("init", error);
-        std::process::exit(2);
-    });
-
-    let venv = gaanim_project::provision_authoring_package(&project.root);
-    console::success(
-        "init",
-        format!(
-            "Created {} project: {}",
-            parsed.kind.name(),
-            project.root.display()
-        ),
-    );
-    console::detail("Edit", project.entry.display());
-    console::detail("Preview", format!("gaanim {}", project.root.display()));
-    console::detail("Check", format!("gaanim check {}", project.root.display()));
-    if parsed.kind.is_slides() {
-        console::detail(
-            "Present",
-            format!("gaanim --present --monitor 1 {}", project.root.display()),
-        );
-    } else {
-        console::detail(
-            "Export",
-            format!(
-                "gaanim export {} --output exports/video.mp4 --quality production",
-                project.root.display()
-            ),
-        );
-    }
-    match venv {
-        Ok(venv) => console::detail("Python", venv.display()),
-        Err(error) => console::warn(
-            "python",
-            format!("authoring environment not ready: {error}"),
-        ),
-    }
-    true
-}
-
-fn parse_init_args(args: &[String]) -> Result<gaanim_project::CreateProjectOptions, String> {
-    let kind = args
-        .first()
-        .ok_or_else(|| "missing project kind; available kinds: video, slides".to_string())
-        .and_then(|value| gaanim_project::ProjectKind::parse(value))?;
-
-    let mut directory = None;
-    let mut force = false;
-    for arg in &args[1..] {
-        match arg.as_str() {
-            "--force" => force = true,
-            value if value.starts_with('-') => return Err(format!("unknown option `{value}`")),
-            value if directory.is_none() => directory = Some(PathBuf::from(value)),
-            value => return Err(format!("unexpected argument `{value}`")),
-        }
-    }
-
-    Ok(gaanim_project::CreateProjectOptions {
-        kind,
-        directory: directory.unwrap_or_else(|| PathBuf::from(kind.default_directory())),
-        force,
-    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -585,22 +499,22 @@ fn dispatch_check_mode() -> bool {
         console::hint("Run `gaanim check --help` for usage.");
         std::process::exit(2);
     });
+    // A playback bundle is checked against its recording, without Python.
+    if gaanim_editor::bundle_player::is_bundle_path(&parsed.script) {
+        check_bundle(&parsed.script).unwrap_or_else(|error| error.exit("check"));
+        return true;
+    }
     let script = gaanim_project::resolve_entry(&parsed.script).unwrap_or_else(|error| {
         console::error("check", error);
         std::process::exit(2);
     });
 
-    let probe = gaanim_project::EnvironmentProbe::detect(Some(&script));
-    let venv_root = gaanim_project::activate_environment(&probe).unwrap_or_else(|error| {
+    let python = crate::python::runtime(&script).unwrap_or_else(|error| {
         console::error("check", error);
+        console::hint(crate::python::install_hint());
         std::process::exit(2);
     });
-    gaanim_python::register_inittab();
-    Python::initialize();
-    if let Some(ref venv) = venv_root {
-        python_home::inject_venv_site_packages(venv);
-    }
-    let canvas = script_runner::load_script_canvas(&script).unwrap_or_else(|error| {
+    let canvas = (python.load_script_canvas)(&script).unwrap_or_else(|error| {
         console::error("check", format!("could not load project: {error}"));
         std::process::exit(2);
     });
@@ -697,6 +611,52 @@ fn parse_check_args(args: &[String]) -> Result<CheckArgs, String> {
         script: script.ok_or_else(|| "missing <script.py>".to_string())?,
         strict,
     })
+}
+
+/// Open `path`, describe it, and recompose every frame against its digest.
+fn check_bundle(path: &Path) -> Result<(), gaanim_editor::cli::CommandError> {
+    let mut bundle = gaanim_bundle::Bundle::open(path).map_err(|error| {
+        gaanim_editor::cli::CommandError::Failed(format!("{}: {error}", path.display()))
+    })?;
+    let scene = &bundle.scene;
+    let stops: usize = scene
+        .segments
+        .iter()
+        .map(|segment| segment.stops.len())
+        .sum();
+    console::info("check", format!("{} · {}", path.display(), scene.title));
+    console::detail(
+        "Frames",
+        format!(
+            "{} at {} fps · {:.2} seconds · {}×{}",
+            bundle.frame_count(),
+            scene.fps,
+            scene.duration,
+            scene.output_size.0,
+            scene.output_size.1
+        ),
+    );
+    console::detail(
+        "Structure",
+        format!(
+            "{} segments · {stops} stops · {} markers · {} audio tracks",
+            scene.segments.len(),
+            scene.markers.len(),
+            scene.audio.len()
+        ),
+    );
+    let mismatched = bundle
+        .verify()
+        .map_err(|error| gaanim_editor::cli::CommandError::Failed(error.to_string()))?;
+    if let Some((index, time)) = mismatched.first() {
+        return Err(gaanim_editor::cli::CommandError::Failed(format!(
+            "{} of {} frames differ from the recording, first frame {index} at {time:.3}s",
+            mismatched.len(),
+            bundle.frame_count()
+        )));
+    }
+    console::success("pass", "every frame composes as it was recorded");
+    Ok(())
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -829,24 +789,20 @@ fn dispatch_diff_mode() -> bool {
             console::display_path(&script),
             capture_dir.display()
         );
-        let probe = gaanim_project::EnvironmentProbe::detect(Some(&script));
-        let venv_root = gaanim_project::activate_environment(&probe).unwrap_or_else(|error| {
+        let python = crate::python::runtime(&script).unwrap_or_else(|error| {
             console::error("diff", error);
+            console::hint(crate::python::install_hint());
             std::process::exit(2);
         });
-        gaanim_python::register_inittab();
-        Python::initialize();
-        if let Some(ref venv) = venv_root {
-            python_home::inject_venv_site_packages(venv);
-        }
         if parsed.capture_stops {
             capture_stop_snapshots(
+                python,
                 &script,
                 capture_dir,
                 parsed.stops.as_deref(),
                 &parsed.selection,
             );
-        } else if let Err(error) = script_runner::capture_script_snapshots(&script, capture_dir) {
+        } else if let Err(error) = (python.capture_script_snapshots)(&script, capture_dir) {
             console::error("diff", format!("snapshot capture failed: {error}"));
             std::process::exit(2);
         }
@@ -862,12 +818,13 @@ fn dispatch_diff_mode() -> bool {
 
 /// Run the script like `gaanim check` and capture the frame shown at each stop.
 fn capture_stop_snapshots(
+    python: &gaanim_editor::python_plugin::PythonPlugin,
     script: &Path,
     capture_dir: &Path,
     stops: Option<&[usize]>,
     selection: &gaanim_timeline::selection::SegmentSelection,
 ) {
-    let canvas = script_runner::load_script_canvas(script).unwrap_or_else(|error| {
+    let canvas = (python.load_script_canvas)(script).unwrap_or_else(|error| {
         console::error("diff", error);
         std::process::exit(2);
     });
@@ -1162,20 +1119,6 @@ mod tests {
     fn rejects_monitor_without_presentation_mode() {
         let args = ["demo.py", "--monitor", "0"].map(str::to_string);
         assert!(parse_launch_args(&args).is_err());
-    }
-
-    #[test]
-    fn parses_only_video_and_slides_project_kinds() {
-        assert_eq!(
-            parse_init_args(&["video".to_string()]).unwrap().kind,
-            gaanim_project::ProjectKind::Video
-        );
-        assert_eq!(
-            parse_init_args(&["slides".to_string()]).unwrap().kind,
-            gaanim_project::ProjectKind::Slides
-        );
-        assert!(parse_init_args(&["presentation".to_string()]).is_err());
-        assert!(parse_init_args(&["thesis".to_string()]).is_err());
     }
 
     #[test]

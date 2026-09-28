@@ -11,7 +11,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "target/rolling-number-validation"
-HOST = ROOT / "target/debug" / ("gaanim-core.exe" if os.name == "nt" else "gaanim-core")
+HOST = ROOT / "target/debug" / ("gaanim.exe" if os.name == "nt" else "gaanim")
 
 
 def main():

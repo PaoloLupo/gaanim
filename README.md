@@ -61,8 +61,8 @@ el archivo recarga la escena.
 
 | Plataforma | CI | Artefacto instalable | Estado declarado |
 | --- | --- | --- | --- |
-| Windows 10/11 x64 | Sí | Zip con launcher, core, reproductor y wheel de autoría | Soportada en `0.2.x` |
-| Ubuntu 24.04 x64 | Sí | Tarball con launcher, core, reproductor y wheel de autoría | Soportada en `0.2.x` |
+| Windows 10/11 x64 | Sí | Zip con `gaanim.exe`, sus bibliotecas y wheel de autoría | Soportada en `0.2.x` |
+| Ubuntu 24.04 x64 | Sí | Tarball con `gaanim`, sus bibliotecas y wheel de autoría | Soportada en `0.2.x` |
 | macOS | No | No | Experimental, sin garantía de release |
 
 El wheel `py3-none-any` es el mismo en todas las plataformas porque no contiene
@@ -74,10 +74,13 @@ salen de `.github/release-notes/v<versión>.md`: la primera línea,
 `# Título`, nombra el release y el resto es el texto que se muestra. Sin ese
 archivo el release se llama como el tag y lleva las notas que genera GitHub.
 
-En Ubuntu, descargue `gaanim-v<versión>-linux-x64.tar.gz`, extráigalo y copie
-`gaanim`, `gaanim-core` y `gaanim-play` juntos a una carpeta de `PATH`, por ejemplo
-`~/.local/bin`. Requiere exactamente Python 3.14 (el core de Linux enlaza
-`libpython3.14.so`; por ejemplo `uv python install 3.14`) y las bibliotecas de
+En Ubuntu, descargue `gaanim-v<versión>-linux-x64.tar.gz`, extráigalo completo
+en una carpeta, por ejemplo `~/.local/lib/gaanim`, y enlace el ejecutable
+`gaanim` desde una carpeta de `PATH` como `~/.local/bin`: el ejecutable busca
+sus bibliotecas (`libgaanim_engine.so`, `libgaanim_python_plugin.so` y el `std`
+de Rust) junto a él. Para ejecutar scripts requiere exactamente Python 3.14
+(el soporte de Python de Linux enlaza `libpython3.14.so`; por ejemplo
+`uv python install 3.14`) y las bibliotecas de
 sistema de Ubuntu 24.04; FFmpeg sigue siendo opcional salvo para video y audio.
 En Windows sirve cualquier Python 3.14 o superior.
 
@@ -236,9 +239,8 @@ explícitamente porque no forman parte del contrato alpha de Gaanim.
 Para compartir una escena o presentación con alguien que no tiene Python,
 grábela en un paquete `.gaanim`: un solo archivo con todos los fotogramas que
 dibuja la escena (callbacks incluidos), sus segmentos, notas, pausas,
-marcadores y audio. `gaanim-play`, que se distribuye junto a `gaanim` y no
-enlaza Python, lo reproduce, lo presenta y lo exporta a vídeo con los mismos
-píxeles que la exportación del script:
+marcadores y audio. `gaanim` lo reproduce, lo presenta y lo exporta a vídeo sin
+cargar Python, con los mismos píxeles que la exportación del script:
 
 ```powershell
 gaanim export . --output charla.gaanim

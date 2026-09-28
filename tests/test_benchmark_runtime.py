@@ -37,7 +37,7 @@ class RuntimeBenchmarkTests(unittest.TestCase):
     def test_capture_scenarios_use_the_non_baseline_cli(self) -> None:
         command = benchmark_runtime.scenario_command(
             "seek",
-            executable=Path("gaanim-core"),
+            executable=Path("gaanim"),
             scene=Path("scene.py"),
             artifact_dir=Path("target/performance/seek"),
         )
@@ -48,7 +48,7 @@ class RuntimeBenchmarkTests(unittest.TestCase):
     def test_export_scenario_forwards_the_requested_encoder(self) -> None:
         command = benchmark_runtime.scenario_command(
             "export",
-            executable=Path("gaanim-core"),
+            executable=Path("gaanim"),
             scene=Path("scene.py"),
             artifact_dir=Path("target/performance/export"),
             encoder="nvenc",

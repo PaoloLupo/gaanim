@@ -1,0 +1,29 @@
+[package]
+name = "gaanim_python_plugin"
+version = "0.6.2"
+license = "MIT OR Apache-2.0"
+edition = "2024"
+description = "Python support for gaanim, loaded when a script or project opens"
+publish = false
+
+# The only library that links Python. `gaanim` loads it at runtime (see
+# `gaanim_editor::python_plugin`), after finding a Python runtime.
+[lib]
+crate-type = ["dylib"]
+
+[dependencies]
+gaanim_engine = { path = "../gaanim_engine" }
+gaanim_python = { path = "../gaanim_python" }
+gaanim_core = { path = "../gaanim_core" }
+gaanim_api = { path = "../gaanim_api" }
+gaanim_diff = { path = "../gaanim_diff" }
+gaanim_editor = { path = "../gaanim_editor" }
+gaanim_project = { path = "../gaanim_project" }
+pyo3 = { version = "0.28", features = ["abi3-py314"] }
+crossbeam-channel = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+dev-dynamic = ["gaanim_engine/dev-dynamic", "gaanim_python/dev-dynamic"]

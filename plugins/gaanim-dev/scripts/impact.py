@@ -40,6 +40,8 @@ VISUAL_CANDIDATES = {
 
 PERFORMANCE_CRATES = {
     "gaanim_editor",
+    "gaanim_engine",
+    "gaanim_launcher",
     "gaanim_export",
     "gaanim_media",
     "gaanim_renderer",
@@ -149,7 +151,7 @@ def _docs_for(paths: Iterable[str]) -> set[str]:
             docs.add("docs/content/referencia/mecanica.typ")
         if any(token in lower for token in ("pycanvas", "canvas", "scene", "runtime", "camera", "timeline")):
             docs.add("docs/content/referencia/scene.typ")
-        if "gaanim_launcher" in lower or lower == "crates/gaanim_editor/src/main.rs":
+        if "gaanim_launcher" in lower:
             docs.add("docs/content/referencia/cli.typ")
         if "gaanim_project" in lower:
             docs.add("docs/content/referencia/cli.typ")
@@ -173,7 +175,6 @@ def analyze_paths(repo: Path, paths: Iterable[str]) -> Impact:
     # The command line and the project manifest are user-facing contracts too.
     cli_surface = any(
         path.startswith(("crates/gaanim_launcher/", "crates/gaanim_project/"))
-        or path == "crates/gaanim_editor/src/main.rs"
         for path in normalized
     )
     visual = bool(set(crates) & VISUAL_CRATES)

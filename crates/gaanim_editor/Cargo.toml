@@ -9,16 +9,6 @@ description = "Gaanim application: interactive viewer with hot-reload of animati
 name = "gaanim_editor"
 path = "src/lib.rs"
 
-[[bin]]
-name = "gaanim-core"
-path = "src/main.rs"
-required-features = ["python"]
-
-# Plays and exports playback bundles; it does not link Python.
-[[bin]]
-name = "gaanim-play"
-path = "src/play.rs"
-
 [dependencies]
 gaanim_core = { path = "../gaanim_core" }
 gaanim_math = { path = "../gaanim_math" }
@@ -31,7 +21,6 @@ gaanim_media = { path = "../gaanim_media" }
 gaanim_export = { path = "../gaanim_export" }
 gaanim_diff = { path = "../gaanim_diff" }
 gaanim_renderer = { path = "../gaanim_renderer" }
-gaanim_python = { path = "../gaanim_python", optional = true }
 gaanim_text = { path = "../gaanim_text" }
 gaanim_project = { path = "../gaanim_project" }
 
@@ -50,7 +39,6 @@ vello = "0.9.0"
 bevy_egui = { version = "0.42.0", default-features = false, features = ["render", "manage_clipboard", "default_fonts"] }
 # Same winit as bevy_winit; only its `Icon` type is used, for the window icon.
 winit = { version = "0.30", default-features = false }
-pyo3 = { version = "0.28", features = ["abi3-py314"], optional = true }
 notify = { workspace = true }
 crossbeam-channel = { workspace = true }
 chrono = { version = "0.4.44", default-features = false, features = ["clock"] }
@@ -71,10 +59,6 @@ chrono = { version = "0.4.44", default-features = false, features = ["clock", "w
 tempfile = "3"
 
 [features]
-default = ["python"]
-# The Python host behind `gaanim-core`. The library and `gaanim-play` do not
-# need it, and the web player cannot link it.
-python = ["dep:gaanim_python", "dep:pyo3"]
 dev-dynamic = [
     "bevy/dynamic_linking",
     "gaanim_animation/dev-dynamic",
@@ -84,7 +68,6 @@ dev-dynamic = [
     "gaanim_export/dev-dynamic",
     "gaanim_math/dev-dynamic",
     "gaanim_media/dev-dynamic",
-    "gaanim_python?/dev-dynamic",
     "gaanim_renderer/dev-dynamic",
     "gaanim_scene/dev-dynamic",
     "gaanim_text/dev-dynamic",

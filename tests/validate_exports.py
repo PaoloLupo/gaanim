@@ -505,7 +505,7 @@ def main() -> int:
         else repo
         / "target"
         / "debug"
-        / ("gaanim-core.exe" if os.name == "nt" else "gaanim-core")
+        / ("gaanim.exe" if os.name == "nt" else "gaanim")
     )
     scene = (repo / args.scene).resolve() if not args.scene.is_absolute() else args.scene
     alpha_scene = (

@@ -57,8 +57,7 @@ Sin argumentos, `gaanim` abre el Inicio: crear un proyecto, abrir una carpeta o
 volver a uno de los diez proyectos recientes. Con un script o proyecto abre el
 editor, que vuelve a ejecutar el script al guardar (hot reload) y recarga la
 escena cuando cambia un asset del proyecto. Con un paquete `.gaanim`, `gaanim`
-lo abre con `gaanim-play`, que no necesita Python, y reproduce los fotogramas
-grabados con las mismas opciones.
+reproduce los fotogramas grabados con las mismas opciones, sin cargar Python.
 
 #table(
   columns: (auto, 1fr),

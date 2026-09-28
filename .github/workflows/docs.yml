@@ -76,7 +76,7 @@ jobs:
           restore-keys: docs-previews-
 
       - name: Build preview runtime
-        run: cargo build -p gaanim_editor --bin gaanim-core
+        run: cargo build -p gaanim_launcher
 
       # Runs every example with the real runtime and fails when any of them
       # reports an error; the log lists each failing cell with its location.

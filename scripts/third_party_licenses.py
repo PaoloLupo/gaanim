@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Write the third-party notices shipped with the Gaanim release binaries.
 
-The notices cover every crate compiled into ``gaanim``, ``gaanim-core`` and
-``gaanim-play`` for the host platform, plus the third-party assets embedded in
-them. Build-only dependencies (build scripts and procedural macros) do not end
+The notices cover every crate compiled into ``gaanim``, its engine library
+and its Python plugin for the host platform, plus the third-party assets
+embedded in them. Build-only dependencies (build scripts and procedural macros) do not end
 up in the binaries and are left out. Identical license texts are printed once,
 with the crates that carry them.
 
@@ -22,7 +22,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 # Packages whose binaries are distributed.
-SHIPPED_PACKAGES = ("gaanim_editor", "gaanim_launcher")
+# `gaanim` depends on the engine library and the Python plugin.
+SHIPPED_PACKAGES = ("gaanim_launcher",)
 LICENSE_FILE = re.compile(
     r"^(licen[cs]es?|copying|copyright|notice|unlicense|authors|ofl|ufl)([-_.].*)?$",
     re.IGNORECASE,

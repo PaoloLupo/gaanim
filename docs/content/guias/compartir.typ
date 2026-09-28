@@ -72,13 +72,9 @@ igual y reproduce archivos `.gaanim`; para crear o abrir proyectos te indica
 cómo instalarlo. Sin FFmpeg, el paquete se reproduce sin audio y se exporta
 solo a secuencias PNG.
 
-`gaanim` reconoce el paquete y lo abre con `gaanim-play`, un ejecutable que se
-instala junto a `gaanim` y no enlaza Python. Si en el equipo solo copias
-`gaanim-play`, también puedes llamarlo directamente con las mismas opciones:
-
-```bash
-gaanim-play --present mi-charla.gaanim
-```
+`gaanim` no carga Python para reproducir, presentar, exportar ni comprobar un
+paquete: solo lo carga al ejecutar un script. Por eso basta con copiar el
+paquete de Gaanim de la release, sin instalar Python.
 
 La inspección (`I`) sigue funcionando: los fotogramas son vectoriales, así que
 el zoom los redibuja nítidos.

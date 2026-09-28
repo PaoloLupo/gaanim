@@ -37,7 +37,7 @@ example with the binding or execute it when practical.
 
 ## Executable blocks
 
-Every `python` block in `docs/content` runs through `gaanim-core` during the
+Every `python` block in `docs/content` runs through `gaanim` during the
 docs build, and the build fails when any of them reports an error (pass
 `--allow-example-errors` to `docs compile` to finish anyway while drafting). A
 block exports when it has `# output:`, is checked when it calls `render()`, and

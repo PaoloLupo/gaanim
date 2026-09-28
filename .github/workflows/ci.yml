@@ -94,10 +94,9 @@ jobs:
           echo "PYO3_PYTHON=$(which python)" >> "$GITHUB_ENV"
           echo "LD_LIBRARY_PATH=${pythonLocation}/lib" >> "$GITHUB_ENV"
 
+      # `gaanim` builds with the engine library and the Python plugin it loads.
       - name: Build headless snapshot runner
-        run: |
-          cargo build -p gaanim_launcher --bin gaanim
-          cargo build -p gaanim_editor --bin gaanim-core
+        run: cargo build -p gaanim_launcher
 
       # Native 3D scenes open a window even for headless captures, hence Xvfb.
       - name: Validate public Scene examples
@@ -169,7 +168,7 @@ jobs:
           echo "LD_LIBRARY_PATH=${pythonLocation}/lib" >> "$GITHUB_ENV"
 
       - name: Build executable runtime
-        run: cargo build -p gaanim_editor --bin gaanim-core
+        run: cargo build -p gaanim_launcher
 
       # The isolated 3D worker exports through a window, hence Xvfb.
       - name: Export formats and isolated 3D smoke
@@ -216,7 +215,7 @@ jobs:
           python -m pip install dist/*.whl
 
       - name: Validate the embedded Python API stub
-        run: cargo run -p gaanim_editor --bin gaanim-core -- --validate-python-api tests/validate_python_api.py
+        run: cargo run -p gaanim_launcher -- --validate-python-api tests/validate_python_api.py
 
   performance:
     name: Runtime performance (Ubuntu, informational)
@@ -246,7 +245,7 @@ jobs:
           echo "LD_LIBRARY_PATH=${pythonLocation}/lib" >> "$GITHUB_ENV"
 
       - name: Build release runtime
-        run: cargo build -p gaanim_editor --bin gaanim-core --release
+        run: cargo build -p gaanim_launcher --release
 
       - name: Measure versioned runtime budgets
         run: xvfb-run -a python tests/benchmark_runtime.py --profile standard

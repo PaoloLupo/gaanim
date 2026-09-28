@@ -20,8 +20,9 @@ This file guides repository work; model selection belongs to the calling client.
 
 ## Repo layout
 
-- **Workspace root:** `Cargo.toml` defines 23 workspace members: 22 crates under
-  `crates/` plus the `docs` application.
+- **Workspace root:** `Cargo.toml` defines 24 workspace members: 23 crates under
+  `crates/` plus the `docs` application. `crates/gaanim_engine` is excluded on
+  purpose (see below).
 - **Key crates (bottom-up):**
   - `gaanim_core` — re-exports `peniko`/`kurbo`/`glam`, error types.
   - `gaanim_math` — `SpatialTransform`, `Camera`, `RateFunc`, `Bounds3D`.
@@ -37,21 +38,35 @@ This file guides repository work; model selection belongs to the calling client.
   - `gaanim_visualization` — scales, coordinate spaces, sampling, data, and statistics.
   - `gaanim_text` — cosmic-text/HarfBuzz shaping, Typst math compilation.
   - `gaanim_api` — fluent Rust builder API; depends on most core crates.
-  - `gaanim_python` — PyO3 0.28 module embedded by the editor plus the pure-Python authoring wheel.
+  - `gaanim_python` — PyO3 0.28 module embedded by the Python plugin plus the pure-Python authoring wheel.
   - `gaanim_project` — shared project scaffolding, manifests, recent-project state,
     and side-effect-free Python/uv environment discovery.
   - `gaanim_bundle` — the `.gaanim` playback bundle format: lossless frame
     captures, delta-encoded chunks, per-frame digests. `gaanim_export::bundle`
-    records it; the editor's `gaanim-play` binary (no libpython) plays,
-    presents, and exports it. A bundle stores an optional `thumbnail.png` cover.
+    records it; `gaanim` plays, presents, and exports it without loading
+    Python. A bundle stores an optional `thumbnail.png` cover.
   - `gaanim_thumbnail` — reads and scales a bundle's cover without a GPU (used by
     `gaanim thumbnail` and the Linux thumbnailer); `gaanim_thumbnail_handler` is
     the Windows Explorer thumbnail handler DLL (a cdylib, empty off Windows).
     `gaanim_project::association` implements `gaanim register`/`unregister`.
   - `gaanim_editor`, `gaanim_launcher`, `gaanim_export`, and `gaanim_diff` — application hosting, launch, export, and visual comparison tools.
-    `gaanim_editor`'s default `python` feature adds the Python host behind
-    `gaanim-core`; the library and `gaanim-play` build without it.
-  - `gaanim_web` — the web player: `gaanim-play`'s app (same egui playback bar)
+  - **One executable.** `gaanim_launcher` builds `gaanim`, the only executable:
+    Home, editor, bundle playback, and CLI. It does not link Python.
+    `gaanim_engine` is a Rust `dylib` holding one copy of the engine crates;
+    `gaanim` and the Python plugin both link it, so they share types and
+    statics. `gaanim_python_plugin` is a `dylib` with PyO3 and the script
+    runner, loaded with `libloading` when a script runs
+    (`crates/gaanim_launcher/src/python.rs`); its interface is
+    `gaanim_editor::python_plugin`. `std` is linked dynamically too, so an
+    installation is `gaanim`, both libraries, and the toolchain's `std-*`
+    library side by side (`scripts/stage_app.py`). Rules: build `gaanim` and
+    the plugin in one Cargo invocation (`-p gaanim_launcher` already depends on
+    the plugin) so they share one engine; keep `gaanim_engine` out of the
+    workspace members, since Cargo links `std` dynamically into a dylib only
+    when it is not a selected package; and reference `gaanim_engine` (`use
+    gaanim_engine as _;`) from any new binary or plugin so the engine crates
+    link from it rather than statically.
+  - `gaanim_web` — the web player: `gaanim`'s playback app (same egui playback bar)
     compiled to wasm32 + WebGPU. `just web` builds it into `dist/web/`. Code the
     web cannot run (native windows, files, threads, FFmpeg) is gated on
     `target_arch = "wasm32"` or goes through `gaanim_editor::platform`.

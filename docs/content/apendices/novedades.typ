@@ -15,6 +15,18 @@ instalar una versión nueva, sigue
 
 Sin publicar todavía. No hace falta cambiar tus escenas.
 
+== Cambios
+
+- Gaanim es un solo ejecutable, `gaanim`. Ya no existen `gaanim-core` ni
+  `gaanim-play`. El motor está en una biblioteca, `gaanim_engine`, en lugar de
+  copiarse en dos ejecutables, y el soporte de Python en otra,
+  `gaanim_python_plugin`, que `gaanim` carga solo al ejecutar un script. Al
+  actualizar, reemplaza todos los archivos de la carpeta y borra
+  `gaanim-core` y `gaanim-play`. En Ubuntu cambia la instalación (ver
+  #link("/empezar/instalacion/")[Instalación]).
+- El inicio abre proyectos aunque instales Python con Gaanim ya abierto: el
+  soporte de Python se carga al abrir el proyecto, no al arrancar.
+
 == Correcciones
 
 - El reproductor web ya no se detiene al abrir un `.gaanim` con

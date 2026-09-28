@@ -349,7 +349,7 @@ def main() -> int:
     args = parse_args()
     repo = Path(__file__).resolve().parents[1]
     executable = args.executable or repo / "target" / "release" / (
-        "gaanim-core.exe" if os.name == "nt" else "gaanim-core"
+        "gaanim.exe" if os.name == "nt" else "gaanim"
     )
     executable = executable.resolve()
     scene = (repo / args.scene).resolve() if not args.scene.is_absolute() else args.scene

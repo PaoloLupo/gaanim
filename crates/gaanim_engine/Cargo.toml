@@ -1,0 +1,40 @@
+[package]
+name = "gaanim_engine"
+version = "0.6.2"
+license = "MIT OR Apache-2.0"
+edition = "2024"
+description = "The Gaanim engine as one shared library for the gaanim executable and its Python plugin"
+publish = false
+
+# A Rust dylib: `gaanim` and `gaanim_python_plugin` link this one copy of the
+# engine, so they share its types and statics (the script host channel, caches)
+# and the engine ships once. Cargo passes `-C prefer-dynamic`, which links `std`
+# dynamically as a shared engine requires, only when it builds a dylib as a
+# dependency. That is why the workspace excludes this crate: it is never a
+# package selected on the command line.
+[lib]
+crate-type = ["dylib"]
+
+# Everything the executable and the plugin use from the engine side must come
+# from here; the plugin adds only PyO3 and the Python bindings.
+[dependencies]
+gaanim_core = { path = "../gaanim_core" }
+gaanim_math = { path = "../gaanim_math" }
+gaanim_scene = { path = "../gaanim_scene" }
+gaanim_animation = { path = "../gaanim_animation" }
+gaanim_timeline = { path = "../gaanim_timeline" }
+gaanim_layout = { path = "../gaanim_layout" }
+gaanim_objects = { path = "../gaanim_objects" }
+gaanim_visualization = { path = "../gaanim_visualization" }
+gaanim_text = { path = "../gaanim_text" }
+gaanim_renderer = { path = "../gaanim_renderer" }
+gaanim_api = { path = "../gaanim_api" }
+gaanim_bundle = { path = "../gaanim_bundle" }
+gaanim_export = { path = "../gaanim_export" }
+gaanim_diff = { path = "../gaanim_diff" }
+gaanim_project = { path = "../gaanim_project" }
+gaanim_thumbnail = { path = "../gaanim_thumbnail" }
+gaanim_editor = { path = "../gaanim_editor" }
+
+[features]
+dev-dynamic = ["gaanim_editor/dev-dynamic"]

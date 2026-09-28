@@ -3,7 +3,7 @@ set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
 python_dir := if os_family() == "windows" { "./.venv/Scripts" } else { "./.venv/bin" }
 python := python_dir + if os_family() == "windows" { "/python.exe" } else { "/python3" }
 system_python := if os_family() == "windows" { "py.exe" } else { "python" }
-release_runtime := if os_family() == "windows" { "./target/release/gaanim-core.exe" } else { "./target/release/gaanim-core" }
+release_runtime := if os_family() == "windows" { "./target/release/gaanim.exe" } else { "./target/release/gaanim" }
 
 # All development Cargo commands select the same opt-in dynamic-linking feature.
 dev +args:
@@ -58,38 +58,40 @@ test-package package *args:
 clippy:
     {{ system_python }} scripts/dev.py clippy --workspace
 
-# Build the `gaanim` application binary (debug mode).
+# Build the `gaanim` application (debug mode): the executable, the engine
+# library, and the Python plugin it loads.
 build:
-    {{ system_python }} scripts/dev.py build -p gaanim_editor -p gaanim_launcher
+    {{ system_python }} scripts/dev.py build -p gaanim_launcher
 
 # Build the runtime and write target/cargo-timings/cargo-timing.html.
 build-timings:
-    {{ system_python }} scripts/dev.py build -p gaanim_editor --bin gaanim-core --timings
+    {{ system_python }} scripts/dev.py build -p gaanim_launcher --timings
 
-# Build the `gaanim` application binary (release mode).
+# Build the `gaanim` application (release mode).
 build-release:
-    cargo build -p gaanim_editor -p gaanim_launcher --release
+    cargo build -p gaanim_launcher --release
 
-# Build the distributed binaries (single codegen unit; slower, smaller), plus
-# the Explorer thumbnail handler DLL (an empty library off Windows).
+# Build the distributed application (single codegen unit; slower, smaller),
+# plus the Explorer thumbnail handler DLL (an empty library off Windows).
 build-dist:
-    cargo build -p gaanim_editor -p gaanim_launcher -p gaanim_thumbnail_handler --profile dist
+    cargo build -p gaanim_launcher -p gaanim_thumbnail_handler --profile dist
 
 [windows]
 build-release-install: build-dist wheel
     New-Item -ItemType Directory -Force -Path "C:\Tools\gaanim" | Out-Null
-    Copy-Item -Path "./target/dist/gaanim.exe" -Destination "C:\Tools\gaanim\" -Force
-    Copy-Item -Path "./target/dist/gaanim-core.exe" -Destination "C:\Tools\gaanim\" -Force
-    Copy-Item -Path "./target/dist/gaanim-play.exe" -Destination "C:\Tools\gaanim\" -Force
+    {{ system_python }} scripts/stage_app.py --profile dist --dest "C:\Tools\gaanim"
+    Remove-Item -Path "C:\Tools\gaanim\gaanim-core.exe", "C:\Tools\gaanim\gaanim-play.exe" -ErrorAction SilentlyContinue
     # Explorer may hold the thumbnail handler loaded; the old copy keeps working.
     try { Copy-Item -Path "./target/dist/gaanim_thumbnail_handler.dll" -Destination "C:\Tools\gaanim\" -Force -ErrorAction Stop } catch { Write-Warning "gaanim_thumbnail_handler.dll is in use; restart Explorer and run this again to update it" }
     Copy-Item -Path (Get-ChildItem "./target/wheels/gaanim-*-py3-none-any.whl" | Select-Object -First 1).FullName -Destination "C:\Tools\gaanim\" -Force
 
 [unix]
 build-release-install: build-dist wheel
-    mkdir -p "$HOME/.local/bin" "$HOME/.local/share/gaanim"
-    install -m 755 ./target/dist/gaanim ./target/dist/gaanim-core ./target/dist/gaanim-play "$HOME/.local/bin/"
-    install -m 644 ./target/wheels/gaanim-*-py3-none-any.whl "$HOME/.local/share/gaanim/"
+    mkdir -p "$HOME/.local/bin" "$HOME/.local/lib/gaanim"
+    {{ system_python }} scripts/stage_app.py --profile dist --dest "$HOME/.local/lib/gaanim"
+    install -m 644 ./target/wheels/gaanim-*-py3-none-any.whl "$HOME/.local/lib/gaanim/"
+    rm -f "$HOME/.local/bin/gaanim-core" "$HOME/.local/bin/gaanim-play"
+    ln -sf "$HOME/.local/lib/gaanim/gaanim" "$HOME/.local/bin/gaanim"
 
 # Install the lightweight authoring package in the local virtual environment.
 python-develop:
@@ -102,17 +104,17 @@ wheel:
 
 # Check that the embedded extension exports every public stub declaration.
 validate-python-api:
-    {{ system_python }} scripts/dev.py run -p gaanim_editor --bin gaanim-core -- --validate-python-api tests/validate_python_api.py
+    {{ system_python }} scripts/dev.py run -p gaanim_launcher -- --validate-python-api tests/validate_python_api.py
 
 # Export every supported format plus one isolated 3D MP4 and inspect their contracts.
 test-exports encoder="libx264":
-    {{ system_python }} scripts/dev.py build -p gaanim_editor --bin gaanim-core
+    {{ system_python }} scripts/dev.py build -p gaanim_launcher
     {{ system_python }} scripts/dev.py exec {{ system_python }} tests/validate_exports.py --output target/export-smoke --encoder {{ encoder }}
 
 # Measure runtime p50/p95, throughput, and peak memory using the native release executable.
 # Profiles: smoke (fast wiring check) or standard (300-frame export and stable sample counts).
 benchmark profile="smoke" encoder="libx264":
-    cargo build -p gaanim_editor --bin gaanim-core --release
+    cargo build -p gaanim_launcher --release
     {{ python }} tests/benchmark_runtime.py --executable {{ release_runtime }} --profile {{ profile }} --encoder {{ encoder }}
 
 # ---- Run --------------------------------------------------------------------
@@ -136,7 +138,7 @@ web-serve: web
 
 # Build documentation site and PDF (one-shot).
 docs:
-    {{ system_python }} scripts/dev.py build -p gaanim_editor --bin gaanim-core
+    {{ system_python }} scripts/dev.py build -p gaanim_launcher
     {{ system_python }} scripts/dev.py run -p docs -- compile
 
 # Build documentation PDF explicitly to custom output path.

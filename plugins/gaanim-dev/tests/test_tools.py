@@ -272,7 +272,7 @@ class DevCommandTests(unittest.TestCase):
         ], command)
 
     def test_lightweight_packages_do_not_acquire_bevy(self):
-        for name in ["gaanim_core", "gaanim_project", "gaanim_launcher", "docs"]:
+        for name in ["gaanim_core", "gaanim_project", "gaanim_thumbnail", "docs"]:
             self.assertEqual(
                 ["cargo", "check", "-p", name],
                 self.dev.cargo_command(self.repo, ["check", "-p", name]),
@@ -280,7 +280,7 @@ class DevCommandTests(unittest.TestCase):
 
     def test_mixed_batch_enables_only_the_bevy_consumer(self):
         command = self.dev.cargo_command(self.repo, [
-            "build", "-p", "gaanim_editor", "-p", "gaanim_launcher",
+            "build", "-p", "gaanim_editor", "-p", "gaanim_project",
         ])
         self.assertEqual("gaanim_editor/dev-dynamic", command[3])
 
