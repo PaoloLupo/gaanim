@@ -11,35 +11,13 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
-= 0.6.2
-
-Sin publicar todavía. No hace falta cambiar tus escenas.
-
-== Cambios
-
-- `scene.launch(...)`, o `scene.play(..., advance=False)`, empieza animaciones
-  en el cursor sin moverlo: un giro que dura varios cortes sigue mientras
-  programas lo demás. `duration(0)` queda documentado como corte dentro de
-  una composición.
-- Rejilla de tempo: `scene.tempo(bpm, offset)`, `scene.beats(n)` y
-  `scene.wait_until(beat=n)` o `wait_until(bar=n)` cortan a tiempo con la
-  música, y avisan si un plano se pasó de su hueco. El editor dibuja una
-  línea en cada compás de la barra de reproducción.
-- `scene.media.audio(..., end=30.0, fade_out=1.5)` recorta y funde una música
-  de fondo sin alargar el `play` que la activa.
-- `echo(..., hold=True)` deja las copias congeladas cuando el objeto se
-  detiene, como un papel cebolla, en lugar de que lo alcancen.
-- `drawable.points([...])` fija los vértices de un polígono o una polilínea
-  sin animarlos, igual que los demás setters.
-- Con `role="code"`, `$` es literal: `scene.text("$ gaanim init",
-  role="code")` ya no pide escribir `\$`.
-
 = 0.6.1
 
-Publicada el 28 de septiembre de 2026. Llegan el reproductor web y la
-licencia MIT OR Apache-2.0. Cambian el ancho de los trazos escalados, la
-opacidad tras `transform_to` y la colocación de un SVG cuyas partes mueves:
-lee «Al actualizar».
+Publicada el 28 de septiembre de 2026. Llegan el reproductor web, la
+licencia MIT OR Apache-2.0, `scene.launch`, la rejilla de tempo y paquetes
+`.gaanim` más pequeños. Cambian el ancho de los trazos
+escalados, la opacidad tras `transform_to` y la colocación de un SVG cuyas
+partes mueves: lee «Al actualizar».
 
 == Al actualizar
 
@@ -66,6 +44,14 @@ lee «Al actualizar».
   escala y el pivote de la raíz usan el dibujo tal como lo declara el archivo.
   Antes `move_to` centraba el SVG con la parte ya desplazada y todo el dibujo
   se movía para compensar; si lo corregías a mano, quita esa compensación.
+- Los paquetes `.gaanim` usan el formato 2: sus datos van comprimidos con
+  Zstandard. Una presentación larga ocupa menos de la mitad (la de 4½ minutos
+  de #link("/guias/compartir/")[Compartir sin Python] baja de 42 a 18 MB) y un
+  paquete pequeño, alrededor de un 10 % menos. El cambio rompe la
+  compatibilidad en los dos sentidos: 0.6.1 ya no abre los paquetes grabados
+  con 0.6.0 (vuelve a grabarlos desde su script con `gaanim export`), y 0.6.0
+  no abre los de 0.6.1, así que quien los reciba debe actualizar o usar el
+  reproductor web.
 
 == Correcciones
 
@@ -92,6 +78,25 @@ lee «Al actualizar».
 
 == Cambios
 
+- `scene.launch(...)`, o `scene.play(..., advance=False)`, empieza animaciones
+  en el cursor sin moverlo: un giro que dura varios cortes sigue mientras
+  programas lo demás. Animar el mismo canal antes de que termine lanza
+  `ValueError`, y `gaanim check` avisa si la escena acaba antes que ella.
+  `duration(0)` queda documentado como corte dentro de una composición.
+- Rejilla de tempo: `scene.tempo(bpm, offset)`, `scene.beats(n)` y
+  `scene.wait_until(beat=n)` o `wait_until(bar=n)` cortan a tiempo con la
+  música, y avisan si un plano se pasó de su hueco. El editor dibuja una
+  línea en cada compás de la barra de reproducción.
+- `scene.media.audio(..., end=30.0, fade_out=1.5)` recorta y funde una música
+  de fondo sin alargar el `play` que la activa.
+- `echo(..., hold=True)` deja las copias congeladas cuando el objeto se
+  detiene, como un papel cebolla, en lugar de que lo alcancen.
+- `drawable.points([...])` fija los vértices de un polígono o una polilínea
+  sin animarlos, igual que los demás setters.
+- Con `role="code"`, `$` es literal: `scene.text("$ gaanim init",
+  role="code")` ya no pide escribir `\$`.
+- El ejemplo `examples/launch_tempo_demo.py` reúne `launch`, el tempo, el eco
+  congelado, `points` y el `$` literal, con su referencia visual.
 - Documentación: la guía de Efectos cubre postprocesos encadenados y
   animados, acabados listos, bloom, desenfoque de movimiento, ecos y fondos
   vivos; Movimiento añade repetidores, duplicadores y plexus. La referencia de

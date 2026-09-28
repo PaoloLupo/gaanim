@@ -315,6 +315,16 @@ pub enum PlayItem {
     Lottie(LottieClip),
 }
 
+/// A channel a launched animation drives until `end`.
+#[derive(Clone, Debug)]
+pub(crate) struct LaunchedChannel {
+    target: gaanim_core::ObjectId,
+    channel: String,
+    start: f64,
+    end: f64,
+    label: &'static str,
+}
+
 /// A pure, nestable description of temporal composition.
 #[derive(Debug, Clone)]
 pub struct Composition {
@@ -2049,6 +2059,9 @@ pub struct SceneModel {
     /// Musical tempo set with [`Self::set_tempo`], for beat-timed cuts and
     /// the editor's bar lines.
     pub(crate) tempo: Option<gaanim_timeline::timeline::BeatGrid>,
+    /// Channels driven by launched animations (`play(advance=False)`), with
+    /// their absolute span, so a later play cannot drive them at once.
+    pub(crate) launched_channels: Vec<LaunchedChannel>,
     /// Voiceover blocks and the live take, for timing and the editor recorder.
     pub(crate) narration: super::narration::NarrationState,
     /// Reusable logo/footer treatment generated for every explicit segment.
@@ -2090,6 +2103,7 @@ impl SceneModel {
             asset_root: None,
             audio_tracks: Vec::new(),
             tempo: None,
+            launched_channels: Vec::new(),
             narration: Default::default(),
             branding: None,
             camera_position: gaanim_core::glam::DVec3::ZERO,
@@ -4951,6 +4965,26 @@ impl SceneModel {
         Ok(beats * tempo.beat())
     }
 
+    /// A warning when a launched animation still runs where the scene ends:
+    /// the scene ends at the cursor, so the animation is cut there.
+    pub fn launched_past_end_warning(&self) -> Option<String> {
+        let end = self.current_time();
+        let last = self
+            .launched_channels
+            .iter()
+            .filter(|launched| launched.end > end + 1e-6)
+            .max_by(|a, b| a.end.total_cmp(&b.end))?;
+        Some(format!(
+            "a launched animation ({} of its '{}' channel) runs until {:.2} s, but the scene \
+             ends at {:.2} s and cuts it; add scene.wait({:.2}) at the end to show all of it",
+            last.label,
+            last.channel,
+            last.end,
+            end,
+            last.end - end
+        ))
+    }
+
     /// Wait until beat `beat` (0 is the tempo's offset). A beat already
     /// behind the cursor is an error: the shot before it ran too long.
     pub fn wait_until_beat(&mut self, beat: f64) -> Result<(), String> {
@@ -5079,13 +5113,33 @@ impl SceneModel {
             anim.validate_paint_targets(&mut paint_targets)
                 .map_err(|error| PlayError::InvalidPaint(error.to_owned()))?;
         }
-        let mut occupied: Vec<(gaanim_core::ObjectId, String, f64, f64, &'static str)> = Vec::new();
         // Starts accumulated through sequences and staggers carry rounding
         // error, so a clip that begins where another ends may appear to
         // overlap it by a few ulps.
         const OVERLAP_EPSILON: f64 = 1e-9;
         let described =
             |label: &str, start: f64, end: f64| format!("{label} ({start:.2}–{end:.2} s)");
+        // Spans are relative to the cursor; launched animations still
+        // running occupy their channels too.
+        let cursor = self.current_time();
+        let mut occupied: Vec<(gaanim_core::ObjectId, String, f64, f64, String)> = self
+            .launched_channels
+            .iter()
+            .filter(|launched| launched.end > cursor + OVERLAP_EPSILON)
+            .map(|launched| {
+                (
+                    launched.target,
+                    launched.channel.clone(),
+                    launched.start - cursor,
+                    launched.end - cursor,
+                    format!(
+                        "{} launched at {:.2} s (until {:.2} s)",
+                        launched.label, launched.start, launched.end
+                    ),
+                )
+            })
+            .collect();
+        let mut launched = Vec::new();
         for resolved_item in &resolved {
             let PlayItem::Animation(anim) = &resolved_item.item else {
                 continue;
@@ -5134,7 +5188,7 @@ impl SceneModel {
                         }
                     },
                 );
-                if let Some((_, _, occupied_start, occupied_end, occupied_label)) = conflict {
+                if let Some((_, _, _, _, first)) = conflict {
                     let target_kind = self
                         .state
                         .lock()
@@ -5150,11 +5204,21 @@ impl SceneModel {
                         target: anim.inner.target,
                         channel,
                         target_kind,
-                        first: described(occupied_label, *occupied_start, *occupied_end),
+                        first: first.clone(),
                         second: described(label, start, end),
                     });
                 }
-                occupied.push((anim.inner.target, channel, start, end, label));
+                if !advance {
+                    launched.push(LaunchedChannel {
+                        target: anim.inner.target,
+                        channel: channel.clone(),
+                        start: cursor + start,
+                        end: cursor + end,
+                        label,
+                    });
+                }
+                let description = described(label, start, end);
+                occupied.push((anim.inner.target, channel, start, end, description));
             }
         }
         if resolved.iter().any(
@@ -5257,6 +5321,9 @@ impl SceneModel {
             .expect("canvas state poisoned")
             .freeze_spawn_specs();
 
+        self.launched_channels
+            .retain(|launched| launched.end > cursor + OVERLAP_EPSILON);
+        self.launched_channels.extend(launched);
         let play_start = self.current_time();
         let mut builders = Vec::new();
         let mut camera_captures = Vec::new();
@@ -9202,6 +9269,83 @@ mod tests {
             ops.iter()
                 .any(|op| matches!(op, Op::Launch(anims) if anims.len() == 1))
         );
+    }
+
+    #[test]
+    fn a_play_cannot_drive_a_channel_a_launch_still_drives() {
+        let mut canvas = SceneModel::new(1280, 720);
+        let wheel = canvas.circle(20.0);
+        canvas
+            .launch_composition_configured(
+                Composition::leaf(wheel.animate().rotate_by(6.0).duration(2.0)),
+                None,
+                None,
+            )
+            .unwrap();
+        // Another channel of the same object runs under it.
+        canvas
+            .play_composition_configured(
+                Composition::leaf(wheel.animate().shift_by(10.0, 0.0).duration(1.0)),
+                None,
+                None,
+            )
+            .unwrap();
+        let error = canvas
+            .play_composition_configured(
+                Composition::leaf(wheel.animate().rotate_by(1.0).duration(0.5)),
+                None,
+                None,
+            )
+            .unwrap_err();
+        assert!(
+            matches!(&error, PlayError::ConflictingChannel { channel, first, .. }
+                if channel == "rotation" && first.contains("launched at 0.00 s (until 2.00 s)")),
+            "{error}"
+        );
+        assert!(
+            (canvas.current_time() - 1.0).abs() < 1e-9,
+            "a refused play keeps the cursor"
+        );
+        // A second launch on the channel is refused too, and once the first
+        // one ends the channel is free.
+        assert!(
+            canvas
+                .launch_composition_configured(
+                    Composition::leaf(wheel.animate().rotate_by(1.0).duration(0.5)),
+                    None,
+                    None,
+                )
+                .is_err()
+        );
+        canvas.wait(1.0);
+        canvas
+            .play_composition_configured(
+                Composition::leaf(wheel.animate().rotate_by(1.0).duration(0.5)),
+                None,
+                None,
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn a_launch_past_the_end_of_the_scene_is_reported() {
+        let mut canvas = SceneModel::new(1280, 720);
+        let wheel = canvas.circle(20.0);
+        canvas
+            .launch_composition_configured(
+                Composition::leaf(wheel.animate().rotate_by(6.0).duration(3.0)),
+                None,
+                None,
+            )
+            .unwrap();
+        canvas.wait(1.0);
+        let warning = canvas.launched_past_end_warning().expect("cut launch");
+        assert!(
+            warning.contains("until 3.00 s") && warning.contains("scene.wait(2.00)"),
+            "{warning}"
+        );
+        canvas.wait(2.0);
+        assert_eq!(canvas.launched_past_end_warning(), None);
     }
 
     #[test]

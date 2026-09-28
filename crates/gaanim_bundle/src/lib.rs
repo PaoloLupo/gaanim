@@ -46,8 +46,16 @@ pub use model::{EntityKeys, Frame, PostPass};
 
 /// Identifies the file type in `manifest.json`.
 pub const FORMAT: &str = "gaanim-bundle";
-/// Version of the bundle encoding this build writes and reads.
-pub const VERSION: u32 = 1;
+/// Version of the bundle encoding this build writes and reads; bundles of
+/// any other version are refused.
+///
+/// Every data entry holds a Zstandard frame; `manifest.json` stays Deflate
+/// and media stays as authored. Version 1 (Gaanim 0.6.0) left compression
+/// to the archive.
+pub const VERSION: u32 = 2;
+/// Zstandard level of data entries: slow to write, still fast to read.
+#[cfg(not(target_arch = "wasm32"))]
+const ZSTD_LEVEL: i32 = 17;
 /// File extension of playback bundles.
 pub const EXTENSION: &str = "gaanim";
 /// Frames per chunk: one second at the default rate.
@@ -61,16 +69,28 @@ pub enum BundleError {
     Zip(#[from] zip::result::ZipError),
     #[error("the bundle is damaged: {0}")]
     Corrupt(String),
-    #[error(
-        "this bundle uses format version {found}; this Gaanim reads version {VERSION}. \
-         Open it with the Gaanim version that wrote it ({generator})"
-    )]
+    #[error("{}", version_message(*found, generator))]
     UnsupportedVersion { found: u32, generator: String },
     #[error("{0}")]
     Unsupported(String),
 }
 
 type Result<T> = std::result::Result<T, BundleError>;
+
+fn version_message(found: u32, generator: &str) -> String {
+    if found < VERSION {
+        format!(
+            "this bundle was recorded by {generator} in format version {found}, which this \
+             Gaanim no longer reads (it reads version {VERSION}). Record it again from its \
+             script with `gaanim export <script> --output <file>.gaanim`"
+        )
+    } else {
+        format!(
+            "this bundle uses format version {found}; this Gaanim reads version {VERSION}. \
+             Open it with the Gaanim that wrote it ({generator}) or a newer one"
+        )
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Static scene data
@@ -446,6 +466,13 @@ fn entry_options() -> zip::write::SimpleFileOptions {
         .large_file(true)
 }
 
+/// Entries the archive keeps as they are.
+fn stored_options() -> zip::write::SimpleFileOptions {
+    entry_options()
+        .compression_method(zip::CompressionMethod::Stored)
+        .compression_level(None)
+}
+
 impl BundleWriter<std::io::BufWriter<std::fs::File>> {
     /// Create `path`, replacing it if it exists.
     pub fn create(path: &Path, generator: impl Into<String>) -> Result<Self> {
@@ -477,8 +504,11 @@ impl<W: Write + Seek> BundleWriter<W> {
     }
 
     fn write_entry(&mut self, name: &str, bytes: &[u8]) -> Result<()> {
-        self.zip.start_file(name, entry_options())?;
-        self.zip.write_all(bytes)?;
+        // Zstandard compresses these far better than the archive's Deflate;
+        // the archive only stores the frame.
+        let compressed = compress(bytes)?;
+        self.zip.start_file(name, stored_options())?;
+        self.zip.write_all(&compressed)?;
         self.entries
             .insert(name.to_owned(), blake3::hash(bytes).to_hex().to_string());
         Ok(())
@@ -500,10 +530,7 @@ impl<W: Write + Seek> BundleWriter<W> {
             .unwrap_or_default();
         let entry = format!("media/{}{extension}", &hash.to_hex()[..32]);
         // Media is usually compressed already.
-        self.zip.start_file(
-            &entry,
-            entry_options().compression_method(zip::CompressionMethod::Stored),
-        )?;
+        self.zip.start_file(&entry, stored_options())?;
         self.zip.write_all(&bytes)?;
         self.entries
             .insert(entry.clone(), hash.to_hex().to_string());
@@ -701,6 +728,39 @@ fn scene_entry(index: u32) -> String {
     format!("scenes/{index:06}.bin")
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn compress(bytes: &[u8]) -> Result<Vec<u8>> {
+    Ok(zstd::bulk::compress(bytes, ZSTD_LEVEL)?)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn compress(bytes: &[u8]) -> Result<Vec<u8>> {
+    Ok(ruzstd::encoding::compress_to_vec(
+        bytes,
+        ruzstd::encoding::CompressionLevel::Fastest,
+    ))
+}
+
+/// Decoded with the pure-Rust decoder on every platform, so the native and
+/// web players read bundles the same way.
+fn decompress(name: &str, bytes: &[u8]) -> Result<Vec<u8>> {
+    let corrupt = |error: &dyn std::fmt::Display| {
+        BundleError::Corrupt(format!("entry {name} could not be decompressed: {error}"))
+    };
+    let mut decoder =
+        ruzstd::decoding::StreamingDecoder::new(bytes).map_err(|error| corrupt(&error))?;
+    let mut decoded = Vec::with_capacity(bytes.len().saturating_mul(4).min(1 << 30));
+    decoder
+        .read_to_end(&mut decoded)
+        .map_err(|error| corrupt(&error))?;
+    Ok(decoded)
+}
+
+/// Whether the bundle stores `name` as a Zstandard frame.
+fn zstd_entry(name: &str) -> bool {
+    name != "manifest.json" && !name.starts_with("media/")
+}
+
 fn read_entry<R: Read + Seek>(
     archive: &mut zip::ZipArchive<R>,
     manifest: Option<&Manifest>,
@@ -711,7 +771,11 @@ fn read_entry<R: Read + Seek>(
         .map_err(|_| BundleError::Corrupt(format!("missing entry {name}")))?;
     let mut bytes = Vec::with_capacity(file.size().min(1 << 30) as usize);
     file.read_to_end(&mut bytes)?;
+    drop(file);
     if let Some(manifest) = manifest {
+        if zstd_entry(name) {
+            bytes = decompress(name, &bytes)?;
+        }
         let expected = manifest
             .entries
             .get(name)

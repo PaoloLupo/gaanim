@@ -368,6 +368,13 @@ table th {
 }
 table tbody tr:hover td { background: var(--bg-soft); }
 main > table { display: block; overflow-x: auto; }
+/* Wide tables scroll inside their own box instead of being clipped. */
+.table-scroll {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+}
 
 /* ============================================================
    Header
@@ -835,7 +842,10 @@ table th, .code-header, .code-cell-anim .anim-preview::before, .api-badge, .kind
     color: var(--text-muted);
     margin: 6px 0 8px;
 }
-.api-params table { margin: 0 0 12px; font-size: 0.86rem; }
+.api-params .table-scroll { margin: 0 0 12px; }
+.api-params table { margin: 0; font-size: 0.86rem; }
+/* Keep descriptions readable when the table scrolls on a narrow screen. */
+.api-params td:last-child { min-width: 15em; }
 .api-required { font-size: 0.72rem; font-weight: 700; color: var(--danger); }
 .api-returns {
     margin: 10px 16px 14px;

@@ -7335,9 +7335,12 @@ class Scene:
         The cursor moves to the end of the batch. With ``advance=False`` (or
         ``launch``) it stays where it was: the animations start and keep
         running while later waits, plays, cuts and segments are scheduled over
-        them, e.g. a rotation that spans several cuts. Do not animate the same
-        channel of the same object again until a launched animation ends, and
-        keep the scene long enough for it: the video ends at the cursor.
+        them, e.g. a rotation that spans several cuts. Animating the same
+        channel of the same object before a launched animation ends raises
+        ``ValueError``. The video ends at the cursor, so a launched animation
+        still running there is cut; ``gaanim check`` warns about it. Objects
+        of a segment still leave the screen at its end unless ``persist``
+        keeps them.
         """
         ...
     def launch(

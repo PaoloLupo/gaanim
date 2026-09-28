@@ -266,7 +266,7 @@ scene.render()
     (name: "duration / easing", type: "float | Easing | None", default: "None", desc: [Valores por defecto, como en `play`.]),
   ),
   returns: (type: "None", desc: [No mueve el cursor.]),
-  desc: [Empieza el bloque en el cursor y deja el cursor donde estaba: lo que programes después (esperas, otros `play`, cortes, segmentos) ocurre mientras el bloque sigue. Sirve para un giro que dura varios cortes o una música de fondo. No vuelvas a animar el mismo canal del mismo objeto hasta que termine, y deja la escena larga lo suficiente: el vídeo acaba en el cursor.],
+  desc: [Empieza el bloque en el cursor y deja el cursor donde estaba: lo que programes después (esperas, otros `play`, cortes, segmentos) ocurre mientras el bloque sigue. Sirve para un giro que dura varios cortes o una música de fondo. Animar el mismo canal del mismo objeto antes de que termine lanza `ValueError`. El vídeo acaba en el cursor, así que lo que siga corriendo ahí se corta; `gaanim check` lo avisa. Los objetos de un segmento salen de pantalla al terminar este, salvo que `scene.persist` los mantenga.],
 )[
 ```python
 >>>from gaanim import *
