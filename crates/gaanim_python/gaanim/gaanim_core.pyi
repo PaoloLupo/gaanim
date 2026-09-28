@@ -3118,6 +3118,12 @@ class Primitive3D(Drawable):
     """Native indexed 3D mesh with an animatable PBR material."""
     def material(self, material: Material3D) -> Self: ...
 
+TextRole: TypeAlias = Literal["title", "subtitle", "kicker", "heading", "body", "caption", "label", "code", "math"]
+TextWrap: TypeAlias = Literal["auto", False] | float
+TextAlign: TypeAlias = Literal["left", "center", "right", "justify"]
+TextOverflow: TypeAlias = Literal["visible", "clip", "ellipsis"]
+TextDirection: TypeAlias = Literal["auto", "ltr", "rtl"]
+
 class TextStyle:
     """Reusable visual and metric text style without outer box layout."""
     def __init__(
