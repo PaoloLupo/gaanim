@@ -12,7 +12,7 @@ floor = scene.geometry.plane(
     14,
     10,
     subdivisions=(8, 6),
-    material=Material3D.matte(NAVY),
+    material=Material3D.matte("#5A6A9C"),
 ).move_to_3d(0, -2.2, 0)
 cube = scene.geometry.cube(2.2, material=Material3D.matte(BLUE)).move_to_3d(-4.2, -1.0, 0)
 sphere = scene.geometry.sphere(1.35, material=Material3D.metal(GOLD)).move_to_3d(-1.4, -0.85, 0)
