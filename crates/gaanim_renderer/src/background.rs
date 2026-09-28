@@ -9,6 +9,8 @@ use thiserror::Error;
 use vello::wgpu;
 use wgpu::util::DeviceExt;
 
+use crate::gpu_scope::ScopeCheck;
+
 const SHADER_PREAMBLE: &str = r#"
 @group(0) @binding(0)
 var gaanim_output: texture_storage_2d<rgba8unorm, write>;
@@ -483,6 +485,8 @@ struct GpuShaderTarget {
     time: wgpu::Buffer,
     /// `None` when the pipeline failed to build; the texture holds the fallback.
     pipeline: Option<(Arc<CompiledShader>, wgpu::BindGroup)>,
+    /// Set while WebGPU has not validated `pipeline`; it is not run until then.
+    checking: Option<crate::gpu_scope::PendingScope>,
     /// Time and frame size bits of the texture contents.
     rendered_time: Option<[u32; 3]>,
 }
@@ -530,6 +534,7 @@ impl GpuShaderBackgrounds {
                     target.contract == request.shader.contract
                         && *target.source == *request.shader.source
                 })
+                .filter(|target| target.checking.is_none())
                 .and_then(|target| target.pipeline.as_ref())
                 .map(|(compiled, _)| compiled.clone())
         });
@@ -556,6 +561,15 @@ impl GpuShaderBackgrounds {
             request.frame[0].to_bits(),
             request.frame[1].to_bits(),
         ];
+        if let Some(scope) = &target.checking {
+            let Some(outcome) = scope.poll() else {
+                return;
+            };
+            target.checking = None;
+            if let ScopeCheck::Invalid(error) = outcome {
+                target.fail(queue, &request.shader, &error);
+            }
+        }
         if target.rendered_time == Some(time) {
             return;
         }
@@ -623,34 +637,41 @@ impl GpuShaderTarget {
             Arc::new(CompiledShader::new(device, &shader.source, shader.contract))
         });
         let bind_group = compiled.bind_group(device, &texture, &time);
-        let pipeline = match pollster::block_on(error_scope.pop()) {
-            None => Some((compiled, bind_group)),
-            Some(error) => {
-                bevy::log::error!("background shader failed; using its fallback color: {error}");
-                let rgba = shader.fallback.to_rgba8().to_u8_array();
-                let pixels = rgba.repeat(image.width as usize * image.height as usize);
-                queue.write_texture(
-                    texture.as_image_copy(),
-                    &pixels,
-                    wgpu::TexelCopyBufferLayout {
-                        offset: 0,
-                        bytes_per_row: Some(image.width * 4),
-                        rows_per_image: None,
-                    },
-                    texture.size(),
-                );
-                None
-            }
-        };
-        Self {
+        let mut target = Self {
             image: image.clone(),
             source: shader.source.clone(),
             contract: shader.contract,
             texture,
             time,
-            pipeline,
+            pipeline: Some((compiled, bind_group)),
+            checking: None,
             rendered_time: None,
+        };
+        match crate::gpu_scope::check(error_scope) {
+            ScopeCheck::Valid => {}
+            ScopeCheck::Invalid(error) => target.fail(queue, shader, &error),
+            ScopeCheck::Pending(scope) => target.checking = Some(scope),
         }
+        target
+    }
+
+    /// Drop the pipeline that failed to build and fill the texture with the
+    /// shader's fallback color.
+    fn fail(&mut self, queue: &wgpu::Queue, shader: &ShaderBackground, error: &wgpu::Error) {
+        bevy::log::error!("background shader failed; using its fallback color: {error}");
+        self.pipeline = None;
+        let rgba = shader.fallback.to_rgba8().to_u8_array();
+        let pixels = rgba.repeat(self.image.width as usize * self.image.height as usize);
+        queue.write_texture(
+            self.texture.as_image_copy(),
+            &pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(self.image.width * 4),
+                rows_per_image: None,
+            },
+            self.texture.size(),
+        );
     }
 }
 

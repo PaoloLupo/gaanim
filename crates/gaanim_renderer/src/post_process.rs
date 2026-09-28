@@ -12,6 +12,8 @@ use std::sync::Arc;
 use thiserror::Error;
 use vello::wgpu;
 
+use crate::gpu_scope::ScopeCheck;
+
 use crate::post_bloom::{
     self, BLOOM_COMPOSITE_PREAMBLE, BloomChain, BloomDispatch, BloomPipelines,
 };
@@ -445,8 +447,8 @@ struct PassBuffers {
 #[derive(Default)]
 pub struct GpuPostProcess {
     device: Option<wgpu::Device>,
-    /// Pipelines by complete shader; `None` records a failed build.
-    pipelines: HashMap<Arc<str>, Option<Arc<PostPipeline>>>,
+    /// Pipelines by complete shader.
+    pipelines: HashMap<Arc<str>, CachedPipeline>,
     sampler: Option<wgpu::Sampler>,
     params: Option<wgpu::Buffer>,
     buffers: Vec<PassBuffers>,
@@ -725,27 +727,50 @@ impl GpuPostProcess {
         device: &wgpu::Device,
         shader: &PostProcessShader,
     ) -> Option<Arc<PostPipeline>> {
-        if let Some(cached) = self.pipelines.get(&shader.complete) {
-            return cached.clone();
+        if !self.pipelines.contains_key(&shader.complete) {
+            let error_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+            let pipeline = Arc::new(PostPipeline::new(
+                device,
+                &shader.complete,
+                !shader.uniforms.is_empty(),
+                shader.data.is_some(),
+                shader.bloom,
+            ));
+            let cached = match crate::gpu_scope::check(error_scope) {
+                ScopeCheck::Pending(scope) => CachedPipeline::Checking(pipeline, scope),
+                outcome => CachedPipeline::Ready(validated(pipeline, outcome)),
+            };
+            self.pipelines.insert(shader.complete.clone(), cached);
         }
-        let error_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let pipeline = PostPipeline::new(
-            device,
-            &shader.complete,
-            !shader.uniforms.is_empty(),
-            shader.data.is_some(),
-            shader.bloom,
-        );
-        let pipeline = match pollster::block_on(error_scope.pop()) {
-            None => Some(Arc::new(pipeline)),
-            Some(error) => {
-                bevy::log::error!("post-process shader failed; drawing without it: {error}");
-                None
-            }
-        };
-        self.pipelines
-            .insert(shader.complete.clone(), pipeline.clone());
-        pipeline
+        let cached = self.pipelines.get_mut(&shader.complete)?;
+        if let CachedPipeline::Checking(pipeline, scope) = cached {
+            let outcome = scope.poll()?;
+            let pipeline = validated(pipeline.clone(), outcome);
+            *cached = CachedPipeline::Ready(pipeline);
+        }
+        match cached {
+            CachedPipeline::Ready(pipeline) => pipeline.clone(),
+            CachedPipeline::Checking(..) => None,
+        }
+    }
+}
+
+/// A post-process pipeline as built.
+enum CachedPipeline {
+    /// `None` records a failed build.
+    Ready(Option<Arc<PostPipeline>>),
+    /// Built, and WebGPU has not validated it yet: the pass is skipped until then.
+    Checking(Arc<PostPipeline>, crate::gpu_scope::PendingScope),
+}
+
+fn validated(pipeline: Arc<PostPipeline>, outcome: ScopeCheck) -> Option<Arc<PostPipeline>> {
+    match outcome {
+        ScopeCheck::Valid => Some(pipeline),
+        ScopeCheck::Invalid(error) => {
+            bevy::log::error!("post-process shader failed; drawing without it: {error}");
+            None
+        }
+        ScopeCheck::Pending(_) => None,
     }
 }
 

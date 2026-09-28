@@ -11,6 +11,17 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.6.3
+
+Sin publicar todavía. No hace falta cambiar tus escenas.
+
+== Correcciones
+
+- El reproductor web ya no se detiene al abrir un `.gaanim` con
+  post-procesado o un fondo de shader: comprobar el shader esperaba a la GPU
+  bloqueando el único hilo de la página. Ahora la comprobación se resuelve
+  entre frames, y el efecto aparece un frame después.
+
 = 0.6.2
 
 Publicada el 28 de septiembre de 2026. El reproductor web abre el Presenter
