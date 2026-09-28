@@ -201,6 +201,20 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 // ============================================================================
+// Wide tables scroll sideways inside a box (the API tables come wrapped)
+// ============================================================================
+document.addEventListener("DOMContentLoaded", () => {
+    document.querySelectorAll("main table").forEach((table) => {
+        const parent = table.parentElement;
+        if (parent.matches("main, .table-scroll")) return;
+        const box = document.createElement("div");
+        box.className = "table-scroll";
+        parent.insertBefore(box, table);
+        box.appendChild(table);
+    });
+});
+
+// ============================================================================
 // Theme toggle (light / dark)
 // ============================================================================
 document.addEventListener("DOMContentLoaded", () => {

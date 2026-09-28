@@ -190,7 +190,8 @@
       if params.len() > 0 {
         html.div(class: "api-params", {
           html.div(class: "api-params-title", "Parámetros")
-          html.table({
+          // Scrolls sideways when the columns do not fit, e.g. on a phone.
+          html.div(class: "table-scroll", html.table({
             html.thead(html.tr({
               html.th("Nombre")
               html.th("Tipo")
@@ -208,7 +209,7 @@
                 })
               }
             })
-          })
+          }))
         })
       }
 
