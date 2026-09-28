@@ -13,16 +13,21 @@ instalar una versión nueva, sigue
 
 = 0.6.2
 
-Sin publicar todavía. No hace falta cambiar tus escenas.
+Publicada el 28 de septiembre de 2026. El reproductor web abre el Presenter
+View, y los `.gaanim` se reproducen sin saltos de cámara ni tirones. No hace
+falta cambiar tus escenas.
 
 == Cambios
 
 - El reproductor web abre el Presenter View: al presentar, abre en otra
-  ventana el mismo Presenter View del escritorio, con la diapositiva actual y la siguiente, notas, cronómetro,
-  vista general y dock. Las dos ventanas van a la par desde cualquiera de
-  ellas: teclas, clics, el dock, la barra de reproducción y las pantallas en
-  negro o en blanco. `P` lo vuelve a abrir. Ver
-  #link("/guias/compartir/")[Compartir sin Python].
+  ventana el mismo Presenter View del escritorio, con la diapositiva actual y
+  la siguiente, notas, cronómetro, vista general y dock. Las dos ventanas van
+  a la par desde cualquiera de ellas: teclas, clics, el dock, la barra de
+  reproducción y las pantallas en negro o en blanco. `P` lo vuelve a abrir.
+  Ver #link("/guias/compartir/")[Compartir sin Python].
+
+== Correcciones
+
 - Al reproducir un `.gaanim`, la cámara ya no salta frame a frame a la
   posición del inicio: si la pantalla refrescaba más rápido que el paquete,
   cada refresco sin frame nuevo mostraba la cámara de t=0.
