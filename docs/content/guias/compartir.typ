@@ -72,13 +72,9 @@ igual y reproduce archivos `.gaanim`; para crear o abrir proyectos te indica
 cómo instalarlo. Sin FFmpeg, el paquete se reproduce sin audio y se exporta
 solo a secuencias PNG.
 
-`gaanim` reconoce el paquete y lo abre con `gaanim-play`, un ejecutable que se
-instala junto a `gaanim` y no enlaza Python. Si en el equipo solo copias
-`gaanim-play`, también puedes llamarlo directamente con las mismas opciones:
-
-```bash
-gaanim-play --present mi-charla.gaanim
-```
+`gaanim` no carga Python para reproducir, presentar, exportar ni comprobar un
+paquete: solo lo carga al ejecutar un script. Por eso basta con copiar el
+paquete de Gaanim de la release, sin instalar Python.
 
 La inspección (`I`) sigue funcionando: los fotogramas son vectoriales, así que
 el zoom los redibuja nítidos.
@@ -252,11 +248,9 @@ rejilla repetidos, porque no hay nada que interpolar sin ejecutar la escena.
 
 = Límites
 
-La grabación se niega, con un mensaje, cuando la escena contiene algo que el
-paquete aún no puede reproducir exactamente. En esos casos exporta un vídeo:
-
-- contenido 3D (mallas, superficies, modelos glTF y ejes 3D);
-- clips de vídeo (`scene.media.video`).
+La grabación se niega, con un mensaje, cuando la escena contiene clips de
+vídeo (`scene.media.video`), que el paquete aún no puede reproducir
+exactamente. En ese caso exporta un vídeo. El contenido 3D sí se graba.
 
 Los paquetes son de un solo uso: no se pueden editar ni volver a convertir en
 script. Guarda el proyecto original para seguir trabajando.

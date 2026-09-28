@@ -13,7 +13,39 @@ instalar una versión nueva, sigue
 
 = 0.6.3
 
-Sin publicar todavía. No hace falta cambiar tus escenas.
+Sin publicar todavía. Si una escena importa modelos glTF, quita las llamadas a
+`scene.media.gltf(...)` y a `animation(...)` de esos modelos; el resto de las
+escenas funciona sin cambios.
+
+== Cambios
+
+- Gaanim es un solo ejecutable, `gaanim`. Ya no existen `gaanim-core` ni
+  `gaanim-play`. El motor está en una biblioteca, `gaanim_engine`, en lugar de
+  copiarse en dos ejecutables, y el soporte de Python en otra,
+  `gaanim_python_plugin`, que `gaanim` carga solo al ejecutar un script. Al
+  actualizar, reemplaza todos los archivos de la carpeta y borra
+  `gaanim-core` y `gaanim-play`. En Ubuntu cambia la instalación (ver
+  #link("/empezar/instalacion/")[Instalación]).
+- El inicio abre proyectos aunque instales Python con Gaanim ya abierto: el
+  soporte de Python se carga al abrir el proyecto, no al arrancar.
+- Vello dibuja el 3D: proyecta las mallas de triángulos y las líneas 3D con
+  la cámara de la escena, las ordena de atrás hacia delante y calcula la luz
+  en la CPU con un estilo propio de Gaanim: las primitivas con `Material3D`
+  conservan su color, con luz del cielo y del suelo, una luz principal suave
+  desde arriba a la izquierda y un brillo leve en los bordes; las caras planas
+  tienen un solo color y las curvas, degradados suaves. Las superficies, los
+  gráficos 3D y las líneas no reciben luz. Sin búfer de profundidad, la
+  geometría que se cruza puede ordenarse mal, y el 3D queda debajo del 2D.
+  El contenido 3D no proyecta sombras: `lighting_3d(shadows=...)` se acepta
+  pero no tiene efecto (ver #link("/guias/camara-y-3d/")[Cámara y 3D]).
+- Se elimina la importación glTF. `scene.media.gltf(...)` lanza
+  `NotImplementedError`, `Drawable.animations()` devuelve una tupla vacía y
+  `Drawable.animation(...)` lanza `NotImplementedError`. `scene.assets.preload`
+  ya no acepta `.gltf` ni `.glb`.
+- Los paquetes `.gaanim` graban el contenido 3D, y las vistas previas de
+  Presenter View lo muestran. El desenfoque de movimiento, el postprocesado y
+  los fondos (también los de shader y degradado) se aplican a las escenas 3D
+  y con cámara en perspectiva.
 
 == Correcciones
 

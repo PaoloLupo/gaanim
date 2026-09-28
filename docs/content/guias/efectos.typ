@@ -246,11 +246,10 @@ líneas vivas (`connect`) o animar el trazo (`stroke_profile`,
 
 - Las transiciones entre segmentos no aceptan shaders propios: usa las de
   `Transition`.
-- El postprocesado no se aplica con una cámara en perspectiva (las mallas 3D
-  no pasan por el renderizador vectorial) ni a la exportación SVG y otras
-  salidas vectoriales.
+- El postprocesado no se aplica a la exportación SVG ni a otras salidas
+  vectoriales. Con una cámara en perspectiva y en escenas 3D sí se aplica.
 - El desenfoque de movimiento solo se ve al exportar y en los snapshots; la
-  vista previa interactiva y las escenas 3D nativas quedan nítidas.
+  vista previa interactiva queda nítida. También afecta al contenido 3D.
 
 == Referencia
 

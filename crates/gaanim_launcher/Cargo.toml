@@ -3,13 +3,47 @@ name = "gaanim_launcher"
 version = "0.6.2"
 license = "MIT OR Apache-2.0"
 edition = "2024"
-description = "Launcher for gaanim that sets up Python PATH before spawning gaanim-core"
+description = "The gaanim executable: Home, playback, editor, and command line, with Python loaded on demand"
 
 [[bin]]
 name = "gaanim"
 path = "src/main.rs"
 
 [dependencies]
+# The engine library; `main.rs` names it so every engine crate below links
+# from it rather than statically.
+gaanim_engine = { path = "../gaanim_engine" }
+# Never linked: listed so every build of `gaanim` also builds the plugin it
+# loads, from the same engine.
+gaanim_python_plugin = { path = "../gaanim_python_plugin" }
 gaanim_core = { path = "../gaanim_core" }
+gaanim_math = { path = "../gaanim_math" }
+gaanim_scene = { path = "../gaanim_scene" }
+gaanim_animation = { path = "../gaanim_animation" }
+gaanim_timeline = { path = "../gaanim_timeline" }
+gaanim_text = { path = "../gaanim_text" }
+gaanim_renderer = { path = "../gaanim_renderer" }
+gaanim_api = { path = "../gaanim_api" }
+gaanim_bundle = { path = "../gaanim_bundle" }
+gaanim_export = { path = "../gaanim_export" }
+gaanim_diff = { path = "../gaanim_diff" }
+gaanim_editor = { path = "../gaanim_editor" }
 gaanim_project = { path = "../gaanim_project" }
 gaanim_thumbnail = { path = "../gaanim_thumbnail" }
+bevy = { workspace = true }
+bevy_egui = { version = "0.42.0", default-features = false, features = ["render", "manage_clipboard", "default_fonts"] }
+crossbeam-channel = { workspace = true }
+notify = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+libloading = "0.8"
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+dev-dynamic = [
+    "bevy/dynamic_linking",
+    "gaanim_engine/dev-dynamic",
+    "gaanim_python_plugin/dev-dynamic",
+]

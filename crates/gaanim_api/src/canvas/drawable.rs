@@ -12,7 +12,6 @@ use gaanim_core::glam::{DQuat, DVec2, DVec3, EulerRot};
 use gaanim_core::kurbo::BezPath;
 use gaanim_core::peniko::{Brush, Color};
 use gaanim_layout::{Anchor, Direction};
-use gaanim_objects::prelude::GltfAnimationMetadata;
 use gaanim_text::prelude::TextAnchor;
 
 use crate::anim::{
@@ -39,7 +38,6 @@ pub struct DrawableHandle {
     pub(crate) state: SharedCanvasState,
     pub(crate) segment_idx: usize,
     named_parts: Option<Arc<HashMap<String, DrawableHandle>>>,
-    gltf_animations: Option<Arc<Vec<GltfAnimationMetadata>>>,
     style_targets: Arc<Vec<SharedObjectSpec>>,
 }
 
@@ -53,20 +51,10 @@ pub enum ImagePixelError {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SvgPartError {
-    #[error("this drawable has no named SVG or glTF parts")]
+    #[error("this drawable has no named SVG parts")]
     NotSvg,
     #[error("unknown SVG part '{id}'; available ids: {available}")]
     Unknown { id: String, available: String },
-}
-
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
-pub enum GltfAnimationError {
-    #[error("this drawable has no glTF Actions")]
-    NotGltf,
-    #[error("unknown glTF Action '{name}'; available Actions: {available}")]
-    Unknown { name: String, available: String },
-    #[error("glTF Action speed must be finite and greater than zero")]
-    InvalidSpeed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -561,7 +549,6 @@ impl DrawableHandle {
             state,
             segment_idx,
             named_parts: None,
-            gltf_animations: None,
             style_targets: Arc::new(Vec::new()),
         }
     }
@@ -738,16 +725,6 @@ impl DrawableHandle {
         self
     }
 
-    pub(crate) fn with_gltf_metadata(
-        mut self,
-        parts: HashMap<String, DrawableHandle>,
-        animations: Vec<GltfAnimationMetadata>,
-    ) -> Self {
-        self.named_parts = Some(Arc::new(parts));
-        self.gltf_animations = Some(Arc::new(animations));
-        self
-    }
-
     /// If this drawable is an axes, return its x/y ranges and full config.
     pub fn axes_info(
         &self,
@@ -789,60 +766,6 @@ impl DrawableHandle {
             .unwrap_or_default();
         result.sort();
         result
-    }
-
-    /// Blender Action names embedded in an imported glTF model.
-    pub fn animations(&self) -> Vec<String> {
-        self.gltf_animations
-            .as_ref()
-            .map(|items| items.iter().map(|item| item.name.clone()).collect())
-            .unwrap_or_default()
-    }
-
-    /// Schedule a Blender Action using absolute timeline sampling.
-    #[allow(clippy::too_many_arguments)]
-    pub fn animation(
-        &self,
-        name: &str,
-        duration: Option<f64>,
-        speed: f64,
-        looped: bool,
-        reverse: bool,
-        transition: f64,
-        start_time: f64,
-    ) -> Result<Anim, GltfAnimationError> {
-        if !speed.is_finite() || speed <= 0.0 {
-            return Err(GltfAnimationError::InvalidSpeed);
-        }
-        let Some(animations) = &self.gltf_animations else {
-            return Err(GltfAnimationError::NotGltf);
-        };
-        let Some(metadata) = animations.iter().find(|animation| animation.name == name) else {
-            return Err(GltfAnimationError::Unknown {
-                name: name.to_owned(),
-                available: animations
-                    .iter()
-                    .map(|animation| animation.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            });
-        };
-        let authored_duration = (metadata.duration / speed).max(0.0);
-        Ok(Anim::queued(
-            self.id,
-            AnimationType::GltfAnimation {
-                animation_index: metadata.index,
-                source_duration: metadata.duration,
-                speed,
-                looped,
-                reverse,
-                transition: transition.max(0.0),
-                start_time: start_time.max(0.0),
-            },
-            self.state.clone(),
-            self.segment_idx,
-        )
-        .duration(duration.unwrap_or(authored_duration)))
     }
 
     fn push_layout(&self, op: LayoutOp) -> Self {

@@ -1,7 +1,6 @@
 //! Internal runtime benchmark entrypoints used by the repository harness.
 
 use bevy::prelude::World;
-use pyo3::prelude::*;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -51,17 +50,11 @@ fn parse_reload_benchmark_args(args: &[String]) -> Result<ReloadBenchmarkArgs, S
 
 fn benchmark_reload(script: &Path, output: &Path) -> Result<ReloadBenchmarkReport, String> {
     let script = gaanim_project::resolve_entry(script)?;
-    let probe = gaanim_project::EnvironmentProbe::detect(Some(&script));
-    let venv_root = gaanim_project::activate_environment(&probe)?;
-    gaanim_python::register_inittab();
-    Python::initialize();
-    if let Some(ref venv) = venv_root {
-        crate::python_home::inject_venv_site_packages(venv);
-    }
+    let python = crate::python::runtime(&script)?;
 
     // Prime the same interpreter and ECS world that the measured reload will
     // reuse. Startup, environment discovery, and the first import are excluded.
-    let initial_canvas = crate::script_runner::load_script_canvas(&script)?;
+    let initial_canvas = (python.load_script_canvas)(&script)?;
     let mut world = World::new();
     world.insert_resource(gaanim_timeline::timeline::Timeline::default());
     world.insert_resource(gaanim_text::font::FontRegistry::new());
@@ -70,7 +63,7 @@ fn benchmark_reload(script: &Path, output: &Path) -> Result<ReloadBenchmarkRepor
     crate::hot_reload::reload_with(&mut world, initial_canvas);
 
     let python_started = Instant::now();
-    let canvas = crate::script_runner::load_script_canvas(&script)?;
+    let canvas = (python.load_script_canvas)(&script)?;
     let python_ms = python_started.elapsed().as_secs_f64() * 1000.0;
 
     let (width, height) = canvas.frame.preview_pixel_size();
@@ -106,9 +99,7 @@ pub fn dispatch_reload_benchmark_mode() -> bool {
     }
     let parsed = parse_reload_benchmark_args(&args[1..]).unwrap_or_else(|error| {
         eprintln!("gaanim reload benchmark: {error}");
-        eprintln!(
-            "usage: gaanim-core --benchmark-reload <SCRIPT_OR_PROJECT> --output <REPORT.json>"
-        );
+        eprintln!("usage: gaanim --benchmark-reload <SCRIPT_OR_PROJECT> --output <REPORT.json>");
         std::process::exit(2);
     });
     match benchmark_reload(&parsed.script, &parsed.output) {

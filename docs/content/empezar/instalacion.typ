@@ -58,14 +58,16 @@ con un paquete por sistema y su suma SHA-256. No necesitas Rust ni compilar nada
 #table(
   columns: 3,
   table.header[*Sistema*][*Archivo*][*Contenido*],
-  [Windows 10/11 x64], [`gaanim-v<versión>-windows-x64.zip`], [`gaanim.exe`, `gaanim-core.exe`, wheel de autoría],
-  [Ubuntu 24.04 x64], [`gaanim-v<versión>-linux-x64.tar.gz`], [`gaanim`, `gaanim-core`, wheel de autoría],
+  [Windows 10/11 x64], [`gaanim-v<versión>-windows-x64.zip`], [`gaanim.exe` y sus bibliotecas, wheel de autoría],
+  [Ubuntu 24.04 x64], [`gaanim-v<versión>-linux-x64.tar.gz`], [`gaanim` y sus bibliotecas, wheel de autoría],
 )
 
-- `gaanim` es un lanzador ligero: busca un Python compatible y arranca
-  `gaanim-core`.
-- `gaanim-core` es el motor: vista previa, renderer y exportador. Deja siempre
-  los dos ejecutables en la misma carpeta.
+- `gaanim` es el único ejecutable: inicio, vista previa, presentaciones,
+  reproductor de paquetes `.gaanim` y línea de comandos.
+- Lo acompañan tres bibliotecas: el motor (`gaanim_engine`), el soporte de
+  Python (`gaanim_python_plugin`), que `gaanim` carga solo al abrir una escena
+  o un proyecto, y la biblioteca estándar de Rust (`std-…`). Deja siempre
+  todos los archivos del paquete en la misma carpeta.
 - El wheel `gaanim-<versión>-py3-none-any.whl` es el paquete de autoría: tipos,
   stubs y ayudas para que tu editor autocomplete la API. No contiene el
   renderer, así que `python main.py` falla a propósito: las escenas siempre se
@@ -89,7 +91,7 @@ sha256sum -c gaanim-v*-linux-x64.tar.gz.sha256
 = Instala en Windows <instala-windows>
 
 1. Extrae el zip en una carpeta, por ejemplo `C:\Tools\gaanim`. El wheel debe
-   quedar junto a los ejecutables: ahí lo busca `gaanim`.
+   quedar junto a `gaanim.exe`: ahí lo busca.
 2. Añade esa carpeta al `PATH` de tu usuario, desde _Configuración_ #sym.arrow
    _Variables de entorno_ #sym.arrow `Path`, o con PowerShell:
 
@@ -109,13 +111,13 @@ abres una escena o un proyecto.
 
 = Instala en Ubuntu <instala-ubuntu>
 
-Copia los ejecutables a `~/.local/bin` y el wheel a `~/.local/share/gaanim`,
-donde el lanzador lo busca:
+Extrae el paquete en `~/.local/lib/gaanim`, con el wheel junto al ejecutable,
+donde `gaanim` lo busca, y enlaza el ejecutable desde `~/.local/bin`:
 
 ```bash
-tar -xzf gaanim-v*-linux-x64.tar.gz
-install -Dm755 -t ~/.local/bin gaanim gaanim-core gaanim-play
-install -Dm644 -t ~/.local/share/gaanim gaanim-*-py3-none-any.whl
+mkdir -p ~/.local/lib/gaanim ~/.local/bin
+tar -xzf gaanim-v*-linux-x64.tar.gz -C ~/.local/lib/gaanim
+ln -sf ~/.local/lib/gaanim/gaanim ~/.local/bin/gaanim
 ~/.local/bin/gaanim register   # opcional: doble clic y portadas de los .gaanim
 ```
 
@@ -184,7 +186,7 @@ Tu editor autocompleta la API si usa el intérprete de `mi-video/.venv`.
 
 = Cómo encuentra Python
 
-No hace falta activar el entorno. Al abrir una escena, el lanzador usa el
+No hace falta activar el entorno. Al abrir una escena, `gaanim` usa el
 primer intérprete que encuentra:
 
 1. El entorno activo (`VIRTUAL_ENV`).
@@ -199,7 +201,8 @@ Python 3.12 produce un error aunque tengas 3.14 instalado.
 
 = Actualiza
 
-Descarga la release nueva y reemplaza los dos ejecutables y el wheel. No hace
+Descarga la release nueva y reemplaza todos los archivos de la carpeta: el
+ejecutable y sus bibliotecas deben venir de la misma versión. No hace
 falta recrear los proyectos: al abrir uno, Gaanim reinstala su paquete de
 autoría si no coincide con la versión del ejecutable.
 
@@ -210,11 +213,14 @@ autoría si no coincide con la versión del ejecutable.
 - *`Gaanim requires Python … but found Python 3.x`*: el entorno activo o el
   `.venv` del proyecto usa otra versión. Desactívalo, o recrea el entorno con
   `uv venv --python 3.14`.
-- *`python3.dll` no encontrado o salida `-1073741515` (Windows)*: ejecutaste
-  `gaanim-core` directamente. Usa siempre `gaanim`, que prepara Python antes de
-  arrancar el motor.
+- *`gaanim_engine.dll` o `std-….dll` no encontrado, o salida `-1073741515`
+  (Windows)*: faltan archivos del paquete junto a `gaanim.exe`. Extrae de nuevo
+  el zip completo en la misma carpeta.
+- *`… belongs to another build of Gaanim`* o *`could not load
+  …gaanim_python_plugin…`*: los archivos de la carpeta son de versiones
+  distintas. Reemplázalos todos con los de una misma release.
 - *`authoring environment not ready`*: falta uv, o el wheel no está junto a
-  `gaanim.exe` (Windows) ni en `~/.local/share/gaanim` (Ubuntu). La vista
+  `gaanim` (en Ubuntu, en `~/.local/lib/gaanim`). La vista
   previa funciona igual, pero el editor no autocompleta.
 - *`gaanim check: could not load project`*: revisa que `entry` en
   `gaanim.toml` sea una ruta relativa a un archivo que exista.

@@ -23,7 +23,7 @@ __pycache__/
 *.gif
 "#;
 const PYTHON_VERSION: &str = "3.14";
-/// Minor version of the Python 3 runtime `gaanim-core` is built against.
+/// Minor version of the Python 3 runtime the Python plugin is built against.
 pub const PYTHON_MINOR: u16 = 14;
 const RECENTS_LIMIT: usize = 10;
 
@@ -828,15 +828,23 @@ pub fn activate_environment(probe: &EnvironmentProbe) -> Result<Option<PathBuf>,
     Ok(python.venv_root.clone())
 }
 
-/// Environment variables `gaanim-core` needs to load and initialise the
-/// selected runtime. On Windows `activate_environment` already makes
-/// `python3.dll` resolvable through `PATH`. On Linux the dynamic loader must
-/// find `libpython3.<minor>.so` under `<base_prefix>/lib` (uv, pyenv and other
-/// non-system installs are not on the default search path), and the embedded
-/// interpreter needs `PYTHONHOME` because it cannot derive its prefix from the
-/// core executable, and relocated builds such as uv's report a stale
-/// compile-time prefix.
-pub fn core_environment(probe: &EnvironmentProbe) -> Vec<(&'static str, OsString)> {
+/// The `PYTHONHOME` the embedded interpreter needs for the selected runtime
+/// (Linux only). It cannot derive its prefix from the `gaanim` executable,
+/// and relocated builds such as uv's report a stale compile-time prefix.
+pub fn embedded_python_home(probe: &EnvironmentProbe) -> Option<PathBuf> {
+    let python = probe
+        .python
+        .as_ref()
+        .filter(|python| python.version.is_supported())?;
+    cfg!(target_os = "linux").then(|| python.home.clone())
+}
+
+/// The shared `libpython` of the selected runtime, in the order to try
+/// (Linux and macOS). The plugin links it, but the dynamic loader does not
+/// search `<base_prefix>/lib` of uv, pyenv, and other non-system installs,
+/// so `gaanim` loads it first. The bare file names come last, for the
+/// loader's default search (a distribution's own Python).
+pub fn python_library_candidates(probe: &EnvironmentProbe) -> Vec<PathBuf> {
     let Some(python) = probe
         .python
         .as_ref()
@@ -844,19 +852,22 @@ pub fn core_environment(probe: &EnvironmentProbe) -> Vec<(&'static str, OsString
     else {
         return Vec::new();
     };
-    if !cfg!(target_os = "linux") {
+    let names: Vec<String> = if cfg!(target_os = "linux") {
+        vec![
+            format!("libpython3.{PYTHON_MINOR}.so.1.0"),
+            format!("libpython3.{PYTHON_MINOR}.so"),
+        ]
+    } else if cfg!(target_os = "macos") {
+        vec![format!("libpython3.{PYTHON_MINOR}.dylib")]
+    } else {
         return Vec::new();
-    }
+    };
     let lib_dir = python.home.join("lib");
-    let mut paths = vec![lib_dir.clone()];
-    if let Some(current) = std::env::var_os("LD_LIBRARY_PATH") {
-        paths.extend(std::env::split_paths(&current).filter(|path| path != &lib_dir));
-    }
-    let mut env = vec![("PYTHONHOME", python.home.clone().into_os_string())];
-    if let Ok(joined) = std::env::join_paths(paths) {
-        env.push(("LD_LIBRARY_PATH", joined));
-    }
-    env
+    names
+        .iter()
+        .map(|name| lib_dir.join(name))
+        .chain(names.iter().map(PathBuf::from))
+        .collect()
 }
 
 /// Create a project virtual environment with uv and install the bundled
@@ -1148,7 +1159,7 @@ mod tests {
     }
 
     #[test]
-    fn core_environment_points_linux_loader_at_the_selected_runtime() {
+    fn embedded_runtime_points_at_the_selected_python() {
         let home = PathBuf::from("/opt/python-3.14");
         let supported = EnvironmentProbe {
             python: Some(DetectedPython {
@@ -1160,16 +1171,23 @@ mod tests {
             }),
             uv: None,
         };
-        let env = core_environment(&supported);
+        let libraries = python_library_candidates(&supported);
         if cfg!(target_os = "linux") {
-            let value = |key| env.iter().find(|(name, _)| *name == key).map(|(_, v)| v);
-            assert_eq!(value("PYTHONHOME"), Some(&home.clone().into_os_string()));
-            let loader = value("LD_LIBRARY_PATH").unwrap();
-            assert_eq!(std::env::split_paths(loader).next(), Some(home.join("lib")));
+            assert_eq!(embedded_python_home(&supported), Some(home.clone()));
+            assert_eq!(
+                libraries.first(),
+                Some(&home.join("lib").join("libpython3.14.so.1.0"))
+            );
+            assert_eq!(libraries.last(), Some(&PathBuf::from("libpython3.14.so")));
         } else {
-            assert!(env.is_empty());
+            assert_eq!(embedded_python_home(&supported), None);
         }
-        assert!(core_environment(&EnvironmentProbe::default()).is_empty());
+        if cfg!(windows) {
+            assert!(libraries.is_empty());
+        }
+        let missing = EnvironmentProbe::default();
+        assert_eq!(embedded_python_home(&missing), None);
+        assert!(python_library_candidates(&missing).is_empty());
     }
 
     struct FakeRunner {

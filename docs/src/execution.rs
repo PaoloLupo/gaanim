@@ -807,15 +807,15 @@ fn lookup_cache(job: &CellJob) -> Lookup {
     }
 }
 
-fn core_binary() -> PathBuf {
+fn gaanim_binary() -> PathBuf {
     std::env::current_exe()
         .ok()
         .and_then(|executable| executable.parent().map(Path::to_path_buf))
         .unwrap_or_else(|| project_root().join("target/debug"))
         .join(if cfg!(windows) {
-            "gaanim-core.exe"
+            "gaanim.exe"
         } else {
-            "gaanim-core"
+            "gaanim"
         })
 }
 
@@ -864,8 +864,8 @@ fn run_cell(job: &CellJob) -> CellOutcome {
 }
 
 fn execute(job: &CellJob, work_dir: &Path, temp_file: &Path) -> CellOutcome {
-    let program = "gaanim-core";
-    let mut command = Command::new(core_binary());
+    let program = "gaanim";
+    let mut command = Command::new(gaanim_binary());
     match &job.mode {
         // A preview that only needs revalidating is checked, not rendered.
         CellMode::Export(_) if job.cached_webp.is_some() => {
@@ -1075,12 +1075,9 @@ mod tests {
 
     #[test]
     fn a_process_that_fails_silently_reports_its_exit_status() {
-        let message = silent_failure("gaanim-core", false, "exit code: 0xc0000135", "").unwrap();
-        assert!(message.starts_with("gaanim-core exited with exit code: 0xc0000135"));
-        assert_eq!(
-            silent_failure("gaanim-core", true, "exit code: 0", ""),
-            None
-        );
+        let message = silent_failure("gaanim", false, "exit code: 0xc0000135", "").unwrap();
+        assert!(message.starts_with("gaanim exited with exit code: 0xc0000135"));
+        assert_eq!(silent_failure("gaanim", true, "exit code: 0", ""), None);
         assert_eq!(
             silent_failure(
                 "python",

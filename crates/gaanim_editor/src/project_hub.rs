@@ -115,9 +115,6 @@ pub struct ProjectHubState {
     /// A playback bundle to open on the next frame; see
     /// [`open_bundle_request_system`].
     bundle_request: Option<PathBuf>,
-    /// Shown by `gaanim-play`, which has no Python: .gaanim files open, and
-    /// projects explain what they need.
-    without_python: bool,
     /// Whether `.gaanim` files open with Gaanim; read when the environment
     /// page first shows it.
     associated: Option<bool>,
@@ -140,7 +137,6 @@ impl Default for ProjectHubState {
             dropped: None,
             was_focused: true,
             bundle_request: None,
-            without_python: false,
             associated: None,
         }
     }
@@ -150,25 +146,6 @@ impl ProjectHubState {
     pub fn show(&mut self) {
         self.active = true;
         self.check_tools();
-    }
-
-    /// Show Home in a process without Python, which plays .gaanim files only.
-    pub fn show_without_python(&mut self) {
-        self.without_python = true;
-        self.show();
-    }
-
-    /// Projects run Python; without it, say how to get it instead.
-    fn needs_python(&mut self) -> bool {
-        if self.without_python {
-            self.section = Section::Environment;
-            self.notice = Some(Notice::Info(
-                "Para crear o abrir proyectos, Gaanim necesita Python. Instálalo con uv \
-                 (abajo) y vuelve a abrir Gaanim."
-                    .into(),
-            ));
-        }
-        self.without_python
     }
 
     pub fn report_open_error(&mut self, error: String) {
@@ -258,9 +235,6 @@ impl ProjectHubState {
 
     /// Open a project, preparing its environment first when it needs one.
     fn open_project(&mut self, project: ResolvedProject, created: bool) {
-        if self.needs_python() {
-            return;
-        }
         self.notice = None;
         self.recents.record(&project);
         let _ = self.recents.save();
@@ -348,9 +322,6 @@ impl ProjectHubState {
 
     /// Ask for a folder with the native picker and create the project there.
     fn create_with_picker(&mut self, kind: ProjectKind) {
-        if self.needs_python() {
-            return;
-        }
         let title = match kind {
             ProjectKind::Video => "Elige o crea una carpeta para el nuevo video",
             ProjectKind::Slides => "Elige o crea una carpeta para la nueva presentación",
@@ -380,9 +351,6 @@ impl ProjectHubState {
     }
 
     fn open_with_picker(&mut self) {
-        if self.needs_python() {
-            return;
-        }
         if let Some(path) = crate::platform::pick_folder(
             "Abrir un proyecto de Gaanim",
             Some(&default_project_parent()),

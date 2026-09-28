@@ -83,7 +83,7 @@ escena no puede usarse en otra: pasarlo lanza `ValueError`.
   [`scene.geometry`], [Primitivas, trayectorias, flechas, geometría reactiva y 3D. Ver #link("/referencia/geometria/")[Geometría].],
   [`scene.text`], [Texto, ecuaciones, Typst y código. Ver #link("/referencia/text/")[Texto].],
   [`scene.layout`], [Filas, columnas, grids y regiones. Ver #link("/referencia/layout/")[Layout].],
-  [`scene.media`], [Imágenes, SVG, vídeo, audio, Lottie y glTF. Ver #link("/referencia/medios/")[Medios] y #link("/referencia/audio/")[Audio].],
+  [`scene.media`], [Imágenes, SVG, vídeo, audio y Lottie. Ver #link("/referencia/medios/")[Medios] y #link("/referencia/audio/")[Audio].],
   [`scene.viz`], [Ejes, funciones, gráficas, parámetros y matrices. Ver #link("/referencia/visualization/")[Visualización].],
   [`scene.slides`], [Tarjetas, viñetas, tablas e identidad de presentación. Ver #link("/referencia/diapositivas/")[Diapositivas].],
   [`scene.mechanics`], [Muelles, cotas, fuerzas y apoyos. Ver #link("/referencia/mecanica/")[Mecánica].],
@@ -1408,8 +1408,7 @@ label = scene.viz.readout(view.zoom, format=".1f", prefix="x")
 #experimental()
 
 La cámara 3D usa coordenadas de mundo `(x, y, z)` y ángulos en radianes. Las
-primitivas 3D están en #link("/referencia/geometria/")[Geometría] y los modelos
-glTF en #link("/referencia/medios/#api-medialibrary-gltf")[Medios]. Para una
+primitivas 3D están en #link("/referencia/geometria/")[Geometría]. Para una
 introducción, consulta la guía #link("/guias/camara-y-3d/")[Cámara y 3D].
 
 #api-entry(

@@ -19,7 +19,7 @@ use gaanim_text::font::FontRegistry;
 use gaanim_text::shaper::{HierarchyChild, compile_text_to_hierarchy};
 use gaanim_text::typst_compiler::{compile_scaled_typst_to_hierarchy, math_accent_for_symbol};
 use gaanim_timeline::{
-    clip::{AnimationSpec, ClipPayload, GltfAnimationSpec, PropertyLensSpec, SceneId, TrackId},
+    clip::{AnimationSpec, ClipPayload, PropertyLensSpec, SceneId, TrackId},
     scene::SceneMember,
     timeline::Timeline,
     transition::TransitionType,
@@ -1468,7 +1468,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::CameraOrthographic { .. }
             | AnimationType::CameraReset
             | AnimationType::CameraDolly { .. } => "Camera",
-            AnimationType::GltfAnimation { .. } => "Action",
             AnimationType::TextMotion(_) => "TextMotion",
             AnimationType::Properties { .. } => "Properties",
             AnimationType::Write { .. } => "Write",
@@ -3077,33 +3076,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             );
             return;
         }
-        if let AnimationType::GltfAnimation {
-            animation_index,
-            source_duration,
-            speed,
-            looped,
-            reverse,
-            transition,
-            start_time,
-        } = &anim.anim_type
-        {
-            self.timeline.add_clip(
-                track,
-                self.current_time + anim.delay,
-                anim.duration,
-                ClipPayload::GltfAnimation(GltfAnimationSpec {
-                    target: anim.target,
-                    animation_index: *animation_index,
-                    source_duration: *source_duration,
-                    speed: *speed,
-                    looped: *looped,
-                    reverse: *reverse,
-                    transition: *transition,
-                    start_time: *start_time,
-                }),
-            );
-            return;
-        }
 
         // The Write/Create/Uncreate/Unwrite/SpinIn/Indicate animations expand into
         // multiple staggered or parallel sub-clips, so they have their own branches
@@ -3467,7 +3439,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::CameraOrthographic { .. }
             | AnimationType::CameraReset
             | AnimationType::CameraDolly { .. }
-            | AnimationType::GltfAnimation { .. }
             | AnimationType::TextMotion(_)
             | AnimationType::Write { .. }
             | AnimationType::Create { .. }

@@ -8,7 +8,6 @@ use gaanim_layout::{Anchor, Direction, LayoutItemStyle, LayoutNodeKind, LayoutSt
 use gaanim_math::{Bounds3D, RateFunc};
 use gaanim_objects::prelude::{ImageView, SvgPath};
 use gaanim_text::prelude::TextAnchor;
-use std::path::PathBuf;
 
 use crate::anim::{
     AnimationBuilder, AnimationType, DrawAnimationConfig, PropertyAnimation, PropertyRotation,
@@ -740,7 +739,7 @@ pub enum SpawnKind {
         /// Optional per-vertex colors.
         colors: Option<Vec<Color>>,
     },
-    /// Friendly native PBR primitive with complete geometry attributes.
+    /// Lit 3D primitive with complete geometry attributes.
     Primitive3D(gaanim_scene::TriangleMeshData),
     /// 3D polyline (e.g., curve) defined by world-space points.
     /// If `colors` is Some and length matches `points`, per-vertex colors are used (colormap).
@@ -752,20 +751,6 @@ pub enum SpawnKind {
     LineSegments3D {
         points: Vec<[f32; 3]>,
         colors: Option<Vec<Color>>,
-    },
-    /// Stable manual-animation wrapper for one native glTF node.
-    GltfNode {
-        node_index: usize,
-        path: String,
-        bounds: Bounds3D,
-    },
-    /// Root of a native Bevy glTF scene instance.
-    GltfModel {
-        path: PathBuf,
-        scene_index: usize,
-        bounds: Bounds3D,
-        nodes: Vec<(usize, Option<usize>, String, ObjectId)>,
-        animation_names: Vec<String>,
     },
     /// Unified structured text, including paragraphs and inline/display math.
     Text(gaanim_text::prelude::TextSpec),
@@ -1688,7 +1673,7 @@ impl Anim {
         self
     }
 
-    /// Animate all PBR channels of a native 3D primitive.
+    /// Animate every material channel of a lit 3D primitive.
     pub fn material(self, material: gaanim_scene::Material3D) -> Self {
         let from = self
             .material_target()
@@ -1696,7 +1681,7 @@ impl Anim {
         self.set_material_target(from, material)
     }
 
-    /// Animate the visible color. For Primitive3D this changes its PBR base color.
+    /// Animate the visible color. For Primitive3D this changes its material base color.
     pub fn color(self, color: Color) -> Self {
         if let Some(from) = self.material_target() {
             let mut to = from;
@@ -1710,7 +1695,7 @@ impl Anim {
         })
     }
 
-    /// Animate vector paint, or a solid PBR base color for a Primitive3D.
+    /// Animate vector paint, or a solid material base color for a Primitive3D.
     pub fn fill(self, paint: impl Into<Brush>) -> Self {
         self.try_fill_paint(paint.into())
             .expect("incompatible fill paint")

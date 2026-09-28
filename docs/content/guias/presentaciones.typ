@@ -162,8 +162,8 @@ vista del presentador, se adaptan al tamaño y la densidad de píxeles de la
 ventana y solo se regeneran al agrandarla. Si el renderizado falla, la barra
 ofrece `Retry` y conserva las vistas ya generadas.
 
-Las vistas previas solo dibujan las capas 2D. En escenas con objetos 3D (una
-función experimental), la barra lo advierte y la audiencia sigue viéndolos.
+Las vistas previas incluyen el contenido 3D, igual que la pantalla de la
+audiencia.
 
 = Revisar sin pausas
 

@@ -1,6 +1,5 @@
-//! `gaanim --diff`, shared by `gaanim-core` and `gaanim-play`: capture
-//! snapshots of a scene or a playback bundle and compare them with an
-//! approved baseline.
+//! `gaanim --diff`: capture snapshots of a scene or a playback bundle and
+//! compare them with an approved baseline.
 
 use std::path::{Path, PathBuf};
 

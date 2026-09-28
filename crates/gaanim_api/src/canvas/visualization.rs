@@ -615,10 +615,10 @@ impl ChartHandle {
             {
                 self.root.replacement_transform(&target.root)
             }
-            // Crossing the vector/mesh renderer boundary cannot use a path
+            // Crossing from vector paths to a triangle mesh cannot use a path
             // proxy: the vector root has no triangle geometry to interpolate.
-            // A hierarchy-aware fade keeps both retained batches alive and
-            // hands visibility to the native 3D target deterministically.
+            // A hierarchy-aware fade keeps both alive and hands visibility to
+            // the 3D target deterministically.
             gaanim_visualization::TransitionKind::Morph => self.root.fade_transform(&target.root),
             gaanim_visualization::TransitionKind::Crossfade => {
                 self.root.fade_transform(&target.root)
@@ -6466,11 +6466,11 @@ mod tests {
     #[test]
     fn native_three_dimensional_spawns_select_hybrid_rendering() {
         let mut canvas = SceneModel::new(640, 360);
-        assert!(!canvas.has_native_3d_content());
+        assert!(!canvas.has_3d_content());
 
         canvas.polyline_3d(vec![[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]]);
 
-        assert!(canvas.has_native_3d_content());
+        assert!(canvas.has_3d_content());
     }
 
     #[test]
@@ -6539,7 +6539,7 @@ mod tests {
 
         let chart = canvas.chart(spec).unwrap();
         assert_eq!(chart.layer("marks").unwrap().id, chart.marks.id);
-        assert!(!canvas.has_native_3d_content());
+        assert!(!canvas.has_3d_content());
 
         let mut world = bevy::prelude::World::new();
         world.insert_resource(gaanim_timeline::timeline::Timeline::new());

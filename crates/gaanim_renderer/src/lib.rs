@@ -17,6 +17,7 @@ pub mod post_process;
 mod post_process_gpu;
 pub mod prelude;
 mod stroke;
+mod three_d;
 
 // MainVelloScene is re-exported via prelude; used implicitly by the plugin system registration.
 #[allow(unused_imports)]
@@ -81,7 +82,6 @@ impl Plugin for GaanimRendererPlugin {
             (
                 pipeline::sync_canvas_background_clear_system,
                 pipeline::sync_gaanim_camera_to_bevy_system,
-                pipeline::sync_gaanim_camera_to_bevy_3d_system,
             )
                 .in_set(gaanim_scene::SceneSet::Bounds),
         );

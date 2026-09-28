@@ -1,10 +1,9 @@
 #import "../../components/section.typ": docs-chapter
 #import "../../components/api.typ": api-entry
-#import "../../components/tutorial.typ": experimental
 
 #show: docs-chapter.with(
   title: "Medios",
-  description: "Fábricas de scene.media: imágenes, SVG, video, Lottie y modelos glTF",
+  description: "Fábricas de scene.media: imágenes, SVG, video y Lottie",
   route: "/referencia/medios/",
   nav: "Medios",
 )
@@ -12,7 +11,7 @@
 = Medios
 
 `scene.media` carga archivos locales como objetos de la escena: imágenes, SVG,
-video, animaciones Lottie y modelos glTF. Todos son `Drawable`, así que se
+video y animaciones Lottie. Todos son `Drawable`, así que se
 colocan, escalan y animan como cualquier forma. Las rutas relativas se resuelven
 desde la carpeta de assets del proyecto (ver
 #link("/referencia/assets/")[Recursos]); el audio está en
@@ -127,7 +126,7 @@ scene.render()
 #api-entry(
   name: "Drawable.part",
   kind: "method",
-  desc: [Devuelve la parte con ese `id` de un SVG (o el nodo de un glTF) como un `Drawable` propio. Los nombres distinguen mayúsculas; un nombre desconocido lanza `KeyError` con la lista de nombres disponibles. El estilo de un grupo llega a todos sus caminos.],
+  desc: [Devuelve la parte con ese `id` de un SVG como un `Drawable` propio. Los nombres distinguen mayúsculas; un nombre desconocido lanza `KeyError` con la lista de nombres disponibles. El estilo de un grupo llega a todos sus caminos.],
 )[
 ```python
 >>>from gaanim import *
@@ -296,51 +295,3 @@ print(package.animation_ids, package.theme_ids, package.state_machine_ids)
   desc: [Lista de características de la fuente que Velato omite o aproxima. Revísala si el clip no se ve como en la herramienta de origen. `source_width`, `source_height`, `frame_rate` y `source_duration` describen la composición original.],
   none,
 )
-
-== Modelos glTF
-
-#experimental()
-
-Modelos `.gltf` y `.glb` con jerarquía, materiales PBR y acciones de Blender.
-Los detalles de importación están en #link("/referencia/assets/")[Recursos].
-
-#api-entry(
-  name: "MediaLibrary.gltf",
-  kind: "factory",
-  desc: [Importa un modelo glTF 2.0 local. `scene` elige una escena del archivo por nombre o índice; `None` usa la predeterminada. El modelo y cada nodo seleccionado con `part` admiten las transformaciones 3D completas (`move_to_3d`, `scale_to_3d`, `rotate_to_3d`, `with_pivot_3d`). Una unidad glTF equivale a una unidad del mundo; los modelos no se centran ni escalan solos.],
-)[
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-model = scene.media.gltf("assets/robot.glb")
-arm = model.part("Robot/Rig/Arm")
-print(model.parts())
-```
-]
-
-#api-entry(
-  name: "Drawable.animations",
-  kind: "method",
-  desc: [Tupla con los nombres de las acciones de Blender del modelo.],
-)[
-```python
-# hide-code
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-print(scene.media.gltf("assets/robot.glb").animations())
-```
-]
-
-#api-entry(
-  name: "Drawable.animation",
-  kind: "method",
-  params: ((name: "name", type: "str", default: none, desc: [Acción de Blender, de `animations()`.]), (name: "duration", type: "float | None", default: "None", desc: [Segundos de escena; `None` usa la duración de la acción.]), (name: "speed / loop / reverse", type: "float / bool / bool", default: "1.0 / False / False", desc: [Velocidad, repetición y sentido.]), (name: "transition", type: "float", default: "0.0", desc: [Segundos de mezcla con la pose anterior.]), (name: "start_time", type: "float", default: "0.0", desc: [Instante de inicio dentro de la acción.])),
-  desc: [Devuelve un `Anim` que muestrea la acción de forma determinista en la línea de tiempo de la escena.],
-)[
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9))
-model = scene.media.gltf("assets/robot.glb")
-scene.play([model.animation("Wave", loop=True, duration=2.0)])
-```
-]

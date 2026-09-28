@@ -11,7 +11,7 @@ use gaanim_core::glam::{DVec2, DVec3};
 use gaanim_core::kurbo::{Cap, Shape, Stroke};
 use gaanim_core::peniko::{Brush, Color};
 use gaanim_math::RateFunc;
-use gaanim_objects::prelude::{GltfDocument, GltfLoadError, GltfSceneSelector, SvgLoadError};
+use gaanim_objects::prelude::SvgLoadError;
 use gaanim_objects::primitives::{
     DEFAULT_ARROW_BODY_WIDTH, DEFAULT_ARROW_HEAD_LENGTH, DEFAULT_ARROW_HEAD_WIDTH,
 };
@@ -1934,12 +1934,6 @@ pub enum AssetPreloadError {
         #[source]
         source: SvgLoadError,
     },
-    #[error("could not preload glTF '{path}': {source}")]
-    Gltf {
-        path: PathBuf,
-        #[source]
-        source: GltfLoadError,
-    },
     #[error("could not preload Lottie JSON '{path}': {source}")]
     Lottie {
         path: PathBuf,
@@ -1955,13 +1949,12 @@ static IMAGE_CACHE: OnceLock<Mutex<HashMap<PathBuf, gaanim_core::peniko::ImageDa
     OnceLock::new();
 
 /// Drop every process-local cache of files read by scenes (raster images,
-/// Lottie, glTF metadata, and Typst layouts) so the next compile reads them
+/// Lottie, and Typst layouts) so the next compile reads them
 /// from disk again.
 pub fn clear_asset_caches() {
     if let Some(cache) = IMAGE_CACHE.get() {
         cache.lock().expect("image cache poisoned").clear();
     }
-    gaanim_objects::prelude::clear_gltf_cache();
     gaanim_renderer::lottie::clear_lottie_cache();
     gaanim_text::typst_compiler::clear_typst_layout_cache();
 }
@@ -2034,7 +2027,7 @@ pub struct SceneModel {
     pub frame: SceneFrame,
     pub background: Option<Color>,
     /// Full scene-bounds paint. `background` remains the representative color used
-    /// for theme contrast and native 3D clears.
+    /// for theme contrast and the window clear.
     pub background_paint: Option<gaanim_renderer::background::BackgroundPaint>,
     pub(crate) background_overridden: bool,
     /// WGSL post-process passes applied in order to the rendered 2D scene
@@ -2122,8 +2115,8 @@ impl SceneModel {
         Arc::ptr_eq(&self.state, &drawable.state)
     }
 
-    /// Whether replay requires Bevy's native 3D render graph.
-    pub fn has_native_3d_content(&self) -> bool {
+    /// Whether the scene draws 3D content (meshes, surfaces, 3D lines).
+    pub fn has_3d_content(&self) -> bool {
         self.state
             .lock()
             .expect("canvas state poisoned")
@@ -2136,8 +2129,7 @@ impl SceneModel {
                     Op::Spawn(spec)
                         if matches!(
                             spec.lock().expect("object spec poisoned").kind,
-                            SpawnKind::GltfModel { .. }
-                                | SpawnKind::Axes3D { .. }
+                            SpawnKind::Axes3D { .. }
                                 | SpawnKind::Primitive3D(..)
                                 | SpawnKind::SurfaceMesh { .. }
                                 | SpawnKind::Polyline3D { .. }
@@ -2657,15 +2649,6 @@ impl SceneModel {
                         source,
                     }
                 })?;
-            } else if extension.eq_ignore_ascii_case("gltf")
-                || extension.eq_ignore_ascii_case("glb")
-            {
-                GltfDocument::load(&resolved, &GltfSceneSelector::Default).map_err(|source| {
-                    AssetPreloadError::Gltf {
-                        path: resolved.clone(),
-                        source,
-                    }
-                })?;
             } else {
                 load_image(&resolved).map_err(|source| AssetPreloadError::Image {
                     path: resolved.clone(),
@@ -2959,8 +2942,6 @@ impl SceneModel {
                     | SpawnKind::Primitive3D(_)
                     | SpawnKind::Polyline3D { .. }
                     | SpawnKind::LineSegments3D { .. }
-                    | SpawnKind::GltfNode { .. }
-                    | SpawnKind::GltfModel { .. }
             )
         }) {
             return Err(BooleanError::NonVectorOperand);
@@ -4067,71 +4048,6 @@ impl SceneModel {
             parts.insert(document.root.id.clone(), root.clone());
         }
         root.with_svg_parts(parts)
-    }
-
-    /// Import the default scene of a local glTF 2.0 `.gltf` or `.glb` model.
-    pub fn gltf(&mut self, path: impl AsRef<Path>) -> Result<DrawableHandle, GltfLoadError> {
-        self.gltf_scene(path, GltfSceneSelector::Default)
-    }
-
-    /// Import a selected glTF scene by name or index.
-    pub fn gltf_scene(
-        &mut self,
-        path: impl AsRef<Path>,
-        selector: GltfSceneSelector,
-    ) -> Result<DrawableHandle, GltfLoadError> {
-        let document = GltfDocument::load(self.resolve_asset_path(path), &selector)?;
-        let mut handles = HashMap::<usize, DrawableHandle>::new();
-        for node in &document.nodes {
-            let handle = self.spawn_registered(
-                SpawnKind::GltfNode {
-                    node_index: node.index,
-                    path: node.path.clone(),
-                    bounds: node.bounds,
-                },
-                false,
-            );
-            handles.insert(node.index, handle);
-        }
-
-        let bindings = document
-            .nodes
-            .iter()
-            .map(|node| {
-                (
-                    node.index,
-                    node.parent,
-                    node.path.clone(),
-                    handles[&node.index].id,
-                )
-            })
-            .collect();
-        let animation_names = document
-            .animations
-            .iter()
-            .map(|animation| animation.name.clone())
-            .collect::<Vec<_>>();
-        let root = self.spawn(SpawnKind::GltfModel {
-            path: document.path,
-            scene_index: document.scene_index,
-            bounds: document.bounds,
-            nodes: bindings,
-            animation_names: animation_names.clone(),
-        });
-
-        let mut parts = HashMap::new();
-        let mut short_counts = HashMap::<String, usize>::new();
-        for node in &document.nodes {
-            *short_counts.entry(node.name.clone()).or_default() += 1;
-        }
-        for node in &document.nodes {
-            let handle = handles[&node.index].clone();
-            parts.insert(node.path.clone(), handle.clone());
-            if short_counts.get(&node.name) == Some(&1) {
-                parts.insert(node.name.clone(), handle);
-            }
-        }
-        Ok(root.with_gltf_metadata(parts, document.animations))
     }
 
     fn spawn_svg_group(

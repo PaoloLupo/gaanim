@@ -72,7 +72,7 @@ impl BackgroundPaint {
         Self::Brush(Brush::Solid(color))
     }
 
-    /// Representative color used by the native 3D clear pass and text contrast.
+    /// Representative color used by the window clear and text contrast.
     pub fn fallback_color(&self) -> Color {
         match self {
             Self::Brush(Brush::Solid(color)) => *color,

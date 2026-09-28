@@ -1,4 +1,4 @@
-//! Friendly Python bindings for native PBR primitives.
+//! Python bindings for lit 3D primitives and their materials.
 
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;

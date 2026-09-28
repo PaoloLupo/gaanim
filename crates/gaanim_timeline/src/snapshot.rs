@@ -88,7 +88,7 @@ pub struct EntitySnapshot {
     /// parameter value instead of staying at the final animated value.
     #[cfg_attr(feature = "serde", serde(default))]
     pub float_signal: Option<f64>,
-    /// PBR material state for deterministic backward and forward seeks.
+    /// 3D material state for deterministic backward and forward seeks.
     #[cfg_attr(feature = "serde", serde(default))]
     pub material_3d: Option<gaanim_scene::Material3D>,
     #[cfg_attr(feature = "serde", serde(default))]

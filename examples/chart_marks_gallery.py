@@ -62,7 +62,6 @@ scene.camera.look_at(eye=(0, 0, 18), target=(0, 0, 0))
 scene.wait(1.0)
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
-    # Native 3D resources are guaranteed ready after the first rendered frame.
     scene.snapshots(snapshots, [0.5, 1.0])
 else:
     scene.render()

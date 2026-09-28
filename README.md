@@ -61,8 +61,8 @@ el archivo recarga la escena.
 
 | Plataforma | CI | Artefacto instalable | Estado declarado |
 | --- | --- | --- | --- |
-| Windows 10/11 x64 | Sí | Zip con launcher, core, reproductor y wheel de autoría | Soportada en `0.2.x` |
-| Ubuntu 24.04 x64 | Sí | Tarball con launcher, core, reproductor y wheel de autoría | Soportada en `0.2.x` |
+| Windows 10/11 x64 | Sí | Zip con `gaanim.exe`, sus bibliotecas y wheel de autoría | Soportada en `0.2.x` |
+| Ubuntu 24.04 x64 | Sí | Tarball con `gaanim`, sus bibliotecas y wheel de autoría | Soportada en `0.2.x` |
 | macOS | No | No | Experimental, sin garantía de release |
 
 El wheel `py3-none-any` es el mismo en todas las plataformas porque no contiene
@@ -74,10 +74,13 @@ salen de `.github/release-notes/v<versión>.md`: la primera línea,
 `# Título`, nombra el release y el resto es el texto que se muestra. Sin ese
 archivo el release se llama como el tag y lleva las notas que genera GitHub.
 
-En Ubuntu, descargue `gaanim-v<versión>-linux-x64.tar.gz`, extráigalo y copie
-`gaanim`, `gaanim-core` y `gaanim-play` juntos a una carpeta de `PATH`, por ejemplo
-`~/.local/bin`. Requiere exactamente Python 3.14 (el core de Linux enlaza
-`libpython3.14.so`; por ejemplo `uv python install 3.14`) y las bibliotecas de
+En Ubuntu, descargue `gaanim-v<versión>-linux-x64.tar.gz`, extráigalo completo
+en una carpeta, por ejemplo `~/.local/lib/gaanim`, y enlace el ejecutable
+`gaanim` desde una carpeta de `PATH` como `~/.local/bin`: el ejecutable busca
+sus bibliotecas (`libgaanim_engine.so`, `libgaanim_python_plugin.so` y el `std`
+de Rust) junto a él. Para ejecutar scripts requiere exactamente Python 3.14
+(el soporte de Python de Linux enlaza `libpython3.14.so`; por ejemplo
+`uv python install 3.14`) y las bibliotecas de
 sistema de Ubuntu 24.04; FFmpeg sigue siendo opcional salvo para video y audio.
 En Windows sirve cualquier Python 3.14 o superior.
 
@@ -148,15 +151,23 @@ revela un dock compacto con Previous, Advance/Pause, inicio, fin y progreso al
 llevar el cursor a su zona inferior; se oculta al retirar el cursor o perder
 foco. Consulta `docs/content/guias/presentaciones.typ` para el detalle.
 
-## 3D nativo e inspección
+## 3D e inspección
 
 > **Experimental.** La API 3D todavía tiene errores conocidos y puede cambiar
 > entre versiones; queda mucho trabajo para estabilizarla.
 
-Gaanim incluye `cube`, `sphere`, `cylinder`, `cone` y `plane` como mallas PBR
+Gaanim incluye `cube`, `sphere`, `cylinder`, `cone` y `plane` como mallas
 animables, con `Material3D.matte`, `Material3D.metal` y
-`Material3D.emissive`. `scene.geometry.lighting_3d("studio")` proporciona un único rig
-de estudio. Consulta `examples/primitives_3d_demo.py` para una escena completa.
+`Material3D.emissive`. `scene.geometry.lighting_3d("studio")` las ilumina con el
+estilo de Gaanim: luz de cielo y suelo, una luz principal suave y un brillo leve
+en los bordes, conservando el color de cada material. Consulta
+`examples/primitives_3d_demo.py` para una escena completa.
+
+Vello dibuja el 3D como el resto de la escena: proyecta las mallas y las líneas
+3D con la cámara, las ordena de atrás hacia delante y calcula la luz en la CPU.
+No hay sombras ni búfer de profundidad, la geometría que se cruza puede
+ordenarse mal y el 3D queda debajo del contenido 2D. Gaanim ya no importa
+glTF: `scene.media.gltf(...)` lanza `NotImplementedError`.
 
 Las escenas 2D y 3D abren con el modo interactivo desactivado. Cuando el usuario
 pulsa `I` o usa **Interactivo: ON/OFF** en Overlays (`O`), la cámara interactiva
@@ -236,9 +247,8 @@ explícitamente porque no forman parte del contrato alpha de Gaanim.
 Para compartir una escena o presentación con alguien que no tiene Python,
 grábela en un paquete `.gaanim`: un solo archivo con todos los fotogramas que
 dibuja la escena (callbacks incluidos), sus segmentos, notas, pausas,
-marcadores y audio. `gaanim-play`, que se distribuye junto a `gaanim` y no
-enlaza Python, lo reproduce, lo presenta y lo exporta a vídeo con los mismos
-píxeles que la exportación del script:
+marcadores y audio. `gaanim` lo reproduce, lo presenta y lo exporta a vídeo sin
+cargar Python, con los mismos píxeles que la exportación del script:
 
 ```powershell
 gaanim export . --output charla.gaanim
@@ -346,10 +356,10 @@ linker = "rust-lld.exe"
 
 Si el comando no está disponible, instala `cargo-binutils` y el componente
 `llvm-tools-preview` de Rust. Las funciones de Bevy se activan en los crates
-que las necesitan: matemáticas usa la base ECS, escena conserva PBR/glTF,
-el renderizador añade el pipeline 2D donde compone el lienzo de Vello,
-multimedia añade audio y los hosts añaden ventanas nativas. Bevy UI, sprites,
-texto y gizmos no se compilan.
+que las necesitan: matemáticas usa la base ECS, escena añade assets y render
+(sin PBR ni glTF), el renderizador añade el pipeline 2D donde compone el
+lienzo de Vello, multimedia añade audio y los hosts añaden ventanas nativas.
+Bevy UI, sprites, texto y gizmos no se compilan.
 
 `just build-timings` compila el runtime y genera
 `target/cargo-timings/cargo-timing.html`. Para medir una iteración representativa,

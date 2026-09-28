@@ -1,6 +1,6 @@
 //! Gaanim web player.
 //!
-//! Runs the same application as `gaanim-play`, with the editor's playback bar
+//! Runs the same playback application as `gaanim`, with the editor's playback bar
 //! and Presenter View, compiled to WebAssembly. The page hands it the bytes of
 //! a `.gaanim` file (picked, dropped or fetched from `?src=`) through
 //! [`open_bundle`]; Bevy opens them on its next frame.

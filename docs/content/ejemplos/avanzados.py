@@ -157,7 +157,7 @@ scene.render()
 from gaanim import CYAN, GOLD, Material3D, Scene
 
 scene = Scene(frame=(16, 9), background="#0f172a")
-scene.geometry.lighting_3d("studio", intensity=1.0, shadows=True)
+scene.geometry.lighting_3d("studio", intensity=1.0)
 cube = scene.geometry.cube(2.0, material=Material3D.matte(CYAN)).move_to_3d(-1.8, 0, 0)
 sphere = scene.geometry.sphere(1.1, material=Material3D.metal(GOLD)).move_to_3d(1.8, 0, 0)
 

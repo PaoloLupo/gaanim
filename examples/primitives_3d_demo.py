@@ -1,4 +1,4 @@
-"""Native PBR primitives, material animation, and a deterministic 3D camera."""
+"""3D primitives lit and shaded by Vello, material animation, and a deterministic 3D camera."""
 
 import os
 
@@ -6,13 +6,13 @@ from gaanim import BLUE, CORAL, CYAN, GOLD, NAVY, WHITE, Material3D, Scene
 
 
 scene = Scene(frame=(16, 9), background=NAVY)
-scene.geometry.lighting_3d("studio", intensity=1.0, shadows=True)
+scene.geometry.lighting_3d("studio", intensity=1.0)
 
 floor = scene.geometry.plane(
     14,
     10,
     subdivisions=(8, 6),
-    material=Material3D.matte(NAVY),
+    material=Material3D.matte("#5A6A9C"),
 ).move_to_3d(0, -2.2, 0)
 cube = scene.geometry.cube(2.2, material=Material3D.matte(BLUE)).move_to_3d(-4.2, -1.0, 0)
 sphere = scene.geometry.sphere(1.35, material=Material3D.metal(GOLD)).move_to_3d(-1.4, -0.85, 0)
@@ -41,6 +41,6 @@ scene.play(
 scene.play([scene.camera.animate.orbit(delta_yaw=0.55, delta_pitch=0.08).duration(1.5)])
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
-    scene.snapshots(snapshots, [0.3, 1.1, 2.0, 3.0, 4.4])
+    scene.snapshots(snapshots, [0.3, 1.1, 2.0, 3.0, 4.2])
 else:
     scene.render()

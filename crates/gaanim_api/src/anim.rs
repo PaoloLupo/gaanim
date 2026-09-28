@@ -291,16 +291,6 @@ pub enum AnimationType {
     CameraDolly {
         factor: f64,
     },
-    /// A Blender Action embedded in an imported glTF model.
-    GltfAnimation {
-        animation_index: usize,
-        source_duration: f64,
-        speed: f64,
-        looped: bool,
-        reverse: bool,
-        transition: f64,
-        start_time: f64,
-    },
     TranslateTo {
         to: DVec3,
     },
@@ -767,7 +757,6 @@ impl AnimationType {
             Self::CameraFollow { .. }
             | Self::CameraFollowEndpoint { .. }
             | Self::CameraShake { .. }
-            | Self::GltfAnimation { .. }
             | Self::Write { .. }
             | Self::Unwrite { .. }
             | Self::Uncreate { .. }

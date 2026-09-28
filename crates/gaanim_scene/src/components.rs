@@ -1,9 +1,7 @@
-use bevy::animation::graph::{AnimationGraph, AnimationNodeIndex};
-use bevy::prelude::{Component, Entity, Handle, Resource};
+use bevy::prelude::{Component, Resource};
 use gaanim_core::kurbo::{Affine, BezPath, Stroke};
 use gaanim_core::peniko::{Brush, ImageBrush};
 use gaanim_math::Bounds3D;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Represents the fill style of a visual Mobject.
@@ -243,8 +241,6 @@ pub enum RenderLayer {
     /// Vector rendering backend using Vello (Default).
     #[default]
     Vello2D,
-    /// Future 3D rasterization pipeline (wgpu-backed meshes).
-    Wgpu3D,
     /// Overlay layer drawn in screen space on top of all cameras (HUD/Editor UI).
     Overlay,
 }
@@ -313,70 +309,14 @@ pub struct Billboard;
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HudOverlay;
 
-/// 3D mesh marker for PBR rendering (used to distinguish Wgpu3D meshes from Vello2D paths).
+/// Marks 3D content (triangle meshes and line lists) that the renderer
+/// projects through the camera instead of drawing as a 2D path.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Mesh3DMarker;
 
-/// Marker for a Bevy presentation camera that must follow the scene camera rig.
-///
-/// Editor inspection cameras intentionally consume [`gaanim_math::ResolvedCamera`],
-/// while presenter/export views ignore editor overrides but retain timeline camera
-/// bindings and temporary rig constraints.
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct AuthoritativeCameraView;
-
-/// Stable Gaanim wrapper placed immediately above a native glTF node.
-///
-/// Blender-authored transforms remain on the native node while manual Gaanim
-/// transforms are written to this wrapper, so both layers compose.
-#[derive(Component, Debug, Clone, PartialEq, Eq)]
-pub struct GltfNodeWrapper {
-    pub node_index: usize,
-    pub path: String,
-}
-
-/// One stable wrapper binding belonging to an imported glTF model.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GltfNodeBinding {
-    pub node_index: usize,
-    pub path: String,
-    pub wrapper: Entity,
-}
-
-/// Deferred source metadata for a native Bevy glTF scene instance.
-#[derive(Component, Debug, Clone)]
-pub struct GltfModelRoot {
-    pub path: PathBuf,
-    pub scene_index: usize,
-    pub nodes: Vec<GltfNodeBinding>,
-    pub animation_names: Vec<String>,
-}
-
-/// Bevy handle used while a glTF asset is loaded asynchronously.
-#[derive(Component, Debug, Clone)]
-pub struct GltfAssetHandle(pub Handle<bevy::gltf::Gltf>);
-
-/// Animation graph and player entities created for a ready glTF instance.
-#[derive(Component, Debug, Clone)]
-pub struct GltfAnimationState {
-    pub graph: Handle<AnimationGraph>,
-    pub nodes: Vec<AnimationNodeIndex>,
-    pub players: Vec<Entity>,
-}
-
-/// Marker indicating that native nodes, wrappers and animations are linked.
-#[derive(Component, Debug, Clone, Copy, Default)]
-pub struct GltfModelReady;
-
-/// Marker for the single neutral light supplied by Gaanim to imported models.
-#[derive(Component, Debug, Clone, Copy, Default)]
-pub struct GaanimDefault3dLight;
-
-/// Renderer-neutral PBR parameters owned by a Gaanim 3D primitive.
-///
-/// Colors remain native `peniko::Color` values until the Bevy material is built,
-/// keeping the public scene description independent from Bevy's renderer types.
+/// Surface parameters of a lit 3D primitive: base color, roughness, metalness
+/// and emission, shaded by the renderer.
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Material3D {
@@ -475,18 +415,12 @@ impl Default for Material3D {
     }
 }
 
-/// Baseline alpha mode for a Gaanim-owned PBR material.
-#[derive(Component, Debug, Clone, Copy)]
-pub struct Material3DBaseline {
-    pub alpha: f32,
-    pub alpha_mode: bevy::material::AlphaMode,
-}
-
-/// Scene-level automatic lighting policy for native 3D content.
+/// Scene-level lighting of lit 3D content.
 #[derive(Resource, Debug, Clone, Copy, PartialEq)]
 pub struct Lighting3D {
     pub enabled: bool,
     pub intensity: f32,
+    /// Kept for scripts that set it; the renderer casts no shadows.
     pub shadows: bool,
 }
 
@@ -500,14 +434,7 @@ impl Default for Lighting3D {
     }
 }
 
-/// Original material properties retained while wrapper opacity is animated.
-#[derive(Component, Debug, Clone, Copy)]
-pub struct GltfMaterialBaseline {
-    pub alpha: f32,
-    pub alpha_mode: bevy::material::AlphaMode,
-}
-
-/// Raw triangle mesh data to be converted to Bevy `Mesh3d` at runtime.
+/// A triangle mesh in local 3D coordinates, projected and shaded by the renderer.
 #[derive(Component, Debug, Clone)]
 pub struct TriangleMeshData {
     pub vertices: Vec<[f32; 3]>,
@@ -522,7 +449,7 @@ pub struct TriangleMeshData {
     pub material: Option<Material3D>,
 }
 
-/// Raw line list data (pairs of points) to be converted to Bevy `Mesh3d` line list.
+/// A 3D line list (point pairs, or a strip), projected by the renderer.
 #[derive(Component, Debug, Clone)]
 pub struct LineListData {
     pub points: Vec<[f32; 3]>,

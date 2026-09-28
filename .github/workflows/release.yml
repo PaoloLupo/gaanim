@@ -22,11 +22,9 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # `gaanim` builds with the engine library and the Python plugin it loads.
       - name: Build release binaries
-        run: |
-          cargo build -p gaanim_launcher --profile dist --bin gaanim
-          cargo build -p gaanim_editor --profile dist --bin gaanim-core --bin gaanim-play
-          cargo build -p gaanim_thumbnail_handler --profile dist
+        run: cargo build -p gaanim_launcher -p gaanim_thumbnail_handler --profile dist
 
       - name: Build authoring wheel
         run: |
@@ -46,8 +44,6 @@ jobs:
               exit 1
             }
           }
-          # Launcher should start without python on PATH; core is tested via launcher
-          .\target\dist\gaanim.exe --help 2>&1 | Out-Host
 
       - name: Package zip
         shell: pwsh
@@ -56,9 +52,14 @@ jobs:
           $zipName = "gaanim-v$ver-windows-x64.zip"
           $stage = "dist/stage"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          Copy-Item target/dist/gaanim.exe "$stage/gaanim.exe"
-          Copy-Item target/dist/gaanim-core.exe "$stage/gaanim-core.exe"
-          Copy-Item target/dist/gaanim-play.exe "$stage/gaanim-play.exe"
+          python scripts/stage_app.py --profile dist --dest $stage
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # The packaged gaanim.exe starts with only its own files: no Rust
+          # toolchain or Python on PATH.
+          & "$stage/gaanim.exe" --help 2>&1 | Out-Host
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$stage/gaanim.exe" check examples/theme_demo.py 2>&1 | Out-Host
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Copy-Item target/dist/gaanim_thumbnail_handler.dll "$stage/gaanim_thumbnail_handler.dll"
           Copy-Item target/wheels/gaanim-*-py3-none-any.whl "$stage/"
           if (Test-Path README.md) { Copy-Item README.md "$stage/" }
@@ -72,9 +73,9 @@ jobs:
           Instalacion:
             1. Extrae el zip a C:\Tools\gaanim\ o donde prefieras.
             2. Añade esa carpeta a PATH (Panel > Sistema > Variables de entorno).
-            3. Verifica: gaanim --help  (launcher detecta automaticamente .venv sin necesidad de PATH/VIRTUAL_ENV)
+            3. Verifica: gaanim --help  (detecta automaticamente .venv sin necesidad de PATH/VIRTUAL_ENV)
           
-          Contenido: gaanim.exe + gaanim-core.exe + gaanim-play.exe + gaanim_thumbnail_handler.dll (miniaturas en el Explorador) + wheel ligero para autocompletado
+          Contenido: gaanim.exe con su motor (gaanim_engine.dll), el soporte de Python que carga al abrir un script (gaanim_python_plugin.dll) y la biblioteca estandar de Rust (std-*.dll); gaanim_thumbnail_handler.dll (miniaturas en el Explorador); wheel ligero para autocompletado
           Licencia: MIT OR Apache-2.0 (LICENSE-MIT, LICENSE-APACHE); componentes de terceros en THIRD-PARTY-NOTICES.txt
           Los paquetes .gaanim se reproducen, presentan y exportan sin Python:
             gaanim --present charla.gaanim
@@ -128,10 +129,9 @@ jobs:
       - name: Expose the embedded Python runtime
         run: echo "PYO3_PYTHON=$(which python)" >> "$GITHUB_ENV"
 
+      # `gaanim` builds with the engine library and the Python plugin it loads.
       - name: Build release binaries
-        run: |
-          cargo build -p gaanim_launcher --profile dist --bin gaanim
-          cargo build -p gaanim_editor --profile dist --bin gaanim-core --bin gaanim-play
+        run: cargo build -p gaanim_launcher --profile dist
 
       - name: Build authoring wheel
         run: |
@@ -139,38 +139,36 @@ jobs:
           python -m build --wheel --no-isolation --outdir target/wheels crates/gaanim_python
           python tests/validate_authoring_wheel.py target/wheels
 
-      - name: Verify version and launcher
+      - name: Verify version
         run: |
           cargo_ver=$(sed -n 's/^version = "\([^"]*\)"/\1/p' crates/gaanim_editor/Cargo.toml | head -n 1)
           echo "Cargo version: $cargo_ver"
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             test "v$cargo_ver" = "${{ github.ref_name }}"
           fi
-          target/dist/gaanim --help
 
-      - name: Verify core links against Python 3.14
+      - name: Stage application
+        run: python scripts/stage_app.py --profile dist --dest dist/stage
+
+      - name: Verify gaanim does not link Python and its plugin does
         run: |
-          ldd target/dist/gaanim-core | tee ldd.txt
-          grep -q 'libpython3\.14\.so' ldd.txt
+          env -u LD_LIBRARY_PATH ldd dist/stage/gaanim | tee ldd.txt
+          ! grep -q 'libpython' ldd.txt
+          ! grep -q 'not found' ldd.txt
+          readelf -d dist/stage/libgaanim_python_plugin.so | tee plugin.txt
+          grep -q 'libpython3\.14\.so' plugin.txt
+          env -u LD_LIBRARY_PATH -u PYTHONHOME dist/stage/gaanim --help
 
-      - name: Verify the bundle player does not link Python
-        run: |
-          ldd target/dist/gaanim-play | tee ldd-play.txt
-          ! grep -q 'libpython' ldd-play.txt
-          env -u LD_LIBRARY_PATH -u PYTHONHOME target/dist/gaanim-play --help
-
-      - name: Smoke test core through the launcher
-        # Drop the loader path setup-python exports so the launcher's own
-        # runtime discovery (LD_LIBRARY_PATH + PYTHONHOME) is what gets tested.
-        run: env -u LD_LIBRARY_PATH -u PYTHONHOME target/dist/gaanim check examples/theme_demo.py
+      - name: Smoke test Python through the plugin
+        # Drop the loader path setup-python exports so gaanim's own runtime
+        # discovery (libpython and PYTHONHOME) is what gets tested.
+        run: env -u LD_LIBRARY_PATH -u PYTHONHOME dist/stage/gaanim check examples/theme_demo.py
 
       - name: Package tarball
         run: |
           ver=$(sed -n 's/^version = "\([^"]*\)"/\1/p' crates/gaanim_editor/Cargo.toml | head -n 1)
           archive="gaanim-v$ver-linux-x64.tar.gz"
           stage="dist/stage"
-          mkdir -p "$stage"
-          install -m 755 target/dist/gaanim target/dist/gaanim-core target/dist/gaanim-play "$stage/"
           install -m 644 target/wheels/gaanim-*-py3-none-any.whl README.md LICENSE-MIT LICENSE-APACHE "$stage/"
           python scripts/third_party_licenses.py --output "$stage/THIRD-PARTY-NOTICES.txt"
           tar -C "$stage" -czf "dist/$archive" .

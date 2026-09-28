@@ -54,9 +54,12 @@ def _fast_commands(repo: Path, change: impact_tool.Impact) -> list[list[str]]:
         _append_unique(commands, ["cargo", "fmt", "--all", "--", "--check"])
         # One focused invocation lets Cargo unify features and reuse dependencies.
         # A successful test compilation does not need a redundant workspace check.
+        # `gaanim_engine` is not a workspace member; `gaanim` builds it.
         crates = sorted({
-            Path(path).parts[1] for path in change.changed_files
+            "gaanim_launcher" if crate == "gaanim_engine" else crate
+            for path in change.changed_files
             if path.startswith("crates/") and path.endswith(".rs")
+            for crate in [Path(path).parts[1]]
         })
         if crates:
             _append_unique(commands, ["just", "dev", "test", *[

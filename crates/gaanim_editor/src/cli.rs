@@ -1,6 +1,6 @@
-//! `gaanim export` arguments, shared by `gaanim-core` and `gaanim-play`.
+//! `gaanim export` arguments.
 //!
-//! Scripts and projects export through the Python host; playback bundles
+//! Scripts and projects export through the Python plugin; playback bundles
 //! (`.gaanim`) export through [`export_bundle_video`] without Python.
 
 use std::path::{Path, PathBuf};

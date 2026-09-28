@@ -967,7 +967,11 @@ scene.render()
 
 #experimental()
 
-Primitivas con material PBR, líneas en el espacio y estelas 3D. Gaanim usa un
+Primitivas iluminadas con `Material3D`, líneas en el espacio y estelas 3D.
+Gaanim las dibuja con Vello: proyecta cada triángulo con la cámara, los ordena
+de atrás hacia delante y calcula la luz en la CPU. No hay sombras ni búfer de
+profundidad, así que las superficies que se cruzan pueden mostrar errores de
+orden, y todo el 3D queda debajo del contenido 2D. Gaanim usa un
 mundo dextrógiro con Y hacia arriba: cilindros y conos crecen a lo largo de Y y
 los planos yacen en XZ. Los puntos 3D son tuplas `(x, y, z)`. La guía
 #link("/guias/camara-y-3d/")[Cámara y 3D] explica la cámara en perspectiva.
@@ -986,7 +990,7 @@ cube = scene.geometry.cube(2, material=Material3D.matte(BLUE))
 sphere = scene.geometry.sphere(1, segments=32, rings=16,
                       material=Material3D.metal(GOLD)).move_to_3d(3, 0, 0)
 floor = scene.geometry.plane(10, 8, subdivisions=(4, 4)).move_to_3d(0, -2, 0)
-scene.geometry.lighting_3d("studio", intensity=1.0, shadows=True)
+scene.geometry.lighting_3d("studio", intensity=1.0)
 scene.camera.look_at(eye=(6, 4, 8), target=(1, 0, 0))
 scene.play([cube.animate.create(), sphere.animate.create(), floor.animate.fade_in()])
 scene.play([cube.animate.material(Material3D.metal(GOLD)).duration(1.0)])
@@ -1031,7 +1035,7 @@ scene.render()
 #api-entry(
   name: "Geometry.lighting_3d",
   kind: "method",
-  desc: [Configura el único equipo automático de luces 3D de la escena: `"studio"` o `"none"`, con intensidad y sombras.],
+  desc: [Configura el único equipo automático de luces 3D de la escena. `"studio"` ilumina las primitivas con material al estilo de Gaanim (luz del cielo y del suelo, una luz principal suave desde arriba a la izquierda y un brillo leve en los bordes), escalada por `intensity`; `"none"` deja solo la emisión. `shadows` se acepta por compatibilidad, pero el contenido 3D no proyecta sombras. Las superficies, los gráficos 3D y las líneas no reciben luz.],
   none,
 )
 
@@ -1039,7 +1043,7 @@ scene.render()
   name: "Material3D.matte / metal / emissive / color / roughness / metallic / emissive_color / emissive_strength",
   kind: "class",
   signature: "Material3D(color=WHITE, roughness=0.55, metallic=0.0, emissive=None, emissive_strength=0.0)",
-  desc: [Material PBR cuyas propiedades numéricas se interpolan en espacio lineal y cuyos rangos se validan. Los atajos `Material3D.matte(color)`, `Material3D.metal(color)` y `Material3D.emissive(color, strength=1.0)` cubren los aspectos habituales. Las propiedades `color`, `roughness`, `metallic`, `emissive_color` y `emissive_strength` son de solo lectura.],
+  desc: [Material de una primitiva 3D iluminada, sombreado por Gaanim: la rugosidad y la metalicidad dan forma al brillo y la emisión se suma a la luz. Sus propiedades numéricas se interpolan en espacio lineal y cuyos rangos se validan. Los atajos `Material3D.matte(color)`, `Material3D.metal(color)` y `Material3D.emissive(color, strength=1.0)` cubren los aspectos habituales. Las propiedades `color`, `roughness`, `metallic`, `emissive_color` y `emissive_strength` son de solo lectura.],
 )[
 ```python
 >>>from gaanim import *

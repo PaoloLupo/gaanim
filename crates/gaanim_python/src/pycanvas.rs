@@ -4645,30 +4645,13 @@ impl PyMediaLibrary {
             .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
     }
 
-    /// Load a local glTF 2.0 model, selecting a scene by name or index.
+    /// glTF models are no longer supported: Gaanim draws 3D with Vello, from
+    /// its own primitives, surfaces, and lines.
     #[pyo3(signature = (path, *, scene=None))]
     fn gltf(&self, path: &str, scene: Option<&Bound<'_, PyAny>>) -> PyResult<PyDrawable> {
+        let _ = (path, scene);
         crate::custom::ensure_authoring_allowed()?;
-        let selector = match scene {
-            None => gaanim_objects::prelude::GltfSceneSelector::Default,
-            Some(value) => {
-                if let Ok(index) = value.extract::<usize>() {
-                    gaanim_objects::prelude::GltfSceneSelector::Index(index)
-                } else if let Ok(name) = value.extract::<String>() {
-                    gaanim_objects::prelude::GltfSceneSelector::Name(name)
-                } else {
-                    return Err(pyo3::exceptions::PyTypeError::new_err(
-                        "scene must be a string, integer, or None",
-                    ));
-                }
-            }
-        };
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .gltf_scene(path, selector)
-            .map(PyDrawable)
-            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+        Err(crate::gltf_unsupported())
     }
 }
 

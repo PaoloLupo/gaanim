@@ -1,4 +1,4 @@
-"""A keyed rectangular grid morphs from a heatmap into a native 3D surface."""
+"""A keyed rectangular grid morphs from a heatmap into a 3D surface."""
 
 import math
 import os
@@ -39,6 +39,6 @@ scene.play([
 ])
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
-    scene.snapshots(snapshots, [0.7, 1.4, 2.4])
+    scene.snapshots(snapshots, [0.7, 1.4, 2.3])
 else:
     scene.render()

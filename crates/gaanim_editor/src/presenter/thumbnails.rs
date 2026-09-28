@@ -113,7 +113,6 @@ pub(crate) struct PresenterThumbnailCache {
     pending_growth: Option<(u32, Instant)>,
     next_generation: u64,
     error: Option<String>,
-    native_3d: Option<(u64, bool)>,
     textures: TextureSet,
     /// Captures the web player renders in its own world, lacking threads.
     in_world: Option<InWorldPlan>,
@@ -152,14 +151,6 @@ impl PresenterThumbnailCache {
         let revision = stash.revision;
         if revision == 0 || timeline.segments.is_empty() {
             return;
-        }
-        if self.native_3d.is_none_or(|(known, _)| known != revision) {
-            let native_3d = match &source {
-                PreviewSource::Scene(canvas) => canvas.has_native_3d_content(),
-                // A bundle holds only what the 2D renderer draws.
-                PreviewSource::Bundle(_) => false,
-            };
-            self.native_3d = Some((revision, native_3d));
         }
 
         let edge = self.target_edge(revision, desired_edge, now);
@@ -429,12 +420,6 @@ impl PresenterThumbnailCache {
         } else {
             PreviewStatus::Waiting
         }
-    }
-
-    /// Whether the current scene has native 3D objects that the vector-only
-    /// preview capture cannot draw.
-    pub(crate) fn omits_native_3d(&self, revision: u64) -> bool {
-        self.native_3d == Some((revision, true))
     }
 
     /// Upload new or changed previews into this presenter window's egui context.

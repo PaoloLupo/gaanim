@@ -1,5 +1,5 @@
-//! The application both `gaanim-core` and `gaanim-play` run: window, engine
-//! plugins, the editor UI, and the camera the preview is drawn through.
+//! The application `gaanim` and the web player run: window, engine plugins,
+//! the editor UI, and the camera the preview is drawn through.
 
 use bevy::prelude::*;
 

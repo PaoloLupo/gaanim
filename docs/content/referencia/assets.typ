@@ -1,16 +1,15 @@
 #import "../../components/section.typ": docs-chapter
 #import "../../components/api.typ": api-entry
-#import "../../components/tutorial.typ": experimental
 
 #show: docs-chapter.with(
   title: "Recursos",
-  description: "Carpeta de recursos, precarga y recarga, y qué admiten los importadores de SVG, Lottie y glTF",
+  description: "Carpeta de recursos, precarga y recarga, y qué admiten los importadores de SVG y Lottie",
   route: "/referencia/assets/",
 )
 
 = Recursos
 
-Imágenes, SVG, vídeo, audio, Lottie, glTF, WGSL y archivos Typst se cargan
+Imágenes, SVG, vídeo, audio, Lottie, WGSL y archivos Typst se cargan
 desde rutas locales. Las fábricas que los crean están en
 #link("/referencia/medios/")[Medios] y #link("/referencia/audio/")[Audio]; esta
 página explica cómo se resuelven las rutas, cómo precargar y recargar
@@ -71,7 +70,7 @@ hero = scene.media.image("cover.png", width=8)
   kind: "method",
   params: ((name: "paths", type: "Sequence[str]", default: none, desc: [Rutas que se validan, relativas a la carpeta de recursos.]),),
   returns: (type: "None", desc: [Valida y guarda en caché los archivos.]),
-  desc: [Comprueba archivos ráster, SVG, Lottie JSON, `.lottie` y glTF antes de reproducir la escena. Las imágenes se decodifican en la misma caché que usa `scene.media.image`, y las composiciones Lottie en la de `scene.media.lottie`; de un paquete dotLottie se precarga su animación o máquina de estados inicial. Un archivo que no se puede resolver o decodificar lanza `RuntimeError` con su ruta.],
+  desc: [Comprueba archivos ráster, SVG, Lottie JSON y `.lottie` antes de reproducir la escena. Las imágenes se decodifican en la misma caché que usa `scene.media.image`, y las composiciones Lottie en la de `scene.media.lottie`; de un paquete dotLottie se precarga su animación o máquina de estados inicial. Un archivo que no se puede resolver o decodificar lanza `RuntimeError` con su ruta.],
 )[
 ```python
 >>>from gaanim import *
@@ -85,7 +84,7 @@ scene.assets.preload(["logo.svg", "cover.png", "pulse.json", "button.lottie"])
   name: "AssetManager.reload_assets",
   kind: "method",
   returns: (type: "None", desc: [Vacía las cachés de archivos.]),
-  desc: [Vacía las cachés de imágenes ráster, Lottie JSON, paquetes dotLottie y glTF. Los objetos ya creados conservan sus recursos; las cargas siguientes leen los archivos del disco. En el editor no hace falta: guardar cualquier archivo del proyecto vacía las cachés y recarga la escena. Los SVG se vuelven a leer cada vez que `scene.media.svg(...)` crea un objeto.],
+  desc: [Vacía las cachés de imágenes ráster, Lottie JSON y paquetes dotLottie. Los objetos ya creados conservan sus recursos; las cargas siguientes leen los archivos del disco. En el editor no hace falta: guardar cualquier archivo del proyecto vacía las cachés y recarga la escena. Los SVG se vuelven a leer cada vez que `scene.media.svg(...)` crea un objeto.],
 )[
 ```python
 >>>from gaanim import *
@@ -202,41 +201,6 @@ scene = Scene(frame=(16, 9), background="#0f172a")
 clip = scene.media.lottie("assets/pulse.json")
 scene.play(sequence(clip.animate.create().duration(1.0), clip))
 scene.render()
-```
-
-== Modelos 3D glTF
-
-#experimental()
-
-`scene.media.gltf(path, *, scene=None)` importa archivos glTF 2.0 locales
-(`.gltf` o `.glb`); la fábrica y las acciones de Blender están en
-#link("/referencia/medios/#api-medialibrary-gltf")[Medios].
-
-*Qué se importa.* Unidades, orientación, jerarquía de nodos, materiales PBR
-metallic-roughness, normales, UV, texturas, skins, huesos y morph targets. Una
-unidad glTF es una unidad de mundo de Gaanim: los modelos no se centran ni se
-escalan solos. Las cámaras y luces del archivo se descartan en favor de la
-cámara de Gaanim y su iluminación neutra. Las extensiones no admitidas y los
-buffers o texturas externos que faltan producen un error con la ruta del
-archivo.
-
-*Nodos.* `model.part("Robot/Rig/Arm")` selecciona un nodo. El nombre corto
-solo vale si es único; una ruta jerárquica resuelve los nombres repetidos, y
-las rutas completas duplicadas reciben el sufijo estable `#<índice>`. Los
-errores de búsqueda listan los candidatos y `model.parts()` los enumera. Cada
-nodo tiene un contenedor propio: sus transformaciones se componen sobre la
-de Blender y sobre la animación esquelética o de morph, sin sustituirlas.
-Los materiales se copian por instancia, así que animar la opacidad de un
-modelo no cambia otra importación del mismo archivo. Los metadatos se guardan
-en caché por ruta y fecha de modificación.
-
-```python
->>>from gaanim import *
->>>scene = Scene(frame=(16, 9), background="#0f172a")
-model = scene.media.gltf("assets/robot.glb")
-arm = model.part("Robot/Rig/Arm")
-print(model.parts())       # selectores estables
-print(model.animations())  # acciones de Blender
 ```
 
 == SVG

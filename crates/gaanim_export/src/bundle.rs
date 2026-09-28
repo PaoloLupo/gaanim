@@ -257,19 +257,6 @@ fn post_passes(world: &World, shaders: &[PostProcessShader], time: f64) -> Resul
 /// instead of writing a bundle that plays back differently.
 fn unsupported_content(world: &mut World) -> Option<&'static str> {
     if world
-        .query_filtered::<(), With<gaanim_scene::Mesh3DMarker>>()
-        .iter(world)
-        .next()
-        .is_some()
-        || world
-            .query_filtered::<(), With<gaanim_scene::GltfModelRoot>>()
-            .iter(world)
-            .next()
-            .is_some()
-    {
-        return Some("3D content (meshes, surfaces and glTF models)");
-    }
-    if world
         .query_filtered::<(), With<gaanim_media::VideoPlayback>>()
         .iter(world)
         .next()

@@ -44,8 +44,8 @@ pub use camera_view::{
     CameraViewOptions, CameraViewZoom,
 };
 pub use drawable::{
-    ClipOptions, DrawableHandle, FragmentSelection, GltfAnimationError, ImagePixelError,
-    LayoutOwnershipError, Primitive3DHandleError, RotationAxisError, SvgPartError,
+    ClipOptions, DrawableHandle, FragmentSelection, ImagePixelError, LayoutOwnershipError,
+    Primitive3DHandleError, RotationAxisError, SvgPartError,
 };
 mod editorial;
 pub use editorial::{

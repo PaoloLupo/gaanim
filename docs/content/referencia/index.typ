@@ -28,13 +28,13 @@ conservan en inglés porque forman parte de la API ejecutable.
   card("layout/", "scene.layout", "Layout", [Filas, columnas, grids, capas, reglas por hijo, reflow y restricciones.])
   card("visualization/", "scene.viz", "Visualización", [Espacios de coordenadas, cálculo, datos, valores reactivos, gráficos y campos vectoriales.])
   card("matrices/", "scene.viz", "Matrices", [Matrices seleccionables y mutables, morph entre estados y álgebra.])
-  card("medios/", "scene.media", "Medios", [Imágenes, SVG, video, Lottie y modelos glTF.])
+  card("medios/", "scene.media", "Medios", [Imágenes, SVG, video y Lottie.])
   card("audio/", "scene.media", "Audio", [Pistas sincronizadas y narración grabada en el editor.])
   card("diapositivas/", "scene.slides", "Diapositivas", [Insignias, tarjetas, rótulos, listas, tablas e identidad de la presentación.])
   card("mecanica/", "scene.mechanics", "Mecánica", [Cotas, barras, muelles, fuerzas, apoyos y engranajes reactivos.])
   card("animations/", "Tiempo", "Animaciones", [`.animate`, entradas, énfasis, transformaciones, composición y easing.])
   card("themes/", "Estilo", "Colores y temas", [Paleta, pinceles, degradados, efectos y temas reutilizables.])
-  card("assets/", "Proyecto", "Recursos", [Carpeta de assets, precarga, SVG, Lottie y glTF en detalle.])
+  card("assets/", "Proyecto", "Recursos", [Carpeta de assets, precarga, SVG y Lottie en detalle.])
 })
 
 == Cómo leer una ficha

@@ -7,7 +7,7 @@ just benchmark smoke
 just benchmark standard
 ```
 
-Both recipes build and invoke the native `gaanim-core` release executable.
+Both recipes build and invoke the native `gaanim` release executable.
 Results live in `target/performance/runtime-benchmark.json`; command logs and
 generated artifacts remain under `target/performance/artifacts/`.
 
