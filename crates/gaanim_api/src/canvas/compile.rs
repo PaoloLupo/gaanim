@@ -2317,6 +2317,7 @@ impl SceneModel {
             *metadata = compiled;
         }
         timeline.set_segments(segment_metadata.clone());
+        timeline.beat_grid = self.tempo;
         timeline.set_markers(
             self.markers()
                 .into_iter()
@@ -2633,7 +2634,7 @@ impl SceneModel {
             .flat_map(|op| {
                 let anims: &[AnimationBuilder] = match op {
                     Op::Animate { anim, active: true } => std::slice::from_ref(anim),
-                    Op::Play(anims) => anims,
+                    Op::Play(anims) | Op::Launch(anims) => anims,
                     _ => &[],
                 };
                 anims.iter().filter_map(|anim| {
@@ -2872,7 +2873,7 @@ impl SceneModel {
                         builder.play(anim);
                     }
                 }
-                Op::Play(anims) => {
+                Op::Play(anims) | Op::Launch(anims) => {
                     for anim in anims {
                         Self::reveal_deferred_on_play(
                             builder,
@@ -2926,7 +2927,11 @@ impl SceneModel {
                             builder.play_at_current_time(anim);
                         }
                     }
-                    builder.current_time = start + max_duration;
+                    // A launch schedules like a play but leaves the cursor
+                    // where it was, so what follows runs over it.
+                    if matches!(op, Op::Play(_)) {
+                        builder.current_time = start + max_duration;
+                    }
                     for anim in anims {
                         Self::continue_text_transition_identity(anim, id_map);
                     }
@@ -6055,7 +6060,7 @@ impl SceneModel {
                     }
                     _ => {}
                 },
-                Op::Play(anims) => {
+                Op::Play(anims) | Op::Launch(anims) => {
                     for anim in anims {
                         match &anim.anim_type {
                             AnimationType::Transform { target }
@@ -6171,7 +6176,7 @@ impl SceneModel {
         for op in ops {
             let anims: &[AnimationBuilder] = match op {
                 Op::Animate { anim, active: true } => std::slice::from_ref(anim),
-                Op::Play(anims) => anims,
+                Op::Play(anims) | Op::Launch(anims) => anims,
                 _ => &[],
             };
             for anim in anims {
@@ -6195,7 +6200,7 @@ impl SceneModel {
         let fades_in = |op: &Op| {
             let anims: &[AnimationBuilder] = match op {
                 Op::Animate { anim, active: true } => std::slice::from_ref(anim),
-                Op::Play(anims) => anims,
+                Op::Play(anims) | Op::Launch(anims) => anims,
                 _ => &[],
             };
             anims.iter().any(|anim| {
@@ -8856,6 +8861,7 @@ impl SceneModel {
                     .map(|child| (*child, Some(node))),
             );
         }
+        let motion_sources: Vec<ObjectId> = nodes.iter().map(|(node, _, _)| *node).collect();
         for copy in 1..=echo.count() {
             let mut copies: HashMap<ObjectId, bevy::prelude::Entity> = HashMap::new();
             for &(node, entity, parent) in &nodes {
@@ -8892,6 +8898,8 @@ impl SceneModel {
                             },
                             parent,
                             rank: copy,
+                            hold: echo.hold(),
+                            motion_sources: motion_sources.clone(),
                         },
                     ))
                     .id();
@@ -13092,6 +13100,135 @@ mod tests {
             vertices_at(0.0),
             [(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)]
         );
+    }
+
+    #[test]
+    fn launched_animations_run_under_later_plays() {
+        let mut canvas = SceneModel::new(640, 360);
+        let wheel = canvas.circle(1.0);
+        let label = canvas.circle(0.5).move_to(3.0, 0.0);
+        canvas
+            .launch_composition_configured(
+                super::super::canvas_impl::Composition::leaf(
+                    wheel
+                        .animate()
+                        .rotate_by(4.0)
+                        .duration(4.0)
+                        .rate_func(gaanim_math::RateFunc::Linear),
+                ),
+                None,
+                None,
+            )
+            .unwrap();
+        canvas.play(vec![label.animate().move_to(3.0, 2.0).duration(1.0)]);
+        canvas.wait(3.0);
+        assert!((canvas.current_time() - 4.0).abs() < 1e-9);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let angle = |world: &mut World, timeline: &mut Timeline, time: f64| {
+            timeline.seek(world, time);
+            transform_of(world, &wheel)
+                .rotation
+                .to_euler(gaanim_core::glam::EulerRot::XYZ)
+                .2
+        };
+        assert!((angle(&mut world, &mut timeline, 2.0) - 2.0).abs() < 1e-6);
+        assert!((angle(&mut world, &mut timeline, 0.5) - 0.5).abs() < 1e-6);
+        let label_y = |world: &mut World, timeline: &mut Timeline, time: f64| {
+            timeline.seek(world, time);
+            transform_of(world, &label).translation.y
+        };
+        // The play after the launch starts at the same instant.
+        assert!((label_y(&mut world, &mut timeline, 1.0) - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn points_setter_declares_the_shape_then_cuts_at_the_cursor() {
+        let mut canvas = SceneModel::new(640, 360);
+        let shape = canvas.polygon(vec![(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)]);
+        assert!(shape.clone().points(vec![(0.0, 0.0)]).is_err());
+        assert!(canvas.circle(1.0).points(vec![(0.0, 0.0)]).is_err());
+        let declared = vec![(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
+        let shape = shape.points(declared.clone()).unwrap();
+        canvas.play(vec![shape.animate().shift_by(0.0, 0.0).duration(1.0)]);
+        let cut = vec![(0.0, 0.0), (3.0, 0.0), (3.0, 3.0), (0.0, 3.0)];
+        let _ = shape.clone().points(cut.clone()).unwrap();
+        canvas.wait(1.0);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let id = ObjectId::from_raw(shape.id.as_raw() - 1);
+        let mut vertices_at = |time: f64| {
+            timeline.seek(&mut world, time);
+            let path = world
+                .query::<(&MobjectId, &gaanim_scene::Path2D)>()
+                .iter(&world)
+                .find(|(object, _)| object.0 == id)
+                .unwrap()
+                .1
+                .0
+                .clone();
+            path.elements()
+                .iter()
+                .filter_map(|element| match element {
+                    gaanim_core::kurbo::PathEl::MoveTo(point)
+                    | gaanim_core::kurbo::PathEl::LineTo(point) => Some((point.x, point.y)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(vertices_at(0.5), declared);
+        assert_eq!(vertices_at(1.5), cut);
+        assert_eq!(vertices_at(0.2), declared);
+    }
+
+    #[test]
+    fn held_echo_copies_freeze_when_the_drawable_stops() {
+        let mut canvas = SceneModel::new(640, 360);
+        let ball = canvas.circle(0.5).move_to(-3.0, 0.0).echo(Some(
+            super::super::types::EchoSpec::new(2, 0.25, 0.5)
+                .unwrap()
+                .with_hold(true),
+        ));
+        canvas.play(vec![
+            ball.animate()
+                .move_to(3.0, 0.0)
+                .duration(1.0)
+                .rate_func(gaanim_math::RateFunc::Linear),
+        ]);
+        canvas.wait(1.0);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let mut copies: Vec<(Entity, u32)> = world
+            .query::<(Entity, &gaanim_animation::EchoGhost)>()
+            .iter(&world)
+            .map(|(entity, echo)| (entity, echo.rank))
+            .collect();
+        copies.sort_by_key(|(_, rank)| *rank);
+        let copy_x = |world: &mut World, timeline: &mut Timeline, time: f64| {
+            timeline.seek(world, time);
+            copies
+                .iter()
+                .map(|(entity, _)| {
+                    world
+                        .get::<SpatialTransform>(*entity)
+                        .unwrap()
+                        .translation
+                        .x
+                })
+                .collect::<Vec<_>>()
+        };
+        // Moving: like a plain echo, 0.25 s and 0.5 s behind (6 units per s).
+        let moving = copy_x(&mut world, &mut timeline, 0.75);
+        assert!(
+            (moving[0] - 0.0).abs() < 1e-9 && (moving[1] + 1.5).abs() < 1e-9,
+            "{moving:?}"
+        );
+        // Stopped at 1.0 s: the copies stay where they were instead of
+        // catching up with the ball at x = 3.
+        for time in [1.5, 1.99] {
+            let held = copy_x(&mut world, &mut timeline, time);
+            assert!(
+                (held[0] - 1.5).abs() < 1e-9 && (held[1] - 0.0).abs() < 1e-9,
+                "{held:?}"
+            );
+        }
     }
 
     #[test]

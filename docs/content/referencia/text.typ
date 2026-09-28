@@ -233,6 +233,8 @@ label = scene.text("Valores: V_e del piso 1 (tb:agriet_xy)", markup=False)
   compositor y no crea un objeto distinto.
 - `scene.text.equation(...)` añade `$ … $`: no escribas los delimitadores.
 - `\$` escribe un dólar literal y un delimitador sin pareja lanza `ValueError`.
+- Con `role="code"` todo `$` es literal: `scene.text("$ gaanim init", role="code")`
+  muestra el prompt tal cual, sin escapar nada.
 - Si todo el contenido es matemático, el rol inferido es `math`; si mezcla prosa
   y matemáticas, `body`.
 - Dentro de la matemática, cada frontera entre piezas es un espacio normal de

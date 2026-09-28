@@ -1033,6 +1033,7 @@ pub struct EchoSpec {
     count: u32,
     delay: f64,
     decay: f32,
+    hold: bool,
 }
 
 impl EchoSpec {
@@ -1056,7 +1057,19 @@ impl EchoSpec {
             count,
             delay,
             decay: decay as f32,
+            hold: false,
         })
+    }
+
+    /// Whether the copies freeze where they are when the drawable stops
+    /// moving (an onion skin) instead of catching up with it.
+    pub fn with_hold(mut self, hold: bool) -> Self {
+        self.hold = hold;
+        self
+    }
+
+    pub fn hold(&self) -> bool {
+        self.hold
     }
 
     pub fn count(&self) -> u32 {

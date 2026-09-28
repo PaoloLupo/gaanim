@@ -254,6 +254,13 @@ impl TextSpec {
         flow: TextFlow,
         markup: bool,
     ) -> Result<Self, TextSpecError> {
+        // Code is literal: a `$` in a terminal prompt or a variable never
+        // opens mathematics.
+        let content = if role == Some(TextRole::Code) {
+            escape_math_delimiters(content)
+        } else {
+            content
+        };
         validate_content(&content, "<root>")?;
         validate_style(&style)?;
         validate_flow(&flow)?;
@@ -514,6 +521,32 @@ fn validate_content(content: &[TextContent], parent: &str) -> Result<(), TextSpe
         }
     }
     Ok(())
+}
+
+/// Escape every `$` not already escaped, so it is shown instead of
+/// opening mathematics.
+fn escape_math_delimiters(content: Vec<TextContent>) -> Vec<TextContent> {
+    content
+        .into_iter()
+        .map(|node| match node {
+            TextContent::Literal(text) => {
+                let mut escaped = String::with_capacity(text.len());
+                let mut previous = None;
+                for character in text.chars() {
+                    if character == '$' && previous != Some('\\') {
+                        escaped.push('\\');
+                    }
+                    escaped.push(character);
+                    previous = Some(character);
+                }
+                TextContent::Literal(escaped)
+            }
+            TextContent::Part(mut part) => {
+                part.content = escape_math_delimiters(part.content);
+                TextContent::Part(part)
+            }
+        })
+        .collect()
 }
 
 pub fn flatten_content(content: &[TextContent]) -> String {
@@ -956,6 +989,41 @@ mod tests {
             "fuerte enfatizado y *literal*"
         );
         assert_eq!(spec.parts()[0].text, "enfatizado");
+    }
+
+    #[test]
+    fn code_role_shows_dollars_literally() {
+        for markup in [true, false] {
+            let spec = TextSpec::new_with_markup(
+                vec!["$ gaanim init".into()],
+                Some(TextRole::Code),
+                TextStyle::default(),
+                TextFlow::default(),
+                markup,
+            )
+            .unwrap();
+            assert_eq!(spec.rendered_text(), "$ gaanim init");
+            assert!(!spec.has_math());
+        }
+        // An already escaped dollar stays a single literal dollar.
+        let spec = TextSpec::new(
+            vec!["echo \\$HOME $PATH".into()],
+            Some(TextRole::Code),
+            TextStyle::default(),
+            TextFlow::default(),
+        )
+        .unwrap();
+        assert_eq!(spec.rendered_text(), "echo $HOME $PATH");
+        // Other roles still open mathematics with `$`.
+        assert!(
+            TextSpec::new(
+                vec!["$ gaanim init".into()],
+                None,
+                TextStyle::default(),
+                TextFlow::default(),
+            )
+            .is_err()
+        );
     }
 
     #[test]

@@ -11,6 +11,29 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.6.2
+
+Sin publicar todavía. No hace falta cambiar tus escenas.
+
+== Cambios
+
+- `scene.launch(...)`, o `scene.play(..., advance=False)`, empieza animaciones
+  en el cursor sin moverlo: un giro que dura varios cortes sigue mientras
+  programas lo demás. `duration(0)` queda documentado como corte dentro de
+  una composición.
+- Rejilla de tempo: `scene.tempo(bpm, offset)`, `scene.beats(n)` y
+  `scene.wait_until(beat=n)` o `wait_until(bar=n)` cortan a tiempo con la
+  música, y avisan si un plano se pasó de su hueco. El editor dibuja una
+  línea en cada compás de la barra de reproducción.
+- `scene.media.audio(..., end=30.0, fade_out=1.5)` recorta y funde una música
+  de fondo sin alargar el `play` que la activa.
+- `echo(..., hold=True)` deja las copias congeladas cuando el objeto se
+  detiene, como un papel cebolla, en lugar de que lo alcancen.
+- `drawable.points([...])` fija los vértices de un polígono o una polilínea
+  sin animarlos, igual que los demás setters.
+- Con `role="code"`, `$` es literal: `scene.text("$ gaanim init",
+  role="code")` ya no pide escribir `\$`.
+
 = 0.6.1
 
 Publicada el 28 de septiembre de 2026. Llegan el reproductor web y la
@@ -80,7 +103,8 @@ lee «Al actualizar».
   #link("https://paololupo.github.io/gaanim/reproductor/")[paololupo.github.io/gaanim/reproductor].
   Con `?src=` abre un archivo publicado en otro sitio. Todavía no reproduce el
   audio ni abre la ventana del Presenter View (ver
-  #link("/guias/compartir/")[Compartir sin Python]).
+  #link("/guias/compartir/")[Compartir sin Python]). El sitio de la
+  documentación lo enlaza desde la cabecera, la barra lateral y la portada.
 - Controles táctiles en el reproductor, al estilo de los reproductores de vídeo
   del móvil: un toque muestra u oculta los controles, con botones grandes para
   la pausa anterior, reproducir y la siguiente; dos toques en un lado, o

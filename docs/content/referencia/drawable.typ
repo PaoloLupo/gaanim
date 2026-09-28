@@ -561,6 +561,7 @@ scene.render()
     (name: "count", type: "int", default: "5", desc: [Copias, de 1 a 32; `0` quita el eco.]),
     (name: "delay", type: "float", default: "0.04", desc: [Segundos entre copias; positivo.]),
     (name: "decay", type: "float", default: "0.6", desc: [Opacidad de cada copia respecto a la anterior, en `(0, 1]`.]),
+    (name: "hold", type: "bool", default: "False", desc: [Con `True` las copias se retrasan a lo largo del movimiento y no del reloj: cuando el objeto se detiene, quedan congeladas donde estaban (papel cebolla) y siguen cuando vuelve a moverse. Sin él, alcanzan al objeto al detenerse.]),
   ),
   desc: [Copias que siguen al objeto en el tiempo, como el efecto Echo de After Effects: la copia `k` lo muestra como estaba hace `k * delay` segundos, con `decay ** k` de su opacidad y debajo de él. Cada copia repite las animaciones del propio objeto (`animate`, `create`, fundidos, color y forma) con ese retraso, así que es exacta en cualquier búsqueda y en todas las exportaciones, SVG incluido. Se ocultan mientras el objeto está oculto y no cruzan un corte de segmento. No retrasan el movimiento de los _updaters_, de las posiciones reactivas ni de un grupo padre que se mueve, ni copian Lottie o vídeo. En un `Text`, cada glifo repite sus propias animaciones. Se declara una vez y vale para toda la línea de tiempo.],
 )[
@@ -588,6 +589,22 @@ scene.render()
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
 ring = scene.geometry.duplicate(scene.geometry.dot(0.1), Distribution.circle(16, 2.5)).count(4)
+```
+]
+
+#api-entry(
+  name: "Drawable.points",
+  kind: "method",
+  params: (
+    (name: "points", type: "Sequence[tuple[float, float]]", default: none, desc: [Un punto por vértice, en las coordenadas en que se declaró la figura.]),
+  ),
+  desc: [Fija todos los vértices de un polígono o una polilínea. Antes del primer `scene.play` cambia la forma declarada, así que varias figuras pueden nacer iguales y deformarse luego; después la cambia en el cursor. `animate.points` sigue desde ahí. Otro número de puntos, un valor no finito o un objeto que no sea polígono ni polilínea lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+tri = scene.geometry.polygon([(0, 0), (1, 0), (0, 1)]).points([(-1, -1), (1, -1), (0, 1)])
+scene.play([tri.animate.points([(-2, -1), (2, -1), (0, 2)]).duration(1.0)])
 ```
 ]
 

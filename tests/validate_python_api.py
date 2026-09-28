@@ -1759,6 +1759,7 @@ def validate_scene_capability_surface(module) -> list[str]:
         "play", "release", "render", "reuse", "sections", "segment", "snapshots", "stop",
         "wait", "time", "cursor", "stops", "random", "noise",
         "voiceover", "live_take", "narration_script", "marker", "markers",
+        "launch", "tempo", "beats", "wait_until",
     }
     actual = {name for name in dir(module.Scene) if not name.startswith("_")}
     failures = []
@@ -1767,6 +1768,24 @@ def validate_scene_capability_surface(module) -> list[str]:
             f"Scene public surface differs: missing={sorted(expected - actual)}, "
             f"unexpected={sorted(actual - expected)}"
         )
+
+    timed = module.Scene(frame=(16, 9))
+    timed.tempo(120, offset=0.5)
+    if abs(timed.beats(2) - 1.0) > 1e-9:
+        failures.append("Scene.beats did not convert beats to seconds")
+    spinner = timed.geometry.circle(1)
+    timed.launch(spinner.animate.rotate_by(1.0).duration(4.0))
+    if timed.cursor != 0.0:
+        failures.append("Scene.launch moved the cursor")
+    timed.wait_until(beat=1)
+    if abs(timed.cursor - 1.0) > 1e-9:
+        failures.append("Scene.wait_until(beat=1) did not reach 1.0 s")
+    try:
+        timed.wait_until(beat=0)
+    except ValueError:
+        pass
+    else:
+        failures.append("Scene.wait_until accepted a beat behind the cursor")
 
     scene = module.Scene(frame=(16, 9))
     first = scene.geometry.circle(20)

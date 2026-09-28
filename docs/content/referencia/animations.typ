@@ -1145,7 +1145,7 @@ scene.render()
     (name: "points", type: "Sequence[tuple[float, float]]", default: none, desc: [Posición final de cada vértice, en las coordenadas en que se declaró la figura.]),
   ),
   returns: (type: "Anim", desc: [Morph vértice a vértice.]),
-  desc: [Lleva cada vértice de un polígono o una polilínea en línea recta a su nueva posición: el vértice `i` va a `points[i]`. A diferencia de `transform_to` no remuestrea el contorno, así que cada fotograma es la mezcla exacta de los dos y las figuras de píxel o técnicas conservan sus esquinas. Un `move_to` o `shift` posterior se sigue aplicando encima. La figura conserva su número de vértices: otro número de puntos, una figura que no sea polígono o polilínea, o un punto no finito lanzan `ValueError`. Se combina con `fill`, `move_to` y los demás destinos de propiedades en un mismo `Anim`, y `echo` repite el morph en sus copias.],
+  desc: [Para fijar los vértices sin animar, usa `Drawable.points`. Lleva cada vértice de un polígono o una polilínea en línea recta a su nueva posición: el vértice `i` va a `points[i]`. A diferencia de `transform_to` no remuestrea el contorno, así que cada fotograma es la mezcla exacta de los dos y las figuras de píxel o técnicas conservan sus esquinas. Un `move_to` o `shift` posterior se sigue aplicando encima. La figura conserva su número de vértices: otro número de puntos, una figura que no sea polígono o polilínea, o un punto no finito lanzan `ValueError`. Se combina con `fill`, `move_to` y los demás destinos de propiedades en un mismo `Anim`, y `echo` repite el morph en sus copias.],
 )[
 ```python
 # show-code: true
@@ -1179,6 +1179,7 @@ scene.render()
   kind: "method",
   params: ((name: "seconds", type: "float", default: none, desc: [Duración finita y no negativa.]),),
   returns: (type: "Anim", desc: [El `Anim` configurado.]),
+  desc: [`duration(0)` es un corte: el destino se aplica de golpe en ese punto de la composición. Sirve para cambiar un valor a mitad de un `sequence` o de un `play` con `delay`, sin partir el bloque: `sequence(a.animate.shift_by(2, 0), a.animate.opacity(0.3).duration(0), a.animate.shift_by(-2, 0))`.],
 )[
 ```python
 >>>from gaanim import *

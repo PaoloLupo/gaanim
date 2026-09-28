@@ -21,7 +21,7 @@ Archivos de sonido que empiezan en el cursor donde los activas.
 #api-entry(
   name: "MediaLibrary.audio",
   kind: "factory",
-  params: ((name: "path", type: "str", default: none, desc: [Archivo de audio; una ruta relativa usa la carpeta de assets, igual que imágenes y SVG.]), (name: "duration", type: "float | None", default: "None", desc: [Recorta la pista y la hace participar en la duración del lote. Sin ella, la pista suena de fondo sin alargar la línea de tiempo.]), (name: "volume", type: "float", default: "1.0", desc: [Ganancia lineal.]), (name: "fade_in / fade_out", type: "float", default: "0.0", desc: [Fundidos de entrada y salida en segundos; el de salida es determinista cuando hay `duration`.])),
+  params: ((name: "path", type: "str", default: none, desc: [Archivo de audio; una ruta relativa usa la carpeta de assets, igual que imágenes y SVG.]), (name: "duration", type: "float | None", default: "None", desc: [Recorta la pista y la hace participar en la duración del lote. Sin ella, la pista suena de fondo sin alargar la línea de tiempo.]), (name: "end", type: "float | None", default: "None", desc: [Corta la pista en ese segundo del archivo *sin* alargar el lote: música de fondo que suena bajo las escenas siguientes y termina donde quieres. No se combina con `duration`.]), (name: "volume", type: "float", default: "1.0", desc: [Ganancia lineal.]), (name: "fade_in / fade_out", type: "float", default: "0.0", desc: [Fundidos de entrada y salida en segundos; `fade_out` necesita `duration` o `end` y termina justo en el corte.])),
   desc: [Declara una pista validada. La declaración no cambia la línea de tiempo: `scene.play([pista])` fija su inicio en el cursor absoluto de esa llamada. Rutas o tiempos inválidos lanzan `ValueError`.],
 )[
 ```python
@@ -53,6 +53,17 @@ narration = scene.media.audio(
     fade_out=0.25,
 )
 scene.play([narration])
+```
+
+Música de fondo que dura 30 s y se funde al final, mientras la escena sigue
+programándose desde el mismo cursor:
+
+```python
+>>>from gaanim import *
+>>>scene = Scene()
+>>>scene.assets.assets_dir("assets")
+musica = scene.media.audio("music.ogg", end=30.0, fade_out=1.5, volume=0.5)
+scene.play([musica])  # no mueve el cursor: lo que sigue suena sobre la música
 ```
 ]
 

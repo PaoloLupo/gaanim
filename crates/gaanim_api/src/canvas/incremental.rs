@@ -65,6 +65,7 @@ impl SceneModel {
             margin,
             asset_root,
             audio_tracks,
+            tempo,
             // Editor metadata: its timing already lives in the segment waits
             // and `audio_tracks`, and it is never compiled.
             narration: _,
@@ -91,6 +92,7 @@ impl SceneModel {
         global.add(margin);
         global.add(asset_root);
         global.add(audio_tracks);
+        global.add(tempo);
         global.add(branding);
         global.add(camera_position);
         global.add(lighting_3d);

@@ -138,6 +138,7 @@ impl CanvasState {
                 | AnimationType::RotateBy3D { .. } => "rotation",
                 AnimationType::SignalFloat { .. } => "signal",
                 AnimationType::PathTrim { .. } => "trim",
+                AnimationType::PathPointsTo { .. } => "points",
                 AnimationType::TextAnimator(_) => "text_animator",
                 _ => "other",
             }
@@ -219,7 +220,9 @@ impl CanvasState {
                     }
                     return;
                 }
-                Op::Wait(_) | Op::Play(_) | Op::Animate { active: true, .. } => break,
+                Op::Wait(_) | Op::Play(_) | Op::Launch(_) | Op::Animate { active: true, .. } => {
+                    break;
+                }
                 Op::LayoutTransition {
                     duration: Some(_), ..
                 }
@@ -316,6 +319,9 @@ pub(crate) enum Op {
     Immediate(AnimationBuilder),
     /// Play several animations in parallel.
     Play(Vec<AnimationBuilder>),
+    /// Play several animations in parallel from the cursor without moving
+    /// it, so later operations run over them.
+    Launch(Vec<AnimationBuilder>),
     /// Set the fill of selected glyphs after their textual hierarchy exists.
     FragmentFill {
         target: ObjectId,
