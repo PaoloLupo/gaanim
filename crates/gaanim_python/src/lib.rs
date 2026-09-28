@@ -1,6 +1,3 @@
-// Proving the post-process pyclass `Sync` walks deep renderer types.
-#![recursion_limit = "256"]
-
 use ::gaanim_core as engine_core;
 use pyo3::prelude::*;
 

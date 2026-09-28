@@ -41,10 +41,10 @@ impl PyLayoutExpression {
             }
             return Ok((expression.inner.clone(), Some(expression.owner.clone())));
         }
-        if let Ok(value) = value.extract::<f64>() {
-            if value.is_finite() {
-                return Ok((value.into(), None));
-            }
+        if let Ok(value) = value.extract::<f64>()
+            && value.is_finite()
+        {
+            return Ok((value.into(), None));
         }
         Err(pyo3::exceptions::PyTypeError::new_err(
             "layout expressions only support finite scalars and other linear expressions",
@@ -732,11 +732,11 @@ impl PyLayout {
                 let state = self.inner.lock().expect("layout poisoned");
                 (state.canvas.clone(), state.root.clone())
             };
-            let diagnostics = canvas
+
+            canvas
                 .lock()
                 .expect("scene canvas poisoned")
-                .layout_diagnostics(&root);
-            diagnostics
+                .layout_diagnostics(&root)
         })
     }
 }

@@ -106,7 +106,7 @@ impl PyColor {
             _ => {
                 return Err(PyValueError::new_err(
                     "Color(r, g, b, a?) requires all three RGB components",
-                ))
+                ));
             }
         };
         Ok(Self(peniko::Color::from_rgba8(r, g, b, a.unwrap_or(0xFF))))

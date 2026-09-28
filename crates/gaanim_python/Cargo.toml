@@ -2,7 +2,7 @@
 name = "gaanim_python"
 version = "0.6.2"
 license = "MIT OR Apache-2.0"
-edition = "2021"
+edition = "2024"
 
 [lib]
 name = "gaanim_python"
