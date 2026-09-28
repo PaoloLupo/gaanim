@@ -1022,8 +1022,6 @@ pub(crate) fn spawn_name(kind: &SpawnKind) -> &'static str {
         SpawnKind::Primitive3D(_) => "primitive_3d",
         SpawnKind::Polyline3D { .. } => "polyline_3d",
         SpawnKind::LineSegments3D { .. } => "line_segments_3d",
-        SpawnKind::GltfNode { .. } => "gltf_node",
-        SpawnKind::GltfModel { .. } => "gltf_model",
         SpawnKind::Text(_) => "text",
         SpawnKind::Typst { .. } => "typst",
         SpawnKind::Image { .. } => "image",

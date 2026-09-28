@@ -248,11 +248,9 @@ rejilla repetidos, porque no hay nada que interpolar sin ejecutar la escena.
 
 = Límites
 
-La grabación se niega, con un mensaje, cuando la escena contiene algo que el
-paquete aún no puede reproducir exactamente. En esos casos exporta un vídeo:
-
-- contenido 3D (mallas, superficies, modelos glTF y ejes 3D);
-- clips de vídeo (`scene.media.video`).
+La grabación se niega, con un mensaje, cuando la escena contiene clips de
+vídeo (`scene.media.video`), que el paquete aún no puede reproducir
+exactamente. En ese caso exporta un vídeo. El contenido 3D sí se graba.
 
 Los paquetes son de un solo uso: no se pueden editar ni volver a convertir en
 script. Guarda el proyecto original para seguir trabajando.

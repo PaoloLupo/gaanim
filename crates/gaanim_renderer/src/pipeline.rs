@@ -193,19 +193,14 @@ fn interactive_background_pixel_size(
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub struct MainVelloScene;
 
-/// Full-target color clear performed before the fitted PBR viewport.
+/// Full-target color clear performed before the canvas is drawn.
 ///
-/// A camera only clears inside its viewport. Keeping this pass separate avoids
-/// stale pixels around a fitted canvas and lets presentation hosts choose a
-/// neutral letterbox color without changing the authored scene background.
+/// Keeping this pass separate avoids stale pixels around a fitted canvas and
+/// lets presentation hosts choose a neutral letterbox color without changing
+/// the authored scene background.
 #[doc(hidden)]
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub struct GaanimFullWindowClearCamera;
-
-/// The primary PBR camera owned by the shared Gaanim scene runtime.
-#[doc(hidden)]
-#[derive(Component, Debug, Clone, Copy, Default)]
-pub struct GaanimPbrCamera;
 
 /// Retained GPU cache of precompiled local Vello scenes for each Mobject.
 ///
@@ -320,6 +315,9 @@ pub struct ExtractedElement {
     /// [`gaanim_animation::EchoGhost::rank`] of an echo copy, 0 otherwise:
     /// copies of one source draw beneath it, the farthest first.
     echo_rank: u32,
+    /// A [`gaanim_animation::StrokeTip`], which shares its path's order and
+    /// draws above it.
+    tip: bool,
 }
 
 /// A camera view screen: its view and the stroke drawn above it.
@@ -370,7 +368,8 @@ impl ExtractedCameraView {
 
 impl ExtractedElement {
     /// Deterministic layering: z-index, then creation order, then echo copies
-    /// beneath their source.
+    /// beneath their source and stroke tips beneath the stroke they share an
+    /// order with.
     fn draw_order(a: &Self, b: &Self) -> std::cmp::Ordering {
         a.render_order
             .z_index
@@ -381,6 +380,7 @@ impl ExtractedElement {
                     .cmp(&b.render_order.creation_order),
             )
             .then(b.echo_rank.cmp(&a.echo_rank))
+            .then(b.tip.cmp(&a.tip))
     }
 
     /// This element as the camera of a view sees it: `content` maps it onto
@@ -406,6 +406,7 @@ impl ExtractedElement {
             layer: self.layer.clone(),
             screen: self.screen.clone(),
             echo_rank: self.echo_rank,
+            tip: self.tip,
         }
     }
 }
@@ -1787,11 +1788,7 @@ pub fn sync_gaanim_camera_to_bevy_system(
     }
 }
 
-/// System: Synchronizes the `gaanim_math::Camera` resource to any Bevy `Camera3d` (perspective).
-///
-/// Used for the hybrid 2D/3D pipeline where 3D meshes are rendered with Bevy's PBR
-/// while Vello continues to handle 2D vector content. When the camera is orthographic
-/// the 3D camera is still updated with the same position/rotation for consistency.
+/// The window viewport of the fitted canvas under a perspective camera.
 pub(crate) fn fitted_canvas_viewport(
     cam: &gaanim_math::Camera,
     viewport: gaanim_math::CameraViewport,
@@ -1827,111 +1824,6 @@ pub(crate) fn fitted_canvas_viewport(
         ),
         depth: 0.0..1.0,
     })
-}
-
-pub fn sync_gaanim_camera_to_bevy_3d_system(
-    gaanim_camera: Option<Res<gaanim_math::ResolvedCamera>>,
-    authored_camera: Option<Res<gaanim_math::Camera>>,
-    rig_camera: Option<Res<gaanim_math::CameraRigCamera>>,
-    mut bevy_cameras: Query<
-        (
-            &mut Camera,
-            &bevy::camera::RenderTarget,
-            &mut Transform,
-            &mut Projection,
-            Option<&gaanim_scene::AuthoritativeCameraView>,
-        ),
-        With<Camera3d>,
-    >,
-    windows: Query<&Window>,
-    primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
-) {
-    let Some(resolved_camera) = gaanim_camera else {
-        return;
-    };
-    let primary_window = primary_window.single().ok();
-    for (mut bevy_camera, render_target, mut transform, mut projection, authoritative_view) in
-        &mut bevy_cameras
-    {
-        let cam: &gaanim_math::Camera = if authoritative_view.is_some() {
-            rig_camera
-                .as_deref()
-                .map(|rig| &rig.0)
-                .or(authored_camera.as_deref())
-                .unwrap_or(&resolved_camera.camera)
-        } else {
-            &resolved_camera.camera
-        };
-        transform.translation = Vec3::new(
-            cam.position.x as f32,
-            cam.position.y as f32,
-            cam.position.z as f32,
-        );
-        // Convert DQuat -> Quat
-        transform.rotation = Quat::from_xyzw(
-            cam.rotation.x as f32,
-            cam.rotation.y as f32,
-            cam.rotation.z as f32,
-            cam.rotation.w as f32,
-        );
-        match cam.projection {
-            gaanim_math::Projection::Perspective { fov_y, near, far } => {
-                if !matches!(projection.as_ref(), Projection::Perspective(_)) {
-                    *projection = Projection::Perspective(Default::default());
-                }
-                let target_window = match render_target {
-                    bevy::camera::RenderTarget::Window(bevy::window::WindowRef::Primary) => {
-                        primary_window
-                    }
-                    bevy::camera::RenderTarget::Window(bevy::window::WindowRef::Entity(entity)) => {
-                        Some(*entity)
-                    }
-                    _ => None,
-                };
-                if let Some(window) = target_window.and_then(|entity| windows.get(entity).ok()) {
-                    bevy_camera.viewport =
-                        fitted_canvas_viewport(cam, resolved_camera.viewport, window);
-                }
-                if let Projection::Perspective(persp) = projection.as_mut() {
-                    persp.fov = fov_y as f32;
-                    persp.near = near as f32;
-                    persp.far = far as f32;
-                    // Aspect is derived from viewport dimensions automatically by Bevy,
-                    // but we set it explicitly to keep headless/export in sync.
-                    persp.aspect_ratio = if cam.viewport_height > 0 {
-                        cam.viewport_width as f32 / cam.viewport_height as f32
-                    } else {
-                        1.0
-                    };
-                }
-            }
-            gaanim_math::Projection::Orthographic { zoom } => {
-                // Camera3d starts with a perspective projection. Assign the
-                // orthographic variant explicitly when the authored rig resets
-                // to 2D; merely updating an existing variant leaves the old
-                // perspective frustum active and can magnify nearby meshes into
-                // edge-wide colour bands.
-                if !matches!(projection.as_ref(), Projection::Orthographic(_)) {
-                    *projection = Projection::Orthographic(
-                        bevy::camera::OrthographicProjection::default_3d(),
-                    );
-                }
-                // Perspective uses a fitted canvas viewport. Orthographic 2D
-                // rendering returns to the complete target, so retaining that
-                // crop would expose stale pixels around the canvas.
-                bevy_camera.viewport = None;
-                if let Projection::Orthographic(ortho) = projection.as_mut() {
-                    let effective =
-                        resolved_camera.pixels_per_unit() * zoom * resolved_camera.viewport.scale;
-                    ortho.scale = if effective > 0.0 {
-                        1.0 / effective as f32
-                    } else {
-                        1.0
-                    };
-                }
-            }
-        }
-    }
 }
 
 /// System: Cleans up stale fragment cache entries when Mobject entities are destroyed.
@@ -1999,16 +1891,11 @@ fn compile_scene_with_pins(
     pins: Option<&mut PinnedElements>,
 ) -> vello::Scene {
     let extraction = extract_world(world, camera, pins, true);
-    let is_perspective = camera
-        .is_some_and(|cam| matches!(cam.projection, gaanim_math::Projection::Perspective { .. }));
     let background = world.get_resource::<CanvasBackground>();
     compose_elements(
         &extraction.elements,
         extraction.transition.as_ref(),
-        (!is_perspective)
-            .then_some(background)
-            .flatten()
-            .map(|background| (background, background.pixel_size)),
+        background.map(|background| (background, background.pixel_size)),
         extraction.background_time,
         None,
     )
@@ -2329,6 +2216,7 @@ fn extract_world(
             echo_rank: world
                 .get::<gaanim_animation::EchoGhost>(entity)
                 .map_or(0, |echo| echo.rank),
+            tip: world.get::<gaanim_animation::StrokeTip>(entity).is_some(),
         });
         if exempt && let (Some(pins), Some(element)) = (pins.as_deref_mut(), extracted.last()) {
             pins.elements.push(element.clone());
@@ -2340,6 +2228,16 @@ fn extract_world(
         }
         pins.recorded = true;
     }
+    if let Some(camera) = camera {
+        extract_three_d(
+            world,
+            camera,
+            transition_frame.as_ref(),
+            !camera_views.is_empty(),
+            opacity_fallback,
+            &mut extracted,
+        );
+    }
 
     extracted.sort_by(ExtractedElement::draw_order);
 
@@ -2350,13 +2248,316 @@ fn extract_world(
     }
 }
 
-/// Composite sorted drawables over the canvas background.
-///
-/// In perspective the 3D camera already clears to the background color and
-/// the Vello scene is drawn after the 3D pass (order 1 vs 0) so labels stay
-/// above meshes; callers then pass no background, so an opaque rectangle
-/// does not hide the meshes. With `gpu`, a shader background records its
-/// request there instead of rasterizing on the CPU.
+/// The 3D content of one drawable, with how it composes: whether it is a HUD
+/// overlay and its view layer.
+pub(crate) type ThreeDSource<'a> = (Entity, crate::three_d::Content<'a>, bool, Option<Arc<str>>);
+
+/// Components of a drawable with 3D content.
+type ThreeDData = (
+    Entity,
+    &'static GlobalSpatialTransform,
+    &'static GlobalOpacity,
+    Option<&'static gaanim_scene::TriangleMeshData>,
+    Option<&'static gaanim_scene::LineListData>,
+    Option<&'static gaanim_scene::Material3D>,
+    Has<gaanim_scene::HudOverlay>,
+    Option<&'static ViewLayer>,
+);
+type ThreeDFilter = (With<Visible>, With<gaanim_scene::Mesh3DMarker>);
+/// Query of the drawables with 3D content.
+type ThreeDQuery<'w, 's> = Query<'w, 's, ThreeDData, ThreeDFilter>;
+/// Query of the tips drawn on strokes.
+type TipQuery<'w, 's> = Query<'w, 's, (), With<gaanim_animation::StrokeTip>>;
+
+/// One drawable of a [`ThreeDQuery`].
+type ThreeDItem<'a> = (
+    Entity,
+    &'a GlobalSpatialTransform,
+    &'a GlobalOpacity,
+    Option<&'a gaanim_scene::TriangleMeshData>,
+    Option<&'a gaanim_scene::LineListData>,
+    Option<&'a gaanim_scene::Material3D>,
+    bool,
+    Option<&'a ViewLayer>,
+);
+
+fn three_d_source<'a>(
+    (entity, transform, opacity, mesh, lines, material, hud, layer): ThreeDItem<'a>,
+) -> ThreeDSource<'a> {
+    (
+        entity,
+        crate::three_d::Content {
+            transform,
+            opacity,
+            mesh,
+            lines,
+            material,
+        },
+        hud,
+        layer.map(|layer| Arc::clone(&layer.0)),
+    )
+}
+
+/// [`three_d_elements`] of every drawable with 3D content in `world`.
+fn extract_three_d(
+    world: &mut World,
+    camera: &gaanim_math::Camera,
+    transition_frame: Option<&gaanim_scene::SceneTransitionFrame>,
+    with_lineage: bool,
+    opacity_fallback: kurbo::Rect,
+    extracted: &mut Vec<ExtractedElement>,
+) {
+    let lighting = world
+        .get_resource::<gaanim_scene::Lighting3D>()
+        .copied()
+        .unwrap_or_default();
+    let mut content = world.query_filtered::<ThreeDData, ThreeDFilter>();
+    let mut parents = world.query::<&ChildOf>();
+    let world: &World = world;
+    three_d_elements(
+        camera,
+        &lighting,
+        content.iter(world).map(three_d_source),
+        |entity| parents.get(world, entity).ok().map(ChildOf::parent),
+        transition_frame,
+        with_lineage,
+        opacity_fallback,
+        extracted,
+    );
+}
+
+/// Native 3D content (see [`crate::three_d`]) as drawables beneath the 2D
+/// content, back to front. Consecutive primitives of one drawable with the
+/// same paint share an element.
+#[allow(clippy::too_many_arguments)]
+fn three_d_elements<'a>(
+    camera: &gaanim_math::Camera,
+    lighting: &gaanim_scene::Lighting3D,
+    sources: impl Iterator<Item = ThreeDSource<'a>>,
+    mut parent_of: impl FnMut(Entity) -> Option<Entity>,
+    transition_frame: Option<&gaanim_scene::SceneTransitionFrame>,
+    with_lineage: bool,
+    opacity_fallback: kurbo::Rect,
+    extracted: &mut Vec<ExtractedElement>,
+) {
+    use crate::three_d::{Primitive, Projector, sort_back_to_front};
+
+    let Some(projector) = Projector::new(camera) else {
+        return;
+    };
+    let mut composition = HashMap::new();
+    let mut items = Vec::new();
+    for (entity, content, hud, layer) in sources {
+        let before = items.len();
+        projector.push(entity, &content, lighting, &mut items);
+        if items.len() > before {
+            composition.insert(entity, (hud, layer));
+        }
+    }
+    if items.is_empty() {
+        return;
+    }
+    sort_back_to_front(&mut items);
+
+    // Each run of primitives that shares an element: one path and one paint.
+    let mut runs: Vec<Run> = Vec::new();
+    for item in items {
+        let entity = item.key;
+        let opacity = item.opacity;
+        match item.primitive {
+            Primitive::Solid { faces } => {
+                let mut silhouette = kurbo::BezPath::new();
+                for (points, _) in &faces {
+                    push_triangle(&mut silhouette, points);
+                }
+                runs.push(Run {
+                    entity,
+                    opacity,
+                    path: silhouette,
+                    paint: item.paint,
+                    kind: RunKind::Fill,
+                });
+                for (points, paint) in faces {
+                    extend_run(
+                        &mut runs,
+                        entity,
+                        opacity,
+                        paint,
+                        RunKind::SealedFill,
+                        |path| push_triangle(path, &points),
+                    );
+                }
+            }
+            Primitive::Triangle { points, seam } => {
+                let kind = if seam {
+                    RunKind::SealedFill
+                } else {
+                    RunKind::Fill
+                };
+                extend_run(&mut runs, entity, opacity, item.paint, kind, |path| {
+                    push_triangle(path, &points)
+                });
+            }
+            Primitive::Segment { points } => {
+                extend_run(
+                    &mut runs,
+                    entity,
+                    opacity,
+                    item.paint,
+                    RunKind::Line,
+                    |path| {
+                        path.move_to(points[0]);
+                        path.line_to(points[1]);
+                    },
+                );
+            }
+        }
+    }
+
+    for (creation_order, run) in runs.into_iter().enumerate() {
+        let Run {
+            entity,
+            opacity,
+            path,
+            paint,
+            kind,
+        } = run;
+        // A fading drawable composites its runs in one layer, clipped to
+        // what they draw.
+        let reach = projector.line_width().max(projector.seam_width());
+        let opacity_bounds = if opacity < 1.0 {
+            path.bounding_box().inflate(reach, reach)
+        } else {
+            opacity_fallback
+        };
+        let brush = paint.brush();
+        let stroke = match kind {
+            RunKind::Line => Some(StrokeBrush {
+                brush: Some(brush.clone()),
+                style: kurbo::Stroke::new(projector.line_width()).with_caps(kurbo::Cap::Round),
+            }),
+            RunKind::SealedFill => Some(StrokeBrush {
+                brush: Some(brush.clone()),
+                style: kurbo::Stroke::new(projector.seam_width()),
+            }),
+            RunKind::Fill => None,
+        };
+        let recipe = FragmentRecipe {
+            path: Some(Arc::new(path)),
+            fill: (kind != RunKind::Line).then_some(brush),
+            stroke,
+            ..Default::default()
+        };
+        let scene = build_fragment(&recipe, None).scene;
+        let (hud, layer) = composition.get(&entity).cloned().unwrap_or_default();
+        extracted.push(ExtractedElement {
+            entity,
+            recipe: Some(Arc::new(recipe)),
+            lottie: None,
+            transform: kurbo::Affine::IDENTITY,
+            opacity,
+            opacity_bounds,
+            opacity_extent: None,
+            opacity_group: entity,
+            // Beneath every 2D drawable, in depth order.
+            render_order: RenderOrder {
+                z_index: i32::MIN,
+                creation_order: creation_order as u64,
+            },
+            scene: Arc::new(scene),
+            clip_mask: None,
+            blend: None,
+            transition_side: transition_frame.map_or_else(Default::default, |frame| {
+                frame.side_of(entity, &mut parent_of)
+            }),
+            lineage: if with_lineage {
+                element_lineage(entity, &mut parent_of)
+            } else {
+                Vec::new()
+            },
+            view_bounds: None,
+            in_views: !hud,
+            layer,
+            screen: None,
+            echo_rank: 0,
+            tip: false,
+        });
+    }
+}
+
+/// Consecutive 3D primitives drawn as one element: one path, one paint.
+struct Run {
+    entity: Entity,
+    opacity: f32,
+    path: kurbo::BezPath,
+    paint: crate::three_d::Paint,
+    kind: RunKind,
+}
+
+/// How a run of 3D primitives is painted.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RunKind {
+    Fill,
+    /// A fill whose edges are also stroked, closing antialiasing seams
+    /// between neighbouring opaque triangles.
+    SealedFill,
+    Line,
+}
+
+/// Append a triangle, always with the same orientation: triangles merged into
+/// one nonzero fill must not cancel where front and back faces overlap.
+fn push_triangle(path: &mut kurbo::BezPath, points: &[kurbo::Point; 3]) {
+    let [a, b, c] = *points;
+    let (b, c) = if (b - a).cross(c - a) < 0.0 {
+        (c, b)
+    } else {
+        (b, c)
+    };
+    path.move_to(a);
+    path.line_to(b);
+    path.line_to(c);
+    path.close_path();
+}
+
+/// Add to the last run when it has the same drawable, kind and solid paint;
+/// otherwise start a run. Gradients never share a run: each is fitted to one
+/// primitive.
+fn extend_run(
+    runs: &mut Vec<Run>,
+    entity: Entity,
+    opacity: f32,
+    paint: crate::three_d::Paint,
+    kind: RunKind,
+    add: impl FnOnce(&mut kurbo::BezPath),
+) {
+    let shares = matches!(paint, crate::three_d::Paint::Solid(_));
+    match runs.last_mut() {
+        Some(last)
+            if shares
+                && last.entity == entity
+                && last.kind == kind
+                && last.opacity == opacity
+                && last.paint == paint =>
+        {
+            add(&mut last.path)
+        }
+        _ => {
+            let mut path = kurbo::BezPath::new();
+            add(&mut path);
+            runs.push(Run {
+                entity,
+                opacity,
+                path,
+                paint,
+                kind,
+            });
+        }
+    }
+}
+
+/// Composite sorted drawables over the canvas background. With `gpu`, a
+/// shader background records its request there instead of rasterizing on the
+/// CPU.
 fn compose_elements(
     elements: &[ExtractedElement],
     transition: Option<&gaanim_scene::SceneTransitionFrame>,
@@ -2590,6 +2791,8 @@ pub fn compose_captured(
                     overlay,
                 }),
                 echo_rank: element.echo_rank,
+                // Captured frames keep their recorded order.
+                tip: false,
             }
         })
         .collect();
@@ -2631,22 +2834,16 @@ pub fn external_frame_system(
     let Some(frame) = external.frame.clone() else {
         return;
     };
-    let is_perspective = gaanim_camera
-        .as_ref()
-        .is_some_and(|cam| matches!(cam.projection, gaanim_math::Projection::Perspective { .. }));
-    let background = canvas_bg
-        .as_deref()
-        .filter(|_| !is_perspective)
-        .map(|canvas_bg| {
-            (
+    let background = canvas_bg.as_deref().map(|canvas_bg| {
+        (
+            canvas_bg,
+            interactive_background_pixel_size(
                 canvas_bg,
-                interactive_background_pixel_size(
-                    canvas_bg,
-                    gaanim_camera.as_deref(),
-                    preview.as_deref(),
-                ),
-            )
-        });
+                gaanim_camera.as_deref(),
+                preview.as_deref(),
+            ),
+        )
+    });
     // Viewport pixels per world unit, as the interactive preview pads layers.
     let pixels_per_unit = gaanim_camera.as_ref().and_then(|cam| match cam.projection {
         gaanim_math::Projection::Orthographic { zoom } => Some(zoom * cam.viewport.scale),
@@ -2741,7 +2938,13 @@ pub fn gaanim_render_system(
     transition_frame: Option<Res<gaanim_scene::SceneTransitionFrame>>,
     child_query: Query<&ChildOf>,
     order_query: Query<&RenderOrder>,
-    (blend_query, echo_query): (Query<&ElementBlend>, Query<&gaanim_animation::EchoGhost>),
+    (blend_query, echo_query, tip_query, three_d_query, lighting): (
+        Query<&ElementBlend>,
+        Query<&gaanim_animation::EchoGhost>,
+        TipQuery,
+        ThreeDQuery,
+        Option<Res<gaanim_scene::Lighting3D>>,
+    ),
     query_mobjects: Query<
         (
             Entity,
@@ -3117,31 +3320,37 @@ pub fn gaanim_render_system(
                 overlay: cache.screen_overlays.get(&mobj_id.0).cloned(),
             }),
             echo_rank: echo_query.get(entity).map_or(0, |echo| echo.rank),
+            tip: tip_query.contains(entity),
         });
+    }
+    if let Some(camera) = gaanim_camera.as_deref() {
+        three_d_elements(
+            &camera.camera,
+            &lighting.as_deref().copied().unwrap_or_default(),
+            three_d_query.iter().map(three_d_source),
+            |entity| child_query.get(entity).ok().map(ChildOf::parent),
+            transition_frame.as_deref(),
+            !camera_views.is_empty(),
+            opacity_fallback,
+            local_extracted,
+        );
     }
 
     // Sort elements deterministically by RenderOrder to ensure correct layering
     local_extracted.sort_by(ExtractedElement::draw_order);
 
-    // Assemble the global composited Scene in Bevy world coordinates. In
-    // perspective the canvas background is left out (see `compose_elements`).
-    let is_perspective = gaanim_camera
-        .as_ref()
-        .is_some_and(|cam| matches!(cam.projection, gaanim_math::Projection::Perspective { .. }));
+    // Assemble the global composited Scene in Bevy world coordinates.
     let mut shader_request = None;
-    let background = canvas_bg
-        .as_deref()
-        .filter(|_| !is_perspective)
-        .map(|canvas_bg| {
-            (
+    let background = canvas_bg.as_deref().map(|canvas_bg| {
+        (
+            canvas_bg,
+            interactive_background_pixel_size(
                 canvas_bg,
-                interactive_background_pixel_size(
-                    canvas_bg,
-                    gaanim_camera.as_deref(),
-                    preview.as_deref(),
-                ),
-            )
-        });
+                gaanim_camera.as_deref(),
+                preview.as_deref(),
+            ),
+        )
+    });
     let mut main_scene = compose_elements(
         local_extracted.as_slice(),
         transition_frame.as_deref(),
@@ -3217,6 +3426,18 @@ mod tests {
 
     fn rect_path(x0: f64, y0: f64, x1: f64, y1: f64) -> Arc<kurbo::BezPath> {
         Arc::new(kurbo::Rect::new(x0, y0, x1, y1).to_path(0.1))
+    }
+
+    #[test]
+    fn merged_triangles_of_either_winding_never_cancel() {
+        use kurbo::Shape;
+        let a = kurbo::Point::new(0.0, 0.0);
+        let b = kurbo::Point::new(10.0, 0.0);
+        let c = kurbo::Point::new(0.0, 10.0);
+        let mut path = kurbo::BezPath::new();
+        push_triangle(&mut path, &[a, b, c]);
+        push_triangle(&mut path, &[a, c, b]);
+        assert_eq!(path.winding(kurbo::Point::new(2.0, 2.0)).abs(), 2);
     }
 
     #[test]
@@ -4155,6 +4376,7 @@ mod tests {
             layer: None,
             screen: None,
             echo_rank: 0,
+            tip: false,
         };
         let run = [
             element(kurbo::Rect::new(-6.0, 1.0, -3.0, 1.2)),
@@ -4188,6 +4410,7 @@ mod tests {
             layer: None,
             screen: None,
             echo_rank: 0,
+            tip: false,
         };
         let elements = vec![element(0.5), element(0.5), element(0.5), element(0.75)];
 
@@ -4217,6 +4440,7 @@ mod tests {
             layer: None,
             screen: None,
             echo_rank: 0,
+            tip: false,
         };
         let circle = kurbo::Circle::new((0.0, 0.0), 1.0);
         let red = peniko::Color::from_rgba8(200, 0, 0, 255);
@@ -4275,6 +4499,7 @@ mod tests {
             layer: None,
             screen: None,
             echo_rank: 0,
+            tip: false,
         };
         let multiply = Some(peniko::BlendMode::from(peniko::Mix::Multiply));
         let elements = vec![element(None), element(multiply), element(None)];
@@ -4311,6 +4536,7 @@ mod tests {
             layer: None,
             screen: None,
             echo_rank: 0,
+            tip: false,
         };
         let elements = vec![
             element(Some(mask(1, false))),
@@ -4603,86 +4829,5 @@ mod tests {
 
         assert_eq!(viewport.physical_size, UVec2::new(640, 360));
         assert_eq!(viewport.physical_position, UVec2::new(320, 80));
-    }
-
-    #[test]
-    fn presentation_camera_uses_rig_camera_instead_of_editor_override() {
-        let mut authored = gaanim_math::Camera::perspective_3d(1280, 720, 0.8);
-        authored.position = gaanim_core::glam::DVec3::new(1.0, 2.0, 3.0);
-        let mut rig = authored;
-        rig.position = gaanim_core::glam::DVec3::new(4.0, 5.0, 6.0);
-        let mut resolved = authored.clone();
-        resolved.position = gaanim_core::glam::DVec3::new(9.0, 8.0, 7.0);
-
-        let mut app = App::new();
-        app.insert_resource(authored)
-            .insert_resource(gaanim_math::CameraRigCamera(rig))
-            .insert_resource(gaanim_math::ResolvedCamera::new(
-                resolved,
-                gaanim_math::CameraViewport::default(),
-            ))
-            .add_systems(Update, sync_gaanim_camera_to_bevy_3d_system);
-        let presentation = app
-            .world_mut()
-            .spawn((Camera3d::default(), gaanim_scene::AuthoritativeCameraView))
-            .id();
-        let inspection = app.world_mut().spawn(Camera3d::default()).id();
-
-        app.update();
-
-        assert_eq!(
-            app.world()
-                .entity(presentation)
-                .get::<Transform>()
-                .unwrap()
-                .translation,
-            Vec3::new(4.0, 5.0, 6.0)
-        );
-        assert_eq!(
-            app.world()
-                .entity(inspection)
-                .get::<Transform>()
-                .unwrap()
-                .translation,
-            Vec3::new(9.0, 8.0, 7.0)
-        );
-    }
-
-    #[test]
-    fn pbr_camera_switches_back_to_orthographic_and_releases_perspective_viewport() {
-        let camera = gaanim_math::Camera::ortho_2d(960, 540);
-        let mut app = App::new();
-        app.insert_resource(camera)
-            .insert_resource(gaanim_math::ResolvedCamera::new(
-                camera,
-                gaanim_math::CameraViewport::default(),
-            ))
-            .add_systems(Update, sync_gaanim_camera_to_bevy_3d_system);
-        let entity = app.world_mut().spawn(Camera3d::default()).id();
-        app.world_mut()
-            .entity_mut(entity)
-            .get_mut::<Camera>()
-            .unwrap()
-            .viewport = Some(bevy::camera::Viewport {
-            physical_position: UVec2::new(30, 0),
-            physical_size: UVec2::new(900, 540),
-            depth: 0.0..1.0,
-        });
-
-        app.update();
-
-        assert!(matches!(
-            app.world().entity(entity).get::<Projection>(),
-            Some(Projection::Orthographic(_))
-        ));
-        assert!(
-            app.world()
-                .entity(entity)
-                .get::<Camera>()
-                .unwrap()
-                .viewport
-                .is_none(),
-            "the fitted perspective viewport must not survive a reset to 2D"
-        );
     }
 }

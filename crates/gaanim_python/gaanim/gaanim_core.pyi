@@ -348,8 +348,8 @@ class Background:
         the authored scene bounds at their effective viewport resolution.
         Legacy two-argument shaders remain accepted as static backgrounds.
         Invalid WGSL raises ``ValueError`` and an unreadable asset raises
-        ``RuntimeError``. ``fallback`` is used outside the scene bounds, by
-        native 3D clears, and if rasterization is unavailable. The shader may
+        ``RuntimeError``. ``fallback`` is used outside the scene bounds and if
+        rasterization is unavailable. The shader may
         call ``gaanim_frame_size(resolution)`` for the scene frame size in
         world units, e.g. to draw a grid in scene units.
         """
@@ -1171,7 +1171,7 @@ class Anim:
 
         Text glyphs interpolate independently from their current fills, so
         fragment-specific colors converge to this target. On ``Primitive3D``
-        this targets the PBR material base color instead and requires a solid.
+        this targets the material base color instead and requires a solid.
         Same-kind gradients interpolate geometry and normalized color stops;
         a solid can transition to a gradient. Incompatible gradient kinds raise
         ``ValueError``. Text selections retain their solid-color contract.
@@ -1186,7 +1186,7 @@ class Anim:
         """
         ...
     def material(self, material: Material3D) -> Anim:
-        """Target every animatable PBR channel of a native Primitive3D."""
+        """Target every animatable material channel of a Primitive3D."""
         ...
     def opacity(self, value: ScalarSource) -> Anim:
         """Target drawable opacity, clamped to the 0..1 range.
@@ -2142,11 +2142,13 @@ class Drawable:
     width: LayoutExpression
     height: LayoutExpression
     def part(self, id: str) -> Drawable:
-        """Return a named SVG part or glTF node by unique name/canonical path."""
+        """Return a named SVG part by unique name or canonical path."""
         ...
 
     def parts(self) -> tuple[str, ...]: ...
-    def animations(self) -> tuple[str, ...]: ...
+    def animations(self) -> tuple[str, ...]:
+        """Always empty: glTF models and their Actions are no longer supported."""
+        ...
     @property
     def animate(self) -> Anim:
         """Start a typed compound property animation.
@@ -2170,7 +2172,8 @@ class Drawable:
         transition: float = 0.0,
         start_time: float = 0.0,
     ) -> Anim:
-        """Sample a Blender Action deterministically on the scene timeline."""
+        """Raise ``NotImplementedError``: glTF models and their Actions are no
+        longer supported."""
         ...
     def fill(self, paint: Paint) -> Self:
         """Apply fill to this drawable and return the result.
@@ -2710,7 +2713,7 @@ class Drawable:
         the same ``Drawable``.
 
         Example:
-            title = scene.text("glTF demo").hud().move_to(0.0, 3.5)
+            title = scene.text("3D demo").hud().move_to(0.0, 3.5)
         """
         ...
     def scale_by(self, factor: float) -> Self:
@@ -3088,7 +3091,7 @@ ScalarSource: TypeAlias = float | Parameter | Variable | Computed | TimeInput
 AngleRay: TypeAlias = Direction | Endpoint
 
 class Material3D:
-    """PBR material whose numeric properties interpolate in linear space."""
+    """Material of a lit 3D primitive; its numeric properties interpolate in linear space."""
     def __init__(
         self,
         color: ColorLike = WHITE,
@@ -3115,7 +3118,7 @@ class Material3D:
     def emissive_strength(self) -> float: ...
 
 class Primitive3D(Drawable):
-    """Native indexed 3D mesh with an animatable PBR material."""
+    """Indexed 3D mesh with an animatable material, lit and drawn by Vello."""
     def material(self, material: Material3D) -> Self: ...
 
 TextRole: TypeAlias = Literal["title", "subtitle", "kicker", "heading", "body", "caption", "label", "code", "math"]
@@ -3648,7 +3651,7 @@ class Canvas:
         timeline seeks averaged in linear light, so blurred exports are
         deterministic, and they never cross a segment cut. The shutter length
         follows the export frame rate (snapshots use 60 fps). ``None`` turns
-        the blur off. The interactive preview and native 3D scenes stay sharp;
+        the blur off. The interactive preview stays sharp;
         rendering costs ``samples`` times as much. Keep a drawable sharp with
         ``drawable.motion_blur(False)``.
 
@@ -5208,7 +5211,17 @@ class Geometry:
         """Create an XZ plane with upward-facing normals."""
         ...
     def lighting_3d(self, preset: Literal["studio", "none"] = "studio", intensity: float = 1.0, shadows: bool = True) -> None:
-        """Configure the scene's single automatic 3D light rig."""
+        """Configure the light of lit 3D primitives.
+
+        ``"studio"`` lights them in Gaanim's style, scaled by ``intensity``:
+        sky and ground light, a soft key light from the upper left, and a
+        faint rim along silhouettes, keeping each material's color readable.
+        ``"none"`` leaves only their emission. ``shadows`` is accepted for existing scripts; 3D content
+        casts no shadows.
+
+        Example:
+            scene.geometry.lighting_3d("studio", intensity=1.2)
+        """
         ...
     def rect(self, width: float, height: float) -> Drawable:
         """Create a rect drawable in the scene.
@@ -5968,7 +5981,7 @@ class LayoutBuilder:
         ...
 
 class MediaLibrary:
-    """Scene-owned loader for image, SVG, glTF, video, Lottie, and audio assets."""
+    """Scene-owned loader for image, SVG, video, Lottie, and audio assets."""
     def audio(
         self,
         path: str,
@@ -6113,7 +6126,11 @@ class MediaLibrary:
         """
         ...
     def gltf(self, path: str, *, scene: str | int | None = None) -> Drawable:
-        """Import a local glTF 2.0 ``.gltf`` or ``.glb`` model."""
+        """Raise ``NotImplementedError``: glTF models are no longer supported.
+
+        Gaanim draws 3D with Vello from its own primitives, surfaces and lines
+        (``scene.geometry.cube``, ``sphere``, ``surface``, ``polyline_3d``).
+        """
         ...
 
 class Visualization:
@@ -6974,7 +6991,7 @@ class AssetManager:
         """
         ...
     def reload_assets(self) -> None:
-        """Clear raster, Lottie JSON, dotLottie package and glTF asset caches.
+        """Clear raster, Lottie JSON and dotLottie package asset caches.
 
         Existing clips retain their resources; subsequent loads see disk changes.
         Example:

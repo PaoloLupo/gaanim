@@ -1,9 +1,7 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass, egui, input::EguiWantsInput};
 use gaanim_math::{Camera, CameraViewOverride, CameraViewport, ResolvedCamera};
-use gaanim_scene::{
-    GlobalOpacity, GltfModelRoot, Mesh3DMarker, Path2D, RenderOrder, Visible, WorldBounds,
-};
+use gaanim_scene::{GlobalOpacity, Mesh3DMarker, Path2D, RenderOrder, Visible, WorldBounds};
 use gaanim_timeline::timeline::{PlaybackStopPolicy, Timeline};
 use ui_kit::{ButtonTone, Icon, PRIMARY_SIZE, ToggleColor, divider, icon_button, palette};
 
@@ -2200,30 +2198,21 @@ fn presentation_blank_overlay_system(
 fn sync_fullscreen_letterbox_color_system(
     presentation_mode: Res<PresentationMode>,
     primary_window: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    mut cameras: Query<(
+    mut cameras: Query<
         &mut bevy::camera::Camera,
-        Option<&gaanim_renderer::pipeline::GaanimFullWindowClearCamera>,
-        Option<&gaanim_renderer::pipeline::GaanimPbrCamera>,
-    )>,
+        With<gaanim_renderer::pipeline::GaanimFullWindowClearCamera>,
+    >,
 ) {
     let fullscreen = presentation_mode.active
         || primary_window
             .single()
             .is_ok_and(|window| !matches!(window.mode, bevy::window::WindowMode::Windowed));
-    for (mut camera, full_window_clear, pbr) in &mut cameras {
-        if full_window_clear.is_some() {
-            camera.clear_color = if fullscreen {
-                bevy::camera::ClearColorConfig::Custom(Color::BLACK)
-            } else {
-                bevy::camera::ClearColorConfig::Default
-            };
-        } else if pbr.is_some() {
-            camera.clear_color = if fullscreen {
-                bevy::camera::ClearColorConfig::Default
-            } else {
-                bevy::camera::ClearColorConfig::None
-            };
-        }
+    for mut camera in &mut cameras {
+        camera.clear_color = if fullscreen {
+            bevy::camera::ClearColorConfig::Custom(Color::BLACK)
+        } else {
+            bevy::camera::ClearColorConfig::Default
+        };
     }
 }
 
@@ -2709,7 +2698,7 @@ fn ray_aabb_intersect(
 #[allow(clippy::type_complexity)]
 fn detect_3d_content_system(
     mut interactive: ResMut<PreviewInteractive>,
-    primitives: Query<(), Or<(With<Mesh3DMarker>, With<GltfModelRoot>)>>,
+    primitives: Query<(), With<Mesh3DMarker>>,
 ) {
     if interactive.detected_3d || primitives.is_empty() {
         return;
@@ -3462,13 +3451,6 @@ mod tests {
                 gaanim_renderer::pipeline::GaanimFullWindowClearCamera,
             ))
             .id();
-        let pbr_camera = app
-            .world_mut()
-            .spawn((
-                bevy::camera::Camera::default(),
-                gaanim_renderer::pipeline::GaanimPbrCamera,
-            ))
-            .id();
 
         app.update();
 
@@ -3480,14 +3462,6 @@ mod tests {
             camera.clear_color,
             bevy::camera::ClearColorConfig::Custom(color) if color == Color::BLACK
         ));
-        let pbr = app
-            .world()
-            .get::<bevy::camera::Camera>(pbr_camera)
-            .expect("PBR camera");
-        assert!(matches!(
-            pbr.clear_color,
-            bevy::camera::ClearColorConfig::Default
-        ));
 
         app.world_mut().resource_mut::<PresentationMode>().active = false;
         app.update();
@@ -3498,14 +3472,6 @@ mod tests {
         assert!(matches!(
             camera.clear_color,
             bevy::camera::ClearColorConfig::Default
-        ));
-        let pbr = app
-            .world()
-            .get::<bevy::camera::Camera>(pbr_camera)
-            .expect("PBR camera");
-        assert!(matches!(
-            pbr.clear_color,
-            bevy::camera::ClearColorConfig::None
         ));
     }
 
@@ -3530,13 +3496,6 @@ mod tests {
                 gaanim_renderer::pipeline::GaanimFullWindowClearCamera,
             ))
             .id();
-        let pbr_camera = app
-            .world_mut()
-            .spawn((
-                bevy::camera::Camera::default(),
-                gaanim_renderer::pipeline::GaanimPbrCamera,
-            ))
-            .id();
 
         app.update();
 
@@ -3547,14 +3506,6 @@ mod tests {
         assert!(matches!(
             clear.clear_color,
             bevy::camera::ClearColorConfig::Custom(color) if color == Color::BLACK
-        ));
-        let pbr = app
-            .world()
-            .get::<bevy::camera::Camera>(pbr_camera)
-            .expect("PBR camera");
-        assert!(matches!(
-            pbr.clear_color,
-            bevy::camera::ClearColorConfig::Default
         ));
 
         let mut query = app
@@ -3573,14 +3524,6 @@ mod tests {
         assert!(matches!(
             clear.clear_color,
             bevy::camera::ClearColorConfig::Default
-        ));
-        let pbr = app
-            .world()
-            .get::<bevy::camera::Camera>(pbr_camera)
-            .expect("PBR camera");
-        assert!(matches!(
-            pbr.clear_color,
-            bevy::camera::ClearColorConfig::None
         ));
     }
 

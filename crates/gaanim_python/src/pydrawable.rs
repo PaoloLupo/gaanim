@@ -2100,7 +2100,7 @@ impl PyDrawable {
         ))
     }
 
-    /// Return a named source group or path from an imported SVG or glTF.
+    /// Return a named source group or path from an imported SVG.
     fn part(&self, id: &str) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         if id.is_empty() {
@@ -2109,7 +2109,7 @@ impl PyDrawable {
         match self.0.part(id) {
             Ok(part) => Ok(Self(part)),
             Err(gaanim_api::canvas::SvgPartError::NotSvg) => Err(PyValueError::new_err(
-                "this drawable has no named SVG or glTF parts",
+                "this drawable has no named SVG parts",
             )),
             Err(error @ gaanim_api::canvas::SvgPartError::Unknown { .. }) => {
                 Err(PyKeyError::new_err(error.to_string()))
@@ -2122,9 +2122,10 @@ impl PyDrawable {
         Ok(PyTuple::new(py, self.0.parts())?.unbind())
     }
 
+    /// glTF Actions; always empty, since glTF models are no longer supported.
     fn animations(&self, py: Python<'_>) -> PyResult<Py<PyTuple>> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok(PyTuple::new(py, self.0.animations())?.unbind())
+        Ok(PyTuple::empty(py).unbind())
     }
 
     /// Return a fresh, pure animation proxy. Accessing it never schedules work.
@@ -2147,18 +2148,11 @@ impl PyDrawable {
         transition: f64,
         start_time: f64,
     ) -> PyResult<PyCanvasAnim> {
+        let _ = (
+            name, duration, speed, r#loop, reverse, transition, start_time,
+        );
         crate::custom::ensure_authoring_allowed()?;
-        self.0
-            .animation(
-                name, duration, speed, r#loop, reverse, transition, start_time,
-            )
-            .map(|inner| PyCanvasAnim { inner })
-            .map_err(|error| match error {
-                gaanim_api::canvas::GltfAnimationError::Unknown { .. } => {
-                    PyKeyError::new_err(error.to_string())
-                }
-                _ => PyValueError::new_err(error.to_string()),
-            })
+        Err(crate::gltf_unsupported())
     }
 
     fn fill(&self, paint: PyPaint) -> PyResult<Self> {

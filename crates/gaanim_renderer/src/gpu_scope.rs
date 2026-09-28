@@ -88,7 +88,10 @@ mod web {
     /// Poll without a waker: the scope's promise records its result when it
     /// settles, and the next frame polls again.
     pub(super) fn poll(future: &mut ScopeFuture) -> Option<Option<wgpu::Error>> {
-        match future.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
+        match future
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+        {
             Poll::Ready(error) => Some(error),
             Poll::Pending => None,
         }

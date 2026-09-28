@@ -9,7 +9,7 @@
 
 #experimental[
   La cámara 2D es estable. Todo lo 3D de esta página (primitivas, materiales,
-  luces, cámara en perspectiva, ejes y superficies 3D y modelos glTF) es
+  luces, cámara en perspectiva, ejes y superficies 3D) es
   experimental: tiene errores conocidos y puede cambiar entre versiones.
   Úsalo para explorar, no para producción.
 ]
@@ -284,7 +284,7 @@ legible, anima la cámara.
 from gaanim import CYAN, GOLD, Material3D, Scene
 
 scene = Scene(frame=(16, 9), background="#0f172a")
-scene.geometry.lighting_3d("studio", intensity=1.0, shadows=True)
+scene.geometry.lighting_3d("studio", intensity=1.0)
 
 cube = scene.geometry.cube(2.0, material=Material3D.matte(CYAN)).move_to_3d(-1.8, 0, 0)
 sphere = scene.geometry.sphere(1.1, material=Material3D.metal(GOLD)).move_to_3d(1.8, 0, 0)
@@ -305,8 +305,16 @@ scene.render()
 - `Material3D.matte(color)`, `Material3D.metal(color)` y
   `Material3D.emissive(color, strength)` son puntos de partida; el constructor
   `Material3D(color, roughness=, metallic=)` permite ajustarlos.
-- `scene.geometry.lighting_3d("studio")` añade una iluminación de estudio con
-  sombras opcionales.
+- `scene.geometry.lighting_3d("studio")` ilumina las primitivas con material
+  al estilo de Gaanim: luz del cielo y del suelo, que aclara las caras que
+  miran arriba y oscurece las que miran abajo; una luz principal suave desde
+  arriba a la izquierda, y un leve brillo en los bordes de la silueta. El
+  color del material se mantiene legible: una cara iluminada muestra más o
+  menos su color, y una en sombra, la mitad. Los materiales pulidos (poca
+  rugosidad) tienen un reflejo blanco y los metálicos reflejan el cielo.
+  `"none"` deja solo la emisión del material.
+- Las caras planas se pintan de un solo color y las curvas con degradados
+  suaves.
 - Los drawables tienen versiones 3D de sus transformaciones: `move_to_3d`,
   `shift_by_3d`, `rotate_by_3d(eje, radianes)` y `scale_by_3d`, tanto
   inmediatas como bajo `.animate`.
@@ -355,19 +363,31 @@ scene.render()
 La coordenada `z` de los datos apunta hacia el espectador, así que para ver la
 superficie como un relieve se usa `up=(0, 0, 1)` en `look_at`.
 
-== Modelos glTF
+== Cómo se dibuja el 3D
 
-`scene.media.gltf("modelo.glb")` importa un modelo glTF 2.0 como un drawable
-más. Consulta #link("/referencia/assets/")[Recursos] para las rutas y las
-escenas internas del archivo.
+Gaanim dibuja el 3D con Vello, igual que el 2D: proyecta las mallas de
+triángulos y las líneas 3D a través de la cámara de la escena, las ordena de
+atrás hacia delante y calcula la luz en la CPU. De ahí salen sus límites:
+
+- Las primitivas con `Material3D` reciben luz y ocultan sus caras traseras.
+  Las mallas sin material (superficies, gráficos 3D) no reciben luz y se ven
+  por las dos caras; las líneas 3D tampoco reciben luz y miden 1,5 px.
+- No hay sombras: `lighting_3d(shadows=True)` se acepta, pero ningún objeto
+  proyecta sombra.
+- No hay búfer de profundidad: los triángulos se ordenan por profundidad, así
+  que las superficies que se cruzan pueden mostrar errores de orden.
+- Todo el contenido 3D se dibuja debajo del 2D: etiquetas, textos y HUD
+  quedan siempre encima.
+
+Como es dibujo normal de Vello, el 3D aparece en las exportaciones, las
+capturas, los paquetes `.gaanim` y las vistas previas de Presenter View, y
+admite desenfoque de movimiento y postprocesado.
 
 = Consejos
 
 - Valida primero una escena quieta; añade el movimiento de cámara al final.
 - Los objetos 3D usan las mismas unidades lógicas que el resto de la escena;
   mide tamaños y distancias de cámara con la misma escala.
-- En Presenter View, las vistas previas del orador solo dibujan las capas 2D;
-  la pantalla de la audiencia sí muestra los objetos 3D.
 
 Las firmas completas de la cámara están en la
 #link("/referencia/scene/")[referencia de la escena].

@@ -116,7 +116,7 @@ El resultado siempre es idéntico al de una recarga completa. Para forzar esta
 == Recursos
 
 Guardar cualquier archivo que no sea Python dentro del proyecto (imágenes,
-SVG, Lottie, glTF, WGSL, fuentes, documentos Typst, datos) vacía las cachés de
+SVG, Lottie, WGSL, fuentes, documentos Typst, datos) vacía las cachés de
 recursos, vuelve a ejecutar el script y recompila todos los segmentos.
 
 Se ignoran los archivos y carpetas ocultos (`.git`, `.venv`, archivos de

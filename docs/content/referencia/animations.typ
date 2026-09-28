@@ -306,7 +306,7 @@ scene.play([box.animate.opacity(0.35).duration(0.6)])
   kind: "method",
   params: ((name: "color", type: "Paint", default: none, desc: [Color o `Brush` de destino.]),),
   returns: (type: "Anim", desc: [Cambio de relleno.]),
-  desc: [Los gradientes del mismo tipo interpolan su geometría y sus paradas normalizadas; un color sólido puede pasar a un gradiente y al revés. Tipos de gradiente incompatibles (lineal y radial) lanzan `ValueError`. Tras `no_fill()`, el relleno aparece desde transparente. En un `Text`, cada glifo interpola desde su color actual, así que los fragmentos de color propio convergen al destino. En una `Primitive3D` cambia el color base del material PBR y exige un color sólido. Ver #link("/referencia/themes/")[Temas y colores].],
+  desc: [Los gradientes del mismo tipo interpolan su geometría y sus paradas normalizadas; un color sólido puede pasar a un gradiente y al revés. Tipos de gradiente incompatibles (lineal y radial) lanzan `ValueError`. Tras `no_fill()`, el relleno aparece desde transparente. En un `Text`, cada glifo interpola desde su color actual, así que los fragmentos de color propio convergen al destino. En una `Primitive3D` cambia el color base de su `Material3D` y exige un color sólido. Ver #link("/referencia/themes/")[Temas y colores].],
 )[
 ```python
 >>>from gaanim import *
@@ -2056,9 +2056,7 @@ Para un ejemplo con varilla, cota y estela, consulta
 #experimental()
 
 Los mismos destinos en tres ejes, para objetos en el espacio de una cámara en
-perspectiva. Las rotaciones de Euler usan orden XYZ y radianes. Las acciones
-de modelos glTF están en
-#link("/referencia/medios/#api-drawable-animation")[`Drawable.animation`].
+perspectiva. Las rotaciones de Euler usan orden XYZ y radianes.
 
 #api-entry(
   name: "Anim.move_to_3d",
@@ -2114,9 +2112,9 @@ de modelos glTF están en
 #api-entry(
   name: "Anim.material",
   kind: "method",
-  params: ((name: "material", type: "Material3D", default: none, desc: [Material PBR de destino.]),),
+  params: ((name: "material", type: "Material3D", default: none, desc: [Material de destino.]),),
   returns: (type: "Anim", desc: [Interpolación del material.]),
-  desc: [Solo en una `Primitive3D` nativa. Color, color emisivo, rugosidad, metalicidad e intensidad de emisión se interpolan de forma determinista y los extremos exactos se restauran al buscar. En una malla, `write()` lanza `TypeError`: usa `create()`, que crece desde el centro mientras aparece.],
+  desc: [Solo en una `Primitive3D`. Color, color emisivo, rugosidad, metalicidad e intensidad de emisión se interpolan de forma determinista y los extremos exactos se restauran al buscar. En una malla, `write()` lanza `TypeError`: usa `create()`, que crece desde el centro mientras aparece.],
 )[
 ```python
 >>>from gaanim import *

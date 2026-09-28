@@ -151,15 +151,23 @@ revela un dock compacto con Previous, Advance/Pause, inicio, fin y progreso al
 llevar el cursor a su zona inferior; se oculta al retirar el cursor o perder
 foco. Consulta `docs/content/guias/presentaciones.typ` para el detalle.
 
-## 3D nativo e inspección
+## 3D e inspección
 
 > **Experimental.** La API 3D todavía tiene errores conocidos y puede cambiar
 > entre versiones; queda mucho trabajo para estabilizarla.
 
-Gaanim incluye `cube`, `sphere`, `cylinder`, `cone` y `plane` como mallas PBR
+Gaanim incluye `cube`, `sphere`, `cylinder`, `cone` y `plane` como mallas
 animables, con `Material3D.matte`, `Material3D.metal` y
-`Material3D.emissive`. `scene.geometry.lighting_3d("studio")` proporciona un único rig
-de estudio. Consulta `examples/primitives_3d_demo.py` para una escena completa.
+`Material3D.emissive`. `scene.geometry.lighting_3d("studio")` las ilumina con el
+estilo de Gaanim: luz de cielo y suelo, una luz principal suave y un brillo leve
+en los bordes, conservando el color de cada material. Consulta
+`examples/primitives_3d_demo.py` para una escena completa.
+
+Vello dibuja el 3D como el resto de la escena: proyecta las mallas y las líneas
+3D con la cámara, las ordena de atrás hacia delante y calcula la luz en la CPU.
+No hay sombras ni búfer de profundidad, la geometría que se cruza puede
+ordenarse mal y el 3D queda debajo del contenido 2D. Gaanim ya no importa
+glTF: `scene.media.gltf(...)` lanza `NotImplementedError`.
 
 Las escenas 2D y 3D abren con el modo interactivo desactivado. Cuando el usuario
 pulsa `I` o usa **Interactivo: ON/OFF** en Overlays (`O`), la cámara interactiva
@@ -348,10 +356,10 @@ linker = "rust-lld.exe"
 
 Si el comando no está disponible, instala `cargo-binutils` y el componente
 `llvm-tools-preview` de Rust. Las funciones de Bevy se activan en los crates
-que las necesitan: matemáticas usa la base ECS, escena conserva PBR/glTF,
-el renderizador añade el pipeline 2D donde compone el lienzo de Vello,
-multimedia añade audio y los hosts añaden ventanas nativas. Bevy UI, sprites,
-texto y gizmos no se compilan.
+que las necesitan: matemáticas usa la base ECS, escena añade assets y render
+(sin PBR ni glTF), el renderizador añade el pipeline 2D donde compone el
+lienzo de Vello, multimedia añade audio y los hosts añaden ventanas nativas.
+Bevy UI, sprites, texto y gizmos no se compilan.
 
 `just build-timings` compila el runtime y genera
 `target/cargo-timings/cargo-timing.html`. Para medir una iteración representativa,

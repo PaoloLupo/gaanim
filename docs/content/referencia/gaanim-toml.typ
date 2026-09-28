@@ -56,7 +56,7 @@ y no puede ser absoluta ni salir de la carpeta con `..`. Así, `gaanim .`,
 El editor y la CLI no aplican `assets_dir` por su cuenta: la escena lo carga al
 llamar a `scene.assets.load_project()`, que busca el `gaanim.toml` junto al
 script. Después, las rutas relativas de `scene.media.image`, `svg`, `lottie`,
-`gltf` y demás se resuelven desde esa carpeta, sin depender del directorio de
+`video` y demás se resuelven desde esa carpeta, sin depender del directorio de
 trabajo desde el que se lanzó Gaanim.
 
 ```python

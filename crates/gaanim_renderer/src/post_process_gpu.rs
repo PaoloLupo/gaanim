@@ -66,13 +66,6 @@ fn update_post_process_frame(
 ) {
     frame.0 = (|| {
         let (post, camera) = (post?, camera?);
-        // Perspective scenes draw native 3D meshes that Vello never sees.
-        if matches!(
-            camera.camera.projection,
-            gaanim_math::Projection::Perspective { .. }
-        ) {
-            return None;
-        }
         let (view, target) = views.single().ok()?;
         let window = match target {
             Some(bevy::camera::RenderTarget::Window(bevy::window::WindowRef::Entity(entity))) => {

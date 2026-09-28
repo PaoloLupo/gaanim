@@ -8,14 +8,11 @@ pub mod systems;
 pub mod transition_frame;
 
 pub use components::{
-    AuthoritativeCameraView, Billboard, CoordinateLabelOffset, CoordinateTickLevel,
-    CoordinateViewRole, FillBrush, FillDirection, FillLevel, GaanimDefault3dLight, GlobalOpacity,
-    GltfAnimationState, GltfAssetHandle, GltfMaterialBaseline, GltfModelReady, GltfModelRoot,
-    GltfNodeBinding, GltfNodeWrapper, GroupMarker, HudOverlay, Lighting3D, LineListData,
-    LineListSource, LocalBounds, Material3D, Material3DBaseline, Material3DError, Mesh3DMarker,
-    MobjectId, ObjectTag, Opacity, Path2D, PathRevealOrder, PathSource, Presence, RasterImage,
-    RenderLayer, RenderOrder, ShapeDeform, StrokeBrush, TextBaseline, TriangleMeshData, Visible,
-    WorldBounds,
+    Billboard, CoordinateLabelOffset, CoordinateTickLevel, CoordinateViewRole, FillBrush,
+    FillDirection, FillLevel, GlobalOpacity, GroupMarker, HudOverlay, Lighting3D, LineListData,
+    LineListSource, LocalBounds, Material3D, Material3DError, Mesh3DMarker, MobjectId, ObjectTag,
+    Opacity, Path2D, PathRevealOrder, PathSource, Presence, RasterImage, RenderLayer, RenderOrder,
+    ShapeDeform, StrokeBrush, TextBaseline, TriangleMeshData, Visible, WorldBounds,
 };
 pub use hierarchy::{GaanimScenePlugin, SceneSet};
 pub use systems::{

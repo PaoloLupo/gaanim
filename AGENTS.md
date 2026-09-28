@@ -32,7 +32,10 @@ This file guides repository work; model selection belongs to the calling client.
   - `gaanim_media` — FFmpeg-backed video frames and timeline-synchronized preview audio.
   - `gaanim_renderer` — Vello 0.9 backend, fragment retain caching, and its own
     Bevy canvas (`canvas.rs`): Vello renders to a texture that a full-screen pass
-    composites into the `VelloView` camera's main 2D pass.
+    composites into the `VelloView` camera's main 2D pass. 3D content
+    (`TriangleMeshData`, `LineListData`) is projected, depth-sorted and shaded
+    on the CPU in `three_d.rs` and drawn by Vello beneath the 2D content; there
+    is no Bevy 3D pipeline and no glTF support.
   - `gaanim_objects` — primitive bundles (circle, rect, etc.), text objects.
   - `gaanim_layout` — anchors, grids, regions, flow, and positioning queries.
   - `gaanim_visualization` — scales, coordinate spaces, sampling, data, and statistics.
@@ -124,10 +127,9 @@ all use the application host, which owns the native runtime.
   disabled for dependencies. Configure `rust-lld.exe` for Windows MSVC in the
   gitignored `.cargo/config.toml` as described in README; preserve `PYO3_PYTHON`.
 - Shared Bevy features only enable `multi_threaded`; consumer manifests enable
-  their required subsystems. `gaanim_scene` still requires PBR and glTF for its
-  3D components and systems (plus `png` for glTF textures). Keep window/audio
-  features out of the shared base, and do not add Bevy's UI, sprite, text, or
-  gizmo subsystems: the editor draws its UI with egui.
+  their required subsystems. Keep window/audio features out of the shared base,
+  and do not add Bevy's UI, sprite, text, gizmo, or 3D (PBR, glTF, animation)
+  subsystems: the editor draws its UI with egui and Vello draws 3D.
 - Prefer `just check-package <crate>` during local iteration. `just build-timings`
   writes `target/cargo-timings/cargo-timing.html`; it performs a real build.
 - Dev recipes use `scripts/dev.py` to opt selected Bevy consumers into

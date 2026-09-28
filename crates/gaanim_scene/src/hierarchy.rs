@@ -95,58 +95,16 @@ impl Plugin for GaanimScenePlugin {
             )
                 .in_set(SceneSet::Propagation),
         );
-        // 3D helpers: sync mesh transforms and billboard after hierarchy propagation.
+        // Billboards face the camera after hierarchy propagation.
         app.add_systems(
             Update,
-            (
-                crate::systems::request_gltf_assets_system,
-                crate::systems::ensure_default_3d_light_system,
-                crate::systems::attach_gltf_scenes_system,
-                crate::systems::finalize_gltf_instances_system,
-            )
-                .chain()
-                .run_if(resource_exists::<AssetServer>)
-                .in_set(SceneSet::Input),
-        );
-        app.add_systems(
-            Update,
-            (
-                crate::systems::billboard_system,
-                crate::systems::sync_3d_mesh_transform_system,
-                crate::systems::sync_gltf_wrapper_transform_system,
-                crate::systems::sync_gltf_visibility_system,
-                crate::systems::sync_gltf_material_opacity_system
-                    .run_if(resource_exists::<Assets<StandardMaterial>>)
-                    .after(crate::systems::opacity_propagation_system),
-                crate::systems::sync_material_3d_system
-                    .run_if(resource_exists::<Assets<StandardMaterial>>)
-                    .after(crate::systems::opacity_propagation_system),
-            )
+            crate::systems::billboard_system
                 .in_set(SceneSet::Propagation)
                 .after(crate::systems::transform_propagation_system),
         );
-        // Build raw mesh data into Bevy Mesh3d handles (runs before extraction).
         app.add_systems(
             Update,
-            crate::systems::build_3d_meshes_system.in_set(SceneSet::Bounds),
-        );
-        app.add_systems(
-            Update,
-            crate::systems::update_3d_triangle_meshes_system
-                .in_set(SceneSet::Bounds)
-                .after(crate::systems::build_3d_meshes_system),
-        );
-        app.add_systems(
-            Update,
-            crate::systems::update_3d_line_meshes_system
-                .in_set(SceneSet::Bounds)
-                .after(crate::systems::update_3d_triangle_meshes_system),
-        );
-        app.add_systems(
-            Update,
-            crate::systems::sync_3d_line_visibility_system
-                .in_set(SceneSet::Bounds)
-                .after(crate::systems::update_3d_line_meshes_system),
+            crate::systems::sync_3d_bounds_system.in_set(SceneSet::Bounds),
         );
 
         // Register bounds systems in the Bounds SystemSet.
@@ -171,7 +129,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn scene_plugin_runs_without_pbr_asset_resources() {
+    fn scene_plugin_runs_on_a_bare_app() {
         let mut app = App::new();
         app.add_plugins(GaanimScenePlugin);
 

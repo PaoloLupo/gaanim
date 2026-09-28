@@ -91,9 +91,9 @@ están explicados en la sección de problemas de
 - *La vista previa o la exportación fallan al iniciar la GPU:* prueba otro
   backend con `WGPU_BACKEND`, por ejemplo `WGPU_BACKEND=vulkan` o
   `WGPU_BACKEND=dx12` en Windows y `WGPU_BACKEND=gl` en Linux.
-- *En la vista del presentador no veo los objetos 3D:* sus vistas previas
-  solo dibujan las capas 2D; la audiencia sí los ve. La API 3D es
-  experimental (ver #link("/guias/camara-y-3d/")[Cámara y 3D]).
+- *Dos superficies 3D que se cruzan se ven mal ordenadas:* el 3D no tiene
+  búfer de profundidad y ordena los triángulos por profundidad. Separa las
+  superficies o subdivídelas (ver #link("/guias/camara-y-3d/")[Cámara y 3D]).
 
 = Exportar
 

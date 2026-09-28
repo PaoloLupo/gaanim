@@ -815,9 +815,6 @@ pub fn export_dialog_system(
                 .as_ref()
                 .filter(|_| bundle_source.is_none())
                 .map(|paths| (paths.script_path.clone(), paths.project_dir.clone()));
-            let needs_worker = canvas
-                .as_ref()
-                .is_some_and(|canvas| canvas.has_native_3d_content());
 
             state.active = true;
             state.dialog_open = false;
@@ -871,10 +868,6 @@ pub fn export_dialog_system(
                         }
                         None => Err("No replay data available".to_string()),
                     },
-                    None if needs_worker => Err(
-                        "3D export requires an open project script so it can run in an isolated process"
-                            .to_string(),
-                    ),
                     None => {
                         let mut config = ExportConfig::new(&out).with_quality(qual.preset());
                         config.width = output_size.0;
@@ -893,8 +886,9 @@ pub fn export_dialog_system(
                                 gaanim_export::prelude::export_bundle(&bundle, config)
                                     .map_err(|error| error.to_string())
                             }
-                            (None, Some(canvas)) => export_canvas(canvas, config)
-                                .map_err(|error| error.to_string()),
+                            (None, Some(canvas)) => {
+                                export_canvas(canvas, config).map_err(|error| error.to_string())
+                            }
                             (None, None) => Err("No replay data available".to_string()),
                         }
                     }

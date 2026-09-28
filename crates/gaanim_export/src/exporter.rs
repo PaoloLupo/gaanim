@@ -221,14 +221,6 @@ fn export_pipeline_system(
     mut pipeline_res: ResMut<ExportPipeline>,
     mut timeline: ResMut<Timeline>,
     mut exit: MessageWriter<'_, AppExit>,
-    gltf_models: Query<(), With<gaanim_scene::GltfModelRoot>>,
-    ready_gltf_models: Query<
-        (),
-        (
-            With<gaanim_scene::GltfModelRoot>,
-            With<gaanim_scene::GltfModelReady>,
-        ),
-    >,
 ) {
     if let Some(message) = custom_errors
         .as_ref()
@@ -252,9 +244,6 @@ fn export_pipeline_system(
             Err(ExportError::Capture(message)),
         );
         exit.write(AppExit::Success);
-        return;
-    }
-    if gltf_models.iter().count() != ready_gltf_models.iter().count() {
         return;
     }
     let pipeline = &mut *pipeline_res;
@@ -724,13 +713,7 @@ where
                 config.height,
                 config.fit,
             );
-            let perspective = resolved_camera.as_ref().is_some_and(|resolved| {
-                matches!(
-                    resolved.camera.projection,
-                    gaanim_math::Projection::Perspective { .. }
-                )
-            });
-            (scene, export_post_process(app.world(), perspective, frame))
+            (scene, export_post_process(app.world(), frame))
         };
 
         let bg_color = app
@@ -1006,10 +989,6 @@ impl FrameRasterizer {
     fn render_frame(&mut self, frame: &gaanim_bundle::Frame, time: f64) -> Result<Vec<u8>> {
         let resolved =
             gaanim_math::ResolvedCamera::new(frame.camera, gaanim_math::CameraViewport::default());
-        let perspective = matches!(
-            frame.camera.projection,
-            gaanim_math::Projection::Perspective { .. }
-        );
         let scene = compose_bundle_frame(
             frame,
             self.background.as_ref(),
@@ -1018,7 +997,7 @@ impl FrameRasterizer {
             self.height,
             self.fit,
         );
-        let post = (!perspective && !frame.post.is_empty())
+        let post = (!frame.post.is_empty())
             .then(|| {
                 let passes = frame
                     .post
@@ -1060,10 +1039,6 @@ pub fn compose_bundle_frame(
 ) -> vello::Scene {
     let resolved =
         gaanim_math::ResolvedCamera::new(frame.camera, gaanim_math::CameraViewport::default());
-    let perspective = matches!(
-        frame.camera.projection,
-        gaanim_math::Projection::Perspective { .. }
-    );
     // Pad opacity layers for this output, as a direct export does.
     let pixels_per_unit = background.and_then(|background| {
         gaanim_renderer::pipeline::output_pixels_per_unit(&frame.camera, background.pixel_size.0)
@@ -1071,9 +1046,7 @@ pub fn compose_bundle_frame(
     let raw_scene = gaanim_renderer::pipeline::compose_captured(
         &frame.capture,
         store,
-        background
-            .filter(|_| !perspective)
-            .map(|background| (background, background.pixel_size)),
+        background.map(|background| (background, background.pixel_size)),
         pixels_per_unit,
         None,
     );
@@ -1283,15 +1256,8 @@ where
             config.fit,
         );
         scene.append(&raw_scene, Some(camera_to_vello));
-        let perspective = resolved_camera.as_ref().is_some_and(|resolved| {
-            matches!(
-                resolved.camera.projection,
-                gaanim_math::Projection::Perspective { .. }
-            )
-        });
         let post_process = export_post_process(
             app.world(),
-            perspective,
             capture_camera_frame(
                 resolved_camera.as_ref(),
                 config.width,
@@ -1375,15 +1341,8 @@ fn render_updated_world(
             config.fit,
         )),
     );
-    let perspective = resolved_camera.as_ref().is_some_and(|resolved| {
-        matches!(
-            resolved.camera.projection,
-            gaanim_math::Projection::Perspective { .. }
-        )
-    });
     let post_process = export_post_process(
         app.world(),
-        perspective,
         capture_camera_frame(
             resolved_camera.as_ref(),
             config.width,
@@ -1536,15 +1495,11 @@ fn linear_to_srgb_u8(linear: f32) -> u8 {
 }
 
 /// Post-process of the frame just updated in `world`, with the camera frame
-/// in output pixels. Perspective scenes are not post-processed.
+/// in output pixels.
 fn export_post_process(
     world: &World,
-    perspective: bool,
     frame: kurbo::Rect,
 ) -> Option<gaanim_renderer::post_process::PostProcessRequest> {
-    if perspective {
-        return None;
-    }
     let post = world.get_resource::<gaanim_renderer::post_process::CanvasPostProcess>()?;
     let time = world
         .get_resource::<gaanim_animation::PlaybackState>()
@@ -1648,18 +1603,22 @@ fn capture_camera_to_vello_transform(
         resolved
             .map(|resolved| {
                 let camera = &resolved.camera;
-                let zoom = match camera.projection {
-                    gaanim_math::Projection::Orthographic { zoom } => zoom,
-                    _ => 1.0,
+                // Under perspective the canvas stays at the origin, unrotated,
+                // as in the preview: 3D content is projected onto it.
+                let (zoom, cam_x, cam_y, angle) = match camera.projection {
+                    gaanim_math::Projection::Orthographic { zoom } => {
+                        (zoom, camera.position.x, camera.position.y, camera.z_angle())
+                    }
+                    _ => (1.0, 0.0, 0.0, 0.0),
                 };
                 (
                     zoom,
                     camera.pixels_per_unit(),
                     camera.viewport_width.max(1),
                     camera.viewport_height.max(1),
-                    camera.position.x,
-                    camera.position.y,
-                    camera.z_angle(),
+                    cam_x,
+                    cam_y,
+                    angle,
                     resolved.viewport,
                 )
             })
@@ -1689,274 +1648,6 @@ fn capture_camera_to_vello_transform(
     )) * kurbo::Affine::scale_non_uniform(scale, -scale)
         * kurbo::Affine::rotate(-angle)
         * kurbo::Affine::translate((-cam_x, -cam_y))
-}
-
-#[derive(Resource)]
-struct HybridCapturePipeline {
-    times: Vec<f64>,
-    index: usize,
-    warmup_pending: bool,
-    phase: u8,
-    frames: Vec<CapturedFrame>,
-    tx: SyncSender<Vec<u8>>,
-    rx: Mutex<Receiver<Vec<u8>>>,
-    width: u32,
-    height: u32,
-    result_tx: SyncSender<Vec<CapturedFrame>>,
-    result_sent: bool,
-}
-
-/// Number of complete render frames allowed after an exact seek before the
-/// screenshot request is submitted. Native mesh extraction and GPU pipeline
-/// preparation can take more than two frames on a cold Vulkan renderer.
-const HYBRID_CAPTURE_SETTLE_FRAMES: u8 = 6;
-/// The first hybrid frame also pays for render-pipeline and shader creation.
-/// A longer one-time warm-up prevents an otherwise valid first seek from being
-/// captured before native 3D content reaches the swapchain.
-const HYBRID_CAPTURE_COLD_SETTLE_FRAMES: u8 = 30;
-const HYBRID_CAPTURE_VISIBLE_GLTF_SETTLE_FRAMES: u8 = 6;
-
-fn publish_hybrid_capture_result(pipeline: &mut HybridCapturePipeline) {
-    if pipeline.result_sent {
-        return;
-    }
-    let frames = core::mem::take(&mut pipeline.frames);
-    let _ = pipeline.result_tx.send(frames);
-    pipeline.result_sent = true;
-}
-
-fn accept_hybrid_capture(pipeline: &mut HybridCapturePipeline, rgba: Vec<u8>) {
-    if pipeline.warmup_pending {
-        // The first screenshot request primes Bevy's swapchain/render graph.
-        // Discard it and repeat the same exact seek for the first fixture.
-        pipeline.warmup_pending = false;
-        pipeline.phase = 0;
-        return;
-    }
-
-    let time = pipeline.times[pipeline.index];
-    pipeline.frames.push(CapturedFrame {
-        time,
-        width: pipeline.width,
-        height: pipeline.height,
-        rgba,
-    });
-    pipeline.index += 1;
-    pipeline.phase = 0;
-}
-
-fn hybrid_capture_system(
-    mut commands: Commands,
-    custom_errors: Option<Res<gaanim_animation::CustomAnimationDiagnostics>>,
-    property_errors: Option<Res<gaanim_animation::PropertyBindingDiagnostics>>,
-    mut pipeline: ResMut<HybridCapturePipeline>,
-    mut timeline: ResMut<Timeline>,
-    mut exit: MessageWriter<'_, AppExit>,
-    gltf_models: Query<Option<&gaanim_scene::Visible>, With<gaanim_scene::GltfModelRoot>>,
-    ready_gltf_models: Query<
-        (),
-        (
-            With<gaanim_scene::GltfModelRoot>,
-            With<gaanim_scene::GltfModelReady>,
-        ),
-    >,
-    visible_gltf_meshes: Query<
-        &bevy::camera::visibility::ViewVisibility,
-        With<gaanim_scene::GltfMaterialBaseline>,
-    >,
-) {
-    if custom_errors
-        .as_ref()
-        .is_some_and(|errors| errors.first_error().is_some())
-        || property_errors
-            .as_ref()
-            .is_some_and(|errors| errors.first_error().is_some())
-    {
-        publish_hybrid_capture_result(&mut pipeline);
-        exit.write(AppExit::Success);
-        return;
-    }
-    if gltf_models.iter().count() != ready_gltf_models.iter().count() {
-        return;
-    }
-    if pipeline.index >= pipeline.times.len() {
-        publish_hybrid_capture_result(&mut pipeline);
-        exit.write(AppExit::Success);
-        return;
-    }
-    let settle_frames = if pipeline.warmup_pending {
-        HYBRID_CAPTURE_COLD_SETTLE_FRAMES
-    } else {
-        HYBRID_CAPTURE_SETTLE_FRAMES
-    };
-    match pipeline.phase {
-        0 => {
-            timeline.seek_request = Some(pipeline.times[pipeline.index]);
-            pipeline.phase = 1;
-        }
-        phase if phase <= settle_frames => {
-            // Propagate the exact seek through camera, hierarchy, material,
-            // and mesh systems, then allow changed assets to reach Bevy's
-            // render world. Several frames are required on a cold renderer
-            // while native mesh pipelines are being prepared asynchronously.
-            pipeline.phase += 1;
-        }
-        phase if phase == settle_frames + 1 => {
-            let expects_visible_gltf = gltf_models.iter().any(|visible| visible.is_some());
-            let has_visible_gltf_mesh = visible_gltf_meshes.iter().any(|visible| visible.get());
-            if expects_visible_gltf && !has_visible_gltf_mesh {
-                return;
-            }
-            if expects_visible_gltf {
-                // ViewVisibility confirms main-world culling, but render-asset
-                // preparation may still be catching up after a model changes
-                // from hidden to visible. Count a bounded warm-up below.
-                pipeline.phase += 1;
-            } else {
-                pipeline.phase = settle_frames + HYBRID_CAPTURE_VISIBLE_GLTF_SETTLE_FRAMES + 2;
-            }
-        }
-        phase if phase <= settle_frames + HYBRID_CAPTURE_VISIBLE_GLTF_SETTLE_FRAMES + 1 => {
-            pipeline.phase += 1;
-        }
-        phase if phase == settle_frames + HYBRID_CAPTURE_VISIBLE_GLTF_SETTLE_FRAMES + 2 => {
-            let tx = pipeline.tx.clone();
-            let width = pipeline.width;
-            let height = pipeline.height;
-            commands.spawn(Screenshot::primary_window()).observe(
-                move |mut trigger: On<ScreenshotCaptured>| {
-                    let format = trigger.event().image.texture_descriptor.format;
-                    let size = trigger.event().image.texture_descriptor.size;
-                    let Some(mut data) = core::mem::take(&mut trigger.event_mut().image.data)
-                    else {
-                        return;
-                    };
-                    if matches!(
-                        format,
-                        bevy::render::render_resource::TextureFormat::Bgra8Unorm
-                            | bevy::render::render_resource::TextureFormat::Bgra8UnormSrgb
-                    ) {
-                        for pixel in data.chunks_exact_mut(4) {
-                            pixel.swap(0, 2);
-                        }
-                    }
-                    if size.width != width || size.height != height {
-                        let image = image::ImageBuffer::<image::Rgba<u8>, Vec<u8>>::from_raw(
-                            size.width,
-                            size.height,
-                            data,
-                        )
-                        .expect("Bevy screenshot buffer size mismatch");
-                        data = image::imageops::resize(
-                            &image,
-                            width,
-                            height,
-                            image::imageops::FilterType::CatmullRom,
-                        )
-                        .into_raw();
-                    }
-                    let _ = tx.send(data);
-                },
-            );
-            pipeline.phase += 1;
-        }
-        _ => {
-            let received = pipeline.rx.lock().unwrap().try_recv();
-            match received {
-                Ok(rgba) => {
-                    accept_hybrid_capture(&mut pipeline, rgba);
-                }
-                Err(TryRecvError::Empty) => {}
-                Err(TryRecvError::Disconnected) => {
-                    exit.write(AppExit::Success);
-                }
-            }
-        }
-    }
-}
-
-/// Capture exact seeks through Bevy's shared PBR + Vello camera stack.
-/// Used for scenes containing native 3D assets; the window stays hidden.
-pub fn capture_scene_hybrid<F>(
-    config: ExportConfig,
-    times: &[f64],
-    setup_world_fn: F,
-) -> Result<Vec<CapturedFrame>>
-where
-    F: FnOnce(&mut World) + Send + Sync + 'static,
-{
-    if times.is_empty() {
-        return Err(ExportError::Capture(
-            "at least one snapshot timestamp is required".to_string(),
-        ));
-    }
-    let (tx, rx) = sync_channel(1);
-    let (result_tx, result_rx) = sync_channel(1);
-    let mut app = App::new();
-    app.add_plugins(
-        DefaultPlugins
-            .set(WindowPlugin {
-                primary_window: Some(Window {
-                    // Winit does not render fully hidden windows on every platform.
-                    // Keep the swapchain alive outside the visible desktop instead.
-                    visible: true,
-                    position: bevy::window::WindowPosition::At(bevy::prelude::IVec2::new(
-                        -32_000, -32_000,
-                    )),
-                    decorations: false,
-                    resolution: (config.width, config.height).into(),
-                    resizable: false,
-                    ..default()
-                }),
-                exit_condition: bevy::window::ExitCondition::DontExit,
-                ..default()
-            })
-            .set(gaanim_scene::gaanim_asset_plugin())
-            .set(gaanim_scene::logging::log_plugin()),
-    )
-    .add_plugins(gaanim_scene::GaanimScenePlugin)
-    .add_plugins(gaanim_animation::GaanimAnimationPlugin)
-    .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
-    .add_plugins(gaanim_media::GaanimMediaPlugin)
-    .add_plugins(gaanim_text::GaanimTextPlugin)
-    .add_plugins(gaanim_renderer::GaanimRendererPlugin)
-    .insert_resource(SetupCallback(Some(Box::new(setup_world_fn))))
-    .insert_resource(WindowRenderSize {
-        width: config.width,
-        height: config.height,
-    })
-    .insert_resource(HybridCapturePipeline {
-        times: times.to_vec(),
-        index: 0,
-        warmup_pending: true,
-        phase: 0,
-        frames: Vec::with_capacity(times.len()),
-        tx,
-        rx: Mutex::new(rx),
-        width: config.width,
-        height: config.height,
-        result_tx,
-        result_sent: false,
-    })
-    .add_systems(PreStartup, setup_window_scene_system)
-    .add_systems(
-        Update,
-        hybrid_capture_system.after(gaanim_scene::SceneSet::Extraction),
-    );
-
-    app.run();
-    check_custom_animation_errors(app.world())?;
-    let frames = result_rx.recv().map_err(|_| {
-        ExportError::Capture("hybrid capture exited before returning its frames".to_string())
-    })?;
-    if frames.len() != times.len() {
-        return Err(ExportError::Capture(format!(
-            "captured {} of {} requested hybrid frames",
-            frames.len(),
-            times.len()
-        )));
-    }
-    Ok(frames)
 }
 
 #[cfg(test)]
@@ -2192,66 +1883,5 @@ mod tests {
             .expect("explicit viewport");
         assert_eq!(viewport.physical_position, UVec2::ZERO);
         assert_eq!(viewport.physical_size, UVec2::new(640, 360));
-    }
-
-    #[test]
-    fn hybrid_result_survives_world_cleanup() {
-        let (frame_tx, frame_rx) = sync_channel(1);
-        let (result_tx, result_rx) = sync_channel(1);
-        let mut pipeline = HybridCapturePipeline {
-            times: vec![0.25],
-            index: 1,
-            warmup_pending: false,
-            phase: 0,
-            frames: vec![CapturedFrame {
-                time: 0.25,
-                width: 1,
-                height: 1,
-                rgba: vec![1, 2, 3, 4],
-            }],
-            tx: frame_tx,
-            rx: Mutex::new(frame_rx),
-            width: 1,
-            height: 1,
-            result_tx,
-            result_sent: false,
-        };
-
-        publish_hybrid_capture_result(&mut pipeline);
-        drop(pipeline);
-
-        let frames = result_rx.recv().expect("external capture result");
-        assert_eq!(frames.len(), 1);
-        assert_eq!(frames[0].rgba, vec![1, 2, 3, 4]);
-    }
-
-    #[test]
-    fn hybrid_capture_discards_the_cold_swapchain_frame() {
-        let (frame_tx, frame_rx) = sync_channel(1);
-        let (result_tx, _result_rx) = sync_channel(1);
-        let mut pipeline = HybridCapturePipeline {
-            times: vec![0.25],
-            index: 0,
-            warmup_pending: true,
-            phase: 99,
-            frames: Vec::new(),
-            tx: frame_tx,
-            rx: Mutex::new(frame_rx),
-            width: 1,
-            height: 1,
-            result_tx,
-            result_sent: false,
-        };
-
-        accept_hybrid_capture(&mut pipeline, vec![0, 0, 0, 255]);
-        assert!(!pipeline.warmup_pending);
-        assert_eq!(pipeline.phase, 0);
-        assert_eq!(pipeline.index, 0);
-        assert!(pipeline.frames.is_empty());
-
-        accept_hybrid_capture(&mut pipeline, vec![1, 2, 3, 4]);
-        assert_eq!(pipeline.index, 1);
-        assert_eq!(pipeline.frames.len(), 1);
-        assert_eq!(pipeline.frames[0].rgba, vec![1, 2, 3, 4]);
     }
 }

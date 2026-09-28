@@ -480,9 +480,8 @@ pub(crate) fn sync_presenter_camera_system(
             continue;
         }
         commands.spawn((
-            Camera3d::default(),
+            Camera2d,
             Camera::default(),
-            gaanim_scene::AuthoritativeCameraView,
             bevy::core_pipeline::tonemapping::Tonemapping::None,
             RenderTarget::Window(WindowRef::Entity(event.window)),
             EguiSchedule::new(PresenterEguiPass),
@@ -1206,7 +1205,6 @@ struct PresenterFrame {
     next_preview: CuePreview,
     blank: AudienceBlank,
     preview_status: PreviewStatus,
-    omits_native_3d: bool,
     overview_open: bool,
     elapsed: String,
     clock: String,
@@ -1603,11 +1601,6 @@ fn show_preview_status(ui: &mut egui::Ui, frame: &PresenterFrame, retry: &mut bo
         }
         PreviewStatus::Waiting | PreviewStatus::Ready => {}
     }
-    if frame.omits_native_3d {
-        inline_status_rtl(ui, Icon::Warning, "3D not in previews", palette::WARN).on_hover_text(
-            "Cue previews draw the 2D layers only. Native 3D objects still appear on the audience screen.",
-        );
-    }
 }
 
 /// Presenter View dock button sizes: large targets for a live talk.
@@ -1996,7 +1989,6 @@ pub(crate) fn presenter_view_system(
         slide_count: timeline.segments.len(),
         blank: *audience_blank,
         preview_status: thumbnails.status(revision),
-        omits_native_3d: thumbnails.omits_native_3d(revision),
         overview_open: overview.open,
         elapsed: format_stopwatch(presentation_timer.elapsed()),
         clock: chrono::Local::now().format("%H:%M").to_string(),

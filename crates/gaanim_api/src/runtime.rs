@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 use gaanim_math::Camera;
-use gaanim_renderer::pipeline::{GaanimFullWindowClearCamera, GaanimPbrCamera};
+use gaanim_renderer::pipeline::GaanimFullWindowClearCamera;
 use gaanim_renderer::prelude::VelloView;
 use gaanim_timeline::timeline::Timeline;
 
@@ -75,11 +75,6 @@ fn replay_prepared<R>(
             .iter(world)
             .next()
             .is_some();
-        let has_camera_3d = world
-            .query_filtered::<Entity, With<GaanimPbrCamera>>()
-            .iter(world)
-            .next()
-            .is_some();
 
         // A Camera2d retained by the project hub must use the same overlay
         // policy as a camera spawned directly for a script.
@@ -97,10 +92,9 @@ fn replay_prepared<R>(
             width,
             height,
         ));
-        // Spawn the 2D camera first. bevy_egui assigns the primary context to
-        // the first camera created, so this must be the camera that renders
-        // last and therefore owns the egui pass. The 3D camera still renders
-        // first through its lower render order.
+        // Spawn the Vello camera first. bevy_egui assigns the primary context
+        // to the first camera created, so this must be the camera that renders
+        // last and therefore owns the egui pass.
         if !has_camera_2d {
             commands.spawn((
                 Camera2d,
@@ -114,7 +108,7 @@ fn replay_prepared<R>(
             ));
         }
         if !has_clear_camera {
-            // Clear the complete render target before the fitted PBR viewport.
+            // Clear the complete render target before the canvas is drawn.
             // RenderLayers::none keeps this camera color-only.
             commands.spawn((
                 Camera2d,
@@ -125,22 +119,6 @@ fn replay_prepared<R>(
                     ..default()
                 },
                 bevy::camera::visibility::RenderLayers::none(),
-            ));
-        }
-        if !has_camera_3d {
-            // Perspective camera for 3D meshes (PBR). Render BEFORE 2D so
-            // Vello vector content and egui remain on top.
-            // Use Tonemapping::None to avoid requiring tonemapping_luts
-            // (which needs zstd).
-            commands.spawn((
-                Camera3d::default(),
-                GaanimPbrCamera,
-                bevy::prelude::Camera {
-                    order: 0,
-                    clear_color: ClearColorConfig::None,
-                    ..default()
-                },
-                bevy::core_pipeline::tonemapping::Tonemapping::None,
             ));
         }
 
@@ -574,7 +552,7 @@ mod tests {
     }
 
     #[test]
-    fn hybrid_camera_stack_clears_full_target_before_pbr_and_vello() {
+    fn camera_stack_clears_full_target_before_vello() {
         let canvas = SceneModel::new(640, 360);
         let mut world = World::new();
         world.insert_resource(Timeline::new());
@@ -601,10 +579,12 @@ mod tests {
         assert!(matches!(clear.clear_color, ClearColorConfig::Default));
         assert!(clear.viewport.is_none());
 
-        let mut pbr_query = world.query_filtered::<&bevy::prelude::Camera, With<GaanimPbrCamera>>();
-        let pbr = pbr_query.single(&world).expect("PBR camera");
-        assert_eq!(pbr.order, 0);
-        assert!(matches!(pbr.clear_color, ClearColorConfig::None));
+        let mut three_d = world.query_filtered::<Entity, With<Camera3d>>();
+        assert_eq!(
+            three_d.iter(&world).count(),
+            0,
+            "3D content draws with Vello"
+        );
 
         let mut vello_query =
             world.query_filtered::<&bevy::prelude::Camera, (With<Camera2d>, With<VelloView>)>();

@@ -319,7 +319,7 @@ scene.canvas.background = Brush.linear(["#071022", "#164E8A", "#7DD3FC"], start=
   kind: "factory",
   params: (
     (name: "source", type: "str | os.PathLike[str]", default: none, desc: [WGSL en línea, o la ruta de un asset `.wgsl` (con `pathlib.Path`), que se lee al crear el fondo.]),
-    (name: "fallback", type: "ColorLike | None", default: "None", desc: [Color fuera del marco, para limpiar el fondo 3D, calcular el contraste automático y si falla la rasterización; negro si se omite.]),
+    (name: "fallback", type: "ColorLike | None", default: "None", desc: [Color fuera del marco, para calcular el contraste automático y si falla la rasterización; negro si se omite.]),
   ),
   returns: (type: "Background", desc: [Un fondo procedural que sigue la línea de tiempo.]),
   desc: [WGSL inválido lanza `ValueError` y un asset ilegible, `RuntimeError`.],
@@ -478,9 +478,8 @@ fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32>
 Solo se procesa el cuadro de la cámara. El shader recibe píxeles, así que un
 radio fijo como `1.0 / 1920.0` cambia con la resolución de salida: para un
 número de píxeles usa `offset / resolution` y, para que se vea igual a
-cualquier resolución, expresa el radio como fracción de `uv`. Con una cámara
-en perspectiva la escena se dibuja sin postprocesado, y tampoco se aplica a la
-salida SVG.
+cualquier resolución, expresa el radio como fracción de `uv`. También se
+aplica con una cámara en perspectiva, pero no a la salida SVG.
 
 #api-entry(
   name: "PostProcess.source / uniforms",
@@ -614,7 +613,7 @@ scene.render()
     (name: "phase", type: "float | None", default: "None", desc: [Dónde se abre el obturador respecto al tiempo del cuadro, en grados de un cuadro; por defecto se centra en él.]),
   ),
   returns: (type: "None"),
-  desc: [Desenfoque de movimiento como el de una cámara de cine en las exportaciones y las capturas: cada cuadro promedia en luz lineal `samples` búsquedas exactas repartidas por el obturador, así que es determinista, y nunca mezcla dos segmentos. La duración del obturador sigue los fps de la exportación (las capturas usan 60). El visor interactivo y las escenas 3D nativas se ven nítidos, y renderizar cuesta `samples` veces más. Un valor fuera de rango lanza `ValueError`. Usa `drawable.motion_blur(False)` para mantener nítido un objeto.],
+  desc: [Desenfoque de movimiento como el de una cámara de cine en las exportaciones y las capturas: cada cuadro promedia en luz lineal `samples` búsquedas exactas repartidas por el obturador, así que es determinista, y nunca mezcla dos segmentos. La duración del obturador sigue los fps de la exportación (las capturas usan 60). El visor interactivo se ve nítido, y renderizar cuesta `samples` veces más. Un valor fuera de rango lanza `ValueError`. Usa `drawable.motion_blur(False)` para mantener nítido un objeto.],
 )[
 ```python
 # show-code: true

@@ -466,12 +466,12 @@ def export_three_d_worker(
     )
 
     if not artifact.is_file() or artifact.stat().st_size == 0:
-        raise SmokeFailure(f"Isolated 3D export did not create a non-empty {artifact}")
+        raise SmokeFailure(f"3D export worker did not create a non-empty {artifact}")
     probe = ffprobe(artifact, cwd=repo)
     video = require_stream(probe, "video", "h264", artifact)
     validate_dimensions(video, artifact)
     return {
-        "mode": "isolated-3d-worker",
+        "mode": "3d-export-worker",
         "requested_encoder": encoder,
         "encoder": reported_encoder(output, encoder),
         "artifact": str(artifact),

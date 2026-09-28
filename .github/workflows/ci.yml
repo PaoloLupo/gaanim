@@ -115,11 +115,10 @@ jobs:
             layout_reflow_demo
             equation_step
             primitives_3d_demo
-            gltf_animation_demo
             vector_field_streamlines
             presentation_demo
           )
-          hybrid=" chart_marks_gallery primitives_3d_demo gltf_animation_demo "
+          hybrid=" chart_marks_gallery primitives_3d_demo "
           for example in "${examples[@]}"; do
             if [[ "$hybrid" == *" $example "* ]]; then
               threshold=2 ratio=0.001

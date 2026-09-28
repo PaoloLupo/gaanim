@@ -12,13 +12,13 @@ has the correct user-facing concept, then include it from
 | `scene.text`, `Text`, `TextStyle`, `TextFlow`, selections, Typst, measurement | `docs/content/referencia/text.typ` |
 | `scene.viz`: coordinate spaces, calculus, data series, `Parameter`/`computed`, readouts, `ChartSpec`, vector fields | `docs/content/referencia/visualization.typ` |
 | `scene.viz.matrix`, `Matrix`, `MatrixSelection`, matrix algebra | `docs/content/referencia/matrices.typ` |
-| `scene.media`: images, SVG, video, Lottie, glTF | `docs/content/referencia/medios.typ` |
+| `scene.media`: images, SVG, video, Lottie | `docs/content/referencia/medios.typ` |
 | `scene.slides`: editorial components and presentation branding | `docs/content/referencia/diapositivas.typ` |
 | `scene.mechanics`: dimensions, springs, forces, supports, gears | `docs/content/referencia/mecanica.typ` |
 | `Anim`, transitions, updaters, easing, writing | `docs/content/referencia/animations.typ` |
 | `scene.layout`: rows, columns, grids, stacks, items, reflow, constraints, templates | `docs/content/referencia/layout.typ` |
 | `Color`, `ColorMap`, brushes, backgrounds, post-processing, themes | `docs/content/referencia/themes.typ` |
-| `AssetManager`, preloading, SVG/Lottie/glTF import behavior | `docs/content/referencia/assets.typ` |
+| `AssetManager`, preloading, SVG/Lottie import behavior | `docs/content/referencia/assets.typ` |
 | `scene.media.audio`, voiceover and narration | `docs/content/referencia/audio.typ` |
 | `gaanim` command line: `init`, `check`, `export`, presenting, `--diff` | `docs/content/referencia/cli.typ` |
 | `gaanim.toml` manifest schema and project resolution | `docs/content/referencia/gaanim-toml.typ` |

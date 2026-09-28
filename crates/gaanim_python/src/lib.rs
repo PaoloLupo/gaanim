@@ -31,6 +31,14 @@ mod updater;
 mod visualization;
 
 /// Register the `gaanim_core` builtin module.
+/// The error of the glTF API kept for existing scripts.
+pub(crate) fn gltf_unsupported() -> PyErr {
+    pyo3::exceptions::PyNotImplementedError::new_err(
+        "glTF models are no longer supported: Gaanim draws 3D with Vello from its own \
+         primitives, surfaces and lines (scene.geometry.cube, sphere, surface, polyline_3d)",
+    )
+}
+
 pub fn register_inittab() {
     pyo3::append_to_inittab!(gaanim_core);
 }

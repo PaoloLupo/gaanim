@@ -106,7 +106,7 @@ wheel:
 validate-python-api:
     {{ system_python }} scripts/dev.py run -p gaanim_launcher -- --validate-python-api tests/validate_python_api.py
 
-# Export every supported format plus one isolated 3D MP4 and inspect their contracts.
+# Export every supported format plus one 3D MP4 through the export worker and inspect their contracts.
 test-exports encoder="libx264":
     {{ system_python }} scripts/dev.py build -p gaanim_launcher
     {{ system_python }} scripts/dev.py exec {{ system_python }} tests/validate_exports.py --output target/export-smoke --encoder {{ encoder }}

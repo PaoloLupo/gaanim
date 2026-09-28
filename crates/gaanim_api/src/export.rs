@@ -50,7 +50,7 @@ pub fn export_canvas(canvas: SceneModel, mut config: ExportConfig) -> Result<(),
         }
     }
     config.audio_tracks.extend(canvas.audio_tracks.clone());
-    if config.headless && !canvas.has_native_3d_content() {
+    if config.headless {
         export_scene_direct(config, move |world| replay_canvas_into(world, canvas))
     } else {
         export_scene(config, move |world| replay_canvas_into(world, canvas))

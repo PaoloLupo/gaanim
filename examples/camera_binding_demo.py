@@ -7,7 +7,7 @@ from gaanim import Anchor, BLACK, BLUE, CYAN, GOLD, WHITE, Material3D, Scene, co
 
 
 scene = Scene(frame=(16, 9), background=BLACK)
-scene.geometry.lighting_3d("studio", intensity=1.0, shadows=True)
+scene.geometry.lighting_3d("studio", intensity=1.0)
 scene.text("Reactive camera rig", role="title").fill(WHITE).move_to(0, 3.666667, anchor=Anchor.CENTER)
 marker = scene.geometry.dot(0.3).fill(GOLD)
 scene.geometry.circle(2.5).no_fill().stroke(BLUE, 0.05)

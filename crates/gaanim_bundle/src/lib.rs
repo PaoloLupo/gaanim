@@ -1102,10 +1102,6 @@ pub fn compose_frame(
     background: Option<&CanvasBackground>,
     store: &mut FragmentStore,
 ) -> (vello::Scene, Option<ShaderBackgroundRequest>) {
-    let perspective = matches!(
-        frame.camera.projection,
-        gaanim_math::Projection::Perspective { .. }
-    );
     let mut request = None;
     let pixels_per_unit = background.and_then(|background| {
         gaanim_renderer::pipeline::output_pixels_per_unit(&frame.camera, background.pixel_size.0)
@@ -1113,9 +1109,7 @@ pub fn compose_frame(
     let scene = compose_captured(
         &frame.capture,
         store,
-        background
-            .filter(|_| !perspective)
-            .map(|background| (background, background.pixel_size)),
+        background.map(|background| (background, background.pixel_size)),
         pixels_per_unit,
         Some(&mut request),
     );
