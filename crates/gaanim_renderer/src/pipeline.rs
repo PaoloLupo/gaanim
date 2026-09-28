@@ -7,7 +7,7 @@ use crate::effects::{
 };
 use crate::fragment::{FragmentParts, FragmentRecipe, build_fragment, fragment_recipe};
 use crate::lottie::LottiePlayer;
-use crate::stroke::{draw_stroke, view_stroke_transform};
+use crate::stroke::{draw_stroke, scene_unit_stroke_transform};
 use bevy::prelude::*;
 use gaanim_animation::{FillDrawProgress, ReactiveReadout, WriteTipGlow};
 use gaanim_core::ObjectId;
@@ -433,6 +433,14 @@ fn bounds_rect(bounds: &gaanim_math::Bounds3D) -> kurbo::Rect {
     kurbo::Rect::new(bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y)
 }
 
+/// Local rectangle of a drawable's current geometry: its whole source path,
+/// which a morph rewrites but a reveal does not trim, or its spawn bounds.
+fn geometry_rect(bounds: &LocalBounds, source: Option<&PathSource>) -> kurbo::Rect {
+    source
+        .filter(|source| !source.0.elements().is_empty())
+        .map_or_else(|| bounds_rect(&bounds.0), |source| source.0.bounding_box())
+}
+
 /// Affine that carries what a camera view's source frames onto its screen.
 ///
 /// `source` and `screen` are local rectangles with their world transforms.
@@ -525,14 +533,15 @@ fn resolve_camera_views<'a>(
             &'a GlobalSpatialTransform,
             &'a LocalBounds,
             &'a Path2D,
+            Option<&'a PathSource>,
         ),
     >,
     mut source_frame: impl FnMut(Entity) -> Option<(kurbo::Rect, kurbo::Affine)>,
     mut zoom: impl FnMut(&gaanim_animation::TrackingScalar) -> Option<f64>,
 ) -> HashMap<Entity, Arc<ExtractedCameraView>> {
     screens
-        .map(|(entity, view, transform, bounds, path)| {
-            let screen = (bounds_rect(&bounds.0), transform.affine_2d);
+        .map(|(entity, view, transform, bounds, path, source)| {
+            let screen = (geometry_rect(bounds, source), transform.affine_2d);
             let content = source_frame(view.source).and_then(|source| match &view.zoom {
                 Some(scalar) => explicit_camera_view_transform(source, screen, zoom(scalar)?),
                 None => camera_view_transform(source, screen, view.fit),
@@ -563,15 +572,16 @@ fn resolve_camera_views<'a>(
 }
 
 /// Local rectangle and world transform a camera view source frames: a
-/// leaf's own bounds, or the world bounds of a group whose children move.
+/// leaf's current geometry, or the world bounds of a group whose children move.
 fn camera_source_frame(
     transform: &GlobalSpatialTransform,
     local: Option<&LocalBounds>,
+    source: Option<&PathSource>,
     world: Option<&WorldBounds>,
     is_group: bool,
 ) -> Option<(kurbo::Rect, kurbo::Affine)> {
     match local {
-        Some(local) if !is_group => Some((bounds_rect(&local.0), transform.affine_2d)),
+        Some(local) if !is_group => Some((geometry_rect(local, source), transform.affine_2d)),
         _ => world.map(|world| (bounds_rect(&world.0), kurbo::Affine::IDENTITY)),
     }
 }
@@ -1688,8 +1698,7 @@ pub(crate) fn draw_glow(
     // 120 px per unit) so large glows stay smooth, and each ring's alpha is
     // the 7-ring reference alpha spread over the rings covering the same
     // distance, keeping the total opacity unchanged.
-    let scale = view.map_or(1.0, |view| view.determinant().abs().sqrt());
-    let steps = ((glow.radius * scale / 0.015).ceil() as u32).clamp(7, 96);
+    let steps = ((glow.radius / 0.015).ceil() as u32).clamp(7, 96);
     let share = 7.0 / steps as f32;
     for step in (1..=steps).rev() {
         let fraction = step as f32 / steps as f32;
@@ -2075,18 +2084,20 @@ fn extract_world(
             &GlobalSpatialTransform,
             &LocalBounds,
             &Path2D,
+            Option<&PathSource>,
         ), With<Visible>>();
         let mut sources = world.query::<(
             &GlobalSpatialTransform,
             Option<&LocalBounds>,
+            Option<&PathSource>,
             Option<&WorldBounds>,
             Option<&gaanim_scene::GroupMarker>,
         )>();
         resolve_camera_views(
             screens.iter(world),
             |entity| {
-                let (transform, local, bounds, group) = sources.get(world, entity).ok()?;
-                camera_source_frame(transform, local, bounds, group.is_some())
+                let (transform, local, source, bounds, group) = sources.get(world, entity).ok()?;
+                camera_source_frame(transform, local, source, bounds, group.is_some())
             },
             |zoom| zoom.evaluate(world),
         )
@@ -2204,15 +2215,7 @@ fn extract_world(
         let elem_stroke = stroke_opt.and_then(|s| s.brush.as_ref());
         let elem_stroke_style = stroke_opt.map(|s| &s.style);
         let stroke_view = if elem_stroke.is_some() || glow_opt.is_some() {
-            view_stroke_transform(entity, |ancestor| {
-                Some((
-                    *world.get::<gaanim_math::SpatialTransform>(ancestor)?,
-                    world.get::<ChildOf>(ancestor).map(|parent| parent.parent()),
-                    world
-                        .get::<gaanim_scene::CoordinateViewRole>(ancestor)
-                        .copied(),
-                ))
-            })
+            scene_unit_stroke_transform(transform.affine_2d)
         } else {
             None
         };
@@ -2687,6 +2690,7 @@ type CameraScreenQuery<'w, 's> = Query<
         &'static GlobalSpatialTransform,
         &'static LocalBounds,
         &'static Path2D,
+        Option<&'static PathSource>,
     ),
     With<Visible>,
 >;
@@ -2707,6 +2711,7 @@ type CameraSourceQuery<'w, 's> = Query<
     (
         &'static GlobalSpatialTransform,
         Option<&'static LocalBounds>,
+        Option<&'static PathSource>,
         Option<&'static WorldBounds>,
         Option<&'static gaanim_scene::GroupMarker>,
     ),
@@ -2737,10 +2742,6 @@ pub fn gaanim_render_system(
     child_query: Query<&ChildOf>,
     order_query: Query<&RenderOrder>,
     (blend_query, echo_query): (Query<&ElementBlend>, Query<&gaanim_animation::EchoGhost>),
-    view_query: Query<(
-        &gaanim_math::SpatialTransform,
-        Option<&gaanim_scene::CoordinateViewRole>,
-    )>,
     query_mobjects: Query<
         (
             Entity,
@@ -2792,8 +2793,8 @@ pub fn gaanim_render_system(
     let camera_views = resolve_camera_views(
         camera_screens.iter(),
         |entity| {
-            let (transform, local, bounds, group) = camera_sources.get(entity).ok()?;
-            camera_source_frame(transform, local, bounds, group.is_some())
+            let (transform, local, source, bounds, group) = camera_sources.get(entity).ok()?;
+            camera_source_frame(transform, local, source, bounds, group.is_some())
         },
         |zoom| {
             zoom.source
@@ -2884,14 +2885,7 @@ pub fn gaanim_render_system(
             .is_some_and(|stroke| stroke.brush.is_some())
             || glow_ref.is_some()
         {
-            view_stroke_transform(entity, |ancestor| {
-                let (local, role) = view_query.get(ancestor).ok()?;
-                Some((
-                    *local,
-                    child_query.get(ancestor).ok().map(|parent| parent.parent()),
-                    role.copied(),
-                ))
-            })
+            scene_unit_stroke_transform(transform.affine_2d)
         } else {
             None
         };
@@ -3485,6 +3479,38 @@ mod tests {
                 "{hidden:?} is visible in the view"
             );
         }
+    }
+
+    #[test]
+    fn camera_views_follow_morphed_screen_and_frame_geometry() {
+        let mut world = World::new();
+        let screen = camera_view_world(&mut world);
+        let frame = world
+            .query::<(Entity, &MobjectId)>()
+            .iter(&world)
+            .find(|(_, id)| id.0 == ObjectId::from_raw(2))
+            .unwrap()
+            .0;
+        // A morph rewrites the geometry but not the spawn bounds: the frame
+        // halves to 1 × 0.5 and the screen doubles to 8 × 4.
+        let morph = |shape: kurbo::Rect| {
+            let path = Arc::new(shape.to_path(0.01));
+            (Path2D(Arc::clone(&path)), PathSource(path))
+        };
+        world
+            .entity_mut(frame)
+            .insert(morph(centered_rect(1.0, 0.5)));
+        world
+            .entity_mut(screen)
+            .insert(morph(centered_rect(8.0, 4.0)));
+        let scene = compile_scene_from_world(&mut world, None);
+        let view = kurbo::Affine::translate((-4.0, -1.0))
+            * kurbo::Affine::scale(8.0)
+            * kurbo::Affine::translate((-3.0, -2.0));
+        assert!(
+            transform_index(&scene, view * kurbo::Affine::translate((3.5, 2.0))).is_some(),
+            "the view zooms by the morphed sizes"
+        );
     }
 
     #[test]

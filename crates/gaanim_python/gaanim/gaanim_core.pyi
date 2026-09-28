@@ -1209,6 +1209,11 @@ class Anim:
         Layouts (e.g. cells of two matrices) instead morph as one shape: the
         source keeps its identity and takes the target's outline, color and
         typographic baseline.
+
+        The source keeps its own opacity: the target is only a template,
+        hidden during and after the morph, so a target declared with
+        ``.opacity(0)`` still leaves the source visible. Combine with
+        ``animate.opacity`` to change it.
         """
         ...
     def fill_level(self, level: float) -> Anim:
@@ -2182,8 +2187,11 @@ class Drawable:
     def stroke(self, paint: Paint, width: float, *, align: Optional[Literal["inside", "center", "outside"]] = None) -> Self:
         """Apply a stroke whose width is measured in logical scene units.
 
-        On an imported SVG root, the width remains logical even when the
-        source hierarchy is scaled to fit the scene.
+        The width does not follow the drawable's scale: ``scale_to``,
+        ``scale_to_3d``, ``matrix_to``, skews, group scales and their
+        animations resize the shape, never the pen, which stays round and
+        equally wide on every side. This includes an imported SVG root or
+        part scaled to fit the scene.
 
         ``align`` places the stroke on closed contours, including every text
         glyph. By default it stays inside the shape, so ``write`` draws a
@@ -6054,9 +6062,11 @@ class MediaLibrary:
         ``width``/``height``, or the ``viewBox`` when those are absent: a
         360x220 px SVG spans 3.6x2.2 units of the 16x9 frame. Stroke widths,
         gradients, clip paths, text outlines and filter lengths scale with the
-        geometry. ``scale_to(factor)`` resizes the whole import; fluent stroke
-        widths set on the root or on a ``part(id)``, fixed or animated, stay in
-        logical scene units and are not affected by that scale.
+        geometry. ``scale_to(factor)`` resizes the whole import, the file's own
+        stroke widths included; fluent stroke widths set on the root or on a
+        ``part(id)``, fixed or animated, stay in logical scene units and are
+        not affected by that scale. Like every stroke, none of them follows a
+        later scale animation.
 
         Example:
             logo = scene.media.svg("assets/logo.svg")  # 120 px -> 1.2 units

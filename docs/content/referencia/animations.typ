@@ -899,7 +899,7 @@ scene.play(title.animate.tracking(0.0).duration(1.2))
   kind: "method",
   params: ((name: "target", type: "Drawable", default: none, desc: [Objeto de la misma escena cuya forma se adopta.]),),
   returns: (type: "Anim", desc: [Transformación en el sitio.]),
-  desc: [Transforma la geometría del objeto hasta la del destino. Respeta los tiempos compuestos y un relleno ausente no se inventa. De un `Text` a otro `Text` es una transición estructural: las partes con el mismo nombre viajan a su sitio, cada glifo conserva su color (también los de `part()`) y al terminar se muestra el destino; entre textos de Layouts distintos es un morph de forma única (ver #link("/referencia/text/")[Texto]).],
+  desc: [Transforma la geometría del objeto hasta la del destino. Respeta los tiempos compuestos y un relleno ausente no se inventa. De un `Text` a otro `Text` es una transición estructural: las partes con el mismo nombre viajan a su sitio, cada glifo conserva su color (también los de `part()`) y al terminar se muestra el destino; entre textos de Layouts distintos es un morph de forma única (ver #link("/referencia/text/")[Texto]). El objeto conserva su propia opacidad: el destino es solo una plantilla, oculta durante y después del morph, así que un destino declarado con `.opacity(0)` no lo deja invisible. Para cambiarla, combínalo con `animate.opacity`.],
 )[
 ```python
 # show-code: true
