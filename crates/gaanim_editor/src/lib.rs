@@ -20,6 +20,11 @@ pub mod frame_profile;
 pub mod host;
 pub mod narration;
 pub mod overlays;
+pub mod platform;
+
+/// Built for the web player: no native windows, file system or FFmpeg, so
+/// pinning, exporting and the separate Presenter View window are left out.
+pub(crate) const WEB: bool = cfg!(target_arch = "wasm32");
 mod presenter;
 pub mod project_hub;
 mod ui_kit;
@@ -836,7 +841,8 @@ fn editor_ui_system(
                                         } else {
                                             ButtonTone::Ghost
                                         };
-                                        if icon_button(ui, Icon::Pin, pin_tone, true)
+                                        if !WEB
+                                            && icon_button(ui, Icon::Pin, pin_tone, true)
                                             .on_hover_text(if pinned {
                                                 "Desfijar ventana"
                                             } else {
@@ -880,14 +886,15 @@ fn editor_ui_system(
                                                     .fill(palette::ACCENT)
                                                     .corner_radius(0.0),
                                             );
-                                        } else if icon_button(
-                                            ui,
-                                            Icon::Export,
-                                            ButtonTone::Ghost,
-                                            true,
-                                        )
-                                        .on_hover_text("Exportar animación")
-                                        .clicked()
+                                        } else if !WEB
+                                            && icon_button(
+                                                ui,
+                                                Icon::Export,
+                                                ButtonTone::Ghost,
+                                                true,
+                                            )
+                                            .on_hover_text("Exportar animación")
+                                            .clicked()
                                         {
                                             actions.push(PlaybackAction::OpenExport);
                                         }

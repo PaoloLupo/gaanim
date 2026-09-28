@@ -1,3 +1,4 @@
+use bevy::platform::time::Instant;
 use bevy::prelude::*;
 use bevy_egui::egui;
 use gaanim_api::canvas::SceneModel;
@@ -10,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::ui_kit::{
     ButtonTone, Icon, card_frame, chip, field_frame, icon_button, paint_icon, palette,
@@ -926,7 +927,7 @@ fn resolve_output_path(raw: &str, project_dir: Option<&Path>) -> Result<PathBuf,
 }
 
 fn open_exported_file(path: &Path) -> Result<(), String> {
-    open_exported_file_with(path, |path| open::that(path))
+    open_exported_file_with(path, |path| crate::platform::open(path))
 }
 
 fn open_exported_file_with<E: std::fmt::Display>(
@@ -1266,8 +1267,9 @@ mod tests {
         forward_worker_line, open_exported_file_with, resolve_output_path, short_duration,
         with_format_extension, worker_stop_reason,
     };
+    use bevy::platform::time::Instant;
     use std::path::Path;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     #[test]
     fn worker_watchdog_stops_on_cancel_or_stalled_progress() {

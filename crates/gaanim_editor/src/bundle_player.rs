@@ -77,7 +77,8 @@ fn bundle_timeline(bundle: &Bundle) -> Timeline {
 fn audio_tracks(
     bundle: &mut Bundle,
 ) -> Result<Vec<gaanim_media::AudioTrack>, gaanim_bundle::BundleError> {
-    if bundle.scene.audio.is_empty() {
+    // Preview audio is decoded from files by FFmpeg, which the web lacks.
+    if bundle.scene.audio.is_empty() || cfg!(target_arch = "wasm32") {
         return Ok(Vec::new());
     }
     let dir = std::env::temp_dir().join("gaanim-bundle-media");
@@ -105,7 +106,15 @@ fn audio_tracks(
 
 /// Open `path` and set the world up to play it.
 pub fn open_bundle(world: &mut World, path: &Path) -> Result<(), String> {
-    let mut bundle = Bundle::open(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let bytes = std::fs::read(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    open_bundle_bytes(world, path, bytes.into())
+}
+
+/// Set the world up to play the bundle held in `bytes`; `path` names it
+/// (the web player has no file system, only the file's name or URL).
+pub fn open_bundle_bytes(world: &mut World, path: &Path, bytes: Arc<[u8]>) -> Result<(), String> {
+    let mut bundle =
+        Bundle::from_bytes(bytes).map_err(|error| format!("{}: {error}", path.display()))?;
     if bundle.frame_count() == 0 {
         return Err(format!("{} has no frames", path.display()));
     }

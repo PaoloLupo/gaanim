@@ -320,12 +320,11 @@ impl ProjectHubState {
                 RecentEntry::Project(_) => None,
             })
             .unwrap_or_else(default_project_parent);
-        if let Some(path) = rfd::FileDialog::new()
-            .set_title("Reproducir un archivo .gaanim")
-            .set_directory(directory)
-            .add_filter("Gaanim (.gaanim)", &[gaanim_bundle::EXTENSION])
-            .pick_file()
-        {
+        if let Some(path) = crate::platform::pick_file(
+            "Reproducir un archivo .gaanim",
+            Some(&directory),
+            &[("Gaanim (.gaanim)", &[gaanim_bundle::EXTENSION])],
+        ) {
             self.open_bundle(&path);
         }
     }
@@ -352,10 +351,7 @@ impl ProjectHubState {
             ProjectKind::Video => "Elige o crea una carpeta para el nuevo video",
             ProjectKind::Slides => "Elige o crea una carpeta para la nueva presentación",
         };
-        let Some(picked) = rfd::FileDialog::new()
-            .set_title(title)
-            .set_directory(default_project_parent())
-            .pick_folder()
+        let Some(picked) = crate::platform::pick_folder(title, Some(&default_project_parent()))
         else {
             return;
         };
@@ -383,11 +379,10 @@ impl ProjectHubState {
         if self.needs_python() {
             return;
         }
-        if let Some(path) = rfd::FileDialog::new()
-            .set_title("Abrir un proyecto de Gaanim")
-            .set_directory(default_project_parent())
-            .pick_folder()
-        {
+        if let Some(path) = crate::platform::pick_folder(
+            "Abrir un proyecto de Gaanim",
+            Some(&default_project_parent()),
+        ) {
             self.open_path(&path);
         }
     }
@@ -1461,7 +1456,7 @@ fn recents_ui(ui: &mut Ui, state: &mut ProjectHubState) {
                 RecentEntry::Bundle(bundle) => bundle.path.parent(),
             };
             if let Some(folder) = folder {
-                let _ = open::that_detached(folder);
+                let _ = crate::platform::open_detached(folder);
             }
         }
         Some((RowAction::Remove, entry)) => {
@@ -1961,7 +1956,7 @@ fn install_steps(ui: &mut Ui, name: &str, help: &ToolHelp, after: &[&str]) {
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .clicked()
     {
-        let _ = open::that_detached(help.more_url);
+        let _ = crate::platform::open_detached(help.more_url);
     }
 }
 
@@ -2020,7 +2015,7 @@ fn learn_ui(ui: &mut Ui) {
             ui.spacing_mut().item_spacing.x = gap;
             for &(icon, title, detail, route) in row {
                 if link_card(ui, icon, title, detail, card_w).clicked() {
-                    let _ = open::that_detached(format!("{DOCS_URL}{route}"));
+                    let _ = crate::platform::open_detached(format!("{DOCS_URL}{route}"));
                 }
             }
         });
@@ -2191,7 +2186,7 @@ fn preparation_modal(ctx: &egui::Context, state: &mut ProjectHubState) {
                 ui.add_space(16.0);
                 ui.horizontal(|ui| {
                     if secondary_button(ui, "Mostrar carpeta", true).clicked() {
-                        let _ = open::that_detached(&root);
+                        let _ = crate::platform::open_detached(&root);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let elapsed = (time - started).max(0.0) as u64;

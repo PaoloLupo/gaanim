@@ -123,6 +123,14 @@ run EX: build
 run EX: build
     {{ system_python }} scripts/dev.py exec ./target/debug/gaanim examples/{{ EX }}.py
 
+# Build the web player (.gaanim in the browser) into dist/web.
+web:
+    {{ system_python }} scripts/build_web.py
+
+# Build the web player and serve it on http://localhost:8000.
+web-serve: web
+    {{ system_python }} -m http.server 8000 -d dist/web
+
 # Build documentation site and PDF (one-shot).
 docs:
     {{ system_python }} scripts/dev.py build -p gaanim_editor --bin gaanim-core

@@ -14,6 +14,10 @@ pub struct HostOptions {
     pub selection: gaanim_timeline::selection::SegmentSelection,
 }
 
+/// Selector of the canvas the web player renders into.
+#[cfg(target_arch = "wasm32")]
+pub const WEB_CANVAS: &str = "#gaanim-canvas";
+
 /// The editor application, without a scene: callers load a script session,
 /// a playback bundle, or show the project hub.
 pub fn host_app(options: &HostOptions) -> App {
@@ -39,6 +43,12 @@ pub fn host_app(options: &HostOptions) -> App {
                     } else {
                         bevy::window::WindowMode::Windowed
                     },
+                    // The web player draws into the page's canvas and follows
+                    // its size; the page decides the layout.
+                    #[cfg(target_arch = "wasm32")]
+                    canvas: Some(WEB_CANVAS.to_string()),
+                    #[cfg(target_arch = "wasm32")]
+                    fit_canvas_to_parent: true,
                     ..default()
                 }),
                 ..default()

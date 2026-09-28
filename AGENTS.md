@@ -20,7 +20,7 @@ This file guides repository work; model selection belongs to the calling client.
 
 ## Repo layout
 
-- **Workspace root:** `Cargo.toml` defines 20 workspace members: 19 crates under
+- **Workspace root:** `Cargo.toml` defines 21 workspace members: 20 crates under
   `crates/` plus the `docs` application.
 - **Key crates (bottom-up):**
   - `gaanim_core` — re-exports `peniko`/`kurbo`/`glam`, error types.
@@ -45,6 +45,12 @@ This file guides repository work; model selection belongs to the calling client.
     records it; the editor's `gaanim-play` binary (no libpython) plays,
     presents, and exports it.
   - `gaanim_editor`, `gaanim_launcher`, `gaanim_export`, and `gaanim_diff` — application hosting, launch, export, and visual comparison tools.
+    `gaanim_editor`'s default `python` feature adds the Python host behind
+    `gaanim-core`; the library and `gaanim-play` build without it.
+  - `gaanim_web` — the web player: `gaanim-play`'s app (same egui playback bar)
+    compiled to wasm32 + WebGPU. `just web` builds it into `dist/web/`. Code the
+    web cannot run (native windows, files, threads, FFmpeg) is gated on
+    `target_arch = "wasm32"` or goes through `gaanim_editor::platform`.
 - **Repository overview:** `README.md` is the current user/developer entry point.
   `engine_improvements.md` is aspirational; verify proposals against code and tests.
 
@@ -71,6 +77,7 @@ All commands assume `just` is installed. Do not run `cargo build` at the workspa
 | Validate all export formats | `just test-exports` |
 | Measure runtime budgets | `just benchmark smoke` (or `standard`) |
 | Build documentation | `just docs` |
+| Build the web player | `just web` → `dist/web/` (needs the `wasm32-unknown-unknown` target and a matching `wasm-bindgen-cli`) |
 | Sanity check | `just doctor` — checks workspace, builds application binaries, and runs `--help` |
 | Bootstrap venv | `just bootstrap` — creates `.venv` and installs `build`/`hatchling` |
 | Full clean | `just clean` — deletes `.venv` and `cargo clean` |

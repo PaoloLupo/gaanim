@@ -14,11 +14,12 @@ mod recorder;
 mod settings;
 mod whisper;
 
+use bevy::platform::time::Instant;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use bevy::prelude::*;
 use bevy_egui::egui;
@@ -682,7 +683,7 @@ pub(crate) fn narration_session_system(
                     match script_path(&stash, &manifest) {
                         Some(path) => match complete_script(&path, &manifest) {
                             Ok(added) => {
-                                let opened = open::that(&path);
+                                let opened = crate::platform::open(&path);
                                 let mut message = match added {
                                     0 => format!("Guion: {}", path.display()),
                                     added => format!(
@@ -1723,11 +1724,8 @@ fn path_field(ui: &mut egui::Ui, value: &mut String, title: &str, extensions: &[
         if small_button(ui, "…", true)
             .on_hover_text("Buscar")
             .clicked()
-            && let Some(path) = rfd::FileDialog::new()
-                .set_title(title)
-                .add_filter(title, extensions)
-                .add_filter("Todos", &["*"])
-                .pick_file()
+            && let Some(path) =
+                crate::platform::pick_file(title, None, &[(title, extensions), ("Todos", &["*"])])
         {
             *value = path.to_string_lossy().into_owned();
         }
