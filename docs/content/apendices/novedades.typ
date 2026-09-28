@@ -11,6 +11,19 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.6.2
+
+Sin publicar todavía. No hace falta cambiar tus escenas.
+
+== Cambios
+
+- El reproductor web abre el Presenter View: al presentar, abre en otra
+  ventana el mismo Presenter View del escritorio, con la diapositiva actual y la siguiente, notas, cronómetro,
+  vista general y dock. Las dos ventanas van a la par desde cualquiera de
+  ellas: teclas, clics, el dock, la barra de reproducción y las pantallas en
+  negro o en blanco. `P` lo vuelve a abrir. Ver
+  #link("/guias/compartir/")[Compartir sin Python].
+
 = 0.6.1
 
 Publicada el 28 de septiembre de 2026. Llegan el reproductor web, la

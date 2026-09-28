@@ -26,6 +26,8 @@ pub struct BundlePlayback {
     post: Vec<gaanim_bundle::PostPass>,
     /// Set once a frame fails to decode; playback keeps the last good frame.
     failed: bool,
+    /// Fragments of the frames composed for previews, apart from playback's.
+    preview_store: gaanim_renderer::fragment::FragmentStore,
 }
 
 impl BundlePlayback {
@@ -159,8 +161,43 @@ pub fn open_bundle_bytes(world: &mut World, path: &Path, bytes: Arc<[u8]>) -> Re
         shown: None,
         post: Vec::new(),
         failed: false,
+        preview_store: Default::default(),
     });
     Ok(())
+}
+
+impl BundlePlayback {
+    /// The recorded frame at `time` as a scene `width` by `height` pixels,
+    /// with the color to render it over, for Presenter View's cue previews.
+    /// Post-processing and shader backgrounds are left out.
+    pub fn preview_scene(
+        &mut self,
+        time: f64,
+        width: u32,
+        height: u32,
+    ) -> Option<(vello::Scene, vello::peniko::Color)> {
+        let index = self.bundle.frame_index_at(time);
+        let frame = self.bundle.frame(index).ok()?;
+        let background = self.bundle.scene.background.clone().map(|mut background| {
+            background.pixel_size = (width, height);
+            background
+        });
+        let scene = gaanim_export::prelude::compose_bundle_frame(
+            &frame,
+            background.as_ref(),
+            &mut self.preview_store,
+            width,
+            height,
+            gaanim_export::config::OutputFit::Contain,
+        );
+        let base = self
+            .bundle
+            .scene
+            .clear_color
+            .map(|[r, g, b, a]| vello::peniko::Color::from_rgba8(r, g, b, a))
+            .unwrap_or(vello::peniko::Color::BLACK);
+        Some((scene, base))
+    }
 }
 
 /// System: show the recorded frame at the playhead.

@@ -1010,33 +1010,13 @@ impl FrameRasterizer {
             frame.camera.projection,
             gaanim_math::Projection::Perspective { .. }
         );
-        // Pad opacity layers for this output, as a direct export does.
-        let pixels_per_unit = self.background.as_ref().and_then(|background| {
-            gaanim_renderer::pipeline::output_pixels_per_unit(
-                &frame.camera,
-                background.pixel_size.0,
-            )
-        });
-        let raw_scene = gaanim_renderer::pipeline::compose_captured(
-            &frame.capture,
+        let scene = compose_bundle_frame(
+            frame,
+            self.background.as_ref(),
             &mut self.store,
-            self.background
-                .as_ref()
-                .filter(|_| !perspective)
-                .map(|background| (background, background.pixel_size)),
-            pixels_per_unit,
-            None,
-        );
-        self.store.end_frame();
-        let mut scene = vello::Scene::new();
-        scene.append(
-            &raw_scene,
-            Some(capture_camera_to_vello_transform(
-                Some(&resolved),
-                self.width,
-                self.height,
-                self.fit,
-            )),
+            self.width,
+            self.height,
+            self.fit,
         );
         let post = (!perspective && !frame.post.is_empty())
             .then(|| {
@@ -1065,6 +1045,50 @@ impl FrameRasterizer {
             .render_frame(&scene, self.bg_color, post.as_ref())
             .map_err(|error| frame_render_error(error, time))
     }
+}
+
+/// The scene a bundle `frame` draws at `width` by `height` pixels, before
+/// post-processing, as [`FrameRasterizer`] renders it. `background` is sized
+/// to the output; `store` keeps fragments across the frames of one bundle.
+pub fn compose_bundle_frame(
+    frame: &gaanim_bundle::Frame,
+    background: Option<&gaanim_renderer::pipeline::CanvasBackground>,
+    store: &mut gaanim_renderer::fragment::FragmentStore,
+    width: u32,
+    height: u32,
+    fit: crate::config::OutputFit,
+) -> vello::Scene {
+    let resolved =
+        gaanim_math::ResolvedCamera::new(frame.camera, gaanim_math::CameraViewport::default());
+    let perspective = matches!(
+        frame.camera.projection,
+        gaanim_math::Projection::Perspective { .. }
+    );
+    // Pad opacity layers for this output, as a direct export does.
+    let pixels_per_unit = background.and_then(|background| {
+        gaanim_renderer::pipeline::output_pixels_per_unit(&frame.camera, background.pixel_size.0)
+    });
+    let raw_scene = gaanim_renderer::pipeline::compose_captured(
+        &frame.capture,
+        store,
+        background
+            .filter(|_| !perspective)
+            .map(|background| (background, background.pixel_size)),
+        pixels_per_unit,
+        None,
+    );
+    store.end_frame();
+    let mut scene = vello::Scene::new();
+    scene.append(
+        &raw_scene,
+        Some(capture_camera_to_vello_transform(
+            Some(&resolved),
+            width,
+            height,
+            fit,
+        )),
+    );
+    scene
 }
 
 /// Render the frames of the bundle at `bundle_path` shown at `times`, handing
