@@ -117,6 +117,16 @@ impl<'a> Reader<'a> {
         Self { data, pos: 0 }
     }
 
+    /// A reader over `data` that resumes at byte `pos`.
+    pub fn at(data: &'a [u8], pos: usize) -> Self {
+        Self { data, pos }
+    }
+
+    /// Bytes read so far.
+    pub fn position(&self) -> usize {
+        self.pos
+    }
+
     pub fn is_empty(&self) -> bool {
         self.pos >= self.data.len()
     }
