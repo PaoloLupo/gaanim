@@ -7,6 +7,7 @@ pub mod canvas;
 pub mod diagnostics;
 pub mod effects;
 pub mod fragment;
+mod gpu_scope;
 pub mod lottie;
 pub mod offscreen;
 pub mod pipeline;
