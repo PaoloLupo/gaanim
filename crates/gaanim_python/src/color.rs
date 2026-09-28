@@ -90,8 +90,16 @@ impl PyColor {
                 PyValueError::new_err(format!("invalid color '{source}': {error}"))
             });
         }
+        if g.is_none() && b.is_none() && a.is_none() && value.extract::<u8>().is_err() {
+            // `Color(GOLD)` or `Color((r, g, b))`: any other color value is
+            // returned as a `Color`, like every parameter that takes one.
+            return value.extract::<PyColor>();
+        }
         let r = value.extract::<u8>().map_err(|_| {
-            PyValueError::new_err("Color expects a CSS color string or r, g, b integer components")
+            PyValueError::new_err(
+                "Color expects a Color, a CSS color string, an (r, g, b[, a]) tuple, \
+                 or r, g, b integer components",
+            )
         })?;
         let (g, b) = match (g, b) {
             (Some(g), Some(b)) => (g, b),

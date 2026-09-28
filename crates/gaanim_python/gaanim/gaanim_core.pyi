@@ -207,7 +207,7 @@ class Easing:
 
 class Color:
     @overload
-    def __init__(self, value: str) -> None: ...
+    def __init__(self, value: ColorLike) -> None: ...
     @overload
     def __init__(self, r: int, g: int, b: int, a: int = 255) -> None: ...
     @staticmethod
@@ -244,8 +244,9 @@ class Color:
     """A CSS Color 4 or explicit RGBA color.
 
     Examples include ``Color("#0f172a")``, ``Color("oklch(62% .2 260)")``
-    and ``Color(15, 23, 42)``. Invalid syntax or component ranges raise
-    ``ValueError``.
+    and ``Color(15, 23, 42)``. Any other color value, such as ``Color(GOLD)``
+    or ``Color((15, 23, 42))``, returns that color. Invalid syntax or
+    component ranges raise ``ValueError``.
     """
 
 ColorLike: TypeAlias = Color | str | tuple[int, int, int] | tuple[int, int, int, int]
@@ -934,7 +935,7 @@ class Transition:
     @staticmethod
     def fade_through(
         duration: float,
-        color: Color,
+        color: ColorLike,
         *,
         easing: Optional[Easing] = None,
         overlay: Optional[Overlay] = None,
@@ -1111,7 +1112,7 @@ class Overlay:
     """
 
     @staticmethod
-    def flash(color: Optional[Color] = None, duration: float = 0.2) -> Overlay:
+    def flash(color: Optional[ColorLike] = None, duration: float = 0.2) -> Overlay:
         """Flash the whole frame with ``color`` (white by default), peaking at the cut.
 
         The flash rises over the first half of ``duration`` seconds and fades
@@ -1525,7 +1526,7 @@ class Anim:
             scene.play(plane.animate.move_along(route, orient=True).duration(3))
         """
         ...
-    def glow(self, color: Optional[Color] = None, radius: float = 0.16, intensity: float = 1.0) -> Anim:
+    def glow(self, color: Optional[ColorLike] = None, radius: float = 0.16, intensity: float = 1.0) -> Anim:
         """Animate the glow toward ``color``/``radius``/``intensity``; ``None`` fades it out.
 
         A drawable without glow grows it from zero intensity. Combines with
@@ -1544,7 +1545,7 @@ class Anim:
             scene.play(hero.animate.blur(0.0).duration(0.6))
         """
         ...
-    def shadow(self, color: Optional[Color] = None, x: float = 0.08, y: float = -0.08, blur: float = 0.06) -> Anim:
+    def shadow(self, color: Optional[ColorLike] = None, x: float = 0.08, y: float = -0.08, blur: float = 0.06) -> Anim:
         """Animate the drop shadow; ``None`` fades it out and a new one grows from under the drawable.
 
         Example:
@@ -2218,7 +2219,7 @@ class Drawable:
     def style_class(self, name: str) -> Self:
         """Attach an ordered theme class; explicit fluent styles still win."""
         ...
-    def glow(self, color: Color, radius: float = 0.16, intensity: float = 1.0) -> Drawable:
+    def glow(self, color: ColorLike, radius: float = 0.16, intensity: float = 1.0) -> Drawable:
         """Apply glow to this drawable and return the result.
 
         Example:
@@ -2255,7 +2256,7 @@ class Drawable:
         ...
     def shadow(
         self,
-        color: Color,
+        color: ColorLike,
         x: float = 0.08,
         y: float = -0.08,
         blur: float = 0.06,
@@ -3108,8 +3109,8 @@ class TextStyle:
         size: Optional[float] = None,
         weight: Optional[int] = None,
         italic: Optional[bool] = None,
-        color: Optional[Color] = None,
-        stroke: Optional[Color] = None,
+        color: Optional[ColorLike] = None,
+        stroke: Optional[ColorLike] = None,
         stroke_width: Optional[float] = None,
         opacity: Optional[float] = None,
         letter_spacing: Optional[float] = None,
@@ -3195,7 +3196,7 @@ def part(
     size: Optional[float] = None,
     weight: Optional[int] = None,
     italic: Optional[bool] = None,
-    color: Optional[Color] = None,
+    color: Optional[ColorLike] = None,
     opacity: Optional[float] = None,
     letter_spacing: Optional[float] = None,
     word_spacing: Optional[float] = None,
@@ -3215,7 +3216,7 @@ def part(
 
 class TextSelectionAnimation:
     """Pure typed proxy for one text selection."""
-    def fill(self, color: Color) -> Anim: ...
+    def fill(self, color: ColorLike) -> Anim: ...
     def opacity(self, value: float) -> Anim: ...
     def indicate(self) -> Anim: ...
     def wiggle(self) -> Anim: ...
@@ -3257,7 +3258,7 @@ class TextSelectionAnimation:
         ...
     def marker(
         self,
-        color: Color | None = None,
+        color: ColorLike | None = None,
         *,
         skew: float = 0.05,
         blend: Literal["normal", "multiply"] = "normal",
@@ -3298,7 +3299,7 @@ class TextSelection:
     for example, ``g sin(theta)`` targets the rendered ``g sin(θ)``.
     """
     def __getitem__(self, name: str) -> TextSelection: ...
-    def fill(self, color: Color) -> TextSelection:
+    def fill(self, color: ColorLike) -> TextSelection:
         """Persistently color selected glyphs and invalidate metric state if needed.
 
         In mathematics, the selected part remains inside the same Typst
@@ -3311,7 +3312,7 @@ class TextSelection:
         ...
     def marker(
         self,
-        color: Color | None = None,
+        color: ColorLike | None = None,
         *,
         skew: float = 0.05,
         blend: Literal["normal", "multiply"] = "normal",
@@ -3371,7 +3372,7 @@ class TextAnimator:
         rotation: Optional[float] = None,
         blur: Optional[float] = None,
         tracking: Optional[float] = None,
-        color: Optional[Color] = None,
+        color: Optional[ColorLike] = None,
     ) -> TextAnimator:
         """Define the state a unit reaches at full influence and return this animator.
 
@@ -3414,7 +3415,7 @@ class TextAnimatorAnimation:
 
 class Text(Drawable):
     """Structured, Layout-v2-measurable vector text and mathematics."""
-    def glow(self, color: Color, radius: float = 0.16, intensity: float = 1.0) -> Self:
+    def glow(self, color: ColorLike, radius: float = 0.16, intensity: float = 1.0) -> Self:
         """Apply glow while preserving Text chaining and typographic placement.
 
         Example:
@@ -3430,7 +3431,7 @@ class Text(Drawable):
         ...
     def shadow(
         self,
-        color: Color,
+        color: ColorLike,
         x: float = 0.08,
         y: float = -0.08,
         blur: float = 0.06,
@@ -4898,7 +4899,7 @@ class CoordinateSpace:
         step: bool = False,
         baseline: Optional[float] = None,
         policy: Literal["gap", "drop", "error"] = "gap",
-        color: Optional[Color] = None,
+        color: Optional[ColorLike] = None,
         width: Optional[float] = None,
     ) -> Drawable:
         """Plot a raw data series in this space's data coordinates.
@@ -4921,7 +4922,7 @@ class CoordinateSpace:
         *,
         radius: float = 0.06,
         policy: Literal["gap", "drop", "error"] = "gap",
-        color: Optional[Color] = None,
+        color: Optional[ColorLike] = None,
     ) -> Drawable:
         """Plot a data series as scatter dots in this space's data coordinates.
 
@@ -5444,7 +5445,7 @@ class Geometry:
     def polyline_3d(
         self,
         points: Sequence[tuple[float, float, float]],
-        color: Optional[Color] = None,
+        color: Optional[ColorLike] = None,
         *,
         colors: Optional[Sequence[Color]] = None,
         colormap: Optional[str] = None,
@@ -5526,8 +5527,8 @@ class Geometry:
         petals orbit a flower's center) or about its own pivot. Its opacity
         runs from ``opacity[0]`` for the first copy to ``opacity[1]`` for the
         last. ``shape`` itself becomes copy 0; the copies are the members of
-        the returned group, in order, so ``group[i]`` and animations such as
-        ``stagger`` address them. Group and text shapes are copied with their
+        the returned group, in order, and ``animate.count(n)`` reveals them
+        one by one. Group and text shapes are copied with their
         members. ``count`` must be 1-10000; non-finite values, a non-positive
         ``scale``, opacities outside [0, 1] or a shape of another scene raise
         ``ValueError``.
@@ -5858,9 +5859,9 @@ class Typography:
         width: float = 7.6,
         height: float = 3.0,
         font_size: float = 0.2,
-        background: Optional[Color] = None,
-        color: Optional[Color] = None,
-        accent: Optional[Color] = None,
+        background: Optional[ColorLike] = None,
+        color: Optional[ColorLike] = None,
+        accent: Optional[ColorLike] = None,
     ) -> Drawable:
         """Create a code drawable in the scene.
 
@@ -6058,7 +6059,12 @@ class MediaLibrary:
 
         The document is imported at 100 SVG pixels per logical scene unit, the
         same factor the rest of the engine uses (a 0.03 default stroke is a
-        3 px stroke), centered on the origin. The pixel size is the document
+        3 px stroke), with the document's center on the origin. ``scale_to``
+        and ``rotate_to`` pivot on the center of what the SVG draws, so an
+        off-center drawing moves the document center away from the origin
+        when scaled; place it with ``move_to`` (its visual center) or call
+        ``with_pivot(0, 0)`` first. Parts (``part(id)``) are laid out after
+        the root, so moving a part never moves the whole SVG. The pixel size is the document
         ``width``/``height``, or the ``viewBox`` when those are absent: a
         360x220 px SVG spans 3.6x2.2 units of the 16x9 frame. Stroke widths,
         gradients, clip paths, text outlines and filter lengths scale with the
@@ -6081,8 +6087,8 @@ class Visualization:
     """Scene-owned API for reactive values, coordinate spaces, charts, and matrices."""
     def progress_ring(
         self, value: float = 0.0, *, radius: float = 1.0, width: float = 0.12,
-        color: Optional[Color] = None, track: bool = True, track_color: Optional[Color] = None,
-        label: bool = True, decimals: int = 0, label_color: Optional[Color] = None,
+        color: Optional[ColorLike] = None, track: bool = True, track_color: Optional[ColorLike] = None,
+        label: bool = True, decimals: int = 0, label_color: Optional[ColorLike] = None,
         font_size: float = 0.5,
     ) -> ProgressRing:
         """Create a progress ring whose arc fills clockwise with ``value`` in ``[0, 1]``.
@@ -6101,8 +6107,8 @@ class Visualization:
         ...
     def countdown(
         self, seconds: float, *, radius: float = 1.0, width: float = 0.12,
-        color: Optional[Color] = None, track: bool = True, track_color: Optional[Color] = None,
-        label: bool = True, label_color: Optional[Color] = None, font_size: float = 0.6,
+        color: Optional[ColorLike] = None, track: bool = True, track_color: Optional[ColorLike] = None,
+        label: bool = True, label_color: Optional[ColorLike] = None, font_size: float = 0.6,
     ) -> ProgressRing:
         """Create a countdown timer: a full ring with ``seconds`` rolling in its center.
 
@@ -6122,7 +6128,7 @@ class Visualization:
         prefix: str = "", suffix: str = "", show_plus: bool = False,
         font_family: Optional[str] = None, weight: Optional[int] = None,
         font_size: float = 0.75, digit_spacing: float = 0.02, line_height: float = 1.25,
-        mode: str = "odometer", direction: str = "up", color: Optional[Color] = None,
+        mode: str = "odometer", direction: str = "up", color: Optional[ColorLike] = None,
     ) -> RollingNumber:
         """Create a right-anchored rolling counter with fixed-width digit cells.
 
@@ -6278,7 +6284,7 @@ class Visualization:
         omitted axes retain the default ``Re`` and ``Im`` titles.
         """
         ...
-    def readout(self, source: _ReactiveScalar | Callable[..., float], *, inputs: Sequence[Parameter | Variable | Computed | TimeInput] = (), label: Optional[str] = None, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[Color] = None, invalid: str = "invalid", decimal_separator: str = ".") -> Readout:
+    def readout(self, source: _ReactiveScalar | Callable[..., float], *, inputs: Sequence[Parameter | Variable | Computed | TimeInput] = (), label: Optional[str] = None, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[ColorLike] = None, invalid: str = "invalid", decimal_separator: str = ".") -> Readout:
         """Create a native numeric display with equally spaced, baseline-aligned terms.
 
         The label, equality sign, number, and unit all use ``font_size``;
@@ -6293,7 +6299,7 @@ class Visualization:
         ``%``; otherwise ``ValueError`` is raised.
         """
         ...
-    def variable(self, initial: float, *, label: str, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[Color] = None, invalid: str = "invalid", decimal_separator: str = ".") -> Variable:
+    def variable(self, initial: float, *, label: str, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[ColorLike] = None, invalid: str = "invalid", decimal_separator: str = ".") -> Variable:
         """Create an animatable scalar displayed as an aligned equation row.
 
         Every visible term uses ``font_size``, or 0.48 units when omitted.
@@ -6384,9 +6390,9 @@ class SlideKit:
         radius: Optional[float] = None,
         font_size: Optional[float] = None,
         min_width: Optional[float] = None,
-        color: Optional[Color] = None,
-        background: Optional[Color] = None,
-        border: Optional[Color] = None,
+        color: Optional[ColorLike] = None,
+        background: Optional[ColorLike] = None,
+        border: Optional[ColorLike] = None,
         font: Optional[str] = None,
         weight: Optional[int] = None,
         style: Optional[TextStyle] = None,
@@ -6422,9 +6428,9 @@ class SlideKit:
         padding: tuple[float, float] = (0.14, 0.08),
         radius: Optional[float] = None,
         font_size: Optional[float] = None,
-        color: Optional[Color] = None,
-        background: Optional[Color] = None,
-        border: Optional[Color] = None,
+        color: Optional[ColorLike] = None,
+        background: Optional[ColorLike] = None,
+        border: Optional[ColorLike] = None,
         font: Optional[str] = None,
         weight: Optional[int] = None,
         style: Optional[TextStyle] = None,
@@ -6454,9 +6460,9 @@ class SlideKit:
         radius: float = 0.18,
         variant: Literal["neutral", "accent", "success", "warning", "danger"] = "neutral",
         appearance: Literal["soft", "solid", "outline"] = "soft",
-        color: Optional[Color] = None,
-        background: Optional[Color] = None,
-        border: Optional[Color] = None,
+        color: Optional[ColorLike] = None,
+        background: Optional[ColorLike] = None,
+        border: Optional[ColorLike] = None,
     ) -> Drawable:
         """Create an auto-height card with title, body, and footer text slots.
 
@@ -6480,9 +6486,9 @@ class SlideKit:
         radius: float = 0.14,
         variant: Literal["neutral", "accent", "success", "warning", "danger"] = "neutral",
         appearance: Literal["soft", "solid", "outline"] = "soft",
-        color: Optional[Color] = None,
-        background: Optional[Color] = None,
-        border: Optional[Color] = None,
+        color: Optional[ColorLike] = None,
+        background: Optional[ColorLike] = None,
+        border: Optional[ColorLike] = None,
     ) -> Drawable:
         """Create an auto-height banner anchored to a safe top or bottom edge.
 
@@ -6507,9 +6513,9 @@ class SlideKit:
         radius: float = 0.16,
         variant: Literal["neutral", "accent", "success", "warning", "danger"] = "neutral",
         appearance: Literal["soft", "solid", "outline"] = "soft",
-        color: Optional[Color] = None,
-        background: Optional[Color] = None,
-        border: Optional[Color] = None,
+        color: Optional[ColorLike] = None,
+        background: Optional[ColorLike] = None,
+        border: Optional[ColorLike] = None,
     ) -> Drawable:
         """Create a lower-third anchored to a safe bottom corner.
 
@@ -6533,9 +6539,9 @@ class SlideKit:
         radius: float = 0.18,
         variant: Literal["neutral", "accent", "success", "warning", "danger"] = "neutral",
         appearance: Literal["soft", "solid", "outline"] = "soft",
-        color: Optional[Color] = None,
-        background: Optional[Color] = None,
-        border: Optional[Color] = None,
+        color: Optional[ColorLike] = None,
+        background: Optional[ColorLike] = None,
+        border: Optional[ColorLike] = None,
     ) -> Drawable:
         """Create an auto-height metric card with value, label, and delta.
 
@@ -6557,9 +6563,9 @@ class SlideKit:
         radius: float = 0.18,
         variant: Literal["neutral", "accent", "success", "warning", "danger"] = "neutral",
         appearance: Literal["soft", "solid", "outline"] = "soft",
-        color: Optional[Color] = None,
-        background: Optional[Color] = None,
-        border: Optional[Color] = None,
+        color: Optional[ColorLike] = None,
+        background: Optional[ColorLike] = None,
+        border: Optional[ColorLike] = None,
     ) -> Drawable:
         """Create a wrapped quotation card with optional attribution.
 
@@ -6584,9 +6590,9 @@ class SlideKit:
         radius: float = 0.12,
         variant: Literal["neutral", "accent", "success", "warning", "danger"] = "neutral",
         appearance: Literal["soft", "solid", "outline"] = "soft",
-        color: Optional[Color] = None,
-        background: Optional[Color] = None,
-        border: Optional[Color] = None,
+        color: Optional[ColorLike] = None,
+        background: Optional[ColorLike] = None,
+        border: Optional[ColorLike] = None,
     ) -> Drawable:
         """Create a section heading with optional kicker and subtitle.
 
@@ -6607,8 +6613,8 @@ class SlideKit:
         offset: tuple[float, float] = (1.6, 0.96),
         width: float = 2.4,
         height: float = 0.72,
-        background: Optional[Color] = None,
-        color: Optional[Color] = None,
+        background: Optional[ColorLike] = None,
+        color: Optional[ColorLike] = None,
     ) -> Drawable:
         """Create a callout drawable in the scene.
 
@@ -6624,9 +6630,9 @@ class SlideKit:
         width: float = 7.6,
         height: float = 3.2,
         panel: bool = False,
-        background: Optional[Color] = None,
-        color: Optional[Color] = None,
-        accent: Optional[Color] = None,
+        background: Optional[ColorLike] = None,
+        color: Optional[ColorLike] = None,
+        accent: Optional[ColorLike] = None,
     ) -> Drawable:
         """Create a title card drawable in the scene.
 
@@ -6641,8 +6647,8 @@ class SlideKit:
         width: float = 7.2,
         gap: float = 0.68,
         bullet_radius: float = 0.08,
-        bullet_color: Optional[Color] = None,
-        color: Optional[Color] = None,
+        bullet_color: Optional[ColorLike] = None,
+        color: Optional[ColorLike] = None,
     ) -> Drawable:
         """Create a bullets drawable in the scene.
 
@@ -6657,9 +6663,9 @@ class SlideKit:
         *,
         width: float = 7.6,
         row_height: float = 0.58,
-        header_background: Optional[Color] = None,
-        rule_color: Optional[Color] = None,
-        color: Optional[Color] = None,
+        header_background: Optional[ColorLike] = None,
+        rule_color: Optional[ColorLike] = None,
+        color: Optional[ColorLike] = None,
     ) -> Drawable:
         """Create a table drawable in the scene.
 
@@ -6734,7 +6740,7 @@ class Mechanics:
         label_gap: float = 0.10,
         label_orientation: Literal["upright", "aligned"] = "upright",
         font_size: Optional[float] = None,
-        color: Optional[Color] = None,
+        color: Optional[ColorLike] = None,
         line_width: float = 0.03,
         extension_style: Literal["solid", "dashed"] = "solid",
         dash_length: float = 0.12,
@@ -6808,7 +6814,7 @@ class Mechanics:
         label_orientation: Literal["upright", "aligned"] = "upright",
         show_extensions: bool = True,
         font_size: Optional[float] = None,
-        color: Optional[Color] = None,
+        color: Optional[ColorLike] = None,
     ) -> AngleDimension:
         """Create a same-frame angular dimension from fixed directions or endpoints.
 
@@ -6817,7 +6823,7 @@ class Mechanics:
         Degenerate rays hide the geometry; invalid modes or metrics raise ``ValueError``.
         """
         ...
-    def vector_between(self, from_: Endpoint, to: Endpoint, *, label: Optional[str] = None, show_value: bool = False, format: str = ".1f", unit: Optional[str] = None, scale: float = 1.0, label_gap: float = 0.14, font_size: Optional[float] = None, color: Optional[Color] = None) -> ForceVector:
+    def vector_between(self, from_: Endpoint, to: Endpoint, *, label: Optional[str] = None, show_value: bool = False, format: str = ".1f", unit: Optional[str] = None, scale: float = 1.0, label_gap: float = 0.14, font_size: Optional[float] = None, color: Optional[ColorLike] = None) -> ForceVector:
         """Create a reactive vector with accessible shaft, solid head, and readout parts.
 
         ``color`` applies to the vector and every readout term, including the
@@ -6825,7 +6831,7 @@ class Mechanics:
         units default to 0.48 scene units.
         """
         ...
-    def force_at(self, origin: Endpoint, magnitude: _ReactiveScalar, *, direction: _ReactiveScalar = 0.0, visual_scale: float = 1.0, label: Optional[str] = None, show_value: bool = False, format: str = ".1f", unit: str = "N", label_gap: float = 0.14, font_size: Optional[float] = None, color: Optional[Color] = None) -> ForceVector:
+    def force_at(self, origin: Endpoint, magnitude: _ReactiveScalar, *, direction: _ReactiveScalar = 0.0, visual_scale: float = 1.0, label: Optional[str] = None, show_value: bool = False, format: str = ".1f", unit: str = "N", label_gap: float = 0.14, font_size: Optional[float] = None, color: Optional[ColorLike] = None) -> ForceVector:
         """Create a reactive force from physical magnitude and direction in radians.
 
         ``visual_scale`` converts physical units into scene units and must be
@@ -6834,50 +6840,50 @@ class Mechanics:
         row defaults to 0.48 scene units.
         """
         ...
-    def force_from_components(self, origin: Endpoint, fx: _ReactiveScalar, fy: _ReactiveScalar, *, visual_scale: float = 1.0, label: Optional[str] = None, show_value: bool = False, format: str = ".1f", unit: str = "N", label_gap: float = 0.14, font_size: Optional[float] = None, color: Optional[Color] = None) -> ForceVector:
+    def force_from_components(self, origin: Endpoint, fx: _ReactiveScalar, fy: _ReactiveScalar, *, visual_scale: float = 1.0, label: Optional[str] = None, show_value: bool = False, format: str = ".1f", unit: str = "N", label_gap: float = 0.14, font_size: Optional[float] = None, color: Optional[ColorLike] = None) -> ForceVector:
         """Create a reactive force from physical X/Y components relative to a moving origin.
 
         ``color`` applies to the force and the complete reactive readout, whose
         terms default to 0.48 scene units.
         """
         ...
-    def support_at(self, point: Endpoint, *, kind: Literal["fixed", "pin", "roller", "simple", "guided", "prismatic", "cable", "spring"] = "pin", direction: Optional[Direction] = None, size: float = 0.48, ground_length: float = 0.70, color: Optional[Color] = None) -> Support:
+    def support_at(self, point: Endpoint, *, kind: Literal["fixed", "pin", "roller", "simple", "guided", "prismatic", "cable", "spring"] = "pin", direction: Optional[Direction] = None, size: float = 0.48, ground_length: float = 0.70, color: Optional[ColorLike] = None) -> Support:
         """Create a theme-aware vector support following ``point``.
 
         Direction runs from the base toward the connection; sizes are scene units.
         """
         ...
-    def fixed_support(self, point: Endpoint, *, direction: Optional[Direction] = None, size: float = 0.48, ground_length: float = 0.70, color: Optional[Color] = None) -> Support:
+    def fixed_support(self, point: Endpoint, *, direction: Optional[Direction] = None, size: float = 0.48, ground_length: float = 0.70, color: Optional[ColorLike] = None) -> Support:
         """Create a fixed or ceiling support with plate and consistent hatching."""
         ...
-    def pin_support(self, point: Endpoint, *, direction: Optional[Direction] = None, size: float = 0.48, ground_length: float = 0.70, color: Optional[Color] = None) -> Support:
+    def pin_support(self, point: Endpoint, *, direction: Optional[Direction] = None, size: float = 0.48, ground_length: float = 0.70, color: Optional[ColorLike] = None) -> Support:
         """Create a triangular pinned support with a circular joint."""
         ...
-    def roller_support(self, point: Endpoint, *, direction: Optional[Direction] = None, size: float = 0.48, ground_length: float = 0.70, color: Optional[Color] = None) -> Support:
+    def roller_support(self, point: Endpoint, *, direction: Optional[Direction] = None, size: float = 0.48, ground_length: float = 0.70, color: Optional[ColorLike] = None) -> Support:
         """Create a triangular support on two aligned rollers."""
         ...
-    def guided_support(self, point: Endpoint, *, direction: Optional[Direction] = None, size: float = 0.48, ground_length: float = 0.70, color: Optional[Color] = None) -> Support:
+    def guided_support(self, point: Endpoint, *, direction: Optional[Direction] = None, size: float = 0.48, ground_length: float = 0.70, color: Optional[ColorLike] = None) -> Support:
         """Create a guided carriage support aligned with ``direction``."""
         ...
-    def joint_at(self, point: Endpoint, *, kind: Literal["revolute", "prismatic"] = "revolute", axis: Optional[Direction] = None, size: float = 0.36, color: Optional[Color] = None) -> Drawable:
+    def joint_at(self, point: Endpoint, *, kind: Literal["revolute", "prismatic"] = "revolute", axis: Optional[Direction] = None, size: float = 0.36, color: Optional[ColorLike] = None) -> Drawable:
         """Create a standalone reactive revolute or prismatic joint symbol."""
         ...
-    def gear(self, radius: float, teeth: int, *, bore_radius: float = 0.08, color: Optional[Color] = None) -> Drawable:
+    def gear(self, radius: float, teeth: int, *, bore_radius: float = 0.08, color: Optional[ColorLike] = None) -> Drawable:
         """Create an editorial gear silhouette; geometry is illustrative, not manufacturing involute."""
         ...
-    def rack(self, length: float, teeth: int, *, color: Optional[Color] = None) -> Drawable:
+    def rack(self, length: float, teeth: int, *, color: Optional[ColorLike] = None) -> Drawable:
         """Create an editorial straight rack with evenly spaced teeth."""
         ...
-    def cam_profile(self, samples: Sequence[tuple[float, float]], *, bore_radius: float = 0.08, color: Optional[Color] = None) -> Drawable:
+    def cam_profile(self, samples: Sequence[tuple[float, float]], *, bore_radius: float = 0.08, color: Optional[ColorLike] = None) -> Drawable:
         """Create a closed radial cam from ``(angle_radians, radius)`` samples."""
         ...
     def contact_on_curve(self, curve: Drawable, tracker: Parameter | Variable, *, tangent_length: float = 0.8, normal_length: float = 0.8) -> Drawable:
         """Group a reactive contact point, tangent, and normal on a sampled curve."""
         ...
-    def moment_about(self, center: Endpoint, radius: float, *, direction: Literal["cw", "ccw"] = "ccw", label: Optional[str] = None, color: Optional[Color] = None) -> Drawable:
+    def moment_about(self, center: Endpoint, radius: float, *, direction: Literal["cw", "ccw"] = "ccw", label: Optional[str] = None, color: Optional[ColorLike] = None) -> Drawable:
         """Create a curved moment arrow that follows a reactive center."""
         ...
-    def coordinate_frame_at(self, origin: Endpoint, x_direction: Direction, *, length: float = 0.70, labels: Optional[tuple[str, str]] = None, color: Optional[Color] = None) -> Drawable:
+    def coordinate_frame_at(self, origin: Endpoint, x_direction: Direction, *, length: float = 0.70, labels: Optional[tuple[str, str]] = None, color: Optional[ColorLike] = None) -> Drawable:
         """Create a reactive orthogonal 2D coordinate frame at an endpoint."""
         ...
 

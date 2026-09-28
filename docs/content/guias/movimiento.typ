@@ -410,6 +410,38 @@ scene.render()
 `create`, `write`, `trim` y `show_passing_flash` comparten el mismo canal en
 un drawable: no los solapes en el mismo `play`; encadénalos con `sequence`.
 
+== Repetidores, duplicadores y plexus
+
+Para llenar una escena con muchas copias de una forma no hace falta un bucle
+de `move_to`: `scene.geometry.repeat(forma, n, ...)` hace `n` copias, cada una
+un paso más girada, escalada o desplazada (como el Repeater de After
+Effects), y `scene.geometry.duplicate(forma, Distribution...)` las reparte en
+una rejilla, un círculo, un camino o una nube aleatoria reproducible. Las dos
+devuelven un grupo cuyos miembros son las copias, en orden;
+`animate.count(n)` revela las copias de un repetidor una a una. `scene.geometry.connect(puntos, max_distance)` une con líneas vivas
+los puntos cercanos (un _plexus_) y las líneas siguen a los puntos mientras
+se mueven.
+
+```python
+import math
+from gaanim import CYAN, GOLD, PINK, Distribution, Scene
+
+scene = Scene(frame=(16, 9), background="#0f172a")
+petalo = scene.geometry.ellipse(0.25, 0.9).fill(PINK).move_to(-4, 1.2)
+flor = scene.geometry.repeat(petalo, 12, rotate=math.tau / 12, about=(-4, 0), opacity=(1.0, 0.4)).count(0)
+estrella = scene.geometry.star(5, 0.12, 0.05).fill(GOLD)
+cielo = scene.geometry.duplicate(estrella, Distribution.random(40, (1, -3, 7, 3), seed=3))
+enlaces = scene.geometry.connect(cielo, max_distance=1.6).stroke(CYAN, 0.015)
+scene.play([flor.animate.count(12).duration(1.0)])
+scene.play([enlaces.animate.fade_in().duration(0.6)])
+scene.render()
+```
+
+El trazo también se anima sin cambiar la forma: `stroke_profile` da un
+grosor variable a lo largo del camino y `Updater.dash_flow(speed)` hace
+correr los guiones de un trazo discontinuo (ver
+#link("/referencia/drawable/")[Drawable]).
+
 == Referencia
 
 - #link("/referencia/animations/")[Animaciones]: `Easing`, `stagger`,
