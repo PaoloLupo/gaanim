@@ -360,17 +360,29 @@ pub fn regular_polygon(id: ObjectId, n_sides: u32, radius: f64) -> MobjectBundle
 /// The mark is a closed outline whose thickness is proportional to `size`, so
 /// it is a filled shape: `.fill()` colours it and no stroke is required.
 pub fn checkmark(id: ObjectId, size: f64) -> MobjectBundle {
-    let centerline = [
-        kurbo::PathEl::MoveTo(kurbo::Point::new(-0.4 * size, -0.1 * size)),
-        kurbo::PathEl::LineTo(kurbo::Point::new(-0.15 * size, -0.35 * size)),
-        kurbo::PathEl::LineTo(kurbo::Point::new(0.4 * size, 0.4 * size)),
-    ];
+    let start = kurbo::Point::new(-0.4 * size, -0.1 * size);
+    let elbow = kurbo::Point::new(-0.15 * size, -0.35 * size);
+    let end = kurbo::Point::new(0.4 * size, 0.4 * size);
     let thickness = 0.12 * size;
-    let style = kurbo::Stroke::new(thickness)
-        .with_caps(kurbo::Cap::Butt)
-        .with_join(kurbo::Join::Miter);
-    let path = kurbo::stroke(centerline, &style, &kurbo::StrokeOpts::default(), 0.001);
     let half = thickness * 0.5;
+
+    // Offset the two-segment centerline by hand (butt caps, mitered elbow):
+    // a stroked outline self-intersects at the inner corner, which shows up
+    // as a stray loop as soon as the mark gets an explicit stroke.
+    let normal = |from: kurbo::Point, to: kurbo::Point| {
+        let d = (to - from).normalize();
+        kurbo::Vec2::new(-d.y, d.x)
+    };
+    let (n1, n2) = (normal(start, elbow), normal(elbow, end));
+    let miter = (n1 + n2) * (half / (1.0 + n1.dot(n2)));
+    let mut path = kurbo::BezPath::new();
+    path.move_to(start + n1 * half);
+    path.line_to(elbow + miter);
+    path.line_to(end + n2 * half);
+    path.line_to(end - n2 * half);
+    path.line_to(elbow - miter);
+    path.line_to(start - n1 * half);
+    path.close_path();
     let bounds = Bounds3D::new_2d(
         -0.4 * size - half,
         -0.35 * size - half,
