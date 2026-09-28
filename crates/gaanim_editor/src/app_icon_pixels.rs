@@ -3,6 +3,9 @@
 /// Side of the icon's pixel grid.
 pub(crate) const ICON_GRID: usize = 16;
 
+/// Corner radius of the tile (palette index 1), in grid pixels.
+pub(crate) const ICON_TILE_RADIUS: f32 = 3.5;
+
 /// RGBA colours for grid indices 1..; index 0 is transparent.
 pub(crate) const ICON_PALETTE: [[u8; 4]; 4] = [
     [20, 17, 46, 255],
@@ -13,8 +16,8 @@ pub(crate) const ICON_PALETTE: [[u8; 4]; 4] = [
 
 /// One ASCII digit per pixel, row by row: an index into the palette plus one.
 pub(crate) const ICON_PIXELS: [[u8; 16]; 16] = [
-    *b"0011111111111100",
-    *b"0111111111111110",
+    *b"1111111111111111",
+    *b"1111111111111111",
     *b"1111111111111111",
     *b"1111111111111111",
     *b"1122233344441111",
@@ -27,6 +30,6 @@ pub(crate) const ICON_PIXELS: [[u8; 16]; 16] = [
     *b"1122233344441111",
     *b"1111111111111111",
     *b"1111111111111111",
-    *b"0111111111111110",
-    *b"0011111111111100",
+    *b"1111111111111111",
+    *b"1111111111111111",
 ];

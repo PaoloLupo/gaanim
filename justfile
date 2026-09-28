@@ -70,9 +70,10 @@ build-timings:
 build-release:
     cargo build -p gaanim_editor -p gaanim_launcher --release
 
-# Build the distributed binaries (single codegen unit; slower, smaller).
+# Build the distributed binaries (single codegen unit; slower, smaller), plus
+# the Explorer thumbnail handler DLL (an empty library off Windows).
 build-dist:
-    cargo build -p gaanim_editor -p gaanim_launcher --profile dist
+    cargo build -p gaanim_editor -p gaanim_launcher -p gaanim_thumbnail_handler --profile dist
 
 [windows]
 build-release-install: build-dist wheel
@@ -80,6 +81,8 @@ build-release-install: build-dist wheel
     Copy-Item -Path "./target/dist/gaanim.exe" -Destination "C:\Tools\gaanim\" -Force
     Copy-Item -Path "./target/dist/gaanim-core.exe" -Destination "C:\Tools\gaanim\" -Force
     Copy-Item -Path "./target/dist/gaanim-play.exe" -Destination "C:\Tools\gaanim\" -Force
+    # Explorer may hold the thumbnail handler loaded; the old copy keeps working.
+    try { Copy-Item -Path "./target/dist/gaanim_thumbnail_handler.dll" -Destination "C:\Tools\gaanim\" -Force -ErrorAction Stop } catch { Write-Warning "gaanim_thumbnail_handler.dll is in use; restart Explorer and run this again to update it" }
     Copy-Item -Path (Get-ChildItem "./target/wheels/gaanim-*-py3-none-any.whl" | Select-Object -First 1).FullName -Destination "C:\Tools\gaanim\" -Force
 
 [unix]

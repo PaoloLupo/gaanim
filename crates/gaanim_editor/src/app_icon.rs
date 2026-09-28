@@ -2,7 +2,8 @@
 //! switcher.
 //!
 //! The 16×16 pixel mark from `tools/generate_brand.py` is scaled by a whole
-//! factor so its pixels stay square. The executables also embed the icon as a
+//! factor so its pixels stay square, over a tile whose rounded corners are
+//! antialiased at the icon's size. The executables also embed the icon as a
 //! Windows resource (see `build.rs`) for Explorer and pinned shortcuts; windows
 //! do not load it back because winit resolves resources in the module that
 //! contains winit, which is Bevy's DLL in dynamically linked dev builds.
@@ -62,21 +63,49 @@ fn apply_icon(window: &winit::window::Window) {
     window.set_window_icon(icon(RGBA_SCALE));
 }
 
-/// The icon as straight RGBA, each grid pixel drawn as a `scale`×`scale` block.
+/// The icon as straight RGBA, each grid pixel drawn as a `scale`×`scale` block
+/// except the tile's rounded corners.
 fn icon_rgba(scale: usize) -> Vec<u8> {
     let side = ICON_GRID * scale;
     let mut rgba = Vec::with_capacity(side * side * 4);
     for y in 0..side {
         for x in 0..side {
             let index = usize::from(ICON_PIXELS[y / scale][x / scale] - b'0');
-            rgba.extend_from_slice(if index == 0 {
-                &[0; 4]
+            if index == 0 {
+                rgba.extend_from_slice(&[0; 4]);
+                continue;
+            }
+            let [r, g, b, a] = ICON_PALETTE[index - 1];
+            let coverage = if index == 1 {
+                tile_coverage(x, y, side, ICON_TILE_RADIUS * scale as f32)
             } else {
-                &ICON_PALETTE[index - 1]
-            });
+                1.0
+            };
+            rgba.extend_from_slice(&[r, g, b, (f32::from(a) * coverage).round() as u8]);
         }
     }
     rgba
+}
+
+/// How much of pixel (`x`, `y`) a `side`-pixel square with corners of
+/// `radius` covers, from 4×4 samples.
+fn tile_coverage(x: usize, y: usize, side: usize, radius: f32) -> f32 {
+    const SAMPLES: usize = 4;
+    let side = side as f32;
+    let mut inside = 0;
+    for sy in 0..SAMPLES {
+        for sx in 0..SAMPLES {
+            let px = x as f32 + (sx as f32 + 0.5) / SAMPLES as f32;
+            let py = y as f32 + (sy as f32 + 0.5) / SAMPLES as f32;
+            // Distance past the rounded corner's centre on each axis.
+            let dx = (radius - px).max(px - (side - radius)).max(0.0);
+            let dy = (radius - py).max(py - (side - radius)).max(0.0);
+            if dx * dx + dy * dy <= radius * radius {
+                inside += 1;
+            }
+        }
+    }
+    inside as f32 / (SAMPLES * SAMPLES) as f32
 }
 
 #[cfg(test)]
@@ -100,8 +129,11 @@ mod tests {
         let rgba = icon_rgba(scale);
         assert_eq!(rgba.len(), side * side * 4);
         let at = |x: usize, y: usize| &rgba[(y * side + x) * 4..(y * side + x) * 4 + 4];
-        // Stepped corner stays transparent; the tile and the current frame are opaque.
-        assert_eq!(at(0, 0), [0, 0, 0, 0]);
+        // The rounded corner stays transparent and its edge is partly covered;
+        // the tile and the current frame are opaque.
+        assert_eq!(at(0, 0)[3], 0);
+        let edge = at(3, 4)[3];
+        assert!(edge > 0 && edge < 255, "{edge}");
         assert_eq!(at(side / 2, 0), ICON_PALETTE[0]);
         assert_eq!(
             at(10 * scale, side / 2),

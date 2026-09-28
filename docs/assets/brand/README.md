@@ -22,7 +22,7 @@ Todo se dibuja sobre una sola rejilla de unidades.
 
 | Elemento | Medida |
 | --- | --- |
-| Lienzo del icono | 16 × 16 unidades, esquinas escalonadas de 2 pasos |
+| Lienzo del icono | 16 × 16 unidades, cuadrado redondeado de radio 3,5 (vectorial) |
 | Fotograma | 8 × 8 unidades (cuadrado, intermedio, círculo de píxel) |
 | Paso entre fotogramas | 2 unidades; símbolo completo de 12 × 8 |
 | Altura x del logotipo | 8 unidades, igual al diámetro del círculo |
@@ -43,9 +43,11 @@ Todo se dibuja sobre una sola rejilla de unidades.
 | `gaanim-logo-mono.svg` | Una tinta (`currentColor`); fotogramas al 30 % y 60 % |
 | `gaanim-symbol.svg`, `gaanim-symbol-dark.svg` | Símbolo sin texto |
 | `gaanim-icon.svg` | Icono con fondo; favicon SVG |
-| `favicon.ico` | 16, 32 y 48 px, escalados sin interpolar |
+| `favicon.ico` | 16, 32 y 48 px; los fotogramas, escalados sin interpolar |
 | `apple-touch-icon.png` | 180 px, opaco (el sistema redondea las esquinas) |
 | `gaanim-icon-512.png` | Avatar para GitHub y redes |
+| `gaanim-app.ico`, `gaanim-app.res` | Icono de los ejecutables; el `.res` añade el de los `.gaanim` como recurso 2 |
+| `gaanim-document.svg`, `gaanim-document.ico`, `gaanim-document-512.png` | Icono de los archivos `.gaanim`: hoja de 32 × 32 unidades con esquina doblada, pantalla 16:9 con una bola sobre su trayectoria vectorial (nodo, manija de tangente y dos copias de papel cebolla), línea de tiempo con cabezal y keyframes, y el icono como insignia de 16 × 16 abajo a la izquierda |
 | `gaanim-social.png` | Vista previa social del repositorio (1280 × 640) |
 
 ## Color

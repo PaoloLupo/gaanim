@@ -18,6 +18,9 @@ pub const MIME_TYPE: &str = "application/x-gaanim";
 pub const PROG_ID: &str = "Gaanim.Bundle";
 /// Name shown for the file type.
 const TYPE_NAME: &str = "Paquete de Gaanim";
+/// Icon group resource of `.gaanim` files in `gaanim.exe`.
+#[cfg_attr(not(windows), allow(dead_code))]
+const DOCUMENT_ICON_RESOURCE: u32 = 2;
 /// Shell extension slot of thumbnail providers (`IThumbnailProvider`).
 #[cfg_attr(not(windows), allow(dead_code))]
 const THUMBNAIL_PROVIDER_SLOT: &str = "{e357fccd-a995-4576-b01f-234630154e96}";
@@ -158,6 +161,8 @@ MimeType={MIME_TYPE};
 /// Files a registration writes, relative to the XDG data directory.
 fn linux_files(launcher: &Path) -> Vec<(PathBuf, Vec<u8>)> {
     const ICON: &[u8] = include_bytes!("../../../docs/assets/brand/gaanim-icon-512.png");
+    const DOCUMENT: &[u8] = include_bytes!("../../../docs/assets/brand/gaanim-document-512.png");
+    const DOCUMENT_SVG: &[u8] = include_bytes!("../../../docs/assets/brand/gaanim-document.svg");
     vec![
         (
             PathBuf::from("mime/packages/gaanim.xml"),
@@ -177,7 +182,11 @@ fn linux_files(launcher: &Path) -> Vec<(PathBuf, Vec<u8>)> {
         ),
         (
             PathBuf::from("icons/hicolor/512x512/mimetypes/application-x-gaanim.png"),
-            ICON.to_vec(),
+            DOCUMENT.to_vec(),
+        ),
+        (
+            PathBuf::from("icons/hicolor/scalable/mimetypes/application-x-gaanim.svg"),
+            DOCUMENT_SVG.to_vec(),
         ),
     ]
 }
@@ -317,10 +326,12 @@ fn windows_values(launcher: &Path, handler: Option<&Path>) -> Vec<RegistryValue>
         value(".gaanim", Some("Content Type"), MIME_TYPE),
         value(r".gaanim\OpenWithProgids", Some(PROG_ID), ""),
         value(PROG_ID, None, TYPE_NAME),
+        // Resource 2 of the executables is the document icon (see
+        // tools/generate_brand.py); a negative index names a resource ID.
         value(
             format!(r"{PROG_ID}\DefaultIcon"),
             None,
-            format!("\"{exe}\",0"),
+            format!("\"{exe}\",-{DOCUMENT_ICON_RESOURCE}"),
         ),
         value(format!(r"{PROG_ID}\shell"), None, "open"),
         value(format!(r"{PROG_ID}\shell\open"), None, "Reproducir"),
@@ -582,20 +593,21 @@ mod tests {
         let data = tempfile::tempdir().unwrap();
         let launcher = Path::new("/opt/gaanim/gaanim");
         let done = install_linux_files(data.path(), launcher).unwrap();
-        assert_eq!(done.len(), 5);
+        assert_eq!(done.len(), 6);
         for relative in [
             "mime/packages/gaanim.xml",
             "applications/gaanim.desktop",
             "thumbnailers/gaanim.thumbnailer",
             "icons/hicolor/512x512/apps/gaanim.png",
             "icons/hicolor/512x512/mimetypes/application-x-gaanim.png",
+            "icons/hicolor/scalable/mimetypes/application-x-gaanim.svg",
         ] {
             assert!(data.path().join(relative).is_file(), "{relative}");
         }
         let icon =
             std::fs::read(data.path().join("icons/hicolor/512x512/apps/gaanim.png")).unwrap();
         assert_eq!(&icon[..8], b"\x89PNG\r\n\x1a\n");
-        assert_eq!(remove_linux_files(data.path()).len(), 5);
+        assert_eq!(remove_linux_files(data.path()).len(), 6);
         assert!(!data.path().join("applications/gaanim.desktop").exists());
         assert!(remove_linux_files(data.path()).is_empty());
     }
@@ -622,6 +634,10 @@ mod tests {
         assert_eq!(
             find(r".gaanim\OpenWithProgids", Some(PROG_ID)).as_deref(),
             Some("")
+        );
+        assert_eq!(
+            find(r"Gaanim.Bundle\DefaultIcon", None).as_deref(),
+            Some(r#""C:\Tools\gaanim\gaanim.exe",-2"#)
         );
         assert!(values.iter().all(|value| !value.key.starts_with("CLSID")));
 
