@@ -47,6 +47,7 @@
         )
         #html.a(href: "empezar/primera-animacion/", class: "secondary", [Primera animación →])
         #html.a(href: "tutorial/antes-de-empezar/", class: "secondary", [Tutorial])
+        #html.a(href: "reproductor/", class: "secondary", [Reproducir un .gaanim])
       ])
       #html.div(class: "home-download-meta", [
         #html.span(class: "home-download-info", [v#stdx.version]) ·
@@ -177,6 +178,7 @@ scene.render()
 
 #html.div(class: "home-more", [
   #link("/ejemplos/")[Galería de ejemplos] ·
+  #html.a(href: "reproductor/", [Reproductor web]) ·
   #link("/apendices/novedades/")[Novedades] ·
   #link("documentation.pdf")[Toda la documentación en PDF] ·
   #link("https://github.com/PaoloLupo/gaanim")[Código fuente] ·

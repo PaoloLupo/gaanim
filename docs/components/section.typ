@@ -196,6 +196,7 @@
             html.a(href: prefix + "tutorial/antes-de-empezar/", "Tutorial")
             html.a(href: prefix + "guias/layout/", "Guías")
             html.a(href: prefix + "referencia/", "Referencia")
+            html.a(href: prefix + "reproductor/", "Reproductor")
             html.a(href: "https://github.com/PaoloLupo/gaanim", class: "header-github", "GitHub")
           })
           html.elem("button", attrs: (id: "theme-toggle-btn", class: "icon-btn theme-toggle-btn", type: "button", "aria-label": "Cambiar tema"), "")
@@ -205,6 +206,7 @@
           html.aside(class: "nav-sidebar", id: "global-nav-sidebar", {
             html.elem("nav", attrs: ("aria-label": "Documentación"), html.ul({
               html.li(html.a(href: href(""), class: if route == "/" { "nav-active" } else { "" }, "Inicio"))
+              html.li(html.a(href: prefix + "reproductor/", "Reproductor web"))
               for part in outline-parts {
                 let details-content = {
                   html.summary(part.title)

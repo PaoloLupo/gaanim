@@ -42,6 +42,9 @@
       margin-top: 14px; cursor: pointer; }
     #status { min-height: 1.5em; margin-top: 16px; font-size: 13px; color: var(--muted); }
     #status.error { color: var(--danger); }
+    .links { margin: 20px 0 0; font-size: 13px; }
+    .links a { color: var(--accent); text-decoration: none; }
+    .links a:hover { text-decoration: underline; }
     progress { width: 100%; height: 4px; margin-top: 12px; appearance: none; border: 0; background: #262833; }
     progress::-webkit-progress-bar { background: #262833; }
     progress::-webkit-progress-value { background: var(--loop); }
@@ -72,6 +75,7 @@
       </label>
       <progress id="progress" max="1" value="0" hidden></progress>
       <div id="status" role="status"></div>
+      <p class="links"><a href="../">Documentación de Gaanim</a> · <a href="../guias/compartir/">Cómo compartir un .gaanim</a></p>
     </div>
   </div>
   <script type="module" src="main.js"></script>
