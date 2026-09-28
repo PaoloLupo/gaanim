@@ -113,14 +113,18 @@ que más muestra. Para elegir otro, llama a `scene.thumbnail()` justo después d
 plano que quieres, o pásale un instante de la línea de tiempo:
 
 ```python
+>>>from gaanim import BLUE, Scene
+>>>scene = Scene(frame=(16, 9))
+>>>diagrama = scene.geometry.circle(2).stroke(BLUE, 0.1)
 scene.play(diagrama.animate.create())
 scene.thumbnail()        # la portada es este plano
-scene.thumbnail(12.5)    # o el fotograma de los 12,5 s
+scene.thumbnail(0.5)     # o el fotograma de los 0,5 s
 ```
 
 La portada se dibuja con la GPU, como una exportación; sin GPU el paquete se
-graba igual, sin portada. Los paquetes grabados con 0.6.1 no la tienen y el
-explorador muestra el icono de Gaanim. Para extraerla, sin GPU:
+graba igual, sin portada, y el explorador muestra el icono de los `.gaanim`:
+una hoja con un video animado vectorial y el logo de Gaanim. Para extraerla, sin
+GPU:
 
 ```bash
 gaanim thumbnail mi-charla.gaanim portada.png       # 512 px

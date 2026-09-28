@@ -58,8 +58,8 @@ FRAMES = (
 FRAME_SIZE = 8
 FRAME_STEP = 2
 SYMBOL_W = FRAME_SIZE + FRAME_STEP * (len(FRAMES) - 1)  # 12
-TILE = (12, 14) + (16,) * 12 + (14, 12)  # 16x16 icon tile with stepped corners
-TILE_SIZE = 16
+TILE_SIZE = 16  # the icon tile: a rounded square behind the pixel frames
+TILE_RADIUS = 3.5
 
 
 def rows_to_pixels(widths, x0=0, y0=0):
@@ -343,14 +343,154 @@ def symbol_only_svg(theme):
     return svg_doc(SYMBOL_W, FRAME_SIZE, body, "Gaanim")
 
 
+def tile_svg(x0=0, y0=0):
+    return (
+        f'<rect x="{fmt(x0)}" y="{fmt(y0)}" width="{TILE_SIZE}" height="{TILE_SIZE}"'
+        f' rx="{fmt(TILE_RADIUS)}" fill="{INK}"/>\n'
+    )
+
+
 def icon_svg():
     x0 = (TILE_SIZE - SYMBOL_W) // 2
     y0 = (TILE_SIZE - FRAME_SIZE) // 2
     body = (
-        f'<g shape-rendering="crispEdges"><path fill="{INK}" d="{pixel_path(rows_to_pixels(TILE))}"/></g>\n'
+        tile_svg()
         + symbol_svg(THEMES["dark"]["frames"], x0, y0)
     )
     return svg_doc(TILE_SIZE, TILE_SIZE, body, "Gaanim")
+
+
+# ---- Document icon: vector ----------------------------------------------------------------
+
+# The icon of `.gaanim` files, on a 32-unit grid: a page holding a vector
+# animation. A 16:9 screen shows a ball on a motion path, with the path's
+# anchor and tangent handle as a vector editor draws them and two onion-skin
+# copies of the ball (the symbol's tween, as smooth shapes); under it, a
+# timeline with its playhead and keyframes. The application tile is a badge
+# over the lower left, like the file icons of office suites. The badge is
+# exactly half the grid, so it keeps the tile's pixels whole at 32 px and up.
+DOC_SIZE = 32
+PAGE = (7.0, 1.0, 29.0, 31.0)  # x0, y0, x1, y1
+PAGE_RADIUS = 2.0
+PAGE_FOLD = 5.0
+PAGE_EDGE_WIDTH = 1.0
+PAGE_FILL = "#FFFFFF"
+PAGE_EDGE = "#B4ADF5"
+BADGE = (1, 15)  # top-left of the 16-unit tile
+SCREEN = (9.5, 6.0, 26.5, 15.5)  # x0, y0, x1, y1: about 16:9
+SCREEN_RADIUS = 1.2
+MOTION = ((12.0, 13.0), (16.0, 13.0), (19.0, 8.8), (23.5, 8.8))  # cubic Bézier
+MOTION_WIDTH = 0.7
+# Onion skin: (t along the motion path, radius, colour), back to front.
+BALLS = ((0.45, 1.35, HAZE_DARK), (0.72, 1.7, VIOLET), (1.0, 2.1, GOLD))
+ANCHOR = 1.3  # side of the anchor square
+HANDLE = (14.8, 13.0)  # end of the anchor's tangent handle, towards MOTION[1]
+HANDLE_WIDTH = 0.35
+HANDLE_DOT = 0.55
+TRACK_Y = (19.5, 23.5, 27.5)
+TRACK_X = (19.0, 27.0)
+TRACK_WIDTH = 1.3
+PLAYHEAD_X = 23.5
+PLAYHEAD = (18.0, 29.0, 0.9)  # y0, y1, width
+KEYFRAMES = ((20.5, 1), (25.8, 1), (21.8, 2))  # (x, track)
+KEY_RADIUS = 1.1
+
+
+def rounded_rect(x0, y0, x1, y1, r, steps=12):
+    points = arc_points(x0 + r, y0 + r, r, r, math.pi, 1.5 * math.pi, steps)
+    points += arc_points(x1 - r, y0 + r, r, r, 1.5 * math.pi, 2 * math.pi, steps)
+    points += arc_points(x1 - r, y1 - r, r, r, 0, 0.5 * math.pi, steps)
+    points += arc_points(x0 + r, y1 - r, r, r, 0.5 * math.pi, math.pi, steps)
+    return points
+
+
+def page_outline(inset=0.0):
+    """The page with a folded top-right corner, shrunk by `inset`."""
+    x0, y0, x1, y1 = (PAGE[0] + inset, PAGE[1] + inset, PAGE[2] - inset, PAGE[3] - inset)
+    r = max(PAGE_RADIUS - inset, 0.1)
+    # The fold's diagonal moves inward by the inset measured across it.
+    fold = PAGE_FOLD - inset * (math.sqrt(2) - 1)
+    points = arc_points(x0 + r, y0 + r, r, r, math.pi, 1.5 * math.pi, 12)
+    points += [(x1 - fold, y0), (x1, y0 + fold)]
+    points += arc_points(x1 - r, y1 - r, r, r, 0, 0.5 * math.pi, 12)
+    points += arc_points(x0 + r, y1 - r, r, r, 0.5 * math.pi, math.pi, 12)
+    return points
+
+
+def fold_triangle():
+    x1, y0 = PAGE[2], PAGE[1]
+    return [(x1 - PAGE_FOLD, y0), (x1 - PAGE_FOLD, y0 + PAGE_FOLD), (x1, y0 + PAGE_FOLD)]
+
+
+def bezier_at(curve, t):
+    (ax, ay), (bx, by), (cx, cy), (dx, dy) = curve
+    u = 1 - t
+    return (
+        u ** 3 * ax + 3 * u * u * t * bx + 3 * u * t * t * cx + t ** 3 * dx,
+        u ** 3 * ay + 3 * u * u * t * by + 3 * u * t * t * cy + t ** 3 * dy,
+    )
+
+
+def diamond(cx, cy, r):
+    return [(cx, cy - r), (cx + r, cy), (cx, cy + r), (cx - r, cy)]
+
+
+def document_shapes():
+    """The page and its animation back to front, as drawing operations:
+    ("fill", colour, polygon), ("line", colour, width, points) with round caps,
+    ("curve", colour, width, bezier) and ("disc", colour, (x, y), radius)."""
+    shapes = [
+        ("fill", PAGE_EDGE, page_outline()),
+        ("fill", PAGE_FILL, page_outline(PAGE_EDGE_WIDTH)),
+        ("fill", HAZE_LIGHT, fold_triangle()),
+        ("fill", INK, rounded_rect(*SCREEN, SCREEN_RADIUS)),
+        ("curve", VIOLET, MOTION_WIDTH, MOTION),
+    ]
+    (sx, sy), (hx, hy) = MOTION[0], HANDLE
+    shapes += [
+        ("line", PAPER, HANDLE_WIDTH, [(sx, sy), (hx, hy)]),
+        ("disc", PAPER, (hx, hy), HANDLE_DOT),
+    ]
+    shapes += [("disc", color, bezier_at(MOTION, t), r) for t, r, color in BALLS]
+    h = ANCHOR / 2
+    shapes.append(("fill", PAPER, [(sx - h, sy - h), (sx + h, sy - h), (sx + h, sy + h), (sx - h, sy + h)]))
+    x0, x1 = TRACK_X
+    for y in TRACK_Y:
+        shapes.append(("line", HAZE_LIGHT, TRACK_WIDTH, [(x0, y), (x1, y)]))
+    shapes.append(("line", VIOLET, TRACK_WIDTH, [(x0, TRACK_Y[0]), (PLAYHEAD_X, TRACK_Y[0])]))
+    shapes += [("fill", INK, diamond(x, TRACK_Y[track], KEY_RADIUS)) for x, track in KEYFRAMES]
+    y0, y1, width = PLAYHEAD
+    shapes.append(("line", GOLD_DEEP, width, [(PLAYHEAD_X, y0), (PLAYHEAD_X, y1)]))
+    return shapes
+
+
+def polygon_path(points):
+    return "M" + "L".join(f"{fmt(x)} {fmt(y)}" for x, y in points) + "Z"
+
+
+def document_svg():
+    body = ""
+    for shape in document_shapes():
+        kind, color = shape[0], shape[1]
+        if kind == "fill":
+            body += f'<path fill="{color}" d="{polygon_path(shape[2])}"/>\n'
+        elif kind == "line":
+            points = shape[3]
+            d = "M" + "L".join(f"{fmt(x)} {fmt(y)}" for x, y in points)
+            body += (f'<path d="{d}" fill="none" stroke="{color}" stroke-width="{fmt(shape[2])}"'
+                     ' stroke-linecap="round"/>\n')
+        elif kind == "curve":
+            (ax, ay), (bx, by), (cx, cy), (dx, dy) = shape[3]
+            body += (f'<path d="M{fmt(ax)} {fmt(ay)}C{fmt(bx)} {fmt(by)} {fmt(cx)} {fmt(cy)}'
+                     f' {fmt(dx)} {fmt(dy)}" fill="none" stroke="{color}"'
+                     f' stroke-width="{fmt(shape[2])}" stroke-linecap="round"/>\n')
+        else:
+            (x, y), r = shape[2], shape[3]
+            body += f'<circle cx="{fmt(x)}" cy="{fmt(y)}" r="{fmt(r)}" fill="{color}"/>\n'
+    bx0, by0 = BADGE
+    x0, y0 = bx0 + (TILE_SIZE - SYMBOL_W) // 2, by0 + (TILE_SIZE - FRAME_SIZE) // 2
+    body += tile_svg(bx0, by0) + symbol_svg(THEMES["dark"]["frames"], x0, y0)
+    return svg_doc(DOC_SIZE, DOC_SIZE, body, "Gaanim bundle")
 
 
 # ---- Rasters --------------------------------------------------------------------------------
@@ -368,23 +508,71 @@ def paint_pixels(image, pixels, color, scale, ox=0, oy=0):
         )
 
 
+def tile_mask(size, supersample=8):
+    """Coverage of the rounded tile at `size` px, antialiased like the SVG."""
+    big = size * supersample
+    mask = Image.new("L", (big, big), 0)
+    ImageDraw.Draw(mask).rounded_rectangle(
+        [0, 0, big - 1, big - 1], radius=TILE_RADIUS * big / TILE_SIZE, fill=255
+    )
+    return mask.resize((size, size), Image.LANCZOS)
+
+
 def icon_image(scale, tile=True):
     size = TILE_SIZE * scale
     image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     if tile:
-        paint_pixels(image, rows_to_pixels(TILE), INK, scale)
+        image.paste(Image.new("RGBA", (size, size), rgb(INK) + (255,)), (0, 0), tile_mask(size))
     x0, y0 = (TILE_SIZE - SYMBOL_W) // 2, (TILE_SIZE - FRAME_SIZE) // 2
     for index, color in enumerate(THEMES["dark"]["frames"]):
         paint_pixels(image, frame_pixels(index, x0, y0), color, scale)
     return image
 
 
+def document_image(size, supersample=8):
+    """The document icon at `size` px, drawn supersampled like the SVG."""
+    canvas = size * supersample
+    unit = canvas / DOC_SIZE
+    image = Image.new("RGBA", (canvas, canvas), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+
+    def scaled(points):
+        return [(x * unit, y * unit) for x, y in points]
+
+    def disc(color, x, y, r):
+        draw.ellipse([(x - r) * unit, (y - r) * unit, (x + r) * unit, (y + r) * unit],
+                     fill=rgb(color) + (255,))
+
+    def line(color, width, points):
+        draw.line(scaled(points), fill=rgb(color) + (255,), width=max(1, round(width * unit)),
+                  joint="curve")
+        for x, y in (points[0], points[-1]):
+            disc(color, x, y, width / 2)
+
+    for shape in document_shapes():
+        kind, color = shape[0], shape[1]
+        if kind == "fill":
+            draw.polygon(scaled(shape[2]), fill=rgb(color) + (255,))
+        elif kind == "line":
+            line(color, shape[2], shape[3])
+        elif kind == "curve":
+            line(color, shape[2], [bezier_at(shape[3], i / 64) for i in range(65)])
+        else:
+            disc(color, *shape[2], shape[3])
+    # The badge keeps whole tile pixels: the supersampled unit is an integer.
+    badge = icon_image(round(unit))
+    image.alpha_composite(badge, (round(BADGE[0] * unit), round(BADGE[1] * unit)))
+    return image.resize((size, size), Image.LANCZOS)
+
+
 def icon_grid():
-    """The 16x16 icon as palette indices (0 = transparent), back to front."""
+    """The 16x16 icon as palette indices (0 = transparent), back to front. The
+    tile fills the grid; the window icon rounds its corners with TILE_RADIUS."""
     colors = (INK,) + THEMES["dark"]["frames"]
     grid = [[0] * TILE_SIZE for _ in range(TILE_SIZE)]
     x0, y0 = (TILE_SIZE - SYMBOL_W) // 2, (TILE_SIZE - FRAME_SIZE) // 2
-    layers = [rows_to_pixels(TILE)] + [frame_pixels(i, x0, y0) for i in range(len(FRAMES))]
+    square = {(x, y) for x in range(TILE_SIZE) for y in range(TILE_SIZE)}
+    layers = [square] + [frame_pixels(i, x0, y0) for i in range(len(FRAMES))]
     for index, pixels in enumerate(layers, start=1):
         for x, y in pixels:
             grid[y][x] = index
@@ -409,8 +597,9 @@ def ico_bytes(pngs):
     return header + entries + data
 
 
-def res_bytes(pngs):
-    """Win32 .res with one RT_GROUP_ICON (ordinal 1) over RT_ICON entries 1..n.
+def res_bytes(groups):
+    """Win32 .res with one RT_GROUP_ICON per entry of `groups`, ordinals 1, 2, ...,
+    over RT_ICON entries numbered on from 1.
 
     MSVC link.exe and lld-link accept .res files as linker inputs directly.
     """
@@ -422,11 +611,14 @@ def res_bytes(pngs):
         return header + data + b"\0" * (-len(data) % 4)
 
     out = struct.pack("<II", 0, 32) + struct.pack("<HHHH", 0xFFFF, 0, 0xFFFF, 0) + bytes(16)
-    group = struct.pack("<HHH", 0, 1, len(pngs))
-    for number, (size, png) in enumerate(pngs, start=1):
-        out += entry(3, number, png, 0x1010)  # RT_ICON, moveable | discardable
-        group += struct.pack("<BBBBHHIH", size % 256, size % 256, 0, 0, 1, 32, len(png), number)
-    out += entry(14, 1, group, 0x1030)  # RT_GROUP_ICON, moveable | pure | discardable
+    number = 0
+    for ordinal, pngs in enumerate(groups, start=1):
+        group = struct.pack("<HHH", 0, 1, len(pngs))
+        for size, png in pngs:
+            number += 1
+            out += entry(3, number, png, 0x1010)  # RT_ICON, moveable | discardable
+            group += struct.pack("<BBBBHHIH", size % 256, size % 256, 0, 0, 1, 32, len(png), number)
+        out += entry(14, ordinal, group, 0x1030)  # RT_GROUP_ICON, moveable | pure | discardable
     return out
 
 
@@ -440,6 +632,9 @@ def app_icon_rust():
 
 /// Side of the icon's pixel grid.
 pub(crate) const ICON_GRID: usize = {TILE_SIZE};
+
+/// Corner radius of the tile (palette index 1), in grid pixels.
+pub(crate) const ICON_TILE_RADIUS: f32 = {TILE_RADIUS};
 
 /// RGBA colours for grid indices 1..; index 0 is transparent.
 pub(crate) const ICON_PALETTE: [[u8; 4]; {len(colors)}] = [
@@ -498,6 +693,7 @@ def main():
         "gaanim-symbol.svg": symbol_only_svg("light"),
         "gaanim-symbol-dark.svg": symbol_only_svg("dark"),
         "gaanim-icon.svg": icon_svg(),
+        "gaanim-document.svg": document_svg(),
     }
     for name, text in files.items():
         (OUT / name).write_text(text, encoding="utf-8", newline="\n")
@@ -508,9 +704,13 @@ def main():
     # Application icon: Explorer, taskbar and title bar sizes up to 256 px.
     app = [(TILE_SIZE * s, png_bytes(icon_image(s))) for s in (1, 2, 3, 4, 6, 8, 16)]
     (OUT / "gaanim-app.ico").write_bytes(ico_bytes(app))
-    (OUT / "gaanim-app.res").write_bytes(res_bytes(app))
+    # `.gaanim` files: the second icon group of the executables (resource 2).
+    document = [(size, png_bytes(document_image(size))) for size in (16, 24, 32, 48, 64, 256)]
+    (OUT / "gaanim-document.ico").write_bytes(ico_bytes(document))
+    (OUT / "gaanim-app.res").write_bytes(res_bytes([app, document]))
     APP_ICON_RUST.write_text(app_icon_rust(), encoding="utf-8", newline="\n")
     icon_image(32).save(OUT / "gaanim-icon-512.png")
+    document_image(512).save(OUT / "gaanim-document-512.png")
     # Apple icons must be opaque; the system rounds the corners itself.
     apple = Image.new("RGBA", (180, 180), rgb(INK) + (255,))
     motif = icon_image(11, tile=False)

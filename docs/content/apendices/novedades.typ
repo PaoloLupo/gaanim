@@ -11,30 +11,11 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
-= 0.6.2
-
-Sin publicar todavía. No hace falta cambiar tus escenas.
-
-== Cambios
-
-- Los archivos `.gaanim` se comportan como documentos del sistema:
-  `gaanim register` (o el botón *Asociar archivos .gaanim* del inicio) hace
-  que el doble clic los reproduzca, añade *Presentar* al menú contextual y
-  muestra su portada en el Explorador de Windows y en Nautilus, Nemo, Caja y
-  Thunar. `gaanim unregister` lo deshace; ninguno pide permisos de
-  administrador. Ver #link("/guias/compartir/")[Compartir sin Python].
-- Cada `.gaanim` guarda una portada: el fotograma de la primera pausa o, sin
-  pausas, el del primer segmento que más muestra. `scene.thumbnail()` elige
-  otro, y `gaanim thumbnail archivo.gaanim portada.png` la extrae sin GPU. Los
-  paquetes de 0.6.1 se siguen abriendo, sin portada.
-- La instalación en Ubuntu copia también `gaanim-play`, que reproduce los
-  `.gaanim`.
-
 = 0.6.1
 
 Publicada el 28 de septiembre de 2026. Llegan el reproductor web, la
 licencia MIT OR Apache-2.0, `scene.launch`, la rejilla de tempo y paquetes
-`.gaanim` más pequeños. Cambian el ancho de los trazos
+`.gaanim` más pequeños, con portada, icono propio y doble clic. Cambian el ancho de los trazos
 escalados, la opacidad tras `transform_to` y la colocación de un SVG cuyas
 partes mueves: lee «Al actualizar».
 
@@ -74,6 +55,11 @@ partes mueves: lee «Al actualizar».
 
 == Correcciones
 
+- Acercar o alejar la vista con el modo interactivo al reproducir un `.gaanim`,
+  en el escritorio o en el navegador, ya no deja copias de los fotogramas
+  anteriores alrededor del marco.
+- La ventana de un `.gaanim` se titula con el nombre del proyecto que lo
+  grabó, no con el del script (`main`).
 - Un tren de engranajes encadenado (`b.bind_rotation_from(a)`,
   `c.bind_rotation_from(b)`...) gira entero en la vista previa. Antes, desde la
   tercera rueda se quedaban quietas hasta hacer un seek o pausar, y con
@@ -97,6 +83,21 @@ partes mueves: lee «Al actualizar».
 
 == Cambios
 
+- Los archivos `.gaanim` se comportan como documentos del sistema:
+  `gaanim register` (o el botón *Asociar archivos .gaanim* del inicio) hace
+  que el doble clic los reproduzca, añade *Presentar* al menú contextual y
+  muestra su portada en el Explorador de Windows y en Nautilus, Nemo, Caja y
+  Thunar. `gaanim unregister` lo deshace; ninguno pide permisos de
+  administrador. Los `.gaanim` tienen su propio icono: una hoja con un video
+  animado vectorial y el logo de Gaanim, que ahora tiene las esquinas
+  redondeadas. Ver
+  #link("/guias/compartir/")[Compartir sin Python].
+- Cada `.gaanim` guarda una portada: el fotograma de la primera pausa o, sin
+  pausas, el del primer segmento que más muestra. `scene.thumbnail()` elige
+  otro, y `gaanim thumbnail archivo.gaanim portada.png` la extrae sin GPU. Un
+  paquete sin portada se abre igual.
+- La instalación en Ubuntu copia también `gaanim-play`, que reproduce los
+  `.gaanim`.
 - `scene.launch(...)`, o `scene.play(..., advance=False)`, empieza animaciones
   en el cursor sin moverlo: un giro que dura varios cortes sigue mientras
   programas lo demás. Animar el mismo canal antes de que termine lanza
@@ -128,7 +129,7 @@ partes mueves: lee «Al actualizar».
   Con `?src=` abre un archivo publicado en otro sitio. Todavía no reproduce el
   audio ni abre la ventana del Presenter View (ver
   #link("/guias/compartir/")[Compartir sin Python]). El sitio de la
-  documentación lo enlaza desde la cabecera, la barra lateral y la portada.
+  documentación lo enlaza desde la cabecera y la portada.
 - Controles táctiles en el reproductor, al estilo de los reproductores de vídeo
   del móvil: un toque muestra u oculta los controles, con botones grandes para
   la pausa anterior, reproducir y la siguiente; dos toques en un lado, o

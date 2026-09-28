@@ -308,8 +308,9 @@ pub fn bundle_fps(quality: &str) -> u32 {
     }
 }
 
-/// The recording of `canvas` into a bundle at `output`, named after `script`
-/// and sized like the scene's preview.
+/// The recording of `canvas` into a bundle at `output`, named after the
+/// project `script` belongs to (or the script) and sized like the scene's
+/// preview.
 pub fn bundle_config(
     script: Option<&Path>,
     canvas: &gaanim_api::canvas::SceneModel,
@@ -317,11 +318,8 @@ pub fn bundle_config(
     fps: Option<u32>,
 ) -> gaanim_api::export::BundleConfig {
     let mut config = gaanim_api::export::BundleConfig::new(output);
-    if let Some(title) = script
-        .and_then(|script| script.file_stem())
-        .and_then(|stem| stem.to_str())
-    {
-        config.title = title.to_owned();
+    if let Some(title) = script.and_then(bundle_title) {
+        config.title = title;
     }
     if let Some(fps) = fps {
         config.fps = fps;
@@ -331,6 +329,21 @@ pub fn bundle_config(
     // compare it with the single-world recording.
     config.force_second_world = std::env::var_os("GAANIM_BUNDLE_SECOND_WORLD").is_some();
     config
+}
+
+/// The title a bundle recorded from `script` carries: its project's name,
+/// which the player shows in the window title, or the script's name outside
+/// a project. Every project's entry is `main.py`, so its name says nothing.
+fn bundle_title(script: &Path) -> Option<String> {
+    let project = gaanim_project::find_project_for_script(script)
+        .map(|project| project.manifest.name.trim().to_owned())
+        .filter(|name| !name.is_empty());
+    project.or_else(|| {
+        script
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .map(str::to_owned)
+    })
 }
 
 /// Why a command stopped: bad arguments (exit status 2) or a failed run (1).
@@ -392,6 +405,20 @@ mod tests {
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| value.to_string()).collect()
+    }
+
+    #[test]
+    fn bundles_are_titled_after_their_project() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let project = gaanim_project::create_project(&gaanim_project::CreateProjectOptions {
+            kind: gaanim_project::ProjectKind::Slides,
+            directory: temp.path().join("tesis"),
+            force: false,
+        })
+        .expect("project");
+        assert_eq!(bundle_title(&project.entry).as_deref(), Some("tesis"));
+        let loose = temp.path().join("demo.py");
+        assert_eq!(bundle_title(&loose).as_deref(), Some("demo"));
     }
 
     #[test]

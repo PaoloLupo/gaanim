@@ -8,7 +8,7 @@
 //! painted icons, seek tracks with a playhead, stops and keyframes, all with
 //! square corners like the pixel mark.
 
-use crate::app_icon::{ICON_GRID, ICON_PALETTE, ICON_PIXELS};
+use crate::app_icon::{ICON_GRID, ICON_PALETTE, ICON_PIXELS, ICON_TILE_RADIUS};
 use crate::ui_kit::{
     self, ButtonTone, Icon, caption, icon_button, palette, primary_button, secondary_button,
 };
@@ -1917,8 +1917,9 @@ fn association_card(ui: &mut Ui, state: &mut ProjectHubState) {
                 .any(|warning| warning.contains(association::THUMBNAIL_HANDLER_DLL)) =>
         {
             Notice::Info(format!(
-                "Los archivos .gaanim se abren con Gaanim, pero sin portada en el \
-                 Explorador: falta {} junto a gaanim.exe.",
+                "Los archivos .gaanim se abren con Gaanim, pero el Explorador no \
+                 mostrará su portada: falta {} junto a gaanim.exe. Viene en el .zip \
+                 de cada versión; cópialo a esa carpeta y vuelve a asociar.",
                 association::THUMBNAIL_HANDLER_DLL
             ))
         }
@@ -2412,14 +2413,22 @@ fn paint_knob(painter: &egui::Painter, center: Pos2, half: f32) {
     painter.rect_filled(knob, 0.0, Color32::WHITE);
 }
 
-/// The Gaanim pixel mark at `unit` points per grid pixel. A mesh keeps
-/// neighbouring pixels seamless (shapes would anti-alias every edge).
+/// The Gaanim mark at `unit` points per grid pixel: the rounded tile, then
+/// its pixel frames. A mesh keeps neighbouring pixels seamless (shapes would
+/// anti-alias every edge).
 fn paint_pixel_mark(painter: &egui::Painter, origin: Pos2, unit: f32) {
+    let [r, g, b, a] = ICON_PALETTE[0];
+    painter.rect_filled(
+        Rect::from_min_size(origin, Vec2::splat(ICON_GRID as f32 * unit)),
+        ICON_TILE_RADIUS * unit,
+        Color32::from_rgba_unmultiplied(r, g, b, a),
+    );
     let mut mesh = egui::Mesh::default();
     for (y, row) in ICON_PIXELS.iter().enumerate() {
         for (x, &pixel) in row.iter().enumerate() {
             let index = usize::from(pixel - b'0');
-            if index == 0 {
+            // 0 is transparent and 1 the tile, drawn above.
+            if index <= 1 {
                 continue;
             }
             let [r, g, b, a] = ICON_PALETTE[index - 1];

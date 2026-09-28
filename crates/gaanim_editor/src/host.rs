@@ -103,6 +103,20 @@ fn spawn_host_camera(world: &mut World) {
         },
         bevy::core_pipeline::tonemapping::Tonemapping::None,
     ));
+    // The canvas composites over the window without clearing it. A script
+    // replay spawns this clear itself, but a bundle does not: without it the
+    // area around the frame kept every earlier frame while the interactive
+    // view zoomed out. Spawned second, so egui keeps the camera above.
+    world.spawn((
+        Camera2d,
+        gaanim_renderer::pipeline::GaanimFullWindowClearCamera,
+        bevy::prelude::Camera {
+            order: -1,
+            clear_color: bevy::camera::ClearColorConfig::Default,
+            ..default()
+        },
+        bevy::camera::visibility::RenderLayers::none(),
+    ));
 }
 
 #[cfg(test)]
@@ -119,6 +133,26 @@ mod tests {
                 .iter(&world)
                 .next()
                 .is_some()
+        );
+    }
+
+    #[test]
+    fn host_clears_the_whole_window_before_the_canvas() {
+        let mut world = World::new();
+        spawn_host_camera(&mut world);
+        let clears = world
+            .query_filtered::<&bevy::prelude::Camera, With<
+                gaanim_renderer::pipeline::GaanimFullWindowClearCamera,
+            >>()
+            .iter(&world)
+            .map(|camera| (camera.order, camera.clear_color.clone()))
+            .collect::<Vec<_>>();
+        assert!(
+            matches!(
+                clears.as_slice(),
+                [(-1, bevy::camera::ClearColorConfig::Default)]
+            ),
+            "{clears:?}"
         );
     }
 }

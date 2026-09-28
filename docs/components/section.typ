@@ -206,7 +206,6 @@
           html.aside(class: "nav-sidebar", id: "global-nav-sidebar", {
             html.elem("nav", attrs: ("aria-label": "Documentación"), html.ul({
               html.li(html.a(href: href(""), class: if route == "/" { "nav-active" } else { "" }, "Inicio"))
-              html.li(html.a(href: prefix + "reproductor/", "Reproductor web"))
               for part in outline-parts {
                 let details-content = {
                   html.summary(part.title)
