@@ -22,6 +22,10 @@ pub struct BundlePlayback {
     bundle: Bundle,
     path: PathBuf,
     shown: Option<usize>,
+    /// Camera of the shown frame. Every playback tick seeks the timeline,
+    /// and a seek restores the camera of its t=0 keyframe, so the camera is
+    /// reapplied on every tick, not only when the shown frame changes.
+    camera: gaanim_math::Camera,
     /// Post-processing of the shown frame.
     post: Vec<gaanim_bundle::PostPass>,
     /// Set once a frame fails to decode; playback keeps the last good frame.
@@ -159,6 +163,7 @@ pub fn open_bundle_bytes(world: &mut World, path: &Path, bytes: Arc<[u8]>) -> Re
         bundle,
         path: path.to_path_buf(),
         shown: None,
+        camera: first.camera,
         post: Vec::new(),
         failed: false,
         preview_store: Default::default(),
@@ -210,6 +215,9 @@ pub fn bundle_frame_system(
 ) {
     let index = playback.bundle.frame_index_at(timeline.current_time);
     if playback.shown == Some(index) || playback.failed {
+        if *camera != playback.camera {
+            *camera = playback.camera;
+        }
         return;
     }
     let frame = match playback.bundle.frame(index) {
@@ -221,6 +229,7 @@ pub fn bundle_frame_system(
         }
     };
     playback.shown = Some(index);
+    playback.camera = frame.camera;
     if *camera != frame.camera {
         *camera = frame.camera;
     }
@@ -261,4 +270,54 @@ pub fn is_bundle_path(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| extension.eq_ignore_ascii_case(gaanim_bundle::EXTENSION))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+    use gaanim_bundle::{BundleWriter, Frame, SceneData};
+
+    fn frame(time: f64, zoom: f64) -> Frame {
+        let mut camera = gaanim_math::Camera::ortho_2d(1280, 720);
+        camera.projection = gaanim_math::Projection::Orthographic { zoom };
+        Frame {
+            time,
+            camera,
+            capture: Default::default(),
+            post: Vec::new(),
+            motion_blur: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn the_recorded_camera_survives_seeks_between_frame_changes() {
+        let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
+        for (index, zoom) in [1.0, 3.0].into_iter().enumerate() {
+            writer
+                .push_frame(&frame(index as f64 * 0.5, zoom), [0; 32])
+                .unwrap();
+        }
+        let scene = SceneData {
+            fps: 2,
+            duration: 1.0,
+            output_size: (16, 9),
+            ..Default::default()
+        };
+        let bytes = writer.finish(&scene).unwrap().into_inner();
+        let mut world = World::new();
+        open_bundle_bytes(&mut world, Path::new("test.gaanim"), bytes.into()).unwrap();
+        let zoomed = frame(0.5, 3.0).camera;
+
+        world.resource_mut::<Timeline>().current_time = 0.6;
+        world.run_system_once(bundle_frame_system).unwrap();
+        assert_eq!(*world.resource::<gaanim_math::Camera>(), zoomed);
+
+        // A playback tick seeks, restoring the camera of the t=0 keyframe,
+        // while the playhead still shows the same recorded frame.
+        world.insert_resource(frame(0.0, 1.0).camera);
+        world.resource_mut::<Timeline>().current_time = 0.7;
+        world.run_system_once(bundle_frame_system).unwrap();
+        assert_eq!(*world.resource::<gaanim_math::Camera>(), zoomed);
+    }
 }

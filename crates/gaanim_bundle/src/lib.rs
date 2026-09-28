@@ -736,10 +736,51 @@ pub struct Bundle {
     by_time: Vec<usize>,
     /// [`frame_digest`] of every frame as the scene drew it while recording.
     digests: Vec<[u8; 32]>,
-    /// Decoded chunk: index and its frames.
-    cached: Option<(usize, Vec<FrameRecord>)>,
-    /// Decoded Lottie frames of the cached chunk.
+    /// Chunks being decoded, least recently used first.
+    cached: Vec<ChunkCursor>,
+    /// Decoded Lottie frames of the cached chunks.
     scenes: HashMap<u32, Arc<vello::Scene>>,
+}
+
+/// Chunks a [`Bundle`] keeps decoded: the one playing, the one it left for
+/// an instant off the frame grid (a later pass's chunk) or a step back, and
+/// one for Presenter View's previews of other instants.
+const CACHED_CHUNKS: usize = 3;
+
+/// A chunk decoded up to the latest frame asked of it. Frames are
+/// delta-encoded in order, so playback decodes one frame per step instead
+/// of the whole chunk on entering it, which stalls on heavy chunks.
+struct ChunkCursor {
+    chunk: usize,
+    /// Decompressed entry; released once every frame is decoded.
+    bytes: Vec<u8>,
+    /// Byte offset of the next frame in `bytes`.
+    position: usize,
+    decoder: DeltaDecoder,
+    frames: Vec<FrameRecord>,
+    /// Frames the chunk holds.
+    total: usize,
+}
+
+impl ChunkCursor {
+    /// Decode frames up to and including `local`, the frame's index in the chunk.
+    fn decode_through(&mut self, local: usize, entry: &str) -> Result<&FrameRecord> {
+        if local >= self.total {
+            return Err(BundleError::Corrupt("frame index out of range".into()));
+        }
+        let mut r = Reader::at(&self.bytes, self.position);
+        while self.frames.len() <= local {
+            self.frames.push(self.decoder.read(&mut r)?);
+            self.position = r.position();
+        }
+        if self.frames.len() == self.total && !self.bytes.is_empty() {
+            if self.position != self.bytes.len() {
+                return Err(BundleError::Corrupt(format!("{entry} has trailing data")));
+            }
+            self.bytes = Vec::new();
+        }
+        Ok(&self.frames[local])
+    }
 }
 
 fn scene_entry(index: u32) -> String {
@@ -897,32 +938,26 @@ impl Bundle {
             times,
             by_time,
             digests,
-            cached: None,
+            cached: Vec::new(),
             scenes: HashMap::new(),
         })
     }
 
-    fn decode_chunk(&mut self, chunk: usize) -> Result<Vec<FrameRecord>> {
+    fn open_chunk(&mut self, chunk: usize) -> Result<ChunkCursor> {
         let info = self
             .manifest
             .chunks
             .get(chunk)
-            .ok_or_else(|| BundleError::Corrupt("chunk index out of range".into()))?
-            .clone();
+            .ok_or_else(|| BundleError::Corrupt("chunk index out of range".into()))?;
         let bytes = read_entry(&mut self.archive, Some(&self.manifest), &info.entry)?;
-        let mut r = Reader::new(&bytes);
-        let mut decoder = DeltaDecoder::default();
-        let mut frames = Vec::with_capacity(info.frames);
-        for _ in 0..info.frames {
-            frames.push(decoder.read(&mut r)?);
-        }
-        if !r.is_empty() {
-            return Err(BundleError::Corrupt(format!(
-                "{} has trailing data",
-                info.entry
-            )));
-        }
-        Ok(frames)
+        Ok(ChunkCursor {
+            chunk,
+            bytes,
+            position: 0,
+            decoder: DeltaDecoder::default(),
+            frames: Vec::with_capacity(info.frames),
+            total: info.frames,
+        })
     }
 
     /// Number of recorded frames.
@@ -956,20 +991,24 @@ impl Bundle {
             .partition_point(|info| info.first_frame <= index)
             .checked_sub(1)
             .ok_or_else(|| BundleError::Corrupt("frame index out of range".into()))?;
-        if self
+        let cursor = match self.cached.iter().position(|cursor| cursor.chunk == chunk) {
+            Some(slot) => self.cached.remove(slot),
+            None => {
+                let cursor = self.open_chunk(chunk)?;
+                if self.cached.len() >= CACHED_CHUNKS {
+                    self.cached.remove(0);
+                    self.scenes.clear();
+                }
+                cursor
+            }
+        };
+        self.cached.push(cursor);
+        let info = &self.manifest.chunks[chunk];
+        let record = self
             .cached
-            .as_ref()
-            .is_none_or(|(cached, _)| *cached != chunk)
-        {
-            let frames = self.decode_chunk(chunk)?;
-            self.cached = Some((chunk, frames));
-            self.scenes.clear();
-        }
-        let (_, frames) = self.cached.as_ref().expect("chunk decoded");
-        let first = self.manifest.chunks[chunk].first_frame;
-        let record = frames
-            .get(index - first)
-            .ok_or_else(|| BundleError::Corrupt("frame index out of range".into()))?;
+            .last_mut()
+            .expect("chunk cached")
+            .decode_through(index - info.first_frame, &info.entry)?;
         let (archive, manifest, tables, scenes) = (
             &mut self.archive,
             &self.manifest,
@@ -1116,4 +1155,55 @@ pub fn frame_digest(
         hasher.update(&frame_digest(sample, background, store));
     }
     *hasher.finalize().as_bytes()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn frame(time: f64) -> Frame {
+        let mut camera = gaanim_math::Camera::ortho_2d(1280, 720);
+        camera.position.x = time;
+        Frame {
+            time,
+            camera,
+            capture: Default::default(),
+            post: Vec::new(),
+            motion_blur: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn frames_decode_in_any_order_across_passes() {
+        let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
+        let grid: Vec<f64> = (0..130).map(|index| f64::from(index) / 60.0).collect();
+        for time in &grid {
+            writer.push_frame(&frame(*time), [0; 32]).unwrap();
+        }
+        writer.start_pass().unwrap();
+        let extras = [0.505, 1.255];
+        for time in extras {
+            writer.push_frame(&frame(time), [0; 32]).unwrap();
+        }
+        let scene = SceneData {
+            fps: 60,
+            duration: 130.0 / 60.0,
+            ..Default::default()
+        };
+        let bytes = writer.finish(&scene).unwrap().into_inner();
+        let mut bundle = Bundle::from_bytes(bytes.into()).unwrap();
+        assert_eq!(bundle.manifest.chunks.len(), 4);
+
+        // Playback through a grid chunk and the pass holding the extras,
+        // then back and forth within and across chunks.
+        let mut order: Vec<usize> = (0..40).collect();
+        order.extend([130, 40, 41, 131, 75, 3, 129, 0, 59, 60, 131, 130]);
+        for index in order {
+            let decoded = bundle.frame(index).unwrap();
+            let time = bundle.times()[index];
+            assert_eq!(decoded.time, time, "frame {index}");
+            assert_eq!(decoded.camera, frame(time).camera, "frame {index}");
+        }
+        assert!(bundle.cached.len() <= CACHED_CHUNKS);
+    }
 }

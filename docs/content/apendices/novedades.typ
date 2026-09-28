@@ -23,6 +23,13 @@ Sin publicar todavía. No hace falta cambiar tus escenas.
   ellas: teclas, clics, el dock, la barra de reproducción y las pantallas en
   negro o en blanco. `P` lo vuelve a abrir. Ver
   #link("/guias/compartir/")[Compartir sin Python].
+- Al reproducir un `.gaanim`, la cámara ya no salta frame a frame a la
+  posición del inicio: si la pantalla refrescaba más rápido que el paquete,
+  cada refresco sin frame nuevo mostraba la cámara de t=0.
+- Los `.gaanim` con mucha geometría por segundo, como líneas de corriente,
+  se reproducen sin tirones: los frames se decodifican a medida que se
+  muestran, no un segundo entero de golpe, así que la preview ya no baja de
+  resolución en esos tramos.
 
 = 0.6.1
 
