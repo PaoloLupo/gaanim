@@ -46,12 +46,12 @@ pub use model::{EntityKeys, Frame, PostPass};
 
 /// Identifies the file type in `manifest.json`.
 pub const FORMAT: &str = "gaanim-bundle";
-/// Version of the bundle encoding this build writes. It also reads every
-/// earlier version.
+/// Version of the bundle encoding this build writes and reads; bundles of
+/// any other version are refused.
 ///
-/// - 1: entries compressed by the archive with Deflate.
-/// - 2: data entries hold a Zstandard frame each; `manifest.json` stays
-///   Deflate and media stays as authored.
+/// Every data entry holds a Zstandard frame; `manifest.json` stays Deflate
+/// and media stays as authored. Version 1 (Gaanim 0.6.0) left compression
+/// to the archive.
 pub const VERSION: u32 = 2;
 /// Zstandard level of data entries: slow to write, still fast to read.
 #[cfg(not(target_arch = "wasm32"))]
@@ -69,16 +69,28 @@ pub enum BundleError {
     Zip(#[from] zip::result::ZipError),
     #[error("the bundle is damaged: {0}")]
     Corrupt(String),
-    #[error(
-        "this bundle uses format version {found}; this Gaanim reads versions up to {VERSION}. \
-         Open it with the Gaanim version that wrote it ({generator}) or a newer one"
-    )]
+    #[error("{}", version_message(*found, generator))]
     UnsupportedVersion { found: u32, generator: String },
     #[error("{0}")]
     Unsupported(String),
 }
 
 type Result<T> = std::result::Result<T, BundleError>;
+
+fn version_message(found: u32, generator: &str) -> String {
+    if found < VERSION {
+        format!(
+            "this bundle was recorded by {generator} in format version {found}, which this \
+             Gaanim no longer reads (it reads version {VERSION}). Record it again from its \
+             script with `gaanim export <script> --output <file>.gaanim`"
+        )
+    } else {
+        format!(
+            "this bundle uses format version {found}; this Gaanim reads version {VERSION}. \
+             Open it with the Gaanim that wrote it ({generator}) or a newer one"
+        )
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Static scene data
@@ -744,9 +756,9 @@ fn decompress(name: &str, bytes: &[u8]) -> Result<Vec<u8>> {
     Ok(decoded)
 }
 
-/// Whether a bundle of `version` stores `name` as a Zstandard frame.
-fn zstd_entry(version: u32, name: &str) -> bool {
-    version >= 2 && name != "manifest.json" && !name.starts_with("media/")
+/// Whether the bundle stores `name` as a Zstandard frame.
+fn zstd_entry(name: &str) -> bool {
+    name != "manifest.json" && !name.starts_with("media/")
 }
 
 fn read_entry<R: Read + Seek>(
@@ -760,12 +772,10 @@ fn read_entry<R: Read + Seek>(
     let mut bytes = Vec::with_capacity(file.size().min(1 << 30) as usize);
     file.read_to_end(&mut bytes)?;
     drop(file);
-    if let Some(manifest) = manifest
-        && zstd_entry(manifest.version, name)
-    {
-        bytes = decompress(name, &bytes)?;
-    }
     if let Some(manifest) = manifest {
+        if zstd_entry(name) {
+            bytes = decompress(name, &bytes)?;
+        }
         let expected = manifest
             .entries
             .get(name)
@@ -797,7 +807,7 @@ impl Bundle {
                 manifest.format
             )));
         }
-        if manifest.version == 0 || manifest.version > VERSION {
+        if manifest.version != VERSION {
             return Err(BundleError::UnsupportedVersion {
                 found: manifest.version,
                 generator: manifest.generator.clone(),

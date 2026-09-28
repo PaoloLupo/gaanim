@@ -47,10 +47,11 @@ partes mueves: lee «Al actualizar».
 - Los paquetes `.gaanim` usan el formato 2: sus datos van comprimidos con
   Zstandard. Una presentación larga ocupa menos de la mitad (la de 4½ minutos
   de #link("/guias/compartir/")[Compartir sin Python] baja de 42 a 18 MB) y un
-  paquete pequeño, alrededor de un 10 % menos. Un
-  paquete grabado con 0.6.1 necesita Gaanim 0.6.1 o posterior para abrirse;
-  quien vaya a verlo con 0.6.0 debe actualizar, o usar el reproductor web. Los
-  paquetes de 0.6.0 se siguen abriendo.
+  paquete pequeño, alrededor de un 10 % menos. El cambio rompe la
+  compatibilidad en los dos sentidos: 0.6.1 ya no abre los paquetes grabados
+  con 0.6.0 (vuelve a grabarlos desde su script con `gaanim export`), y 0.6.0
+  no abre los de 0.6.1, así que quien los reciba debe actualizar o usar el
+  reproductor web.
 
 == Correcciones
 

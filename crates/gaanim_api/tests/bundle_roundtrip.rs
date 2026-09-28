@@ -207,7 +207,7 @@ fn a_damaged_bundle_is_rejected() {
 }
 
 #[test]
-fn data_entries_are_zstd_frames_and_version_1_bundles_still_open() {
+fn data_entries_are_zstd_frames_and_version_1_bundles_are_refused() {
     use std::io::{Read, Write};
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("small.gaanim");
@@ -257,10 +257,14 @@ fn data_entries_are_zstd_frames_and_version_1_bundles_still_open() {
         }
         target.finish().unwrap();
     }
-    let mut bundle = Bundle::open(&legacy).expect("a version 1 bundle opens");
-    assert_eq!(bundle.manifest.version, 1);
-    assert_eq!(bundle.frame_count(), recorded.frame_count());
-    assert!(bundle.verify().unwrap().is_empty());
+    let error = Bundle::open(&legacy)
+        .err()
+        .expect("a version 1 bundle is refused");
+    let message = error.to_string();
+    assert!(
+        message.contains("no longer reads") && message.contains("gaanim export"),
+        "{message}"
+    );
 }
 
 #[test]

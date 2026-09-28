@@ -226,6 +226,6 @@ modo que el paquete compone exactamente lo que compuso la escena.
 Salvo `manifest.json` y `media/*`, cada entrada guarda sus datos comprimidos
 con Zstandard. En una presentación larga ocupa menos de la mitad que con la
 compresión propia del ZIP; en un paquete pequeño, alrededor de un 10 % menos.
-Este es el formato 2, que escribe Gaanim 0.6.1: un paquete grabado con 0.6.1
-necesita Gaanim 0.6.1 o posterior (y el reproductor web actual), y los
-paquetes grabados con 0.6.0 se siguen abriendo.
+Este es el formato 2, que escribe y lee Gaanim 0.6.1 (y el reproductor web
+actual). Los paquetes grabados con 0.6.0 usan el formato 1 y ya no se abren:
+vuelve a grabarlos desde su script.
