@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import builtins
 from dataclasses import dataclass, asdict
 import json
 from pathlib import Path
@@ -84,6 +85,38 @@ def _stub_names(path: Path) -> set[str]:
         elif isinstance(node, ast.Assign):
             names.update(target.id for target in node.targets if isinstance(target, ast.Name))
     return names
+
+
+def _stub_unresolved_annotations(path: Path, stub_names: set[str]) -> set[str]:
+    """Names used in stub annotations that the stub never defines or imports.
+
+    Type checkers resolve such names to ``Unknown``, which silently drops
+    parameter completion and checking for every signature that uses them.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    known = stub_names | set(dir(builtins))
+    for node in tree.body:
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            known.update((alias.asname or alias.name).split(".")[0] for alias in node.names)
+    annotations: list[ast.expr] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            arguments = node.args
+            for argument in [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs, arguments.vararg, arguments.kwarg]:
+                if argument is not None and argument.annotation is not None:
+                    annotations.append(argument.annotation)
+            if node.returns is not None:
+                annotations.append(node.returns)
+        elif isinstance(node, ast.AnnAssign):
+            annotations.append(node.annotation)
+            if isinstance(node.annotation, ast.Name) and node.annotation.id == "TypeAlias" and node.value is not None:
+                annotations.append(node.value)
+    return {
+        name.id
+        for annotation in annotations
+        for name in ast.walk(annotation)
+        if isinstance(name, ast.Name) and name.id not in known
+    }
 
 
 def _python_exports(path: Path) -> tuple[set[str], set[str]]:
@@ -292,6 +325,9 @@ def collect_findings(repo: Path, base: str | None = None) -> list[Finding]:
         missing_stub_names = sorted(name for name in imported_native if not name.startswith("_") and name not in stub_names)
         if missing_stub_names:
             findings.append(_error("python-stub", f"Top-level native imports missing from stub: {', '.join(missing_stub_names)}"))
+        unresolved = sorted(_stub_unresolved_annotations(stub, stub_names))
+        if unresolved:
+            findings.append(_error("python-stub-annotations", f"Stub annotations use undefined names: {', '.join(unresolved)}"))
 
     agents_path = repo / "AGENTS.md"
     if agents_path.is_file():
