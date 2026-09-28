@@ -355,23 +355,29 @@ pub fn regular_polygon(id: ObjectId, n_sides: u32, radius: f64) -> MobjectBundle
     bundle
 }
 
-/// Creates a checkmark ✓ Mobject bundle (drawn stroke-only by default).
+/// Creates a checkmark ✓ Mobject bundle.
+///
+/// The mark is a closed outline whose thickness is proportional to `size`, so
+/// it is a filled shape: `.fill()` colours it and no stroke is required.
 pub fn checkmark(id: ObjectId, size: f64) -> MobjectBundle {
-    let mut path = kurbo::BezPath::new();
-    path.move_to(kurbo::Point::new(-0.4 * size, -0.1 * size));
-    path.line_to(kurbo::Point::new(-0.15 * size, -0.35 * size));
-    path.line_to(kurbo::Point::new(0.4 * size, 0.4 * size));
-    let bounds = Bounds3D::new_2d(-0.4 * size, -0.35 * size, 0.4 * size, 0.4 * size);
+    let centerline = [
+        kurbo::PathEl::MoveTo(kurbo::Point::new(-0.4 * size, -0.1 * size)),
+        kurbo::PathEl::LineTo(kurbo::Point::new(-0.15 * size, -0.35 * size)),
+        kurbo::PathEl::LineTo(kurbo::Point::new(0.4 * size, 0.4 * size)),
+    ];
+    let thickness = 0.12 * size;
+    let style = kurbo::Stroke::new(thickness)
+        .with_caps(kurbo::Cap::Butt)
+        .with_join(kurbo::Join::Miter);
+    let path = kurbo::stroke(centerline, &style, &kurbo::StrokeOpts::default(), 0.001);
+    let half = thickness * 0.5;
+    let bounds = Bounds3D::new_2d(
+        -0.4 * size - half,
+        -0.35 * size - half,
+        0.4 * size + half,
+        0.4 * size + half,
+    );
     let mut bundle = MobjectBundle::new(id, path, bounds);
-
-    // Checkmarks default to stroke-only
-    bundle.fill = FillBrush(None);
-    bundle.stroke = StrokeBrush {
-        brush: Some(gaanim_core::peniko::Brush::Solid(
-            gaanim_core::peniko::Color::WHITE,
-        )),
-        style: kurbo::Stroke::new(3.0),
-    };
     bundle.tag = ObjectTag("Checkmark".into());
     bundle
 }
@@ -1359,6 +1365,13 @@ mod arrow_tests {
     use super::*;
     use gaanim_core::ObjectId;
     use kurbo::Shape;
+
+    #[test]
+    fn checkmark_stays_proportional_to_its_size() {
+        // Regression: a 3-unit world-space stroke drew a disc around the mark.
+        let bounds = checkmark(ObjectId::from_raw(0), 0.3).path.0.bounding_box();
+        assert!(bounds.width() < 0.3 && bounds.height() < 0.3);
+    }
 
     #[test]
     fn dimensioned_arrow_uses_scene_unit_defaults_and_rotates_geometry() {

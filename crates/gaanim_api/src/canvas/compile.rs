@@ -15554,6 +15554,28 @@ mod tests {
     }
 
     #[test]
+    fn create_after_fade_out_shows_the_object_again() {
+        use gaanim_timeline::clip::{AnimationSpec, ClipPayload, PropertyLensSpec};
+        let mut canvas = SceneModel::new(640, 360);
+        let line = canvas.line(-1.0, 0.0, 1.0, 0.0);
+        canvas.play(vec![line.animate().create().duration(1.0)]);
+        canvas.play(vec![line.animate().fade_out().duration(0.5)]);
+        canvas.play(vec![line.animate().create().duration(1.0)]);
+
+        let (_, timeline) = compiled_world(&canvas);
+        let restored = timeline.clips.values().any(|clip| {
+            matches!(
+                &clip.payload,
+                ClipPayload::Animation(AnimationSpec {
+                    lens: PropertyLensSpec::Opacity { from, to },
+                    ..
+                }) if *from == 0.0 && *to == 1.0
+            ) && (clip.start - 1.5).abs() < 1.0e-9
+        });
+        assert!(restored, "the second create() must restore the opacity");
+    }
+
+    #[test]
     fn responsive_layout_text_stays_hidden_until_its_fade_in() {
         let mut canvas = SceneModel::new(640, 360);
         let text = canvas.configured_text(

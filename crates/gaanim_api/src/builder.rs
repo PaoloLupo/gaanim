@@ -3721,6 +3721,27 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }
         }
 
+        // A draw entrance after a `fade_out()` must show the object again.
+        if !schedule.reversed
+            && let Some(state) = self.states.get_mut(anim.target)
+            && state.opacity <= 0.0
+        {
+            state.opacity = 1.0;
+            self.commands.entity(state.entity).insert(Opacity(0.0));
+            self.timeline.add_clip(
+                parent_track,
+                start_time,
+                0.0,
+                ClipPayload::Animation(AnimationSpec {
+                    target: anim.target,
+                    lens: PropertyLensSpec::Opacity { from: 0.0, to: 1.0 },
+                    rate_func: gaanim_math::RateFunc::Linear,
+                    delay: 0.0,
+                    label: self.current_label.clone(),
+                }),
+            );
+        }
+
         let mut temporary_strokes = HashMap::new();
         for item_id in &items {
             if let Some(state) = self.states.get(*item_id)
