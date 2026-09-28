@@ -3,8 +3,10 @@
 
 Compiles `gaanim_web` to WebAssembly, generates its JavaScript bindings with
 `wasm-bindgen` (the CLI version must match the `wasm-bindgen` crate), and
-copies the page and icons next to them. Serve the folder with any static
-server, for example `python -m http.server -d dist/web`.
+copies the page and icons next to them. The module ships gzip-compressed
+(`gaanim_web_bg.wasm.gz`) and the page decompresses it, so it downloads at
+its compressed size from any static host, GitHub Pages included. Serve the
+folder with any static server, for example `python -m http.server -d dist/web`.
 
 Usage: python scripts/build_web.py [--out DIR] [--profile PROFILE]
 """
@@ -12,7 +14,9 @@ Usage: python scripts/build_web.py [--out DIR] [--profile PROFILE]
 from __future__ import annotations
 
 import argparse
+import gzip
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -25,12 +29,34 @@ PAGE_FILES = ("index.html", "main.js")
 ICONS = ("favicon.ico", "gaanim-icon-512.png")
 
 
+def check_wasm_bindgen() -> None:
+    """Stop early when the CLI does not match the pinned crate version."""
+    manifest = (ROOT / "crates" / "gaanim_web" / "Cargo.toml").read_text(encoding="utf-8")
+    pinned = re.search(r'^wasm-bindgen = "=([^"]+)"', manifest, re.MULTILINE)
+    try:
+        output = subprocess.run(
+            ["wasm-bindgen", "--version"], check=True, capture_output=True, text=True
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        raise SystemExit(
+            "wasm-bindgen is not installed: cargo install wasm-bindgen-cli --version "
+            f"{pinned.group(1) if pinned else '<version>'} --locked"
+        )
+    installed = output.split()[-1]
+    if pinned and installed != pinned.group(1):
+        raise SystemExit(
+            f"wasm-bindgen {installed} is installed but gaanim_web pins {pinned.group(1)}: "
+            f"cargo install wasm-bindgen-cli --version {pinned.group(1)} --locked"
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=ROOT / "dist" / "web")
     parser.add_argument("--profile", default="web")
     args = parser.parse_args()
 
+    check_wasm_bindgen()
     env = dict(os.environ, CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS=RUSTFLAGS)
     subprocess.run(
         ["cargo", "build", "-p", "gaanim_web", "--target", TARGET, "--profile", args.profile],
@@ -61,8 +87,16 @@ def main() -> int:
     for name in ICONS:
         shutil.copy(ROOT / "docs" / "assets" / "brand" / name, out / name)
 
-    size = (out / "pkg" / "gaanim_web_bg.wasm").stat().st_size
-    print(f"web player: {out} (wasm {size / 1e6:.1f} MB)")
+    module = out / "pkg" / "gaanim_web_bg.wasm"
+    size = module.stat().st_size
+    compressed = module.with_suffix(".wasm.gz")
+    with module.open("rb") as source, gzip.open(compressed, "wb", compresslevel=9) as target:
+        shutil.copyfileobj(source, target)
+    module.unlink()
+    print(
+        f"web player: {out} (wasm {size / 1e6:.1f} MB, "
+        f"{compressed.stat().st_size / 1e6:.1f} MB compressed)"
+    )
     return 0
 
 

@@ -83,6 +83,39 @@ gaanim-play --present mi-charla.gaanim
 La inspección (`I`) sigue funcionando: los fotogramas son vectoriales, así que
 el zoom los redibuja nítidos.
 
+= En el navegador y el teléfono
+
+El reproductor web abre un `.gaanim` sin instalar nada, en la PC o en el
+teléfono:
+#link("https://paololupo.github.io/gaanim/reproductor/")[paololupo.github.io/gaanim/reproductor].
+Toca o arrastra el archivo; no sale de tu equipo. Es el mismo reproductor de
+escritorio compilado para la web, con la misma barra de reproducción.
+
+Para compartir un enlace, publica el `.gaanim` en un sitio que permita
+abrirlo desde otra página (por ejemplo GitHub Pages o tu propia web) y añade su
+dirección con `?src=`:
+
+```
+https://paololupo.github.io/gaanim/reproductor/?src=https://tu-sitio.com/mi-charla.gaanim
+```
+
+En pantallas táctiles, los controles funcionan como en un reproductor de vídeo
+del móvil:
+
+- Toca la escena para mostrar u ocultar los controles; se ocultan solos tras
+  unos segundos. Mientras se ven, los botones grandes del centro van a la pausa
+  anterior, reproducen o pausan, y van a la pausa siguiente.
+- Toca dos veces el lado derecho o el izquierdo para ir a la pausa siguiente o
+  anterior (sin pausas, avanza o retrocede 10 segundos). Cada toque rápido más
+  sigue avanzando.
+- Desliza a la izquierda o a la derecha para ir a la pausa siguiente o
+  anterior.
+- Arrastra la barra para moverte por la presentación.
+
+Es experimental: necesita un navegador con WebGPU (Chrome o Edge recientes,
+Safari 26, Firefox en Windows), descarga unos 25 MB la primera vez y todavía
+no reproduce el audio ni abre la ventana del Presenter View.
+
 = Exportar el paquete a vídeo
 
 ```bash

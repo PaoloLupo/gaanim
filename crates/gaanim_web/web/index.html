@@ -18,9 +18,14 @@
     }
     * { box-sizing: border-box; }
     html, body { margin: 0; height: 100%; background: var(--ink); color: var(--text);
-      font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
+      font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden;
+      overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
     #stage { position: fixed; inset: 0; }
-    #gaanim-canvas { display: block; width: 100%; height: 100%; outline: none; }
+    /* The player handles every gesture on the canvas (taps, double taps,
+       swipes, dragging the seek bar); the browser must not scroll or zoom. */
+    #gaanim-canvas { display: block; width: 100%; height: 100%; outline: none;
+      touch-action: none; user-select: none; -webkit-user-select: none;
+      -webkit-touch-callout: none; }
     #welcome { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px;
       background: var(--ink); }
     #welcome[hidden] { display: none; }
@@ -28,7 +33,7 @@
     .card img { width: 64px; height: 64px; image-rendering: pixelated; }
     h1 { font-size: 24px; font-weight: 500; margin: 16px 0 4px; }
     p { color: var(--muted); margin: 0 0 20px; }
-    .drop { border: 1px dashed rgba(255,255,255,.18); padding: 32px 16px; cursor: pointer;
+    .drop { display: block; border: 1px dashed rgba(255,255,255,.18); padding: 32px 16px; cursor: pointer;
       background: var(--surface); transition: border-color .15s, background .15s; }
     .drop.over, .drop:hover { border-color: var(--loop); background: #1b1c24; }
     .drop strong { display: block; font-weight: 500; }
@@ -42,6 +47,13 @@
     progress::-webkit-progress-value { background: var(--loop); }
     progress::-moz-progress-bar { background: var(--loop); }
     progress[hidden] { display: none; }
+    /* Wording for mouse or touch screens. */
+    .drop strong.touch, .drop span.touch { display: none; }
+    @media (pointer: coarse) {
+      .drop strong.mouse, .drop span.mouse { display: none; }
+      .drop strong.touch { display: block; }
+      .drop { padding: 40px 16px; }
+    }
   </style>
 </head>
 <body>
@@ -52,9 +64,11 @@
       <h1>Reproductor Gaanim</h1>
       <p>Reproduce y presenta archivos <code>.gaanim</code> en el navegador.</p>
       <label class="drop" id="drop">
-        <strong>Suelta aquí un archivo .gaanim</strong>
-        <span>o haz clic para elegirlo. El archivo no sale de tu equipo.</span>
-        <input type="file" id="file" accept=".gaanim" hidden>
+        <strong class="mouse">Suelta aquí un archivo .gaanim</strong>
+        <strong class="touch">Toca para elegir un archivo .gaanim</strong>
+        <span><span class="mouse">o haz clic para elegirlo. </span>El archivo no sale de tu equipo.</span>
+        <!-- No accept filter: iOS greys out files of unknown types. -->
+        <input type="file" id="file" hidden>
       </label>
       <progress id="progress" max="1" value="0" hidden></progress>
       <div id="status" role="status"></div>
