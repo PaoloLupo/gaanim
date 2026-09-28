@@ -292,6 +292,7 @@ detecta las marcas por palabra. Consulte `docs/content/referencia/audio.typ`.
 | Ejecutar un ejemplo | `just run quickstart` |
 | Medir presupuestos del runtime | `just benchmark smoke` |
 | Generar la documentación | `just docs` |
+| Compilar el reproductor web de `.gaanim` (experimental) | `just web` (servirlo: `just web-serve`) |
 
 Durante la iteración, comprueba el crate afectado y conserva `target/`, el
 toolchain y las opciones de compilación para aprovechar la caché. El perfil

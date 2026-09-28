@@ -7,11 +7,9 @@ use std::{
     collections::HashMap,
     sync::{Arc, Mutex, OnceLock, Weak},
 };
-use typst_kit::{
-    downloader::SystemDownloader,
-    files::{FileLoader, FileStore},
-    packages::SystemPackages,
-};
+use typst_kit::files::{FileLoader, FileStore};
+#[cfg(not(target_arch = "wasm32"))]
+use typst_kit::{downloader::SystemDownloader, packages::SystemPackages};
 
 use crate::font::{FontRegistry, OutlineCollector};
 use crate::shaper::HierarchyChild;
@@ -240,6 +238,7 @@ fn shared_typst_resources() -> &'static SharedTypstResources {
     SHARED_TYPST_RESOURCES.get_or_init(|| {
         let mut fonts = typst_kit::fonts::FontStore::new();
         fonts.extend(typst_kit::fonts::embedded());
+        #[cfg(not(target_arch = "wasm32"))]
         fonts.extend(typst_kit::fonts::system());
 
         if fonts.book().families().next().is_none() {
@@ -317,12 +316,14 @@ pub struct GaanimTypstWorld {
 /// Project-local files deliberately remain unavailable: scene markup is supplied
 /// in memory and should not gain implicit access to the host file system.
 struct UniverseFileLoader {
+    #[cfg(not(target_arch = "wasm32"))]
     packages: SystemPackages,
 }
 
 impl UniverseFileLoader {
     fn new() -> Self {
         Self {
+            #[cfg(not(target_arch = "wasm32"))]
             packages: SystemPackages::new(SystemDownloader::new("gaanim/0.3")),
         }
     }
@@ -331,7 +332,11 @@ impl UniverseFileLoader {
 impl FileLoader for UniverseFileLoader {
     fn load(&self, id: FileId) -> typst::diag::FileResult<Bytes> {
         match id.root() {
+            #[cfg(not(target_arch = "wasm32"))]
             VirtualRoot::Package(spec) => self.packages.obtain(spec)?.load(id.vpath()),
+            // The web has no package cache or registry access.
+            #[cfg(target_arch = "wasm32")]
+            VirtualRoot::Package(_) => Err(FileError::AccessDenied),
             VirtualRoot::Project => Err(FileError::NotFound(id.vpath().get_with_slash().into())),
         }
     }

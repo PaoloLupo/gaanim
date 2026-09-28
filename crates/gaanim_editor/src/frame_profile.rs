@@ -8,6 +8,7 @@
 //! exits with a summary of the slowest windows when the timeline ends.
 
 use crate::EditorState;
+use bevy::platform::time::Instant;
 use bevy::prelude::*;
 use bevy::render::renderer::render_system;
 use bevy::render::view::window::prepare_windows;
@@ -19,7 +20,7 @@ use gaanim_timeline::timeline::Timeline;
 use gaanim_timeline::{timeline_playback_system, timeline_seek_system};
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Frames rendered after the scene loads, before playback starts.
 const WARMUP_FRAMES: u32 = 30;

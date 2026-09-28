@@ -6,6 +6,7 @@
 //! first (current and next) are rendered first, and previews from an older
 //! revision stay visible until their replacement arrives.
 
+use bevy::platform::time::Instant;
 use bevy::prelude::*;
 use bevy_egui::egui;
 use crossbeam_channel::{Receiver, TryRecvError, unbounded};
@@ -18,7 +19,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::export::{StashedBundle, StashedReplay};
 

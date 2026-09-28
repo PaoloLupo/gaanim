@@ -1,0 +1,19 @@
+[package]
+name = "gaanim_web"
+version = "0.6.0"
+license = "MIT OR Apache-2.0"
+edition = "2024"
+description = "Gaanim web player: plays .gaanim files in the browser with the editor's own playback bar and Presenter View"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+gaanim_editor = { path = "../gaanim_editor", default-features = false }
+bevy = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+bevy = { workspace = true, features = ["webgpu"] }
+wasm-bindgen = "0.2.129"
+console_error_panic_hook = "0.1"

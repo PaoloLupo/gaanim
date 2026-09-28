@@ -651,7 +651,9 @@ impl Default for VideoDecoder {
         let realtime_process_spawns = Arc::new(AtomicUsize::new(0));
         #[cfg(test)]
         let worker_process_spawns = realtime_process_spawns.clone();
-        thread::Builder::new()
+        // Without threads (the web player) video frames never decode; the
+        // web plays bundles, which hold no video.
+        let spawned = thread::Builder::new()
             .name("gaanim-video-decoder".to_string())
             .spawn(move || {
                 let mut sessions = HashMap::new();
@@ -668,8 +670,10 @@ impl Default for VideoDecoder {
                         image: image.map_err(|error| error.to_string()),
                     });
                 }
-            })
-            .expect("failed to spawn video decoder worker");
+            });
+        if let Err(error) = spawned {
+            bevy::log::warn!("video frames are unavailable: {error}");
+        }
         Self {
             request_tx,
             response_rx,

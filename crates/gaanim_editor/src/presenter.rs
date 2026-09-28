@@ -2,6 +2,7 @@
 
 mod thumbnails;
 
+use bevy::platform::time::Instant;
 use bevy::{
     camera::RenderTarget,
     ecs::schedule::ScheduleLabel,
@@ -13,7 +14,7 @@ use bevy::{
 };
 use bevy_egui::{EguiContext, EguiSchedule, egui, input::EguiWantsInput};
 use gaanim_timeline::timeline::{SegmentMetadata, Timeline};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 pub(crate) use thumbnails::PresenterThumbnailCache;
 use thumbnails::{
@@ -435,7 +436,13 @@ pub(crate) fn spawn_presenter_window_system(
 }
 
 /// Spawn the speaker-facing window from either startup or an editor command.
+///
+/// The web player presents in its page alone: a browser opens further
+/// windows as separate pages, which do not share this app's world.
 pub(crate) fn spawn_presenter_window(commands: &mut Commands) {
+    if crate::WEB {
+        return;
+    }
     commands.spawn((
         Window {
             title: "Gaanim — Presenter View".to_string(),
@@ -2117,6 +2124,7 @@ mod tests {
         segment_entry_time, segment_matches, step_caption, sync_presentation_timer_system,
     };
     use crate::{AudienceBlank, PresentationMode};
+    use bevy::platform::time::Instant;
     use bevy::{
         camera::Camera,
         prelude::*,
@@ -2124,7 +2132,7 @@ mod tests {
     };
     use bevy_egui::input::EguiWantsInput;
     use gaanim_timeline::timeline::{SegmentMetadata, SegmentStop, Timeline};
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     fn stop(name: Option<&str>, time: f64) -> SegmentStop {
         SegmentStop {
