@@ -550,8 +550,8 @@ scene.play([frame.retarget(equation["result"]).duration(0.9).easing(Easing.sprin
 
 Copias de una figura colocadas por una transformación acumulada o por una
 distribución, como el Repeater de After Effects o el Duplicator de Cavalry. El
-resultado es un grupo cuyos miembros son las copias, en orden: `group[i]`,
-`stagger` y `connect` las recorren. La figura original es la copia 0; los
+resultado es un grupo cuyos miembros son las copias, en orden: `connect` las
+recorre y el estilo del grupo llega a todas. La figura original es la copia 0; los
 grupos y textos se copian con sus miembros. `count` y `animate.count` muestran
 solo las primeras copias y funden la siguiente con la parte fraccionaria, para
 construir el patrón copia a copia.

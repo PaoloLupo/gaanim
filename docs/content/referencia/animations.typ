@@ -407,7 +407,19 @@ scene.play([water.animate.fill_level(0.72).duration(1.4)])
 == Entradas y salidas
 
 Una entrada programada mantiene oculto el objeto antes de empezar, también si
-se declaró después de otras animaciones o dentro de un grupo.
+se declaró después de otras animaciones o dentro de un grupo, y durante la
+transición que abre su segmento. Son entradas:
+
+- por opacidad: `fade_in` y `fade_in_from`;
+- por trazo: `create`, `write` y `draw_border_then_fill`;
+- por escala desde cero: `grow_from_center`, `grow_from_point`,
+  `grow_from_edge`, `grow_arrow` y `spin_in_from_nothing`;
+- de texto: `typewriter` y `reveal`.
+
+Las demás animaciones (`move_to`, `scale_to`, `indicate`…) parten del estado
+visible del objeto: si no debe verse antes, empieza con una entrada o dale
+`opacity(0)` y anímala con `animate.opacity(1)`. Las salidas (`fade_out`,
+`uncreate`, `unwrite`, `shrink_to_center`) lo dejan oculto al terminar.
 
 #api-entry(
   name: "Anim.fade_in",
@@ -1424,7 +1436,7 @@ scene.play(logo.animate.rotate_by(1.0).easing(Easing.spring(stiffness=90, dampin
     (name: "strength", type: "float", default: "1.0", desc: [Mezcla de una curva cúbica (`0`) al rebote clásico (`1`).]),
     (name: "mode", type: "\"in\" | \"out\" | \"in_out\"", default: "\"out\"", desc: [Extremo en el que rebota.]),
   ),
-  returns: (type: "Easing", desc: [Rebotes al llegar.]),
+  returns: (type: "Easing", desc: [Rebotes al llegar. Con `strength=1` y `mode="out"` el objeto toca el destino por primera vez al 4/11 (≈ 0,364) de la duración y vuelve a tocarlo a 8/11, 10/11 y al final; para que el golpe caiga en un instante `t`, empieza la animación en `t - 0.364 * duración`. Con `strength < 1` solo llega exactamente al final: el primer rebote se queda en `1 - 0,258 · (1 - strength)` del recorrido, también a 4/11. Para un contacto en otro instante, escribe la curva con `Easing.custom`.]),
 )[
 ```python
 >>>from gaanim import *

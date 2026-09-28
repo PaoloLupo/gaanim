@@ -8831,6 +8831,66 @@ mod tests {
     }
 
     #[test]
+    fn moving_an_svg_part_does_not_move_its_root() {
+        let temp = std::env::temp_dir().join(format!(
+            "gaanim_svg_part_layout_test_{}.svg",
+            std::process::id()
+        ));
+        std::fs::write(
+            &temp,
+            r##"<svg width="300" height="100" xmlns="http://www.w3.org/2000/svg">
+                <rect id="g" x="0" y="0" width="100" height="100" fill="#ffffff"/>
+                <rect id="a" x="200" y="0" width="100" height="100" fill="#ffffff"/>
+              </svg>"##,
+        )
+        .unwrap();
+        let place = |shift: bool| {
+            let mut canvas = SceneModel::new(16.0, 9.0);
+            let svg = canvas.svg(&temp).unwrap().move_to_default(1.0, 2.0);
+            if shift {
+                let _ = svg.part("g").unwrap().shift_by(0.0, -0.45);
+            }
+            let mut app = bevy::prelude::App::new();
+            app.add_plugins(bevy::prelude::MinimalPlugins)
+                .add_plugins(gaanim_scene::GaanimScenePlugin)
+                .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+                .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+                .add_plugins(gaanim_text::GaanimTextPlugin);
+            canvas.compile(app.world_mut());
+            app.finish();
+            app.cleanup();
+            app.update();
+            let mut positions = std::collections::HashMap::new();
+            for (tag, transform) in app
+                .world_mut()
+                .query::<(
+                    &gaanim_scene::ObjectTag,
+                    &gaanim_math::GlobalSpatialTransform,
+                )>()
+                .iter(app.world())
+            {
+                let [_, _, _, _, x, y] = transform.affine_2d.as_coeffs();
+                positions.insert(tag.0.clone(), (x, y));
+            }
+            positions
+        };
+        let still = place(false);
+        let shifted = place(true);
+        std::fs::remove_file(temp).unwrap();
+        // The other part, and so the root, stays where `move_to` put it.
+        let (ax, ay) = still["SvgPath#a"];
+        let (bx, by) = shifted["SvgPath#a"];
+        assert!(
+            (ax - bx).abs() < 1e-9 && (ay - by).abs() < 1e-9,
+            "{still:?} {shifted:?}"
+        );
+        // The shifted part moves by exactly its own offset.
+        let (gx, gy) = still["SvgPath#g"];
+        let (hx, hy) = shifted["SvgPath#g"];
+        assert!((gx - hx).abs() < 1e-9 && (hy - (gy - 0.45)).abs() < 1e-9);
+    }
+
+    #[test]
     fn scaled_svg_part_strokes_are_in_scene_units() {
         let temp = std::env::temp_dir().join(format!(
             "gaanim_svg_part_stroke_test_{}.svg",

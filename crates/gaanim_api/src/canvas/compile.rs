@@ -2709,6 +2709,13 @@ impl SceneModel {
                     id_map.insert(spec.id, actual.id);
                     if spec.svg_root {
                         Self::scene_unit_svg_strokes(builder, spec.id, object_specs, id_map);
+                        Self::apply_svg_part_layouts(
+                            builder,
+                            spec.id,
+                            object_specs,
+                            id_map,
+                            frame_bounds,
+                        );
                     }
                     object_scopes.insert(spec.id, CompiledObjectScope::Segment(scene_id));
                     // Compilation creates every entity up front so arbitrary timeline seeks
@@ -8571,7 +8578,10 @@ impl SceneModel {
             SpawnKind::SvgPath(path) => {
                 let b = builder.svg_path(path);
                 let mr = Self::finish_spawn_builder(b, spec);
-                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                // A part of an imported SVG is laid out after its root.
+                if spec.svg_owner.is_none() {
+                    Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                }
                 mr
             }
             SpawnKind::Group(ids) => {
@@ -9148,7 +9158,33 @@ impl SceneModel {
                     .insert(bevy::prelude::Transform::default());
             }
         }
-        Self::apply_layout(builder, id, spec, id_map, frame_bounds);
+        // A part of an imported SVG is laid out after its root.
+        if spec.svg_owner.is_none() {
+            Self::apply_layout(builder, id, spec, id_map, frame_bounds);
+        }
+    }
+
+    /// Lay out the parts of an imported SVG after its root. The root is
+    /// placed, scaled and pivoted by the drawing as the file declares it,
+    /// so moving a part (`svg.part("g").shift_by(...)`) never moves the
+    /// whole SVG, and a part placed in scene coordinates lands there.
+    fn apply_svg_part_layouts(
+        builder: &mut SceneBuilder,
+        root: ObjectId,
+        object_specs: &HashMap<ObjectId, ObjectSpec>,
+        id_map: &HashMap<ObjectId, ObjectId>,
+        frame_bounds: Bounds3D,
+    ) {
+        let mut parts: Vec<&ObjectSpec> = object_specs
+            .values()
+            .filter(|spec| spec.svg_owner == Some(root) && !spec.layout_ops.is_empty())
+            .collect();
+        parts.sort_by_key(|spec| spec.id.index());
+        for spec in parts {
+            if let Some(&id) = id_map.get(&spec.id) {
+                Self::apply_layout(builder, id, spec, id_map, frame_bounds);
+            }
+        }
     }
 
     /// Shapes whose geometry is authored at absolute scene positions, such

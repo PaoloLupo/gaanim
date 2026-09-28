@@ -2,7 +2,7 @@
 
 #show: docs-chapter.with(
   title: "Efectos",
-  description: "Glow, blur y sombra animables, postprocesado WGSL y lo que aún no está disponible",
+  description: "Glow, blur y sombra animables, postprocesado encadenado, acabados, desenfoque de movimiento y fondos vivos",
   route: "/guias/efectos/",
 )
 
@@ -10,7 +10,8 @@
 
 En esta guía añades profundidad y brillo a los objetos con `glow`, `blur` y
 `shadow`, los animas para levantar una tarjeta, hacer latir una luz o enfocar
-un objeto, y aplicas un postprocesado WGSL a todo el cuadro.
+un objeto, aplicas postprocesados (propios o listos, encadenados y animados)
+a todo el cuadro, y das movimiento con desenfoque, ecos y fondos vivos.
 
 ```python
 from gaanim import BLACK, CYAN, WHITE, Scene
@@ -150,31 +151,111 @@ Para un fondo procedural o animado, `Background.shader(...)` acepta una
 función WGSL análoga, `gaanim_background(uv, resolution, time)`, que se dibuja
 detrás de la escena.
 
-== Lo que todavía no existe
+== Cadenas de postprocesos y acabados listos
 
-El postprocesado actual es un único shader por escena o segmento que recibe
-solo `uv`, `resolution` y `time`. Estas capacidades todavía *no* están
-disponibles:
+`post` también acepta una lista: cada pasada recibe el cuadro que dejó la
+anterior, así que el orden importa (el grano va al final para que la
+viñeta no lo oscurezca). `PostProcess` trae acabados listos que se combinan
+con tus propios shaders:
 
-- encadenar varios postprocesos o pasarles valores animados desde Python;
-- presets de acabado listos para usar (grano, viñeta, aberración cromática,
-  corrección de color o LUT), bloom de varios pasos, desenfoque de movimiento,
-  ecos y estelas;
-- modos de fusión por objeto en general (solo el resaltador de texto acepta
-  `blend="multiply"`);
-- fondos vivos predefinidos y transiciones entre segmentos basadas en shaders.
+- `grain(amount, size)`, `vignette(strength, softness)` y
+  `chromatic_aberration(amount)`: acabado de película.
+- `color_grade(exposure, contrast, saturation, temperature)` y
+  `lut(ruta, strength)` con un archivo `.cube`: corrección de color.
+- `bloom(threshold, intensity, radius)`: bloom de varios pasos; todo lo que
+  supera `threshold` brilla, igual a cualquier resolución.
+- `halftone`, `dither`, `crt`, `pixelate` y `glitch`: estilos.
 
-Mientras tanto, escribe el acabado en tu propio shader, como el grano y la
-viñeta del ejemplo anterior, o usa `glow` para simular brillo.
+```python
+from gaanim import CORAL, CYAN, PostProcess, Scene
 
-Además, el postprocesado no se aplica con una cámara en perspectiva (las
-mallas 3D no pasan por el renderizador vectorial) ni a la exportación SVG y
-otras salidas vectoriales.
+scene = Scene(frame=(16, 9), background="#0f172a", post=[
+    PostProcess.bloom(threshold=0.7, intensity=0.8),
+    PostProcess.color_grade(contrast=1.1, temperature=0.2),
+    PostProcess.vignette(0.4),
+    PostProcess.grain(0.05),
+])
+scene.geometry.circle(1.2).fill(CYAN).move_to(-2.5, 0)
+scene.geometry.star(5, 1.0, 0.45).fill(CORAL).move_to(2.5, 0)
+scene.render()
+```
+
+Los parámetros de los acabados y los `uniforms` de un shader propio aceptan
+un `Parameter` (o un `Computed`), así que un efecto se anima como cualquier
+otro valor: `PostProcess.shader(fuente, uniforms={"amount": amount})` expone
+`gaanim_uniforms.amount` a la función WGSL.
+
+```python
+from gaanim import PostProcess, Scene
+
+scene = Scene(frame=(16, 9), background="#1e293b")
+golpe = scene.viz.parameter(0.0)
+scene.canvas.post = PostProcess.glitch(intensity=golpe, seed=3)
+scene.text("¡Corte!", role="title").fill("#f8fafc")
+scene.play([golpe.animate.set(1.0).duration(0.2).repeat(1, yoyo=True)])
+scene.render()
+```
+
+== Movimiento: desenfoque, ecos y deformación
+
+- `scene.canvas.motion_blur(180, samples=8)` desenfoca el movimiento en la
+  exportación como el obturador de una cámara de cine: cada fotograma
+  promedia `samples` subfotogramas exactos. La vista previa sigue nítida.
+  `drawable.motion_blur(False)` deja nítido un título o un HUD.
+- `drawable.echo(count, delay=0.04, decay=0.6)` deja una estela de copias
+  del objeto tal como estaba antes. Es estado de declaración: cuando el
+  movimiento termina, las copias lo alcanzan.
+- `drawable.squash_stretch(amount)` estira el objeto en la dirección de su
+  velocidad y lo aplasta en la perpendicular, conservando el área.
+
+```python
+from gaanim import CORAL, GOLD, Scene
+
+scene = Scene(frame=(16, 9), background="#0f172a")
+scene.canvas.motion_blur(180, samples=8)
+bola = scene.geometry.circle(0.4).fill(CORAL).move_to(-5, 1).echo(6, delay=0.05)
+gota = scene.geometry.circle(0.4).fill(GOLD).move_to(-5, -1.5).squash_stretch(0.08)
+scene.play([
+    bola.animate.move_to(5, 1).duration(1.0),
+    gota.animate.move_to(5, -1.5).duration(0.6),
+])
+scene.render()
+```
+
+== Fondos vivos
+
+Además de `Background.shader(...)`, hay fondos animados listos, deterministas
+en cualquier seek: `Background.mesh_gradient(colores)`,
+`Background.noise_gradient(colores)`, `Background.aurora(colores)` y
+`Background.dot_grid(spacing)`, con `drift` para desplazar la rejilla.
+
+```python
+from gaanim import Background, Scene
+
+scene = Scene(frame=(16, 9), background=Background.aurora(["#22d3ee", "#a78bfa", "#34d399"]))
+scene.text("Aurora", role="title").fill("#f8fafc")
+scene.render()
+```
+
+Para repetir formas (`scene.geometry.repeat`, `duplicate`), unir puntos con
+líneas vivas (`connect`) o animar el trazo (`stroke_profile`,
+`Updater.dash_flow`), consulta
+#link("/guias/movimiento/")[Movimiento con intención].
+
+== Límites
+
+- Las transiciones entre segmentos no aceptan shaders propios: usa las de
+  `Transition`.
+- El postprocesado no se aplica con una cámara en perspectiva (las mallas 3D
+  no pasan por el renderizador vectorial) ni a la exportación SVG y otras
+  salidas vectoriales.
+- El desenfoque de movimiento solo se ve al exportar y en los snapshots; la
+  vista previa interactiva y las escenas 3D nativas quedan nítidas.
 
 == Referencia
 
 - #link("/referencia/themes/")[Temas y colores]: efectos visuales,
-  `PostProcess`, `Background.shader` y pinceles.
+  `PostProcess` y sus acabados, `Canvas.motion_blur`, `Background` y pinceles.
 - #link("/referencia/animations/")[Animaciones]: `animate.glow`,
   `animate.blur` y `animate.shadow`.
 - #link("/referencia/text/")[Texto]: `blur_in` y el animador de rango con

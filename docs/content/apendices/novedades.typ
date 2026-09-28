@@ -13,8 +13,9 @@ instalar una versión nueva, sigue
 
 = 0.6.1
 
-Sin publicar todavía. Cambian el ancho de los trazos escalados y la opacidad
-tras `transform_to`: lee «Al actualizar».
+Sin publicar todavía. Cambian el ancho de los trazos escalados, la opacidad
+tras `transform_to` y la colocación de un SVG cuyas partes mueves: lee «Al
+actualizar».
 
 == Al actualizar
 
@@ -36,8 +37,29 @@ tras `transform_to`: lee «Al actualizar».
   destinos, ya no hace falta: se ocultan solos. Para cambiar la opacidad
   durante el morph, combínalo con `animate.opacity`. `replacement_transform_to`
   no cambia.
+- Mover una parte de un SVG (`svg.part("g").shift_by(...)`) ya no mueve el SVG
+  entero: las partes se colocan después de la raíz, así que `move_to`, la
+  escala y el pivote de la raíz usan el dibujo tal como lo declara el archivo.
+  Antes `move_to` centraba el SVG con la parte ya desplazada y todo el dibujo
+  se movía para compensar; si lo corregías a mano, quita esa compensación.
 
 == Correcciones
+
+- Un tren de engranajes encadenado (`b.bind_rotation_from(a)`,
+  `c.bind_rotation_from(b)`...) gira entero en la vista previa. Antes, desde la
+  tercera rueda se quedaban quietas hasta hacer un seek o pausar, y con
+  `Canvas.motion_blur` dejaban copias dobles: cada eslabón leía la rueda
+  anterior con un fotograma de retraso.
+- `traced_path` se reconstruye con su recorrido completo al saltar a otro
+  instante, también al exportar un fragmento (`--from`), al capturar
+  fotogramas sueltos y con `Canvas.motion_blur`, cuando la fuente se mueve con
+  animaciones o sigue a un `Parameter` animado. Antes la estela salía vacía o
+  desaparecía; `dissipating_time` fallaba igual.
+- `Color(GOLD)` o `Color((r, g, b))` devuelven ese color, como cualquier
+  parámetro que acepta uno. Los stubs tipan como `ColorLike` los parámetros de
+  color que aceptan una cadena o una tupla (`glow`, `Overlay.flash`,
+  `mechanics.gear`, `rolling_number`, `marker`...), así que un comprobador de
+  tipos ya no marca como error código correcto.
 
 - Una vista de cámara (`camera_view`) cuya pantalla o marco se transforma con
   `transform_to` en otra figura ajusta el aumento y el encuadre a la forma
@@ -47,6 +69,11 @@ tras `transform_to`: lee «Al actualizar».
 
 == Cambios
 
+- Documentación: la guía de Efectos cubre postprocesos encadenados y
+  animados, acabados listos, bloom, desenfoque de movimiento, ecos y fondos
+  vivos; Movimiento añade repetidores, duplicadores y plexus. La referencia de
+  animaciones lista qué animaciones son entradas y cuándo toca suelo
+  `Easing.bounce`, y la de `hud()` explica cómo pasa por las transiciones.
 - Reproductor web (experimental): abre un `.gaanim` en el navegador de la PC o
   del teléfono, sin instalar nada, con la misma barra de reproducción que el
   escritorio, en

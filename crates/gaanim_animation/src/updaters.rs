@@ -6,6 +6,7 @@ use gaanim_core::kurbo::{BezPath, Shape};
 use gaanim_math::SpatialTransform;
 use gaanim_scene::prelude::{ChildOf, Entity, World};
 use gaanim_scene::{LocalBounds, Path2D, PathSource, WorldBounds};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -2273,16 +2274,55 @@ fn world_z_angle(entity: Entity, world: &World) -> Option<f64> {
     Some(matrix.x_axis.y.atan2(matrix.x_axis.x))
 }
 
+/// Bound targets whose rotation `entity`'s world angle reads: the entity itself
+/// and its ancestors.
+fn bound_in_chain(mut entity: Entity, bound: &HashSet<Entity>, world: &World) -> Vec<Entity> {
+    let mut found = Vec::new();
+    let mut visited = HashSet::new();
+    while visited.insert(entity) {
+        if bound.contains(&entity) {
+            found.push(entity);
+        }
+        let Some(parent) = world
+            .get::<ChildOf>(entity)
+            .map(|relation| relation.parent())
+        else {
+            break;
+        };
+        entity = parent;
+    }
+    found
+}
+
 /// Apply rotation and rotation-to-translation bindings in the connector phase.
 pub fn mechanism_binding_system(world: &mut World) {
-    let mut rotations = Vec::new();
     let mut rotation_query = world.query::<(Entity, &RotationBinding)>();
-    for (entity, binding) in rotation_query.iter(world) {
-        if let Some(source_angle) = world_z_angle(binding.source, world) {
-            rotations.push((entity, source_angle * binding.ratio + binding.phase));
-        }
-    }
-    for (entity, world_angle) in rotations {
+    let mut pending: Vec<(Entity, RotationBinding)> = rotation_query
+        .iter(world)
+        .map(|(entity, binding)| (entity, binding.clone()))
+        .collect();
+    // Write each rotation before the bindings that read it (a gear train
+    // `c.bind_rotation_from(b)`, `b.bind_rotation_from(a)`, or a wheel on a
+    // bound carrier), so a whole chain is current in one pass instead of
+    // lagging one frame per link. A cycle is written in declaration order.
+    let bound: HashSet<Entity> = pending.iter().map(|(entity, _)| *entity).collect();
+    let mut done = HashSet::new();
+    while !pending.is_empty() {
+        let ready = pending.iter().position(|(entity, binding)| {
+            let parent = world
+                .get::<ChildOf>(*entity)
+                .map(|relation| relation.parent());
+            bound_in_chain(binding.source, &bound, world)
+                .into_iter()
+                .chain(parent.map_or_else(Vec::new, |parent| bound_in_chain(parent, &bound, world)))
+                .all(|dependency| dependency == *entity || done.contains(&dependency))
+        });
+        let (entity, binding) = pending.remove(ready.unwrap_or(0));
+        done.insert(entity);
+        let Some(source_angle) = world_z_angle(binding.source, world) else {
+            continue;
+        };
+        let world_angle = source_angle * binding.ratio + binding.phase;
         let parent_angle = world
             .get::<ChildOf>(entity)
             .map(|relation| relation.parent())
@@ -3279,6 +3319,35 @@ mod tests {
 
         let resolved = resolve_tracking_endpoint(&endpoint, &world).unwrap();
         assert!(resolved.distance(DVec3::new(-5.0, 28.0, 0.0)) < 1e-9);
+    }
+
+    #[test]
+    fn chained_rotation_bindings_resolve_in_one_pass() {
+        let mut world = World::new();
+        let motor = world
+            .spawn(SpatialTransform::default().with_rotation_2d(0.3))
+            .id();
+        // The train runs motor -> w3 -> w2 -> w1 -> w0: every wheel was
+        // spawned before its source, so one pass in entity order would read
+        // stale sources.
+        let wheels: Vec<Entity> = (0..4)
+            .map(|_| world.spawn(SpatialTransform::default()).id())
+            .collect();
+        for (index, &wheel) in wheels.iter().enumerate() {
+            let source = wheels.get(index + 1).copied().unwrap_or(motor);
+            world.entity_mut(wheel).insert(RotationBinding {
+                source,
+                ratio: -0.5,
+                phase: 0.1,
+            });
+        }
+        mechanism_binding_system(&mut world);
+        let mut expected = 0.3;
+        for &wheel in wheels.iter().rev() {
+            expected = expected * -0.5 + 0.1;
+            let angle = world_z_angle(wheel, &world).unwrap();
+            assert!((angle - expected).abs() < 1e-9, "{angle} != {expected}");
+        }
     }
 
     #[test]

@@ -170,7 +170,7 @@ animadas están en #link("/referencia/animations/")[Animaciones].
   kind: "method",
   signature: "move_to(x, y, anchor=None) | move_to(reference) | move_to(point) -> Self",
   params: ((name: "x / y", type: "float | fuente reactiva", default: none, desc: [Posición de destino en unidades de escena.]), (name: "anchor", type: "Anchor | None", default: "None", desc: [Punto propio que se coloca en `(x, y)`; posicional o por nombre.]), (name: "reference", type: "Drawable", default: none, desc: [Alternativa: centra este objeto sobre otro.]), (name: "point", type: "AnchorPoint", default: none, desc: [Alternativa: coloca el centro sobre un anclaje de otro objeto.])),
-  desc: [Sin `anchor`, los objetos se colocan por su centro visual; las raíces de sistemas de coordenadas colocan su origen matemático, para que las etiquetas no desplacen los ejes. `move_to(reference)` crea una relación de layout diferida centro con centro que no sigue animaciones posteriores: usa `follow` o `attach_to` para eso. Una referencia o un `AnchorPoint` no se combinan con `y` ni con `anchor`. `Text` acepta además `TextAnchor` (ver #link("/referencia/text/")[Texto]). Las coordenadas aceptan fuentes reactivas, con las mismas reglas que `opacity`.],
+  desc: [Sin `anchor`, los objetos se colocan por su centro visual, medido con la geometría tal como se declaró: mover después una parte de un SVG (`svg.part("g").shift_by(...)`) no mueve el SVG entero; las raíces de sistemas de coordenadas colocan su origen matemático, para que las etiquetas no desplacen los ejes. `move_to(reference)` crea una relación de layout diferida centro con centro que no sigue animaciones posteriores: usa `follow` o `attach_to` para eso. Una referencia o un `AnchorPoint` no se combinan con `y` ni con `anchor`. `Text` acepta además `TextAnchor` (ver #link("/referencia/text/")[Texto]). Las coordenadas aceptan fuentes reactivas, con las mismas reglas que `opacity`.],
 )[
 ```python
 >>>from gaanim import *
@@ -981,7 +981,7 @@ panel = scene.geometry.rect(2, 1).move_to_3d(0, 0, 0).rotate_to_3d(0.3, 0.6, 0)
 #api-entry(
   name: "Drawable.hud",
   kind: "method",
-  desc: [Fija el objeto a la imagen como superposición: se queda en su sitio aunque la cámara 2D se desplace, acerque o gire, y aunque se mueva la cámara 3D. Sus coordenadas son las de la cámara sin mover, así que `.move_to(0, 3.5)` lo pone arriba en un fotograma de 16 × 9. Se dibuja encima de la escena y nunca aparece dentro de una vista de cámara.],
+  desc: [Fija el objeto a la imagen como superposición: se queda en su sitio aunque la cámara 2D se desplace, acerque o gire, y aunque se mueva la cámara 3D. Sus coordenadas son las de la cámara sin mover, así que `.move_to(0, 3.5)` lo pone arriba en un fotograma de 16 × 9. Se dibuja encima de la escena y nunca aparece dentro de una vista de cámara. Pertenece a su segmento como cualquier objeto: `wipe`, `iris`, `blinds` y las demás transiciones vectoriales lo recortan con su segmento, y `push` y `slide` lo desplazan con él. En `cross_fade`, `fade_through` y `zoom_through`, que solo funden la opacidad, se ven a la vez el HUD del segmento que sale y el del que entra; si deben ocupar el mismo sitio, usa un solo HUD con `scene.persist(...)` y cambia su contenido, o dale al que entra una entrada que empiece al terminar la transición.],
 )[
 ```python
 >>>from gaanim import *
