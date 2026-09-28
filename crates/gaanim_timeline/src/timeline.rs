@@ -338,6 +338,43 @@ pub struct Timeline {
     /// Named instants authored with `scene.marker`, in time order.
     #[cfg_attr(feature = "serde", serde(default))]
     pub markers: Vec<TimelineMarker>,
+    /// Tempo set with `scene.tempo`, drawn as bar lines on the seek bar.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub beat_grid: Option<BeatGrid>,
+}
+
+/// A musical tempo: `bpm` beats per minute from `offset` seconds, grouped
+/// in bars of `beats_per_bar` beats.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct BeatGrid {
+    pub bpm: f64,
+    pub offset: f64,
+    pub beats_per_bar: u32,
+}
+
+impl BeatGrid {
+    /// Seconds per beat.
+    pub fn beat(&self) -> f64 {
+        60.0 / self.bpm
+    }
+
+    /// Absolute time of beat `beat` (0 is `offset`).
+    pub fn time_of_beat(&self, beat: f64) -> f64 {
+        self.offset + beat * self.beat()
+    }
+
+    /// Start times of every bar within `[0, end]`, at most `limit` of them.
+    pub fn bar_times(&self, end: f64, limit: usize) -> Vec<f64> {
+        let bar = self.beat() * f64::from(self.beats_per_bar.max(1));
+        if !bar.is_finite() || bar <= 0.0 {
+            return Vec::new();
+        }
+        (0..limit)
+            .map(|index| self.offset + index as f64 * bar)
+            .take_while(|time| *time <= end)
+            .collect()
+    }
 }
 
 /// A named instant on the global timeline, authored with `scene.marker`.
@@ -375,6 +412,7 @@ impl Default for Timeline {
             scene_index: BTreeMap::new(),
             scene_connections: Vec::new(),
             markers: Vec::new(),
+            beat_grid: None,
         }
     }
 }
@@ -1708,7 +1746,13 @@ impl Timeline {
         // Each source's animation clips, in start order.
         let sources: HashSet<_> = ghosts
             .iter()
-            .map(|(_, echo)| echo.source)
+            .flat_map(|(_, echo)| {
+                std::iter::once(echo.source).chain(if echo.hold {
+                    echo.motion_sources.clone()
+                } else {
+                    Vec::new()
+                })
+            })
             .chain(squashes.iter().map(|(_, id, _)| *id))
             .collect();
         let mut source_clips: HashMap<gaanim_core::ObjectId, Vec<&Clip>> = HashMap::new();
@@ -1737,7 +1781,16 @@ impl Timeline {
         let current_segment = segment(self.current_time);
 
         for (ghost, echo) in ghosts {
-            let time = self.current_time - echo.lag;
+            let time = if echo.hold {
+                let clips: Vec<&Clip> = echo
+                    .motion_sources
+                    .iter()
+                    .flat_map(|source| clips_of(source).iter().copied())
+                    .collect();
+                held_echo_time(&clips, self.current_time, echo.lag)
+            } else {
+                self.current_time - echo.lag
+            };
             let source_visible = entity_map
                 .get(&echo.source)
                 .is_some_and(|&source| world.get::<gaanim_scene::Visible>(source).is_some());
@@ -2469,6 +2522,39 @@ impl Timeline {
             }
         }
     }
+}
+
+/// The time a held echo copy shows at `time`: `lag` seconds back along the
+/// motion of `clips` rather than along the timeline. While no clip runs the
+/// motion clock stops, so the copy freezes; it is negative (the copy is
+/// hidden) until the drawable has moved for `lag` seconds.
+fn held_echo_time(clips: &[&Clip], time: f64, lag: f64) -> f64 {
+    let mut intervals: Vec<(f64, f64)> = clips
+        .iter()
+        .filter(|clip| clip.duration > 0.0 && clip.start < time)
+        .map(|clip| (clip.start, clip.end().min(time)))
+        .collect();
+    intervals.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut merged: Vec<(f64, f64)> = Vec::new();
+    for (start, end) in intervals {
+        match merged.last_mut() {
+            Some(last) if start <= last.1 => last.1 = last.1.max(end),
+            _ => merged.push((start, end)),
+        }
+    }
+    let moved: f64 = merged.iter().map(|(start, end)| end - start).sum();
+    let mut target = moved - lag;
+    if target < 0.0 {
+        return target;
+    }
+    for (start, end) in merged {
+        let length = end - start;
+        if target <= length {
+            return start + target;
+        }
+        target -= length;
+    }
+    time
 }
 
 /// Whether the world has any traced path, whose points a seek must keep.
@@ -3799,6 +3885,8 @@ mod tests {
                         opacity,
                         parent: None,
                         rank,
+                        hold: false,
+                        motion_sources: Vec::new(),
                     },
                 ))
                 .id()

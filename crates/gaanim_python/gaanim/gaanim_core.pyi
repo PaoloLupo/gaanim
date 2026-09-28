@@ -1957,8 +1957,9 @@ class Audio:
     """A validated audio declaration activated explicitly by ``Scene.play``.
 
     Audio declarations are bound to their creating scene. A finite ``duration``
-    contributes to the enclosing play duration; an open-ended declaration
-    starts as background audio without extending the timeline.
+    contributes to the enclosing play duration; an open-ended declaration, or
+    one trimmed with ``end``, starts as background audio without extending the
+    timeline.
     """
 
 class Voiceover:
@@ -2363,6 +2364,20 @@ class Drawable:
             ring = scene.geometry.duplicate(dot, Distribution.circle(16, 2.5)).count(4)
         """
         ...
+    def points(self, points: Sequence[tuple[float, float]]) -> Drawable:
+        """Set every vertex of a polygon or polyline, in its declared coordinates.
+
+        Before the first ``scene.play`` it replaces the declared shape; later it
+        changes the shape at the cursor. ``animate.points`` then moves the
+        vertices on from there. It needs one finite point per vertex; another
+        count, a non-finite value, or a drawable that is not a polygon or
+        polyline raises ``ValueError``.
+
+        Example:
+            frame = scene.geometry.polygon([(0, 0), (1, 0), (0, 1)]).points([(0, 0), (1, 0), (1, 1)])
+            scene.play([frame.animate.points([(0, 0), (2, 0), (0, 2)])])
+        """
+        ...
     def squash_stretch(self, amount: float = 0.1, max_ratio: float = 1.6) -> Drawable:
         """Stretch along the velocity and squash across it, keeping the area.
 
@@ -2391,7 +2406,7 @@ class Drawable:
             hud = scene.text("t = 0").move_to(-6, 4).motion_blur(False)
         """
         ...
-    def echo(self, count: int = 5, *, delay: float = 0.04, decay: float = 0.6) -> Drawable:
+    def echo(self, count: int = 5, *, delay: float = 0.04, decay: float = 0.6, hold: bool = False) -> Drawable:
         """Trail this drawable with ``count`` copies of itself as it was earlier.
 
         Copy ``k`` shows the drawable ``k * delay`` seconds ago with ``decay ** k``
@@ -2404,6 +2419,11 @@ class Drawable:
         ``delay`` is positive and ``decay`` is in (0, 1]. Echo is declaration
         state: it applies for the whole timeline. Lottie and video frames are
         not copied.
+
+        By default the copies catch up with the drawable when it stops. With
+        ``hold=True`` they are delayed along its motion instead of the clock:
+        when its animations stop, the copies freeze where they were (an onion
+        skin of ``count`` frozen poses) and move on when it moves again.
 
         Example:
             ball = scene.geometry.circle(0.4).fill(CORAL).echo(6, delay=0.05)
@@ -3467,7 +3487,7 @@ class Text(Drawable):
             title.motion_blur(False).move_to(0.0, 3.0)
         """
         ...
-    def echo(self, count: int = 5, *, delay: float = 0.04, decay: float = 0.6) -> Self:
+    def echo(self, count: int = 5, *, delay: float = 0.04, decay: float = 0.6, hold: bool = False) -> Self:
         """Trail the text with fading copies of itself, preserving Text chaining.
 
         See ``Drawable.echo``; each glyph's copy replays that glyph's own
@@ -5766,7 +5786,9 @@ class Typography:
         ``markup=False`` keeps every ``*`` and ``_`` literal (and their
         backslashes), for technical labels such as ``tb:dist_comp`` or
         ``X1_2``; ``$...$`` math still applies. ``markup=None`` uses the
-        theme's ``text_markup`` (``True`` without a theme).
+        theme's ``text_markup`` (``True`` without a theme). With
+        ``role="code"`` every ``$`` is literal, so a terminal prompt such as
+        ``"$ gaanim init"`` needs no escaping.
 
         Without ``flow`` or ``text_align``, the lines of a text with explicit
         line breaks take their horizontal alignment from the anchor of
@@ -5946,6 +5968,7 @@ class MediaLibrary:
         path: str,
         *,
         duration: Optional[float] = None,
+        end: Optional[float] = None,
         volume: float = 1.0,
         fade_in: float = 0.0,
         fade_out: float = 0.0,
@@ -5954,12 +5977,16 @@ class MediaLibrary:
 
         The declaration is inert until passed to ``Scene.play``. Playback then
         begins at that call's absolute timeline cursor and follows pause, seek,
-        and speed in preview and MP4/WebM export. Invalid paths or timing values
-        raise ``ValueError``.
+        and speed in preview and MP4/WebM export. ``duration`` plays that many
+        seconds and makes the play last as long; ``end`` cuts the file at that
+        many seconds without lengthening the play, for background music that
+        fades out (``fade_out``) under the scenes that follow. ``fade_out``
+        needs one of them. Passing both, or invalid paths or timing values,
+        raises ``ValueError``.
 
         Example:
-            music = scene.audio("music.ogg", volume=0.5)
-            scene.play([music])
+            music = scene.media.audio("music.ogg", end=30.0, fade_out=1.5, volume=0.5)
+            scene.play([music, title.animate.write()])
         """
         ...
     def image(
@@ -7113,6 +7140,37 @@ class Scene:
             scene.wait(1.0)
         """
         ...
+    def tempo(self, bpm: float, offset: float = 0.0, *, beats_per_bar: int = 4) -> None:
+        """Set a musical tempo for cutting on the beat.
+
+        Beat 0 is at ``offset`` seconds of the timeline (where the music's
+        first beat falls). ``beats`` converts beats to seconds and
+        ``wait_until(beat=...)`` moves the cursor to a beat; the editor draws
+        a line at every bar on the seek bar. A non-positive ``bpm``, a negative
+        ``offset`` or ``beats_per_bar`` below 1 raises ``ValueError``.
+
+        Example:
+            scene.tempo(128, offset=0.12)
+            scene.play(logo.animate.grow_from_center().duration(scene.beats(2)))
+            scene.wait_until(bar=2)
+        """
+        ...
+    def beats(self, n: float) -> float:
+        """Seconds that ``n`` beats last at the tempo set with ``tempo``.
+
+        Raises ``ValueError`` without a tempo.
+        """
+        ...
+    def wait_until(self, *, beat: Optional[float] = None, bar: Optional[float] = None) -> None:
+        """Move the cursor to a beat, or to the start of a bar, of the tempo.
+
+        Give exactly one of ``beat`` (0 is the tempo's ``offset``) or ``bar``
+        (``bar=2`` is beat ``2 * beats_per_bar``). A beat already behind the
+        cursor raises ``ValueError`` saying how much too long the shot before
+        it is, instead of silently drifting off the music. Also raises without
+        a tempo.
+        """
+        ...
     def stop(
         self,
         name: Optional[str] = None,
@@ -7266,12 +7324,35 @@ class Scene:
         *,
         duration: Optional[float] = None,
         easing: Optional[Easing] = None,
+        advance: bool = True,
     ) -> None:
         """Atomically schedule a leaf, implicit parallel batch, or composition tree.
 
         ``duration`` and ``easing`` are defaults overridden by explicit ``Anim``
         or nested group configuration. Reused, foreign, duplicate, or temporally
         overlapping channel writes raise ``ValueError`` without partial changes.
+
+        The cursor moves to the end of the batch. With ``advance=False`` (or
+        ``launch``) it stays where it was: the animations start and keep
+        running while later waits, plays, cuts and segments are scheduled over
+        them, e.g. a rotation that spans several cuts. Do not animate the same
+        channel of the same object again until a launched animation ends, and
+        keep the scene long enough for it: the video ends at the cursor.
+        """
+        ...
+    def launch(
+        self,
+        items: Playable | Sequence[Playable],
+        *,
+        duration: Optional[float] = None,
+        easing: Optional[Easing] = None,
+    ) -> None:
+        """``play(items, advance=False)``: start at the cursor without moving it.
+
+        Example:
+            scene.launch(mandala.animate.rotate_by(math.tau).duration(8.0))
+            for shape in shapes:
+                scene.play(shape.animate.fade_in().duration(1.0))
         """
         ...
     def fade_out_all(self, seconds: float) -> None:

@@ -43,6 +43,8 @@ use crate::export::{AudioTrack, AudioTrackError};
 pub struct AudioClip {
     track: AudioTrack,
     state: SharedCanvasState,
+    /// Whether the track's duration lengthens the play that activates it.
+    extends_play: bool,
 }
 
 /// A timeline-synchronized video declaration activated by [`SceneModel::play_items`].
@@ -663,7 +665,10 @@ impl Composition {
                         anim.inner.delay = 0.0;
                         (start, Some(anim.inner.duration.max(0.0)))
                     }
-                    PlayItem::Audio(audio) => (0.0, audio.track.duration),
+                    PlayItem::Audio(audio) => (
+                        0.0,
+                        audio.extends_play.then_some(audio.track.duration).flatten(),
+                    ),
                     PlayItem::Video(video) => (0.0, video.duration),
                     PlayItem::VideoSegment(segment) => (0.0, Some(segment.interval.scene_end())),
                     PlayItem::Lottie(lottie) => (0.0, lottie.duration),
@@ -2041,6 +2046,9 @@ pub struct SceneModel {
     pub asset_root: Option<PathBuf>,
     /// Audio sources synchronized in preview and mixed by FFmpeg during export.
     pub audio_tracks: Vec<AudioTrack>,
+    /// Musical tempo set with [`Self::set_tempo`], for beat-timed cuts and
+    /// the editor's bar lines.
+    pub(crate) tempo: Option<gaanim_timeline::timeline::BeatGrid>,
     /// Voiceover blocks and the live take, for timing and the editor recorder.
     pub(crate) narration: super::narration::NarrationState,
     /// Reusable logo/footer treatment generated for every explicit segment.
@@ -2081,6 +2089,7 @@ impl SceneModel {
             margin: Margin::default(),
             asset_root: None,
             audio_tracks: Vec::new(),
+            tempo: None,
             narration: Default::default(),
             branding: None,
             camera_position: gaanim_core::glam::DVec3::ZERO,
@@ -2575,6 +2584,35 @@ impl SceneModel {
         Ok(AudioClip {
             track,
             state: self.state.clone(),
+            extends_play: true,
+        })
+    }
+
+    /// Declare background audio trimmed at `end` seconds of the file.
+    ///
+    /// Unlike a `duration`, `end` does not lengthen the play that activates
+    /// it: the track plays under what follows, is cut at `end` and can fade
+    /// out before it.
+    pub fn audio_until(
+        &self,
+        path: impl AsRef<Path>,
+        end: f64,
+        volume: f64,
+        fade_in: f64,
+        fade_out: f64,
+    ) -> Result<AudioClip, AudioTrackError> {
+        let track = AudioTrack::new(
+            self.resolve_asset_path(path),
+            0.0,
+            Some(end),
+            volume,
+            fade_in,
+            fade_out,
+        )?;
+        Ok(AudioClip {
+            track,
+            state: self.state.clone(),
+            extends_play: false,
         })
     }
 
@@ -4875,6 +4913,66 @@ impl SceneModel {
         guard.active_mut().ops.push(Op::Wait(dur.max(0.0)));
     }
 
+    /// Set the tempo: `bpm` beats per minute, beat 0 at `offset` seconds of
+    /// the timeline, in bars of `beats_per_bar` beats.
+    pub fn set_tempo(&mut self, bpm: f64, offset: f64, beats_per_bar: u32) -> Result<(), String> {
+        if !(bpm.is_finite() && bpm > 0.0) {
+            return Err(format!("bpm must be a positive number, got {bpm}"));
+        }
+        if !(offset.is_finite() && offset >= 0.0) {
+            return Err(format!(
+                "tempo offset must be a non-negative number of seconds, got {offset}"
+            ));
+        }
+        if beats_per_bar == 0 {
+            return Err("beats_per_bar must be at least 1".to_string());
+        }
+        self.tempo = Some(gaanim_timeline::timeline::BeatGrid {
+            bpm,
+            offset,
+            beats_per_bar,
+        });
+        Ok(())
+    }
+
+    /// The tempo set with [`Self::set_tempo`].
+    pub fn tempo(&self) -> Option<gaanim_timeline::timeline::BeatGrid> {
+        self.tempo
+    }
+
+    /// Seconds that `beats` beats last at the current tempo.
+    pub fn beats(&self, beats: f64) -> Result<f64, String> {
+        let tempo = self
+            .tempo
+            .ok_or("set a tempo with scene.tempo(bpm) first")?;
+        if !beats.is_finite() {
+            return Err(format!("beats must be finite, got {beats}"));
+        }
+        Ok(beats * tempo.beat())
+    }
+
+    /// Wait until beat `beat` (0 is the tempo's offset). A beat already
+    /// behind the cursor is an error: the shot before it ran too long.
+    pub fn wait_until_beat(&mut self, beat: f64) -> Result<(), String> {
+        let tempo = self
+            .tempo
+            .ok_or("set a tempo with scene.tempo(bpm) first")?;
+        if !beat.is_finite() {
+            return Err(format!("beat must be finite, got {beat}"));
+        }
+        let target = tempo.time_of_beat(beat);
+        let cursor = self.current_time();
+        if target < cursor - 1e-6 {
+            return Err(format!(
+                "beat {beat} is at {target:.3} s, but the cursor is already at {cursor:.3} s: \
+                 what comes before it is {:.3} s too long",
+                cursor - target
+            ));
+        }
+        self.wait((target - cursor).max(0.0));
+        Ok(())
+    }
+
     /// Regroup auto-queued animations into a parallel batch at the current
     /// cursor. Each `Anim` passed here is deactivated from its original
     /// sequential position before the batch is inserted.
@@ -4909,6 +5007,29 @@ impl SceneModel {
         composition: Composition,
         default_duration: Option<f64>,
         default_rate: Option<RateFunc>,
+    ) -> Result<(), PlayError> {
+        self.schedule_composition(composition, default_duration, default_rate, true)
+    }
+
+    /// Schedule a composition tree at the cursor like
+    /// [`Self::play_composition_configured`], but leave the cursor where it
+    /// is: the animations run while later waits, plays and cuts are
+    /// scheduled over them.
+    pub fn launch_composition_configured(
+        &mut self,
+        composition: Composition,
+        default_duration: Option<f64>,
+        default_rate: Option<RateFunc>,
+    ) -> Result<(), PlayError> {
+        self.schedule_composition(composition, default_duration, default_rate, false)
+    }
+
+    fn schedule_composition(
+        &mut self,
+        composition: Composition,
+        default_duration: Option<f64>,
+        default_rate: Option<RateFunc>,
+        advance: bool,
     ) -> Result<(), PlayError> {
         let mut resolved = composition.resolved(default_duration, default_rate)?;
         resolved.sort_by(|left, right| {
@@ -5216,10 +5337,14 @@ impl SceneModel {
         }
 
         let mut guard = self.state.lock().expect("canvas state poisoned");
-        guard.active_mut().cursor += max_duration;
         for id in camera_captures {
             guard.active_mut().ops.push(Op::CaptureCameraState { id });
         }
+        if !advance {
+            guard.active_mut().ops.push(Op::Launch(builders));
+            return Ok(());
+        }
+        guard.active_mut().cursor += max_duration;
         guard.active_mut().ops.push(Op::Play(builders));
         let media_remainder = (max_duration - visual_duration).max(0.0);
         if media_remainder > 0.0 {
@@ -7587,10 +7712,14 @@ mod tests {
             .iter()
             .flat_map(|segment| &segment.ops)
             .find_map(|op| match op {
-                Op::Play(anims) => anims.iter().find_map(|anim| match &anim.anim_type {
-                    AnimationType::TextTransition { semantic_pairs, .. } => Some(semantic_pairs),
-                    _ => None,
-                }),
+                Op::Play(anims) | Op::Launch(anims) => {
+                    anims.iter().find_map(|anim| match &anim.anim_type {
+                        AnimationType::TextTransition { semantic_pairs, .. } => {
+                            Some(semantic_pairs)
+                        }
+                        _ => None,
+                    })
+                }
                 _ => None,
             })
             .expect("step equation op should be queued");
@@ -9032,6 +9161,50 @@ mod tests {
     }
 
     #[test]
+    fn tempo_times_beats_and_rejects_a_beat_behind_the_cursor() {
+        let mut canvas = SceneModel::new(1280, 720);
+        assert!(canvas.beats(1.0).is_err());
+        assert!(canvas.set_tempo(0.0, 0.0, 4).is_err());
+        canvas.set_tempo(120.0, 0.5, 4).unwrap();
+        assert!((canvas.beats(2.0).unwrap() - 1.0).abs() < 1e-12);
+        canvas.wait_until_beat(4.0).unwrap();
+        assert!((canvas.current_time() - 2.5).abs() < 1e-9);
+        canvas.wait(1.0);
+        let error = canvas.wait_until_beat(5.0).unwrap_err();
+        assert!(error.contains("too long"), "{error}");
+        canvas.wait_until_beat(8.0).unwrap();
+        assert!((canvas.current_time() - 4.5).abs() < 1e-9);
+        let grid = canvas.tempo().unwrap();
+        assert_eq!(grid.bar_times(4.5, 100), vec![0.5, 2.5, 4.5]);
+    }
+
+    #[test]
+    fn launch_schedules_at_the_cursor_without_moving_it() {
+        let mut canvas = SceneModel::new(1280, 720);
+        let wheel = canvas.circle(20.0);
+        let label = canvas.circle(10.0);
+        canvas.wait(1.0);
+        canvas
+            .launch_composition_configured(
+                Composition::leaf(wheel.animate().rotate_by(6.0).duration(8.0)),
+                None,
+                None,
+            )
+            .unwrap();
+        assert!((canvas.current_time() - 1.0).abs() < 1e-9);
+        canvas
+            .play_composition_configured(Composition::leaf(label.fade_in(1.0)), None, None)
+            .unwrap();
+        assert!((canvas.current_time() - 2.0).abs() < 1e-9);
+        let guard = canvas.state.lock().expect("canvas state poisoned");
+        let ops = &guard.active().ops;
+        assert!(
+            ops.iter()
+                .any(|op| matches!(op, Op::Launch(anims) if anims.len() == 1))
+        );
+    }
+
+    #[test]
     fn stagger_offsets_delays_and_cursor() {
         let mut canvas = SceneModel::new(1280, 720);
         let first = canvas.circle(20.0);
@@ -10266,6 +10439,29 @@ mod tests {
         ));
         assert!(matches!(state.active().ops.last(), Some(Op::Wait(2.0))));
         drop(state);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn trimmed_background_audio_fades_without_extending_the_play() {
+        let path =
+            std::env::temp_dir().join(format!("gaanim-trimmed-audio-{}.wav", std::process::id()));
+        std::fs::write(&path, b"fixture").unwrap();
+        let mut canvas = SceneModel::new(1280, 720);
+        canvas.wait(1.0);
+        let music = canvas.audio_until(&path, 30.0, 0.8, 0.0, 1.5).unwrap();
+        canvas.play_items(vec![music.into()]).unwrap();
+        assert_eq!(
+            canvas.current_time(),
+            1.0,
+            "background audio keeps the cursor"
+        );
+        assert_eq!(canvas.audio_tracks.len(), 1);
+        let track = &canvas.audio_tracks[0];
+        assert_eq!(track.start_time, 1.0);
+        assert_eq!(track.duration, Some(30.0));
+        assert_eq!(track.fade_out, 1.5);
+        assert!(canvas.audio_until(&path, 1.0, 1.0, 0.8, 0.8).is_err());
         let _ = std::fs::remove_file(path);
     }
 

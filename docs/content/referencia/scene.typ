@@ -231,6 +231,8 @@ page = scene.layout.column([scene.text("Vídeo vertical", role="title")], within
 
 Cada llamada a `play` o `wait` avanza el cursor de autoría. Las animaciones
 de una misma lista empiezan juntas; llamadas sucesivas van una detrás de otra.
+`scene.launch(...)` (o `play(..., advance=False)`) empieza en el cursor sin
+moverlo, para una animación larga que sigue mientras programas lo demás.
 
 #api-entry(
   name: "Scene.play",
@@ -239,8 +241,9 @@ de una misma lista empiezan juntas; llamadas sucesivas van una detrás de otra.
     (name: "items", type: "Playable | Sequence[Playable]", default: none, desc: [Un `Anim`, audio, vídeo, Lottie o `Composition`, o una lista que se reproduce en paralelo.]),
     (name: "duration", type: "float | None", default: "None", desc: [Duración para las animaciones que no fijan la suya.]),
     (name: "easing", type: "Easing | None", default: "None", desc: [Easing para las animaciones que no fijan el suyo.]),
+    (name: "advance", type: "bool", default: "True", desc: [Con `False` el cursor no se mueve: el bloque empieza y sigue sonando bajo lo que programes después. Es lo mismo que `scene.launch`.]),
   ),
-  returns: (type: "None", desc: [Avanza el cursor hasta el final del bloque.]),
+  returns: (type: "None", desc: [Avanza el cursor hasta el final del bloque, salvo con `advance=False`.]),
   desc: [Programa el bloque de forma atómica: un `Anim` ya usado, de otra escena, repetido o que escribe un canal ocupado en el mismo tramo lanza `ValueError` sin aplicar ningún cambio. `duration` y `easing` son valores por defecto; los que fija cada `Anim` o cada grupo tienen prioridad.],
 )[
 ```python
@@ -252,6 +255,51 @@ rect = scene.geometry.rect(1.8, 1.0).fill(GOLD).move_to(1.6, 0)
 scene.play([circle.animate.create(), rect.animate.grow_from_center()], duration=0.8)
 scene.play(circle.animate.shift_by(1.2, 0), easing=Easing.SNAPPY)
 scene.render()
+```
+]
+
+#api-entry(
+  name: "Scene.launch",
+  kind: "method",
+  params: (
+    (name: "items", type: "Playable | Sequence[Playable]", default: none, desc: [Lo mismo que acepta `play`.]),
+    (name: "duration / easing", type: "float | Easing | None", default: "None", desc: [Valores por defecto, como en `play`.]),
+  ),
+  returns: (type: "None", desc: [No mueve el cursor.]),
+  desc: [Empieza el bloque en el cursor y deja el cursor donde estaba: lo que programes después (esperas, otros `play`, cortes, segmentos) ocurre mientras el bloque sigue. Sirve para un giro que dura varios cortes o una música de fondo. No vuelvas a animar el mismo canal del mismo objeto hasta que termine, y deja la escena larga lo suficiente: el vídeo acaba en el cursor.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+import math
+rueda = scene.geometry.regular_polygon(6, 1.5).fill("#38bdf8")
+puntos = [scene.geometry.dot(0.2).move_to(x, -3) for x in (-4, -2, 0, 2, 4)]
+scene.launch(rueda.animate.rotate_by(math.tau).duration(5.0))
+for punto in puntos:
+    scene.play(punto.animate.fade_in().duration(1.0))
+```
+]
+
+#api-entry(
+  name: "Scene.tempo",
+  kind: "method",
+  params: (
+    (name: "bpm", type: "float", default: none, desc: [Pulsos por minuto; positivo.]),
+    (name: "offset", type: "float", default: "0.0", desc: [Segundo de la línea de tiempo donde cae el pulso 0, el primer tiempo de la música.]),
+    (name: "beats_per_bar", type: "int", default: "4", desc: [Pulsos por compás.]),
+  ),
+  returns: (type: "None", desc: [Fija el tempo de la escena.]),
+  desc: [Rejilla de tempo para cortar a tiempo con la música: `scene.beats(n)` convierte pulsos en segundos y `scene.wait_until(beat=n)` o `scene.wait_until(bar=n)` llevan el cursor a un pulso o al inicio de un compás. Si el cursor ya pasó ese pulso, `wait_until` lanza `ValueError` y dice cuánto se alargó el plano anterior, en vez de desfasarse en silencio. La barra de reproducción del editor dibuja una línea en cada compás. Valores no válidos lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.tempo(128, offset=0.0)
+logo = scene.geometry.star(5, 1.2, 0.5).fill("#fbbf24")
+scene.play(logo.animate.grow_from_center().duration(scene.beats(2)))
+scene.wait_until(bar=1)
+scene.play(logo.animate.rotate_by(1.0).duration(scene.beats(4)))
+scene.wait_until(bar=2)
 ```
 ]
 

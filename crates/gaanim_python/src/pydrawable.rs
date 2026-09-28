@@ -55,12 +55,13 @@ pub(crate) fn echo_spec(
     count: u32,
     delay: f64,
     decay: f64,
+    hold: bool,
 ) -> PyResult<Option<gaanim_api::canvas::EchoSpec>> {
     if count == 0 {
         return Ok(None);
     }
     gaanim_api::canvas::EchoSpec::new(count, delay, decay)
-        .map(Some)
+        .map(|spec| Some(spec.with_hold(hold)))
         .map_err(PyValueError::new_err)
 }
 
@@ -2341,6 +2342,15 @@ impl PyDrawable {
             .map(Self)
             .map_err(PyValueError::new_err)
     }
+    /// Set every vertex of a polygon or polyline at once.
+    fn points(&self, points: Vec<(f64, f64)>) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.0
+            .clone()
+            .points(points)
+            .map(Self)
+            .map_err(PyValueError::new_err)
+    }
     /// Stretch the drawable along its velocity and squash it across.
     #[pyo3(signature = (amount=0.1, max_ratio=1.6))]
     fn squash_stretch(&self, amount: f64, max_ratio: f64) -> PyResult<Self> {
@@ -2358,10 +2368,12 @@ impl PyDrawable {
         Ok(Self(self.0.clone().motion_blur(enabled)))
     }
     /// Trail the drawable with fading copies of itself as it was earlier.
-    #[pyo3(signature = (count=5, *, delay=0.04, decay=0.6))]
-    fn echo(&self, count: u32, delay: f64, decay: f64) -> PyResult<Self> {
+    #[pyo3(signature = (count=5, *, delay=0.04, decay=0.6, hold=false))]
+    fn echo(&self, count: u32, delay: f64, decay: f64, hold: bool) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok(Self(self.0.clone().echo(echo_spec(count, delay, decay)?)))
+        Ok(Self(
+            self.0.clone().echo(echo_spec(count, delay, decay, hold)?),
+        ))
     }
     /// Clip this drawable to another drawable's vector outline.
     #[pyo3(signature = (mask, rule="nonzero", invert=false))]

@@ -24,4 +24,11 @@ pub struct EchoGhost {
     /// Draw order among copies of one source: a higher rank draws first,
     /// and the source itself (rank 0) above all of them.
     pub rank: u32,
+    /// Delay along the motion of `motion_sources` instead of the timeline:
+    /// while none of them is animated the copy freezes where it was, like
+    /// an onion skin, and it moves on when they move again.
+    pub hold: bool,
+    /// The echoed subtree, whose animation clips make up the motion a held
+    /// copy follows.
+    pub motion_sources: Vec<ObjectId>,
 }

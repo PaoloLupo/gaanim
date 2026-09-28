@@ -680,6 +680,14 @@ fn editor_ui_system(
                             .copied()
                             .chain(seek_markers.iter().map(|marker| marker.frac))
                             .collect();
+                        // Bar lines of `scene.tempo`, at most one per 4 px.
+                        let bar_fracs: Vec<f32> = timeline
+                            .beat_grid
+                            .map(|grid| grid.bar_times(total, 4096))
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(|time| (time as f32 / total_f32).clamp(0.0, 1.0))
+                            .collect();
 
                         let seek_resp = paint_seek_bar(
                             ui,
@@ -691,6 +699,7 @@ fn editor_ui_system(
                             total,
                             snapping_allowed,
                             &seek_markers,
+                            &bar_fracs,
                         );
                         if let Some(time) = seek_resp.marker_jump {
                             timeline.seek_request = Some(time);
@@ -1372,6 +1381,7 @@ fn paint_seek_bar(
     total: f64,
     snapping_enabled: bool,
     markers: &[SeekMarker],
+    bars: &[f32],
 ) -> SeekBarResponse {
     const LANE_H: f32 = 22.0;
     const LANE_GAP: f32 = 6.0;
@@ -1611,6 +1621,21 @@ fn paint_seek_bar(
             && ((pos.x - lx0).abs() < 8.0 || (pos.x - lx1).abs() < 8.0)
         {
             ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        }
+    }
+
+    // ── Bars of the tempo: faint lines across the track ────────────────────
+    let bar_spacing = bars
+        .windows(2)
+        .map(|pair| (pair[1] - pair[0]) * rect.width())
+        .fold(f32::INFINITY, f32::min);
+    if bar_spacing >= 4.0 {
+        for &bar in bars {
+            let x = x_at(bar);
+            painter.line_segment(
+                [egui::pos2(x, bar_y - 5.0), egui::pos2(x, bar_y + 5.0)],
+                egui::Stroke::new(1.0, egui::Color32::from_white_alpha(28)),
+            );
         }
     }
 

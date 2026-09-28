@@ -3154,6 +3154,7 @@ impl PyMediaLibrary {
         path,
         *,
         duration=None,
+        end=None,
         volume=1.0,
         fade_in=0.0,
         fade_out=0.0,
@@ -3162,16 +3163,23 @@ impl PyMediaLibrary {
         &self,
         path: &str,
         duration: Option<f64>,
+        end: Option<f64>,
         volume: f64,
         fade_in: f64,
         fade_out: f64,
     ) -> PyResult<PyAudio> {
         crate::custom::ensure_authoring_allowed()?;
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .audio(path, duration, volume, fade_in, fade_out)
-            .map(|inner| PyAudio { inner })
+        let canvas = self.inner.lock().expect("scene canvas poisoned");
+        let clip = match (duration, end) {
+            (Some(_), Some(_)) => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "audio() takes duration or end, not both",
+                ));
+            }
+            (_, Some(end)) => canvas.audio_until(path, end, volume, fade_in, fade_out),
+            (duration, None) => canvas.audio(path, duration, volume, fade_in, fade_out),
+        };
+        clip.map(|inner| PyAudio { inner })
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
 }
@@ -5738,6 +5746,53 @@ impl PyScene {
         })
     }
 
+    /// Set the musical tempo used by `beats` and `wait_until(beat=...)`.
+    #[pyo3(signature = (bpm, offset=0.0, *, beats_per_bar=4))]
+    fn tempo(&self, bpm: f64, offset: f64, beats_per_bar: u32) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .set_tempo(bpm, offset, beats_per_bar)
+            .map_err(pyo3::exceptions::PyValueError::new_err)
+    }
+
+    /// Seconds that `n` beats last at the scene's tempo.
+    fn beats(&self, n: f64) -> PyResult<f64> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .beats(n)
+            .map_err(pyo3::exceptions::PyValueError::new_err)
+    }
+
+    /// Advance the cursor to a beat or the start of a bar of the tempo.
+    #[pyo3(signature = (*, beat=None, bar=None))]
+    fn wait_until(&self, beat: Option<f64>, bar: Option<f64>) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        let mut scene = self.inner.lock().expect("scene canvas poisoned");
+        let beat = match (beat, bar) {
+            (Some(beat), None) => beat,
+            (None, Some(bar)) => {
+                let tempo = scene.tempo().ok_or_else(|| {
+                    pyo3::exceptions::PyValueError::new_err(
+                        "set a tempo with scene.tempo(bpm) first",
+                    )
+                })?;
+                bar * f64::from(tempo.beats_per_bar)
+            }
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "wait_until() takes exactly one of beat= or bar=",
+                ));
+            }
+        };
+        scene
+            .wait_until_beat(beat)
+            .map_err(pyo3::exceptions::PyValueError::new_err)
+    }
+
     /// Insert an explicit zero-duration interactive stop, optionally with an
     /// ambient loop that repeats while the presentation rests there.
     ///
@@ -5882,12 +5937,13 @@ impl PyScene {
             .collect())
     }
 
-    #[pyo3(signature = (items, *, duration=None, easing=None))]
+    #[pyo3(signature = (items, *, duration=None, easing=None, advance=true))]
     fn play(
         &self,
         items: &Bound<'_, PyAny>,
         duration: Option<f64>,
         easing: Option<&crate::easing::PyEasing>,
+        advance: bool,
     ) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
         if duration.is_some_and(|value| !value.is_finite() || value < 0.0) {
@@ -5897,13 +5953,25 @@ impl PyScene {
         }
         let composition = crate::composition::extract_play_root(items)?;
         let mut scene = self.inner.lock().expect("scene canvas poisoned");
-        scene
-            .play_composition_configured(
-                composition,
-                duration,
-                easing.map(|value| value.inner.clone()),
-            )
-            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+        let easing = easing.map(|value| value.inner.clone());
+        if advance {
+            scene.play_composition_configured(composition, duration, easing)
+        } else {
+            scene.launch_composition_configured(composition, duration, easing)
+        }
+        .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+    }
+
+    /// `play(items, advance=False)`: start animations at the cursor and keep
+    /// scheduling from the same instant.
+    #[pyo3(signature = (items, *, duration=None, easing=None))]
+    fn launch(
+        &self,
+        items: &Bound<'_, PyAny>,
+        duration: Option<f64>,
+        easing: Option<&crate::easing::PyEasing>,
+    ) -> PyResult<()> {
+        self.play(items, duration, easing, false)
     }
 
     fn fade_out_all(&self, seconds: f64) -> PyResult<()> {

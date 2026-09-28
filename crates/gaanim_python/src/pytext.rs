@@ -1191,15 +1191,16 @@ impl PyText {
         Ok(slf)
     }
 
-    #[pyo3(signature = (count=5, *, delay=0.04, decay=0.6))]
+    #[pyo3(signature = (count=5, *, delay=0.04, decay=0.6, hold=false))]
     fn echo<'py>(
         slf: PyRef<'py, Self>,
         count: u32,
         delay: f64,
         decay: f64,
+        hold: bool,
     ) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        let echo = crate::pydrawable::echo_spec(count, delay, decay)?;
+        let echo = crate::pydrawable::echo_spec(count, delay, decay, hold)?;
         slf.handle.clone().echo(echo);
         Ok(slf)
     }

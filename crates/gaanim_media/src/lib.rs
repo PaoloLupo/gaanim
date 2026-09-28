@@ -72,7 +72,7 @@ pub enum AudioTrackError {
     InvalidPath { path: PathBuf },
     #[error("{name} must be a finite non-negative number")]
     InvalidNumber { name: &'static str },
-    #[error("fade_out requires an explicit track duration")]
+    #[error("fade_out requires a track duration or end")]
     FadeOutNeedsDuration,
     #[error("fade duration cannot exceed the track duration")]
     FadeExceedsDuration,

@@ -1468,6 +1468,32 @@ impl DrawableHandle {
         Ok(self)
     }
 
+    /// Set every vertex of a polygon or polyline, in the coordinates it was
+    /// declared in. Before the first play this is the declared shape; after
+    /// it, a cut at the cursor that `animate.points` can continue from.
+    pub fn points(self, points: Vec<(f64, f64)>) -> Result<Self, String> {
+        let declared = match &self.spec.lock().expect("object spec poisoned").kind {
+            SpawnKind::Polygon(declared) | SpawnKind::Polyline(declared) => declared.len(),
+            _ => return Err("points() requires a polygon or polyline".to_string()),
+        };
+        if points.len() != declared {
+            return Err(format!(
+                "points() needs {declared} points, one per vertex of the shape, got {}",
+                points.len()
+            ));
+        }
+        if points.iter().any(|(x, y)| !x.is_finite() || !y.is_finite()) {
+            return Err("points must be finite".to_string());
+        }
+        let this = self.update_spec(|spec| {
+            if let SpawnKind::Polygon(vertices) | SpawnKind::Polyline(vertices) = &mut spec.kind {
+                *vertices = points.clone();
+            }
+        });
+        this.push_immediate(this.id, AnimationType::PathPointsTo { points });
+        Ok(this)
+    }
+
     pub fn z_index(self, z: i32) -> Self {
         self.update_spec(|spec| spec.z_index = z)
     }
