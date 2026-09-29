@@ -16,9 +16,11 @@ instalar una versión nueva, sigue
 Publicada el 29 de septiembre de 2026. Una caja se puede recorrer, buscar,
 animar en cascada y reordenar (`walk`, `find`, `cascade`, `stagger`, `swap`…), y
 un solo movimiento del cursor puede escalar, teñir, girar o desvanecer cientos
-de elementos con los nuevos falloffs. Las cajas que entran con `grow_*` ya no se
-ven antes de su turno y el overlay *Layout* del editor no mezcla segmentos. No
-hace falta cambiar tus escenas.
+de elementos con los nuevos falloffs. La reproducción ya no se vuelve más lenta
+a medida que avanza una presentación larga, y recargar una escena que mide
+cajas del layout es mucho más rápido. Las cajas que entran con `grow_*` ya no
+se ven antes de su turno y el overlay *Layout* del editor no mezcla segmentos.
+No hace falta cambiar tus escenas.
 
 == Cambios
 
@@ -63,6 +65,26 @@ hace falta cambiar tus escenas.
   cambia de color. Lee #link("/referencia/animations/")[Animaciones].
 - `box.children`, `box[i]` y la iteración de una caja están tipados como
   `Drawable` en lugar de `Any`.
+
+== Rendimiento
+
+- Cada fotograma parte del inicio del segmento en que cae, en lugar de
+  reconstruir la escena desde el principio: el coste de un fotograma ya no
+  crece a lo largo de la presentación. En una presentación de 41 segmentos, la
+  reproducción pasaba de 100 fps al principio a 55 fps al final y ahora se
+  mantiene en torno a 100 fps de principio a fin, y exportarla tarda un 30 %
+  menos. El resultado es idéntico fotograma a fotograma;
+  `GAANIM_SEGMENT_CHECKPOINTS=0` vuelve al comportamiento anterior para
+  comparar. Lee #link("/referencia/cli/")[CLI].
+- Guardar el estado de la escena es unas cuatro veces más rápido. Lo hace al
+  cargar y la primera vez que la reproducción entra en cada segmento, que en
+  esa presentación cuesta un solo fotograma de unos 50 ms.
+- `bounds()` sobre un objeto de una caja recién declarada mide solo su árbol de
+  cajas en lugar de recompilar toda la escena: en la misma presentación, la
+  parte de Python de una recarga bajó de 3,5 s a 1,4 s.
+- Los fondos y bordes de las cajas ya no se redibujan en cada fotograma cuando
+  no cambian.
+- `GAANIM_FRAME_PROFILE=1` informa además de cuántos objetos están visibles.
 
 == Correcciones
 
