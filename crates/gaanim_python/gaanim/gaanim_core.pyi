@@ -925,6 +925,32 @@ class Box(Drawable):
             card.each(lambda piece: piece.fill("#0f172a"), type=Text)
         """
         ...
+    def reveal(
+        self,
+        *,
+        each: float = 0.06,
+        duration: float = 0.4,
+        direction: Optional[Direction] = None,
+        distance: float = 0.3,
+        rules: Literal["grow", "fade"] = "grow",
+        rules_from: Optional[Direction] = None,
+    ) -> Composition:
+        """Reveal the box piece by piece with the usual slide policy, as one ``stagger``.
+
+        Backgrounds and other drawables fade in, texts fade in from
+        ``direction`` (``Direction.UP`` by default) over ``distance`` scene
+        units, and boxes without children that draw something (rules, bars)
+        grow from ``rules_from`` (``Direction.LEFT`` by default) or, with
+        ``rules="fade"``, fade in. Each piece takes ``duration`` seconds and
+        starts ``each`` seconds after the previous one. Use ``cascade`` or
+        ``stagger`` to choose the animation of each piece yourself. An
+        unknown ``rules``, a non-positive ``duration`` or a box with nothing
+        to show raises ``ValueError``.
+
+        Example:
+            scene.play(card.reveal())
+        """
+        ...
     def cascade(
         self,
         *,

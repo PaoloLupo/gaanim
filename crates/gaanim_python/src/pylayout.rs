@@ -1143,6 +1143,59 @@ impl PyBox {
         Self::finish(&self.inner, duration, advance);
     }
 
+    /// The pieces `reveal` shows, in draw order: backgrounds and other
+    /// drawables, texts, and the empty boxes that draw something.
+    fn collect_reveal(
+        py: Python<'_>,
+        inner: &SharedLayout,
+        pieces: &mut Vec<(Py<PyAny>, RevealKind)>,
+    ) -> PyResult<()> {
+        let (background, members) = {
+            let state = inner.lock().expect("layout poisoned");
+            let members: Vec<(Py<PyAny>, Option<SharedLayout>)> = state
+                .members
+                .iter()
+                .map(|member| (member.object.clone_ref(py), member.child_layout.clone()))
+                .collect();
+            (state.background.clone(), members)
+        };
+        if let Some(handle) = background {
+            pieces.push((
+                Py::new(py, PyDrawable(handle))?.into_any(),
+                RevealKind::Other,
+            ));
+        }
+        for (object, nested) in members {
+            match nested {
+                Some(nested) => {
+                    let (empty, drawn) = {
+                        let state = nested.lock().expect("layout poisoned");
+                        (state.members.is_empty(), state.background.is_some())
+                    };
+                    if !empty {
+                        Self::collect_reveal(py, &nested, pieces)?;
+                    } else if drawn {
+                        // A rule or a bar: the box itself grows, background and all.
+                        pieces.push((object, RevealKind::Rule));
+                    }
+                }
+                None => {
+                    let kind = if object
+                        .bind(py)
+                        .extract::<PyRef<'_, crate::pytext::PyText>>()
+                        .is_ok()
+                    {
+                        RevealKind::Text
+                    } else {
+                        RevealKind::Other
+                    };
+                    pieces.push((object, kind));
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn collect_pieces(
         py: Python<'_>,
         inner: &Arc<Mutex<LayoutState>>,
@@ -1914,6 +1967,66 @@ impl PyBox {
         crate::composition::stagger(&items, each, total, origin, grid, easing, seed)
     }
 
+    /// Reveal the box piece by piece with the usual slide policy: backgrounds
+    /// and other drawables fade in, texts fade in from `direction`, and boxes
+    /// without children that draw something (rules, bars) grow from one edge.
+    /// Returns one `stagger` over the pieces, `each` seconds apart.
+    #[pyo3(signature = (*, each=0.06, duration=0.4, direction=None, distance=0.3, rules="grow", rules_from=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn reveal(
+        &self,
+        py: Python<'_>,
+        each: f64,
+        duration: f64,
+        direction: Option<Bound<'_, PyAny>>,
+        distance: f64,
+        rules: &str,
+        rules_from: Option<Bound<'_, PyAny>>,
+    ) -> PyResult<crate::composition::PyComposition> {
+        crate::custom::ensure_authoring_allowed()?;
+        if rules != "grow" && rules != "fade" {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "rules must be 'grow' or 'fade'",
+            ));
+        }
+        if !duration.is_finite() || duration <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "duration must be finite and positive",
+            ));
+        }
+        let direction = match direction {
+            Some(direction) => direction.unbind(),
+            None => Py::new(py, PyDirection(Direction::Up))?.into_any(),
+        };
+        let rules_from = match rules_from {
+            Some(edge) => edge.unbind(),
+            None => Py::new(py, PyDirection(Direction::Left))?.into_any(),
+        };
+        let mut pieces = Vec::new();
+        Self::collect_reveal(py, &self.inner, &mut pieces)?;
+        let mut animations = Vec::with_capacity(pieces.len());
+        for (piece, kind) in pieces {
+            let animate = piece.bind(py).getattr("animate")?;
+            let animation = match kind {
+                RevealKind::Text => {
+                    animate.call_method1("fade_in_from", (direction.bind(py), distance))?
+                }
+                RevealKind::Rule if rules == "grow" => {
+                    animate.call_method1("grow_from_edge", (rules_from.bind(py),))?
+                }
+                RevealKind::Rule | RevealKind::Other => animate.call_method0("fade_in")?,
+            };
+            animations.push(animation.call_method1("duration", (duration,))?);
+        }
+        if animations.is_empty() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "reveal found nothing to show in this box",
+            ));
+        }
+        let animations = PyTuple::new(py, animations)?;
+        crate::composition::stagger(&animations, each, None, None, None, None, 0)
+    }
+
     /// The first piece of `walk(boxes=boxes)` that is an instance of `type`
     /// and for which `where` returns true, or `None`.
     #[pyo3(signature = (*, r#type=None, r#where=None, text=None, boxes=true))]
@@ -2297,6 +2410,17 @@ impl PyBox {
         };
         format!("Box({kind}, {} children)", state.members.len())
     }
+}
+
+/// How `Box.reveal` shows one piece of a box.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RevealKind {
+    /// A text: fades in from a side.
+    Text,
+    /// An empty box that draws something: grows from an edge.
+    Rule,
+    /// Anything else, backgrounds included: fades in.
+    Other,
 }
 
 /// What `Box.find`, `find_all` and `each` keep among the pieces.
