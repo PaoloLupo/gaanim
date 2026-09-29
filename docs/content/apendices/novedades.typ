@@ -11,6 +11,26 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.7.3
+
+Un solo movimiento del cursor puede escalar, teñir, girar o desvanecer cientos
+de elementos: llegan los falloffs. No hace falta cambiar tus escenas.
+
+== Cambios
+
+- `Falloff` calcula un valor por instancia a partir de su posición en el grupo
+  (`Falloff.index`), su distancia a un objeto o un punto (`Falloff.distance`,
+  `Falloff.linear`) o un ruido con semilla (`Falloff.noise`). Se reforma con
+  `remap` e `invert` y se combina con `+`, `-`, `*`, `maximum` y `minimum`.
+- `grupo.drive("scale", near.remap(1.0, 1.8))` conecta un falloff a un canal de
+  cada miembro de un grupo: `scale`, `rotation`, `opacity`, `x`, `y` y, con
+  `near.gradient(AZUL, ORO)`, `fill`. `grupo.look_at(cursor)` hace que cada
+  miembro mire a un objeto que se mueve, y `clear_drive()` lo termina.
+- Se evalúa en Rust por miembro y fotograma, sin llamar a Python: una rejilla
+  de 20×12 con tres efectos cuesta alrededor de 0,1 ms por fotograma. Un seek
+  cae en el mismo fotograma que la reproducción. Lee
+  #link("/referencia/animations/#falloffs")[Falloffs].
+
 = 0.7.2
 
 Publicada el 29 de septiembre de 2026. Una caja se puede recorrer, buscar,
