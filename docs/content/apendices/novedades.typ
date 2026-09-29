@@ -61,6 +61,14 @@ escenas que usan `scene.layout.item`, `scene.layout.card` o
   `layout_reflow`, `layout_zones`, `ui_dashboard`, `ui_mobile_app` y
   `ui_lower_third`.
 
+== Correcciones
+
+- `scene.assets.load_project()` sin ruta busca el `gaanim.toml` más cercano
+  subiendo desde la carpeta del módulo que la llama, así que funciona desde un
+  paquete del proyecto (`capitulo4/estilo.py`) y no solo desde el script de
+  entrada. Sin manifiesto, el error indica la carpeta de partida y cómo pasar
+  la ruta (#link("https://github.com/PaoloLupo/gaanim/issues/266")[\#266]).
+
 = 0.7.0
 
 Publicada el 29 de septiembre de 2026. Gaanim pasa a ser un solo ejecutable,

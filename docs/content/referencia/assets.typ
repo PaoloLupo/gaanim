@@ -19,7 +19,7 @@ archivos, y qué partes de cada formato se importan.
 from gaanim import Scene
 
 scene = Scene(frame=(16, 9), background="#0f172a")
-scene.assets.load_project()          # usa assets_dir de ./gaanim.toml
+scene.assets.load_project()          # usa assets_dir del gaanim.toml del proyecto
 
 logo = scene.media.svg("logo.svg")
 cover = scene.media.image("cover.png")
@@ -36,9 +36,9 @@ bytes o arrays.
 #api-entry(
   name: "AssetManager.load_project",
   kind: "method",
-  params: ((name: "path", type: "str | None", default: "None", desc: [Ruta del manifiesto; sin ella, el `gaanim.toml` que está junto al script que llama.]),),
+  params: ((name: "path", type: "str | None", default: "None", desc: [Ruta del manifiesto; sin ella, el `gaanim.toml` más cercano, buscando desde la carpeta del script que llama hacia arriba.]),),
   returns: (type: "None", desc: [Fija la carpeta de recursos.]),
-  desc: [Lee la clave `assets_dir` del manifiesto (`"assets"` si falta, como en la CLI) y la resuelve respecto de la carpeta del manifiesto, así que funciona igual se lance Gaanim desde donde se lance. Una ruta explícita relativa, en cambio, se resuelve desde el directorio de trabajo del proceso; sin argumento se usa el `gaanim.toml` junto al script. Es la forma recomendada en un proyecto. Un manifiesto ilegible lanza `RuntimeError`; un `assets_dir` que no es una cadena entre comillas o que apunta a una carpeta inexistente, `ValueError`. Consulta #link("/referencia/gaanim-toml/")[`gaanim.toml`].],
+  desc: [Lee la clave `assets_dir` del manifiesto (`"assets"` si falta, como en la CLI) y la resuelve respecto de la carpeta del manifiesto, así que funciona igual se lance Gaanim desde donde se lance. Una ruta explícita relativa, en cambio, se resuelve desde el directorio de trabajo del proceso; sin argumento se busca el `gaanim.toml` en la carpeta del script que llama y después en sus carpetas superiores, así que un módulo como `capitulo4/estilo.py` usa el manifiesto del proyecto. Si no hay ninguno, lanza `RuntimeError` con la carpeta de partida. Es la forma recomendada en un proyecto. Un manifiesto ilegible lanza `RuntimeError`; un `assets_dir` que no es una cadena entre comillas o que apunta a una carpeta inexistente, `ValueError`. Consulta #link("/referencia/gaanim-toml/")[`gaanim.toml`].],
 )[
 ```python
 >>>from gaanim import *

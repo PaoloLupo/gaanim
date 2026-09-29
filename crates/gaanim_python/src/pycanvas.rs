@@ -39,17 +39,39 @@ pub(crate) fn image_quality(value: &str) -> PyResult<gaanim_core::peniko::ImageQ
     }
 }
 
-fn default_project_manifest(py: Python<'_>) -> PyResult<PathBuf> {
+/// Folder of the Python file that called into Gaanim.
+fn caller_directory(py: Python<'_>) -> PyResult<PathBuf> {
     let frame = py.import("inspect")?.call_method0("currentframe")?;
     let filename = frame
         .getattr("f_code")?
         .getattr("co_filename")?
         .extract::<String>()?;
-    let script = PathBuf::from(filename);
-    Ok(script
+    let directory = PathBuf::from(filename)
         .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_default();
+    Ok(std::path::absolute(&directory).unwrap_or(directory))
+}
+
+/// The nearest `gaanim.toml` in `start` or one of its parent folders, as
+/// `git` finds `.git`: a module deep inside a project still loads the
+/// project's manifest.
+fn find_manifest_upward(start: &std::path::Path) -> Option<PathBuf> {
+    start
+        .ancestors()
         .map(|directory| directory.join("gaanim.toml"))
-        .unwrap_or_else(|| PathBuf::from("gaanim.toml")))
+        .find(|manifest| manifest.is_file())
+}
+
+fn default_project_manifest(py: Python<'_>) -> PyResult<PathBuf> {
+    let directory = caller_directory(py)?;
+    find_manifest_upward(&directory).ok_or_else(|| {
+        pyo3::exceptions::PyRuntimeError::new_err(format!(
+            "no gaanim.toml in {} or any parent folder; pass its path, e.g. \
+             scene.assets.load_project(\"path/to/gaanim.toml\")",
+            directory.display()
+        ))
+    })
 }
 
 /// Folder used when `gaanim.toml` omits `assets_dir`; matches the default of
@@ -3019,8 +3041,9 @@ impl PyAssetManager {
             .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
     }
 
-    /// Load the minimal project manifest. Without an explicit path, it reads
-    /// `gaanim.toml` beside the Python script that called this method. It
+    /// Load the minimal project manifest. Without an explicit path, it uses
+    /// the nearest `gaanim.toml`, from the folder of the calling Python file
+    /// up through its parents. It
     /// reads one setting, `assets_dir`, resolved relative to the manifest
     /// file; like the CLI and editor, a manifest without it uses `"assets"`.
     #[pyo3(signature = (path=None))]
@@ -7105,34 +7128,81 @@ mod tests {
         assert!(manifest_assets_dir("assets_dir = \"media\n").is_err());
     }
 
+    /// A fresh folder under the system temporary directory.
+    fn scratch_dir(name: &str) -> PathBuf {
+        let directory =
+            std::env::temp_dir().join(format!("gaanim-manifest-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        directory
+    }
+
+    #[test]
+    fn manifest_search_walks_up_from_a_nested_module() {
+        let project = scratch_dir("nested");
+        let chapter = project.join("capitulo4").join("partes");
+        std::fs::create_dir_all(&chapter).unwrap();
+        std::fs::write(project.join("gaanim.toml"), "kind = \"video\"\n").unwrap();
+
+        assert_eq!(
+            find_manifest_upward(&chapter),
+            Some(project.join("gaanim.toml"))
+        );
+        // The nearest manifest wins, as in a project nested in another.
+        std::fs::write(chapter.join("gaanim.toml"), "kind = \"slides\"\n").unwrap();
+        assert_eq!(
+            find_manifest_upward(&chapter),
+            Some(chapter.join("gaanim.toml"))
+        );
+        std::fs::remove_dir_all(project).unwrap();
+    }
+
     #[pyfunction]
     fn caller_default_manifest(py: Python<'_>) -> PyResult<String> {
         Ok(default_project_manifest(py)?.to_string_lossy().into_owned())
     }
 
+    /// Run `caller_default_manifest` from a module whose file is `filename`.
+    fn manifest_seen_from(py: Python<'_>, filename: &std::path::Path) -> PyResult<String> {
+        let module = PyModule::new(py, "manifest_path_test")?;
+        module.add_function(pyo3::wrap_pyfunction!(caller_default_manifest, &module)?)?;
+        py.import("sys")?
+            .getattr("modules")?
+            .set_item("manifest_path_test", &module)?;
+        let source = std::ffi::CString::new(
+            "from manifest_path_test import caller_default_manifest\nresult = caller_default_manifest()\n",
+        )?;
+        let filename = std::ffi::CString::new(filename.to_string_lossy().into_owned())?;
+        let module_name = std::ffi::CString::new("project_module")?;
+        let script = PyModule::from_code(py, &source, &filename, &module_name)?;
+        script.getattr("result")?.extract::<String>()
+    }
+
     #[test]
-    fn default_manifest_is_next_to_the_calling_script() {
+    fn default_manifest_is_the_project_one_for_a_module_in_a_package() {
+        let project = scratch_dir("caller");
+        let package = project.join("capitulo4");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(project.join("gaanim.toml"), "kind = \"video\"\n").unwrap();
         Python::initialize();
         Python::attach(|py| -> PyResult<()> {
-            let module = PyModule::new(py, "manifest_path_test")?;
-            module.add_function(pyo3::wrap_pyfunction!(caller_default_manifest, &module)?)?;
-            py.import("sys")?
-                .getattr("modules")?
-                .set_item("manifest_path_test", &module)?;
-
-            let source = std::ffi::CString::new(
-                "from manifest_path_test import caller_default_manifest\nresult = caller_default_manifest()\n",
-            )?;
-            let filename = std::ffi::CString::new("project/main.py")?;
-            let module_name = std::ffi::CString::new("project_main")?;
-            let script = PyModule::from_code(py, &source, &filename, &module_name)?;
-
             assert_eq!(
-                script.getattr("result")?.extract::<String>()?,
-                PathBuf::from("project").join("gaanim.toml").to_string_lossy()
+                manifest_seen_from(py, &project.join("main.py"))?,
+                project.join("gaanim.toml").to_string_lossy()
+            );
+            assert_eq!(
+                manifest_seen_from(py, &package.join("estilo.py"))?,
+                project.join("gaanim.toml").to_string_lossy()
+            );
+            std::fs::remove_file(project.join("gaanim.toml"))?;
+            let error = manifest_seen_from(py, &package.join("estilo.py")).unwrap_err();
+            assert!(
+                error.to_string().contains("or any parent folder"),
+                "{error}"
             );
             Ok(())
         })
         .unwrap();
+        std::fs::remove_dir_all(project).unwrap();
     }
 }

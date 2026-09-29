@@ -7037,7 +7037,10 @@ class AssetManager:
     def load_project(self, path: str | None = None) -> None:
         """Load a project manifest and set its asset directory.
 
-        With no path, reads ``gaanim.toml`` beside the calling Python script.
+        With no path, uses the nearest ``gaanim.toml``: in the folder of the
+        calling Python file or, failing that, in its parent folders (as git
+        finds ``.git``), so a module inside a project package loads the
+        project's manifest.
         An explicit relative path is resolved against the process working
         directory. ``assets_dir`` is resolved relative to the selected
         manifest and defaults to ``"assets"`` when the manifest omits it, as in
