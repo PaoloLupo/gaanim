@@ -4281,6 +4281,33 @@ impl SceneModel {
         Ok(background)
     }
 
+    /// Record a box's new snapshot without resolving it: a transition of the
+    /// box that encloses it follows at the same instant and resolves both.
+    pub fn record_layout(
+        &mut self,
+        container: &DrawableHandle,
+        members: Vec<LayoutMemberSpec>,
+        spec: LayoutSpec,
+        version: u64,
+    ) {
+        let mut state = self.state.lock().expect("canvas state poisoned");
+        let snapshot = LayoutTreeSnapshot {
+            version,
+            container: container.id,
+            members,
+            spec,
+        };
+        state.latest_layouts.insert(container.id, snapshot.clone());
+        state.active_mut().ops.push(Op::LayoutTransition {
+            from_version: version.checked_sub(1).filter(|version| *version > 0),
+            to: snapshot,
+            duration: None,
+            entering: None,
+            leaving: None,
+            resolve: false,
+        });
+    }
+
     /// Queue a layout recalculation. `duration = Some(_)` animates the move
     /// and fades the newly inserted member in; `None` updates immediately.
     pub fn reflow_layout(
@@ -4307,6 +4334,7 @@ impl SceneModel {
             duration: duration.filter(|value| value.is_finite() && *value > 0.0),
             entering: entering.map(|member| member.id),
             leaving: leaving.map(|member| member.id),
+            resolve: true,
         });
         if !state.layout_constraints.is_empty() {
             let constraints = state.layout_constraints.clone();

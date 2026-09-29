@@ -592,8 +592,47 @@ struct CompiledLayoutMeasure<'a> {
     fixed: BTreeMap<gaanim_layout::LayoutId, DVec2>,
     texts: BTreeMap<gaanim_layout::LayoutId, CompiledTextMeasure>,
     text_compositions: RefCell<BTreeMap<gaanim_layout::LayoutId, TextComposition>>,
+    /// Every composition measured per text leaf, with its size: the solver
+    /// probes several widths (min-content among them) in no fixed order.
+    text_candidates: RefCell<BTreeMap<gaanim_layout::LayoutId, Vec<(TextComposition, DVec2)>>>,
     natural_text_sizes: RefCell<BTreeMap<gaanim_layout::LayoutId, DVec2>>,
+    /// Ascent and descent of a full line of each text leaf's font and size.
+    line_extents: RefCell<BTreeMap<gaanim_layout::LayoutId, (f64, f64)>>,
     font_registry: &'a gaanim_text::font::FontRegistry,
+}
+
+/// The box a text occupies in a layout: its ink widened vertically to full
+/// lines (from the first baseline up by a line's ascent, and for one line down
+/// by its descent), so texts of one style share heights and baselines
+/// whatever glyphs they contain.
+fn text_line_box(
+    ink: Bounds3D,
+    metrics: gaanim_text::prelude::TextMetrics,
+    (ascent, descent): (f64, f64),
+) -> Bounds3D {
+    let top = ink.max.y.max(metrics.first_baseline + ascent);
+    let bottom = if metrics.line_count <= 1 {
+        ink.min.y.min(metrics.first_baseline - descent)
+    } else {
+        ink.min.y
+    };
+    Bounds3D::new_2d(ink.min.x, bottom, ink.max.x, top)
+}
+
+/// Whether text content is a single `$…$` formula.
+fn is_formula(content: &[StructuredTextContent]) -> bool {
+    fn collect(content: &[StructuredTextContent], out: &mut String) {
+        for item in content {
+            match item {
+                StructuredTextContent::Literal(text) => out.push_str(text),
+                StructuredTextContent::Part(part) => collect(&part.content, out),
+            }
+        }
+    }
+    let mut text = String::new();
+    collect(content, &mut text);
+    let text = text.trim();
+    text.len() >= 2 && text.starts_with('$') && text.ends_with('$') && !text.ends_with("\\$")
 }
 
 impl CompiledLayoutMeasure<'_> {
@@ -611,9 +650,29 @@ impl CompiledLayoutMeasure<'_> {
             &text.font_family,
             text.color,
         );
-        let bounds = gaanim_text::prelude::measure_typst(
+        let (bounds, metrics) = self.typst_lines(id, text, &source)?;
+        // Formulas keep their ink box, the convention equations and
+        // matrices are laid out with; prose sits on full lines.
+        let line_box = if is_formula(&text.spec.content) {
+            bounds
+        } else {
+            text_line_box(bounds, metrics, self.line_extent(id, text)?)
+        };
+        Ok(DVec2::new(
+            line_box.width().max(0.0),
+            line_box.height().max(0.0),
+        ))
+    }
+
+    fn typst_lines(
+        &self,
+        id: gaanim_layout::LayoutId,
+        text: &CompiledTextMeasure,
+        source: &str,
+    ) -> Result<(Bounds3D, gaanim_text::prelude::TextMetrics), gaanim_layout::LayoutError> {
+        gaanim_text::prelude::measure_typst_lines(
             self.font_registry,
-            &source,
+            source,
             false,
             Some(&text.font_family),
             Some(&text.math_font),
@@ -625,11 +684,37 @@ impl CompiledLayoutMeasure<'_> {
         .map_err(|errors| gaanim_layout::LayoutError::Measure {
             id,
             message: errors.join("; "),
-        })?;
-        Ok(DVec2::new(
-            bounds.width().max(0.0),
-            bounds.height().max(0.0),
-        ))
+        })
+    }
+
+    /// Ascent and descent of a full line in this text's style, from glyphs
+    /// that reach the ascender and the descender.
+    fn line_extent(
+        &self,
+        id: gaanim_layout::LayoutId,
+        text: &CompiledTextMeasure,
+    ) -> Result<(f64, f64), gaanim_layout::LayoutError> {
+        if let Some(extent) = self.line_extents.borrow().get(&id) {
+            return Ok(*extent);
+        }
+        let mut reference = text.spec.clone();
+        reference.content = vec![StructuredTextContent::Literal("ÁÉgjpqy".to_owned())];
+        reference.flow.wrap = StructuredTextWrap::NoWrap;
+        reference.flow.max_lines = None;
+        let source = structured_text_typst_source(
+            &reference,
+            None,
+            text.font_size,
+            &text.font_family,
+            text.color,
+        );
+        let (bounds, metrics) = self.typst_lines(id, text, &source)?;
+        let extent = (
+            (bounds.max.y - metrics.first_baseline).max(0.0),
+            (metrics.first_baseline - bounds.min.y).max(0.0),
+        );
+        self.line_extents.borrow_mut().insert(id, extent);
+        Ok(extent)
     }
 }
 
@@ -712,7 +797,41 @@ impl CompiledLayoutMeasure<'_> {
             }
         };
         self.text_compositions.borrow_mut().insert(id, composition);
+        self.text_candidates
+            .borrow_mut()
+            .entry(id)
+            .or_default()
+            .push((composition, size));
         Ok(constraints.constrain(size))
+    }
+
+    /// The composition that produced a text leaf's final box: the widest one
+    /// measured that fits `width`, not whichever the solver probed last.
+    fn final_composition(
+        &self,
+        id: gaanim_layout::LayoutId,
+        width: f64,
+    ) -> Option<TextComposition> {
+        const FIT_EPSILON: f64 = 1.0e-6;
+        let candidates = self.text_candidates.borrow();
+        candidates
+            .get(&id)
+            .and_then(|candidates| {
+                candidates
+                    .iter()
+                    .filter(|(_, size)| size.x <= width + FIT_EPSILON)
+                    .max_by(|(a, a_size), (b, b_size)| {
+                        let wrap = |composition: &TextComposition| {
+                            composition.width().unwrap_or(f64::INFINITY)
+                        };
+                        a_size
+                            .x
+                            .total_cmp(&b_size.x)
+                            .then(wrap(a).total_cmp(&wrap(b)))
+                    })
+                    .map(|(composition, _)| *composition)
+            })
+            .or_else(|| self.text_compositions.borrow().get(&id).copied())
     }
 }
 
@@ -2672,9 +2791,15 @@ impl SceneModel {
                         ) => *frozen = current.clone(),
                         _ => {}
                     }
-                    // Layering has no timeline cut: a z-index set after the
-                    // declaration froze still orders the drawable.
+                    // Layering and box structure have no timeline cut: a
+                    // z-index, a box background or the box that adopts the
+                    // drawable, set after the declaration froze, still apply.
+                    // A drawable later detached keeps the box it was spawned
+                    // in, whose layout snapshots still place it until then.
                     authored.z_index = live.z_index;
+                    authored.layout_background =
+                        authored.layout_background.or(live.layout_background);
+                    authored.layout_owner = authored.layout_owner.or(live.layout_owner);
                     let spec = theme
                         .map(|theme| theme.resolve_object(&authored))
                         .transpose()
@@ -3659,6 +3784,7 @@ impl SceneModel {
                     duration,
                     entering,
                     leaving,
+                    resolve,
                 } => {
                     if let Some(expected) = from_version {
                         let actual = layout_versions.get(&to.container).copied();
@@ -3673,6 +3799,9 @@ impl SceneModel {
                     }
                     layout_versions.insert(to.container, to.version);
                     layout_snapshots.insert(to.container, to.clone());
+                    if !*resolve {
+                        continue;
+                    }
                     let root_source =
                         outermost_layout_source(to.container, layout_snapshots, object_specs);
                     let Some(root_snapshot) = layout_snapshots.get(&root_source) else {
@@ -3713,6 +3842,8 @@ impl SceneModel {
                         fixed: tree.fixed.clone(),
                         texts: tree.texts.clone(),
                         text_compositions: RefCell::default(),
+                        text_candidates: RefCell::default(),
+                        line_extents: RefCell::default(),
                         natural_text_sizes: RefCell::default(),
                         font_registry: builder.font_registry,
                     };
@@ -3731,7 +3862,15 @@ impl SceneModel {
                                 continue;
                             }
                         };
-                    let text_compositions = measurer.text_compositions.into_inner();
+                    let text_compositions: BTreeMap<_, _> = tree
+                        .texts
+                        .keys()
+                        .filter_map(|id| {
+                            let width = resolved.boxes.get(id)?.bounds.width();
+                            Some((*id, measurer.final_composition(*id, width)?))
+                        })
+                        .collect();
+                    let line_extents = measurer.line_extents.into_inner();
                     if !resolved.diagnostics.is_empty() {
                         let mut state = diagnostic_state.lock().expect("canvas state poisoned");
                         state
@@ -3812,8 +3951,22 @@ impl SceneModel {
                             text_config,
                             scene_background,
                         );
+                        let entering_ancestor = entering.is_some_and(|entering| {
+                            let mut current = Some(*layout_id);
+                            while let Some(id) = current {
+                                if tree.source_by_id.get(&id) == Some(&entering) {
+                                    return true;
+                                }
+                                current = tree.parent_by_id.get(&id).copied();
+                            }
+                            false
+                        });
                         let entry_pending = Self::fade_in_pending(&seg.ops, op_index, *source);
-                        text_crossfades.push((member, replacement.id, entry_pending));
+                        // A text placed for the first time, or entering with
+                        // its box, has shown no composition worth fading from.
+                        let instant =
+                            entering_ancestor || !responsive_text_widths.contains_key(source);
+                        text_crossfades.push((member, replacement.id, entry_pending, instant));
                         materialized_by_id.insert(*layout_id, replacement.id);
                         id_map.insert(*source, replacement.id);
                         responsive_text_widths.insert(*source, width);
@@ -3841,6 +3994,19 @@ impl SceneModel {
                         if let Some(background) = background {
                             children.insert(0, background);
                         }
+                        // A leaving child, or a text replaced by its rewrapped
+                        // copy, fades out where it stands. It keeps its parent
+                        // in the scene hierarchy: reparenting is not on the
+                        // timeline, so it would also change the child's earlier,
+                        // parent-relative placement and inherited opacity.
+                        let leaving_child = leaving
+                            .as_ref()
+                            .and_then(|member| id_map.get(member))
+                            .copied();
+                        let keeps_parent = |child: &ObjectId| {
+                            Some(*child) == leaving_child
+                                || text_crossfades.iter().any(|(old, ..)| old == child)
+                        };
                         let removed_children: Vec<_> = builder
                             .states
                             .get(parent)
@@ -3850,6 +4016,7 @@ impl SceneModel {
                                     .iter()
                                     .copied()
                                     .filter(|child| !children.contains(child))
+                                    .filter(|child| !keeps_parent(child))
                                     .collect()
                             })
                             .unwrap_or_default();
@@ -3977,13 +4144,25 @@ impl SceneModel {
                             targets.push((*member, target));
                             continue;
                         }
+                        let metrics = builder.text_metrics.get(member).copied();
                         let Some(state) = builder.states.get_mut(*member) else {
                             continue;
                         };
                         let mut zero_translation = state.transform;
                         zero_translation.translation = DVec3::ZERO;
-                        let intrinsic =
-                            gaanim_layout::transform_bounds(state.bounds, &zero_translation);
+                        // Text sits by its line box, as it was measured, unless
+                        // its item sets the height: then its ink is centered.
+                        let sized = tree
+                            .item_style_by_id
+                            .get(layout_id)
+                            .is_some_and(|style| style.height.is_some());
+                        let local = match (line_extents.get(layout_id), metrics) {
+                            (Some(extent), Some(metrics)) if !sized => {
+                                text_line_box(state.bounds, metrics, *extent)
+                            }
+                            _ => state.bounds,
+                        };
+                        let intrinsic = gaanim_layout::transform_bounds(local, &zero_translation);
                         let target_center = target_box.bounds.center() - parent_center;
                         let intrinsic_center = intrinsic.center();
                         let mut target = state.transform;
@@ -4070,7 +4249,7 @@ impl SceneModel {
                             ]
                         })
                         .collect();
-                    for (old, new, entry_pending) in text_crossfades {
+                    for (old, new, entry_pending, instant) in text_crossfades {
                         if entry_pending {
                             // The text has not entered yet and its fade-in now
                             // targets the replacement: a crossfade here would
@@ -4078,6 +4257,16 @@ impl SceneModel {
                             if let Some(state) = builder.states.get(old).cloned() {
                                 builder.hide_visuals_now(&state);
                             }
+                            continue;
+                        }
+                        if instant {
+                            animations.push(AnimationBuilder {
+                                target: old,
+                                anim_type: AnimationType::FadeOut,
+                                duration: 0.0,
+                                rate_func: RateFunc::Linear,
+                                delay: 0.0,
+                            });
                             continue;
                         }
                         animations.push(AnimationBuilder {
@@ -14908,6 +15097,8 @@ mod tests {
                 },
             )]),
             text_compositions: RefCell::default(),
+            text_candidates: RefCell::default(),
+            line_extents: RefCell::default(),
             natural_text_sizes: RefCell::default(),
             font_registry: &fonts,
         };
@@ -14967,6 +15158,8 @@ mod tests {
                     },
                 )]),
                 text_compositions: RefCell::default(),
+                text_candidates: RefCell::default(),
+                line_extents: RefCell::default(),
                 natural_text_sizes: RefCell::default(),
                 font_registry: &fonts,
             };
@@ -15027,6 +15220,8 @@ mod tests {
                 },
             )]),
             text_compositions: RefCell::default(),
+            text_candidates: RefCell::default(),
+            line_extents: RefCell::default(),
             natural_text_sizes: RefCell::default(),
             font_registry: &fonts,
         };

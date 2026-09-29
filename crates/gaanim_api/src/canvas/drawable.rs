@@ -453,6 +453,7 @@ impl DrawableHandle {
                 duration: duration.filter(|value| value.is_finite() && *value > 0.0),
                 entering: None,
                 leaving: None,
+                resolve: true,
             });
         }
     }

@@ -981,6 +981,34 @@ pub fn measure_typst(
     .map(|cached| cached.parent_bounds)
 }
 
+/// Ink bounds and line metrics (first baseline, line count) of Typst
+/// source, in the same local coordinates the scene gives the text.
+#[allow(clippy::too_many_arguments)]
+pub fn measure_typst_lines(
+    font_registry: &FontRegistry,
+    source: &str,
+    is_math: bool,
+    text_font: Option<&str>,
+    math_font: Option<&str>,
+    text_size: Option<f64>,
+    math_size: Option<f64>,
+    fill: Option<peniko::Brush>,
+    stroke: StrokeBrush,
+) -> Result<(Bounds3D, TextMetrics), Vec<String>> {
+    cached_typst_hierarchy(
+        font_registry,
+        source,
+        is_math,
+        text_font,
+        math_font,
+        text_size,
+        math_size,
+        &fill,
+        &stroke,
+    )
+    .map(|cached| (cached.parent_bounds, cached.metrics))
+}
+
 /// Shape plain text into one Y-up outline with its baseline at `y = 0`.
 ///
 /// Fonts resolve exactly as for scene text: by the family name stored in the

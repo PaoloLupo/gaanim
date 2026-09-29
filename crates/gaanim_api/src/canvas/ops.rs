@@ -529,6 +529,9 @@ pub(crate) enum Op {
         duration: Option<f64>,
         entering: Option<ObjectId>,
         leaving: Option<ObjectId>,
+        /// `false` only records the snapshot: an enclosing box's transition,
+        /// which resolves the whole tree, follows at the same instant.
+        resolve: bool,
     },
     /// Resolve relational constraints against the current geometry. The
     /// expressions use stable canvas object IDs and are remapped on replay.

@@ -572,16 +572,17 @@ pub fn resolve_layout(
                 return taffy::Size::ZERO;
             };
             let width_sensitive = measurer.is_width_sensitive(id);
-            let limit = |known: Option<f32>, space: AvailableSpace| match (known, space) {
+            // Only wrapping content adapts to the space offered; any other
+            // leaf keeps its intrinsic size and overflows a smaller box, as
+            // replaced content does in CSS.
+            let width = match (known.width, space.width) {
                 (Some(value), _) => f64::from(value),
-                (None, AvailableSpace::Definite(value)) => f64::from(value),
+                (None, AvailableSpace::Definite(value)) if width_sensitive => f64::from(value),
                 (None, AvailableSpace::MinContent) if width_sensitive => 0.0,
                 (None, _) => f64::INFINITY,
             };
-            let max = DVec2::new(
-                limit(known.width, space.width),
-                limit(known.height, space.height),
-            );
+            let height = known.height.map_or(f64::INFINITY, f64::from);
+            let max = DVec2::new(width, height);
             let constraints = BoxConstraints {
                 min: DVec2::ZERO,
                 max,
@@ -687,7 +688,14 @@ fn insets(value: Insets) -> taffy::Rect<LengthPercentage> {
 }
 
 fn margins(value: Insets) -> taffy::Rect<LengthPercentageAuto> {
-    let side = |value: f64| LengthPercentageAuto::length(value as f32);
+    // An infinite margin is `auto`: it takes the free space, as in CSS.
+    let side = |value: f64| {
+        if value == f64::INFINITY {
+            LengthPercentageAuto::auto()
+        } else {
+            LengthPercentageAuto::length(value as f32)
+        }
+    };
     taffy::Rect {
         left: side(value.left),
         right: side(value.right),
@@ -910,10 +918,14 @@ fn build_node(
                 taffy_style.grid_column = taffy_style.grid_row.clone();
             }
             // A stretching container fills the cell; otherwise the child's
-            // anchor places it inside.
+            // anchor places it inside. In a grid, `align` (the item's own, or
+            // the grid's) places it vertically, as CSS `align-self` does.
             let parent_align = parent_style.map_or(Align::Start, |style| style.align);
             let (justify, align) = match item.align.unwrap_or(parent_align) {
                 Align::Stretch => (AlignSelf::Stretch, AlignSelf::Stretch),
+                align if matches!(parent, Some(LayoutNodeKind::Grid { .. })) => {
+                    (anchor_alignment(item.anchor).0, align_items(align))
+                }
                 _ => anchor_alignment(item.anchor),
             };
             taffy_style.justify_self = Some(if matches!(style.width, SizeRule::Fill(_)) {
@@ -1202,6 +1214,112 @@ mod tests {
             },
             (id, size),
         )
+    }
+
+    /// A paragraph: 100 wide on one line, or two 60-wide lines when offered
+    /// less.
+    struct Paragraph;
+    impl IntrinsicMeasure for Paragraph {
+        fn measure(&self, id: LayoutId, constraints: BoxConstraints) -> Result<DVec2, LayoutError> {
+            // Leaf 7 is a single word.
+            if id == LayoutId(7) {
+                return Ok(DVec2::new(80.0, 20.0));
+            }
+            Ok(if constraints.max.x >= 100.0 {
+                DVec2::new(100.0, 20.0)
+            } else {
+                DVec2::new(60.0, 40.0)
+            })
+        }
+
+        fn is_width_sensitive(&self, _: LayoutId) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn filled_row_in_a_column_hugs_its_text_at_the_final_width() {
+        let text = LayoutChild {
+            node: Box::new(LayoutNode::leaf(LayoutId(3))),
+            style: LayoutItemStyle::default(),
+        };
+        let mut row =
+            LayoutNode::container(LayoutId(2), LayoutNodeKind::Row { wrap: false }, vec![text]);
+        row.style.width = SizeRule::Fill(1.0);
+        let mut filler =
+            LayoutNode::container(LayoutId(4), LayoutNodeKind::Row { wrap: false }, vec![]);
+        filler.style.height = SizeRule::Fill(1.0);
+        let mut column = LayoutNode::container(
+            LayoutId(1),
+            LayoutNodeKind::Column { wrap: false },
+            vec![
+                LayoutChild {
+                    node: Box::new(row),
+                    style: LayoutItemStyle::default(),
+                },
+                LayoutChild {
+                    node: Box::new(filler),
+                    style: LayoutItemStyle::default(),
+                },
+            ],
+        );
+        column.style.width = SizeRule::Fill(1.0);
+        column.style.height = SizeRule::Fill(1.0);
+        let layout = resolve_layout(
+            &column,
+            Bounds3D::new_2d(-250.0, -100.0, 250.0, 100.0),
+            &Paragraph,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(layout.boxes[&LayoutId(3)].bounds.height(), 20.0);
+        assert_eq!(layout.boxes[&LayoutId(2)].bounds.height(), 20.0);
+    }
+
+    #[test]
+    fn growing_column_in_a_row_sizes_nested_text_at_the_final_width() {
+        let leaf = |id| LayoutChild {
+            node: Box::new(LayoutNode::leaf(LayoutId(id))),
+            style: LayoutItemStyle::default(),
+        };
+        let node = |kind, children| LayoutChild {
+            node: Box::new(LayoutNode::container(LayoutId(0), kind, children)),
+            style: LayoutItemStyle::default(),
+        };
+        let mut caption = node(LayoutNodeKind::Column { wrap: false }, vec![leaf(7)]);
+        caption.node.id = LayoutId(8);
+        let mut value = node(LayoutNodeKind::Column { wrap: false }, vec![leaf(3)]);
+        value.node.id = LayoutId(9);
+        let mut card = node(LayoutNodeKind::Column { wrap: false }, vec![caption, value]);
+        card.node.id = LayoutId(5);
+        card.node.style.padding = Insets::all(10.0);
+        card.style.grow = 1.0;
+        let mut row = node(LayoutNodeKind::Row { wrap: false }, vec![card]);
+        row.node.id = LayoutId(2);
+        row.node.style.width = SizeRule::Fill(1.0);
+        let mut filler = node(LayoutNodeKind::Row { wrap: false }, vec![]);
+        filler.node.id = LayoutId(4);
+        filler.node.style.height = SizeRule::Fill(1.0);
+        let mut content = node(LayoutNodeKind::Column { wrap: false }, vec![row, filler]);
+        content.node.id = LayoutId(6);
+        content.node.style.height = SizeRule::Fill(1.0);
+        content.style.grow = 1.0;
+        let mut app = LayoutNode::container(
+            LayoutId(1),
+            LayoutNodeKind::Row { wrap: false },
+            vec![content],
+        );
+        app.style.width = SizeRule::Fill(1.0);
+        app.style.height = SizeRule::Fill(1.0);
+        let layout = resolve_layout(
+            &app,
+            Bounds3D::new_2d(-250.0, -100.0, 250.0, 100.0),
+            &Paragraph,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(layout.boxes[&LayoutId(3)].bounds.height(), 20.0);
+        assert_eq!(layout.boxes[&LayoutId(2)].bounds.height(), 60.0);
     }
 
     #[test]

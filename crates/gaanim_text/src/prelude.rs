@@ -11,5 +11,6 @@ pub use crate::structured::{
 };
 pub use crate::typst_compiler::{
     GaanimTypstWorld, TextMetrics, TypstTextRun, compile_scaled_typst_to_hierarchy,
-    compile_typst_text_to_path, compile_typst_to_hierarchy, measure_typst, shape_typst_text_run,
+    compile_typst_text_to_path, compile_typst_to_hierarchy, measure_typst, measure_typst_lines,
+    shape_typst_text_run,
 };

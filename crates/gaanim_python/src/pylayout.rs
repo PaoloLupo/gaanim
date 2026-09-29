@@ -395,6 +395,28 @@ impl Units {
 
     /// CSS shorthand: one value, (vertical, horizontal), (top, horizontal,
     /// bottom) or (top, right, bottom, left).
+    /// Margins: like insets, but negative lengths and `"auto"` (take the
+    /// free space, stored as an infinite length) are allowed.
+    pub(crate) fn margins(&self, value: &Bound<'_, PyAny>) -> PyResult<Insets> {
+        let is_auto =
+            |value: &Bound<'_, PyAny>| value.extract::<String>().is_ok_and(|text| text == "auto");
+        let side = |value: &Bound<'_, PyAny>| {
+            if is_auto(value) {
+                Ok(f64::INFINITY)
+            } else {
+                self.length(value, "margin")
+            }
+        };
+        let values = match value.cast::<PyTuple>() {
+            Ok(tuple) => tuple
+                .iter()
+                .map(|item| side(&item))
+                .collect::<PyResult<Vec<_>>>()?,
+            Err(_) => vec![side(value)?],
+        };
+        Self::sides(&values, "margin")
+    }
+
     pub(crate) fn insets(
         &self,
         value: &Bound<'_, PyAny>,
@@ -415,7 +437,13 @@ impl Units {
             .iter()
             .map(|item| side(&item))
             .collect::<PyResult<Vec<_>>>()?;
-        match values.as_slice() {
+        Self::sides(&values, name)
+    }
+
+    /// CSS shorthand: all, (vertical, horizontal), (top, horizontal,
+    /// bottom) or (top, right, bottom, left).
+    fn sides(values: &[f64], name: &str) -> PyResult<Insets> {
+        match values {
             [all] => Ok(Insets::all(*all)),
             [vertical, horizontal] => Ok(Insets::symmetric(*vertical, *horizontal)),
             [top, horizontal, bottom] => Ok(Insets {
@@ -842,7 +870,7 @@ pub(crate) fn apply_item(
         item.column_span = value.extract::<usize>()?.max(1);
     }
     if let Some(value) = prop(props, "margin")? {
-        item.margin = units.insets(&value, "margin", true)?;
+        item.margin = units.margins(&value)?;
     }
     if let Some(value) = prop(props, "fit")? {
         item.fit = parse_fit(&value.extract::<String>()?)?;
@@ -1348,46 +1376,66 @@ impl PyBox {
         }
     }
 
+    /// Record this box's new snapshot and its ancestors', then resolve the
+    /// whole tree once from the outermost box: one transition animates every
+    /// child, however deep the change was.
     pub(crate) fn reflow_inner(
         inner: &Arc<Mutex<LayoutState>>,
         duration: Option<f64>,
         entering: Option<DrawableHandle>,
         leaving: Option<DrawableHandle>,
     ) {
-        let (canvas, spec, root, members, parents, version) = {
-            let mut state = inner.lock().expect("layout poisoned");
-            state.version = state.version.saturating_add(1);
-            (
-                state.canvas.clone(),
-                state.spec.clone(),
-                state.root.clone(),
-                state.members.clone(),
-                state.parents.clone(),
-                state.version,
-            )
-        };
-        let refs: Vec<_> = members.iter().map(|member| &member.handle).collect();
-        let snapshots = members
-            .iter()
-            .map(|member| LayoutMemberSpec {
-                id: member.handle.id,
-                style: member.handle.layout_item(),
-            })
-            .collect();
-        let mut canvas = canvas.lock().expect("scene canvas poisoned");
-        canvas.set_group_members(&root, &refs);
-        canvas.reflow_layout(
-            &root,
-            snapshots,
-            spec,
-            version,
-            duration,
-            entering.as_ref(),
-            leaving.as_ref(),
-        );
-        drop(canvas);
-        for parent in parents.into_iter().filter_map(|parent| parent.upgrade()) {
-            Self::reflow_inner(&parent, duration, None, None);
+        let mut chain = vec![inner.clone()];
+        let mut index = 0;
+        while index < chain.len() {
+            let parents = chain[index]
+                .lock()
+                .expect("layout poisoned")
+                .parents
+                .clone();
+            for parent in parents.into_iter().filter_map(|parent| parent.upgrade()) {
+                if !chain.iter().any(|seen| Arc::ptr_eq(seen, &parent)) {
+                    chain.push(parent);
+                }
+            }
+            index += 1;
+        }
+        let last = chain.len() - 1;
+        for (position, state) in chain.iter().enumerate() {
+            let (canvas, spec, root, members, version) = {
+                let mut state = state.lock().expect("layout poisoned");
+                state.version = state.version.saturating_add(1);
+                (
+                    state.canvas.clone(),
+                    state.spec.clone(),
+                    state.root.clone(),
+                    state.members.clone(),
+                    state.version,
+                )
+            };
+            let refs: Vec<_> = members.iter().map(|member| &member.handle).collect();
+            let snapshots = members
+                .iter()
+                .map(|member| LayoutMemberSpec {
+                    id: member.handle.id,
+                    style: member.handle.layout_item(),
+                })
+                .collect();
+            let mut canvas = canvas.lock().expect("scene canvas poisoned");
+            canvas.set_group_members(&root, &refs);
+            if position == last {
+                canvas.reflow_layout(
+                    &root,
+                    snapshots,
+                    spec,
+                    version,
+                    duration,
+                    entering.as_ref(),
+                    leaving.as_ref(),
+                );
+            } else {
+                canvas.record_layout(&root, snapshots, spec, version);
+            }
         }
     }
 
@@ -1431,6 +1479,18 @@ impl PyBox {
                 .push(Arc::downgrade(&self.inner));
         }
         Ok(())
+    }
+
+    /// Forget this box as the parent of a child box that leaves it, so the
+    /// child's later changes no longer reflow this box.
+    fn orphan(&self, member: &LayoutMember) {
+        if let Some(child) = &member.child_layout {
+            child
+                .lock()
+                .expect("layout poisoned")
+                .parents
+                .retain(|parent| !std::ptr::eq(parent.as_ptr(), Arc::as_ptr(&self.inner)));
+        }
     }
 
     fn restacked(&self) {
@@ -1743,6 +1803,7 @@ impl PyBox {
             let index = at.unwrap_or(state.members.len());
             if index > state.members.len() {
                 handle.release_layout(&state.root);
+                self.orphan(&member);
                 return Err(pyo3::exceptions::PyIndexError::new_err(
                     "box insertion index is out of range",
                 ));
@@ -1772,6 +1833,7 @@ impl PyBox {
             removed.handle.release_layout(&state.root);
             removed
         };
+        self.orphan(&removed);
         Self::reflow_inner(&self.inner, duration, None, Some(removed.handle));
         Self::finish(&self.inner, duration, advance);
         Ok(())
@@ -1789,11 +1851,13 @@ impl PyBox {
         crate::custom::ensure_authoring_allowed()?;
         let duration = duration_value(duration)?;
         let index = self.position(child)?;
-        {
+        let detached = {
             let mut state = self.inner.lock().expect("layout poisoned");
             let detached = state.members.remove(index);
             detached.handle.release_layout(&state.root);
-        }
+            detached
+        };
+        self.orphan(&detached);
         Self::reflow_inner(&self.inner, duration, None, None);
         Self::finish(&self.inner, duration, advance);
         Ok(())
@@ -1830,8 +1894,10 @@ impl PyBox {
             let mut state = self.inner.lock().expect("layout poisoned");
             let old = std::mem::replace(&mut state.members[index], member);
             old.handle.release_layout(&state.root);
-            old.handle
+            old
         };
+        self.orphan(&old);
+        let old = old.handle;
         self.restacked();
         Self::reflow_inner(&self.inner, duration, Some(handle), Some(old));
         Self::finish(&self.inner, duration, advance);
@@ -1869,8 +1935,9 @@ impl PyBox {
         root.set_layout_item(item);
         Self::decorate(py, &slf.inner, parse_decoration(&props, &units)?, &props)?;
         Self::restack(&slf.inner);
+        // The chain up to the outermost box re-reads this box's item
+        // properties, so one transition covers both kinds of change.
         Self::reflow_inner(&slf.inner, duration, None, None);
-        reflow_owner_of(&root, duration);
         Self::finish(&slf.inner, duration, advance);
         Ok(slf)
     }
