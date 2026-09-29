@@ -1,6 +1,6 @@
 [package]
 name = "gaanim_thumbnail"
-version = "0.6.2"
+version = "0.7.0"
 license = "MIT OR Apache-2.0"
 edition = "2024"
 description = "Reads and scales the cover image of a .gaanim bundle without a GPU"

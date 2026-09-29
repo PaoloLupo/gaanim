@@ -11,11 +11,14 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
-= 0.6.3
+= 0.7.0
 
-Sin publicar todavía. Si una escena importa modelos glTF, quita las llamadas a
+Publicada el 29 de septiembre de 2026. Gaanim pasa a ser un solo ejecutable,
+que carga Python solo cuando abre un script, y Vello dibuja también el 3D con
+un estilo propio. Si una escena importa modelos glTF, quita las llamadas a
 `scene.media.gltf(...)` y a `animation(...)` de esos modelos; el resto de las
-escenas funciona sin cambios.
+escenas funciona sin cambios. Al actualizar, reemplaza todos los archivos de
+la carpeta de Gaanim.
 
 == Cambios
 
@@ -62,6 +65,15 @@ escenas funciona sin cambios.
 - `slides.brand` no dibuja la identidad en el primer segmento salvo con
   `show_on_cover=True`. El pie empieza en el borde izquierdo del área segura y
   se reduce si no cabe, y la regla ocupa el ancho del área segura.
+- `checkmark` dibuja una marca rellena proporcional a su tamaño, en lugar de
+  un disco blanco enorme, y un trazo explícito ya no muestra un rombo en la
+  esquina interior.
+- `create()` y `write()` vuelven a mostrar un objeto que un `fade_out()`
+  anterior había dejado con opacidad 0.
+- El editor vuelve a completar los parámetros de `scene.text(...)`,
+  `scene.text.equation(...)`, `Text.become(...)` y `TextFlow(...)`: los tipos
+  `TextRole`, `TextWrap`, `TextAlign`, `TextOverflow` y `TextDirection` vuelven
+  a estar en los tipos del paquete.
 
 = 0.6.2
 
