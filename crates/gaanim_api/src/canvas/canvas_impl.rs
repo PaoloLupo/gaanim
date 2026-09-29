@@ -2673,11 +2673,6 @@ impl SceneModel {
         clear_asset_caches();
     }
 
-    /// Identity of this scene, shared by its drawables' `scene_key`.
-    pub fn scene_key(&self) -> usize {
-        Arc::as_ptr(&self.state).cast::<()>() as usize
-    }
-
     /// Scene units per design pixel.
     pub fn pixel_unit(&self) -> f64 {
         self.frame.bounds().height() / self.design_resolution.max(1.0)

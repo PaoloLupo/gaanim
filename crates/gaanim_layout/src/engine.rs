@@ -232,6 +232,10 @@ pub struct LayoutItemStyle {
     pub basis: Option<f64>,
     /// Space around the child inside its parent; may be negative.
     pub margin: Insets,
+    /// Layout size set on the child from outside, replacing its own (for
+    /// example `height: 0` so a tall glyph does not stretch its rows).
+    pub width: Option<SizeRule>,
+    pub height: Option<SizeRule>,
     pub align: Option<Align>,
     pub row: Option<usize>,
     pub column: Option<usize>,
@@ -250,6 +254,8 @@ impl Default for LayoutItemStyle {
             shrink: 1.0,
             basis: None,
             margin: Insets::default(),
+            width: None,
+            height: None,
             align: None,
             row: None,
             column: None,
@@ -554,9 +560,12 @@ pub fn resolve_layout(
     let mut failure = None;
     tree.compute_layout_with_measure(
         root_id,
+        // A root that hugs its content is sized to its max-content (capped at
+        // the viewport by its max size): with definite space Taffy would
+        // size an auto-width grid like a block and stretch its auto tracks.
         taffy::Size {
-            width: AvailableSpace::Definite(available.x as f32),
-            height: AvailableSpace::Definite(available.y as f32),
+            width: root_space(root.style.width, available.x),
+            height: root_space(root.style.height, available.y),
         },
         |known, space, _, context, _| {
             let Some(id) = context.copied() else {
@@ -620,6 +629,13 @@ pub fn solve_constraints(
     relations: &[LayoutConstraint],
 ) -> Result<(), LayoutError> {
     apply_relations(layout, relations)
+}
+
+fn root_space(rule: SizeRule, available: f64) -> AvailableSpace {
+    match rule {
+        SizeRule::Hug => AvailableSpace::MaxContent,
+        _ => AvailableSpace::Definite(available as f32),
+    }
 }
 
 fn validate_tree(root: &LayoutNode) -> Result<(), LayoutError> {
@@ -741,7 +757,11 @@ fn build_node(
     item: Option<&LayoutItemStyle>,
     viewport: DVec2,
 ) -> Result<NodeId, LayoutError> {
-    let style = node.style.sanitized();
+    let mut style = node.style.sanitized();
+    if let Some(item) = item {
+        style.width = item.width.unwrap_or(style.width).sanitize();
+        style.height = item.height.unwrap_or(style.height).sanitize();
+    }
     let mut taffy_style = Style {
         size: taffy::Size {
             width: dimension(style.width),
@@ -822,11 +842,21 @@ fn build_node(
     // How this node sits in its parent.
     match (parent, item) {
         (None, _) => {
-            if matches!(style.width, SizeRule::Fill(_)) {
-                taffy_style.size.width = Dimension::length(viewport.x as f32);
+            match style.width {
+                SizeRule::Fill(_) => taffy_style.size.width = Dimension::length(viewport.x as f32),
+                SizeRule::Hug => {
+                    let cap = style.max_width.unwrap_or(f64::INFINITY).min(viewport.x);
+                    taffy_style.max_size.width = Dimension::length(cap.max(0.0) as f32);
+                }
+                _ => {}
             }
-            if matches!(style.height, SizeRule::Fill(_)) {
-                taffy_style.size.height = Dimension::length(viewport.y as f32);
+            match style.height {
+                SizeRule::Fill(_) => taffy_style.size.height = Dimension::length(viewport.y as f32),
+                SizeRule::Hug => {
+                    let cap = style.max_height.unwrap_or(f64::INFINITY).min(viewport.y);
+                    taffy_style.max_size.height = Dimension::length(cap.max(0.0) as f32);
+                }
+                _ => {}
             }
         }
         (Some(_), Some(item)) if item.absolute => {
@@ -1422,6 +1452,43 @@ mod tests {
         assert_eq!(layout.boxes[&LayoutId(1)].bounds.center().x, 150.0);
         assert_eq!(layout.boxes[&LayoutId(2)].bounds.center().x, 50.0);
         assert_eq!(layout.boxes[&LayoutId(2)].bounds.height(), 200.0);
+    }
+
+    #[test]
+    fn hugging_grid_sizes_auto_tracks_to_their_widest_cell() {
+        let sizes = [
+            (0.17, 0.28),
+            (0.13, 0.27),
+            (0.16, 0.27),
+            (0.17, 0.28),
+            (0.18, 0.27),
+        ];
+        let mut children = Vec::new();
+        let mut map = BTreeMap::new();
+        for (index, (w, h)) in sizes.iter().enumerate() {
+            let (c, m) = child(index as u64 + 1, DVec2::new(*w, *h));
+            children.push(c);
+            map.insert(m.0, m.1);
+        }
+        let mut root = LayoutNode::container(
+            LayoutId(0),
+            LayoutNodeKind::Grid {
+                rows: vec![Track::Auto; 2],
+                columns: vec![Track::Auto; 3],
+                auto_flow: AutoFlow::Row,
+            },
+            children,
+        );
+        root.style.gap = DVec2::splat(0.2);
+        let layout = resolve_layout(
+            &root,
+            Bounds3D::new_2d(-8.0, -4.5, 8.0, 4.5),
+            &Measure(map),
+            &[],
+        )
+        .unwrap();
+        // Columns: max(0.17, 0.17) + max(0.13, 0.18) + 0.16, plus two gaps.
+        assert!((layout.boxes[&LayoutId(0)].bounds.width() - 0.91).abs() < 1e-5);
     }
 
     #[test]

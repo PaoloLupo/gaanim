@@ -245,15 +245,9 @@ impl Units {
 
     /// Units of the scene `drawable` belongs to.
     pub(crate) fn of(drawable: &DrawableHandle) -> PyResult<Self> {
-        scenes()
-            .lock()
-            .expect("scene registry poisoned")
-            .get(&drawable.scene_key())
-            .and_then(Weak::upgrade)
-            .map(Self::new)
-            .ok_or_else(|| {
-                pyo3::exceptions::PyRuntimeError::new_err("this drawable's Scene no longer exists")
-            })
+        drawable.scene().map(Self::new).ok_or_else(|| {
+            pyo3::exceptions::PyRuntimeError::new_err("this drawable's Scene no longer exists")
+        })
     }
 
     fn number(value: &Bound<'_, PyAny>, name: &str) -> PyResult<Option<f64>> {
@@ -323,7 +317,7 @@ impl Units {
     }
 
     /// A box size: a length, `"hug"`, `"fill"`, `"Nfr"` or `"N%"`.
-    fn size(&self, value: &Bound<'_, PyAny>, name: &str) -> PyResult<SizeRule> {
+    pub(crate) fn size(&self, value: &Bound<'_, PyAny>, name: &str) -> PyResult<SizeRule> {
         if let Some(number) = Self::number(value, name)? {
             finite_non_negative(number, name)?;
             return Ok(SizeRule::Fixed(number));
@@ -371,7 +365,7 @@ impl Units {
     }
 
     /// Grid tracks: a count of equal `1fr` tracks or a sequence of tracks.
-    fn tracks(&self, value: &Bound<'_, PyAny>, name: &str) -> PyResult<Vec<Track>> {
+    pub(crate) fn tracks(&self, value: &Bound<'_, PyAny>, name: &str) -> PyResult<Vec<Track>> {
         if let Ok(count) = value.extract::<usize>()
             && !value.is_instance_of::<pyo3::types::PyBool>()
         {
@@ -401,7 +395,12 @@ impl Units {
 
     /// CSS shorthand: one value, (vertical, horizontal), (top, horizontal,
     /// bottom) or (top, right, bottom, left).
-    fn insets(&self, value: &Bound<'_, PyAny>, name: &str, negative: bool) -> PyResult<Insets> {
+    pub(crate) fn insets(
+        &self,
+        value: &Bound<'_, PyAny>,
+        name: &str,
+        negative: bool,
+    ) -> PyResult<Insets> {
         let side = |value: &Bound<'_, PyAny>| {
             if negative {
                 self.length(value, name)
@@ -437,7 +436,7 @@ impl Units {
         }
     }
 
-    fn point(&self, value: &Bound<'_, PyAny>, name: &str) -> PyResult<DVec3> {
+    pub(crate) fn point(&self, value: &Bound<'_, PyAny>, name: &str) -> PyResult<DVec3> {
         let tuple = value.cast::<PyTuple>().map_err(|_| {
             pyo3::exceptions::PyTypeError::new_err(format!("{name} must be an (x, y) pair"))
         })?;
@@ -452,21 +451,6 @@ impl Units {
             0.0,
         ))
     }
-}
-
-/// Scenes by identity, so a drawable can reach its scene's units and theme.
-fn scenes() -> &'static Mutex<std::collections::HashMap<usize, Weak<Mutex<ApiCanvas>>>> {
-    static SCENES: std::sync::OnceLock<
-        Mutex<std::collections::HashMap<usize, Weak<Mutex<ApiCanvas>>>>,
-    > = std::sync::OnceLock::new();
-    SCENES.get_or_init(Default::default)
-}
-
-pub(crate) fn register_scene(canvas: &Arc<Mutex<ApiCanvas>>) {
-    let key = canvas.lock().expect("scene canvas poisoned").scene_key();
-    let mut scenes = scenes().lock().expect("scene registry poisoned");
-    scenes.retain(|_, scene| scene.strong_count() > 0);
-    scenes.insert(key, Arc::downgrade(canvas));
 }
 
 pub(crate) fn parse_anchor(value: &Bound<'_, PyAny>) -> PyResult<Anchor> {
@@ -559,14 +543,90 @@ const TEXT_KEYS: &[&str] = &[
     "markup",
 ];
 
-/// Merge `style` (a mapping or a `BoxStyle`), then the inline properties,
-/// into one mapping, rejecting unknown names.
+/// Named box styles of each scene, used by `class_=`.
+fn classes()
+-> &'static Mutex<std::collections::HashMap<usize, std::collections::HashMap<String, Py<PyDict>>>> {
+    static CLASSES: std::sync::OnceLock<
+        Mutex<std::collections::HashMap<usize, std::collections::HashMap<String, Py<PyDict>>>>,
+    > = std::sync::OnceLock::new();
+    CLASSES.get_or_init(Default::default)
+}
+
+fn scene_key(canvas: &Arc<Mutex<ApiCanvas>>) -> usize {
+    Arc::as_ptr(canvas).cast::<()>() as usize
+}
+
+/// Register named styles for `class_=` in this scene.
+pub(crate) fn define_classes(
+    py: Python<'_>,
+    canvas: &Arc<Mutex<ApiCanvas>>,
+    named: &Bound<'_, PyDict>,
+) -> PyResult<()> {
+    let mut parsed = Vec::new();
+    for (name, style) in named.iter() {
+        let name = name.extract::<String>()?;
+        if name.trim().is_empty() || name.contains(char::is_whitespace) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "class names cannot be empty or contain spaces",
+            ));
+        }
+        parsed.push((name, merged_props(py, None, Some(&style), None)?.unbind()));
+    }
+    let mut registry = classes().lock().expect("class registry poisoned");
+    let scene = registry.entry(scene_key(canvas)).or_default();
+    scene.extend(parsed);
+    Ok(())
+}
+
+/// Resolve `class_` ("card elevated" or a list) against the scene's classes.
+fn class_props<'py>(
+    py: Python<'py>,
+    canvas: &Arc<Mutex<ApiCanvas>>,
+    names: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyDict>> {
+    let names: Vec<String> = if let Ok(text) = names.extract::<String>() {
+        text.split_whitespace().map(str::to_owned).collect()
+    } else {
+        names.extract::<Vec<String>>().map_err(|_| {
+            pyo3::exceptions::PyTypeError::new_err("class_ must be a string or a list of names")
+        })?
+    };
+    let merged = PyDict::new(py);
+    let registry = classes().lock().expect("class registry poisoned");
+    let scene = registry.get(&scene_key(canvas));
+    for name in names {
+        let style = scene.and_then(|scene| scene.get(&name)).ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "unknown class {name:?}; define it with scene.layout.classes({name}=BoxStyle(...))"
+            ))
+        })?;
+        merged.update(style.bind(py).as_mapping())?;
+    }
+    Ok(merged)
+}
+
+/// Merge the scene classes named by `class_`, then `style` (a mapping or a
+/// `BoxStyle`), then the inline properties into one mapping, rejecting
+/// unknown names. Later sources win, like CSS specificity.
 fn merged_props<'py>(
     py: Python<'py>,
+    canvas: Option<&Arc<Mutex<ApiCanvas>>>,
     style: Option<&Bound<'py, PyAny>>,
     props: Option<&Bound<'py, PyDict>>,
 ) -> PyResult<Bound<'py, PyDict>> {
     let merged = PyDict::new(py);
+    let class_names = props
+        .map(|props| props.get_item("class_"))
+        .transpose()?
+        .flatten()
+        .filter(|value| !value.is_none());
+    if let (Some(canvas), Some(names)) = (canvas, &class_names) {
+        merged.update(class_props(py, canvas, names)?.as_mapping())?;
+    } else if class_names.is_some() {
+        return Err(pyo3::exceptions::PyTypeError::new_err(
+            "class_ is resolved when a box is created; pass it to the box",
+        ));
+    }
     if let Some(style) = style {
         let mapping = if let Ok(style) = style.extract::<PyRef<'_, PyBoxStyle>>() {
             style.props.bind(py).clone()
@@ -579,6 +639,9 @@ fn merged_props<'py>(
     }
     if let Some(props) = props {
         merged.update(props.as_mapping())?;
+    }
+    if merged.contains("class_")? {
+        merged.del_item("class_")?;
     }
     for key in merged.keys() {
         let key = key.extract::<String>()?;
@@ -725,6 +788,24 @@ fn apply_container(
     }
     if let Some(value) = prop(props, "within")? {
         spec.within = parse_within(Some(&value.extract::<String>()?))?;
+    }
+    Ok(())
+}
+
+/// Keys `Drawable.item` accepts: the item properties plus a layout size
+/// set from outside.
+pub(crate) const DRAWABLE_ITEM_KEYS: &[&str] = &["width", "height"];
+
+pub(crate) fn apply_item_size(
+    item: &mut LayoutItemStyle,
+    props: &Bound<'_, PyDict>,
+    units: &Units,
+) -> PyResult<()> {
+    if let Some(value) = prop(props, "width")? {
+        item.width = Some(units.size(&value, "width")?);
+    }
+    if let Some(value) = prop(props, "height")? {
+        item.height = Some(units.size(&value, "height")?);
     }
     Ok(())
 }
@@ -932,7 +1013,7 @@ impl PyBoxStyle {
     #[new]
     #[pyo3(signature = (**props))]
     fn new(py: Python<'_>, props: Option<&Bound<'_, PyDict>>) -> PyResult<Self> {
-        let props = merged_props(py, None, props)?;
+        let props = merged_props(py, None, None, props)?;
         Ok(Self {
             props: props.unbind(),
         })
@@ -941,7 +1022,7 @@ impl PyBoxStyle {
     /// A copy with some properties replaced, like a modifier class.
     #[pyo3(signature = (**props))]
     fn but(&self, py: Python<'_>, props: Option<&Bound<'_, PyDict>>) -> PyResult<Self> {
-        let merged = merged_props(py, Some(self.props.bind(py).as_any()), props)?;
+        let merged = merged_props(py, None, Some(self.props.bind(py).as_any()), props)?;
         Ok(Self {
             props: merged.unbind(),
         })
@@ -978,7 +1059,7 @@ impl PyBox {
         style: Option<&Bound<'py, PyAny>>,
         props: Option<&Bound<'py, PyDict>>,
     ) -> PyResult<Py<Self>> {
-        let props = merged_props(py, style, props)?;
+        let props = merged_props(py, Some(&canvas), style, props)?;
         let units = Units::new(canvas.clone());
         let mut spec = LayoutSpec {
             kind,
@@ -1770,7 +1851,8 @@ impl PyBox {
     ) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
         let duration = duration_value(duration)?;
-        let props = merged_props(py, style, props)?;
+        let canvas = slf.inner.lock().expect("layout poisoned").canvas.clone();
+        let props = merged_props(py, Some(&canvas), style, props)?;
         let (canvas, root) = {
             let state = slf.inner.lock().expect("layout poisoned");
             (state.canvas.clone(), state.root.clone())
@@ -1829,7 +1911,7 @@ impl PyBox {
     }
 }
 
-fn parse_align(value: &str) -> PyResult<Align> {
+pub(crate) fn parse_align(value: &str) -> PyResult<Align> {
     match value {
         "start" => Ok(Align::Start),
         "center" => Ok(Align::Center),
@@ -1842,7 +1924,7 @@ fn parse_align(value: &str) -> PyResult<Align> {
     }
 }
 
-fn parse_justify(value: &str) -> PyResult<Justify> {
+pub(crate) fn parse_justify(value: &str) -> PyResult<Justify> {
     match value {
         "start" => Ok(Justify::Start),
         "center" => Ok(Justify::Center),
@@ -1856,7 +1938,7 @@ fn parse_justify(value: &str) -> PyResult<Justify> {
     }
 }
 
-fn parse_fit(value: &str) -> PyResult<FitMode> {
+pub(crate) fn parse_fit(value: &str) -> PyResult<FitMode> {
     match value {
         "none" => Ok(FitMode::None),
         "contain" => Ok(FitMode::Contain),

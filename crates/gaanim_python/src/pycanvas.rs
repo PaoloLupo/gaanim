@@ -2600,7 +2600,6 @@ impl PyScene {
         }
         canvas.design_resolution = design_resolution;
         let inner = canvas.into_shared();
-        crate::pylayout::register_scene(&inner);
         let passes = crate::brush::post_process_passes(post, &inner)?;
         inner
             .lock()
@@ -2752,6 +2751,24 @@ impl PySlideKit {
 }
 
 impl PyLayoutBuilder {
+    fn region(&self, within: Option<&Bound<'_, PyAny>>) -> PyResult<gaanim_math::Bounds3D> {
+        let canvas = self.inner.lock().expect("scene canvas poisoned");
+        let Some(within) = within else {
+            return Ok(canvas.safe_frame());
+        };
+        if let Ok(name) = within.extract::<String>() {
+            return match name.as_str() {
+                "safe" => Ok(canvas.safe_frame()),
+                "frame" => Ok(canvas.frame.bounds()),
+                _ => Err(pyo3::exceptions::PyValueError::new_err(
+                    "within must be 'safe', 'frame', a Zone or a Drawable",
+                )),
+            };
+        }
+        drop(canvas);
+        crate::pyzones::target_bounds(within)
+    }
+
     fn build<'py>(
         &self,
         py: Python<'py>,
@@ -2853,6 +2870,56 @@ impl PyLayoutBuilder {
             auto_flow: gaanim_layout::AutoFlow::Row,
         };
         self.build(py, kind, Align::Stretch, children, style, props)
+    }
+
+    /// Divide a region with a ``Zones`` template. ``within`` is ``"safe"``
+    /// (the frame minus its margin, by default), ``"frame"``, a Zone or a
+    /// Drawable (its current box).
+    #[pyo3(signature = (template, *, within=None))]
+    fn zones(
+        &self,
+        py: Python<'_>,
+        template: PyRef<'_, crate::pyzones::PyZones>,
+        within: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<crate::pyzones::PyZoneSet> {
+        crate::custom::ensure_authoring_allowed()?;
+        let region = self.region(within)?;
+        crate::pyzones::PyZoneSet::resolve(py, self.inner.clone(), &template, region)
+    }
+
+    /// The safe area: the frame minus the scene margin.
+    #[getter]
+    fn safe(&self) -> PyResult<crate::pyzones::PyZone> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(crate::pyzones::PyZone::new(
+            self.inner.clone(),
+            self.region(None)?,
+        ))
+    }
+
+    /// The whole frame, edge to edge.
+    #[getter]
+    fn frame(&self) -> PyResult<crate::pyzones::PyZone> {
+        crate::custom::ensure_authoring_allowed()?;
+        let bounds = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .frame
+            .bounds();
+        Ok(crate::pyzones::PyZone::new(self.inner.clone(), bounds))
+    }
+
+    /// Name reusable box styles, like CSS classes: ``classes(pill=BoxStyle(...))``
+    /// then ``box("Nuevo", class_="pill")``. Later definitions replace earlier
+    /// ones of the same name.
+    #[pyo3(signature = (**styles))]
+    fn classes(&self, py: Python<'_>, styles: Option<&Bound<'_, PyDict>>) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        match styles {
+            Some(styles) => crate::pylayout::define_classes(py, &self.inner, styles),
+            None => Ok(()),
+        }
     }
 
     /// A box that layers its children on top of one another.

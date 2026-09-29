@@ -1861,6 +1861,17 @@ pub(crate) fn resolve_at_target(
 }
 
 impl PyDrawable {
+    /// Move so the object's `anchor` lands on `point` (used by `place`).
+    pub(crate) fn move_to_point(
+        &self,
+        point: gaanim_core::glam::DVec3,
+        anchor: gaanim_api::canvas::Anchor,
+    ) -> PyResult<()> {
+        self.require_free_position("place")?;
+        self.0.clone().at_anchor(point.x, point.y, anchor);
+        Ok(())
+    }
+
     pub(crate) fn require_free_position(&self, operation: &str) -> PyResult<()> {
         if self.0.is_live_derived_geometry() {
             return Err(PyValueError::new_err(format!(
@@ -2453,10 +2464,32 @@ impl PyDrawable {
         Ok(Self(self.0.clone().z_index(z)))
     }
 
+    /// Move this object into a Zone (or onto another drawable's box) without
+    /// tying it there: its ``anchor`` meets the same anchor of the target,
+    /// inset by ``padding`` and shifted by ``offset``. ``fit`` scales it to
+    /// the target (``"contain"``, ``"cover"``, ``"stretch"``,
+    /// ``"scale_down"``).
+    #[pyo3(signature = (target, *, anchor=None, fit=None, padding=None, offset=None))]
+    fn place<'py>(
+        slf: PyRef<'py, Self>,
+        target: &Bound<'py, PyAny>,
+        anchor: Option<&Bound<'py, PyAny>>,
+        fit: Option<&str>,
+        padding: Option<&Bound<'py, PyAny>>,
+        offset: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let canvas = crate::pyzones::canvas_of(&slf.0)?;
+        let placement = crate::pyzones::Placement::parse(&canvas, anchor, fit, padding, offset)?;
+        placement.place(&slf.0, crate::pyzones::target_bounds(target)?)?;
+        Ok(slf)
+    }
+
     /// Set how this object sits in the box that holds it, like CSS on the
     /// element: ``grow``, ``shrink``, ``basis``, ``align_self``, ``row``,
     /// ``column``, ``row_span``, ``column_span``, ``margin``, ``fit``,
-    /// ``anchor``, ``absolute`` and ``offset``. Inside a box already, the box
+    /// ``anchor``, ``absolute``, ``offset``, and a layout ``width``/``height``
+    /// that replaces the object's own. Inside a box already, the box
     /// reflows (over ``duration`` if given).
     #[pyo3(signature = (*, duration=None, advance=true, **props))]
     fn item<'py>(
@@ -2470,7 +2503,9 @@ impl PyDrawable {
         if let Some(props) = props {
             for key in props.keys() {
                 let key = key.extract::<String>()?;
-                if !crate::pylayout::ITEM_KEYS.contains(&key.as_str()) {
+                if !crate::pylayout::ITEM_KEYS.contains(&key.as_str())
+                    && !crate::pylayout::DRAWABLE_ITEM_KEYS.contains(&key.as_str())
+                {
                     return Err(pyo3::exceptions::PyTypeError::new_err(format!(
                         "unknown item property {key:?}"
                     )));
@@ -2483,6 +2518,7 @@ impl PyDrawable {
         let units = crate::pylayout::Units::of(&handle)?;
         let mut item = handle.layout_item();
         crate::pylayout::apply_item(&mut item, props, &units)?;
+        crate::pylayout::apply_item_size(&mut item, props, &units)?;
         handle.set_layout_item(item);
         let duration = match duration {
             Some(value) if !value.is_finite() || value < 0.0 => {

@@ -34,14 +34,18 @@ content.bind(
 )
 scene.wait(0.4)
 
-manual = scene.layout.stack([
+manual = scene.layout.stack(
     scene.geometry.rounded_rect(3.875, 1.5, 0.225).fill(scene.canvas.color("panel")),
     scene.text("Manual"),
-], width=3.875, height=1.5)
-semantic = scene.layout.stack([
+    width=3.875,
+    height=1.5,
+)
+semantic = scene.layout.stack(
     scene.geometry.rounded_rect(3.875, 1.5, 0.225).fill(scene.canvas.color("header")),
     scene.text("Semantic"),
-], width=3.875, height=1.5)
+    width=3.875,
+    height=1.5,
+)
 compare = scene.segment("Comparison", template=comparison, notes="Compare both workflows.")
 compare.bind(title=scene.text("Authoring workflow", role="title"), left=manual, right=semantic)
 scene.wait(0.4)

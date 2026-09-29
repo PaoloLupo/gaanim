@@ -639,6 +639,22 @@ impl gaanim_layout::IntrinsicMeasure for CompiledLayoutMeasure<'_> {
         id: gaanim_layout::LayoutId,
         constraints: gaanim_layout::BoxConstraints,
     ) -> Result<DVec2, gaanim_layout::LayoutError> {
+        self.measure_inner(id, constraints)
+    }
+
+    fn is_width_sensitive(&self, id: gaanim_layout::LayoutId) -> bool {
+        self.texts
+            .get(&id)
+            .is_some_and(|text| !matches!(text.spec.flow.wrap, StructuredTextWrap::NoWrap))
+    }
+}
+
+impl CompiledLayoutMeasure<'_> {
+    fn measure_inner(
+        &self,
+        id: gaanim_layout::LayoutId,
+        constraints: gaanim_layout::BoxConstraints,
+    ) -> Result<DVec2, gaanim_layout::LayoutError> {
         let Some(text) = self.texts.get(&id) else {
             return Ok(constraints.constrain(*self.fixed.get(&id).unwrap_or(&DVec2::ZERO)));
         };
@@ -697,12 +713,6 @@ impl gaanim_layout::IntrinsicMeasure for CompiledLayoutMeasure<'_> {
         };
         self.text_compositions.borrow_mut().insert(id, composition);
         Ok(constraints.constrain(size))
-    }
-
-    fn is_width_sensitive(&self, id: gaanim_layout::LayoutId) -> bool {
-        self.texts
-            .get(&id)
-            .is_some_and(|text| !matches!(text.spec.flow.wrap, StructuredTextWrap::NoWrap))
     }
 }
 

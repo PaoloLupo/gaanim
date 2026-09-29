@@ -36,11 +36,13 @@ scene.stop("pipeline")
 scene.wait(0.35)
 scene.stop("same-timeline")
 
-benefits = scene.layout.column([
+benefits = scene.layout.column(
     scene.text("Named slides").fill(WHITE),
     scene.text("Speaker notes").fill(WHITE),
     scene.text("Direct navigation").fill(WHITE),
-], gap=0.266667, align="center")
+    gap=0.266667,
+    align="center",
+)
 reveal = scene.segment("Reveal in steps", notes="Advance once per benefit.", template=lecture)
 reveal.bind(title=scene.text("Reveal only what matters", role="title").fill(GOLD), body=benefits)
 scene.wait(0.35)

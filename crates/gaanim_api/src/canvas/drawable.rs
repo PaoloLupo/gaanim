@@ -461,12 +461,6 @@ impl DrawableHandle {
         Arc::ptr_eq(&self.state, &other.state)
     }
 
-    /// Identity of the scene this drawable belongs to, equal to
-    /// [`SceneModel::scene_key`](super::SceneModel::scene_key) of its scene.
-    pub fn scene_key(&self) -> usize {
-        Arc::as_ptr(&self.state).cast::<()>() as usize
-    }
-
     /// Live derived geometry is defined in source world-space and therefore
     /// intentionally has no independent layout/transform ownership.
     pub fn is_live_derived_geometry(&self) -> bool {

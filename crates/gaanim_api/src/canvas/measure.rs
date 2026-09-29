@@ -260,7 +260,36 @@ fn spawn_members(kind: &SpawnKind) -> Option<&[ObjectId]> {
     }
 }
 
+impl super::Anim {
+    /// Scene-space box of the animated drawable at the authoring cursor,
+    /// before this animation runs.
+    pub fn target_bounds(&self) -> Result<Bounds3D, BoundsError> {
+        let owner = self
+            .owner
+            .as_ref()
+            .ok_or(BoundsError::SceneDropped)?
+            .lock()
+            .expect("canvas state poisoned")
+            .owner
+            .clone()
+            .ok_or(BoundsError::SceneDropped)?;
+        let scene = owner.upgrade().ok_or(BoundsError::SceneDropped)?;
+        let scene = scene.lock().expect("scene poisoned").clone();
+        scene.compiled_bounds(self.inner.target, scene.current_time())
+    }
+}
+
 impl DrawableHandle {
+    /// The shared scene this drawable belongs to, while it exists.
+    pub fn scene(&self) -> Option<Arc<Mutex<SceneModel>>> {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .owner
+            .clone()
+            .and_then(|owner| owner.upgrade())
+    }
+
     /// Scene-space box of this drawable at its scene's authoring cursor; see
     /// [`SceneModel::bounds_of`]. The scene must have been shared with
     /// [`SceneModel::into_shared`].

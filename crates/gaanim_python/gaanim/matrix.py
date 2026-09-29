@@ -349,8 +349,8 @@ def _build_matrix(scene: Any, data: Any, **options: Any) -> Matrix:
         right = scene.text(pair[delimiter][1], size=size, weight=weight)
         delimiter_cells.extend((left, right))
         delimiter_offset = max(0.0, column_gap - delimiter_gap) * 0.5
-        items.append(left.item(row=row_offset, column=label_columns, row_span=len(values), align_self="center", offset=(delimiter_offset, 0.0)))
-        items.append(right.item(row=row_offset, column=entry_column_offset + len(values[0]), row_span=len(values), align_self="center", offset=(-delimiter_offset, 0.0)))
+        items.append(left.item(row=row_offset, column=label_columns, row_span=len(values), align_self="center", height=0, offset=(delimiter_offset, 0.0)))
+        items.append(right.item(row=row_offset, column=entry_column_offset + len(values[0]), row_span=len(values), align_self="center", height=0, offset=(-delimiter_offset, 0.0)))
     column_count = entry_column_offset + len(values[0]) + delimiter_columns
     grid = scene.layout.grid(*items, rows=["auto"] * (len(values) + row_offset), columns=["auto"] * column_count,
                       row_gap=row_gap, column_gap=column_gap, align="center")
