@@ -1977,6 +1977,16 @@ def validate_polyline_connector_contract(module):
     return failures
 
 
+def raises_error(expected, operation):
+    try:
+        operation()
+    except expected:
+        return True
+    except Exception:
+        return False
+    return False
+
+
 def validate_layout_box_contract(module):
     """Boxes, styles, classes, zones and item rules keep their contracts."""
     failures = []
@@ -2044,6 +2054,63 @@ def validate_layout_box_contract(module):
             scene.play(animation().duration(0.2))
         except (ValueError, module.LayoutOwnershipError) as error:
             failures.append(f"a box child refused animate.{name}: {error}")
+    # walk lists backgrounds and pieces at any depth, in draw order.
+    inner_text = scene.text("dentro")
+    inner = L.row(inner_text, background="red")
+    outer = L.column("fuera", inner, background="white")
+    plain = outer.walk()
+    if len(plain) != 4 or plain[0] is None or plain[-1] is not inner_text:
+        failures.append(f"Box.walk did not list background, children and nested pieces: {plain}")
+    if not any(piece is inner for piece in outer.walk(boxes=True)) or len(outer.walk(boxes=True)) != 5:
+        failures.append("Box.walk(boxes=True) did not include the nested box")
+    if any(piece is outer for piece in outer.walk(boxes=True)):
+        failures.append("Box.walk listed the box itself")
+    scene.play(outer.stagger(lambda piece: piece.animate.fade_in(), each=0.05))
+    scene.play(outer.stagger(lambda piece: piece.animate.fade_out() if piece is inner_text else None, boxes=True))
+    for operation, expected in (
+        (lambda: outer.stagger(5), TypeError),
+        (lambda: outer.stagger(lambda piece: None), ValueError),
+    ):
+        try:
+            operation()
+        except expected:
+            pass
+        else:
+            failures.append("Box.stagger accepted invalid arguments")
+    # find, cascade and reordering.
+    found_text = outer.find(type=module.Text)
+    if found_text is None or not isinstance(found_text, module.Text):
+        failures.append("Box.find(type=Text) did not return a Text")
+    if outer.find(type=module.Text, where=lambda piece: False) is not None:
+        failures.append("Box.find matched with a predicate that is always false")
+    if len(outer.find_all(type=module.Text)) != 2:
+        failures.append("Box.find_all(type=Text) did not list both texts")
+    if outer.find(type=module.Box) is not inner:
+        failures.append("Box.find did not search nested boxes")
+    if outer.find(type=module.Box, boxes=False) is not None:
+        failures.append("Box.find(boxes=False) still returned a box")
+    if not (raises_error(TypeError, lambda: outer.find(where=3))):
+        failures.append("Box.find accepted a non-callable predicate")
+    scene.play(outer.cascade(each=0.05).fade_in())
+    scene.play(outer.cascade(boxes=True, origin="center").shift_by(0.1, 0))
+    if not raises_error(AttributeError, lambda: outer.cascade().no_such_animation()):
+        failures.append("BoxCascade accepted an unknown animation")
+    if not raises_error(ValueError, lambda: L.box().cascade().fade_in()):
+        failures.append("BoxCascade on an empty box did not raise")
+    row = L.row(*[L.box(name) for name in "abc"])
+    a, b, c = row.children
+    row.move_child(c, 0)
+    row.swap(a, b, duration=0.2)
+    row.reverse()
+    if row.children[0] is not a and len(row.children) != 3:
+        failures.append("reordering lost children")
+    row.move_child(a, -1)
+    if row.children[-1] is not a:
+        failures.append("move_child with a negative position did not move to the end")
+    if not raises_error(IndexError, lambda: row.move_child(a, 3)):
+        failures.append("move_child accepted an out-of-range position")
+    if not raises_error(ValueError, lambda: row.move_child(scene.geometry.rect(1, 1), 0)):
+        failures.append("move_child accepted a non-child")
     for operation in (
         lambda: L.box(radius=-1),
         lambda: L.box(border_width=float("nan")),
@@ -2322,6 +2389,9 @@ def main() -> int:
                 missing.append(node.name)
                 continue
             for member in declared_members(node):
+                # PyO3 serves `__getattr__` from a type slot, not a class attribute.
+                if member == "__getattr__":
+                    continue
                 if not hasattr(native_class, member):
                     missing.append(f"{node.name}.{member}")
         elif (
