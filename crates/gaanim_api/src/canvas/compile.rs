@@ -16627,7 +16627,7 @@ mod tests {
         let target = canvas.rect(1.0, 1.0);
         let anim = canvas
             .spotlight(
-                crate::canvas::BoundsTarget::Drawable(target.id),
+                vec![crate::canvas::BoundsTarget::Drawable(target.id)],
                 0.7,
                 [0.1; 4],
                 0.05,
@@ -16659,7 +16659,7 @@ mod tests {
         assert!(
             canvas
                 .spotlight(
-                    crate::canvas::BoundsTarget::Drawable(target.id),
+                    vec![crate::canvas::BoundsTarget::Drawable(target.id)],
                     0.0,
                     [0.1; 4],
                     0.0
@@ -16669,7 +16669,7 @@ mod tests {
         assert!(
             canvas
                 .spotlight(
-                    crate::canvas::BoundsTarget::Drawable(target.id),
+                    vec![crate::canvas::BoundsTarget::Drawable(target.id)],
                     1.5,
                     [0.1; 4],
                     0.0
