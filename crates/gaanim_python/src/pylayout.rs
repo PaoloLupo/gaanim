@@ -761,6 +761,7 @@ pub(crate) fn layout_item_from_python(
     member.style = LayoutItemStyle {
         grow,
         shrink,
+        basis: None,
         align: align.map(parse_align).transpose()?,
         row,
         column,
