@@ -48,6 +48,13 @@ hace falta cambiar tus escenas.
   de 20×12 con tres efectos cuesta alrededor de 0,1 ms por fotograma. Un seek
   cae en el mismo fotograma que la reproducción. Lee
   #link("/referencia/animations/#falloffs")[Falloffs].
+- Énfasis nuevos: `animate.blink(3)` parpadea un objeto, `animate.broadcast()`
+  lanza ondas concéntricas desde él, `animate.flash_around()` y
+  `animate.flash_under()` pasan una ventana brillante por un marco o un
+  subrayado (también sobre `texto["palabra"]`), `scene.fx.spotlight(objeto)`
+  oscurece todo salvo un hueco alrededor del objetivo y
+  `objeto.animated_boundary([AZUL, MORADO, CIAN])` dibuja un marco cuyo trazo
+  cambia de color. Lee #link("/referencia/animations/")[Animaciones].
 - `box.children`, `box[i]` y la iteración de una caja están tipados como
   `Drawable` en lugar de `Any`.
 

@@ -740,6 +740,137 @@ scene.play(star.animate.flash().duration(0.6))
 ```
 ]
 
+#api-entry(
+  name: "Anim.blink",
+  kind: "method",
+  signature: "blink(count=3) -> Anim",
+  params: ((name: "count", type: "int", default: "3", desc: [Cuántas veces parpadea; menos de 1 lanza `ValueError`.]),),
+  returns: (type: "Anim", desc: [Apaga y enciende el objeto `count` veces.]),
+  desc: [Cada parpadeo es un fundido rápido a nada y de vuelta, y dura medio segundo: la duración por defecto es `0.5 * count`, y `duration` fija el ciclo completo. Al final el objeto vuelve a verse.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>caret = scene.geometry.rect(0.1, 0.7).fill(WHITE)
+scene.play(caret.animate.blink(3))
+```
+]
+
+#api-entry(
+  name: "Anim.broadcast",
+  kind: "method",
+  signature: "broadcast(count=4, max_scale=3.0, lag=0.2) -> Anim",
+  params: (
+    (name: "count", type: "int", default: "4", desc: [Ondas, de 1 a 64.]),
+    (name: "max_scale", type: "float", default: "3.0", desc: [Tamaño final de cada onda respecto al objeto; al menos 1.]),
+    (name: "lag", type: "float", default: "0.2", desc: [Cuánto tarda cada onda en salir tras la anterior, como fracción de una onda.]),
+  ),
+  returns: (type: "Anim", desc: [Ondas concéntricas que salen del objeto.]),
+  desc: [Cada onda es una copia del objeto, colocada donde está cuando empieza la animación, que crece hasta `max_scale` mientras se desvanece. `duration` cubre todas las ondas. El objeto no cambia y las copias son invisibles fuera de su onda. Valores fuera de rango lanzan `ValueError`.],
+)[
+```python
+# output: preview.webp
+# show-code: true
+from gaanim import PINK, Scene
+
+scene = Scene(frame=(16, 9), background="#0f172a")
+pin = scene.geometry.dot(0.2).fill(PINK)
+scene.play([pin.animate.broadcast(count=4, max_scale=4.0, lag=0.25).duration(2.0)])
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Anim.flash_around",
+  kind: "method",
+  signature: "flash_around(*, color=None, width=None, padding=None, corner_radius=0.08, time_width=0.4) -> Anim",
+  params: (
+    (name: "color, width", type: "ColorLike | None, float | None", default: "None", desc: [Reestilizan el marco; un ancho necesita un color. Sin ellos usa el trazo del tema.]),
+    (name: "padding", type: "Padding | None", default: "0.12", desc: [Separación entre el objeto y el marco.]),
+    (name: "corner_radius", type: "float", default: "0.08", desc: [Radio de las esquinas.]),
+    (name: "time_width", type: "float", default: "0.4", desc: [Longitud de la ventana brillante, como fracción del contorno, en `(0, 1]`.]),
+  ),
+  returns: (type: "Anim", desc: [Una ventana brillante que recorre un marco alrededor del objeto.]),
+  desc: [El marco es un contorno vivo nuevo (como `Geometry.surrounding_rect`) que sigue los límites del objeto y es invisible fuera del destello. La animación devuelta se reproduce sobre el marco. Sirve también sobre un `TextSelection`: `texto["palabra"].animate.flash_around()`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>line = scene.text("Gaanim resalta lo importante")
+scene.play(line["importante"].animate.flash_around(color=PINK, width=0.04).duration(1.2))
+```
+]
+
+#api-entry(
+  name: "Anim.flash_under",
+  kind: "method",
+  signature: "flash_under(*, color=None, width=None, gap=0.06, overhang=0.04, time_width=0.5) -> Anim",
+  params: (
+    (name: "color, width", type: "ColorLike | None, float | None", default: "None", desc: [Como en `flash_around`.]),
+    (name: "gap", type: "float", default: "0.06", desc: [Distancia de la línea bajo el objeto.]),
+    (name: "overhang", type: "float", default: "0.04", desc: [Cuánto sobresale la línea a cada lado.]),
+    (name: "time_width", type: "float", default: "0.5", desc: [Longitud de la ventana brillante, en `(0, 1]`.]),
+  ),
+  returns: (type: "Anim", desc: [Una ventana brillante que recorre una línea bajo el objeto.]),
+  desc: [La línea es un subrayado vivo nuevo, tan ancho como el objeto, invisible fuera del destello. Valores fuera de rango lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>line = scene.text("Gaanim resalta lo importante")
+scene.play(line["resalta"].animate.flash_under(color=GOLD, width=0.05).duration(1.0))
+```
+]
+
+#api-entry(
+  name: "Fx.spotlight",
+  kind: "method",
+  signature: "scene.fx.spotlight(target, *, dim=0.7, padding=None, corner_radius=0.1) -> Anim",
+  params: (
+    (name: "target", type: "Drawable | TextSelection | Sequence", default: none, desc: [Lo que queda iluminado.]),
+    (name: "dim", type: "float", default: "0.7", desc: [Opacidad máxima del velo negro, en `(0, 1]`.]),
+    (name: "padding", type: "Padding | None", default: "0.2", desc: [Separación entre el objetivo y el borde del hueco.]),
+    (name: "corner_radius", type: "float", default: "0.1", desc: [Radio de las esquinas del hueco.]),
+  ),
+  returns: (type: "Anim", desc: [Un velo con un hueco que se oscurece y vuelve.]),
+  desc: [Un velo negro con un hueco vivo alrededor del objetivo (sigue al objetivo si se mueve) llega a `dim` a mitad de la animación y vuelve a nada; `duration` fija el ciclo entero y una curva como `Easing.SMOOTH` lo deja oscurecido al final. La animación devuelta se reproduce sobre el velo. Un `dim` fuera de rango o un objetivo de otra escena lanzan `ValueError`.],
+)[
+```python
+# output: preview.webp
+# show-code: true
+from gaanim import BLUE, WHITE, Scene
+
+scene = Scene(frame=(16, 9), background="#0f172a")
+title = scene.text("Un título", role="title").fill(WHITE).move_to(0, 2.4)
+card = scene.geometry.rounded_rect(4, 2.2, 0.25).fill("#1e293b").stroke(BLUE, 0.03).move_to(0, -0.6)
+scene.play([scene.fx.spotlight(card, dim=0.8).duration(2.0)])
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Drawable.animated_boundary",
+  kind: "method",
+  signature: "animated_boundary(colors, *, cycle_rate=0.5, width=0.04, padding=None, corner_radius=0.08) -> Drawable",
+  params: (
+    (name: "colors", type: "Sequence[ColorLike]", default: none, desc: [Al menos dos colores; el último se mezcla de nuevo con el primero.]),
+    (name: "cycle_rate", type: "float", default: "0.5", desc: [Vueltas a la lista de colores por segundo, desde el cursor de la línea de tiempo.]),
+    (name: "width", type: "float", default: "0.04", desc: [Ancho del trazo, en unidades de escena.]),
+    (name: "padding", type: "Padding | None", default: "0.12", desc: [Separación entre el objeto y el marco.]),
+    (name: "corner_radius", type: "float", default: "0.08", desc: [Radio de las esquinas.]),
+  ),
+  returns: (type: "Drawable", desc: [Un marco vivo con el trazo que cambia de color.]),
+  desc: [El marco es un objeto nuevo, visible desde el principio, que sigue los límites del objeto; anímalo como cualquier otro (`fade_in`, `fade_out`) para que aparezca o desaparezca. El color es función pura del tiempo, así que los seeks y la exportación coinciden con la reproducción. Menos de dos colores, un `width` no positivo o un `cycle_rate` no finito lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>card = scene.geometry.rounded_rect(3, 1.6, 0.2).fill("#1e293b")
+border = card.animated_boundary([BLUE, PURPLE, CYAN], cycle_rate=0.5)
+scene.wait(2)
+```
+]
+
 == Texto
 
 Estas animaciones solo existen sobre un `Text` completo; en otro objeto lanzan
