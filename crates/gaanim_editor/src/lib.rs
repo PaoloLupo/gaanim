@@ -543,24 +543,8 @@ fn editor_ui_system(
     let narration_available = bundle_playback.is_none();
 
     let is_exporting = export_state.active;
-    let (export_progress_pct, export_current, export_total) = if is_exporting {
-        if let Ok(lock) = export_state.progress_shared.lock() {
-            if let Some(ref p) = *lock {
-                let pct = if p.total_frames > 0 {
-                    p.current_frame as f32 / p.total_frames as f32
-                } else {
-                    0.0
-                };
-                (pct, p.current_frame, p.total_frames)
-            } else {
-                (0.0, 0, 0)
-            }
-        } else {
-            (0.0, 0, 0)
-        }
-    } else {
-        (0.0, 0, 0)
-    };
+    let export_status = export_state.status();
+    let export_progress_pct = export_status.map_or(0.0, |status| status.fraction);
 
     // Temporal snapping is intentionally unavailable while inspecting 3D.
     // Keep the ordinary 2D preference untouched.
@@ -706,6 +690,7 @@ fn editor_ui_system(
                             snapping_allowed,
                             &seek_markers,
                             &bar_fracs,
+                            export_status.map(|status| status.fraction),
                         );
                         if let Some(time) = seek_resp.marker_jump {
                             timeline.seek_request = Some(time);
@@ -897,24 +882,38 @@ fn editor_ui_system(
                                             actions.push(PlaybackAction::ToggleNarration);
                                         }
 
-                                        if is_exporting {
+                                        if let Some(status) = export_status {
+                                            // Right to left: cancel, then the
+                                            // percentage; the timeline shows
+                                            // which part is written.
+                                            if icon_button(
+                                                ui,
+                                                Icon::Close,
+                                                ButtonTone::Ghost,
+                                                !status.cancelling,
+                                            )
+                                            .on_hover_text("Cancelar la exportación")
+                                            .clicked()
+                                            {
+                                                actions.push(PlaybackAction::CancelExport);
+                                            }
+                                            let text = if status.cancelling {
+                                                "Deteniendo…".to_owned()
+                                            } else {
+                                                format!(
+                                                    "Exportando {:.0} %",
+                                                    status.fraction * 100.0
+                                                )
+                                            };
                                             ui.add(
                                                 egui::Label::new(
-                                                    egui::RichText::new(format!(
-                                                        "{export_current}/{export_total}"
-                                                    ))
-                                                    .size(11.0)
-                                                    .color(palette::TEXT_MUTED),
+                                                    egui::RichText::new(text)
+                                                        .size(11.5)
+                                                        .color(EXPORT_PROGRESS_COLOR),
                                                 )
                                                 .selectable(false),
-                                            );
-                                            ui.add(
-                                                egui::ProgressBar::new(export_progress_pct)
-                                                    .desired_width(84.0)
-                                                    .desired_height(6.0)
-                                                    .fill(palette::ACCENT)
-                                                    .corner_radius(0.0),
-                                            );
+                                            )
+                                            .on_hover_text(export_tooltip(&status));
                                         } else if !WEB
                                             && icon_button(
                                                 ui,
@@ -1047,13 +1046,22 @@ fn editor_ui_system(
                                             {
                                                 actions.push(PlaybackAction::OpenExport);
                                             }
-                                            if is_exporting {
+                                            if let Some(status) = export_status {
                                                 ui.label(format!(
-                                                    "Exportando {:.0}% · {}/{}",
+                                                    "Exportando {:.0} % · {}/{}",
                                                     export_progress_pct * 100.0,
-                                                    export_current,
-                                                    export_total,
+                                                    status.current,
+                                                    status.total,
                                                 ));
+                                                if ui
+                                                    .add_enabled(
+                                                        !status.cancelling,
+                                                        egui::Button::new("Cancelar exportación"),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    actions.push(PlaybackAction::CancelExport);
+                                                }
                                             }
                                             let pin_label = if pinned {
                                                 "Desfijar ventana"
@@ -1116,6 +1124,7 @@ fn editor_ui_system(
                                     range,
                                 ),
                                 PlaybackAction::OpenExport => export_state.dialog_open = true,
+        PlaybackAction::CancelExport => export_state.cancel(),
                                 PlaybackAction::ToggleNarration => {
                                     narration_panel.open = !narration_panel.open;
                                 }
@@ -1219,6 +1228,23 @@ fn toggle_scene_loop_range(
     timeline.loop_range = Some((start, end));
     timeline.seek_request = Some(start);
     timeline.is_playing = true;
+}
+
+/// The export's progress in the playback bar and the timeline.
+const EXPORT_PROGRESS_COLOR: egui::Color32 = palette::LOOP;
+
+fn export_tooltip(status: &export::ExportStatus) -> String {
+    let mut text = format!(
+        "{} / {} fotogramas · {}",
+        status.current,
+        status.total,
+        export::short_duration(status.elapsed)
+    );
+    if let Some(remaining) = status.remaining {
+        text.push_str(&format!(" · quedan ~{}", export::short_duration(remaining)));
+    }
+    text.push_str("\nLa barra de tiempo marca lo ya exportado; puedes seguir reproduciendo.");
+    text
 }
 
 /// A scene's time range, precomputed for the seek bar.
@@ -1388,6 +1414,7 @@ fn paint_seek_bar(
     snapping_enabled: bool,
     markers: &[SeekMarker],
     bars: &[f32],
+    exported: Option<f32>,
 ) -> SeekBarResponse {
     const LANE_H: f32 = 22.0;
     const LANE_GAP: f32 = 6.0;
@@ -1589,6 +1616,40 @@ fn paint_seek_bar(
                 .with_clip_rect(clip.intersect(painter.clip_rect()))
                 .rect_filled(piece_rect, 0.0, palette::ACCENT);
         }
+    }
+
+    // A running export fills the timeline as it writes it: under each chapter
+    // (segment by segment) or under the track, with the written share.
+    if let Some(exported) = exported {
+        let done_x = x_at(exported.clamp(0.0, 1.0));
+        let strip = |from: f32, to: f32, y: f32, height: f32| {
+            egui::Rect::from_min_max(egui::pos2(from, y), egui::pos2(to, y + height))
+        };
+        if has_scenes {
+            for chip in chips.iter().flatten() {
+                let full = strip(chip.min.x, chip.max.x, chip.max.y - 3.0, 3.0);
+                painter.rect_filled(full, 0.0, EXPORT_PROGRESS_COLOR.gamma_multiply(0.18));
+                if done_x > chip.min.x {
+                    let written = strip(chip.min.x, done_x.min(chip.max.x), full.min.y, 3.0);
+                    painter.rect_filled(written, 0.0, EXPORT_PROGRESS_COLOR);
+                }
+            }
+        }
+        let under = strip(rect.min.x, rect.max.x, bar_rect.max.y + 3.0, 2.0);
+        painter.rect_filled(under, 0.0, EXPORT_PROGRESS_COLOR.gamma_multiply(0.18));
+        painter.rect_filled(
+            strip(rect.min.x, done_x, under.min.y, 2.0),
+            0.0,
+            EXPORT_PROGRESS_COLOR,
+        );
+        // The frontier the export has reached.
+        painter.line_segment(
+            [
+                egui::pos2(done_x, rect.min.y),
+                egui::pos2(done_x, under.max.y),
+            ],
+            egui::Stroke::new(1.0, EXPORT_PROGRESS_COLOR.gamma_multiply(0.6)),
+        );
     }
 
     // Scene boundaries: a divider across the lane and the track, so where one
@@ -1949,6 +2010,7 @@ enum PlaybackAction {
     ToggleContinuous,
     ToggleLoop((f64, f64)),
     OpenExport,
+    CancelExport,
     ToggleNarration,
     Present,
     ToggleFullscreen,

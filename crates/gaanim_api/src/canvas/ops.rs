@@ -598,6 +598,11 @@ pub(crate) enum Op {
         container: ObjectId,
         radius: f64,
     },
+    /// Named zones created by `scene.layout.zones(...)`, in scene coordinates,
+    /// shown by the editor's layout inspector until the segment ends.
+    RecordLayoutZones {
+        zones: Vec<(String, gaanim_math::Bounds3D)>,
+    },
     /// Attach a live frame to compiled drawable or text-selection bounds.
     AttachSurroundingRect {
         target: ObjectId,

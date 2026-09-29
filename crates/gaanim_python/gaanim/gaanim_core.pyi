@@ -876,7 +876,13 @@ class Box(Drawable):
         """Lay the tree out again after children changed their own size."""
         ...
     def diagnostics(self) -> list[str]:
-        """Layout warnings for this box (unsatisfied weak constraints, text errors)."""
+        """Layout warnings for this box and the boxes nested in it.
+
+        Resolves the scene's layout so far: unsatisfied weak constraints, text
+        composition errors, and decorated boxes that end with zero width or
+        height (an empty bar without ``width="fill"``). Each warning starts
+        with the box's path, such as ``column[2] > row[1]``.
+        """
         ...
 
 class Zones:
@@ -3185,6 +3191,7 @@ TextRole: TypeAlias = Literal["title", "subtitle", "kicker", "heading", "body", 
 TextWrap: TypeAlias = Literal["auto", False] | float
 TextAlign: TypeAlias = Literal["left", "center", "right", "justify"]
 TextOverflow: TypeAlias = Literal["visible", "clip", "ellipsis"]
+TextBox: TypeAlias = Literal["line", "cap", "ink"]
 TextDirection: TypeAlias = Literal["auto", "ltr", "rtl"]
 
 class TextStyle:
@@ -3231,6 +3238,7 @@ class TextFlow:
         direction: TextDirection = "auto",
         hyphenate: bool = False,
         lang: Optional[str] = None,
+        text_box: TextBox = "line",
     ) -> None:
         """Configure wrapping and line composition inside a measured Text leaf.
 
@@ -3240,6 +3248,12 @@ class TextFlow:
         ``"en"``, …) that selects the hyphenation patterns used with
         ``hyphenate=True``; ``None`` keeps Typst's English default. Invalid
         widths, spacing, line counts, or language codes raise ``ValueError``.
+
+        ``text_box`` is the box a layout measures and places the text by, like
+        CSS ``text-box``: ``"line"`` spans full lines (ascent to descent),
+        ``"cap"`` runs from the capital height to the baseline of a single
+        line so capitals meet a box edge, and ``"ink"`` hugs the glyphs.
+        ``$...$`` formulas always use their ink.
 
         Example:
             flow = TextFlow(wrap="auto", align="justify", line_spacing=1.25)
@@ -5849,12 +5863,15 @@ class Typography:
         hyphenate: Optional[bool] = None,
         lang: Optional[str] = None,
         markup: Optional[bool] = None,
+        text_box: Optional[TextBox] = None,
     ) -> Text:
         """Create structured vector text, paragraphs, mathematics, or mixed content.
 
         ``lang`` (for example ``"es"``) selects language-specific hyphenation
         and typography, as in ``TextFlow``; combine it with ``hyphenate=True``
-        for justified Spanish paragraphs.
+        for justified Spanish paragraphs. ``text_box`` (``"line"``, ``"cap"``
+        or ``"ink"``) is the box a layout places the text by, as in
+        ``TextFlow``.
 
         ``color`` accepts Color, CSS/hex strings, RGB/RGBA byte tuples, or
         None to inherit the style/theme color.
@@ -5990,7 +6007,8 @@ class LayoutBuilder:
     - Typography inherited by string children: ``color``, ``font``,
       ``font_size``, ``weight``, ``italic``, ``role``, ``text_align``,
       ``line_spacing``, ``letter_spacing``, ``max_lines``, ``overflow``,
-      ``markup``.
+      ``markup``, ``text_box`` (``"line"``, ``"cap"`` or ``"ink"``: the box
+      the text is measured and placed by).
     - ``class_``: space-separated names registered with ``classes``.
 
     Lengths are scene units, ``"Npx"`` (design pixels, 1080 per frame height
@@ -6036,7 +6054,12 @@ class LayoutBuilder:
         """
         ...
     def check_layout(self) -> list[str]:
-        """Return current constraint and text-composition diagnostics."""
+        """Resolve the layout so far and return its diagnostics.
+
+        Unsatisfied weak constraints, text composition errors, and decorated
+        boxes with zero width or height, each prefixed with the box's path
+        such as ``column[2] > row[1]``. ``gaanim check`` reports them too.
+        """
         ...
 
 class MediaLibrary:

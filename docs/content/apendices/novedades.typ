@@ -11,6 +11,48 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.7.1
+
+Publicada el 29 de septiembre de 2026. Los hijos de una caja se animan con
+libertad: el layout decide dónde descansan, no cómo se mueven. Llegan
+`text_box` para calcar diseños al píxel, avisos de cajas vacías y un overlay
+*Layout* en el editor para inspeccionar cajas y zonas como en las herramientas
+de desarrollo de un navegador. Exportar desde el editor ya no bloquea la
+reproducción. No hace falta cambiar tus escenas.
+
+== Cambios
+
+- Los hijos de una caja aceptan todas las animaciones de `.animate`:
+  `fade_in_from`, `shift_by`, `move_to`, `scale_by`, `rotate_by`,
+  `grow_from_edge`, `spin_in_from_nothing`… Parten del sitio que les da la
+  caja y no empujan a sus hermanos, como un `transform` de CSS. Si la caja se
+  reorganiza después, el hijo conserva su desplazamiento, su escala y su
+  giro. Colocar un hijo de forma inmediata (`move_to` sin `.animate`) sigue
+  lanzando `LayoutOwnershipError`. Lee
+  #link("/guias/layout/")[Animar dentro de una caja].
+- `text_box="cap"` o `"ink"` en un texto o en una caja cambia la caja con que
+  el layout mide y coloca el texto: de la altura de las mayúsculas a la línea
+  base, o ajustada a la tinta. Sirve para calcar diseños en los que las
+  mayúsculas tocan el borde. Por defecto sigue siendo `"line"`.
+- `scene.layout.check_layout()`, `box.diagnostics()` y `gaanim check` avisan
+  de las cajas con fondo o borde que quedan con ancho o alto cero, como una
+  barra vacía sin `width="fill"`, e indican su ruta (`column[2] > row[1]`).
+- El editor tiene un overlay *Layout* (`O` y después `K`) que inspecciona las
+  cajas como las herramientas de desarrollo de un navegador: contornos de
+  cajas y zonas, y, bajo el cursor, padding, celdas, márgenes y gaps con sus
+  medidas en px.
+- Una exportación desde el editor sigue en segundo plano: el diálogo se cierra
+  y puedes seguir reproduciendo. La barra de tiempo marca bajo cada segmento lo
+  ya exportado, la barra de reproducción muestra el porcentaje y permite
+  cancelar, y la terminal muestra la barra de progreso de `gaanim export`.
+
+== Correcciones
+
+- El indicador de progreso de una exportación desde el editor ya no se queda en
+  0.
+- `animate.move_to(x, y)` sobre un objeto dentro de otro usa coordenadas de
+  la escena, no las de su contenedor.
+
 = 0.7.0
 
 Publicada el 29 de septiembre de 2026. Llega un layout nuevo al estilo de CSS,

@@ -569,6 +569,7 @@ const TEXT_KEYS: &[&str] = &[
     "max_lines",
     "overflow",
     "markup",
+    "text_box",
 ];
 
 /// Named box styles by name, for each scene key.
@@ -1148,6 +1149,18 @@ impl PyBox {
         Self::restack(&inner);
         Self::reflow_inner(&inner, None, None, None);
         Ok(boxed)
+    }
+
+    /// The root drawables of this box and of every box nested in it.
+    fn subtree_roots(inner: &Arc<Mutex<LayoutState>>) -> Vec<gaanim_core::ObjectId> {
+        let state = inner.lock().expect("layout poisoned");
+        let mut roots = vec![state.root.id];
+        for member in &state.members {
+            if let Some(child) = &member.child_layout {
+                roots.extend(Self::subtree_roots(child));
+            }
+        }
+        roots
     }
 
     fn members<'py>(
@@ -1958,10 +1971,21 @@ impl PyBox {
             let state = self.inner.lock().expect("layout poisoned");
             (state.canvas.clone(), state.root.clone())
         };
-        Ok(canvas
-            .lock()
-            .expect("scene canvas poisoned")
-            .layout_diagnostics(&root))
+        let owners = Self::subtree_roots(&self.inner);
+        let canvas = canvas.lock().expect("scene canvas poisoned");
+        let compiled = canvas.compiled_layout_diagnostics();
+        let mut messages: Vec<String> = Vec::new();
+        for message in compiled
+            .into_iter()
+            .filter(|(owner, _)| owner.is_none_or(|owner| owners.contains(&owner)))
+            .map(|(_, message)| message)
+            .chain(canvas.layout_diagnostics(&root))
+        {
+            if !messages.contains(&message) {
+                messages.push(message);
+            }
+        }
+        Ok(messages)
     }
 
     fn __repr__(&self) -> String {

@@ -27,7 +27,9 @@ pub struct CapturedFrame {
     pub rgba: Vec<u8>,
 }
 
-pub(crate) fn create_progress_bar(total_frames: u64) -> ProgressBar {
+/// The terminal progress bar every export draws, from `gaanim export` or the
+/// editor.
+pub fn create_progress_bar(total_frames: u64) -> ProgressBar {
     let pb = ProgressBar::new(total_frames).with_prefix("render");
     pb.set_style(
         ProgressStyle::default_bar()

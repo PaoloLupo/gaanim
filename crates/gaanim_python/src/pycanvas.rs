@@ -3010,7 +3010,10 @@ impl PyLayoutBuilder {
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
-                .check_layout()
+                .compiled_layout_diagnostics()
+                .into_iter()
+                .map(|(_, message)| message)
+                .collect()
         })
     }
 }
@@ -3813,7 +3816,7 @@ impl PySlideKit {
 
 #[pymethods]
 impl PyTypography {
-    #[pyo3(signature = (*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None, lang=None, markup=None))]
+    #[pyo3(signature = (*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None, lang=None, markup=None, text_box=None))]
     #[allow(clippy::too_many_arguments)]
     fn __call__<'py>(
         &self,
@@ -3841,6 +3844,7 @@ impl PyTypography {
         hyphenate: Option<bool>,
         lang: Option<String>,
         markup: Option<bool>,
+        text_box: Option<&str>,
     ) -> PyResult<Py<PyText>> {
         crate::custom::ensure_authoring_allowed()?;
         let markup = markup.unwrap_or_else(|| self.default_markup());
@@ -3872,6 +3876,10 @@ impl PyTypography {
             lang,
             markup,
         )?;
+        let mut spec = spec;
+        if let Some(value) = text_box {
+            spec.flow.text_box = crate::pytext::parse_text_box(value)?;
+        }
         let handle = self
             .inner
             .lock()

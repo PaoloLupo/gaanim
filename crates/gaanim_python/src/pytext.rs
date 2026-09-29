@@ -126,6 +126,18 @@ fn parse_overflow(value: &str) -> PyResult<TextOverflow> {
     }
 }
 
+pub(crate) fn parse_text_box(value: &str) -> PyResult<gaanim_text::prelude::TextBox> {
+    use gaanim_text::prelude::TextBox;
+    match value {
+        "line" => Ok(TextBox::Line),
+        "cap" => Ok(TextBox::Cap),
+        "ink" => Ok(TextBox::Ink),
+        _ => Err(PyValueError::new_err(
+            "text_box must be 'line', 'cap', or 'ink'",
+        )),
+    }
+}
+
 fn parse_direction(value: &str) -> PyResult<TextDirection> {
     match value {
         "auto" => Ok(TextDirection::Auto),
@@ -198,7 +210,7 @@ pub struct PyTextFlow(pub TextFlow);
 #[pymethods]
 impl PyTextFlow {
     #[new]
-    #[pyo3(signature = (*, wrap=None, align="left", line_spacing=1.2, max_lines=None, overflow="clip", direction="auto", hyphenate=false, lang=None))]
+    #[pyo3(signature = (*, wrap=None, align="left", line_spacing=1.2, max_lines=None, overflow="clip", direction="auto", hyphenate=false, lang=None, text_box="line"))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         wrap: Option<&Bound<'_, PyAny>>,
@@ -209,6 +221,7 @@ impl PyTextFlow {
         direction: &str,
         hyphenate: bool,
         lang: Option<String>,
+        text_box: &str,
     ) -> PyResult<Self> {
         let flow = TextFlow {
             wrap: wrap.map(parse_wrap).transpose()?.unwrap_or(TextWrap::Auto),
@@ -219,6 +232,7 @@ impl PyTextFlow {
             direction: parse_direction(direction)?,
             hyphenate,
             lang,
+            text_box: parse_text_box(text_box)?,
         };
         TextSpec::new(
             vec!["x".into()],

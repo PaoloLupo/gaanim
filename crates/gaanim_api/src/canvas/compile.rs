@@ -598,6 +598,8 @@ struct CompiledLayoutMeasure<'a> {
     natural_text_sizes: RefCell<BTreeMap<gaanim_layout::LayoutId, DVec2>>,
     /// Ascent and descent of a full line of each text leaf's font and size.
     line_extents: RefCell<BTreeMap<gaanim_layout::LayoutId, (f64, f64)>>,
+    /// Cap height of each text leaf's font and size, for `TextBox::Cap`.
+    cap_heights: RefCell<BTreeMap<gaanim_layout::LayoutId, f64>>,
     font_registry: &'a gaanim_text::font::FontRegistry,
 }
 
@@ -617,6 +619,35 @@ fn text_line_box(
         ink.min.y
     };
     Bounds3D::new_2d(ink.min.x, bottom, ink.max.x, top)
+}
+
+/// The box a text occupies in a layout for its `text_box` mode. Formulas
+/// keep their ink box, the convention equations and matrices are laid out
+/// with.
+fn text_layout_box(
+    ink: Bounds3D,
+    metrics: gaanim_text::prelude::TextMetrics,
+    mode: gaanim_text::prelude::TextBox,
+    line_extent: (f64, f64),
+    cap_height: Option<f64>,
+) -> Bounds3D {
+    use gaanim_text::prelude::TextBox;
+    match (mode, cap_height) {
+        (TextBox::Ink, _) => ink,
+        (TextBox::Cap, Some(cap_height)) => {
+            let line_box = text_line_box(ink, metrics, line_extent);
+            let top = metrics.first_baseline + cap_height;
+            // One line ends on its baseline; more lines keep the last one's
+            // ink, as the line box does.
+            let bottom = if metrics.line_count <= 1 {
+                metrics.first_baseline
+            } else {
+                line_box.min.y
+            };
+            Bounds3D::new_2d(line_box.min.x, bottom, line_box.max.x, top.max(bottom))
+        }
+        _ => text_line_box(ink, metrics, line_extent),
+    }
 }
 
 /// Whether text content is a single `$…$` formula.
@@ -651,12 +682,21 @@ impl CompiledLayoutMeasure<'_> {
             text.color,
         );
         let (bounds, metrics) = self.typst_lines(id, text, &source)?;
-        // Formulas keep their ink box, the convention equations and
-        // matrices are laid out with; prose sits on full lines.
         let line_box = if is_formula(&text.spec.content) {
             bounds
         } else {
-            text_line_box(bounds, metrics, self.line_extent(id, text)?)
+            let mode = text.spec.flow.text_box;
+            let cap_height = match mode {
+                gaanim_text::prelude::TextBox::Cap => Some(self.cap_height(id, text)?),
+                _ => None,
+            };
+            text_layout_box(
+                bounds,
+                metrics,
+                mode,
+                self.line_extent(id, text)?,
+                cap_height,
+            )
         };
         Ok(DVec2::new(
             line_box.width().max(0.0),
@@ -715,6 +755,32 @@ impl CompiledLayoutMeasure<'_> {
         );
         self.line_extents.borrow_mut().insert(id, extent);
         Ok(extent)
+    }
+
+    /// Height of a capital above the baseline in this text's style.
+    fn cap_height(
+        &self,
+        id: gaanim_layout::LayoutId,
+        text: &CompiledTextMeasure,
+    ) -> Result<f64, gaanim_layout::LayoutError> {
+        if let Some(height) = self.cap_heights.borrow().get(&id) {
+            return Ok(*height);
+        }
+        let mut reference = text.spec.clone();
+        reference.content = vec![StructuredTextContent::Literal("H".to_owned())];
+        reference.flow.wrap = StructuredTextWrap::NoWrap;
+        reference.flow.max_lines = None;
+        let source = structured_text_typst_source(
+            &reference,
+            None,
+            text.font_size,
+            &text.font_family,
+            text.color,
+        );
+        let (bounds, metrics) = self.typst_lines(id, text, &source)?;
+        let height = (bounds.max.y - metrics.first_baseline).max(0.0);
+        self.cap_heights.borrow_mut().insert(id, height);
+        Ok(height)
     }
 }
 
@@ -1500,6 +1566,7 @@ fn collect_compiled_layout_node(
     children_by_id: &mut BTreeMap<gaanim_layout::LayoutId, Vec<gaanim_layout::LayoutId>>,
     fixed: &mut BTreeMap<gaanim_layout::LayoutId, DVec2>,
     texts: &mut BTreeMap<gaanim_layout::LayoutId, CompiledTextMeasure>,
+    rests: &HashMap<ObjectId, crate::builder::LayoutRest>,
     visiting: &mut HashSet<ObjectId>,
 ) -> Option<gaanim_layout::LayoutNode> {
     assert!(
@@ -1534,6 +1601,7 @@ fn collect_compiled_layout_node(
                 children_by_id,
                 fixed,
                 texts,
+                rests,
                 visiting,
             ) else {
                 continue;
@@ -1554,6 +1622,10 @@ fn collect_compiled_layout_node(
     } else {
         let mut transform = state.transform;
         transform.translation = DVec3::ZERO;
+        if let Some(rest) = rests.get(&source) {
+            transform.scale = rest.scale;
+            transform.rotation = rest.rotation;
+        }
         let bounds = gaanim_layout::transform_bounds(state.bounds, &transform);
         fixed.insert(
             id,
@@ -1578,6 +1650,7 @@ fn compile_layout_tree(
     states: &MobjectStateMap,
     object_specs: &HashMap<ObjectId, ObjectSpec>,
     text_config: &gaanim_text::prelude::TextConfig,
+    rests: &HashMap<ObjectId, crate::builder::LayoutRest>,
 ) -> Option<CompiledLayoutTree> {
     let mut source_by_id = BTreeMap::new();
     let mut parent_by_id = BTreeMap::new();
@@ -1598,6 +1671,7 @@ fn compile_layout_tree(
         &mut children_by_id,
         &mut fixed,
         &mut texts,
+        rests,
         &mut HashSet::new(),
     )?;
     Some(CompiledLayoutTree {
@@ -1609,6 +1683,43 @@ fn compile_layout_tree(
         fixed,
         texts,
     })
+}
+
+/// Where a box sits in its layout tree, for diagnostics: the kind and index
+/// of each ancestor below the root, such as `column[1] > row[0]`.
+fn layout_box_path(
+    tree: &CompiledLayoutTree,
+    snapshots: &HashMap<ObjectId, LayoutTreeSnapshot>,
+    id: gaanim_layout::LayoutId,
+) -> String {
+    let kind_name = |id: &gaanim_layout::LayoutId| {
+        tree.source_by_id
+            .get(id)
+            .and_then(|source| snapshots.get(source))
+            .map_or("box", |snapshot| match snapshot.spec.kind {
+                gaanim_layout::LayoutNodeKind::Row { .. } => "row",
+                gaanim_layout::LayoutNodeKind::Column { .. } => "column",
+                gaanim_layout::LayoutNodeKind::Grid { .. } => "grid",
+                gaanim_layout::LayoutNodeKind::Stack => "stack",
+                gaanim_layout::LayoutNodeKind::Leaf => "box",
+            })
+    };
+    let mut segments = Vec::new();
+    let mut current = id;
+    while let Some(parent) = tree.parent_by_id.get(&current) {
+        let index = tree
+            .children_by_id
+            .get(parent)
+            .and_then(|children| children.iter().position(|child| *child == current))
+            .unwrap_or(0);
+        segments.push(format!("{}[{index}]", kind_name(parent)));
+        current = *parent;
+    }
+    if segments.is_empty() {
+        return format!("root {}", kind_name(&id));
+    }
+    segments.reverse();
+    segments.join(" > ")
 }
 
 fn outermost_layout_source(
@@ -2510,6 +2621,14 @@ impl SceneModel {
             let previous_scene = seg
                 .prev_segment
                 .and_then(|index| scene_ids.get(index).copied());
+            // Zones belong to the segment that created them; a resumed
+            // compile replays this segment's zones again.
+            builder.commands.queue(move |world: &mut World| {
+                world
+                    .get_resource_or_insert_with(gaanim_scene::LayoutZones::default)
+                    .0
+                    .retain(|zone| zone.segment < index);
+            });
             let scene_id = builder.begin_scene(&seg.name);
             scene_ids.push(scene_id);
             let start_time = builder.current_time;
@@ -2557,6 +2676,15 @@ impl SceneModel {
                     stop.time = time;
                 }
             }
+            let end_time = builder.current_time;
+            builder.commands.queue(move |world: &mut World| {
+                if let Some(mut zones) = world.get_resource_mut::<gaanim_scene::LayoutZones>() {
+                    for zone in zones.0.iter_mut().filter(|zone| zone.segment == usize::MAX) {
+                        zone.segment = index;
+                        zone.end = end_time;
+                    }
+                }
+            });
             builder.end_scene();
         }
         let segment_paints = segments
@@ -2687,6 +2815,45 @@ impl SceneModel {
             .insert_resource(gaanim_media::PreviewAudioTracks(self.audio_tracks.clone()));
         builder.commands.insert_resource(self.lighting_3d);
         checkpoint
+    }
+
+    /// Compile the scene into a scratch world and return every layout
+    /// diagnostic with the box it belongs to, including those only a
+    /// resolved layout reveals (a decorated box of zero size, a failed
+    /// resolution). `gaanim check` and `check_layout()` use it; the scene's
+    /// own diagnostics are left as they were.
+    pub fn compiled_layout_diagnostics(&self) -> Vec<(Option<ObjectId>, String)> {
+        let saved = self
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .layout_diagnostics
+            .clone();
+        let mut world = World::new();
+        let mut timeline = Timeline::new();
+        let mut font_registry = gaanim_text::font::FontRegistry::new();
+        let text_config = self.scene_text_config(&gaanim_text::prelude::TextConfig::default());
+        self.register_theme_fonts(&mut font_registry);
+        {
+            let mut commands = world.commands();
+            self.compile_into(&mut commands, &mut timeline, &font_registry, &text_config);
+        }
+        world.flush();
+        let compiled = std::mem::replace(
+            &mut self
+                .state
+                .lock()
+                .expect("canvas state poisoned")
+                .layout_diagnostics,
+            saved,
+        );
+        let mut unique = Vec::new();
+        for entry in compiled {
+            if !unique.contains(&entry) {
+                unique.push(entry);
+            }
+        }
+        unique
     }
 
     pub fn compile(&self, world: &mut World) {
@@ -3812,6 +3979,7 @@ impl SceneModel {
                         &builder.states,
                         object_specs,
                         text_config,
+                        &builder.layout_rests,
                     ) else {
                         continue;
                     };
@@ -3843,6 +4011,21 @@ impl SceneModel {
                                 .map(|state| (actual, state.transform))
                         })
                         .collect();
+                    // Where each child stands now, by source object: its
+                    // offset from the rest its layout last gave it survives
+                    // this reflow, as a CSS transform survives a relayout.
+                    let current_translations: HashMap<ObjectId, DVec3> = tree
+                        .source_by_id
+                        .iter()
+                        .filter(|(id, _)| **id != root_id && !entering_subtree(**id))
+                        .filter_map(|(_, source)| {
+                            let actual = id_map.get(source).copied()?;
+                            builder
+                                .states
+                                .get(actual)
+                                .map(|state| (*source, state.transform.translation))
+                        })
+                        .collect();
                     let viewport = match root_snapshot.spec.within {
                         LayoutWithin::Safe => frame_bounds,
                         LayoutWithin::Frame => raw_frame_bounds,
@@ -3854,6 +4037,7 @@ impl SceneModel {
                         text_compositions: RefCell::default(),
                         text_candidates: RefCell::default(),
                         line_extents: RefCell::default(),
+                        cap_heights: RefCell::default(),
                         natural_text_sizes: RefCell::default(),
                         font_registry: builder.font_registry,
                     };
@@ -3872,6 +4056,45 @@ impl SceneModel {
                                 continue;
                             }
                         };
+                    // A decorated box that resolves to nothing draws nothing:
+                    // usually an empty bar or rule missing `width="fill"`.
+                    for (layout_id, source) in &tree.source_by_id {
+                        if !object_specs
+                            .get(source)
+                            .is_some_and(|spec| spec.layout_background.is_some())
+                        {
+                            continue;
+                        }
+                        let Some(size) = resolved
+                            .boxes
+                            .get(layout_id)
+                            .map(|resolved| resolved.bounds.size())
+                        else {
+                            continue;
+                        };
+                        // Keyed by the box itself, so resolving it again (on
+                        // its own first, then inside the box that adopts it)
+                        // replaces the earlier report.
+                        const EMPTY_BOX: &str = "a box with a background or border has zero";
+                        let mut state = diagnostic_state.lock().expect("canvas state poisoned");
+                        state.layout_diagnostics.retain(|(owner, message)| {
+                            *owner != Some(*source) || !message.contains(EMPTY_BOX)
+                        });
+                        let empty = match (size.x <= 1.0e-6, size.y <= 1.0e-6) {
+                            (true, true) => "width and height",
+                            (true, false) => "width",
+                            (false, true) => "height",
+                            (false, false) => continue,
+                        };
+                        let path = layout_box_path(&tree, layout_snapshots, *layout_id);
+                        state.layout_diagnostics.push((
+                            Some(*source),
+                            format!(
+                                "{path}: {EMPTY_BOX} {empty}, so it draws nothing; give it \
+                                 content or a size such as width=\"fill\" or height=\"8px\""
+                            ),
+                        ));
+                    }
                     let text_compositions: BTreeMap<_, _> = tree
                         .texts
                         .keys()
@@ -3881,6 +4104,7 @@ impl SceneModel {
                         })
                         .collect();
                     let line_extents = measurer.line_extents.into_inner();
+                    let cap_heights = measurer.cap_heights.into_inner();
                     if !resolved.diagnostics.is_empty() {
                         let mut state = diagnostic_state.lock().expect("canvas state poisoned");
                         state
@@ -4161,18 +4385,32 @@ impl SceneModel {
                                 target_box.bounds.width() * 0.5,
                                 target_box.bounds.height() * 0.5,
                             );
+                            let rest = target_box.bounds.center() - parent_center;
+                            let Some(current) =
+                                builder.states.get(*member).map(|state| state.transform)
+                            else {
+                                continue;
+                            };
+                            let translation = Self::keep_layout_offset(
+                                builder,
+                                tree.source_by_id.get(layout_id).copied(),
+                                &current_translations,
+                                &current,
+                                rest,
+                            );
                             let Some(state) = builder.states.get_mut(*member) else {
                                 continue;
                             };
                             let mut target = state.transform;
-                            target.translation = target_box.bounds.center() - parent_center;
+                            target.translation = translation;
                             state.bounds = local_bounds;
                             state.transform = target;
+                            let entity = state.entity;
                             builder
                                 .commands
-                                .entity(state.entity)
-                                .insert((LocalBounds(local_bounds), target));
-                            let entity = state.entity;
+                                .entity(entity)
+                                .insert(LocalBounds(local_bounds));
+                            Self::place_layout_member(builder, entity, target);
                             let time = builder.current_time;
                             let span = duration.unwrap_or(0.0);
                             builder.commands.queue(move |world: &mut World| {
@@ -4188,10 +4426,14 @@ impl SceneModel {
                             continue;
                         }
                         let metrics = builder.text_metrics.get(member).copied();
-                        let Some(state) = builder.states.get_mut(*member) else {
+                        let Some((transform, bounds)) = builder
+                            .states
+                            .get(*member)
+                            .map(|state| (state.transform, state.bounds))
+                        else {
                             continue;
                         };
-                        let mut zero_translation = state.transform;
+                        let mut zero_translation = transform;
                         zero_translation.translation = DVec3::ZERO;
                         // Text sits by its line box, as it was measured, unless
                         // its item sets the height: then its ink is centered.
@@ -4199,17 +4441,32 @@ impl SceneModel {
                             .item_style_by_id
                             .get(layout_id)
                             .is_some_and(|style| style.height.is_some());
+                        let mode = tree
+                            .texts
+                            .get(layout_id)
+                            .map(|text| text.spec.flow.text_box)
+                            .unwrap_or_default();
                         let local = match (line_extents.get(layout_id), metrics) {
-                            (Some(extent), Some(metrics)) if !sized => {
-                                text_line_box(state.bounds, metrics, *extent)
-                            }
-                            _ => state.bounds,
+                            (Some(extent), Some(metrics)) if !sized => text_layout_box(
+                                bounds,
+                                metrics,
+                                mode,
+                                *extent,
+                                cap_heights.get(layout_id).copied(),
+                            ),
+                            _ => bounds,
                         };
                         let intrinsic = gaanim_layout::transform_bounds(local, &zero_translation);
                         let target_center = target_box.bounds.center() - parent_center;
                         let intrinsic_center = intrinsic.center();
-                        let mut target = state.transform;
-                        target.translation = target_center - intrinsic_center;
+                        let mut target = transform;
+                        target.translation = Self::keep_layout_offset(
+                            builder,
+                            tree.source_by_id.get(layout_id).copied(),
+                            &current_translations,
+                            &transform,
+                            target_center - intrinsic_center,
+                        );
                         let sx = target_box.bounds.width() / intrinsic.width().max(1.0e-9);
                         let sy = target_box.bounds.height() / intrinsic.height().max(1.0e-9);
                         let item_style = tree
@@ -4229,8 +4486,87 @@ impl SceneModel {
                             cover_clips.push((*member, target_box.bounds));
                         }
                         targets.push((*member, target));
+                        let Some(state) = builder.states.get_mut(*member) else {
+                            continue;
+                        };
                         state.transform = target;
-                        builder.commands.entity(state.entity).insert(target);
+                        let entity = state.entity;
+                        Self::place_layout_member(builder, entity, target);
+                    }
+                    // What the editor's layout inspector draws for each box:
+                    // padding, gap and its children's cells from now on.
+                    for (container_id, child_ids) in &tree.children_by_id {
+                        let (Some(container_box), Some(entity)) = (
+                            resolved.boxes.get(container_id),
+                            materialized_by_id
+                                .get(container_id)
+                                .and_then(|member| builder.states.get(*member))
+                                .map(|state| state.entity),
+                        ) else {
+                            continue;
+                        };
+                        let Some(snapshot) = tree
+                            .source_by_id
+                            .get(container_id)
+                            .and_then(|source| layout_snapshots.get(source))
+                        else {
+                            continue;
+                        };
+                        let center = container_box.bounds.center();
+                        let insets = |insets: gaanim_layout::Insets| {
+                            [insets.top, insets.right, insets.bottom, insets.left]
+                        };
+                        let frame = gaanim_scene::LayoutInspectionFrame {
+                            kind: match snapshot.spec.kind {
+                                gaanim_layout::LayoutNodeKind::Row { .. } => {
+                                    gaanim_scene::LayoutInspectionKind::Row
+                                }
+                                gaanim_layout::LayoutNodeKind::Column { .. } => {
+                                    gaanim_scene::LayoutInspectionKind::Column
+                                }
+                                gaanim_layout::LayoutNodeKind::Grid { .. } => {
+                                    gaanim_scene::LayoutInspectionKind::Grid
+                                }
+                                _ => gaanim_scene::LayoutInspectionKind::Stack,
+                            },
+                            padding: insets(snapshot.spec.style.padding),
+                            gap: snapshot.spec.style.gap,
+                            cells: child_ids
+                                .iter()
+                                .filter_map(|child| {
+                                    let bounds = resolved.boxes.get(child)?.bounds;
+                                    Some(gaanim_scene::LayoutInspectionCell {
+                                        bounds: Bounds3D::new_2d(
+                                            bounds.min.x - center.x,
+                                            bounds.min.y - center.y,
+                                            bounds.max.x - center.x,
+                                            bounds.max.y - center.y,
+                                        ),
+                                        margin: insets(
+                                            tree.item_style_by_id
+                                                .get(child)
+                                                .map(|style| style.margin)
+                                                .unwrap_or_default(),
+                                        ),
+                                    })
+                                })
+                                .collect(),
+                        };
+                        let time = builder.current_time;
+                        builder.commands.queue(move |world: &mut World| {
+                            let Ok(mut entity) = world.get_entity_mut(entity) else {
+                                return;
+                            };
+                            if let Some(mut inspection) =
+                                entity.get_mut::<gaanim_scene::LayoutInspection>()
+                            {
+                                inspection.record(time, frame);
+                            } else {
+                                let mut inspection = gaanim_scene::LayoutInspection::default();
+                                inspection.record(time, frame);
+                                entity.insert(inspection);
+                            }
+                        });
                     }
                     for (member, clip_bounds) in cover_clips {
                         let world_path = Rect::new(
@@ -4265,7 +4601,8 @@ impl SceneModel {
                     for (member, transform) in before {
                         if let Some(state) = builder.states.get_mut(member) {
                             state.transform = transform;
-                            builder.commands.entity(state.entity).insert(transform);
+                            let entity = state.entity;
+                            Self::place_layout_member(builder, entity, transform);
                         }
                     }
                     let transition_duration = (*duration).unwrap_or(0.0);
@@ -5278,6 +5615,26 @@ impl SceneModel {
                             },
                         );
                     }
+                }
+                Op::RecordLayoutZones { zones } => {
+                    let start = builder.current_time;
+                    let records: Vec<_> = zones
+                        .iter()
+                        .map(|(name, bounds)| gaanim_scene::LayoutZoneRecord {
+                            name: name.clone(),
+                            bounds: *bounds,
+                            // Set when the segment ends.
+                            segment: usize::MAX,
+                            start,
+                            end: f64::INFINITY,
+                        })
+                        .collect();
+                    builder.commands.queue(move |world: &mut World| {
+                        world
+                            .get_resource_or_insert_with(gaanim_scene::LayoutZones::default)
+                            .0
+                            .extend(records);
+                    });
                 }
                 Op::AttachSurroundingRect {
                     target,
@@ -9306,6 +9663,55 @@ impl SceneModel {
                 | SpawnKind::Bezier { .. }
                 | SpawnKind::Curve(_)
         )
+    }
+
+    /// Write the translation and scale a layout gives a member to its
+    /// entity. Its rotation and skew are its own: a child rotated later in
+    /// the timeline must not show that rotation before its animation starts.
+    fn place_layout_member(
+        builder: &mut SceneBuilder,
+        entity: bevy::prelude::Entity,
+        transform: SpatialTransform,
+    ) {
+        builder.commands.queue(move |world: &mut World| {
+            if let Some(mut current) = world.get_mut::<SpatialTransform>(entity) {
+                current.translation = transform.translation;
+                current.scale = transform.scale;
+            } else if let Ok(mut entity) = world.get_entity_mut(entity) {
+                entity.insert(transform);
+            }
+        });
+    }
+
+    /// The translation a box child takes at its new `rest`: the rest plus the
+    /// offset it has been moved from the rest its layout last gave it, so
+    /// the child's own animations survive a reflow. Records `rest`, and on
+    /// the child's first placement its `current` scale and rotation.
+    fn keep_layout_offset(
+        builder: &mut SceneBuilder,
+        source: Option<ObjectId>,
+        current_translations: &HashMap<ObjectId, DVec3>,
+        current: &SpatialTransform,
+        rest: DVec3,
+    ) -> DVec3 {
+        let Some(source) = source else {
+            return rest;
+        };
+        let previous = builder.layout_rests.get(&source).copied();
+        builder.layout_rests.insert(
+            source,
+            crate::builder::LayoutRest {
+                translation: rest,
+                scale: previous.map_or(current.scale, |previous| previous.scale),
+                rotation: previous.map_or(current.rotation, |previous| previous.rotation),
+            },
+        );
+        let offset = previous
+            .zip(current_translations.get(&source))
+            .map_or(DVec3::ZERO, |(previous, current)| {
+                *current - previous.translation
+            });
+        rest + offset
     }
 
     fn apply_layout(
@@ -15120,6 +15526,7 @@ mod tests {
             text_compositions: RefCell::default(),
             text_candidates: RefCell::default(),
             line_extents: RefCell::default(),
+            cap_heights: RefCell::default(),
             natural_text_sizes: RefCell::default(),
             font_registry: &fonts,
         };
@@ -15181,6 +15588,7 @@ mod tests {
                 text_compositions: RefCell::default(),
                 text_candidates: RefCell::default(),
                 line_extents: RefCell::default(),
+                cap_heights: RefCell::default(),
                 natural_text_sizes: RefCell::default(),
                 font_registry: &fonts,
             };
@@ -15243,6 +15651,7 @@ mod tests {
             text_compositions: RefCell::default(),
             text_candidates: RefCell::default(),
             line_extents: RefCell::default(),
+            cap_heights: RefCell::default(),
             natural_text_sizes: RefCell::default(),
             font_registry: &fonts,
         };
@@ -15621,6 +16030,128 @@ mod tests {
                 }
             ) if *from == 0.0 && *to == 1.0
         )));
+    }
+
+    #[test]
+    fn layout_records_what_the_editor_inspector_draws() {
+        let mut canvas = SceneModel::new(640, 360);
+        let first = canvas.rect(80.0, 30.0);
+        let second = canvas.rect(80.0, 30.0);
+        let container = canvas.group(&[&first, &second]);
+        let member = |handle: &crate::canvas::DrawableHandle| crate::canvas::LayoutMemberSpec {
+            id: handle.id,
+            style: gaanim_layout::LayoutItemStyle::default(),
+        };
+        canvas.reflow_layout(
+            &container,
+            vec![member(&first), member(&second)],
+            crate::canvas::LayoutSpec {
+                kind: gaanim_layout::LayoutNodeKind::Row { wrap: false },
+                style: gaanim_layout::LayoutStyle {
+                    gap: DVec2::splat(20.0),
+                    padding: gaanim_layout::Insets::all(10.0),
+                    ..Default::default()
+                },
+                within: LayoutWithin::Intrinsic,
+            },
+            1,
+            None,
+            None,
+            None,
+        );
+        canvas.record_layout_zones(vec![(
+            "top".to_owned(),
+            Bounds3D::new_2d(-1.0, 0.0, 1.0, 1.0),
+        )]);
+        canvas.wait(1.0);
+
+        let (mut world, _) = compiled_world(&canvas);
+        let mut inspections = world.query::<&gaanim_scene::LayoutInspection>();
+        let inspection = inspections.iter(&world).next().expect("box inspection");
+        let frame = inspection.at(0.0).expect("arrangement at the start");
+        assert_eq!(frame.kind, gaanim_scene::LayoutInspectionKind::Row);
+        assert_eq!(frame.padding, [10.0; 4]);
+        assert_eq!(frame.cells.len(), 2);
+        // The cells sit side by side, 20 apart, around the box's center.
+        let gap = frame.cells[1].bounds.min.x - frame.cells[0].bounds.max.x;
+        assert!((gap - 20.0).abs() < 1.0e-6, "{gap}");
+        let zones = world.resource::<gaanim_scene::LayoutZones>();
+        assert_eq!(zones.0.len(), 1);
+        assert_eq!(zones.0[0].name, "top");
+        assert_eq!((zones.0[0].segment, zones.0[0].start), (0, 0.0));
+        assert!((zones.0[0].end - 1.0).abs() < 1.0e-9);
+    }
+
+    #[test]
+    fn layout_reflow_keeps_a_member_offset_from_its_rest() {
+        use gaanim_timeline::clip::{AnimationSpec, ClipPayload, PropertyLensSpec};
+        let mut canvas = SceneModel::new(640, 360);
+        let first = canvas.rect(80.0, 30.0);
+        let second = canvas.rect(80.0, 30.0);
+        let third = canvas.rect(80.0, 30.0);
+        let container = canvas.group(&[&first, &second]);
+        let spec = crate::canvas::LayoutSpec {
+            kind: gaanim_layout::LayoutNodeKind::Column { wrap: false },
+            style: gaanim_layout::LayoutStyle {
+                gap: DVec2::splat(20.0),
+                align: gaanim_layout::Align::Center,
+                ..Default::default()
+            },
+            within: LayoutWithin::Intrinsic,
+        };
+        let member = |handle: &crate::canvas::DrawableHandle| crate::canvas::LayoutMemberSpec {
+            id: handle.id,
+            style: gaanim_layout::LayoutItemStyle::default(),
+        };
+        canvas.reflow_layout(
+            &container,
+            vec![member(&first), member(&second)],
+            spec.clone(),
+            1,
+            None,
+            None,
+            None,
+        );
+        // The first member moves on its own, then the box gains a member.
+        canvas.play(vec![first.animate().shift_by(30.0, 0.0).duration(0.5)]);
+        canvas.set_group_members(&container, &[&first, &second, &third]);
+        canvas.reflow_layout(
+            &container,
+            vec![member(&first), member(&second), member(&third)],
+            spec,
+            2,
+            Some(0.5),
+            Some(&third),
+            None,
+        );
+
+        let (_, timeline) = compiled_world(&canvas);
+        // Every member rests at x = 0; only the moved one stays 30 to the right
+        // while the reflow slides it to its new row.
+        let reflow_moves: Vec<_> = timeline
+            .clips
+            .values()
+            .filter(|clip| clip.start >= 0.5 - 1.0e-9)
+            .filter_map(|clip| match &clip.payload {
+                ClipPayload::Animation(AnimationSpec {
+                    lens: PropertyLensSpec::Translation { from, to },
+                    ..
+                }) => Some((*from, *to)),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            reflow_moves
+                .iter()
+                .any(|(from, to)| (from.x - 30.0).abs() < 1.0e-6 && (to.x - 30.0).abs() < 1.0e-6),
+            "{reflow_moves:?}"
+        );
+        assert!(
+            reflow_moves
+                .iter()
+                .all(|(_, to)| to.x.abs() < 1.0e-6 || (to.x - 30.0).abs() < 1.0e-6),
+            "{reflow_moves:?}"
+        );
     }
 
     #[test]

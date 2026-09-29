@@ -300,6 +300,10 @@ impl PyCanvasAnim {
             .map_err(PyValueError::new_err)
     }
 
+    /// Transforms animate freely, box children included: their layout gives
+    /// them a place to rest, and a reflow keeps their offset from it. Only
+    /// live derived geometry, which rewrites the transform every frame,
+    /// refuses them.
     fn require_transformable(&self) -> PyResult<()> {
         if self.inner.property_target_is_text_selection() {
             return Err(PyTypeError::new_err(
@@ -307,14 +311,15 @@ impl PyCanvasAnim {
             ));
         }
         crate::custom::ensure_authoring_allowed()?;
-        if self.inner.property_position_is_free() {
-            Ok(())
-        } else {
+        if self.inner.property_transform_is_live_derived() {
             Err(PyValueError::new_err(
-                "live derived geometry or layout owns this drawable's transform",
+                "live derived geometry owns this drawable's transform",
             ))
+        } else {
+            Ok(())
         }
     }
+
     fn fill_level(&self, level: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
@@ -527,9 +532,9 @@ impl PyCanvasAnim {
                 "TextSelection.animate supports only fill and opacity targets",
             ));
         }
-        if !self.inner.property_position_is_free() {
-            return Err(crate::LayoutOwnershipError::new_err(
-                "layout owns this drawable's translation; animate the box or detach the child first",
+        if self.inner.property_transform_is_live_derived() {
+            return Err(PyValueError::new_err(
+                "live derived geometry owns this drawable's transform",
             ));
         }
         self.require_property_slot("shift_by")?;
@@ -590,9 +595,9 @@ impl PyCanvasAnim {
                 "TextSelection.animate supports only fill and opacity targets",
             ));
         }
-        if !self.inner.property_position_is_free() {
-            return Err(crate::LayoutOwnershipError::new_err(
-                "layout owns this drawable's translation; animate the box or detach the child first",
+        if self.inner.property_transform_is_live_derived() {
+            return Err(PyValueError::new_err(
+                "live derived geometry owns this drawable's transform",
             ));
         }
         self.require_property_slot("shift_by_3d")?;

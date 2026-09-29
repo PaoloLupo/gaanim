@@ -244,6 +244,24 @@ impl PyZoneSet {
     ) -> PyResult<Self> {
         let units = Units::new(canvas.clone());
         let zones = template.resolve(py, region, &units)?;
+        // The editor's layout inspector outlines them until the segment ends.
+        canvas
+            .lock()
+            .expect("scene canvas poisoned")
+            .record_layout_zones(
+                zones
+                    .iter()
+                    .enumerate()
+                    .map(|(index, bounds)| {
+                        let name = template
+                            .names
+                            .get(index)
+                            .cloned()
+                            .unwrap_or_else(|| format!("#{index}"));
+                        (name, *bounds)
+                    })
+                    .collect(),
+            );
         Ok(Self {
             canvas,
             zones,

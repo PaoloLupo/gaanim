@@ -1602,15 +1602,14 @@ impl Anim {
             .property_spec
             .as_ref()
             .and_then(|spec| {
-                spec.lock().ok().map(|spec| {
-                    spec.layout_owner.is_some()
-                        || matches!(spec.kind, SpawnKind::Boolean { live: true, .. })
-                })
+                spec.lock()
+                    .ok()
+                    .map(|spec| matches!(spec.kind, SpawnKind::Boolean { live: true, .. }))
             })
             .unwrap_or(false);
         assert!(
             !unavailable,
-            "layout or live derived geometry owns this drawable's transform"
+            "live derived geometry owns this drawable's transform"
         );
     }
 
@@ -1625,6 +1624,21 @@ impl Anim {
                 })
             })
             .unwrap_or(true)
+    }
+
+    /// Whether live derived geometry (a live boolean) rewrites this
+    /// drawable's transform every frame. Unlike a layout owner, it leaves no
+    /// resting position for an entrance effect to return to.
+    #[doc(hidden)]
+    pub fn property_transform_is_live_derived(&self) -> bool {
+        self.property_spec
+            .as_ref()
+            .and_then(|spec| {
+                spec.lock()
+                    .ok()
+                    .map(|spec| matches!(spec.kind, SpawnKind::Boolean { live: true, .. }))
+            })
+            .unwrap_or(false)
     }
 
     #[doc(hidden)]

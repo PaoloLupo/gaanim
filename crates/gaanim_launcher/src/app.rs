@@ -685,6 +685,12 @@ fn presentation_preflight(
     };
     report.warnings.extend(canvas.unthemed_contrast_warning());
     report.warnings.extend(canvas.launched_past_end_warning());
+    report.warnings.extend(
+        canvas
+            .compiled_layout_diagnostics()
+            .into_iter()
+            .map(|(_, message)| format!("layout: {message}")),
+    );
 
     if manifest.segments.is_empty() {
         report
@@ -749,6 +755,12 @@ fn scene_preflight(canvas: &gaanim_api::canvas::SceneModel, source: &str) -> Pre
     };
     report.warnings.extend(canvas.unthemed_contrast_warning());
     report.warnings.extend(canvas.launched_past_end_warning());
+    report.warnings.extend(
+        canvas
+            .compiled_layout_diagnostics()
+            .into_iter()
+            .map(|(_, message)| format!("layout: {message}")),
+    );
     if canvas.frame.validate().is_err() {
         report
             .errors

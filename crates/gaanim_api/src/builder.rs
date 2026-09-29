@@ -837,6 +837,22 @@ pub struct SceneBuilder<'w, 's, 'a> {
     /// Selected glyphs dimmed by `TextSelection.cancel()`. They leave with the
     /// same owning Text instead of lingering behind a replacement.
     text_canceled_term_children: HashMap<ObjectId, Vec<ObjectId>>,
+    /// Where each box child rests in its layout, keyed by source object. A
+    /// reflow keeps the child's own offset from it, so a child animated
+    /// inside its box stays where it was moved.
+    pub(crate) layout_rests: HashMap<ObjectId, LayoutRest>,
+}
+
+/// A box child's place in its layout, apart from its own animations.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct LayoutRest {
+    /// The translation its layout last gave it.
+    pub(crate) translation: DVec3,
+    /// Its scale and rotation when its layout first placed it. The layout
+    /// measures the child with them, so animating either does not resize
+    /// its slot, as a CSS transform does not.
+    pub(crate) scale: DVec3,
+    pub(crate) rotation: gaanim_core::glam::DQuat,
 }
 
 /// Owned state of a [`SceneBuilder`], detached from its ECS and timeline
@@ -876,6 +892,7 @@ pub(crate) struct SceneBuilderState {
     membership_managed_objects: HashSet<ObjectId>,
     text_cancellation_marks: HashMap<ObjectId, Vec<ObjectId>>,
     text_canceled_term_children: HashMap<ObjectId, Vec<ObjectId>>,
+    layout_rests: HashMap<ObjectId, LayoutRest>,
 }
 
 impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
@@ -909,6 +926,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             membership_managed_objects: self.membership_managed_objects.clone(),
             text_cancellation_marks: self.text_cancellation_marks.clone(),
             text_canceled_term_children: self.text_canceled_term_children.clone(),
+            layout_rests: self.layout_rests.clone(),
         }
     }
 
@@ -949,6 +967,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             membership_managed_objects,
             text_cancellation_marks,
             text_canceled_term_children,
+            layout_rests,
         } = state;
         Self {
             property_source_cursors,
@@ -983,6 +1002,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             membership_managed_objects,
             text_cancellation_marks,
             text_canceled_term_children,
+            layout_rests,
         }
     }
 
@@ -1287,6 +1307,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             membership_managed_objects: HashSet::new(),
             text_cancellation_marks: HashMap::new(),
             text_canceled_term_children: HashMap::new(),
+            layout_rests: HashMap::new(),
         }
     }
 
@@ -3214,6 +3235,17 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             _ => None,
         };
 
+        // Scene points arrive in world space; a child (of a box, say) keeps
+        // its translation in its parent's space.
+        let to_parent_space = self
+            .states
+            .get(anim.target)
+            .and_then(|state| state.parent)
+            .map(|parent| self.get_world_transform(parent).to_mat4().inverse());
+        let to_parent_space = move |point: DVec3| {
+            to_parent_space.map_or(point, |inverse| inverse.transform_point3(point))
+        };
+
         let state = match self.states.get_mut(anim.target) {
             Some(s) => s,
             None => {
@@ -3234,8 +3266,13 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }
             AnimationType::TranslateAnchorTo { to, anchor } => {
                 let from = state.transform.translation;
-                let to = gaanim_layout::compute_move_to(state.bounds, &state.transform, to, anchor)
-                    .translation;
+                let to = gaanim_layout::compute_move_to(
+                    state.bounds,
+                    &state.transform,
+                    to_parent_space(to),
+                    anchor,
+                )
+                .translation;
                 state.transform.translation = to;
                 PropertyLensSpec::Translation { from, to }
             }
@@ -3246,7 +3283,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 let to = gaanim_layout::compute_move_to(
                     state.bounds,
                     &state.transform,
-                    target,
+                    to_parent_space(target),
                     Anchor::Center,
                 )
                 .translation;

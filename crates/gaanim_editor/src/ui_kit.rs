@@ -73,6 +73,8 @@ pub(crate) enum Icon {
     Reset,
     /// Frame split in thirds: composition guides.
     Thirds,
+    /// A box holding two boxes: layout inspector.
+    Layout,
 }
 
 /// How an icon button presents its state.
@@ -520,6 +522,23 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color:
                 tip + normal * head * 0.75,
             ]);
         }
+        Icon::Layout => {
+            painter.rect_stroke(
+                Rect::from_min_max(p(-0.42, -0.34), p(0.42, 0.34)),
+                s * 0.06,
+                stroke,
+                egui::StrokeKind::Middle,
+            );
+            let thin = Stroke::new(stroke.width * 0.8, color);
+            for (left, right) in [(-0.28, -0.04), (0.04, 0.28)] {
+                painter.rect_stroke(
+                    Rect::from_min_max(p(left, -0.2), p(right, 0.2)),
+                    0.0,
+                    thin,
+                    egui::StrokeKind::Middle,
+                );
+            }
+        }
         Icon::Thirds => {
             painter.rect_stroke(
                 Rect::from_min_max(p(-0.42, -0.32), p(0.42, 0.32)),
@@ -791,21 +810,6 @@ fn text_button(
         text,
     );
     response
-}
-
-/// Slim progress track.
-pub(crate) fn progress_track(ui: &mut Ui, fraction: f32, color: Color32) {
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 6.0), Sense::hover());
-    let painter = ui.painter();
-    painter.rect_filled(rect, 0.0, Color32::from_white_alpha(22));
-    let fraction = fraction.clamp(0.0, 1.0);
-    if fraction > 0.0 {
-        let fill = Rect::from_min_max(
-            rect.min,
-            pos2(rect.min.x + rect.width() * fraction, rect.max.y),
-        );
-        painter.rect_filled(fill, 0.0, color);
-    }
 }
 
 /// Square badge with an icon, used as the headline of result dialogs.

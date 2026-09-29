@@ -340,7 +340,7 @@ Colocación por línea base para que palabras y ecuaciones se alineen.
     (name: "x / y", type: "float | fuente reactiva", default: none, desc: [Punto de destino en unidades de escena.]),
     (name: "anchor", type: "Anchor | TextAnchor | None", default: "None", desc: [Anclaje geométrico, o `TextAnchor.BASELINE_LEFT`, `BASELINE_CENTER` o `BASELINE_RIGHT` sobre la línea base.]),
   ),
-  desc: [Una sola línea se coloca por defecto con `TextAnchor.BASELINE_CENTER`: el centro horizontal visual en `x` y la línea base en `y`. Así, textos y ecuaciones con distintas ascendentes, fracciones o tamaños comparten línea base. Un bloque de varias líneas sin anclaje usa su centro visual, y un `TextAnchor` explícito usa la primera línea. Los anclajes geométricos (`Anchor.TOP_LEFT`…) se basan en los límites y no garantizan una línea base común. Un `Drawable` o un `AnchorPoint` centran el texto sobre la referencia sin seguirla. Un texto gestionado por Layout lanza `LayoutOwnershipError`.],
+  desc: [Una sola línea se coloca por defecto con `TextAnchor.BASELINE_CENTER`: el centro horizontal visual en `x` y la línea base en `y`. Así, textos y ecuaciones con distintas ascendentes, fracciones o tamaños comparten línea base. Un bloque de varias líneas sin anclaje usa su centro visual, y un `TextAnchor` explícito usa la primera línea. Los anclajes geométricos (`Anchor.TOP_LEFT`…) se basan en los límites y no garantizan una línea base común. Un `Drawable` o un `AnchorPoint` centran el texto sobre la referencia sin seguirla. Un texto gestionado por Layout lanza `LayoutOwnershipError`; `text.animate.move_to(...)` sí lo mueve.],
 )[
 ```python
 >>>from gaanim import *
@@ -730,10 +730,11 @@ un contenedor que abraza su contenido (`"hug"`) nunca lo reparte en más líneas
 `animate.transform_to` invalidan la medición y piden reflow; los énfasis
 transitorios (`indicate`, `pulse`, `wiggle`, `wave`, `highlight`, `focus`) no.
 
-Una caja es dueña de la traslación de sus hijos: un `Text` dentro de una caja
-rechaza `move_to`, `shift_by`, `next_to` y las animaciones de posición con
-`LayoutOwnershipError`. Ajusta su `text.item(...)` o las propiedades de la caja. Los efectos visuales y
-las transformaciones no posicionales siguen disponibles. Consulta
+Una caja decide dónde descansa un `Text` hijo: colocarlo de forma inmediata
+con `move_to`, `shift_by` o `next_to` lanza `LayoutOwnershipError`; ajusta su
+`text.item(...)` o las propiedades de la caja. Todas las animaciones de
+`.animate`, de posición incluidas, siguen disponibles y parten de ese sitio.
+Consulta
 #link("/referencia/layout/")[Layout].
 
 == Errores y casos límite
