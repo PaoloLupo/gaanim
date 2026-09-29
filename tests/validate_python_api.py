@@ -2044,6 +2044,29 @@ def validate_layout_box_contract(module):
             scene.play(animation().duration(0.2))
         except (ValueError, module.LayoutOwnershipError) as error:
             failures.append(f"a box child refused animate.{name}: {error}")
+    # walk lists backgrounds and pieces at any depth, in draw order.
+    inner_text = scene.text("dentro")
+    inner = L.row(inner_text, background="red")
+    outer = L.column("fuera", inner, background="white")
+    plain = outer.walk()
+    if len(plain) != 4 or plain[0] is None or plain[-1] is not inner_text:
+        failures.append(f"Box.walk did not list background, children and nested pieces: {plain}")
+    if not any(piece is inner for piece in outer.walk(boxes=True)) or len(outer.walk(boxes=True)) != 5:
+        failures.append("Box.walk(boxes=True) did not include the nested box")
+    if any(piece is outer for piece in outer.walk(boxes=True)):
+        failures.append("Box.walk listed the box itself")
+    scene.play(outer.stagger(lambda piece: piece.animate.fade_in(), each=0.05))
+    scene.play(outer.stagger(lambda piece: piece.animate.fade_out() if piece is inner_text else None, boxes=True))
+    for operation, expected in (
+        (lambda: outer.stagger(5), TypeError),
+        (lambda: outer.stagger(lambda piece: None), ValueError),
+    ):
+        try:
+            operation()
+        except expected:
+            pass
+        else:
+            failures.append("Box.stagger accepted invalid arguments")
     for operation in (
         lambda: L.box(radius=-1),
         lambda: L.box(border_width=float("nan")),

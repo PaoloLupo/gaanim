@@ -844,12 +844,49 @@ class Box(Drawable):
     to start the next change at the same time.
     """
     @property
-    def children(self) -> list[Any]:
-        """The direct children, as the objects that were passed in."""
+    def children(self) -> list[Drawable]:
+        """The direct children, as the objects that were passed in (a ``Box`` or any other drawable)."""
         ...
     def __len__(self) -> int: ...
-    def __getitem__(self, index: int) -> Any: ...
-    def __iter__(self) -> Iterator[Any]: ...
+    def __getitem__(self, index: int) -> Drawable: ...
+    def __iter__(self) -> Iterator[Drawable]: ...
+    def walk(self, *, boxes: bool = False) -> list[Drawable]:
+        """The pieces of the box at any depth, in draw order.
+
+        For each box it lists the background first, then the children,
+        descending into child boxes, so animating the result in order reveals
+        a card from the back to the front without missing a background. With
+        ``boxes=True`` every nested box is listed too, before its own pieces
+        (the box itself is never included). Returns a new list.
+
+        Example:
+            for piece in card.walk():
+                scene.play(piece.animate.fade_in().duration(0.1))
+        """
+        ...
+    def stagger(
+        self,
+        make: Callable[[Drawable], Optional[Playable]],
+        *,
+        boxes: bool = False,
+        each: float = 0.1,
+        total: Optional[float] = None,
+        origin: Optional[StaggerOrigin] = None,
+        grid: Optional[Literal["auto"] | tuple[int, int]] = None,
+        easing: Optional[Easing] = None,
+        seed: int = 0,
+    ) -> Composition:
+        """Animate every piece of ``walk(boxes=boxes)`` as one ``stagger``.
+
+        ``make`` receives each piece and returns its animation, or ``None`` to
+        skip it. The other arguments are those of the module-level ``stagger``.
+        Raises ``TypeError`` if ``make`` is not callable and ``ValueError``
+        when no piece is left to animate.
+
+        Example:
+            scene.play(card.stagger(lambda piece: piece.animate.fade_in(), each=0.05))
+        """
+        ...
     @property
     def background(self) -> Optional[Drawable]:
         """The drawable behind the box (fill, border, radius), if any."""

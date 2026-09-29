@@ -13,9 +13,21 @@ instalar una versión nueva, sigue
 
 = 0.7.2
 
-Correcciones del layout: las cajas que entran con `grow_from_*` ya no se ven
-antes de su turno y el overlay *Layout* del editor no mezcla segmentos. No hace
-falta cambiar tus escenas.
+Correcciones del layout y recorrido de cajas: las cajas que entran con
+`grow_from_*` ya no se ven antes de su turno, el overlay *Layout* del editor no
+mezcla segmentos y `box.walk()` recorre el contenido de una caja. No hace falta
+cambiar tus escenas.
+
+== Cambios
+
+- `box.walk()` devuelve las piezas de una caja a cualquier profundidad, en
+  orden de dibujo, con el fondo de cada caja antes de su contenido.
+  `box.walk(boxes=True)` incluye también las cajas anidadas.
+- `box.stagger(make, each=…)` anima todas esas piezas de una vez como un
+  `stagger`: `make` recibe cada pieza y devuelve su animación (o `None` para
+  saltarla). Lee #link("/referencia/layout/")[Layout].
+- `box.children`, `box[i]` y la iteración de una caja están tipados como
+  `Drawable` en lugar de `Any`.
 
 == Correcciones
 

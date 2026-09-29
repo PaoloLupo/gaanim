@@ -296,6 +296,39 @@ grid.set(columns=2, gap="30px", duration=0.8)
 )
 
 #api-entry(
+  name: "Box.walk",
+  kind: "method",
+  desc: [Devuelve una lista con las piezas de la caja a cualquier profundidad, en orden de dibujo: de cada caja, primero su fondo y luego sus hijos, entrando en las cajas hijas. Con `boxes=True` incluye también cada caja anidada, antes de sus piezas; la propia caja no aparece nunca. Sirve para revelar una tarjeta pieza por pieza sin recorrer el árbol a mano ni olvidar los fondos.],
+  signature: "box.walk(*, boxes=False) -> list[Drawable]",
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9), theme="paper")
+>>>chip = BoxStyle(padding="12px", background="#e0e7ff", radius="10px")
+>>>card = scene.layout.column(scene.layout.box("Título", style=chip), scene.layout.row("A", "B"), background="#ffffff", padding="20px")
+for piece in card.walk():
+    scene.play(piece.animate.fade_in().duration(0.1))
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Box.stagger",
+  kind: "method",
+  desc: [Anima cada pieza de `walk(boxes=boxes)` como un solo `stagger`. `make` recibe la pieza y devuelve su animación, o `None` para saltarla; el resto de argumentos son los de `stagger`. Lanza `TypeError` si `make` no es invocable y `ValueError` si no queda ninguna pieza.],
+  signature: "box.stagger(make, *, boxes=False, each=0.1, total=None, origin=None, grid=None, easing=None, seed=0) -> Composition",
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9), theme="paper")
+>>>chip = BoxStyle(padding="12px", background="#e0e7ff", radius="10px")
+>>>card = scene.layout.column(scene.layout.box("Título", style=chip), scene.layout.row("A", "B"), background="#ffffff", padding="20px")
+scene.play(card.stagger(lambda piece: piece.animate.fade_in(), each=0.08))
+scene.render()
+```
+]
+
+#api-entry(
   name: "Box.reflow",
   kind: "method",
   desc: [Vuelve a calcular la disposición cuando un hijo cambió de tamaño por su cuenta (por ejemplo, al escalarlo). Los cambios de texto y de estructura ya reorganizan solos.],

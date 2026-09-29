@@ -1077,7 +1077,42 @@ pub struct PyBox {
     inner: Arc<Mutex<LayoutState>>,
 }
 
+/// A box's shared state, as its parent and its handle hold it.
+type SharedLayout = Arc<Mutex<LayoutState>>;
+
 impl PyBox {
+    fn collect_pieces(
+        py: Python<'_>,
+        inner: &Arc<Mutex<LayoutState>>,
+        boxes: bool,
+        pieces: &mut Vec<Py<PyAny>>,
+    ) -> PyResult<()> {
+        let (background, members) = {
+            let state = inner.lock().expect("layout poisoned");
+            let members: Vec<(Py<PyAny>, Option<SharedLayout>)> = state
+                .members
+                .iter()
+                .map(|member| (member.object.clone_ref(py), member.child_layout.clone()))
+                .collect();
+            (state.background.clone(), members)
+        };
+        if let Some(handle) = background {
+            pieces.push(Py::new(py, PyDrawable(handle))?.into_any());
+        }
+        for (object, nested) in members {
+            match nested {
+                Some(nested) => {
+                    if boxes {
+                        pieces.push(object);
+                    }
+                    Self::collect_pieces(py, &nested, boxes, pieces)?;
+                }
+                None => pieces.push(object),
+            }
+        }
+        Ok(())
+    }
+
     /// Build a box from Python children and properties.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn create<'py>(
@@ -1775,6 +1810,54 @@ impl PyBox {
             .try_iter()?
             .into_any()
             .unbind())
+    }
+
+    /// The pieces of the box at any depth, in draw order: for each box its
+    /// background, then its children, descending into child boxes. With
+    /// `boxes`, every nested box is listed too, before its own pieces.
+    #[pyo3(signature = (*, boxes=false))]
+    fn walk(&self, py: Python<'_>, boxes: bool) -> PyResult<Vec<Py<PyAny>>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let mut pieces = Vec::new();
+        Self::collect_pieces(py, &self.inner, boxes, &mut pieces)?;
+        Ok(pieces)
+    }
+
+    /// Play `make(piece)` for every piece of `walk(boxes=boxes)` as one
+    /// `stagger`. `make` returns an animation, or `None` to skip a piece.
+    #[pyo3(signature = (make, *, boxes=false, each=0.1, total=None, origin=None, grid=None, easing=None, seed=0))]
+    #[allow(clippy::too_many_arguments)]
+    fn stagger(
+        &self,
+        py: Python<'_>,
+        make: &Bound<'_, PyAny>,
+        boxes: bool,
+        each: f64,
+        total: Option<f64>,
+        origin: Option<&Bound<'_, PyAny>>,
+        grid: Option<&Bound<'_, PyAny>>,
+        easing: Option<&crate::easing::PyEasing>,
+        seed: u64,
+    ) -> PyResult<crate::composition::PyComposition> {
+        if !make.is_callable() {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "make must be a function that takes a piece and returns an animation",
+            ));
+        }
+        let mut items = Vec::new();
+        for piece in self.walk(py, boxes)? {
+            let item = make.call1((piece.bind(py),))?;
+            if !item.is_none() {
+                items.push(item);
+            }
+        }
+        if items.is_empty() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "stagger found no pieces to animate in this box",
+            ));
+        }
+        let items = PyTuple::new(py, items)?;
+        crate::composition::stagger(&items, each, total, origin, grid, easing, seed)
     }
 
     /// The drawable behind the box (fill, border, radius), if any.
