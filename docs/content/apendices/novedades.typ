@@ -11,9 +11,14 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
-= Próxima versión
+= 0.7.1
 
-Sin publicar todavía.
+Publicada el 29 de septiembre de 2026. Los hijos de una caja se animan con
+libertad: el layout decide dónde descansan, no cómo se mueven. Llegan
+`text_box` para calcar diseños al píxel, avisos de cajas vacías y un overlay
+*Layout* en el editor para inspeccionar cajas y zonas como en las herramientas
+de desarrollo de un navegador. Exportar desde el editor ya no bloquea la
+reproducción. No hace falta cambiar tus escenas.
 
 == Cambios
 
