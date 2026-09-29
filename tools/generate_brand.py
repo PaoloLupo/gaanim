@@ -12,8 +12,8 @@ ascender and descender 4, so the lockup is exactly 16 units tall, like the icon.
 
 Outputs are checked in under docs/assets/brand/ (see README.md there), so the
 docs build does not need Pillow. The application icon is also written as a
-Windows resource (gaanim-app.res, linked by the gaanim_editor and
-gaanim_launcher build scripts) and as a Rust pixel table for the window icon
+Windows resource (gaanim-app.res, linked into gaanim.exe by the
+gaanim_launcher build script) and as a Rust pixel table for the window icon
 (crates/gaanim_editor/src/app_icon_pixels.rs). Rerun this script after changing
 geometry or colors. Requires Pillow for the PNG rasters.
 """

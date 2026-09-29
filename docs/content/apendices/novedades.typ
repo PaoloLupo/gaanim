@@ -11,14 +11,16 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
-= Próxima versión
+= 0.7.0
 
-Un layout nuevo, construido sobre Taffy (el motor de flexbox y grid de CSS
-que usan otros proyectos de Rust): cajas con padding, gap, bordes, radio,
-sombra y recorte, estilos reutilizables, zonas y estructura animada. Lee la
-guía de #link("/guias/layout/")[Layout]. Es un cambio incompatible: las
-escenas que usan `scene.layout.item`, `scene.layout.card` o
-`scene.layout.template` tienen que actualizarse.
+Publicada el 29 de septiembre de 2026. Llega un layout nuevo al estilo de CSS,
+construido sobre Taffy (el motor de flexbox y grid que usan otros proyectos de
+Rust): cajas con padding, gap, bordes, radio, sombra y recorte, estilos
+reutilizables, zonas y estructura animada, para componer escenas sin
+coordenadas (lee la guía de #link("/guias/layout/")[Layout]). Además, Gaanim
+pasa a ser un solo ejecutable, que carga Python solo cuando abre un script, y
+Vello dibuja también el 3D con un estilo propio. Lee «Al actualizar»: el layout
+cambia de forma incompatible y desaparece la importación glTF.
 
 == Al actualizar
 
@@ -39,6 +41,10 @@ escenas que usan `scene.layout.item`, `scene.layout.card` o
   descendentes de la fuente), así que textos del mismo estilo comparten
   altura y línea base. Las fórmulas `$…$` conservan su caja de tinta. Un
   texto puede desplazarse unos píxeles respecto a la versión anterior.
+- Si una escena importa modelos glTF, quita las llamadas a
+  `scene.media.gltf(...)` y a `animation(...)` de esos modelos.
+- Reemplaza todos los archivos de la carpeta de Gaanim y borra `gaanim-core`
+  y `gaanim-play`.
 
 == Cambios
 
@@ -60,38 +66,6 @@ escenas que usan `scene.layout.item`, `scene.layout.card` o
 - Ejemplos nuevos: `layout_boxes`, `layout_flex`, `layout_grid`,
   `layout_reflow`, `layout_zones`, `ui_dashboard`, `ui_mobile_app` y
   `ui_lower_third`.
-
-== Correcciones
-
-- `scene.assets.load_project()` sin ruta busca el `gaanim.toml` más cercano
-  subiendo desde la carpeta del módulo que la llama, así que funciona desde un
-  paquete del proyecto (`capitulo4/estilo.py`) y no solo desde el script de
-  entrada. Sin manifiesto, el error indica la carpeta de partida y cómo pasar
-  la ruta (#link("https://github.com/PaoloLupo/gaanim/issues/266")[\#266]).
-- Los métodos fluidos heredados de `Drawable` (`move_to`, `shift_by`,
-  `fill`, `opacity`, `scale_by`, `next_to`…) devuelven el mismo objeto sobre
-  el que se llaman, así que un `Readout`, una `Variable`, una `Dimension` o
-  cualquier otro tipo compuesto conserva sus partes al encadenar:
-  `scene.viz.readout(3.0).move_to(0, 0).number.fill("red")`. `part()` sigue
-  devolviendo un objeto nuevo
-  (#link("https://github.com/PaoloLupo/gaanim/issues/267")[\#267]).
-- `--sections` selecciona segmentos cuyo nombre tiene comas: pasa el nombre
-  solo (`--sections "Tiempo, lugar y orientación"`) o escribe sus comas como
-  `\,` dentro de una lista. El error de un nombre desconocido lista las
-  opciones entre comillas y explica cómo escribir una coma
-  (#link("https://github.com/PaoloLupo/gaanim/issues/270")[\#270]).
-
-= 0.7.0
-
-Publicada el 29 de septiembre de 2026. Gaanim pasa a ser un solo ejecutable,
-que carga Python solo cuando abre un script, y Vello dibuja también el 3D con
-un estilo propio. Si una escena importa modelos glTF, quita las llamadas a
-`scene.media.gltf(...)` y a `animation(...)` de esos modelos; el resto de las
-escenas funciona sin cambios. Al actualizar, reemplaza todos los archivos de
-la carpeta de Gaanim.
-
-== Cambios
-
 - Gaanim es un solo ejecutable, `gaanim`. Ya no existen `gaanim-core` ni
   `gaanim-play`. El motor está en una biblioteca, `gaanim_engine`, en lugar de
   copiarse en dos ejecutables, y el soporte de Python en otra,
@@ -144,6 +118,23 @@ la carpeta de Gaanim.
   `scene.text.equation(...)`, `Text.become(...)` y `TextFlow(...)`: los tipos
   `TextRole`, `TextWrap`, `TextAlign`, `TextOverflow` y `TextDirection` vuelven
   a estar en los tipos del paquete.
+- `scene.assets.load_project()` sin ruta busca el `gaanim.toml` más cercano
+  subiendo desde la carpeta del módulo que la llama, así que funciona desde un
+  paquete del proyecto (`capitulo4/estilo.py`) y no solo desde el script de
+  entrada. Sin manifiesto, el error indica la carpeta de partida y cómo pasar
+  la ruta (#link("https://github.com/PaoloLupo/gaanim/issues/266")[\#266]).
+- Los métodos fluidos heredados de `Drawable` (`move_to`, `shift_by`,
+  `fill`, `opacity`, `scale_by`, `next_to`…) devuelven el mismo objeto sobre
+  el que se llaman, así que un `Readout`, una `Variable`, una `Dimension` o
+  cualquier otro tipo compuesto conserva sus partes al encadenar:
+  `scene.viz.readout(3.0).move_to(0, 0).number.fill("red")`. `part()` sigue
+  devolviendo un objeto nuevo
+  (#link("https://github.com/PaoloLupo/gaanim/issues/267")[\#267]).
+- `--sections` selecciona segmentos cuyo nombre tiene comas: pasa el nombre
+  solo (`--sections "Tiempo, lugar y orientación"`) o escribe sus comas como
+  `\,` dentro de una lista. El error de un nombre desconocido lista las
+  opciones entre comillas y explica cómo escribir una coma
+  (#link("https://github.com/PaoloLupo/gaanim/issues/270")[\#270]).
 
 = 0.6.2
 

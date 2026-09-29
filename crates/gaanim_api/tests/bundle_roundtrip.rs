@@ -342,6 +342,12 @@ fn brightness(image: &image::RgbaImage) -> f64 {
 
 #[test]
 fn bundles_carry_a_cover_of_the_fullest_or_the_chosen_frame() {
+    // The cover is rendered on the GPU; without an adapter a bundle is
+    // recorded without one, by design.
+    if gaanim_export::prelude::GpuContext::new(16, 16).is_err() {
+        eprintln!("skipped: no GPU adapter");
+        return;
+    }
     // Without stops: the frame that shows the most, once the disc is in.
     let full = cover_of(fading_disc(), "full.gaanim");
     assert_eq!(full.dimensions(), (512, 288));
