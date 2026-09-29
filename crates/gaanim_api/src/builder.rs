@@ -27,7 +27,7 @@ use gaanim_timeline::{
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::OnceLock;
 use typst_syntax::ast::{
-    Arg, AstNode, MathCall, MathFieldAccess, MathIdent, MathPrimes, MathShorthand,
+    Arg, AstNode, MathCall, MathFieldAccess, MathIdent, MathPrimes, MathShorthand, Str,
 };
 use typst_syntax::{SyntaxNode, parse_math};
 
@@ -144,6 +144,11 @@ fn typst_math_selection_source(source: &str) -> String {
                 output.push(accent);
                 return;
             }
+        }
+        // A string lays out its text, without the quotes around it.
+        if let Some(text) = node.cast::<Str>() {
+            output.push_str(&text.get());
+            return;
         }
         if let Some(primes) = node.cast::<MathPrimes>() {
             if let Some(value) = codex_math_primes(primes.count()) {
@@ -8519,6 +8524,10 @@ mod tests {
         assert_eq!(typst_math_selection_source("sin(x)"), "sin(x)");
         assert_eq!(typst_math_selection_source("dot(theta)"), "θ\u{307}");
         assert_eq!(typst_math_selection_source("hat(x)^2"), "x\u{302}^2");
+        assert_eq!(
+            typst_math_selection_source("\"bloques vistos\" + 3"),
+            "bloques vistos + 3"
+        );
     }
 
     #[test]

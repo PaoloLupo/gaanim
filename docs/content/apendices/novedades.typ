@@ -53,6 +53,15 @@ escenas funciona sin cambios.
   post-procesado o un fondo de shader: comprobar el shader esperaba a la GPU
   bloqueando el único hilo de la página. Ahora la comprobación se resuelve
   entre frames, y el efecto aparece un frame después.
+- Un texto declarado con `opacity(0)` vuelve a verse con
+  `animate.opacity(1)`: la opacidad ya no se copiaba también a cada glifo.
+- `cancel()` y los demás efectos de selección encuentran una cadena entre
+  comillas dentro de una ecuación, como `part("x", '"bloques vistos"')`.
+- Un `z_index` puesto después de enlazar una propiedad reactiva, por ejemplo
+  el nivel de `fill_level` con `computed`, ya no se ignora.
+- `slides.brand` no dibuja la identidad en el primer segmento salvo con
+  `show_on_cover=True`. El pie empieza en el borde izquierdo del área segura y
+  se reduce si no cabe, y la regla ocupa el ancho del área segura.
 
 = 0.6.2
 

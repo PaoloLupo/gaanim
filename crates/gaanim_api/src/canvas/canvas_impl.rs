@@ -1993,6 +1993,10 @@ fn load_image(path: impl AsRef<Path>) -> Result<gaanim_core::peniko::ImageData, 
 
 /// Default height of a presentation brand logo in scene units.
 const BRAND_LOGO_HEIGHT: f64 = 0.6;
+/// Inset of the brand footer and rule from the safe frame's sides.
+const BRAND_INSET: f64 = 0.4;
+/// Scale of the brand footer text when it fits.
+const BRAND_FOOTER_SCALE: f64 = 0.5;
 
 /// Spawn a drawable into the canvas that owns `state`, as
 /// [`SceneModel::spawn`] does, so handles can create helper drawables.
@@ -5382,11 +5386,17 @@ impl SceneModel {
         let Some(branding) = self.branding.clone() else {
             return Ok(());
         };
-        if matches!(template, Some("title_slide" | "title" | "cover")) && !branding.show_on_cover {
+        // The first segment is the cover, as is any segment with a cover
+        // template.
+        let cover =
+            segment_number == 1 || matches!(template, Some("title_slide" | "title" | "cover"));
+        if cover && !branding.show_on_cover {
             return Ok(());
         }
 
         let frame = self.safe_frame();
+        let left = frame.min.x + BRAND_INSET;
+        let right = frame.max.x - BRAND_INSET;
         let palette = self.theme_style.as_ref().map(|theme| theme.palette);
         let muted = palette
             .map(|palette| palette.muted)
@@ -5398,7 +5408,7 @@ impl SceneModel {
         let rule_y = frame.min.y + frame.height() * 0.075;
 
         if branding.rule {
-            self.line(frame.min.x, rule_y, frame.max.x, rule_y)
+            self.line(left, rule_y, right, rule_y)
                 .no_fill()
                 .stroke(rule, 0.02)
                 .z_index(100);
@@ -5410,10 +5420,19 @@ impl SceneModel {
             (None, false) => None,
         };
         if let Some(footer) = footer {
+            // Starts at the safe edge and shrinks to fit when it is too long.
+            let scale = self
+                .measure_text(&footer, None, None, None, None, None)
+                .ok()
+                .map(|(width, _)| width)
+                .filter(|width| *width > f64::EPSILON)
+                .map_or(BRAND_FOOTER_SCALE, |width| {
+                    BRAND_FOOTER_SCALE.min((right - left) / width)
+                });
             self.text(&footer)
                 .fill(muted)
-                .scale_to(0.5)
-                .move_to(frame.min.x + frame.width() * 0.14, footer_y + 0.08)
+                .scale_to(scale)
+                .at_anchor(left, footer_y + 0.08, Anchor::Left)
                 .z_index(101);
         }
         if let Some(logo) = branding.logo.as_deref() {
@@ -11077,6 +11096,33 @@ mod tests {
             after_content, 2,
             "rule and numbered footer are added to the active segment"
         );
+    }
+
+    #[test]
+    fn branding_skips_the_first_segment_without_a_cover_template() {
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        canvas.set_branding(PresentationBrand {
+            footer: Some("MI CHARLA".to_owned()),
+            ..Default::default()
+        });
+        let ops = |canvas: &SceneModel| {
+            canvas
+                .state
+                .lock()
+                .expect("canvas state poisoned")
+                .active()
+                .ops
+                .len()
+        };
+        canvas
+            .segment_with("Portada", None, None, None)
+            .expect("first segment");
+        assert_eq!(ops(&canvas), 0, "the first segment is the cover");
+        canvas.wait(0.1);
+        canvas
+            .segment_with("Contenido", None, None, None)
+            .expect("second segment");
+        assert_eq!(ops(&canvas), 2);
     }
 
     #[test]
