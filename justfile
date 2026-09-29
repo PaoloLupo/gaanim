@@ -80,7 +80,8 @@ build-dist:
 build-release-install: build-dist wheel
     New-Item -ItemType Directory -Force -Path "C:\Tools\gaanim" | Out-Null
     {{ system_python }} scripts/stage_app.py --profile dist --dest "C:\Tools\gaanim"
-    Remove-Item -Path "C:\Tools\gaanim\gaanim-core.exe", "C:\Tools\gaanim\gaanim-play.exe" -ErrorAction SilentlyContinue
+    # Executables of older releases. Remove-Item on a missing path fails the recipe.
+    foreach ($old in "C:\Tools\gaanim\gaanim-core.exe", "C:\Tools\gaanim\gaanim-play.exe") { if (Test-Path $old) { Remove-Item -Path $old } }
     # Explorer may hold the thumbnail handler loaded; the old copy keeps working.
     try { Copy-Item -Path "./target/dist/gaanim_thumbnail_handler.dll" -Destination "C:\Tools\gaanim\" -Force -ErrorAction Stop } catch { Write-Warning "gaanim_thumbnail_handler.dll is in use; restart Explorer and run this again to update it" }
     Copy-Item -Path (Get-ChildItem "./target/wheels/gaanim-*-py3-none-any.whl" | Select-Object -First 1).FullName -Destination "C:\Tools\gaanim\" -Force

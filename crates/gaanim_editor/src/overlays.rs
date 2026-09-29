@@ -518,11 +518,36 @@ pub fn overlays_settings_ui_system(
 
 /// What the layout inspector reads from each box.
 type LayoutQueryData = (
+    Entity,
     &'static gaanim_scene::LayoutInspection,
     &'static gaanim_scene::LocalBounds,
     &'static gaanim_math::GlobalSpatialTransform,
-    Option<&'static gaanim_scene::GlobalOpacity>,
 );
+
+/// What the layout inspector reads to tell whether a box is on screen.
+type LayoutShownData = (
+    Has<gaanim_scene::Visible>,
+    Option<&'static gaanim_scene::GlobalOpacity>,
+    Option<&'static Children>,
+);
+
+/// Whether anything a box holds is drawn now. A box of an earlier or later
+/// segment keeps its entity and its full opacity while what it holds is
+/// hidden or faded out, so its own components cannot tell.
+fn layout_box_shown(shown: &Query<LayoutShownData>, entity: Entity) -> bool {
+    let Ok((visible, opacity, children)) = shown.get(entity) else {
+        return false;
+    };
+    if opacity.is_some_and(|opacity| opacity.0 <= 0.01) {
+        return false;
+    }
+    match children {
+        Some(children) if !children.is_empty() => {
+            children.iter().any(|child| layout_box_shown(shown, child))
+        }
+        _ => visible,
+    }
+}
 
 /// A rectangle in a box's local space: `(min_x, min_y, max_x, max_y)`.
 type LocalRect = (f64, f64, f64, f64);
@@ -653,7 +678,7 @@ fn paint_layout(
     painter: &egui::Painter,
     cam: &ResolvedCamera,
     window: &Window,
-    layouts: &Query<LayoutQueryData>,
+    (layouts, shown): (&Query<LayoutQueryData>, &Query<LayoutShownData>),
     zones: Option<&gaanim_scene::LayoutZones>,
     now: f64,
     pointer: Option<egui::Pos2>,
@@ -689,8 +714,8 @@ fn paint_layout(
 
     let boxes: Vec<InspectedBox> = layouts
         .iter()
-        .filter(|(.., opacity)| opacity.is_none_or(|opacity| opacity.0 > 0.01))
-        .filter_map(|(inspection, bounds, global, _)| {
+        .filter(|(entity, ..)| layout_box_shown(shown, *entity))
+        .filter_map(|(_, inspection, bounds, global)| {
             let frame = inspection.at(now)?;
             let outer = (
                 bounds.0.min.x,
@@ -1020,6 +1045,7 @@ pub fn scene_overlays_system(
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     layouts: Query<LayoutQueryData>,
+    shown: Query<LayoutShownData>,
     zones: Option<Res<gaanim_scene::LayoutZones>>,
     timeline: Option<Res<gaanim_timeline::timeline::Timeline>>,
 ) {
@@ -1185,7 +1211,7 @@ pub fn scene_overlays_system(
                     painter,
                     &cam,
                     window,
-                    &layouts,
+                    (&layouts, &shown),
                     zones.as_deref(),
                     now,
                     ctx.pointer_hover_pos(),
