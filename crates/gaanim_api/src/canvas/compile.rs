@@ -1685,6 +1685,10 @@ fn compile_layout_tree(
     })
 }
 
+/// How far, in scene units, a box may leave its parent or touch a sibling
+/// before `check` reports it: rounding and antialiasing, not a layout mistake.
+const LAYOUT_SLACK: f64 = 0.01;
+
 /// Where a box sits in its layout tree, for diagnostics: the kind and index
 /// of each ancestor below the root, such as `column[1] > row[0]`.
 fn layout_box_path(
@@ -4095,6 +4099,96 @@ impl SceneModel {
                             ),
                         ));
                     }
+                    // Content that leaves its box, or siblings that lie on top of
+                    // each other: usually a box too small for what it holds.
+                    for (container_id, child_ids) in &tree.children_by_id {
+                        let (Some(container), Some(source)) = (
+                            resolved.boxes.get(container_id).copied(),
+                            tree.source_by_id.get(container_id),
+                        ) else {
+                            continue;
+                        };
+                        const OVERFLOW: &str = "content leaves its box";
+                        const OVERLAP: &str = "overlaps the box before it";
+                        let kind = layout_snapshots
+                            .get(source)
+                            .map(|snapshot| snapshot.spec.kind.clone());
+                        let mut reports = Vec::new();
+                        let placed: Vec<_> = child_ids
+                            .iter()
+                            .filter(|child| {
+                                !tree
+                                    .item_style_by_id
+                                    .get(child)
+                                    .is_some_and(|style| style.absolute)
+                            })
+                            .filter_map(|child| {
+                                let resolved = resolved.boxes.get(child)?;
+                                Some((*child, resolved.bounds, resolved.clip.is_some()))
+                            })
+                            .collect();
+                        // Clipped content is meant to leave.
+                        let clips = id_map
+                            .get(source)
+                            .is_some_and(|actual| builder.clipped.contains(actual));
+                        if container.clip.is_none() && !clips {
+                            for (child, bounds, clipped) in &placed {
+                                if *clipped {
+                                    continue;
+                                }
+                                let x = (container.bounds.min.x - bounds.min.x)
+                                    .max(bounds.max.x - container.bounds.max.x)
+                                    .max(0.0);
+                                let y = (container.bounds.min.y - bounds.min.y)
+                                    .max(bounds.max.y - container.bounds.max.y)
+                                    .max(0.0);
+                                if x > LAYOUT_SLACK || y > LAYOUT_SLACK {
+                                    let by = match (x > LAYOUT_SLACK, y > LAYOUT_SLACK) {
+                                        (true, true) => format!("{x:.2} wide and {y:.2} tall"),
+                                        (true, false) => format!("{x:.2} wide"),
+                                        _ => format!("{y:.2} tall"),
+                                    };
+                                    reports.push(format!(
+                                        "{}: {OVERFLOW} by {by} scene units; give the box more \
+                                         room, let it grow or shorten its content",
+                                        layout_box_path(&tree, layout_snapshots, *child)
+                                    ));
+                                }
+                            }
+                        }
+                        if matches!(
+                            kind,
+                            Some(
+                                gaanim_layout::LayoutNodeKind::Row { .. }
+                                    | gaanim_layout::LayoutNodeKind::Column { .. }
+                            )
+                        ) {
+                            for pair in placed.windows(2) {
+                                let ((_, before, _), (child, after, _)) = (pair[0], pair[1]);
+                                let x =
+                                    before.max.x.min(after.max.x) - before.min.x.max(after.min.x);
+                                let y =
+                                    before.max.y.min(after.max.y) - before.min.y.max(after.min.y);
+                                if x > LAYOUT_SLACK && y > LAYOUT_SLACK {
+                                    reports.push(format!(
+                                        "{}: it {OVERLAP} by {x:.2} by {y:.2} scene units; \
+                                         check the gap and the size of the boxes around it",
+                                        layout_box_path(&tree, layout_snapshots, child)
+                                    ));
+                                }
+                            }
+                        }
+                        // Keyed by the box that holds them, so resolving it
+                        // again replaces the earlier report.
+                        let mut state = diagnostic_state.lock().expect("canvas state poisoned");
+                        state.layout_diagnostics.retain(|(owner, message)| {
+                            *owner != Some(*source)
+                                || !(message.contains(OVERFLOW) || message.contains(OVERLAP))
+                        });
+                        state
+                            .layout_diagnostics
+                            .extend(reports.into_iter().map(|message| (Some(*source), message)));
+                    }
                     let text_compositions: BTreeMap<_, _> = tree
                         .texts
                         .keys()
@@ -5204,6 +5298,11 @@ impl SceneModel {
                     let Some(target) = id_map.get(target).copied() else {
                         continue;
                     };
+                    if mask.is_some() {
+                        builder.clipped.insert(target);
+                    } else {
+                        builder.clipped.remove(&target);
+                    }
                     let target_leaves = Self::visual_leaf_ids(builder, target);
                     if let Some(mask) = mask {
                         let Some(mask) = id_map.get(mask).copied() else {
@@ -5653,7 +5752,25 @@ impl SceneModel {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(st) = builder.states.get(target_id)
                     {
-                        builder.commands.entity(st.entity).insert(
+                        // A connector a box places, with fixed points, is a
+                        // shape of its own: its points are local, and the
+                        // box measures it from the outline they draw.
+                        let fixed: Option<Vec<DVec3>> = points
+                            .iter()
+                            .map(|point| match point {
+                                crate::canvas::ops::CanvasEndpoint::Static(position) => {
+                                    Some(*position)
+                                }
+                                _ => None,
+                            })
+                            .collect();
+                        let local_points = fixed.filter(|_| {
+                            object_specs
+                                .get(target)
+                                .is_some_and(|spec| spec.layout_owner.is_some())
+                        });
+                        let entity = st.entity;
+                        builder.commands.entity(entity).insert(
                             gaanim_animation::updaters::TrackingConnector {
                                 points: points
                                     .iter()
@@ -5664,8 +5781,23 @@ impl SceneModel {
                                 body_width: *body_width,
                                 max_head_ratio: *max_head_ratio,
                                 progress: 1.0,
+                                local: local_points.is_some(),
                             },
                         );
+                        if let Some(local_points) = local_points {
+                            let outline = gaanim_animation::updaters::connector_path(
+                                &local_points,
+                                *head_length,
+                                *head_width,
+                                *body_width,
+                                *max_head_ratio,
+                                1.0,
+                            );
+                            let rect = gaanim_core::kurbo::Shape::bounding_box(&outline);
+                            if let Some(state) = builder.states.get_mut(target_id) {
+                                state.bounds = Bounds3D::new_2d(rect.x0, rect.y0, rect.x1, rect.y1);
+                            }
+                        }
                         builder.connectors.insert(target_id);
                     }
                 }
@@ -16763,6 +16895,117 @@ mod tests {
         // A turn takes two seconds: the color list has two entries, so the
         // second one is reached after one of them.
         assert_eq!(cycle.color_at(2.0), blue);
+    }
+
+    #[test]
+    fn connectors_with_fixed_points_are_placed_by_the_box_that_holds_them() {
+        use crate::canvas::ops::CanvasEndpoint;
+        let mut canvas = SceneModel::new(640, 360);
+        let mut connector = |canvas: &mut SceneModel| {
+            canvas
+                .connector(
+                    CanvasEndpoint::Static(DVec3::ZERO),
+                    CanvasEndpoint::Static(DVec3::new(1.5, 0.0, 0.0)),
+                    Vec::new(),
+                    0.18,
+                    0.15,
+                    0.036,
+                    None,
+                )
+                .unwrap()
+        };
+        let (first, second) = (connector(&mut canvas), connector(&mut canvas));
+        let container = canvas.group(&[&first, &second]);
+        first.claim_layout(&container).unwrap();
+        second.claim_layout(&container).unwrap();
+        canvas.reflow_layout(
+            &container,
+            [&first, &second]
+                .into_iter()
+                .map(|member| crate::canvas::LayoutMemberSpec {
+                    id: member.id,
+                    style: gaanim_layout::LayoutItemStyle::default(),
+                })
+                .collect(),
+            crate::canvas::LayoutSpec {
+                kind: gaanim_layout::LayoutNodeKind::Column { wrap: false },
+                style: gaanim_layout::LayoutStyle::default(),
+                within: LayoutWithin::Safe,
+            },
+            1,
+            None,
+            None,
+            None,
+        );
+        canvas.wait(0.5);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        timeline.seek(&mut world, 0.25);
+        let mut fixed = world.query::<&gaanim_animation::updaters::TrackingConnector>();
+        assert!(
+            fixed.iter(&world).all(|connector| connector.local),
+            "a connector a box holds draws its own points"
+        );
+        let (a, b) = (
+            transform_of(&mut world, &first).translation,
+            transform_of(&mut world, &second).translation,
+        );
+        assert!(
+            (a.y - b.y).abs() > 1e-6,
+            "each connector sits in its own cell of the column: {a:?} and {b:?}"
+        );
+    }
+
+    #[test]
+    fn check_reports_content_that_leaves_its_box_and_only_that() {
+        let report = |height: f64| {
+            let mut canvas = SceneModel::new(640, 360);
+            let members = [canvas.rect(2.0, 1.0), canvas.rect(2.0, 1.0)];
+            let container = canvas.group(&members.iter().collect::<Vec<_>>());
+            for member in &members {
+                member.claim_layout(&container).unwrap();
+            }
+            canvas.reflow_layout(
+                &container,
+                members
+                    .iter()
+                    .map(|member| crate::canvas::LayoutMemberSpec {
+                        id: member.id,
+                        style: gaanim_layout::LayoutItemStyle::default(),
+                    })
+                    .collect(),
+                crate::canvas::LayoutSpec {
+                    kind: gaanim_layout::LayoutNodeKind::Column { wrap: false },
+                    style: gaanim_layout::LayoutStyle {
+                        height: gaanim_layout::SizeRule::Fixed(height),
+                        ..gaanim_layout::LayoutStyle::default()
+                    },
+                    within: LayoutWithin::Safe,
+                },
+                1,
+                None,
+                None,
+                None,
+            );
+            canvas
+                .compiled_layout_diagnostics()
+                .into_iter()
+                .map(|(_, message)| message)
+                .collect::<Vec<_>>()
+        };
+        let tight = report(1.5);
+        assert!(
+            tight
+                .iter()
+                .any(|message| message.contains("content leaves its box by")),
+            "two boxes of height 1 do not fit in 1.5: {tight:?}"
+        );
+        let roomy = report(2.5);
+        assert!(
+            roomy
+                .iter()
+                .all(|message| !message.contains("leaves its box") && !message.contains("overlaps")),
+            "they fit in 2.5: {roomy:?}"
+        );
     }
 
     /// A row of two rectangles, laid out twice with a play in between.

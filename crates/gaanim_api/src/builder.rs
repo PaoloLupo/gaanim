@@ -820,6 +820,8 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub(crate) arrow_shapes: HashMap<ObjectId, gaanim_math::ArrowShape>,
     /// Reactive connectors, which `GrowArrow` grows through their progress.
     pub(crate) connectors: HashSet<ObjectId>,
+    /// Objects a clip mask cuts: their content may leave their box.
+    pub(crate) clipped: HashSet<ObjectId>,
     /// Extra glyph tracking of Text roots set by `tracking(...)`, in scene units.
     pub(crate) text_tracking: HashMap<ObjectId, f64>,
     /// Resting transforms and opacities of camera view screens hidden by
@@ -885,6 +887,7 @@ pub(crate) struct SceneBuilderState {
     media_frames: HashMap<ObjectId, gaanim_scene::MediaFrame>,
     arrow_shapes: HashMap<ObjectId, gaanim_math::ArrowShape>,
     connectors: HashSet<ObjectId>,
+    clipped: HashSet<ObjectId>,
     text_tracking: HashMap<ObjectId, f64>,
     camera_view_rests: HashMap<ObjectId, CameraViewRest>,
     text_motion: crate::text_motion::TextMotionState,
@@ -919,6 +922,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             media_frames: self.media_frames.clone(),
             arrow_shapes: self.arrow_shapes.clone(),
             connectors: self.connectors.clone(),
+            clipped: self.clipped.clone(),
             text_tracking: self.text_tracking.clone(),
             camera_view_rests: self.camera_view_rests.clone(),
             text_motion: self.text_motion.clone(),
@@ -960,6 +964,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             media_frames,
             arrow_shapes,
             connectors,
+            clipped,
             text_tracking,
             camera_view_rests,
             text_motion,
@@ -995,6 +1000,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             media_frames,
             arrow_shapes,
             connectors,
+            clipped,
             text_tracking,
             camera_view_rests,
             text_motion,
@@ -1298,6 +1304,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             media_frames: HashMap::new(),
             arrow_shapes: HashMap::new(),
             connectors: HashSet::new(),
+            clipped: HashSet::new(),
             text_tracking: HashMap::new(),
             camera_view_rests: HashMap::new(),
             text_motion: Default::default(),
