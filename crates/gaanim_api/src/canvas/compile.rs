@@ -4606,29 +4606,51 @@ impl SceneModel {
                         }
                     }
                     let transition_duration = (*duration).unwrap_or(0.0);
+                    // A member whose entry is a grow from scale zero, still to
+                    // come, keeps its scale at zero until then: a scale cut
+                    // here would show it in full before its turn.
+                    let held_scale: HashMap<ObjectId, DVec3> = tree
+                        .source_by_id
+                        .iter()
+                        .filter(|(_, source)| Self::grow_pending(&seg.ops, op_index, **source))
+                        .filter_map(|(layout_id, _)| materialized_by_id.get(layout_id))
+                        .filter_map(|member| {
+                            targets
+                                .iter()
+                                .find(|(target, _)| target == member)
+                                .map(|(target, to)| (*target, to.scale))
+                        })
+                        .collect();
                     // Zero-duration clips retain reversible cuts for immediate
                     // reflow; otherwise earlier seeks inherit final positions.
                     let mut animations: Vec<AnimationBuilder> = targets
                         .into_iter()
                         .flat_map(|(target, to)| {
-                            [
-                                AnimationBuilder {
-                                    target,
-                                    anim_type: AnimationType::TranslateTo { to: to.translation },
-                                    duration: transition_duration,
-                                    rate_func: RateFunc::Smooth,
-                                    delay: 0.0,
-                                },
+                            let translate = AnimationBuilder {
+                                target,
+                                anim_type: AnimationType::TranslateTo { to: to.translation },
+                                duration: transition_duration,
+                                rate_func: RateFunc::Smooth,
+                                delay: 0.0,
+                            };
+                            let scale = (!held_scale.contains_key(&target)).then(|| {
                                 AnimationBuilder {
                                     target,
                                     anim_type: AnimationType::ScaleTo { to: to.scale },
                                     duration: transition_duration,
                                     rate_func: RateFunc::Smooth,
                                     delay: 0.0,
-                                },
-                            ]
+                                }
+                            });
+                            std::iter::once(translate).chain(scale)
                         })
                         .collect();
+                    // The grow starts from the scale the layout gave.
+                    for (member, scale) in &held_scale {
+                        if let Some(state) = builder.states.get_mut(*member) {
+                            state.transform.scale = *scale;
+                        }
+                    }
                     for (old, new, entry_pending, instant, own_entry) in text_crossfades {
                         if entry_pending {
                             // The text has not entered yet and its fade-in now
@@ -6817,6 +6839,29 @@ impl SceneModel {
             })
         };
         !ops[..index].iter().any(fades_in) && ops[index + 1..].iter().any(fades_in)
+    }
+
+    /// Whether `target` has a grow from scale zero (or a spin in) still to
+    /// come at `ops[index]` and none before it: its entry is pending.
+    fn grow_pending(ops: &[Op], index: usize, target: ObjectId) -> bool {
+        let grows = |op: &Op| {
+            let anims: &[AnimationBuilder] = match op {
+                Op::Animate { anim, active: true } => std::slice::from_ref(anim),
+                Op::Play(anims) | Op::Launch(anims) => anims,
+                _ => &[],
+            };
+            anims.iter().any(|anim| {
+                anim.target == target
+                    && matches!(
+                        anim.anim_type,
+                        AnimationType::GrowFromCenter
+                            | AnimationType::GrowFromPoint { .. }
+                            | AnimationType::GrowFromEdge { .. }
+                            | AnimationType::SpinInFromNothing
+                    )
+            })
+        };
+        !ops[..index].iter().any(grows) && ops[index + 1..].iter().any(grows)
     }
 
     fn animation_reveals_deferred(anim_type: &AnimationType) -> bool {

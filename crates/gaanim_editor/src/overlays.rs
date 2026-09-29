@@ -522,6 +522,7 @@ type LayoutQueryData = (
     &'static gaanim_scene::LocalBounds,
     &'static gaanim_math::GlobalSpatialTransform,
     Option<&'static gaanim_scene::GlobalOpacity>,
+    Option<&'static gaanim_scene::Visible>,
 );
 
 /// A rectangle in a box's local space: `(min_x, min_y, max_x, max_y)`.
@@ -689,8 +690,11 @@ fn paint_layout(
 
     let boxes: Vec<InspectedBox> = layouts
         .iter()
-        .filter(|(.., opacity)| opacity.is_none_or(|opacity| opacity.0 > 0.01))
-        .filter_map(|(inspection, bounds, global, _)| {
+        // Boxes of other segments lose `Visible` while the playhead is away.
+        .filter(|(.., opacity, visible)| {
+            visible.is_some() && opacity.is_none_or(|opacity| opacity.0 > 0.01)
+        })
+        .filter_map(|(inspection, bounds, global, ..)| {
             let frame = inspection.at(now)?;
             let outer = (
                 bounds.0.min.x,
