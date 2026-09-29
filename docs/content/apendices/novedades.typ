@@ -39,6 +39,9 @@ cambiar tus escenas.
 - Una caja colocada por el layout, o un hijo suyo, ya no se ve entera antes de
   su turno cuando entra con `grow_from_center`, `grow_from_point`,
   `grow_from_edge` o `spin_in_from_nothing`.
+- Una caja, su fondo o sus hijos que entran con `grow_*` ya no aparecen antes de
+  su turno cuando una caja se reorganiza después (`set`, `add`, `remove`,
+  `swap`…).
 - El overlay *Layout* del editor solo dibuja las cajas del segmento actual: los
   límites de los layouts de otros segmentos ya no quedan visibles.
 - `just build-release-install` ya no falla al borrar `gaanim-core` y
