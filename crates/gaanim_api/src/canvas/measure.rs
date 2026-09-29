@@ -39,10 +39,12 @@ impl SceneModel {
     /// reactive updaters rebuild every frame is measured as declared.
     ///
     /// A drawable declared since the scene last advanced (by `play`, `wait`
-    /// and the like) that nothing else refers to yet has no animation, cut,
-    /// group or layout acting on it: its box depends only on its own
-    /// declaration and those of its members, so it is measured by compiling
-    /// just them. Otherwise this compiles the scene authored so far.
+    /// and the like) that nothing else refers to yet has no animation, cut or
+    /// group acting on it: its box depends only on its own declaration, those
+    /// of its members and, inside a box, those of its box tree when that was
+    /// declared since then too and placed without animation. It is measured
+    /// by compiling just them. Otherwise this compiles the scene authored so
+    /// far.
     pub fn bounds_of(&self, handle: &DrawableHandle) -> Result<Bounds3D, BoundsError> {
         if !self.owns(handle) {
             return Err(BoundsError::ForeignScene);
@@ -119,24 +121,54 @@ impl SceneModel {
             .iter()
             .position(|op| spawned(op).is_some_and(|spawned| closure.contains(&spawned)))?;
         let mut ops = Vec::new();
+        let mut spawned_closure = 0;
         for op in &segment.ops[first..] {
-            let Op::Spawn(spec) = op else {
-                // An animation, cut, grouping, layout or binding may act on
-                // the closure.
-                return None;
-            };
-            let spec = spec.lock().expect("object spec poisoned");
-            if closure.contains(&spec.id) {
-                ops.push(op.clone());
-            } else if spawn_members(&spec.kind)?
-                .iter()
-                .any(|member| closure.contains(member))
-            {
-                // A later group gathers the closure and may move it.
-                return None;
+            match op {
+                Op::Spawn(spec) => {
+                    let spec = spec.lock().expect("object spec poisoned");
+                    if closure.contains(&spec.id) {
+                        ops.push(op.clone());
+                        spawned_closure += 1;
+                    } else if spawn_members(&spec.kind)?
+                        .iter()
+                        .any(|member| closure.contains(member))
+                    {
+                        // A later group gathers the closure and may move it.
+                        return None;
+                    }
+                }
+                // Boxes of the closure placed at once; an animated reflow
+                // moves them over time.
+                Op::LayoutTransition { to, duration, .. } => {
+                    let ours = closure.contains(&to.container);
+                    if !ours
+                        && !to
+                            .members
+                            .iter()
+                            .any(|member| closure.contains(&member.id))
+                    {
+                        continue;
+                    }
+                    if !ours || duration.is_some() {
+                        return None;
+                    }
+                    ops.push(op.clone());
+                }
+                Op::AttachLayoutBackground {
+                    target, container, ..
+                } => match (closure.contains(target), closure.contains(container)) {
+                    (true, true) => ops.push(op.clone()),
+                    (false, false) => {}
+                    _ => return None,
+                },
+                // Zones only compute rectangles.
+                Op::RecordLayoutZones { .. } => {}
+                // An animation, cut, grouping, constraint or binding may act
+                // on the closure.
+                _ => return None,
             }
         }
-        if ops.len() != closure.len() {
+        if spawned_closure != closure.len() {
             return None;
         }
 
@@ -160,8 +192,9 @@ impl SceneModel {
 }
 
 /// The object `id` and every object its box depends on (group members, SVG
-/// roots, layout references), when all of them are declared but not yet
-/// frozen and none depends on anything else. `None` otherwise.
+/// roots, layout references, the whole box tree it belongs to), when all of
+/// them are declared but not yet frozen and none depends on anything else.
+/// `None` otherwise.
 fn independent_closure(
     state: &CanvasState,
     id: ObjectId,
@@ -172,9 +205,8 @@ fn independent_closure(
         if !closure.insert(id) {
             continue;
         }
-        // Frozen objects may carry cuts and animations; layout containers
-        // are placed by their layout tree.
-        if state.frozen_spawn_specs.contains_key(&id) || state.latest_layouts.contains_key(&id) {
+        // Frozen objects may carry cuts and animations.
+        if state.frozen_spawn_specs.contains_key(&id) {
             return None;
         }
         let spec = state
@@ -187,6 +219,13 @@ fn independent_closure(
         }
         pending.extend_from_slice(spawn_members(&spec.kind)?);
         pending.extend(spec.svg_owner);
+        // A box places its members and is placed by the box that holds it,
+        // so every box of a tree depends on the whole tree.
+        pending.extend(spec.layout_owner);
+        pending.extend(spec.layout_background);
+        if let Some(snapshot) = state.latest_layouts.get(&id) {
+            pending.extend(snapshot.members.iter().map(|member| member.id));
+        }
         for op in &spec.layout_ops {
             match op {
                 LayoutOp::NextTo { reference, .. } | LayoutOp::AlignTo { reference, .. } => {
@@ -200,12 +239,10 @@ fn independent_closure(
     Some(closure)
 }
 
-/// Whether nothing outside the declaration of `spec` shapes it: no layout,
-/// coordinate view, HUD placement or animation state.
+/// Whether nothing outside the declaration of `spec` and its box tree shapes
+/// it: no coordinate view, HUD placement or animation state.
 fn self_contained(spec: &ObjectSpec) -> bool {
-    spec.layout_owner.is_none()
-        && spec.layout_background.is_none()
-        && !spec.hud
+    !spec.hud
         && !spec.defer_visibility_until_play
         && spec.coordinate_view_role.is_none()
         && spec.coordinate_label_offset.is_none()
@@ -371,6 +408,134 @@ mod tests {
             .text("Sismo moderado")
             .next_to(&label, Direction::Right, 0.18);
         assert_same(&scene, &next);
+    }
+
+    /// A decorated column holding a text and a sized spacer, inside a row
+    /// on the safe area beside another box, like a slide's cards.
+    fn card_row(scene: &mut SceneModel) -> (DrawableHandle, DrawableHandle, DrawableHandle) {
+        use crate::canvas::{LayoutMemberSpec, LayoutSpec, LayoutWithin};
+        use gaanim_core::glam::DVec2;
+        use gaanim_layout::{Align, Insets, LayoutNodeKind, LayoutStyle, SizeRule};
+
+        fn place(
+            scene: &mut SceneModel,
+            members: &[&DrawableHandle],
+            decorated: bool,
+            item: gaanim_layout::LayoutItemStyle,
+            spec: LayoutSpec,
+        ) -> DrawableHandle {
+            let root = scene.group(members);
+            for member in members {
+                member.claim_layout(&root).unwrap();
+            }
+            if decorated {
+                scene
+                    .decorate_layout(&root, Some(Color::WHITE.into()), None, 0.0)
+                    .unwrap();
+            }
+            root.set_layout_item(item);
+            let snapshots = members
+                .iter()
+                .map(|member| LayoutMemberSpec {
+                    id: member.id,
+                    style: member.layout_item(),
+                })
+                .collect();
+            scene.reflow_layout(&root, snapshots, spec, 1, None, None, None);
+            root
+        }
+
+        let label = scene.text("Densidad de muros");
+        let slot = scene.rect(0.1, 0.1).no_fill().no_stroke();
+        slot.set_layout_item(gaanim_layout::LayoutItemStyle {
+            shrink: 0.0,
+            ..Default::default()
+        });
+        let card = place(
+            scene,
+            &[&slot, &label],
+            true,
+            gaanim_layout::LayoutItemStyle {
+                grow: 1.0,
+                ..Default::default()
+            },
+            LayoutSpec {
+                kind: LayoutNodeKind::Column { wrap: false },
+                style: LayoutStyle {
+                    padding: Insets::all(0.25),
+                    gap: DVec2::splat(0.15),
+                    height: SizeRule::Fill(1.0),
+                    ..Default::default()
+                },
+                within: LayoutWithin::Intrinsic,
+            },
+        );
+        let other = scene.circle(0.6);
+        let row = place(
+            scene,
+            &[&card, &other],
+            false,
+            Default::default(),
+            LayoutSpec {
+                kind: LayoutNodeKind::Row { wrap: false },
+                style: LayoutStyle {
+                    width: SizeRule::Fill(1.0),
+                    height: SizeRule::Fill(1.0),
+                    padding: Insets::all(0.4),
+                    gap: DVec2::splat(0.3),
+                    align: Align::Stretch,
+                    ..Default::default()
+                },
+                within: LayoutWithin::Safe,
+            },
+        );
+        (row, card, slot)
+    }
+
+    #[test]
+    fn a_fresh_box_tree_measures_like_the_compiled_scene() {
+        let mut scene = busy_scene();
+        let (row, card, slot) = card_row(&mut scene);
+        assert_same(&scene, &slot);
+        assert_same(&scene, &card);
+        assert_same(&scene, &row);
+
+        // A root box placed by one of its anchors beside the first tree.
+        let (moved, _, inner) = card_row(&mut scene);
+        let moved = moved.at_anchor(-6.0, 2.0, Anchor::Left);
+        assert_same(&scene, &inner);
+        assert_same(&scene, &moved);
+        assert_same(&scene, &slot);
+    }
+
+    #[test]
+    fn box_trees_with_history_compile_the_scene() {
+        let mut scene = busy_scene();
+        let (row, _, slot) = card_row(&mut scene);
+        scene.play(vec![row.animate().shift_by(1.0, 0.0).duration(0.4)]);
+        assert!(scene.isolated_declaration(slot.id).is_none());
+        let bounds = scene.bounds_of(&slot).unwrap();
+        assert!(bounds.min.x.is_finite(), "{bounds:?}");
+
+        // A fresh tree whose box then reflows over time.
+        let (row, card, fresh) = card_row(&mut scene);
+        let members = [&card]
+            .iter()
+            .map(|member| crate::canvas::LayoutMemberSpec {
+                id: member.id,
+                style: member.layout_item(),
+            })
+            .collect();
+        scene.reflow_layout(
+            &row,
+            members,
+            Default::default(),
+            2,
+            Some(0.5),
+            None,
+            None,
+        );
+        assert!(scene.isolated_declaration(fresh.id).is_none());
     }
 
     #[test]
