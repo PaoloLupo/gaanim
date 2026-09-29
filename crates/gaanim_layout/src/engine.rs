@@ -893,11 +893,25 @@ fn build_node(
             let grow = if item.grow > 0.0 { item.grow } else { fill };
             taffy_style.flex_grow = grow.max(0.0) as f32;
             taffy_style.flex_shrink = item.shrink.max(0.0) as f32;
+            // A parent that hugs its content has no free space to share: a
+            // growing item counts its content, or the parent would measure
+            // as if every one of them were empty and its content would
+            // overflow it.
+            let parent_hugs = parent_style.is_some_and(|parent| {
+                matches!(
+                    if horizontal {
+                        parent.width
+                    } else {
+                        parent.height
+                    },
+                    SizeRule::Hug
+                )
+            });
             taffy_style.flex_basis = match item.basis {
                 Some(basis) => Dimension::length(basis.max(0.0) as f32),
                 // A growing item shares the free space by weight, ignoring
                 // its own content size.
-                None if grow > 0.0 => Dimension::length(0.0),
+                None if grow > 0.0 && !parent_hugs => Dimension::length(0.0),
                 None => Dimension::auto(),
             };
             if let Some(align) = item.align {
@@ -1297,6 +1311,70 @@ mod tests {
         .unwrap();
         assert_eq!(layout.boxes[&LayoutId(3)].bounds.height(), 20.0);
         assert_eq!(layout.boxes[&LayoutId(2)].bounds.height(), 20.0);
+    }
+
+    #[test]
+    fn a_hugging_column_of_growing_items_is_as_tall_as_its_content() {
+        let block = |id, height| {
+            let mut node = LayoutNode::leaf(LayoutId(id));
+            node.style.width = SizeRule::Fixed(50.0);
+            node.style.height = SizeRule::Fixed(height);
+            LayoutChild {
+                node: Box::new(node),
+                style: LayoutItemStyle {
+                    grow: 1.0,
+                    ..LayoutItemStyle::default()
+                },
+            }
+        };
+        // A column that hugs its content holds two items that grow, inside a
+        // row that centers it, above a footer.
+        let stack = LayoutNode::container(
+            LayoutId(2),
+            LayoutNodeKind::Column { wrap: false },
+            vec![block(3, 40.0), block(4, 60.0)],
+        );
+        let mut row = LayoutNode::container(
+            LayoutId(5),
+            LayoutNodeKind::Row { wrap: false },
+            vec![LayoutChild {
+                node: Box::new(stack),
+                style: LayoutItemStyle::default(),
+            }],
+        );
+        row.style.align = Align::Center;
+        let mut footer = LayoutNode::leaf(LayoutId(6));
+        footer.style.width = SizeRule::Fixed(50.0);
+        footer.style.height = SizeRule::Fixed(10.0);
+        let mut page = LayoutNode::container(
+            LayoutId(1),
+            LayoutNodeKind::Column { wrap: false },
+            vec![
+                LayoutChild {
+                    node: Box::new(row),
+                    style: LayoutItemStyle::default(),
+                },
+                LayoutChild {
+                    node: Box::new(footer),
+                    style: LayoutItemStyle::default(),
+                },
+            ],
+        );
+        page.style.width = SizeRule::Fill(1.0);
+        page.style.height = SizeRule::Fill(1.0);
+        let layout = resolve_layout(
+            &page,
+            Bounds3D::new_2d(-250.0, -200.0, 250.0, 200.0),
+            &Paragraph,
+            &[],
+        )
+        .unwrap();
+        let stack = layout.boxes[&LayoutId(2)].bounds;
+        assert_eq!(stack.height(), 100.0, "the column counts its content");
+        assert_eq!(layout.boxes[&LayoutId(3)].bounds.height(), 40.0);
+        assert_eq!(layout.boxes[&LayoutId(4)].bounds.height(), 60.0);
+        // y points up: the footer sits below the row, not over it.
+        assert!(layout.boxes[&LayoutId(6)].bounds.max.y <= stack.min.y + 1e-9);
     }
 
     #[test]

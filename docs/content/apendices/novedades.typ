@@ -31,6 +31,12 @@ hace falta cambiar tus escenas.
 - `box.find(type=…, where=…, text=…)` y `box.find_all(...)` buscan entre esas
   piezas; `text` compara con el contenido de un texto (`Text.content`).
 - `box.each(make)` aplica un ajuste inmediato a cada pieza y devuelve la caja.
+- `box.reveal()` revela una caja con la política que casi toda diapositiva
+  pide: fondos y objetos con un fundido, textos que entran deslizándose y
+  filetes (cajas sin hijos que dibujan algo) que crecen.
+- `gaanim check` y `box.diagnostics()` avisan cuando el contenido de una caja se
+  sale de ella o una caja se superpone con la anterior de su fila o columna. Un
+  contenedor con recorte (`clip=True`) puede sacar contenido sin aviso.
 - `box.cascade(each=…).fade_in()` (o cualquier otra animación) las anima todas
   en cascada, sin escribir la lambda de `stagger`.
 - `box.move_child(hijo, a)`, `box.swap(a, b)` y `box.reverse()` reordenan los
@@ -63,6 +69,12 @@ hace falta cambiar tus escenas.
 - Una caja colocada por el layout, o un hijo suyo, ya no se ve entera antes de
   su turno cuando entra con `grow_from_center`, `grow_from_point`,
   `grow_from_edge` o `spin_in_from_nothing`.
+- Un `geometry.connector` con extremos fijos que es hijo de una caja ya se
+  coloca en su celda, como `geometry.arrow`, en lugar de dibujarse apilado con
+  los demás.
+- Una columna con hijos `.item(grow=1)` y altura automática ya cuenta el
+  contenido de esos hijos: antes se medía casi sin altura y su contenido se
+  desbordaba sobre la caja siguiente.
 - Una caja, su fondo o sus hijos que entran con `grow_*` ya no aparecen antes de
   su turno cuando una caja se reorganiza después (`set`, `add`, `remove`,
   `swap`…).

@@ -2198,6 +2198,18 @@ def validate_layout_box_contract(module):
             scene.play(animation().duration(0.2))
         except (ValueError, module.LayoutOwnershipError) as error:
             failures.append(f"a box child refused animate.{name}: {error}")
+    # reveal: one stagger with the usual policy, and checked arguments.
+    slide = L.column(L.box("Título", role="title"), L.box(height="4px", width="fill", background="#4f46e5"), L.box("texto"), background="#f8fafc")
+    if not isinstance(slide.reveal(), module.Composition):
+        failures.append("Box.reveal did not return a Composition")
+    scene.play(slide.reveal(each=0.05, duration=0.3, direction=module.Direction.LEFT, rules="fade"))
+    for description, operation in (
+        ("an unknown rules mode", lambda: slide.reveal(rules="slide")),
+        ("a zero duration", lambda: slide.reveal(duration=0)),
+        ("a box with nothing to show", lambda: L.box().reveal()),
+    ):
+        if not raises_error(ValueError, operation):
+            failures.append(f"reveal accepted {description}")
     # walk lists backgrounds and pieces at any depth, in draw order.
     inner_text = scene.text("dentro")
     inner = L.row(inner_text, background="red")

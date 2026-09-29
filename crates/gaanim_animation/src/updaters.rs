@@ -1274,6 +1274,10 @@ pub struct TrackingConnector {
     /// Visible fraction of the polyline measured from the tail, animated by
     /// `grow_arrow`. The head keeps its full size and rides the tip.
     pub progress: f64,
+    /// The static points are the connector's own geometry, in its local
+    /// frame, instead of positions in the scene: a box places it like any
+    /// other shape and it moves with it.
+    pub local: bool,
 }
 
 /// A card background reads its parent's resolved local layout box.
@@ -1321,7 +1325,7 @@ pub fn record_layout_bounds(
     }
 }
 
-fn connector_path(
+pub fn connector_path(
     points: &[DVec3],
     head_length: f64,
     head_width: f64,
@@ -1681,6 +1685,10 @@ pub fn tracking_line_system(world: &mut World) {
                 )
             })
             .unwrap_or_default();
+        if connector.local {
+            updates.push((entity, path));
+            continue;
+        }
         let inverse = entity_world_matrix(entity, world)
             .unwrap_or(DMat4::IDENTITY)
             .inverse();
