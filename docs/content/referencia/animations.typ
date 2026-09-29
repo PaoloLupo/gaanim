@@ -2051,6 +2051,226 @@ scene.wait(4.0)
 Para un ejemplo con varilla, cota y estela, consulta
 `examples/pendulum_simulation.py` en el repositorio de Gaanim.
 
+== Falloffs: influencia por instancia <falloffs>
+
+Un `Falloff` es un valor por instancia calculado a partir de su posición en el
+grupo, su distancia a un objetivo o un ruido con semilla. `Drawable.drive` lo
+conecta a un canal de todos los miembros de un grupo, así que un solo
+movimiento del cursor escala, tiñe o gira cientos de elementos. Se evalúa en
+Rust por miembro y fotograma, sin llamar a Python, y es función pura del
+tiempo de la línea de tiempo: un seek cae en el mismo fotograma que la
+reproducción. Los valores autorados no se tocan: el efecto se suma o multiplica
+por encima, como `Updater.wiggle`.
+
+Los falloffs se combinan con `+`, `-` y `*` (con números u otros falloffs),
+`maximum` y `minimum`, como los modos de combinación de Cavalry.
+
+#api-entry(
+  name: "Falloff.distance",
+  kind: "factory",
+  params: (
+    (name: "target", type: "Drawable | tuple[float, float]", default: none, desc: [Objetivo: un objeto, que se sigue allí donde lo lleven sus animaciones, o un punto `(x, y)`.]),
+    (name: "radius", type: "float", default: "2.0", desc: [Distancia, en unidades de escena, a la que la influencia llega a 0.]),
+    (name: "falloff", type: "\"linear\" | \"smooth\" | \"sharp\" | \"round\"", default: "\"smooth\"", desc: [Forma de la caída: lineal, suave (smoothstep), concentrada junto al objetivo o que llega lejos.]),
+  ),
+  returns: (type: "Falloff", desc: [1 en el objetivo y 0 a `radius` y más allá.]),
+  desc: [Un `radius` no positivo o no finito, o una forma desconocida, lanza `ValueError`; un objetivo de otro tipo lanza `TypeError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>cursor = scene.geometry.dot(0.1).move_to(-3, 0)
+near = Falloff.distance(cursor, radius=2.0, falloff="smooth")
+```
+]
+
+#api-entry(
+  name: "Falloff.index",
+  kind: "factory",
+  params: (
+    (name: "easing", type: "Easing | None", default: "None", desc: [Curva que da forma a la rampa.]),
+    (name: "reverse", type: "bool", default: "False", desc: [Cuenta desde el último miembro.]),
+  ),
+  returns: (type: "Falloff", desc: [0 para el primer miembro y 1 para el último.]),
+  desc: [Un grupo de un solo miembro da 0.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+fade_in_order = Falloff.index(easing=Easing.SMOOTH).remap(0.2, 1.0)
+```
+]
+
+#api-entry(
+  name: "Falloff.linear",
+  kind: "factory",
+  params: (
+    (name: "start, end", type: "Drawable | tuple[float, float]", default: none, desc: [Extremos de la línea, objetos o puntos.]),
+    (name: "falloff", type: "str", default: "\"linear\"", desc: [Forma de la rampa, como en `Falloff.distance`.]),
+  ),
+  returns: (type: "Falloff", desc: [0 en `start`, 1 en `end` y proporcional entre ambos.]),
+  desc: [Los miembros antes de `start` reciben 0 y los que pasan de `end` reciben 1: al mover un extremo, una ola cruza el grupo.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+wave = Falloff.linear((-6, 0), (6, 0), falloff="smooth")
+```
+]
+
+#api-entry(
+  name: "Falloff.noise",
+  kind: "factory",
+  params: (
+    (name: "frequency", type: "float", default: "0.5", desc: [Rapidez con que el campo se desplaza en el tiempo.]),
+    (name: "scale", type: "float", default: "0.5", desc: [Ciclos de ruido por unidad de escena: los vecinos reciben valores parecidos.]),
+    (name: "octaves", type: "int", default: "1", desc: [Capas de detalle, de 1 a 8.]),
+    (name: "seed", type: "int", default: "0", desc: [Semilla: la misma da el mismo campo.]),
+  ),
+  returns: (type: "Falloff", desc: [Ruido simplex en `[0, 1]` sobre la posición de cada miembro y el tiempo.]),
+  desc: [Valores fuera de rango lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+sway = Falloff.noise(frequency=0.4, seed=2).remap(-0.3, 0.3)
+```
+]
+
+#api-entry(
+  name: "Falloff.constant",
+  kind: "factory",
+  params: ((name: "value", type: "float", default: none, desc: [Valor finito.]),),
+  returns: (type: "Falloff", desc: [El mismo valor para todos los miembros.]),
+  desc: [Sirve para combinar: `near.maximum(Falloff.constant(0.3))`. Un valor no finito lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+half = Falloff.constant(0.5)
+```
+]
+
+#api-entry(
+  name: "Falloff.remap",
+  kind: "method",
+  signature: "remap(low, high) -> Falloff",
+  params: ((name: "low, high", type: "float", default: none, desc: [Valores finitos: 0 se convierte en `low` y 1 en `high`.]),),
+  returns: (type: "Falloff", desc: [Un falloff nuevo.]),
+  desc: [`near.remap(1.0, 1.8)` escala de 1 a 1.8 conforme el miembro se acerca al objetivo. `Falloff.invert()` devuelve `1 - valor`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>near = Falloff.distance((0, 0), radius=2)
+grow = near.remap(1.0, 1.8)
+far = near.invert()
+```
+]
+
+#api-entry(
+  name: "Falloff.gradient",
+  kind: "method",
+  signature: "gradient(*colors) -> FalloffColor",
+  params: ((name: "colors", type: "ColorLike", default: none, desc: [Al menos dos colores, repartidos a partes iguales: 0 es el primero y 1 el último.]),),
+  returns: (type: "FalloffColor", desc: [El falloff convertido en color, para `drive(\"fill\", ...)`.]),
+  desc: [Menos de dos colores lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>near = Falloff.distance((0, 0), radius=2)
+heat = near.gradient(BLUE, GOLD)
+```
+]
+
+#api-entry(
+  name: "Falloff.maximum / minimum",
+  kind: "method",
+  signature: "maximum(other) -> Falloff · minimum(other) -> Falloff",
+  params: ((name: "other", type: "Falloff | float", default: none, desc: [Con quien se combina.]),),
+  returns: (type: "Falloff", desc: [El mayor o el menor de los dos valores, miembro a miembro.]),
+  desc: [Un operando de otro tipo lanza `TypeError`. `a + b`, `a - b` y `a * b` combinan igual.],
+)[
+```python
+>>>from gaanim import *
+>>>a = Falloff.distance((-2, 0), radius=2)
+>>>b = Falloff.distance((2, 0), radius=2)
+both = a.maximum(b)
+sum_of = a + b
+```
+]
+
+#api-entry(
+  name: "Drawable.drive",
+  kind: "method",
+  signature: "drive(channel, value) -> None",
+  params: (
+    (name: "channel", type: "\"scale\" | \"rotation\" | \"opacity\" | \"x\" | \"y\" | \"fill\"", default: none, desc: [Canal: `scale` y `opacity` multiplican el valor autorado, `rotation` suma radianes, `x` e `y` suman unidades de escena y `fill` sustituye el color de relleno.]),
+    (name: "value", type: "Falloff | FalloffColor", default: none, desc: [Un `Falloff` para los canales numéricos; el `FalloffColor` de `Falloff.gradient` para `fill`.]),
+  ),
+  returns: (type: "None", desc: [Se aplica desde el cursor de la línea de tiempo.]),
+  desc: [Sobre un grupo (por ejemplo el de `scene.geometry.duplicate`) actúa sobre cada miembro; sobre un objeto suelto, sobre él mismo. Varios `drive` sobre un canal se combinan. `clear_drive()` los termina en el cursor. Un canal desconocido lanza `ValueError`, un valor del tipo equivocado lanza `TypeError` y un objetivo de otra escena lanza `ValueError`.],
+)[
+```python
+# output: preview.webp
+# show-code: true
+import math
+from gaanim import BLUE, GOLD, WHITE, Distribution, Easing, Falloff, Scene
+
+scene = Scene(frame=(16, 9), background="#0f172a")
+tip = scene.geometry.regular_polygon(3, 0.17).fill(BLUE).no_stroke()
+grid = scene.geometry.duplicate(tip, Distribution.grid(20, 12, 0.7))
+cursor = scene.geometry.dot(0.12).fill(WHITE).move_to(-6.5, 0)
+
+near = Falloff.distance(cursor, radius=2.5, falloff="smooth")
+grid.drive("scale", near.remap(1.0, 1.9))
+grid.drive("fill", near.gradient(BLUE, GOLD))
+grid.drive("opacity", Falloff.index(easing=Easing.SMOOTH).remap(0.35, 1.0))
+grid.look_at(cursor, offset=-math.pi / 2)  # la punta mira al cursor
+
+scene.play([cursor.animate.move_to(6.5, 0).duration(2.5).easing(Easing.SMOOTH)])
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Drawable.look_at",
+  kind: "method",
+  signature: "look_at(target, *, offset=0.0) -> None",
+  params: (
+    (name: "target", type: "Drawable | tuple[float, float]", default: none, desc: [Hacia dónde mira: un objeto, que se sigue allí donde vaya, o un punto.]),
+    (name: "offset", type: "float", default: "0.0", desc: [Radianes que se suman, para formas que apuntan hacia otro lado (un triángulo apunta hacia arriba: usa `-math.pi / 2`).]),
+  ),
+  returns: (type: "None", desc: [Se aplica desde el cursor de la línea de tiempo.]),
+  desc: [Gira el objeto, o cada miembro de un grupo, para que su eje x apunte al objetivo. Se suma al giro autorado y a los `drive("rotation", ...)`. Un objetivo de otro tipo lanza `TypeError` y uno de otra escena `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>cursor = scene.geometry.dot(0.1).move_to(2, 1)
+>>>needles = scene.geometry.duplicate(scene.geometry.line(length=0.4), Distribution.grid(6, 4, 0.8))
+needles.look_at(cursor)
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Drawable.clear_drive",
+  kind: "method",
+  signature: "clear_drive() -> None",
+  returns: (type: "None", desc: [Termina en el cursor todos los `drive` y `look_at` del objeto o de los miembros del grupo.]),
+  desc: [Los valores autorados vuelven a verse desde ese instante; lo anterior no cambia.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>dots = scene.geometry.duplicate(scene.geometry.dot(0.1), Distribution.grid(4, 3, 0.5))
+>>>dots.drive("scale", Falloff.index().remap(1.0, 2.0))
+scene.wait(1)
+dots.clear_drive()
+scene.render()
+```
+]
+
 == Transformaciones 3D
 
 #experimental()

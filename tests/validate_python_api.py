@@ -1987,6 +1987,82 @@ def raises_error(expected, operation):
     return False
 
 
+def validate_falloff_contract(module):
+    """Falloffs build, combine and connect to channels with checked arguments."""
+    failures = []
+    scene = module.Scene(frame=(16, 9))
+    cursor = scene.geometry.circle(0.1).move_to(-3, 0)
+    grid = scene.geometry.duplicate(
+        scene.geometry.circle(0.15).fill("#3b82f6"), module.Distribution.grid(6, 3, 0.6)
+    )
+    near = module.Falloff.distance(cursor, radius=2.0, falloff="smooth")
+    for name, build in (
+        ("constant", lambda: module.Falloff.constant(0.5)),
+        ("index", lambda: module.Falloff.index(easing=module.Easing.SMOOTH, reverse=True)),
+        ("linear", lambda: module.Falloff.linear((-3, 0), cursor, falloff="round")),
+        ("noise", lambda: module.Falloff.noise(frequency=0.4, scale=0.3, octaves=3, seed=2)),
+        ("remap", lambda: near.remap(1.0, 1.8)),
+        ("invert", lambda: near.invert()),
+        ("maximum", lambda: near.maximum(0.3)),
+        ("minimum", lambda: near.minimum(near)),
+        ("add", lambda: near + 1),
+        ("radd", lambda: 1 + near),
+        ("sub", lambda: near - near),
+        ("rsub", lambda: 1 - near),
+        ("mul", lambda: near * 2),
+        ("rmul", lambda: 2 * near),
+    ):
+        try:
+            if not isinstance(build(), module.Falloff):
+                failures.append(f"Falloff.{name} did not return a Falloff")
+        except Exception as error:
+            failures.append(f"Falloff.{name} failed: {error}")
+    if not isinstance(near.gradient("#2563eb", "#f59e0b"), module.FalloffColor):
+        failures.append("Falloff.gradient did not return a FalloffColor")
+    for description, operation, expected in (
+        ("a zero radius", lambda: module.Falloff.distance((0, 0), radius=0), ValueError),
+        ("a negative radius", lambda: module.Falloff.distance((0, 0), radius=-1), ValueError),
+        ("a NaN radius", lambda: module.Falloff.distance((0, 0), radius=float("nan")), ValueError),
+        ("an unknown shape", lambda: module.Falloff.distance((0, 0), falloff="cubic"), ValueError),
+        ("a target of another type", lambda: module.Falloff.distance("centro"), TypeError),
+        ("zero octaves", lambda: module.Falloff.noise(octaves=0), ValueError),
+        ("nine octaves", lambda: module.Falloff.noise(octaves=9), ValueError),
+        ("a non-finite constant", lambda: module.Falloff.constant(float("inf")), ValueError),
+        ("a non-finite remap", lambda: near.remap(0, float("nan")), ValueError),
+        ("a single gradient color", lambda: near.gradient("#ffffff"), ValueError),
+        ("a text operand", lambda: near + "a", TypeError),
+        ("an unknown channel", lambda: grid.drive("width", near), ValueError),
+        ("a color on a scalar channel", lambda: grid.drive("scale", near.gradient("red", "blue")), TypeError),
+        ("a scalar on the fill", lambda: grid.drive("fill", near), TypeError),
+        ("a number as a value", lambda: grid.drive("scale", 2.0), TypeError),
+        ("a look_at target of another type", lambda: grid.look_at("centro"), TypeError),
+        ("a non-finite offset", lambda: grid.look_at((0, 0), offset=float("inf")), ValueError),
+    ):
+        if not raises_error(expected, operation):
+            failures.append(f"{description} did not raise {expected.__name__}")
+    other_scene = module.Scene(frame=(16, 9))
+    stranger = other_scene.geometry.circle(0.1)
+    if not raises_error(ValueError, lambda: grid.drive("scale", module.Falloff.distance(stranger))):
+        failures.append("a target of another scene was accepted")
+    if not raises_error(ValueError, lambda: grid.look_at(stranger)):
+        failures.append("a look_at target of another scene was accepted")
+    try:
+        grid.drive("scale", near.remap(1.0, 1.8))
+        grid.drive("rotation", module.Falloff.noise(seed=2).remap(-0.3, 0.3))
+        grid.drive("opacity", module.Falloff.index().remap(0.2, 1.0))
+        grid.drive("x", (near * 0.1))
+        grid.drive("y", near.invert() * 0.1)
+        grid.drive("fill", near.gradient("#2563eb", "#f59e0b"))
+        grid.look_at(cursor)
+        grid.look_at((2, 1), offset=0.5)
+        cursor.drive("scale", module.Falloff.constant(1.0))
+        scene.play(cursor.animate.move_to(3, 0).duration(1.0))
+        grid.clear_drive()
+    except Exception as error:
+        failures.append(f"Drawable.drive, look_at or clear_drive failed: {error}")
+    return failures
+
+
 def validate_layout_box_contract(module):
     """Boxes, styles, classes, zones and item rules keep their contracts."""
     failures = []
@@ -2438,6 +2514,7 @@ def main() -> int:
     missing.extend(validate_reactive_fill_level_contract(module))
     missing.extend(validate_polyline_connector_contract(module))
     missing.extend(validate_layout_box_contract(module))
+    missing.extend(validate_falloff_contract(module))
     missing.extend(validate_fluent_setters_keep_their_class(module))
     missing.extend(validate_editorial_contract(module))
     missing.extend(validate_theme_typography_contract(module))

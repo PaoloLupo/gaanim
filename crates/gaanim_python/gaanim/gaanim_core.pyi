@@ -2186,6 +2186,101 @@ class Voiceover:
         """Whether an audio file backs the take; ``False`` means estimated."""
         ...
 
+class Falloff:
+    """A value per instance, computed from its index, its distance to a target or noise.
+
+    Connect it to a channel with ``Drawable.drive``: one call moves, scales,
+    tints or fades every member of a group, and the value follows the scene as
+    it plays. It is evaluated natively per member and frame without calling
+    Python, and it is a pure function of the timeline time, so seeks and
+    exports agree with playback. Falloffs combine with ``+``, ``-`` and ``*``
+    (with numbers or other falloffs), ``maximum`` and ``minimum``.
+
+    Example:
+        cursor = scene.geometry.circle(0.1).move_to(-6, 0)
+        near = Falloff.distance(cursor, radius=2.0, falloff="smooth")
+        grid.drive("scale", near.remap(1.0, 1.8))
+        grid.drive("fill", near.gradient(BLUE, GOLD))
+        scene.play(cursor.animate.move_to(6, 0).duration(3))
+    """
+    @staticmethod
+    def constant(value: float) -> Falloff:
+        """The same value for every instance; a non-finite value raises ``ValueError``."""
+        ...
+    @staticmethod
+    def index(*, easing: Optional[Easing] = None, reverse: bool = False) -> Falloff:
+        """The instance's place in its group: 0 for the first member, 1 for the last.
+
+        A group of one gives 0. ``easing`` shapes the ramp and ``reverse``
+        counts from the last member.
+
+        Example:
+            grid.drive("opacity", Falloff.index(easing=Easing.SMOOTH).remap(0.2, 1.0))
+        """
+        ...
+    @staticmethod
+    def distance(target: Drawable | tuple[float, float], *, radius: float = 2.0, falloff: Literal["linear", "smooth", "sharp", "round"] = "smooth") -> Falloff:
+        """1 at ``target``, 0 at ``radius`` scene units and beyond.
+
+        ``target`` is a drawable, followed wherever its animations move it, or
+        an ``(x, y)`` point. ``falloff`` shapes the drop: ``"linear"``,
+        ``"smooth"`` (smoothstep), ``"sharp"`` (concentrated near the target)
+        or ``"round"`` (reaching far). A non-positive ``radius`` or another
+        ``falloff`` raises ``ValueError``; a target of another type raises
+        ``TypeError``, and ``drive`` raises ``ValueError`` for a target of
+        another scene.
+        """
+        ...
+    @staticmethod
+    def linear(start: Drawable | tuple[float, float], end: Drawable | tuple[float, float], *, falloff: Literal["linear", "smooth", "sharp", "round"] = "linear") -> Falloff:
+        """0 at ``start``, 1 at ``end`` and in between along the line joining them.
+
+        Instances before ``start`` get 0 and beyond ``end`` get 1, so it sweeps
+        a wave across a group when one end moves.
+        """
+        ...
+    @staticmethod
+    def noise(*, frequency: float = 0.5, scale: float = 0.5, octaves: int = 1, seed: int = 0) -> Falloff:
+        """Seeded simplex noise in ``[0, 1]`` over each instance's position and the time.
+
+        ``scale`` is noise cycles per scene unit (neighbors get similar
+        values), ``frequency`` how fast the field drifts and ``octaves`` (1 to
+        8) adds finer detail. The same seed gives the same field; ``octaves``
+        outside 1 to 8 raises ``ValueError``.
+
+        Example:
+            grid.drive("rotation", Falloff.noise(frequency=0.4, seed=2).remap(-0.3, 0.3))
+        """
+        ...
+    def remap(self, low: float, high: float) -> Falloff:
+        """Map ``[0, 1]`` to ``[low, high]``: 0 becomes ``low`` and 1 becomes ``high``."""
+        ...
+    def invert(self) -> Falloff:
+        """``1 - value``: near becomes far and far becomes near."""
+        ...
+    def maximum(self, other: Falloff | float) -> Falloff:
+        """The larger of this falloff and ``other``; another type raises ``TypeError``."""
+        ...
+    def minimum(self, other: Falloff | float) -> Falloff:
+        """The smaller of this falloff and ``other``; another type raises ``TypeError``."""
+        ...
+    def gradient(self, *colors: ColorLike) -> FalloffColor:
+        """Turn the value into a color: 0 is the first color and 1 the last.
+
+        Colors are evenly spaced and blended in between. Fewer than two colors
+        raise ``ValueError``. Pass the result to ``drive("fill", ...)``.
+        """
+        ...
+    def __add__(self, other: Falloff | float) -> Falloff: ...
+    def __radd__(self, other: Falloff | float) -> Falloff: ...
+    def __sub__(self, other: Falloff | float) -> Falloff: ...
+    def __rsub__(self, other: Falloff | float) -> Falloff: ...
+    def __mul__(self, other: Falloff | float) -> Falloff: ...
+    def __rmul__(self, other: Falloff | float) -> Falloff: ...
+
+class FalloffColor:
+    """A falloff turned into colors by ``Falloff.gradient``; pass it to ``drive("fill", ...)``."""
+
 class Updater:
     """Preset updater — attach to a DrawableHandle via add_updater()."""
     @staticmethod
@@ -3055,6 +3150,36 @@ class Drawable:
         """
         ...
     # Reactive methods
+    def drive(self, channel: Literal["scale", "rotation", "opacity", "x", "y", "fill"], value: Falloff | FalloffColor) -> None:
+        """Connect a ``Falloff`` to a channel of this drawable, or of each member of this group.
+
+        It applies from the timeline cursor on, until ``clear_drive``.
+        ``"scale"`` and ``"opacity"`` multiply the authored value, ``"rotation"``
+        adds radians and ``"x"`` or ``"y"`` add scene units; each takes a
+        ``Falloff``. ``"fill"`` takes the ``FalloffColor`` of
+        ``Falloff.gradient`` and replaces the fill color. The authored values
+        stay untouched, and several drives on one channel combine. An unknown
+        channel raises ``ValueError`` and a value of the wrong type raises
+        ``TypeError``.
+
+        Example:
+            grid.drive("scale", Falloff.distance(cursor, radius=2).remap(1.0, 1.8))
+        """
+        ...
+    def look_at(self, target: Drawable | tuple[float, float], *, offset: float = 0.0) -> None:
+        """Turn this drawable, or each member of this group, to point its x axis at ``target``.
+
+        ``target`` is a drawable, followed wherever it moves, or an ``(x, y)``
+        point; ``offset`` adds radians, for shapes that point elsewhere. It
+        applies from the timeline cursor on, until ``clear_drive``.
+
+        Example:
+            arrows.look_at(cursor)
+        """
+        ...
+    def clear_drive(self) -> None:
+        """End every ``drive`` and ``look_at`` of this drawable, or of the members of this group, at the cursor."""
+        ...
     def add_updater(self, updater: Updater) -> None:
         """Use add updater on this Drawable or create the requested value.
 

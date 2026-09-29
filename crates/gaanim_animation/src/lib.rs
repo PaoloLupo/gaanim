@@ -2,6 +2,11 @@ pub mod camera;
 pub mod custom;
 pub mod echo;
 pub use echo::EchoGhost;
+pub mod falloff;
+pub use falloff::{
+    ColorRamp, FalloffChannel, FalloffDrive, FalloffEffect, FalloffExpr, FalloffOffset,
+    FalloffShape, FalloffTarget, ScheduledEffect,
+};
 pub mod squash;
 pub use squash::{SQUASH_STEP, SquashStretch};
 pub mod paint;
@@ -174,6 +179,13 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
                 procedural::restore_procedural_motion_system
                     .after(gaanim_scene::transform_propagation_system)
                     .after(gaanim_scene::opacity_propagation_system),
+                // Falloffs measure the authored state, then wrap the
+                // procedural layers: applied first, restored last.
+                falloff::apply_falloff_system
+                    .before(procedural::apply_procedural_motion_system)
+                    .before(gaanim_scene::transform_propagation_system)
+                    .before(gaanim_scene::sync_new_opacities),
+                falloff::restore_falloff_system.after(procedural::restore_procedural_motion_system),
             )
                 .in_set(SceneSet::Propagation),
         );
@@ -193,6 +205,7 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
             (
                 procedural::restore_dash_flow_system,
                 stroke_tips::restore_stroke_tips_system,
+                falloff::restore_falloff_fills_system,
             ),
         );
         app.add_systems(

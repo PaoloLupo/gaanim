@@ -157,7 +157,7 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
 | ☐ | ID | Ítem | Coste | Impacto | Depende | Issue |
 |---|---|---|---|---|---|---|
 | ☑ | [PR-04](#pr-04--duplicador-y-repeater-con-distribuciones) | Duplicador/Repeater con distribuciones | M | ★★★ | — | [#148](https://github.com/PaoloLupo/gaanim/issues/148) |
-| ☐ | [PR-05](#pr-05--campos-y-falloffs) | Campos y falloffs estilo Cavalry | M | ★★★ | PR-02, PR-04 | [#149](https://github.com/PaoloLupo/gaanim/issues/149) |
+| ☑ | [PR-05](#pr-05--campos-y-falloffs) | Campos y falloffs estilo Cavalry | M | ★★★ | PR-02, PR-04 | [#149](https://github.com/PaoloLupo/gaanim/issues/149) |
 | ☑ | [PR-06](#pr-06--conexiones-tipo-plexus) | Conexiones tipo plexus | S | ★ | PR-04 | [#150](https://github.com/PaoloLupo/gaanim/issues/150) |
 | ☐ | [PR-07](#pr-07--emisor-de-partículas-determinista) | Emisor de partículas determinista | M | ★★★ | PR-02 | [#151](https://github.com/PaoloLupo/gaanim/issues/151) |
 | ☐ | [PR-08](#pr-08--física-analítica-ligera) | Física analítica ligera (`throw`, `inertia`) | M | ★★ | — | [#152](https://github.com/PaoloLupo/gaanim/issues/152) |
@@ -661,11 +661,11 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
 
   ```python
   cursor = scene.geometry.dot().move_to(-6, 0)
-  near = Field.distance(cursor, radius=2.0, falloff="smooth")
+  near = Falloff.distance(cursor, radius=2.0, falloff="smooth")
   grid.drive("scale", near.remap(1.0, 1.8))
   grid.drive("fill", near.gradient(BLUE, GOLD))
-  grid.drive("rotation", Field.noise(frequency=0.4, seed=2).remap(-0.3, 0.3))
-  grid.drive("opacity", Field.index(easing=Easing.SMOOTH).remap(0.2, 1.0))
+  grid.drive("rotation", Falloff.noise(frequency=0.4, seed=2).remap(-0.3, 0.3))
+  grid.drive("opacity", Falloff.index(easing=Easing.SMOOTH).remap(0.2, 1.0))
   grid.look_at(cursor)
   scene.play([cursor.animate.move_to(6, 0).duration(3)])
   ```
@@ -673,6 +673,11 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
 - **Implementación:** Es un nodo reactivo nativo por instancia. Los campos se combinan
   (`a * b`, `max(a, b)`, `a + b`) como los modos de falloff de Cavalry. Hoy se podría
   hacer con N `computed` en Python, pero eso invoca Python por hijo y por frame.
+- **Hecho:** Se llama `Falloff`, porque `Field` ya nombra la codificación de una columna
+  de datos en los gráficos. `drive` acepta `scale`, `rotation`, `opacity`, `x`, `y` y
+  `fill`; `look_at` apunta cada miembro a un objeto; `clear_drive` los termina. Una
+  rejilla de 20×12 con tres efectos cuesta unos 0,1 ms por fotograma; los ejemplos
+  `falloff_grid` y `falloff_gallery` tienen baseline.
 - **Hecho cuando:** Un grid de 20×12 barrido por un cursor corre en tiempo real en el
   preview, y existe un baseline.
 
