@@ -80,7 +80,6 @@ build-dist:
 build-release-install: build-dist wheel
     New-Item -ItemType Directory -Force -Path "C:\Tools\gaanim" | Out-Null
     {{ system_python }} scripts/stage_app.py --profile dist --dest "C:\Tools\gaanim"
-    Remove-Item -Path "C:\Tools\gaanim\gaanim-core.exe", "C:\Tools\gaanim\gaanim-play.exe" -ErrorAction SilentlyContinue
     # Explorer may hold the thumbnail handler loaded; the old copy keeps working.
     try { Copy-Item -Path "./target/dist/gaanim_thumbnail_handler.dll" -Destination "C:\Tools\gaanim\" -Force -ErrorAction Stop } catch { Write-Warning "gaanim_thumbnail_handler.dll is in use; restart Explorer and run this again to update it" }
     Copy-Item -Path (Get-ChildItem "./target/wheels/gaanim-*-py3-none-any.whl" | Select-Object -First 1).FullName -Destination "C:\Tools\gaanim\" -Force
@@ -90,7 +89,6 @@ build-release-install: build-dist wheel
     mkdir -p "$HOME/.local/bin" "$HOME/.local/lib/gaanim"
     {{ system_python }} scripts/stage_app.py --profile dist --dest "$HOME/.local/lib/gaanim"
     install -m 644 ./target/wheels/gaanim-*-py3-none-any.whl "$HOME/.local/lib/gaanim/"
-    rm -f "$HOME/.local/bin/gaanim-core" "$HOME/.local/bin/gaanim-play"
     ln -sf "$HOME/.local/lib/gaanim/gaanim" "$HOME/.local/bin/gaanim"
 
 # Install the lightweight authoring package in the local virtual environment.

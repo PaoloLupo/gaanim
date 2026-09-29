@@ -11,6 +11,22 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.7.2
+
+Correcciones del layout: las cajas que entran con `grow_from_*` ya no se ven
+antes de su turno y el overlay *Layout* del editor no mezcla segmentos. No hace
+falta cambiar tus escenas.
+
+== Correcciones
+
+- Una caja colocada por el layout, o un hijo suyo, ya no se ve entera antes de
+  su turno cuando entra con `grow_from_center`, `grow_from_point`,
+  `grow_from_edge` o `spin_in_from_nothing`.
+- El overlay *Layout* del editor solo dibuja las cajas del segmento actual: los
+  límites de los layouts de otros segmentos ya no quedan visibles.
+- `just build-release-install` ya no falla al borrar `gaanim-core` y
+  `gaanim-play`, que dejaron de instalarse.
+
 = 0.7.1
 
 Publicada el 29 de septiembre de 2026. Los hijos de una caja se animan con
