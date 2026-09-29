@@ -95,8 +95,9 @@ build-release-install: build-dist wheel
 python-develop:
     {{ python }} -m pip install --editable crates/gaanim_python
 
-# Build the universal authoring wheel in target/wheels/.
+# Build the universal authoring wheel in target/wheels/, replacing any older one.
 wheel:
+    {{ python }} -c "import pathlib; [wheel.unlink() for wheel in pathlib.Path('target/wheels').glob('gaanim-*-py3-none-any.whl')]"
     {{ python }} -m build --wheel --no-isolation --outdir target/wheels crates/gaanim_python
     {{ python }} tests/validate_authoring_wheel.py target/wheels
 

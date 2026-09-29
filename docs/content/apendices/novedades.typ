@@ -68,6 +68,9 @@ hace falta cambiar tus escenas.
   `swap`…).
 - El overlay *Layout* del editor solo dibuja las cajas del segmento actual: los
   límites de los layouts de otros segmentos ya no quedan visibles.
+- `just wheel` (y con él `just build-release-install`) borra las wheels de
+  versiones anteriores antes de construir: ya no falla con «Expected one
+  universal Gaanim wheel» tras subir de versión.
 - `just build-release-install` ya no falla al borrar `gaanim-core` y
   `gaanim-play`, que dejaron de instalarse.
 
