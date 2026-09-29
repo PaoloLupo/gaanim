@@ -329,6 +329,56 @@ scene.render()
 ]
 
 #api-entry(
+  name: "Box.find / find_all",
+  kind: "method",
+  desc: [Buscan entre las piezas de `walk(boxes=boxes)`: `find` devuelve la primera que cumple, o `None`; `find_all` las devuelve todas en orden de dibujo. Una pieza cumple si es instancia de `type` (una clase o una tupla de clases) y `where(pieza)` es verdadero; un filtro omitido lo acepta todo. Por defecto también buscan entre las cajas anidadas. Lanzan `TypeError` si `where` no es invocable.],
+  signature: "box.find(*, type=None, where=None, boxes=True) -> Drawable | None",
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9), theme="paper")
+>>>card = scene.layout.column("Título", scene.layout.row("A", "B"), background="#ffffff", padding="20px")
+title = card.find(type=Text)
+letters = card.find_all(type=Text, where=lambda piece: piece is not title)
+scene.play(title.animate.fade_in())
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Box.cascade",
+  kind: "method",
+  desc: [Elige las piezas de `walk(boxes=boxes)` y devuelve un `BoxCascade`. Cada animación de `.animate` (`fade_in`, `grow_from_center`, `shift_by`…) se puede llamar sobre él con sus mismos argumentos y devuelve un `stagger` sobre todas las piezas. El resto de argumentos son los de `stagger`. Lanza `ValueError` si la caja no tiene piezas y `AttributeError` si una pieza no tiene esa animación; para saltarte piezas usa `Box.stagger`.],
+  signature: "box.cascade(*, boxes=False, each=0.1, total=None, origin=None, grid=None, easing=None, seed=0) -> BoxCascade",
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9), theme="paper")
+>>>card = scene.layout.column("Título", scene.layout.row("A", "B"), background="#ffffff", padding="20px")
+scene.play(card.cascade(each=0.08).fade_in())
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Box.move_child / swap / reverse",
+  kind: "method",
+  desc: [Cambian el orden de los hijos: `move_child(hijo, a)` lo lleva a la posición `a` (negativa cuenta desde el final), `swap(a, b)` intercambia dos y `reverse()` invierte todos. Con `duration` los hijos se deslizan a su nuevo sitio; `advance=False` empieza el siguiente cambio a la vez. `move_child` lanza `ValueError` si el objeto no es hijo de la caja e `IndexError` si la posición no existe.],
+  signature: "box.move_child(child, to, *, duration=None, advance=True) · box.swap(a, b, ...) · box.reverse(...)",
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9), theme="paper")
+>>>chip = BoxStyle(padding="12px", background="#e0e7ff", radius="10px")
+>>>row = scene.layout.row(*[scene.layout.box(t, style=chip) for t in "ABC"], gap="12px")
+row.move_child(row[2], 0, duration=0.6)
+row.swap(row[0], row[2], duration=0.6)
+row.reverse(duration=0.6)
+scene.render()
+```
+]
+
+#api-entry(
   name: "Box.reflow",
   kind: "method",
   desc: [Vuelve a calcular la disposición cuando un hijo cambió de tamaño por su cuenta (por ejemplo, al escalarlo). Los cambios de texto y de estructura ya reorganizan solos.],

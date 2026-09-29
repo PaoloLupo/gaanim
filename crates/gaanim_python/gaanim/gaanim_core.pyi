@@ -830,6 +830,16 @@ class BoxStyle:
         ...
     def to_dict(self) -> dict[str, Any]: ...
 
+class BoxCascade:
+    """The pieces chosen by ``Box.cascade``.
+
+    Any animation method of a drawable's ``animate`` proxy can be called on it
+    with the same arguments; it returns one ``stagger`` over the pieces.
+    Raises ``ValueError`` when the box had no pieces and ``AttributeError``
+    when a piece has no such animation.
+    """
+    def __getattr__(self, name: str) -> Callable[..., Composition]: ...
+
 class Box(Drawable):
     """A box of the layout tree, like an HTML ``div``.
 
@@ -886,6 +896,58 @@ class Box(Drawable):
         Example:
             scene.play(card.stagger(lambda piece: piece.animate.fade_in(), each=0.05))
         """
+        ...
+    def find(self, *, type: Optional[type | tuple[type, ...]] = None, where: Optional[Callable[[Drawable], bool]] = None, boxes: bool = True) -> Optional[Drawable]:
+        """The first piece of ``walk(boxes=boxes)`` that matches, or ``None``.
+
+        A piece matches when it is an instance of ``type`` (a class or a tuple
+        of classes) and ``where(piece)`` is true; a filter left out accepts
+        everything. Nested boxes are searched too unless ``boxes=False``.
+        Raises ``TypeError`` if ``where`` is not callable.
+
+        Example:
+            title = card.find(type=Text)
+            cell = card.find(where=lambda piece: piece.width > 2)
+        """
+        ...
+    def find_all(self, *, type: Optional[type | tuple[type, ...]] = None, where: Optional[Callable[[Drawable], bool]] = None, boxes: bool = True) -> list[Drawable]:
+        """Every piece of ``walk(boxes=boxes)`` that matches, in draw order (see ``find``)."""
+        ...
+    def cascade(
+        self,
+        *,
+        boxes: bool = False,
+        each: float = 0.1,
+        total: Optional[float] = None,
+        origin: Optional[StaggerOrigin] = None,
+        grid: Optional[Literal["auto"] | tuple[int, int]] = None,
+        easing: Optional[Easing] = None,
+        seed: int = 0,
+    ) -> BoxCascade:
+        """Choose the pieces of ``walk(boxes=boxes)`` and return a ``BoxCascade``.
+
+        Each animation method of the result (``fade_in``, ``grow_from_center``,
+        ``shift_by``...) takes the arguments of the same method under
+        ``.animate`` and returns one ``stagger`` over all the pieces. The other
+        arguments are those of the module-level ``stagger``.
+
+        Example:
+            scene.play(card.cascade(each=0.05).fade_in())
+        """
+        ...
+    def move_child(self, child: Drawable, to: int, *, duration: Optional[float] = None, advance: bool = True) -> None:
+        """Move ``child`` to position ``to`` (negative counts from the end).
+
+        The other children make room; with ``duration`` they slide there.
+        Raises ``ValueError`` if ``child`` is not a child of this box and
+        ``IndexError`` if ``to`` is out of range.
+        """
+        ...
+    def swap(self, a: Drawable, b: Drawable, *, duration: Optional[float] = None, advance: bool = True) -> None:
+        """Exchange the places of two children; with ``duration`` they slide."""
+        ...
+    def reverse(self, *, duration: Optional[float] = None, advance: bool = True) -> None:
+        """Reverse the order of the children; with ``duration`` they slide."""
         ...
     @property
     def background(self) -> Optional[Drawable]:

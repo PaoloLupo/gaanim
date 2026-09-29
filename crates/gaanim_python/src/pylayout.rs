@@ -1081,6 +1081,49 @@ pub struct PyBox {
 type SharedLayout = Arc<Mutex<LayoutState>>;
 
 impl PyBox {
+    fn matching(
+        &self,
+        py: Python<'_>,
+        kind: Option<&Bound<'_, PyAny>>,
+        predicate: Option<&Bound<'_, PyAny>>,
+        boxes: bool,
+        first_only: bool,
+    ) -> PyResult<Vec<Py<PyAny>>> {
+        if let Some(predicate) = predicate
+            && !predicate.is_callable()
+        {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "where must be a function that takes a piece and returns a bool",
+            ));
+        }
+        let mut found = Vec::new();
+        for piece in self.walk(py, boxes)? {
+            let bound = piece.bind(py);
+            if let Some(kind) = kind
+                && !bound.is_instance(kind)?
+            {
+                continue;
+            }
+            if let Some(predicate) = predicate
+                && !predicate.call1((bound,))?.is_truthy()?
+            {
+                continue;
+            }
+            found.push(piece);
+            if first_only {
+                break;
+            }
+        }
+        Ok(found)
+    }
+
+    /// Restack and reflow after the children changed order.
+    fn reordered(&self, duration: Option<f64>, advance: bool) {
+        self.restacked();
+        Self::reflow_inner(&self.inner, duration, None, None);
+        Self::finish(&self.inner, duration, advance);
+    }
+
     fn collect_pieces(
         py: Python<'_>,
         inner: &Arc<Mutex<LayoutState>>,
@@ -1860,6 +1903,129 @@ impl PyBox {
         crate::composition::stagger(&items, each, total, origin, grid, easing, seed)
     }
 
+    /// The first piece of `walk(boxes=boxes)` that is an instance of `type`
+    /// and for which `where` returns true, or `None`.
+    #[pyo3(signature = (*, r#type=None, r#where=None, boxes=true))]
+    fn find(
+        &self,
+        py: Python<'_>,
+        r#type: Option<&Bound<'_, PyAny>>,
+        r#where: Option<&Bound<'_, PyAny>>,
+        boxes: bool,
+    ) -> PyResult<Option<Py<PyAny>>> {
+        Ok(self
+            .matching(py, r#type, r#where, boxes, true)?
+            .into_iter()
+            .next())
+    }
+
+    /// Every piece of `walk(boxes=boxes)` that is an instance of `type` and
+    /// for which `where` returns true, in draw order.
+    #[pyo3(signature = (*, r#type=None, r#where=None, boxes=true))]
+    fn find_all(
+        &self,
+        py: Python<'_>,
+        r#type: Option<&Bound<'_, PyAny>>,
+        r#where: Option<&Bound<'_, PyAny>>,
+        boxes: bool,
+    ) -> PyResult<Vec<Py<PyAny>>> {
+        self.matching(py, r#type, r#where, boxes, false)
+    }
+
+    /// Choose the pieces of `walk(boxes=boxes)` once and return an object
+    /// whose animation methods (`fade_in`, `grow_from_center`, ...) animate
+    /// all of them as one `stagger`, so `box.cascade(each=0.05).fade_in()` is
+    /// `box.stagger(lambda p: p.animate.fade_in(), each=0.05)`.
+    #[pyo3(signature = (*, boxes=false, each=0.1, total=None, origin=None, grid=None, easing=None, seed=0))]
+    #[allow(clippy::too_many_arguments)]
+    fn cascade(
+        &self,
+        py: Python<'_>,
+        boxes: bool,
+        each: f64,
+        total: Option<f64>,
+        origin: Option<&Bound<'_, PyAny>>,
+        grid: Option<&Bound<'_, PyAny>>,
+        easing: Option<&Bound<'_, PyAny>>,
+        seed: u64,
+    ) -> PyResult<PyBoxCascade> {
+        let options = PyDict::new(py);
+        options.set_item("each", each)?;
+        options.set_item("total", total)?;
+        options.set_item("origin", origin)?;
+        options.set_item("grid", grid)?;
+        options.set_item("easing", easing)?;
+        options.set_item("seed", seed)?;
+        Ok(PyBoxCascade {
+            pieces: self.walk(py, boxes)?,
+            options: options.unbind(),
+        })
+    }
+
+    /// Move a child to position `to` (negative counts from the end); the
+    /// others make room. With `duration` they slide there.
+    #[pyo3(signature = (child, to, *, duration=None, advance=true))]
+    fn move_child(
+        &self,
+        child: &Bound<'_, PyAny>,
+        to: isize,
+        duration: Option<f64>,
+        advance: bool,
+    ) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        let duration = duration_value(duration)?;
+        let from = self.position(child)?;
+        {
+            let mut state = self.inner.lock().expect("layout poisoned");
+            let len = state.members.len() as isize;
+            let target = if to < 0 { len + to } else { to };
+            if !(0..len).contains(&target) {
+                return Err(pyo3::exceptions::PyIndexError::new_err(
+                    "box child position is out of range",
+                ));
+            }
+            let member = state.members.remove(from);
+            state.members.insert(target as usize, member);
+        }
+        self.reordered(duration, advance);
+        Ok(())
+    }
+
+    /// Exchange the places of two children.
+    #[pyo3(signature = (a, b, *, duration=None, advance=true))]
+    fn swap(
+        &self,
+        a: &Bound<'_, PyAny>,
+        b: &Bound<'_, PyAny>,
+        duration: Option<f64>,
+        advance: bool,
+    ) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        let duration = duration_value(duration)?;
+        let (first, second) = (self.position(a)?, self.position(b)?);
+        self.inner
+            .lock()
+            .expect("layout poisoned")
+            .members
+            .swap(first, second);
+        self.reordered(duration, advance);
+        Ok(())
+    }
+
+    /// Reverse the order of the children.
+    #[pyo3(signature = (*, duration=None, advance=true))]
+    fn reverse(&self, duration: Option<f64>, advance: bool) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        let duration = duration_value(duration)?;
+        self.inner
+            .lock()
+            .expect("layout poisoned")
+            .members
+            .reverse();
+        self.reordered(duration, advance);
+        Ok(())
+    }
+
     /// The drawable behind the box (fill, border, radius), if any.
     #[getter]
     fn background(&self) -> PyResult<Option<PyDrawable>> {
@@ -2081,6 +2247,74 @@ impl PyBox {
             LayoutNodeKind::Leaf => "leaf",
         };
         format!("Box({kind}, {} children)", state.members.len())
+    }
+}
+
+/// The pieces of a box chosen by `Box.cascade`: each animation method
+/// animates all of them as one `stagger`.
+#[pyclass(name = "BoxCascade", module = "gaanim_core", frozen)]
+pub struct PyBoxCascade {
+    pieces: Vec<Py<PyAny>>,
+    options: Py<PyDict>,
+}
+
+#[pymethods]
+impl PyBoxCascade {
+    fn __getattr__(&self, py: Python<'_>, name: &str) -> PyResult<Py<PyAny>> {
+        if name.starts_with("__") {
+            return Err(pyo3::exceptions::PyAttributeError::new_err(name.to_owned()));
+        }
+        let pieces: Vec<Py<PyAny>> = self
+            .pieces
+            .iter()
+            .map(|piece| piece.clone_ref(py))
+            .collect();
+        let options = self.options.clone_ref(py);
+        let name = name.to_owned();
+        let animate = pyo3::types::PyCFunction::new_closure(
+            py,
+            None,
+            None,
+            move |args: &Bound<'_, PyTuple>, kwargs: Option<&Bound<'_, PyDict>>| {
+                let py = args.py();
+                if pieces.is_empty() {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "cascade found no pieces to animate in this box",
+                    ));
+                }
+                let mut items = Vec::with_capacity(pieces.len());
+                for piece in &pieces {
+                    let method = piece.bind(py).getattr("animate")?.getattr(name.as_str())?;
+                    items.push(method.call(args, kwargs)?);
+                }
+                let items = PyTuple::new(py, items)?;
+                let options = options.bind(py);
+                let option = |key: &str| -> PyResult<Option<Bound<'_, PyAny>>> {
+                    Ok(options.get_item(key)?.filter(|value| !value.is_none()))
+                };
+                let each = option("each")?.map_or(Ok(0.1), |value| value.extract::<f64>())?;
+                let total = option("total")?
+                    .map(|value| value.extract::<f64>())
+                    .transpose()?;
+                let seed = option("seed")?.map_or(Ok(0), |value| value.extract::<u64>())?;
+                let (origin, grid) = (option("origin")?, option("grid")?);
+                let easing_value = option("easing")?;
+                let easing = easing_value
+                    .as_ref()
+                    .map(|value| value.extract::<PyRef<'_, crate::easing::PyEasing>>())
+                    .transpose()?;
+                crate::composition::stagger(
+                    &items,
+                    each,
+                    total,
+                    origin.as_ref(),
+                    grid.as_ref(),
+                    easing.as_deref(),
+                    seed,
+                )
+            },
+        )?;
+        Ok(animate.into_any().unbind())
     }
 }
 

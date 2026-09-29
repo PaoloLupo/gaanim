@@ -26,6 +26,11 @@ cambiar tus escenas.
 - `box.stagger(make, each=…)` anima todas esas piezas de una vez como un
   `stagger`: `make` recibe cada pieza y devuelve su animación (o `None` para
   saltarla). Lee #link("/referencia/layout/")[Layout].
+- `box.find(type=…, where=…)` y `box.find_all(...)` buscan entre esas piezas.
+- `box.cascade(each=…).fade_in()` (o cualquier otra animación) las anima todas
+  en cascada, sin escribir la lambda de `stagger`.
+- `box.move_child(hijo, a)`, `box.swap(a, b)` y `box.reverse()` reordenan los
+  hijos, y con `duration=` se deslizan a su nuevo sitio.
 - `box.children`, `box[i]` y la iteración de una caja están tipados como
   `Drawable` en lugar de `Any`.
 

@@ -129,6 +129,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(pytext::text_part, m)?)?;
     m.add_function(wrap_pyfunction!(pytext::text_parts, m)?)?;
     m.add_class::<pylayout::PyBox>()?;
+    m.add_class::<pylayout::PyBoxCascade>()?;
     m.add_class::<pylayout::PyBoxStyle>()?;
     m.add_class::<pyzones::PyZones>()?;
     m.add_class::<pyzones::PyZoneSet>()?;
