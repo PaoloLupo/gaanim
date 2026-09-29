@@ -25,6 +25,9 @@ pub struct EditorOverlays {
     pub show_grid: bool,
     /// Mostrar márgenes seguros y tercios.
     pub show_guides: bool,
+    /// Mostrar las cajas y zonas del layout, como las herramientas de
+    /// desarrollo de un navegador.
+    pub show_layout: bool,
     /// Momento (segundos de la app) en que se copiaron las coordenadas del cursor.
     pub copied_at: Option<f64>,
 }
@@ -37,6 +40,7 @@ impl Default for EditorOverlays {
             show_coords: true,
             show_grid: false,
             show_guides: false,
+            show_layout: false,
             copied_at: None,
         }
     }
@@ -55,6 +59,8 @@ pub struct OverlayPreferences {
     pub show_grid: bool,
     #[serde(default)]
     pub show_guides: bool,
+    #[serde(default)]
+    pub show_layout: bool,
 }
 
 fn enabled() -> bool {
@@ -96,6 +102,7 @@ impl EditorOverlays {
             show_coords: preferences.show_coords,
             show_grid: preferences.show_grid,
             show_guides: preferences.show_guides,
+            show_layout: preferences.show_layout,
             ..Self::default()
         }
     }
@@ -106,6 +113,7 @@ impl EditorOverlays {
             show_coords: self.show_coords,
             show_grid: self.show_grid,
             show_guides: self.show_guides,
+            show_layout: self.show_layout,
         }
     }
 }
@@ -322,6 +330,13 @@ mod colors {
     pub const SELECTION: Color32 = palette::ACCENT;
     pub const GRID: Color32 = Color32::from_rgba_premultiplied(22, 22, 24, 24);
     pub const TICK_LABEL: Color32 = palette::TEXT_MUTED;
+    /// Layout inspector, in the colors of a browser's developer tools.
+    pub const LAYOUT: Color32 = Color32::from_rgb(167, 139, 250);
+    pub const LAYOUT_CONTENT: Color32 = Color32::from_rgba_premultiplied(61, 92, 121, 140);
+    pub const LAYOUT_PADDING: Color32 = Color32::from_rgba_premultiplied(98, 131, 83, 170);
+    pub const LAYOUT_MARGIN: Color32 = Color32::from_rgba_premultiplied(164, 119, 71, 170);
+    pub const LAYOUT_GAP: Color32 = Color32::from_rgba_premultiplied(107, 68, 137, 140);
+    pub const ZONE: Color32 = Color32::from_rgb(45, 212, 191);
 }
 
 /// How long the coordinate label confirms a copy (seconds).
@@ -436,6 +451,22 @@ pub fn overlays_settings_ui_system(
                         {
                             overlays.show_guides = !overlays.show_guides;
                         }
+                        if pill_toggle(
+                            ui,
+                            Icon::Layout,
+                            Some("Layout"),
+                            overlays.show_layout,
+                            colors::LAYOUT,
+                            HEIGHT,
+                        )
+                        .on_hover_text(
+                            "Cajas y zonas del layout · K\n\
+                             Al pasar el cursor por una caja: contenido, padding, margen y gap.",
+                        )
+                        .clicked()
+                        {
+                            overlays.show_layout = !overlays.show_layout;
+                        }
                         if interactive.enabled {
                             divider(ui);
                             let free_3d = interactive.view == PreviewView::Free3D;
@@ -485,11 +516,370 @@ pub fn overlays_settings_ui_system(
         });
 }
 
+/// What the layout inspector reads from each box.
+type LayoutQueryData = (
+    &'static gaanim_scene::LayoutInspection,
+    &'static gaanim_scene::LocalBounds,
+    &'static gaanim_math::GlobalSpatialTransform,
+    Option<&'static gaanim_scene::GlobalOpacity>,
+);
+
+/// A rectangle in a box's local space: `(min_x, min_y, max_x, max_y)`.
+type LocalRect = (f64, f64, f64, f64);
+
+/// A box as the layout inspector draws it.
+struct InspectedBox<'a> {
+    affine: gaanim_core::kurbo::Affine,
+    outer: LocalRect,
+    frame: &'a gaanim_scene::LayoutInspectionFrame,
+    screen: [egui::Pos2; 4],
+}
+
+impl InspectedBox<'_> {
+    /// The box minus its padding (top, right, bottom, left); y points up.
+    fn content(&self) -> LocalRect {
+        let [top, right, bottom, left] = self.frame.padding;
+        let (x0, y0, x1, y1) = self.outer;
+        (x0 + left, y0 + bottom, x1 - right, y1 - top)
+    }
+}
+
+fn local_quad(
+    cam: &ResolvedCamera,
+    window: &Window,
+    affine: gaanim_core::kurbo::Affine,
+    (x0, y0, x1, y1): LocalRect,
+) -> [egui::Pos2; 4] {
+    [(x0, y0), (x1, y0), (x1, y1), (x0, y1)].map(|(x, y)| {
+        let world = affine * gaanim_core::kurbo::Point::new(x, y);
+        world_to_egui(cam, window, glam::DVec3::new(world.x, world.y, 0.0))
+    })
+}
+
+fn quad_area(quad: &[egui::Pos2; 4]) -> f32 {
+    let mut twice = 0.0;
+    for index in 0..4 {
+        let (a, b) = (quad[index], quad[(index + 1) % 4]);
+        twice += a.x * b.y - b.x * a.y;
+    }
+    (twice * 0.5).abs()
+}
+
+fn quad_contains(quad: &[egui::Pos2; 4], point: egui::Pos2) -> bool {
+    let mut sign = 0.0f32;
+    for index in 0..4 {
+        let (a, b) = (quad[index], quad[(index + 1) % 4]);
+        let cross = (b - a).x * (point - a).y - (b - a).y * (point - a).x;
+        if cross.abs() < f32::EPSILON {
+            continue;
+        }
+        if sign == 0.0 {
+            sign = cross.signum();
+        } else if cross.signum() != sign {
+            return false;
+        }
+    }
+    true
+}
+
+fn fill_rect(
+    painter: &egui::Painter,
+    cam: &ResolvedCamera,
+    window: &Window,
+    affine: gaanim_core::kurbo::Affine,
+    rect: LocalRect,
+    color: egui::Color32,
+) {
+    if rect.2 - rect.0 <= 1.0e-9 || rect.3 - rect.1 <= 1.0e-9 {
+        return;
+    }
+    let quad = local_quad(cam, window, affine, rect);
+    painter.add(egui::Shape::convex_polygon(
+        quad.to_vec(),
+        color,
+        egui::Stroke::NONE,
+    ));
+}
+
+/// Fill the band between `outer` and `inner`, as the padding or margin of a
+/// box: four strips that do not overlap.
+fn fill_ring(
+    painter: &egui::Painter,
+    cam: &ResolvedCamera,
+    window: &Window,
+    affine: gaanim_core::kurbo::Affine,
+    outer: LocalRect,
+    inner: LocalRect,
+    color: egui::Color32,
+) {
+    let (ox0, oy0, ox1, oy1) = outer;
+    let (ix0, iy0, ix1, iy1) = inner;
+    for strip in [
+        (ox0, iy1, ox1, oy1),
+        (ox0, oy0, ox1, iy0),
+        (ox0, iy0, ix0, iy1),
+        (ix1, iy0, ox1, iy1),
+    ] {
+        fill_rect(painter, cam, window, affine, strip, color);
+    }
+}
+
+fn outline_quad(
+    painter: &egui::Painter,
+    quad: &[egui::Pos2; 4],
+    stroke: egui::Stroke,
+    dashed: bool,
+) {
+    let mut points = quad.to_vec();
+    points.push(quad[0]);
+    if dashed {
+        painter.extend(egui::Shape::dashed_line(&points, stroke, 5.0, 4.0));
+    } else {
+        painter.add(egui::Shape::line(points, stroke));
+    }
+}
+
+/// Lengths in the design pixels boxes are written in (1080 per frame height).
+fn design_px(cam: &ResolvedCamera, units: f64) -> String {
+    let px = units * 1080.0 / cam.frame_height.max(1.0e-9);
+    format!("{:.0}", px)
+}
+
+/// Draw every box and zone like a browser's developer tools: a dashed outline
+/// for each box and the zones of the current segment, and, for the innermost
+/// box under the cursor, its padding, its children's cells, margins and the
+/// gaps between them, with a label of its size, padding and gap.
+fn paint_layout(
+    painter: &egui::Painter,
+    cam: &ResolvedCamera,
+    window: &Window,
+    layouts: &Query<LayoutQueryData>,
+    zones: Option<&gaanim_scene::LayoutZones>,
+    now: f64,
+    pointer: Option<egui::Pos2>,
+) {
+    if let Some(zones) = zones {
+        for zone in zones
+            .0
+            .iter()
+            .filter(|zone| zone.start <= now + 1.0e-9 && now <= zone.end + 1.0e-9)
+        {
+            let quad = local_quad(
+                cam,
+                window,
+                gaanim_core::kurbo::Affine::IDENTITY,
+                (
+                    zone.bounds.min.x,
+                    zone.bounds.min.y,
+                    zone.bounds.max.x,
+                    zone.bounds.max.y,
+                ),
+            );
+            outline_quad(painter, &quad, egui::Stroke::new(1.5, colors::ZONE), true);
+            let top_left = quad[3];
+            painter.text(
+                top_left + egui::vec2(6.0, 4.0),
+                egui::Align2::LEFT_TOP,
+                &zone.name,
+                egui::FontId::proportional(11.0),
+                colors::ZONE,
+            );
+        }
+    }
+
+    let boxes: Vec<InspectedBox> = layouts
+        .iter()
+        .filter(|(.., opacity)| opacity.is_none_or(|opacity| opacity.0 > 0.01))
+        .filter_map(|(inspection, bounds, global, _)| {
+            let frame = inspection.at(now)?;
+            let outer = (
+                bounds.0.min.x,
+                bounds.0.min.y,
+                bounds.0.max.x,
+                bounds.0.max.y,
+            );
+            let screen = local_quad(cam, window, global.affine_2d, outer);
+            Some(InspectedBox {
+                affine: global.affine_2d,
+                outer,
+                frame,
+                screen,
+            })
+        })
+        .collect();
+
+    let outline = egui::Stroke::new(1.0, colors::LAYOUT.gamma_multiply(0.7));
+    for inspected in &boxes {
+        outline_quad(painter, &inspected.screen, outline, true);
+    }
+
+    let Some(hovered) = pointer.and_then(|pointer| {
+        boxes
+            .iter()
+            .filter(|inspected| quad_contains(&inspected.screen, pointer))
+            .min_by(|a, b| quad_area(&a.screen).total_cmp(&quad_area(&b.screen)))
+    }) else {
+        return;
+    };
+    let content = hovered.content();
+    fill_ring(
+        painter,
+        cam,
+        window,
+        hovered.affine,
+        hovered.outer,
+        content,
+        colors::LAYOUT_PADDING,
+    );
+    let cells = &hovered.frame.cells;
+    for cell in cells {
+        let [top, right, bottom, left] = cell.margin;
+        let inner = (
+            cell.bounds.min.x,
+            cell.bounds.min.y,
+            cell.bounds.max.x,
+            cell.bounds.max.y,
+        );
+        let outer = (
+            inner.0 - left,
+            inner.1 - bottom,
+            inner.2 + right,
+            inner.3 + top,
+        );
+        fill_ring(
+            painter,
+            cam,
+            window,
+            hovered.affine,
+            outer,
+            inner,
+            colors::LAYOUT_MARGIN,
+        );
+        fill_rect(
+            painter,
+            cam,
+            window,
+            hovered.affine,
+            inner,
+            colors::LAYOUT_CONTENT,
+        );
+    }
+    // Gaps between consecutive children, across the content box.
+    let mut ordered: Vec<_> = cells.iter().collect();
+    match hovered.frame.kind {
+        gaanim_scene::LayoutInspectionKind::Row => {
+            ordered.sort_by(|a, b| a.bounds.min.x.total_cmp(&b.bounds.min.x));
+            for pair in ordered.windows(2) {
+                let start = pair[0].bounds.max.x + pair[0].margin[1];
+                let end = pair[1].bounds.min.x - pair[1].margin[3];
+                fill_rect(
+                    painter,
+                    cam,
+                    window,
+                    hovered.affine,
+                    (start, content.1, end, content.3),
+                    colors::LAYOUT_GAP,
+                );
+            }
+        }
+        gaanim_scene::LayoutInspectionKind::Column => {
+            ordered.sort_by(|a, b| b.bounds.max.y.total_cmp(&a.bounds.max.y));
+            for pair in ordered.windows(2) {
+                let top = pair[0].bounds.min.y - pair[0].margin[2];
+                let bottom = pair[1].bounds.max.y + pair[1].margin[0];
+                fill_rect(
+                    painter,
+                    cam,
+                    window,
+                    hovered.affine,
+                    (content.0, bottom, content.2, top),
+                    colors::LAYOUT_GAP,
+                );
+            }
+        }
+        _ => {}
+    }
+    outline_quad(
+        painter,
+        &hovered.screen,
+        egui::Stroke::new(1.5, colors::LAYOUT),
+        false,
+    );
+
+    let (x0, y0, x1, y1) = hovered.outer;
+    let mut label = format!(
+        "{} · {} × {} px",
+        match hovered.frame.kind {
+            gaanim_scene::LayoutInspectionKind::Row => "row",
+            gaanim_scene::LayoutInspectionKind::Column => "column",
+            gaanim_scene::LayoutInspectionKind::Grid => "grid",
+            gaanim_scene::LayoutInspectionKind::Stack => "stack",
+        },
+        design_px(cam, x1 - x0),
+        design_px(cam, y1 - y0),
+    );
+    let [top, right, bottom, left] = hovered.frame.padding;
+    if [top, right, bottom, left].iter().any(|side| *side > 1.0e-9) {
+        let sides = if top == right && right == bottom && bottom == left {
+            design_px(cam, top)
+        } else {
+            [top, right, bottom, left]
+                .map(|side| design_px(cam, side))
+                .join(" ")
+        };
+        label.push_str(&format!(" · padding {sides} px"));
+    }
+    let gap = hovered.frame.gap;
+    let gap = match hovered.frame.kind {
+        gaanim_scene::LayoutInspectionKind::Row => Some(design_px(cam, gap.x)),
+        gaanim_scene::LayoutInspectionKind::Column => Some(design_px(cam, gap.y)),
+        gaanim_scene::LayoutInspectionKind::Grid if gap.x == gap.y => Some(design_px(cam, gap.x)),
+        gaanim_scene::LayoutInspectionKind::Grid => Some(format!(
+            "{} {}",
+            design_px(cam, gap.y),
+            design_px(cam, gap.x)
+        )),
+        gaanim_scene::LayoutInspectionKind::Stack => None,
+    };
+    if let Some(gap) = gap.filter(|gap| gap != "0" && gap != "0 0") {
+        label.push_str(&format!(" · gap {gap} px"));
+    }
+    label.push_str(&format!(" · {} hijos", cells.len()));
+    // Above the box, or below it near the top of the screen, and always
+    // inside the screen.
+    let screen_box = egui::Rect::from_points(&hovered.screen);
+    let size = painter
+        .layout_no_wrap(
+            label.clone(),
+            egui::FontId::proportional(11.0),
+            colors::LAYOUT,
+        )
+        .size()
+        + egui::vec2(12.0, 6.0);
+    let clip = painter.clip_rect();
+    let x = screen_box
+        .left()
+        .min(clip.right() - size.x - 4.0)
+        .max(clip.left() + 4.0);
+    let (y, align) = if screen_box.top() - 4.0 - size.y >= clip.top() {
+        (screen_box.top() - 4.0, egui::Align2::LEFT_BOTTOM)
+    } else {
+        (
+            (screen_box.bottom() + 4.0).min(clip.bottom() - size.y - 4.0),
+            egui::Align2::LEFT_TOP,
+        )
+    };
+    paint_tag(painter, egui::pos2(x, y), align, label, colors::LAYOUT);
+}
+
 /// Atajos del modo overlays y de la inspección.
 const SHORTCUTS: &[(&str, &str)] = &[
     ("O · Esc", "Mostrar u ocultar los overlays"),
     ("I", "Inspección: mover la vista sin tocar la cámara"),
-    ("B · C · G · M", "Límites, coordenadas, grilla y guías"),
+    (
+        "B · C · G · M · K",
+        "Límites, coordenadas, grilla, guías y layout",
+    ),
     (
         "Arrastrar",
         "Desplazar la vista (en 3D, orbitar con el derecho)",
@@ -629,6 +1019,9 @@ pub fn scene_overlays_system(
     pickable: Query<crate::PickBoundsQueryData>,
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
+    layouts: Query<LayoutQueryData>,
+    zones: Option<Res<gaanim_scene::LayoutZones>>,
+    timeline: Option<Res<gaanim_timeline::timeline::Timeline>>,
 ) {
     if presentation.active || !overlays.enabled {
         return;
@@ -781,6 +1174,22 @@ pub fn scene_overlays_system(
             let origin_visible = lo.x <= 0.0 && hi.x >= 0.0 && lo.y <= 0.0 && hi.y >= 0.0;
             if overlays.show_coords && !is_perspective && origin_visible {
                 paint_axes(painter, &cam, window, lo, hi, step);
+            }
+
+            // --- Layout: cajas y zonas ---
+            if overlays.show_layout && !is_perspective {
+                let now = timeline
+                    .as_ref()
+                    .map_or(0.0, |timeline| timeline.current_time);
+                paint_layout(
+                    painter,
+                    &cam,
+                    window,
+                    &layouts,
+                    zones.as_deref(),
+                    now,
+                    ctx.pointer_hover_pos(),
+                );
             }
 
             // --- Selección ---
@@ -1145,6 +1554,9 @@ pub fn overlays_toggle_keys_system(
     if keys.just_pressed(KeyCode::KeyM) {
         overlays.show_guides = !overlays.show_guides;
     }
+    if keys.just_pressed(KeyCode::KeyK) {
+        overlays.show_layout = !overlays.show_layout;
+    }
 }
 
 #[cfg(test)]
@@ -1170,13 +1582,14 @@ mod tests {
         let stored: OverlayPreferences = serde_json::from_str("{}").unwrap();
         assert_eq!(stored, OverlayPreferences::default());
         assert!(stored.show_bounds && stored.show_coords);
-        assert!(!stored.show_grid && !stored.show_guides);
+        assert!(!stored.show_grid && !stored.show_guides && !stored.show_layout);
 
         let chosen = OverlayPreferences {
             show_bounds: false,
             show_coords: true,
             show_grid: true,
             show_guides: true,
+            show_layout: true,
         };
         let overlays = EditorOverlays::with_preferences(chosen);
         assert!(!overlays.enabled, "the mode itself always starts hidden");

@@ -310,6 +310,73 @@ pub struct Billboard;
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LayoutBackdrop;
 
+/// How a box arranges its children, for the editor's layout inspector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayoutInspectionKind {
+    Row,
+    Column,
+    Grid,
+    Stack,
+}
+
+/// One child's place in a box: its cell in the box's local space (the box's
+/// center is the origin) and the margin around it, top/right/bottom/left.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LayoutInspectionCell {
+    pub bounds: Bounds3D,
+    pub margin: [f64; 4],
+}
+
+/// A box's arrangement from one moment on: its padding (top/right/bottom/
+/// left), gap and the cells of its children, in its local space.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayoutInspectionFrame {
+    pub kind: LayoutInspectionKind,
+    pub padding: [f64; 4],
+    pub gap: gaanim_core::glam::DVec2,
+    pub cells: Vec<LayoutInspectionCell>,
+}
+
+/// What the editor's layout inspector draws for a box, as the timeline
+/// changes it: each arrangement with the time it starts.
+#[derive(Component, Debug, Clone, Default, PartialEq)]
+pub struct LayoutInspection(pub Vec<(f64, LayoutInspectionFrame)>);
+
+impl LayoutInspection {
+    /// Record `frame` from `time` on, dropping arrangements recorded for the
+    /// same moment or later (a recompile replays them).
+    pub fn record(&mut self, time: f64, frame: LayoutInspectionFrame) {
+        self.0.retain(|(start, _)| *start < time - 1.0e-9);
+        self.0.push((time, frame));
+    }
+
+    /// The arrangement shown at `time`: the last one started by then, or
+    /// the first before any starts.
+    pub fn at(&self, time: f64) -> Option<&LayoutInspectionFrame> {
+        self.0
+            .iter()
+            .rev()
+            .find(|(start, _)| *start <= time + 1.0e-9)
+            .or_else(|| self.0.first())
+            .map(|(_, frame)| frame)
+    }
+}
+
+/// A named zone of `scene.layout.zones(...)`, in scene coordinates, with the
+/// segment it was created in and the times it is shown.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayoutZoneRecord {
+    pub name: String,
+    pub bounds: Bounds3D,
+    pub segment: usize,
+    pub start: f64,
+    pub end: f64,
+}
+
+/// Every zone the scene created, for the editor's layout inspector.
+#[derive(Resource, Debug, Clone, Default, PartialEq)]
+pub struct LayoutZones(pub Vec<LayoutZoneRecord>);
+
 /// HUD overlay marker: entity is rendered in screen-space overlay layer.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

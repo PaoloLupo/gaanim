@@ -445,7 +445,10 @@ reservado a la caja es colocar a un hijo _al declararlo_: `move_to`,
 `LayoutOwnershipError`. Para eso ajusta `item(offset=...)`, mueve la caja
 entera o saca al hijo con `box.detach(hijo)`. Si algo no encaja,
 `box.diagnostics()` y `scene.layout.check_layout()` explican qué restricción
-o texto no se pudo cumplir.
+o texto no se pudo cumplir. En el editor, `O` y después `K` activan el
+overlay *Layout*: muestra cada caja y zona y, al pasar el cursor por una
+caja, su padding, sus márgenes y sus gaps, como las herramientas de
+desarrollo de un navegador.
 
 Consulta #link("/referencia/layout/")[la referencia de Layout] para todas las
 propiedades, firmas y errores. Los ejemplos `layout_*` y `ui_*` del

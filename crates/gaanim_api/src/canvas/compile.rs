@@ -2621,6 +2621,14 @@ impl SceneModel {
             let previous_scene = seg
                 .prev_segment
                 .and_then(|index| scene_ids.get(index).copied());
+            // Zones belong to the segment that created them; a resumed
+            // compile replays this segment's zones again.
+            builder.commands.queue(move |world: &mut World| {
+                world
+                    .get_resource_or_insert_with(gaanim_scene::LayoutZones::default)
+                    .0
+                    .retain(|zone| zone.segment < index);
+            });
             let scene_id = builder.begin_scene(&seg.name);
             scene_ids.push(scene_id);
             let start_time = builder.current_time;
@@ -2668,6 +2676,15 @@ impl SceneModel {
                     stop.time = time;
                 }
             }
+            let end_time = builder.current_time;
+            builder.commands.queue(move |world: &mut World| {
+                if let Some(mut zones) = world.get_resource_mut::<gaanim_scene::LayoutZones>() {
+                    for zone in zones.0.iter_mut().filter(|zone| zone.segment == usize::MAX) {
+                        zone.segment = index;
+                        zone.end = end_time;
+                    }
+                }
+            });
             builder.end_scene();
         }
         let segment_paints = segments
@@ -4476,6 +4493,81 @@ impl SceneModel {
                         let entity = state.entity;
                         Self::place_layout_member(builder, entity, target);
                     }
+                    // What the editor's layout inspector draws for each box:
+                    // padding, gap and its children's cells from now on.
+                    for (container_id, child_ids) in &tree.children_by_id {
+                        let (Some(container_box), Some(entity)) = (
+                            resolved.boxes.get(container_id),
+                            materialized_by_id
+                                .get(container_id)
+                                .and_then(|member| builder.states.get(*member))
+                                .map(|state| state.entity),
+                        ) else {
+                            continue;
+                        };
+                        let Some(snapshot) = tree
+                            .source_by_id
+                            .get(container_id)
+                            .and_then(|source| layout_snapshots.get(source))
+                        else {
+                            continue;
+                        };
+                        let center = container_box.bounds.center();
+                        let insets = |insets: gaanim_layout::Insets| {
+                            [insets.top, insets.right, insets.bottom, insets.left]
+                        };
+                        let frame = gaanim_scene::LayoutInspectionFrame {
+                            kind: match snapshot.spec.kind {
+                                gaanim_layout::LayoutNodeKind::Row { .. } => {
+                                    gaanim_scene::LayoutInspectionKind::Row
+                                }
+                                gaanim_layout::LayoutNodeKind::Column { .. } => {
+                                    gaanim_scene::LayoutInspectionKind::Column
+                                }
+                                gaanim_layout::LayoutNodeKind::Grid { .. } => {
+                                    gaanim_scene::LayoutInspectionKind::Grid
+                                }
+                                _ => gaanim_scene::LayoutInspectionKind::Stack,
+                            },
+                            padding: insets(snapshot.spec.style.padding),
+                            gap: snapshot.spec.style.gap,
+                            cells: child_ids
+                                .iter()
+                                .filter_map(|child| {
+                                    let bounds = resolved.boxes.get(child)?.bounds;
+                                    Some(gaanim_scene::LayoutInspectionCell {
+                                        bounds: Bounds3D::new_2d(
+                                            bounds.min.x - center.x,
+                                            bounds.min.y - center.y,
+                                            bounds.max.x - center.x,
+                                            bounds.max.y - center.y,
+                                        ),
+                                        margin: insets(
+                                            tree.item_style_by_id
+                                                .get(child)
+                                                .map(|style| style.margin)
+                                                .unwrap_or_default(),
+                                        ),
+                                    })
+                                })
+                                .collect(),
+                        };
+                        let time = builder.current_time;
+                        builder.commands.queue(move |world: &mut World| {
+                            let Ok(mut entity) = world.get_entity_mut(entity) else {
+                                return;
+                            };
+                            if let Some(mut inspection) =
+                                entity.get_mut::<gaanim_scene::LayoutInspection>()
+                            {
+                                inspection.record(time, frame);
+                            } else {
+                                let mut inspection = gaanim_scene::LayoutInspection::default();
+                                inspection.record(time, frame);
+                                entity.insert(inspection);
+                            }
+                        });
+                    }
                     for (member, clip_bounds) in cover_clips {
                         let world_path = Rect::new(
                             clip_bounds.min.x,
@@ -5523,6 +5615,26 @@ impl SceneModel {
                             },
                         );
                     }
+                }
+                Op::RecordLayoutZones { zones } => {
+                    let start = builder.current_time;
+                    let records: Vec<_> = zones
+                        .iter()
+                        .map(|(name, bounds)| gaanim_scene::LayoutZoneRecord {
+                            name: name.clone(),
+                            bounds: *bounds,
+                            // Set when the segment ends.
+                            segment: usize::MAX,
+                            start,
+                            end: f64::INFINITY,
+                        })
+                        .collect();
+                    builder.commands.queue(move |world: &mut World| {
+                        world
+                            .get_resource_or_insert_with(gaanim_scene::LayoutZones::default)
+                            .0
+                            .extend(records);
+                    });
                 }
                 Op::AttachSurroundingRect {
                     target,
@@ -15918,6 +16030,56 @@ mod tests {
                 }
             ) if *from == 0.0 && *to == 1.0
         )));
+    }
+
+    #[test]
+    fn layout_records_what_the_editor_inspector_draws() {
+        let mut canvas = SceneModel::new(640, 360);
+        let first = canvas.rect(80.0, 30.0);
+        let second = canvas.rect(80.0, 30.0);
+        let container = canvas.group(&[&first, &second]);
+        let member = |handle: &crate::canvas::DrawableHandle| crate::canvas::LayoutMemberSpec {
+            id: handle.id,
+            style: gaanim_layout::LayoutItemStyle::default(),
+        };
+        canvas.reflow_layout(
+            &container,
+            vec![member(&first), member(&second)],
+            crate::canvas::LayoutSpec {
+                kind: gaanim_layout::LayoutNodeKind::Row { wrap: false },
+                style: gaanim_layout::LayoutStyle {
+                    gap: DVec2::splat(20.0),
+                    padding: gaanim_layout::Insets::all(10.0),
+                    ..Default::default()
+                },
+                within: LayoutWithin::Intrinsic,
+            },
+            1,
+            None,
+            None,
+            None,
+        );
+        canvas.record_layout_zones(vec![(
+            "top".to_owned(),
+            Bounds3D::new_2d(-1.0, 0.0, 1.0, 1.0),
+        )]);
+        canvas.wait(1.0);
+
+        let (mut world, _) = compiled_world(&canvas);
+        let mut inspections = world.query::<&gaanim_scene::LayoutInspection>();
+        let inspection = inspections.iter(&world).next().expect("box inspection");
+        let frame = inspection.at(0.0).expect("arrangement at the start");
+        assert_eq!(frame.kind, gaanim_scene::LayoutInspectionKind::Row);
+        assert_eq!(frame.padding, [10.0; 4]);
+        assert_eq!(frame.cells.len(), 2);
+        // The cells sit side by side, 20 apart, around the box's center.
+        let gap = frame.cells[1].bounds.min.x - frame.cells[0].bounds.max.x;
+        assert!((gap - 20.0).abs() < 1.0e-6, "{gap}");
+        let zones = world.resource::<gaanim_scene::LayoutZones>();
+        assert_eq!(zones.0.len(), 1);
+        assert_eq!(zones.0[0].name, "top");
+        assert_eq!((zones.0[0].segment, zones.0[0].start), (0, 0.0));
+        assert!((zones.0[0].end - 1.0).abs() < 1.0e-9);
     }
 
     #[test]

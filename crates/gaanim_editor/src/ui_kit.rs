@@ -73,6 +73,8 @@ pub(crate) enum Icon {
     Reset,
     /// Frame split in thirds: composition guides.
     Thirds,
+    /// A box holding two boxes: layout inspector.
+    Layout,
 }
 
 /// How an icon button presents its state.
@@ -519,6 +521,23 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color:
                 tip - normal * head * 0.75,
                 tip + normal * head * 0.75,
             ]);
+        }
+        Icon::Layout => {
+            painter.rect_stroke(
+                Rect::from_min_max(p(-0.42, -0.34), p(0.42, 0.34)),
+                s * 0.06,
+                stroke,
+                egui::StrokeKind::Middle,
+            );
+            let thin = Stroke::new(stroke.width * 0.8, color);
+            for (left, right) in [(-0.28, -0.04), (0.04, 0.28)] {
+                painter.rect_stroke(
+                    Rect::from_min_max(p(left, -0.2), p(right, 0.2)),
+                    0.0,
+                    thin,
+                    egui::StrokeKind::Middle,
+                );
+            }
         }
         Icon::Thirds => {
             painter.rect_stroke(

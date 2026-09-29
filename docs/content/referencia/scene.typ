@@ -1583,6 +1583,13 @@ capturas ni en la exportación. `O` o `Esc` la ocultan.
   con el eje X en rojo y el Z en azul.
 - *Guías* (`M`): márgenes seguros de acción (90 %) y de títulos (80 %), y los
   tercios del marco.
+- *Layout* (`K`): inspecciona las cajas como las herramientas de desarrollo
+  de un navegador. Cada caja lleva un contorno discontinuo y las zonas del
+  segmento actual un contorno turquesa con su nombre. Al pasar el cursor por
+  una caja se colorean su padding (verde), las celdas de sus hijos (azul), sus
+  márgenes (naranja) y los gaps entre ellos (morado), con una etiqueta de su
+  tipo, tamaño, padding y gap en px de diseño. Sigue la caja en cada momento
+  de la línea de tiempo, también mientras se reorganiza.
 - El objeto seleccionado se enmarca con su centro y su tamaño en unidades.
 - Con la inspección activa, la barra muestra el zoom de la vista (o *3D libre*)
   en azul cuando ya no coincide con la cámara de la escena, y un botón para

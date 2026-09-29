@@ -32,6 +32,10 @@ Sin publicar todavía.
 - `scene.layout.check_layout()`, `box.diagnostics()` y `gaanim check` avisan
   de las cajas con fondo o borde que quedan con ancho o alto cero, como una
   barra vacía sin `width="fill"`, e indican su ruta (`column[2] > row[1]`).
+- El editor tiene un overlay *Layout* (`O` y después `K`) que inspecciona las
+  cajas como las herramientas de desarrollo de un navegador: contornos de
+  cajas y zonas, y, bajo el cursor, padding, celdas, márgenes y gaps con sus
+  medidas en px.
 
 == Correcciones
 

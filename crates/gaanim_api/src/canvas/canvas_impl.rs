@@ -4284,6 +4284,21 @@ impl SceneModel {
         Ok(background)
     }
 
+    /// Show named zones in the editor's layout inspector from the current
+    /// cursor to the end of the segment. Zones only compute rectangles, so
+    /// this is their only trace in the compiled scene.
+    pub fn record_layout_zones(&mut self, zones: Vec<(String, gaanim_math::Bounds3D)>) {
+        if zones.is_empty() {
+            return;
+        }
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::RecordLayoutZones { zones });
+    }
+
     /// Record a box's new snapshot without resolving it: a transition of the
     /// box that encloses it follows at the same instant and resolves both.
     pub fn record_layout(
