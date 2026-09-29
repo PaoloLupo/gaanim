@@ -36,9 +36,15 @@ Sin publicar todavía.
   cajas como las herramientas de desarrollo de un navegador: contornos de
   cajas y zonas, y, bajo el cursor, padding, celdas, márgenes y gaps con sus
   medidas en px.
+- Una exportación desde el editor sigue en segundo plano: el diálogo se cierra
+  y puedes seguir reproduciendo. La barra de tiempo marca bajo cada segmento lo
+  ya exportado, la barra de reproducción muestra el porcentaje y permite
+  cancelar, y la terminal muestra la barra de progreso de `gaanim export`.
 
 == Correcciones
 
+- El indicador de progreso de una exportación desde el editor ya no se queda en
+  0.
 - `animate.move_to(x, y)` sobre un objeto dentro de otro usa coordenadas de
   la escena, no las de su contenedor.
 

@@ -812,21 +812,6 @@ fn text_button(
     response
 }
 
-/// Slim progress track.
-pub(crate) fn progress_track(ui: &mut Ui, fraction: f32, color: Color32) {
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 6.0), Sense::hover());
-    let painter = ui.painter();
-    painter.rect_filled(rect, 0.0, Color32::from_white_alpha(22));
-    let fraction = fraction.clamp(0.0, 1.0);
-    if fraction > 0.0 {
-        let fill = Rect::from_min_max(
-            rect.min,
-            pos2(rect.min.x + rect.width() * fraction, rect.max.y),
-        );
-        painter.rect_filled(fill, 0.0, color);
-    }
-}
-
 /// Square badge with an icon, used as the headline of result dialogs.
 pub(crate) fn status_badge(ui: &mut Ui, icon: Icon, color: Color32) {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(40.0), Sense::hover());

@@ -182,6 +182,17 @@ de comandos] listan todas las opciones. Las paradas
 (`scene.stop(...)`) no detienen la exportación: el resultado es un video
 continuo.
 
+== Desde el editor
+
+El botón Exportar de la barra de reproducción abre las mismas opciones. Al
+pulsar Exportar, el diálogo se cierra y la exportación sigue en segundo plano:
+puedes seguir reproduciendo y navegando la escena. La barra de tiempo marca en
+verde, bajo cada segmento, la parte ya exportada; la barra de reproducción
+muestra el porcentaje (pasa el cursor para ver fotogramas y tiempo restante) y
+una X para cancelar. La terminal desde la que abriste `gaanim` muestra la misma
+barra de progreso que `gaanim export` y el resultado. Al terminar aparece un
+aviso en la esquina con el archivo y un botón para abrirlo.
+
 = Convertir un script suelto en proyecto
 
 Crea un proyecto con `gaanim init video mi-video`, reemplaza su `main.py` por

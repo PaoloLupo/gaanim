@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use crate::ui_kit::{
     ButtonTone, Icon, card_frame, chip, field_frame, icon_button, paint_icon, palette,
-    primary_button, progress_track, secondary_button, section_label, segmented, status_badge,
+    primary_button, secondary_button, section_label, segmented, status_badge,
 };
 
 const EXPORT_WORKER_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -77,6 +77,124 @@ pub struct ExportProgress {
     pub started_at: Instant,
     pub result: Option<Result<(), String>>,
     pub telemetry: ExportTelemetry,
+}
+
+/// Where a running export is, for the playback bar and the timeline.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ExportStatus {
+    /// Share of the frames written, between zero and one. Frames follow the
+    /// timeline, so it is also the share of the timeline exported.
+    pub fraction: f32,
+    pub current: u64,
+    pub total: u64,
+    pub elapsed: f64,
+    /// Seconds left at the current speed, once a frame is written.
+    pub remaining: Option<f64>,
+    pub cancelling: bool,
+}
+
+impl ExportState {
+    /// Where the running export is, or `None` without one.
+    pub fn status(&self) -> Option<ExportStatus> {
+        if !self.active {
+            return None;
+        }
+        let lock = self.progress_shared.lock().ok()?;
+        let progress = lock.as_ref()?;
+        let (telemetry_frame, telemetry_total) = progress.telemetry.progress();
+        let total = telemetry_total.max(progress.total_frames);
+        let current = telemetry_frame.max(progress.current_frame).min(total);
+        let elapsed = progress.started_at.elapsed().as_secs_f64();
+        Some(ExportStatus {
+            fraction: if total > 0 {
+                current as f32 / total as f32
+            } else {
+                0.0
+            },
+            current,
+            total,
+            elapsed,
+            remaining: (current > 0 && total >= current)
+                .then(|| elapsed * (total - current) as f64 / current as f64),
+            cancelling: self.cancel_requested.load(Ordering::Acquire),
+        })
+    }
+
+    /// Ask the running export to stop; it reports itself as cancelled.
+    pub fn cancel(&self) {
+        if self.active {
+            self.cancel_requested.store(true, Ordering::Release);
+        }
+    }
+}
+
+/// Mirrors a background export in the terminal the editor was started from,
+/// with the progress bar of `gaanim export`, and reports how it ended.
+struct TerminalProgress {
+    done: Arc<AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+    started: Instant,
+    file: String,
+}
+
+impl TerminalProgress {
+    fn start(telemetry: ExportTelemetry, file: String) -> Self {
+        gaanim_core::console::info("export", format!("{file} · from the editor"));
+        let done = Arc::new(AtomicBool::new(false));
+        let finished = done.clone();
+        let handle = std::thread::spawn(move || {
+            // indicatif draws only on a terminal, like `gaanim export`.
+            let mut bar = None;
+            let mut last = (0, 0);
+            let mut last_speed_at = Instant::now();
+            let mut last_speed_frame = 0;
+            while !finished.load(Ordering::Acquire) {
+                let (current, total) = telemetry.progress();
+                if total > 0 && (current, total) != last {
+                    let bar = bar.get_or_insert_with(|| {
+                        let bar = gaanim_export::exporter::create_progress_bar(total);
+                        bar.set_message("…");
+                        bar
+                    });
+                    bar.set_length(total);
+                    bar.set_position(current);
+                    let seconds = last_speed_at.elapsed().as_secs_f64();
+                    if seconds >= 1.0 {
+                        let fps = current.saturating_sub(last_speed_frame) as f64 / seconds;
+                        bar.set_message(format!("{fps:.1} fps"));
+                        last_speed_at = Instant::now();
+                        last_speed_frame = current;
+                    }
+                    last = (current, total);
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            if let Some(bar) = bar {
+                bar.finish_and_clear();
+            }
+        });
+        Self {
+            done,
+            handle: Some(handle),
+            started: Instant::now(),
+            file,
+        }
+    }
+
+    fn finish(mut self, result: &Result<(), String>) {
+        self.done.store(true, Ordering::Release);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+        let elapsed = short_duration(self.started.elapsed().as_secs_f64());
+        match result {
+            Ok(()) => gaanim_core::console::success("export", format!("{} · {elapsed}", self.file)),
+            Err(error) if error.starts_with("export cancelled") => {
+                gaanim_core::console::warn("export", format!("{} · cancelled", self.file))
+            }
+            Err(error) => gaanim_core::console::error("export", error),
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -209,82 +327,82 @@ pub fn export_dialog_system(
             .unwrap_or_else(|| state.output_path.clone());
         let can_open = state.completed_successfully && state.completed_output_path.is_some();
 
-        let modal = egui::Modal::new(egui::Id::new("export_complete"))
-            .frame(card_frame())
-            .backdrop_color(egui::Color32::from_black_alpha(150))
+        // A card in the corner, not a modal: playback goes on around it.
+        egui::Area::new(egui::Id::new("export_complete"))
+            .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -140.0))
+            .order(egui::Order::Foreground)
             .show(ctx, |ui| {
-                ui.set_width(420.0);
-                ui.spacing_mut().item_spacing.y = 10.0;
-                ui.horizontal(|ui| {
-                    status_badge(ui, icon, color);
-                    ui.add_space(6.0);
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 2.0;
-                        ui.add_space(2.0);
-                        ui.label(
-                            egui::RichText::new(title)
-                                .size(16.0)
-                                .strong()
-                                .color(palette::TEXT),
-                        );
-                        if !summary.is_empty() {
+                card_frame().show(ui, |ui| {
+                    ui.set_width(420.0);
+                    ui.spacing_mut().item_spacing.y = 10.0;
+                    ui.horizontal(|ui| {
+                        status_badge(ui, icon, color);
+                        ui.add_space(6.0);
+                        ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 2.0;
+                            ui.add_space(2.0);
                             ui.label(
-                                egui::RichText::new(&summary)
-                                    .size(12.0)
-                                    .color(palette::TEXT_MUTED),
+                                egui::RichText::new(title)
+                                    .size(16.0)
+                                    .strong()
+                                    .color(palette::TEXT),
                             );
-                        }
-                    });
-                });
-                if !state.completed_successfully && !cancelled {
-                    egui::Frame::new()
-                        .fill(palette::DANGER.gamma_multiply(0.08))
-                        .inner_margin(egui::Margin::symmetric(12, 10))
-                        .show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            ui.label(
-                                egui::RichText::new(&state.message)
-                                    .size(12.0)
-                                    .color(palette::TEXT_MUTED),
-                            );
+                            if !summary.is_empty() {
+                                ui.label(
+                                    egui::RichText::new(&summary)
+                                        .size(12.0)
+                                        .color(palette::TEXT_MUTED),
+                                );
+                            }
                         });
-                } else if state.completed_successfully {
-                    field_frame().show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(&displayed_path)
-                                    .monospace()
-                                    .size(11.5)
-                                    .color(palette::TEXT_MUTED),
-                            )
-                            .truncate(),
-                        )
-                        .on_hover_text(&displayed_path);
                     });
-                    // e.g. the file was written but could not be opened.
-                    if state.message != EXPORT_SUCCESS_MESSAGE {
-                        notice(ui, palette::STOP, &state.message);
-                    }
-                }
-                ui.add_space(4.0);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = 8.0;
-                    if can_open {
-                        if primary_button(ui, "Abrir archivo", None, true).clicked() {
-                            trigger_open = true;
+                    if !state.completed_successfully && !cancelled {
+                        egui::Frame::new()
+                            .fill(palette::DANGER.gamma_multiply(0.08))
+                            .inner_margin(egui::Margin::symmetric(12, 10))
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                ui.label(
+                                    egui::RichText::new(&state.message)
+                                        .size(12.0)
+                                        .color(palette::TEXT_MUTED),
+                                );
+                            });
+                    } else if state.completed_successfully {
+                        field_frame().show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(&displayed_path)
+                                        .monospace()
+                                        .size(11.5)
+                                        .color(palette::TEXT_MUTED),
+                                )
+                                .truncate(),
+                            )
+                            .on_hover_text(&displayed_path);
+                        });
+                        // e.g. the file was written but could not be opened.
+                        if state.message != EXPORT_SUCCESS_MESSAGE {
+                            notice(ui, palette::STOP, &state.message);
                         }
-                        if secondary_button(ui, "Cerrar", true).clicked() {
+                    }
+                    ui.add_space(4.0);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        if can_open {
+                            if primary_button(ui, "Abrir archivo", None, true).clicked() {
+                                trigger_open = true;
+                            }
+                            if secondary_button(ui, "Cerrar", true).clicked() {
+                                trigger_ok = true;
+                            }
+                        } else if primary_button(ui, "Cerrar", None, true).clicked() {
                             trigger_ok = true;
                         }
-                    } else if primary_button(ui, "Cerrar", None, true).clicked() {
-                        trigger_ok = true;
-                    }
+                    });
                 });
             });
-        if modal.should_close() {
-            trigger_ok = true;
-        }
     }
 
     if trigger_open && let Some(path) = state.completed_output_path.clone() {
@@ -302,7 +420,7 @@ pub fn export_dialog_system(
     }
 
     if state.active {
-        let (prog_frame, prog_total, prog_done, encoder_label, elapsed_seconds) = {
+        let (prog_done, encoder_label) = {
             let lock = state.progress_shared.lock().unwrap();
             if let Some(ref prog) = *lock {
                 let (telemetry_frame, telemetry_total) = prog.telemetry.progress();
@@ -310,14 +428,11 @@ pub fn export_dialog_system(
                 let total_frames = telemetry_total.max(prog.total_frames);
                 let result_ready = prog.result.is_some();
                 (
-                    current_frame,
-                    total_frames,
                     current_frame >= total_frames && result_ready,
                     prog.telemetry.encoder(),
-                    prog.started_at.elapsed().as_secs_f64(),
                 )
             } else {
-                (0, 1, false, None, 0.0)
+                (false, None)
             }
         };
 
@@ -359,105 +474,8 @@ pub fn export_dialog_system(
             state.cancel_requested.store(false, Ordering::Release);
             *state.progress_shared.lock().unwrap() = None;
         } else {
-            let progress = if prog_total > 0 {
-                prog_frame as f32 / prog_total as f32
-            } else {
-                0.0
-            };
-            let eta_seconds = if prog_frame > 0 && prog_total > prog_frame {
-                elapsed_seconds * (prog_total - prog_frame) as f64 / prog_frame as f64
-            } else {
-                0.0
-            };
-            let cancelling = state.cancel_requested.load(Ordering::Acquire);
-            let file_name = Path::new(&state.output_path)
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| state.output_path.clone());
-            // Closing by the backdrop or Escape must not cancel a long export
-            // by accident; only the explicit button does.
-            egui::Modal::new(egui::Id::new("export_progress"))
-                .frame(card_frame())
-                .backdrop_color(egui::Color32::from_black_alpha(150))
-                .show(ctx, |ui| {
-                    ui.set_width(420.0);
-                    ui.spacing_mut().item_spacing.y = 12.0;
-                    ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            ui.spacing_mut().item_spacing.y = 2.0;
-                            ui.label(
-                                egui::RichText::new(if cancelling {
-                                    "Deteniendo…"
-                                } else {
-                                    "Exportando"
-                                })
-                                .size(16.0)
-                                .strong()
-                                .color(palette::TEXT),
-                            );
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(&file_name)
-                                        .size(12.0)
-                                        .color(palette::TEXT_MUTED),
-                                )
-                                .truncate(),
-                            );
-                        });
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(
-                                egui::RichText::new(format!("{:.0}%", progress * 100.0))
-                                    .monospace()
-                                    .size(24.0)
-                                    .color(palette::TEXT),
-                            );
-                        });
-                    });
-                    progress_track(
-                        ui,
-                        progress,
-                        if cancelling {
-                            palette::TEXT_FAINT
-                        } else {
-                            palette::ACCENT
-                        },
-                    );
-                    ui.columns(4, |columns| {
-                        stat(
-                            &mut columns[0],
-                            "Frames",
-                            &format!("{prog_frame} / {prog_total}"),
-                        );
-                        stat(
-                            &mut columns[1],
-                            "Transcurrido",
-                            &short_duration(elapsed_seconds),
-                        );
-                        stat(
-                            &mut columns[2],
-                            "Restante",
-                            &if prog_frame > 0 {
-                                format!("~{}", short_duration(eta_seconds))
-                            } else {
-                                "—".to_string()
-                            },
-                        );
-                        stat(
-                            &mut columns[3],
-                            "Codificador",
-                            encoder_label.as_deref().unwrap_or("detectando…"),
-                        );
-                    });
-                    ui.add_space(2.0);
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if secondary_button(ui, "Cancelar exportación", !cancelling).clicked() {
-                            trigger_cancel = true;
-                        }
-                    });
-                });
-            if trigger_cancel {
-                state.cancel_requested.store(true, Ordering::Release);
-            }
+            // The export runs in the background: the playback bar and the
+            // timeline show its progress, and playback stays available.
             return;
         }
     }
@@ -834,7 +852,16 @@ pub fn export_dialog_system(
             });
 
             let progress_clone = progress.clone();
+            let file_name = Path::new(&out)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| out.clone());
             std::thread::spawn(move || {
+                // The worker process reports to the editor; the in-process
+                // exports draw their own terminal bar.
+                let terminal = worker_paths
+                    .is_some()
+                    .then(|| TerminalProgress::start(telemetry.clone(), file_name));
                 let result = match worker_paths {
                     Some((script_path, project_dir)) => run_export_worker(
                         &script_path,
@@ -893,6 +920,9 @@ pub fn export_dialog_system(
                         }
                     }
                 };
+                if let Some(terminal) = terminal {
+                    terminal.finish(&result);
+                }
                 if let Ok(mut lock) = progress_clone.lock()
                     && let Some(ref mut p) = *lock
                 {
@@ -1201,7 +1231,7 @@ fn with_output_extension(path: &str, extension: &str) -> String {
     }
 }
 
-fn short_duration(seconds: f64) -> String {
+pub(crate) fn short_duration(seconds: f64) -> String {
     let seconds = seconds.max(0.0);
     if seconds < 60.0 {
         format!("{seconds:.1} s")
@@ -1209,24 +1239,6 @@ fn short_duration(seconds: f64) -> String {
         let whole = seconds.round() as u64;
         format!("{}:{:02} min", whole / 60, whole % 60)
     }
-}
-
-fn stat(ui: &mut egui::Ui, label: &str, value: &str) {
-    ui.spacing_mut().item_spacing.y = 2.0;
-    ui.label(
-        egui::RichText::new(label)
-            .size(11.0)
-            .color(palette::TEXT_FAINT),
-    );
-    ui.add(
-        egui::Label::new(
-            egui::RichText::new(value)
-                .monospace()
-                .size(12.5)
-                .color(palette::TEXT),
-        )
-        .truncate(),
-    );
 }
 
 fn notice(ui: &mut egui::Ui, color: egui::Color32, text: &str) {
