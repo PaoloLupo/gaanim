@@ -12,6 +12,7 @@ mod color;
 mod composition;
 mod custom;
 mod easing;
+mod falloff;
 mod procedural;
 mod progress_ring;
 mod py3d;
@@ -136,6 +137,8 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pyzones::PyZone>()?;
     m.add_class::<pymatrix::PyMatrixOrder>()?;
     m.add_class::<updater::PyUpdater>()?;
+    m.add_class::<falloff::PyFalloff>()?;
+    m.add_class::<falloff::PyFalloffColor>()?;
     m.add_class::<visualization::PyAxis>()?;
     m.add_class::<visualization::PyScale>()?;
     m.add_class::<visualization::PyField>()?;
