@@ -2093,6 +2093,30 @@ impl DrawableHandle {
             .push(Op::RemoveUpdater(self.id));
     }
 
+    /// Drive a channel from a falloff, for this drawable or, when it is a
+    /// group, for each of its members, from the cursor on.
+    pub fn drive_falloff(&self, effect: gaanim_animation::FalloffEffect) {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachFalloff {
+                target: self.id,
+                effect,
+            });
+    }
+
+    /// End the falloff effects of this drawable or of its group's members.
+    pub fn clear_falloff(&self) {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::ClearFalloff(self.id));
+    }
+
     /// Copy the source entity's Y position each frame (after updaters run).
     pub fn bind_y_from(&self, source: &DrawableHandle) {
         self.defer_visibility_until_play();

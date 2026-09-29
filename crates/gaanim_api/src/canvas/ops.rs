@@ -551,6 +551,14 @@ pub(crate) enum Op {
     },
     /// Remove the updater from an entity.
     RemoveUpdater(ObjectId),
+    /// Connect a falloff to a channel of an instance, or of every member of a
+    /// group, from the cursor on.
+    AttachFalloff {
+        target: ObjectId,
+        effect: gaanim_animation::FalloffEffect,
+    },
+    /// End the falloff effects of an instance or of a group's members.
+    ClearFalloff(ObjectId),
     /// Attach a TracedPath to an entity, tracking a source entity's movement.
     AttachTracedPath {
         target: ObjectId,

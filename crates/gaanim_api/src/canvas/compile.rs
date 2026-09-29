@@ -5503,6 +5503,55 @@ impl SceneModel {
                     }
                 }
 
+                Op::AttachFalloff { target, effect } => {
+                    if let Some(target_id) = id_map.get(target).copied() {
+                        let mut effect = effect.clone();
+                        effect.resolve_targets(&mut |object| {
+                            id_map
+                                .get(&object)
+                                .and_then(|id| builder.states.get(*id))
+                                .map(|state| state.entity)
+                        });
+                        let start = builder.current_time;
+                        let members = Self::falloff_members(builder, target_id);
+                        let count = members.len();
+                        for (index, entity) in members.into_iter().enumerate() {
+                            let effect = effect.clone();
+                            builder.commands.entity(entity).queue(
+                                move |mut entity: bevy::prelude::EntityWorldMut| {
+                                    if let Some(mut drive) =
+                                        entity.get_mut::<gaanim_animation::FalloffDrive>()
+                                    {
+                                        drive.index = index;
+                                        drive.count = count;
+                                        drive.push(effect, start);
+                                    } else {
+                                        let mut drive =
+                                            gaanim_animation::FalloffDrive::new(index, count);
+                                        drive.push(effect, start);
+                                        entity.insert(drive);
+                                    }
+                                },
+                            );
+                        }
+                    }
+                }
+                Op::ClearFalloff(target) => {
+                    if let Some(target_id) = id_map.get(target).copied() {
+                        let end = builder.current_time;
+                        for entity in Self::falloff_members(builder, target_id) {
+                            builder.commands.entity(entity).queue(
+                                move |mut entity: bevy::prelude::EntityWorldMut| {
+                                    if let Some(mut drive) =
+                                        entity.get_mut::<gaanim_animation::FalloffDrive>()
+                                    {
+                                        drive.stop_at(end);
+                                    }
+                                },
+                            );
+                        }
+                    }
+                }
                 Op::AttachTracedPath {
                     target,
                     source,
@@ -9257,6 +9306,25 @@ impl SceneModel {
 
     /// Entities of `id`, its glyph spans and its descendants, each flagged
     /// with whether it belongs to `id` itself.
+    /// The instances a falloff drives: the members of a group, or the
+    /// drawable itself when it has none.
+    fn falloff_members(builder: &SceneBuilder, id: ObjectId) -> Vec<bevy::prelude::Entity> {
+        let Some(state) = builder.states.get(id) else {
+            return Vec::new();
+        };
+        let members: Vec<_> = state
+            .children
+            .iter()
+            .filter_map(|child| builder.states.get(*child))
+            .map(|child| child.entity)
+            .collect();
+        if members.is_empty() {
+            vec![state.entity]
+        } else {
+            members
+        }
+    }
+
     fn hierarchy_entities(
         builder: &SceneBuilder,
         id: ObjectId,
@@ -16354,6 +16422,64 @@ mod tests {
             reveal_starts.iter().all(|start| *start >= 0.5 - 1.0e-9),
             "revealed before the fade-in: {reveal_starts:?}"
         );
+    }
+
+    #[test]
+    fn a_falloff_scales_group_members_by_their_distance_to_a_moving_target() {
+        use gaanim_animation::{
+            FalloffChannel, FalloffEffect, FalloffExpr, FalloffShape, FalloffTarget,
+        };
+        let mut canvas = SceneModel::new(640, 360);
+        let members: Vec<_> = [-2.0, 0.0, 2.0]
+            .into_iter()
+            .map(|x| canvas.rect(1.0, 1.0).move_to_default(x, 0.0))
+            .collect();
+        let group = canvas.group(&members.iter().collect::<Vec<_>>());
+        let cursor = canvas.rect(0.2, 0.2).move_to_default(-2.0, 0.0);
+        group.drive_falloff(FalloffEffect::Scalar {
+            channel: FalloffChannel::Scale,
+            expr: FalloffExpr::Remap {
+                input: Box::new(FalloffExpr::Distance {
+                    target: FalloffTarget::Object(cursor.id),
+                    radius: 2.0,
+                    shape: FalloffShape::Linear,
+                }),
+                low: 1.0,
+                high: 3.0,
+            },
+        });
+        canvas.play(vec![cursor.animate().move_to(2.0, 0.0).duration(2.0)]);
+
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let mut restore = Schedule::default();
+        restore.add_systems(gaanim_animation::falloff::restore_falloff_system);
+        let mut scales_at = |time: f64| {
+            timeline.seek(&mut world, time);
+            world.insert_resource(gaanim_animation::PlaybackState {
+                current_time: time,
+                ..Default::default()
+            });
+            gaanim_animation::falloff::apply_falloff_system(&mut world);
+            let scales: Vec<f64> = members
+                .iter()
+                .map(|member| transform_of(&mut world, member).scale.x)
+                .collect();
+            restore.run(&mut world);
+            scales
+        };
+        let start = scales_at(0.0);
+        assert!((start[0] - 3.0).abs() < 1e-6, "under the cursor: {start:?}");
+        assert!((start[1] - 1.0).abs() < 1e-6 && (start[2] - 1.0).abs() < 1e-6);
+        let end = scales_at(2.0);
+        assert!((end[2] - 3.0).abs() < 1e-6, "the cursor moved: {end:?}");
+        assert!((end[0] - 1.0).abs() < 1e-6);
+        let middle = scales_at(1.0);
+        assert!(
+            (middle[1] - 3.0).abs() < 0.2,
+            "the cursor is over the middle member: {middle:?}"
+        );
+        // Seeking back reproduces the first frame exactly.
+        assert_eq!(scales_at(0.0), start);
     }
 
     /// A row of two rectangles, laid out twice with a play in between.
