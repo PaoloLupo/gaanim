@@ -25,6 +25,13 @@ Sin publicar todavía.
   giro. Colocar un hijo de forma inmediata (`move_to` sin `.animate`) sigue
   lanzando `LayoutOwnershipError`. Lee
   #link("/guias/layout/")[Animar dentro de una caja].
+- `text_box="cap"` o `"ink"` en un texto o en una caja cambia la caja con que
+  el layout mide y coloca el texto: de la altura de las mayúsculas a la línea
+  base, o ajustada a la tinta. Sirve para calcar diseños en los que las
+  mayúsculas tocan el borde. Por defecto sigue siendo `"line"`.
+- `scene.layout.check_layout()`, `box.diagnostics()` y `gaanim check` avisan
+  de las cajas con fondo o borde que quedan con ancho o alto cero, como una
+  barra vacía sin `width="fill"`, e indican su ruta (`column[2] > row[1]`).
 
 == Correcciones
 

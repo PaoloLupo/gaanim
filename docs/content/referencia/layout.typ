@@ -173,8 +173,15 @@ Las mismas propiedades valen para `box`, `row`, `column`, `grid`, `stack`,
 *Tipografía* (la heredan las cadenas hijas)
 
 - `color`, `font`, `font_size`, `weight`, `italic`, `role`, `text_align`,
-  `line_spacing`, `letter_spacing`, `max_lines`, `overflow`, `markup`.
-  `markup` es `False` por defecto: `$` y `*` se escriben tal cual.
+  `line_spacing`, `letter_spacing`, `max_lines`, `overflow`, `markup`,
+  `text_box`. `markup` es `False` por defecto: `$` y `*` se escriben tal cual.
+- `text_box` elige la caja con que se mide y coloca el texto, como
+  `text-box` en CSS: `"line"` (por defecto) ocupa líneas completas, de la
+  ascendente a la descendente, así que textos del mismo estilo comparten
+  altura; `"cap"` va de la altura de las mayúsculas a la línea base (de un
+  texto de una línea), para que las mayúsculas toquen el borde de la caja
+  como en un diseño calcado; `"ink"` se ajusta a la tinta de los glifos. Las
+  fórmulas `$…$` usan siempre su tinta.
 
 == Estilos y clases
 
@@ -442,7 +449,7 @@ relations = scene.layout.constrain(
 #api-entry(
   name: "LayoutBuilder.check_layout",
   kind: "method",
-  desc: [Lista de diagnósticos: restricciones débiles incumplidas y fallos de composición de texto (que no detienen la recarga del editor). `box.diagnostics()` filtra los de una caja.],
+  desc: [Resuelve el layout de la escena hasta ese punto y devuelve sus diagnósticos: restricciones débiles incumplidas, fallos de composición de texto (que no detienen la recarga del editor) y cajas con fondo o borde que quedan con ancho o alto cero, como una barra vacía sin `width="fill"`. Cada aviso empieza por la ruta de la caja, por ejemplo `column[2] > row[1]`: el segundo hijo de la fila que es el tercer hijo de la columna raíz. `box.diagnostics()` filtra los de una caja y sus cajas anidadas, y `gaanim check` los muestra como avisos.],
 )[
 ```python
 # continue

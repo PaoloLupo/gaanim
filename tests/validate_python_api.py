@@ -2015,6 +2015,22 @@ def validate_layout_box_contract(module):
     if free.place(body, anchor="top_left", padding="12px") is not free:
         failures.append("Drawable.place did not return the drawable")
     scene.play(card.animate.fade_in().duration(0.2))
+    # text_box chooses the box a text is laid out by.
+    for mode in ("line", "cap", "ink"):
+        L.box("Título", text_box=mode)
+        scene.text("Título", text_box=mode)
+        module.TextFlow(text_box=mode)
+    try:
+        scene.text("x", text_box="baseline")
+    except ValueError:
+        pass
+    else:
+        failures.append("text_box accepted an unknown mode")
+    # A decorated box that resolves to nothing is reported with its path.
+    empty_bar = L.box(background="red")
+    holder = L.column(L.box("x"), empty_bar)
+    if not any("zero" in message and message.startswith("column[1]") for message in holder.diagnostics()):
+        failures.append(f"an empty decorated box was not diagnosed: {holder.diagnostics()}")
     # A box places its children; they still animate freely from there.
     for name, animation in (
         ("fade_in_from", lambda: child.animate.fade_in_from(module.Direction.UP)),

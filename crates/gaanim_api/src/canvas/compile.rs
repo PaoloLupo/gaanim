@@ -598,6 +598,8 @@ struct CompiledLayoutMeasure<'a> {
     natural_text_sizes: RefCell<BTreeMap<gaanim_layout::LayoutId, DVec2>>,
     /// Ascent and descent of a full line of each text leaf's font and size.
     line_extents: RefCell<BTreeMap<gaanim_layout::LayoutId, (f64, f64)>>,
+    /// Cap height of each text leaf's font and size, for `TextBox::Cap`.
+    cap_heights: RefCell<BTreeMap<gaanim_layout::LayoutId, f64>>,
     font_registry: &'a gaanim_text::font::FontRegistry,
 }
 
@@ -617,6 +619,35 @@ fn text_line_box(
         ink.min.y
     };
     Bounds3D::new_2d(ink.min.x, bottom, ink.max.x, top)
+}
+
+/// The box a text occupies in a layout for its `text_box` mode. Formulas
+/// keep their ink box, the convention equations and matrices are laid out
+/// with.
+fn text_layout_box(
+    ink: Bounds3D,
+    metrics: gaanim_text::prelude::TextMetrics,
+    mode: gaanim_text::prelude::TextBox,
+    line_extent: (f64, f64),
+    cap_height: Option<f64>,
+) -> Bounds3D {
+    use gaanim_text::prelude::TextBox;
+    match (mode, cap_height) {
+        (TextBox::Ink, _) => ink,
+        (TextBox::Cap, Some(cap_height)) => {
+            let line_box = text_line_box(ink, metrics, line_extent);
+            let top = metrics.first_baseline + cap_height;
+            // One line ends on its baseline; more lines keep the last one's
+            // ink, as the line box does.
+            let bottom = if metrics.line_count <= 1 {
+                metrics.first_baseline
+            } else {
+                line_box.min.y
+            };
+            Bounds3D::new_2d(line_box.min.x, bottom, line_box.max.x, top.max(bottom))
+        }
+        _ => text_line_box(ink, metrics, line_extent),
+    }
 }
 
 /// Whether text content is a single `$…$` formula.
@@ -651,12 +682,21 @@ impl CompiledLayoutMeasure<'_> {
             text.color,
         );
         let (bounds, metrics) = self.typst_lines(id, text, &source)?;
-        // Formulas keep their ink box, the convention equations and
-        // matrices are laid out with; prose sits on full lines.
         let line_box = if is_formula(&text.spec.content) {
             bounds
         } else {
-            text_line_box(bounds, metrics, self.line_extent(id, text)?)
+            let mode = text.spec.flow.text_box;
+            let cap_height = match mode {
+                gaanim_text::prelude::TextBox::Cap => Some(self.cap_height(id, text)?),
+                _ => None,
+            };
+            text_layout_box(
+                bounds,
+                metrics,
+                mode,
+                self.line_extent(id, text)?,
+                cap_height,
+            )
         };
         Ok(DVec2::new(
             line_box.width().max(0.0),
@@ -715,6 +755,32 @@ impl CompiledLayoutMeasure<'_> {
         );
         self.line_extents.borrow_mut().insert(id, extent);
         Ok(extent)
+    }
+
+    /// Height of a capital above the baseline in this text's style.
+    fn cap_height(
+        &self,
+        id: gaanim_layout::LayoutId,
+        text: &CompiledTextMeasure,
+    ) -> Result<f64, gaanim_layout::LayoutError> {
+        if let Some(height) = self.cap_heights.borrow().get(&id) {
+            return Ok(*height);
+        }
+        let mut reference = text.spec.clone();
+        reference.content = vec![StructuredTextContent::Literal("H".to_owned())];
+        reference.flow.wrap = StructuredTextWrap::NoWrap;
+        reference.flow.max_lines = None;
+        let source = structured_text_typst_source(
+            &reference,
+            None,
+            text.font_size,
+            &text.font_family,
+            text.color,
+        );
+        let (bounds, metrics) = self.typst_lines(id, text, &source)?;
+        let height = (bounds.max.y - metrics.first_baseline).max(0.0);
+        self.cap_heights.borrow_mut().insert(id, height);
+        Ok(height)
     }
 }
 
@@ -1617,6 +1683,43 @@ fn compile_layout_tree(
         fixed,
         texts,
     })
+}
+
+/// Where a box sits in its layout tree, for diagnostics: the kind and index
+/// of each ancestor below the root, such as `column[1] > row[0]`.
+fn layout_box_path(
+    tree: &CompiledLayoutTree,
+    snapshots: &HashMap<ObjectId, LayoutTreeSnapshot>,
+    id: gaanim_layout::LayoutId,
+) -> String {
+    let kind_name = |id: &gaanim_layout::LayoutId| {
+        tree.source_by_id
+            .get(id)
+            .and_then(|source| snapshots.get(source))
+            .map_or("box", |snapshot| match snapshot.spec.kind {
+                gaanim_layout::LayoutNodeKind::Row { .. } => "row",
+                gaanim_layout::LayoutNodeKind::Column { .. } => "column",
+                gaanim_layout::LayoutNodeKind::Grid { .. } => "grid",
+                gaanim_layout::LayoutNodeKind::Stack => "stack",
+                gaanim_layout::LayoutNodeKind::Leaf => "box",
+            })
+    };
+    let mut segments = Vec::new();
+    let mut current = id;
+    while let Some(parent) = tree.parent_by_id.get(&current) {
+        let index = tree
+            .children_by_id
+            .get(parent)
+            .and_then(|children| children.iter().position(|child| *child == current))
+            .unwrap_or(0);
+        segments.push(format!("{}[{index}]", kind_name(parent)));
+        current = *parent;
+    }
+    if segments.is_empty() {
+        return format!("root {}", kind_name(&id));
+    }
+    segments.reverse();
+    segments.join(" > ")
 }
 
 fn outermost_layout_source(
@@ -2695,6 +2798,45 @@ impl SceneModel {
             .insert_resource(gaanim_media::PreviewAudioTracks(self.audio_tracks.clone()));
         builder.commands.insert_resource(self.lighting_3d);
         checkpoint
+    }
+
+    /// Compile the scene into a scratch world and return every layout
+    /// diagnostic with the box it belongs to, including those only a
+    /// resolved layout reveals (a decorated box of zero size, a failed
+    /// resolution). `gaanim check` and `check_layout()` use it; the scene's
+    /// own diagnostics are left as they were.
+    pub fn compiled_layout_diagnostics(&self) -> Vec<(Option<ObjectId>, String)> {
+        let saved = self
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .layout_diagnostics
+            .clone();
+        let mut world = World::new();
+        let mut timeline = Timeline::new();
+        let mut font_registry = gaanim_text::font::FontRegistry::new();
+        let text_config = self.scene_text_config(&gaanim_text::prelude::TextConfig::default());
+        self.register_theme_fonts(&mut font_registry);
+        {
+            let mut commands = world.commands();
+            self.compile_into(&mut commands, &mut timeline, &font_registry, &text_config);
+        }
+        world.flush();
+        let compiled = std::mem::replace(
+            &mut self
+                .state
+                .lock()
+                .expect("canvas state poisoned")
+                .layout_diagnostics,
+            saved,
+        );
+        let mut unique = Vec::new();
+        for entry in compiled {
+            if !unique.contains(&entry) {
+                unique.push(entry);
+            }
+        }
+        unique
     }
 
     pub fn compile(&self, world: &mut World) {
@@ -3878,6 +4020,7 @@ impl SceneModel {
                         text_compositions: RefCell::default(),
                         text_candidates: RefCell::default(),
                         line_extents: RefCell::default(),
+                        cap_heights: RefCell::default(),
                         natural_text_sizes: RefCell::default(),
                         font_registry: builder.font_registry,
                     };
@@ -3896,6 +4039,45 @@ impl SceneModel {
                                 continue;
                             }
                         };
+                    // A decorated box that resolves to nothing draws nothing:
+                    // usually an empty bar or rule missing `width="fill"`.
+                    for (layout_id, source) in &tree.source_by_id {
+                        if !object_specs
+                            .get(source)
+                            .is_some_and(|spec| spec.layout_background.is_some())
+                        {
+                            continue;
+                        }
+                        let Some(size) = resolved
+                            .boxes
+                            .get(layout_id)
+                            .map(|resolved| resolved.bounds.size())
+                        else {
+                            continue;
+                        };
+                        // Keyed by the box itself, so resolving it again (on
+                        // its own first, then inside the box that adopts it)
+                        // replaces the earlier report.
+                        const EMPTY_BOX: &str = "a box with a background or border has zero";
+                        let mut state = diagnostic_state.lock().expect("canvas state poisoned");
+                        state.layout_diagnostics.retain(|(owner, message)| {
+                            *owner != Some(*source) || !message.contains(EMPTY_BOX)
+                        });
+                        let empty = match (size.x <= 1.0e-6, size.y <= 1.0e-6) {
+                            (true, true) => "width and height",
+                            (true, false) => "width",
+                            (false, true) => "height",
+                            (false, false) => continue,
+                        };
+                        let path = layout_box_path(&tree, layout_snapshots, *layout_id);
+                        state.layout_diagnostics.push((
+                            Some(*source),
+                            format!(
+                                "{path}: {EMPTY_BOX} {empty}, so it draws nothing; give it \
+                                 content or a size such as width=\"fill\" or height=\"8px\""
+                            ),
+                        ));
+                    }
                     let text_compositions: BTreeMap<_, _> = tree
                         .texts
                         .keys()
@@ -3905,6 +4087,7 @@ impl SceneModel {
                         })
                         .collect();
                     let line_extents = measurer.line_extents.into_inner();
+                    let cap_heights = measurer.cap_heights.into_inner();
                     if !resolved.diagnostics.is_empty() {
                         let mut state = diagnostic_state.lock().expect("canvas state poisoned");
                         state
@@ -4241,10 +4424,19 @@ impl SceneModel {
                             .item_style_by_id
                             .get(layout_id)
                             .is_some_and(|style| style.height.is_some());
+                        let mode = tree
+                            .texts
+                            .get(layout_id)
+                            .map(|text| text.spec.flow.text_box)
+                            .unwrap_or_default();
                         let local = match (line_extents.get(layout_id), metrics) {
-                            (Some(extent), Some(metrics)) if !sized => {
-                                text_line_box(bounds, metrics, *extent)
-                            }
+                            (Some(extent), Some(metrics)) if !sized => text_layout_box(
+                                bounds,
+                                metrics,
+                                mode,
+                                *extent,
+                                cap_heights.get(layout_id).copied(),
+                            ),
                             _ => bounds,
                         };
                         let intrinsic = gaanim_layout::transform_bounds(local, &zero_translation);
@@ -15222,6 +15414,7 @@ mod tests {
             text_compositions: RefCell::default(),
             text_candidates: RefCell::default(),
             line_extents: RefCell::default(),
+            cap_heights: RefCell::default(),
             natural_text_sizes: RefCell::default(),
             font_registry: &fonts,
         };
@@ -15283,6 +15476,7 @@ mod tests {
                 text_compositions: RefCell::default(),
                 text_candidates: RefCell::default(),
                 line_extents: RefCell::default(),
+                cap_heights: RefCell::default(),
                 natural_text_sizes: RefCell::default(),
                 font_registry: &fonts,
             };
@@ -15345,6 +15539,7 @@ mod tests {
             text_compositions: RefCell::default(),
             text_candidates: RefCell::default(),
             line_extents: RefCell::default(),
+            cap_heights: RefCell::default(),
             natural_text_sizes: RefCell::default(),
             font_registry: &fonts,
         };

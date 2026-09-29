@@ -54,6 +54,21 @@ pub enum TextOverflow {
     Ellipsis,
 }
 
+/// The box a text occupies in a layout, like CSS `text-box`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum TextBox {
+    /// Full lines: from a line's ascent to its descent, so texts of one style
+    /// share heights and baselines whatever glyphs they contain.
+    #[default]
+    Line,
+    /// From the cap height of the first line to the baseline of a single
+    /// line, so capitals align with a box edge.
+    Cap,
+    /// The glyphs' own ink.
+    Ink,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TextDirection {
@@ -113,6 +128,9 @@ pub struct TextFlow {
     /// patterns and language-specific typography; `None` keeps Typst's default.
     #[cfg_attr(feature = "serde", serde(default))]
     pub lang: Option<String>,
+    /// The box a layout measures and places the text by.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub text_box: TextBox,
 }
 
 impl Default for TextFlow {
@@ -126,6 +144,7 @@ impl Default for TextFlow {
             direction: TextDirection::Auto,
             hyphenate: false,
             lang: None,
+            text_box: TextBox::Line,
         }
     }
 }

@@ -145,6 +145,35 @@ La tipografía también se hereda: `font_size`, `color`, `weight`, `italic`,
 `font`, `line_spacing`, `letter_spacing`… definidas en una caja se aplican a
 todas las cadenas de texto que contiene, como el `font-size` de CSS.
 
+== La caja del texto: `text_box`
+
+Por defecto un texto ocupa líneas completas, de la ascendente a la
+descendente: dos textos del mismo estilo miden lo mismo aunque uno tenga
+«g» o «Á». Para calcar un diseño en el que las mayúsculas tocan el borde de
+la caja, usa `text_box="cap"`: el texto va de la altura de las mayúsculas a
+su línea base. `text_box="ink"` se ajusta a la tinta de los glifos.
+
+```python
+# output: preview.webp
+from gaanim import Scene
+
+scene = Scene(frame=(16, 9), theme="paper", margin=0.6)
+L = scene.layout
+
+def sample(mode):
+    return L.column(
+        L.box(f'text_box="{mode}"', font_size="24px", color="#64748b"),
+        L.box("Título", font_size="96px", weight=700, text_box=mode,
+              background="#e0e7ff", radius="8px"),
+        gap="12px", align="center",
+    )
+
+page = L.row(sample("line"), sample("cap"), sample("ink"), gap="64px",
+             align="end", within="safe")
+scene.play([page.animate.fade_in().duration(0.5)])
+scene.render()
+```
+
 = Estilos reutilizables: `BoxStyle` y clases
 
 Un `BoxStyle` agrupa propiedades, como una regla CSS. Pásalo con `style=`,
