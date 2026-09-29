@@ -71,7 +71,11 @@ reproduce los fotogramas grabados con las mismas opciones, sin cargar Python.
 
 Cada nombre de `--sections` y `--from` puede ser el nombre completo de un
 segmento, la clave de un `Section` (selecciona todos sus pasos) o el nombre de
-un `SectionStep`. No distingue mayúsculas de minúsculas. Un nombre que no
+un `SectionStep`. No distingue mayúsculas de minúsculas. Para un nombre con
+comas, pásalo solo (`--sections "Tiempo, lugar y orientación"`: si el valor
+completo nombra un segmento, se usa tal cual) o escribe sus comas como `\,`
+dentro de una lista (`--sections "Tiempo\, lugar y orientación,Cierre"`). Un
+nombre que no
 selecciona nada muestra un error con los nombres disponibles y se reproduce la
 escena completa. La escena se
 construye entera igualmente, así que objetos, cámara y tema llegan al primer

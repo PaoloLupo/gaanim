@@ -13,6 +13,9 @@ pub struct SegmentSelection {
     pub sections: Vec<String>,
     /// Play from this segment or section to the end.
     pub from: Option<String>,
+    /// The `--sections` value as written, used whole when it names one
+    /// segment exactly, so a name with commas needs no escaping.
+    pub sections_value: Option<String>,
 }
 
 /// Selected segment indices and the merged time ranges they cover.
@@ -23,18 +26,42 @@ pub struct ResolvedSelection {
 }
 
 impl SegmentSelection {
-    /// Parse a comma-separated `--sections` list.
+    /// Parse a comma-separated `--sections` list. `\,` is a comma inside a
+    /// name and `\\` a backslash: `Tiempo\, lugar,Cierre` is two names.
     pub fn parse_list(spec: &str) -> Result<Vec<String>, String> {
-        let names: Vec<String> = spec
-            .split(',')
-            .map(|name| name.trim().to_string())
-            .collect();
+        let mut names = Vec::new();
+        let mut name = String::new();
+        let mut chars = spec.chars();
+        while let Some(ch) = chars.next() {
+            match ch {
+                '\\' => match chars.next() {
+                    Some(escaped @ (',' | '\\')) => name.push(escaped),
+                    Some(other) => {
+                        name.push('\\');
+                        name.push(other);
+                    }
+                    None => name.push('\\'),
+                },
+                ',' => names.push(std::mem::take(&mut name)),
+                _ => name.push(ch),
+            }
+        }
+        names.push(name);
+        let names: Vec<String> = names.iter().map(|name| name.trim().to_string()).collect();
         if names.iter().any(String::is_empty) {
             return Err(format!(
-                "invalid section list `{spec}`: use comma-separated names, e.g. results,conclusions"
+                "invalid section list `{spec}`: use comma-separated names, e.g. results,conclusions \
+                 (write \\, for a comma inside a name)"
             ));
         }
         Ok(names)
+    }
+
+    /// Set the `--sections` list from its command-line value.
+    pub fn set_sections(&mut self, spec: &str) -> Result<(), String> {
+        self.sections = Self::parse_list(spec)?;
+        self.sections_value = Some(spec.trim().to_string());
+        Ok(())
     }
 
     pub fn is_empty(&self) -> bool {
@@ -53,19 +80,20 @@ impl SegmentSelection {
     ) -> Result<ResolvedSelection, String> {
         let segments: Vec<(&str, f64, f64)> = segments.into_iter().collect();
         let matching = |name: &str| -> Result<Vec<usize>, String> {
-            let found: Vec<usize> = segments
-                .iter()
-                .enumerate()
-                .filter(|(_, (segment, _, _))| segment_matches(segment, name))
-                .map(|(index, _)| index)
-                .collect();
+            let found = matching_names(name, &segments);
             if found.is_empty() {
                 return Err(unknown_segment(name, &segments));
             }
             Ok(found)
         };
         let mut selected = vec![false; segments.len()];
-        for name in &self.sections {
+        // A value that names one segment exactly is that name, commas and all.
+        let whole = self
+            .sections_value
+            .as_ref()
+            .filter(|value| self.sections.len() > 1 && !matching_names(value, &segments).is_empty())
+            .map(|value| vec![value.clone()]);
+        for name in whole.as_ref().unwrap_or(&self.sections) {
             for index in matching(name)? {
                 selected[index] = true;
             }
@@ -99,6 +127,16 @@ impl SegmentSelection {
     }
 }
 
+/// Indices of the segments `name` selects.
+fn matching_names(name: &str, segments: &[(&str, f64, f64)]) -> Vec<usize> {
+    segments
+        .iter()
+        .enumerate()
+        .filter(|(_, (segment, _, _))| segment_matches(segment, name))
+        .map(|(index, _)| index)
+        .collect()
+}
+
 fn segment_matches(segment: &str, name: &str) -> bool {
     let segment = segment.to_lowercase();
     let name = name.to_lowercase();
@@ -130,9 +168,16 @@ fn unknown_segment(name: &str, segments: &[(&str, f64, f64)]) -> String {
             choices.push(choice);
         }
     }
+    // Quote the choices: a name may itself contain commas.
+    let listed: Vec<String> = choices.iter().map(|choice| format!("`{choice}`")).collect();
+    let hint = if choices.iter().any(|choice| choice.contains(',')) {
+        "; to select a name with commas, pass it alone or write its commas as \\,"
+    } else {
+        ""
+    };
     format!(
-        "no segment or section named `{name}`; available: {}",
-        choices.join(", ")
+        "no segment or section named `{name}`; available: {}{hint}",
+        listed.join(", ")
     )
 }
 
@@ -151,10 +196,56 @@ mod tests {
     }
 
     #[test]
+    fn section_lists_escape_commas_inside_names() {
+        assert_eq!(
+            SegmentSelection::parse_list(r"Tiempo\, lugar y orientación, Cierre").unwrap(),
+            vec!["Tiempo, lugar y orientación", "Cierre"]
+        );
+        assert_eq!(
+            SegmentSelection::parse_list(r"a\\b,c").unwrap(),
+            vec![r"a\b", "c"]
+        );
+        assert!(SegmentSelection::parse_list("a,,b").is_err());
+    }
+
+    #[test]
+    fn a_whole_value_naming_one_segment_needs_no_escape() {
+        let deck = vec![
+            ("Portada", 0.0, 1.0),
+            ("Tiempo, lugar y orientación", 1.0, 2.0),
+            ("Cierre", 2.0, 3.0),
+        ];
+        let mut selection = SegmentSelection::default();
+        selection
+            .set_sections("Tiempo, lugar y orientación")
+            .unwrap();
+        assert_eq!(selection.resolve(deck.clone()).unwrap().segments, vec![1]);
+        // A real list still splits, and an escaped comma joins.
+        selection
+            .set_sections(r"Tiempo\, lugar y orientación, Cierre")
+            .unwrap();
+        assert_eq!(
+            selection.resolve(deck.clone()).unwrap().segments,
+            vec![1, 2]
+        );
+        selection.set_sections("Portada, Cierre").unwrap();
+        assert_eq!(
+            selection.resolve(deck.clone()).unwrap().segments,
+            vec![0, 2]
+        );
+        // Parts of a comma name that match nothing are reported, with a hint.
+        selection.set_sections("Tiempo, Cierre").unwrap();
+        let error = selection.resolve(deck).unwrap_err();
+        assert!(error.contains("`Tiempo, lugar y orientación`"), "{error}");
+        assert!(error.contains(r"write its commas as \,"), "{error}");
+    }
+
+    #[test]
     fn sections_match_segment_names_and_section_keys_ignoring_case() {
         let selection = SegmentSelection {
             sections: vec!["resultados".into(), "CLOSE".into()],
             from: None,
+            sections_value: None,
         };
         let resolved = selection.resolve(deck()).unwrap();
         assert_eq!(resolved.segments, vec![2, 3, 4]);
@@ -171,11 +262,13 @@ mod tests {
         let selection = SegmentSelection {
             sections: vec!["problemática · PAÍS SÍSMICO".into()],
             from: None,
+            sections_value: None,
         };
         assert_eq!(selection.resolve(deck.clone()).unwrap().segments, vec![0]);
         let from = SegmentSelection {
             sections: Vec::new(),
             from: Some("Problemática · traslado".into()),
+            sections_value: None,
         };
         assert_eq!(from.resolve(deck).unwrap().segments, vec![1, 2]);
     }
@@ -185,6 +278,7 @@ mod tests {
         let selection = SegmentSelection {
             sections: vec!["intro".into(), "close".into()],
             from: None,
+            sections_value: None,
         };
         let resolved = selection.resolve(deck()).unwrap();
         assert_eq!(resolved.ranges, vec![(1.0, 2.0), (3.0, 5.0)]);
@@ -195,11 +289,13 @@ mod tests {
         let from = SegmentSelection {
             sections: Vec::new(),
             from: Some("Resultados".into()),
+            sections_value: None,
         };
         assert_eq!(from.resolve(deck()).unwrap().ranges, vec![(2.0, 5.0)]);
         let both = SegmentSelection {
             sections: vec!["intro".into(), "close".into()],
             from: Some("resultados".into()),
+            sections_value: None,
         };
         assert_eq!(both.resolve(deck()).unwrap().segments, vec![3, 4]);
     }
@@ -209,11 +305,12 @@ mod tests {
         let selection = SegmentSelection {
             sections: vec!["missing".into()],
             from: None,
+            sections_value: None,
         };
         let error = selection.resolve(deck()).unwrap_err();
         assert!(error.contains("`missing`"), "{error}");
         assert!(
-            error.contains("Portada, intro, Resultados, close"),
+            error.contains("`Portada`, `intro`, `Resultados`, `close`"),
             "{error}"
         );
         assert!(SegmentSelection::parse_list("a,,b").is_err());

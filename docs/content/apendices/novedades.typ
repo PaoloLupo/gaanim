@@ -75,6 +75,11 @@ escenas que usan `scene.layout.item`, `scene.layout.card` o
   `scene.viz.readout(3.0).move_to(0, 0).number.fill("red")`. `part()` sigue
   devolviendo un objeto nuevo
   (#link("https://github.com/PaoloLupo/gaanim/issues/267")[\#267]).
+- `--sections` selecciona segmentos cuyo nombre tiene comas: pasa el nombre
+  solo (`--sections "Tiempo, lugar y orientación"`) o escribe sus comas como
+  `\,` dentro de una lista. El error de un nombre desconocido lista las
+  opciones entre comillas y explica cómo escribir una coma
+  (#link("https://github.com/PaoloLupo/gaanim/issues/270")[\#270]).
 
 = 0.7.0
 

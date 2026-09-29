@@ -310,6 +310,7 @@ mod tests {
         let selection = gaanim_timeline::selection::SegmentSelection {
             sections: vec!["results".into()],
             from: None,
+            sections_value: None,
         };
         assert_eq!(
             select_stop_numbers(&segments, &selection, None).unwrap(),
@@ -322,6 +323,7 @@ mod tests {
         let from = gaanim_timeline::selection::SegmentSelection {
             sections: Vec::new(),
             from: Some("RESULTS".into()),
+            sections_value: None,
         };
         assert_eq!(
             select_stop_numbers(&segments, &from, None).unwrap(),

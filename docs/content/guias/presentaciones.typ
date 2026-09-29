@@ -90,7 +90,8 @@ gaanim --present mi-charla --from contenido
 y sigue hasta el final; si los combinas, `--from` recorta la lista. Cada
 nombre selecciona el segmento con ese nombre exacto, todos los segmentos de
 una `Section` con esa clave o el paso de una `Section` con ese nombre de
-`SectionStep` (por ejemplo `--sections "Problemática · país sísmico"`), sin
+`SectionStep` (por ejemplo `--sections "Problemática · país sísmico"`). Un
+nombre con comas se pasa solo o con sus comas escritas como `\,`, sin
 distinguir mayúsculas. Un nombre desconocido se muestra como error con las
 opciones disponibles, y entonces se reproduce todo.
 

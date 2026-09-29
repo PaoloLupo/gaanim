@@ -954,8 +954,7 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
                 if arg == "--from" {
                     selection.from = Some(value.clone());
                 } else {
-                    selection.sections =
-                        gaanim_timeline::selection::SegmentSelection::parse_list(value)?;
+                    selection.set_sections(value)?;
                 }
             }
             "--monitor" => {
