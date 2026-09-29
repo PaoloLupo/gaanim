@@ -4284,10 +4284,8 @@ impl SceneModel {
                             // Group attachment preserves world placement by default;
                             // a decoration instead uses its container's local box.
                             state.transform = SpatialTransform::identity();
-                            builder
-                                .commands
-                                .entity(state.entity)
-                                .insert(state.transform);
+                            let (entity, transform) = (state.entity, state.transform);
+                            Self::insert_transform_keeping_grow(builder, entity, transform);
                         }
                         // The background shares the order of the box's first
                         // content and draws just before it: under that content,
@@ -4337,11 +4335,13 @@ impl SceneModel {
                         state.bounds = local_root_bounds;
                         state.transform = SpatialTransform::identity();
                         state.transform.translation = root_center;
+                        let entity = state.entity;
+                        let root_transform = state.transform;
                         builder
                             .commands
-                            .entity(state.entity)
-                            .insert((LocalBounds(local_root_bounds), state.transform));
-                        let entity = state.entity;
+                            .entity(entity)
+                            .insert(LocalBounds(local_root_bounds));
+                        Self::insert_transform_keeping_grow(builder, entity, root_transform);
                         let time = builder.current_time;
                         let span = duration.unwrap_or(0.0);
                         builder.commands.queue(move |world: &mut World| {
@@ -4633,15 +4633,14 @@ impl SceneModel {
                                 rate_func: RateFunc::Smooth,
                                 delay: 0.0,
                             };
-                            let scale = (!held_scale.contains_key(&target)).then(|| {
-                                AnimationBuilder {
+                            let scale =
+                                (!held_scale.contains_key(&target)).then(|| AnimationBuilder {
                                     target,
                                     anim_type: AnimationType::ScaleTo { to: to.scale },
                                     duration: transition_duration,
                                     rate_func: RateFunc::Smooth,
                                     delay: 0.0,
-                                }
-                            });
+                                });
                             std::iter::once(translate).chain(scale)
                         })
                         .collect();
@@ -9710,9 +9709,34 @@ impl SceneModel {
         )
     }
 
+    /// Set an entity's whole transform, except that a scale of zero stays: it
+    /// is the start of a grow entry, and a reflow must not show the object
+    /// before its turn.
+    fn insert_transform_keeping_grow(
+        builder: &mut SceneBuilder,
+        entity: bevy::prelude::Entity,
+        transform: SpatialTransform,
+    ) {
+        builder.commands.queue(move |world: &mut World| {
+            let Ok(mut entity) = world.get_entity_mut(entity) else {
+                return;
+            };
+            let mut transform = transform;
+            if entity
+                .get::<SpatialTransform>()
+                .is_some_and(|current| current.scale == DVec3::ZERO)
+            {
+                transform.scale = DVec3::ZERO;
+            }
+            entity.insert(transform);
+        });
+    }
+
     /// Write the translation and scale a layout gives a member to its
     /// entity. Its rotation and skew are its own: a child rotated later in
     /// the timeline must not show that rotation before its animation starts.
+    /// A scale of zero stays: it is the start of a grow entry, and a later
+    /// reflow must not show the member before its turn.
     fn place_layout_member(
         builder: &mut SceneBuilder,
         entity: bevy::prelude::Entity,
@@ -9721,7 +9745,9 @@ impl SceneModel {
         builder.commands.queue(move |world: &mut World| {
             if let Some(mut current) = world.get_mut::<SpatialTransform>(entity) {
                 current.translation = transform.translation;
-                current.scale = transform.scale;
+                if current.scale != DVec3::ZERO {
+                    current.scale = transform.scale;
+                }
             } else if let Ok(mut entity) = world.get_entity_mut(entity) {
                 entity.insert(transform);
             }
