@@ -68,6 +68,13 @@ escenas que usan `scene.layout.item`, `scene.layout.card` o
   paquete del proyecto (`capitulo4/estilo.py`) y no solo desde el script de
   entrada. Sin manifiesto, el error indica la carpeta de partida y cómo pasar
   la ruta (#link("https://github.com/PaoloLupo/gaanim/issues/266")[\#266]).
+- Los métodos fluidos heredados de `Drawable` (`move_to`, `shift_by`,
+  `fill`, `opacity`, `scale_by`, `next_to`…) devuelven el mismo objeto sobre
+  el que se llaman, así que un `Readout`, una `Variable`, una `Dimension` o
+  cualquier otro tipo compuesto conserva sus partes al encadenar:
+  `scene.viz.readout(3.0).move_to(0, 0).number.fill("red")`. `part()` sigue
+  devolviendo un objeto nuevo
+  (#link("https://github.com/PaoloLupo/gaanim/issues/267")[\#267]).
 
 = 0.7.0
 

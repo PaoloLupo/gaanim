@@ -519,6 +519,19 @@ impl DrawableHandle {
         Ok(())
     }
 
+    /// Whether `other` is this very handle: the same drawable, spec and
+    /// style targets (a fluent setter's result), not a part or a copy.
+    pub fn is_same_handle(&self, other: &DrawableHandle) -> bool {
+        self.id == other.id
+            && Arc::ptr_eq(&self.spec, &other.spec)
+            && Arc::ptr_eq(&self.style_targets, &other.style_targets)
+            && match (&self.named_parts, &other.named_parts) {
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            }
+    }
+
     pub fn release_layout(&self, owner: &DrawableHandle) {
         let mut spec = self.spec.lock().expect("object spec poisoned");
         if spec.layout_owner == Some(owner.id) {

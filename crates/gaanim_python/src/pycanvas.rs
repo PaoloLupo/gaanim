@@ -288,7 +288,7 @@ impl PySurroundingRect {
 
     fn opacity<'py>(slf: PyRef<'py, Self>, value: &Bound<'_, PyAny>) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        PyDrawable(slf.handle.drawable.clone()).opacity(value)?;
+        PyDrawable(slf.handle.drawable.clone()).opacity_impl(value)?;
         Ok(slf)
     }
 

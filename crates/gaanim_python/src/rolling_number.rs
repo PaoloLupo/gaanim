@@ -39,7 +39,7 @@ impl PyRollingNumber {
     }
 
     fn opacity<'py>(slf: PyRef<'py, Self>, op: &Bound<'py, PyAny>) -> PyResult<PyRef<'py, Self>> {
-        slf.visual.opacity(op)?;
+        slf.visual.opacity_impl(op)?;
         Ok(slf)
     }
 
@@ -79,7 +79,7 @@ impl PyRollingNumber {
             let anchor = anchor
                 .map(|value| value.extract::<PyRef<'_, crate::pylayout::PyAnchor>>())
                 .transpose()?;
-            slf.visual.move_to(x, y, anchor.as_deref())?;
+            slf.visual.move_to_impl(x, y, anchor.as_deref())?;
         }
         Ok(slf)
     }

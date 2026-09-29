@@ -66,17 +66,17 @@ impl PyProgressRing {
         y: Option<&Bound<'_, PyAny>>,
         anchor: Option<&crate::pylayout::PyAnchor>,
     ) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.ring.group.clone()).move_to(x, y, anchor)?;
+        PyDrawable(slf.ring.group.clone()).move_to_impl(x, y, anchor)?;
         Ok(slf)
     }
 
     fn shift_by<'py>(slf: PyRef<'py, Self>, dx: f64, dy: f64) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.ring.group.clone()).shift_by(dx, dy)?;
+        PyDrawable(slf.ring.group.clone()).shift_by_impl(dx, dy)?;
         Ok(slf)
     }
 
     fn opacity<'py>(slf: PyRef<'py, Self>, op: &Bound<'_, PyAny>) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.ring.group.clone()).opacity(op)?;
+        PyDrawable(slf.ring.group.clone()).opacity_impl(op)?;
         Ok(slf)
     }
 

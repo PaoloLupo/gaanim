@@ -97,7 +97,7 @@ pub(crate) fn camera_view(
         .map_err(view_error)?;
     if let Some(center) = center {
         let (x, y) = coordinates(center, None)?;
-        PyDrawable(view.frame().clone()).move_to(&x, y.as_ref(), None)?;
+        PyDrawable(view.frame().clone()).move_to_impl(&x, y.as_ref(), None)?;
     }
     Ok(PyCameraView { inner: view })
 }
@@ -272,7 +272,7 @@ impl PyCameraView {
         y: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyRef<'py, Self>> {
         let (x, y) = coordinates(x, y)?;
-        PyDrawable(slf.inner.frame().clone()).move_to(&x, y.as_ref(), None)?;
+        PyDrawable(slf.inner.frame().clone()).move_to_impl(&x, y.as_ref(), None)?;
         Ok(slf)
     }
 
@@ -288,7 +288,7 @@ impl PyCameraView {
         slf: PyRef<'py, Self>,
         radians: &Bound<'_, PyAny>,
     ) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.inner.frame().clone()).rotate_to(radians)?;
+        PyDrawable(slf.inner.frame().clone()).rotate_to_impl(radians)?;
         Ok(slf)
     }
 

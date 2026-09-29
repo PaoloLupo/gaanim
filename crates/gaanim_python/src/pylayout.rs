@@ -1508,12 +1508,12 @@ impl PyBox {
 #[pymethods]
 impl PyBox {
     fn opacity<'py>(slf: PyRef<'py, Self>, op: &Bound<'_, PyAny>) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).opacity(op)?;
+        crate::pydrawable::PyDrawable(slf.handle()).opacity_impl(op)?;
         Ok(slf)
     }
 
     fn z_index<'py>(slf: PyRef<'py, Self>, z: i32) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).z_index(z)?;
+        crate::pydrawable::PyDrawable(slf.handle()).z_index_impl(z)?;
         Ok(slf)
     }
     #[pyo3(signature = (x, y=None, anchor=None))]
@@ -1523,7 +1523,7 @@ impl PyBox {
         y: Option<&Bound<'_, PyAny>>,
         anchor: Option<&PyAnchor>,
     ) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).move_to(x, y, anchor)?;
+        crate::pydrawable::PyDrawable(slf.handle()).move_to_impl(x, y, anchor)?;
         Ok(slf)
     }
 
@@ -1533,12 +1533,12 @@ impl PyBox {
         y: &Bound<'_, PyAny>,
         z: &Bound<'_, PyAny>,
     ) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).move_to_3d(x, y, z)?;
+        crate::pydrawable::PyDrawable(slf.handle()).move_to_3d_impl(x, y, z)?;
         Ok(slf)
     }
 
     fn shift_by<'py>(slf: PyRef<'py, Self>, dx: f64, dy: f64) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).shift_by(dx, dy)?;
+        crate::pydrawable::PyDrawable(slf.handle()).shift_by_impl(dx, dy)?;
         Ok(slf)
     }
 
@@ -1548,17 +1548,17 @@ impl PyBox {
         dy: f64,
         dz: f64,
     ) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).shift_by_3d(dx, dy, dz)?;
+        crate::pydrawable::PyDrawable(slf.handle()).shift_by_3d_impl(dx, dy, dz)?;
         Ok(slf)
     }
 
     fn billboard<'py>(slf: PyRef<'py, Self>) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).billboard()?;
+        crate::pydrawable::PyDrawable(slf.handle()).billboard_impl()?;
         Ok(slf)
     }
 
     fn hud<'py>(slf: PyRef<'py, Self>) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).hud()?;
+        crate::pydrawable::PyDrawable(slf.handle()).hud_impl()?;
         Ok(slf)
     }
 
@@ -1566,7 +1566,7 @@ impl PyBox {
         slf: PyRef<'py, Self>,
         factor: &Bound<'_, PyAny>,
     ) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).scale_to(factor)?;
+        crate::pydrawable::PyDrawable(slf.handle()).scale_to_impl(factor)?;
         Ok(slf)
     }
 
@@ -1576,12 +1576,12 @@ impl PyBox {
         y: &Bound<'_, PyAny>,
         z: &Bound<'_, PyAny>,
     ) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).scale_to_3d(x, y, z)?;
+        crate::pydrawable::PyDrawable(slf.handle()).scale_to_3d_impl(x, y, z)?;
         Ok(slf)
     }
 
     fn scale_by<'py>(slf: PyRef<'py, Self>, factor: f64) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).scale_by(factor)?;
+        crate::pydrawable::PyDrawable(slf.handle()).scale_by_impl(factor)?;
         Ok(slf)
     }
 
@@ -1591,7 +1591,7 @@ impl PyBox {
         y: f64,
         z: f64,
     ) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).scale_by_3d(x, y, z)?;
+        crate::pydrawable::PyDrawable(slf.handle()).scale_by_3d_impl(x, y, z)?;
         Ok(slf)
     }
 
@@ -1599,7 +1599,7 @@ impl PyBox {
         slf: PyRef<'py, Self>,
         radians: &Bound<'_, PyAny>,
     ) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).rotate_to(radians)?;
+        crate::pydrawable::PyDrawable(slf.handle()).rotate_to_impl(radians)?;
         Ok(slf)
     }
 
@@ -1609,17 +1609,17 @@ impl PyBox {
         y: &Bound<'_, PyAny>,
         z: &Bound<'_, PyAny>,
     ) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).rotate_to_3d(x, y, z)?;
+        crate::pydrawable::PyDrawable(slf.handle()).rotate_to_3d_impl(x, y, z)?;
         Ok(slf)
     }
 
     fn rotate_by<'py>(slf: PyRef<'py, Self>, radians: f64) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).rotate_by(radians)?;
+        crate::pydrawable::PyDrawable(slf.handle()).rotate_by_impl(radians)?;
         Ok(slf)
     }
 
     fn skew_to<'py>(slf: PyRef<'py, Self>, x: f64, y: f64) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).skew_to(x, y)?;
+        crate::pydrawable::PyDrawable(slf.handle()).skew_to_impl(x, y)?;
         Ok(slf)
     }
 
@@ -1627,7 +1627,7 @@ impl PyBox {
         slf: PyRef<'py, Self>,
         matrix: ((f64, f64), (f64, f64)),
     ) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).matrix_to(matrix)?;
+        crate::pydrawable::PyDrawable(slf.handle()).matrix_to_impl(matrix)?;
         Ok(slf)
     }
 
@@ -1636,12 +1636,12 @@ impl PyBox {
         axis: &str,
         radians: f64,
     ) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).rotate_by_3d(axis, radians)?;
+        crate::pydrawable::PyDrawable(slf.handle()).rotate_by_3d_impl(axis, radians)?;
         Ok(slf)
     }
 
     fn with_pivot<'py>(slf: PyRef<'py, Self>, x: f64, y: f64) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).with_pivot(x, y)?;
+        crate::pydrawable::PyDrawable(slf.handle()).with_pivot_impl(x, y)?;
         Ok(slf)
     }
 
@@ -1651,12 +1651,12 @@ impl PyBox {
         y: f64,
         z: f64,
     ) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).with_pivot_3d(x, y, z)?;
+        crate::pydrawable::PyDrawable(slf.handle()).with_pivot_3d_impl(x, y, z)?;
         Ok(slf)
     }
 
     fn pivot<'py>(slf: PyRef<'py, Self>, x: f64, y: f64) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).pivot(x, y)?;
+        crate::pydrawable::PyDrawable(slf.handle()).pivot_impl(x, y)?;
         Ok(slf)
     }
     #[pyo3(signature = (reference, direction, spacing=0.24, aligned_edge=None))]
@@ -1667,7 +1667,7 @@ impl PyBox {
         spacing: f64,
         aligned_edge: Option<&PyAnchor>,
     ) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).next_to(
+        crate::pydrawable::PyDrawable(slf.handle()).next_to_impl(
             reference,
             direction,
             spacing,
@@ -1682,7 +1682,7 @@ impl PyBox {
         target_anchor: &PyAnchor,
         reference_anchor: Option<&PyAnchor>,
     ) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).align_to(
+        crate::pydrawable::PyDrawable(slf.handle()).align_to_impl(
             reference,
             target_anchor,
             reference_anchor,
@@ -1695,7 +1695,7 @@ impl PyBox {
         direction: &PyDirection,
         buff: f64,
     ) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).to_edge(direction, buff)?;
+        crate::pydrawable::PyDrawable(slf.handle()).to_edge_impl(direction, buff)?;
         Ok(slf)
     }
     #[pyo3(signature = (corner, buff=0.24))]
@@ -1704,7 +1704,7 @@ impl PyBox {
         corner: &PyAnchor,
         buff: f64,
     ) -> PyResult<PyRef<'py, Self>> {
-        crate::pydrawable::PyDrawable(slf.handle()).to_corner(corner, buff)?;
+        crate::pydrawable::PyDrawable(slf.handle()).to_corner_impl(corner, buff)?;
         Ok(slf)
     }
 }

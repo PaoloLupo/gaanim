@@ -2033,6 +2033,33 @@ def validate_layout_box_contract(module):
     return failures
 
 
+def validate_fluent_setters_keep_their_class(module):
+    """Fluent setters return the receiver itself, so composite handles keep
+    their parts when chained (issue #267)."""
+    failures = []
+    scene = module.Scene(frame=(16, 9))
+    readout = scene.viz.readout(3.0, format=".0f", label="x").move_to(0, 0)
+    if not isinstance(readout, module.Readout):
+        failures.append(f"Readout.move_to returned {type(readout).__name__}")
+    else:
+        readout.number.fill("red")
+        chained = readout.shift_by(0.5, 0).fill("blue").opacity(0.8).scale_by(1.2)
+        if chained is not readout:
+            failures.append("chained Readout setters did not return the same object")
+    variable = scene.viz.variable(1.0, label="t").move_to(-2, 1).fill("red")
+    if not isinstance(variable, module.Variable):
+        failures.append(f"Variable setters returned {type(variable).__name__}")
+    dimension = scene.mechanics.dimension_between((-2, -1), (2, -1), 0.4).stroke("white", 0.02).shift_by(0, 0.1)
+    if not isinstance(dimension, module.Dimension):
+        failures.append(f"Dimension setters returned {type(dimension).__name__}")
+    else:
+        dimension.line.stroke("red", 0.02)
+    circle = scene.geometry.circle(1)
+    if circle.move_to(1, 1) is not circle:
+        failures.append("Drawable.move_to did not return the same object")
+    return failures
+
+
 def validate_narration_contract(module: object) -> list[str]:
     """Voiceover takes set the pace; a live take turns stops into holds."""
     import json
@@ -2302,6 +2329,7 @@ def main() -> int:
     missing.extend(validate_reactive_fill_level_contract(module))
     missing.extend(validate_polyline_connector_contract(module))
     missing.extend(validate_layout_box_contract(module))
+    missing.extend(validate_fluent_setters_keep_their_class(module))
     missing.extend(validate_editorial_contract(module))
     missing.extend(validate_theme_typography_contract(module))
     missing.extend(validate_default_theme_contract(module, tree))

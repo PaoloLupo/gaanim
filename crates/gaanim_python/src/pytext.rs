@@ -1215,7 +1215,7 @@ impl PyText {
 
     fn opacity<'py>(slf: PyRef<'py, Self>, value: &Bound<'_, PyAny>) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        PyDrawable(slf.handle.clone()).opacity(value)?;
+        PyDrawable(slf.handle.clone()).opacity_impl(value)?;
         Ok(slf)
     }
 
@@ -1252,7 +1252,7 @@ impl PyText {
                 let values = [sx, sy, gaanim_animation::ScalarSource::Constant(0.0)];
                 match anchor.map(resolve_text_anchor).transpose()? {
                     Some(ResolvedTextAnchor::Geometric(anchor)) => {
-                        PyDrawable(slf.handle.clone()).move_to(
+                        PyDrawable(slf.handle.clone()).move_to_impl(
                             x,
                             Some(y),
                             Some(&PyAnchor(anchor)),
@@ -1311,13 +1311,13 @@ impl PyText {
         z: &Bound<'_, PyAny>,
     ) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        PyDrawable(slf.handle.clone()).move_to_3d(x, y, z)?;
+        PyDrawable(slf.handle.clone()).move_to_3d_impl(x, y, z)?;
         Ok(slf)
     }
 
     fn shift_by<'py>(slf: PyRef<'py, Self>, dx: f64, dy: f64) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        PyDrawable(slf.handle.clone()).shift_by(dx, dy)?;
+        PyDrawable(slf.handle.clone()).shift_by_impl(dx, dy)?;
         Ok(slf)
     }
 
@@ -1328,7 +1328,7 @@ impl PyText {
         dz: f64,
     ) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        PyDrawable(slf.handle.clone()).shift_by_3d(dx, dy, dz)?;
+        PyDrawable(slf.handle.clone()).shift_by_3d_impl(dx, dy, dz)?;
         Ok(slf)
     }
 
@@ -1353,13 +1353,13 @@ impl PyText {
         factor: &Bound<'_, PyAny>,
     ) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        PyDrawable(slf.handle.clone()).scale_to(factor)?;
+        PyDrawable(slf.handle.clone()).scale_to_impl(factor)?;
         Ok(slf)
     }
 
     fn scale_by<'py>(slf: PyRef<'py, Self>, factor: f64) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        PyDrawable(slf.handle.clone()).scale_by(factor)?;
+        PyDrawable(slf.handle.clone()).scale_by_impl(factor)?;
         Ok(slf)
     }
 
@@ -1370,7 +1370,7 @@ impl PyText {
         z: &Bound<'_, PyAny>,
     ) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        PyDrawable(slf.handle.clone()).scale_to_3d(x, y, z)?;
+        PyDrawable(slf.handle.clone()).scale_to_3d_impl(x, y, z)?;
         Ok(slf)
     }
 
@@ -1381,7 +1381,7 @@ impl PyText {
         z: f64,
     ) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        PyDrawable(slf.handle.clone()).scale_by_3d(x, y, z)?;
+        PyDrawable(slf.handle.clone()).scale_by_3d_impl(x, y, z)?;
         Ok(slf)
     }
 
@@ -1390,18 +1390,18 @@ impl PyText {
         radians: &Bound<'_, PyAny>,
     ) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        PyDrawable(slf.handle.clone()).rotate_to(radians)?;
+        PyDrawable(slf.handle.clone()).rotate_to_impl(radians)?;
         Ok(slf)
     }
 
     fn rotate_by<'py>(slf: PyRef<'py, Self>, radians: f64) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        PyDrawable(slf.handle.clone()).rotate_by(radians)?;
+        PyDrawable(slf.handle.clone()).rotate_by_impl(radians)?;
         Ok(slf)
     }
 
     fn skew_to<'py>(slf: PyRef<'py, Self>, x: f64, y: f64) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle.clone()).skew_to(x, y)?;
+        PyDrawable(slf.handle.clone()).skew_to_impl(x, y)?;
         Ok(slf)
     }
 
@@ -1409,7 +1409,7 @@ impl PyText {
         slf: PyRef<'py, Self>,
         matrix: ((f64, f64), (f64, f64)),
     ) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle.clone()).matrix_to(matrix)?;
+        PyDrawable(slf.handle.clone()).matrix_to_impl(matrix)?;
         Ok(slf)
     }
 
@@ -1420,7 +1420,7 @@ impl PyText {
         z: &Bound<'_, PyAny>,
     ) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        PyDrawable(slf.handle.clone()).rotate_to_3d(x, y, z)?;
+        PyDrawable(slf.handle.clone()).rotate_to_3d_impl(x, y, z)?;
         Ok(slf)
     }
 
@@ -1430,7 +1430,7 @@ impl PyText {
         radians: f64,
     ) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        PyDrawable(slf.handle.clone()).rotate_by_3d(axis, radians)?;
+        PyDrawable(slf.handle.clone()).rotate_by_3d_impl(axis, radians)?;
         Ok(slf)
     }
 
