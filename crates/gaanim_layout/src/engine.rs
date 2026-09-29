@@ -775,9 +775,12 @@ fn build_node(
             width: dimension(style.width),
             height: dimension(style.height),
         },
+        // Items may shrink below their content width (CSS `min-width: 0`).
+        // The minimum height stays `auto`: with a zero minimum Taffy sizes a
+        // padded column as if each child were at least that padding tall.
         min_size: taffy::Size {
             width: limit(style.min_width.or(Some(0.0))),
-            height: limit(style.min_height.or(Some(0.0))),
+            height: limit(style.min_height),
         },
         max_size: taffy::Size {
             width: limit(style.max_width),
@@ -838,10 +841,19 @@ fn build_node(
         }
         LayoutNodeKind::Stack => {
             taffy_style.display = Display::Grid;
-            taffy_style.grid_template_rows =
-                vec![taffy::style_helpers::auto::<taffy::TrackSizingFunction>().into()];
-            taffy_style.grid_template_columns =
-                vec![taffy::style_helpers::auto::<taffy::TrackSizingFunction>().into()];
+            // One layer the size of the stack: its content only sets the size
+            // of a hugging stack, and a larger child overflows a sized one.
+            let layer = || {
+                vec![
+                    taffy::style_helpers::minmax::<taffy::TrackSizingFunction>(
+                        taffy::style_helpers::length(0.0_f32),
+                        taffy::style_helpers::fr(1.0_f32),
+                    )
+                    .into(),
+                ]
+            };
+            taffy_style.grid_template_rows = layer();
+            taffy_style.grid_template_columns = layer();
             taffy_style.align_items = Some(align_items(style.align));
             taffy_style.justify_items = Some(align_items(style.align));
         }
@@ -921,7 +933,21 @@ fn build_node(
             // anchor places it inside. In a grid, `align` (the item's own, or
             // the grid's) places it vertically, as CSS `align-self` does.
             let parent_align = parent_style.map_or(Align::Start, |style| style.align);
+            // A fitted item takes the whole cell and is scaled into it; its
+            // own size must not grow the cell.
+            let fitted = !matches!(item.fit, FitMode::None);
+            if fitted {
+                taffy_style.min_size = taffy::Size {
+                    width: Dimension::length(0.0),
+                    height: Dimension::length(0.0),
+                };
+                taffy_style.size = taffy::Size {
+                    width: Dimension::percent(1.0),
+                    height: Dimension::percent(1.0),
+                };
+            }
             let (justify, align) = match item.align.unwrap_or(parent_align) {
+                _ if fitted => (AlignSelf::Stretch, AlignSelf::Stretch),
                 Align::Stretch => (AlignSelf::Stretch, AlignSelf::Stretch),
                 align if matches!(parent, Some(LayoutNodeKind::Grid { .. })) => {
                     (anchor_alignment(item.anchor).0, align_items(align))
@@ -1320,6 +1346,97 @@ mod tests {
         .unwrap();
         assert_eq!(layout.boxes[&LayoutId(3)].bounds.height(), 20.0);
         assert_eq!(layout.boxes[&LayoutId(2)].bounds.height(), 60.0);
+    }
+
+    #[test]
+    fn root_row_hugs_a_growing_card_at_its_final_width() {
+        let leaf = |id| LayoutChild {
+            node: Box::new(LayoutNode::leaf(LayoutId(id))),
+            style: LayoutItemStyle::default(),
+        };
+        let column = |id, children| LayoutChild {
+            node: Box::new({
+                let mut node = LayoutNode::container(
+                    LayoutId(id),
+                    LayoutNodeKind::Column { wrap: false },
+                    children,
+                );
+                node.style.padding = Insets::all(10.0);
+                node
+            }),
+            style: LayoutItemStyle {
+                grow: 1.0,
+                ..LayoutItemStyle::default()
+            },
+        };
+        let card = column(5, vec![leaf(7), leaf(3)]);
+        let mut row =
+            LayoutNode::container(LayoutId(2), LayoutNodeKind::Row { wrap: false }, vec![card]);
+        row.style.width = SizeRule::Fill(1.0);
+        let layout = resolve_layout(
+            &row,
+            Bounds3D::new_2d(-250.0, -100.0, 250.0, 100.0),
+            &Paragraph,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(layout.boxes[&LayoutId(5)].bounds.height(), 60.0);
+        assert_eq!(layout.boxes[&LayoutId(2)].bounds.height(), 60.0);
+    }
+
+    /// Unwrapped labels of a KPI card, in scene units.
+    struct Labels;
+    impl IntrinsicMeasure for Labels {
+        fn measure(&self, id: LayoutId, constraints: BoxConstraints) -> Result<DVec2, LayoutError> {
+            let size = if id == LayoutId(7) {
+                DVec2::new(0.4639, 0.1529)
+            } else {
+                DVec2::new(0.886, 0.4588)
+            };
+            Ok(constraints.constrain(size))
+        }
+
+        fn is_width_sensitive(&self, _: LayoutId) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn padded_card_hugs_its_labels() {
+        let boxed = |id, leaf| LayoutChild {
+            node: Box::new(LayoutNode::container(
+                LayoutId(id),
+                LayoutNodeKind::Column { wrap: false },
+                vec![LayoutChild {
+                    node: Box::new(LayoutNode::leaf(LayoutId(leaf))),
+                    style: LayoutItemStyle::default(),
+                }],
+            )),
+            style: LayoutItemStyle::default(),
+        };
+        let mut card = LayoutNode::container(
+            LayoutId(5),
+            LayoutNodeKind::Column { wrap: false },
+            vec![boxed(8, 7), boxed(9, 3)],
+        );
+        card.style.padding = Insets::all(0.1667);
+        let card = LayoutChild {
+            node: Box::new(card),
+            style: LayoutItemStyle {
+                grow: 1.0,
+                ..LayoutItemStyle::default()
+            },
+        };
+        let mut row =
+            LayoutNode::container(LayoutId(2), LayoutNodeKind::Row { wrap: false }, vec![card]);
+        row.style.width = SizeRule::Fill(1.0);
+        let layout =
+            resolve_layout(&row, Bounds3D::new_2d(-7.7, -4.2, 7.7, 4.2), &Labels, &[]).unwrap();
+        let height = layout.boxes[&LayoutId(5)].bounds.height();
+        assert!(
+            (height - (0.1529 + 0.4588 + 2.0 * 0.1667)).abs() < 1e-4,
+            "{height}"
+        );
     }
 
     #[test]

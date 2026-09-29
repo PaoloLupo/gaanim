@@ -3821,10 +3821,22 @@ impl SceneModel {
                     let Some(container) = id_map.get(&root_source).copied() else {
                         continue;
                     };
+                    // A child entering now appears in its place: only the
+                    // others move, from where they were.
+                    let entering_subtree = |id: gaanim_layout::LayoutId| {
+                        let mut current = Some(id);
+                        while let Some(id) = current {
+                            if tree.source_by_id.get(&id) == entering.as_ref() {
+                                return true;
+                            }
+                            current = tree.parent_by_id.get(&id).copied();
+                        }
+                        false
+                    };
                     let before: HashMap<ObjectId, SpatialTransform> = tree
                         .source_by_id
                         .iter()
-                        .filter(|(id, _)| **id != root_id)
+                        .filter(|(id, _)| **id != root_id && !entering_subtree(**id))
                         .filter_map(|(_, source)| {
                             let actual = id_map.get(source).copied()?;
                             builder
@@ -3966,7 +3978,14 @@ impl SceneModel {
                         // its box, has shown no composition worth fading from.
                         let instant =
                             entering_ancestor || !responsive_text_widths.contains_key(source);
-                        text_crossfades.push((member, replacement.id, entry_pending, instant));
+                        let own_entry = entering.as_ref() == Some(source);
+                        text_crossfades.push((
+                            member,
+                            replacement.id,
+                            entry_pending,
+                            instant,
+                            own_entry,
+                        ));
                         materialized_by_id.insert(*layout_id, replacement.id);
                         id_map.insert(*source, replacement.id);
                         responsive_text_widths.insert(*source, width);
@@ -3984,11 +4003,12 @@ impl SceneModel {
                             .iter()
                             .filter_map(|id| materialized_by_id.get(id).copied())
                             .collect();
-                        let background = tree
+                        let background_source = tree
                             .source_by_id
                             .get(parent_id)
                             .and_then(|source| object_specs.get(source))
-                            .and_then(|spec| spec.layout_background)
+                            .and_then(|spec| spec.layout_background);
+                        let background = background_source
                             .and_then(|source| id_map.get(&source))
                             .copied();
                         if let Some(background) = background {
@@ -4046,6 +4066,31 @@ impl SceneModel {
                                 .commands
                                 .entity(state.entity)
                                 .insert(state.transform);
+                        }
+                        // The background shares the order of the box's first
+                        // content and draws just before it: under that content,
+                        // over whatever was created before the box.
+                        if let Some(background) = background {
+                            let first = children
+                                .iter()
+                                .filter(|child| **child != background)
+                                .flat_map(|child| builder.hierarchy_ids(*child))
+                                .map(|id| id.index())
+                                .min();
+                            let z_index = background_source
+                                .and_then(|source| object_specs.get(&source))
+                                .map_or(0, |spec| spec.z_index);
+                            if let (Some(first), Some(state)) =
+                                (first, builder.states.get(background))
+                            {
+                                builder.commands.entity(state.entity).insert((
+                                    gaanim_scene::LayoutBackdrop,
+                                    RenderOrder {
+                                        z_index,
+                                        creation_order: first as u64,
+                                    },
+                                ));
+                            }
                         }
                         if let Some(state) = builder.states.get_mut(parent) {
                             state.children = children;
@@ -4249,7 +4294,7 @@ impl SceneModel {
                             ]
                         })
                         .collect();
-                    for (old, new, entry_pending, instant) in text_crossfades {
+                    for (old, new, entry_pending, instant, own_entry) in text_crossfades {
                         if entry_pending {
                             // The text has not entered yet and its fade-in now
                             // targets the replacement: a crossfade here would
@@ -4267,6 +4312,17 @@ impl SceneModel {
                                 rate_func: RateFunc::Linear,
                                 delay: 0.0,
                             });
+                            // The copy exists only from now on; a text that is
+                            // itself entering gets its fade-in below.
+                            if !own_entry {
+                                animations.push(AnimationBuilder {
+                                    target: new,
+                                    anim_type: AnimationType::FadeIn,
+                                    duration: 0.0,
+                                    rate_func: RateFunc::Linear,
+                                    delay: 0.0,
+                                });
+                            }
                             continue;
                         }
                         animations.push(AnimationBuilder {

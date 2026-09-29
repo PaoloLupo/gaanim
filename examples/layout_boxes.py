@@ -22,7 +22,7 @@ tag = BoxStyle(direction="row", padding=("4px", "12px"), radius="6px", font_size
 cards = L.row(
     L.box(
         L.box("Tarjeta simple", font_size="30px", weight=700),
-        L.box("Padding, borde y radio en px.", class_="muted"),
+        L.box("Padding, borde y radio en px.", class_="muted", line_spacing=1.4),
         class_="card", width="300px",
     ),
     L.box(

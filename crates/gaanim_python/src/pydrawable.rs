@@ -529,7 +529,7 @@ impl PyCanvasAnim {
         }
         if !self.inner.property_position_is_free() {
             return Err(crate::LayoutOwnershipError::new_err(
-                "layout owns this drawable's translation; animate the LayoutItem offset instead",
+                "layout owns this drawable's translation; animate the box or detach the child first",
             ));
         }
         self.require_property_slot("shift_by")?;
@@ -592,7 +592,7 @@ impl PyCanvasAnim {
         }
         if !self.inner.property_position_is_free() {
             return Err(crate::LayoutOwnershipError::new_err(
-                "layout owns this drawable's translation; animate the LayoutItem offset instead",
+                "layout owns this drawable's translation; animate the box or detach the child first",
             ));
         }
         self.require_property_slot("shift_by_3d")?;
@@ -1880,7 +1880,7 @@ impl PyDrawable {
         }
         if self.0.layout_owner().is_some() {
             Err(crate::LayoutOwnershipError::new_err(format!(
-                "layout owns this drawable's translation; use scene.item(..., offset=...) or layout.configure_item(...). Operation: {operation}"
+                "layout owns this drawable's translation; move the box, use .item(offset=...) or box.detach(child) first. Operation: {operation}"
             )))
         } else {
             Ok(())

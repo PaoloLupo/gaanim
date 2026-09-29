@@ -57,6 +57,33 @@ Para crear una escena nueva, guarde un script en `examples/` y ejecútelo con
 `just run nombre_del_script` (sin `.py`). Durante la previsualización, guardar
 el archivo recarga la escena.
 
+### Composición sin coordenadas
+
+`scene.layout` compone la escena con cajas que funcionan como en CSS: padding,
+gap, bordes, radio, sombra, filas, columnas y grids que miden el texto y
+reparten el espacio. Los cambios de estructura se animan solos:
+
+```python
+from gaanim import BoxStyle, Scene
+
+scene = Scene(theme="paper")
+L = scene.layout
+L.classes(pill=BoxStyle(padding=("6px", "16px"), radius="full", background="#4f46e5", color="white"))
+
+card = L.box(
+    L.box("Panel semanal", font_size="44px", weight=700),
+    L.row(L.box("Visitas", class_="pill"), L.box("Ventas", class_="pill"), gap="10px"),
+    padding="28px", gap="16px", radius="24px", background="white", shadow=True,
+)
+scene.play([card.animate.fade_in().duration(0.5)])
+card[1].add(L.box("Nuevo", class_="pill", background="#16a34a"), duration=0.6)
+scene.render()
+```
+
+La [guía de Layout](https://paololupo.github.io/gaanim/guias/layout/) cubre
+grids, estilos, zonas y componentes; `examples/ui_*.py` construye un panel de
+métricas, una app de chat y un rótulo de vídeo.
+
 ## Plataformas y artefactos
 
 | Plataforma | CI | Artefacto instalable | Estado declarado |
@@ -109,12 +136,11 @@ Las presentaciones usan el mismo concepto de segmento que los videos. Los
 límites son continuos y solo `stop()` solicita input durante la reproducción:
 
 ```python
-from gaanim import Anchor, Scene
+from gaanim import Scene, title_slide
 
 scene = Scene()
-intro = scene.segment("Introducción", notes="Presenta el objetivo", layout="cover")
-intro.region("title").place(scene.text("Una idea clara", role="title"), Anchor.CENTER)
-scene.play([scene.text("Resultado").animate.write().duration(0.5)])
+intro = scene.segment("Introducción", notes="Presenta el objetivo", template=title_slide)
+intro.bind(title=scene.text("Una idea clara", role="title"))
 scene.stop("resultado")
 ```
 

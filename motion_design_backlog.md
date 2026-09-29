@@ -1633,7 +1633,7 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
 | Puppet pins / deformación ARAP | El coste es alto frente a la ruta glTF con skins, que ya existe. |
 | Pixel sorting | Es de nicho y costoso en GPU (ordenamiento por pasadas). Puede ser un preset de FX-03 más adelante. |
 | Editor visual de curvas y keyframes (Theatre.js) | Es valioso, pero depende de identidades estables e invalidación incremental (hot reload P2). Los marcadores sidecar de AU-01 son el primer paso. |
-| Layout FLIP genérico | Gaanim ya anima reflows de layout (`examples/layout_reflow_demo.py`). TS-03 cubre el caso entre estados. |
+| Layout FLIP genérico | Gaanim ya anima reflows de layout (`examples/layout_reflow.py`, con `add`/`remove`/`set(duration=...)`). TS-03 cubre el caso entre estados. |
 
 ## Fuentes consultadas
 

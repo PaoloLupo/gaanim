@@ -25,7 +25,7 @@ conservan en inglés porque forman parte de la API ejecutable.
   card("drawable/", "Núcleo", "Drawable", [El handle de todos los objetos: estilo, posición, efectos, anclajes y relaciones reactivas.])
   card("geometria/", "scene.geometry", "Geometría", [Primitivas, líneas, flechas, trayectorias, booleanas, geometría reactiva y 3D.])
   card("text/", "scene.text", "Texto", [Prosa, ecuaciones, partes semánticas, estilo, flujo, selecciones y documentos Typst.])
-  card("layout/", "scene.layout", "Layout", [Filas, columnas, grids, capas, reglas por hijo, reflow y restricciones.])
+  card("layout/", "scene.layout", "Layout", [Cajas como en CSS: filas, columnas, grids, capas, estilos, zonas y estructura animada.])
   card("visualization/", "scene.viz", "Visualización", [Espacios de coordenadas, cálculo, datos, valores reactivos, gráficos y campos vectoriales.])
   card("matrices/", "scene.viz", "Matrices", [Matrices seleccionables y mutables, morph entre estados y álgebra.])
   card("medios/", "scene.media", "Medios", [Imágenes, SVG, video y Lottie.])

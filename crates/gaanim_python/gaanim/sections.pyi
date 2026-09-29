@@ -2,7 +2,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal, TypeAlias
 from .gaanim_core import (
-    Anim, BackgroundLike, Composition, Drawable, Easing, Layout, Paint, Scene, Segment,
+    Anim, BackgroundLike, Composition, Box, Drawable, Easing, Paint, Scene, Segment,
     TextStyle, Transition,
 )
 
@@ -18,7 +18,7 @@ class SectionStep:
     build: Callable[[Scene], None]
     transition: Transition | None = None
     notes: str | None = None
-    template: Callable[..., Layout] | None = None
+    template: Callable[..., Box] | None = None
     background: BackgroundLike | None = None
 
 @dataclass(frozen=True)

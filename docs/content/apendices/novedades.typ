@@ -11,6 +11,56 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= Próxima versión
+
+Un layout nuevo, construido sobre Taffy (el motor de flexbox y grid de CSS
+que usan otros proyectos de Rust): cajas con padding, gap, bordes, radio,
+sombra y recorte, estilos reutilizables, zonas y estructura animada. Lee la
+guía de #link("/guias/layout/")[Layout]. Es un cambio incompatible: las
+escenas que usan `scene.layout.item`, `scene.layout.card` o
+`scene.layout.template` tienen que actualizarse.
+
+== Al actualizar
+
+- `scene.layout.item(objeto, grow=1)` pasa a ser `objeto.item(grow=1)`, que
+  devuelve el propio objeto.
+- `scene.layout.card([...], background=..., padding=...)` pasa a ser
+  `scene.layout.box(..., background=..., padding=...)`. Los _ports_ de las
+  tarjetas desaparecen: une conectores a los objetos.
+- `row`, `column`, `grid` y `stack` reciben los hijos como argumentos
+  (`row(a, b, c)`); una lista sigue funcionando porque se aplana. Una cadena
+  se convierte en texto.
+- `Layout` se llama `Box`; `configure(...)` es `set(...)` y
+  `configure_item(...)` es `hijo.item(...)`. `add`, `remove` y `replace`
+  aceptan `duration=` para animar el cambio.
+- `layout_template` y `scene.layout.template` se sustituyen por
+  `@component`: llama a la función directamente, `mi_plantilla(scene, ...)`.
+- El texto dentro de una caja se mide por su caja de línea (ascendentes y
+  descendentes de la fuente), así que textos del mismo estilo comparten
+  altura y línea base. Las fórmulas `$…$` conservan su caja de tinta. Un
+  texto puede desplazarse unos píxeles respecto a la versión anterior.
+
+== Cambios
+
+- Unidades de diseño: `"24px"` son píxeles de un fotograma de 1080 de alto
+  (`Scene(design_resolution=...)`), `"50%"` del padre, `"1fr"` en grids y
+  tokens del tema como `"space_md"`.
+- Propiedades de caja al estilo CSS: `padding`, `gap`, `margin` (con
+  `"auto"`), `justify`, `align`, `align_self`, `grow`, `shrink`, `basis`,
+  `wrap`, `border`, `radius="full"`, `shadow`, `clip` y tipografía heredada
+  (`font_size`, `color`, `weight`…).
+- `BoxStyle` y `scene.layout.classes(...)` para estilos reutilizables con
+  `style=` y `class_=`.
+- `Box.set(..., duration=...)` y `hijo.item(..., duration=...)` animan
+  cualquier cambio de propiedades; `advance=False` encadena cambios en
+  paralelo.
+- Zonas: `Zones.rows`, `Zones.columns` y `Zones.grid` dividen el área segura,
+  una zona o un objeto en regiones con nombre; `objeto.place(zona, ...)` y
+  `objeto.animate.place(...)` colocan objetos que siguen siendo libres.
+- Ejemplos nuevos: `layout_boxes`, `layout_flex`, `layout_grid`,
+  `layout_reflow`, `layout_zones`, `ui_dashboard`, `ui_mobile_app` y
+  `ui_lower_third`.
+
 = 0.7.0
 
 Publicada el 29 de septiembre de 2026. Gaanim pasa a ser un solo ejecutable,

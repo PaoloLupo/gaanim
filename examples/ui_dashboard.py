@@ -52,9 +52,10 @@ kpis = L.row(
     kpi(scene, label="Devoluciones", value="2.1%", delta="-0.3%", up=False),
     gap="16px", width="fill",
 )
-heights = [60, 92, 74, 120, 104, 150, 132]
-bars = L.row(*[L.box(width="fill", height=f"{h}px", radius="6px", background="#a5b4fc")
-               for h in heights], gap="10px", align="end", height="160px", width="fill")
+# Bar heights are percentages of the plot area, which takes the panel's free height.
+heights = [40, 61, 49, 80, 69, 100, 88]
+bars = L.row(*[L.box(width="fill", height=f"{h}%", radius="6px", background="#a5b4fc")
+               for h in heights], gap="10px", align="end", width="fill", grow=1)
 days = L.row(*[L.box(d, class_="caption", width="fill", align="center") for d in "LMMJVSD"],
              gap="10px", width="fill")
 chart = L.box(L.box("Ventas por día", font_size="20px", weight=700), bars, days,

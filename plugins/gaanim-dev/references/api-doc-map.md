@@ -16,7 +16,7 @@ has the correct user-facing concept, then include it from
 | `scene.slides`: editorial components and presentation branding | `docs/content/referencia/diapositivas.typ` |
 | `scene.mechanics`: dimensions, springs, forces, supports, gears | `docs/content/referencia/mecanica.typ` |
 | `Anim`, transitions, updaters, easing, writing | `docs/content/referencia/animations.typ` |
-| `scene.layout`: rows, columns, grids, stacks, items, reflow, constraints, templates | `docs/content/referencia/layout.typ` |
+| `scene.layout`: boxes (box, row, column, grid, stack), BoxStyle and classes, `Drawable.item`, animated structure, zones and `place`, components, constraints | `docs/content/referencia/layout.typ` |
 | `Color`, `ColorMap`, brushes, backgrounds, post-processing, themes | `docs/content/referencia/themes.typ` |
 | `AssetManager`, preloading, SVG/Lottie import behavior | `docs/content/referencia/assets.typ` |
 | `scene.media.audio`, voiceover and narration | `docs/content/referencia/audio.typ` |

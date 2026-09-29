@@ -318,6 +318,8 @@ pub struct ExtractedElement {
     /// A [`gaanim_animation::StrokeTip`], which shares its path's order and
     /// draws above it.
     tip: bool,
+    /// A box background: drawn before the content it shares an order with.
+    backdrop: bool,
 }
 
 /// A camera view screen: its view and the stroke drawn above it.
@@ -379,6 +381,7 @@ impl ExtractedElement {
                     .creation_order
                     .cmp(&b.render_order.creation_order),
             )
+            .then(b.backdrop.cmp(&a.backdrop))
             .then(b.echo_rank.cmp(&a.echo_rank))
             .then(b.tip.cmp(&a.tip))
     }
@@ -407,6 +410,7 @@ impl ExtractedElement {
             screen: self.screen.clone(),
             echo_rank: self.echo_rank,
             tip: self.tip,
+            backdrop: self.backdrop,
         }
     }
 }
@@ -2217,6 +2221,7 @@ fn extract_world(
                 .get::<gaanim_animation::EchoGhost>(entity)
                 .map_or(0, |echo| echo.rank),
             tip: world.get::<gaanim_animation::StrokeTip>(entity).is_some(),
+            backdrop: world.get::<gaanim_scene::LayoutBackdrop>(entity).is_some(),
         });
         if exempt && let (Some(pins), Some(element)) = (pins.as_deref_mut(), extracted.last()) {
             pins.elements.push(element.clone());
@@ -2481,6 +2486,7 @@ fn three_d_elements<'a>(
             screen: None,
             echo_rank: 0,
             tip: false,
+            backdrop: false,
         });
     }
 }
@@ -2793,6 +2799,7 @@ pub fn compose_captured(
                 echo_rank: element.echo_rank,
                 // Captured frames keep their recorded order.
                 tip: false,
+                backdrop: false,
             }
         })
         .collect();
@@ -2938,10 +2945,11 @@ pub fn gaanim_render_system(
     transition_frame: Option<Res<gaanim_scene::SceneTransitionFrame>>,
     child_query: Query<&ChildOf>,
     order_query: Query<&RenderOrder>,
-    (blend_query, echo_query, tip_query, three_d_query, lighting): (
+    (blend_query, echo_query, tip_query, backdrop_query, three_d_query, lighting): (
         Query<&ElementBlend>,
         Query<&gaanim_animation::EchoGhost>,
         TipQuery,
+        Query<(), With<gaanim_scene::LayoutBackdrop>>,
         ThreeDQuery,
         Option<Res<gaanim_scene::Lighting3D>>,
     ),
@@ -3321,6 +3329,7 @@ pub fn gaanim_render_system(
             }),
             echo_rank: echo_query.get(entity).map_or(0, |echo| echo.rank),
             tip: tip_query.contains(entity),
+            backdrop: backdrop_query.contains(entity),
         });
     }
     if let Some(camera) = gaanim_camera.as_deref() {
@@ -4377,6 +4386,7 @@ mod tests {
             screen: None,
             echo_rank: 0,
             tip: false,
+            backdrop: false,
         };
         let run = [
             element(kurbo::Rect::new(-6.0, 1.0, -3.0, 1.2)),
@@ -4411,6 +4421,7 @@ mod tests {
             screen: None,
             echo_rank: 0,
             tip: false,
+            backdrop: false,
         };
         let elements = vec![element(0.5), element(0.5), element(0.5), element(0.75)];
 
@@ -4441,6 +4452,7 @@ mod tests {
             screen: None,
             echo_rank: 0,
             tip: false,
+            backdrop: false,
         };
         let circle = kurbo::Circle::new((0.0, 0.0), 1.0);
         let red = peniko::Color::from_rgba8(200, 0, 0, 255);
@@ -4500,6 +4512,7 @@ mod tests {
             screen: None,
             echo_rank: 0,
             tip: false,
+            backdrop: false,
         };
         let multiply = Some(peniko::BlendMode::from(peniko::Mix::Multiply));
         let elements = vec![element(None), element(multiply), element(None)];
@@ -4537,6 +4550,7 @@ mod tests {
             screen: None,
             echo_rank: 0,
             tip: false,
+            backdrop: false,
         };
         let elements = vec![
             element(Some(mask(1, false))),

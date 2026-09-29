@@ -41,7 +41,7 @@ class MatrixSelection(Sequence[Drawable]):
     def offset(self, dx: float, dy: float) -> MatrixSelection: ...
 
 class Matrix(Drawable):
-    """Selectable Drawable-compatible facade backed by persistent Layout v2.
+    """Selectable Drawable-compatible facade backed by a grid box.
 
     Transform, placement, styling, and animation methods are delegated to the
     root layout; inherited ``Drawable`` methods therefore preserve ``Matrix``

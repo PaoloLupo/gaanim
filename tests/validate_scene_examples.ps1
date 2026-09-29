@@ -19,7 +19,6 @@ $examples = @(
     "03_anchors.py",
     "advanced_animations_demo.py",
     "group_demo.py",
-    "layout_verification.py",
     "math_animation.py",
     "number_plane_tangent.py",
     "reactive_features_demo.py",

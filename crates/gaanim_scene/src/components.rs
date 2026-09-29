@@ -304,6 +304,12 @@ pub struct TextSpan {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Billboard;
 
+/// Box background marker: drawn before the box content it shares a render
+/// order with, so it stays beneath that content but above earlier siblings.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct LayoutBackdrop;
+
 /// HUD overlay marker: entity is rendered in screen-space overlay layer.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

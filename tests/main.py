@@ -293,13 +293,13 @@ def make_panel(title_text, lines, accent):
         justify="center",
     )
     panel = scene.layout.stack(
-        [scene.layout.item(background, fit="stretch"), content],
+        [background.item(fit="stretch"), content],
         width=520,
         height=475,
         align="stretch",
     )
     return scene.layout.stack(
-        [scene.layout.item(panel, absolute=True, offset=(625, -35))],
+        [panel.item(absolute=True, offset=(625, -35))],
         within="safe",
         width="fill",
         height="fill",
@@ -324,7 +324,7 @@ header = scene.layout.column(
     justify="center",
 )
 header_layer = scene.layout.stack(
-    [scene.layout.item(header, absolute=True, offset=(0, 420))],
+    [header.item(absolute=True, offset=(0, 420))],
     within="safe",
     width="fill",
     height="fill",
@@ -466,13 +466,13 @@ comparison_content = scene.layout.column(
     justify="center",
 )
 comparison_panel = scene.layout.stack(
-    [scene.layout.item(comparison_background, fit="stretch"), comparison_content],
+    [comparison_background.item(fit="stretch"), comparison_content],
     width=520,
     height=420,
     align="stretch",
 )
 comparison_panel_layer = scene.layout.stack(
-    [scene.layout.item(comparison_panel, absolute=True, offset=(625.0, -20.0))],
+    [comparison_panel.item(absolute=True, offset=(625.0, -20.0))],
     within="safe",
     width="fill",
     height="fill",
@@ -593,7 +593,7 @@ closing = scene.layout.column(
     justify="center",
 )
 closing_layer = scene.layout.stack(
-    [scene.layout.item(closing, absolute=True, offset=(0, 35))],
+    [closing.item(absolute=True, offset=(0, 35))],
     within="safe",
     width="fill",
     height="fill",

@@ -11213,14 +11213,12 @@ mod tests {
     }
 
     #[test]
-    fn layout_ownership_rejects_positioning_but_allows_visual_transforms() {
+    fn layout_ownership_adopts_positioned_and_transformed_drawables() {
         let mut canvas = SceneModel::new(320, 180);
         let owner = canvas.group(&[]);
+        // A drawable placed before joining a box is simply placed by it.
         let positioned = canvas.circle(10.0).move_to(12.0, 0.0);
-        assert_eq!(
-            positioned.claim_layout(&owner),
-            Err(crate::canvas::LayoutOwnershipError::PositionalOperation)
-        );
+        assert!(positioned.claim_layout(&owner).is_ok());
 
         let animated = canvas.circle(10.0);
         let _description = animated.animate().shift_by(8.0, 0.0);

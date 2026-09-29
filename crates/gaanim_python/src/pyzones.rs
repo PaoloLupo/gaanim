@@ -621,16 +621,31 @@ impl Placement {
         target: Bounds3D,
     ) -> PyResult<gaanim_api::canvas::Anim> {
         let region = self.region(target);
-        let mut anim = anim;
-        if self.fit != FitMode::None {
-            let bounds = anim
-                .target_bounds()
-                .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
-            let scale = self.scale(DVec2::new(bounds.width(), bounds.height()), region);
-            anim = anim.scale_by(scale.x.min(scale.y));
-        }
         let point = self.point(target);
-        Ok(anim.move_to_anchor(point.x, point.y, self.anchor))
+        if self.fit == FitMode::None {
+            return Ok(anim.move_to_anchor(point.x, point.y, self.anchor));
+        }
+        let bounds = anim
+            .target_bounds()
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        let factor = {
+            let scale = self.scale(DVec2::new(bounds.width(), bounds.height()), region);
+            scale.x.min(scale.y)
+        };
+        // The anchor is found on the box the object will have once scaled:
+        // aim its center there, since the move starts from the unscaled box.
+        let (half_width, half_height) = (
+            bounds.width() * factor * 0.5,
+            bounds.height() * factor * 0.5,
+        );
+        let center = point
+            - anchor_point(
+                Bounds3D::new_2d(-half_width, -half_height, half_width, half_height),
+                self.anchor,
+            );
+        Ok(anim
+            .scale_by(factor)
+            .move_to_anchor(center.x, center.y, gaanim_layout::Anchor::Center))
     }
 }
 

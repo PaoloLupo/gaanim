@@ -1354,14 +1354,12 @@ impl PyBox {
             .min()
             .unwrap_or(0)
             .min(0);
-        let own = match background {
-            Some(background) => {
-                background.z_index(floor - 1);
-                floor - 1
-            }
-            None => floor,
-        };
-        inner.lock().expect("layout poisoned").floor_z = own;
+        // The background takes its content's lowest layer; the renderer draws
+        // it just before that content (see `LayoutBackdrop`).
+        if let Some(background) = background {
+            background.z_index(floor);
+        }
+        inner.lock().expect("layout poisoned").floor_z = floor;
         for parent in parents.into_iter().filter_map(|parent| parent.upgrade()) {
             Self::restack(&parent);
         }

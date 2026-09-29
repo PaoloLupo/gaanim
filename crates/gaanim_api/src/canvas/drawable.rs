@@ -74,7 +74,7 @@ pub enum LayoutOwnershipError {
     #[error("drawable already belongs to layout {owner:?}")]
     AlreadyManaged { owner: ObjectId },
     #[error(
-        "layout owns this drawable's position; remove at/shift/next_to/align_to/to_edge/to_corner and use LayoutItem offset or absolute placement"
+        "layout owns this drawable's position; remove at/shift/next_to/align_to/to_edge/to_corner and use .item(offset=...) or absolute placement"
     )]
     PositionalOperation,
 }
@@ -844,7 +844,7 @@ impl DrawableHandle {
             );
             assert!(
                 !(positional && spec.layout_owner.is_some()),
-                "layout owns this drawable's position; use LayoutItem offset or absolute placement"
+                "layout owns this drawable's position; use .item(offset=...) or absolute placement"
             );
             spec.layout_ops.push(op);
         });
@@ -1722,7 +1722,7 @@ impl DrawableHandle {
             let mut spec = self.spec.lock().expect("object spec poisoned");
             assert!(
                 spec.layout_owner.is_none(),
-                "layout owns this drawable's position; use LayoutItem offset or configure_item"
+                "a box owns this drawable's position; use .item(offset=...) or detach it"
             );
             spec.manual_position_animation = true;
         }

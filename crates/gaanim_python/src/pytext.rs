@@ -879,7 +879,7 @@ impl PyText {
     fn require_free_position(&self, operation: &str) -> PyResult<()> {
         if self.handle.layout_owner().is_some() {
             Err(crate::LayoutOwnershipError::new_err(format!(
-                "layout owns this Text's translation; use scene.item(..., offset=...) or layout.configure_item(...). Operation: {operation}"
+                "layout owns this Text's translation; move the box, use .item(offset=...) or box.detach(child) first. Operation: {operation}"
             )))
         } else {
             Ok(())
