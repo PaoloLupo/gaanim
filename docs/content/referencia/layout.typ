@@ -361,6 +361,29 @@ scene.render()
 ]
 
 #api-entry(
+  name: "Box.reveal",
+  kind: "method",
+  signature: "reveal(*, each=0.06, duration=0.4, direction=None, distance=0.3, rules=\"grow\", rules_from=None) -> Composition",
+  params: (
+    (name: "each", type: "float", default: "0.06", desc: [Segundos entre el inicio de una pieza y el de la siguiente.]),
+    (name: "duration", type: "float", default: "0.4", desc: [Duración de cada pieza; debe ser positiva.]),
+    (name: "direction, distance", type: "Direction | None, float", default: "Direction.UP, 0.3", desc: [De dónde entran los textos y desde qué distancia, en unidades de escena.]),
+    (name: "rules, rules_from", type: "\"grow\" | \"fade\", Direction | None", default: "\"grow\", Direction.LEFT", desc: [Cómo entran las cajas sin hijos que dibujan algo (filetes, barras): crecen desde `rules_from` o aparecen con un fundido.]),
+  ),
+  returns: (type: "Composition", desc: [Un `stagger` sobre las piezas.]),
+  desc: [Es la política que casi toda diapositiva pide: los fondos y demás objetos aparecen con un fundido, los textos entran deslizándose y los filetes crecen. Una caja sin hijos que no dibuja nada no se anima. Para elegir la animación de cada pieza usa `Box.cascade` o `Box.stagger`. Un `rules` desconocido, una `duration` no positiva o una caja sin nada que mostrar lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9), theme="paper")
+>>>L = scene.layout
+>>>card = L.column(L.box("Título", role="title"), L.box(height="4px", width="fill", background="#4f46e5"), L.box("Un texto que entra deslizándose"), background="#f8fafc", padding="24px", gap="14px")
+scene.play(card.reveal())
+scene.render()
+```
+]
+
+#api-entry(
   name: "Box.cascade",
   kind: "method",
   desc: [Elige las piezas de `walk(boxes=boxes)` y devuelve un `BoxCascade`. Cada animación de `.animate` (`fade_in`, `grow_from_center`, `shift_by`…) se puede llamar sobre él con sus mismos argumentos y devuelve un `stagger` sobre todas las piezas. El resto de argumentos son los de `stagger`. Lanza `ValueError` si la caja no tiene piezas y `AttributeError` si una pieza no tiene esa animación; para saltarte piezas usa `Box.stagger`.],
