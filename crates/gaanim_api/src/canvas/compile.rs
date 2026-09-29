@@ -4112,7 +4112,11 @@ impl SceneModel {
                         });
                     }
                     if !animations.is_empty() {
+                        // The scene advances its own cursor (or not, with
+                        // `advance=False`): the transition only starts here.
+                        let start = builder.current_time;
                         builder.play_parallel(animations);
+                        builder.current_time = start;
                     }
                 }
                 Op::LayoutConstraints {
@@ -4261,7 +4265,9 @@ impl SceneModel {
                             delay: 0.0,
                         });
                     }
+                    let start = builder.current_time;
                     builder.play_parallel(animations);
+                    builder.current_time = start;
                 }
                 Op::Wait(d) => builder.wait(*d),
                 Op::CameraPosition { to, duration, .. } => {

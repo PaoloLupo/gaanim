@@ -176,8 +176,6 @@ pub struct LayoutStyle {
     pub min_height: Option<f64>,
     pub max_height: Option<f64>,
     pub padding: Insets,
-    /// Space around the box inside its parent; may be negative.
-    pub margin: Insets,
     pub gap: DVec2,
     pub align: Align,
     pub justify: Justify,
@@ -194,7 +192,6 @@ impl Default for LayoutStyle {
             min_height: None,
             max_height: None,
             padding: Insets::default(),
-            margin: Insets::default(),
             gap: DVec2::ZERO,
             align: Align::Start,
             justify: Justify::Start,
@@ -215,7 +212,6 @@ impl LayoutStyle {
             min_height: finite(self.min_height),
             max_height: finite(self.max_height),
             padding: self.padding.sanitized(),
-            margin: self.margin,
             gap: self.gap.max(DVec2::ZERO),
             align: self.align,
             justify: self.justify,
@@ -234,6 +230,8 @@ pub struct LayoutItemStyle {
     /// Main-axis size before growing or shrinking; `None` uses the content
     /// (or zero for a growing item).
     pub basis: Option<f64>,
+    /// Space around the child inside its parent; may be negative.
+    pub margin: Insets,
     pub align: Option<Align>,
     pub row: Option<usize>,
     pub column: Option<usize>,
@@ -251,6 +249,7 @@ impl Default for LayoutItemStyle {
             grow: 0.0,
             shrink: 1.0,
             basis: None,
+            margin: Insets::default(),
             align: None,
             row: None,
             column: None,
@@ -758,7 +757,7 @@ fn build_node(
         },
         aspect_ratio: style.aspect_ratio.map(|ratio| ratio as f32),
         padding: insets(style.padding),
-        margin: margins(style.margin),
+        margin: margins(item.map_or_else(Insets::default, |item| item.margin)),
         gap: taffy::Size {
             width: length(style.gap.x),
             height: length(style.gap.y),

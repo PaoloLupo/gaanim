@@ -2050,6 +2050,9 @@ pub struct SceneModel {
     /// Direct code-family override applied after the active theme.
     pub(crate) code_font_family_override: Option<String>,
     pub margin: Margin,
+    /// Frame height in design pixels: layout lengths written as `"16px"`
+    /// convert with it, so measurements copied from a 1080p design match.
+    pub design_resolution: f64,
     pub asset_root: Option<PathBuf>,
     /// Audio sources synchronized in preview and mixed by FFmpeg during export.
     pub audio_tracks: Vec<AudioTrack>,
@@ -2100,6 +2103,7 @@ impl SceneModel {
             math_font_family_override: None,
             code_font_family_override: None,
             margin: Margin::default(),
+            design_resolution: 1080.0,
             asset_root: None,
             audio_tracks: Vec::new(),
             tempo: None,
@@ -2667,6 +2671,16 @@ impl SceneModel {
     /// files changed on disk. SVG documents are resolved anew for every drawable.
     pub fn reload_assets(&mut self) {
         clear_asset_caches();
+    }
+
+    /// Identity of this scene, shared by its drawables' `scene_key`.
+    pub fn scene_key(&self) -> usize {
+        Arc::as_ptr(&self.state).cast::<()>() as usize
+    }
+
+    /// Scene units per design pixel.
+    pub fn pixel_unit(&self) -> f64 {
+        self.frame.bounds().height() / self.design_resolution.max(1.0)
     }
 
     pub fn safe_frame(&self) -> gaanim_math::Bounds3D {

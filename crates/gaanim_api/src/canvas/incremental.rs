@@ -63,6 +63,8 @@ impl SceneModel {
             math_font_family_override,
             code_font_family_override,
             margin,
+            // Read only while authoring, to convert `px` lengths.
+            design_resolution: _,
             asset_root,
             audio_tracks,
             tempo,

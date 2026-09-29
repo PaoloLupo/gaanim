@@ -461,6 +461,12 @@ impl DrawableHandle {
         Arc::ptr_eq(&self.state, &other.state)
     }
 
+    /// Identity of the scene this drawable belongs to, equal to
+    /// [`SceneModel::scene_key`](super::SceneModel::scene_key) of its scene.
+    pub fn scene_key(&self) -> usize {
+        Arc::as_ptr(&self.state).cast::<()>() as usize
+    }
+
     /// Live derived geometry is defined in source world-space and therefore
     /// intentionally has no independent layout/transform ownership.
     pub fn is_live_derived_geometry(&self) -> bool {
@@ -504,24 +510,9 @@ impl DrawableHandle {
         if self.is_live_derived_geometry() {
             return Err(LayoutOwnershipError::PositionalOperation);
         }
+        // A drawable placed or moved before joining a box is simply placed by
+        // the box from then on.
         let mut spec = self.spec.lock().expect("object spec poisoned");
-        if spec.manual_position_animation
-            || spec.layout_ops.iter().any(|op| {
-                matches!(
-                    op,
-                    LayoutOp::SetTranslation(_)
-                        | LayoutOp::MoveAnchorTo { .. }
-                        | LayoutOp::MoveToAnchorPoint { .. }
-                        | LayoutOp::MoveTextAnchorTo { .. }
-                        | LayoutOp::NextTo { .. }
-                        | LayoutOp::AlignTo { .. }
-                        | LayoutOp::ToEdge { .. }
-                        | LayoutOp::ToCorner { .. }
-                )
-            })
-        {
-            return Err(LayoutOwnershipError::PositionalOperation);
-        }
         if let Some(existing) = spec.layout_owner
             && existing != owner.id
         {
@@ -870,6 +861,30 @@ impl DrawableHandle {
 
     pub fn layout_owner(&self) -> Option<ObjectId> {
         self.spec.lock().expect("object spec poisoned").layout_owner
+    }
+
+    /// How this drawable sits in the box that contains it.
+    pub fn layout_item(&self) -> gaanim_layout::LayoutItemStyle {
+        self.spec
+            .lock()
+            .expect("object spec poisoned")
+            .layout_item
+            .clone()
+            .unwrap_or_default()
+    }
+
+    /// The item properties set on this drawable, if any.
+    pub fn explicit_layout_item(&self) -> Option<gaanim_layout::LayoutItemStyle> {
+        self.spec
+            .lock()
+            .expect("object spec poisoned")
+            .layout_item
+            .clone()
+    }
+
+    /// Set how this drawable sits in the box that contains it.
+    pub fn set_layout_item(&self, item: gaanim_layout::LayoutItemStyle) {
+        self.spec.lock().expect("object spec poisoned").layout_item = Some(item);
     }
 
     // -- Instant setters (return Self) --

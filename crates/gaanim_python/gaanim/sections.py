@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Literal, TypeAlias, get_args
 
 if TYPE_CHECKING:
     from .gaanim_core import (
-        Anim, BackgroundLike, Composition, Drawable, Easing, Layout, Paint, Parameter,
+        Anim, BackgroundLike, Composition, Box, Drawable, Easing, Paint, Parameter,
         Scene, Segment,
         TextStyle, Transition,
     )
@@ -27,7 +27,7 @@ class SectionStep:
     build: Callable[[Scene], None]
     transition: Transition | None = None
     notes: str | None = None
-    template: Callable[..., Layout] | None = None
+    template: Callable[..., Box] | None = None
     background: BackgroundLike | None = None
 
     def __post_init__(self) -> None:

@@ -21,14 +21,12 @@ use crate::brush::PyPaint;
 use crate::color::{PyColor, PyColorMapArg};
 use crate::py3d::{PyMaterial3D, PyPrimitive3D};
 use crate::pydrawable::{PyAnchorPoint, PyCanvasAnim, PyDrawable};
-use crate::pylayout::{
-    PyAnchor, PyConstraintSet, PyLayout, PyLayoutConstraint, PyLayoutItem, column_kind, grid_kind,
-    layout_item_from_python, layout_spec, parse_grid_tracks, row_kind, stack_kind,
-};
+use crate::pylayout::{PyAnchor, PyBox, PyConstraintSet, PyLayoutConstraint};
 use crate::pystyle::{PyAxesStyle, PyStyle};
 use crate::pytext::{PyText, PyTextFlow, PyTextSelection, PyTextStyle, build_text_spec};
 use crate::transition::PyTransitionType;
 use crate::visualization::{PyParameter, PyVariable, extract_scalar_source};
+use gaanim_layout::{Align, LayoutNodeKind};
 
 pub(crate) fn image_quality(value: &str) -> PyResult<gaanim_core::peniko::ImageQuality> {
     match value {
@@ -515,18 +513,6 @@ fn drawable_args(
         drawables.push(drawable.0.clone());
     }
     Ok(drawables)
-}
-
-fn layout_members(children: &Bound<'_, PyAny>) -> PyResult<Vec<crate::pylayout::LayoutMember>> {
-    let children = children.cast::<PySequence>().map_err(|_| {
-        pyo3::exceptions::PyTypeError::new_err(
-            "children must be a sequence of Drawable, Layout, or LayoutItem values",
-        )
-    })?;
-    children
-        .try_iter()?
-        .map(|child| PyLayout::member_from_python(&child?))
-        .collect()
 }
 
 fn parse_curve_elements(commands: &Bound<'_, PyAny>) -> PyResult<Vec<CurveElement>> {
@@ -2492,13 +2478,13 @@ pub struct PySegment {
 
 #[pymethods]
 impl PySegment {
-    /// Bind template slots and return the segment's root Layout.
+    /// Bind template slots and return the segment's root box.
     #[pyo3(signature = (**slots))]
     fn bind<'py>(
         &self,
         py: Python<'py>,
         slots: Option<&Bound<'py, PyDict>>,
-    ) -> PyResult<Py<PyLayout>> {
+    ) -> PyResult<Py<PyBox>> {
         crate::custom::ensure_authoring_allowed()?;
         let template = self.template.as_ref().ok_or_else(|| {
             pyo3::exceptions::PyValueError::new_err(
@@ -2506,12 +2492,12 @@ impl PySegment {
             )
         })?;
         let result = template.bind(py).call((self.scene.bind(py),), slots)?;
-        if !result.is_instance_of::<PyLayout>() {
+        if !result.is_instance_of::<PyBox>() {
             return Err(pyo3::exceptions::PyTypeError::new_err(
-                "a segment template must return Layout",
+                "a segment template must return a Box",
             ));
         }
-        Ok(result.extract::<Py<PyLayout>>()?)
+        Ok(result.extract::<Py<PyBox>>()?)
     }
 }
 
@@ -2583,6 +2569,7 @@ impl PyScene {
         margin=None,
         theme=Some(PyThemeInput::Default),
         post=None,
+        design_resolution=1080.0,
     ))]
     fn new(
         frame: (f64, f64),
@@ -2590,8 +2577,14 @@ impl PyScene {
         margin: Option<f64>,
         theme: Option<PyThemeInput>,
         post: Option<&Bound<'_, PyAny>>,
+        design_resolution: f64,
     ) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
+        if !design_resolution.is_finite() || design_resolution <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "design_resolution must be a positive number of pixels",
+            ));
+        }
         let frame = gaanim_api::canvas::SceneFrame::new(frame.0, frame.1)
             .validate()
             .map_err(pyo3::exceptions::PyValueError::new_err)?;
@@ -2605,7 +2598,9 @@ impl PyScene {
         if let Some(margin) = margin {
             canvas.margin = gaanim_api::canvas::Margin::all(margin);
         }
+        canvas.design_resolution = design_resolution;
         let inner = canvas.into_shared();
+        crate::pylayout::register_scene(&inner);
         let passes = crate::brush::post_process_passes(post, &inner)?;
         inner
             .lock()
@@ -2756,252 +2751,126 @@ impl PySlideKit {
     }
 }
 
-#[pymethods]
 impl PyLayoutBuilder {
-    /// A persistent layout with a separately styled background and named ports.
-    #[pyo3(signature = (children, *, direction="column", gap=0.24, padding=None, width=None, height=None, align="center", justify="start", background=None, border=None, border_width=0.025, radius=0.08, ports=None))]
-    #[allow(clippy::too_many_arguments)]
-    fn card<'py>(
+    fn build<'py>(
         &self,
         py: Python<'py>,
-        children: &Bound<'py, PyAny>,
-        direction: &str,
-        gap: f64,
-        padding: Option<&Bound<'py, PyAny>>,
-        width: Option<&Bound<'py, PyAny>>,
-        height: Option<&Bound<'py, PyAny>>,
-        align: &str,
-        justify: &str,
-        background: Option<PyPaint>,
-        border: Option<PyPaint>,
-        border_width: f64,
-        radius: f64,
-        ports: Option<&Bound<'py, PyDict>>,
-    ) -> PyResult<Py<PyLayout>> {
+        kind: LayoutNodeKind,
+        align: Align,
+        children: &Bound<'py, PyTuple>,
+        style: Option<&Bound<'py, PyAny>>,
+        props: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Py<PyBox>> {
         crate::custom::ensure_authoring_allowed()?;
-        let kind = match direction {
-            "column" => column_kind(false),
-            "row" => row_kind(false),
-            "stack" => stack_kind(),
-            _ => {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "card direction must be column, row or stack",
-                ));
-            }
-        };
-        if !radius.is_finite() || radius < 0.0 || !border_width.is_finite() || border_width < 0.0 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "card radius and border_width must be finite and nonnegative",
-            ));
-        }
-        let mut parsed_ports = Vec::new();
-        if let Some(ports) = ports {
-            for (name, value) in ports.iter() {
-                let name = name.extract::<String>()?;
-                let (anchor, offset) = if let Ok(anchor) = value.extract::<PyAnchor>() {
-                    (anchor, (0.0, 0.0))
-                } else {
-                    value.extract::<(PyAnchor, (f64, f64))>()?
-                };
-                if name.trim().is_empty() || !offset.0.is_finite() || !offset.1.is_finite() {
-                    return Err(pyo3::exceptions::PyValueError::new_err(
-                        "port name must be nonempty and its offset finite",
-                    ));
-                }
-                parsed_ports.push((
-                    name,
-                    anchor.0,
-                    gaanim_core::glam::DVec3::new(offset.0, offset.1, 0.0),
-                ));
-            }
-        }
-        Py::new(
+        PyBox::create(
             py,
-            PyLayout::initializer_decorated(
-                self.inner.clone(),
-                layout_spec(kind, gap, padding, width, height, align, justify, None)?,
-                layout_members(children)?,
-                Some((
-                    background.map(|paint| paint.0),
-                    border.map(|paint| (paint.0, border_width)),
-                    radius,
-                )),
-                parsed_ports,
-            )?,
+            self.inner.clone(),
+            self.scene.clone_ref(py).into_any(),
+            kind,
+            gaanim_layout::LayoutStyle {
+                align,
+                ..gaanim_layout::LayoutStyle::default()
+            },
+            children,
+            style,
+            props,
+        )
+    }
+}
+
+#[pymethods]
+impl PyLayoutBuilder {
+    /// A box (like a CSS ``div``): its children flow in a column by default;
+    /// ``direction`` switches to ``"row"``, ``"grid"`` or ``"stack"``.
+    #[pyo3(name = "box", signature = (*children, style=None, **props))]
+    fn box_<'py>(
+        &self,
+        py: Python<'py>,
+        children: &Bound<'py, PyTuple>,
+        style: Option<&Bound<'py, PyAny>>,
+        props: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Py<PyBox>> {
+        self.build(
+            py,
+            LayoutNodeKind::Column { wrap: false },
+            Align::Start,
+            children,
+            style,
+            props,
         )
     }
 
-    /// Horizontal Layout v2 container.
-    #[pyo3(signature = (children, *, gap=0.24, padding=None, width=None, height=None, align="center", justify="start", wrap=false, within=None))]
-    #[allow(clippy::too_many_arguments)]
+    /// A box whose children flow left to right.
+    #[pyo3(signature = (*children, style=None, **props))]
     fn row<'py>(
         &self,
         py: Python<'py>,
-        children: &Bound<'py, PyAny>,
-        gap: f64,
-        padding: Option<&Bound<'py, PyAny>>,
-        width: Option<&Bound<'py, PyAny>>,
-        height: Option<&Bound<'py, PyAny>>,
-        align: &str,
-        justify: &str,
-        wrap: bool,
-        within: Option<&str>,
-    ) -> PyResult<Py<PyLayout>> {
-        crate::custom::ensure_authoring_allowed()?;
-        Py::new(
+        children: &Bound<'py, PyTuple>,
+        style: Option<&Bound<'py, PyAny>>,
+        props: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Py<PyBox>> {
+        self.build(
             py,
-            PyLayout::initializer(
-                self.inner.clone(),
-                layout_spec(
-                    row_kind(wrap),
-                    gap,
-                    padding,
-                    width,
-                    height,
-                    align,
-                    justify,
-                    within,
-                )?,
-                layout_members(children)?,
-            )?,
+            LayoutNodeKind::Row { wrap: false },
+            Align::Start,
+            children,
+            style,
+            props,
         )
     }
 
-    /// Vertical Layout v2 container.
-    #[pyo3(signature = (children, *, gap=0.24, padding=None, width=None, height=None, align="start", justify="start", wrap=false, within=None))]
-    #[allow(clippy::too_many_arguments)]
+    /// A box whose children flow top to bottom.
+    #[pyo3(signature = (*children, style=None, **props))]
     fn column<'py>(
         &self,
         py: Python<'py>,
-        children: &Bound<'py, PyAny>,
-        gap: f64,
-        padding: Option<&Bound<'py, PyAny>>,
-        width: Option<&Bound<'py, PyAny>>,
-        height: Option<&Bound<'py, PyAny>>,
-        align: &str,
-        justify: &str,
-        wrap: bool,
-        within: Option<&str>,
-    ) -> PyResult<Py<PyLayout>> {
-        crate::custom::ensure_authoring_allowed()?;
-        Py::new(
+        children: &Bound<'py, PyTuple>,
+        style: Option<&Bound<'py, PyAny>>,
+        props: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Py<PyBox>> {
+        self.build(
             py,
-            PyLayout::initializer(
-                self.inner.clone(),
-                layout_spec(
-                    column_kind(wrap),
-                    gap,
-                    padding,
-                    width,
-                    height,
-                    align,
-                    justify,
-                    within,
-                )?,
-                layout_members(children)?,
-            )?,
+            LayoutNodeKind::Column { wrap: false },
+            Align::Start,
+            children,
+            style,
+            props,
         )
     }
 
-    /// Grid Layout v2 container with fixed, auto, and fractional tracks.
-    #[pyo3(signature = (children, *, rows=None, columns=None, gap=0.0, row_gap=None, column_gap=None, padding=None, width=None, height=None, align="stretch", justify="start", auto_flow="row", within=None))]
-    #[allow(clippy::too_many_arguments)]
+    /// A box that places its children in the cells of a grid.
+    #[pyo3(signature = (*children, style=None, **props))]
     fn grid<'py>(
         &self,
         py: Python<'py>,
-        children: &Bound<'py, PyAny>,
-        rows: Option<&Bound<'py, PyAny>>,
-        columns: Option<&Bound<'py, PyAny>>,
-        gap: f64,
-        row_gap: Option<f64>,
-        column_gap: Option<f64>,
-        padding: Option<&Bound<'py, PyAny>>,
-        width: Option<&Bound<'py, PyAny>>,
-        height: Option<&Bound<'py, PyAny>>,
-        align: &str,
-        justify: &str,
-        auto_flow: &str,
-        within: Option<&str>,
-    ) -> PyResult<Py<PyLayout>> {
-        crate::custom::ensure_authoring_allowed()?;
-        let kind = grid_kind(
-            parse_grid_tracks(rows, "rows")?,
-            parse_grid_tracks(columns, "columns")?,
-            auto_flow,
-        )?;
-        let mut spec = layout_spec(kind, gap, padding, width, height, align, justify, within)?;
-        spec.style.gap =
-            gaanim_core::glam::DVec2::new(column_gap.unwrap_or(gap), row_gap.unwrap_or(gap));
-        Py::new(
-            py,
-            PyLayout::initializer(self.inner.clone(), spec, layout_members(children)?)?,
-        )
+        children: &Bound<'py, PyTuple>,
+        style: Option<&Bound<'py, PyAny>>,
+        props: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Py<PyBox>> {
+        let kind = LayoutNodeKind::Grid {
+            rows: vec![gaanim_layout::Track::Auto],
+            columns: vec![gaanim_layout::Track::Fraction(1.0)],
+            auto_flow: gaanim_layout::AutoFlow::Row,
+        };
+        self.build(py, kind, Align::Stretch, children, style, props)
     }
 
-    /// Overlay Layout v2 container.
-    #[pyo3(signature = (children, *, padding=None, width=None, height=None, align="center", within=None))]
+    /// A box that layers its children on top of one another.
+    #[pyo3(signature = (*children, style=None, **props))]
     fn stack<'py>(
         &self,
         py: Python<'py>,
-        children: &Bound<'py, PyAny>,
-        padding: Option<&Bound<'py, PyAny>>,
-        width: Option<&Bound<'py, PyAny>>,
-        height: Option<&Bound<'py, PyAny>>,
-        align: &str,
-        within: Option<&str>,
-    ) -> PyResult<Py<PyLayout>> {
-        crate::custom::ensure_authoring_allowed()?;
-        Py::new(
+        children: &Bound<'py, PyTuple>,
+        style: Option<&Bound<'py, PyAny>>,
+        props: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Py<PyBox>> {
+        self.build(
             py,
-            PyLayout::initializer(
-                self.inner.clone(),
-                layout_spec(
-                    stack_kind(),
-                    0.0,
-                    padding,
-                    width,
-                    height,
-                    align,
-                    "start",
-                    within,
-                )?,
-                layout_members(children)?,
-            )?,
-        )
-    }
-
-    /// Adds per-child sizing, grid, fit, absolute, anchor, and offset rules.
-    #[pyo3(signature = (child, *, grow=0.0, shrink=1.0, align=None, row=None, column=None, row_span=1, column_span=1, absolute=false, anchor=None, offset=(0.0, 0.0), fit="none"))]
-    #[allow(clippy::too_many_arguments)]
-    fn item(
-        &self,
-        child: &Bound<'_, PyAny>,
-        grow: f64,
-        shrink: f64,
-        align: Option<&str>,
-        row: Option<usize>,
-        column: Option<usize>,
-        row_span: usize,
-        column_span: usize,
-        absolute: bool,
-        anchor: Option<&PyAnchor>,
-        offset: (f64, f64),
-        fit: &str,
-    ) -> PyResult<PyLayoutItem> {
-        crate::custom::ensure_authoring_allowed()?;
-        layout_item_from_python(
-            child,
-            grow,
-            shrink,
-            align,
-            row,
-            column,
-            row_span,
-            column_span,
-            absolute,
-            anchor,
-            offset,
-            fit,
+            LayoutNodeKind::Stack,
+            Align::Start,
+            children,
+            style,
+            props,
         )
     }
 
@@ -3054,24 +2923,6 @@ impl PyLayoutBuilder {
                 .expect("scene canvas poisoned")
                 .check_layout()
         })
-    }
-
-    /// Instantiate a typed Python layout template with this scene.
-    #[pyo3(signature = (template, **slots))]
-    fn template<'py>(
-        &self,
-        py: Python<'py>,
-        template: &Bound<'py, PyAny>,
-        slots: Option<&Bound<'py, PyDict>>,
-    ) -> PyResult<Py<PyLayout>> {
-        crate::custom::ensure_authoring_allowed()?;
-        let result = template.call((self.scene.bind(py),), slots)?;
-        if !result.is_instance_of::<PyLayout>() {
-            return Err(pyo3::exceptions::PyTypeError::new_err(
-                "a layout template must return Layout",
-            ));
-        }
-        Ok(result.extract::<Py<PyLayout>>()?)
     }
 }
 

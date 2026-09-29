@@ -2448,9 +2448,53 @@ impl PyDrawable {
         }
         binding_result(self, PropertySources::Opacity(value))
     }
-    fn z_index(&self, z: i32) -> PyResult<Self> {
+    pub(crate) fn z_index(&self, z: i32) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         Ok(Self(self.0.clone().z_index(z)))
+    }
+
+    /// Set how this object sits in the box that holds it, like CSS on the
+    /// element: ``grow``, ``shrink``, ``basis``, ``align_self``, ``row``,
+    /// ``column``, ``row_span``, ``column_span``, ``margin``, ``fit``,
+    /// ``anchor``, ``absolute`` and ``offset``. Inside a box already, the box
+    /// reflows (over ``duration`` if given).
+    #[pyo3(signature = (*, duration=None, advance=true, **props))]
+    fn item<'py>(
+        slf: PyRef<'py, Self>,
+        py: Python<'py>,
+        duration: Option<f64>,
+        advance: bool,
+        props: Option<&Bound<'py, pyo3::types::PyDict>>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        if let Some(props) = props {
+            for key in props.keys() {
+                let key = key.extract::<String>()?;
+                if !crate::pylayout::ITEM_KEYS.contains(&key.as_str()) {
+                    return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                        "unknown item property {key:?}"
+                    )));
+                }
+            }
+        }
+        let empty = pyo3::types::PyDict::new(py);
+        let props = props.unwrap_or(&empty);
+        let handle = slf.0.clone();
+        let units = crate::pylayout::Units::of(&handle)?;
+        let mut item = handle.layout_item();
+        crate::pylayout::apply_item(&mut item, props, &units)?;
+        handle.set_layout_item(item);
+        let duration = match duration {
+            Some(value) if !value.is_finite() || value < 0.0 => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "duration must be finite and non-negative",
+                ));
+            }
+            Some(value) if value > 0.0 => Some(value),
+            _ => None,
+        };
+        crate::pylayout::reflow_owner_and_advance(&handle, duration, advance);
+        Ok(slf)
     }
     #[pyo3(signature = (x, y=None, anchor=None))]
     pub(crate) fn move_to(
@@ -2542,11 +2586,11 @@ impl PyDrawable {
         free_channel(&self.0, PropertyChannel::Translation)?;
         Ok(Self(self.0.clone().shift_by_3d(dx, dy, dz)))
     }
-    fn billboard(&self) -> PyResult<Self> {
+    pub(crate) fn billboard(&self) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         Ok(Self(self.0.clone().billboard()))
     }
-    fn hud(&self) -> PyResult<Self> {
+    pub(crate) fn hud(&self) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         Ok(Self(self.0.clone().hud()))
     }
@@ -2660,20 +2704,20 @@ impl PyDrawable {
             .map(Self)
             .map_err(|error| PyValueError::new_err(error.to_string()))
     }
-    fn with_pivot(&self, x: f64, y: f64) -> PyResult<Self> {
+    pub(crate) fn with_pivot(&self, x: f64, y: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         Ok(Self(self.0.clone().with_pivot(x, y)))
     }
-    fn with_pivot_3d(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
+    pub(crate) fn with_pivot_3d(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         Ok(Self(self.0.clone().with_pivot_3d(x, y, z)))
     }
-    fn pivot(&self, x: f64, y: f64) -> PyResult<Self> {
+    pub(crate) fn pivot(&self, x: f64, y: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         Ok(Self(self.0.clone().pivot(x, y)))
     }
     #[pyo3(signature = (reference, direction, spacing=0.24, aligned_edge=None))]
-    fn next_to(
+    pub(crate) fn next_to(
         &self,
         reference: &PyDrawable,
         direction: &PyDirection,
@@ -2693,7 +2737,7 @@ impl PyDrawable {
         )))
     }
     #[pyo3(signature = (reference, target_anchor, reference_anchor=None))]
-    fn align_to(
+    pub(crate) fn align_to(
         &self,
         reference: &PyDrawable,
         target_anchor: &PyAnchor,
@@ -2711,13 +2755,13 @@ impl PyDrawable {
         )))
     }
     #[pyo3(signature = (direction, buff=0.24))]
-    fn to_edge(&self, direction: &PyDirection, buff: f64) -> PyResult<Self> {
+    pub(crate) fn to_edge(&self, direction: &PyDirection, buff: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_free_position("to_edge")?;
         Ok(Self(self.0.clone().to_edge(direction.0, buff)))
     }
     #[pyo3(signature = (corner, buff=0.24))]
-    fn to_corner(&self, corner: &PyAnchor, buff: f64) -> PyResult<Self> {
+    pub(crate) fn to_corner(&self, corner: &PyAnchor, buff: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_free_position("to_corner")?;
         Ok(Self(self.0.clone().to_corner(corner.0, buff)))
