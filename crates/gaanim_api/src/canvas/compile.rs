@@ -2662,6 +2662,9 @@ impl SceneModel {
                         ) => *frozen = current.clone(),
                         _ => {}
                     }
+                    // Layering has no timeline cut: a z-index set after the
+                    // declaration froze still orders the drawable.
+                    authored.z_index = live.z_index;
                     let spec = theme
                         .map(|theme| theme.resolve_object(&authored))
                         .transpose()
@@ -8927,17 +8930,8 @@ impl SceneModel {
                     });
             }
         }
-        if spec.opacity != 1.0 {
-            for child in &child_spans {
-                if let Some(child_state) = builder.states.get_mut(child.id) {
-                    child_state.opacity = spec.opacity;
-                }
-                builder
-                    .commands
-                    .entity(child.entity)
-                    .insert(Opacity(spec.opacity));
-            }
-        }
+        // Opacity multiplies down the hierarchy: the spans keep their own, so
+        // animating the root's opacity alone can bring them back.
         if spec.stroke_overridden {
             for child in &child_spans {
                 let sb = if let Some((ref brush, w)) = spec.stroke {
@@ -13373,6 +13367,64 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn text_declared_transparent_fades_back_in_with_its_root_opacity() {
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        let text = canvas.text("(4.6) texto").opacity(0.0);
+        canvas.play(vec![text.animate().opacity(1.0).duration(1.0)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let root = ObjectId::from_raw(text.id.as_raw() - 1);
+        let root_entity = world
+            .query::<(Entity, &MobjectId)>()
+            .iter(&world)
+            .find(|(_, object)| object.0 == root)
+            .unwrap()
+            .0;
+        for (time, expected) in [(0.0, 0.0), (1.0, 1.0)] {
+            timeline.seek(&mut world, time);
+            assert!((opacity_of(&mut world, &text) - expected).abs() < 1e-5);
+            let spans: Vec<f32> = world
+                .query::<(&Opacity, &ChildOf)>()
+                .iter(&world)
+                .filter(|(_, parent)| parent.parent() == root_entity)
+                .map(|(opacity, _)| opacity.0)
+                .collect();
+            assert!(!spans.is_empty());
+            assert!(
+                spans.iter().all(|&opacity| opacity == 1.0),
+                "{spans:?} at {time}"
+            );
+        }
+    }
+
+    #[test]
+    fn z_index_set_after_a_reactive_binding_orders_the_drawable() {
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        let level = canvas.parameter(0.2).expect("parameter");
+        let mask = canvas.rect(2.0, 2.0).opacity(0.0);
+        let water = canvas
+            .fill_level(
+                &mask,
+                Brush::Solid(PenikoColor::WHITE),
+                0.2,
+                crate::canvas::FillLevelDirection::Up,
+                false,
+            )
+            .expect("fill level")
+            .set_fill_level(&level)
+            .expect("reactive level")
+            .z_index(4);
+        canvas.wait(0.5);
+        let (mut world, _) = compiled_world(&canvas);
+        let id = ObjectId::from_raw(water.id.as_raw() - 1);
+        let order = world
+            .query::<(&MobjectId, &RenderOrder)>()
+            .iter(&world)
+            .find(|(object, _)| object.0 == id)
+            .map(|(_, order)| order.z_index);
+        assert_eq!(order, Some(4));
     }
 
     fn opacity_of(world: &mut World, handle: &DrawableHandle) -> f32 {
