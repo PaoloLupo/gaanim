@@ -13,10 +13,10 @@ instalar una versión nueva, sigue
 
 = 0.7.2
 
-Correcciones del layout y recorrido de cajas: las cajas que entran con
-`grow_from_*` ya no se ven antes de su turno, el overlay *Layout* del editor no
-mezcla segmentos y `box.walk()` recorre el contenido de una caja. No hace falta
-cambiar tus escenas.
+Publicada el 29 de septiembre de 2026. Una caja se puede recorrer, buscar,
+animar en cascada y reordenar (`walk`, `find`, `cascade`, `stagger`, `swap`…).
+Las cajas que entran con `grow_*` ya no se ven antes de su turno y el overlay
+*Layout* del editor no mezcla segmentos. No hace falta cambiar tus escenas.
 
 == Cambios
 
@@ -26,11 +26,14 @@ cambiar tus escenas.
 - `box.stagger(make, each=…)` anima todas esas piezas de una vez como un
   `stagger`: `make` recibe cada pieza y devuelve su animación (o `None` para
   saltarla). Lee #link("/referencia/layout/")[Layout].
-- `box.find(type=…, where=…)` y `box.find_all(...)` buscan entre esas piezas.
+- `box.find(type=…, where=…, text=…)` y `box.find_all(...)` buscan entre esas
+  piezas; `text` compara con el contenido de un texto (`Text.content`).
+- `box.each(make)` aplica un ajuste inmediato a cada pieza y devuelve la caja.
 - `box.cascade(each=…).fade_in()` (o cualquier otra animación) las anima todas
   en cascada, sin escribir la lambda de `stagger`.
 - `box.move_child(hijo, a)`, `box.swap(a, b)` y `box.reverse()` reordenan los
-  hijos, y con `duration=` se deslizan a su nuevo sitio.
+  hijos, y con `duration=` se deslizan a su nuevo sitio. En un `stack` la
+  posición no cambia qué hijo queda encima: usa `z_index`.
 - `box.children`, `box[i]` y la iteración de una caja están tipados como
   `Drawable` en lugar de `Any`.
 

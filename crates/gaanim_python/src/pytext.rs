@@ -810,6 +810,11 @@ pub struct PyText {
 }
 
 impl PyText {
+    /// The visible text: markup delimiters and math dollars removed.
+    pub(crate) fn content_text(&self) -> String {
+        self.spec.rendered_text()
+    }
+
     pub(crate) fn initializer(
         handle: gaanim_api::canvas::DrawableHandle,
         spec: TextSpec,
@@ -1094,6 +1099,12 @@ bb",))?;
 
 #[pymethods]
 impl PyText {
+    /// The visible text, without markup delimiters or math dollars.
+    #[getter]
+    fn content(&self) -> String {
+        self.content_text()
+    }
+
     /// Apply a fill while preserving the specialized Text handle.
     fn fill(slf: PyRef<'_, Self>, paint: PyPaint) -> PyResult<PyRef<'_, Self>> {
         crate::custom::ensure_authoring_allowed()?;

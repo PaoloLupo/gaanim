@@ -1084,12 +1084,11 @@ impl PyBox {
     fn matching(
         &self,
         py: Python<'_>,
-        kind: Option<&Bound<'_, PyAny>>,
-        predicate: Option<&Bound<'_, PyAny>>,
+        filter: &PieceFilter<'_, '_>,
         boxes: bool,
         first_only: bool,
     ) -> PyResult<Vec<Py<PyAny>>> {
-        if let Some(predicate) = predicate
+        if let Some(predicate) = filter.predicate
             && !predicate.is_callable()
         {
             return Err(pyo3::exceptions::PyTypeError::new_err(
@@ -1099,12 +1098,20 @@ impl PyBox {
         let mut found = Vec::new();
         for piece in self.walk(py, boxes)? {
             let bound = piece.bind(py);
-            if let Some(kind) = kind
+            if let Some(kind) = filter.kind
                 && !bound.is_instance(kind)?
             {
                 continue;
             }
-            if let Some(predicate) = predicate
+            if let Some(text) = filter.text {
+                let matches = bound
+                    .extract::<PyRef<'_, crate::pytext::PyText>>()
+                    .is_ok_and(|candidate| candidate.content_text() == text);
+                if !matches {
+                    continue;
+                }
+            }
+            if let Some(predicate) = filter.predicate
                 && !predicate.call1((bound,))?.is_truthy()?
             {
                 continue;
@@ -1115,6 +1122,18 @@ impl PyBox {
             }
         }
         Ok(found)
+    }
+
+    /// The drawable a Python object stands for: a box's root or a drawable.
+    fn handle_of(child: &Bound<'_, PyAny>) -> PyResult<DrawableHandle> {
+        if let Ok(boxed) = child.extract::<PyRef<'_, PyBox>>() {
+            return Ok(boxed.inner.lock().expect("layout poisoned").root.clone());
+        }
+        Ok(child
+            .extract::<PyRef<'_, PyDrawable>>()
+            .map_err(|_| pyo3::exceptions::PyTypeError::new_err("expected a Drawable"))?
+            .0
+            .clone())
     }
 
     /// Restack and reflow after the children changed order.
@@ -1530,15 +1549,7 @@ impl PyBox {
     }
 
     fn position(&self, child: &Bound<'_, PyAny>) -> PyResult<usize> {
-        let handle = if let Ok(boxed) = child.extract::<PyRef<'_, PyBox>>() {
-            boxed.inner.lock().expect("layout poisoned").root.clone()
-        } else {
-            child
-                .extract::<PyRef<'_, PyDrawable>>()
-                .map_err(|_| pyo3::exceptions::PyTypeError::new_err("expected a Drawable"))?
-                .0
-                .clone()
-        };
+        let handle = Self::handle_of(child)?;
         self.inner
             .lock()
             .expect("layout poisoned")
@@ -1905,31 +1916,69 @@ impl PyBox {
 
     /// The first piece of `walk(boxes=boxes)` that is an instance of `type`
     /// and for which `where` returns true, or `None`.
-    #[pyo3(signature = (*, r#type=None, r#where=None, boxes=true))]
+    #[pyo3(signature = (*, r#type=None, r#where=None, text=None, boxes=true))]
     fn find(
         &self,
         py: Python<'_>,
         r#type: Option<&Bound<'_, PyAny>>,
         r#where: Option<&Bound<'_, PyAny>>,
+        text: Option<&str>,
         boxes: bool,
     ) -> PyResult<Option<Py<PyAny>>> {
-        Ok(self
-            .matching(py, r#type, r#where, boxes, true)?
-            .into_iter()
-            .next())
+        let filter = PieceFilter {
+            kind: r#type,
+            predicate: r#where,
+            text,
+        };
+        Ok(self.matching(py, &filter, boxes, true)?.into_iter().next())
     }
 
     /// Every piece of `walk(boxes=boxes)` that is an instance of `type` and
     /// for which `where` returns true, in draw order.
-    #[pyo3(signature = (*, r#type=None, r#where=None, boxes=true))]
+    #[pyo3(signature = (*, r#type=None, r#where=None, text=None, boxes=true))]
     fn find_all(
         &self,
         py: Python<'_>,
         r#type: Option<&Bound<'_, PyAny>>,
         r#where: Option<&Bound<'_, PyAny>>,
+        text: Option<&str>,
         boxes: bool,
     ) -> PyResult<Vec<Py<PyAny>>> {
-        self.matching(py, r#type, r#where, boxes, false)
+        let filter = PieceFilter {
+            kind: r#type,
+            predicate: r#where,
+            text,
+        };
+        self.matching(py, &filter, boxes, false)
+    }
+
+    /// Call `make(piece)` for every piece of `walk(boxes=boxes)` that matches
+    /// the filters (as in `find_all`, but `boxes` defaults to false), and
+    /// return the box so the call chains.
+    #[pyo3(signature = (make, *, r#type=None, r#where=None, text=None, boxes=false))]
+    fn each<'py>(
+        slf: PyRef<'py, Self>,
+        py: Python<'py>,
+        make: &Bound<'py, PyAny>,
+        r#type: Option<&Bound<'py, PyAny>>,
+        r#where: Option<&Bound<'py, PyAny>>,
+        text: Option<&str>,
+        boxes: bool,
+    ) -> PyResult<PyRef<'py, Self>> {
+        if !make.is_callable() {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "make must be a function that takes a piece",
+            ));
+        }
+        let filter = PieceFilter {
+            kind: r#type,
+            predicate: r#where,
+            text,
+        };
+        for piece in slf.matching(py, &filter, boxes, false)? {
+            make.call1((piece.bind(py),))?;
+        }
+        Ok(slf)
     }
 
     /// Choose the pieces of `walk(boxes=boxes)` once and return an object
@@ -2248,6 +2297,13 @@ impl PyBox {
         };
         format!("Box({kind}, {} children)", state.members.len())
     }
+}
+
+/// What `Box.find`, `find_all` and `each` keep among the pieces.
+struct PieceFilter<'a, 'py> {
+    kind: Option<&'a Bound<'py, PyAny>>,
+    predicate: Option<&'a Bound<'py, PyAny>>,
+    text: Option<&'a str>,
 }
 
 /// The pieces of a box chosen by `Box.cascade`: each animation method

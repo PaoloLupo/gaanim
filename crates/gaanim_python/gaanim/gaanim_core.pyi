@@ -897,21 +897,33 @@ class Box(Drawable):
             scene.play(card.stagger(lambda piece: piece.animate.fade_in(), each=0.05))
         """
         ...
-    def find(self, *, type: Optional[type | tuple[type, ...]] = None, where: Optional[Callable[[Drawable], bool]] = None, boxes: bool = True) -> Optional[Drawable]:
+    def find(self, *, type: Optional[type | tuple[type, ...]] = None, where: Optional[Callable[[Drawable], bool]] = None, text: Optional[str] = None, boxes: bool = True) -> Optional[Drawable]:
         """The first piece of ``walk(boxes=boxes)`` that matches, or ``None``.
 
         A piece matches when it is an instance of ``type`` (a class or a tuple
-        of classes) and ``where(piece)`` is true; a filter left out accepts
-        everything. Nested boxes are searched too unless ``boxes=False``.
-        Raises ``TypeError`` if ``where`` is not callable.
+        of classes), it is a ``Text`` whose ``content`` equals ``text``, and
+        ``where(piece)`` is true; a filter left out accepts everything. Nested
+        boxes are searched too unless ``boxes=False``. Raises ``TypeError`` if
+        ``where`` is not callable.
 
         Example:
             title = card.find(type=Text)
             cell = card.find(where=lambda piece: piece.width > 2)
         """
         ...
-    def find_all(self, *, type: Optional[type | tuple[type, ...]] = None, where: Optional[Callable[[Drawable], bool]] = None, boxes: bool = True) -> list[Drawable]:
+    def find_all(self, *, type: Optional[type | tuple[type, ...]] = None, where: Optional[Callable[[Drawable], bool]] = None, text: Optional[str] = None, boxes: bool = True) -> list[Drawable]:
         """Every piece of ``walk(boxes=boxes)`` that matches, in draw order (see ``find``)."""
+        ...
+    def each(self, make: Callable[[Drawable], Any], *, type: Optional[type | tuple[type, ...]] = None, where: Optional[Callable[[Drawable], bool]] = None, text: Optional[str] = None, boxes: bool = False) -> Self:
+        """Call ``make(piece)`` for every matching piece and return the box.
+
+        The filters are those of ``find_all``, except that ``boxes`` defaults
+        to ``False``. It applies immediate setters to a whole card in one line.
+        Raises ``TypeError`` if ``make`` is not callable.
+
+        Example:
+            card.each(lambda piece: piece.fill("#0f172a"), type=Text)
+        """
         ...
     def cascade(
         self,
@@ -938,9 +950,10 @@ class Box(Drawable):
     def move_child(self, child: Drawable, to: int, *, duration: Optional[float] = None, advance: bool = True) -> None:
         """Move ``child`` to position ``to`` (negative counts from the end).
 
-        The other children make room; with ``duration`` they slide there.
-        Raises ``ValueError`` if ``child`` is not a child of this box and
-        ``IndexError`` if ``to`` is out of range.
+        The other children make room; with ``duration`` they slide there. In a
+        ``stack`` the position does not change which child draws on top: use
+        ``z_index`` for that. Raises ``ValueError`` if ``child`` is not a child
+        of this box and ``IndexError`` if ``to`` is out of range.
         """
         ...
     def swap(self, a: Drawable, b: Drawable, *, duration: Optional[float] = None, advance: bool = True) -> None:
@@ -3694,6 +3707,14 @@ class Text(Drawable):
         ...
     @overload
     def __getitem__(self, index: int | slice) -> TextSelection: ...
+    @property
+    def content(self) -> str:
+        """The visible text, without markup delimiters or math dollars.
+
+        Example:
+            title = card.find(text="Título")
+        """
+        ...
     @property
     def graphemes(self) -> TextQuery: ...
     @property

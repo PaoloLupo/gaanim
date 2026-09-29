@@ -2104,6 +2104,16 @@ def validate_layout_box_contract(module):
     row.reverse()
     if row.children[0] is not a and len(row.children) != 3:
         failures.append("reordering lost children")
+    named = L.column("uno", "dos", scene.text("tres"))
+    if named.find(text="dos") is None or named.find(text="dos") is not named[1]:
+        failures.append("Box.find(text=...) did not find the text by its content")
+    if named.find(text="nada") is not None or named[0].content != "uno":
+        failures.append("Text.content or a missing text match is wrong")
+    seen = []
+    if named.each(lambda piece: seen.append(piece), type=module.Text) is not named or len(seen) != 3:
+        failures.append("Box.each did not visit the texts and return the box")
+    if not raises_error(TypeError, lambda: named.each(5)):
+        failures.append("Box.each accepted a non-callable")
     row.move_child(a, -1)
     if row.children[-1] is not a:
         failures.append("move_child with a negative position did not move to the end")

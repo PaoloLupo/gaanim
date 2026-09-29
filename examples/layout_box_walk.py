@@ -1,4 +1,4 @@
-"""Traverse a box: walk, find, cascade, stagger and child reordering."""
+"""Traverse a box: walk, find, each, cascade, stagger and child reordering."""
 
 import os
 
@@ -31,9 +31,11 @@ marks.append(scene.cursor)
 scene.stop("cascade")
 
 # find searches the pieces by type and predicate.
-title = card.find(type=Text)
+title = card.find(text="Tarjeta")
 chips = row.find_all(type=Box)
-assert len(chips) == 3 and title is not None
+assert len(chips) == 3 and title is not None and card.find(text="nada") is None
+# each applies an immediate setter to every matching piece.
+card.each(lambda piece: piece.fill("#1e3a8a"), type=Text)
 scene.play([title.animate.scale_by(1.15).duration(0.4)])
 
 # stagger builds one animation per piece; None skips a piece.

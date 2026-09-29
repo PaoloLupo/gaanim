@@ -331,16 +331,31 @@ scene.render()
 #api-entry(
   name: "Box.find / find_all",
   kind: "method",
-  desc: [Buscan entre las piezas de `walk(boxes=boxes)`: `find` devuelve la primera que cumple, o `None`; `find_all` las devuelve todas en orden de dibujo. Una pieza cumple si es instancia de `type` (una clase o una tupla de clases) y `where(pieza)` es verdadero; un filtro omitido lo acepta todo. Por defecto también buscan entre las cajas anidadas. Lanzan `TypeError` si `where` no es invocable.],
-  signature: "box.find(*, type=None, where=None, boxes=True) -> Drawable | None",
+  desc: [Buscan entre las piezas de `walk(boxes=boxes)`: `find` devuelve la primera que cumple, o `None`; `find_all` las devuelve todas en orden de dibujo. Una pieza cumple si es instancia de `type` (una clase o una tupla de clases), es un `Text` cuyo `content` es igual a `text`, y `where(pieza)` es verdadero; un filtro omitido lo acepta todo. Por defecto también buscan entre las cajas anidadas. Lanzan `TypeError` si `where` no es invocable.],
+  signature: "box.find(*, type=None, where=None, text=None, boxes=True) -> Drawable | None",
 )[
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9), theme="paper")
 >>>card = scene.layout.column("Título", scene.layout.row("A", "B"), background="#ffffff", padding="20px")
-title = card.find(type=Text)
+title = card.find(text="Título")
 letters = card.find_all(type=Text, where=lambda piece: piece is not title)
 scene.play(title.animate.fade_in())
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Box.each",
+  kind: "method",
+  desc: [Llama a `make(pieza)` para cada pieza que cumple los filtros (los de `find_all`, pero `boxes` vale `False` por defecto) y devuelve la caja, así que se encadena. Sirve para aplicar un ajuste inmediato a toda una tarjeta en una línea. Lanza `TypeError` si `make` no es invocable.],
+  signature: "box.each(make, *, type=None, where=None, text=None, boxes=False) -> Box",
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9), theme="paper")
+>>>card = scene.layout.column("Título", scene.layout.row("A", "B"), background="#ffffff", padding="20px")
+card.each(lambda piece: piece.fill("#0f172a"), type=Text)
 scene.render()
 ```
 ]
@@ -363,7 +378,7 @@ scene.render()
 #api-entry(
   name: "Box.move_child / swap / reverse",
   kind: "method",
-  desc: [Cambian el orden de los hijos: `move_child(hijo, a)` lo lleva a la posición `a` (negativa cuenta desde el final), `swap(a, b)` intercambia dos y `reverse()` invierte todos. Con `duration` los hijos se deslizan a su nuevo sitio; `advance=False` empieza el siguiente cambio a la vez. `move_child` lanza `ValueError` si el objeto no es hijo de la caja e `IndexError` si la posición no existe.],
+  desc: [Cambian el orden de los hijos: `move_child(hijo, a)` lo lleva a la posición `a` (negativa cuenta desde el final), `swap(a, b)` intercambia dos y `reverse()` invierte todos. Con `duration` los hijos se deslizan a su nuevo sitio; `advance=False` empieza el siguiente cambio a la vez. En un `stack` la posición no cambia qué hijo se dibuja encima: para eso usa `z_index`. `move_child` lanza `ValueError` si el objeto no es hijo de la caja e `IndexError` si la posición no existe.],
   signature: "box.move_child(child, to, *, duration=None, advance=True) · box.swap(a, b, ...) · box.reverse(...)",
 )[
 ```python

@@ -16356,6 +16356,76 @@ mod tests {
         );
     }
 
+    /// A row of two rectangles, laid out twice with a play in between.
+    fn reflowed_row(
+        animate: impl FnOnce(&mut SceneModel, &DrawableHandle, &DrawableHandle, &DrawableHandle),
+    ) -> (
+        World,
+        Timeline,
+        DrawableHandle,
+        DrawableHandle,
+        DrawableHandle,
+    ) {
+        let mut canvas = SceneModel::new(640, 360);
+        let first = canvas.rect(2.0, 1.0);
+        let second = canvas.rect(2.0, 1.0);
+        let container = canvas.group(&[&first, &second]);
+        first.claim_layout(&container).unwrap();
+        second.claim_layout(&container).unwrap();
+        let reflow = |canvas: &mut SceneModel, version| {
+            let members = [&first, &second]
+                .into_iter()
+                .map(|member| crate::canvas::LayoutMemberSpec {
+                    id: member.id,
+                    style: gaanim_layout::LayoutItemStyle::default(),
+                })
+                .collect();
+            canvas.reflow_layout(
+                &container,
+                members,
+                crate::canvas::LayoutSpec {
+                    kind: gaanim_layout::LayoutNodeKind::Row { wrap: false },
+                    style: gaanim_layout::LayoutStyle::default(),
+                    within: LayoutWithin::Safe,
+                },
+                version,
+                None,
+                None,
+                None,
+            );
+        };
+        reflow(&mut canvas, 1);
+        canvas.wait(0.5);
+        animate(&mut canvas, &container, &first, &second);
+        reflow(&mut canvas, 2);
+        canvas.wait(0.5);
+        let (world, timeline) = compiled_world(&canvas);
+        (world, timeline, container, first, second)
+    }
+
+    #[test]
+    fn a_member_grow_entry_stays_hidden_when_its_box_reflows_afterwards() {
+        let (mut world, mut timeline, _, first, second) = reflowed_row(|canvas, _, first, _| {
+            canvas.play(vec![first.animate().grow_from_center().duration(0.5)]);
+        });
+        timeline.seek(&mut world, 0.25);
+        assert_eq!(transform_of(&mut world, &first).scale, DVec3::ZERO);
+        assert_ne!(transform_of(&mut world, &second).scale, DVec3::ZERO);
+        timeline.seek(&mut world, 1.5);
+        assert!(transform_of(&mut world, &first).scale.x > 0.99);
+    }
+
+    #[test]
+    fn a_box_grow_entry_stays_hidden_when_it_reflows_afterwards() {
+        let (mut world, mut timeline, container, ..) = reflowed_row(|canvas, container, _, _| {
+            canvas.play(vec![container.animate().grow_from_center().duration(0.5)]);
+        });
+        timeline.seek(&mut world, 0.25);
+        assert_eq!(transform_of(&mut world, &container).scale, DVec3::ZERO);
+        timeline.seek(&mut world, 1.5);
+        assert!(transform_of(&mut world, &container).scale.x > 0.99);
+    }
+
     #[test]
     fn points_compile_to_one_path_with_a_circle_per_position() {
         let mut canvas = SceneModel::new(640, 360);
