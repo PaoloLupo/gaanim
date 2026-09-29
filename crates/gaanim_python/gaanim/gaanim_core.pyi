@@ -1558,6 +1558,58 @@ class Anim:
     def draw_border_then_fill(self) -> Anim: ...
     def circumscribe(self) -> Anim: ...
     def flash(self) -> Anim: ...
+    def blink(self, count: int = 3) -> Anim:
+        """Switch the drawable off and on ``count`` times.
+
+        Each blink is a quick fade out and back in and takes half a second, so
+        the default duration is ``0.5 * count``; ``duration`` sets the whole
+        cycle. The drawable is visible again at the end. ``count`` below 1
+        raises ``ValueError``.
+
+        Example:
+            scene.play(cursor.animate.blink(3))
+        """
+        ...
+    def broadcast(self, count: int = 4, max_scale: float = 3.0, lag: float = 0.2) -> Anim:
+        """Send concentric ripples out from the drawable.
+
+        ``count`` copies of it (1 to 64), placed where it is when the
+        animation starts, each grow to ``max_scale`` times its size while
+        fading out, one after another: each starts ``lag`` of a ripple after the
+        previous one, and ``duration`` covers all of them. The drawable itself
+        does not change. ``max_scale`` below 1, a negative ``lag`` or a
+        ``count`` out of range raises ``ValueError``.
+
+        Example:
+            scene.play(pin.animate.broadcast(count=4, max_scale=3.0, lag=0.2).duration(2))
+        """
+        ...
+    def flash_around(self, *, color: Optional[ColorLike] = None, width: Optional[float] = None, padding: Optional[Padding] = None, corner_radius: float = 0.08, time_width: float = 0.4) -> Anim:
+        """Sweep a bright window around a frame drawn around the drawable.
+
+        The frame is a new live outline (see ``Geometry.surrounding_rect``),
+        ``padding`` away from the drawable's bounds (0.12 by default) and
+        invisible outside the flash. ``color`` and ``width`` restyle it (a
+        width needs a color); ``time_width`` is the window's length as a
+        fraction of the outline, in ``(0, 1]``. The returned animation plays on
+        the frame, not on the drawable.
+
+        Example:
+            scene.play(term.animate.flash_around(color=GOLD).duration(0.8))
+        """
+        ...
+    def flash_under(self, *, color: Optional[ColorLike] = None, width: Optional[float] = None, gap: float = 0.06, overhang: float = 0.04, time_width: float = 0.5) -> Anim:
+        """Sweep a bright window along a line under the drawable.
+
+        The line is a new live underline ``gap`` scene units below the
+        drawable's bounds and ``overhang`` wider on each side; ``color``,
+        ``width`` and ``time_width`` are as in ``flash_around``. The returned
+        animation plays on the line, not on the drawable.
+
+        Example:
+            scene.play(term.animate.flash_under().duration(0.6))
+        """
+        ...
     def show_passing_flash(self, *, time_width: float = 0.2) -> Anim:
         """Sweep a visible window of the path from start to end.
 
@@ -3149,6 +3201,21 @@ class Drawable:
             result = drawable.to_corner(Anchor.CENTER)
         """
         ...
+    def animated_boundary(self, colors: Sequence[ColorLike], *, cycle_rate: float = 0.5, width: float = 0.04, padding: Optional[Padding] = None, corner_radius: float = 0.08) -> Drawable:
+        """Draw a live frame around this drawable whose stroke cycles through ``colors``.
+
+        ``cycle_rate`` is the turns through the whole list per second from the
+        timeline cursor on (the last color blends back into the first);
+        ``width`` is the stroke width in scene units. The frame is a new
+        drawable, visible right away and following this one's bounds,
+        ``padding`` away (0.12 by default): animate it like any drawable to
+        fade it in. Fewer than two colors, a non-positive ``width`` or a
+        non-finite ``cycle_rate`` raises ``ValueError``.
+
+        Example:
+            border = card.animated_boundary([BLUE, PURPLE, CYAN], cycle_rate=0.5)
+        """
+        ...
     # Reactive methods
     def drive(self, channel: Literal["scale", "rotation", "opacity", "x", "y", "fill"], value: Falloff | FalloffColor) -> None:
         """Connect a ``Falloff`` to a channel of this drawable, or of each member of this group.
@@ -3560,6 +3627,12 @@ class TextSelectionAnimation:
     def opacity(self, value: float) -> Anim: ...
     def indicate(self) -> Anim: ...
     def wiggle(self) -> Anim: ...
+    def flash_around(self, *, color: Optional[ColorLike] = None, width: Optional[float] = None, padding: Optional[Padding] = None, corner_radius: float = 0.08, time_width: float = 0.4) -> Anim:
+        """Sweep a bright window around a frame drawn around the selected glyphs (see ``Anim.flash_around``)."""
+        ...
+    def flash_under(self, *, color: Optional[ColorLike] = None, width: Optional[float] = None, gap: float = 0.06, overhang: float = 0.04, time_width: float = 0.5) -> Anim:
+        """Sweep a bright window along a line under the selected glyphs (see ``Anim.flash_under``)."""
+        ...
     def pulse(self) -> Anim: ...
     def wave(self) -> Anim: ...
     def highlight(self) -> Anim: ...
@@ -7051,6 +7124,25 @@ class SlideKit:
         """
         ...
 
+class Fx:
+    """Scene-owned screen effects: emphasis that acts on the whole frame."""
+    def spotlight(self, target: Drawable | TextSelection | Sequence[Drawable | TextSelection], *, dim: float = 0.7, padding: Optional[Padding] = None, corner_radius: float = 0.1) -> Anim:
+        """Dim everything outside ``target`` while an overlay with a hole around it fades in and out.
+
+        The overlay is black and reaches ``dim`` opacity (in ``(0, 1]``) halfway
+        through the animation, then fades back out: ``duration`` sets the
+        whole cycle, and an easing such as ``Easing.SMOOTH`` keeps it dimmed at
+        the end. The hole is a live frame around the target's bounds,
+        ``padding`` away (0.2 by default) and rounded by ``corner_radius``; it
+        follows the target if it moves. The returned animation plays on the
+        overlay. A ``dim`` out of range or a target of another scene raises
+        ``ValueError``.
+
+        Example:
+            scene.play([scene.fx.spotlight(card, dim=0.7).duration(1.5)])
+        """
+        ...
+
 class Mechanics:
     """Scene-owned technical drawing and mechanism toolkit."""
     def dimension(self, x1: float, y1: float, x2: float, y2: float, offset: float) -> Drawable:
@@ -7791,6 +7883,11 @@ class Scene:
     @property
     def mechanics(self) -> Mechanics:
         """Return the scene-owned mechanics capability."""
+        ...
+
+    @property
+    def fx(self) -> Fx:
+        """Return the scene-owned screen effects, such as ``fx.spotlight``."""
         ...
 
     @property

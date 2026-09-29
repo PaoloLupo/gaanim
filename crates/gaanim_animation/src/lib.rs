@@ -17,7 +17,7 @@ pub mod property_bindings;
 pub mod reactive;
 pub use procedural::{
     DashFlow, OscillatedChannel, ProceduralLayer, ProceduralMotion, ProceduralOffset,
-    ScheduledLayer, Waveform,
+    ScheduledLayer, StrokeCycle, Waveform,
 };
 pub use progress_arc::{ProgressArc, progress_arc_path};
 pub use property_bindings::*;
@@ -62,8 +62,8 @@ pub use updaters::{
     DimensionLabelPlacement, DimensionSide, EndpointAngle, EndpointDistance, EndpointFollow,
     FollowOffsetSpace, InvalidFixedStep, InvalidSampledSeries, PlaybackState, RotationBinding,
     RotationTranslationBinding, SampledInterpolation, SampledProperty, SampledSeriesDriver,
-    SampledSeriesDrivers, SurroundingRect, TracedPath, TracedPath3D, TrackingAngle,
-    TrackingAnglePart, TrackingEndpoint, TrackingLine, TrackingRay, TrackingScalar,
+    SampledSeriesDrivers, SurroundingRect, SurroundingShape, TracedPath, TracedPath3D,
+    TrackingAngle, TrackingAnglePart, TrackingEndpoint, TrackingLine, TrackingRay, TrackingScalar,
     TrackingVectorHead, Updater, advance_updaters_by, advance_x_updater,
     angle_label_placement_system, bob_updater, dimension_label_placement_system,
     endpoint_angle_system, endpoint_distance_system, endpoint_follow_system,
@@ -198,12 +198,14 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
             (
                 stroke_tips::apply_stroke_tips_system.in_set(SceneSet::DerivedGeometry),
                 procedural::apply_dash_flow_system.in_set(SceneSet::Bounds),
+                procedural::apply_stroke_cycle_system.in_set(SceneSet::Bounds),
             ),
         );
         app.add_systems(
             First,
             (
                 procedural::restore_dash_flow_system,
+                procedural::restore_stroke_cycle_system,
                 stroke_tips::restore_stroke_tips_system,
                 falloff::restore_falloff_fills_system,
             ),

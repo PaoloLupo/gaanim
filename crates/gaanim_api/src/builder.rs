@@ -1563,6 +1563,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::GrowArrow => "Arrow",
             AnimationType::SignalFloat { .. } => "Signal",
             AnimationType::ShowPassingFlash { .. } => "ShowPassingFlash",
+            AnimationType::Blink { .. } => "Blink",
+            AnimationType::Broadcast { .. } => "Broadcast",
+            AnimationType::Spotlight { .. } => "Spotlight",
             AnimationType::TextAnimator(_) => "TextAnimator",
         }
     }
@@ -3192,6 +3195,18 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_grow_from_edge_internal(anim, track);
             return;
         }
+        if matches!(anim.anim_type, AnimationType::Blink { .. }) {
+            self.play_blink_internal(anim, track);
+            return;
+        }
+        if matches!(anim.anim_type, AnimationType::Broadcast { .. }) {
+            self.play_broadcast_internal(anim, track);
+            return;
+        }
+        if matches!(anim.anim_type, AnimationType::Spotlight { .. }) {
+            self.play_spotlight_internal(anim, track);
+            return;
+        }
         if matches!(anim.anim_type, AnimationType::Flash { .. }) {
             self.play_flash_internal(anim, track);
             return;
@@ -3513,6 +3528,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::Transform { .. }
             | AnimationType::ReplacementTransform { .. }
             | AnimationType::GrowArrow
+            | AnimationType::Blink { .. }
+            | AnimationType::Broadcast { .. }
+            | AnimationType::Spotlight { .. }
             | AnimationType::TextAnimator(_) => {
                 unreachable!("Expansion is dispatched in the early branch above")
             }
@@ -5927,6 +5945,161 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     label: self.current_label.clone(),
                 }),
             );
+        }
+    }
+
+    /// Internal: `count` blinks, each a quick fade out and back in.
+    fn play_blink_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
+        let AnimationType::Blink { count } = anim.anim_type else {
+            return;
+        };
+        let Some(state) = self.states.get(anim.target) else {
+            return;
+        };
+        let opacity = state.opacity;
+        let cycle = anim.duration / f64::from(count.max(1));
+        for blink in 0..count.max(1) {
+            let start = self.current_time + f64::from(blink) * cycle;
+            for (offset, from, to) in [(0.0, opacity, 0.0), (0.5, 0.0, opacity)] {
+                self.timeline.add_clip(
+                    parent_track,
+                    start + offset * cycle,
+                    cycle * 0.2,
+                    ClipPayload::Animation(AnimationSpec {
+                        target: anim.target,
+                        lens: PropertyLensSpec::Opacity { from, to },
+                        rate_func: gaanim_math::RateFunc::Smooth,
+                        delay: 0.0,
+                        label: self.current_label.clone(),
+                    }),
+                );
+            }
+        }
+    }
+
+    /// Internal: ripples. Each ghost is placed on the source as it is now,
+    /// then grows while it fades out; ghost `i` starts `i * lag` ripples in.
+    fn play_broadcast_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
+        let AnimationType::Broadcast {
+            source,
+            ghosts,
+            max_scale,
+            lag,
+        } = &anim.anim_type
+        else {
+            return;
+        };
+        // How opaque a ripple is when it starts.
+        const START_OPACITY: f64 = 0.8;
+        let placement = self.get_world_transform(*source);
+        let count = ghosts.len().max(1) as f64;
+        let ripple = anim.duration / (1.0 + lag * (count - 1.0));
+        for (index, ghost) in ghosts.iter().enumerate() {
+            let Some(state) = self.states.get(*ghost) else {
+                continue;
+            };
+            let opacity = state.opacity;
+            let scale = placement.scale;
+            let entity = state.entity;
+            let start = self.current_time + index as f64 * lag * ripple;
+            // A ripple is invisible until its own turn.
+            self.commands.entity(entity).insert(Opacity(0.0));
+            let mut clip = |start: f64, duration: f64, lens: PropertyLensSpec, rate| {
+                self.timeline.add_clip(
+                    parent_track,
+                    start,
+                    duration,
+                    ClipPayload::Animation(AnimationSpec {
+                        target: *ghost,
+                        lens,
+                        rate_func: rate,
+                        delay: 0.0,
+                        label: self.current_label.clone(),
+                    }),
+                );
+            };
+            // Placed on the source, and invisible until its ripple starts.
+            clip(
+                start,
+                0.0,
+                PropertyLensSpec::Translation {
+                    from: placement.translation,
+                    to: placement.translation,
+                },
+                gaanim_math::RateFunc::Linear,
+            );
+            clip(
+                start,
+                0.0,
+                PropertyLensSpec::Rotation {
+                    from: placement.rotation,
+                    to: placement.rotation,
+                },
+                gaanim_math::RateFunc::Linear,
+            );
+            let fade_in = ripple * 0.05;
+            clip(
+                start,
+                fade_in,
+                PropertyLensSpec::Opacity {
+                    from: 0.0,
+                    to: opacity * START_OPACITY as f32,
+                },
+                gaanim_math::RateFunc::Linear,
+            );
+            clip(
+                start + fade_in,
+                ripple - fade_in,
+                PropertyLensSpec::Opacity {
+                    from: opacity * START_OPACITY as f32,
+                    to: 0.0,
+                },
+                gaanim_math::RateFunc::Linear,
+            );
+            clip(
+                start,
+                ripple,
+                PropertyLensSpec::Scale {
+                    from: scale,
+                    to: scale * *max_scale,
+                },
+                gaanim_math::RateFunc::Smooth,
+            );
+            if let Some(state) = self.states.get_mut(*ghost) {
+                state.opacity = 0.0;
+                state.transform.scale = scale * *max_scale;
+                state.transform.translation = placement.translation;
+            }
+        }
+    }
+
+    /// Internal: fade the dimming overlay in to `dim`, shaped by the rate
+    /// function (there and back by default).
+    fn play_spotlight_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
+        let AnimationType::Spotlight { dim } = anim.anim_type else {
+            return;
+        };
+        // The overlay is invisible until the spotlight starts.
+        if let Some(state) = self.states.get(anim.target) {
+            self.commands.entity(state.entity).insert(Opacity(0.0));
+        }
+        self.timeline.add_clip(
+            parent_track,
+            self.current_time,
+            anim.duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Opacity {
+                    from: 0.0,
+                    to: dim as f32,
+                },
+                rate_func: anim.rate_func.clone(),
+                delay: 0.0,
+                label: self.current_label.clone(),
+            }),
+        );
+        if let Some(state) = self.states.get_mut(anim.target) {
+            state.opacity = (dim * anim.rate_func.evaluate(1.0)) as f32;
         }
     }
 

@@ -9,6 +9,7 @@
 
 use bevy::prelude::*;
 use gaanim_core::glam::{DQuat, DVec3};
+use gaanim_core::peniko::{Brush, Color};
 use gaanim_math::{Noise, SpatialTransform};
 use gaanim_scene::{Opacity, StrokeBrush};
 
@@ -297,6 +298,80 @@ pub fn restore_dash_flow_system(mut query: Query<(&mut DashFlow, &mut StrokeBrus
     }
 }
 
+/// A stroke color that cycles through `colors`, like an animated boundary.
+///
+/// The color is a pure function of timeline time: `rate` full turns through
+/// the list per second from `start`, blending each color into the next and the
+/// last into the first. It replaces the stroke color right before extraction
+/// and is restored at the start of the next frame, like [`DashFlow`].
+#[derive(Component, Debug, Clone)]
+pub struct StrokeCycle {
+    pub colors: Vec<Color>,
+    /// Turns through the whole list per second.
+    pub rate: f64,
+    pub start: f64,
+    /// Authored and cycled brushes while the cycled one is shown.
+    applied: Option<(Option<Brush>, Brush)>,
+}
+
+impl StrokeCycle {
+    pub fn new(colors: Vec<Color>, rate: f64, start: f64) -> Self {
+        Self {
+            colors,
+            rate,
+            start,
+            applied: None,
+        }
+    }
+
+    /// The color at `time`; the first one until `start`.
+    pub fn color_at(&self, time: f64) -> Color {
+        match self.colors.len() {
+            0 => Color::TRANSPARENT,
+            1 => self.colors[0],
+            count => {
+                let phase =
+                    ((time - self.start).max(0.0) * self.rate).rem_euclid(1.0) * count as f64;
+                let index = (phase.floor() as usize).min(count - 1);
+                gaanim_core::interpolate_color(
+                    self.colors[index],
+                    self.colors[(index + 1) % count],
+                    phase - index as f64,
+                )
+            }
+        }
+    }
+}
+
+/// Puts the cycled color on the stroke right before extraction.
+pub fn apply_stroke_cycle_system(
+    playback: Option<Res<PlaybackState>>,
+    mut query: Query<(&mut StrokeCycle, &mut StrokeBrush)>,
+) {
+    let time = playback.map_or(0.0, |state| state.current_time);
+    for (mut cycle, mut stroke) in &mut query {
+        if cycle.colors.is_empty() {
+            continue;
+        }
+        let authored = stroke.brush.clone();
+        let cycled = Brush::Solid(cycle.color_at(time));
+        stroke.brush = Some(cycled.clone());
+        cycle.applied = Some((authored, cycled));
+    }
+}
+
+/// Restores the authored stroke at the start of the next frame, and only when
+/// nothing rewrote the cycled one in between, such as a seek.
+pub fn restore_stroke_cycle_system(mut query: Query<(&mut StrokeCycle, &mut StrokeBrush)>) {
+    for (mut cycle, mut stroke) in &mut query {
+        if let Some((authored, cycled)) = cycle.applied.take()
+            && stroke.brush.as_ref() == Some(&cycled)
+        {
+            stroke.brush = authored;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -483,6 +558,68 @@ mod tests {
         assert_eq!(
             world.get::<StrokeBrush>(entity).unwrap().style.dash_offset,
             0.75
+        );
+    }
+
+    #[test]
+    fn a_stroke_cycle_blends_through_its_colors_and_wraps() {
+        let red = Color::from_rgb8(255, 0, 0);
+        let green = Color::from_rgb8(0, 255, 0);
+        let blue = Color::from_rgb8(0, 0, 255);
+        let cycle = StrokeCycle::new(vec![red, green, blue], 0.5, 1.0);
+        assert_eq!(cycle.color_at(0.0), red, "the first color before the start");
+        assert_eq!(cycle.color_at(1.0), red);
+        // A turn takes 2 s: the second color is a third of the way through.
+        let second = cycle.color_at(1.0 + 2.0 / 3.0).to_rgba8();
+        assert!(second.g > 250 && second.r < 6 && second.b < 6, "{second:?}");
+        assert_eq!(
+            cycle.color_at(3.0).to_rgba8(),
+            red.to_rgba8(),
+            "a whole turn returns"
+        );
+        let wrapping = cycle.color_at(1.0 + 2.0 * 5.0 / 6.0).to_rgba8();
+        assert!(
+            wrapping.b > 100 && wrapping.r > 100,
+            "blue blends back into red: {wrapping:?}"
+        );
+        assert_eq!(
+            cycle.color_at(1.7),
+            cycle.color_at(1.7),
+            "a pure function of time"
+        );
+    }
+
+    #[test]
+    fn a_stroke_cycle_replaces_the_stroke_and_restores_it() {
+        let mut world = World::new();
+        world.insert_resource(PlaybackState {
+            current_time: 1.0,
+            ..Default::default()
+        });
+        let red = Color::from_rgb8(255, 0, 0);
+        let blue = Color::from_rgb8(0, 0, 255);
+        let white = Color::from_rgb8(255, 255, 255);
+        let entity = world
+            .spawn((
+                StrokeCycle::new(vec![red, blue], 0.25, 0.0),
+                StrokeBrush::new(white, 0.05),
+            ))
+            .id();
+        let mut apply = Schedule::default();
+        apply.add_systems(apply_stroke_cycle_system);
+        apply.run(&mut world);
+        assert_eq!(
+            world.get::<StrokeBrush>(entity).unwrap().brush,
+            Some(Brush::Solid(
+                StrokeCycle::new(vec![red, blue], 0.25, 0.0).color_at(1.0)
+            ))
+        );
+        let mut restore = Schedule::default();
+        restore.add_systems(restore_stroke_cycle_system);
+        restore.run(&mut world);
+        assert_eq!(
+            world.get::<StrokeBrush>(entity).unwrap().brush,
+            Some(Brush::Solid(white))
         );
     }
 }

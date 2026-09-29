@@ -37,6 +37,7 @@ pub type ImageHandle = DrawableHandle;
 mod camera_view;
 mod drawable;
 mod duplicate;
+mod emphasis;
 pub use duplicate::{Distribution, MAX_COPIES, RepeatStep};
 mod property_bindings;
 pub use camera_view::{

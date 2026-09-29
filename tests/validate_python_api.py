@@ -1754,7 +1754,7 @@ def validate_easing_contract(module) -> list[str]:
 def validate_scene_capability_surface(module) -> list[str]:
     """Keep Scene limited to orchestration and scene-owned capabilities."""
     expected = {
-        "assets", "camera", "canvas", "geometry", "layout", "mechanics",
+        "assets", "camera", "canvas", "fx", "geometry", "layout", "mechanics",
         "media", "slides", "text", "viz", "fade_out_all", "link", "persist",
         "play", "release", "render", "reuse", "sections", "segment", "snapshots", "stop",
         "wait", "time", "cursor", "stops", "random", "noise",
@@ -2060,6 +2060,74 @@ def validate_falloff_contract(module):
         grid.clear_drive()
     except Exception as error:
         failures.append(f"Drawable.drive, look_at or clear_drive failed: {error}")
+    return failures
+
+
+def validate_emphasis_contract(module):
+    """Extra emphasis effects build their helpers and check their arguments."""
+    failures = []
+    scene = module.Scene(frame=(16, 9))
+    pin = scene.geometry.circle(0.3).fill("#3b82f6").move_to(-2, 0)
+    label = scene.text("hello mundo", role="body").move_to(2, 1)
+    for name, build in (
+        ("blink", lambda: pin.animate.blink(3)),
+        ("blink default", lambda: pin.animate.blink()),
+        ("broadcast", lambda: pin.animate.broadcast(count=4, max_scale=3.0, lag=0.2)),
+        ("broadcast default", lambda: pin.animate.broadcast()),
+        ("flash_around", lambda: pin.animate.flash_around(color="#f59e0b", width=0.06, padding=(0.1, 0.2))),
+        ("flash_under", lambda: pin.animate.flash_under(color="#f59e0b")),
+        ("flash_around on text", lambda: label.animate.flash_around()),
+        ("flash_under on a selection", lambda: label["mundo"].animate.flash_under()),
+        ("flash_around on a selection", lambda: label["hello"].animate.flash_around(time_width=0.6)),
+        ("spotlight", lambda: scene.fx.spotlight(pin, dim=0.7)),
+        ("spotlight selection", lambda: scene.fx.spotlight(label["mundo"], padding=0.3, corner_radius=0.2)),
+        ("spotlight two targets", lambda: scene.fx.spotlight([pin, label], dim=1.0)),
+    ):
+        try:
+            if not isinstance(build(), module.Anim):
+                failures.append(f"{name} did not return an Anim")
+        except Exception as error:
+            failures.append(f"{name} failed: {error}")
+    for description, operation, expected in (
+        ("blink(0)", lambda: pin.animate.blink(0), ValueError),
+        ("broadcast(0)", lambda: pin.animate.broadcast(count=0), ValueError),
+        ("broadcast(65)", lambda: pin.animate.broadcast(count=65), ValueError),
+        ("a shrinking broadcast", lambda: pin.animate.broadcast(max_scale=0.5), ValueError),
+        ("a negative lag", lambda: pin.animate.broadcast(lag=-0.1), ValueError),
+        ("a NaN scale", lambda: pin.animate.broadcast(max_scale=float("nan")), ValueError),
+        ("flash after another effect", lambda: pin.animate.fade_in().flash_around(), ValueError),
+        ("broadcast after a property", lambda: pin.animate.move_to(1, 1).broadcast(), ValueError),
+        ("flash_around negative padding", lambda: pin.animate.flash_around(padding=-1), ValueError),
+        ("flash_around width without color", lambda: pin.animate.flash_around(width=0.1), ValueError),
+        ("flash_around zero time_width", lambda: pin.animate.flash_around(time_width=0.0), ValueError),
+        ("flash_under time_width above 1", lambda: pin.animate.flash_under(time_width=1.5), ValueError),
+        ("flash_under negative gap", lambda: pin.animate.flash_under(gap=-1), ValueError),
+        ("flash_around a bad padding", lambda: pin.animate.flash_around(padding="x"), TypeError),
+        ("spotlight zero dim", lambda: scene.fx.spotlight(pin, dim=0), ValueError),
+        ("spotlight dim above 1", lambda: scene.fx.spotlight(pin, dim=1.5), ValueError),
+        ("spotlight of another type", lambda: scene.fx.spotlight("pin"), TypeError),
+        ("spotlight of nothing", lambda: scene.fx.spotlight([]), (TypeError, ValueError)),
+        ("spotlight a stranger", lambda: scene.fx.spotlight(module.Scene(frame=(16, 9)).geometry.circle(1)), ValueError),
+        ("boundary of one color", lambda: pin.animated_boundary(["red"]), ValueError),
+        ("boundary NaN rate", lambda: pin.animated_boundary(["red", "blue"], cycle_rate=float("nan")), ValueError),
+        ("boundary zero width", lambda: pin.animated_boundary(["red", "blue"], width=0), ValueError),
+        ("boundary bad color", lambda: pin.animated_boundary(["red", 3.5]), (TypeError, ValueError)),
+    ):
+        if not raises_error(expected, operation):
+            failures.append(f"{description} did not raise")
+    try:
+        border = pin.animated_boundary(["#3b82f6", "#a855f7", "#06b6d4"], cycle_rate=0.5, padding=0.2)
+        if not isinstance(border, module.Drawable):
+            failures.append("animated_boundary did not return a Drawable")
+        scene.play([
+            pin.animate.blink(2).duration(0.6),
+            label["mundo"].animate.flash_under().duration(0.5),
+        ])
+        scene.play([scene.fx.spotlight(label, dim=0.6).duration(0.8)])
+        scene.play([pin.animate.broadcast(count=3).duration(1.0)])
+        scene.play([border.animate.fade_out()])
+    except Exception as error:
+        failures.append(f"playing the emphasis effects failed: {error}")
     return failures
 
 
@@ -2515,6 +2583,7 @@ def main() -> int:
     missing.extend(validate_polyline_connector_contract(module))
     missing.extend(validate_layout_box_contract(module))
     missing.extend(validate_falloff_contract(module))
+    missing.extend(validate_emphasis_contract(module))
     missing.extend(validate_fluent_setters_keep_their_class(module))
     missing.extend(validate_editorial_contract(module))
     missing.extend(validate_theme_typography_contract(module))

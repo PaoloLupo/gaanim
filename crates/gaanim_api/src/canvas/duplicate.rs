@@ -4,6 +4,7 @@
 use gaanim_core::ObjectId;
 use gaanim_core::glam::DVec2;
 
+use super::ops::SharedCanvasState;
 use super::types::{ObjectSpec, SpawnKind};
 use super::{DrawableHandle, SceneModel};
 
@@ -405,51 +406,56 @@ impl SceneModel {
 
     /// A new drawable declared like `spec`, with copies of its members.
     fn clone_spec(&mut self, spec: &ObjectSpec) -> DrawableHandle {
-        let mut members = Vec::new();
-        let kind = match &spec.kind {
-            SpawnKind::Group(ids) | SpawnKind::GroupNoCenter(ids) => {
-                for id in ids {
-                    let member = self
-                        .state
-                        .lock()
-                        .expect("canvas state poisoned")
-                        .object_specs
-                        .get(id)
-                        .cloned();
-                    if let Some(member) = member {
-                        let member_spec = member.lock().expect("object spec poisoned").clone();
-                        members.push(self.clone_spec(&member_spec));
-                    }
-                }
-                let ids: Vec<ObjectId> = members.iter().map(|member| member.id).collect();
-                if matches!(spec.kind, SpawnKind::GroupNoCenter(_)) {
-                    SpawnKind::GroupNoCenter(ids)
-                } else {
-                    SpawnKind::Group(ids)
+        clone_spec_in(&self.state, spec)
+    }
+}
+
+/// A new drawable declared like `spec`, with copies of its members, in the
+/// scene `state` belongs to.
+pub(crate) fn clone_spec_in(state: &SharedCanvasState, spec: &ObjectSpec) -> DrawableHandle {
+    let mut members = Vec::new();
+    let kind = match &spec.kind {
+        SpawnKind::Group(ids) | SpawnKind::GroupNoCenter(ids) => {
+            for id in ids {
+                let member = state
+                    .lock()
+                    .expect("canvas state poisoned")
+                    .object_specs
+                    .get(id)
+                    .cloned();
+                if let Some(member) = member {
+                    let member_spec = member.lock().expect("object spec poisoned").clone();
+                    members.push(clone_spec_in(state, &member_spec));
                 }
             }
-            other => other.clone(),
-        };
-        let handle = self.spawn(kind.clone());
-        {
-            let mut target = handle.spec.lock().expect("object spec poisoned");
-            let id = target.id;
-            *target = spec.clone();
-            target.id = id;
-            target.kind = kind;
-            // The copy is placed explicitly, not by the source's layout.
-            target.layout_owner = None;
+            let ids: Vec<ObjectId> = members.iter().map(|member| member.id).collect();
+            if matches!(spec.kind, SpawnKind::GroupNoCenter(_)) {
+                SpawnKind::GroupNoCenter(ids)
+            } else {
+                SpawnKind::Group(ids)
+            }
         }
-        if members.is_empty() {
-            handle
-        } else {
-            handle.with_style_targets(
-                members
-                    .iter()
-                    .flat_map(|member| member.inherited_style_targets())
-                    .collect(),
-            )
-        }
+        other => other.clone(),
+    };
+    let handle = super::canvas_impl::spawn_in(state, kind.clone(), true);
+    {
+        let mut target = handle.spec.lock().expect("object spec poisoned");
+        let id = target.id;
+        *target = spec.clone();
+        target.id = id;
+        target.kind = kind;
+        // The copy is placed explicitly, not by the source's layout.
+        target.layout_owner = None;
+    }
+    if members.is_empty() {
+        handle
+    } else {
+        handle.with_style_targets(
+            members
+                .iter()
+                .flat_map(|member| member.inherited_style_targets())
+                .collect(),
+        )
     }
 }
 

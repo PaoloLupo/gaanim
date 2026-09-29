@@ -2297,6 +2297,17 @@ impl Anim {
         })
     }
 
+    /// Turn the target off and on `count` times (at least one), each blink
+    /// taking half a second unless a duration is set.
+    pub fn blink(self, count: u32) -> Self {
+        let count = count.max(1);
+        let mut anim = self.effect(AnimationType::Blink { count });
+        if !anim.duration_explicit {
+            anim.inner.duration = 0.5 * f64::from(count);
+        }
+        anim
+    }
+
     pub fn wiggle(self) -> Self {
         if self.property_target_is_text_selection() {
             return self.selection_effect(crate::anim::TextSelectionEffect::Wiggle);

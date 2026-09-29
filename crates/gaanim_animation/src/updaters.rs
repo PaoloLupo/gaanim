@@ -1473,6 +1473,20 @@ pub struct SurroundingRect {
     pub padding: [f64; 4],
     pub corner_radius: f64,
     pub last_bounds: Option<gaanim_math::Bounds3D>,
+    /// What is drawn inside the padded bounds.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub shape: SurroundingShape,
+}
+
+/// What a [`SurroundingRect`] draws inside its padded bounds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum SurroundingShape {
+    /// The frame: a rectangle, rounded by `corner_radius`.
+    #[default]
+    Frame,
+    /// A single line along the bottom edge, as an underline.
+    Underline,
 }
 
 impl SurroundingRect {
@@ -1484,6 +1498,16 @@ impl SurroundingRect {
             padding,
             corner_radius,
             last_bounds: None,
+            shape: SurroundingShape::Frame,
+        }
+    }
+
+    /// A line under the targets, `gap` scene units below them and as wide as
+    /// they are plus `overhang` on each side.
+    pub fn underline(targets: Vec<gaanim_core::ObjectId>, gap: f64, overhang: f64) -> Self {
+        Self {
+            shape: SurroundingShape::Underline,
+            ..Self::new(targets, [0.0, overhang, gap, overhang], 0.0)
         }
     }
 }
@@ -1554,6 +1578,25 @@ pub fn surrounding_rect_system(world: &mut World) {
             continue;
         };
 
+        if frame.shape == SurroundingShape::Underline {
+            let mut line = BezPath::new();
+            line.move_to((bounds.min.x, bounds.min.y));
+            line.line_to((bounds.max.x, bounds.min.y));
+            write_path(world, entity, line);
+            let bounds = gaanim_math::Bounds3D::new_2d(
+                bounds.min.x,
+                bounds.min.y,
+                bounds.max.x,
+                bounds.min.y,
+            );
+            if let Some(mut local) = world.get_mut::<LocalBounds>(entity) {
+                local.0 = bounds;
+            }
+            if let Some(mut live) = world.get_mut::<SurroundingRect>(entity) {
+                live.last_bounds = Some(bounds);
+            }
+            continue;
+        }
         let radius = frame
             .corner_radius
             .min(bounds.width().abs() * 0.5)
@@ -2612,6 +2655,7 @@ mod tests {
                     padding: [2.0, 4.0, 6.0, 8.0],
                     corner_radius: 8.0,
                     last_bounds: None,
+                    shape: SurroundingShape::Frame,
                 },
             ))
             .id();
@@ -2634,6 +2678,40 @@ mod tests {
             .x += 20.0;
         surrounding_rect_system(&mut world);
         assert_eq!(world.get::<LocalBounds>(frame).unwrap().0.max.x, 59.0);
+    }
+
+    #[test]
+    fn an_underline_is_one_line_under_the_padded_bounds() {
+        let mut world = World::new();
+        let id = ObjectId::from_parts(1, 1);
+        world.spawn((
+            gaanim_scene::MobjectId(id),
+            SpatialTransform::new_2d(10.0, 20.0),
+            LocalBounds(gaanim_math::Bounds3D::new_2d(-5.0, -2.0, 5.0, 2.0)),
+        ));
+        let empty = Arc::new(BezPath::new());
+        let line = world
+            .spawn((
+                gaanim_scene::MobjectId(ObjectId::from_parts(2, 1)),
+                SpatialTransform::default(),
+                Path2D(empty.clone()),
+                PathSource(empty),
+                LocalBounds(gaanim_math::Bounds3D::default()),
+                SurroundingRect::underline(vec![id], 1.0, 0.5),
+            ))
+            .id();
+        surrounding_rect_system(&mut world);
+        // The target spans x 5..15 and y 18..22: the line sits 1 below and
+        // overhangs 0.5 on each side.
+        let bounds = world.get::<LocalBounds>(line).unwrap().0;
+        assert_eq!(bounds, gaanim_math::Bounds3D::new_2d(4.5, 17.0, 15.5, 17.0));
+        let path = world.get::<PathSource>(line).unwrap().0.clone();
+        assert_eq!(path.elements().len(), 2, "one segment: a move and a line");
+        let drawn = path.bounding_box();
+        assert_eq!(
+            (drawn.x0, drawn.x1, drawn.y0, drawn.y1),
+            (4.5, 15.5, 17.0, 17.0)
+        );
     }
 
     #[test]

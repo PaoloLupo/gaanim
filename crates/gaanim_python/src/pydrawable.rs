@@ -1212,6 +1212,82 @@ impl PyCanvasAnim {
         })
     }
 
+    #[pyo3(signature = (count=3))]
+    fn blink(&self, count: u32) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        self.require_effect_slot("blink")?;
+        if count == 0 {
+            return Err(PyValueError::new_err("count must be at least 1"));
+        }
+        Ok(Self {
+            inner: self.inner.clone().blink(count),
+        })
+    }
+
+    #[pyo3(signature = (count=4, max_scale=3.0, lag=0.2))]
+    fn broadcast(&self, count: usize, max_scale: f64, lag: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        self.require_effect_slot("broadcast")?;
+        Ok(Self {
+            inner: self
+                .inner
+                .clone()
+                .broadcast(count, max_scale, lag)
+                .map_err(PyValueError::new_err)?,
+        })
+    }
+
+    #[pyo3(signature = (*, color=None, width=None, padding=None, corner_radius=0.08, time_width=0.4))]
+    fn flash_around(
+        &self,
+        color: Option<PyColor>,
+        width: Option<f64>,
+        padding: Option<Bound<'_, PyAny>>,
+        corner_radius: f64,
+        time_width: f64,
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        self.require_effect_slot("flash_around")?;
+        let padding = crate::pycanvas::surrounding_padding(padding)?;
+        Ok(Self {
+            inner: self
+                .inner
+                .clone()
+                .flash_around(
+                    color.map(|color| color.0),
+                    width,
+                    padding,
+                    corner_radius,
+                    time_width,
+                )
+                .map_err(PyValueError::new_err)?,
+        })
+    }
+
+    #[pyo3(signature = (*, color=None, width=None, gap=0.06, overhang=0.04, time_width=0.5))]
+    fn flash_under(
+        &self,
+        color: Option<PyColor>,
+        width: Option<f64>,
+        gap: f64,
+        overhang: f64,
+        time_width: f64,
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        self.require_effect_slot("flash_under")?;
+        Ok(Self {
+            inner: self
+                .inner
+                .clone()
+                .flash_under(color.map(|color| color.0), width, gap, overhang, time_width)
+                .map_err(PyValueError::new_err)?,
+        })
+    }
+
     fn pulse(&self) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
