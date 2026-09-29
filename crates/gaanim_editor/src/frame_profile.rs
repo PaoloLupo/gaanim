@@ -99,6 +99,9 @@ struct Window {
     compile: Phase,
     rebuilt: u64,
     fragments: usize,
+    /// Visible and total Mobjects at the end of the window.
+    visible: usize,
+    mobjects: usize,
     /// Lowest preview resolution scale used in the window.
     preview_scale: f32,
     timeline_start: f64,
@@ -117,6 +120,8 @@ impl Window {
             compile: Phase::ZERO,
             rebuilt: 0,
             fragments: 0,
+            visible: 0,
+            mobjects: 0,
             preview_scale: 1.0,
             timeline_start: timeline_time,
             timeline_end: timeline_time,
@@ -260,6 +265,7 @@ fn main_frame_end(
     mut profile: ResMut<FrameProfile>,
     timeline: Option<Res<Timeline>>,
     preview: Option<Res<PreviewResolution>>,
+    mobjects: Query<Has<gaanim_scene::Visible>, With<gaanim_scene::MobjectId>>,
 ) {
     let now = Instant::now();
     let main = profile.main_start.take().map(|start| now - start);
@@ -287,6 +293,12 @@ fn main_frame_end(
         }
     }
     if window.started.elapsed() >= Duration::from_secs(1) {
+        window.mobjects = 0;
+        window.visible = 0;
+        for visible in &mobjects {
+            window.mobjects += 1;
+            window.visible += usize::from(visible);
+        }
         let next = window.timeline_end;
         flush_window(&mut profile);
         profile.window = Some(Window::new(next));
@@ -307,7 +319,7 @@ fn flush_window(profile: &mut FrameProfile) {
     let frames = window.frames;
     let avg_dt_ms = window.frame_dt.avg_ms(frames);
     let line = format!(
-        "t={:6.2}-{:6.2}s {:>3} fps | frame {:5.1} [{:5.1}] | main {:5.1} [{:5.1}] seek {:5.1} [{:5.1}] compile {:5.1} [{:5.1}] rebuilt {:5.1}/{:<5} | render {:5.1} [{:5.1}] acquire {:5.1} [{:5.1}] graph+present {:5.1} [{:5.1}] preview {:3.0}% | {}",
+        "t={:6.2}-{:6.2}s {:>3} fps | frame {:5.1} [{:5.1}] | main {:5.1} [{:5.1}] seek {:5.1} [{:5.1}] compile {:5.1} [{:5.1}] rebuilt {:5.1}/{:<5} | render {:5.1} [{:5.1}] acquire {:5.1} [{:5.1}] graph+present {:5.1} [{:5.1}] preview {:3.0}% | visible {}/{} | {}",
         window.timeline_start,
         window.timeline_end,
         (f64::from(frames) / window.started.elapsed().as_secs_f64()).round(),
@@ -328,6 +340,8 @@ fn flush_window(profile: &mut FrameProfile) {
         render.graph.avg_ms(render.frames),
         render.graph.max_ms(),
         window.preview_scale * 100.0,
+        window.visible,
+        window.mobjects,
         window.segment.as_deref().unwrap_or("-"),
     );
     eprintln!("GAANIM_FRAME_PROFILE {line}");

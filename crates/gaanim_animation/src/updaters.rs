@@ -1,5 +1,5 @@
 use crate::tween::DeltaTime;
-use bevy::prelude::{Children, Component};
+use bevy::prelude::{Children, Component, DetectChangesMut};
 use gaanim_core::ObjectId;
 use gaanim_core::glam::{DMat4, DQuat, DVec2, DVec3};
 use gaanim_core::kurbo::{BezPath, Shape};
@@ -1643,7 +1643,7 @@ pub fn tracking_line_system(world: &mut World) {
     let mut boxes = world.query::<(&LayoutBoundsTrack, &mut LocalBounds)>();
     for (track, mut bounds) in boxes.iter_mut(world) {
         if let Some(value) = track.at(time) {
-            bounds.0 = value;
+            bounds.set_if_neq(LocalBounds(value));
         }
     }
     let mut updates = Vec::new();
@@ -1906,24 +1906,28 @@ fn write_path(world: &mut World, entity: Entity, path: BezPath) {
         reveal,
         world.get::<crate::writing::PathTrimWindow>(entity),
     );
+    // These systems rewrite every tracked path each frame; writing only what
+    // differs keeps unchanged paths out of the renderer's re-encoding and the
+    // timeline's restore set.
     if let Some(mut path_comp) = world.get_mut::<Path2D>(entity) {
-        path_comp.0 = visible;
+        path_comp.set_if_neq(Path2D(visible));
     }
     if let Some(mut source) = world.get_mut::<PathSource>(entity) {
-        source.0 = path.clone();
+        source.set_if_neq(PathSource(path.clone()));
     }
     if let Some(mut bounds) = world.get_mut::<LocalBounds>(entity) {
-        if path.elements().is_empty() {
-            bounds.0 = gaanim_math::Bounds3D::new_2d(0.0, 0.0, 0.0, 0.0);
+        let local = if path.elements().is_empty() {
+            gaanim_math::Bounds3D::new_2d(0.0, 0.0, 0.0, 0.0)
         } else {
             let rect = gaanim_core::kurbo::Shape::bounding_box(path.as_ref());
-            bounds.0 = gaanim_math::Bounds3D::new_2d(
+            gaanim_math::Bounds3D::new_2d(
                 rect.x0 - 12.0,
                 rect.y0 - 12.0,
                 rect.x1 + 12.0,
                 rect.y1 + 12.0,
-            );
-        }
+            )
+        };
+        bounds.set_if_neq(LocalBounds(local));
     }
 }
 

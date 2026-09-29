@@ -275,6 +275,17 @@ pub struct Timeline {
     pub last_restore_kf_time: Option<OrderedFloat<f64>>,
     #[cfg_attr(feature = "serde", serde(skip))]
     replay_baseline: Option<ReplayBaseline>,
+    /// Whether seeks may restore from segment checkpoints; see
+    /// [`Self::seek`]. On unless `GAANIM_SEGMENT_CHECKPOINTS=0`.
+    ///
+    /// A seek from a checkpoint always restores, like every seek of a
+    /// timeline with scenes or reactive state: a write from outside the
+    /// timeline to a channel no clip drives is undone, where replaying over
+    /// the world from t=0 would have kept it.
+    #[cfg_attr(feature = "serde", serde(skip, default = "segment_checkpoints_enabled"))]
+    pub segment_checkpoints: bool,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    checkpoints: Checkpoints,
     /// Arena of scene metadata for multi-scene timelines.
     pub scenes: SlotMap<SceneId, SceneMetadata>,
     /// Index mapping scene start times to scene IDs for O(log n) lookup.
@@ -331,6 +342,55 @@ pub struct TimelineMarker {
     pub time: f64,
 }
 
+/// Most segment checkpoints kept at once; each holds a whole world snapshot.
+const MAX_CHECKPOINTS: usize = 4;
+
+/// How far past a segment start an earlier clip may end, from floating-point
+/// accumulation, and still count as finished there.
+const CHECKPOINT_SLACK: f64 = 1e-9;
+
+fn segment_checkpoints_enabled() -> bool {
+    std::env::var_os("GAANIM_SEGMENT_CHECKPOINTS").is_none_or(|value| value != "0")
+}
+
+/// World snapshots at segment starts, captured when playback crosses into a
+/// segment or a second seek in a row needs one.
+///
+/// A checkpoint at `t` holds the world with every clip that starts before
+/// `t` applied and none of the others, which is what restoring the t=0
+/// keyframe and replaying those clips produces. Seeking from it replays only
+/// the clips from `t` on, so a seek late in a long timeline costs what one
+/// in its first segment does.
+#[derive(Debug, Clone, Default)]
+struct Checkpoints {
+    /// Timeline revision and segment starts `times` and `snapshots` belong to.
+    revision: Option<u64>,
+    starts: Vec<f64>,
+    /// Segment starts where every earlier clip has finished.
+    times: Vec<OrderedFloat<f64>>,
+    snapshots: BTreeMap<OrderedFloat<f64>, WorldSnapshot>,
+    /// Captured times, least recently used first.
+    recent: Vec<OrderedFloat<f64>>,
+    /// The missing checkpoint the last seek could have used.
+    wanted: Option<OrderedFloat<f64>>,
+}
+
+impl Checkpoints {
+    fn touch(&mut self, time: OrderedFloat<f64>) {
+        self.recent.retain(|recent| *recent != time);
+        self.recent.push(time);
+    }
+
+    fn insert(&mut self, time: OrderedFloat<f64>, snapshot: WorldSnapshot) {
+        self.snapshots.insert(time, snapshot);
+        self.touch(time);
+        while self.recent.len() > MAX_CHECKPOINTS {
+            let oldest = self.recent.remove(0);
+            self.snapshots.remove(&oldest);
+        }
+    }
+}
+
 impl Default for Timeline {
     fn default() -> Self {
         Self {
@@ -354,6 +414,8 @@ impl Default for Timeline {
             seek_request: None,
             last_restore_kf_time: None,
             replay_baseline: None,
+            segment_checkpoints: segment_checkpoints_enabled(),
+            checkpoints: Checkpoints::default(),
             scenes: SlotMap::with_key(),
             scene_index: BTreeMap::new(),
             scene_connections: Vec::new(),
@@ -887,6 +949,7 @@ impl Timeline {
     /// of clip start times (e.g. during editor drag/resize operations).
     pub fn rebuild_clip_index(&mut self) {
         self.replay_baseline = None;
+        self.checkpoints = Checkpoints::default();
         self.clip_index.clear();
         for clip in self.clips.values() {
             let start_key = OrderedFloat(clip.start);
@@ -937,6 +1000,190 @@ impl Timeline {
         // Ensure deterministic order
         result.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap());
         result
+    }
+
+    /// The snapshot a seek to `target` restores: the latest keyframe at or
+    /// before it, or a later segment checkpoint, captured now if needed.
+    fn restore_base(&mut self, world: &mut World, target: f64) -> Option<OrderedFloat<f64>> {
+        let keyframe = self
+            .keyframes
+            .range(..=OrderedFloat(target))
+            .next_back()
+            .map(|(&time, _)| time)?;
+        let Some(checkpoint) = self
+            .checkpoint_before(world, target)
+            .filter(|time| *time > keyframe)
+        else {
+            return Some(keyframe);
+        };
+        if !self.checkpoints.snapshots.contains_key(&checkpoint) {
+            // One seek into a segment (a measurement, a thumbnail) costs
+            // less from the base it has than capturing; a second one shows
+            // the segment is being played or browsed. Any earlier checkpoint
+            // is as valid a base as the keyframe, and keeps playback that
+            // just crossed into the segment on its incremental replay.
+            if self.checkpoints.wanted != Some(checkpoint) && !self.crossing_into(world, checkpoint)
+            {
+                self.checkpoints.wanted = Some(checkpoint);
+                let earlier = self
+                    .checkpoints
+                    .snapshots
+                    .range(..checkpoint)
+                    .next_back()
+                    .map(|(&time, _)| time)
+                    .filter(|time| *time > keyframe);
+                if let Some(earlier) = earlier {
+                    self.checkpoints.touch(earlier);
+                }
+                return Some(earlier.unwrap_or(keyframe));
+            }
+            self.capture_checkpoint(world, checkpoint);
+        }
+        self.checkpoints.touch(checkpoint);
+        Some(checkpoint)
+    }
+
+    /// Whether the last seek left the world before `checkpoint` on the base
+    /// it would be captured from, as playback does on the frame before it
+    /// crosses into a segment: capturing then replays only what changed.
+    fn crossing_into(&self, world: &World, checkpoint: OrderedFloat<f64>) -> bool {
+        self.replay_baseline.as_ref().is_some_and(|baseline| {
+            baseline.world == world.id()
+                && baseline.property_revision == self.property_revision
+                && baseline.time <= checkpoint.0
+                && Some(baseline.keyframe) == self.capture_base(checkpoint.0)
+        })
+    }
+
+    /// The latest keyframe or captured checkpoint before a checkpoint at
+    /// `time`: settling the clips between them yields that checkpoint, so
+    /// consecutive segments are captured one segment's clips at a time.
+    fn capture_base(&self, time: f64) -> Option<OrderedFloat<f64>> {
+        let keyframe = self
+            .keyframes
+            .range(..=OrderedFloat(time))
+            .next_back()
+            .map(|(&time, _)| time);
+        let checkpoint = self
+            .checkpoints
+            .snapshots
+            .range(..OrderedFloat(time))
+            .next_back()
+            .map(|(&time, _)| time);
+        keyframe.max(checkpoint)
+    }
+
+    /// The keyframe or checkpoint recorded at `time`.
+    fn base_snapshot(&self, time: OrderedFloat<f64>) -> &WorldSnapshot {
+        self.keyframes
+            .get(&time)
+            .or_else(|| self.checkpoints.snapshots.get(&time))
+            .expect("seek base has a snapshot")
+    }
+
+    /// The latest segment start at or before `target` a checkpoint can hold.
+    fn checkpoint_before(&mut self, world: &mut World, target: f64) -> Option<OrderedFloat<f64>> {
+        let times = self.checkpoint_times(world)?;
+        let index = times.partition_point(|time| time.0 <= target);
+        index.checked_sub(1).map(|index| times[index])
+    }
+
+    /// Segment starts where checkpoints can be taken, or `None` when this
+    /// world cannot use them.
+    fn checkpoint_times(&mut self, world: &mut World) -> Option<&[OrderedFloat<f64>]> {
+        // Reactive state is rebuilt by running it from t=0, not replayed
+        // from a checkpoint; property preparation seeks to clip starts
+        // inside an unfinished revision. Scene membership is restored with
+        // the snapshot and scene visibility follows the playhead.
+        if !self.segment_checkpoints
+            || world.contains_resource::<gaanim_animation::PreparingPropertySources>()
+            || has_replayed_state(world)
+        {
+            return None;
+        }
+        if self.checkpoints.revision != Some(self.property_revision)
+            || !self
+                .checkpoints
+                .starts
+                .iter()
+                .copied()
+                .eq(self.segments.iter().map(|segment| segment.start_time))
+        {
+            self.checkpoints = Checkpoints {
+                revision: Some(self.property_revision),
+                starts: self.segments.iter().map(|segment| segment.start_time).collect(),
+                times: self.settled_segment_starts(),
+                ..Checkpoints::default()
+            };
+        }
+        Some(&self.checkpoints.times)
+    }
+
+    /// Segment starts after t=0 where every clip that starts earlier has
+    /// finished, up to the first ungrouping, which replay repeats in place.
+    fn settled_segment_starts(&self) -> Vec<OrderedFloat<f64>> {
+        let mut starts: Vec<f64> = self
+            .segments
+            .iter()
+            .map(|segment| segment.start_time)
+            .filter(|time| *time > 0.0)
+            .collect();
+        starts.sort_by(f64::total_cmp);
+        starts.dedup();
+        let mut clips = self
+            .clip_index
+            .iter()
+            .flat_map(|(start, ids)| ids.iter().map(move |id| (start.0, *id)))
+            .peekable();
+        let mut latest_end = f64::NEG_INFINITY;
+        let mut times = Vec::new();
+        for time in starts {
+            while let Some(&(start, id)) = clips.peek() {
+                if start >= time {
+                    break;
+                }
+                clips.next();
+                let Some(clip) = self.clips.get(id) else {
+                    continue;
+                };
+                if matches!(clip.payload, ClipPayload::Ungroup { .. }) {
+                    return times;
+                }
+                latest_end = latest_end.max(clip.end());
+            }
+            if latest_end <= time + CHECKPOINT_SLACK {
+                times.push(OrderedFloat(time));
+            }
+        }
+        times
+    }
+
+    /// Record the checkpoint at `time`, leaving the playhead where it was.
+    fn capture_checkpoint(&mut self, world: &mut World, time: OrderedFloat<f64>) {
+        let current_time = self.current_time;
+        let segment_position = self.segment_position;
+        let started = bevy::platform::time::Instant::now();
+        self.seek_with(world, time.0, Some(time.0));
+        let replayed = started.elapsed();
+        let snapshot = WorldSnapshot::capture(world);
+        if std::env::var_os("GAANIM_CHECKPOINT_TIMINGS").is_some() {
+            eprintln!(
+                "GAANIM_CHECKPOINT_TIMINGS t={:.3}s replay {:.1} ms, capture {:.1} ms, {} entities",
+                time.0,
+                replayed.as_secs_f64() * 1000.0,
+                (started.elapsed() - replayed).as_secs_f64() * 1000.0,
+                snapshot.entities.len()
+            );
+        }
+        self.current_time = current_time;
+        self.segment_position = segment_position;
+        // The world now holds the checkpoint exactly, so the seek that
+        // wanted it replays from it incrementally: every clip from `time`
+        // on either rewrites its absolute channel or marks its target for
+        // a restore, and nothing else differs from the snapshot.
+        self.last_restore_kf_time = None;
+        self.replay_baseline = Some(replay_baseline_now(world, time, time.0, self.property_revision));
+        self.checkpoints.insert(time, snapshot);
     }
 
     fn can_replay_without_restore(
@@ -1161,7 +1408,21 @@ impl Timeline {
     /// Stateful timelines restore the closest keyframe on every seek. Timelines containing only
     /// absolute 2D property clips may replay from an already-restored keyframe without repeating
     /// the full world restore; every other payload keeps the deterministic restore path.
+    ///
+    /// Past the first segment start where every earlier clip has finished, a seek restores a
+    /// checkpoint of that instant instead of the t=0 keyframe, and replays only the clips from
+    /// there on. The checkpoint is captured when playback crosses into its segment, replaying
+    /// incrementally from the previous one, or when a second seek in a row lands past it, so a
+    /// one-off seek never pays for it (see [`Self::segment_checkpoints`]).
     pub fn seek(&mut self, world: &mut World, target_time: f64) {
+        self.seek_with(world, target_time, None);
+    }
+
+    /// [`Self::seek`], or with `before` the state a checkpoint at `before`
+    /// holds: every clip that starts before it settled at its end and the
+    /// later ones held at their initial values, replayed from the latest
+    /// keyframe or checkpoint before it.
+    fn seek_with(&mut self, world: &mut World, target_time: f64, before: Option<f64>) {
         self.prepare_property_starts(world);
         let max_time = self
             .loop_range
@@ -1198,12 +1459,14 @@ impl Timeline {
             ReactiveStates::new()
         };
 
-        // 1. Locate the nearest recorded keyframe <= target_time
-        let keyframe_time = self
-            .keyframes
-            .range(..=OrderedFloat(clamped_target))
-            .next_back()
-            .map(|(&time, _)| time);
+        // 1. Locate the nearest recorded keyframe <= target_time, or a later
+        //    segment checkpoint.
+        let keyframe_time = match before {
+            Some(before) => self.capture_base(before),
+            None => self.restore_base(world, clamped_target),
+        };
+        let from_checkpoint =
+            keyframe_time.is_some_and(|time| !self.keyframes.contains_key(&time));
 
         let mut restored_entity_map = None;
         let mut replay_without_restore = false;
@@ -1211,12 +1474,18 @@ impl Timeline {
         // Objects restored by an incremental replay; `None` after a full restore.
         let mut restored_objects = None;
         let kf_start_time = if let Some(kf_time) = keyframe_time {
-            replay_without_restore =
-                self.can_replay_without_restore(world, kf_time, clamped_target);
+            // Replaying over the world without a restore relies on holding
+            // future clips at their initial values, which a checkpoint does
+            // not repeat (see below).
+            replay_without_restore = !from_checkpoint
+                && before.is_none()
+                && self.can_replay_without_restore(world, kf_time, clamped_target);
             if !replay_without_restore {
-                dirty = self.dirty_entities(world, kf_time, clamped_target);
-                let restore_scene_visibility = self.scenes.is_empty();
-                let snapshot = &self.keyframes[&kf_time];
+                // A capture replays forward like any seek: entities that no
+                // clip up to it restores keep what the last seek left, and
+                // its absolute clips rewrite their channels.
+                dirty = self.dirty_entities(world, kf_time, clamped_target);                let restore_scene_visibility = self.scenes.is_empty();
+                let snapshot = self.base_snapshot(kf_time);
                 restored_entity_map = Some(match &dirty {
                     Some(dirty) => {
                         let mut restored = bevy::platform::collections::HashSet::new();
@@ -1252,7 +1521,10 @@ impl Timeline {
         self.current_time = clamped_target;
 
         // 2. Fetch all clips starting within [kf_start_time, target_time]
-        let candidate_clips = self.clips_in_range(kf_start_time, self.current_time);
+        let mut candidate_clips = self.clips_in_range(kf_start_time, self.current_time);
+        if let Some(before) = before {
+            candidate_clips.retain(|clip| clip.start < before);
+        }
 
         // Map ObjectIds to current Bevy Entities dynamically
         let entity_map = restored_entity_map.unwrap_or_else(|| {
@@ -1271,16 +1543,26 @@ impl Timeline {
         // when continuous playback loops or crosses a segment boundary.
         // Initialize only the earliest future clip per object, then let
         // past/current clips below replay over it as usual.
+        //
+        // A checkpoint already holds these values for the clips after it, as
+        // replaying from t=0 would leave them, so none are written again: a
+        // channel no clip has touched since keeps it, and a clip that has
+        // run since replays over its channel. Rewriting one would instead
+        // undo the clips before the checkpoint on the same channel.
         let mut future_property_initials = HashMap::new();
         let future_starts = (
-            std::ops::Bound::Excluded(OrderedFloat(self.current_time)),
+            match before {
+                Some(before) => std::ops::Bound::Included(OrderedFloat(before)),
+                None => std::ops::Bound::Excluded(OrderedFloat(self.current_time)),
+            },
             std::ops::Bound::Included(OrderedFloat(self.cached_duration)),
         );
         let future_clips = self
             .clip_index
             .range(future_starts)
             .flat_map(|(_, ids)| ids)
-            .filter_map(|id| self.clips.get(*id));
+            .filter_map(|id| self.clips.get(*id))
+            .filter(|_| !from_checkpoint);
         for clip in future_clips {
             let ClipPayload::Animation(anim) = &clip.payload else {
                 continue;
@@ -1335,7 +1617,9 @@ impl Timeline {
             match clip.payload {
                 ClipPayload::Animation(ref anim) => {
                     if let Some(&target_entity) = entity_map.get(&anim.target) {
-                        if clip.end() <= self.current_time {
+                        // A checkpoint settles every earlier clip, including
+                        // one whose end rounding put just past it.
+                        if clip.end() <= self.current_time || before.is_some() {
                             // Animation finished before or at seek head: apply final state.
                             let final_t = anim.rate_func.evaluate(1.0);
                             apply_lens_spec(world, target_entity, &anim.lens, final_t, true);
@@ -2426,6 +2710,49 @@ fn held_echo_time(clips: &[&Clip], time: f64, lag: f64) -> f64 {
         target -= length;
     }
     time
+}
+
+/// The baseline of a world that holds what a seek from `keyframe` to
+/// `time` left: later writes, and components added or removed since, mark
+/// the entities a forward replay must restore.
+fn replay_baseline_now(
+    world: &mut World,
+    keyframe: OrderedFloat<f64>,
+    time: f64,
+    property_revision: u64,
+) -> ReplayBaseline {
+    let tick = world.increment_change_tick();
+    let entities: Vec<Entity> = world
+        .query_filtered::<Entity, With<MobjectId>>()
+        .iter(world)
+        .collect();
+    let archetypes = entities
+        .into_iter()
+        .filter_map(|entity| Some((entity, world.get_entity(entity).ok()?.archetype().id())))
+        .collect();
+    ReplayBaseline {
+        world: world.id(),
+        keyframe,
+        time,
+        property_revision,
+        tick,
+        archetypes,
+    }
+}
+
+/// Whether the world holds state a seek rebuilds by running it from t=0
+/// (updaters, sampled series, traces) rather than restoring it.
+fn has_replayed_state(world: &mut World) -> bool {
+    world
+        .query_filtered::<Entity, Or<(
+            With<gaanim_animation::Updater>,
+            With<gaanim_animation::SampledSeriesDrivers>,
+            With<gaanim_animation::TracedPath>,
+            With<gaanim_animation::TracedPath3D>,
+        )>>()
+        .iter(world)
+        .next()
+        .is_some()
 }
 
 /// Whether the world has any traced path, whose points a seek must keep.
@@ -5223,6 +5550,224 @@ mod tests {
                 .query_filtered::<Entity, bevy::prelude::Changed<SpatialTransform>>()
                 .iter(&world)
                 .any(|entity| entity == entities[2])
+        );
+    }
+
+    /// Four segments starting at 0, 1, 2 and 3; a clip runs across 3. With
+    /// `scenes`, each segment is a scene, as slides compile.
+    fn checkpoint_fixture(
+        checkpoints: bool,
+        signal: bool,
+        scenes: bool,
+    ) -> (World, Timeline, [Entity; 3]) {
+        use gaanim_core::glam::DVec3;
+
+        let mut world = World::new();
+        let mut path = BezPath::new();
+        path.move_to((0.0, 0.0));
+        path.curve_to((10.0, 20.0), (20.0, 20.0), (30.0, 0.0));
+        let entities = [1, 2, 3].map(|raw| {
+            world
+                .spawn((
+                    MobjectId(ObjectId::from_raw(raw)),
+                    SpatialTransform::default(),
+                    Opacity(1.0),
+                    Path2D(Arc::new(path.clone())),
+                    PathSource(Arc::new(path.clone())),
+                ))
+                .id()
+        });
+        if signal {
+            // Forces the restoring path on the reference too.
+            world.spawn((
+                MobjectId(ObjectId::from_raw(4)),
+                SpatialTransform::default(),
+                Opacity(1.0),
+                gaanim_animation::FloatSignal::new(0.0),
+            ));
+        }
+        let mut timeline = Timeline::default();
+        timeline.segment_checkpoints = checkpoints;
+        let track = timeline.add_track("replay", 0);
+        let mut clip = |target, start, duration, lens| {
+            timeline.add_clip(
+                track,
+                start,
+                duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: ObjectId::from_raw(target),
+                    lens,
+                    rate_func: RateFunc::Linear,
+                    delay: 0.0,
+                    label: None,
+                }),
+            );
+        };
+        let at = |x| DVec3::new(x, 0.0, 0.0);
+        // Written in the first segment, then undone later from another
+        // start: before that clip starts, the earlier write still shows.
+        clip(1, 0.0, 0.8, PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 });
+        clip(1, 2.2, 0.4, PropertyLensSpec::PathCompletion { from: 0.5, to: 0.3 });
+        clip(1, 0.2, 0.5, PropertyLensSpec::Translation { from: at(0.0), to: at(2.0) });
+        clip(1, 1.0, 0.0, PropertyLensSpec::Translation { from: at(2.0), to: at(-1.0) });
+        clip(1, 2.0, 0.5, PropertyLensSpec::Translation { from: at(-1.0), to: at(4.0) });
+        // Hidden until its clip, a segment later.
+        clip(2, 1.2, 0.4, PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 });
+        clip(2, 0.5, 0.5, PropertyLensSpec::Opacity { from: 1.0, to: 0.2 });
+        clip(2, 1.0, 0.5, PropertyLensSpec::Opacity { from: 0.2, to: 0.9 });
+        // Runs across the last segment start.
+        clip(3, 2.9, 0.4, PropertyLensSpec::Opacity { from: 1.0, to: 0.0 });
+        clip(3, 3.4, 0.3, PropertyLensSpec::PathCompletion { from: 1.0, to: 0.2 });
+        if scenes {
+            let ids = ["first", "second", "third", "fourth"].map(|name| timeline.add_scene(name));
+            for (index, &scene) in ids.iter().enumerate() {
+                let start = index as f64;
+                timeline.index_scene(scene, start);
+                timeline.add_clip(track, start, 0.0, ClipPayload::SceneStart(scene));
+                timeline.add_clip(track, start + 1.0, 0.0, ClipPayload::SceneEnd(scene));
+            }
+            // Ends exactly where the second segment starts.
+            timeline.add_clip(
+                track,
+                0.8,
+                0.2,
+                ClipPayload::Transition {
+                    from: ids[0],
+                    to: ids[1],
+                    transition_type: TransitionType::Slide {
+                        duration: 0.2,
+                        direction: crate::transition::SlideDirection::Left,
+                    },
+                },
+            );
+            // Moves to the third scene as it starts.
+            timeline.add_clip(
+                track,
+                2.0,
+                0.0,
+                ClipPayload::SetSceneMember {
+                    target: ObjectId::from_raw(1),
+                    scene: Some(ids[2]),
+                },
+            );
+            for (entity, scene) in entities.iter().zip([ids[0], ids[1], ids[3]]) {
+                world
+                    .entity_mut(*entity)
+                    .insert((SceneMember(scene), gaanim_scene::Visible));
+            }
+        }
+        let segments = [0.0, 1.0, 2.0, 3.0, 3.7]
+            .windows(2)
+            .enumerate()
+            .map(|(index, span)| SegmentMetadata {
+                id: index as u32 + 1,
+                name: format!("segment {index}"),
+                notes: None,
+                start_time: span[0],
+                end_time: span[1],
+                stops: Vec::new(),
+            })
+            .collect();
+        timeline.set_segments(segments);
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        (world, timeline, entities)
+    }
+
+    #[test]
+    fn checkpoint_seeks_match_seeks_from_the_first_keyframe() {
+        // Forward playback, which captures each checkpoint from the one
+        // before, then jumps back and forth across segments; and the same
+        // times from the end, which captures the last one from t=0.
+        let forward: Vec<f64> = (0..=60)
+            .map(|step| f64::from(step) / 16.0)
+            .chain([1.0, 0.3, 2.3, 1.1, 3.5, 2.0, 0.0, 3.05, 2.95, 1.9, 3.7])
+            .collect();
+        let backward: Vec<f64> = forward.iter().rev().copied().collect();
+        for (signal, scenes, times) in [(false, false), (true, false), (false, true)]
+            .into_iter()
+            .flat_map(|(signal, scenes)| {
+                [(signal, scenes, &forward), (signal, scenes, &backward)]
+            })
+        {
+            let (mut world, mut timeline, entities) = checkpoint_fixture(true, signal, scenes);
+            let (mut reference_world, mut reference, reference_entities) =
+                checkpoint_fixture(false, signal, scenes);
+            for (step, &time) in times.iter().enumerate() {
+                if step % 17 == 16 && (signal || scenes) {
+                    // A write outside the timeline (a layout pass) since the
+                    // last seek, right after some checkpoint captures. A
+                    // restoring seek undoes it; without scenes or signals
+                    // the reference replays over the world and keeps it.
+                    for (world, entity) in [
+                        (&mut world, entities[2]),
+                        (&mut reference_world, reference_entities[2]),
+                    ] {
+                        world
+                            .get_mut::<SpatialTransform>(entity)
+                            .unwrap()
+                            .translation
+                            .y = 5.0;
+                    }
+                }
+                timeline.seek(&mut world, time);
+                reference.seek(&mut reference_world, time);
+                for (&entity, &reference_entity) in entities.iter().zip(&reference_entities) {
+                    assert_eq!(
+                        world.get::<SpatialTransform>(entity),
+                        reference_world.get::<SpatialTransform>(reference_entity),
+                        "transform at t={time}"
+                    );
+                    assert_eq!(
+                        world.get::<Opacity>(entity),
+                        reference_world.get::<Opacity>(reference_entity),
+                        "opacity at t={time}"
+                    );
+                    assert_eq!(
+                        world.get::<Path2D>(entity),
+                        reference_world.get::<Path2D>(reference_entity),
+                        "path at t={time}, signal={signal}"
+                    );
+                    assert_eq!(
+                        world.get::<SceneMember>(entity),
+                        reference_world.get::<SceneMember>(reference_entity),
+                        "scene at t={time}"
+                    );
+                    assert_eq!(
+                        world.get::<gaanim_scene::Visible>(entity).is_some(),
+                        reference_world
+                            .get::<gaanim_scene::Visible>(reference_entity)
+                            .is_some(),
+                        "visibility at t={time}, scenes={scenes}"
+                    );
+                }
+            }
+            // 3.0 has a clip running across it.
+            assert_eq!(
+                timeline.checkpoints.times,
+                [OrderedFloat(1.0), OrderedFloat(2.0)]
+            );
+            assert_eq!(timeline.checkpoints.snapshots.len(), 2);
+            assert!(reference.checkpoints.snapshots.is_empty());
+        }
+    }
+
+    #[test]
+    fn checkpoints_are_dropped_when_the_timeline_changes() {
+        let (mut world, mut timeline, _) = checkpoint_fixture(true, false, false);
+        // A single seek into a segment does not capture it.
+        timeline.seek(&mut world, 2.5);
+        assert!(timeline.checkpoints.snapshots.is_empty());
+        timeline.seek(&mut world, 2.6);
+        assert_eq!(timeline.checkpoints.snapshots.len(), 1);
+        let track = timeline.add_track("late", 1);
+        // A clip across 2.0 leaves 1.0 as the only checkpoint.
+        timeline.add_clip(track, 1.8, 0.5, ClipPayload::Wait);
+        timeline.seek(&mut world, 2.5);
+        timeline.seek(&mut world, 2.6);
+        assert_eq!(timeline.checkpoints.times, [OrderedFloat(1.0)]);
+        assert_eq!(
+            timeline.checkpoints.snapshots.keys().copied().collect::<Vec<_>>(),
+            [OrderedFloat(1.0)]
         );
     }
 }
