@@ -161,6 +161,7 @@ impl PyProgressRing {
 #[pymethods]
 impl PyVisualization {
     #[pyo3(signature = (value=0.0, *, radius=1.0, width=0.12, color=None, track=true, track_color=None, label=true, decimals=0, label_color=None, font_size=0.5))]
+    #[allow(clippy::too_many_arguments)]
     fn progress_ring(
         &self,
         py: Python<'_>,
@@ -195,6 +196,7 @@ impl PyVisualization {
     }
 
     #[pyo3(signature = (seconds, *, radius=1.0, width=0.12, color=None, track=true, track_color=None, label=true, label_color=None, font_size=0.6))]
+    #[allow(clippy::too_many_arguments)]
     fn countdown(
         &self,
         py: Python<'_>,

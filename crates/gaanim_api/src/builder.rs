@@ -986,6 +986,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn register_textual_hierarchy(
         &mut self,
         parent_id: ObjectId,
@@ -4875,8 +4876,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// - `Shapes` mode: geometry + position + color cost, Hungarian + shape hash bonus.
     /// - `Tex` mode: LCS on character keys first (order-preserving), then Hungarian
     ///   on remainder with tex penalty.
-    /// Matched source leaves morph into target leaves (path, transform, colors);
-    /// unmatched source leaves fade out, unmatched target leaves fade in.
+    ///   Matched source leaves morph into target leaves (path, transform, colors);
+    ///   unmatched source leaves fade out, unmatched target leaves fade in.
     pub fn play_transform_matching(
         &mut self,
         source: ObjectId,
@@ -7045,7 +7046,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             bounds,
             transform: SpatialTransform::default(),
             opacity: 1.0,
-            fill: data.color.map(|c| Brush::Solid(c)),
+            fill: data.color.map(Brush::Solid),
             stroke: StrokeBrush::transparent(),
             entity,
             child_spans: Vec::new(),
@@ -8305,6 +8306,255 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     }
 }
 
+/// Helper structure providing fluent configuration for Mobjects before spawning them.
+pub struct MobjectSpawnBuilder<'b, 'w, 's, 'a> {
+    pub builder: &'b mut SceneBuilder<'w, 's, 'a>,
+    pub id: ObjectId,
+    pub bundle: MobjectBundle,
+    pub parent_entity: Option<Entity>,
+}
+
+impl<'b, 'w, 's, 'a> MobjectSpawnBuilder<'b, 'w, 's, 'a> {
+    pub fn fill(mut self, color: Color) -> Self {
+        self.bundle.fill = FillBrush(Some(Brush::Solid(color)));
+        self
+    }
+
+    pub fn fill_brush(mut self, brush: Brush) -> Self {
+        self.bundle.fill = FillBrush(Some(brush));
+        self
+    }
+
+    pub fn no_fill(mut self) -> Self {
+        self.bundle.fill = FillBrush(None);
+        self
+    }
+
+    pub fn stroke(mut self, color: Color, width: f64) -> Self {
+        self.bundle.stroke = StrokeBrush {
+            brush: Some(Brush::Solid(color)),
+            style: kurbo::Stroke::new(width),
+        };
+        self
+    }
+
+    pub fn stroke_brush(mut self, brush: Brush, width: f64) -> Self {
+        self.bundle.stroke = StrokeBrush {
+            brush: Some(brush),
+            style: kurbo::Stroke::new(width),
+        };
+        self
+    }
+
+    pub fn stroke_with_style(mut self, brush: Brush, style: kurbo::Stroke) -> Self {
+        self.bundle.stroke = StrokeBrush {
+            brush: Some(brush),
+            style,
+        };
+        self
+    }
+
+    pub fn no_stroke(mut self) -> Self {
+        self.bundle.stroke = StrokeBrush::transparent();
+        self
+    }
+
+    pub fn transform(mut self, transform: SpatialTransform) -> Self {
+        self.bundle.transform = transform;
+        self
+    }
+
+    pub fn translate(mut self, x: f64, y: f64) -> Self {
+        self.bundle.transform = self.bundle.transform.shift_2d(x, y);
+        self
+    }
+
+    pub fn scale(mut self, s: f64) -> Self {
+        self.bundle.transform = self.bundle.transform.scale_uniform(s);
+        self
+    }
+
+    pub fn rotate(mut self, radians: f64) -> Self {
+        self.bundle.transform = self.bundle.transform.with_rotation_2d(radians);
+        self
+    }
+
+    pub fn opacity(mut self, opacity: f32) -> Self {
+        self.bundle.opacity = Opacity(opacity);
+        self
+    }
+
+    pub fn z_index(mut self, z: i32) -> Self {
+        self.bundle.render_order.z_index = z;
+        self
+    }
+
+    /// Positions this object adjacent to a reference object with Direction and Anchor support.
+    pub fn next_to_new(
+        mut self,
+        reference: MobjectRef,
+        direction: Direction,
+        spacing: f64,
+        aligned_edge: Anchor,
+    ) -> Self {
+        if let Some(ref_state) = self.builder.states.get(reference.id) {
+            let shift = gaanim_layout::compute_next_to_new(
+                self.bundle.bounds.0,
+                &self.bundle.transform,
+                ref_state.bounds,
+                &ref_state.transform,
+                direction,
+                spacing,
+                aligned_edge,
+            );
+            self.bundle.transform = self.bundle.transform.shift_3d(shift);
+        }
+        self
+    }
+
+    /// Aligns target_anchor on this object with ref_anchor on the reference object.
+    pub fn align_to_new(
+        mut self,
+        reference: MobjectRef,
+        target_anchor: Anchor,
+        ref_anchor: Anchor,
+    ) -> Self {
+        if let Some(ref_state) = self.builder.states.get(reference.id) {
+            let shift = gaanim_layout::compute_align_to_new(
+                self.bundle.bounds.0,
+                &self.bundle.transform,
+                ref_state.bounds,
+                &ref_state.transform,
+                target_anchor,
+                ref_anchor,
+            );
+            self.bundle.transform = self.bundle.transform.shift_3d(shift);
+        }
+        self
+    }
+
+    /// Position the object so that the specified anchor is at (x, y).
+    pub fn at_anchor(mut self, x: f64, y: f64, anchor: Anchor) -> Self {
+        self.bundle.transform = gaanim_layout::compute_move_to(
+            self.bundle.bounds.0,
+            &self.bundle.transform,
+            gaanim_core::glam::DVec3::new(x, y, 0.0),
+            anchor,
+        );
+        self
+    }
+
+    /// Position the object so its center is at (x, y). Default center-based positioning.
+    pub fn at(self, x: f64, y: f64) -> Self {
+        self.at_anchor(x, y, Anchor::Center)
+    }
+
+    /// Position at screen edge with buffer spacing.
+    pub fn to_edge(mut self, direction: Direction, buff: f64) -> Self {
+        let frame_bounds = Bounds3D::new(
+            gaanim_core::glam::DVec3::new(-640.0, -360.0, 0.0),
+            gaanim_core::glam::DVec3::new(640.0, 360.0, 0.0),
+        );
+        self.bundle.transform = gaanim_layout::compute_to_edge(
+            self.bundle.bounds.0,
+            &self.bundle.transform,
+            direction,
+            buff,
+            frame_bounds,
+        );
+        self
+    }
+
+    /// Position at screen corner with buffer spacing.
+    pub fn to_corner(mut self, corner: Anchor, buff: f64) -> Self {
+        let frame_bounds = Bounds3D::new(
+            gaanim_core::glam::DVec3::new(-640.0, -360.0, 0.0),
+            gaanim_core::glam::DVec3::new(640.0, 360.0, 0.0),
+        );
+        self.bundle.transform = gaanim_layout::compute_to_corner(
+            self.bundle.bounds.0,
+            &self.bundle.transform,
+            corner,
+            buff,
+            frame_bounds,
+        );
+        self
+    }
+
+    /// Establishes parent-child relationship via Bevy hierarchy systems.
+    pub fn parent(mut self, parent: MobjectRef) -> Self {
+        if let Some(parent_state) = self.builder.states.get(parent.id) {
+            self.parent_entity = Some(parent_state.entity);
+        }
+        self
+    }
+
+    /// Finalizes the setup, spawning the Bevy ECS bundle and recording its tracked hot state in the SceneBuilder.
+    pub fn spawn(self) -> MobjectRef {
+        self.spawn_with_effects(None, None, None)
+    }
+
+    pub(crate) fn spawn_with_effects(
+        self,
+        glow: Option<gaanim_renderer::effects::Glow>,
+        blur: Option<gaanim_renderer::effects::GaussianBlur>,
+        shadow: Option<gaanim_renderer::effects::DropShadow>,
+    ) -> MobjectRef {
+        let mut entity_cmd = self.builder.commands.spawn(self.bundle.clone());
+        let entity = entity_cmd.id();
+
+        if let Some(parent) = self.parent_entity {
+            entity_cmd.set_parent_in_place(parent);
+        }
+        let effects = crate::effect_lens::EffectState {
+            glow: glow.clone(),
+            blur,
+            shadow: shadow.clone(),
+        };
+        if let Some(glow) = glow {
+            entity_cmd.insert(glow);
+        }
+        if let Some(blur) = blur {
+            entity_cmd.insert(blur);
+        }
+        if let Some(shadow) = shadow {
+            entity_cmd.insert(shadow);
+        }
+        if effects != crate::effect_lens::EffectState::default() {
+            self.builder.effects.insert(self.id, effects);
+        }
+
+        // Tag entity with the current scene if inside a scene scope
+        if let Some(scene_id) = self.builder.current_scene {
+            self.builder
+                .commands
+                .entity(entity)
+                .insert(SceneMember(scene_id));
+        }
+
+        let state = MobjectState {
+            fill_level: 0.0,
+            path: self.bundle.path.0.clone(),
+            bounds: self.bundle.bounds.0,
+            transform: self.bundle.transform,
+            opacity: self.bundle.opacity.0,
+            fill: self.bundle.fill.0.clone(),
+            stroke: self.bundle.stroke.clone(),
+            entity,
+            child_spans: Vec::new(),
+            children: Vec::new(),
+            parent: None,
+            exclude_from_parent_draw: false,
+        };
+        self.builder.states.insert(self.id, state);
+        self.builder
+            .mobject_names
+            .insert(self.id, self.bundle.tag.0.clone());
+
+        MobjectRef { id: self.id }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -9276,7 +9526,6 @@ mod tests {
         let group_entity = builder.states.get(group.id).unwrap().entity;
 
         drop(builder);
-        drop(commands);
         queue.apply(&mut world);
 
         let expected = FillBrush::color(gold);
@@ -9344,7 +9593,6 @@ mod tests {
         );
 
         drop(builder);
-        drop(commands);
         queue.apply(&mut world);
         assert!(
             world
@@ -9352,254 +9600,5 @@ mod tests {
                 .is_none()
         );
         assert_eq!(world.get::<Opacity>(child_entity), Some(&Opacity(1.0)));
-    }
-}
-
-/// Helper structure providing fluent configuration for Mobjects before spawning them.
-pub struct MobjectSpawnBuilder<'b, 'w, 's, 'a> {
-    pub builder: &'b mut SceneBuilder<'w, 's, 'a>,
-    pub id: ObjectId,
-    pub bundle: MobjectBundle,
-    pub parent_entity: Option<Entity>,
-}
-
-impl<'b, 'w, 's, 'a> MobjectSpawnBuilder<'b, 'w, 's, 'a> {
-    pub fn fill(mut self, color: Color) -> Self {
-        self.bundle.fill = FillBrush(Some(Brush::Solid(color)));
-        self
-    }
-
-    pub fn fill_brush(mut self, brush: Brush) -> Self {
-        self.bundle.fill = FillBrush(Some(brush));
-        self
-    }
-
-    pub fn no_fill(mut self) -> Self {
-        self.bundle.fill = FillBrush(None);
-        self
-    }
-
-    pub fn stroke(mut self, color: Color, width: f64) -> Self {
-        self.bundle.stroke = StrokeBrush {
-            brush: Some(Brush::Solid(color)),
-            style: kurbo::Stroke::new(width),
-        };
-        self
-    }
-
-    pub fn stroke_brush(mut self, brush: Brush, width: f64) -> Self {
-        self.bundle.stroke = StrokeBrush {
-            brush: Some(brush),
-            style: kurbo::Stroke::new(width),
-        };
-        self
-    }
-
-    pub fn stroke_with_style(mut self, brush: Brush, style: kurbo::Stroke) -> Self {
-        self.bundle.stroke = StrokeBrush {
-            brush: Some(brush),
-            style,
-        };
-        self
-    }
-
-    pub fn no_stroke(mut self) -> Self {
-        self.bundle.stroke = StrokeBrush::transparent();
-        self
-    }
-
-    pub fn transform(mut self, transform: SpatialTransform) -> Self {
-        self.bundle.transform = transform;
-        self
-    }
-
-    pub fn translate(mut self, x: f64, y: f64) -> Self {
-        self.bundle.transform = self.bundle.transform.shift_2d(x, y);
-        self
-    }
-
-    pub fn scale(mut self, s: f64) -> Self {
-        self.bundle.transform = self.bundle.transform.scale_uniform(s);
-        self
-    }
-
-    pub fn rotate(mut self, radians: f64) -> Self {
-        self.bundle.transform = self.bundle.transform.with_rotation_2d(radians);
-        self
-    }
-
-    pub fn opacity(mut self, opacity: f32) -> Self {
-        self.bundle.opacity = Opacity(opacity);
-        self
-    }
-
-    pub fn z_index(mut self, z: i32) -> Self {
-        self.bundle.render_order.z_index = z;
-        self
-    }
-
-    /// Positions this object adjacent to a reference object with Direction and Anchor support.
-    pub fn next_to_new(
-        mut self,
-        reference: MobjectRef,
-        direction: Direction,
-        spacing: f64,
-        aligned_edge: Anchor,
-    ) -> Self {
-        if let Some(ref_state) = self.builder.states.get(reference.id) {
-            let shift = gaanim_layout::compute_next_to_new(
-                self.bundle.bounds.0,
-                &self.bundle.transform,
-                ref_state.bounds,
-                &ref_state.transform,
-                direction,
-                spacing,
-                aligned_edge,
-            );
-            self.bundle.transform = self.bundle.transform.shift_3d(shift);
-        }
-        self
-    }
-
-    /// Aligns target_anchor on this object with ref_anchor on the reference object.
-    pub fn align_to_new(
-        mut self,
-        reference: MobjectRef,
-        target_anchor: Anchor,
-        ref_anchor: Anchor,
-    ) -> Self {
-        if let Some(ref_state) = self.builder.states.get(reference.id) {
-            let shift = gaanim_layout::compute_align_to_new(
-                self.bundle.bounds.0,
-                &self.bundle.transform,
-                ref_state.bounds,
-                &ref_state.transform,
-                target_anchor,
-                ref_anchor,
-            );
-            self.bundle.transform = self.bundle.transform.shift_3d(shift);
-        }
-        self
-    }
-
-    /// Position the object so that the specified anchor is at (x, y).
-    pub fn at_anchor(mut self, x: f64, y: f64, anchor: Anchor) -> Self {
-        self.bundle.transform = gaanim_layout::compute_move_to(
-            self.bundle.bounds.0,
-            &self.bundle.transform,
-            gaanim_core::glam::DVec3::new(x, y, 0.0),
-            anchor,
-        );
-        self
-    }
-
-    /// Position the object so its center is at (x, y). Default center-based positioning.
-    pub fn at(self, x: f64, y: f64) -> Self {
-        self.at_anchor(x, y, Anchor::Center)
-    }
-
-    /// Position at screen edge with buffer spacing.
-    pub fn to_edge(mut self, direction: Direction, buff: f64) -> Self {
-        let frame_bounds = Bounds3D::new(
-            gaanim_core::glam::DVec3::new(-640.0, -360.0, 0.0),
-            gaanim_core::glam::DVec3::new(640.0, 360.0, 0.0),
-        );
-        self.bundle.transform = gaanim_layout::compute_to_edge(
-            self.bundle.bounds.0,
-            &self.bundle.transform,
-            direction,
-            buff,
-            frame_bounds,
-        );
-        self
-    }
-
-    /// Position at screen corner with buffer spacing.
-    pub fn to_corner(mut self, corner: Anchor, buff: f64) -> Self {
-        let frame_bounds = Bounds3D::new(
-            gaanim_core::glam::DVec3::new(-640.0, -360.0, 0.0),
-            gaanim_core::glam::DVec3::new(640.0, 360.0, 0.0),
-        );
-        self.bundle.transform = gaanim_layout::compute_to_corner(
-            self.bundle.bounds.0,
-            &self.bundle.transform,
-            corner,
-            buff,
-            frame_bounds,
-        );
-        self
-    }
-
-    /// Establishes parent-child relationship via Bevy hierarchy systems.
-    pub fn parent(mut self, parent: MobjectRef) -> Self {
-        if let Some(parent_state) = self.builder.states.get(parent.id) {
-            self.parent_entity = Some(parent_state.entity);
-        }
-        self
-    }
-
-    /// Finalizes the setup, spawning the Bevy ECS bundle and recording its tracked hot state in the SceneBuilder.
-    pub fn spawn(self) -> MobjectRef {
-        self.spawn_with_effects(None, None, None)
-    }
-
-    pub(crate) fn spawn_with_effects(
-        self,
-        glow: Option<gaanim_renderer::effects::Glow>,
-        blur: Option<gaanim_renderer::effects::GaussianBlur>,
-        shadow: Option<gaanim_renderer::effects::DropShadow>,
-    ) -> MobjectRef {
-        let mut entity_cmd = self.builder.commands.spawn(self.bundle.clone());
-        let entity = entity_cmd.id();
-
-        if let Some(parent) = self.parent_entity {
-            entity_cmd.set_parent_in_place(parent);
-        }
-        let effects = crate::effect_lens::EffectState {
-            glow: glow.clone(),
-            blur,
-            shadow: shadow.clone(),
-        };
-        if let Some(glow) = glow {
-            entity_cmd.insert(glow);
-        }
-        if let Some(blur) = blur {
-            entity_cmd.insert(blur);
-        }
-        if let Some(shadow) = shadow {
-            entity_cmd.insert(shadow);
-        }
-        if effects != crate::effect_lens::EffectState::default() {
-            self.builder.effects.insert(self.id, effects);
-        }
-
-        // Tag entity with the current scene if inside a scene scope
-        if let Some(scene_id) = self.builder.current_scene {
-            self.builder
-                .commands
-                .entity(entity)
-                .insert(SceneMember(scene_id));
-        }
-
-        let state = MobjectState {
-            fill_level: 0.0,
-            path: self.bundle.path.0.clone(),
-            bounds: self.bundle.bounds.0,
-            transform: self.bundle.transform,
-            opacity: self.bundle.opacity.0,
-            fill: self.bundle.fill.0.clone(),
-            stroke: self.bundle.stroke.clone(),
-            entity,
-            child_spans: Vec::new(),
-            children: Vec::new(),
-            parent: None,
-            exclude_from_parent_draw: false,
-        };
-        self.builder.states.insert(self.id, state);
-        self.builder
-            .mobject_names
-            .insert(self.id, self.bundle.tag.0.clone());
-
-        MobjectRef { id: self.id }
     }
 }

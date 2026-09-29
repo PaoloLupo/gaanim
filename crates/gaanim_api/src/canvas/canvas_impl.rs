@@ -306,6 +306,9 @@ impl AudioClip {
 }
 
 /// One value accepted by the mixed animation/audio playback API.
+// Built once per scene or clip, not stored in bulk: boxing the large
+// variant would only add indirection.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum PlayItem {
     Animation(Anim),
@@ -4140,15 +4143,13 @@ impl SceneModel {
     }
 
     pub fn group(&mut self, members: &[&DrawableHandle]) -> DrawableHandle {
-        let handle = self
-            .spawn(SpawnKind::Group(members.iter().map(|m| m.id).collect()))
+        self.spawn(SpawnKind::Group(members.iter().map(|m| m.id).collect()))
             .with_style_targets(
                 members
                     .iter()
                     .flat_map(|member| member.inherited_style_targets())
                     .collect(),
-            );
-        handle
+            )
     }
 
     /// Build the stable, equation-style row used by reactive numeric readouts.
@@ -4310,6 +4311,7 @@ impl SceneModel {
 
     /// Queue a layout recalculation. `duration = Some(_)` animates the move
     /// and fades the newly inserted member in; `None` updates immediately.
+    #[allow(clippy::too_many_arguments)]
     pub fn reflow_layout(
         &mut self,
         container: &DrawableHandle,
@@ -5903,6 +5905,7 @@ impl SceneModel {
 
     /// Creates a hidden curved arrow whose sweep is regenerated from `tracker`
     /// on every frame. The effective sweep is `value * sweep_scale + sweep_offset`.
+    #[allow(clippy::too_many_arguments)]
     pub fn always_redraw_arc(
         &mut self,
         tracker: &DrawableHandle,
@@ -6111,9 +6114,11 @@ impl SceneModel {
         font_size: Option<f64>,
         color: Option<Color>,
     ) -> Result<DrawableHandle, gaanim_text::prelude::TextSpecError> {
-        let mut style = gaanim_text::prelude::TextStyle::default();
-        style.size = Some(font_size.unwrap_or(DEFAULT_REACTIVE_TEXT_SIZE));
-        style.color = color;
+        let style = gaanim_text::prelude::TextStyle {
+            size: Some(font_size.unwrap_or(DEFAULT_REACTIVE_TEXT_SIZE)),
+            color,
+            ..gaanim_text::prelude::TextStyle::default()
+        };
         gaanim_text::prelude::TextSpec::new(
             vec![text.into()],
             None,
@@ -11349,11 +11354,11 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(fill_paths.len(), 1);
-        assert_eq!(fill_paths[0].0, false);
+        assert!(!fill_paths[0].0);
         assert_eq!(fill_paths[0].1, 1);
-        assert_eq!(fill_paths[0].2, true);
+        assert!(fill_paths[0].2);
         assert_eq!(fill_paths[0].3, Some(1.0));
-        assert_eq!(fill_paths[0].5, true);
+        assert!(fill_paths[0].5);
         assert!(fill_paths[0].4.is_none());
 
         let outline_paths = app
@@ -11379,11 +11384,11 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(outline_paths.len(), 1);
-        assert_eq!(outline_paths[0].0, false);
+        assert!(!outline_paths[0].0);
         assert_eq!(outline_paths[0].1, 1);
-        assert_eq!(outline_paths[0].2, true);
+        assert!(outline_paths[0].2);
         assert_eq!(outline_paths[0].3, Some(1.0));
-        assert_eq!(outline_paths[0].5, true);
+        assert!(outline_paths[0].5);
         assert!(outline_paths[0].4.is_none());
     }
 

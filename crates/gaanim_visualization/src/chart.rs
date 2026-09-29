@@ -949,10 +949,9 @@ fn infer_axis(data: &DataTable, encoding: &Encoding) -> Result<Axis, ChartError>
                     categories: configured,
                     ..
                 }) = scale
+                    && !configured.is_empty()
                 {
-                    if !configured.is_empty() {
-                        categories = configured.clone();
-                    }
+                    categories = configured.clone();
                 }
                 Ok(Axis::category(categories)?)
             }

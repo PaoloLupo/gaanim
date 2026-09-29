@@ -150,6 +150,7 @@ impl Default for WriteTipGlow {
 /// on its target entities at scheduling time, so the renderer is
 /// guaranteed to hide the fill on the very first frame even if the
 /// path-trim lens hasn't yet been applied to a freshly-spawned entity.
+#[allow(clippy::type_complexity)]
 pub fn path_source_seed_added_system(
     mut commands: Commands,
     q: Query<(Entity, &Path2D), (Added<Path2D>, Without<PathSource>)>,

@@ -95,6 +95,9 @@ pub enum CameraStateSource {
 /// Represents which Mobject property the tween should interpolate.
 ///
 /// Lenses are generic and support 2D/3D spaces natively.
+// Built once per scene or clip, not stored in bulk: boxing the large
+// variant would only add indirection.
+#[allow(clippy::large_enum_variant)]
 #[derive(Component, Clone)]
 pub enum PropertyLens {
     // === Spatial (3D-Ready) ===
@@ -472,6 +475,7 @@ impl Clone for Box<dyn AnimatableLens> {
 /// Built-in lenses (Translation, Rotation, Scale, Opacity, FillColor, StrokeColor, StrokeWidth, PathCompletion)
 /// are applied directly via Bevy's parallel query system. Custom lenses are handled separately
 /// by `evaluate_custom_tweens_system` due to their need for exclusive World access.
+#[allow(clippy::too_many_arguments)]
 pub fn evaluate_tweens_system(
     mut commands: bevy::prelude::Commands,
     dt: Res<DeltaTime>,
@@ -645,7 +649,7 @@ pub fn evaluate_tweens_system(
             PropertyLens::MediaFrame { from, to } => {
                 commands
                     .entity(tween.target)
-                    .insert(from.interpolate(*to, t as f64));
+                    .insert(from.interpolate(*to, t));
             }
             PropertyLens::FillLevel { from, to } => {
                 if let Ok(mut level) = fill_levels.get_mut(tween.target) {
@@ -854,9 +858,7 @@ fn trim_line_strip_range(source: &LineListData, start: f64, end: f64) -> LineLis
             colors[start_segment + 1],
             start_fraction,
         )];
-        for index in (start_segment + 1)..=end_segment {
-            visible.push(colors[index]);
-        }
+        visible.extend_from_slice(&colors[(start_segment + 1)..=end_segment]);
         visible.push(lerp_line_value(
             colors[end_segment],
             colors[end_segment + 1],
@@ -924,6 +926,11 @@ pub fn evaluate_custom_tweens_system(world: &mut bevy::prelude::World) {
     }
 }
 
+/// Trim window between two `[start, end, offset]` states at `t`.
+pub fn lerp_trim(from: &[f64; 3], to: &[f64; 3], t: f64) -> [f64; 3] {
+    std::array::from_fn(|index| from[index] + (to[index] - from[index]) * t)
+}
+
 #[cfg(test)]
 mod tests {
     use gaanim_math::get_point_at_alpha;
@@ -954,9 +961,4 @@ mod tests {
             assert!(sampled.y.is_finite(), "y at t={t} not finite");
         }
     }
-}
-
-/// Trim window between two `[start, end, offset]` states at `t`.
-pub fn lerp_trim(from: &[f64; 3], to: &[f64; 3], t: f64) -> [f64; 3] {
-    std::array::from_fn(|index| from[index] + (to[index] - from[index]) * t)
 }

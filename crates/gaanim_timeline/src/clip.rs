@@ -58,6 +58,9 @@ impl Clip {
 }
 
 /// The payload data representing the behavior/event of a timeline clip.
+// Built once per scene or clip, not stored in bulk: boxing the large
+// variant would only add indirection.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ClipPayload {

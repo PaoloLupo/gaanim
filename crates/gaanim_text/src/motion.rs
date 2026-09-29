@@ -310,8 +310,7 @@ impl TypingLayout {
             if let Some(p) = previous {
                 let mut pen = cells[p].pen_after;
                 let baseline = cells_baseline(&baselines, &line_of, p);
-                for grapheme in start..split {
-                    let cell = &mut cells[grapheme];
+                for cell in &mut cells[start..split] {
                     cell.pen_before = pen;
                     cell.pen_after = pen + space;
                     cell.center = pen + space * 0.5;
@@ -337,9 +336,8 @@ impl TypingLayout {
                 ),
                 None => (0.0, first_baseline),
             };
-            for grapheme in leading..end {
+            for (grapheme, cell) in cells.iter_mut().enumerate().take(end).skip(leading) {
                 let width = width_of(grapheme);
-                let cell = &mut cells[grapheme];
                 cell.pen_before = pen;
                 cell.pen_after = pen + width;
                 cell.center = pen + width * 0.5;

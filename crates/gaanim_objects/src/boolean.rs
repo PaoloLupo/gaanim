@@ -174,9 +174,7 @@ fn collect_subpaths(path: &kurbo::BezPath, tolerance: f64) -> Vec<Vec<[f64; 2]>>
                 if let Some(buf) = current.take() {
                     subpaths.push(buf);
                 }
-                let mut buf = Vec::new();
-                buf.push([p.x, p.y]);
-                current = Some(buf);
+                current = Some(vec![[p.x, p.y]]);
                 last_pt = Some(p);
             }
             PathEl::LineTo(p) => {
@@ -246,7 +244,7 @@ fn extend_with_flattened<F: FnOnce(&mut dyn FnMut(PathEl))>(
     // `kurbo::flatten` needs the leading MoveTo to establish the curve's
     // current point. Dropping it reduces every quadratic/cubic to its endpoint,
     // which turns circles into diamonds before boolean operations.
-    kurbo::flatten(collected.into_iter(), tolerance, &mut cb);
+    kurbo::flatten(collected, tolerance, &mut cb);
 }
 
 /// Convert an i_overlay shape (Vec of contours) back into a `BezPath`.

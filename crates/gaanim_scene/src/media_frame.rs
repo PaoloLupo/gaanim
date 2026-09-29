@@ -82,10 +82,10 @@ pub fn update_media_frames(
         if raster.local_transform != transform {
             raster.local_transform = transform;
         }
-        if let Some(image) = raster.image.as_ref() {
-            if image.sampler.quality != frame.quality {
-                raster.image = Some(image.clone().with_quality(frame.quality));
-            }
+        if let Some(image) = raster.image.as_ref()
+            && image.sampler.quality != frame.quality
+        {
+            raster.image = Some(image.clone().with_quality(frame.quality));
         }
         let geometry = rect.to_path(0.1);
         if *path.0 != geometry {

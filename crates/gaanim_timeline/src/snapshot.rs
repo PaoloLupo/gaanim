@@ -480,10 +480,10 @@ impl WorldSnapshot {
         restore_scene_visibility: bool,
         mut needs_restore: impl FnMut(&World, ObjectId, Entity) -> bool,
     ) -> ObjectEntityMap {
-        if let Some(camera) = self.camera {
-            if world.get_resource::<gaanim_math::Camera>() != Some(&camera) {
-                world.insert_resource(camera);
-            }
+        if let Some(camera) = self.camera
+            && world.get_resource::<gaanim_math::Camera>() != Some(&camera)
+        {
+            world.insert_resource(camera);
         }
         world.insert_resource(CapturedCameraStates(self.camera_states.clone()));
         // 1. Map every existing Mobject in one pass: hide the ones missing from

@@ -72,6 +72,7 @@ pub fn progress_arc_path(radius: f64, fraction: f64) -> BezPath {
 
 /// Rebuilds progress arcs when their source changes, and after a snapshot
 /// replay restores an older path.
+#[allow(clippy::type_complexity)]
 pub fn progress_arc_system(
     playback: Option<Res<crate::updaters::PlaybackState>>,
     mut query: Query<(

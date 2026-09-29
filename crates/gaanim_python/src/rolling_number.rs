@@ -145,6 +145,7 @@ impl PyRollingNumber {
 #[pymethods]
 impl PyVisualization {
     #[pyo3(signature = (value=0.0, *, decimals=0, min_digits=1, group_separator="", decimal_separator=".", prefix="", suffix="", show_plus=false, font_family=None, weight=None, font_size=0.75, digit_spacing=0.02, line_height=1.25, mode="odometer", direction="up", color=None))]
+    #[allow(clippy::too_many_arguments)]
     fn rolling_number(
         &self,
         py: Python<'_>,

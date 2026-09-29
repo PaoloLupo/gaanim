@@ -22,9 +22,10 @@ const EPSILON: f64 = 1.0e-6;
 pub struct LayoutId(pub u64);
 
 /// How a box chooses its size on one axis.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum SizeRule {
     /// Fit the content.
+    #[default]
     Hug,
     /// Share the parent's free space by weight (or stretch across it).
     Fill(f64),
@@ -32,12 +33,6 @@ pub enum SizeRule {
     Fixed(f64),
     /// A percentage (0–100) of the parent's content box.
     Percent(f64),
-}
-
-impl Default for SizeRule {
-    fn default() -> Self {
-        Self::Hug
-    }
 }
 
 impl SizeRule {
@@ -484,6 +479,8 @@ impl Mul<f64> for LayoutExpression {
 
 impl Div<f64> for LayoutExpression {
     type Output = Self;
+    // Dividing by a scalar is multiplying by its reciprocal.
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn div(self, rhs: f64) -> Self {
         self * rhs.recip()
     }

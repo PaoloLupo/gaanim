@@ -33,6 +33,7 @@ pub fn resolve_camera_system(
 /// `SpatialTransform` (which updates Bevy's change tick), and the only other
 /// mutation path is `seek()` snapshot restore (which also updates ticks), this
 /// condition correctly detects every scenario where propagation is needed.
+#[allow(clippy::type_complexity)]
 pub fn has_transform_changes(
     query: Query<&SpatialTransform, Or<(Changed<SpatialTransform>, Added<SpatialTransform>)>>,
     deforms: Query<(), Changed<crate::ShapeDeform>>,
@@ -250,10 +251,7 @@ fn computed_global(
         let mut parent_basis = gaanim_core::kurbo::Affine::IDENTITY;
         let mut ancestor = entity;
         let mut needs_compensation = false;
-        loop {
-            let Ok((local, _, _)) = transforms.get(ancestor) else {
-                break;
-            };
+        while let Ok((local, _, _)) = transforms.get(ancestor) {
             let mut local = *local;
             if matches!(
                 propagation.view_roles.get(ancestor),
@@ -393,6 +391,7 @@ pub fn pin_hud_overlays_system(
 }
 
 /// Run condition: skip opacity propagation when no local opacity has changed.
+#[allow(clippy::type_complexity)]
 pub fn has_opacity_changes(
     query: Query<&Opacity, Or<(Changed<Opacity>, Added<Opacity>)>>,
     presences: Query<(), Changed<crate::Presence>>,
@@ -610,6 +609,7 @@ pub fn sync_new_opacities(mut query: Query<(&Opacity, &mut GlobalOpacity), Added
 }
 
 /// Run condition: skip bounds propagation when no relevant inputs changed.
+#[allow(clippy::type_complexity)]
 pub fn has_bounds_changes(
     q_local: Query<Entity, Or<(Changed<LocalBounds>, Added<LocalBounds>)>>,
     q_transform: Query<
@@ -630,6 +630,7 @@ pub fn has_bounds_changes(
 ///
 /// Only entities whose local bounds or world transform changed, or whose world
 /// bounds another system wrote (a snapshot restore), are recomputed.
+#[allow(clippy::type_complexity)]
 pub fn world_bounds_propagation_system(
     mut query: Query<
         (&LocalBounds, &GlobalSpatialTransform, &mut WorldBounds),
@@ -648,6 +649,7 @@ pub fn world_bounds_propagation_system(
 }
 
 /// System: Approximate WorldBounds for entities without LocalBounds using transform position.
+#[allow(clippy::type_complexity)]
 pub fn world_bounds_fallback_system(
     mut query: Query<
         (&GlobalSpatialTransform, &mut WorldBounds),
@@ -669,6 +671,7 @@ pub fn world_bounds_fallback_system(
 }
 
 /// System: Propagate WorldBounds bottom-up for nested group hierarchies.
+#[allow(clippy::type_complexity)]
 pub fn hierarchical_bounds_system(
     root_query: Query<Entity, (With<bevy::prelude::Children>, Without<ChildOf>)>,
     empty_root_group_query: Query<
@@ -736,6 +739,7 @@ fn compute_bounds_recursive(
 }
 
 /// System: Propagate styling changes (FillBrush/StrokeBrush) from groups to their children.
+#[allow(clippy::type_complexity)]
 pub fn style_propagation_system(
     mut param_set: ParamSet<(
         Query<
@@ -863,7 +867,6 @@ pub fn billboard_system(
                 bevy::prelude::Vec3::new(scale_d.x as f32, scale_d.y as f32, scale_d.z as f32);
         }
         let current_global = *global;
-        drop(global);
 
         // Propagate updated billboard transform to non-billboard child entities (e.g. text glyphs)
         propagate_billboard_children_recursive(
@@ -890,7 +893,6 @@ fn propagate_billboard_children_recursive(
                 *child_global =
                     GlobalSpatialTransform::from_parent_and_local(parent_global, child_local);
                 let current_child_global = *child_global;
-                drop(child_global);
                 propagate_billboard_children_recursive(
                     child,
                     &current_child_global,

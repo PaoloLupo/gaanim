@@ -595,7 +595,7 @@ mod tests {
         let geometry = space.geometry().unwrap();
 
         assert_eq!(mapped, Point::new(100.0, 50.0));
-        assert!(geometry.major_grid.elements().chunks_exact(2).all(|segment| {
+        assert!(geometry.major_grid.elements().as_chunks::<2>().0.iter().all(|segment| {
             matches!(segment, [PathEl::MoveTo(start), PathEl::LineTo(end)] if start.x == end.x)
         }));
         assert!(!geometry.minor_grid.is_empty());
@@ -603,7 +603,7 @@ mod tests {
             geometry.axes.elements(),
             [PathEl::MoveTo(start), PathEl::LineTo(end)] if start.x == end.x
         ));
-        assert!(geometry.ticks.elements().chunks_exact(2).all(|segment| {
+        assert!(geometry.ticks.elements().as_chunks::<2>().0.iter().all(|segment| {
             matches!(segment, [PathEl::MoveTo(start), PathEl::LineTo(end)] if start.y == end.y)
         }));
         assert!(!geometry.numbers.is_empty());

@@ -1252,12 +1252,8 @@ fn structured_typst_content(spec: &StructuredTextSpec, _font_size: f64) -> Strin
         if !in_math {
             continue;
         }
-        let left_has_space = raw_leaves[index]
-            .text
-            .ends_with(|character| character == ' ' || character == '\t');
-        let right_has_space = raw_leaves[index + 1]
-            .text
-            .starts_with(|character| character == ' ' || character == '\t');
+        let left_has_space = raw_leaves[index].text.ends_with([' ', '\t']);
+        let right_has_space = raw_leaves[index + 1].text.starts_with([' ', '\t']);
         let display_open = left_has_space
             && raw_leaves[index]
                 .text
@@ -1490,6 +1486,7 @@ struct CompiledLayoutTree {
     texts: BTreeMap<gaanim_layout::LayoutId, CompiledTextMeasure>,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect_compiled_layout_node(
     source: ObjectId,
     snapshots: &HashMap<ObjectId, LayoutTreeSnapshot>,
@@ -2713,6 +2710,7 @@ impl SceneModel {
         world.insert_resource(text_config);
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn replay_seg(
         builder: &mut SceneBuilder,
         seg: &Segment,
@@ -2826,10 +2824,10 @@ impl SceneModel {
                     if spec.hud {
                         Self::apply_hud(builder, actual.id);
                     }
-                    if spec.exclude_from_parent_draw {
-                        if let Some(state) = builder.states.get_mut(actual.id) {
-                            state.exclude_from_parent_draw = true;
-                        }
+                    if spec.exclude_from_parent_draw
+                        && let Some(state) = builder.states.get_mut(actual.id)
+                    {
+                        state.exclude_from_parent_draw = true;
                     }
                     id_map.insert(spec.id, actual.id);
                     if spec.svg_root {
@@ -2874,11 +2872,11 @@ impl SceneModel {
                             }
                         }
                     }
-                    if transform_targets.contains(&spec.id) {
-                        if let Some(state) = builder.states.get(actual.id).cloned() {
-                            builder.hide_visuals_now(&state);
-                            builder.schedule_hide_hierarchy(actual.id);
-                        }
+                    if transform_targets.contains(&spec.id)
+                        && let Some(state) = builder.states.get(actual.id).cloned()
+                    {
+                        builder.hide_visuals_now(&state);
+                        builder.schedule_hide_hierarchy(actual.id);
                     }
                 }
                 Op::SpawnCameraBinding(spec) => {
@@ -5216,7 +5214,7 @@ impl SceneModel {
                             .insert(EndpointFollow {
                                 endpoint: compile_tracking_endpoint(
                                     endpoint,
-                                    &id_map,
+                                    id_map,
                                     &builder.states,
                                 ),
                                 offset: *offset,
@@ -5230,8 +5228,8 @@ impl SceneModel {
                         && let Some(st) = builder.states.get(target_id)
                     {
                         let line = TrackingLine::new(
-                            compile_tracking_endpoint(from, &id_map, &builder.states),
-                            compile_tracking_endpoint(to, &id_map, &builder.states),
+                            compile_tracking_endpoint(from, id_map, &builder.states),
+                            compile_tracking_endpoint(to, id_map, &builder.states),
                         );
                         builder.commands.entity(st.entity).insert(line);
                     }
@@ -5252,7 +5250,7 @@ impl SceneModel {
                             gaanim_animation::updaters::TrackingConnector {
                                 points: points
                                     .iter()
-                                    .map(|p| compile_tracking_endpoint(p, &id_map, &builder.states))
+                                    .map(|p| compile_tracking_endpoint(p, id_map, &builder.states))
                                     .collect(),
                                 head_length: *head_length,
                                 head_width: *head_width,
@@ -5299,7 +5297,7 @@ impl SceneModel {
                                 occurrence,
                             } => Self::fragment_child_ids(
                                 builder,
-                                &id_map,
+                                id_map,
                                 *target,
                                 fragment,
                                 *occurrence,
@@ -5332,8 +5330,8 @@ impl SceneModel {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(st) = builder.states.get(target_id)
                     {
-                        let from = compile_tracking_endpoint(from, &id_map, &builder.states);
-                        let to = compile_tracking_endpoint(to, &id_map, &builder.states);
+                        let from = compile_tracking_endpoint(from, id_map, &builder.states);
+                        let to = compile_tracking_endpoint(to, id_map, &builder.states);
                         let coils = *coils;
                         let amplitude = *amplitude;
                         let crossing = *crossing;
@@ -5382,8 +5380,8 @@ impl SceneModel {
                     line_width,
                     extension_dash,
                 } => {
-                    let from = compile_tracking_endpoint(from, &id_map, &builder.states);
-                    let to = compile_tracking_endpoint(to, &id_map, &builder.states);
+                    let from = compile_tracking_endpoint(from, id_map, &builder.states);
+                    let to = compile_tracking_endpoint(to, id_map, &builder.states);
                     let authored_offset = *offset;
                     let side = *side;
                     let line_width = *line_width;
@@ -5454,8 +5452,8 @@ impl SceneModel {
                         && let Some(st) = builder.states.get(target_id)
                     {
                         builder.commands.entity(st.entity).insert(EndpointDistance {
-                            from: compile_tracking_endpoint(from, &id_map, &builder.states),
-                            to: compile_tracking_endpoint(to, &id_map, &builder.states),
+                            from: compile_tracking_endpoint(from, id_map, &builder.states),
+                            to: compile_tracking_endpoint(to, id_map, &builder.states),
                             scale: *scale,
                         });
                     }
@@ -5480,8 +5478,8 @@ impl SceneModel {
                         builder.commands.entity(target_state.entity).insert(
                             DimensionLabelPlacement {
                                 label: label_state.entity,
-                                from: compile_tracking_endpoint(from, &id_map, &builder.states),
-                                to: compile_tracking_endpoint(to, &id_map, &builder.states),
+                                from: compile_tracking_endpoint(from, id_map, &builder.states),
+                                to: compile_tracking_endpoint(to, id_map, &builder.states),
                                 offset: *offset,
                                 side: *side,
                                 gap: *gap,
@@ -5503,9 +5501,9 @@ impl SceneModel {
                     sweep,
                     arrowheads,
                 } => {
-                    let vertex = compile_tracking_endpoint(vertex, &id_map, &builder.states);
-                    let from = compile_tracking_ray(from, &id_map, &builder.states);
-                    let to = compile_tracking_ray(to, &id_map, &builder.states);
+                    let vertex = compile_tracking_endpoint(vertex, id_map, &builder.states);
+                    let from = compile_tracking_ray(from, id_map, &builder.states);
+                    let to = compile_tracking_ray(to, id_map, &builder.states);
                     for (target, part) in [
                         (arc, TrackingAnglePart::Arc),
                         (arrows, TrackingAnglePart::Arrows),
@@ -5539,9 +5537,9 @@ impl SceneModel {
                         && let Some(state) = builder.states.get(runtime)
                     {
                         builder.commands.entity(state.entity).insert(EndpointAngle {
-                            vertex: compile_tracking_endpoint(vertex, &id_map, &builder.states),
-                            from: compile_tracking_ray(from, &id_map, &builder.states),
-                            to: compile_tracking_ray(to, &id_map, &builder.states),
+                            vertex: compile_tracking_endpoint(vertex, id_map, &builder.states),
+                            from: compile_tracking_ray(from, id_map, &builder.states),
+                            to: compile_tracking_ray(to, id_map, &builder.states),
                             sweep: *sweep,
                             scale: *scale,
                         });
@@ -5571,9 +5569,9 @@ impl SceneModel {
                             .entity(target_state.entity)
                             .insert(AngleLabelPlacement {
                                 label: label_state.entity,
-                                vertex: compile_tracking_endpoint(vertex, &id_map, &builder.states),
-                                from: compile_tracking_ray(from, &id_map, &builder.states),
-                                to: compile_tracking_ray(to, &id_map, &builder.states),
+                                vertex: compile_tracking_endpoint(vertex, id_map, &builder.states),
+                                from: compile_tracking_ray(from, id_map, &builder.states),
+                                to: compile_tracking_ray(to, id_map, &builder.states),
                                 radius: *radius,
                                 gap: *gap,
                                 sweep: *sweep,
@@ -5596,8 +5594,8 @@ impl SceneModel {
                             .commands
                             .entity(state.entity)
                             .insert(TrackingVectorHead {
-                                from: compile_tracking_endpoint(from, &id_map, &builder.states),
-                                to: compile_tracking_endpoint(to, &id_map, &builder.states),
+                                from: compile_tracking_endpoint(from, id_map, &builder.states),
+                                to: compile_tracking_endpoint(to, id_map, &builder.states),
                                 length: *length,
                                 width: *width,
                             });
@@ -8754,14 +8752,14 @@ impl SceneModel {
             SpawnKind::TracedPathLine => {
                 // Spawn a minimal line (0,0)→(0,0). TracedPath will overwrite its Path2D.
                 let b = builder.line(Point::new(0.0, 0.0), Point::new(0.0, 0.0));
-                let mr = Self::finish_spawn_builder(b, spec);
-                mr
+
+                Self::finish_spawn_builder(b, spec)
             }
             SpawnKind::TrackingLine => {
                 // Spawn a minimal line (0,0)→(0,0). TrackingLine will overwrite its Path2D.
                 let b = builder.line(Point::new(0.0, 0.0), Point::new(0.0, 0.0));
-                let mr = Self::finish_spawn_builder(b, spec);
-                mr
+
+                Self::finish_spawn_builder(b, spec)
             }
             SpawnKind::TracedPath3DLine => {
                 // Empty 3D line placeholder; TracedPath3D will fill its LineListData.
@@ -9245,17 +9243,17 @@ impl SceneModel {
             }
         }
         // Billboard / HUD chaining (.billboard() / .hud())
-        if spec.billboard {
-            if let Some(state) = builder.states.get(id) {
-                builder
-                    .commands
-                    .entity(state.entity)
-                    .insert(gaanim_scene::Billboard);
-                builder
-                    .commands
-                    .entity(state.entity)
-                    .insert(bevy::prelude::Transform::default());
-            }
+        if spec.billboard
+            && let Some(state) = builder.states.get(id)
+        {
+            builder
+                .commands
+                .entity(state.entity)
+                .insert(gaanim_scene::Billboard);
+            builder
+                .commands
+                .entity(state.entity)
+                .insert(bevy::prelude::Transform::default());
         }
         // A part of an imported SVG is laid out after its root.
         if spec.svg_owner.is_none() {
@@ -9654,7 +9652,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -10019,7 +10016,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -10242,7 +10238,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
         queue.apply(&mut world);
         timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
         let plot = world
@@ -10399,8 +10394,10 @@ mod tests {
         ]);
         assert_eq!(structured_typst_content(&tight_literal, 32.0), "$x _1$");
 
-        let mut colored = StructuredTextStyle::default();
-        colored.color = Some(PenikoColor::from_rgb8(255, 0, 0));
+        let colored = StructuredTextStyle {
+            color: Some(PenikoColor::from_rgb8(255, 0, 0)),
+            ..StructuredTextStyle::default()
+        };
         let distributed_delimiters = spec(vec![
             part("left", "$a", StructuredTextStyle::default()),
             part("right", "b$", colored),
@@ -10447,8 +10444,10 @@ mod tests {
         ]);
         assert_eq!(structured_typst_content(&tight_syntax, 32.0), "$- x _1$");
 
-        let mut colored = StructuredTextStyle::default();
-        colored.color = Some(PenikoColor::from_rgb8(255, 0, 0));
+        let colored = StructuredTextStyle {
+            color: Some(PenikoColor::from_rgb8(255, 0, 0)),
+            ..StructuredTextStyle::default()
+        };
         let styled_right = spec(vec![
             "$".into(),
             part("left", "x", StructuredTextStyle::default()),
@@ -10554,7 +10553,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
         let mut world = world;
         queue.apply(&mut world);
 
@@ -10646,7 +10644,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
         let mut world = world;
         queue.apply(&mut world);
 
@@ -10680,7 +10677,6 @@ mod tests {
             word_spacing: Some(0.5),
             decorations: vec!["underline".to_owned()],
             baseline: Some(1.0),
-            ..StructuredTextStyle::default()
         };
         let equation = StructuredTextSpec::new(
             vec![
@@ -10717,7 +10713,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
         let mut world = world;
         queue.apply(&mut world);
         assert_eq!(
@@ -10773,7 +10768,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
         let mut world = world;
         queue.apply(&mut world);
 
@@ -10829,7 +10823,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
         queue.apply(&mut world);
         timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
         (world, timeline)
@@ -11047,7 +11040,6 @@ mod tests {
             .unwrap()
             .font_family = "Libertinus Serif".to_owned();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &config);
-        drop(commands);
         queue.apply(&mut world);
 
         let (path, baseline) = world
@@ -11113,7 +11105,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &config);
-        drop(commands);
         queue.apply(&mut world);
         timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
 
@@ -11156,7 +11147,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -11197,7 +11187,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &config);
-        drop(commands);
         queue.apply(&mut world);
         timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
 
@@ -11245,7 +11234,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -11333,7 +11321,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
         let mut world = world;
         queue.apply(&mut world);
 
@@ -11371,7 +11358,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
         let mut world = world;
         queue.apply(&mut world);
 
@@ -11717,7 +11703,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -11751,7 +11736,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -11797,7 +11781,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -11916,7 +11899,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -11937,7 +11919,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
         let mut world = world;
         queue.apply(&mut world);
         let mut query = world.query::<&LocalBounds>();
@@ -12021,7 +12002,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -12049,7 +12029,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -12086,7 +12065,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -12150,7 +12128,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = canvas.themed_text_config();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -12320,7 +12297,7 @@ mod tests {
         let card = canvas.rect(120.0, 80.0).move_to(200.0, -60.0);
         let zoom_in = canvas.camera_zoom_to_source(ScalarSource::constant(8.0), 1.0);
         canvas.play(vec![zoom_in]);
-        let frame = canvas.camera_frame_many(&[card.clone()], [20.0; 4], false, 1.0);
+        let frame = canvas.camera_frame_many(std::slice::from_ref(&card), [20.0; 4], false, 1.0);
         canvas.play(vec![frame]);
         let linear = canvas.camera_frame_many_with_interpolation(
             &[card],
@@ -12572,7 +12549,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -12605,7 +12581,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -12708,7 +12683,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -12982,7 +12956,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &config);
-        drop(commands);
         queue.apply(&mut world);
         timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
 
@@ -13021,7 +12994,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &config);
-        drop(commands);
         queue.apply(&mut world);
         timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
         (world, timeline)
@@ -14221,7 +14193,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
         let mut world = world;
         queue.apply(&mut world);
 
@@ -14637,7 +14608,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -14748,7 +14718,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -14847,7 +14816,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -14976,7 +14944,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -15060,7 +15027,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
         let mut world = world;
         queue.apply(&mut world);
         let fills: Vec<_> = world
@@ -15109,7 +15075,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
         let mut world = world;
         queue.apply(&mut world);
         let fills: Vec<_> = world
@@ -15378,7 +15343,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);

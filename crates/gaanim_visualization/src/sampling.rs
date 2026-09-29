@@ -62,11 +62,9 @@ impl SampledPath {
 fn validate_sampling(sampling: Sampling) -> Result<(), SamplingError> {
     match sampling {
         Sampling::Fixed { samples } if samples < 2 => Err(SamplingError::TooFewSamples),
-        Sampling::Adaptive {
-            min_samples,
-            tolerance: _,
-            ..
-        } if min_samples < 2 => Err(SamplingError::TooFewSamples),
+        Sampling::Adaptive { min_samples, .. } if min_samples < 2 => {
+            Err(SamplingError::TooFewSamples)
+        }
         Sampling::Adaptive { tolerance, .. } if !tolerance.is_finite() || tolerance <= 0.0 => {
             Err(SamplingError::InvalidTolerance)
         }
@@ -323,7 +321,7 @@ pub fn implicit_contours(
                 .filter(|(a, b)| (values[*a].2 <= 0.0) != (values[*b].2 <= 0.0))
                 .map(|(a, b)| interpolate(values[a], values[b]))
                 .collect();
-            for pair in intersections.chunks_exact(2) {
+            for pair in intersections.as_chunks::<2>().0 {
                 if let (Ok(start), Ok(end)) = (
                     map.data_to_local(pair[0].0, pair[0].1),
                     map.data_to_local(pair[1].0, pair[1].1),

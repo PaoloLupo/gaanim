@@ -394,7 +394,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
         let mut world = world;
         queue.apply(&mut world);
         timeline.add_keyframe(
@@ -446,7 +445,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
         let mut world = world;
         queue.apply(&mut world);
         timeline.add_keyframe(

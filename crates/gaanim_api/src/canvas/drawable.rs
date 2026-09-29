@@ -22,6 +22,9 @@ use crate::canvas::ops::{
 };
 use crate::canvas::types::{Anim, LayoutOp, ObjectSpec, OptDuration, SpawnKind};
 
+/// An axis range: (min, max, step).
+pub type AxisRange = (f64, f64, f64);
+
 /// An ergonomic handle to a mobject on a SceneModel.
 ///
 /// - Immediate setters return `Self` (fluent): `obj.move_to(0, 0).fill(RED)`.
@@ -30,6 +33,7 @@ use crate::canvas::types::{Anim, LayoutOp, ObjectSpec, OptDuration, SpawnKind};
 ///     - `obj.fade_in()`       — default 1.0s
 ///     - `obj.fade_in(2.0)`    — 2.0s
 ///     - `obj.fade_in(None)`   — default 1.0s (explicit)
+///
 ///   You can still chain `.duration()` or any other `Anim` method after.
 #[derive(Debug, Clone)]
 pub struct DrawableHandle {
@@ -319,12 +323,10 @@ impl DrawableHandle {
         }
         let source_owner = self.layout_owner();
         let target_owner = target.layout_owner();
-        if source_owner.is_some() || target_owner.is_some() {
-            if source_owner != target_owner {
-                return Err(LayoutOwnershipError::AlreadyManaged {
-                    owner: target_owner.or(source_owner).expect("one owner exists"),
-                });
-            }
+        if (source_owner.is_some() || target_owner.is_some()) && source_owner != target_owner {
+            return Err(LayoutOwnershipError::AlreadyManaged {
+                owner: target_owner.or(source_owner).expect("one owner exists"),
+            });
         }
         Ok(())
     }
@@ -712,9 +714,7 @@ impl DrawableHandle {
     }
 
     /// If this drawable is an axes, return its x/y ranges and full config.
-    pub fn axes_info(
-        &self,
-    ) -> Option<((f64, f64, f64), (f64, f64, f64), crate::canvas::AxesConfig)> {
+    pub fn axes_info(&self) -> Option<(AxisRange, AxisRange, crate::canvas::AxesConfig)> {
         let spec = self.spec.lock().ok()?;
         if let crate::canvas::SpawnKind::Axes {
             x_range,

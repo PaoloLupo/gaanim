@@ -847,10 +847,7 @@ impl PyCanvasAnim {
         }
         self.require_effect_slot("fade_in_from")?;
         Ok(Self {
-            inner: self
-                .inner
-                .clone()
-                .fade_in_from(direction.0.clone(), distance),
+            inner: self.inner.clone().fade_in_from(direction.0, distance),
         })
     }
 
@@ -1005,7 +1002,7 @@ impl PyCanvasAnim {
         self.require_transformable()?;
         self.require_effect_slot("grow_from_edge")?;
         Ok(Self {
-            inner: self.inner.clone().grow_from_edge(direction.0.clone()),
+            inner: self.inner.clone().grow_from_edge(direction.0),
         })
     }
 
@@ -2149,6 +2146,7 @@ impl PyDrawable {
     }
 
     #[pyo3(signature = (name, *, duration=None, speed=1.0, r#loop=false, reverse=false, transition=0.0, start_time=0.0))]
+    #[allow(clippy::too_many_arguments)]
     fn animation(
         &self,
         name: &str,
@@ -2807,9 +2805,8 @@ impl PyDrawable {
     /// Attach a preset updater that runs every frame.
     fn add_updater(&self, updater: &PyUpdater) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.0.add_updater(updater.0.clone());
-        })
+        self.0.add_updater(updater.0.clone());
+        Ok(())
     }
 
     /// Attach a generic Python callback updater or deterministic simulation.
@@ -2948,9 +2945,8 @@ impl PyDrawable {
     /// Remove any updater attached to this entity.
     fn remove_updater(&self) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.0.remove_updater();
-        })
+        self.0.remove_updater();
+        Ok(())
     }
 
     /// Drive a property of this drawable along a sampled `(times, values)`
@@ -3054,33 +3050,29 @@ impl PyDrawable {
     /// Copy the source entity's Y position each frame.
     fn bind_y_from(&self, source: &PyDrawable) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.0.bind_y_from(&source.0);
-        })
+        self.0.bind_y_from(&source.0);
+        Ok(())
     }
 
     /// Copy the source entity's X position each frame.
     fn bind_x_from(&self, source: &PyDrawable) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.0.bind_x_from(&source.0);
-        })
+        self.0.bind_x_from(&source.0);
+        Ok(())
     }
 
     /// Keep this drawable centered on ``source`` each frame.
     fn attach_to(&self, source: &PyDrawable) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.0.attach_to(&source.0);
-        })
+        self.0.attach_to(&source.0);
+        Ok(())
     }
 
     /// Follow ``source`` while keeping an ``(x, y)`` scene-space offset.
     fn follow_to(&self, source: &PyDrawable, offset: (f64, f64)) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.0.follow_to(&source.0, offset.0, offset.1);
-        })
+        self.0.follow_to(&source.0, offset.0, offset.1);
+        Ok(())
     }
 
     /// Follow any endpoint and return this drawable for fluent chaining.

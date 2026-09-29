@@ -647,7 +647,7 @@ mod tests {
                 vec![ReactiveInput::Signal(signal)],
                 |values| match values[0] {
                     value if value < 0.0 => Err("negative input".to_owned()),
-                    value if value == 0.0 => Ok(vec![f64::NAN]),
+                    0.0 => Ok(vec![f64::NAN]),
                     value => Ok(vec![value * 2.0]),
                 },
             );

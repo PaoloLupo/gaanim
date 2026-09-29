@@ -327,10 +327,11 @@ impl RollingNumber {
                 append('0', Some(state));
                 if place == o.decimals && o.decimals > 0 {
                     append(o.decimal_separator.chars().next().unwrap(), None);
-                } else if place > o.decimals && (place - o.decimals) % 3 == 0 {
-                    if let Some(ch) = o.group_separator.chars().next() {
-                        append(ch, None);
-                    }
+                } else if place > o.decimals
+                    && (place - o.decimals).is_multiple_of(3)
+                    && let Some(ch) = o.group_separator.chars().next()
+                {
+                    append(ch, None);
                 }
             }
             for ch in o.suffix.chars() {

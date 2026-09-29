@@ -1193,6 +1193,7 @@ fn aligned_pen(style: &kurbo::Stroke, align: StrokeAlign) -> std::borrow::Cow<'_
 /// Stroke `path` aligned to its closed contour (see [`StrokeAlign`]).
 /// `source_path` is the untrimmed contour while a draw animation reveals
 /// `path`; open contours are always stroked on their centerline.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_aligned_stroke(
     scene: &mut vello::Scene,
     style: &kurbo::Stroke,
@@ -1309,6 +1310,7 @@ pub fn resolve_dynamic_clip_masks_system(
 
 /// Rebuild live booleans from their source paths after propagation. The output
 /// remains a normal drawable, so renderer caching and bounds work unchanged.
+#[allow(clippy::type_complexity)]
 pub fn resolve_dynamic_boolean_system(
     mut queries: ParamSet<(
         Query<(Entity, &BooleanBinding, &GlobalSpatialTransform)>,
@@ -1372,6 +1374,7 @@ pub fn resolve_dynamic_boolean_system(
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub fn resolve_fill_level_system(
     mut queries: ParamSet<(
         Query<(
@@ -1457,6 +1460,7 @@ pub fn resolve_fill_level_system(
 
 /// Rebuild every [`crate::effects::ConnectBinding`] from the current world
 /// position of its sources: the centre of each visible source's local bounds.
+#[allow(clippy::type_complexity)]
 pub fn resolve_connect_system(
     mut queries: ParamSet<(
         Query<(
@@ -1530,6 +1534,7 @@ pub fn resolve_connect_system(
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub fn resolve_vector_outline_system(
     mut queries: ParamSet<(
         Query<(Entity, &VectorOutlineBinding, &GlobalSpatialTransform)>,
@@ -2936,6 +2941,8 @@ type CameraSourceQuery<'w, 's> = Query<
 /// global `MainVelloScene` entity has a negative Y scale that converts the
 /// completed scene to Vello's Y-down pixel space without changing the meaning
 /// of `.at(x, y)` or requiring per-object coordinate workarounds.
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
 pub fn gaanim_render_system(
     mut commands: Commands,
     mut cache: ResMut<GaanimRenderCache>,
@@ -4279,8 +4286,10 @@ mod tests {
 
     #[test]
     fn zero_path_reveal_is_rendered_as_empty_geometry() {
-        let mut tip = WriteTipGlow::default();
-        tip.completion = 0.0;
+        let mut tip = WriteTipGlow {
+            completion: 0.0,
+            ..WriteTipGlow::default()
+        };
         assert!(path_reveal_is_empty(Some(&tip)));
         tip.completion = 0.001;
         assert!(!path_reveal_is_empty(Some(&tip)));

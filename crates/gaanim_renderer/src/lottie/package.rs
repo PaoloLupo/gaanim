@@ -230,15 +230,14 @@ impl Package {
                 return Err(invalid(format!("unknown theme '{theme}'")));
             }
             let allowed = self.animation_metadata(id).get("themes");
-            if let Some(allowed) = allowed {
-                if !allowed
+            if let Some(allowed) = allowed
+                && !allowed
                     .as_array()
                     .is_some_and(|a| a.iter().any(|v| v == theme))
-                {
-                    return Err(invalid(format!(
-                        "theme '{theme}' is not compatible with animation '{id}'"
-                    )));
-                }
+            {
+                return Err(invalid(format!(
+                    "theme '{theme}' is not compatible with animation '{id}'"
+                )));
             }
             apply_theme(&mut json, &self.json(&format!("t/{theme}.json"))?, id)?;
         }
@@ -400,15 +399,14 @@ fn replace_slots(node: &mut Value, id: &str, value: &Value, points: Option<usize
                 return;
             }
             // A gradient's stop count lives beside its animated k property.
-            if let Some(points) = points {
-                if object
+            if let Some(points) = points
+                && object
                     .get("k")
                     .and_then(|k| k.get("sid"))
                     .and_then(Value::as_str)
                     == Some(id)
-                {
-                    object.insert("p".into(), json!(points));
-                }
+            {
+                object.insert("p".into(), json!(points));
             }
             for child in object.values_mut() {
                 replace_slots(child, id, value, points);

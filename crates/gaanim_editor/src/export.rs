@@ -167,16 +167,16 @@ pub fn export_dialog_system(
     let Ok(ctx) = ctx.ctx_mut() else { return };
 
     // Initialize default output path from gaanim.toml if still default
-    if let Some(ref proj) = project_paths {
-        if state.output_path == "output.mp4" {
-            // Show relative to project for nicer UX: e.g. "exports/output.mp4"
-            let rel = proj
-                .output_dir
-                .strip_prefix(&proj.project_dir)
-                .unwrap_or(&proj.output_dir)
-                .join("output.mp4");
-            state.output_path = rel.to_string_lossy().to_string();
-        }
+    if let Some(ref proj) = project_paths
+        && state.output_path == "output.mp4"
+    {
+        // Show relative to project for nicer UX: e.g. "exports/output.mp4"
+        let rel = proj
+            .output_dir
+            .strip_prefix(&proj.project_dir)
+            .unwrap_or(&proj.output_dir)
+            .join("output.mp4");
+        state.output_path = rel.to_string_lossy().to_string();
     }
 
     // --- Collect intent from egui into local variables first ---
@@ -893,14 +893,14 @@ pub fn export_dialog_system(
                         }
                     }
                 };
-                if let Ok(mut lock) = progress_clone.lock() {
-                    if let Some(ref mut p) = *lock {
-                        p.result = Some(result);
-                        // A recording counts its own work, which can exceed
-                        // the dialog's frame estimate.
-                        p.total_frames = p.total_frames.max(p.telemetry.progress().1);
-                        p.current_frame = p.total_frames;
-                    }
+                if let Ok(mut lock) = progress_clone.lock()
+                    && let Some(ref mut p) = *lock
+                {
+                    p.result = Some(result);
+                    // A recording counts its own work, which can exceed
+                    // the dialog's frame estimate.
+                    p.total_frames = p.total_frames.max(p.telemetry.progress().1);
+                    p.current_frame = p.total_frames;
                 }
             });
         }
@@ -1040,6 +1040,7 @@ fn worker_error_context(summary: &str, output_path: &str, telemetry: &ExportTele
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_export_worker(
     script_path: &std::path::Path,
     project_dir: &std::path::Path,

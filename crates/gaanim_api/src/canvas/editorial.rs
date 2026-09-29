@@ -940,6 +940,7 @@ impl SceneModel {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn editorial_container(
         &mut self,
         width: f64,

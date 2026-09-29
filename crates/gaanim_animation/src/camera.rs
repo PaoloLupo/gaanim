@@ -19,6 +19,9 @@ impl CameraBindingWindow {
 }
 
 /// Typed channels controlled by one persistent camera binding.
+// Built once per scene or clip, not stored in bulk: boxing the large
+// variant would only add indirection.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum CameraBindingKind {
     TwoD {

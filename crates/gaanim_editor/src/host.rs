@@ -202,7 +202,7 @@ mod tests {
                 gaanim_renderer::pipeline::GaanimFullWindowClearCamera,
             >>()
             .iter(&world)
-            .map(|camera| (camera.order, camera.clear_color.clone()))
+            .map(|camera| (camera.order, camera.clear_color))
             .collect::<Vec<_>>();
         assert!(
             matches!(

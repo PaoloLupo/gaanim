@@ -571,12 +571,13 @@ const TEXT_KEYS: &[&str] = &[
     "markup",
 ];
 
+/// Named box styles by name, for each scene key.
+type ClassRegistry =
+    Mutex<std::collections::HashMap<usize, std::collections::HashMap<String, Py<PyDict>>>>;
+
 /// Named box styles of each scene, used by `class_=`.
-fn classes()
--> &'static Mutex<std::collections::HashMap<usize, std::collections::HashMap<String, Py<PyDict>>>> {
-    static CLASSES: std::sync::OnceLock<
-        Mutex<std::collections::HashMap<usize, std::collections::HashMap<String, Py<PyDict>>>>,
-    > = std::sync::OnceLock::new();
+fn classes() -> &'static ClassRegistry {
+    static CLASSES: std::sync::OnceLock<ClassRegistry> = std::sync::OnceLock::new();
     CLASSES.get_or_init(Default::default)
 }
 
@@ -1077,6 +1078,7 @@ pub struct PyBox {
 
 impl PyBox {
     /// Build a box from Python children and properties.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn create<'py>(
         py: Python<'py>,
         canvas: Arc<Mutex<ApiCanvas>>,
@@ -1200,8 +1202,7 @@ impl PyBox {
             } else {
                 content
                     .replace("\\$", "\u{0}")
-                    .replace('$', "\\$")
-                    .replace('\u{0}', "\\$")
+                    .replace(['$', '\u{0}'], "\\$")
             };
             scene
                 .bind(py)
@@ -1718,7 +1719,7 @@ fn duration_value(duration: Option<f64>) -> PyResult<Option<f64>> {
         Some(value) if !value.is_finite() || value < 0.0 => Err(
             pyo3::exceptions::PyValueError::new_err("duration must be finite and non-negative"),
         ),
-        Some(value) if value == 0.0 => Ok(None),
+        Some(0.0) => Ok(None),
         other => Ok(other),
     }
 }

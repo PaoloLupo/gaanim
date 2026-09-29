@@ -418,6 +418,7 @@ fn parse_decimal_separator(value: &str) -> PyResult<char> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_readout_parts(
     canvas: &mut ApiCanvas,
     source: ScalarSource,
@@ -445,13 +446,15 @@ fn build_readout_parts(
             .readout_decimal_separator(decimal_separator)
             .expect("decimal separator validated by the public binding");
     }
-    if let Some(color) = color.clone() {
+    if let Some(color) = color {
         number = number.fill(color.0);
     }
     let number_part = PyDrawable(number.clone());
     let mut text_part = |value: &str| {
-        let mut style = gaanim_text::prelude::TextStyle::default();
-        style.size = Some(font_size);
+        let style = gaanim_text::prelude::TextStyle {
+            size: Some(font_size),
+            ..gaanim_text::prelude::TextStyle::default()
+        };
         let spec = gaanim_text::prelude::TextSpec::new(
             vec![value.into()],
             None,
@@ -460,7 +463,7 @@ fn build_readout_parts(
         )
         .expect("reactive readout text is validated by the public binding");
         let mut handle = canvas.text_spec(spec);
-        if let Some(color) = color.clone() {
+        if let Some(color) = color {
             handle = handle.fill(color.0);
         }
         PyDrawable(handle)
@@ -626,6 +629,7 @@ impl PyAxis {
     }
 
     #[pyo3(signature = (*, color=None, width=None, tick_length=None, tick_width=None, tick_color=None, number_color=None, label_color=None))]
+    #[allow(clippy::too_many_arguments)]
     fn style(
         &self,
         color: Option<PyColor>,
@@ -1060,9 +1064,8 @@ impl PyParameter {
 
     fn remove_updater(&self) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.inner.drawable().remove_updater();
-        })
+        self.inner.drawable().remove_updater();
+        Ok(())
     }
 
     /// Drive this parameter's value along a sampled `(times, values)` series,
@@ -1168,9 +1171,8 @@ impl PyVariable {
 
     fn remove_updater(&self) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.parameter.remove_updater()?;
-        })
+        self.parameter.remove_updater()?;
+        Ok(())
     }
 
     #[getter]
@@ -1417,6 +1419,7 @@ impl PyVectorField {
     }
 
     #[pyo3(signature = (*, resolution=None, min_length=0.0, max_length=None, length_scale=1.0, width=0.02, tip_length=None, tip_width=None, color=None, colormap=None, color_range=None))]
+    #[allow(clippy::too_many_arguments)]
     fn arrows(
         &self,
         resolution: Option<Bound<'_, PyAny>>,
@@ -1924,6 +1927,7 @@ impl PyNumberLine {
     }
 
     #[pyo3(signature = (function, domain=None, *, normal_scale=1.2, reveal=None, samples=None, tolerance=0.0075, inputs=Vec::new()))]
+    #[allow(clippy::too_many_arguments)]
     fn function(
         &self,
         py: Python<'_>,
@@ -2277,6 +2281,7 @@ impl PyCoordinateSpace {
     }
 
     #[pyo3(signature = (function, domain=None, *, samples=None, tolerance=0.0075, derivative=None, inputs=Vec::new()))]
+    #[allow(clippy::too_many_arguments)]
     fn plot(
         &self,
         py: Python<'_>,
@@ -2497,6 +2502,7 @@ impl PyCoordinateSpace {
     /// plane = scene.cartesian_2d(Axis.linear(0, 30), Axis.linear(-0.4, 0.4))
     /// curve = plane.plot_data(times, accel, color=CYAN, width=4)
     /// ```
+    #[allow(clippy::too_many_arguments)]
     fn plot_data(
         &self,
         xs: Vec<Option<f64>>,

@@ -204,6 +204,12 @@ pub fn resolve(before: &TypedText, kind: &TextMotionKind) -> (TypedText, Keystro
     }
 }
 
+/// A glyph drawable and its outline.
+type TypedGlyph = (ObjectId, Arc<BezPath>);
+
+/// Lays out plain content as Typst source for a Text.
+pub type TypesetFn = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
 /// Font and typesetting facts of the target Text, attached at compile time.
 #[derive(Clone)]
 pub struct TextMotionContext {
@@ -214,7 +220,7 @@ pub struct TextMotionContext {
     pub font_size: f64,
     pub weight: Option<u16>,
     /// Typst source laying out new plain content exactly like the Text.
-    pub typeset: Arc<dyn Fn(&str) -> Option<String> + Send + Sync>,
+    pub typeset: TypesetFn,
 }
 
 impl std::fmt::Debug for TextMotionContext {
@@ -379,7 +385,7 @@ impl SceneBuilder<'_, '_, '_> {
         object: &TypingObject,
         context: &TextMotionContext,
         text: &str,
-    ) -> Option<(Vec<(ObjectId, Arc<BezPath>)>, TypingLayout)> {
+    ) -> Option<(Vec<TypedGlyph>, TypingLayout)> {
         let source = (context.typeset)(text)?;
         let root_entity = self.states.get(root)?.entity;
         let (fill, stroke) = object

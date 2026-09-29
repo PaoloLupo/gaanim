@@ -491,6 +491,7 @@ fn typst_stroke_to_kurbo(stroke: &FixedStroke) -> kurbo::Stroke {
 }
 
 /// Recursively extract vector items from a Typst `Frame` into Gaanim Mobject entities.
+#[allow(clippy::too_many_arguments)]
 fn extract_frame_items(
     frame: &Frame,
     current_transform: &kurbo::Affine,
@@ -737,6 +738,7 @@ fn effective_line_baselines(mut samples: Vec<LineBaselineSample>) -> Vec<f64> {
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_typst_cache_key(
     font_universe: FontUniverseKey,
     source: &str,
@@ -762,6 +764,7 @@ fn build_typst_cache_key(
 }
 
 #[cfg(test)]
+#[allow(clippy::too_many_arguments)]
 fn compile_typst_source(
     font_registry: &FontRegistry,
     source: &str,

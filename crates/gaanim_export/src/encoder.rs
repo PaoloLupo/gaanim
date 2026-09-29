@@ -399,7 +399,7 @@ fn png_pixels(
     }
 
     let mut rgb = Vec::with_capacity(width as usize * height as usize * 3);
-    for pixel in frame.chunks_exact(4) {
+    for pixel in frame.as_chunks::<4>().0 {
         rgb.extend_from_slice(&pixel[..3]);
     }
     Ok((rgb, image::ExtendedColorType::Rgb8))

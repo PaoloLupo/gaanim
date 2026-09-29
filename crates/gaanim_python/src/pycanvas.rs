@@ -697,6 +697,9 @@ fn editorial_error(error: gaanim_api::canvas::EditorialError) -> PyErr {
 
 /// A theme argument: a built-in scheme name or alias, or a `Theme`.
 /// `None` is handled by the caller as "no theme".
+// Built once per scene or clip, not stored in bulk: boxing the large
+// variant would only add indirection.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum PyThemeInput {
     /// Keep the scene's default theme (never produced from Python values).
     Default,
@@ -760,6 +763,7 @@ impl PyTheme {
         font_dir=None,
         text_markup=None,
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         base: Option<&Bound<'_, PyAny>>,
         name: Option<String>,
@@ -1335,12 +1339,11 @@ impl PyCanvas {
     #[setter]
     fn set_background(&self, background: Option<crate::brush::PyBackgroundInput>) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .set_background_paint(background.map(|background| background.0));
-        })
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .set_background_paint(background.map(|background| background.0));
+        Ok(())
     }
 
     /// Blur exported frames and snapshots over a shutter of `shutter_angle`
@@ -1471,10 +1474,9 @@ impl PyCanvas {
     /// `to_corner` layout operations.
     fn set_margin(&self, margin: f64) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.inner.lock().expect("scene canvas poisoned").margin =
-                gaanim_api::canvas::Margin::all(margin);
-        })
+        self.inner.lock().expect("scene canvas poisoned").margin =
+            gaanim_api::canvas::Margin::all(margin);
+        Ok(())
     }
 
     /// Configure a per-edge safe area in canvas coordinates.
@@ -1666,17 +1668,15 @@ impl PyCameraConstraint {
     /// Enable this constraint at the current timeline cursor.
     fn enable(&self) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.inner.enable();
-        })
+        self.inner.enable();
+        Ok(())
     }
 
     /// Disable this constraint at the current timeline cursor.
     fn disable(&self) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.inner.disable();
-        })
+        self.inner.disable();
+        Ok(())
     }
 }
 
@@ -3056,12 +3056,11 @@ impl PyAssetManager {
     /// Invalidate decoded raster assets so a hot reload reads changed files.
     fn reload_assets(&self) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .reload_assets();
-        })
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .reload_assets();
+        Ok(())
     }
 }
 
@@ -3271,6 +3270,7 @@ impl PyGeometry {
         }
     }
     #[pyo3(signature = (x1, y1, x2, y2, *, head_length=None, head_width=None, body_width=None, max_head_ratio=None))]
+    #[allow(clippy::too_many_arguments)]
     fn arrow(
         &self,
         x1: f64,
@@ -3299,6 +3299,7 @@ impl PyGeometry {
             .map_err(pyo3::exceptions::PyValueError::new_err)
     }
     #[pyo3(signature = (start, end, *, via=None, head_length=0.18, head_width=0.15, body_width=0.036, max_head_ratio=None))]
+    #[allow(clippy::too_many_arguments)]
     fn connector(
         &self,
         start: &Bound<'_, PyAny>,
@@ -4201,7 +4202,7 @@ impl PyGeometry {
                 .lock()
                 .expect("scene canvas poisoned")
                 .polyline_3d(verts2);
-            if let Some(c) = color.clone() {
+            if let Some(c) = color {
                 h = h.fill(c.0);
             }
             // If we have uniform color via fill fallback, the per-vertex path is not needed.
@@ -4352,6 +4353,7 @@ impl PyMediaLibrary {
     /// Load a PNG, JPEG, or WebP image with optional size, fit mode, crop, and sampling quality.
     /// `crop` is `(x, y, width, height)` in source pixels, from the top-left.
     #[pyo3(signature = (path, *, width=None, height=None, fit="contain", crop=None, quality="medium"))]
+    #[allow(clippy::too_many_arguments)]
     fn image(
         &self,
         py: Python<'_>,
@@ -4414,6 +4416,7 @@ impl PyMediaLibrary {
         audio=true,
         volume=1.0,
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn video(
         &self,
         py: Python<'_>,
@@ -4493,6 +4496,7 @@ impl PyMediaLibrary {
         r#loop=false,
         speed=1.0,
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn lottie(
         &self,
         py: Python<'_>,
@@ -5125,6 +5129,7 @@ impl PySlideKit {
         background=None,
         color=None,
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn callout(
         &self,
         text: String,
@@ -5190,6 +5195,7 @@ impl PySlideKit {
         color=None,
         accent=None,
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn title_card(
         &self,
         title: String,
@@ -5359,6 +5365,7 @@ impl PySlideKit {
         rule_color=None,
         color=None,
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn table(
         &self,
         headers: Vec<String>,
@@ -5463,6 +5470,7 @@ impl PyTypography {
         color=None,
         accent=None,
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn code(
         &self,
         source: &str,
@@ -5639,12 +5647,11 @@ impl PyScene {
 
     fn wait(&self, seconds: f64) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .wait(seconds);
-        })
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .wait(seconds);
+        Ok(())
     }
 
     /// Set the musical tempo used by `beats` and `wait_until(beat=...)`.
@@ -5888,12 +5895,11 @@ impl PyScene {
 
     fn fade_out_all(&self, seconds: f64) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .fade_out_all(seconds);
-        })
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .fade_out_all(seconds);
+        Ok(())
     }
     fn render(&self) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
@@ -5995,6 +6001,7 @@ impl PyGeometry {
     }
 
     #[pyo3(signature = (tracker, cx, cy, radius, start_angle, sweep_scale=1.0, sweep_offset=0.0))]
+    #[allow(clippy::too_many_arguments)]
     fn always_redraw_arc(
         &self,
         tracker: Bound<'_, PyAny>,
@@ -6217,6 +6224,7 @@ impl PyMechanics {
     }
 
     #[pyo3(signature = (from, to, coils=8, amplitude=0.12, crossing=0.0, start_straight=0.12, end_straight=0.12))]
+    #[allow(clippy::too_many_arguments)]
     fn spring_between(
         &self,
         from: Bound<'_, PyAny>,
@@ -6619,6 +6627,7 @@ impl PyMechanics {
     }
 
     #[pyo3(signature = (point, *, kind="pin", direction=None, size=0.48, ground_length=0.70, color=None))]
+    #[allow(clippy::too_many_arguments)]
     fn support_at<'py>(
         &self,
         py: Python<'py>,

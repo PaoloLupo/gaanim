@@ -257,6 +257,7 @@ fn content_from_tuple(content: &Bound<'_, PyTuple>) -> PyResult<Vec<TextContent>
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn overlay_style(
     mut style: TextStyle,
     font: Option<String>,

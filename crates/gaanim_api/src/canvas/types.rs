@@ -1484,15 +1484,15 @@ impl Anim {
                             .or_else(|| spec.stroke.as_ref().map(|(_, width)| *width))
                             .unwrap_or(1.0);
                         spec.stroke = Some((paint, width));
-                    } else if let Some(width) = values.stroke_width {
-                        if let Some((_, current_width)) = &mut spec.stroke {
-                            *current_width = width;
-                        }
+                    } else if let Some(width) = values.stroke_width
+                        && let Some((_, current_width)) = &mut spec.stroke
+                    {
+                        *current_width = width;
                     }
-                    if let Some(width) = values.stroke_width {
-                        if let Some(style) = &mut spec.stroke_style {
-                            style.width = width;
-                        }
+                    if let Some(width) = values.stroke_width
+                        && let Some(style) = &mut spec.stroke_style
+                    {
+                        style.width = width;
                     }
                 }
             }

@@ -723,7 +723,7 @@ impl RateFunc {
         let elapsed = t * total;
         let period = 1.0 + gap;
         let cycle = ((elapsed / period).floor() as u32).min(count - 1);
-        let progress = ((elapsed - cycle as f64 * period).min(1.0)).max(0.0);
+        let progress = (elapsed - cycle as f64 * period).clamp(0.0, 1.0);
         (cycle, progress)
     }
 
