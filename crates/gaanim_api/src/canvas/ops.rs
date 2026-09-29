@@ -559,6 +559,21 @@ pub(crate) enum Op {
     },
     /// End the falloff effects of an instance or of a group's members.
     ClearFalloff(ObjectId),
+    /// Turn a drawable into a live underline of `sources`: a line `gap` below
+    /// them, `overhang` wider on each side.
+    AttachUnderline {
+        target: ObjectId,
+        sources: Vec<crate::anim::BoundsTarget>,
+        gap: f64,
+        overhang: f64,
+    },
+    /// Cycle the stroke color of a drawable through `colors`, `rate` turns
+    /// per second from the cursor on.
+    AttachStrokeCycle {
+        target: ObjectId,
+        colors: Vec<gaanim_core::peniko::Color>,
+        rate: f64,
+    },
     /// Attach a TracedPath to an entity, tracking a source entity's movement.
     AttachTracedPath {
         target: ObjectId,

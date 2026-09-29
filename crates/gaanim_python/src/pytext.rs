@@ -640,6 +640,53 @@ impl PyTextSelectionAnimation {
         })
     }
 
+    #[pyo3(signature = (*, color=None, width=None, padding=None, corner_radius=0.08, time_width=0.4))]
+    fn flash_around(
+        &self,
+        color: Option<PyColor>,
+        width: Option<f64>,
+        padding: Option<Bound<'_, PyAny>>,
+        corner_radius: f64,
+        time_width: f64,
+    ) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        let padding = crate::pycanvas::surrounding_padding(padding)?;
+        Ok(PyCanvasAnim {
+            inner: self
+                .source
+                .clone()
+                .animate_properties()
+                .flash_around(
+                    color.map(|color| color.0),
+                    width,
+                    padding,
+                    corner_radius,
+                    time_width,
+                )
+                .map_err(PyValueError::new_err)?,
+        })
+    }
+
+    #[pyo3(signature = (*, color=None, width=None, gap=0.06, overhang=0.04, time_width=0.5))]
+    fn flash_under(
+        &self,
+        color: Option<PyColor>,
+        width: Option<f64>,
+        gap: f64,
+        overhang: f64,
+        time_width: f64,
+    ) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyCanvasAnim {
+            inner: self
+                .source
+                .clone()
+                .animate_properties()
+                .flash_under(color.map(|color| color.0), width, gap, overhang, time_width)
+                .map_err(PyValueError::new_err)?,
+        })
+    }
+
     fn pulse(&self) -> PyResult<PyCanvasAnim> {
         crate::custom::ensure_authoring_allowed()?;
         Ok(PyCanvasAnim {

@@ -47,6 +47,10 @@ impl Plugin for GaanimDerivedGeometryPlugin {
                 pipeline::resolve_connect_system,
             )
                 .chain()
+                // A boolean or a mask may use a live frame as an operand, so
+                // the frame is rebuilt first: without an order between them a
+                // frame could be composed from the previous frame's outline.
+                .after(gaanim_animation::surrounding_rect_system)
                 .in_set(gaanim_scene::SceneSet::DerivedGeometry),
         );
         // Exports install only this plugin, so tips get their layers here.

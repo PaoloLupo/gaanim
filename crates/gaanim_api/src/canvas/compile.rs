@@ -5712,25 +5712,7 @@ impl SceneModel {
                     padding,
                     corner_radius,
                 } => {
-                    let compiled = sources
-                        .iter()
-                        .flat_map(|source| match source {
-                            crate::anim::BoundsTarget::Drawable(source) => {
-                                id_map.get(source).copied().into_iter().collect::<Vec<_>>()
-                            }
-                            crate::anim::BoundsTarget::TextSelection {
-                                target,
-                                fragment,
-                                occurrence,
-                            } => Self::fragment_child_ids(
-                                builder,
-                                id_map,
-                                *target,
-                                fragment,
-                                *occurrence,
-                            ),
-                        })
-                        .collect::<Vec<_>>();
+                    let compiled = Self::bounds_source_ids(builder, id_map, sources);
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(state) = builder.states.get(target_id)
                     {
@@ -5739,6 +5721,38 @@ impl SceneModel {
                                 compiled,
                                 *padding,
                                 *corner_radius,
+                            ),
+                        );
+                    }
+                }
+                Op::AttachUnderline {
+                    target,
+                    sources,
+                    gap,
+                    overhang,
+                } => {
+                    let compiled = Self::bounds_source_ids(builder, id_map, sources);
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(state) = builder.states.get(target_id)
+                    {
+                        builder.commands.entity(state.entity).insert(
+                            gaanim_animation::SurroundingRect::underline(compiled, *gap, *overhang),
+                        );
+                    }
+                }
+                Op::AttachStrokeCycle {
+                    target,
+                    colors,
+                    rate,
+                } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(state) = builder.states.get(target_id)
+                    {
+                        builder.commands.entity(state.entity).insert(
+                            gaanim_animation::StrokeCycle::new(
+                                colors.clone(),
+                                *rate,
+                                builder.current_time,
                             ),
                         );
                     }
@@ -7553,6 +7567,20 @@ impl SceneModel {
                 dynamic: *dynamic,
                 interpolation: *interpolation,
             },
+            AnimationType::Broadcast {
+                source,
+                ghosts,
+                max_scale,
+                lag,
+            } => AnimationType::Broadcast {
+                source: *id_map.get(source)?,
+                ghosts: ghosts
+                    .iter()
+                    .filter_map(|ghost| id_map.get(ghost).copied())
+                    .collect(),
+                max_scale: *max_scale,
+                lag: *lag,
+            },
             AnimationType::CameraFollow { target } => AnimationType::CameraFollow {
                 target: *id_map.get(target)?,
             },
@@ -9323,6 +9351,28 @@ impl SceneModel {
         } else {
             members
         }
+    }
+
+    /// The compiled object ids a bounds frame follows: the drawables, and the
+    /// glyphs of the text selections.
+    fn bounds_source_ids(
+        builder: &mut SceneBuilder,
+        id_map: &HashMap<ObjectId, ObjectId>,
+        sources: &[crate::anim::BoundsTarget],
+    ) -> Vec<ObjectId> {
+        sources
+            .iter()
+            .flat_map(|source| match source {
+                crate::anim::BoundsTarget::Drawable(source) => {
+                    id_map.get(source).copied().into_iter().collect::<Vec<_>>()
+                }
+                crate::anim::BoundsTarget::TextSelection {
+                    target,
+                    fragment,
+                    occurrence,
+                } => Self::fragment_child_ids(builder, id_map, *target, fragment, *occurrence),
+            })
+            .collect()
     }
 
     fn hierarchy_entities(
@@ -16480,6 +16530,239 @@ mod tests {
         );
         // Seeking back reproduces the first frame exactly.
         assert_eq!(scales_at(0.0), start);
+    }
+
+    /// Opacity and scale of the object `id` (a handle id is one past its entity id).
+    fn object_state(world: &mut World, id: ObjectId) -> (f32, DVec3) {
+        let id = ObjectId::from_raw(id.as_raw() - 1);
+        world
+            .query::<(&MobjectId, &Opacity, &SpatialTransform)>()
+            .iter(world)
+            .find(|(object, ..)| object.0 == id)
+            .map(|(_, opacity, transform)| (opacity.0, transform.scale))
+            .unwrap()
+    }
+
+    #[test]
+    fn blink_switches_the_target_off_and_on_that_many_times() {
+        let mut canvas = SceneModel::new(640, 360);
+        let rect = canvas.rect(1.0, 1.0);
+        canvas.play(vec![rect.animate().blink(3)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let mut opacity_at = |time: f64| {
+            timeline.seek(&mut world, time);
+            opacity_of(&mut world, &rect)
+        };
+        // Three blinks of half a second each.
+        assert_eq!(opacity_at(0.0), 1.0);
+        assert!(opacity_at(0.15) < 0.01, "first blink is off");
+        assert!((opacity_at(0.4) - 1.0).abs() < 0.01, "and back on");
+        assert!(opacity_at(0.65) < 0.01, "second blink");
+        assert!(opacity_at(1.15) < 0.01, "third blink");
+        assert_eq!(opacity_at(1.5), 1.0, "visible again at the end");
+    }
+
+    #[test]
+    fn broadcast_ripples_grow_and_fade_one_after_another_from_where_the_source_is() {
+        let mut canvas = SceneModel::new(640, 360);
+        let source = canvas.circle(0.5).move_to_default(2.0, 1.0);
+        let anim = source.animate().broadcast(3, 3.0, 0.5).unwrap();
+        let AnimationType::Broadcast { ghosts, .. } = anim.inner.anim_type.clone() else {
+            panic!("broadcast builds a Broadcast animation");
+        };
+        assert_eq!(ghosts.len(), 3);
+        canvas.play(vec![anim.duration(3.0)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let mut ripples_at = |time: f64| {
+            timeline.seek(&mut world, time);
+            ghosts
+                .iter()
+                .map(|ghost| object_state(&mut world, *ghost))
+                .collect::<Vec<_>>()
+        };
+        // Three ripples of 1.5 s, a ripple apart by half of one: 0.75 s.
+        let before = ripples_at(0.0);
+        for (opacity, _) in &before {
+            assert_eq!(
+                *opacity, 0.0,
+                "nothing shows before the ripples start: {before:?}"
+            );
+        }
+        let middle = ripples_at(0.75);
+        assert!(
+            middle[0].0 > 0.1 && middle[0].1.x > 1.5,
+            "the first is growing: {middle:?}"
+        );
+        assert!(
+            middle[1].0 < 0.01,
+            "the second is only starting: {middle:?}"
+        );
+        assert!(middle[2].0 < 0.01);
+        for (opacity, scale) in ripples_at(3.0) {
+            assert!(opacity < 0.01, "every ripple has faded out");
+            assert!((scale.x - 3.0).abs() < 1e-6, "at the full size: {scale:?}");
+        }
+        assert_eq!(
+            ripples_at(0.75),
+            middle,
+            "seeking back reproduces the frame"
+        );
+    }
+
+    #[test]
+    fn broadcast_rejects_values_that_cannot_ripple() {
+        let mut canvas = SceneModel::new(640, 360);
+        let source = canvas.circle(0.5);
+        assert!(source.animate().broadcast(0, 3.0, 0.2).is_err());
+        assert!(source.animate().broadcast(65, 3.0, 0.2).is_err());
+        assert!(source.animate().broadcast(3, 0.5, 0.2).is_err());
+        assert!(source.animate().broadcast(3, f64::NAN, 0.2).is_err());
+        assert!(source.animate().broadcast(3, 3.0, -1.0).is_err());
+        assert!(source.animate().fade_in().broadcast(3, 3.0, 0.2).is_err());
+    }
+
+    #[test]
+    fn a_spotlight_dims_and_returns_and_its_helpers_stay_invisible() {
+        let mut canvas = SceneModel::new(640, 360);
+        let target = canvas.rect(1.0, 1.0);
+        let anim = canvas
+            .spotlight(
+                vec![crate::canvas::BoundsTarget::Drawable(target.id)],
+                0.7,
+                [0.1; 4],
+                0.05,
+            )
+            .unwrap();
+        let overlay = anim.inner.target;
+        canvas.wait(1.0);
+        canvas.play(vec![anim.duration(2.0)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let mut dim_at = |time: f64| {
+            timeline.seek(&mut world, time);
+            object_state(&mut world, overlay).0
+        };
+        assert!(dim_at(0.0) < 0.01, "nothing is dimmed before it starts");
+        assert!(dim_at(0.99) < 0.01);
+        assert!((dim_at(2.0) - 0.7).abs() < 0.01, "fully dimmed halfway");
+        assert!(dim_at(3.0) < 0.01, "and back to normal");
+        // The cover and the hole only shape the overlay.
+        let overlay_entity = ObjectId::from_raw(overlay.as_raw() - 1);
+        let target_entity = ObjectId::from_raw(target.id.as_raw() - 1);
+        let helpers: Vec<f32> = world
+            .query::<(&MobjectId, &Opacity)>()
+            .iter(&world)
+            .filter(|(object, _)| object.0 != overlay_entity && object.0 != target_entity)
+            .map(|(_, opacity)| opacity.0)
+            .collect();
+        assert_eq!(helpers.len(), 2);
+        assert!(helpers.iter().all(|opacity| *opacity == 0.0), "{helpers:?}");
+        assert!(
+            canvas
+                .spotlight(
+                    vec![crate::canvas::BoundsTarget::Drawable(target.id)],
+                    0.0,
+                    [0.1; 4],
+                    0.0
+                )
+                .is_err()
+        );
+        assert!(
+            canvas
+                .spotlight(
+                    vec![crate::canvas::BoundsTarget::Drawable(target.id)],
+                    1.5,
+                    [0.1; 4],
+                    0.0
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn flashes_sweep_a_frame_or_an_underline_that_follow_the_target() {
+        let mut canvas = SceneModel::new(640, 360);
+        let target = canvas.rect(2.0, 1.0).move_to_default(1.0, 1.0);
+        let around = target
+            .animate()
+            .flash_around(None, None, [0.1; 4], 0.05, 0.4)
+            .unwrap();
+        let under = target
+            .animate()
+            .flash_under(None, None, 0.08, 0.1, 0.5)
+            .unwrap();
+        assert!(matches!(
+            around.inner.anim_type,
+            AnimationType::ShowPassingFlash { time_width } if time_width == 0.4
+        ));
+        canvas.play(vec![around, under]);
+        let flash = |width: Option<f64>, padding: [f64; 4], time_width: f64| {
+            target
+                .animate()
+                .flash_around(None, width, padding, 0.0, time_width)
+        };
+        assert!(
+            flash(Some(0.1), [0.1; 4], 0.4).is_err(),
+            "a width needs a color"
+        );
+        assert!(flash(None, [-1.0; 4], 0.4).is_err());
+        assert!(flash(None, [0.1; 4], 0.0).is_err());
+        assert!(
+            target
+                .animate()
+                .flash_under(None, None, 0.1, 0.0, 1.5)
+                .is_err()
+        );
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        timeline.seek(&mut world, 0.5);
+        let mut shapes = world
+            .query::<&gaanim_animation::SurroundingRect>()
+            .iter(&world)
+            .map(|frame| frame.shape)
+            .collect::<Vec<_>>();
+        shapes.sort_by_key(|shape| *shape as u8);
+        assert_eq!(
+            shapes,
+            vec![
+                gaanim_animation::SurroundingShape::Frame,
+                gaanim_animation::SurroundingShape::Underline
+            ]
+        );
+    }
+
+    #[test]
+    fn an_animated_boundary_cycles_its_stroke_through_the_colors_from_the_cursor() {
+        let mut canvas = SceneModel::new(640, 360);
+        let card = canvas.rect(2.0, 1.0);
+        canvas.wait(1.0);
+        let red = gaanim_core::peniko::Color::from_rgb8(255, 0, 0);
+        let blue = gaanim_core::peniko::Color::from_rgb8(0, 0, 255);
+        card.animated_boundary(vec![red, blue], 0.5, 0.04, [0.1; 4], 0.05)
+            .unwrap();
+        assert!(
+            card.animated_boundary(vec![red], 0.5, 0.04, [0.1; 4], 0.05)
+                .is_err()
+        );
+        assert!(
+            card.animated_boundary(vec![red, blue], f64::NAN, 0.04, [0.1; 4], 0.05)
+                .is_err()
+        );
+        assert!(
+            card.animated_boundary(vec![red, blue], 0.5, 0.0, [0.1; 4], 0.05)
+                .is_err()
+        );
+        canvas.wait(3.0);
+        let (mut world, _) = compiled_world(&canvas);
+        let cycle = world
+            .query::<&gaanim_animation::StrokeCycle>()
+            .single(&world)
+            .unwrap()
+            .clone();
+        assert_eq!(cycle.start, 1.0, "it starts where it was declared");
+        assert_eq!(cycle.rate, 0.5);
+        assert_eq!(cycle.color_at(1.0), red);
+        // A turn takes two seconds: the color list has two entries, so the
+        // second one is reached after one of them.
+        assert_eq!(cycle.color_at(2.0), blue);
     }
 
     /// A row of two rectangles, laid out twice with a play in between.

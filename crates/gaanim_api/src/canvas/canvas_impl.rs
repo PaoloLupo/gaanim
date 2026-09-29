@@ -2030,6 +2030,44 @@ pub(crate) fn spawn_in(
     handle
 }
 
+/// A live frame around `targets`, in the scene `state` belongs to.
+pub(crate) fn surrounding_rect_in(
+    state: &SharedCanvasState,
+    targets: Vec<BoundsTarget>,
+    padding: [f64; 4],
+    corner_radius: f64,
+) -> Result<SurroundingRectHandle, SurroundingRectError> {
+    if targets.is_empty() {
+        return Err(SurroundingRectError::NoTargets);
+    }
+    if padding
+        .iter()
+        .any(|value| !value.is_finite() || *value < 0.0)
+    {
+        return Err(SurroundingRectError::InvalidPadding);
+    }
+    if !corner_radius.is_finite() || corner_radius < 0.0 {
+        return Err(SurroundingRectError::InvalidCornerRadius);
+    }
+    let drawable = spawn_in(state, SpawnKind::SurroundingRect, true).no_fill();
+    let id = drawable.id;
+    state
+        .lock()
+        .expect("canvas state poisoned")
+        .active_mut()
+        .ops
+        .push(Op::AttachSurroundingRect {
+            target: id,
+            sources: targets.clone(),
+            padding,
+            corner_radius,
+        });
+    Ok(SurroundingRectHandle {
+        drawable,
+        targets: Arc::new(Mutex::new(targets)),
+    })
+}
+
 /// Top-level facade for building Gaanim animations.
 #[derive(Debug, Clone)]
 pub struct SceneModel {
@@ -2854,35 +2892,7 @@ impl SceneModel {
         padding: [f64; 4],
         corner_radius: f64,
     ) -> Result<SurroundingRectHandle, SurroundingRectError> {
-        if targets.is_empty() {
-            return Err(SurroundingRectError::NoTargets);
-        }
-        if padding
-            .iter()
-            .any(|value| !value.is_finite() || *value < 0.0)
-        {
-            return Err(SurroundingRectError::InvalidPadding);
-        }
-        if !corner_radius.is_finite() || corner_radius < 0.0 {
-            return Err(SurroundingRectError::InvalidCornerRadius);
-        }
-        let drawable = self.spawn(SpawnKind::SurroundingRect).no_fill();
-        let id = drawable.id;
-        self.state
-            .lock()
-            .expect("canvas state poisoned")
-            .active_mut()
-            .ops
-            .push(Op::AttachSurroundingRect {
-                target: id,
-                sources: targets.clone(),
-                padding,
-                corner_radius,
-            });
-        Ok(SurroundingRectHandle {
-            drawable,
-            targets: Arc::new(Mutex::new(targets)),
-        })
+        surrounding_rect_in(&self.state, targets, padding, corner_radius)
     }
     pub fn square(&mut self, s: f64) -> DrawableHandle {
         self.spawn(SpawnKind::Square(s))

@@ -564,6 +564,24 @@ pub enum AnimationType {
     ShowPassingFlash {
         time_width: f64,
     },
+    /// Turn the target off and on `count` times.
+    Blink {
+        count: u32,
+    },
+    /// Ripples spreading from `source`: each ghost (a copy of it, placed where
+    /// it is when the animation starts) grows to `max_scale` times its size
+    /// while it fades out, `lag` of a ripple after the previous one.
+    Broadcast {
+        source: ObjectId,
+        ghosts: Vec<ObjectId>,
+        max_scale: f64,
+        lag: f64,
+    },
+    /// Fade a dimming overlay in to `dim` opacity. Its rate function shapes the
+    /// cycle: the default goes there and back.
+    Spotlight {
+        dim: f64,
+    },
     /// Per-unit text range animation (sweep, reveal presets, tracking); see
     /// [`crate::canvas::text_animator`].
     TextAnimator(Box<crate::canvas::text_animator::TextAnimatorSpec>),
@@ -761,12 +779,15 @@ impl AnimationType {
             | Self::Unwrite { .. }
             | Self::Uncreate { .. }
             | Self::ShowPassingFlash { .. }
+            | Self::Blink { .. }
+            | Self::Broadcast { .. }
             | Self::TextMotion(_)
             | Self::Wiggle => RateFunc::Linear,
             Self::Create { .. } | Self::DrawBorderThenFill { .. } => RateFunc::DoubleSmooth,
-            Self::Indicate { .. } | Self::Flash { .. } | Self::Circumscribe { .. } => {
-                RateFunc::ThereAndBack
-            }
+            Self::Indicate { .. }
+            | Self::Flash { .. }
+            | Self::Circumscribe { .. }
+            | Self::Spotlight { .. } => RateFunc::ThereAndBack,
             _ => RateFunc::Smooth,
         }
     }

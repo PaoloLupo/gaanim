@@ -183,7 +183,7 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
 | ☐ | [TS-03](#ts-03--magic-move-por-claves) | Magic move por claves | M | ★★★ | QW-04 | [#167](https://github.com/PaoloLupo/gaanim/issues/167) |
 | ☐ | [AN-01](#an-01--anotaciones-a-mano-alzada) | Anotaciones a mano alzada | M | ★★★ | TR-01, PR-02 | [#168](https://github.com/PaoloLupo/gaanim/issues/168) |
 | ☑ | [AN-03](#an-03--puntas-de-flecha-en-cualquier-trazo) | Puntas de flecha en cualquier trazo | S | ★ | TR-01 | [#169](https://github.com/PaoloLupo/gaanim/issues/169) |
-| ☐ | [AN-04](#an-04--énfasis-adicionales) | Énfasis adicionales (broadcast, spotlight…) | S | ★★ | — | [#170](https://github.com/PaoloLupo/gaanim/issues/170) |
+| ☑ | [AN-04](#an-04--énfasis-adicionales) | Énfasis adicionales (broadcast, spotlight…) | S | ★★ | — | [#170](https://github.com/PaoloLupo/gaanim/issues/170) |
 | ☐ | [AN-05](#an-05--carrera-de-barras) | Carrera de barras (bar chart race) | M | ★★ | — | [#171](https://github.com/PaoloLupo/gaanim/issues/171) |
 | ☑ | [AN-07](#an-07--anillos-de-progreso-y-temporizadores) | Anillos de progreso y temporizadores | S | ★ | TR-01 | [#172](https://github.com/PaoloLupo/gaanim/issues/172) |
 
@@ -1496,6 +1496,11 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
   term.animate.flash_around()
   cursor.animate.blink(3)
   ```
+
+- **Hecho:** `broadcast`, `blink`, `flash_under` y `flash_around` son métodos de `.animate`
+  (los dos últimos también sobre `texto["palabra"]`); `scene.fx.spotlight` acepta un objeto,
+  una selección o varios; `animated_boundary` devuelve un marco vivo cuyo trazo recorre los
+  colores. Los ejemplos `emphasis_demo` y `emphasis_variants` tienen baseline.
 
 ### AN-05 · Carrera de barras
 

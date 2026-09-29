@@ -170,7 +170,7 @@ impl PySurroundingRect {
     }
 }
 
-fn bounds_targets(
+pub(crate) fn bounds_targets(
     value: &Bound<'_, PyAny>,
 ) -> PyResult<
     Vec<(
@@ -215,7 +215,7 @@ fn bounds_targets(
     Ok(result)
 }
 
-fn surrounding_padding(value: Option<Bound<'_, PyAny>>) -> PyResult<[f64; 4]> {
+pub(crate) fn surrounding_padding(value: Option<Bound<'_, PyAny>>) -> PyResult<[f64; 4]> {
     let padding = if let Some(value) = value {
         if let Ok(all) = value.extract::<f64>() {
             [all; 4]
@@ -1654,6 +1654,7 @@ scene_capability!(PyTypography, "Typography");
 scene_capability!(PyMediaLibrary, "MediaLibrary");
 scene_capability!(PySlideKit, "SlideKit");
 scene_capability!(PyMechanics, "Mechanics");
+scene_capability!(PyFx, "Fx");
 scene_capability!(PyAssetManager, "AssetManager");
 contextual_scene_capability!(PyLayoutBuilder, "LayoutBuilder");
 contextual_scene_capability!(PyVisualization, "Visualization");
@@ -2729,6 +2730,15 @@ impl PyScene {
     }
 
     #[getter]
+    fn fx(slf: &Bound<'_, Self>) -> PyResult<PyFx> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok({
+            let inner = slf.borrow().inner.clone();
+            PyFx { inner }
+        })
+    }
+
+    #[getter]
     fn assets(slf: &Bound<'_, Self>) -> PyResult<PyAssetManager> {
         crate::custom::ensure_authoring_allowed()?;
         Ok({
@@ -3688,6 +3698,41 @@ impl PyGeometry {
             )
             .map(PyDrawable)
             .map_err(pyo3::exceptions::PyValueError::new_err)
+    }
+}
+
+#[pymethods]
+impl PyFx {
+    /// Dim everything outside `target` while an overlay with a hole around it
+    /// fades in and, by default, back out.
+    #[pyo3(signature = (target, *, dim=0.7, padding=None, corner_radius=0.1))]
+    fn spotlight(
+        &self,
+        target: &Bound<'_, PyAny>,
+        dim: f64,
+        padding: Option<Bound<'_, PyAny>>,
+        corner_radius: f64,
+    ) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        let targets = bounds_targets(target)?;
+        let padding = match padding {
+            Some(value) => surrounding_padding(Some(value))?,
+            None => [0.2; 4],
+        };
+        let mut canvas = self.inner.lock().expect("scene canvas poisoned");
+        if targets
+            .iter()
+            .any(|(_, target)| !canvas.owns_drawable(target))
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "every spotlight target must belong to this Scene",
+            ));
+        }
+        let targets = targets.into_iter().map(|(target, _)| target).collect();
+        let inner = canvas
+            .spotlight(targets, dim, padding, corner_radius)
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        Ok(PyCanvasAnim { inner })
     }
 }
 
