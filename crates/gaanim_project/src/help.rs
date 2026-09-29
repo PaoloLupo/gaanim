@@ -155,6 +155,10 @@ const GENERAL: Page = Page {
                     "GAANIM_INCREMENTAL=0",
                     "Rebuild the whole scene on every reload",
                 ),
+                (
+                    "GAANIM_SEGMENT_CHECKPOINTS=0",
+                    "Replay every seek from the start instead of from the\nsegment it lands in",
+                ),
             ],
         ),
     ],

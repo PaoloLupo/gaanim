@@ -352,10 +352,17 @@ Para diagnosticar los FPS de la previsualización, abre un proyecto con
 `GAANIM_FRAME_PROFILE=1`: el editor reproduce la línea de tiempo completa sin
 detenerse en las paradas, escribe en stderr una línea por segundo con el coste
 del seek, la compilación de fragmentos, el render (incluida la espera de
-vsync) y la resolución del preview y, al terminar, cierra la ventana tras
-listar las ventanas más lentas. La previsualización baja su resolución al
-reproducir si el render no llega a 60 fps y la recupera al pausar; para medir
-siempre a resolución completa, añade `GAANIM_PREVIEW_RESOLUTION=full`.
+vsync), la resolución del preview y los objetos visibles y, al terminar, cierra
+la ventana tras listar las ventanas más lentas. La previsualización baja su
+resolución al reproducir si el render no llega a 60 fps y la recupera al
+pausar; para medir siempre a resolución completa, añade
+`GAANIM_PREVIEW_RESOLUTION=full`.
+
+Los seeks parten del inicio del segmento en que caen: la segunda vez que uno
+cae en un segmento, el timeline guarda el estado de su inicio (si ningún clip
+anterior sigue en curso ahí) y los siguientes solo reaplican los clips desde
+ese punto. `GAANIM_SEGMENT_CHECKPOINTS=0` vuelve a reaplicar desde t=0 para
+comparar; `GAANIM_CHECKPOINT_TIMINGS=1` informa cuánto tarda cada captura.
 
 `just run` comprueba la vigencia de los binarios mediante Cargo antes de abrir
 la escena. Para ejecutar un binario ya validado sin invocar un build, usa
