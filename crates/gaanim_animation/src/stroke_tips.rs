@@ -96,7 +96,7 @@ impl StrokeTips {
         let (Some(first), Some(last)) = (first_point(path), last_point(path)) else {
             return (path.clone(), BezPath::new(), BezPath::new());
         };
-        if !(total > 1e-9) {
+        if total.is_nan() || total <= 1e-9 {
             return (path.clone(), BezPath::new(), BezPath::new());
         }
         let (length, width) = self.arrow_size(stroke_width);
@@ -196,6 +196,7 @@ type TipQuery<'w, 's> = Query<
 >;
 
 /// Shortens tipped paths and shapes their tips right before extraction.
+#[allow(clippy::type_complexity)]
 pub fn apply_stroke_tips_system(
     mut commands: Commands,
     mut paths: Query<

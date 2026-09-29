@@ -311,7 +311,7 @@ mod tests {
                 .flatten()
                 .all(|uv| (0.0..=1.0).contains(uv))
         );
-        for triangle in mesh.indices.chunks_exact(3) {
+        for triangle in mesh.indices.as_chunks::<3>().0 {
             let a = Vec3::from_array(mesh.vertices[triangle[0] as usize]);
             let b = Vec3::from_array(mesh.vertices[triangle[1] as usize]);
             let c = Vec3::from_array(mesh.vertices[triangle[2] as usize]);

@@ -93,29 +93,28 @@ enum Rerun {
 
 fn format_py_traceback(py: Python<'_>, err: &PyErr) -> String {
     // Intentar traceback.format_exception para obtener el traceback completo
-    if let Ok(tb_mod) = py.import("traceback") {
-        if let Ok(formatted) = tb_mod.call_method1(
+    if let Ok(tb_mod) = py.import("traceback")
+        && let Ok(formatted) = tb_mod.call_method1(
             "format_exception",
             (err.get_type(py), err.value(py), err.traceback(py)),
-        ) {
-            if let Ok(list) = formatted.extract::<Vec<String>>() {
-                let joined = list.join("");
-                if !joined.trim().is_empty() {
-                    return joined;
-                }
-            }
+        )
+        && let Ok(list) = formatted.extract::<Vec<String>>()
+    {
+        let joined = list.join("");
+        if !joined.trim().is_empty() {
+            return joined;
         }
     }
     // Fallback: valor de la excepción + tipo
-    if let Ok(val) = err.value(py).extract::<String>() {
-        if !val.trim().is_empty() {
-            let type_name = err
-                .get_type(py)
-                .name()
-                .map(|n| n.to_string())
-                .unwrap_or_else(|_| "PythonError".to_string());
-            return format!("{type_name}: {val}");
-        }
+    if let Ok(val) = err.value(py).extract::<String>()
+        && !val.trim().is_empty()
+    {
+        let type_name = err
+            .get_type(py)
+            .name()
+            .map(|n| n.to_string())
+            .unwrap_or_else(|_| "PythonError".to_string());
+        return format!("{type_name}: {val}");
     }
     err.to_string()
 }

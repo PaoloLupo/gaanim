@@ -28,7 +28,7 @@ VISUAL_CRATES = {
 VISUAL_CANDIDATES = {
     "gaanim_animation": ["transform_demo"],
     "gaanim_api": ["transform_demo"],
-    "gaanim_layout": ["layout_verification", "layout_fit_demo"],
+    "gaanim_layout": ["layout_flex", "layout_grid", "layout_reflow"],
     "gaanim_math": ["camera_demo", "transform_demo"],
     "gaanim_objects": ["svg_demo", "image_demo"],
     "gaanim_python": ["transform_demo"],

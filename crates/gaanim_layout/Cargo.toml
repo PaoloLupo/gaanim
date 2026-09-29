@@ -3,7 +3,7 @@ name = "gaanim_layout"
 version = "0.7.0"
 license = "MIT OR Apache-2.0"
 edition = "2024"
-description = "Mathematical relative coordinate layout and bounding box alignment tools for gaanim v2"
+description = "CSS flexbox and grid layout (on Taffy), anchors and relational constraints for Gaanim"
 
 [dependencies]
 # Local workspace dependencies
@@ -16,6 +16,7 @@ glam = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }
 kasuari = "0.4.12"
+taffy = { version = "0.10", default-features = false, features = ["std", "taffy_tree", "flexbox", "grid", "content_size"] }
 thiserror = { workspace = true }
 
 # Serialization (conditional)

@@ -592,8 +592,47 @@ struct CompiledLayoutMeasure<'a> {
     fixed: BTreeMap<gaanim_layout::LayoutId, DVec2>,
     texts: BTreeMap<gaanim_layout::LayoutId, CompiledTextMeasure>,
     text_compositions: RefCell<BTreeMap<gaanim_layout::LayoutId, TextComposition>>,
+    /// Every composition measured per text leaf, with its size: the solver
+    /// probes several widths (min-content among them) in no fixed order.
+    text_candidates: RefCell<BTreeMap<gaanim_layout::LayoutId, Vec<(TextComposition, DVec2)>>>,
     natural_text_sizes: RefCell<BTreeMap<gaanim_layout::LayoutId, DVec2>>,
+    /// Ascent and descent of a full line of each text leaf's font and size.
+    line_extents: RefCell<BTreeMap<gaanim_layout::LayoutId, (f64, f64)>>,
     font_registry: &'a gaanim_text::font::FontRegistry,
+}
+
+/// The box a text occupies in a layout: its ink widened vertically to full
+/// lines (from the first baseline up by a line's ascent, and for one line down
+/// by its descent), so texts of one style share heights and baselines
+/// whatever glyphs they contain.
+fn text_line_box(
+    ink: Bounds3D,
+    metrics: gaanim_text::prelude::TextMetrics,
+    (ascent, descent): (f64, f64),
+) -> Bounds3D {
+    let top = ink.max.y.max(metrics.first_baseline + ascent);
+    let bottom = if metrics.line_count <= 1 {
+        ink.min.y.min(metrics.first_baseline - descent)
+    } else {
+        ink.min.y
+    };
+    Bounds3D::new_2d(ink.min.x, bottom, ink.max.x, top)
+}
+
+/// Whether text content is a single `$…$` formula.
+fn is_formula(content: &[StructuredTextContent]) -> bool {
+    fn collect(content: &[StructuredTextContent], out: &mut String) {
+        for item in content {
+            match item {
+                StructuredTextContent::Literal(text) => out.push_str(text),
+                StructuredTextContent::Part(part) => collect(&part.content, out),
+            }
+        }
+    }
+    let mut text = String::new();
+    collect(content, &mut text);
+    let text = text.trim();
+    text.len() >= 2 && text.starts_with('$') && text.ends_with('$') && !text.ends_with("\\$")
 }
 
 impl CompiledLayoutMeasure<'_> {
@@ -611,9 +650,29 @@ impl CompiledLayoutMeasure<'_> {
             &text.font_family,
             text.color,
         );
-        let bounds = gaanim_text::prelude::measure_typst(
+        let (bounds, metrics) = self.typst_lines(id, text, &source)?;
+        // Formulas keep their ink box, the convention equations and
+        // matrices are laid out with; prose sits on full lines.
+        let line_box = if is_formula(&text.spec.content) {
+            bounds
+        } else {
+            text_line_box(bounds, metrics, self.line_extent(id, text)?)
+        };
+        Ok(DVec2::new(
+            line_box.width().max(0.0),
+            line_box.height().max(0.0),
+        ))
+    }
+
+    fn typst_lines(
+        &self,
+        id: gaanim_layout::LayoutId,
+        text: &CompiledTextMeasure,
+        source: &str,
+    ) -> Result<(Bounds3D, gaanim_text::prelude::TextMetrics), gaanim_layout::LayoutError> {
+        gaanim_text::prelude::measure_typst_lines(
             self.font_registry,
-            &source,
+            source,
             false,
             Some(&text.font_family),
             Some(&text.math_font),
@@ -625,16 +684,58 @@ impl CompiledLayoutMeasure<'_> {
         .map_err(|errors| gaanim_layout::LayoutError::Measure {
             id,
             message: errors.join("; "),
-        })?;
-        Ok(DVec2::new(
-            bounds.width().max(0.0),
-            bounds.height().max(0.0),
-        ))
+        })
+    }
+
+    /// Ascent and descent of a full line in this text's style, from glyphs
+    /// that reach the ascender and the descender.
+    fn line_extent(
+        &self,
+        id: gaanim_layout::LayoutId,
+        text: &CompiledTextMeasure,
+    ) -> Result<(f64, f64), gaanim_layout::LayoutError> {
+        if let Some(extent) = self.line_extents.borrow().get(&id) {
+            return Ok(*extent);
+        }
+        let mut reference = text.spec.clone();
+        reference.content = vec![StructuredTextContent::Literal("ÁÉgjpqy".to_owned())];
+        reference.flow.wrap = StructuredTextWrap::NoWrap;
+        reference.flow.max_lines = None;
+        let source = structured_text_typst_source(
+            &reference,
+            None,
+            text.font_size,
+            &text.font_family,
+            text.color,
+        );
+        let (bounds, metrics) = self.typst_lines(id, text, &source)?;
+        let extent = (
+            (bounds.max.y - metrics.first_baseline).max(0.0),
+            (metrics.first_baseline - bounds.min.y).max(0.0),
+        );
+        self.line_extents.borrow_mut().insert(id, extent);
+        Ok(extent)
     }
 }
 
 impl gaanim_layout::IntrinsicMeasure for CompiledLayoutMeasure<'_> {
     fn measure(
+        &self,
+        id: gaanim_layout::LayoutId,
+        constraints: gaanim_layout::BoxConstraints,
+    ) -> Result<DVec2, gaanim_layout::LayoutError> {
+        self.measure_inner(id, constraints)
+    }
+
+    fn is_width_sensitive(&self, id: gaanim_layout::LayoutId) -> bool {
+        self.texts
+            .get(&id)
+            .is_some_and(|text| !matches!(text.spec.flow.wrap, StructuredTextWrap::NoWrap))
+    }
+}
+
+impl CompiledLayoutMeasure<'_> {
+    fn measure_inner(
         &self,
         id: gaanim_layout::LayoutId,
         constraints: gaanim_layout::BoxConstraints,
@@ -696,13 +797,41 @@ impl gaanim_layout::IntrinsicMeasure for CompiledLayoutMeasure<'_> {
             }
         };
         self.text_compositions.borrow_mut().insert(id, composition);
+        self.text_candidates
+            .borrow_mut()
+            .entry(id)
+            .or_default()
+            .push((composition, size));
         Ok(constraints.constrain(size))
     }
 
-    fn is_width_sensitive(&self, id: gaanim_layout::LayoutId) -> bool {
-        self.texts
+    /// The composition that produced a text leaf's final box: the widest one
+    /// measured that fits `width`, not whichever the solver probed last.
+    fn final_composition(
+        &self,
+        id: gaanim_layout::LayoutId,
+        width: f64,
+    ) -> Option<TextComposition> {
+        const FIT_EPSILON: f64 = 1.0e-6;
+        let candidates = self.text_candidates.borrow();
+        candidates
             .get(&id)
-            .is_some_and(|text| !matches!(text.spec.flow.wrap, StructuredTextWrap::NoWrap))
+            .and_then(|candidates| {
+                candidates
+                    .iter()
+                    .filter(|(_, size)| size.x <= width + FIT_EPSILON)
+                    .max_by(|(a, a_size), (b, b_size)| {
+                        let wrap = |composition: &TextComposition| {
+                            composition.width().unwrap_or(f64::INFINITY)
+                        };
+                        a_size
+                            .x
+                            .total_cmp(&b_size.x)
+                            .then(wrap(a).total_cmp(&wrap(b)))
+                    })
+                    .map(|(composition, _)| *composition)
+            })
+            .or_else(|| self.text_compositions.borrow().get(&id).copied())
     }
 }
 
@@ -1123,12 +1252,8 @@ fn structured_typst_content(spec: &StructuredTextSpec, _font_size: f64) -> Strin
         if !in_math {
             continue;
         }
-        let left_has_space = raw_leaves[index]
-            .text
-            .ends_with(|character| character == ' ' || character == '\t');
-        let right_has_space = raw_leaves[index + 1]
-            .text
-            .starts_with(|character| character == ' ' || character == '\t');
+        let left_has_space = raw_leaves[index].text.ends_with([' ', '\t']);
+        let right_has_space = raw_leaves[index + 1].text.starts_with([' ', '\t']);
         let display_open = left_has_space
             && raw_leaves[index]
                 .text
@@ -1361,6 +1486,7 @@ struct CompiledLayoutTree {
     texts: BTreeMap<gaanim_layout::LayoutId, CompiledTextMeasure>,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect_compiled_layout_node(
     source: ObjectId,
     snapshots: &HashMap<ObjectId, LayoutTreeSnapshot>,
@@ -2584,6 +2710,7 @@ impl SceneModel {
         world.insert_resource(text_config);
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn replay_seg(
         builder: &mut SceneBuilder,
         seg: &Segment,
@@ -2662,9 +2789,15 @@ impl SceneModel {
                         ) => *frozen = current.clone(),
                         _ => {}
                     }
-                    // Layering has no timeline cut: a z-index set after the
-                    // declaration froze still orders the drawable.
+                    // Layering and box structure have no timeline cut: a
+                    // z-index, a box background or the box that adopts the
+                    // drawable, set after the declaration froze, still apply.
+                    // A drawable later detached keeps the box it was spawned
+                    // in, whose layout snapshots still place it until then.
                     authored.z_index = live.z_index;
+                    authored.layout_background =
+                        authored.layout_background.or(live.layout_background);
+                    authored.layout_owner = authored.layout_owner.or(live.layout_owner);
                     let spec = theme
                         .map(|theme| theme.resolve_object(&authored))
                         .transpose()
@@ -2691,10 +2824,10 @@ impl SceneModel {
                     if spec.hud {
                         Self::apply_hud(builder, actual.id);
                     }
-                    if spec.exclude_from_parent_draw {
-                        if let Some(state) = builder.states.get_mut(actual.id) {
-                            state.exclude_from_parent_draw = true;
-                        }
+                    if spec.exclude_from_parent_draw
+                        && let Some(state) = builder.states.get_mut(actual.id)
+                    {
+                        state.exclude_from_parent_draw = true;
                     }
                     id_map.insert(spec.id, actual.id);
                     if spec.svg_root {
@@ -2739,11 +2872,11 @@ impl SceneModel {
                             }
                         }
                     }
-                    if transform_targets.contains(&spec.id) {
-                        if let Some(state) = builder.states.get(actual.id).cloned() {
-                            builder.hide_visuals_now(&state);
-                            builder.schedule_hide_hierarchy(actual.id);
-                        }
+                    if transform_targets.contains(&spec.id)
+                        && let Some(state) = builder.states.get(actual.id).cloned()
+                    {
+                        builder.hide_visuals_now(&state);
+                        builder.schedule_hide_hierarchy(actual.id);
                     }
                 }
                 Op::SpawnCameraBinding(spec) => {
@@ -3649,6 +3782,7 @@ impl SceneModel {
                     duration,
                     entering,
                     leaving,
+                    resolve,
                 } => {
                     if let Some(expected) = from_version {
                         let actual = layout_versions.get(&to.container).copied();
@@ -3663,6 +3797,9 @@ impl SceneModel {
                     }
                     layout_versions.insert(to.container, to.version);
                     layout_snapshots.insert(to.container, to.clone());
+                    if !*resolve {
+                        continue;
+                    }
                     let root_source =
                         outermost_layout_source(to.container, layout_snapshots, object_specs);
                     let Some(root_snapshot) = layout_snapshots.get(&root_source) else {
@@ -3682,10 +3819,22 @@ impl SceneModel {
                     let Some(container) = id_map.get(&root_source).copied() else {
                         continue;
                     };
+                    // A child entering now appears in its place: only the
+                    // others move, from where they were.
+                    let entering_subtree = |id: gaanim_layout::LayoutId| {
+                        let mut current = Some(id);
+                        while let Some(id) = current {
+                            if tree.source_by_id.get(&id) == entering.as_ref() {
+                                return true;
+                            }
+                            current = tree.parent_by_id.get(&id).copied();
+                        }
+                        false
+                    };
                     let before: HashMap<ObjectId, SpatialTransform> = tree
                         .source_by_id
                         .iter()
-                        .filter(|(id, _)| **id != root_id)
+                        .filter(|(id, _)| **id != root_id && !entering_subtree(**id))
                         .filter_map(|(_, source)| {
                             let actual = id_map.get(source).copied()?;
                             builder
@@ -3703,6 +3852,8 @@ impl SceneModel {
                         fixed: tree.fixed.clone(),
                         texts: tree.texts.clone(),
                         text_compositions: RefCell::default(),
+                        text_candidates: RefCell::default(),
+                        line_extents: RefCell::default(),
                         natural_text_sizes: RefCell::default(),
                         font_registry: builder.font_registry,
                     };
@@ -3721,7 +3872,15 @@ impl SceneModel {
                                 continue;
                             }
                         };
-                    let text_compositions = measurer.text_compositions.into_inner();
+                    let text_compositions: BTreeMap<_, _> = tree
+                        .texts
+                        .keys()
+                        .filter_map(|id| {
+                            let width = resolved.boxes.get(id)?.bounds.width();
+                            Some((*id, measurer.final_composition(*id, width)?))
+                        })
+                        .collect();
+                    let line_extents = measurer.line_extents.into_inner();
                     if !resolved.diagnostics.is_empty() {
                         let mut state = diagnostic_state.lock().expect("canvas state poisoned");
                         state
@@ -3802,8 +3961,29 @@ impl SceneModel {
                             text_config,
                             scene_background,
                         );
+                        let entering_ancestor = entering.is_some_and(|entering| {
+                            let mut current = Some(*layout_id);
+                            while let Some(id) = current {
+                                if tree.source_by_id.get(&id) == Some(&entering) {
+                                    return true;
+                                }
+                                current = tree.parent_by_id.get(&id).copied();
+                            }
+                            false
+                        });
                         let entry_pending = Self::fade_in_pending(&seg.ops, op_index, *source);
-                        text_crossfades.push((member, replacement.id, entry_pending));
+                        // A text placed for the first time, or entering with
+                        // its box, has shown no composition worth fading from.
+                        let instant =
+                            entering_ancestor || !responsive_text_widths.contains_key(source);
+                        let own_entry = entering.as_ref() == Some(source);
+                        text_crossfades.push((
+                            member,
+                            replacement.id,
+                            entry_pending,
+                            instant,
+                            own_entry,
+                        ));
                         materialized_by_id.insert(*layout_id, replacement.id);
                         id_map.insert(*source, replacement.id);
                         responsive_text_widths.insert(*source, width);
@@ -3821,16 +4001,30 @@ impl SceneModel {
                             .iter()
                             .filter_map(|id| materialized_by_id.get(id).copied())
                             .collect();
-                        let background = tree
+                        let background_source = tree
                             .source_by_id
                             .get(parent_id)
                             .and_then(|source| object_specs.get(source))
-                            .and_then(|spec| spec.layout_background)
+                            .and_then(|spec| spec.layout_background);
+                        let background = background_source
                             .and_then(|source| id_map.get(&source))
                             .copied();
                         if let Some(background) = background {
                             children.insert(0, background);
                         }
+                        // A leaving child, or a text replaced by its rewrapped
+                        // copy, fades out where it stands. It keeps its parent
+                        // in the scene hierarchy: reparenting is not on the
+                        // timeline, so it would also change the child's earlier,
+                        // parent-relative placement and inherited opacity.
+                        let leaving_child = leaving
+                            .as_ref()
+                            .and_then(|member| id_map.get(member))
+                            .copied();
+                        let keeps_parent = |child: &ObjectId| {
+                            Some(*child) == leaving_child
+                                || text_crossfades.iter().any(|(old, ..)| old == child)
+                        };
                         let removed_children: Vec<_> = builder
                             .states
                             .get(parent)
@@ -3840,6 +4034,7 @@ impl SceneModel {
                                     .iter()
                                     .copied()
                                     .filter(|child| !children.contains(child))
+                                    .filter(|child| !keeps_parent(child))
                                     .collect()
                             })
                             .unwrap_or_default();
@@ -3869,6 +4064,31 @@ impl SceneModel {
                                 .commands
                                 .entity(state.entity)
                                 .insert(state.transform);
+                        }
+                        // The background shares the order of the box's first
+                        // content and draws just before it: under that content,
+                        // over whatever was created before the box.
+                        if let Some(background) = background {
+                            let first = children
+                                .iter()
+                                .filter(|child| **child != background)
+                                .flat_map(|child| builder.hierarchy_ids(*child))
+                                .map(|id| id.index())
+                                .min();
+                            let z_index = background_source
+                                .and_then(|source| object_specs.get(&source))
+                                .map_or(0, |spec| spec.z_index);
+                            if let (Some(first), Some(state)) =
+                                (first, builder.states.get(background))
+                            {
+                                builder.commands.entity(state.entity).insert((
+                                    gaanim_scene::LayoutBackdrop,
+                                    RenderOrder {
+                                        z_index,
+                                        creation_order: first as u64,
+                                    },
+                                ));
+                            }
                         }
                         if let Some(state) = builder.states.get_mut(parent) {
                             state.children = children;
@@ -3967,13 +4187,25 @@ impl SceneModel {
                             targets.push((*member, target));
                             continue;
                         }
+                        let metrics = builder.text_metrics.get(member).copied();
                         let Some(state) = builder.states.get_mut(*member) else {
                             continue;
                         };
                         let mut zero_translation = state.transform;
                         zero_translation.translation = DVec3::ZERO;
-                        let intrinsic =
-                            gaanim_layout::transform_bounds(state.bounds, &zero_translation);
+                        // Text sits by its line box, as it was measured, unless
+                        // its item sets the height: then its ink is centered.
+                        let sized = tree
+                            .item_style_by_id
+                            .get(layout_id)
+                            .is_some_and(|style| style.height.is_some());
+                        let local = match (line_extents.get(layout_id), metrics) {
+                            (Some(extent), Some(metrics)) if !sized => {
+                                text_line_box(state.bounds, metrics, *extent)
+                            }
+                            _ => state.bounds,
+                        };
+                        let intrinsic = gaanim_layout::transform_bounds(local, &zero_translation);
                         let target_center = target_box.bounds.center() - parent_center;
                         let intrinsic_center = intrinsic.center();
                         let mut target = state.transform;
@@ -4060,13 +4292,34 @@ impl SceneModel {
                             ]
                         })
                         .collect();
-                    for (old, new, entry_pending) in text_crossfades {
+                    for (old, new, entry_pending, instant, own_entry) in text_crossfades {
                         if entry_pending {
                             // The text has not entered yet and its fade-in now
                             // targets the replacement: a crossfade here would
                             // show it before that fade-in starts.
                             if let Some(state) = builder.states.get(old).cloned() {
                                 builder.hide_visuals_now(&state);
+                            }
+                            continue;
+                        }
+                        if instant {
+                            animations.push(AnimationBuilder {
+                                target: old,
+                                anim_type: AnimationType::FadeOut,
+                                duration: 0.0,
+                                rate_func: RateFunc::Linear,
+                                delay: 0.0,
+                            });
+                            // The copy exists only from now on; a text that is
+                            // itself entering gets its fade-in below.
+                            if !own_entry {
+                                animations.push(AnimationBuilder {
+                                    target: new,
+                                    anim_type: AnimationType::FadeIn,
+                                    duration: 0.0,
+                                    rate_func: RateFunc::Linear,
+                                    delay: 0.0,
+                                });
                             }
                             continue;
                         }
@@ -4112,7 +4365,11 @@ impl SceneModel {
                         });
                     }
                     if !animations.is_empty() {
+                        // The scene advances its own cursor (or not, with
+                        // `advance=False`): the transition only starts here.
+                        let start = builder.current_time;
                         builder.play_parallel(animations);
+                        builder.current_time = start;
                     }
                 }
                 Op::LayoutConstraints {
@@ -4261,7 +4518,9 @@ impl SceneModel {
                             delay: 0.0,
                         });
                     }
+                    let start = builder.current_time;
                     builder.play_parallel(animations);
+                    builder.current_time = start;
                 }
                 Op::Wait(d) => builder.wait(*d),
                 Op::CameraPosition { to, duration, .. } => {
@@ -4955,7 +5214,7 @@ impl SceneModel {
                             .insert(EndpointFollow {
                                 endpoint: compile_tracking_endpoint(
                                     endpoint,
-                                    &id_map,
+                                    id_map,
                                     &builder.states,
                                 ),
                                 offset: *offset,
@@ -4969,8 +5228,8 @@ impl SceneModel {
                         && let Some(st) = builder.states.get(target_id)
                     {
                         let line = TrackingLine::new(
-                            compile_tracking_endpoint(from, &id_map, &builder.states),
-                            compile_tracking_endpoint(to, &id_map, &builder.states),
+                            compile_tracking_endpoint(from, id_map, &builder.states),
+                            compile_tracking_endpoint(to, id_map, &builder.states),
                         );
                         builder.commands.entity(st.entity).insert(line);
                     }
@@ -4991,7 +5250,7 @@ impl SceneModel {
                             gaanim_animation::updaters::TrackingConnector {
                                 points: points
                                     .iter()
-                                    .map(|p| compile_tracking_endpoint(p, &id_map, &builder.states))
+                                    .map(|p| compile_tracking_endpoint(p, id_map, &builder.states))
                                     .collect(),
                                 head_length: *head_length,
                                 head_width: *head_width,
@@ -5038,7 +5297,7 @@ impl SceneModel {
                                 occurrence,
                             } => Self::fragment_child_ids(
                                 builder,
-                                &id_map,
+                                id_map,
                                 *target,
                                 fragment,
                                 *occurrence,
@@ -5071,8 +5330,8 @@ impl SceneModel {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(st) = builder.states.get(target_id)
                     {
-                        let from = compile_tracking_endpoint(from, &id_map, &builder.states);
-                        let to = compile_tracking_endpoint(to, &id_map, &builder.states);
+                        let from = compile_tracking_endpoint(from, id_map, &builder.states);
+                        let to = compile_tracking_endpoint(to, id_map, &builder.states);
                         let coils = *coils;
                         let amplitude = *amplitude;
                         let crossing = *crossing;
@@ -5121,8 +5380,8 @@ impl SceneModel {
                     line_width,
                     extension_dash,
                 } => {
-                    let from = compile_tracking_endpoint(from, &id_map, &builder.states);
-                    let to = compile_tracking_endpoint(to, &id_map, &builder.states);
+                    let from = compile_tracking_endpoint(from, id_map, &builder.states);
+                    let to = compile_tracking_endpoint(to, id_map, &builder.states);
                     let authored_offset = *offset;
                     let side = *side;
                     let line_width = *line_width;
@@ -5193,8 +5452,8 @@ impl SceneModel {
                         && let Some(st) = builder.states.get(target_id)
                     {
                         builder.commands.entity(st.entity).insert(EndpointDistance {
-                            from: compile_tracking_endpoint(from, &id_map, &builder.states),
-                            to: compile_tracking_endpoint(to, &id_map, &builder.states),
+                            from: compile_tracking_endpoint(from, id_map, &builder.states),
+                            to: compile_tracking_endpoint(to, id_map, &builder.states),
                             scale: *scale,
                         });
                     }
@@ -5219,8 +5478,8 @@ impl SceneModel {
                         builder.commands.entity(target_state.entity).insert(
                             DimensionLabelPlacement {
                                 label: label_state.entity,
-                                from: compile_tracking_endpoint(from, &id_map, &builder.states),
-                                to: compile_tracking_endpoint(to, &id_map, &builder.states),
+                                from: compile_tracking_endpoint(from, id_map, &builder.states),
+                                to: compile_tracking_endpoint(to, id_map, &builder.states),
                                 offset: *offset,
                                 side: *side,
                                 gap: *gap,
@@ -5242,9 +5501,9 @@ impl SceneModel {
                     sweep,
                     arrowheads,
                 } => {
-                    let vertex = compile_tracking_endpoint(vertex, &id_map, &builder.states);
-                    let from = compile_tracking_ray(from, &id_map, &builder.states);
-                    let to = compile_tracking_ray(to, &id_map, &builder.states);
+                    let vertex = compile_tracking_endpoint(vertex, id_map, &builder.states);
+                    let from = compile_tracking_ray(from, id_map, &builder.states);
+                    let to = compile_tracking_ray(to, id_map, &builder.states);
                     for (target, part) in [
                         (arc, TrackingAnglePart::Arc),
                         (arrows, TrackingAnglePart::Arrows),
@@ -5278,9 +5537,9 @@ impl SceneModel {
                         && let Some(state) = builder.states.get(runtime)
                     {
                         builder.commands.entity(state.entity).insert(EndpointAngle {
-                            vertex: compile_tracking_endpoint(vertex, &id_map, &builder.states),
-                            from: compile_tracking_ray(from, &id_map, &builder.states),
-                            to: compile_tracking_ray(to, &id_map, &builder.states),
+                            vertex: compile_tracking_endpoint(vertex, id_map, &builder.states),
+                            from: compile_tracking_ray(from, id_map, &builder.states),
+                            to: compile_tracking_ray(to, id_map, &builder.states),
                             sweep: *sweep,
                             scale: *scale,
                         });
@@ -5310,9 +5569,9 @@ impl SceneModel {
                             .entity(target_state.entity)
                             .insert(AngleLabelPlacement {
                                 label: label_state.entity,
-                                vertex: compile_tracking_endpoint(vertex, &id_map, &builder.states),
-                                from: compile_tracking_ray(from, &id_map, &builder.states),
-                                to: compile_tracking_ray(to, &id_map, &builder.states),
+                                vertex: compile_tracking_endpoint(vertex, id_map, &builder.states),
+                                from: compile_tracking_ray(from, id_map, &builder.states),
+                                to: compile_tracking_ray(to, id_map, &builder.states),
                                 radius: *radius,
                                 gap: *gap,
                                 sweep: *sweep,
@@ -5335,8 +5594,8 @@ impl SceneModel {
                             .commands
                             .entity(state.entity)
                             .insert(TrackingVectorHead {
-                                from: compile_tracking_endpoint(from, &id_map, &builder.states),
-                                to: compile_tracking_endpoint(to, &id_map, &builder.states),
+                                from: compile_tracking_endpoint(from, id_map, &builder.states),
+                                to: compile_tracking_endpoint(to, id_map, &builder.states),
                                 length: *length,
                                 width: *width,
                             });
@@ -8493,14 +8752,14 @@ impl SceneModel {
             SpawnKind::TracedPathLine => {
                 // Spawn a minimal line (0,0)→(0,0). TracedPath will overwrite its Path2D.
                 let b = builder.line(Point::new(0.0, 0.0), Point::new(0.0, 0.0));
-                let mr = Self::finish_spawn_builder(b, spec);
-                mr
+
+                Self::finish_spawn_builder(b, spec)
             }
             SpawnKind::TrackingLine => {
                 // Spawn a minimal line (0,0)→(0,0). TrackingLine will overwrite its Path2D.
                 let b = builder.line(Point::new(0.0, 0.0), Point::new(0.0, 0.0));
-                let mr = Self::finish_spawn_builder(b, spec);
-                mr
+
+                Self::finish_spawn_builder(b, spec)
             }
             SpawnKind::TracedPath3DLine => {
                 // Empty 3D line placeholder; TracedPath3D will fill its LineListData.
@@ -8984,17 +9243,17 @@ impl SceneModel {
             }
         }
         // Billboard / HUD chaining (.billboard() / .hud())
-        if spec.billboard {
-            if let Some(state) = builder.states.get(id) {
-                builder
-                    .commands
-                    .entity(state.entity)
-                    .insert(gaanim_scene::Billboard);
-                builder
-                    .commands
-                    .entity(state.entity)
-                    .insert(bevy::prelude::Transform::default());
-            }
+        if spec.billboard
+            && let Some(state) = builder.states.get(id)
+        {
+            builder
+                .commands
+                .entity(state.entity)
+                .insert(gaanim_scene::Billboard);
+            builder
+                .commands
+                .entity(state.entity)
+                .insert(bevy::prelude::Transform::default());
         }
         // A part of an imported SVG is laid out after its root.
         if spec.svg_owner.is_none() {
@@ -9393,7 +9652,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -9758,7 +10016,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -9981,7 +10238,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
         queue.apply(&mut world);
         timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
         let plot = world
@@ -10138,8 +10394,10 @@ mod tests {
         ]);
         assert_eq!(structured_typst_content(&tight_literal, 32.0), "$x _1$");
 
-        let mut colored = StructuredTextStyle::default();
-        colored.color = Some(PenikoColor::from_rgb8(255, 0, 0));
+        let colored = StructuredTextStyle {
+            color: Some(PenikoColor::from_rgb8(255, 0, 0)),
+            ..StructuredTextStyle::default()
+        };
         let distributed_delimiters = spec(vec![
             part("left", "$a", StructuredTextStyle::default()),
             part("right", "b$", colored),
@@ -10186,8 +10444,10 @@ mod tests {
         ]);
         assert_eq!(structured_typst_content(&tight_syntax, 32.0), "$- x _1$");
 
-        let mut colored = StructuredTextStyle::default();
-        colored.color = Some(PenikoColor::from_rgb8(255, 0, 0));
+        let colored = StructuredTextStyle {
+            color: Some(PenikoColor::from_rgb8(255, 0, 0)),
+            ..StructuredTextStyle::default()
+        };
         let styled_right = spec(vec![
             "$".into(),
             part("left", "x", StructuredTextStyle::default()),
@@ -10293,7 +10553,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
         let mut world = world;
         queue.apply(&mut world);
 
@@ -10385,7 +10644,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
         let mut world = world;
         queue.apply(&mut world);
 
@@ -10419,7 +10677,6 @@ mod tests {
             word_spacing: Some(0.5),
             decorations: vec!["underline".to_owned()],
             baseline: Some(1.0),
-            ..StructuredTextStyle::default()
         };
         let equation = StructuredTextSpec::new(
             vec![
@@ -10456,7 +10713,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
         let mut world = world;
         queue.apply(&mut world);
         assert_eq!(
@@ -10512,7 +10768,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
         let mut world = world;
         queue.apply(&mut world);
 
@@ -10568,7 +10823,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
         queue.apply(&mut world);
         timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
         (world, timeline)
@@ -10786,7 +11040,6 @@ mod tests {
             .unwrap()
             .font_family = "Libertinus Serif".to_owned();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &config);
-        drop(commands);
         queue.apply(&mut world);
 
         let (path, baseline) = world
@@ -10852,7 +11105,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &config);
-        drop(commands);
         queue.apply(&mut world);
         timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
 
@@ -10895,7 +11147,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -10936,7 +11187,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &config);
-        drop(commands);
         queue.apply(&mut world);
         timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
 
@@ -10984,7 +11234,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -11072,7 +11321,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
         let mut world = world;
         queue.apply(&mut world);
 
@@ -11110,7 +11358,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
         let mut world = world;
         queue.apply(&mut world);
 
@@ -11456,7 +11703,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -11490,7 +11736,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -11536,7 +11781,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -11655,7 +11899,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -11676,7 +11919,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
         let mut world = world;
         queue.apply(&mut world);
         let mut query = world.query::<&LocalBounds>();
@@ -11760,7 +12002,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -11788,7 +12029,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -11825,7 +12065,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -11889,7 +12128,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = canvas.themed_text_config();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -12059,7 +12297,7 @@ mod tests {
         let card = canvas.rect(120.0, 80.0).move_to(200.0, -60.0);
         let zoom_in = canvas.camera_zoom_to_source(ScalarSource::constant(8.0), 1.0);
         canvas.play(vec![zoom_in]);
-        let frame = canvas.camera_frame_many(&[card.clone()], [20.0; 4], false, 1.0);
+        let frame = canvas.camera_frame_many(std::slice::from_ref(&card), [20.0; 4], false, 1.0);
         canvas.play(vec![frame]);
         let linear = canvas.camera_frame_many_with_interpolation(
             &[card],
@@ -12311,7 +12549,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -12344,7 +12581,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -12447,7 +12683,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -12721,7 +12956,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &config);
-        drop(commands);
         queue.apply(&mut world);
         timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
 
@@ -12760,7 +12994,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &config);
-        drop(commands);
         queue.apply(&mut world);
         timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
         (world, timeline)
@@ -13960,7 +14193,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
         let mut world = world;
         queue.apply(&mut world);
 
@@ -14376,7 +14608,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -14487,7 +14718,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -14586,7 +14816,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -14715,7 +14944,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);
@@ -14799,7 +15027,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
         let mut world = world;
         queue.apply(&mut world);
         let fills: Vec<_> = world
@@ -14848,7 +15075,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
         let mut world = world;
         queue.apply(&mut world);
         let fills: Vec<_> = world
@@ -14892,6 +15118,8 @@ mod tests {
                 },
             )]),
             text_compositions: RefCell::default(),
+            text_candidates: RefCell::default(),
+            line_extents: RefCell::default(),
             natural_text_sizes: RefCell::default(),
             font_registry: &fonts,
         };
@@ -14951,6 +15179,8 @@ mod tests {
                     },
                 )]),
                 text_compositions: RefCell::default(),
+                text_candidates: RefCell::default(),
+                line_extents: RefCell::default(),
                 natural_text_sizes: RefCell::default(),
                 font_registry: &fonts,
             };
@@ -15011,6 +15241,8 @@ mod tests {
                 },
             )]),
             text_compositions: RefCell::default(),
+            text_candidates: RefCell::default(),
+            line_extents: RefCell::default(),
             natural_text_sizes: RefCell::default(),
             font_registry: &fonts,
         };
@@ -15111,7 +15343,6 @@ mod tests {
         let fonts = gaanim_text::font::FontRegistry::new();
         let text_config = gaanim_text::prelude::TextConfig::default();
         canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
-        drop(commands);
 
         let mut world = world;
         queue.apply(&mut world);

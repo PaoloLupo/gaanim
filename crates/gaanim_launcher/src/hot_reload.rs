@@ -17,7 +17,7 @@ pub struct ReloadReceiver {
 }
 
 /// Optional human-readable status line shown in the editor.
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct ReloadStatus {
     pub last_message: String,
     /// Time spent executing Python up to `scene.render()`.
@@ -26,17 +26,6 @@ pub struct ReloadStatus {
     pub replay_duration_seconds: Option<f64>,
     /// `Some(seconds_since_startup)` when the message was set.
     pub shown_at: Option<f64>,
-}
-
-impl Default for ReloadStatus {
-    fn default() -> Self {
-        Self {
-            last_message: String::new(),
-            compile_duration_seconds: None,
-            replay_duration_seconds: None,
-            shown_at: None,
-        }
-    }
 }
 
 /// Ultimo traceback de error del script, mostrado en el editor.
@@ -349,6 +338,77 @@ fn replay(
     kind
 }
 
+/// How long the reload badge stays fully visible (seconds).
+const RELOAD_BADGE_VISIBLE_SECS: f64 = 3.0;
+/// How long the badge fades out (seconds).
+const RELOAD_BADGE_FADE_SECS: f64 = 1.0;
+
+/// egui panel showing the last reload status, auto-hiding after a few seconds.
+pub fn reload_status_overlay_system(
+    mut ctx: bevy_egui::EguiContexts,
+    mut status: ResMut<ReloadStatus>,
+    time: Res<Time>,
+    presentation_mode: Option<Res<gaanim_editor::PresentationMode>>,
+    overlays: Option<Res<gaanim_editor::overlays::EditorOverlays>>,
+) {
+    if presentation_mode.is_some_and(|mode| mode.active) {
+        return;
+    }
+    let Some(shown_at) = status.shown_at else {
+        return;
+    };
+    let elapsed = time.elapsed_secs_f64() - shown_at;
+    let total_secs = RELOAD_BADGE_VISIBLE_SECS + RELOAD_BADGE_FADE_SECS;
+
+    if elapsed >= total_secs {
+        status.last_message.clear();
+        status.shown_at = None;
+        return;
+    }
+
+    let alpha_mul = if elapsed < RELOAD_BADGE_VISIBLE_SECS {
+        1.0_f32
+    } else {
+        1.0 - ((elapsed - RELOAD_BADGE_VISIBLE_SECS) / RELOAD_BADGE_FADE_SECS) as f32
+    };
+
+    if alpha_mul < 0.01 {
+        return;
+    }
+
+    let Ok(ctx) = ctx.ctx_mut() else {
+        return;
+    };
+    // The overlay bar sits at the top center; keep the badge below it.
+    let top = if overlays.is_some_and(|overlays| overlays.enabled) {
+        60.0
+    } else {
+        12.0
+    };
+    gaanim_editor::feedback::reload_badge(ctx, &status.last_message, alpha_mul, top);
+}
+
+/// Panel de error que muestra el traceback completo del script.
+///
+/// Persiste hasta el próximo reload exitoso o hasta que el usuario lo cierre con `Esc` o el botón.
+pub fn script_error_overlay_system(
+    mut ctx: bevy_egui::EguiContexts,
+    mut error: ResMut<ScriptError>,
+) {
+    let Ok(ctx) = ctx.ctx_mut() else {
+        return;
+    };
+    let Some(message) = error.message.as_deref() else {
+        return;
+    };
+    if gaanim_editor::feedback::script_error_panel(ctx, message)
+        == gaanim_editor::feedback::ErrorPanelAction::Close
+    {
+        error.message = None;
+        error.updated_at = None;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -580,76 +640,5 @@ mod tests {
             opacity, 0.0,
             "a text whose first entry is later on the timeline must not flash after hot reload"
         );
-    }
-}
-
-/// How long the reload badge stays fully visible (seconds).
-const RELOAD_BADGE_VISIBLE_SECS: f64 = 3.0;
-/// How long the badge fades out (seconds).
-const RELOAD_BADGE_FADE_SECS: f64 = 1.0;
-
-/// egui panel showing the last reload status, auto-hiding after a few seconds.
-pub fn reload_status_overlay_system(
-    mut ctx: bevy_egui::EguiContexts,
-    mut status: ResMut<ReloadStatus>,
-    time: Res<Time>,
-    presentation_mode: Option<Res<gaanim_editor::PresentationMode>>,
-    overlays: Option<Res<gaanim_editor::overlays::EditorOverlays>>,
-) {
-    if presentation_mode.is_some_and(|mode| mode.active) {
-        return;
-    }
-    let Some(shown_at) = status.shown_at else {
-        return;
-    };
-    let elapsed = time.elapsed_secs_f64() - shown_at;
-    let total_secs = RELOAD_BADGE_VISIBLE_SECS + RELOAD_BADGE_FADE_SECS;
-
-    if elapsed >= total_secs {
-        status.last_message.clear();
-        status.shown_at = None;
-        return;
-    }
-
-    let alpha_mul = if elapsed < RELOAD_BADGE_VISIBLE_SECS {
-        1.0_f32
-    } else {
-        1.0 - ((elapsed - RELOAD_BADGE_VISIBLE_SECS) / RELOAD_BADGE_FADE_SECS) as f32
-    };
-
-    if alpha_mul < 0.01 {
-        return;
-    }
-
-    let Ok(ctx) = ctx.ctx_mut() else {
-        return;
-    };
-    // The overlay bar sits at the top center; keep the badge below it.
-    let top = if overlays.is_some_and(|overlays| overlays.enabled) {
-        60.0
-    } else {
-        12.0
-    };
-    gaanim_editor::feedback::reload_badge(ctx, &status.last_message, alpha_mul, top);
-}
-
-/// Panel de error que muestra el traceback completo del script.
-///
-/// Persiste hasta el próximo reload exitoso o hasta que el usuario lo cierre con `Esc` o el botón.
-pub fn script_error_overlay_system(
-    mut ctx: bevy_egui::EguiContexts,
-    mut error: ResMut<ScriptError>,
-) {
-    let Ok(ctx) = ctx.ctx_mut() else {
-        return;
-    };
-    let Some(message) = error.message.as_deref() else {
-        return;
-    };
-    if gaanim_editor::feedback::script_error_panel(ctx, message)
-        == gaanim_editor::feedback::ErrorPanelAction::Close
-    {
-        error.message = None;
-        error.updated_at = None;
     }
 }

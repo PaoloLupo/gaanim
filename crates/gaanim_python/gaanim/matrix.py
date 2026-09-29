@@ -109,7 +109,7 @@ class MatrixSelection(Sequence[Drawable]):
         if not all(isinstance(value, (int, float)) and float(value) == float(value) for value in (dx, dy)):
             raise ValueError("matrix selection offset must be finite")
         for position, (_, cell) in enumerate(self._entries):
-            self._matrix._grid.configure_item(cell, offset=(float(dx), float(dy)))
+            cell.item(offset=(float(dx), float(dy)))
         return self
 
     def _ordered(self, order: Any, seed: int) -> list[tuple[tuple[int, int], Drawable]]:
@@ -129,7 +129,7 @@ class MatrixSelection(Sequence[Drawable]):
 
 
 class Matrix:
-    """Persistent matrix composed from real Gaanim drawables and Layout v2."""
+    """Persistent matrix composed from real Gaanim drawables and a grid box."""
 
     def __init__(self, scene: Any, values: list[list[Any]], cells: list[list[Drawable]], grid: Any, root: Any,
                  delimiters: tuple[Drawable, ...], row_labels: tuple[Drawable, ...],
@@ -327,18 +327,18 @@ def _build_matrix(scene: Any, data: Any, **options: Any) -> Matrix:
         for column, value in enumerate(source_row):
             stored, cell = _make_cell(scene, value, row, column, options)
             values[row][column] = stored; cell_row.append(cell)
-            items.append(scene.layout.item(cell, row=row + row_offset, column=column + entry_column_offset, align="center"))
+            items.append(cell.item(row=row + row_offset, column=column + entry_column_offset, align_self="center"))
         cells.append(cell_row)
     if row_labels is not None:
         for row, value in enumerate(row_labels):
             _, label = _make_cell(scene, value, row, -1, {**options, "cell_mode": options.get("label_mode", "math"), "entry_style": options.get("label_style")})
             row_label_cells.append(label)
-            items.append(scene.layout.item(label, row=row + row_offset, column=0, align="center"))
+            items.append(label.item(row=row + row_offset, column=0, align_self="center"))
     if column_labels is not None:
         for column, value in enumerate(column_labels):
             _, label = _make_cell(scene, value, -1, column, {**options, "cell_mode": options.get("label_mode", "math"), "entry_style": options.get("label_style")})
             column_label_cells.append(label)
-            items.append(scene.layout.item(label, row=0, column=column + entry_column_offset, align="center"))
+            items.append(label.item(row=0, column=column + entry_column_offset, align_self="center"))
     delimiter_cells = []
     requested_size = options.get("delimiter_size")
     size = float(requested_size) if requested_size is not None else _default_delimiter_size(len(values))
@@ -349,10 +349,10 @@ def _build_matrix(scene: Any, data: Any, **options: Any) -> Matrix:
         right = scene.text(pair[delimiter][1], size=size, weight=weight)
         delimiter_cells.extend((left, right))
         delimiter_offset = max(0.0, column_gap - delimiter_gap) * 0.5
-        items.append(scene.layout.item(left, row=row_offset, column=label_columns, row_span=len(values), align="center", offset=(delimiter_offset, 0.0)))
-        items.append(scene.layout.item(right, row=row_offset, column=entry_column_offset + len(values[0]), row_span=len(values), align="center", offset=(-delimiter_offset, 0.0)))
+        items.append(left.item(row=row_offset, column=label_columns, row_span=len(values), align_self="center", height=0, offset=(delimiter_offset, 0.0)))
+        items.append(right.item(row=row_offset, column=entry_column_offset + len(values[0]), row_span=len(values), align_self="center", height=0, offset=(-delimiter_offset, 0.0)))
     column_count = entry_column_offset + len(values[0]) + delimiter_columns
-    grid = scene.layout.grid(items, rows=["auto"] * (len(values) + row_offset), columns=["auto"] * column_count,
+    grid = scene.layout.grid(*items, rows=["auto"] * (len(values) + row_offset), columns=["auto"] * column_count,
                       row_gap=row_gap, column_gap=column_gap, align="center")
     root = grid
     stored_options = dict(options)

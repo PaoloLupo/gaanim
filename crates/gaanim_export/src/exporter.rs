@@ -199,8 +199,11 @@ fn publish_export_result(
     *result_sent = true;
 }
 
+/// One-shot world setup run before the first exported frame.
+type WorldSetup = Box<dyn FnOnce(&mut World) + Send + Sync>;
+
 #[derive(Resource)]
-pub(crate) struct SetupCallback(Option<Box<dyn FnOnce(&mut World) + Send + Sync>>);
+pub(crate) struct SetupCallback(Option<WorldSetup>);
 
 impl SetupCallback {
     pub(crate) fn new(setup: impl FnOnce(&mut World) + Send + Sync + 'static) -> Self {
@@ -373,7 +376,7 @@ fn export_pipeline_system(
             if format == bevy::render::render_resource::TextureFormat::Bgra8Unorm
                 || format == bevy::render::render_resource::TextureFormat::Bgra8UnormSrgb
             {
-                for chunk in data.chunks_exact_mut(4) {
+                for chunk in data.as_chunks_mut::<4>().0 {
                     chunk.swap(0, 2);
                 }
             }
@@ -1441,7 +1444,13 @@ impl LinearAverage {
 
     fn add(&mut self, rgba: &[u8]) {
         let linear = srgb_to_linear_table();
-        for (sum, pixel) in self.sum.chunks_exact_mut(4).zip(rgba.chunks_exact(4)) {
+        for (sum, pixel) in self
+            .sum
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(rgba.as_chunks::<4>().0)
+        {
             let alpha = f32::from(pixel[3]) / 255.0;
             for channel in 0..3 {
                 sum[channel] += linear[usize::from(pixel[channel])] * alpha;
@@ -1454,7 +1463,7 @@ impl LinearAverage {
     fn finish(self) -> Vec<u8> {
         let frames = self.frames.max(1) as f32;
         let mut rgba = Vec::with_capacity(self.sum.len());
-        for sum in self.sum.chunks_exact(4) {
+        for sum in self.sum.as_chunks::<4>().0 {
             let alpha = sum[3] / frames;
             for channel in 0..3 {
                 let straight = if sum[3] > 0.0 {

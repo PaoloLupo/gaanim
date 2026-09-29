@@ -57,6 +57,9 @@ pub enum OscillatedChannel {
     Opacity,
 }
 
+// Built once per scene or clip, not stored in bulk: boxing the large
+// variant would only add indirection.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProceduralLayer {
     /// Organic jitter: seeded fBm noise on position, rotation, and scale.

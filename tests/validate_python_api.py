@@ -968,14 +968,14 @@ def validate_layout_detach_contract(module: object) -> list[str]:
     scene.segment("cover", background=module.BLUE)
     title = scene.text("Reusable title", role="title")
     body = scene.text("Body")
-    page = scene.layout.column([title, body], width="fill", align="center")
+    page = scene.layout.column(title, body, width="fill", align="center")
     scene.segment("detail", module.Transition.cross_fade(0.2))
     scene.reuse(title)
     page.detach(title)
     try:
         movement = title.move_to(0.0, 120.0)
     except module.LayoutOwnershipError:
-        failures.append("Layout.detach did not release positional ownership")
+        failures.append("Box.detach did not release positional ownership")
     else:
         if not isinstance(movement, module.Text):
             failures.append("a detached child move_to was not immediate")
@@ -1977,47 +1977,86 @@ def validate_polyline_connector_contract(module):
     return failures
 
 
-def validate_layout_card_ports_contract(module):
+def validate_layout_box_contract(module):
+    """Boxes, styles, classes, zones and item rules keep their contracts."""
     failures = []
-    scene = module.Scene(frame=(16, 9))
+    scene = module.Scene(frame=(16, 9), margin=0.5)
+    L = scene.layout
+    pill = module.BoxStyle(direction="row", padding=("4px", "12px"), radius="full", background="white")
+    if pill.but(background="black").to_dict().get("background") != "black":
+        failures.append("BoxStyle.but did not override a property")
+    L.classes(card=module.BoxStyle(padding="20px", background="white", border="black"))
     child = scene.geometry.rect(1, 1)
-    nested = scene.layout.column([child])
-    card = scene.layout.card([nested], padding=0.2, background="white", border="black",
-                             ports={"in": module.Anchor.LEFT, "out": (module.Anchor.RIGHT, (0.1, 0))})
-    if card.count != 1 or card.background is None:
-        failures.append("card background must not count as content")
+    card = L.box(L.column(child), "texto", class_="card", style=pill, gap="8px")
+    if len(card) != 2 or card.background is None:
+        failures.append("box children or background are wrong")
+    if not isinstance(card[1], module.Text):
+        failures.append("a string child did not become Text")
     if card.move_to(-2, 0) is not card or card.shift_by(0.1, 0) is not card:
-        failures.append("positioning lost the Layout subclass")
-    if card.with_port("bottom", module.Anchor.BOTTOM) is not card:
-        failures.append("with_port lost the Layout subclass")
-    scene.geometry.connector(card.port("out"), (5, 0))
-    scene.play(card.animate.fade_in().duration(0.2))
+        failures.append("positioning lost the Box subclass")
+    if L.stack().background is not None:
+        failures.append("an undecorated box unexpectedly has a background")
     added = scene.geometry.rect(2, 1)
-    card.add(added)
+    card.add(added, at=0)
     card.remove(added)
-    if scene.layout.stack([]).background is not None:
-        failures.append("ordinary layout unexpectedly has a background")
+    if child.item(grow=1, margin=(0, "auto")) is not child:
+        failures.append("Drawable.item did not return the drawable")
     try:
-        card.port("missing")
-    except KeyError:
+        child.move_to(1, 1)
+    except module.LayoutOwnershipError:
         pass
     else:
-        failures.append("unknown port must raise KeyError")
+        failures.append("a box child accepted a positional operation")
+    zones = L.zones(module.Zones.rows(["1fr", "2fr"], names=["top", "body"], gap="10px"))
+    body = zones["body"]
+    if not (zones["top"].bottom > body.top and body.width > 0):
+        failures.append("zones did not divide the safe area in order")
+    free = scene.geometry.circle(0.5)
+    if free.place(body, anchor="top_left", padding="12px") is not free:
+        failures.append("Drawable.place did not return the drawable")
+    scene.play(card.animate.fade_in().duration(0.2))
     for operation in (
-        lambda: card.with_port("in", module.Anchor.RIGHT),
-        lambda: card.with_port("", module.Anchor.LEFT),
-        lambda: card.with_port("bad", module.Anchor.LEFT, offset=(float("nan"), 0)),
-        lambda: scene.layout.card([], radius=-1),
-        lambda: scene.layout.card([], border_width=float("nan")),
-        lambda: scene.layout.card([], direction="diagonal"),
-        lambda: scene.layout.card([], ports={"": module.Anchor.LEFT}),
+        lambda: L.box(radius=-1),
+        lambda: L.box(border_width=float("nan")),
+        lambda: L.box(direction="diagonal"),
+        lambda: L.box(width="3em"),
+        lambda: L.box(unknown_property=1),
+        lambda: L.box(class_="missing"),
+        lambda: zones["missing"],
     ):
         try:
             operation()
-        except ValueError:
+        except (ValueError, TypeError, KeyError):
             pass
         else:
-            failures.append("card or port accepted invalid arguments")
+            failures.append("box or zone accepted invalid arguments")
+    return failures
+
+
+def validate_fluent_setters_keep_their_class(module):
+    """Fluent setters return the receiver itself, so composite handles keep
+    their parts when chained (issue #267)."""
+    failures = []
+    scene = module.Scene(frame=(16, 9))
+    readout = scene.viz.readout(3.0, format=".0f", label="x").move_to(0, 0)
+    if not isinstance(readout, module.Readout):
+        failures.append(f"Readout.move_to returned {type(readout).__name__}")
+    else:
+        readout.number.fill("red")
+        chained = readout.shift_by(0.5, 0).fill("blue").opacity(0.8).scale_by(1.2)
+        if chained is not readout:
+            failures.append("chained Readout setters did not return the same object")
+    variable = scene.viz.variable(1.0, label="t").move_to(-2, 1).fill("red")
+    if not isinstance(variable, module.Variable):
+        failures.append(f"Variable setters returned {type(variable).__name__}")
+    dimension = scene.mechanics.dimension_between((-2, -1), (2, -1), 0.4).stroke("white", 0.02).shift_by(0, 0.1)
+    if not isinstance(dimension, module.Dimension):
+        failures.append(f"Dimension setters returned {type(dimension).__name__}")
+    else:
+        dimension.line.stroke("red", 0.02)
+    circle = scene.geometry.circle(1)
+    if circle.move_to(1, 1) is not circle:
+        failures.append("Drawable.move_to did not return the same object")
     return failures
 
 
@@ -2289,7 +2328,8 @@ def main() -> int:
     missing.extend(validate_section_navigation_contract(module))
     missing.extend(validate_reactive_fill_level_contract(module))
     missing.extend(validate_polyline_connector_contract(module))
-    missing.extend(validate_layout_card_ports_contract(module))
+    missing.extend(validate_layout_box_contract(module))
+    missing.extend(validate_fluent_setters_keep_their_class(module))
     missing.extend(validate_editorial_contract(module))
     missing.extend(validate_theme_typography_contract(module))
     missing.extend(validate_default_theme_contract(module, tree))

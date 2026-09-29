@@ -174,7 +174,7 @@ fn sample(gradient: &Gradient, offset: f32, left_side: bool) -> Color {
         return if left_side {
             first.color
         } else {
-            exact.last().unwrap_or(first).color
+            exact.next_back().unwrap_or(first).color
         }
         .to_alpha_color();
     }

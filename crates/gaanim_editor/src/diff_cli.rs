@@ -215,8 +215,7 @@ pub fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, Str
                 );
             }
             "--sections" => {
-                selection.sections =
-                    gaanim_timeline::selection::SegmentSelection::parse_list(value(&mut index)?)?;
+                selection.set_sections(value(&mut index)?)?;
             }
             "--from" => selection.from = Some(value(&mut index)?.to_string()),
             "--help" | "-h" => return Ok(None),

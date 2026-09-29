@@ -1,37 +1,38 @@
-"""Typed reusable Layout templates shipped with Gaanim."""
+"""Reusable, signature-checked components built from boxes."""
 
 from __future__ import annotations
 
 from typing import Any, Callable, Generic, ParamSpec, TypeVar
 
-from .gaanim_core import Layout, Scene
+from .gaanim_core import Box, Scene
 
 P = ParamSpec("P")
 R = TypeVar("R")
 
-class LayoutTemplate(Generic[P, R]):
-    """Signature-preserving callable wrapper for a Layout v2 template."""
+class Component(Generic[P, R]):
+    """Validated callable produced by :func:`component`."""
     @property
     def slots(self) -> tuple[str, ...]: ...
-    def __call__(self, scene: Scene, **slots: Any) -> R:
-        """Bind validated named slots and build the template result.
-
-        Example:
-            root = lecture(scene, title=scene.text("Topic", role="title"), body=scene.text("Body"))
-        """
+    def __call__(self, scene: Scene, *args: Any, **slots: Any) -> R:
+        """Check the arguments against the function signature and build a new result."""
         ...
 
-def layout_template(function: Callable[P, R]) -> LayoutTemplate[P, R]:
-    """Wrap a typed function as a signature-checked Layout v2 template.
+def component(function: Callable[P, R]) -> Component[P, R]:
+    """Turn a typed function ``(scene, ...) -> Box`` into a reusable component.
+
+    Every call builds new, independent drawables.
 
     Example:
-        @layout_template
-        def centered(scene: Scene, *, content: Any) -> Layout:
-            return scene.stack([content], width="fill", height="fill")
+        @component
+        def tag(scene: Scene, *, text: str, color: str = "#4f46e5") -> Box:
+            return scene.layout.box(text, padding=("4px", "12px"), radius="full",
+                                    background=color, color="white")
+
+        row = scene.layout.row(tag(scene, text="Nuevo"), tag(scene, text="Beta"), gap="8px")
     """
     ...
 
-def title_slide(scene: Scene, *, title: Any, subtitle: Any = None, footer: Any = None) -> Layout:
+def title_slide(scene: Scene, *, title: Any, subtitle: Any = None, footer: Any = None) -> Box:
     """Build a centered title-slide layout inside the safe frame.
 
     Example:
@@ -39,15 +40,15 @@ def title_slide(scene: Scene, *, title: Any, subtitle: Any = None, footer: Any =
     """
     ...
 
-def lecture(scene: Scene, *, title: Any, body: Any, footer: Any = None) -> Layout:
-    """Build a lecture layout whose body grows within Layout v2.
+def lecture(scene: Scene, *, title: Any, body: Any, footer: Any = None) -> Box:
+    """Build a lecture layout whose body grows within the safe area.
 
     Example:
         root = lecture(scene, title=scene.text("Topic", role="heading"), body=scene.text("Explanation"))
     """
     ...
 
-def comparison(scene: Scene, *, title: Any, left: Any, right: Any, footer: Any = None) -> Layout:
+def comparison(scene: Scene, *, title: Any, left: Any, right: Any, footer: Any = None) -> Box:
     """Build a two-column comparison with equally growing sides.
 
     Example:
@@ -55,7 +56,7 @@ def comparison(scene: Scene, *, title: Any, left: Any, right: Any, footer: Any =
     """
     ...
 
-def vertical_short(scene: Scene, *, title: Any, body: Any, caption: Any = None) -> Layout:
+def vertical_short(scene: Scene, *, title: Any, body: Any, caption: Any = None) -> Box:
     """Build a portrait-safe vertical composition.
 
     Example:
@@ -63,7 +64,7 @@ def vertical_short(scene: Scene, *, title: Any, body: Any, caption: Any = None) 
     """
     ...
 
-def minimal(scene: Scene, *, content: Any) -> Layout:
+def minimal(scene: Scene, *, content: Any) -> Box:
     """Center one fitted item in the safe frame.
 
     Example:
@@ -71,7 +72,7 @@ def minimal(scene: Scene, *, content: Any) -> Layout:
     """
     ...
 
-def lower_third(scene: Scene, *, title: Any, subtitle: Any = None, background: Any = None) -> Layout:
+def lower_third(scene: Scene, *, title: Any, subtitle: Any = None, background: Any = None) -> Box:
     """Build a lower-third stack with optional background.
 
     Example:
@@ -79,7 +80,7 @@ def lower_third(scene: Scene, *, title: Any, subtitle: Any = None, background: A
     """
     ...
 
-def credits(scene: Scene, *, title: Any = None, entries: Any, footer: Any = None) -> Layout:
+def credits(scene: Scene, *, title: Any = None, entries: Any, footer: Any = None) -> Box:
     """Build a centered credits layout with a growing entries region.
 
     Example:

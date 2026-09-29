@@ -112,7 +112,7 @@ impl PyPrimitive3D {
 impl PyPrimitive3D {
     fn opacity<'py>(slf: PyRef<'py, Self>, value: &Bound<'_, PyAny>) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        PyDrawable(slf.handle.clone()).opacity(value)?;
+        PyDrawable(slf.handle.clone()).opacity_impl(value)?;
         Ok(slf)
     }
 
@@ -132,7 +132,7 @@ impl PyPrimitive3D {
         anchor: Option<&PyAnchor>,
     ) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        PyDrawable(slf.handle.clone()).move_to(x, y, anchor)?;
+        PyDrawable(slf.handle.clone()).move_to_impl(x, y, anchor)?;
         Ok(slf)
     }
 
@@ -143,7 +143,7 @@ impl PyPrimitive3D {
         z: &Bound<'_, PyAny>,
     ) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        PyDrawable(slf.handle.clone()).move_to_3d(x, y, z)?;
+        PyDrawable(slf.handle.clone()).move_to_3d_impl(x, y, z)?;
         Ok(slf)
     }
 
@@ -152,7 +152,7 @@ impl PyPrimitive3D {
         factor: &Bound<'_, PyAny>,
     ) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        PyDrawable(slf.handle.clone()).scale_to(factor)?;
+        PyDrawable(slf.handle.clone()).scale_to_impl(factor)?;
         Ok(slf)
     }
 
@@ -163,7 +163,7 @@ impl PyPrimitive3D {
         z: &Bound<'_, PyAny>,
     ) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        PyDrawable(slf.handle.clone()).scale_to_3d(x, y, z)?;
+        PyDrawable(slf.handle.clone()).scale_to_3d_impl(x, y, z)?;
         Ok(slf)
     }
 
@@ -172,7 +172,7 @@ impl PyPrimitive3D {
         radians: &Bound<'_, PyAny>,
     ) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        PyDrawable(slf.handle.clone()).rotate_to(radians)?;
+        PyDrawable(slf.handle.clone()).rotate_to_impl(radians)?;
         Ok(slf)
     }
 
@@ -183,7 +183,7 @@ impl PyPrimitive3D {
         z: &Bound<'_, PyAny>,
     ) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        PyDrawable(slf.handle.clone()).rotate_to_3d(x, y, z)?;
+        PyDrawable(slf.handle.clone()).rotate_to_3d_impl(x, y, z)?;
         Ok(slf)
     }
 

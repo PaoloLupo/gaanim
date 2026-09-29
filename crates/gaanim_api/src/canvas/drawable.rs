@@ -22,6 +22,9 @@ use crate::canvas::ops::{
 };
 use crate::canvas::types::{Anim, LayoutOp, ObjectSpec, OptDuration, SpawnKind};
 
+/// An axis range: (min, max, step).
+pub type AxisRange = (f64, f64, f64);
+
 /// An ergonomic handle to a mobject on a SceneModel.
 ///
 /// - Immediate setters return `Self` (fluent): `obj.move_to(0, 0).fill(RED)`.
@@ -30,6 +33,7 @@ use crate::canvas::types::{Anim, LayoutOp, ObjectSpec, OptDuration, SpawnKind};
 ///     - `obj.fade_in()`       — default 1.0s
 ///     - `obj.fade_in(2.0)`    — 2.0s
 ///     - `obj.fade_in(None)`   — default 1.0s (explicit)
+///
 ///   You can still chain `.duration()` or any other `Anim` method after.
 #[derive(Debug, Clone)]
 pub struct DrawableHandle {
@@ -74,7 +78,7 @@ pub enum LayoutOwnershipError {
     #[error("drawable already belongs to layout {owner:?}")]
     AlreadyManaged { owner: ObjectId },
     #[error(
-        "layout owns this drawable's position; remove at/shift/next_to/align_to/to_edge/to_corner and use LayoutItem offset or absolute placement"
+        "layout owns this drawable's position; remove at/shift/next_to/align_to/to_edge/to_corner and use .item(offset=...) or absolute placement"
     )]
     PositionalOperation,
 }
@@ -319,12 +323,10 @@ impl DrawableHandle {
         }
         let source_owner = self.layout_owner();
         let target_owner = target.layout_owner();
-        if source_owner.is_some() || target_owner.is_some() {
-            if source_owner != target_owner {
-                return Err(LayoutOwnershipError::AlreadyManaged {
-                    owner: target_owner.or(source_owner).expect("one owner exists"),
-                });
-            }
+        if (source_owner.is_some() || target_owner.is_some()) && source_owner != target_owner {
+            return Err(LayoutOwnershipError::AlreadyManaged {
+                owner: target_owner.or(source_owner).expect("one owner exists"),
+            });
         }
         Ok(())
     }
@@ -453,6 +455,7 @@ impl DrawableHandle {
                 duration: duration.filter(|value| value.is_finite() && *value > 0.0),
                 entering: None,
                 leaving: None,
+                resolve: true,
             });
         }
     }
@@ -504,24 +507,9 @@ impl DrawableHandle {
         if self.is_live_derived_geometry() {
             return Err(LayoutOwnershipError::PositionalOperation);
         }
+        // A drawable placed or moved before joining a box is simply placed by
+        // the box from then on.
         let mut spec = self.spec.lock().expect("object spec poisoned");
-        if spec.manual_position_animation
-            || spec.layout_ops.iter().any(|op| {
-                matches!(
-                    op,
-                    LayoutOp::SetTranslation(_)
-                        | LayoutOp::MoveAnchorTo { .. }
-                        | LayoutOp::MoveToAnchorPoint { .. }
-                        | LayoutOp::MoveTextAnchorTo { .. }
-                        | LayoutOp::NextTo { .. }
-                        | LayoutOp::AlignTo { .. }
-                        | LayoutOp::ToEdge { .. }
-                        | LayoutOp::ToCorner { .. }
-                )
-            })
-        {
-            return Err(LayoutOwnershipError::PositionalOperation);
-        }
         if let Some(existing) = spec.layout_owner
             && existing != owner.id
         {
@@ -529,6 +517,19 @@ impl DrawableHandle {
         }
         spec.layout_owner = Some(owner.id);
         Ok(())
+    }
+
+    /// Whether `other` is this very handle: the same drawable, spec and
+    /// style targets (a fluent setter's result), not a part or a copy.
+    pub fn is_same_handle(&self, other: &DrawableHandle) -> bool {
+        self.id == other.id
+            && Arc::ptr_eq(&self.spec, &other.spec)
+            && Arc::ptr_eq(&self.style_targets, &other.style_targets)
+            && match (&self.named_parts, &other.named_parts) {
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            }
     }
 
     pub fn release_layout(&self, owner: &DrawableHandle) {
@@ -726,9 +727,7 @@ impl DrawableHandle {
     }
 
     /// If this drawable is an axes, return its x/y ranges and full config.
-    pub fn axes_info(
-        &self,
-    ) -> Option<((f64, f64, f64), (f64, f64, f64), crate::canvas::AxesConfig)> {
+    pub fn axes_info(&self) -> Option<(AxisRange, AxisRange, crate::canvas::AxesConfig)> {
         let spec = self.spec.lock().ok()?;
         if let crate::canvas::SpawnKind::Axes {
             x_range,
@@ -858,7 +857,7 @@ impl DrawableHandle {
             );
             assert!(
                 !(positional && spec.layout_owner.is_some()),
-                "layout owns this drawable's position; use LayoutItem offset or absolute placement"
+                "layout owns this drawable's position; use .item(offset=...) or absolute placement"
             );
             spec.layout_ops.push(op);
         });
@@ -870,6 +869,30 @@ impl DrawableHandle {
 
     pub fn layout_owner(&self) -> Option<ObjectId> {
         self.spec.lock().expect("object spec poisoned").layout_owner
+    }
+
+    /// How this drawable sits in the box that contains it.
+    pub fn layout_item(&self) -> gaanim_layout::LayoutItemStyle {
+        self.spec
+            .lock()
+            .expect("object spec poisoned")
+            .layout_item
+            .clone()
+            .unwrap_or_default()
+    }
+
+    /// The item properties set on this drawable, if any.
+    pub fn explicit_layout_item(&self) -> Option<gaanim_layout::LayoutItemStyle> {
+        self.spec
+            .lock()
+            .expect("object spec poisoned")
+            .layout_item
+            .clone()
+    }
+
+    /// Set how this drawable sits in the box that contains it.
+    pub fn set_layout_item(&self, item: gaanim_layout::LayoutItemStyle) {
+        self.spec.lock().expect("object spec poisoned").layout_item = Some(item);
     }
 
     // -- Instant setters (return Self) --
@@ -1712,7 +1735,7 @@ impl DrawableHandle {
             let mut spec = self.spec.lock().expect("object spec poisoned");
             assert!(
                 spec.layout_owner.is_none(),
-                "layout owns this drawable's position; use LayoutItem offset or configure_item"
+                "a box owns this drawable's position; use .item(offset=...) or detach it"
             );
             spec.manual_position_animation = true;
         }

@@ -931,6 +931,9 @@ pub struct ObjectSpec {
     pub id: ObjectId,
     pub(crate) ports: std::collections::BTreeMap<String, (Anchor, DVec3)>,
     pub(crate) layout_background: Option<ObjectId>,
+    /// How this drawable sits in the box that contains it (grow, span,
+    /// margin…), kept on the drawable like CSS keeps it on the element.
+    pub(crate) layout_item: Option<gaanim_layout::LayoutItemStyle>,
     pub kind: SpawnKind,
     pub fill: Option<Brush>,
     pub fill_overridden: bool,
@@ -1076,6 +1079,7 @@ impl ObjectSpec {
             id,
             ports: Default::default(),
             layout_background: None,
+            layout_item: None,
             kind,
             fill: None,
             fill_overridden: false,
@@ -1480,15 +1484,15 @@ impl Anim {
                             .or_else(|| spec.stroke.as_ref().map(|(_, width)| *width))
                             .unwrap_or(1.0);
                         spec.stroke = Some((paint, width));
-                    } else if let Some(width) = values.stroke_width {
-                        if let Some((_, current_width)) = &mut spec.stroke {
-                            *current_width = width;
-                        }
+                    } else if let Some(width) = values.stroke_width
+                        && let Some((_, current_width)) = &mut spec.stroke
+                    {
+                        *current_width = width;
                     }
-                    if let Some(width) = values.stroke_width {
-                        if let Some(style) = &mut spec.stroke_style {
-                            style.width = width;
-                        }
+                    if let Some(width) = values.stroke_width
+                        && let Some(style) = &mut spec.stroke_style
+                    {
+                        style.width = width;
                     }
                 }
             }

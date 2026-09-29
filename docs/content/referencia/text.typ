@@ -730,9 +730,9 @@ un contenedor que abraza su contenido (`"hug"`) nunca lo reparte en más líneas
 `animate.transform_to` invalidan la medición y piden reflow; los énfasis
 transitorios (`indicate`, `pulse`, `wiggle`, `wave`, `highlight`, `focus`) no.
 
-Layout es dueño de la traslación: un `Text` gestionado rechaza `move_to`,
-`shift_by`, `next_to` y las animaciones de posición con `LayoutOwnershipError`.
-Configura su `scene.layout.item(...)` o su contenedor. Los efectos visuales y
+Una caja es dueña de la traslación de sus hijos: un `Text` dentro de una caja
+rechaza `move_to`, `shift_by`, `next_to` y las animaciones de posición con
+`LayoutOwnershipError`. Ajusta su `text.item(...)` o las propiedades de la caja. Los efectos visuales y
 las transformaciones no posicionales siguen disponibles. Consulta
 #link("/referencia/layout/")[Layout].
 

@@ -15,16 +15,11 @@ use gaanim_core::peniko::Color;
 
 /// Matching strategy — shapes uses geometry + position, tex prioritizes
 /// `tex_string` equality and order preservation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MatchingMode {
+    #[default]
     Shapes,
     Tex,
-}
-
-impl Default for MatchingMode {
-    fn default() -> Self {
-        Self::Shapes
-    }
 }
 
 /// Configurable weights for the matching cost.
@@ -91,10 +86,7 @@ pub fn shape_hash(path: &BezPath) -> u64 {
         y.hash(&mut hasher);
     }
     // Also hash closed-ness and element count class.
-    let closed = path
-        .elements()
-        .iter()
-        .any(|el| *el == kurbo::PathEl::ClosePath);
+    let closed = path.elements().contains(&kurbo::PathEl::ClosePath);
     closed.hash(&mut hasher);
     hasher.finish()
 }
@@ -115,14 +107,8 @@ pub fn shape_distance(a: &BezPath, b: &BezPath) -> f64 {
     if sa.is_empty() || sb.is_empty() {
         return 1.0;
     }
-    let closed_a = a
-        .elements()
-        .iter()
-        .any(|el| *el == kurbo::PathEl::ClosePath);
-    let closed_b = b
-        .elements()
-        .iter()
-        .any(|el| *el == kurbo::PathEl::ClosePath);
+    let closed_a = a.elements().contains(&kurbo::PathEl::ClosePath);
+    let closed_b = b.elements().contains(&kurbo::PathEl::ClosePath);
     let closed = closed_a || closed_b;
 
     // If either is open, distance is min of forward vs reversed.
@@ -355,9 +341,9 @@ fn greedy_assign(cost: &[Vec<f64>]) -> Vec<(usize, usize)> {
     // For each src in order, pick best unused dst below threshold? We pick
     // globally minimal remaining cost iteratively (more stable).
     let mut candidates: Vec<(f64, usize, usize)> = Vec::new();
-    for i in 0..n {
-        for j in 0..m {
-            candidates.push((cost[i][j], i, j));
+    for (i, row) in cost.iter().enumerate().take(n) {
+        for (j, &value) in row.iter().enumerate().take(m) {
+            candidates.push((value, i, j));
         }
     }
     candidates.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -689,8 +675,10 @@ mod tests {
         };
         let src = vec![mk(0, "a"), mk(1, "b"), mk(2, "c"), mk(3, "d")];
         let dst = vec![mk(10, "a"), mk(11, "c"), mk(12, "b"), mk(13, "d")];
-        let mut cfg = MatchingConfig::default();
-        cfg.mode = MatchingMode::Tex;
+        let cfg = MatchingConfig {
+            mode: MatchingMode::Tex,
+            ..MatchingConfig::default()
+        };
         let res = match_items(&src, &dst, &cfg);
         // LCS should pick a,c,d or a,b,d (length 3), verify at least 3 pairs and order preserved
         assert!(res.pairs.len() >= 3);

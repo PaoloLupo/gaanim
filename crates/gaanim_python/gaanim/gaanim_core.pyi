@@ -7,7 +7,7 @@ script. All camera durations are in seconds; 3D angles are in radians.
 from __future__ import annotations
 
 import os
-from typing import Any, Callable, ClassVar, Literal, Mapping, Optional, Self, Sequence, TypeAlias, overload
+from typing import Any, Callable, ClassVar, Iterator, Literal, Mapping, Optional, Self, Sequence, TypeAlias, overload
 from .matrix import Matrix
 from .sections import SceneSections
 from .animation_types import AnimationChannel, CustomAnimationValues
@@ -632,7 +632,7 @@ class AxesStyle:
         ...
 
 class Theme:
-    """Reusable semantic colors, typography, fonts, and Layout v2 tokens."""
+    """Reusable semantic colors, typography, fonts, and layout tokens."""
     def __init__(
         self,
         base: Optional[ThemeName | Theme] = None,
@@ -763,15 +763,24 @@ class Direction:
         """
         ...
 
-SizeRule: TypeAlias = float | Literal["hug", "fill"]
-Track: TypeAlias = float | Literal["auto"] | str
-Padding: TypeAlias = float | tuple[float, float] | tuple[float, float, float, float]
-Align: TypeAlias = Literal["start", "center", "end", "stretch"]
+Length: TypeAlias = float | str
+"""A length: scene units (``1.5``), design pixels (``"24px"``) or a theme layout token (``"space_md"``)."""
+SizeRule: TypeAlias = float | str
+"""A size: a length, ``"N%"`` of the parent, ``"hug"``/``"auto"`` (the content) or ``"fill"`` (the free space)."""
+Track: TypeAlias = float | str
+"""A grid track: a length, ``"N%"``, ``"auto"`` or ``"Nfr"`` (a share of the free space)."""
+Padding: TypeAlias = Length | tuple[Length, Length] | tuple[Length, Length, Length] | tuple[Length, Length, Length, Length]
+"""CSS shorthand: all sides, (vertical, horizontal), (top, horizontal, bottom) or (top, right, bottom, left)."""
+Margin: TypeAlias = Length | tuple[Length | Literal["auto"], ...]
+Align: TypeAlias = Literal["start", "center", "end", "stretch", "baseline"]
 Justify: TypeAlias = Literal["start", "center", "end", "between", "around", "evenly"]
 Fit: TypeAlias = Literal["none", "contain", "cover", "stretch", "scale_down"]
+AnchorName: TypeAlias = Literal["center", "top", "bottom", "left", "right", "top_left", "top_right", "bottom_left", "bottom_right"]
+Shadow: TypeAlias = bool | dict[str, Any]
+"""``True`` for a soft default shadow, or ``{"color", "x", "y", "blur"}`` with lengths."""
 
 class LayoutExpression:
-    """Linear drawable geometry expression used to build Layout v2 constraints.
+    """Linear drawable geometry expression used to build layout constraints.
 
     Expressions may be added or subtracted and scaled only by finite scalars.
     Combining drawables from different scenes raises ``ValueError``.
@@ -803,96 +812,124 @@ class ConstraintSet:
     """Handle returned after a scene registers one or more constraints."""
     count: int
 
-class LayoutItem:
-    """Immutable per-child grow, grid, absolute-placement, offset, and fit rules."""
+class BoxStyle:
+    """A reusable, immutable set of box properties, like a CSS rule.
 
-class Layout(Drawable):
-    def move_to(self, x: ScalarSource | tuple[float, float] | Drawable | AnchorPoint, y: Optional[ScalarSource] = None, anchor: Optional[Anchor] = None) -> Self:
-        """Position the container using Drawable semantics and preserve this Layout."""
+    Pass it as ``style=`` to any box, or register it by name with
+    ``scene.layout.classes(card=BoxStyle(...))`` and use ``class_="card"``.
+    Precedence: classes < ``style=`` < inline properties.
+
+    Example:
+        pill = BoxStyle(direction="row", padding=("4px", "12px"), radius="full",
+                        background="#4f46e5", color="white")
+        tag = pill.but(background="#e0f2fe", color="#075985")
+    """
+    def __init__(self, **props: Any) -> None: ...
+    def but(self, **props: Any) -> BoxStyle:
+        """Return a copy with ``props`` overriding this style."""
         ...
-    def shift_by(self, dx: float, dy: float) -> Self:
-        """Shift the container in scene units and preserve its layout methods."""
+    def to_dict(self) -> dict[str, Any]: ...
+
+class Box(Drawable):
+    """A box of the layout tree, like an HTML ``div``.
+
+    Children flow in a row, a column, grid cells or layers; a box measures
+    them, distributes the space and places them, so nothing needs coordinates.
+    Strings become text with the box's typography. A Box is a Drawable:
+    ``move_to``, ``animate.fade_in()``, ``place`` and friends act on the whole
+    box. Positional methods on a child it owns raise ``LayoutOwnershipError``.
+
+    Structural changes (``add``, ``remove``, ``replace``, ``set``, a child's
+    ``item``) accept ``duration=`` to animate the reflow, and ``advance=False``
+    to start the next change at the same time.
+    """
+    @property
+    def children(self) -> list[Any]:
+        """The direct children, as the objects that were passed in."""
         ...
+    def __len__(self) -> int: ...
+    def __getitem__(self, index: int) -> Any: ...
+    def __iter__(self) -> Iterator[Any]: ...
     @property
     def background(self) -> Optional[Drawable]:
-        """Card background for independent styling; None for ordinary layouts.
+        """The drawable behind the box (fill, border, radius), if any."""
+        ...
+    def add(self, child: Drawable | str, *, at: Optional[int] = None, duration: Optional[float] = None, advance: bool = True) -> Any:
+        """Insert a child (at ``at`` or at the end) and return it.
 
-        This child follows the outer layout box, including padding, and is
-        excluded from count and content measurement.
+        With ``duration`` the others slide to make room while it fades in.
         """
         ...
-    @property
-    def animate(self) -> Anim:
-        """Return the pure animation proxy for the layout root."""
+    def remove(self, child: Drawable, *, duration: Optional[float] = None, advance: bool = True) -> None:
+        """Remove a child: it fades out while the others close the gap."""
         ...
-    """Persistent row, column, grid, or stack that owns child translation.
-
-    Layout is itself a ``Drawable``: positioning, anchor, scale, rotation, and
-    edge-placement methods transform the complete resolved container and all
-    descendants. Reflow preserves those root transforms. Positional fluent
-    methods on managed children raise ``LayoutOwnershipError``; use
-    ``configure_item`` offsets.
-    """
-    count: int
-    def add(self, child: Drawable | Layout | LayoutItem, *, at: Optional[int] = None) -> Drawable:
-        """Insert a direct child immediately and return it.
-
-        Raises ``IndexError`` for an invalid index and ``LayoutOwnershipError``
-        when the child is positioned manually, foreign, or already managed.
-        """
+    def detach(self, child: Drawable, *, duration: Optional[float] = None, advance: bool = True) -> None:
+        """Take a child out of the box without hiding it; it can move freely again."""
         ...
-    def remove(self, child: Drawable | Layout) -> None:
-        """Remove a direct child and release its positional ownership."""
+    def replace(self, old: Drawable, new: Drawable | str, *, duration: Optional[float] = None, advance: bool = True) -> Any:
+        """Put ``new`` where ``old`` was (it inherits the old item rules unless it has its own)."""
         ...
-    def detach(self, child: Drawable | Layout) -> None:
-        """Release a direct child from the layout without hiding it.
-
-        The child preserves its world position, opacity, and scene membership,
-        so positional methods such as ``move_to`` are valid immediately after
-        this call. The remaining children reflow immediately. A non-member
-        raises ``ValueError``.
-
-        Example:
-            scene.reuse(title)
-            page.detach(title)
-            scene.play([title.animate.move_to(0.0, 200.0)])
-        """
+    def set(self, *, duration: Optional[float] = None, advance: bool = True, style: Optional[BoxStyle] = None, **props: Any) -> Self:
+        """Change box properties (the same names as when creating it)."""
         ...
-    def replace(self, old: Drawable | Layout, new: Drawable | Layout | LayoutItem) -> Drawable:
-        """Replace a direct child, returning the replacement after optional reflow."""
-        ...
-    def reflow(self) -> None:
-        """Resolve external geometry changes immediately."""
-        ...
-    def configure(
-        self,
-        *,
-        gap: Optional[float] = None,
-        padding: Optional[Padding] = None,
-        width: Optional[SizeRule] = None,
-        height: Optional[SizeRule] = None,
-        min_width: Optional[float] = None,
-        max_width: Optional[float] = None,
-        min_height: Optional[float] = None,
-        max_height: Optional[float] = None,
-        aspect_ratio: Optional[float] = None,
-        align: Optional[Align] = None,
-        justify: Optional[Justify] = None,
-        wrap: Optional[bool] = None,
-        within: Optional[Literal["safe", "frame"]] = None,
-    ) -> None:
-        """Update container rules and queue deterministic reflow.
-
-        Numeric geometry uses canvas units; ``aspect_ratio`` must be positive.
-        ``wrap`` is valid only for rows and columns. Invalid values raise
-        ``ValueError``.
-        """
-        ...
-    def configure_item(self, child: Drawable | Layout, *, grow: Optional[float] = None, shrink: Optional[float] = None, align: Optional[Align] = None, row: Optional[int] = None, column: Optional[int] = None, row_span: Optional[int] = None, column_span: Optional[int] = None, absolute: Optional[bool] = None, anchor: Optional[Anchor] = None, offset: Optional[tuple[float, float]] = None, fit: Optional[Fit] = None) -> None:
-        """Update direct-child rules and immediately apply the resulting reflow."""
+    def reflow(self, *, duration: Optional[float] = None, advance: bool = True) -> None:
+        """Lay the tree out again after children changed their own size."""
         ...
     def diagnostics(self) -> list[str]:
-        """Return soft-constraint diagnostics associated with this layout root."""
+        """Layout warnings for this box (unsatisfied weak constraints, text errors)."""
+        ...
+
+class Zones:
+    """A reusable template that divides a region into named zones.
+
+    Zones only compute rectangles: objects placed in them stay free, so a
+    template can be applied to the frame, to a zone or to any object's box.
+
+    Example:
+        page = Zones.rows(["80px", "1fr", "60px"], names=["header", "body", "footer"])
+        z = scene.layout.zones(page)
+        title.place(z["header"], anchor="left")
+    """
+    @staticmethod
+    def rows(tracks: int | Sequence[Track], *, names: Optional[Sequence[str]] = None, gap: Optional[Length] = None, padding: Optional[Padding] = None) -> Zones: ...
+    @staticmethod
+    def columns(tracks: int | Sequence[Track], *, names: Optional[Sequence[str]] = None, gap: Optional[Length] = None, padding: Optional[Padding] = None) -> Zones: ...
+    @staticmethod
+    def grid(*, rows: int | Sequence[Track], columns: int | Sequence[Track], names: Optional[Sequence[str]] = None, gap: Optional[Length] = None, row_gap: Optional[Length] = None, column_gap: Optional[Length] = None, padding: Optional[Padding] = None) -> Zones: ...
+    @property
+    def names(self) -> list[str]: ...
+
+class ZoneSet:
+    """The zones of a template resolved in a region, by name or index."""
+    def __len__(self) -> int: ...
+    def __getitem__(self, key: int | str) -> Zone: ...
+    def __iter__(self) -> Iterator[Zone]: ...
+    @property
+    def names(self) -> list[str]: ...
+    def fill(self, *objects: Drawable, anchor: Optional[AnchorName | Anchor] = None, fit: Optional[Fit] = None, padding: Optional[Padding] = None) -> None:
+        """Place one object in each zone, in order."""
+        ...
+
+class Zone:
+    """A rectangle of the scene in scene units (y up)."""
+    left: float
+    right: float
+    top: float
+    bottom: float
+    width: float
+    height: float
+    center: tuple[float, float]
+    def point(self, anchor: Optional[AnchorName | Anchor] = None) -> tuple[float, float]:
+        """A point of the zone: its center or one of its anchors."""
+        ...
+    def inset(self, padding: Padding) -> Zone:
+        """The zone shrunk by ``padding``."""
+        ...
+    def split(self, template: Zones) -> ZoneSet:
+        """Apply a template inside this zone."""
+        ...
+    def arrange(self, *objects: Drawable, direction: Literal["row", "column"] = "row", gap: Optional[Length] = None, align: Align = "center", justify: Justify = "center", padding: Optional[Padding] = None) -> None:
+        """Line up free objects in this zone, once, without owning them."""
         ...
 
 class LayoutOwnershipError(Exception):
@@ -1318,6 +1355,9 @@ class Anim:
         interpolation. An already linked target channel must first be fixed
         with a numeric setter, or animated through its Parameter.
         """
+        ...
+    def place(self, target: Zone | Drawable, *, anchor: Optional[AnchorName | Anchor] = None, fit: Optional[Fit] = None, padding: Optional[Padding] = None, offset: Optional[tuple[Length, Length]] = None) -> Anim:
+        """Animate the object into a zone, like ``Drawable.place``."""
         ...
     def fade_in(self) -> Anim:
         """Select the drawable fade-in effect; scheduling occurs in ``Scene.play``.
@@ -2560,6 +2600,26 @@ class Drawable:
         linked; direct animation or relative writes to this channel error.
         """
         ...
+    def item(self, *, duration: Optional[float] = None, advance: bool = True, **props: Any) -> Self:
+        """Set how this object sits in the box that holds it, like CSS on the element.
+
+        Properties: ``grow``, ``shrink``, ``basis``, ``align_self``, ``row``,
+        ``column``, ``row_span``, ``column_span``, ``margin`` (``"auto"``
+        takes the free space), ``fit``, ``anchor``, ``absolute``, ``offset``,
+        and a layout ``width``/``height`` that replaces the object's own.
+        Inside a box already, the box reflows (over ``duration`` if given).
+
+        Example:
+            scene.layout.row(label, bar.item(grow=1), value)
+        """
+        ...
+    def place(self, target: Zone | Drawable, *, anchor: Optional[AnchorName | Anchor] = None, fit: Optional[Fit] = None, padding: Optional[Padding] = None, offset: Optional[tuple[Length, Length]] = None) -> Self:
+        """Move this object into a zone (or onto another object's box) without tying it there.
+
+        Its ``anchor`` meets the same anchor of the target, inset by
+        ``padding`` and shifted by ``offset``; ``fit`` scales it to the target.
+        """
+        ...
     def z_index(self, z: int) -> Self:
         """Set the stacking layer; higher values draw on top.
 
@@ -3151,7 +3211,7 @@ class TextStyle:
 
         Sizes and spacing use scene units. Invalid non-positive sizes
         raise ``ValueError``. Outer width, height, padding, fit, and growth are
-        intentionally controlled by Layout v2.
+        intentionally controlled by boxes.
 
         Example:
             body = TextStyle(font="Inter", size=0.32, color=WHITE)
@@ -3174,7 +3234,7 @@ class TextFlow:
     ) -> None:
         """Configure wrapping and line composition inside a measured Text leaf.
 
-        ``"auto"`` consumes the width offered by Layout v2 or the safe frame;
+        ``"auto"`` consumes the width offered by its box or the safe frame;
         ``False`` keeps one line except for explicit newlines; a number caps the
         typographic width. ``lang`` is a lowercase ISO 639 code (``"es"``,
         ``"en"``, …) that selects the hyphenation patterns used with
@@ -3443,7 +3503,7 @@ class TextAnimatorAnimation:
         ...
 
 class Text(Drawable):
-    """Structured, Layout-v2-measurable vector text and mathematics."""
+    """Structured, layout-measurable vector text and mathematics."""
     def glow(self, color: ColorLike, radius: float = 0.16, intensity: float = 1.0) -> Self:
         """Apply glow while preserving Text chaining and typographic placement.
 
@@ -3768,8 +3828,8 @@ class Canvas:
         """
         ...
 class Segment:
-    def bind(self, **slots: Any) -> Layout:
-        """Bind this segment's template slots and return its root Layout.
+    def bind(self, **slots: Any) -> Box:
+        """Bind this segment's template slots and return its root Box.
 
         Missing or extra slots raise ``TypeError``; a segment without a
         template raises ``ValueError``.
@@ -5817,7 +5877,7 @@ class Typography:
         Unbalanced or crossed markup, unbalanced math, duplicate sibling part
         names, and invalid metrics raise ``ValueError``. Direct keywords
         override reusable style/flow objects. Responsive wrapping consumes the
-        Layout-v2 width offer or the scene safe frame; outer box dimensions
+        box width offer or the scene safe frame; outer box dimensions
         remain Layout properties. Default theme sizes, in scene units, are
         0.64 for title, 0.48 for subtitle/heading, 0.40 for body, 0.32 for
         caption, 0.36 for label/code, and 0.44 for math.
@@ -5912,72 +5972,71 @@ class Typography:
         ...
 
 class LayoutBuilder:
-    """Scene-owned factory for responsive layouts, items, constraints, and templates."""
-    def card(self, children: Sequence[Drawable | Layout | LayoutItem], *, direction: Literal["column", "row", "stack"] = "column", gap: float = 0.24, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "center", justify: Justify = "start", background: Optional[Paint] = None, border: Optional[Paint] = None, border_width: float = 0.025, radius: float = 0.08, ports: Optional[dict[str, Anchor | tuple[Anchor, tuple[float, float]]]] = None) -> Layout:
-        """Compose arbitrary children inside a persistent card in scene units.
+    """``scene.layout``: boxes, zones, named styles and constraints.
 
-        Background and border default to transparent. The rounded background
-        follows the resolved outer box, including padding, through reflow and
-        seek. It does not affect content measurement or count. Radius is capped
-        to half the smaller box dimension. Style it via card.background.
-        Ports map names to anchors or (anchor, offset) pairs. Invalid dimensions,
-        names or offsets raise ValueError; content uses normal layout ownership.
-        """
+    Box properties (all optional, the same for ``box``/``row``/``column``/
+    ``grid``/``stack``, ``BoxStyle`` and ``Box.set``):
+
+    - Container: ``direction``, ``gap``, ``row_gap``, ``column_gap``,
+      ``padding``, ``width``, ``height``, ``min_width``, ``max_width``,
+      ``min_height``, ``max_height``, ``aspect_ratio``, ``align``,
+      ``justify``, ``wrap``, ``columns``, ``rows``, ``auto_flow``, ``within``.
+    - Item (how the box sits in its parent): ``grow``, ``shrink``, ``basis``,
+      ``align_self``, ``row``, ``column``, ``row_span``, ``column_span``,
+      ``margin`` (``"auto"`` takes the free space), ``fit``, ``anchor``,
+      ``absolute``, ``offset``.
+    - Decoration: ``background``, ``border``, ``border_width``, ``radius``
+      (``"full"`` for a pill), ``shadow``, ``clip``.
+    - Typography inherited by string children: ``color``, ``font``,
+      ``font_size``, ``weight``, ``italic``, ``role``, ``text_align``,
+      ``line_spacing``, ``letter_spacing``, ``max_lines``, ``overflow``,
+      ``markup``.
+    - ``class_``: space-separated names registered with ``classes``.
+
+    Lengths are scene units, ``"Npx"`` (design pixels, 1080 per frame height
+    by default) or theme layout tokens such as ``"space_md"``.
+    """
+    def box(self, *children: Any, style: Optional[BoxStyle] = None, **props: Any) -> Box:
+        """A box whose children flow in a column; ``direction`` switches to
+        ``"row"``, ``"grid"`` or ``"stack"``. Lists are flattened, ``None``
+        is skipped and strings become text."""
         ...
-    def row(self, children: Sequence[Drawable | Layout | LayoutItem], *, gap: float = 0.24, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "center", justify: Justify = "start", wrap: bool = False, within: Optional[Literal["safe", "frame"]] = None) -> Layout:
-        """Create a horizontal Layout v2 container in canvas units.
-
-        ``width`` and ``height`` accept fixed values, ``"hug"``, or ``"fill"``.
-        Responsive text keeps the width offered by its final row allocation,
-        so tight glyph bounds do not trigger a second, narrower composition.
-        Ownership errors are raised before render as ``LayoutOwnershipError``.
-        """
+    def row(self, *children: Any, style: Optional[BoxStyle] = None, **props: Any) -> Box:
+        """A box whose children flow left to right."""
         ...
-    def column(self, children: Sequence[Drawable | Layout | LayoutItem], *, gap: float = 0.24, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "start", justify: Justify = "start", wrap: bool = False, within: Optional[Literal["safe", "frame"]] = None) -> Layout:
-        """Create a vertical Layout v2 container with optional wrapping.
-
-        Responsive text that fits the offered width keeps its natural lines;
-        longer text wraps at that width and keeps the lines it was measured
-        with, so a hugging column never rewraps it into more lines.
-        """
+    def column(self, *children: Any, style: Optional[BoxStyle] = None, **props: Any) -> Box:
+        """A box whose children flow top to bottom."""
         ...
-    def grid(self, children: Sequence[Drawable | Layout | LayoutItem], *, rows: int | Sequence[Track] = 1, columns: int | Sequence[Track] = 1, gap: float = 0.0, row_gap: Optional[float] = None, column_gap: Optional[float] = None, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "stretch", justify: Justify = "start", auto_flow: Literal["row", "column"] = "row", within: Optional[Literal["safe", "frame"]] = None) -> Layout:
-        """Create a grid with fixed, ``"auto"``, or ``"<weight>fr"`` tracks.
-
-        Explicit rows/columns and spans are reserved before deterministic
-        auto-placement. Responsive text uses its final track allocation.
-        Invalid tracks, collisions, or overflow raise errors.
-        """
+    def grid(self, *children: Any, style: Optional[BoxStyle] = None, **props: Any) -> Box:
+        """A box that places its children in grid cells (``columns``/``rows``:
+        a count or a list of tracks). Cells stretch by default."""
         ...
-    def stack(self, children: Sequence[Drawable | Layout | LayoutItem], *, padding: Padding = 0.0, width: SizeRule = "hug", height: SizeRule = "hug", align: Align = "center", within: Optional[Literal["safe", "frame"]] = None) -> Layout:
-        """Create an overlay Layout; use item anchors and offsets for placement.
-
-        Responsive text retains the width offered by the overlay container.
-        """
+    def stack(self, *children: Any, style: Optional[BoxStyle] = None, **props: Any) -> Box:
+        """A box that layers its children; each one sits by its ``anchor``."""
         ...
-    def item(self, child: Drawable | Layout, *, grow: float = 0.0, shrink: float = 1.0, align: Optional[Align] = None, row: Optional[int] = None, column: Optional[int] = None, row_span: int = 1, column_span: int = 1, absolute: bool = False, anchor: Optional[Anchor] = None, offset: tuple[float, float] = (0.0, 0.0), fit: Fit = "none") -> LayoutItem:
-        """Return per-child layout metadata without creating another Drawable.
-
-        ``fit="cover"`` clips media to its allocated box; ``absolute=True``
-        removes the item from normal flow. Negative grow/shrink values error.
-        """
+    def classes(self, **styles: BoxStyle) -> None:
+        """Name reusable styles, like CSS classes, for ``class_=``."""
+        ...
+    def zones(self, template: Zones, *, within: Optional[Literal["safe", "frame"] | Zone | Drawable] = None) -> ZoneSet:
+        """Apply a Zones template to the safe area (default), the frame, a zone or an object's box."""
+        ...
+    @property
+    def safe(self) -> Zone:
+        """The safe area: the frame minus the scene margin."""
+        ...
+    @property
+    def frame(self) -> Zone:
+        """The whole frame, edge to edge."""
         ...
     def constrain(self, *constraints: LayoutConstraint) -> ConstraintSet:
-        """Register prioritized linear relations and return their count.
+        """Register prioritized linear relations between drawable bounds.
 
         Conflicting required relations or cross-scene references raise
-        ``ValueError`` immediately; ``animate`` is a transition duration.
+        ``ValueError`` immediately.
         """
         ...
     def check_layout(self) -> list[str]:
-        """Return current constraint and intrinsic-composition diagnostics.
-
-        Invalid responsive text or Typst math is reported here without
-        terminating editor hot reload.
-        """
-        ...
-    def template(self, template: Callable[..., Layout], **slots: Any) -> Layout:
-        """Instantiate a signature-checked Python template and return its root Layout."""
+        """Return current constraint and text-composition diagnostics."""
         ...
 
 class MediaLibrary:
@@ -6978,7 +7037,10 @@ class AssetManager:
     def load_project(self, path: str | None = None) -> None:
         """Load a project manifest and set its asset directory.
 
-        With no path, reads ``gaanim.toml`` beside the calling Python script.
+        With no path, uses the nearest ``gaanim.toml``: in the folder of the
+        calling Python file or, failing that, in its parent folders (as git
+        finds ``.git``), so a module inside a project package loads the
+        project's manifest.
         An explicit relative path is resolved against the process working
         directory. ``assets_dir`` is resolved relative to the selected
         manifest and defaults to ``"assets"`` when the manifest omits it, as in
@@ -7049,8 +7111,12 @@ class Scene:
         margin: Optional[float] = None,
         theme: ThemeName | Theme | None = "technical",
         post: Optional[PostProcess | Sequence[PostProcess]] = None,
+        design_resolution: float = 1080.0,
     ) -> None:
         """Create a resolution-independent scene in logical units.
+
+        ``design_resolution`` is the frame height, in design pixels, that
+        layout lengths such as ``"24px"`` refer to.
 
         ``frame`` is ``(16, 9)`` by default, centered at the origin. Geometry,
         margins, text sizes, strokes, and effects use the same logical unit;
@@ -7093,7 +7159,7 @@ class Scene:
         transition: Optional[Transition] = None,
         *,
         notes: Optional[str] = None,
-        template: Optional[Callable[..., Layout]] = None,
+        template: Optional[Callable[..., Box]] = None,
         background: Optional[BackgroundLike] = None,
         post: Optional[PostProcess | Sequence[PostProcess] | Literal[False]] = None,
     ) -> Segment:

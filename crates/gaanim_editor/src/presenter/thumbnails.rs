@@ -39,6 +39,9 @@ pub(crate) enum ThumbnailMoment {
 pub(crate) type ThumbnailKey = (u32, ThumbnailMoment);
 
 /// What cue previews are rendered from.
+// Built once per scene or clip, not stored in bulk: boxing the large
+// variant would only add indirection.
+#[allow(clippy::large_enum_variant)]
 enum PreviewSource {
     /// A script's scene, replayed in a headless world.
     Scene(gaanim_api::canvas::SceneModel),

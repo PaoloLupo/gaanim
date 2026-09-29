@@ -157,13 +157,13 @@ impl CanvasState {
                     ) = (&mut previous.anim_type, &builder.anim_type)
                     {
                         if incoming.translation.is_some() {
-                            previous.translation = incoming.translation.clone();
+                            previous.translation = incoming.translation;
                         }
                         if incoming.rotation.is_some() {
-                            previous.rotation = incoming.rotation.clone();
+                            previous.rotation = incoming.rotation;
                         }
                         if incoming.scale.is_some() {
-                            previous.scale = incoming.scale.clone();
+                            previous.scale = incoming.scale;
                         }
                         if incoming.skew.is_some() {
                             previous.skew = incoming.skew;
@@ -249,6 +249,9 @@ pub(crate) struct CameraBindingWindowSpec {
 }
 
 /// Deferred, unresolved channels of a native camera binding.
+// Built once per scene or clip, not stored in bulk: boxing the large
+// variant would only add indirection.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub(crate) enum CanvasCameraBindingKind {
     TwoD {
@@ -529,6 +532,9 @@ pub(crate) enum Op {
         duration: Option<f64>,
         entering: Option<ObjectId>,
         leaving: Option<ObjectId>,
+        /// `false` only records the snapshot: an enclosing box's transition,
+        /// which resolves the whole tree, follows at the same instant.
+        resolve: bool,
     },
     /// Resolve relational constraints against the current geometry. The
     /// expressions use stable canvas object IDs and are remapped on replay.
@@ -789,6 +795,9 @@ pub enum FragmentRevealStyle {
 }
 
 /// A tracking endpoint at the SceneModel level (before entity resolution).
+// Built once per scene or clip, not stored in bulk: boxing the large
+// variant would only add indirection.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum CanvasEndpoint {
     /// Fixed position in space.
@@ -846,6 +855,9 @@ impl From<PointRef> for CanvasEndpoint {
 }
 
 /// A ray for angular and local-frame annotations.
+// Built once per scene or clip, not stored in bulk: boxing the large
+// variant would only add indirection.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum CanvasRay {
     Direction(DVec3),
@@ -884,6 +896,9 @@ impl From<AnchorPoint> for CanvasEndpoint {
 }
 
 /// Preset updater types that can be attached to entities via the SceneModel API.
+// Built once per scene or clip, not stored in bulk: boxing the large
+// variant would only add indirection.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum UpdaterPreset {
     /// Orbit around a center point at a given radius and angular speed.

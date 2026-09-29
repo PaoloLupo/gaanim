@@ -87,7 +87,7 @@ heading = scene.slides.section_header(
     variant="accent",
 )
 chart = scene.viz.chart(spec)
-page = scene.layout.column([heading, scene.layout.item(chart.drawable(), grow=1)], within="safe", gap=0.3)
+page = scene.layout.column([heading, chart.drawable().item(grow=1)], within="safe", gap=0.3)
 scene.play([page.animate.fade_in().duration(0.7), chart.layer("marks").animate.grow_from_edge(Direction.DOWN).duration(0.8)])
 scene.wait(0.5)
 scene.render()
@@ -129,7 +129,7 @@ body = scene.slides.bullets([
 ])
 footer = scene.text("gaanim · explicación visual", role="caption")
 page = scene.layout.column(
-    [header, scene.layout.item(body, grow=1), footer],
+    [header, body.item(grow=1), footer],
     within="safe",
     width="fill",
     height="fill",

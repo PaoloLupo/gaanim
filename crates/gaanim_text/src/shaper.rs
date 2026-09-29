@@ -91,23 +91,11 @@ pub fn shape_text(font_bytes: &[u8], text: &str) -> Vec<ShapedGlyph> {
         .collect()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::normalize_single_line_text;
-
-    #[test]
-    fn single_line_text_normalizes_line_endings_before_shaping() {
-        assert_eq!(
-            normalize_single_line_text("first\nsecond\rthird\r\nfourth"),
-            "first second third  fourth"
-        );
-    }
-}
-
 /// Compiles a plain text string into a parent Mobject entity with individual child letters.
 ///
 /// This registers each letter as a fully animatable `MobjectBundle` with its own
 /// local bounds, spatial offset, and distinct `ObjectTag`.
+#[allow(clippy::too_many_arguments)]
 pub fn compile_text_to_hierarchy(
     commands: &mut Commands,
     font_registry: &FontRegistry,
@@ -364,4 +352,17 @@ pub fn compile_text_to_path(
     }
 
     Ok((merged_path, total_bounds))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_single_line_text;
+
+    #[test]
+    fn single_line_text_normalizes_line_endings_before_shaping() {
+        assert_eq!(
+            normalize_single_line_text("first\nsecond\rthird\r\nfourth"),
+            "first second third  fourth"
+        );
+    }
 }

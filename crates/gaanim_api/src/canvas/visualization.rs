@@ -456,7 +456,7 @@ impl StreamLinesHandle {
 
     /// Build one finite, seekable passing-flash animation per streamline.
     pub fn flow(&self, duration: f64, time_width: f64) -> Vec<super::types::Anim> {
-        let fade_duration = (duration * 0.1).min(0.2).max(f64::EPSILON);
+        let fade_duration = (duration * 0.1).clamp(f64::EPSILON, 0.2);
         self.lines
             .iter()
             .zip(&self.flow_lines)
@@ -523,8 +523,10 @@ pub struct FlowParticleOptions {
 
 impl Default for FlowParticleOptions {
     fn default() -> Self {
-        let mut integration = StreamlineOptions::default();
-        integration.direction = gaanim_visualization::StreamDirection::Forward;
+        let integration = StreamlineOptions {
+            direction: gaanim_visualization::StreamDirection::Forward,
+            ..StreamlineOptions::default()
+        };
         Self {
             integration,
             duration: 3.0,
@@ -2647,7 +2649,7 @@ impl SceneModel {
         let x = self.themed_axis(x);
         let y = self.themed_axis(y);
         let themed_grid_color = self.theme_style.as_ref().map(|theme| {
-            let grid_color = theme
+            theme
                 .styles
                 .get("axes/grid")
                 .and_then(|style| style.stroke.as_ref())
@@ -2656,8 +2658,7 @@ impl SceneModel {
                     gaanim_core::peniko::Brush::Solid(color) => Some(color),
                     _ => None,
                 })
-                .unwrap_or(theme.palette.rule);
-            grid_color
+                .unwrap_or(theme.palette.rule)
         });
         let safe = self.safe_frame();
         let frame = PlotFrame::new(
@@ -4414,6 +4415,7 @@ impl SceneModel {
         Ok(handle)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn heatmap_plot(
         &mut self,
         space: &CoordinateSpaceHandle,
@@ -6456,8 +6458,8 @@ mod tests {
                 .is_some_and(|colors| colors.iter().all(|color| color[3] >= 0.999))
         );
 
-        for axis in axes.points.chunks_exact(2) {
-            assert!(grid.points.chunks_exact(2).all(|segment| {
+        for axis in axes.points.as_chunks::<2>().0 {
+            assert!(grid.points.as_chunks::<2>().0.iter().all(|segment| {
                 segment != axis && !(segment[0] == axis[1] && segment[1] == axis[0])
             }));
         }

@@ -3384,8 +3384,10 @@ mod tests {
 
     #[test]
     fn active_export_preserves_the_editor_viewport_fit() {
-        let mut export_state = export::ExportState::default();
-        export_state.active = true;
+        let export_state = export::ExportState {
+            active: true,
+            ..export::ExportState::default()
+        };
         let mut app = App::new();
         app.insert_resource(ViewportInset { bottom: 120.0 })
             .insert_resource(PreviewInteractive::default())
@@ -3675,8 +3677,10 @@ mod tests {
     #[test]
     fn presentation_mode_overrides_continuous_preview_policy() {
         let mut app = App::new();
-        let mut editor_state = EditorState::default();
-        editor_state.continuous_preview = true;
+        let editor_state = EditorState {
+            continuous_preview: true,
+            ..EditorState::default()
+        };
         app.init_resource::<bevy_egui::input::EguiWantsInput>()
             .init_resource::<Timeline>()
             .init_resource::<PlaybackStopPolicy>()

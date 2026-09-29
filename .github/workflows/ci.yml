@@ -112,7 +112,8 @@ jobs:
             camera_demo
             matrix_showcase
             chart_marks_gallery
-            layout_reflow_demo
+            layout_reflow
+            ui_dashboard
             equation_step
             primitives_3d_demo
             vector_field_streamlines

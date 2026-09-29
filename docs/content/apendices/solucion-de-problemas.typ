@@ -37,7 +37,8 @@ están explicados en la sección de problemas de
   #link("/apendices/novedades/")[Novedades].
 - *No se encuentra una imagen, un SVG o un modelo:* las rutas relativas se
   resuelven desde el directorio de trabajo salvo que cargues el proyecto con
-  `scene.assets.load_project()` (lee el `gaanim.toml` junto al script) o fijes
+  `scene.assets.load_project()` (busca el `gaanim.toml` más cercano, desde la
+  carpeta del script hacia arriba) o fijes
   una carpeta absoluta con
   `scene.assets.assets_dir(str(Path(__file__).parent / "assets"))`.
 - *`script did not submit a scene`:* el script debe terminar llamando a

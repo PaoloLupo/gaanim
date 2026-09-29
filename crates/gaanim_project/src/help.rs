@@ -91,7 +91,7 @@ const GENERAL: Page = Page {
                 ),
                 (
                     "--sections <LIST>",
-                    "Play only these segments or Section keys, e.g. intro,results",
+                    "Play only these segments or Section keys, e.g. intro,results;\na name with commas goes alone or with its commas as \\,",
                 ),
                 (
                     "--from <NAME>",

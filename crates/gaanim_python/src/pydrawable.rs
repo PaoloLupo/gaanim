@@ -529,7 +529,7 @@ impl PyCanvasAnim {
         }
         if !self.inner.property_position_is_free() {
             return Err(crate::LayoutOwnershipError::new_err(
-                "layout owns this drawable's translation; animate the LayoutItem offset instead",
+                "layout owns this drawable's translation; animate the box or detach the child first",
             ));
         }
         self.require_property_slot("shift_by")?;
@@ -592,7 +592,7 @@ impl PyCanvasAnim {
         }
         if !self.inner.property_position_is_free() {
             return Err(crate::LayoutOwnershipError::new_err(
-                "layout owns this drawable's translation; animate the LayoutItem offset instead",
+                "layout owns this drawable's translation; animate the box or detach the child first",
             ));
         }
         self.require_property_slot("shift_by_3d")?;
@@ -847,10 +847,7 @@ impl PyCanvasAnim {
         }
         self.require_effect_slot("fade_in_from")?;
         Ok(Self {
-            inner: self
-                .inner
-                .clone()
-                .fade_in_from(direction.0.clone(), distance),
+            inner: self.inner.clone().fade_in_from(direction.0, distance),
         })
     }
 
@@ -1005,7 +1002,7 @@ impl PyCanvasAnim {
         self.require_transformable()?;
         self.require_effect_slot("grow_from_edge")?;
         Ok(Self {
-            inner: self.inner.clone().grow_from_edge(direction.0.clone()),
+            inner: self.inner.clone().grow_from_edge(direction.0),
         })
     }
 
@@ -1861,6 +1858,17 @@ pub(crate) fn resolve_at_target(
 }
 
 impl PyDrawable {
+    /// Move so the object's `anchor` lands on `point` (used by `place`).
+    pub(crate) fn move_to_point(
+        &self,
+        point: gaanim_core::glam::DVec3,
+        anchor: gaanim_api::canvas::Anchor,
+    ) -> PyResult<()> {
+        self.require_free_position("place")?;
+        self.0.clone().at_anchor(point.x, point.y, anchor);
+        Ok(())
+    }
+
     pub(crate) fn require_free_position(&self, operation: &str) -> PyResult<()> {
         if self.0.is_live_derived_geometry() {
             return Err(PyValueError::new_err(format!(
@@ -1869,7 +1877,7 @@ impl PyDrawable {
         }
         if self.0.layout_owner().is_some() {
             Err(crate::LayoutOwnershipError::new_err(format!(
-                "layout owns this drawable's translation; use scene.item(..., offset=...) or layout.configure_item(...). Operation: {operation}"
+                "layout owns this drawable's translation; move the box, use .item(offset=...) or box.detach(child) first. Operation: {operation}"
             )))
         } else {
             Ok(())
@@ -1959,6 +1967,853 @@ impl PyBounds {
             "Bounds(left={}, bottom={}, right={}, top={})",
             self.left, self.bottom, self.right, self.top
         )
+    }
+}
+
+/// The Python object a fluent setter returns: the receiver itself (keeping its
+/// class, e.g. a `Readout` with `.number`) when the setter changed this very
+/// drawable, or a new `Drawable` for a different one, such as a part.
+fn same_drawable<'py>(
+    slf: &Bound<'py, PyDrawable>,
+    result: PyResult<PyDrawable>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let result = result?;
+    if slf.borrow().0.is_same_handle(&result.0) {
+        return Ok(slf.clone().into_any());
+    }
+    Ok(Bound::new(slf.py(), result)?.into_any())
+}
+
+/// Bodies of the fluent setters, callable from Rust.
+impl PyDrawable {
+    pub(crate) fn part_impl(&self, id: &str) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        if id.is_empty() {
+            return Err(PyKeyError::new_err("part selector must not be empty"));
+        }
+        match self.0.part(id) {
+            Ok(part) => Ok(Self(part)),
+            Err(gaanim_api::canvas::SvgPartError::NotSvg) => Err(PyValueError::new_err(
+                "this drawable has no named SVG parts",
+            )),
+            Err(error @ gaanim_api::canvas::SvgPartError::Unknown { .. }) => {
+                Err(PyKeyError::new_err(error.to_string()))
+            }
+        }
+    }
+
+    pub(crate) fn fill_impl(&self, paint: PyPaint) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self(self.0.clone().fill_brush(paint.0)))
+    }
+
+    pub(crate) fn no_fill_impl(&self) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self(self.0.clone().no_fill()))
+    }
+
+    pub(crate) fn stroke_impl(
+        &self,
+        paint: PyPaint,
+        width: f64,
+        align: Option<&str>,
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        let align = align.map(parse_stroke_align).transpose()?;
+        let handle = self.0.clone().stroke_brush(paint.0, width);
+        Ok(Self(match align {
+            Some(align) => handle.stroke_align(align),
+            None => handle,
+        }))
+    }
+
+    pub(crate) fn stroke_style_impl(&self, style: PyStrokeStyle) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        let brush = match style.0.paint {
+            gaanim_api::canvas::ThemePaint::Color(color) => {
+                gaanim_core::peniko::Brush::Solid(color)
+            }
+            gaanim_api::canvas::ThemePaint::Brush(brush) => brush,
+            gaanim_api::canvas::ThemePaint::Named(name) => {
+                use std::str::FromStr;
+                gaanim_core::peniko::Color::from_str(&name)
+                    .map(gaanim_core::peniko::Brush::Solid)
+                    .map_err(|_| {
+                        PyValueError::new_err(
+                            "individual stroke_style paint must be a literal CSS color; theme tokens are resolved inside Theme.styles",
+                        )
+                    })?
+            }
+        };
+        Ok(Self(self.0.clone().stroke_with_style(brush, style.0.style)))
+    }
+
+    pub(crate) fn no_stroke_impl(&self) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self(self.0.clone().no_stroke()))
+    }
+
+    pub(crate) fn style_class_impl(&self, name: &str) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.0
+            .clone()
+            .style_class(name)
+            .map(Self)
+            .map_err(PyValueError::new_err)
+    }
+
+    pub(crate) fn glow_impl(&self, color: PyColor, radius: f64, intensity: f32) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        if !radius.is_finite() || radius <= 0.0 {
+            return Err(PyValueError::new_err("radius must be finite and positive"));
+        }
+        if !intensity.is_finite() || intensity <= 0.0 {
+            return Err(PyValueError::new_err(
+                "intensity must be finite and positive",
+            ));
+        }
+        Ok(Self(self.0.clone().glow(color.0, radius, intensity)))
+    }
+
+    pub(crate) fn trim_impl(
+        &self,
+        start: Option<f64>,
+        end: Option<f64>,
+        offset: Option<f64>,
+        mode: Option<&str>,
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        validate_trim(start, end, offset)?;
+        let sequential = match mode {
+            None => None,
+            Some("simultaneous") => Some(false),
+            Some("sequential") => Some(true),
+            Some(other) => {
+                return Err(PyValueError::new_err(format!(
+                    "unknown trim mode {other:?}; expected \"simultaneous\" or \"sequential\""
+                )));
+            }
+        };
+        Ok(Self(self.0.clone().trim(start, end, offset, sequential)))
+    }
+
+    pub(crate) fn blur_impl(&self, sigma: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        if !sigma.is_finite() || sigma <= 0.0 {
+            return Err(PyValueError::new_err("sigma must be finite and positive"));
+        }
+        Ok(Self(self.0.clone().blur(sigma)))
+    }
+
+    pub(crate) fn shadow_impl(&self, color: PyColor, x: f64, y: f64, blur: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        if !x.is_finite() || !y.is_finite() {
+            return Err(PyValueError::new_err("shadow offset must be finite"));
+        }
+        if !blur.is_finite() || blur < 0.0 {
+            return Err(PyValueError::new_err(
+                "shadow blur must be finite and non-negative",
+            ));
+        }
+        Ok(Self(self.0.clone().shadow(
+            color.0,
+            gaanim_core::glam::DVec2::new(x, y),
+            blur,
+        )))
+    }
+
+    pub(crate) fn no_effects_impl(&self) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self(self.0.clone().no_effects()))
+    }
+
+    pub(crate) fn tip_impl(
+        &self,
+        end: Option<&str>,
+        start: Option<&str>,
+        length: Option<f64>,
+        width: Option<f64>,
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        let parse = |value: Option<&str>| -> PyResult<Option<gaanim_animation::TipKind>> {
+            match value {
+                None => Ok(None),
+                Some("arrow") => Ok(Some(gaanim_animation::TipKind::Arrow)),
+                Some("dot") => Ok(Some(gaanim_animation::TipKind::Dot)),
+                Some(other) => Err(PyValueError::new_err(format!(
+                    "tip must be 'arrow', 'dot' or None, got {other:?}"
+                ))),
+            }
+        };
+        let (start, end) = (parse(start)?, parse(end)?);
+        self.0
+            .clone()
+            .tip(start, end, length, width)
+            .map(Self)
+            .map_err(PyValueError::new_err)
+    }
+
+    pub(crate) fn blend_impl(&self, mode: &str) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        let mode = parse_blend_mode(mode)?;
+        Ok(Self(self.0.clone().blend(mode)))
+    }
+
+    pub(crate) fn stroke_profile_impl(&self, profile: Option<Vec<(f64, f64)>>) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.0
+            .clone()
+            .stroke_profile(profile)
+            .map(Self)
+            .map_err(PyValueError::new_err)
+    }
+
+    pub(crate) fn stroke_taper_impl(&self, start: f64, end: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.0
+            .clone()
+            .stroke_taper(start, end)
+            .map(Self)
+            .map_err(PyValueError::new_err)
+    }
+
+    pub(crate) fn count_impl(&self, count: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.0
+            .clone()
+            .count(count)
+            .map(Self)
+            .map_err(PyValueError::new_err)
+    }
+
+    pub(crate) fn points_impl(&self, points: Vec<(f64, f64)>) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.0
+            .clone()
+            .points(points)
+            .map(Self)
+            .map_err(PyValueError::new_err)
+    }
+
+    pub(crate) fn squash_stretch_impl(&self, amount: f64, max_ratio: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.0
+            .clone()
+            .squash_stretch(amount, max_ratio)
+            .map(Self)
+            .map_err(PyValueError::new_err)
+    }
+
+    pub(crate) fn motion_blur_impl(&self, enabled: bool) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self(self.0.clone().motion_blur(enabled)))
+    }
+
+    pub(crate) fn echo_impl(
+        &self,
+        count: u32,
+        delay: f64,
+        decay: f64,
+        hold: bool,
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self(
+            self.0.clone().echo(echo_spec(count, delay, decay, hold)?),
+        ))
+    }
+
+    pub(crate) fn clip_impl(&self, mask: &PyDrawable, rule: &str, invert: bool) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        let rule = match rule {
+            "nonzero" => gaanim_core::peniko::Fill::NonZero,
+            "evenodd" | "even_odd" => gaanim_core::peniko::Fill::EvenOdd,
+            _ => {
+                return Err(PyValueError::new_err("rule must be 'nonzero' or 'evenodd'"));
+            }
+        };
+        Ok(Self(self.0.clone().clip_with(
+            &mask.0,
+            gaanim_api::canvas::ClipOptions { rule, invert },
+        )))
+    }
+
+    pub(crate) fn no_clip_impl(&self) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self(self.0.clone().no_clip()))
+    }
+
+    pub(crate) fn no_camera_view_impl(&self) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self(self.0.clone().no_camera_view()))
+    }
+
+    pub(crate) fn view_layer_impl(&self, name: Option<String>) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.0
+            .clone()
+            .view_layer(name.as_deref())
+            .map(Self)
+            .map_err(|error| PyValueError::new_err(error.to_string()))
+    }
+
+    pub(crate) fn set_fill_level_impl(&self, level: &Bound<'_, PyAny>) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        let level = extract_scalar_source_for_drawable(level.clone(), &self.0)?;
+        self.0
+            .clone()
+            .set_fill_level(level)
+            .map(Self)
+            .map_err(PyValueError::new_err)
+    }
+
+    pub(crate) fn opacity_impl(&self, op: &Bound<'_, PyAny>) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        let value = extract_scalar_source_for_drawable(op.clone(), &self.0)?;
+        if let Some(value) = value.constant_value() {
+            return Ok(Self(self.0.clone().opacity(value as f32)));
+        }
+        binding_result(self, PropertySources::Opacity(value))
+    }
+
+    pub(crate) fn z_index_impl(&self, z: i32) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self(self.0.clone().z_index(z)))
+    }
+
+    pub(crate) fn move_to_impl(
+        &self,
+        x: &Bound<'_, PyAny>,
+        y: Option<&Bound<'_, PyAny>>,
+        anchor: Option<&PyAnchor>,
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_free_position("move_to")?;
+        if let Some(y) = y {
+            let sx = extract_scalar_source_for_drawable(x.clone(), &self.0)?;
+            let sy = extract_scalar_source_for_drawable(y.clone(), &self.0)?;
+            if let (Some(x), Some(y)) = (sx.constant_value(), sy.constant_value()) {
+                return Ok(Self(if let Some(anchor) = anchor {
+                    self.0.clone().at_anchor(x, y, anchor.0)
+                } else {
+                    self.0.clone().move_to_default(x, y)
+                }));
+            }
+            let anchor = anchor
+                .map(|anchor| anchor.0)
+                .unwrap_or_default()
+                .to_offset();
+            return binding_result(
+                self,
+                PropertySources::Translation {
+                    values: [sx, sy, 0.0.into()],
+                    anchor: Some(gaanim_core::glam::DVec3::new(anchor.x, anchor.y, 0.0)),
+                },
+            );
+        }
+        match resolve_at_target("move_to", x, None, anchor.is_some())? {
+            PyAtTarget::Coordinates { x, y } => Ok(Self(self.0.clone().move_to_default(x, y))),
+            PyAtTarget::Drawable(reference) => {
+                if !self.0.same_canvas(&reference) {
+                    return Err(PyValueError::new_err("target belongs to another Scene"));
+                }
+                Ok(Self(self.0.clone().at_anchor_point(
+                    reference.anchor_point(
+                        gaanim_api::canvas::Anchor::Center,
+                        gaanim_core::glam::DVec3::ZERO,
+                    ),
+                )))
+            }
+            PyAtTarget::AnchorPoint(point) => {
+                validate_at_target_owner(&PyAtTarget::AnchorPoint(point), &self.0)?;
+                Ok(Self(self.0.clone().at_anchor_point(point)))
+            }
+        }
+    }
+
+    pub(crate) fn move_to_3d_impl(
+        &self,
+        x: &Bound<'_, PyAny>,
+        y: &Bound<'_, PyAny>,
+        z: &Bound<'_, PyAny>,
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_free_position("move_to_3d")?;
+        let values = [
+            extract_scalar_source_for_drawable(x.clone(), &self.0)?,
+            extract_scalar_source_for_drawable(y.clone(), &self.0)?,
+            extract_scalar_source_for_drawable(z.clone(), &self.0)?,
+        ];
+        if let (Some(x), Some(y), Some(z)) = (
+            values[0].constant_value(),
+            values[1].constant_value(),
+            values[2].constant_value(),
+        ) {
+            return Ok(Self(self.0.clone().move_to_3d(x, y, z)));
+        }
+        binding_result(
+            self,
+            PropertySources::Translation {
+                values,
+                anchor: None,
+            },
+        )
+    }
+
+    pub(crate) fn shift_by_impl(&self, dx: f64, dy: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_free_position("shift_by")?;
+        free_channel(&self.0, PropertyChannel::Translation)?;
+        Ok(Self(self.0.clone().shift_by(dx, dy)))
+    }
+
+    pub(crate) fn shift_by_3d_impl(&self, dx: f64, dy: f64, dz: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_free_position("shift_by_3d")?;
+        free_channel(&self.0, PropertyChannel::Translation)?;
+        Ok(Self(self.0.clone().shift_by_3d(dx, dy, dz)))
+    }
+
+    pub(crate) fn billboard_impl(&self) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self(self.0.clone().billboard()))
+    }
+
+    pub(crate) fn hud_impl(&self) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self(self.0.clone().hud()))
+    }
+
+    pub(crate) fn scale_to_impl(&self, factor: &Bound<'_, PyAny>) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_free_position("scale_to")?;
+        let source = extract_scalar_source_for_drawable(factor.clone(), &self.0)?;
+        if let Some(value) = source.constant_value() {
+            return Ok(Self(self.0.clone().scale_to(value)));
+        }
+        binding_result(
+            self,
+            PropertySources::Scale([source.clone(), source.clone(), source]),
+        )
+    }
+
+    pub(crate) fn scale_to_3d_impl(
+        &self,
+        x: &Bound<'_, PyAny>,
+        y: &Bound<'_, PyAny>,
+        z: &Bound<'_, PyAny>,
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_free_position("scale_to_3d")?;
+        let values = [
+            extract_scalar_source_for_drawable(x.clone(), &self.0)?,
+            extract_scalar_source_for_drawable(y.clone(), &self.0)?,
+            extract_scalar_source_for_drawable(z.clone(), &self.0)?,
+        ];
+        if let (Some(x), Some(y), Some(z)) = (
+            values[0].constant_value(),
+            values[1].constant_value(),
+            values[2].constant_value(),
+        ) {
+            return Ok(Self(self.0.clone().scale_to_3d(x, y, z)));
+        }
+        binding_result(self, PropertySources::Scale(values))
+    }
+
+    pub(crate) fn scale_by_impl(&self, factor: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_free_position("scale_by")?;
+        free_channel(&self.0, PropertyChannel::Scale)?;
+        Ok(Self(self.0.clone().scale_by(factor)))
+    }
+
+    pub(crate) fn scale_by_3d_impl(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_free_position("scale_by_3d")?;
+        free_channel(&self.0, PropertyChannel::Scale)?;
+        Ok(Self(self.0.clone().scale_by_3d(x, y, z)))
+    }
+
+    pub(crate) fn rotate_to_impl(&self, radians: &Bound<'_, PyAny>) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_free_position("rotate_to")?;
+        let source = extract_scalar_source_for_drawable(radians.clone(), &self.0)?;
+        if let Some(value) = source.constant_value() {
+            return Ok(Self(self.0.clone().rotate_to(value)));
+        }
+        binding_result(
+            self,
+            PropertySources::Rotation([0.0.into(), 0.0.into(), source]),
+        )
+    }
+
+    pub(crate) fn rotate_to_3d_impl(
+        &self,
+        x: &Bound<'_, PyAny>,
+        y: &Bound<'_, PyAny>,
+        z: &Bound<'_, PyAny>,
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_free_position("rotate_to_3d")?;
+        let values = [
+            extract_scalar_source_for_drawable(x.clone(), &self.0)?,
+            extract_scalar_source_for_drawable(y.clone(), &self.0)?,
+            extract_scalar_source_for_drawable(z.clone(), &self.0)?,
+        ];
+        if let (Some(x), Some(y), Some(z)) = (
+            values[0].constant_value(),
+            values[1].constant_value(),
+            values[2].constant_value(),
+        ) {
+            return Ok(Self(self.0.clone().rotate_to_3d(x, y, z)));
+        }
+        binding_result(self, PropertySources::Rotation(values))
+    }
+
+    pub(crate) fn rotate_by_impl(&self, radians: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_free_position("rotate_by")?;
+        free_channel(&self.0, PropertyChannel::Rotation)?;
+        Ok(Self(self.0.clone().rotate_by(radians)))
+    }
+
+    pub(crate) fn skew_to_impl(&self, x: f64, y: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_free_position("skew_to")?;
+        finite_skew(x, y)?;
+        Ok(Self(self.0.clone().skew_to(x, y)))
+    }
+
+    pub(crate) fn matrix_to_impl(&self, matrix: ((f64, f64), (f64, f64))) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_free_position("matrix_to")?;
+        free_channel(&self.0, PropertyChannel::Rotation)?;
+        free_channel(&self.0, PropertyChannel::Scale)?;
+        let map = linear_map(matrix)?;
+        Ok(Self(self.0.clone().matrix_to(map)))
+    }
+
+    pub(crate) fn rotate_by_3d_impl(&self, axis: &str, radians: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_free_position("rotate_by_3d")?;
+        free_channel(&self.0, PropertyChannel::Rotation)?;
+        self.0
+            .clone()
+            .rotate_by_3d(axis, radians)
+            .map(Self)
+            .map_err(|error| PyValueError::new_err(error.to_string()))
+    }
+
+    pub(crate) fn with_pivot_impl(&self, x: f64, y: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self(self.0.clone().with_pivot(x, y)))
+    }
+
+    pub(crate) fn with_pivot_3d_impl(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self(self.0.clone().with_pivot_3d(x, y, z)))
+    }
+
+    pub(crate) fn pivot_impl(&self, x: f64, y: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self(self.0.clone().pivot(x, y)))
+    }
+
+    pub(crate) fn next_to_impl(
+        &self,
+        reference: &PyDrawable,
+        direction: &PyDirection,
+        spacing: f64,
+        aligned_edge: Option<&PyAnchor>,
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_free_position("next_to")?;
+        let aligned_edge = aligned_edge
+            .map(|anchor| anchor.0)
+            .unwrap_or(gaanim_api::canvas::Anchor::Center);
+        Ok(Self(self.0.clone().next_to_aligned(
+            &reference.0,
+            direction.0,
+            spacing,
+            aligned_edge,
+        )))
+    }
+
+    pub(crate) fn align_to_impl(
+        &self,
+        reference: &PyDrawable,
+        target_anchor: &PyAnchor,
+        reference_anchor: Option<&PyAnchor>,
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_free_position("align_to")?;
+        let reference_anchor = reference_anchor
+            .map(|anchor| anchor.0)
+            .unwrap_or(target_anchor.0);
+        Ok(Self(self.0.clone().align_to(
+            &reference.0,
+            target_anchor.0,
+            reference_anchor,
+        )))
+    }
+
+    pub(crate) fn to_edge_impl(&self, direction: &PyDirection, buff: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_free_position("to_edge")?;
+        Ok(Self(self.0.clone().to_edge(direction.0, buff)))
+    }
+
+    pub(crate) fn to_corner_impl(&self, corner: &PyAnchor, buff: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_free_position("to_corner")?;
+        Ok(Self(self.0.clone().to_corner(corner.0, buff)))
+    }
+
+    pub(crate) fn add_updater_fn_impl(
+        &self,
+        callback: Py<PyAny>,
+        reset: Option<Py<PyAny>>,
+        fixed_dt: Option<f64>,
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        if !Python::attach(|py| callback.bind(py).is_callable()) {
+            return Err(PyValueError::new_err("callback must be callable"));
+        }
+        if let Some(reset) = reset.as_ref()
+            && !Python::attach(|py| reset.bind(py).is_callable())
+        {
+            return Err(PyValueError::new_err("reset must be callable"));
+        }
+        match (reset.is_some(), fixed_dt.is_some()) {
+            (true, false) => {
+                return Err(PyValueError::new_err(
+                    "reset requires fixed_dt for deterministic replay",
+                ));
+            }
+            (false, true) => {
+                return Err(PyValueError::new_err(
+                    "fixed_dt requires reset so seeks and exports can rebuild simulation state",
+                ));
+            }
+            _ => {}
+        }
+
+        let callback_clone = callback.clone();
+        let updater_fn = move |dt: f64,
+                               elapsed: f64,
+                               entity: gaanim_scene::prelude::Entity,
+                               world: &mut gaanim_scene::prelude::World| {
+            let current = world
+                .get::<gaanim_math::SpatialTransform>(entity)
+                .map(|t| t.translation);
+            let current = match current {
+                Some(p) => p,
+                None => return true,
+            };
+            let result: PyResult<(f64, f64, f64)> = Python::attach(|py| {
+                let func = callback_clone.bind(py);
+                let pos = (current.x, current.y, current.z);
+                // Preferred signature: callback(pos, dt, elapsed)
+                let v = func.call1((pos, dt, elapsed))?;
+                // Accept either (x,y,z) tuple or list
+                if let Ok(tup) = v.extract::<(f64, f64, f64)>() {
+                    Ok(tup)
+                } else if let Ok(vec) = v.extract::<Vec<f64>>() {
+                    if vec.len() == 3 {
+                        Ok((vec[0], vec[1], vec[2]))
+                    } else {
+                        Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                            "callback must return (x,y,z) tuple of 3 floats",
+                        ))
+                    }
+                } else {
+                    Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                        "callback must return (x,y,z) tuple",
+                    ))
+                }
+            });
+            match result {
+                Ok((nx, ny, nz)) => {
+                    if !nx.is_finite() || !ny.is_finite() || !nz.is_finite() {
+                        Python::attach(|py| {
+                            PyValueError::new_err("callback must return three finite coordinates")
+                                .print(py)
+                        });
+                        return false;
+                    }
+                    if let Some(mut t) = world.get_mut::<gaanim_math::SpatialTransform>(entity) {
+                        t.translation = gaanim_core::glam::DVec3::new(nx, ny, nz);
+                    }
+                    true
+                }
+                Err(e) => {
+                    Python::attach(|py| e.print(py));
+                    false
+                }
+            }
+        };
+
+        let updater = if let (Some(reset), Some(fixed_dt)) = (reset, fixed_dt) {
+            let reset_clone = reset.clone();
+            let reset_fn =
+                move |_entity: gaanim_scene::prelude::Entity,
+                      _world: &mut gaanim_scene::prelude::World| {
+                    match Python::attach(|py| reset_clone.bind(py).call0().map(|_| ())) {
+                        Ok(()) => true,
+                        Err(e) => {
+                            Python::attach(|py| e.print(py));
+                            false
+                        }
+                    }
+                };
+            gaanim_animation::Updater::new_simulation(updater_fn, reset_fn, fixed_dt).map_err(
+                |_| PyValueError::new_err("fixed_dt must be finite and greater than zero"),
+            )?
+        } else {
+            gaanim_animation::Updater::new(updater_fn)
+        };
+
+        self.0.add_custom_updater(updater);
+        Ok(self.clone())
+    }
+
+    pub(crate) fn drive_from_samples_impl(
+        &self,
+        times: Vec<f64>,
+        values: &Bound<'_, PyAny>,
+        property: &str,
+        interpolation: &str,
+        scale: f64,
+        offset: f64,
+    ) -> PyResult<Self> {
+        use gaanim_animation::{SampledProperty, SampledSeriesDriver};
+
+        crate::custom::ensure_authoring_allowed()?;
+        let interpolation = parse_sampled_interpolation(interpolation)?;
+        let invalid = || {
+            PyValueError::new_err(
+                "drive_from_samples requires non-empty matching times/values, finite values, \
+                 and non-decreasing times",
+            )
+        };
+        // "xy" drives both translation axes from (x, y) pairs as two
+        // independent channels.
+        let channels = if property == "xy" {
+            // Accept tuples or two-element lists, e.g. `list(zip(xs, ys))`.
+            let points = values
+                .extract::<Vec<(f64, f64)>>()
+                .ok()
+                .or_else(|| {
+                    let rows = values.extract::<Vec<Vec<f64>>>().ok()?;
+                    rows.iter()
+                        .map(|row| match row.as_slice() {
+                            [x, y] => Some((*x, *y)),
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .ok_or_else(|| {
+                    PyValueError::new_err("property 'xy' requires values as (x, y) pairs")
+                })?;
+            let (xs, ys) = points.into_iter().unzip();
+            vec![
+                (SampledProperty::TranslateX, xs),
+                (SampledProperty::TranslateY, ys),
+            ]
+        } else {
+            let property = parse_sampled_property(property)?;
+            let values = values.extract::<Vec<f64>>().map_err(|_| {
+                PyValueError::new_err(
+                    "values must be a sequence of numbers; use property 'xy' for (x, y) pairs",
+                )
+            })?;
+            vec![(property, values)]
+        };
+        // Validate every channel first so an invalid y never leaves x attached.
+        for (property, values) in &channels {
+            SampledSeriesDriver::new(
+                times.clone(),
+                values.clone(),
+                *property,
+                interpolation,
+                scale,
+                offset,
+            )
+            .map_err(|_| invalid())?;
+        }
+        for (property, values) in channels {
+            self.0
+                .drive_from_samples(
+                    times.clone(),
+                    values,
+                    property,
+                    interpolation,
+                    scale,
+                    offset,
+                )
+                .map_err(|_| invalid())?;
+        }
+        Ok(self.clone())
+    }
+
+    pub(crate) fn follow_impl(
+        &self,
+        source: Bound<'_, PyAny>,
+        offset: (f64, f64),
+        offset_space: &str,
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        if !offset.0.is_finite() || !offset.1.is_finite() {
+            return Err(PyValueError::new_err("offset must be finite"));
+        }
+        let space = match offset_space {
+            "world" => gaanim_animation::FollowOffsetSpace::World,
+            "local" => gaanim_animation::FollowOffsetSpace::Local,
+            _ => {
+                return Err(PyValueError::new_err(
+                    "offset_space must be 'world' or 'local'",
+                ));
+            }
+        };
+        Ok(Self(self.0.follow_endpoint(
+            crate::pycanvas::resolve_endpoint(&source)?,
+            gaanim_core::glam::DVec3::new(offset.0, offset.1, 0.0),
+            space,
+        )))
+    }
+
+    pub(crate) fn bind_rotation_from_impl(
+        &self,
+        source: &PyDrawable,
+        ratio: f64,
+        phase: f64,
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        if !ratio.is_finite() || !phase.is_finite() {
+            return Err(PyValueError::new_err("ratio and phase must be finite"));
+        }
+        Ok(Self(self.0.bind_rotation_from(&source.0, ratio, phase)))
+    }
+
+    pub(crate) fn bind_translation_from_rotation_impl(
+        &self,
+        source: &PyDrawable,
+        axis: Option<PyDirection>,
+        scale: f64,
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        if !scale.is_finite() {
+            return Err(PyValueError::new_err("scale must be finite"));
+        }
+        let axis = axis
+            .map(|value| value.0.to_vector())
+            .unwrap_or(gaanim_core::glam::DVec3::X);
+        if axis.length_squared() <= 1e-12 {
+            return Err(PyValueError::new_err("axis cannot be zero"));
+        }
+        Ok(Self(
+            self.0
+                .bind_translation_from_rotation(&source.0, axis, scale),
+        ))
     }
 }
 
@@ -2101,20 +2956,9 @@ impl PyDrawable {
     }
 
     /// Return a named source group or path from an imported SVG.
-    fn part(&self, id: &str) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        if id.is_empty() {
-            return Err(PyKeyError::new_err("part selector must not be empty"));
-        }
-        match self.0.part(id) {
-            Ok(part) => Ok(Self(part)),
-            Err(gaanim_api::canvas::SvgPartError::NotSvg) => Err(PyValueError::new_err(
-                "this drawable has no named SVG parts",
-            )),
-            Err(error @ gaanim_api::canvas::SvgPartError::Unknown { .. }) => {
-                Err(PyKeyError::new_err(error.to_string()))
-            }
-        }
+    fn part<'py>(slf: &Bound<'py, Self>, id: &str) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().part_impl(id);
+        same_drawable(slf, result)
     }
 
     fn parts(&self, py: Python<'_>) -> PyResult<Py<PyTuple>> {
@@ -2138,6 +2982,7 @@ impl PyDrawable {
     }
 
     #[pyo3(signature = (name, *, duration=None, speed=1.0, r#loop=false, reverse=false, transition=0.0, start_time=0.0))]
+    #[allow(clippy::too_many_arguments)]
     fn animation(
         &self,
         name: &str,
@@ -2155,242 +3000,176 @@ impl PyDrawable {
         Err(crate::gltf_unsupported())
     }
 
-    fn fill(&self, paint: PyPaint) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        Ok(Self(self.0.clone().fill_brush(paint.0)))
+    fn fill<'py>(slf: &Bound<'py, Self>, paint: PyPaint) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().fill_impl(paint);
+        same_drawable(slf, result)
     }
-    fn no_fill(&self) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        Ok(Self(self.0.clone().no_fill()))
+    fn no_fill<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().no_fill_impl();
+        same_drawable(slf, result)
     }
     #[pyo3(signature = (paint, width, *, align=None))]
-    fn stroke(&self, paint: PyPaint, width: f64, align: Option<&str>) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        let align = align.map(parse_stroke_align).transpose()?;
-        let handle = self.0.clone().stroke_brush(paint.0, width);
-        Ok(Self(match align {
-            Some(align) => handle.stroke_align(align),
-            None => handle,
-        }))
+    fn stroke<'py>(
+        slf: &Bound<'py, Self>,
+        paint: PyPaint,
+        width: f64,
+        align: Option<&str>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().stroke_impl(paint, width, align);
+        same_drawable(slf, result)
     }
     /// Apply cap, join, miter, and dash geometry from a reusable StrokeStyle.
-    fn stroke_style(&self, style: PyStrokeStyle) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        let brush = match style.0.paint {
-            gaanim_api::canvas::ThemePaint::Color(color) => {
-                gaanim_core::peniko::Brush::Solid(color)
-            }
-            gaanim_api::canvas::ThemePaint::Brush(brush) => brush,
-            gaanim_api::canvas::ThemePaint::Named(name) => {
-                use std::str::FromStr;
-                gaanim_core::peniko::Color::from_str(&name)
-                    .map(gaanim_core::peniko::Brush::Solid)
-                    .map_err(|_| {
-                        PyValueError::new_err(
-                            "individual stroke_style paint must be a literal CSS color; theme tokens are resolved inside Theme.styles",
-                        )
-                    })?
-            }
-        };
-        Ok(Self(self.0.clone().stroke_with_style(brush, style.0.style)))
+    fn stroke_style<'py>(
+        slf: &Bound<'py, Self>,
+        style: PyStrokeStyle,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().stroke_style_impl(style);
+        same_drawable(slf, result)
     }
-    fn no_stroke(&self) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        Ok(Self(self.0.clone().no_stroke()))
+    fn no_stroke<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().no_stroke_impl();
+        same_drawable(slf, result)
     }
     /// Add a theme class; calls may be chained and later classes win.
-    fn style_class(&self, name: &str) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        self.0
-            .clone()
-            .style_class(name)
-            .map(Self)
-            .map_err(PyValueError::new_err)
+    fn style_class<'py>(slf: &Bound<'py, Self>, name: &str) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().style_class_impl(name);
+        same_drawable(slf, result)
     }
     /// Add a cached soft outer glow.
     #[pyo3(signature = (color, radius=0.16, intensity=1.0))]
-    fn glow(&self, color: PyColor, radius: f64, intensity: f32) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        if !radius.is_finite() || radius <= 0.0 {
-            return Err(PyValueError::new_err("radius must be finite and positive"));
-        }
-        if !intensity.is_finite() || intensity <= 0.0 {
-            return Err(PyValueError::new_err(
-                "intensity must be finite and positive",
-            ));
-        }
-        Ok(Self(self.0.clone().glow(color.0, radius, intensity)))
+    fn glow<'py>(
+        slf: &Bound<'py, Self>,
+        color: PyColor,
+        radius: f64,
+        intensity: f32,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().glow_impl(color, radius, intensity);
+        same_drawable(slf, result)
     }
     /// Show only part of the drawn path.
     #[pyo3(signature = (start=None, end=None, offset=None, mode=None))]
-    fn trim(
-        &self,
+    fn trim<'py>(
+        slf: &Bound<'py, Self>,
         start: Option<f64>,
         end: Option<f64>,
         offset: Option<f64>,
         mode: Option<&str>,
-    ) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        validate_trim(start, end, offset)?;
-        let sequential = match mode {
-            None => None,
-            Some("simultaneous") => Some(false),
-            Some("sequential") => Some(true),
-            Some(other) => {
-                return Err(PyValueError::new_err(format!(
-                    "unknown trim mode {other:?}; expected \"simultaneous\" or \"sequential\""
-                )));
-            }
-        };
-        Ok(Self(self.0.clone().trim(start, end, offset, sequential)))
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().trim_impl(start, end, offset, mode);
+        same_drawable(slf, result)
     }
     /// Apply a cached soft vector blur.
     #[pyo3(signature = (sigma=0.04))]
-    fn blur(&self, sigma: f64) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        if !sigma.is_finite() || sigma <= 0.0 {
-            return Err(PyValueError::new_err("sigma must be finite and positive"));
-        }
-        Ok(Self(self.0.clone().blur(sigma)))
+    fn blur<'py>(slf: &Bound<'py, Self>, sigma: f64) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().blur_impl(sigma);
+        same_drawable(slf, result)
     }
     /// Add a cached soft shadow behind the drawable.
     #[pyo3(signature = (color, x=0.08, y=-0.08, blur=0.06))]
-    fn shadow(&self, color: PyColor, x: f64, y: f64, blur: f64) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        if !x.is_finite() || !y.is_finite() {
-            return Err(PyValueError::new_err("shadow offset must be finite"));
-        }
-        if !blur.is_finite() || blur < 0.0 {
-            return Err(PyValueError::new_err(
-                "shadow blur must be finite and non-negative",
-            ));
-        }
-        Ok(Self(self.0.clone().shadow(
-            color.0,
-            gaanim_core::glam::DVec2::new(x, y),
-            blur,
-        )))
+    fn shadow<'py>(
+        slf: &Bound<'py, Self>,
+        color: PyColor,
+        x: f64,
+        y: f64,
+        blur: f64,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().shadow_impl(color, x, y, blur);
+        same_drawable(slf, result)
     }
     /// Remove glow, blur, and shadow from the drawable.
-    fn no_effects(&self) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        Ok(Self(self.0.clone().no_effects()))
+    fn no_effects<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().no_effects_impl();
+        same_drawable(slf, result)
     }
     /// Draw arrowheads or dots on the ends of the path.
     #[pyo3(signature = (end=Some("arrow"), start=None, *, length=None, width=None))]
-    fn tip(
-        &self,
+    fn tip<'py>(
+        slf: &Bound<'py, Self>,
         end: Option<&str>,
         start: Option<&str>,
         length: Option<f64>,
         width: Option<f64>,
-    ) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        let parse = |value: Option<&str>| -> PyResult<Option<gaanim_animation::TipKind>> {
-            match value {
-                None => Ok(None),
-                Some("arrow") => Ok(Some(gaanim_animation::TipKind::Arrow)),
-                Some("dot") => Ok(Some(gaanim_animation::TipKind::Dot)),
-                Some(other) => Err(PyValueError::new_err(format!(
-                    "tip must be 'arrow', 'dot' or None, got {other:?}"
-                ))),
-            }
-        };
-        let (start, end) = (parse(start)?, parse(end)?);
-        self.0
-            .clone()
-            .tip(start, end, length, width)
-            .map(Self)
-            .map_err(PyValueError::new_err)
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().tip_impl(end, start, length, width);
+        same_drawable(slf, result)
     }
     /// Composite the drawable with what is drawn beneath it.
     #[pyo3(signature = (mode="normal"))]
-    fn blend(&self, mode: &str) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        let mode = parse_blend_mode(mode)?;
-        Ok(Self(self.0.clone().blend(mode)))
+    fn blend<'py>(slf: &Bound<'py, Self>, mode: &str) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().blend_impl(mode);
+        same_drawable(slf, result)
     }
     /// Shape the stroke width along the path; None restores the plain pen.
-    fn stroke_profile(&self, profile: Option<Vec<(f64, f64)>>) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        self.0
-            .clone()
-            .stroke_profile(profile)
-            .map(Self)
-            .map_err(PyValueError::new_err)
+    fn stroke_profile<'py>(
+        slf: &Bound<'py, Self>,
+        profile: Option<Vec<(f64, f64)>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().stroke_profile_impl(profile);
+        same_drawable(slf, result)
     }
     /// Taper the stroke to a point at its start and end.
     #[pyo3(signature = (start=0.2, end=0.2))]
-    fn stroke_taper(&self, start: f64, end: f64) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        self.0
-            .clone()
-            .stroke_taper(start, end)
-            .map(Self)
-            .map_err(PyValueError::new_err)
+    fn stroke_taper<'py>(
+        slf: &Bound<'py, Self>,
+        start: f64,
+        end: f64,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().stroke_taper_impl(start, end);
+        same_drawable(slf, result)
     }
     /// Show the first `count` copies of a `repeat` or `duplicate` group.
-    fn count(&self, count: f64) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        self.0
-            .clone()
-            .count(count)
-            .map(Self)
-            .map_err(PyValueError::new_err)
+    fn count<'py>(slf: &Bound<'py, Self>, count: f64) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().count_impl(count);
+        same_drawable(slf, result)
     }
     /// Set every vertex of a polygon or polyline at once.
-    fn points(&self, points: Vec<(f64, f64)>) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        self.0
-            .clone()
-            .points(points)
-            .map(Self)
-            .map_err(PyValueError::new_err)
+    fn points<'py>(slf: &Bound<'py, Self>, points: Vec<(f64, f64)>) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().points_impl(points);
+        same_drawable(slf, result)
     }
     /// Stretch the drawable along its velocity and squash it across.
     #[pyo3(signature = (amount=0.1, max_ratio=1.6))]
-    fn squash_stretch(&self, amount: f64, max_ratio: f64) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        self.0
-            .clone()
-            .squash_stretch(amount, max_ratio)
-            .map(Self)
-            .map_err(PyValueError::new_err)
+    fn squash_stretch<'py>(
+        slf: &Bound<'py, Self>,
+        amount: f64,
+        max_ratio: f64,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().squash_stretch_impl(amount, max_ratio);
+        same_drawable(slf, result)
     }
     /// Whether the scene's motion blur smears this drawable.
     #[pyo3(signature = (enabled=true))]
-    fn motion_blur(&self, enabled: bool) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        Ok(Self(self.0.clone().motion_blur(enabled)))
+    fn motion_blur<'py>(slf: &Bound<'py, Self>, enabled: bool) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().motion_blur_impl(enabled);
+        same_drawable(slf, result)
     }
     /// Trail the drawable with fading copies of itself as it was earlier.
     #[pyo3(signature = (count=5, *, delay=0.04, decay=0.6, hold=false))]
-    fn echo(&self, count: u32, delay: f64, decay: f64, hold: bool) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        Ok(Self(
-            self.0.clone().echo(echo_spec(count, delay, decay, hold)?),
-        ))
+    fn echo<'py>(
+        slf: &Bound<'py, Self>,
+        count: u32,
+        delay: f64,
+        decay: f64,
+        hold: bool,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().echo_impl(count, delay, decay, hold);
+        same_drawable(slf, result)
     }
     /// Clip this drawable to another drawable's vector outline.
     #[pyo3(signature = (mask, rule="nonzero", invert=false))]
-    fn clip(&self, mask: &PyDrawable, rule: &str, invert: bool) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        let rule = match rule {
-            "nonzero" => gaanim_core::peniko::Fill::NonZero,
-            "evenodd" | "even_odd" => gaanim_core::peniko::Fill::EvenOdd,
-            _ => {
-                return Err(PyValueError::new_err("rule must be 'nonzero' or 'evenodd'"));
-            }
-        };
-        Ok(Self(self.0.clone().clip_with(
-            &mask.0,
-            gaanim_api::canvas::ClipOptions { rule, invert },
-        )))
+    fn clip<'py>(
+        slf: &Bound<'py, Self>,
+        mask: &PyDrawable,
+        rule: &str,
+        invert: bool,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().clip_impl(mask, rule, invert);
+        same_drawable(slf, result)
     }
     /// Remove the clipping mask from this drawable.
-    fn no_clip(&self) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        Ok(Self(self.0.clone().no_clip()))
+    fn no_clip<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().no_clip_impl();
+        same_drawable(slf, result)
     }
     /// Show inside this closed shape what a second camera sees.
     #[allow(clippy::too_many_arguments)]
@@ -2418,318 +3197,277 @@ impl PyDrawable {
         )
     }
     /// Remove the camera view shown inside this drawable.
-    fn no_camera_view(&self) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        Ok(Self(self.0.clone().no_camera_view()))
+    fn no_camera_view<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().no_camera_view_impl();
+        same_drawable(slf, result)
     }
     /// Put this drawable on a view layer, or back on none with `None`.
-    fn view_layer(&self, name: Option<String>) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        self.0
-            .clone()
-            .view_layer(name.as_deref())
-            .map(Self)
-            .map_err(|error| PyValueError::new_err(error.to_string()))
+    fn view_layer<'py>(
+        slf: &Bound<'py, Self>,
+        name: Option<String>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().view_layer_impl(name);
+        same_drawable(slf, result)
     }
-    fn set_fill_level(&self, level: &Bound<'_, PyAny>) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        let level = extract_scalar_source_for_drawable(level.clone(), &self.0)?;
-        self.0
-            .clone()
-            .set_fill_level(level)
-            .map(Self)
-            .map_err(PyValueError::new_err)
+    fn set_fill_level<'py>(
+        slf: &Bound<'py, Self>,
+        level: &Bound<'_, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().set_fill_level_impl(level);
+        same_drawable(slf, result)
     }
-    pub(crate) fn opacity(&self, op: &Bound<'_, PyAny>) -> PyResult<Self> {
+    fn opacity<'py>(slf: &Bound<'py, Self>, op: &Bound<'_, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().opacity_impl(op);
+        same_drawable(slf, result)
+    }
+    fn z_index<'py>(slf: &Bound<'py, Self>, z: i32) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().z_index_impl(z);
+        same_drawable(slf, result)
+    }
+
+    /// Move this object into a Zone (or onto another drawable's box) without
+    /// tying it there: its ``anchor`` meets the same anchor of the target,
+    /// inset by ``padding`` and shifted by ``offset``. ``fit`` scales it to
+    /// the target (``"contain"``, ``"cover"``, ``"stretch"``,
+    /// ``"scale_down"``).
+    #[pyo3(signature = (target, *, anchor=None, fit=None, padding=None, offset=None))]
+    fn place<'py>(
+        slf: PyRef<'py, Self>,
+        target: &Bound<'py, PyAny>,
+        anchor: Option<&Bound<'py, PyAny>>,
+        fit: Option<&str>,
+        padding: Option<&Bound<'py, PyAny>>,
+        offset: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        let value = extract_scalar_source_for_drawable(op.clone(), &self.0)?;
-        if let Some(value) = value.constant_value() {
-            return Ok(Self(self.0.clone().opacity(value as f32)));
+        let canvas = crate::pyzones::canvas_of(&slf.0)?;
+        let placement = crate::pyzones::Placement::parse(&canvas, anchor, fit, padding, offset)?;
+        placement.place(&slf.0, crate::pyzones::target_bounds(target)?)?;
+        Ok(slf)
+    }
+
+    /// Set how this object sits in the box that holds it, like CSS on the
+    /// element: ``grow``, ``shrink``, ``basis``, ``align_self``, ``row``,
+    /// ``column``, ``row_span``, ``column_span``, ``margin``, ``fit``,
+    /// ``anchor``, ``absolute``, ``offset``, and a layout ``width``/``height``
+    /// that replaces the object's own. Inside a box already, the box
+    /// reflows (over ``duration`` if given).
+    #[pyo3(signature = (*, duration=None, advance=true, **props))]
+    fn item<'py>(
+        slf: PyRef<'py, Self>,
+        py: Python<'py>,
+        duration: Option<f64>,
+        advance: bool,
+        props: Option<&Bound<'py, pyo3::types::PyDict>>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        if let Some(props) = props {
+            for key in props.keys() {
+                let key = key.extract::<String>()?;
+                if !crate::pylayout::ITEM_KEYS.contains(&key.as_str())
+                    && !crate::pylayout::DRAWABLE_ITEM_KEYS.contains(&key.as_str())
+                {
+                    return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                        "unknown item property {key:?}"
+                    )));
+                }
+            }
         }
-        binding_result(self, PropertySources::Opacity(value))
-    }
-    fn z_index(&self, z: i32) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        Ok(Self(self.0.clone().z_index(z)))
+        let empty = pyo3::types::PyDict::new(py);
+        let props = props.unwrap_or(&empty);
+        let handle = slf.0.clone();
+        let units = crate::pylayout::Units::of(&handle)?;
+        let mut item = handle.layout_item();
+        crate::pylayout::apply_item(&mut item, props, &units)?;
+        crate::pylayout::apply_item_size(&mut item, props, &units)?;
+        handle.set_layout_item(item);
+        let duration = match duration {
+            Some(value) if !value.is_finite() || value < 0.0 => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "duration must be finite and non-negative",
+                ));
+            }
+            Some(value) if value > 0.0 => Some(value),
+            _ => None,
+        };
+        crate::pylayout::reflow_owner_and_advance(&handle, duration, advance);
+        Ok(slf)
     }
     #[pyo3(signature = (x, y=None, anchor=None))]
-    pub(crate) fn move_to(
-        &self,
+    fn move_to<'py>(
+        slf: &Bound<'py, Self>,
         x: &Bound<'_, PyAny>,
         y: Option<&Bound<'_, PyAny>>,
         anchor: Option<&PyAnchor>,
-    ) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("move_to")?;
-        if let Some(y) = y {
-            let sx = extract_scalar_source_for_drawable(x.clone(), &self.0)?;
-            let sy = extract_scalar_source_for_drawable(y.clone(), &self.0)?;
-            if let (Some(x), Some(y)) = (sx.constant_value(), sy.constant_value()) {
-                return Ok(Self(if let Some(anchor) = anchor {
-                    self.0.clone().at_anchor(x, y, anchor.0)
-                } else {
-                    self.0.clone().move_to_default(x, y)
-                }));
-            }
-            let anchor = anchor
-                .map(|anchor| anchor.0)
-                .unwrap_or_default()
-                .to_offset();
-            return binding_result(
-                self,
-                PropertySources::Translation {
-                    values: [sx, sy, 0.0.into()],
-                    anchor: Some(gaanim_core::glam::DVec3::new(anchor.x, anchor.y, 0.0)),
-                },
-            );
-        }
-        match resolve_at_target("move_to", x, None, anchor.is_some())? {
-            PyAtTarget::Coordinates { x, y } => Ok(Self(self.0.clone().move_to_default(x, y))),
-            PyAtTarget::Drawable(reference) => {
-                if !self.0.same_canvas(&reference) {
-                    return Err(PyValueError::new_err("target belongs to another Scene"));
-                }
-                Ok(Self(self.0.clone().at_anchor_point(
-                    reference.anchor_point(
-                        gaanim_api::canvas::Anchor::Center,
-                        gaanim_core::glam::DVec3::ZERO,
-                    ),
-                )))
-            }
-            PyAtTarget::AnchorPoint(point) => {
-                validate_at_target_owner(&PyAtTarget::AnchorPoint(point), &self.0)?;
-                Ok(Self(self.0.clone().at_anchor_point(point)))
-            }
-        }
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().move_to_impl(x, y, anchor);
+        same_drawable(slf, result)
     }
-    pub(crate) fn move_to_3d(
-        &self,
+    fn move_to_3d<'py>(
+        slf: &Bound<'py, Self>,
         x: &Bound<'_, PyAny>,
         y: &Bound<'_, PyAny>,
         z: &Bound<'_, PyAny>,
-    ) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("move_to_3d")?;
-        let values = [
-            extract_scalar_source_for_drawable(x.clone(), &self.0)?,
-            extract_scalar_source_for_drawable(y.clone(), &self.0)?,
-            extract_scalar_source_for_drawable(z.clone(), &self.0)?,
-        ];
-        if let (Some(x), Some(y), Some(z)) = (
-            values[0].constant_value(),
-            values[1].constant_value(),
-            values[2].constant_value(),
-        ) {
-            return Ok(Self(self.0.clone().move_to_3d(x, y, z)));
-        }
-        binding_result(
-            self,
-            PropertySources::Translation {
-                values,
-                anchor: None,
-            },
-        )
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().move_to_3d_impl(x, y, z);
+        same_drawable(slf, result)
     }
-    pub(crate) fn shift_by(&self, dx: f64, dy: f64) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("shift_by")?;
-        free_channel(&self.0, PropertyChannel::Translation)?;
-        Ok(Self(self.0.clone().shift_by(dx, dy)))
+    fn shift_by<'py>(slf: &Bound<'py, Self>, dx: f64, dy: f64) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().shift_by_impl(dx, dy);
+        same_drawable(slf, result)
     }
-    pub(crate) fn shift_by_3d(&self, dx: f64, dy: f64, dz: f64) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("shift_by_3d")?;
-        free_channel(&self.0, PropertyChannel::Translation)?;
-        Ok(Self(self.0.clone().shift_by_3d(dx, dy, dz)))
+    fn shift_by_3d<'py>(
+        slf: &Bound<'py, Self>,
+        dx: f64,
+        dy: f64,
+        dz: f64,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().shift_by_3d_impl(dx, dy, dz);
+        same_drawable(slf, result)
     }
-    fn billboard(&self) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        Ok(Self(self.0.clone().billboard()))
+    fn billboard<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().billboard_impl();
+        same_drawable(slf, result)
     }
-    fn hud(&self) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        Ok(Self(self.0.clone().hud()))
+    fn hud<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().hud_impl();
+        same_drawable(slf, result)
     }
-    pub(crate) fn scale_to(&self, factor: &Bound<'_, PyAny>) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("scale_to")?;
-        let source = extract_scalar_source_for_drawable(factor.clone(), &self.0)?;
-        if let Some(value) = source.constant_value() {
-            return Ok(Self(self.0.clone().scale_to(value)));
-        }
-        binding_result(
-            self,
-            PropertySources::Scale([source.clone(), source.clone(), source]),
-        )
+    fn scale_to<'py>(
+        slf: &Bound<'py, Self>,
+        factor: &Bound<'_, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().scale_to_impl(factor);
+        same_drawable(slf, result)
     }
-    pub(crate) fn scale_to_3d(
-        &self,
+    fn scale_to_3d<'py>(
+        slf: &Bound<'py, Self>,
         x: &Bound<'_, PyAny>,
         y: &Bound<'_, PyAny>,
         z: &Bound<'_, PyAny>,
-    ) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("scale_to_3d")?;
-        let values = [
-            extract_scalar_source_for_drawable(x.clone(), &self.0)?,
-            extract_scalar_source_for_drawable(y.clone(), &self.0)?,
-            extract_scalar_source_for_drawable(z.clone(), &self.0)?,
-        ];
-        if let (Some(x), Some(y), Some(z)) = (
-            values[0].constant_value(),
-            values[1].constant_value(),
-            values[2].constant_value(),
-        ) {
-            return Ok(Self(self.0.clone().scale_to_3d(x, y, z)));
-        }
-        binding_result(self, PropertySources::Scale(values))
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().scale_to_3d_impl(x, y, z);
+        same_drawable(slf, result)
     }
-    pub(crate) fn scale_by(&self, factor: f64) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("scale_by")?;
-        free_channel(&self.0, PropertyChannel::Scale)?;
-        Ok(Self(self.0.clone().scale_by(factor)))
+    fn scale_by<'py>(slf: &Bound<'py, Self>, factor: f64) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().scale_by_impl(factor);
+        same_drawable(slf, result)
     }
-    pub(crate) fn scale_by_3d(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("scale_by_3d")?;
-        free_channel(&self.0, PropertyChannel::Scale)?;
-        Ok(Self(self.0.clone().scale_by_3d(x, y, z)))
+    fn scale_by_3d<'py>(
+        slf: &Bound<'py, Self>,
+        x: f64,
+        y: f64,
+        z: f64,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().scale_by_3d_impl(x, y, z);
+        same_drawable(slf, result)
     }
-    pub(crate) fn rotate_to(&self, radians: &Bound<'_, PyAny>) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("rotate_to")?;
-        let source = extract_scalar_source_for_drawable(radians.clone(), &self.0)?;
-        if let Some(value) = source.constant_value() {
-            return Ok(Self(self.0.clone().rotate_to(value)));
-        }
-        binding_result(
-            self,
-            PropertySources::Rotation([0.0.into(), 0.0.into(), source]),
-        )
+    fn rotate_to<'py>(
+        slf: &Bound<'py, Self>,
+        radians: &Bound<'_, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().rotate_to_impl(radians);
+        same_drawable(slf, result)
     }
-    pub(crate) fn rotate_to_3d(
-        &self,
+    fn rotate_to_3d<'py>(
+        slf: &Bound<'py, Self>,
         x: &Bound<'_, PyAny>,
         y: &Bound<'_, PyAny>,
         z: &Bound<'_, PyAny>,
-    ) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("rotate_to_3d")?;
-        let values = [
-            extract_scalar_source_for_drawable(x.clone(), &self.0)?,
-            extract_scalar_source_for_drawable(y.clone(), &self.0)?,
-            extract_scalar_source_for_drawable(z.clone(), &self.0)?,
-        ];
-        if let (Some(x), Some(y), Some(z)) = (
-            values[0].constant_value(),
-            values[1].constant_value(),
-            values[2].constant_value(),
-        ) {
-            return Ok(Self(self.0.clone().rotate_to_3d(x, y, z)));
-        }
-        binding_result(self, PropertySources::Rotation(values))
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().rotate_to_3d_impl(x, y, z);
+        same_drawable(slf, result)
     }
-    pub(crate) fn rotate_by(&self, radians: f64) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("rotate_by")?;
-        free_channel(&self.0, PropertyChannel::Rotation)?;
-        Ok(Self(self.0.clone().rotate_by(radians)))
+    fn rotate_by<'py>(slf: &Bound<'py, Self>, radians: f64) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().rotate_by_impl(radians);
+        same_drawable(slf, result)
     }
-    pub(crate) fn skew_to(&self, x: f64, y: f64) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("skew_to")?;
-        finite_skew(x, y)?;
-        Ok(Self(self.0.clone().skew_to(x, y)))
+    fn skew_to<'py>(slf: &Bound<'py, Self>, x: f64, y: f64) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().skew_to_impl(x, y);
+        same_drawable(slf, result)
     }
-    pub(crate) fn matrix_to(&self, matrix: ((f64, f64), (f64, f64))) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("matrix_to")?;
-        free_channel(&self.0, PropertyChannel::Rotation)?;
-        free_channel(&self.0, PropertyChannel::Scale)?;
-        let map = linear_map(matrix)?;
-        Ok(Self(self.0.clone().matrix_to(map)))
+    fn matrix_to<'py>(
+        slf: &Bound<'py, Self>,
+        matrix: ((f64, f64), (f64, f64)),
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().matrix_to_impl(matrix);
+        same_drawable(slf, result)
     }
-    pub(crate) fn rotate_by_3d(&self, axis: &str, radians: f64) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("rotate_by_3d")?;
-        free_channel(&self.0, PropertyChannel::Rotation)?;
-        self.0
-            .clone()
-            .rotate_by_3d(axis, radians)
-            .map(Self)
-            .map_err(|error| PyValueError::new_err(error.to_string()))
+    fn rotate_by_3d<'py>(
+        slf: &Bound<'py, Self>,
+        axis: &str,
+        radians: f64,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().rotate_by_3d_impl(axis, radians);
+        same_drawable(slf, result)
     }
-    fn with_pivot(&self, x: f64, y: f64) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        Ok(Self(self.0.clone().with_pivot(x, y)))
+    fn with_pivot<'py>(slf: &Bound<'py, Self>, x: f64, y: f64) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().with_pivot_impl(x, y);
+        same_drawable(slf, result)
     }
-    fn with_pivot_3d(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        Ok(Self(self.0.clone().with_pivot_3d(x, y, z)))
+    fn with_pivot_3d<'py>(
+        slf: &Bound<'py, Self>,
+        x: f64,
+        y: f64,
+        z: f64,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().with_pivot_3d_impl(x, y, z);
+        same_drawable(slf, result)
     }
-    fn pivot(&self, x: f64, y: f64) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        Ok(Self(self.0.clone().pivot(x, y)))
+    fn pivot<'py>(slf: &Bound<'py, Self>, x: f64, y: f64) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().pivot_impl(x, y);
+        same_drawable(slf, result)
     }
     #[pyo3(signature = (reference, direction, spacing=0.24, aligned_edge=None))]
-    fn next_to(
-        &self,
+    fn next_to<'py>(
+        slf: &Bound<'py, Self>,
         reference: &PyDrawable,
         direction: &PyDirection,
         spacing: f64,
         aligned_edge: Option<&PyAnchor>,
-    ) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("next_to")?;
-        let aligned_edge = aligned_edge
-            .map(|anchor| anchor.0)
-            .unwrap_or(gaanim_api::canvas::Anchor::Center);
-        Ok(Self(self.0.clone().next_to_aligned(
-            &reference.0,
-            direction.0,
-            spacing,
-            aligned_edge,
-        )))
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf
+            .borrow()
+            .next_to_impl(reference, direction, spacing, aligned_edge);
+        same_drawable(slf, result)
     }
     #[pyo3(signature = (reference, target_anchor, reference_anchor=None))]
-    fn align_to(
-        &self,
+    fn align_to<'py>(
+        slf: &Bound<'py, Self>,
         reference: &PyDrawable,
         target_anchor: &PyAnchor,
         reference_anchor: Option<&PyAnchor>,
-    ) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("align_to")?;
-        let reference_anchor = reference_anchor
-            .map(|anchor| anchor.0)
-            .unwrap_or(target_anchor.0);
-        Ok(Self(self.0.clone().align_to(
-            &reference.0,
-            target_anchor.0,
-            reference_anchor,
-        )))
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf
+            .borrow()
+            .align_to_impl(reference, target_anchor, reference_anchor);
+        same_drawable(slf, result)
     }
     #[pyo3(signature = (direction, buff=0.24))]
-    fn to_edge(&self, direction: &PyDirection, buff: f64) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("to_edge")?;
-        Ok(Self(self.0.clone().to_edge(direction.0, buff)))
+    fn to_edge<'py>(
+        slf: &Bound<'py, Self>,
+        direction: &PyDirection,
+        buff: f64,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().to_edge_impl(direction, buff);
+        same_drawable(slf, result)
     }
     #[pyo3(signature = (corner, buff=0.24))]
-    fn to_corner(&self, corner: &PyAnchor, buff: f64) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("to_corner")?;
-        Ok(Self(self.0.clone().to_corner(corner.0, buff)))
+    fn to_corner<'py>(
+        slf: &Bound<'py, Self>,
+        corner: &PyAnchor,
+        buff: f64,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().to_corner_impl(corner, buff);
+        same_drawable(slf, result)
     }
     // -- Reactive methods --
 
     /// Attach a preset updater that runs every frame.
     fn add_updater(&self, updater: &PyUpdater) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.0.add_updater(updater.0.clone());
-        })
+        self.0.add_updater(updater.0.clone());
+        Ok(())
     }
 
     /// Attach a generic Python callback updater or deterministic simulation.
@@ -2757,120 +3495,21 @@ impl PyDrawable {
     /// dot.add_updater_fn(lorenz, reset=reset_lorenz, fixed_dt=1/600)
     /// ```
     #[pyo3(signature = (callback, *, reset=None, fixed_dt=None))]
-    fn add_updater_fn(
-        &self,
+    fn add_updater_fn<'py>(
+        slf: &Bound<'py, Self>,
         callback: Py<PyAny>,
         reset: Option<Py<PyAny>>,
         fixed_dt: Option<f64>,
-    ) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        if !Python::attach(|py| callback.bind(py).is_callable()) {
-            return Err(PyValueError::new_err("callback must be callable"));
-        }
-        if let Some(reset) = reset.as_ref()
-            && !Python::attach(|py| reset.bind(py).is_callable())
-        {
-            return Err(PyValueError::new_err("reset must be callable"));
-        }
-        match (reset.is_some(), fixed_dt.is_some()) {
-            (true, false) => {
-                return Err(PyValueError::new_err(
-                    "reset requires fixed_dt for deterministic replay",
-                ));
-            }
-            (false, true) => {
-                return Err(PyValueError::new_err(
-                    "fixed_dt requires reset so seeks and exports can rebuild simulation state",
-                ));
-            }
-            _ => {}
-        }
-
-        let callback_clone = callback.clone();
-        let updater_fn = move |dt: f64,
-                               elapsed: f64,
-                               entity: gaanim_scene::prelude::Entity,
-                               world: &mut gaanim_scene::prelude::World| {
-            let current = world
-                .get::<gaanim_math::SpatialTransform>(entity)
-                .map(|t| t.translation);
-            let current = match current {
-                Some(p) => p,
-                None => return true,
-            };
-            let result: PyResult<(f64, f64, f64)> = Python::attach(|py| {
-                let func = callback_clone.bind(py);
-                let pos = (current.x, current.y, current.z);
-                // Preferred signature: callback(pos, dt, elapsed)
-                let v = func.call1((pos, dt, elapsed))?;
-                // Accept either (x,y,z) tuple or list
-                if let Ok(tup) = v.extract::<(f64, f64, f64)>() {
-                    Ok(tup)
-                } else if let Ok(vec) = v.extract::<Vec<f64>>() {
-                    if vec.len() == 3 {
-                        Ok((vec[0], vec[1], vec[2]))
-                    } else {
-                        Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                            "callback must return (x,y,z) tuple of 3 floats",
-                        ))
-                    }
-                } else {
-                    Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                        "callback must return (x,y,z) tuple",
-                    ))
-                }
-            });
-            match result {
-                Ok((nx, ny, nz)) => {
-                    if !nx.is_finite() || !ny.is_finite() || !nz.is_finite() {
-                        Python::attach(|py| {
-                            PyValueError::new_err("callback must return three finite coordinates")
-                                .print(py)
-                        });
-                        return false;
-                    }
-                    if let Some(mut t) = world.get_mut::<gaanim_math::SpatialTransform>(entity) {
-                        t.translation = gaanim_core::glam::DVec3::new(nx, ny, nz);
-                    }
-                    true
-                }
-                Err(e) => {
-                    Python::attach(|py| e.print(py));
-                    false
-                }
-            }
-        };
-
-        let updater = if let (Some(reset), Some(fixed_dt)) = (reset, fixed_dt) {
-            let reset_clone = reset.clone();
-            let reset_fn =
-                move |_entity: gaanim_scene::prelude::Entity,
-                      _world: &mut gaanim_scene::prelude::World| {
-                    match Python::attach(|py| reset_clone.bind(py).call0().map(|_| ())) {
-                        Ok(()) => true,
-                        Err(e) => {
-                            Python::attach(|py| e.print(py));
-                            false
-                        }
-                    }
-                };
-            gaanim_animation::Updater::new_simulation(updater_fn, reset_fn, fixed_dt).map_err(
-                |_| PyValueError::new_err("fixed_dt must be finite and greater than zero"),
-            )?
-        } else {
-            gaanim_animation::Updater::new(updater_fn)
-        };
-
-        self.0.add_custom_updater(updater);
-        Ok(self.clone())
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().add_updater_fn_impl(callback, reset, fixed_dt);
+        same_drawable(slf, result)
     }
 
     /// Remove any updater attached to this entity.
     fn remove_updater(&self) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.0.remove_updater();
-        })
+        self.0.remove_updater();
+        Ok(())
     }
 
     /// Drive a property of this drawable along a sampled `(times, values)`
@@ -2892,175 +3531,88 @@ impl PyDrawable {
     /// building.drive_from_samples(times, accel, "x", scale=520.0)
     /// ```
     #[pyo3(signature = (times, values, property = "x", *, interpolation = "linear", scale = 1.0, offset = 0.0))]
-    fn drive_from_samples(
-        &self,
+    fn drive_from_samples<'py>(
+        slf: &Bound<'py, Self>,
         times: Vec<f64>,
         values: &Bound<'_, PyAny>,
         property: &str,
         interpolation: &str,
         scale: f64,
         offset: f64,
-    ) -> PyResult<Self> {
-        use gaanim_animation::{SampledProperty, SampledSeriesDriver};
-
-        crate::custom::ensure_authoring_allowed()?;
-        let interpolation = parse_sampled_interpolation(interpolation)?;
-        let invalid = || {
-            PyValueError::new_err(
-                "drive_from_samples requires non-empty matching times/values, finite values, \
-                 and non-decreasing times",
-            )
-        };
-        // "xy" drives both translation axes from (x, y) pairs as two
-        // independent channels.
-        let channels = if property == "xy" {
-            // Accept tuples or two-element lists, e.g. `list(zip(xs, ys))`.
-            let points = values
-                .extract::<Vec<(f64, f64)>>()
-                .ok()
-                .or_else(|| {
-                    let rows = values.extract::<Vec<Vec<f64>>>().ok()?;
-                    rows.iter()
-                        .map(|row| match row.as_slice() {
-                            [x, y] => Some((*x, *y)),
-                            _ => None,
-                        })
-                        .collect()
-                })
-                .ok_or_else(|| {
-                    PyValueError::new_err("property 'xy' requires values as (x, y) pairs")
-                })?;
-            let (xs, ys) = points.into_iter().unzip();
-            vec![
-                (SampledProperty::TranslateX, xs),
-                (SampledProperty::TranslateY, ys),
-            ]
-        } else {
-            let property = parse_sampled_property(property)?;
-            let values = values.extract::<Vec<f64>>().map_err(|_| {
-                PyValueError::new_err(
-                    "values must be a sequence of numbers; use property 'xy' for (x, y) pairs",
-                )
-            })?;
-            vec![(property, values)]
-        };
-        // Validate every channel first so an invalid y never leaves x attached.
-        for (property, values) in &channels {
-            SampledSeriesDriver::new(
-                times.clone(),
-                values.clone(),
-                *property,
-                interpolation,
-                scale,
-                offset,
-            )
-            .map_err(|_| invalid())?;
-        }
-        for (property, values) in channels {
-            self.0
-                .drive_from_samples(
-                    times.clone(),
-                    values,
-                    property,
-                    interpolation,
-                    scale,
-                    offset,
-                )
-                .map_err(|_| invalid())?;
-        }
-        Ok(self.clone())
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().drive_from_samples_impl(
+            times,
+            values,
+            property,
+            interpolation,
+            scale,
+            offset,
+        );
+        same_drawable(slf, result)
     }
 
     /// Copy the source entity's Y position each frame.
     fn bind_y_from(&self, source: &PyDrawable) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.0.bind_y_from(&source.0);
-        })
+        self.0.bind_y_from(&source.0);
+        Ok(())
     }
 
     /// Copy the source entity's X position each frame.
     fn bind_x_from(&self, source: &PyDrawable) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.0.bind_x_from(&source.0);
-        })
+        self.0.bind_x_from(&source.0);
+        Ok(())
     }
 
     /// Keep this drawable centered on ``source`` each frame.
     fn attach_to(&self, source: &PyDrawable) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.0.attach_to(&source.0);
-        })
+        self.0.attach_to(&source.0);
+        Ok(())
     }
 
     /// Follow ``source`` while keeping an ``(x, y)`` scene-space offset.
     fn follow_to(&self, source: &PyDrawable, offset: (f64, f64)) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.0.follow_to(&source.0, offset.0, offset.1);
-        })
+        self.0.follow_to(&source.0, offset.0, offset.1);
+        Ok(())
     }
 
     /// Follow any endpoint and return this drawable for fluent chaining.
     #[pyo3(signature = (source, *, offset=(0.0, 0.0), offset_space="world"))]
-    fn follow(
-        &self,
+    fn follow<'py>(
+        slf: &Bound<'py, Self>,
         source: Bound<'_, PyAny>,
         offset: (f64, f64),
         offset_space: &str,
-    ) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        if !offset.0.is_finite() || !offset.1.is_finite() {
-            return Err(PyValueError::new_err("offset must be finite"));
-        }
-        let space = match offset_space {
-            "world" => gaanim_animation::FollowOffsetSpace::World,
-            "local" => gaanim_animation::FollowOffsetSpace::Local,
-            _ => {
-                return Err(PyValueError::new_err(
-                    "offset_space must be 'world' or 'local'",
-                ));
-            }
-        };
-        Ok(Self(self.0.follow_endpoint(
-            crate::pycanvas::resolve_endpoint(&source)?,
-            gaanim_core::glam::DVec3::new(offset.0, offset.1, 0.0),
-            space,
-        )))
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().follow_impl(source, offset, offset_space);
+        same_drawable(slf, result)
     }
 
     #[pyo3(signature = (source, *, ratio=1.0, phase=0.0))]
-    fn bind_rotation_from(&self, source: &PyDrawable, ratio: f64, phase: f64) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        if !ratio.is_finite() || !phase.is_finite() {
-            return Err(PyValueError::new_err("ratio and phase must be finite"));
-        }
-        Ok(Self(self.0.bind_rotation_from(&source.0, ratio, phase)))
+    fn bind_rotation_from<'py>(
+        slf: &Bound<'py, Self>,
+        source: &PyDrawable,
+        ratio: f64,
+        phase: f64,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().bind_rotation_from_impl(source, ratio, phase);
+        same_drawable(slf, result)
     }
 
     #[pyo3(signature = (source, *, axis=None, scale=1.0))]
-    fn bind_translation_from_rotation(
-        &self,
+    fn bind_translation_from_rotation<'py>(
+        slf: &Bound<'py, Self>,
         source: &PyDrawable,
         axis: Option<PyDirection>,
         scale: f64,
-    ) -> PyResult<Self> {
-        crate::custom::ensure_authoring_allowed()?;
-        if !scale.is_finite() {
-            return Err(PyValueError::new_err("scale must be finite"));
-        }
-        let axis = axis
-            .map(|value| value.0.to_vector())
-            .unwrap_or(gaanim_core::glam::DVec3::X);
-        if axis.length_squared() <= 1e-12 {
-            return Err(PyValueError::new_err("axis cannot be zero"));
-        }
-        Ok(Self(
-            self.0
-                .bind_translation_from_rotation(&source.0, axis, scale),
-        ))
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf
+            .borrow()
+            .bind_translation_from_rotation_impl(source, axis, scale);
+        same_drawable(slf, result)
     }
 
     /// Copy selected source axes each frame. ``axes`` accepts ``"x"``,
@@ -3148,12 +3700,12 @@ macro_rules! media_drawable_methods {
     fn source_height(&self) -> PyResult<u32> { crate::custom::ensure_authoring_allowed()?; self.handle().source_height().map_err(PyValueError::new_err) }
 
     fn fill<'py>(slf: PyRef<'py, Self>, paint: PyPaint) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).fill(paint)?;
+        PyDrawable(slf.handle()).fill_impl(paint)?;
         Ok(slf)
     }
 
     fn no_fill<'py>(slf: PyRef<'py, Self>) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).no_fill()?;
+        PyDrawable(slf.handle()).no_fill_impl()?;
         Ok(slf)
     }
 
@@ -3164,175 +3716,175 @@ macro_rules! media_drawable_methods {
         width: f64,
         align: Option<&str>,
     ) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).stroke(paint, width, align)?;
+        PyDrawable(slf.handle()).stroke_impl(paint, width, align)?;
         Ok(slf)
     }
 
     fn stroke_style<'py>(slf: PyRef<'py, Self>, style: PyStrokeStyle) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).stroke_style(style)?;
+        PyDrawable(slf.handle()).stroke_style_impl(style)?;
         Ok(slf)
     }
 
     fn no_stroke<'py>(slf: PyRef<'py, Self>) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).no_stroke()?;
+        PyDrawable(slf.handle()).no_stroke_impl()?;
         Ok(slf)
     }
 
     fn style_class<'py>(slf: PyRef<'py, Self>, name: &str) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).style_class(name)?;
+        PyDrawable(slf.handle()).style_class_impl(name)?;
         Ok(slf)
     }
     #[pyo3(signature = (color, radius=0.16, intensity=1.0))]
     fn glow<'py>(slf: PyRef<'py, Self>, color: PyColor, radius: f64, intensity: f32) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).glow(color, radius, intensity)?;
+        PyDrawable(slf.handle()).glow_impl(color, radius, intensity)?;
         Ok(slf)
     }
     #[pyo3(signature = (sigma=0.04))]
     fn blur<'py>(slf: PyRef<'py, Self>, sigma: f64) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).blur(sigma)?;
+        PyDrawable(slf.handle()).blur_impl(sigma)?;
         Ok(slf)
     }
     #[pyo3(signature = (color, x=0.08, y=-0.08, blur=0.06))]
     fn shadow<'py>(slf: PyRef<'py, Self>, color: PyColor, x: f64, y: f64, blur: f64) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).shadow(color, x, y, blur)?;
+        PyDrawable(slf.handle()).shadow_impl(color, x, y, blur)?;
         Ok(slf)
     }
 
     fn no_effects<'py>(slf: PyRef<'py, Self>) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).no_effects()?;
+        PyDrawable(slf.handle()).no_effects_impl()?;
         Ok(slf)
     }
     #[pyo3(signature = (mode="normal"))]
     fn blend<'py>(slf: PyRef<'py, Self>, mode: &str) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).blend(mode)?;
+        PyDrawable(slf.handle()).blend_impl(mode)?;
         Ok(slf)
     }
     #[pyo3(signature = (mask, rule="nonzero", invert=false))]
     fn clip<'py>(slf: PyRef<'py, Self>, mask: &PyDrawable, rule: &str, invert: bool) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).clip(mask, rule, invert)?;
+        PyDrawable(slf.handle()).clip_impl(mask, rule, invert)?;
         Ok(slf)
     }
 
     fn no_clip<'py>(slf: PyRef<'py, Self>) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).no_clip()?;
+        PyDrawable(slf.handle()).no_clip_impl()?;
         Ok(slf)
     }
 
     fn set_fill_level<'py>(slf: PyRef<'py, Self>, level: &Bound<'py, PyAny>) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).set_fill_level(level)?;
+        PyDrawable(slf.handle()).set_fill_level_impl(level)?;
         Ok(slf)
     }
 
     fn opacity<'py>(slf: PyRef<'py, Self>, op: &Bound<'_, PyAny>) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).opacity(op)?;
+        PyDrawable(slf.handle()).opacity_impl(op)?;
         Ok(slf)
     }
 
     fn z_index<'py>(slf: PyRef<'py, Self>, z: i32) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).z_index(z)?;
+        PyDrawable(slf.handle()).z_index_impl(z)?;
         Ok(slf)
     }
     #[pyo3(signature = (x, y=None, anchor=None))]
     fn move_to<'py>(slf: PyRef<'py, Self>, x: &Bound<'_, PyAny>,
         y: Option<&Bound<'_, PyAny>>,
         anchor: Option<&PyAnchor>,) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).move_to(x, y, anchor)?;
+        PyDrawable(slf.handle()).move_to_impl(x, y, anchor)?;
         Ok(slf)
     }
 
     fn move_to_3d<'py>(slf: PyRef<'py, Self>, x: &Bound<'_, PyAny>,
         y: &Bound<'_, PyAny>,
         z: &Bound<'_, PyAny>,) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).move_to_3d(x, y, z)?;
+        PyDrawable(slf.handle()).move_to_3d_impl(x, y, z)?;
         Ok(slf)
     }
 
     fn shift_by<'py>(slf: PyRef<'py, Self>, dx: f64, dy: f64) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).shift_by(dx, dy)?;
+        PyDrawable(slf.handle()).shift_by_impl(dx, dy)?;
         Ok(slf)
     }
 
     fn shift_by_3d<'py>(slf: PyRef<'py, Self>, dx: f64, dy: f64, dz: f64) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).shift_by_3d(dx, dy, dz)?;
+        PyDrawable(slf.handle()).shift_by_3d_impl(dx, dy, dz)?;
         Ok(slf)
     }
 
     fn billboard<'py>(slf: PyRef<'py, Self>) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).billboard()?;
+        PyDrawable(slf.handle()).billboard_impl()?;
         Ok(slf)
     }
 
     fn hud<'py>(slf: PyRef<'py, Self>) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).hud()?;
+        PyDrawable(slf.handle()).hud_impl()?;
         Ok(slf)
     }
 
     fn scale_to<'py>(slf: PyRef<'py, Self>, factor: &Bound<'_, PyAny>) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).scale_to(factor)?;
+        PyDrawable(slf.handle()).scale_to_impl(factor)?;
         Ok(slf)
     }
 
     fn scale_to_3d<'py>(slf: PyRef<'py, Self>, x: &Bound<'_, PyAny>,
         y: &Bound<'_, PyAny>,
         z: &Bound<'_, PyAny>,) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).scale_to_3d(x, y, z)?;
+        PyDrawable(slf.handle()).scale_to_3d_impl(x, y, z)?;
         Ok(slf)
     }
 
     fn scale_by<'py>(slf: PyRef<'py, Self>, factor: f64) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).scale_by(factor)?;
+        PyDrawable(slf.handle()).scale_by_impl(factor)?;
         Ok(slf)
     }
 
     fn scale_by_3d<'py>(slf: PyRef<'py, Self>, x: f64, y: f64, z: f64) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).scale_by_3d(x, y, z)?;
+        PyDrawable(slf.handle()).scale_by_3d_impl(x, y, z)?;
         Ok(slf)
     }
 
     fn rotate_to<'py>(slf: PyRef<'py, Self>, radians: &Bound<'_, PyAny>) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).rotate_to(radians)?;
+        PyDrawable(slf.handle()).rotate_to_impl(radians)?;
         Ok(slf)
     }
 
     fn rotate_to_3d<'py>(slf: PyRef<'py, Self>, x: &Bound<'_, PyAny>,
         y: &Bound<'_, PyAny>,
         z: &Bound<'_, PyAny>,) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).rotate_to_3d(x, y, z)?;
+        PyDrawable(slf.handle()).rotate_to_3d_impl(x, y, z)?;
         Ok(slf)
     }
 
     fn rotate_by<'py>(slf: PyRef<'py, Self>, radians: f64) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).rotate_by(radians)?;
+        PyDrawable(slf.handle()).rotate_by_impl(radians)?;
         Ok(slf)
     }
 
     fn skew_to<'py>(slf: PyRef<'py, Self>, x: f64, y: f64) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).skew_to(x, y)?;
+        PyDrawable(slf.handle()).skew_to_impl(x, y)?;
         Ok(slf)
     }
 
     fn matrix_to<'py>(slf: PyRef<'py, Self>, matrix: ((f64, f64), (f64, f64))) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).matrix_to(matrix)?;
+        PyDrawable(slf.handle()).matrix_to_impl(matrix)?;
         Ok(slf)
     }
 
     fn rotate_by_3d<'py>(slf: PyRef<'py, Self>, axis: &str, radians: f64) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).rotate_by_3d(axis, radians)?;
+        PyDrawable(slf.handle()).rotate_by_3d_impl(axis, radians)?;
         Ok(slf)
     }
 
     fn with_pivot<'py>(slf: PyRef<'py, Self>, x: f64, y: f64) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).with_pivot(x, y)?;
+        PyDrawable(slf.handle()).with_pivot_impl(x, y)?;
         Ok(slf)
     }
 
     fn with_pivot_3d<'py>(slf: PyRef<'py, Self>, x: f64, y: f64, z: f64) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).with_pivot_3d(x, y, z)?;
+        PyDrawable(slf.handle()).with_pivot_3d_impl(x, y, z)?;
         Ok(slf)
     }
 
     fn pivot<'py>(slf: PyRef<'py, Self>, x: f64, y: f64) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).pivot(x, y)?;
+        PyDrawable(slf.handle()).pivot_impl(x, y)?;
         Ok(slf)
     }
     #[pyo3(signature = (reference, direction, spacing=0.24, aligned_edge=None))]
@@ -3340,31 +3892,31 @@ macro_rules! media_drawable_methods {
         direction: &PyDirection,
         spacing: f64,
         aligned_edge: Option<&PyAnchor>,) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).next_to(reference, direction, spacing, aligned_edge)?;
+        PyDrawable(slf.handle()).next_to_impl(reference, direction, spacing, aligned_edge)?;
         Ok(slf)
     }
     #[pyo3(signature = (reference, target_anchor, reference_anchor=None))]
     fn align_to<'py>(slf: PyRef<'py, Self>, reference: &PyDrawable,
         target_anchor: &PyAnchor,
         reference_anchor: Option<&PyAnchor>,) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).align_to(reference, target_anchor, reference_anchor)?;
+        PyDrawable(slf.handle()).align_to_impl(reference, target_anchor, reference_anchor)?;
         Ok(slf)
     }
     #[pyo3(signature = (direction, buff=0.24))]
     fn to_edge<'py>(slf: PyRef<'py, Self>, direction: &PyDirection, buff: f64) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).to_edge(direction, buff)?;
+        PyDrawable(slf.handle()).to_edge_impl(direction, buff)?;
         Ok(slf)
     }
     #[pyo3(signature = (corner, buff=0.24))]
     fn to_corner<'py>(slf: PyRef<'py, Self>, corner: &PyAnchor, buff: f64) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).to_corner(corner, buff)?;
+        PyDrawable(slf.handle()).to_corner_impl(corner, buff)?;
         Ok(slf)
     }
     #[pyo3(signature = (callback, *, reset=None, fixed_dt=None))]
     fn add_updater_fn<'py>(slf: PyRef<'py, Self>, callback: Py<PyAny>,
         reset: Option<Py<PyAny>>,
         fixed_dt: Option<f64>,) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).add_updater_fn(callback, reset, fixed_dt)?;
+        PyDrawable(slf.handle()).add_updater_fn_impl(callback, reset, fixed_dt)?;
         Ok(slf)
     }
     #[pyo3(signature = (times, values, property = "x", *, interpolation = "linear", scale = 1.0, offset = 0.0))]
@@ -3374,26 +3926,26 @@ macro_rules! media_drawable_methods {
         interpolation: &str,
         scale: f64,
         offset: f64,) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).drive_from_samples(times, &values, property, interpolation, scale, offset)?;
+        PyDrawable(slf.handle()).drive_from_samples_impl(times, &values, property, interpolation, scale, offset)?;
         Ok(slf)
     }
     #[pyo3(signature = (source, *, offset=(0.0, 0.0), offset_space="world"))]
     fn follow<'py>(slf: PyRef<'py, Self>, source: Bound<'_, PyAny>,
         offset: (f64, f64),
         offset_space: &str,) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).follow(source, offset, offset_space)?;
+        PyDrawable(slf.handle()).follow_impl(source, offset, offset_space)?;
         Ok(slf)
     }
     #[pyo3(signature = (source, *, ratio=1.0, phase=0.0))]
     fn bind_rotation_from<'py>(slf: PyRef<'py, Self>, source: &PyDrawable, ratio: f64, phase: f64) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).bind_rotation_from(source, ratio, phase)?;
+        PyDrawable(slf.handle()).bind_rotation_from_impl(source, ratio, phase)?;
         Ok(slf)
     }
     #[pyo3(signature = (source, *, axis=None, scale=1.0))]
     fn bind_translation_from_rotation<'py>(slf: PyRef<'py, Self>, source: &PyDrawable,
         axis: Option<PyDirection>,
         scale: f64,) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).bind_translation_from_rotation(source, axis, scale)?;
+        PyDrawable(slf.handle()).bind_translation_from_rotation_impl(source, axis, scale)?;
         Ok(slf)
     }
             $($extra)*

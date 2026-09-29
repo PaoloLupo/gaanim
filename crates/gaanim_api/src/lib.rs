@@ -77,8 +77,8 @@ pub fn decimal_number_update_system(
     for (_entity, mut dec, mut path, mut path_src, mut bounds) in &mut query {
         if let Ok(sig) = signals.get(dec.signal_entity) {
             let val = sig.value;
-            if dec.last_value != Some(val) {
-                if let Ok((new_path, new_bounds)) = shape_decimal_number(
+            if dec.last_value != Some(val)
+                && let Ok((new_path, new_bounds)) = shape_decimal_number(
                     &registry,
                     &dec.prefix,
                     val,
@@ -86,13 +86,13 @@ pub fn decimal_number_update_system(
                     &dec.suffix,
                     &dec.font_family,
                     dec.font_size,
-                ) {
-                    let arc_path = std::sync::Arc::new(new_path);
-                    path.0 = arc_path.clone();
-                    path_src.0 = arc_path;
-                    bounds.0 = new_bounds;
-                    dec.last_value = Some(val);
-                }
+                )
+            {
+                let arc_path = std::sync::Arc::new(new_path);
+                path.0 = arc_path.clone();
+                path_src.0 = arc_path;
+                bounds.0 = new_bounds;
+                dec.last_value = Some(val);
             }
         }
     }

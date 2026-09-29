@@ -762,6 +762,7 @@ impl LottiePlayer {
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub fn sample_lottie_system(
     playback_state: Option<Res<gaanim_animation::PlaybackState>>,
     mut players: Query<(

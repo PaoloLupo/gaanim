@@ -66,17 +66,17 @@ impl PyProgressRing {
         y: Option<&Bound<'_, PyAny>>,
         anchor: Option<&crate::pylayout::PyAnchor>,
     ) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.ring.group.clone()).move_to(x, y, anchor)?;
+        PyDrawable(slf.ring.group.clone()).move_to_impl(x, y, anchor)?;
         Ok(slf)
     }
 
     fn shift_by<'py>(slf: PyRef<'py, Self>, dx: f64, dy: f64) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.ring.group.clone()).shift_by(dx, dy)?;
+        PyDrawable(slf.ring.group.clone()).shift_by_impl(dx, dy)?;
         Ok(slf)
     }
 
     fn opacity<'py>(slf: PyRef<'py, Self>, op: &Bound<'_, PyAny>) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.ring.group.clone()).opacity(op)?;
+        PyDrawable(slf.ring.group.clone()).opacity_impl(op)?;
         Ok(slf)
     }
 
@@ -161,6 +161,7 @@ impl PyProgressRing {
 #[pymethods]
 impl PyVisualization {
     #[pyo3(signature = (value=0.0, *, radius=1.0, width=0.12, color=None, track=true, track_color=None, label=true, decimals=0, label_color=None, font_size=0.5))]
+    #[allow(clippy::too_many_arguments)]
     fn progress_ring(
         &self,
         py: Python<'_>,
@@ -195,6 +196,7 @@ impl PyVisualization {
     }
 
     #[pyo3(signature = (seconds, *, radius=1.0, width=0.12, color=None, track=true, track_color=None, label=true, label_color=None, font_size=0.6))]
+    #[allow(clippy::too_many_arguments)]
     fn countdown(
         &self,
         py: Python<'_>,

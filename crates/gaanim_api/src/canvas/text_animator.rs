@@ -245,11 +245,14 @@ fn preset_easing() -> RateFunc {
     RateFunc::EaseOut(EasingCurve::Cubic)
 }
 
+/// A character and the reveal unit it belongs to.
+type TextUnit = (char, Option<usize>);
+
 /// Unit segmentation of a Text spec, or `None` for other drawables.
 fn text_units(
     spec: &super::ObjectSpec,
     unit: TextRevealUnit,
-) -> Option<(Vec<(char, Option<usize>)>, Vec<(char, Option<usize>)>, f64)> {
+) -> Option<(Vec<TextUnit>, Vec<TextUnit>, f64)> {
     let SpawnKind::Text(text) = &spec.kind else {
         return None;
     };

@@ -82,7 +82,7 @@ escena no puede usarse en otra: pasarlo lanza `ValueError`.
   [*Propiedad*], [*Contenido*],
   [`scene.geometry`], [Primitivas, trayectorias, flechas, geometría reactiva y 3D. Ver #link("/referencia/geometria/")[Geometría].],
   [`scene.text`], [Texto, ecuaciones, Typst y código. Ver #link("/referencia/text/")[Texto].],
-  [`scene.layout`], [Filas, columnas, grids y regiones. Ver #link("/referencia/layout/")[Layout].],
+  [`scene.layout`], [Cajas, grids, estilos y zonas. Ver #link("/referencia/layout/")[Layout].],
   [`scene.media`], [Imágenes, SVG, vídeo, audio y Lottie. Ver #link("/referencia/medios/")[Medios] y #link("/referencia/audio/")[Audio].],
   [`scene.viz`], [Ejes, funciones, gráficas, parámetros y matrices. Ver #link("/referencia/visualization/")[Visualización].],
   [`scene.slides`], [Tarjetas, viñetas, tablas e identidad de presentación. Ver #link("/referencia/diapositivas/")[Diapositivas].],

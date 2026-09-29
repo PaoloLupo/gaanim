@@ -21,14 +21,12 @@ use crate::brush::PyPaint;
 use crate::color::{PyColor, PyColorMapArg};
 use crate::py3d::{PyMaterial3D, PyPrimitive3D};
 use crate::pydrawable::{PyAnchorPoint, PyCanvasAnim, PyDrawable};
-use crate::pylayout::{
-    PyAnchor, PyConstraintSet, PyLayout, PyLayoutConstraint, PyLayoutItem, column_kind, grid_kind,
-    layout_item_from_python, layout_spec, parse_grid_tracks, row_kind, stack_kind,
-};
+use crate::pylayout::{PyAnchor, PyBox, PyConstraintSet, PyLayoutConstraint};
 use crate::pystyle::{PyAxesStyle, PyStyle};
 use crate::pytext::{PyText, PyTextFlow, PyTextSelection, PyTextStyle, build_text_spec};
 use crate::transition::PyTransitionType;
 use crate::visualization::{PyParameter, PyVariable, extract_scalar_source};
+use gaanim_layout::{Align, LayoutNodeKind};
 
 pub(crate) fn image_quality(value: &str) -> PyResult<gaanim_core::peniko::ImageQuality> {
     match value {
@@ -41,17 +39,39 @@ pub(crate) fn image_quality(value: &str) -> PyResult<gaanim_core::peniko::ImageQ
     }
 }
 
-fn default_project_manifest(py: Python<'_>) -> PyResult<PathBuf> {
+/// Folder of the Python file that called into Gaanim.
+fn caller_directory(py: Python<'_>) -> PyResult<PathBuf> {
     let frame = py.import("inspect")?.call_method0("currentframe")?;
     let filename = frame
         .getattr("f_code")?
         .getattr("co_filename")?
         .extract::<String>()?;
-    let script = PathBuf::from(filename);
-    Ok(script
+    let directory = PathBuf::from(filename)
         .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_default();
+    Ok(std::path::absolute(&directory).unwrap_or(directory))
+}
+
+/// The nearest `gaanim.toml` in `start` or one of its parent folders, as
+/// `git` finds `.git`: a module deep inside a project still loads the
+/// project's manifest.
+fn find_manifest_upward(start: &std::path::Path) -> Option<PathBuf> {
+    start
+        .ancestors()
         .map(|directory| directory.join("gaanim.toml"))
-        .unwrap_or_else(|| PathBuf::from("gaanim.toml")))
+        .find(|manifest| manifest.is_file())
+}
+
+fn default_project_manifest(py: Python<'_>) -> PyResult<PathBuf> {
+    let directory = caller_directory(py)?;
+    find_manifest_upward(&directory).ok_or_else(|| {
+        pyo3::exceptions::PyRuntimeError::new_err(format!(
+            "no gaanim.toml in {} or any parent folder; pass its path, e.g. \
+             scene.assets.load_project(\"path/to/gaanim.toml\")",
+            directory.display()
+        ))
+    })
 }
 
 /// Folder used when `gaanim.toml` omits `assets_dir`; matches the default of
@@ -268,7 +288,7 @@ impl PySurroundingRect {
 
     fn opacity<'py>(slf: PyRef<'py, Self>, value: &Bound<'_, PyAny>) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        PyDrawable(slf.handle.drawable.clone()).opacity(value)?;
+        PyDrawable(slf.handle.drawable.clone()).opacity_impl(value)?;
         Ok(slf)
     }
 
@@ -517,18 +537,6 @@ fn drawable_args(
     Ok(drawables)
 }
 
-fn layout_members(children: &Bound<'_, PyAny>) -> PyResult<Vec<crate::pylayout::LayoutMember>> {
-    let children = children.cast::<PySequence>().map_err(|_| {
-        pyo3::exceptions::PyTypeError::new_err(
-            "children must be a sequence of Drawable, Layout, or LayoutItem values",
-        )
-    })?;
-    children
-        .try_iter()?
-        .map(|child| PyLayout::member_from_python(&child?))
-        .collect()
-}
-
 fn parse_curve_elements(commands: &Bound<'_, PyAny>) -> PyResult<Vec<CurveElement>> {
     let mut elements = Vec::new();
     for command in commands.try_iter()? {
@@ -711,6 +719,9 @@ fn editorial_error(error: gaanim_api::canvas::EditorialError) -> PyErr {
 
 /// A theme argument: a built-in scheme name or alias, or a `Theme`.
 /// `None` is handled by the caller as "no theme".
+// Built once per scene or clip, not stored in bulk: boxing the large
+// variant would only add indirection.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum PyThemeInput {
     /// Keep the scene's default theme (never produced from Python values).
     Default,
@@ -774,6 +785,7 @@ impl PyTheme {
         font_dir=None,
         text_markup=None,
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         base: Option<&Bound<'_, PyAny>>,
         name: Option<String>,
@@ -1349,12 +1361,11 @@ impl PyCanvas {
     #[setter]
     fn set_background(&self, background: Option<crate::brush::PyBackgroundInput>) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .set_background_paint(background.map(|background| background.0));
-        })
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .set_background_paint(background.map(|background| background.0));
+        Ok(())
     }
 
     /// Blur exported frames and snapshots over a shutter of `shutter_angle`
@@ -1485,10 +1496,9 @@ impl PyCanvas {
     /// `to_corner` layout operations.
     fn set_margin(&self, margin: f64) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.inner.lock().expect("scene canvas poisoned").margin =
-                gaanim_api::canvas::Margin::all(margin);
-        })
+        self.inner.lock().expect("scene canvas poisoned").margin =
+            gaanim_api::canvas::Margin::all(margin);
+        Ok(())
     }
 
     /// Configure a per-edge safe area in canvas coordinates.
@@ -1680,17 +1690,15 @@ impl PyCameraConstraint {
     /// Enable this constraint at the current timeline cursor.
     fn enable(&self) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.inner.enable();
-        })
+        self.inner.enable();
+        Ok(())
     }
 
     /// Disable this constraint at the current timeline cursor.
     fn disable(&self) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.inner.disable();
-        })
+        self.inner.disable();
+        Ok(())
     }
 }
 
@@ -2492,13 +2500,13 @@ pub struct PySegment {
 
 #[pymethods]
 impl PySegment {
-    /// Bind template slots and return the segment's root Layout.
+    /// Bind template slots and return the segment's root box.
     #[pyo3(signature = (**slots))]
     fn bind<'py>(
         &self,
         py: Python<'py>,
         slots: Option<&Bound<'py, PyDict>>,
-    ) -> PyResult<Py<PyLayout>> {
+    ) -> PyResult<Py<PyBox>> {
         crate::custom::ensure_authoring_allowed()?;
         let template = self.template.as_ref().ok_or_else(|| {
             pyo3::exceptions::PyValueError::new_err(
@@ -2506,12 +2514,12 @@ impl PySegment {
             )
         })?;
         let result = template.bind(py).call((self.scene.bind(py),), slots)?;
-        if !result.is_instance_of::<PyLayout>() {
+        if !result.is_instance_of::<PyBox>() {
             return Err(pyo3::exceptions::PyTypeError::new_err(
-                "a segment template must return Layout",
+                "a segment template must return a Box",
             ));
         }
-        Ok(result.extract::<Py<PyLayout>>()?)
+        Ok(result.extract::<Py<PyBox>>()?)
     }
 }
 
@@ -2583,6 +2591,7 @@ impl PyScene {
         margin=None,
         theme=Some(PyThemeInput::Default),
         post=None,
+        design_resolution=1080.0,
     ))]
     fn new(
         frame: (f64, f64),
@@ -2590,8 +2599,14 @@ impl PyScene {
         margin: Option<f64>,
         theme: Option<PyThemeInput>,
         post: Option<&Bound<'_, PyAny>>,
+        design_resolution: f64,
     ) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
+        if !design_resolution.is_finite() || design_resolution <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "design_resolution must be a positive number of pixels",
+            ));
+        }
         let frame = gaanim_api::canvas::SceneFrame::new(frame.0, frame.1)
             .validate()
             .map_err(pyo3::exceptions::PyValueError::new_err)?;
@@ -2605,6 +2620,7 @@ impl PyScene {
         if let Some(margin) = margin {
             canvas.margin = gaanim_api::canvas::Margin::all(margin);
         }
+        canvas.design_resolution = design_resolution;
         let inner = canvas.into_shared();
         let passes = crate::brush::post_process_passes(post, &inner)?;
         inner
@@ -2756,252 +2772,194 @@ impl PySlideKit {
     }
 }
 
-#[pymethods]
 impl PyLayoutBuilder {
-    /// A persistent layout with a separately styled background and named ports.
-    #[pyo3(signature = (children, *, direction="column", gap=0.24, padding=None, width=None, height=None, align="center", justify="start", background=None, border=None, border_width=0.025, radius=0.08, ports=None))]
-    #[allow(clippy::too_many_arguments)]
-    fn card<'py>(
+    fn region(&self, within: Option<&Bound<'_, PyAny>>) -> PyResult<gaanim_math::Bounds3D> {
+        let canvas = self.inner.lock().expect("scene canvas poisoned");
+        let Some(within) = within else {
+            return Ok(canvas.safe_frame());
+        };
+        if let Ok(name) = within.extract::<String>() {
+            return match name.as_str() {
+                "safe" => Ok(canvas.safe_frame()),
+                "frame" => Ok(canvas.frame.bounds()),
+                _ => Err(pyo3::exceptions::PyValueError::new_err(
+                    "within must be 'safe', 'frame', a Zone or a Drawable",
+                )),
+            };
+        }
+        drop(canvas);
+        crate::pyzones::target_bounds(within)
+    }
+
+    fn build<'py>(
         &self,
         py: Python<'py>,
-        children: &Bound<'py, PyAny>,
-        direction: &str,
-        gap: f64,
-        padding: Option<&Bound<'py, PyAny>>,
-        width: Option<&Bound<'py, PyAny>>,
-        height: Option<&Bound<'py, PyAny>>,
-        align: &str,
-        justify: &str,
-        background: Option<PyPaint>,
-        border: Option<PyPaint>,
-        border_width: f64,
-        radius: f64,
-        ports: Option<&Bound<'py, PyDict>>,
-    ) -> PyResult<Py<PyLayout>> {
+        kind: LayoutNodeKind,
+        align: Align,
+        children: &Bound<'py, PyTuple>,
+        style: Option<&Bound<'py, PyAny>>,
+        props: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Py<PyBox>> {
         crate::custom::ensure_authoring_allowed()?;
-        let kind = match direction {
-            "column" => column_kind(false),
-            "row" => row_kind(false),
-            "stack" => stack_kind(),
-            _ => {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "card direction must be column, row or stack",
-                ));
-            }
-        };
-        if !radius.is_finite() || radius < 0.0 || !border_width.is_finite() || border_width < 0.0 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "card radius and border_width must be finite and nonnegative",
-            ));
-        }
-        let mut parsed_ports = Vec::new();
-        if let Some(ports) = ports {
-            for (name, value) in ports.iter() {
-                let name = name.extract::<String>()?;
-                let (anchor, offset) = if let Ok(anchor) = value.extract::<PyAnchor>() {
-                    (anchor, (0.0, 0.0))
-                } else {
-                    value.extract::<(PyAnchor, (f64, f64))>()?
-                };
-                if name.trim().is_empty() || !offset.0.is_finite() || !offset.1.is_finite() {
-                    return Err(pyo3::exceptions::PyValueError::new_err(
-                        "port name must be nonempty and its offset finite",
-                    ));
-                }
-                parsed_ports.push((
-                    name,
-                    anchor.0,
-                    gaanim_core::glam::DVec3::new(offset.0, offset.1, 0.0),
-                ));
-            }
-        }
-        Py::new(
+        PyBox::create(
             py,
-            PyLayout::initializer_decorated(
-                self.inner.clone(),
-                layout_spec(kind, gap, padding, width, height, align, justify, None)?,
-                layout_members(children)?,
-                Some((
-                    background.map(|paint| paint.0),
-                    border.map(|paint| (paint.0, border_width)),
-                    radius,
-                )),
-                parsed_ports,
-            )?,
+            self.inner.clone(),
+            self.scene.clone_ref(py).into_any(),
+            kind,
+            gaanim_layout::LayoutStyle {
+                align,
+                ..gaanim_layout::LayoutStyle::default()
+            },
+            children,
+            style,
+            props,
+        )
+    }
+}
+
+#[pymethods]
+impl PyLayoutBuilder {
+    /// A box (like a CSS ``div``): its children flow in a column by default;
+    /// ``direction`` switches to ``"row"``, ``"grid"`` or ``"stack"``.
+    #[pyo3(name = "box", signature = (*children, style=None, **props))]
+    fn box_<'py>(
+        &self,
+        py: Python<'py>,
+        children: &Bound<'py, PyTuple>,
+        style: Option<&Bound<'py, PyAny>>,
+        props: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Py<PyBox>> {
+        self.build(
+            py,
+            LayoutNodeKind::Column { wrap: false },
+            Align::Start,
+            children,
+            style,
+            props,
         )
     }
 
-    /// Horizontal Layout v2 container.
-    #[pyo3(signature = (children, *, gap=0.24, padding=None, width=None, height=None, align="center", justify="start", wrap=false, within=None))]
-    #[allow(clippy::too_many_arguments)]
+    /// A box whose children flow left to right.
+    #[pyo3(signature = (*children, style=None, **props))]
     fn row<'py>(
         &self,
         py: Python<'py>,
-        children: &Bound<'py, PyAny>,
-        gap: f64,
-        padding: Option<&Bound<'py, PyAny>>,
-        width: Option<&Bound<'py, PyAny>>,
-        height: Option<&Bound<'py, PyAny>>,
-        align: &str,
-        justify: &str,
-        wrap: bool,
-        within: Option<&str>,
-    ) -> PyResult<Py<PyLayout>> {
-        crate::custom::ensure_authoring_allowed()?;
-        Py::new(
+        children: &Bound<'py, PyTuple>,
+        style: Option<&Bound<'py, PyAny>>,
+        props: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Py<PyBox>> {
+        self.build(
             py,
-            PyLayout::initializer(
-                self.inner.clone(),
-                layout_spec(
-                    row_kind(wrap),
-                    gap,
-                    padding,
-                    width,
-                    height,
-                    align,
-                    justify,
-                    within,
-                )?,
-                layout_members(children)?,
-            )?,
+            LayoutNodeKind::Row { wrap: false },
+            Align::Start,
+            children,
+            style,
+            props,
         )
     }
 
-    /// Vertical Layout v2 container.
-    #[pyo3(signature = (children, *, gap=0.24, padding=None, width=None, height=None, align="start", justify="start", wrap=false, within=None))]
-    #[allow(clippy::too_many_arguments)]
+    /// A box whose children flow top to bottom.
+    #[pyo3(signature = (*children, style=None, **props))]
     fn column<'py>(
         &self,
         py: Python<'py>,
-        children: &Bound<'py, PyAny>,
-        gap: f64,
-        padding: Option<&Bound<'py, PyAny>>,
-        width: Option<&Bound<'py, PyAny>>,
-        height: Option<&Bound<'py, PyAny>>,
-        align: &str,
-        justify: &str,
-        wrap: bool,
-        within: Option<&str>,
-    ) -> PyResult<Py<PyLayout>> {
-        crate::custom::ensure_authoring_allowed()?;
-        Py::new(
+        children: &Bound<'py, PyTuple>,
+        style: Option<&Bound<'py, PyAny>>,
+        props: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Py<PyBox>> {
+        self.build(
             py,
-            PyLayout::initializer(
-                self.inner.clone(),
-                layout_spec(
-                    column_kind(wrap),
-                    gap,
-                    padding,
-                    width,
-                    height,
-                    align,
-                    justify,
-                    within,
-                )?,
-                layout_members(children)?,
-            )?,
+            LayoutNodeKind::Column { wrap: false },
+            Align::Start,
+            children,
+            style,
+            props,
         )
     }
 
-    /// Grid Layout v2 container with fixed, auto, and fractional tracks.
-    #[pyo3(signature = (children, *, rows=None, columns=None, gap=0.0, row_gap=None, column_gap=None, padding=None, width=None, height=None, align="stretch", justify="start", auto_flow="row", within=None))]
-    #[allow(clippy::too_many_arguments)]
+    /// A box that places its children in the cells of a grid.
+    #[pyo3(signature = (*children, style=None, **props))]
     fn grid<'py>(
         &self,
         py: Python<'py>,
-        children: &Bound<'py, PyAny>,
-        rows: Option<&Bound<'py, PyAny>>,
-        columns: Option<&Bound<'py, PyAny>>,
-        gap: f64,
-        row_gap: Option<f64>,
-        column_gap: Option<f64>,
-        padding: Option<&Bound<'py, PyAny>>,
-        width: Option<&Bound<'py, PyAny>>,
-        height: Option<&Bound<'py, PyAny>>,
-        align: &str,
-        justify: &str,
-        auto_flow: &str,
-        within: Option<&str>,
-    ) -> PyResult<Py<PyLayout>> {
-        crate::custom::ensure_authoring_allowed()?;
-        let kind = grid_kind(
-            parse_grid_tracks(rows, "rows")?,
-            parse_grid_tracks(columns, "columns")?,
-            auto_flow,
-        )?;
-        let mut spec = layout_spec(kind, gap, padding, width, height, align, justify, within)?;
-        spec.style.gap =
-            gaanim_core::glam::DVec2::new(column_gap.unwrap_or(gap), row_gap.unwrap_or(gap));
-        Py::new(
-            py,
-            PyLayout::initializer(self.inner.clone(), spec, layout_members(children)?)?,
-        )
+        children: &Bound<'py, PyTuple>,
+        style: Option<&Bound<'py, PyAny>>,
+        props: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Py<PyBox>> {
+        let kind = LayoutNodeKind::Grid {
+            rows: vec![gaanim_layout::Track::Auto],
+            columns: vec![gaanim_layout::Track::Fraction(1.0)],
+            auto_flow: gaanim_layout::AutoFlow::Row,
+        };
+        self.build(py, kind, Align::Stretch, children, style, props)
     }
 
-    /// Overlay Layout v2 container.
-    #[pyo3(signature = (children, *, padding=None, width=None, height=None, align="center", within=None))]
+    /// Divide a region with a ``Zones`` template. ``within`` is ``"safe"``
+    /// (the frame minus its margin, by default), ``"frame"``, a Zone or a
+    /// Drawable (its current box).
+    #[pyo3(signature = (template, *, within=None))]
+    fn zones(
+        &self,
+        py: Python<'_>,
+        template: PyRef<'_, crate::pyzones::PyZones>,
+        within: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<crate::pyzones::PyZoneSet> {
+        crate::custom::ensure_authoring_allowed()?;
+        let region = self.region(within)?;
+        crate::pyzones::PyZoneSet::resolve(py, self.inner.clone(), &template, region)
+    }
+
+    /// The safe area: the frame minus the scene margin.
+    #[getter]
+    fn safe(&self) -> PyResult<crate::pyzones::PyZone> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(crate::pyzones::PyZone::new(
+            self.inner.clone(),
+            self.region(None)?,
+        ))
+    }
+
+    /// The whole frame, edge to edge.
+    #[getter]
+    fn frame(&self) -> PyResult<crate::pyzones::PyZone> {
+        crate::custom::ensure_authoring_allowed()?;
+        let bounds = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .frame
+            .bounds();
+        Ok(crate::pyzones::PyZone::new(self.inner.clone(), bounds))
+    }
+
+    /// Name reusable box styles, like CSS classes: ``classes(pill=BoxStyle(...))``
+    /// then ``box("Nuevo", class_="pill")``. Later definitions replace earlier
+    /// ones of the same name.
+    #[pyo3(signature = (**styles))]
+    fn classes(&self, py: Python<'_>, styles: Option<&Bound<'_, PyDict>>) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        match styles {
+            Some(styles) => crate::pylayout::define_classes(py, &self.inner, styles),
+            None => Ok(()),
+        }
+    }
+
+    /// A box that layers its children on top of one another.
+    #[pyo3(signature = (*children, style=None, **props))]
     fn stack<'py>(
         &self,
         py: Python<'py>,
-        children: &Bound<'py, PyAny>,
-        padding: Option<&Bound<'py, PyAny>>,
-        width: Option<&Bound<'py, PyAny>>,
-        height: Option<&Bound<'py, PyAny>>,
-        align: &str,
-        within: Option<&str>,
-    ) -> PyResult<Py<PyLayout>> {
-        crate::custom::ensure_authoring_allowed()?;
-        Py::new(
+        children: &Bound<'py, PyTuple>,
+        style: Option<&Bound<'py, PyAny>>,
+        props: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Py<PyBox>> {
+        self.build(
             py,
-            PyLayout::initializer(
-                self.inner.clone(),
-                layout_spec(
-                    stack_kind(),
-                    0.0,
-                    padding,
-                    width,
-                    height,
-                    align,
-                    "start",
-                    within,
-                )?,
-                layout_members(children)?,
-            )?,
-        )
-    }
-
-    /// Adds per-child sizing, grid, fit, absolute, anchor, and offset rules.
-    #[pyo3(signature = (child, *, grow=0.0, shrink=1.0, align=None, row=None, column=None, row_span=1, column_span=1, absolute=false, anchor=None, offset=(0.0, 0.0), fit="none"))]
-    #[allow(clippy::too_many_arguments)]
-    fn item(
-        &self,
-        child: &Bound<'_, PyAny>,
-        grow: f64,
-        shrink: f64,
-        align: Option<&str>,
-        row: Option<usize>,
-        column: Option<usize>,
-        row_span: usize,
-        column_span: usize,
-        absolute: bool,
-        anchor: Option<&PyAnchor>,
-        offset: (f64, f64),
-        fit: &str,
-    ) -> PyResult<PyLayoutItem> {
-        crate::custom::ensure_authoring_allowed()?;
-        layout_item_from_python(
-            child,
-            grow,
-            shrink,
-            align,
-            row,
-            column,
-            row_span,
-            column_span,
-            absolute,
-            anchor,
-            offset,
-            fit,
+            LayoutNodeKind::Stack,
+            Align::Start,
+            children,
+            style,
+            props,
         )
     }
 
@@ -3055,24 +3013,6 @@ impl PyLayoutBuilder {
                 .check_layout()
         })
     }
-
-    /// Instantiate a typed Python layout template with this scene.
-    #[pyo3(signature = (template, **slots))]
-    fn template<'py>(
-        &self,
-        py: Python<'py>,
-        template: &Bound<'py, PyAny>,
-        slots: Option<&Bound<'py, PyDict>>,
-    ) -> PyResult<Py<PyLayout>> {
-        crate::custom::ensure_authoring_allowed()?;
-        let result = template.call((self.scene.bind(py),), slots)?;
-        if !result.is_instance_of::<PyLayout>() {
-            return Err(pyo3::exceptions::PyTypeError::new_err(
-                "a layout template must return Layout",
-            ));
-        }
-        Ok(result.extract::<Py<PyLayout>>()?)
-    }
 }
 
 #[pymethods]
@@ -3101,8 +3041,9 @@ impl PyAssetManager {
             .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
     }
 
-    /// Load the minimal project manifest. Without an explicit path, it reads
-    /// `gaanim.toml` beside the Python script that called this method. It
+    /// Load the minimal project manifest. Without an explicit path, it uses
+    /// the nearest `gaanim.toml`, from the folder of the calling Python file
+    /// up through its parents. It
     /// reads one setting, `assets_dir`, resolved relative to the manifest
     /// file; like the CLI and editor, a manifest without it uses `"assets"`.
     #[pyo3(signature = (path=None))]
@@ -3138,12 +3079,11 @@ impl PyAssetManager {
     /// Invalidate decoded raster assets so a hot reload reads changed files.
     fn reload_assets(&self) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .reload_assets();
-        })
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .reload_assets();
+        Ok(())
     }
 }
 
@@ -3353,6 +3293,7 @@ impl PyGeometry {
         }
     }
     #[pyo3(signature = (x1, y1, x2, y2, *, head_length=None, head_width=None, body_width=None, max_head_ratio=None))]
+    #[allow(clippy::too_many_arguments)]
     fn arrow(
         &self,
         x1: f64,
@@ -3381,6 +3322,7 @@ impl PyGeometry {
             .map_err(pyo3::exceptions::PyValueError::new_err)
     }
     #[pyo3(signature = (start, end, *, via=None, head_length=0.18, head_width=0.15, body_width=0.036, max_head_ratio=None))]
+    #[allow(clippy::too_many_arguments)]
     fn connector(
         &self,
         start: &Bound<'_, PyAny>,
@@ -4283,7 +4225,7 @@ impl PyGeometry {
                 .lock()
                 .expect("scene canvas poisoned")
                 .polyline_3d(verts2);
-            if let Some(c) = color.clone() {
+            if let Some(c) = color {
                 h = h.fill(c.0);
             }
             // If we have uniform color via fill fallback, the per-vertex path is not needed.
@@ -4434,6 +4376,7 @@ impl PyMediaLibrary {
     /// Load a PNG, JPEG, or WebP image with optional size, fit mode, crop, and sampling quality.
     /// `crop` is `(x, y, width, height)` in source pixels, from the top-left.
     #[pyo3(signature = (path, *, width=None, height=None, fit="contain", crop=None, quality="medium"))]
+    #[allow(clippy::too_many_arguments)]
     fn image(
         &self,
         py: Python<'_>,
@@ -4496,6 +4439,7 @@ impl PyMediaLibrary {
         audio=true,
         volume=1.0,
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn video(
         &self,
         py: Python<'_>,
@@ -4575,6 +4519,7 @@ impl PyMediaLibrary {
         r#loop=false,
         speed=1.0,
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn lottie(
         &self,
         py: Python<'_>,
@@ -5207,6 +5152,7 @@ impl PySlideKit {
         background=None,
         color=None,
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn callout(
         &self,
         text: String,
@@ -5272,6 +5218,7 @@ impl PySlideKit {
         color=None,
         accent=None,
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn title_card(
         &self,
         title: String,
@@ -5441,6 +5388,7 @@ impl PySlideKit {
         rule_color=None,
         color=None,
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn table(
         &self,
         headers: Vec<String>,
@@ -5545,6 +5493,7 @@ impl PyTypography {
         color=None,
         accent=None,
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn code(
         &self,
         source: &str,
@@ -5721,12 +5670,11 @@ impl PyScene {
 
     fn wait(&self, seconds: f64) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .wait(seconds);
-        })
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .wait(seconds);
+        Ok(())
     }
 
     /// Set the musical tempo used by `beats` and `wait_until(beat=...)`.
@@ -5970,12 +5918,11 @@ impl PyScene {
 
     fn fade_out_all(&self, seconds: f64) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            self.inner
-                .lock()
-                .expect("scene canvas poisoned")
-                .fade_out_all(seconds);
-        })
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .fade_out_all(seconds);
+        Ok(())
     }
     fn render(&self) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
@@ -6077,6 +6024,7 @@ impl PyGeometry {
     }
 
     #[pyo3(signature = (tracker, cx, cy, radius, start_angle, sweep_scale=1.0, sweep_offset=0.0))]
+    #[allow(clippy::too_many_arguments)]
     fn always_redraw_arc(
         &self,
         tracker: Bound<'_, PyAny>,
@@ -6299,6 +6247,7 @@ impl PyMechanics {
     }
 
     #[pyo3(signature = (from, to, coils=8, amplitude=0.12, crossing=0.0, start_straight=0.12, end_straight=0.12))]
+    #[allow(clippy::too_many_arguments)]
     fn spring_between(
         &self,
         from: Bound<'_, PyAny>,
@@ -6701,6 +6650,7 @@ impl PyMechanics {
     }
 
     #[pyo3(signature = (point, *, kind="pin", direction=None, size=0.48, ground_length=0.70, color=None))]
+    #[allow(clippy::too_many_arguments)]
     fn support_at<'py>(
         &self,
         py: Python<'py>,
@@ -7178,34 +7128,81 @@ mod tests {
         assert!(manifest_assets_dir("assets_dir = \"media\n").is_err());
     }
 
+    /// A fresh folder under the system temporary directory.
+    fn scratch_dir(name: &str) -> PathBuf {
+        let directory =
+            std::env::temp_dir().join(format!("gaanim-manifest-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        directory
+    }
+
+    #[test]
+    fn manifest_search_walks_up_from_a_nested_module() {
+        let project = scratch_dir("nested");
+        let chapter = project.join("capitulo4").join("partes");
+        std::fs::create_dir_all(&chapter).unwrap();
+        std::fs::write(project.join("gaanim.toml"), "kind = \"video\"\n").unwrap();
+
+        assert_eq!(
+            find_manifest_upward(&chapter),
+            Some(project.join("gaanim.toml"))
+        );
+        // The nearest manifest wins, as in a project nested in another.
+        std::fs::write(chapter.join("gaanim.toml"), "kind = \"slides\"\n").unwrap();
+        assert_eq!(
+            find_manifest_upward(&chapter),
+            Some(chapter.join("gaanim.toml"))
+        );
+        std::fs::remove_dir_all(project).unwrap();
+    }
+
     #[pyfunction]
     fn caller_default_manifest(py: Python<'_>) -> PyResult<String> {
         Ok(default_project_manifest(py)?.to_string_lossy().into_owned())
     }
 
+    /// Run `caller_default_manifest` from a module whose file is `filename`.
+    fn manifest_seen_from(py: Python<'_>, filename: &std::path::Path) -> PyResult<String> {
+        let module = PyModule::new(py, "manifest_path_test")?;
+        module.add_function(pyo3::wrap_pyfunction!(caller_default_manifest, &module)?)?;
+        py.import("sys")?
+            .getattr("modules")?
+            .set_item("manifest_path_test", &module)?;
+        let source = std::ffi::CString::new(
+            "from manifest_path_test import caller_default_manifest\nresult = caller_default_manifest()\n",
+        )?;
+        let filename = std::ffi::CString::new(filename.to_string_lossy().into_owned())?;
+        let module_name = std::ffi::CString::new("project_module")?;
+        let script = PyModule::from_code(py, &source, &filename, &module_name)?;
+        script.getattr("result")?.extract::<String>()
+    }
+
     #[test]
-    fn default_manifest_is_next_to_the_calling_script() {
+    fn default_manifest_is_the_project_one_for_a_module_in_a_package() {
+        let project = scratch_dir("caller");
+        let package = project.join("capitulo4");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(project.join("gaanim.toml"), "kind = \"video\"\n").unwrap();
         Python::initialize();
         Python::attach(|py| -> PyResult<()> {
-            let module = PyModule::new(py, "manifest_path_test")?;
-            module.add_function(pyo3::wrap_pyfunction!(caller_default_manifest, &module)?)?;
-            py.import("sys")?
-                .getattr("modules")?
-                .set_item("manifest_path_test", &module)?;
-
-            let source = std::ffi::CString::new(
-                "from manifest_path_test import caller_default_manifest\nresult = caller_default_manifest()\n",
-            )?;
-            let filename = std::ffi::CString::new("project/main.py")?;
-            let module_name = std::ffi::CString::new("project_main")?;
-            let script = PyModule::from_code(py, &source, &filename, &module_name)?;
-
             assert_eq!(
-                script.getattr("result")?.extract::<String>()?,
-                PathBuf::from("project").join("gaanim.toml").to_string_lossy()
+                manifest_seen_from(py, &project.join("main.py"))?,
+                project.join("gaanim.toml").to_string_lossy()
+            );
+            assert_eq!(
+                manifest_seen_from(py, &package.join("estilo.py"))?,
+                project.join("gaanim.toml").to_string_lossy()
+            );
+            std::fs::remove_file(project.join("gaanim.toml"))?;
+            let error = manifest_seen_from(py, &package.join("estilo.py")).unwrap_err();
+            assert!(
+                error.to_string().contains("or any parent folder"),
+                "{error}"
             );
             Ok(())
         })
         .unwrap();
+        std::fs::remove_dir_all(project).unwrap();
     }
 }

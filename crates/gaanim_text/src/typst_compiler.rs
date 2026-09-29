@@ -491,6 +491,7 @@ fn typst_stroke_to_kurbo(stroke: &FixedStroke) -> kurbo::Stroke {
 }
 
 /// Recursively extract vector items from a Typst `Frame` into Gaanim Mobject entities.
+#[allow(clippy::too_many_arguments)]
 fn extract_frame_items(
     frame: &Frame,
     current_transform: &kurbo::Affine,
@@ -737,6 +738,7 @@ fn effective_line_baselines(mut samples: Vec<LineBaselineSample>) -> Vec<f64> {
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_typst_cache_key(
     font_universe: FontUniverseKey,
     source: &str,
@@ -762,6 +764,7 @@ fn build_typst_cache_key(
 }
 
 #[cfg(test)]
+#[allow(clippy::too_many_arguments)]
 fn compile_typst_source(
     font_registry: &FontRegistry,
     source: &str,
@@ -979,6 +982,34 @@ pub fn measure_typst(
         &stroke,
     )
     .map(|cached| cached.parent_bounds)
+}
+
+/// Ink bounds and line metrics (first baseline, line count) of Typst
+/// source, in the same local coordinates the scene gives the text.
+#[allow(clippy::too_many_arguments)]
+pub fn measure_typst_lines(
+    font_registry: &FontRegistry,
+    source: &str,
+    is_math: bool,
+    text_font: Option<&str>,
+    math_font: Option<&str>,
+    text_size: Option<f64>,
+    math_size: Option<f64>,
+    fill: Option<peniko::Brush>,
+    stroke: StrokeBrush,
+) -> Result<(Bounds3D, TextMetrics), Vec<String>> {
+    cached_typst_hierarchy(
+        font_registry,
+        source,
+        is_math,
+        text_font,
+        math_font,
+        text_size,
+        math_size,
+        &fill,
+        &stroke,
+    )
+    .map(|cached| (cached.parent_bounds, cached.metrics))
 }
 
 /// Shape plain text into one Y-up outline with its baseline at `y = 0`.

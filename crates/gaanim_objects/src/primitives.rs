@@ -979,7 +979,13 @@ pub fn spring_path(
 
     let direction = (dx / length, dy / length);
     let normal = (-direction.1, direction.0);
-    let sanitize_straight = |value: f64| value.is_finite().then_some(value.max(0.0)).unwrap_or(0.0);
+    let sanitize_straight = |value: f64| {
+        if value.is_finite() {
+            value.max(0.0)
+        } else {
+            0.0
+        }
+    };
     let mut start_straight = sanitize_straight(start_straight);
     let mut end_straight = sanitize_straight(end_straight);
     let requested_straight = start_straight + end_straight;

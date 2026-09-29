@@ -537,8 +537,7 @@ impl Timeline {
     pub fn previous_stop(&self, time: f64) -> Option<f64> {
         self.interactive_stops()
             .into_iter()
-            .filter(|stop| *stop < time - 1e-5)
-            .last()
+            .rfind(|stop| *stop < time - 1e-5)
     }
 
     /// Return the next explicit interactive stop after `time`.
@@ -668,14 +667,13 @@ impl Timeline {
 
     /// Adds a new scene to the timeline and returns its ID.
     pub fn add_scene(&mut self, name: &str) -> SceneId {
-        let scene_id = self.scenes.insert_with_key(|id| SceneMetadata {
+        self.scenes.insert_with_key(|id| SceneMetadata {
             id,
             name: name.to_string(),
             tracks: Vec::new(),
             camera_override: None,
             background_override: None,
-        });
-        scene_id
+        })
     }
 
     /// Returns the scene active at the given timestamp, if any.
@@ -1477,16 +1475,16 @@ impl Timeline {
                             // Re-apply stored world transforms to prevent stale local-space
                             // animation clips from overwriting the ungrouped positions.
                             for &(child_id, world_transform) in children_world_transforms {
-                                if let Some(&child_entity) = entity_map.get(&child_id) {
-                                    if let Ok(mut child_mut) = world.get_entity_mut(child_entity) {
-                                        child_mut.remove_parent_in_place();
-                                        child_mut.insert(world_transform);
+                                if let Some(&child_entity) = entity_map.get(&child_id)
+                                    && let Ok(mut child_mut) = world.get_entity_mut(child_entity)
+                                {
+                                    child_mut.remove_parent_in_place();
+                                    child_mut.insert(world_transform);
 
-                                        if let Some(gp) = group_parent
-                                            && let Some(&gp_entity) = entity_map.get(&gp)
-                                        {
-                                            child_mut.set_parent_in_place(gp_entity);
-                                        }
+                                    if let Some(gp) = group_parent
+                                        && let Some(&gp_entity) = entity_map.get(&gp)
+                                    {
+                                        child_mut.set_parent_in_place(gp_entity);
                                     }
                                 }
                             }
@@ -1599,7 +1597,7 @@ impl Timeline {
                 };
 
             // Apply transition effects if active (before visibility toggle)
-            if let Some((ref transition_type, t, from, to)) = active_transition {
+            if let Some((transition_type, t, from, to)) = active_transition {
                 apply_transition(world, &scene_entities, transition_type, t, from, to);
             }
             let overlays = self.active_transition_overlays();
@@ -1612,16 +1610,16 @@ impl Timeline {
             // Toggle visibility: entities belonging to non-visible scenes get hidden
             for (entity, scene_id) in &scene_entities {
                 if visible_scenes.contains(scene_id) {
-                    if world.get::<gaanim_scene::Visible>(*entity).is_none() {
-                        if let Ok(mut em) = world.get_entity_mut(*entity) {
-                            em.insert(gaanim_scene::Visible);
-                        }
+                    if world.get::<gaanim_scene::Visible>(*entity).is_none()
+                        && let Ok(mut em) = world.get_entity_mut(*entity)
+                    {
+                        em.insert(gaanim_scene::Visible);
                     }
                 } else {
-                    if world.get::<gaanim_scene::Visible>(*entity).is_some() {
-                        if let Ok(mut em) = world.get_entity_mut(*entity) {
-                            em.remove::<gaanim_scene::Visible>();
-                        }
+                    if world.get::<gaanim_scene::Visible>(*entity).is_some()
+                        && let Ok(mut em) = world.get_entity_mut(*entity)
+                    {
+                        em.remove::<gaanim_scene::Visible>();
                     }
                 }
             }
@@ -2029,10 +2027,10 @@ fn restore_reactive_state(world: &mut World, reactive_state: &ReactiveStates) {
                 updater.stop_at = state.updater_stop_at;
             }
         }
-        if let Some(pos) = state.translation {
-            if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
-                transform.translation = pos;
-            }
+        if let Some(pos) = state.translation
+            && let Some(mut transform) = world.get_mut::<SpatialTransform>(entity)
+        {
+            transform.translation = pos;
         }
 
         if let Some(points) = &state.traced_path_points {
@@ -2108,6 +2106,7 @@ impl Timeline {
     /// source as playback moves it: animation clips on the source, its
     /// ancestors and the signals that bindings read, then updaters and
     /// reactive positions.
+    #[allow(clippy::type_complexity)]
     fn rebuild_traced_paths(&self, world: &mut World, target_time: f64) {
         let traces: Vec<(Entity, Entity, f64, Option<usize>, f64, Option<f64>)> = {
             let mut query = world.query::<(Entity, &gaanim_animation::TracedPath)>();
@@ -2246,12 +2245,12 @@ impl Timeline {
                     if should_add {
                         traced_path.points.push(source_pos);
                         traced_path.sample_times.push(sample_time);
-                        if let Some(max) = max_points {
-                            if traced_path.points.len() > *max {
-                                let overflow = traced_path.points.len() - *max;
-                                traced_path.points.drain(0..overflow);
-                                traced_path.sample_times.drain(0..overflow);
-                            }
+                        if let Some(max) = max_points
+                            && traced_path.points.len() > *max
+                        {
+                            let overflow = traced_path.points.len() - *max;
+                            traced_path.points.drain(0..overflow);
+                            traced_path.sample_times.drain(0..overflow);
                         }
                     }
                 }
@@ -2291,12 +2290,12 @@ impl Timeline {
                     if should_add {
                         traced.points.push(source_pos);
                         traced.sample_times.push(sample_time);
-                        if let Some(max) = max_points {
-                            if traced.points.len() > *max {
-                                let overflow = traced.points.len() - *max;
-                                traced.points.drain(0..overflow);
-                                traced.sample_times.drain(0..overflow);
-                            }
+                        if let Some(max) = max_points
+                            && traced.points.len() > *max
+                        {
+                            let overflow = traced.points.len() - *max;
+                            traced.points.drain(0..overflow);
+                            traced.sample_times.drain(0..overflow);
                         }
                     }
                 }
@@ -2708,9 +2707,7 @@ fn trim_line_strip_range(source: &LineListData, start: f64, end: f64) -> LineLis
             colors[start_segment + 1],
             start_fraction,
         )];
-        for index in (start_segment + 1)..=end_segment {
-            visible.push(colors[index]);
-        }
+        visible.extend_from_slice(&colors[(start_segment + 1)..=end_segment]);
         visible.push(lerp_line_color(
             colors[end_segment],
             colors[end_segment + 1],
@@ -2978,7 +2975,7 @@ fn apply_lens_spec(
             }
         }
         PropertyLensSpec::MediaFrame { from, to } => {
-            let value = from.interpolate(*to, t as f64);
+            let value = from.interpolate(*to, t);
             if world.get::<gaanim_scene::MediaFrame>(target) != Some(&value) {
                 world.entity_mut(target).insert(value);
             }
@@ -3629,8 +3626,10 @@ mod tests {
         let (from, to) = (timeline.add_scene("a"), timeline.add_scene("b"));
         let mut world = World::new();
         let mut spawn = |raw: u64, scene: SceneId, x: f64, half: f64| {
-            let mut transform = SpatialTransform::default();
-            transform.translation = DVec3::new(x, 0.0, 0.0);
+            let transform = SpatialTransform {
+                translation: DVec3::new(x, 0.0, 0.0),
+                ..SpatialTransform::default()
+            };
             let entity = world
                 .spawn((
                     MobjectId(ObjectId::from_raw(raw)),
@@ -4176,8 +4175,10 @@ mod tests {
         let to = Brush::Gradient(
             Gradient::new_linear((0., 0.), (20., 0.)).with_stops([Color::WHITE, Color::BLACK]),
         );
-        let mut stroke = StrokeBrush::default();
-        stroke.brush = Some(from.clone());
+        let stroke = StrokeBrush {
+            brush: Some(from.clone()),
+            ..StrokeBrush::default()
+        };
         let entity = world
             .spawn((
                 MobjectId(id),
@@ -4415,8 +4416,10 @@ mod tests {
             .id();
 
         let snapshot = WorldSnapshot::capture(&mut world);
-        let mut timeline = Timeline::default();
-        timeline.cached_duration = 1.0;
+        let mut timeline = Timeline {
+            cached_duration: 1.0,
+            ..Timeline::default()
+        };
         timeline.add_keyframe(0.0, snapshot);
 
         timeline.seek(&mut world, 0.0);
@@ -4477,8 +4480,10 @@ mod tests {
             .id();
 
         let snapshot = WorldSnapshot::capture(&mut world);
-        let mut timeline = Timeline::default();
-        timeline.cached_duration = 4.0;
+        let mut timeline = Timeline {
+            cached_duration: 4.0,
+            ..Timeline::default()
+        };
         timeline.add_keyframe(0.0, snapshot);
 
         timeline.seek(&mut world, 2.0);
@@ -4598,8 +4603,10 @@ mod tests {
             .id();
 
         let snapshot = WorldSnapshot::capture(&mut world);
-        let mut timeline = Timeline::default();
-        timeline.cached_duration = 3.0;
+        let mut timeline = Timeline {
+            cached_duration: 3.0,
+            ..Timeline::default()
+        };
         timeline.add_keyframe(0.0, snapshot);
 
         timeline.seek(&mut world, 0.5);

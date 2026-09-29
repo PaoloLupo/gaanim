@@ -159,6 +159,7 @@ pub struct ViewLayer(pub std::sync::Arc<str>);
 
 /// System: the tips of a stroked path (see [`gaanim_animation::StrokeTips`])
 /// draw in their path's view layer and, for HUD paths, over the screen.
+#[allow(clippy::type_complexity)]
 pub fn sync_stroke_tip_layers_system(
     mut commands: bevy::prelude::Commands,
     tips: bevy::prelude::Query<

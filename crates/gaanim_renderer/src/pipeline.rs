@@ -318,6 +318,8 @@ pub struct ExtractedElement {
     /// A [`gaanim_animation::StrokeTip`], which shares its path's order and
     /// draws above it.
     tip: bool,
+    /// A box background: drawn before the content it shares an order with.
+    backdrop: bool,
 }
 
 /// A camera view screen: its view and the stroke drawn above it.
@@ -379,6 +381,7 @@ impl ExtractedElement {
                     .creation_order
                     .cmp(&b.render_order.creation_order),
             )
+            .then(b.backdrop.cmp(&a.backdrop))
             .then(b.echo_rank.cmp(&a.echo_rank))
             .then(b.tip.cmp(&a.tip))
     }
@@ -407,6 +410,7 @@ impl ExtractedElement {
             screen: self.screen.clone(),
             echo_rank: self.echo_rank,
             tip: self.tip,
+            backdrop: self.backdrop,
         }
     }
 }
@@ -1189,6 +1193,7 @@ fn aligned_pen(style: &kurbo::Stroke, align: StrokeAlign) -> std::borrow::Cow<'_
 /// Stroke `path` aligned to its closed contour (see [`StrokeAlign`]).
 /// `source_path` is the untrimmed contour while a draw animation reveals
 /// `path`; open contours are always stroked on their centerline.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_aligned_stroke(
     scene: &mut vello::Scene,
     style: &kurbo::Stroke,
@@ -1305,6 +1310,7 @@ pub fn resolve_dynamic_clip_masks_system(
 
 /// Rebuild live booleans from their source paths after propagation. The output
 /// remains a normal drawable, so renderer caching and bounds work unchanged.
+#[allow(clippy::type_complexity)]
 pub fn resolve_dynamic_boolean_system(
     mut queries: ParamSet<(
         Query<(Entity, &BooleanBinding, &GlobalSpatialTransform)>,
@@ -1368,6 +1374,7 @@ pub fn resolve_dynamic_boolean_system(
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub fn resolve_fill_level_system(
     mut queries: ParamSet<(
         Query<(
@@ -1453,6 +1460,7 @@ pub fn resolve_fill_level_system(
 
 /// Rebuild every [`crate::effects::ConnectBinding`] from the current world
 /// position of its sources: the centre of each visible source's local bounds.
+#[allow(clippy::type_complexity)]
 pub fn resolve_connect_system(
     mut queries: ParamSet<(
         Query<(
@@ -1526,6 +1534,7 @@ pub fn resolve_connect_system(
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub fn resolve_vector_outline_system(
     mut queries: ParamSet<(
         Query<(Entity, &VectorOutlineBinding, &GlobalSpatialTransform)>,
@@ -2217,6 +2226,7 @@ fn extract_world(
                 .get::<gaanim_animation::EchoGhost>(entity)
                 .map_or(0, |echo| echo.rank),
             tip: world.get::<gaanim_animation::StrokeTip>(entity).is_some(),
+            backdrop: world.get::<gaanim_scene::LayoutBackdrop>(entity).is_some(),
         });
         if exempt && let (Some(pins), Some(element)) = (pins.as_deref_mut(), extracted.last()) {
             pins.elements.push(element.clone());
@@ -2481,6 +2491,7 @@ fn three_d_elements<'a>(
             screen: None,
             echo_rank: 0,
             tip: false,
+            backdrop: false,
         });
     }
 }
@@ -2793,6 +2804,7 @@ pub fn compose_captured(
                 echo_rank: element.echo_rank,
                 // Captured frames keep their recorded order.
                 tip: false,
+                backdrop: false,
             }
         })
         .collect();
@@ -2929,6 +2941,8 @@ type CameraSourceQuery<'w, 's> = Query<
 /// global `MainVelloScene` entity has a negative Y scale that converts the
 /// completed scene to Vello's Y-down pixel space without changing the meaning
 /// of `.at(x, y)` or requiring per-object coordinate workarounds.
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
 pub fn gaanim_render_system(
     mut commands: Commands,
     mut cache: ResMut<GaanimRenderCache>,
@@ -2938,10 +2952,11 @@ pub fn gaanim_render_system(
     transition_frame: Option<Res<gaanim_scene::SceneTransitionFrame>>,
     child_query: Query<&ChildOf>,
     order_query: Query<&RenderOrder>,
-    (blend_query, echo_query, tip_query, three_d_query, lighting): (
+    (blend_query, echo_query, tip_query, backdrop_query, three_d_query, lighting): (
         Query<&ElementBlend>,
         Query<&gaanim_animation::EchoGhost>,
         TipQuery,
+        Query<(), With<gaanim_scene::LayoutBackdrop>>,
         ThreeDQuery,
         Option<Res<gaanim_scene::Lighting3D>>,
     ),
@@ -3321,6 +3336,7 @@ pub fn gaanim_render_system(
             }),
             echo_rank: echo_query.get(entity).map_or(0, |echo| echo.rank),
             tip: tip_query.contains(entity),
+            backdrop: backdrop_query.contains(entity),
         });
     }
     if let Some(camera) = gaanim_camera.as_deref() {
@@ -4270,8 +4286,10 @@ mod tests {
 
     #[test]
     fn zero_path_reveal_is_rendered_as_empty_geometry() {
-        let mut tip = WriteTipGlow::default();
-        tip.completion = 0.0;
+        let mut tip = WriteTipGlow {
+            completion: 0.0,
+            ..WriteTipGlow::default()
+        };
         assert!(path_reveal_is_empty(Some(&tip)));
         tip.completion = 0.001;
         assert!(!path_reveal_is_empty(Some(&tip)));
@@ -4377,6 +4395,7 @@ mod tests {
             screen: None,
             echo_rank: 0,
             tip: false,
+            backdrop: false,
         };
         let run = [
             element(kurbo::Rect::new(-6.0, 1.0, -3.0, 1.2)),
@@ -4411,6 +4430,7 @@ mod tests {
             screen: None,
             echo_rank: 0,
             tip: false,
+            backdrop: false,
         };
         let elements = vec![element(0.5), element(0.5), element(0.5), element(0.75)];
 
@@ -4441,6 +4461,7 @@ mod tests {
             screen: None,
             echo_rank: 0,
             tip: false,
+            backdrop: false,
         };
         let circle = kurbo::Circle::new((0.0, 0.0), 1.0);
         let red = peniko::Color::from_rgba8(200, 0, 0, 255);
@@ -4500,6 +4521,7 @@ mod tests {
             screen: None,
             echo_rank: 0,
             tip: false,
+            backdrop: false,
         };
         let multiply = Some(peniko::BlendMode::from(peniko::Mix::Multiply));
         let elements = vec![element(None), element(multiply), element(None)];
@@ -4537,6 +4559,7 @@ mod tests {
             screen: None,
             echo_rank: 0,
             tip: false,
+            backdrop: false,
         };
         let elements = vec![
             element(Some(mask(1, false))),

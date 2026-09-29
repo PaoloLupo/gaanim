@@ -146,18 +146,18 @@ impl PropertyValue {
     }
     pub fn apply(self, world: &mut World, target: Entity) {
         if let Self::FillLevel(value) = self {
-            if let Some(mut level) = world.get_mut::<FillLevel>(target) {
-                if level.0 != value {
-                    level.0 = value;
-                }
+            if let Some(mut level) = world.get_mut::<FillLevel>(target)
+                && level.0 != value
+            {
+                level.0 = value;
             }
             return;
         }
         if let Self::Opacity(value) = self {
-            if let Some(mut opacity) = world.get_mut::<Opacity>(target) {
-                if opacity.0 != value {
-                    opacity.0 = value;
-                }
+            if let Some(mut opacity) = world.get_mut::<Opacity>(target)
+                && opacity.0 != value
+            {
+                opacity.0 = value;
             }
         } else if let Some(mut transform) = world.get_mut::<SpatialTransform>(target) {
             let mut next = *transform;

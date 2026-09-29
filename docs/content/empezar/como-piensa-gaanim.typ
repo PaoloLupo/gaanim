@@ -61,7 +61,7 @@ Los objetos se crean con _fábricas_ agrupadas por tema dentro de la escena:
 
 - `scene.geometry`: círculos, rectángulos, líneas, flechas, arcos, grupos…
 - `scene.text`: texto, ecuaciones con Typst y código.
-- `scene.layout`: filas, columnas, grids y tarjetas.
+- `scene.layout`: cajas como en CSS (filas, columnas, grids, capas) y zonas.
 - `scene.media`: imágenes, SVG, video, audio y Lottie.
 - `scene.viz`: ejes, gráficas de funciones y datos.
 
@@ -231,7 +231,7 @@ scene = Scene(frame=(16, 9), theme="technical")
 
 title = scene.text("Tres pasos", role="title").to_edge(Direction.UP, buff=0.6)
 steps = scene.layout.row(
-    [scene.text(word, role="body") for word in ("Crear", "Animar", "Exportar")],
+    *[scene.text(word, role="body") for word in ("Crear", "Animar", "Exportar")],
     gap=1.2,
 ).move_to(0, 1)
 
@@ -245,8 +245,9 @@ objeto. `scene.layout.row` es un contenedor: decide dónde va cada hijo, y
 mover un hijo por su cuenta produce un `LayoutOwnershipError`. Mueve el
 contenedor entero, como hace `.move_to(0, 1)`.
 
-La guía de #link("/guias/layout/")[Layout] cubre filas, columnas, grids,
-regiones y anclas.
+La guía de #link("/guias/layout/")[Layout] cubre cajas con padding, gap,
+bordes y sombras, grids, estilos reutilizables, zonas y cómo animar la
+estructura.
 
 = Recursos
 

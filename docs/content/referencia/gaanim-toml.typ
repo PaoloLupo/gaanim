@@ -54,8 +54,10 @@ y no puede ser absoluta ni salir de la carpeta con `..`. Así, `gaanim .`,
 === `assets_dir`
 
 El editor y la CLI no aplican `assets_dir` por su cuenta: la escena lo carga al
-llamar a `scene.assets.load_project()`, que busca el `gaanim.toml` junto al
-script. Después, las rutas relativas de `scene.media.image`, `svg`, `lottie`,
+llamar a `scene.assets.load_project()`, que busca el `gaanim.toml` en la
+carpeta del script que la llama y, si no está, en sus carpetas superiores, como
+hace `git` con `.git`: un módulo dentro de un paquete del proyecto encuentra el
+manifiesto del proyecto. Después, las rutas relativas de `scene.media.image`, `svg`, `lottie`,
 `video` y demás se resuelven desde esa carpeta, sin depender del directorio de
 trabajo desde el que se lanzó Gaanim.
 
@@ -63,7 +65,7 @@ trabajo desde el que se lanzó Gaanim.
 from gaanim import Scene
 
 scene = Scene()
-scene.assets.load_project()             # lee assets_dir de ./gaanim.toml
+scene.assets.load_project()             # lee assets_dir del gaanim.toml del proyecto
 logo = scene.media.image("logo.webp")   # es assets/logo.webp
 ```
 

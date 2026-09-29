@@ -306,6 +306,9 @@ impl AudioClip {
 }
 
 /// One value accepted by the mixed animation/audio playback API.
+// Built once per scene or clip, not stored in bulk: boxing the large
+// variant would only add indirection.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum PlayItem {
     Animation(Anim),
@@ -2050,6 +2053,9 @@ pub struct SceneModel {
     /// Direct code-family override applied after the active theme.
     pub(crate) code_font_family_override: Option<String>,
     pub margin: Margin,
+    /// Frame height in design pixels: layout lengths written as `"16px"`
+    /// convert with it, so measurements copied from a 1080p design match.
+    pub design_resolution: f64,
     pub asset_root: Option<PathBuf>,
     /// Audio sources synchronized in preview and mixed by FFmpeg during export.
     pub audio_tracks: Vec<AudioTrack>,
@@ -2100,6 +2106,7 @@ impl SceneModel {
             math_font_family_override: None,
             code_font_family_override: None,
             margin: Margin::default(),
+            design_resolution: 1080.0,
             asset_root: None,
             audio_tracks: Vec::new(),
             tempo: None,
@@ -2667,6 +2674,11 @@ impl SceneModel {
     /// files changed on disk. SVG documents are resolved anew for every drawable.
     pub fn reload_assets(&mut self) {
         clear_asset_caches();
+    }
+
+    /// Scene units per design pixel.
+    pub fn pixel_unit(&self) -> f64 {
+        self.frame.bounds().height() / self.design_resolution.max(1.0)
     }
 
     pub fn safe_frame(&self) -> gaanim_math::Bounds3D {
@@ -4131,15 +4143,13 @@ impl SceneModel {
     }
 
     pub fn group(&mut self, members: &[&DrawableHandle]) -> DrawableHandle {
-        let handle = self
-            .spawn(SpawnKind::Group(members.iter().map(|m| m.id).collect()))
+        self.spawn(SpawnKind::Group(members.iter().map(|m| m.id).collect()))
             .with_style_targets(
                 members
                     .iter()
                     .flat_map(|member| member.inherited_style_targets())
                     .collect(),
-            );
-        handle
+            )
     }
 
     /// Build the stable, equation-style row used by reactive numeric readouts.
@@ -4272,8 +4282,36 @@ impl SceneModel {
         Ok(background)
     }
 
+    /// Record a box's new snapshot without resolving it: a transition of the
+    /// box that encloses it follows at the same instant and resolves both.
+    pub fn record_layout(
+        &mut self,
+        container: &DrawableHandle,
+        members: Vec<LayoutMemberSpec>,
+        spec: LayoutSpec,
+        version: u64,
+    ) {
+        let mut state = self.state.lock().expect("canvas state poisoned");
+        let snapshot = LayoutTreeSnapshot {
+            version,
+            container: container.id,
+            members,
+            spec,
+        };
+        state.latest_layouts.insert(container.id, snapshot.clone());
+        state.active_mut().ops.push(Op::LayoutTransition {
+            from_version: version.checked_sub(1).filter(|version| *version > 0),
+            to: snapshot,
+            duration: None,
+            entering: None,
+            leaving: None,
+            resolve: false,
+        });
+    }
+
     /// Queue a layout recalculation. `duration = Some(_)` animates the move
     /// and fades the newly inserted member in; `None` updates immediately.
+    #[allow(clippy::too_many_arguments)]
     pub fn reflow_layout(
         &mut self,
         container: &DrawableHandle,
@@ -4298,6 +4336,7 @@ impl SceneModel {
             duration: duration.filter(|value| value.is_finite() && *value > 0.0),
             entering: entering.map(|member| member.id),
             leaving: leaving.map(|member| member.id),
+            resolve: true,
         });
         if !state.layout_constraints.is_empty() {
             let constraints = state.layout_constraints.clone();
@@ -5866,6 +5905,7 @@ impl SceneModel {
 
     /// Creates a hidden curved arrow whose sweep is regenerated from `tracker`
     /// on every frame. The effective sweep is `value * sweep_scale + sweep_offset`.
+    #[allow(clippy::too_many_arguments)]
     pub fn always_redraw_arc(
         &mut self,
         tracker: &DrawableHandle,
@@ -6074,9 +6114,11 @@ impl SceneModel {
         font_size: Option<f64>,
         color: Option<Color>,
     ) -> Result<DrawableHandle, gaanim_text::prelude::TextSpecError> {
-        let mut style = gaanim_text::prelude::TextStyle::default();
-        style.size = Some(font_size.unwrap_or(DEFAULT_REACTIVE_TEXT_SIZE));
-        style.color = color;
+        let style = gaanim_text::prelude::TextStyle {
+            size: Some(font_size.unwrap_or(DEFAULT_REACTIVE_TEXT_SIZE)),
+            color,
+            ..gaanim_text::prelude::TextStyle::default()
+        };
         gaanim_text::prelude::TextSpec::new(
             vec![text.into()],
             None,
@@ -11176,14 +11218,12 @@ mod tests {
     }
 
     #[test]
-    fn layout_ownership_rejects_positioning_but_allows_visual_transforms() {
+    fn layout_ownership_adopts_positioned_and_transformed_drawables() {
         let mut canvas = SceneModel::new(320, 180);
         let owner = canvas.group(&[]);
+        // A drawable placed before joining a box is simply placed by it.
         let positioned = canvas.circle(10.0).move_to(12.0, 0.0);
-        assert_eq!(
-            positioned.claim_layout(&owner),
-            Err(crate::canvas::LayoutOwnershipError::PositionalOperation)
-        );
+        assert!(positioned.claim_layout(&owner).is_ok());
 
         let animated = canvas.circle(10.0);
         let _description = animated.animate().shift_by(8.0, 0.0);
@@ -11314,11 +11354,11 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(fill_paths.len(), 1);
-        assert_eq!(fill_paths[0].0, false);
+        assert!(!fill_paths[0].0);
         assert_eq!(fill_paths[0].1, 1);
-        assert_eq!(fill_paths[0].2, true);
+        assert!(fill_paths[0].2);
         assert_eq!(fill_paths[0].3, Some(1.0));
-        assert_eq!(fill_paths[0].5, true);
+        assert!(fill_paths[0].5);
         assert!(fill_paths[0].4.is_none());
 
         let outline_paths = app
@@ -11344,11 +11384,11 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(outline_paths.len(), 1);
-        assert_eq!(outline_paths[0].0, false);
+        assert!(!outline_paths[0].0);
         assert_eq!(outline_paths[0].1, 1);
-        assert_eq!(outline_paths[0].2, true);
+        assert!(outline_paths[0].2);
         assert_eq!(outline_paths[0].3, Some(1.0));
-        assert_eq!(outline_paths[0].5, true);
+        assert!(outline_paths[0].5);
         assert!(outline_paths[0].4.is_none());
     }
 

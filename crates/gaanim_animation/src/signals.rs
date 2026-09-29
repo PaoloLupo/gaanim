@@ -234,6 +234,7 @@ pub fn shape_readout_text_with_weight(
 
 /// Restore the cached outline after snapshot replay and only recompile it when
 /// the formatted text changes.
+#[allow(clippy::type_complexity)]
 pub fn reactive_readout_update_system(
     registry: Res<gaanim_text::font::FontRegistry>,
     playback: Option<Res<crate::updaters::PlaybackState>>,
@@ -452,8 +453,11 @@ pub struct SignalBinding {
     /// The closure receives the target entity and a `Commands` buffer.
     /// If reading from the `World` is required, the closure should use `SystemState`
     /// internally or capture necessary data at construction time.
-    pub apply: Arc<dyn Fn(Entity, &mut Commands) + Send + Sync>,
+    pub apply: ApplyFn,
 }
+
+/// Closure applying a signal value to its target entity.
+pub type ApplyFn = Arc<dyn Fn(Entity, &mut Commands) + Send + Sync>;
 
 impl SignalBinding {
     /// Creates a new signal binding between a source signal and a target.
@@ -1184,14 +1188,14 @@ mod tests {
 
         // Libertinus is known to Typst but not by name to the legacy registry,
         // which silently fell back to a system sans face.
-        let (expected, baseline) = typst_readout(&registry, "2.5", "Libertinus Serif");
+        let (expected, baseline) = typst_readout(registry, "2.5", "Libertinus Serif");
         assert_same_outline(
             &app.world().get::<PathSource>(readout).unwrap().0,
             &expected,
         );
         assert!((app.world().get::<TextBaseline>(readout).unwrap().0 - baseline).abs() < 1e-9);
         if let Ok((legacy, bounds)) =
-            gaanim_text::shaper::compile_text_to_path(&registry, "2.5", "Libertinus Serif", 0.75)
+            gaanim_text::shaper::compile_text_to_path(registry, "2.5", "Libertinus Serif", 0.75)
         {
             let (legacy, _) = right_align_readout_path(legacy, bounds);
             assert_ne!(legacy.bounding_box(), expected.bounding_box());
@@ -1199,11 +1203,11 @@ mod tests {
 
         // Fixed prefix/suffix runs and padded numbers keep Typst's advances.
         let (path, bounds) =
-            shape_readout_text(&registry, "x = ", "  2.5", " m", "Libertinus Serif", 0.75).unwrap();
+            shape_readout_text(registry, "x = ", "  2.5", " m", "Libertinus Serif", 0.75).unwrap();
         let (path, _) = right_align_readout_path(path, bounds);
         assert_same_outline(
             &path,
-            &typst_readout(&registry, "x =   2.5 m", "Libertinus Serif").0,
+            &typst_readout(registry, "x =   2.5 m", "Libertinus Serif").0,
         );
     }
 
@@ -1456,11 +1460,11 @@ pub fn always_redraw_regen_system(world: &mut World) {
         }
         // Keep the PathReveal component alive so snapshot restore
         // can see the correct reveal factor.
-        if world.get::<crate::writing::PathReveal>(entity).is_none() && (reveal - 1.0).abs() > 1e-9
+        if world.get::<crate::writing::PathReveal>(entity).is_none()
+            && (reveal - 1.0).abs() > 1e-9
+            && let Ok(mut em) = world.get_entity_mut(entity)
         {
-            if let Ok(mut em) = world.get_entity_mut(entity) {
-                em.insert(crate::writing::PathReveal(reveal));
-            }
+            em.insert(crate::writing::PathReveal(reveal));
         }
     }
 }

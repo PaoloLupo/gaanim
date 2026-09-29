@@ -171,10 +171,10 @@ fn fixed_step_count(total: f64, fixed_dt: f64) -> usize {
 fn run_updater_jobs(world: &mut World, jobs: Vec<UpdaterJob>) {
     let mut to_remove = Vec::new();
     for job in jobs {
-        if let Some(initial_translation) = job.reset_translation {
-            if let Some(mut transform) = world.get_mut::<SpatialTransform>(job.entity) {
-                transform.translation = initial_translation;
-            }
+        if let Some(initial_translation) = job.reset_translation
+            && let Some(mut transform) = world.get_mut::<SpatialTransform>(job.entity)
+        {
+            transform.translation = initial_translation;
         }
         if let Some(reset) = job.reset
             && !reset(job.entity, world)
@@ -374,7 +374,7 @@ pub fn rotate_updater(speed: f64) -> Updater {
     Updater::new(move |dt, _elapsed, entity, world| {
         if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
             let delta_rot = gaanim_core::glam::DQuat::from_rotation_z(speed * dt);
-            transform.rotation = transform.rotation * delta_rot;
+            transform.rotation *= delta_rot;
         }
         true
     })
@@ -426,15 +426,15 @@ pub fn follow_updater(target: Entity, offset: DVec3, smoothing: f64) -> Updater 
     Updater::new(move |dt, _elapsed, entity, world| {
         let target_pos = world.get::<SpatialTransform>(target).map(|t| t.translation);
 
-        if let Some(pos) = target_pos {
-            if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
-                let target_dest = pos + offset;
-                if smoothing <= 0.0 {
-                    transform.translation = target_dest;
-                } else {
-                    let t = (1.0 - (-dt / smoothing).exp()).clamp(0.0, 1.0);
-                    transform.translation = transform.translation.lerp(target_dest, t);
-                }
+        if let Some(pos) = target_pos
+            && let Some(mut transform) = world.get_mut::<SpatialTransform>(entity)
+        {
+            let target_dest = pos + offset;
+            if smoothing <= 0.0 {
+                transform.translation = target_dest;
+            } else {
+                let t = (1.0 - (-dt / smoothing).exp()).clamp(0.0, 1.0);
+                transform.translation = transform.translation.lerp(target_dest, t);
             }
         }
         true
@@ -623,12 +623,12 @@ pub fn traced_path_system(world: &mut World) {
                         traced_path.points.push(pos);
                         traced_path.sample_times.push(current_time);
                         changed = true;
-                        if let Some(max) = max_points {
-                            if traced_path.points.len() > max {
-                                let overflow = traced_path.points.len() - max;
-                                traced_path.points.drain(0..overflow);
-                                traced_path.sample_times.drain(0..overflow);
-                            }
+                        if let Some(max) = max_points
+                            && traced_path.points.len() > max
+                        {
+                            let overflow = traced_path.points.len() - max;
+                            traced_path.points.drain(0..overflow);
+                            traced_path.sample_times.drain(0..overflow);
                         }
                     }
                 }
@@ -710,6 +710,7 @@ fn colormap_rgba(map: &gaanim_core::ColorMap, t: f32) -> [f32; 4] {
 }
 
 /// Sistema que actualiza `LineListData` para cada `TracedPath3D`.
+#[allow(clippy::type_complexity)]
 pub fn traced_path_3d_system(world: &mut World) {
     let current_time = world
         .get_resource::<PlaybackState>()
@@ -758,12 +759,12 @@ pub fn traced_path_3d_system(world: &mut World) {
                         tp.points.push(pos);
                         tp.sample_times.push(current_time);
                         changed = true;
-                        if let Some(max) = max_points {
-                            if tp.points.len() > max {
-                                let overflow = tp.points.len() - max;
-                                tp.points.drain(0..overflow);
-                                tp.sample_times.drain(0..overflow);
-                            }
+                        if let Some(max) = max_points
+                            && tp.points.len() > max
+                        {
+                            let overflow = tp.points.len() - max;
+                            tp.points.drain(0..overflow);
+                            tp.sample_times.drain(0..overflow);
                         }
                     }
                 }
