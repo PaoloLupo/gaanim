@@ -57,9 +57,13 @@ jobs:
       # GPU tests skip themselves when no adapter is found. Hosted Windows
       # runners do report a software adapter, but rendering on it crashes the
       # test process, so ask wgpu for a backend Windows does not have.
+      # At opt-level 1 rustc shares generic instances across crates, and the
+      # gaanim_engine DLL then exports more than the 65535 symbols a Windows
+      # DLL allows (LNK1189). Opt-level 2 stops the sharing, as in release.
       - name: Run unit tests
         env:
           WGPU_BACKEND: ${{ runner.os == 'Windows' && 'metal' || 'vulkan,gl' }}
+          CARGO_PROFILE_DEV_OPT_LEVEL: ${{ runner.os == 'Windows' && '2' || '1' }}
         run: cargo test --workspace
 
       - name: Lint workspace
