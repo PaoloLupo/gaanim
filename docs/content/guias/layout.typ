@@ -374,11 +374,49 @@ Usa cajas y zonas para la composición: títulos, tarjetas, paneles, listas,
 rótulos. Usa coordenadas cuando la posición tiene significado: el punto de
 una gráfica, una órbita, una trayectoria.
 
-Una caja es dueña de la posición de sus hijos: `move_to` sobre un hijo lanza
-`LayoutOwnershipError`. Mueve la caja entera, ajusta `item(offset=...)` o
-saca al hijo con `box.detach(hijo)` para moverlo libremente. Si algo no
-encaja, `box.diagnostics()` y `scene.layout.check_layout()` explican qué
-restricción o texto no se pudo cumplir.
+= Animar dentro de una caja
+
+La caja decide dónde descansa cada hijo, no cómo se mueve. Todas las
+animaciones de `.animate` funcionan sobre un hijo: `fade_in_from`,
+`shift_by`, `move_to`, `scale_by`, `rotate_by`, `grow_from_edge`… Parten del
+sitio que le dio la caja y no empujan a sus hermanos, como un `transform` de
+CSS. Si después la caja se reorganiza (un `add`, un `replace`, un texto que
+cambia), el hijo conserva el desplazamiento que le diste respecto a su sitio.
+
+```python
+# output: preview.webp
+from gaanim import Direction, Scene
+
+scene = Scene(frame=(16, 9), theme="paper", margin=0.5)
+L = scene.layout
+title = L.box("Resultados", font_size="96px", weight=700, color="#312e81")
+points = L.column(
+    L.box("Menos pasos", font_size="44px", padding=("14px", "28px"), radius="16px",
+          background="#e0e7ff"),
+    L.box("Menos errores", font_size="44px", padding=("14px", "28px"), radius="16px",
+          background="#e0e7ff"),
+    gap="20px",
+)
+slide = L.column(title, points, gap="48px", align="center", justify="center",
+                 width="fill", height="fill")
+
+scene.play([title.animate.fade_in_from(Direction.LEFT).duration(0.5)])
+scene.play([points[0].animate.fade_in_from(Direction.UP).duration(0.4),
+            points[1].animate.fade_in_from(Direction.UP).duration(0.4).delay(0.15)])
+scene.play([title.animate.scale_by(1.15).rotate_by(-0.05).duration(0.4)])
+# La columna gana un punto: los demás se deslizan y el título sigue girado.
+points.add(L.box("Más tiempo", font_size="44px", padding=("14px", "28px"),
+                 radius="16px", background="#fde68a"), duration=0.5)
+scene.render()
+```
+
+`move_to(x, y)` usa coordenadas de la escena también para un hijo. Lo único
+reservado a la caja es colocar a un hijo _al declararlo_: `move_to`,
+`next_to` o `to_edge` inmediatos sobre un hijo lanzan
+`LayoutOwnershipError`. Para eso ajusta `item(offset=...)`, mueve la caja
+entera o saca al hijo con `box.detach(hijo)`. Si algo no encaja,
+`box.diagnostics()` y `scene.layout.check_layout()` explican qué restricción
+o texto no se pudo cumplir.
 
 Consulta #link("/referencia/layout/")[la referencia de Layout] para todas las
 propiedades, firmas y errores. Los ejemplos `layout_*` y `ui_*` del

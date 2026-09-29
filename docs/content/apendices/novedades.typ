@@ -11,6 +11,26 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= Próxima versión
+
+Sin publicar todavía.
+
+== Cambios
+
+- Los hijos de una caja aceptan todas las animaciones de `.animate`:
+  `fade_in_from`, `shift_by`, `move_to`, `scale_by`, `rotate_by`,
+  `grow_from_edge`, `spin_in_from_nothing`… Parten del sitio que les da la
+  caja y no empujan a sus hermanos, como un `transform` de CSS. Si la caja se
+  reorganiza después, el hijo conserva su desplazamiento, su escala y su
+  giro. Colocar un hijo de forma inmediata (`move_to` sin `.animate`) sigue
+  lanzando `LayoutOwnershipError`. Lee
+  #link("/guias/layout/")[Animar dentro de una caja].
+
+== Correcciones
+
+- `animate.move_to(x, y)` sobre un objeto dentro de otro usa coordenadas de
+  la escena, no las de su contenedor.
+
 = 0.7.0
 
 Publicada el 29 de septiembre de 2026. Llega un layout nuevo al estilo de CSS,

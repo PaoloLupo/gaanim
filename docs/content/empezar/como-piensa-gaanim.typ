@@ -242,8 +242,9 @@ scene.render()
 
 `to_edge` y `next_to` colocan un objeto respecto al borde del lienzo o a otro
 objeto. `scene.layout.row` es un contenedor: decide dónde va cada hijo, y
-mover un hijo por su cuenta produce un `LayoutOwnershipError`. Mueve el
-contenedor entero, como hace `.move_to(0, 1)`.
+colocar un hijo por su cuenta produce un `LayoutOwnershipError`. Mueve el
+contenedor entero, como hace `.move_to(0, 1)`. Animar a un hijo con
+`.animate` sí está permitido: parte del sitio que le da el contenedor.
 
 La guía de #link("/guias/layout/")[Layout] cubre cajas con padding, gap,
 bordes y sombras, grids, estilos reutilizables, zonas y cómo animar la

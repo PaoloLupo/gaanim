@@ -1500,6 +1500,7 @@ fn collect_compiled_layout_node(
     children_by_id: &mut BTreeMap<gaanim_layout::LayoutId, Vec<gaanim_layout::LayoutId>>,
     fixed: &mut BTreeMap<gaanim_layout::LayoutId, DVec2>,
     texts: &mut BTreeMap<gaanim_layout::LayoutId, CompiledTextMeasure>,
+    rests: &HashMap<ObjectId, crate::builder::LayoutRest>,
     visiting: &mut HashSet<ObjectId>,
 ) -> Option<gaanim_layout::LayoutNode> {
     assert!(
@@ -1534,6 +1535,7 @@ fn collect_compiled_layout_node(
                 children_by_id,
                 fixed,
                 texts,
+                rests,
                 visiting,
             ) else {
                 continue;
@@ -1554,6 +1556,10 @@ fn collect_compiled_layout_node(
     } else {
         let mut transform = state.transform;
         transform.translation = DVec3::ZERO;
+        if let Some(rest) = rests.get(&source) {
+            transform.scale = rest.scale;
+            transform.rotation = rest.rotation;
+        }
         let bounds = gaanim_layout::transform_bounds(state.bounds, &transform);
         fixed.insert(
             id,
@@ -1578,6 +1584,7 @@ fn compile_layout_tree(
     states: &MobjectStateMap,
     object_specs: &HashMap<ObjectId, ObjectSpec>,
     text_config: &gaanim_text::prelude::TextConfig,
+    rests: &HashMap<ObjectId, crate::builder::LayoutRest>,
 ) -> Option<CompiledLayoutTree> {
     let mut source_by_id = BTreeMap::new();
     let mut parent_by_id = BTreeMap::new();
@@ -1598,6 +1605,7 @@ fn compile_layout_tree(
         &mut children_by_id,
         &mut fixed,
         &mut texts,
+        rests,
         &mut HashSet::new(),
     )?;
     Some(CompiledLayoutTree {
@@ -3812,6 +3820,7 @@ impl SceneModel {
                         &builder.states,
                         object_specs,
                         text_config,
+                        &builder.layout_rests,
                     ) else {
                         continue;
                     };
@@ -3841,6 +3850,21 @@ impl SceneModel {
                                 .states
                                 .get(actual)
                                 .map(|state| (actual, state.transform))
+                        })
+                        .collect();
+                    // Where each child stands now, by source object: its
+                    // offset from the rest its layout last gave it survives
+                    // this reflow, as a CSS transform survives a relayout.
+                    let current_translations: HashMap<ObjectId, DVec3> = tree
+                        .source_by_id
+                        .iter()
+                        .filter(|(id, _)| **id != root_id && !entering_subtree(**id))
+                        .filter_map(|(_, source)| {
+                            let actual = id_map.get(source).copied()?;
+                            builder
+                                .states
+                                .get(actual)
+                                .map(|state| (*source, state.transform.translation))
                         })
                         .collect();
                     let viewport = match root_snapshot.spec.within {
@@ -4161,18 +4185,32 @@ impl SceneModel {
                                 target_box.bounds.width() * 0.5,
                                 target_box.bounds.height() * 0.5,
                             );
+                            let rest = target_box.bounds.center() - parent_center;
+                            let Some(current) =
+                                builder.states.get(*member).map(|state| state.transform)
+                            else {
+                                continue;
+                            };
+                            let translation = Self::keep_layout_offset(
+                                builder,
+                                tree.source_by_id.get(layout_id).copied(),
+                                &current_translations,
+                                &current,
+                                rest,
+                            );
                             let Some(state) = builder.states.get_mut(*member) else {
                                 continue;
                             };
                             let mut target = state.transform;
-                            target.translation = target_box.bounds.center() - parent_center;
+                            target.translation = translation;
                             state.bounds = local_bounds;
                             state.transform = target;
+                            let entity = state.entity;
                             builder
                                 .commands
-                                .entity(state.entity)
-                                .insert((LocalBounds(local_bounds), target));
-                            let entity = state.entity;
+                                .entity(entity)
+                                .insert(LocalBounds(local_bounds));
+                            Self::place_layout_member(builder, entity, target);
                             let time = builder.current_time;
                             let span = duration.unwrap_or(0.0);
                             builder.commands.queue(move |world: &mut World| {
@@ -4188,10 +4226,14 @@ impl SceneModel {
                             continue;
                         }
                         let metrics = builder.text_metrics.get(member).copied();
-                        let Some(state) = builder.states.get_mut(*member) else {
+                        let Some((transform, bounds)) = builder
+                            .states
+                            .get(*member)
+                            .map(|state| (state.transform, state.bounds))
+                        else {
                             continue;
                         };
-                        let mut zero_translation = state.transform;
+                        let mut zero_translation = transform;
                         zero_translation.translation = DVec3::ZERO;
                         // Text sits by its line box, as it was measured, unless
                         // its item sets the height: then its ink is centered.
@@ -4201,15 +4243,21 @@ impl SceneModel {
                             .is_some_and(|style| style.height.is_some());
                         let local = match (line_extents.get(layout_id), metrics) {
                             (Some(extent), Some(metrics)) if !sized => {
-                                text_line_box(state.bounds, metrics, *extent)
+                                text_line_box(bounds, metrics, *extent)
                             }
-                            _ => state.bounds,
+                            _ => bounds,
                         };
                         let intrinsic = gaanim_layout::transform_bounds(local, &zero_translation);
                         let target_center = target_box.bounds.center() - parent_center;
                         let intrinsic_center = intrinsic.center();
-                        let mut target = state.transform;
-                        target.translation = target_center - intrinsic_center;
+                        let mut target = transform;
+                        target.translation = Self::keep_layout_offset(
+                            builder,
+                            tree.source_by_id.get(layout_id).copied(),
+                            &current_translations,
+                            &transform,
+                            target_center - intrinsic_center,
+                        );
                         let sx = target_box.bounds.width() / intrinsic.width().max(1.0e-9);
                         let sy = target_box.bounds.height() / intrinsic.height().max(1.0e-9);
                         let item_style = tree
@@ -4229,8 +4277,12 @@ impl SceneModel {
                             cover_clips.push((*member, target_box.bounds));
                         }
                         targets.push((*member, target));
+                        let Some(state) = builder.states.get_mut(*member) else {
+                            continue;
+                        };
                         state.transform = target;
-                        builder.commands.entity(state.entity).insert(target);
+                        let entity = state.entity;
+                        Self::place_layout_member(builder, entity, target);
                     }
                     for (member, clip_bounds) in cover_clips {
                         let world_path = Rect::new(
@@ -4265,7 +4317,8 @@ impl SceneModel {
                     for (member, transform) in before {
                         if let Some(state) = builder.states.get_mut(member) {
                             state.transform = transform;
-                            builder.commands.entity(state.entity).insert(transform);
+                            let entity = state.entity;
+                            Self::place_layout_member(builder, entity, transform);
                         }
                     }
                     let transition_duration = (*duration).unwrap_or(0.0);
@@ -9306,6 +9359,55 @@ impl SceneModel {
                 | SpawnKind::Bezier { .. }
                 | SpawnKind::Curve(_)
         )
+    }
+
+    /// Write the translation and scale a layout gives a member to its
+    /// entity. Its rotation and skew are its own: a child rotated later in
+    /// the timeline must not show that rotation before its animation starts.
+    fn place_layout_member(
+        builder: &mut SceneBuilder,
+        entity: bevy::prelude::Entity,
+        transform: SpatialTransform,
+    ) {
+        builder.commands.queue(move |world: &mut World| {
+            if let Some(mut current) = world.get_mut::<SpatialTransform>(entity) {
+                current.translation = transform.translation;
+                current.scale = transform.scale;
+            } else if let Ok(mut entity) = world.get_entity_mut(entity) {
+                entity.insert(transform);
+            }
+        });
+    }
+
+    /// The translation a box child takes at its new `rest`: the rest plus the
+    /// offset it has been moved from the rest its layout last gave it, so
+    /// the child's own animations survive a reflow. Records `rest`, and on
+    /// the child's first placement its `current` scale and rotation.
+    fn keep_layout_offset(
+        builder: &mut SceneBuilder,
+        source: Option<ObjectId>,
+        current_translations: &HashMap<ObjectId, DVec3>,
+        current: &SpatialTransform,
+        rest: DVec3,
+    ) -> DVec3 {
+        let Some(source) = source else {
+            return rest;
+        };
+        let previous = builder.layout_rests.get(&source).copied();
+        builder.layout_rests.insert(
+            source,
+            crate::builder::LayoutRest {
+                translation: rest,
+                scale: previous.map_or(current.scale, |previous| previous.scale),
+                rotation: previous.map_or(current.rotation, |previous| previous.rotation),
+            },
+        );
+        let offset = previous
+            .zip(current_translations.get(&source))
+            .map_or(DVec3::ZERO, |(previous, current)| {
+                *current - previous.translation
+            });
+        rest + offset
     }
 
     fn apply_layout(
@@ -15621,6 +15723,78 @@ mod tests {
                 }
             ) if *from == 0.0 && *to == 1.0
         )));
+    }
+
+    #[test]
+    fn layout_reflow_keeps_a_member_offset_from_its_rest() {
+        use gaanim_timeline::clip::{AnimationSpec, ClipPayload, PropertyLensSpec};
+        let mut canvas = SceneModel::new(640, 360);
+        let first = canvas.rect(80.0, 30.0);
+        let second = canvas.rect(80.0, 30.0);
+        let third = canvas.rect(80.0, 30.0);
+        let container = canvas.group(&[&first, &second]);
+        let spec = crate::canvas::LayoutSpec {
+            kind: gaanim_layout::LayoutNodeKind::Column { wrap: false },
+            style: gaanim_layout::LayoutStyle {
+                gap: DVec2::splat(20.0),
+                align: gaanim_layout::Align::Center,
+                ..Default::default()
+            },
+            within: LayoutWithin::Intrinsic,
+        };
+        let member = |handle: &crate::canvas::DrawableHandle| crate::canvas::LayoutMemberSpec {
+            id: handle.id,
+            style: gaanim_layout::LayoutItemStyle::default(),
+        };
+        canvas.reflow_layout(
+            &container,
+            vec![member(&first), member(&second)],
+            spec.clone(),
+            1,
+            None,
+            None,
+            None,
+        );
+        // The first member moves on its own, then the box gains a member.
+        canvas.play(vec![first.animate().shift_by(30.0, 0.0).duration(0.5)]);
+        canvas.set_group_members(&container, &[&first, &second, &third]);
+        canvas.reflow_layout(
+            &container,
+            vec![member(&first), member(&second), member(&third)],
+            spec,
+            2,
+            Some(0.5),
+            Some(&third),
+            None,
+        );
+
+        let (_, timeline) = compiled_world(&canvas);
+        // Every member rests at x = 0; only the moved one stays 30 to the right
+        // while the reflow slides it to its new row.
+        let reflow_moves: Vec<_> = timeline
+            .clips
+            .values()
+            .filter(|clip| clip.start >= 0.5 - 1.0e-9)
+            .filter_map(|clip| match &clip.payload {
+                ClipPayload::Animation(AnimationSpec {
+                    lens: PropertyLensSpec::Translation { from, to },
+                    ..
+                }) => Some((*from, *to)),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            reflow_moves
+                .iter()
+                .any(|(from, to)| (from.x - 30.0).abs() < 1.0e-6 && (to.x - 30.0).abs() < 1.0e-6),
+            "{reflow_moves:?}"
+        );
+        assert!(
+            reflow_moves
+                .iter()
+                .all(|(_, to)| to.x.abs() < 1.0e-6 || (to.x - 30.0).abs() < 1.0e-6),
+            "{reflow_moves:?}"
+        );
     }
 
     #[test]

@@ -56,9 +56,11 @@ unidades y alineados a la izquierda. `width=6.5` fija el ancho del panel: si la
 frase no cupiera, se partiría en varias líneas dentro de ese ancho. Después
 movemos el panel entero; sus hijos lo acompañan.
 
-A partir de aquí, el panel es el dueño de la posición de `formula` y
-`explanation`. No llames a `move_to` sobre ellos: Gaanim lo rechaza con un
-`LayoutOwnershipError`. Para recolocarlos, mueve `panel`.
+A partir de aquí, el panel decide dónde descansan `formula` y
+`explanation`. No los coloques con un `move_to` inmediato: Gaanim lo rechaza
+con un `LayoutOwnershipError`. Para recolocarlos, mueve `panel`; para
+animarlos, usa `.animate` sobre ellos, que parte del sitio que les da el
+panel.
 
 #idea[
 Usa coordenadas para la geometría y Layout para el contenido. El círculo

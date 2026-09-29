@@ -236,7 +236,10 @@ row = scene.layout.row("Carga", bar.item(grow=1, height="12px"), "72%", gap="16p
 == Cajas vivas
 
 Una `Box` es un `Drawable`: `move_to`, `scale_by`, `animate.fade_in()` o
-`place` actúan sobre la caja entera. Es dueña de la posición de sus hijos.
+`place` actúan sobre la caja entera. Decide la posición de reposo de sus
+hijos, que siguen aceptando cualquier animación de `.animate`: parten de ese
+sitio, no mueven a sus hermanos y conservan su desplazamiento cuando la caja
+se reorganiza.
 Los cambios de estructura se registran en la línea de tiempo; con
 `duration=` se animan (los hijos se deslizan, lo que entra aparece con un
 fundido y lo que sale se desvanece) y avanzan el cursor como `scene.play`.
@@ -295,7 +298,7 @@ grid.set(columns=2, gap="30px", duration=0.8)
 #api-entry(
   name: "LayoutOwnershipError",
   kind: "class",
-  desc: [Se lanza al mover (`move_to`, `shift_by`, `next_to`…) un hijo de una caja o al meter en una caja un objeto que ya pertenece a otra. Usa `item(offset=...)`, mueve la caja entera o `detach` al hijo.],
+  desc: [Se lanza al colocar de forma inmediata (`move_to`, `shift_by`, `next_to`…, sin `.animate`) un hijo de una caja o al meter en una caja un objeto que ya pertenece a otra. Usa `item(offset=...)`, anima al hijo con `.animate`, mueve la caja entera o `detach` al hijo.],
   none,
 )
 
