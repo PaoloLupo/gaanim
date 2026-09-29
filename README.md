@@ -358,10 +358,10 @@ resolución al reproducir si el render no llega a 60 fps y la recupera al
 pausar; para medir siempre a resolución completa, añade
 `GAANIM_PREVIEW_RESOLUTION=full`.
 
-Los seeks parten del inicio del segmento en que caen: la segunda vez que uno
-cae en un segmento, el timeline guarda el estado de su inicio (si ningún clip
-anterior sigue en curso ahí) y los siguientes solo reaplican los clips desde
-ese punto. `GAANIM_SEGMENT_CHECKPOINTS=0` vuelve a reaplicar desde t=0 para
+Los seeks parten del inicio del segmento en que caen: cuando la reproducción
+entra en un segmento, o la segunda vez que un seek cae en él, el timeline
+guarda el estado de su inicio (si ningún clip anterior sigue en curso ahí) y
+los siguientes solo reaplican los clips desde ese punto. `GAANIM_SEGMENT_CHECKPOINTS=0` vuelve a reaplicar desde t=0 para
 comparar; `GAANIM_CHECKPOINT_TIMINGS=1` informa cuánto tarda cada captura.
 
 `just run` comprueba la vigencia de los binarios mediante Cargo antes de abrir

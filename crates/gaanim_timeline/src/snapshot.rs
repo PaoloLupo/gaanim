@@ -312,6 +312,51 @@ pub(crate) fn insert_snapshot_components(
     sync_optional(entity_mut, snap.scene.map(SceneMember));
 }
 
+/// Identity, hierarchy, style and geometry read by [`WorldSnapshot::capture`].
+type CaptureCore = (
+    Entity,
+    &'static MobjectId,
+    Option<&'static bevy::prelude::ChildOf>,
+    Option<&'static SpatialTransform>,
+    Option<&'static Opacity>,
+    Option<&'static FillBrush>,
+    Option<&'static StrokeBrush>,
+    Option<&'static RenderOrder>,
+    Option<&'static RenderLayer>,
+    bevy::prelude::Has<Visible>,
+    bevy::prelude::Has<gaanim_scene::GroupMarker>,
+    Option<&'static ObjectTag>,
+    Option<&'static Path2D>,
+    Option<&'static PathSource>,
+    bevy::prelude::Has<gaanim_animation::EchoGhost>,
+);
+
+/// Animation and reactive state read by [`WorldSnapshot::capture`].
+type CaptureState = (
+    Option<&'static gaanim_animation::FillDrawProgress>,
+    Option<&'static FillLevel>,
+    Option<&'static gaanim_animation::SurroundingRect>,
+    Option<&'static gaanim_animation::updaters::TrackingConnector>,
+    Option<&'static gaanim_animation::WriteTipGlow>,
+    Option<&'static gaanim_animation::PathReveal>,
+    Option<&'static gaanim_animation::PathTrimWindow>,
+    Option<&'static gaanim_animation::FloatSignal>,
+    Option<&'static gaanim_scene::Material3D>,
+    Option<&'static gaanim_scene::MediaFrame>,
+    Option<&'static gaanim_scene::CoordinateViewRole>,
+    Option<&'static gaanim_animation::TracedPath>,
+    Option<&'static gaanim_animation::TracedPath3D>,
+);
+
+/// Propagated state and scene membership read by [`WorldSnapshot::capture`].
+type CaptureDerived = (
+    Option<&'static GlobalSpatialTransform>,
+    Option<&'static LocalBounds>,
+    Option<&'static WorldBounds>,
+    Option<&'static GlobalOpacity>,
+    Option<&'static SceneMember>,
+);
+
 impl WorldSnapshot {
     /// Captures a new `WorldSnapshot` of all Mobjects currently registered in the Bevy `World`.
     pub fn capture(world: &mut World) -> Self {
@@ -323,21 +368,39 @@ impl WorldSnapshot {
     /// Camera state is always captured in full.
     pub fn capture_spawned_after(world: &mut World, tick: Option<Tick>) -> Self {
         let this_run = world.change_tick();
-        let mut entities = bevy::platform::collections::HashMap::new();
         let camera = world.get_resource::<gaanim_math::Camera>().copied();
         let camera_states = world
             .get_resource::<CapturedCameraStates>()
             .map(|states| states.0.clone())
             .unwrap_or_default();
 
-        // Query all entities with a MobjectId component
-        let mut query = world.query::<(Entity, &MobjectId)>();
-
-        let mut captured_data = Vec::new();
-
-        for (entity, mobj_id) in query.iter(world) {
+        // One pass over the component tables: looking each component up by
+        // entity costs a type and a location lookup apiece, which dominated
+        // capturing tens of thousands of Mobjects.
+        let mut query = world.query::<(CaptureCore, CaptureState, CaptureDerived)>();
+        let mut ids = world.query::<&MobjectId>();
+        let world: &World = world;
+        let mut entities = bevy::platform::collections::HashMap::new();
+        for (core, state, derived) in query.iter(world) {
+            let (
+                entity,
+                mobj_id,
+                child_of,
+                transform,
+                opacity,
+                fill,
+                stroke,
+                render_order,
+                render_layer,
+                visible,
+                is_group,
+                tag,
+                path2d,
+                path_source,
+                echo,
+            ) = core;
             // Echo copies are re-evaluated from their sources after every seek.
-            if world.get::<gaanim_animation::EchoGhost>(entity).is_some() {
+            if echo {
                 continue;
             }
             if let Some(tick) = tick
@@ -348,111 +411,66 @@ impl WorldSnapshot {
             {
                 continue;
             }
+            let (
+                fill_draw_progress,
+                fill_level,
+                surrounding_rect,
+                connector,
+                write_tip_glow,
+                path_reveal,
+                path_trim_window,
+                float_signal,
+                material_3d,
+                media_frame,
+                coordinate_view_role,
+                traced_path,
+                traced_path_3d,
+            ) = state;
+            let (global_transform, local_bounds, world_bounds, global_opacity, scene) = derived;
             let obj_id = mobj_id.0;
-            // Find parent entity's ObjectId if parent is set
-            let parent_entity = world
-                .get::<bevy::prelude::ChildOf>(entity)
-                .map(|c| c.parent());
-            let parent_id =
-                parent_entity.and_then(|p| world.get::<MobjectId>(p).copied().map(|m| m.0));
-
-            let transform = world
-                .get::<SpatialTransform>(entity)
-                .copied()
-                .unwrap_or_default();
-            let opacity = world.get::<Opacity>(entity).map(|o| o.0).unwrap_or(1.0);
-            let has_fill_component = world.get::<FillBrush>(entity).is_some();
-            let fill = world.get::<FillBrush>(entity).and_then(|f| f.0.clone());
-            let stroke = world
-                .get::<StrokeBrush>(entity)
-                .and_then(|s| s.brush.clone());
-            let stroke_style = world.get::<StrokeBrush>(entity).map(|s| s.style.clone());
-            let render_order_opt = world.get::<RenderOrder>(entity);
-            let render_order = render_order_opt.map(|r| r.z_index).unwrap_or(0);
-            let creation_order = render_order_opt.map(|r| r.creation_order).unwrap_or(0);
-            let render_layer = world
-                .get::<RenderLayer>(entity)
-                .copied()
-                .unwrap_or(RenderLayer::Vello2D);
-            let visible = world.get::<Visible>(entity).is_some();
-            let is_group = world.get::<gaanim_scene::GroupMarker>(entity).is_some();
-
-            let mut tags = Vec::new();
-            if let Some(tag) = world.get::<ObjectTag>(entity) {
-                tags.push(tag.0.clone());
-            }
-
-            captured_data.push((
-                obj_id,
-                EntitySnapshot {
-                    id: obj_id,
-                    parent: parent_id,
-                    transform,
-                    opacity,
-                    fill,
-                    has_fill_component,
-                    stroke,
-                    stroke_style,
-                    render_order,
-                    creation_order,
-                    render_layer,
-                    visible,
-                    tags,
-                    path2d: world.get::<Path2D>(entity).map(|p| p.0.clone()),
-                    path_source: world.get::<PathSource>(entity).map(|p| p.0.clone()),
-                    fill_draw_progress: world
-                        .get::<gaanim_animation::FillDrawProgress>(entity)
-                        .map(|p| p.0),
-                    fill_level: world.get::<FillLevel>(entity).map(|level| level.0),
-                    surrounding_rect: world
-                        .get::<gaanim_animation::SurroundingRect>(entity)
-                        .cloned(),
-                    connector_progress: world
-                        .get::<gaanim_animation::updaters::TrackingConnector>(entity)
-                        .map(|connector| connector.progress),
-                    write_tip_glow: world.get::<gaanim_animation::WriteTipGlow>(entity).cloned(),
-                    path_reveal: world
-                        .get::<gaanim_animation::PathReveal>(entity)
-                        .map(|p| p.0),
-                    path_trim_window: world
-                        .get::<gaanim_animation::PathTrimWindow>(entity)
-                        .copied(),
-                    float_signal: world
-                        .get::<gaanim_animation::FloatSignal>(entity)
-                        .map(|s| s.value),
-                    material_3d: world.get::<gaanim_scene::Material3D>(entity).copied(),
-                    media_frame: world.get::<gaanim_scene::MediaFrame>(entity).copied(),
-                    coordinate_view_role: world
-                        .get::<gaanim_scene::CoordinateViewRole>(entity)
-                        .copied(),
-                    traced_path_points: world
-                        .get::<gaanim_animation::TracedPath>(entity)
-                        .map(|t| t.points.clone())
-                        .or_else(|| {
-                            world
-                                .get::<gaanim_animation::TracedPath3D>(entity)
-                                .map(|t| t.points.clone())
-                        }),
-                    traced_path_sample_times: world
-                        .get::<gaanim_animation::TracedPath>(entity)
-                        .map(|t| t.sample_times.clone())
-                        .or_else(|| {
-                            world
-                                .get::<gaanim_animation::TracedPath3D>(entity)
-                                .map(|t| t.sample_times.clone())
-                        }),
-                    is_group,
-                    global_transform: world.get::<GlobalSpatialTransform>(entity).copied(),
-                    local_bounds: world.get::<LocalBounds>(entity).copied(),
-                    world_bounds: world.get::<WorldBounds>(entity).copied(),
-                    global_opacity: world.get::<GlobalOpacity>(entity).copied(),
-                    scene: world.get::<SceneMember>(entity).map(|s| s.0),
-                },
-            ));
-        }
-
-        for (id, snapshot) in captured_data {
-            entities.insert(id, Box::new(snapshot));
+            let snapshot = EntitySnapshot {
+                id: obj_id,
+                parent: child_of
+                    .and_then(|child_of| ids.get(world, child_of.parent()).ok())
+                    .map(|parent| parent.0),
+                transform: transform.copied().unwrap_or_default(),
+                opacity: opacity.map(|o| o.0).unwrap_or(1.0),
+                fill: fill.and_then(|f| f.0.clone()),
+                has_fill_component: fill.is_some(),
+                stroke: stroke.and_then(|s| s.brush.clone()),
+                stroke_style: stroke.map(|s| s.style.clone()),
+                render_order: render_order.map(|r| r.z_index).unwrap_or(0),
+                creation_order: render_order.map(|r| r.creation_order).unwrap_or(0),
+                render_layer: render_layer.copied().unwrap_or(RenderLayer::Vello2D),
+                visible,
+                tags: tag.map(|tag| vec![tag.0.clone()]).unwrap_or_default(),
+                path2d: path2d.map(|p| p.0.clone()),
+                path_source: path_source.map(|p| p.0.clone()),
+                fill_draw_progress: fill_draw_progress.map(|p| p.0),
+                fill_level: fill_level.map(|level| level.0),
+                surrounding_rect: surrounding_rect.cloned(),
+                connector_progress: connector.map(|connector| connector.progress),
+                write_tip_glow: write_tip_glow.cloned(),
+                path_reveal: path_reveal.map(|p| p.0),
+                path_trim_window: path_trim_window.copied(),
+                float_signal: float_signal.map(|s| s.value),
+                material_3d: material_3d.copied(),
+                media_frame: media_frame.copied(),
+                coordinate_view_role: coordinate_view_role.copied(),
+                traced_path_points: traced_path
+                    .map(|t| t.points.clone())
+                    .or_else(|| traced_path_3d.map(|t| t.points.clone())),
+                traced_path_sample_times: traced_path
+                    .map(|t| t.sample_times.clone())
+                    .or_else(|| traced_path_3d.map(|t| t.sample_times.clone())),
+                is_group,
+                global_transform: global_transform.copied(),
+                local_bounds: local_bounds.copied(),
+                world_bounds: world_bounds.copied(),
+                global_opacity: global_opacity.copied(),
+                scene: scene.map(|s| s.0),
+            };
+            entities.insert(obj_id, Box::new(snapshot));
         }
 
         Self {
@@ -669,11 +687,236 @@ mod tests {
     };
     use std::sync::Arc;
 
+    /// The capture as it read each component by entity, to check the
+    /// query-based one against.
+    fn capture_by_lookup(world: &mut World, tick: Option<Tick>) -> WorldSnapshot {
+        let this_run = world.change_tick();
+        let mut entities = bevy::platform::collections::HashMap::new();
+        let camera = world.get_resource::<gaanim_math::Camera>().copied();
+        let camera_states = world
+            .get_resource::<CapturedCameraStates>()
+            .map(|states| states.0.clone())
+            .unwrap_or_default();
+
+        // Query all entities with a MobjectId component
+        let mut query = world.query::<(Entity, &MobjectId)>();
+
+        let mut captured_data = Vec::new();
+
+        for (entity, mobj_id) in query.iter(world) {
+            // Echo copies are re-evaluated from their sources after every seek.
+            if world.get::<gaanim_animation::EchoGhost>(entity).is_some() {
+                continue;
+            }
+            if let Some(tick) = tick
+                && !world
+                    .entity(entity)
+                    .spawn_tick()
+                    .is_newer_than(tick, this_run)
+            {
+                continue;
+            }
+            let obj_id = mobj_id.0;
+            // Find parent entity's ObjectId if parent is set
+            let parent_entity = world
+                .get::<bevy::prelude::ChildOf>(entity)
+                .map(|c| c.parent());
+            let parent_id =
+                parent_entity.and_then(|p| world.get::<MobjectId>(p).copied().map(|m| m.0));
+
+            let transform = world
+                .get::<SpatialTransform>(entity)
+                .copied()
+                .unwrap_or_default();
+            let opacity = world.get::<Opacity>(entity).map(|o| o.0).unwrap_or(1.0);
+            let has_fill_component = world.get::<FillBrush>(entity).is_some();
+            let fill = world.get::<FillBrush>(entity).and_then(|f| f.0.clone());
+            let stroke = world
+                .get::<StrokeBrush>(entity)
+                .and_then(|s| s.brush.clone());
+            let stroke_style = world.get::<StrokeBrush>(entity).map(|s| s.style.clone());
+            let render_order_opt = world.get::<RenderOrder>(entity);
+            let render_order = render_order_opt.map(|r| r.z_index).unwrap_or(0);
+            let creation_order = render_order_opt.map(|r| r.creation_order).unwrap_or(0);
+            let render_layer = world
+                .get::<RenderLayer>(entity)
+                .copied()
+                .unwrap_or(RenderLayer::Vello2D);
+            let visible = world.get::<Visible>(entity).is_some();
+            let is_group = world.get::<gaanim_scene::GroupMarker>(entity).is_some();
+
+            let mut tags = Vec::new();
+            if let Some(tag) = world.get::<ObjectTag>(entity) {
+                tags.push(tag.0.clone());
+            }
+
+            captured_data.push((
+                obj_id,
+                EntitySnapshot {
+                    id: obj_id,
+                    parent: parent_id,
+                    transform,
+                    opacity,
+                    fill,
+                    has_fill_component,
+                    stroke,
+                    stroke_style,
+                    render_order,
+                    creation_order,
+                    render_layer,
+                    visible,
+                    tags,
+                    path2d: world.get::<Path2D>(entity).map(|p| p.0.clone()),
+                    path_source: world.get::<PathSource>(entity).map(|p| p.0.clone()),
+                    fill_draw_progress: world
+                        .get::<gaanim_animation::FillDrawProgress>(entity)
+                        .map(|p| p.0),
+                    fill_level: world.get::<FillLevel>(entity).map(|level| level.0),
+                    surrounding_rect: world
+                        .get::<gaanim_animation::SurroundingRect>(entity)
+                        .cloned(),
+                    connector_progress: world
+                        .get::<gaanim_animation::updaters::TrackingConnector>(entity)
+                        .map(|connector| connector.progress),
+                    write_tip_glow: world.get::<gaanim_animation::WriteTipGlow>(entity).cloned(),
+                    path_reveal: world
+                        .get::<gaanim_animation::PathReveal>(entity)
+                        .map(|p| p.0),
+                    path_trim_window: world
+                        .get::<gaanim_animation::PathTrimWindow>(entity)
+                        .copied(),
+                    float_signal: world
+                        .get::<gaanim_animation::FloatSignal>(entity)
+                        .map(|s| s.value),
+                    material_3d: world.get::<gaanim_scene::Material3D>(entity).copied(),
+                    media_frame: world.get::<gaanim_scene::MediaFrame>(entity).copied(),
+                    coordinate_view_role: world
+                        .get::<gaanim_scene::CoordinateViewRole>(entity)
+                        .copied(),
+                    traced_path_points: world
+                        .get::<gaanim_animation::TracedPath>(entity)
+                        .map(|t| t.points.clone())
+                        .or_else(|| {
+                            world
+                                .get::<gaanim_animation::TracedPath3D>(entity)
+                                .map(|t| t.points.clone())
+                        }),
+                    traced_path_sample_times: world
+                        .get::<gaanim_animation::TracedPath>(entity)
+                        .map(|t| t.sample_times.clone())
+                        .or_else(|| {
+                            world
+                                .get::<gaanim_animation::TracedPath3D>(entity)
+                                .map(|t| t.sample_times.clone())
+                        }),
+                    is_group,
+                    global_transform: world.get::<GlobalSpatialTransform>(entity).copied(),
+                    local_bounds: world.get::<LocalBounds>(entity).copied(),
+                    world_bounds: world.get::<WorldBounds>(entity).copied(),
+                    global_opacity: world.get::<GlobalOpacity>(entity).copied(),
+                    scene: world.get::<SceneMember>(entity).map(|s| s.0),
+                },
+            ));
+        }
+
+        for (id, snapshot) in captured_data {
+            entities.insert(id, Box::new(snapshot));
+        }
+
+        WorldSnapshot {
+            entities,
+            camera,
+            camera_states,
+        }
+    }
+
     fn changed_count<T: bevy::prelude::Component>(world: &mut World) -> usize {
         world
             .query_filtered::<bevy::prelude::Entity, Changed<T>>()
             .iter(world)
             .count()
+    }
+
+    #[test]
+    fn the_query_capture_matches_reading_each_component() {
+        use gaanim_core::peniko::Color;
+        let mut world = World::new();
+        let scene = crate::timeline::Timeline::default().add_scene("first");
+        let path = Arc::new(gaanim_core::kurbo::BezPath::from_svg("M0,0 L10,10").unwrap());
+        let group = world
+            .spawn((
+                MobjectId(ObjectId::from_parts(1, 1)),
+                gaanim_scene::GroupMarker,
+                SpatialTransform::default(),
+                Visible,
+                SceneMember(scene),
+            ))
+            .id();
+        let unregistered_parent = world.spawn(SpatialTransform::default()).id();
+        for index in 0..40u32 {
+            let mut entity = world.spawn((
+                MobjectId(ObjectId::from_parts(10 + index, 1)),
+                SpatialTransform::default(),
+                Opacity(0.25 * (index % 4) as f32),
+            ));
+            if index % 2 == 0 {
+                entity.insert((
+                    Path2D(path.clone()),
+                    PathSource(path.clone()),
+                    FillBrush::color(Color::from_rgb8(index as u8, 0, 0)),
+                    Visible,
+                ));
+            }
+            if index % 3 == 0 {
+                entity.insert((
+                    StrokeBrush::new(Color::BLACK, 1.0 + f64::from(index)),
+                    RenderOrder {
+                        z_index: index as i32,
+                        creation_order: u64::from(index),
+                    },
+                    ObjectTag(format!("tag {index}")),
+                ));
+            }
+            if index % 5 == 0 {
+                entity.insert((
+                    FillLevel(0.5),
+                    gaanim_animation::FloatSignal::new(f64::from(index)),
+                    gaanim_animation::PathReveal(0.3),
+                    gaanim_animation::FillDrawProgress(0.7),
+                    LocalBounds(gaanim_math::Bounds3D::new_2d(0.0, 0.0, 1.0, 2.0)),
+                    GlobalOpacity(0.5),
+                    GlobalSpatialTransform::default(),
+                ));
+            }
+            if index % 7 == 0 {
+                entity.insert(gaanim_animation::EchoGhost {
+                    source: ObjectId::from_parts(10, 1),
+                    lag: 0.5,
+                    opacity: 0.5,
+                    parent: None,
+                    rank: 1,
+                    hold: false,
+                    motion_sources: Vec::new(),
+                });
+            }
+            let entity = entity.id();
+            match index % 4 {
+                0 => world.entity_mut(entity).set_parent_in_place(group),
+                1 => world.entity_mut(entity).set_parent_in_place(unregistered_parent),
+                _ => &mut world.entity_mut(entity),
+            };
+        }
+        assert_eq!(WorldSnapshot::capture(&mut world), capture_by_lookup(&mut world, None));
+
+        let tick = world.change_tick();
+        world.increment_change_tick();
+        world.spawn((
+            MobjectId(ObjectId::from_parts(900, 1)),
+            SpatialTransform::default(),
+        ));
+        let later = WorldSnapshot::capture_spawned_after(&mut world, Some(tick));
+        assert_eq!(later.entities.len(), 1);
+        assert_eq!(later, capture_by_lookup(&mut world, Some(tick)));
     }
 
     #[test]
