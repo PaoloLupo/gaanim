@@ -397,6 +397,46 @@ scene.render()
 Las plantillas de presentación (`title_slide`, `lecture`, `comparison`…) son
 componentes escritos exactamente así.
 
+= Recorrer una caja
+
+Una tarjeta suele animarse pieza por pieza: el fondo, el título, cada fila.
+En lugar de bajar por el árbol a mano, `box.walk()` devuelve las piezas a
+cualquier profundidad, en orden de dibujo y con el fondo de cada caja antes de
+su contenido; con `boxes=True` incluye también las cajas anidadas.
+
+- `box.find(text="Título")`, `box.find(type=Text)` y `box.find_all(...)`
+  buscan una pieza por su clase, su texto o un predicado `where=`.
+- `box.cascade(each=0.1).fade_in()` anima todas las piezas en cascada con
+  cualquier animación de `.animate`. Para elegir qué anima cada pieza (o
+  saltarse alguna), usa `box.stagger(lambda pieza: ...)`.
+- `box.each(lambda pieza: pieza.fill(...), type=Text)` aplica un ajuste
+  inmediato a cada pieza y devuelve la caja.
+- `box.swap(a, b)`, `box.move_child(hijo, 0)` y `box.reverse()` reordenan los
+  hijos; con `duration=` se deslizan a su nuevo sitio.
+
+Antes de su turno, una pieza que entra con `grow_*` o `fade_in` no se ve,
+aunque la caja se reorganice después.
+
+```python
+# output: preview.webp
+from gaanim import BoxStyle, Scene, Text
+
+scene = Scene(frame=(16, 9), theme="paper")
+L = scene.layout
+chip = BoxStyle(padding="14px", radius="10px", background="#e0e7ff", font_size="26px",
+                width="130px", align="center")
+row = L.row(*[L.box(name, style=chip) for name in ("Uno", "Dos", "Tres")], gap="16px")
+card = L.column(L.box("Tarjeta", role="title"), row, gap="24px", padding="30px",
+                align="center", background="#f8fafc", border="#cbd5e1", radius="18px")
+
+scene.play(card.cascade(each=0.12).grow_from_center())
+card.each(lambda piece: piece.fill("#1e3a8a"), type=Text)
+row.swap(row[0], row[2], duration=0.6)
+row.reverse(duration=0.6)
+scene.wait(0.4)
+scene.render()
+```
+
 = Coordenadas o cajas
 
 Usa cajas y zonas para la composición: títulos, tarjetas, paneles, listas,
