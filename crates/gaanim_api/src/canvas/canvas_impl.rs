@@ -1928,8 +1928,10 @@ pub enum AssetPreloadError {
     #[error("could not preload image '{path}': {source}")]
     Image {
         path: PathBuf,
+        // Boxed: an image error is large enough on Windows to trip
+        // `clippy::result_large_err`.
         #[source]
-        source: ImageLoadError,
+        source: Box<ImageLoadError>,
     },
     #[error("could not preload SVG '{path}': {source}")]
     Svg {
@@ -2663,7 +2665,7 @@ impl SceneModel {
             } else {
                 load_image(&resolved).map_err(|source| AssetPreloadError::Image {
                     path: resolved.clone(),
-                    source,
+                    source: Box::new(source),
                 })?;
             }
         }
