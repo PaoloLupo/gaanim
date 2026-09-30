@@ -15,6 +15,13 @@ pub struct LiveZone {
     pub id: String,
     pub open: f64,
     pub close: f64,
+    /// Whether a stop rests exactly at `open` or `close`. A stop holds the
+    /// outgoing moment, as segments do at a shared boundary: resting at
+    /// `open` shows what came before, resting at `close` shows the zone.
+    #[serde(default)]
+    pub stop_at_open: bool,
+    #[serde(default)]
+    pub stop_at_close: bool,
     /// [x0, y0, x1, y1] in scene units: characters are drawn clipped to it.
     pub bounds: [f64; 4],
     /// Height of a character at scale 1, in scene units.

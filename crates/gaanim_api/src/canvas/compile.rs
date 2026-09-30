@@ -2771,6 +2771,12 @@ impl SceneModel {
             }),
         );
         // Always set, so a reload without zones clears the previous ones.
+        let stop_at = |time: f64| {
+            segment_metadata
+                .iter()
+                .flat_map(|metadata| &metadata.stops)
+                .any(|stop| (stop.time - time).abs() <= 1e-5)
+        };
         let live_zones: Vec<gaanim_animation::live::LiveZone> = live_zones
             .into_iter()
             .filter_map(|record| {
@@ -2781,6 +2787,8 @@ impl SceneModel {
                     None => segment_metadata.get(record.open.0)?.end_time,
                 }
                 .max(zone.open);
+                zone.stop_at_open = stop_at(zone.open);
+                zone.stop_at_close = stop_at(zone.close);
                 Some(zone)
             })
             .collect();

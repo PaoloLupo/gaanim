@@ -63,8 +63,18 @@ pub struct LiveRuns {
 /// not throw characters across the zone.
 const MAX_FRAME: f64 = 0.1;
 
-fn zone_contains(zone: &LiveZone, time: f64) -> bool {
-    time >= zone.open - 1e-6 && time <= zone.close + 1e-6
+/// Whether the timeline at `time` is in the zone. Its ends follow segment
+/// boundaries: at `open` the zone shows unless a stop rests there (holding
+/// what came before), and at `close` only if one does (holding the zone).
+pub fn zone_contains(zone: &LiveZone, time: f64) -> bool {
+    const EPSILON: f64 = 1e-5;
+    if (time - zone.close).abs() <= EPSILON {
+        return zone.stop_at_close;
+    }
+    if (time - zone.open).abs() <= EPSILON {
+        return !zone.stop_at_open;
+    }
+    time > zone.open && time < zone.close
 }
 
 /// A live player: with the character the phone made, or one read from the
@@ -166,4 +176,40 @@ pub fn live_zone_system(
         });
     }
     overlay.groups = groups;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stop_at_a_shared_boundary_holds_the_outgoing_zone() {
+        let json = r#"{"version":[1,0],"code":[{"const":"0.0"}],
+            "pose":{"x":0,"y":0,"rotation":0,"scale":0,"sx":0,"sy":0,"lean":0,
+                    "look_x":0,"look_y":0,"flip":0,"visible":0,"express":0,"since":0,"loop":0}}"#;
+        let zone = |open: f64, close: f64| LiveZone {
+            id: "z".into(),
+            open,
+            close,
+            stop_at_open: false,
+            stop_at_close: false,
+            bounds: [0.0, 0.0, 1.0, 1.0],
+            size: 1.0,
+            preview: Vec::new(),
+            preview_every: 1.0,
+            behavior: Program::from_json(json).unwrap(),
+            motion: Motion::default(),
+        };
+        // Two segments meeting at 8, the first ending in a stop.
+        let mut sala = zone(0.0, 8.0);
+        sala.stop_at_close = true;
+        let mut carrera = zone(8.0, 12.0);
+        carrera.stop_at_open = true;
+        assert!(zone_contains(&sala, 8.0) && !zone_contains(&carrera, 8.0));
+        assert!(!zone_contains(&sala, 8.01) && zone_contains(&carrera, 8.01));
+        // Without a stop the incoming zone owns the boundary.
+        let (sala, carrera) = (zone(0.0, 8.0), zone(8.0, 12.0));
+        assert!(!zone_contains(&sala, 8.0) && zone_contains(&carrera, 8.0));
+        assert!(zone_contains(&sala, 7.99) && zone_contains(&sala, 0.0));
+    }
 }

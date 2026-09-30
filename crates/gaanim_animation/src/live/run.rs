@@ -388,6 +388,8 @@ mod tests {
             id: "z".into(),
             open: 0.0,
             close: 60.0,
+            stop_at_open: false,
+            stop_at_close: false,
             bounds: [-8.0, -4.5, 8.0, 4.5],
             size: 1.0,
             preview: Vec::new(),

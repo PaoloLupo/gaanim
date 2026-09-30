@@ -133,6 +133,8 @@ impl SceneModel {
                 id: format!("zone{index}"),
                 open: 0.0,
                 close: 0.0,
+                stop_at_open: false,
+                stop_at_close: false,
                 bounds,
                 size,
                 preview,
