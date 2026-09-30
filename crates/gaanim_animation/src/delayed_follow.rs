@@ -11,7 +11,9 @@ use crate::FollowOffsetSpace;
 ///
 /// The timeline evaluates `source` at `t - delay` from its keyframe and
 /// clips after every seek, exactly as a seek rebuilds it, so a follower
-/// needs no history and any seek reproduces the trail. Until the current
+/// needs no history and any seek reproduces the trail. When `source` is
+/// itself a follower its position is rebuilt at that time too, so followers
+/// chain. Until the current
 /// segment has run for `delay` seconds the follower holds the leader's
 /// position at the segment start.
 #[derive(Component, Debug, Clone, PartialEq)]

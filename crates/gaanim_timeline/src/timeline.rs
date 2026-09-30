@@ -2041,7 +2041,8 @@ impl Timeline {
             .filter_map(|id| self.clips.get(*id))
         {
             if let ClipPayload::Animation(anim) = &clip.payload
-                && sources.contains(&anim.target)
+                // A delayed follower may read a chain of other drawables.
+                && (sources.contains(&anim.target) || !follows.is_empty())
             {
                 source_clips.entry(anim.target).or_default().push(clip);
             }
@@ -2156,6 +2157,10 @@ impl Timeline {
             }
         }
 
+        let object_of: HashMap<Entity, gaanim_core::ObjectId> = entity_map
+            .iter()
+            .map(|(id, entity)| (*entity, *id))
+            .collect();
         for (entity, follow) in follows {
             let probe = match follow
                 .probe
@@ -2172,28 +2177,20 @@ impl Timeline {
                     probe
                 }
             };
-            let time = follow.source_time(self.current_time, segment_start.max(0.0));
-            let Some(parent) = self.replay_source_into(
-                world,
-                follow.source,
-                clips_of(&follow.source),
-                time,
+            let start = segment_start.max(0.0);
+            let time = follow.source_time(self.current_time, start);
+            let context = DelayedContext {
+                clips: &source_clips,
+                entity_map: &entity_map,
+                object_of: &object_of,
+                start,
                 probe,
-                |state| {
-                    state.scene = None;
-                    state.visible = false;
-                },
-            ) else {
+            };
+            let Some(source_world) =
+                self.delayed_world_matrix(world, &context, follow.source, time, 0)
+            else {
                 continue;
             };
-            let Some(local) = world.get::<SpatialTransform>(probe).map(|t| t.to_mat4()) else {
-                continue;
-            };
-            // The leader's delayed local transform under its current parent.
-            let source_world = parent
-                .and_then(|parent| entity_map.get(&parent).copied())
-                .and_then(|parent| gaanim_animation::entity_world_matrix(parent, world))
-                .map_or(local, |parent| parent * local);
             let world_position = follow.position(source_world);
             let position = world
                 .get::<ChildOf>(entity)
@@ -2323,6 +2320,118 @@ impl Timeline {
                 emitter.trail = trail;
             }
         }
+    }
+
+    /// World matrix of the drawable `source` at `time`, rebuilt from its
+    /// keyframe and animation clips like a seek. When `source` is itself
+    /// positioned by a binding its position is rebuilt too, recursively:
+    ///
+    /// - a [`gaanim_animation::DelayedFollow`] reads its own leader at
+    ///   `time - delay` (held at the segment start), so chains of delayed
+    ///   followers trail one another;
+    /// - an [`gaanim_animation::EndpointFollow`] on a drawable (`follow`
+    ///   with no delay) reads that drawable at `time`;
+    /// - a [`gaanim_animation::PositionBinding`] (`attach_to`, `follow_to`,
+    ///   `bind_position_from`) copies the selected axes of its source at
+    ///   `time` plus its offset, in scene axes.
+    ///
+    /// Other endpoints (anchors, expressions) have no past to replay: they
+    /// resolve against the current world, undelayed. Chains deeper than
+    /// [`MAX_DELAYED_DEPTH`], including cycles, stop at the replayed
+    /// position of the drawable where the depth runs out.
+    fn delayed_world_matrix(
+        &self,
+        world: &mut World,
+        context: &DelayedContext<'_, '_>,
+        source: gaanim_core::ObjectId,
+        time: f64,
+        depth: u32,
+    ) -> Option<gaanim_core::glam::DMat4> {
+        use gaanim_animation::{FollowOffsetSpace, TrackingEndpoint};
+        use gaanim_core::glam::DVec3;
+        let clips = context
+            .clips
+            .get(&source)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let parent =
+            self.replay_source_into(world, source, clips, time, context.probe, |state| {
+                state.scene = None;
+                state.visible = false;
+            })?;
+        let local = world.get::<SpatialTransform>(context.probe)?.to_mat4();
+        let mut matrix = parent
+            .and_then(|parent| context.entity_map.get(&parent).copied())
+            .and_then(|parent| gaanim_animation::entity_world_matrix(parent, world))
+            .map_or(local, |parent| parent * local);
+        let Some(entity) = context.entity_map.get(&source).copied() else {
+            return Some(matrix);
+        };
+        if depth >= MAX_DELAYED_DEPTH {
+            return Some(matrix);
+        }
+        let delayed = world
+            .get::<gaanim_animation::DelayedFollow>(entity)
+            .cloned();
+        let endpoint = world
+            .get::<gaanim_animation::EndpointFollow>(entity)
+            .cloned();
+        // (source, copied axes, offset); the component is not `Clone`.
+        let binding = world
+            .get::<gaanim_animation::PositionBinding>(entity)
+            .map(|binding| {
+                let axes = (binding.axes.x, binding.axes.y, binding.axes.z);
+                (binding.source, axes, binding.offset)
+            });
+        let position = if let Some(follow) = delayed {
+            let leader_time = follow.source_time(time, context.start);
+            self.delayed_world_matrix(world, context, follow.source, leader_time, depth + 1)
+                .map(|leader| follow.position(leader))
+        } else if let Some(follow) = endpoint {
+            let offset = |basis: gaanim_core::glam::DMat4| match follow.offset_space {
+                FollowOffsetSpace::World => follow.offset,
+                FollowOffsetSpace::Local => basis.transform_vector3(follow.offset),
+            };
+            match &follow.endpoint {
+                TrackingEndpoint::Entity(leader) => context
+                    .object_of
+                    .get(leader)
+                    .copied()
+                    .and_then(|leader| {
+                        self.delayed_world_matrix(world, context, leader, time, depth + 1)
+                    })
+                    .map(|leader| leader.transform_point3(DVec3::ZERO) + offset(leader)),
+                _ => gaanim_animation::resolve_tracking_endpoint_with_offset(
+                    &follow.endpoint,
+                    follow.offset,
+                    follow.offset_space,
+                    world,
+                ),
+            }
+        } else if let Some((source, axes, offset)) = binding {
+            context
+                .object_of
+                .get(&source)
+                .copied()
+                .and_then(|leader| {
+                    self.delayed_world_matrix(world, context, leader, time, depth + 1)
+                })
+                .map(|leader| {
+                    let copied = leader.transform_point3(DVec3::ZERO) + offset;
+                    let own = matrix.transform_point3(DVec3::ZERO);
+                    DVec3::new(
+                        if axes.0 { copied.x } else { own.x },
+                        if axes.1 { copied.y } else { own.y },
+                        if axes.2 { copied.z } else { own.z },
+                    )
+                })
+        } else {
+            None
+        };
+        if let Some(position) = position {
+            matrix.w_axis = position.extend(1.0);
+        }
+        Some(matrix)
     }
 
     /// Restore `source`'s keyframe state at `time`, adjusted by `prepare`,
@@ -2902,6 +3011,23 @@ impl Timeline {
             }
         }
     }
+}
+
+/// How many followers deep [`Timeline::delayed_world_matrix`] rebuilds a
+/// delayed follower's leader; it also bounds follow cycles.
+const MAX_DELAYED_DEPTH: u32 = 64;
+
+/// What [`Timeline::delayed_world_matrix`] needs to replay drawables at
+/// another time.
+struct DelayedContext<'a, 'c> {
+    /// Animation clips of every drawable, in start order.
+    clips: &'a HashMap<gaanim_core::ObjectId, Vec<&'c Clip>>,
+    entity_map: &'a HashMap<gaanim_core::ObjectId, Entity>,
+    object_of: &'a HashMap<Entity, gaanim_core::ObjectId>,
+    /// Start of the segment holding the current time.
+    start: f64,
+    /// Scratch entity the drawables are replayed into.
+    probe: Entity,
 }
 
 /// The time a held echo copy shows at `time`: `lag` seconds back along the

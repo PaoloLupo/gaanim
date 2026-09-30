@@ -14210,6 +14210,89 @@ mod tests {
     }
 
     #[test]
+    fn delayed_follow_chains_through_followers_at_any_seek() {
+        use gaanim_animation::FollowOffsetSpace;
+        let mut canvas = SceneModel::new(640, 360);
+        let leader = canvas.circle(0.3).move_to(-2.0, 0.0);
+        let follow = |follower: &DrawableHandle, source: &DrawableHandle, offset, delay| {
+            follower
+                .follow_endpoint_delayed(
+                    CanvasEndpoint::Entity(source.id),
+                    offset,
+                    FollowOffsetSpace::World,
+                    delay,
+                )
+                .unwrap()
+        };
+        // A chain of delayed followers of delayed followers.
+        let mut links: Vec<DrawableHandle> = Vec::new();
+        for index in 0..3 {
+            let link = canvas.circle(0.1);
+            let (source, offset) = match links.last() {
+                Some(previous) => (previous.clone(), DVec3::ZERO),
+                None => (leader.clone(), DVec3::new(0.0, -0.5, 0.0)),
+            };
+            links.push(follow(&link, &source, offset, 0.2));
+            assert_eq!(links.len(), index + 1);
+        }
+        // Delayed followers of an undelayed `follow` and of a `follow_to`.
+        let plain = canvas.circle(0.1);
+        follow(&plain, &leader, DVec3::new(0.0, 0.5, 0.0), 0.0);
+        let after_plain = canvas.circle(0.1);
+        follow(&after_plain, &plain, DVec3::ZERO, 0.3);
+        let bound = canvas.circle(0.1);
+        bound.follow_to(&leader, 0.0, 1.0);
+        let after_bound = canvas.circle(0.1);
+        follow(&after_bound, &bound, DVec3::ZERO, 0.3);
+        // A cycle stays finite and deterministic.
+        let (a, b) = (canvas.circle(0.1), canvas.circle(0.1));
+        follow(&a, &b, DVec3::ZERO, 0.1);
+        follow(&b, &a, DVec3::ZERO, 0.1);
+
+        let entered: Vec<DrawableHandle> = links
+            .iter()
+            .cloned()
+            .chain([plain, after_plain.clone(), bound, after_bound.clone(), a, b])
+            .collect();
+        canvas.play(
+            entered
+                .iter()
+                .map(|drawable| drawable.fade_in(0.01))
+                .collect(),
+        );
+        canvas.play(vec![
+            leader
+                .animate()
+                .move_to(2.0, 0.0)
+                .duration(1.0)
+                .rate_func(gaanim_math::RateFunc::Linear),
+        ]);
+        canvas.wait(1.0);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let start = 0.01;
+        let leader_x = |time: f64| -2.0 + 4.0 * (time - start).clamp(0.0, 1.0);
+        let expected =
+            |time: f64, delay: f64, y: f64| DVec3::new(leader_x((time - delay).max(0.0)), y, 0.0);
+        for time in [1.5, 0.3, 0.95, 0.1, 2.0, 0.0, 0.7, 1.5] {
+            timeline.seek(&mut world, time);
+            let mut checks: Vec<(&DrawableHandle, DVec3)> = links
+                .iter()
+                .enumerate()
+                .map(|(index, link)| (link, expected(time, 0.2 * (index + 1) as f64, -0.5)))
+                .collect();
+            checks.push((&after_plain, expected(time, 0.3, 0.5)));
+            checks.push((&after_bound, expected(time, 0.3, 1.0)));
+            for (drawable, expected) in checks {
+                let position = transform_of(&mut world, drawable).translation;
+                assert!(
+                    (position - expected).length() < 1e-9,
+                    "at {time}: {position:?}, expected {expected:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn repeater_count_shows_copies_in_order_and_seeks_back() {
         let mut canvas = SceneModel::new(640, 360);
         let dot = canvas.circle(0.1);

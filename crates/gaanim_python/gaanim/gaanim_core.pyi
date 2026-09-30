@@ -3615,7 +3615,11 @@ class Drawable:
         ``valueAtTime(time - delay)``: chain followers with growing delays
         for trails and tails (overlapping action). The leader's animations
         are re-evaluated at ``t - delay`` on every frame, so any seek
-        reproduces the trail without accumulated state. Until the current
+        reproduces the trail without accumulated state. The leader may itself
+        follow another drawable (``follow`` with or without ``delay``,
+        ``follow_to``, ``attach_to``), so followers of followers trail one
+        another; anchor and expression endpoints further up such a chain are
+        read undelayed. Until the current
         segment has run for ``delay`` seconds the follower holds the
         leader's position at the segment start. A positive ``delay`` needs a
         Drawable ``source`` (``TypeError`` otherwise); a negative or
