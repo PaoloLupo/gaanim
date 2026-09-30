@@ -6737,11 +6737,13 @@ impl SceneModel {
                 base,
                 easing,
                 overlay,
+                sound,
             } => {
                 return TransitionType::Styled {
                     base: Box::new(Self::runtime_transition(base, id_map)),
                     easing: easing.clone(),
                     overlay: overlay.clone(),
+                    sound: sound.clone(),
                 };
             }
             TransitionType::Iris {

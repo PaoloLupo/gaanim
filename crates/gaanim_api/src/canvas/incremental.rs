@@ -67,6 +67,8 @@ impl SceneModel {
             design_resolution: _,
             asset_root,
             audio_tracks,
+            // Positions inside `audio_tracks`, which is fingerprinted.
+            transition_sounds: _,
             tempo,
             // Editor metadata: its timing already lives in the segment waits
             // and `audio_tracks`, and it is never compiled.

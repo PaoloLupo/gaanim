@@ -3135,6 +3135,17 @@ impl PyMediaLibrary {
         clip.map(|inner| PyAudio { inner })
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
+
+    /// Place a sound effect at absolute timeline second `at` (the cursor by default).
+    #[pyo3(signature = (path, at=None, *, volume=1.0))]
+    fn sfx(&self, path: &str, at: Option<f64>, volume: f64) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .sfx(path, at, volume)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+    }
 }
 
 /// Fill omitted solid-arrow dimensions with the scene-unit defaults.

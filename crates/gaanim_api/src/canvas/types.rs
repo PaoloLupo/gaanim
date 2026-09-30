@@ -1141,6 +1141,8 @@ pub struct Anim {
     pub(crate) property_spec: Option<std::sync::Arc<std::sync::Mutex<ObjectSpec>>>,
     camera_capture_before_play: Option<u64>,
     repeat: Option<AnimRepeat>,
+    /// Sound effect anchored to the animation's resolved start.
+    sound: Option<gaanim_timeline::sound::SoundCue>,
 }
 
 /// Repetition requested on an [`Anim`], expanded once its duration and
@@ -1260,6 +1262,7 @@ impl Anim {
             property_spec: None,
             camera_capture_before_play: None,
             repeat: None,
+            sound: None,
         }
     }
 
@@ -2540,6 +2543,22 @@ impl Anim {
 
     pub fn about_point(self, x: f64, y: f64) -> Self {
         self.pivot(x, y)
+    }
+
+    /// Play `cue` when this animation starts.
+    ///
+    /// The sound is anchored to the animation, not to the cursor: it is
+    /// scheduled at the animation's resolved start (including its own
+    /// `delay` and its position inside sequences, staggers and inserts), so
+    /// moving the animation moves the sound. A second call replaces the cue.
+    pub fn sound(mut self, cue: gaanim_timeline::sound::SoundCue) -> Self {
+        self.sound = Some(cue);
+        self
+    }
+
+    /// The sound effect anchored to this animation, if any.
+    pub fn sound_cue(&self) -> Option<&gaanim_timeline::sound::SoundCue> {
+        self.sound.as_ref()
     }
 
     pub fn delay(mut self, sec: f64) -> Self {

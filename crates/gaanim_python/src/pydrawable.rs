@@ -1444,6 +1444,17 @@ impl PyCanvasAnim {
         })
     }
 
+    /// Play a sound effect when this animation starts, anchored to it.
+    #[pyo3(signature = (path, *, volume=1.0, offset=0.0))]
+    fn sound(&self, path: &str, volume: f64, offset: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        let cue = gaanim_timeline::sound::SoundCue::with_options(path, volume, offset)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Ok(Self {
+            inner: self.inner.clone().sound(cue),
+        })
+    }
+
     fn delay(&self, seconds: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         if !seconds.is_finite() || seconds < 0.0 {

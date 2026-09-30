@@ -2487,6 +2487,12 @@ las dos opciones cambia la duración de los segmentos. Sin `easing`,
 y los revelados vectoriales (`wipe`, `clock_wipe`, `iris`, `blinds`, `push` y
 `slide`) usan `Easing.SMOOTH`.
 
+Todas aceptan también `sound=`, la ruta de un efecto de sonido (relativa a la
+carpeta de assets) que suena una vez, con volumen 1, cuando empieza la
+transición, es decir, al inicio del segmento al que entra. Se mezcla como
+`scene.media.audio` en la vista previa y en MP4/WebM y no cambia ninguna
+duración; consulta #link("/referencia/audio/")[Audio].
+
 Los revelados vectoriales recortan ambos segmentos con caminos animados dentro
 del marco visible de la cámara: el entrante se ve dentro de la región revelada
 y el saliente en el resto; si los fondos son distintos, el entrante se revela
@@ -2552,8 +2558,17 @@ scene.wait(1)
   ),
   returns: (type: "Transition", desc: [El entrante se desliza sobre el saliente.]),
   desc: [El segmento saliente queda quieto y el entrante lo cubre al recorrer un ancho o un alto de marco. Usa `push` para mover los dos. Otra dirección lanza `ValueError`.],
-  none,
-)
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>scene.assets.assets_dir("assets")
+>>>scene.segment("intro")
+>>>scene.wait(1)
+scene.segment("detalle", Transition.slide(0.5, "left", sound="whoosh.wav"))
+scene.wait(1)
+```
+]
 
 #api-entry(
   name: "Transition.push",
