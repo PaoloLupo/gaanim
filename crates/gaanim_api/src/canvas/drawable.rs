@@ -1538,6 +1538,30 @@ impl DrawableHandle {
         Ok(self)
     }
 
+    /// Emits `count` particles at once from this particle emitter at the
+    /// cursor, without moving it. Before the first `play` the burst happens
+    /// at the declaration time.
+    pub fn burst(self, count: u32) -> Result<Self, String> {
+        if super::particles::emitter_longest_life(
+            &self.spec.lock().expect("object spec poisoned").kind,
+        )
+        .is_none()
+        {
+            return Err("burst() requires a particle emitter made by scene.fx".to_string());
+        }
+        super::particles::check_burst(count)?;
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::ParticleBurst {
+                target: self.id,
+                count,
+            });
+        Ok(self)
+    }
+
     /// Set every vertex of a polygon or polyline, in the coordinates it was
     /// declared in. Before the first play this is the declared shape; after
     /// it, a cut at the cursor that `animate.points` can continue from.

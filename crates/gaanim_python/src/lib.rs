@@ -16,6 +16,7 @@ mod custom;
 mod easing;
 mod falloff;
 mod magic_move;
+mod particles;
 mod procedural;
 mod progress_ring;
 mod py3d;
@@ -62,6 +63,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<brush::PyBrush>()?;
     m.add_class::<brush::PyBackground>()?;
     m.add_class::<pyduplicate::PyDistribution>()?;
+    m.add_class::<particles::PyEmitter>()?;
     m.add_class::<brush::PyPostProcess>()?;
     m.add_class::<pylayout::PyAnchor>()?;
     m.add_class::<pylayout::PyDirection>()?;

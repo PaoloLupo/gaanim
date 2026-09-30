@@ -384,6 +384,11 @@ pub enum AnimationType {
         from: f64,
         to: f64,
     },
+    /// Emit `count` particles at once from a particle emitter, at the start
+    /// of the animation; its duration only holds the cursor.
+    ParticleBurst {
+        count: u32,
+    },
     /// Move the dash pattern of every drawn stroke to `to` (scene units).
     DashOffsetTo {
         to: f64,

@@ -2234,6 +2234,130 @@ scene.wait(4.0)
 Para un ejemplo con varilla, cota y estela, consulta
 `examples/pendulum_simulation.py` en el repositorio de Gaanim.
 
+== Partículas <particulas>
+
+`scene.fx.particles` crea un emisor de partículas determinista: chispas, polvo,
+humo, nieve o estallidos. Cada partícula tiene forma cerrada: la partícula `i`
+del flujo continuo nace en `inicio + i / rate`, las de una ráfaga nacen juntas
+en su instante, y su vida, velocidad, dirección, tamaño, color y giro salen de
+un generador con semilla indexado por `(seed, i)`. Con gravedad y arrastre
+lineal `k`, la posición es `p0 + v0·(1 − e^(−k·t))/k` más el término exacto de
+la gravedad. Así un seek muestra exactamente lo mismo que la reproducción, la
+exportación coincide con la vista previa y cada fotograma solo evalúa las
+partículas vivas en ese instante.
+
+El emisor es un `Drawable`: su opacidad, sus fundidos y sus transformaciones
+se aplican a todas sus partículas. Las partículas se dibujan en coordenadas de
+escena, así que mover el emisor se hace con `Emitter.at(...)`, no con
+`move_to`.
+
+#api-entry(
+  name: "Fx.particles",
+  kind: "method",
+  signature: "scene.fx.particles(emitter=None, *, rate=30.0, duration=None, lifetime=(0.6, 1.2), speed=(1.0, 2.0), direction=pi/2, spread=tau, gravity=(0, 0), drag=0.0, size=(0.03, 0.06), size_end=1.0, fade=0.3, spin=0.0, flutter=0.0, shape=\"circle\", color=WHITE, seed=0) -> Drawable",
+  params: (
+    (name: "emitter", type: "Emitter | (x, y) | Drawable | None", default: "(0, 0)", desc: [De dónde salen las partículas. Un punto o un objeto equivalen a `Emitter.point().at(...)`.]),
+    (name: "rate", type: "float", default: "30.0", desc: [Partículas por segundo desde el cursor de la declaración; `0` solo emite ráfagas.]),
+    (name: "duration", type: "float | None", default: "None", desc: [Segundos de emisión continua; `None` no se detiene.]),
+    (name: "lifetime", type: "float | (low, high)", default: "(0.6, 1.2)", desc: [Vida de cada partícula en segundos; positiva.]),
+    (name: "speed", type: "float | (low, high)", default: "(1.0, 2.0)", desc: [Velocidad inicial en unidades por segundo.]),
+    (name: "direction", type: "float", default: "pi/2", desc: [Dirección media en radianes (hacia arriba).]),
+    (name: "spread", type: "float", default: "tau", desc: [Ángulo completo del cono de direcciones.]),
+    (name: "gravity", type: "(x, y)", default: "(0, 0)", desc: [Aceleración constante, en unidades por segundo al cuadrado.]),
+    (name: "drag", type: "float", default: "0.0", desc: [Arrastre lineal por segundo; frena cada partícula hacia su velocidad terminal.]),
+    (name: "size", type: "float | (low, high)", default: "(0.03, 0.06)", desc: [Diámetro o lado, en unidades de escena.]),
+    (name: "size_end", type: "float", default: "1.0", desc: [Factor de tamaño al final de cada vida; `0` encoge hasta desaparecer.]),
+    (name: "fade", type: "float", default: "0.3", desc: [Fracción final de cada vida en la que la partícula se desvanece, entre 0 y 1.]),
+    (name: "spin", type: "float | (low, high)", default: "0.0", desc: [Velocidad de giro en radianes por segundo; un número gira en ambos sentidos hasta ese valor.]),
+    (name: "flutter", type: "float", default: "0.0", desc: [Amplitud del vaivén lateral, en unidades.]),
+    (name: "shape", type: "str", default: "\"circle\"", desc: [`"circle"`, `"square"`, `"rect"` (tira 2:1), `"triangle"` o `"streak"` (chispa estirada según su velocidad).]),
+    (name: "color", type: "ColorLike | Sequence[ColorLike] | Brush", default: "WHITE", desc: [Un color, una lista de la que cada partícula elige uno, o un degradado `Brush` a lo largo del cual cada partícula toma un color.]),
+    (name: "seed", type: "int", default: "0", desc: [La misma semilla da las mismas partículas.]),
+  ),
+  returns: (type: "Drawable", desc: [El emisor.]),
+  desc: [Los rangos aceptan un número o un par `(low, high)` y cada partícula elige dentro de ellos. Las ráfagas se añaden con `Drawable.burst` y `animate.burst`. Valores no finitos o fuera de rango, más de 16 colores, `rate * lifetime` por encima de 100 000, una forma desconocida o un objeto de otra escena lanzan `ValueError`.],
+)[
+```python
+# output: preview.webp
+# show-code: true
+import math
+from gaanim import GOLD, ORANGE, RED, Brush, Emitter, Scene
+
+scene = Scene(frame=(16, 9), background="#0b1020")
+logo = scene.geometry.star(5, 0.6, 0.25).fill(GOLD)
+sparks = scene.fx.particles(
+    emitter=Emitter.circle(radius=0.2).at(logo),
+    rate=60, lifetime=(0.6, 1.2), speed=(2.0, 4.0), spread=math.tau,
+    gravity=(0, -3), drag=0.8, size=(0.03, 0.08), shape="streak",
+    color=Brush.linear([GOLD, ORANGE, RED], start=(0, 0), end=(1, 0)), seed=9,
+)
+scene.play([logo.animate.move_to(3, 0).duration(1.5)])
+scene.play([sparks.animate.burst(80)])
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Fx.confetti",
+  kind: "method",
+  signature: "scene.fx.confetti(origin=None, count=120, *, seed=0, colors=None, speed=(6, 10), direction=pi/2, spread=0.9, gravity=(0, -6), lifetime=(2.6, 3.6), size=(0.12, 0.2)) -> Drawable",
+  desc: [Un _preset_ de `Fx.particles`: lanza `count` tiras de papel desde `origin` en el cursor, hacia `direction` dentro de un cono de `spread` radianes. Giran, se balancean y caen con `gravity` y arrastre, en una paleta festiva salvo que pases `colors`. Con `count=0` no lanza nada hasta `burst` o `animate.burst`, que lanzan más del mismo confeti. La misma `seed` lanza el mismo confeti. Un `count` por encima de 100 000 o valores no válidos lanzan `ValueError`.],
+)[
+```python
+# output: preview.webp
+# show-code: true
+from gaanim import Scene
+
+scene = Scene(frame=(16, 9), background="#101828")
+confetti = scene.fx.confetti(origin=(0, -4), count=120, seed=2)
+scene.wait(3)
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Emitter",
+  kind: "class",
+  signature: "Emitter.point() · circle(radius, *, edge=False) · rect(width, height) · line(length, angle=0.0) · at(target, *, offset=(0, 0))",
+  desc: [De dónde salen las partículas de `Fx.particles`. `point`: todas del mismo punto. `circle`: puntos uniformes dentro de un disco, o sobre su borde con `edge`. `rect`: puntos uniformes dentro de un rectángulo. `line`: puntos uniformes sobre un segmento girado `angle` radianes. `at` devuelve el mismo emisor centrado en un punto `(x, y)` o siguiendo un objeto, desplazado `offset`: cada partícula sale de donde estaba el objeto al nacer ella, así que un objeto que se mueve deja una estela. Dimensiones negativas o no finitas lanzan `ValueError`; un destino que no sea un punto ni un objeto lanza `TypeError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+snow = scene.fx.particles(Emitter.rect(16, 0.1).at((0, 4.6)), direction=-1.57, spread=0.3, speed=(0.5, 1.0), lifetime=(8, 10), rate=20, fade=0.1)
+print(Emitter.circle(0.2, edge=True).at((1, 2)))
+```
+]
+
+#api-entry(
+  name: "Drawable.burst",
+  kind: "method",
+  signature: "burst(count) -> Drawable",
+  desc: [Emite `count` partículas a la vez desde un emisor de `scene.fx` en el cursor, sin moverlo; antes del primer `scene.play` la ráfaga ocurre en el instante de la declaración. Un `count` menor que 1 o mayor que 100 000, o un objeto que no sea un emisor, lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+dust = scene.fx.particles((0, -2), rate=0, speed=(0.5, 1.5), lifetime=(1, 2))
+dust.burst(40)
+scene.wait(2)
+```
+]
+
+#api-entry(
+  name: "Anim.burst",
+  kind: "method",
+  signature: "animate.burst(count) -> Anim",
+  desc: [Emite `count` partículas a la vez cuando empieza la animación. Si no fijas `duration`, la animación dura la vida más larga de las partículas, así que el cursor espera a que se apaguen. No se combina con destinos de propiedad ni con otro efecto en el mismo `Anim`. Los mismos errores que `Drawable.burst`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+sparks = scene.fx.particles((0, 0), rate=0, speed=(2, 4), color=[GOLD, RED], seed=9)
+scene.play([sparks.animate.burst(80)])
+```
+]
+
 == Falloffs: influencia por instancia <falloffs>
 
 Un `Falloff` es un valor por instancia calculado a partir de su posición en el

@@ -981,6 +981,7 @@ pub(crate) fn spawn_name(kind: &SpawnKind) -> &'static str {
         SpawnKind::FillLevel { .. } => "fill_level",
         SpawnKind::Boolean { .. } => "boolean",
         SpawnKind::Connect { .. } => "connect",
+        SpawnKind::Particles(_) => "particles",
         SpawnKind::Circle(_) => "circle",
         SpawnKind::Rect(_, _) => "rect",
         SpawnKind::RoundedRect(_, _, _) => "rounded_rect",

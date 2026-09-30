@@ -9,6 +9,8 @@ pub use falloff::{
     ColorRamp, FalloffChannel, FalloffDrive, FalloffEffect, FalloffExpr, FalloffOffset,
     FalloffShape, FalloffTarget, ScheduledEffect,
 };
+pub mod particles;
+pub use particles::{AnchorTrail, PARTICLE_FADE_LEVELS, ParticleEmitter, ParticleLayer};
 pub mod squash;
 pub use squash::{SQUASH_STEP, SquashStretch};
 pub mod paint;

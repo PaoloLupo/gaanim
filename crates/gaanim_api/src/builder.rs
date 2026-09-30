@@ -1537,6 +1537,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::DashOffsetTo { .. } => "DashOffset",
             AnimationType::PathPointsTo { .. } => "Points",
             AnimationType::CountTo { .. } => "Count",
+            AnimationType::ParticleBurst { .. } => "Burst",
             AnimationType::SurroundingRectRetarget { .. } => "Retarget",
             AnimationType::StrokeColorTo { .. } => "Stroke",
             AnimationType::StrokeWidthTo { .. } => "StrokeW",
@@ -3182,6 +3183,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_count_internal(anim, track);
             return;
         }
+        if let AnimationType::ParticleBurst { count } = anim.anim_type {
+            self.schedule_particle_burst(anim.target, self.current_time + anim.delay, count);
+            return;
+        }
         if matches!(anim.anim_type, AnimationType::PathTrim { .. }) {
             self.play_path_trim_internal(anim, track);
             return;
@@ -3533,6 +3538,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::DashOffsetTo { .. }
             | AnimationType::PathPointsTo { .. }
             | AnimationType::CountTo { .. }
+            | AnimationType::ParticleBurst { .. }
             | AnimationType::DrawBorderThenFill { .. }
             | AnimationType::Flash { .. }
             | AnimationType::Circumscribe { .. }
@@ -5652,6 +5658,22 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 }),
             );
         }
+    }
+
+    /// Emit `count` particles from the emitter `target` at `time`. A burst is
+    /// part of the emitter's schedule rather than a clip: the particles are a
+    /// pure function of time, so seeks before `time` show none of them.
+    pub(crate) fn schedule_particle_burst(&mut self, target: ObjectId, time: f64, count: u32) {
+        let Some(entity) = self.states.get(target).map(|state| state.entity) else {
+            return;
+        };
+        self.commands
+            .entity(entity)
+            .queue(move |mut entity: bevy::prelude::EntityWorldMut| {
+                if let Some(mut emitter) = entity.get_mut::<gaanim_animation::ParticleEmitter>() {
+                    emitter.system.bursts.push((time, count));
+                }
+            });
     }
 
     /// One clip per member of a repeater group: copy `i` shows while the

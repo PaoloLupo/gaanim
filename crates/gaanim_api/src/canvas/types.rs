@@ -547,6 +547,8 @@ pub enum SpawnKind {
         /// Draw longer links fainter.
         fade: bool,
     },
+    /// Deterministic particles, drawn in one layer per color and fade level.
+    Particles(Box<super::particles::ParticleSpawn>),
     /// A materialized vector boolean. Sources remain visible and independent.
     Boolean {
         sources: Vec<ObjectId>,
@@ -1953,6 +1955,32 @@ impl Anim {
             .ok_or("count() requires a group made by repeat() or duplicate()")?;
         crate::canvas::duplicate::check_count(count, copies)?;
         Ok(self.update_properties(|properties| properties.count = Some((from, count))))
+    }
+
+    /// Emits `count` particles at once from a particle emitter
+    /// (`SceneModel::particles` or `SceneModel::confetti`) at the start of
+    /// this animation. Unless a duration is set, the animation lasts the
+    /// particles' longest life, so the cursor waits for them to settle.
+    pub fn burst(mut self, count: u32) -> Result<Self, String> {
+        let spec = self
+            .property_spec
+            .as_ref()
+            .ok_or("burst() requires Drawable.animate()")?;
+        let longest = super::particles::emitter_longest_life(
+            &spec.lock().expect("object spec poisoned").kind,
+        )
+        .ok_or("burst() requires a particle emitter made by scene.fx")?;
+        super::particles::check_burst(count)?;
+        if !self.inner.anim_type.is_empty_properties() {
+            return Err(
+                "burst() cannot be combined with property targets or another effect in one Anim"
+                    .to_string(),
+            );
+        }
+        if !self.duration_explicit {
+            self.inner.duration = longest;
+        }
+        Ok(self.effect(AnimationType::ParticleBurst { count }))
     }
 
     /// Animates the dash offset of every stroke, in scene units.

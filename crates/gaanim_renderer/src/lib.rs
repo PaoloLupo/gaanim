@@ -45,6 +45,7 @@ impl Plugin for GaanimDerivedGeometryPlugin {
                 pipeline::resolve_fill_level_system,
                 pipeline::resolve_vector_outline_system,
                 pipeline::resolve_connect_system,
+                pipeline::resolve_particles_system,
             )
                 .chain()
                 // A boolean or a mask may use a live frame as an operand, so

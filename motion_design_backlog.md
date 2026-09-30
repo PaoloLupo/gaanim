@@ -159,7 +159,7 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
 | ☑ | [PR-04](#pr-04--duplicador-y-repeater-con-distribuciones) | Duplicador/Repeater con distribuciones | M | ★★★ | — | [#148](https://github.com/PaoloLupo/gaanim/issues/148) |
 | ☑ | [PR-05](#pr-05--campos-y-falloffs) | Campos y falloffs estilo Cavalry | M | ★★★ | PR-02, PR-04 | [#149](https://github.com/PaoloLupo/gaanim/issues/149) |
 | ☑ | [PR-06](#pr-06--conexiones-tipo-plexus) | Conexiones tipo plexus | S | ★ | PR-04 | [#150](https://github.com/PaoloLupo/gaanim/issues/150) |
-| ☐ | [PR-07](#pr-07--emisor-de-partículas-determinista) | Emisor de partículas determinista | M | ★★★ | PR-02 | [#151](https://github.com/PaoloLupo/gaanim/issues/151) |
+| ☑ | [PR-07](#pr-07--emisor-de-partículas-determinista) | Emisor de partículas determinista | M | ★★★ | PR-02 | [#151](https://github.com/PaoloLupo/gaanim/issues/151) |
 | ☐ | [PR-08](#pr-08--física-analítica-ligera) | Física analítica ligera (`throw`, `inertia`) | M | ★★ | — | [#152](https://github.com/PaoloLupo/gaanim/issues/152) |
 | ☑ | [TR-02](#tr-02--dash-offset-animado) | Dash offset animado | S | ★★ | — | [#153](https://github.com/PaoloLupo/gaanim/issues/153) |
 | ☐ | [TR-04](#tr-04--modificadores-de-path) | Modificadores de path no destructivos | M | ★★ | — | [#154](https://github.com/PaoloLupo/gaanim/issues/154) |
@@ -722,6 +722,15 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
   - Los atributos salen de hash(seed, i).
   - Un seek cuesta O(partículas vivas).
   - `scene.fx` sería un namespace nuevo para partículas y presets de efectos.
+- **Hecho:** `scene.fx.particles(emitter, ...)` devuelve un `Drawable` cuyas partículas
+  se evalúan en forma cerrada (`gaanim_math::particles`) y se dibujan en una capa por
+  color y nivel de desvanecimiento. `Emitter.point/circle/rect/line(...).at(punto u
+  objeto)`: un emisor anclado a un objeto muestrea su posición en una rejilla fija de
+  1/30 s, así que cada partícula sale de donde estaba el ancla al nacer. Las ráfagas son
+  `Drawable.burst(n)` y `animate.burst(n)`; `scene.fx.confetti(origin, count, seed)` es
+  el preset. El benchmark es `examples/performance_particles.py` (unas 2 000 partículas
+  vivas por fotograma) con `tests/benchmark_runtime.py --scene`, más el test ignorado
+  `particles_benchmark_2000` de `gaanim_math`.
 - **Hecho cuando:** El seek es exacto, existe un preset `confetti` y hay benchmark con
   2 000 partículas.
 

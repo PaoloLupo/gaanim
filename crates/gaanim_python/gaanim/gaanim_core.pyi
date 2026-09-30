@@ -401,6 +401,57 @@ class Background:
 
 BackgroundLike: TypeAlias = Paint | Background
 
+class Emitter:
+    """Where ``scene.fx.particles`` releases its particles: a shape at a point or on a drawable.
+
+    Every factory raises ``ValueError`` for negative or non-finite dimensions.
+    """
+    @staticmethod
+    def point() -> Emitter:
+        """Every particle leaves from one point, the origin until ``at`` moves it.
+
+        Example:
+            emitter = Emitter.point().at((0, -2))
+        """
+        ...
+    @staticmethod
+    def circle(radius: float, *, edge: bool = False) -> Emitter:
+        """Particles leave from uniform points inside a disc of ``radius``, or on its rim with ``edge``.
+
+        Example:
+            emitter = Emitter.circle(radius=0.2).at(logo)
+        """
+        ...
+    @staticmethod
+    def rect(width: float, height: float) -> Emitter:
+        """Particles leave from uniform points inside a ``width`` x ``height`` rectangle.
+
+        Example:
+            snow = scene.fx.particles(Emitter.rect(16, 0.1).at((0, 4.6)), direction=-math.pi / 2, spread=0.3)
+        """
+        ...
+    @staticmethod
+    def line(length: float, angle: float = 0.0) -> Emitter:
+        """Particles leave from uniform points along a segment of ``length`` turned by ``angle`` radians.
+
+        Example:
+            emitter = Emitter.line(6.0).at((0, -3))
+        """
+        ...
+    def at(self, target: tuple[float, float] | Drawable, *, offset: tuple[float, float] = (0.0, 0.0)) -> Emitter:
+        """The same emitter centred on a scene point, or following a drawable, shifted by ``offset``.
+
+        With a drawable, each particle leaves from where the drawable's
+        position was at the particle's birth, following its animations; the
+        drawable must belong to the same scene as the emitter. Returns a new
+        ``Emitter``. A non-finite point raises ``ValueError``; any other target
+        raises ``TypeError``.
+
+        Example:
+            sparks = scene.fx.particles(Emitter.circle(0.2).at(logo, offset=(0, 0.5)))
+        """
+        ...
+
 class Distribution:
     """Where ``Geometry.duplicate`` places copies: a grid, circle, path, random cloud or spiral.
 
@@ -1853,6 +1904,20 @@ class Anim:
             scene.play([tri.animate.points([(-1, 1), (1, 1), (0, -1)]).duration(1.0)])
         """
         ...
+    def burst(self, count: int) -> Anim:
+        """Emit ``count`` particles at once from a ``scene.fx`` emitter when this animation starts.
+
+        The particles leave together, each with its own seeded lifetime,
+        speed, heading, size and color. Unless ``duration`` is set, the
+        animation lasts the particles' longest life, so the cursor waits for
+        them to settle. It cannot share an ``Anim`` with property targets or
+        another effect. A count below 1 or above 100000, or a drawable that is
+        not a particle emitter, raises ``ValueError``.
+
+        Example:
+            scene.play([sparks.animate.burst(80)])
+        """
+        ...
     def count(self, count: float) -> Anim:
         """Animate how many copies of a ``repeat`` or ``duplicate`` group show.
 
@@ -2807,6 +2872,17 @@ class Drawable:
 
         Example:
             stroke = scene.geometry.arc(0, 0, 2.0, 0.0, 3.0).no_fill().stroke(GOLD, 0.2).stroke_taper(0.3, 0.5)
+        """
+        ...
+    def burst(self, count: int) -> Drawable:
+        """Emit ``count`` particles at once from this ``scene.fx`` emitter at the cursor.
+
+        The cursor does not move; before the first ``scene.play`` the burst
+        happens at the declaration time. A count below 1 or above 100000, or a
+        drawable that is not a particle emitter, raises ``ValueError``.
+
+        Example:
+            sparks.burst(40)
         """
         ...
     def count(self, count: float) -> Drawable:
@@ -7446,7 +7522,92 @@ class SlideKit:
         ...
 
 class Fx:
-    """Scene-owned screen effects: emphasis that acts on the whole frame."""
+    """Scene-owned effects: whole-frame emphasis, particle emitters and effect presets."""
+    def particles(
+        self,
+        emitter: Emitter | tuple[float, float] | Drawable | None = None,
+        *,
+        rate: float = 30.0,
+        duration: Optional[float] = None,
+        lifetime: float | tuple[float, float] | None = None,
+        speed: float | tuple[float, float] | None = None,
+        direction: float = 1.5707963267948966,
+        spread: float = 6.283185307179586,
+        gravity: tuple[float, float] = (0.0, 0.0),
+        drag: float = 0.0,
+        size: float | tuple[float, float] | None = None,
+        size_end: float = 1.0,
+        fade: float = 0.3,
+        spin: float | tuple[float, float] | None = None,
+        flutter: float = 0.0,
+        shape: Literal["circle", "square", "rect", "triangle", "streak"] = "circle",
+        color: ColorLike | Sequence[ColorLike] | Brush | None = None,
+        seed: int = 0,
+    ) -> Drawable:
+        """Create a deterministic particle emitter and return it as a drawable.
+
+        Particles leave ``emitter`` (an ``Emitter``, an ``(x, y)`` point or a
+        drawable to follow; the origin by default) continuously, ``rate`` per
+        second from the cursor, for ``duration`` seconds (``None`` never
+        stops; ``rate=0`` emits only bursts), and in bursts from
+        ``Drawable.burst`` and ``animate.burst``. Each particle is a closed-form
+        function of the timeline time and of its index and ``seed``, so a seek
+        shows exactly what playback shows, and a frame only evaluates the
+        particles alive then.
+
+        Ranges accept a number or a ``(low, high)`` pair; each particle draws
+        inside them. ``lifetime`` (0.6 to 1.2 s by default) must be positive.
+        ``speed`` (1 to 2 units/s) heads within ``spread`` radians around
+        ``direction`` (up by default; ``spread`` defaults to a full turn).
+        ``gravity`` accelerates every particle and ``drag`` slows it linearly
+        (per second). ``size`` (0.03 to 0.06 units) is the diameter or side and
+        scales to ``size * size_end`` by the end of each life; the last
+        ``fade`` fraction of each life fades it out. ``spin`` is a rotation
+        speed in radians per second (a single number spins either way up to
+        it) and ``flutter`` sways particles sideways by that many units.
+        ``shape`` is ``"circle"``, ``"square"``, ``"rect"`` (a 2:1 strip),
+        ``"triangle"`` or ``"streak"`` (a spark stretched along its velocity).
+        ``color`` is one color (white by default), a sequence of colors each
+        particle picks from, or a gradient ``Brush`` each particle takes a
+        color along. Opacity, fades and transforms of the returned drawable
+        apply to all its particles.
+
+        Invalid values, more than 16 colors, ``rate * lifetime`` above 100000
+        or a drawable of another scene raise ``ValueError``; an unknown
+        ``shape`` raises ``ValueError``.
+
+        Example:
+            sparks = scene.fx.particles(Emitter.circle(0.2).at(logo), rate=60, speed=(2, 4), gravity=(0, -3), drag=0.8, color=[GOLD, RED], seed=9)
+        """
+        ...
+    def confetti(
+        self,
+        origin: Emitter | tuple[float, float] | Drawable | None = None,
+        count: int = 120,
+        *,
+        seed: int = 0,
+        colors: ColorLike | Sequence[ColorLike] | Brush | None = None,
+        speed: float | tuple[float, float] | None = None,
+        direction: float = 1.5707963267948966,
+        spread: float = 0.9,
+        gravity: tuple[float, float] = (0.0, -6.0),
+        lifetime: float | tuple[float, float] | None = None,
+        size: float | tuple[float, float] | None = None,
+    ) -> Drawable:
+        """Throw ``count`` pieces of confetti from ``origin`` at the cursor and return the emitter.
+
+        A preset of ``particles``: paper strips (``shape="rect"``, 0.12 to 0.2
+        units) leave upward within ``spread`` radians of ``direction`` at 6 to
+        10 units/s, spin, sway and fall under ``gravity`` with drag for 2.6 to
+        3.6 s, in a festive palette unless ``colors`` is given. ``count=0``
+        throws nothing until ``burst``/``animate.burst``, which throw more of
+        the same confetti. The same ``seed`` throws the same confetti.
+        ``count`` above 100000 or invalid values raise ``ValueError``.
+
+        Example:
+            confetti = scene.fx.confetti(origin=(0, -4), count=120, seed=2)
+        """
+        ...
     def spotlight(self, target: Drawable | TextSelection | Sequence[Drawable | TextSelection], *, dim: float = 0.7, padding: Optional[Padding] = None, corner_radius: float = 0.1) -> Anim:
         """Dim everything outside ``target`` while an overlay with a hole around it fades in and out.
 
