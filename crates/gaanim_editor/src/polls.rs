@@ -937,15 +937,16 @@ impl AudiencePolls {
     }
 
     /// "New game": the first press asks for a second one, which erases every
-    /// vote, answer and player.
-    pub(crate) fn press_reset(&mut self) {
+    /// vote, answer and player. Returns whether the game was reset, so the
+    /// presentation goes back to where the game begins.
+    pub(crate) fn press_reset(&mut self) -> bool {
         if self.client.is_none() {
-            return;
+            return false;
         }
         if !self.reset_armed() {
             self.confirm_reset = Some(Instant::now());
             gaanim_core::console::info("polls", "press again (R) to start a new game");
-            return;
+            return false;
         }
         self.confirm_reset = None;
         if let Some(client) = &mut self.client {
@@ -955,6 +956,7 @@ impl AudiencePolls {
             client.after_reset = true;
             gaanim_core::console::success("polls", "started a new game");
         }
+        true
     }
 
     pub(crate) fn cancel_reset(&mut self) {
@@ -1119,6 +1121,7 @@ mod tests {
             relay: Some(relay),
             code: code.into(),
             lobby: true,
+            game_segment: None,
         })
         .unwrap();
         let phone = https_agent().unwrap();

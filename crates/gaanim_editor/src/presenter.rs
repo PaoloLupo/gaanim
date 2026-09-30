@@ -609,6 +609,15 @@ fn apply_presentation_action(
 
 /// Route presentation shortcuts according to the focused native window.
 #[allow(clippy::too_many_arguments)]
+/// After a new game, go back to where the game begins, so the room fills
+/// again from the lobby or the first question.
+fn restart_game(timeline: &mut Timeline) {
+    if let Some(start) = timeline.game_start() {
+        timeline.is_playing = false;
+        timeline.seek_request = Some(start);
+    }
+}
+
 pub(crate) fn presentation_input_system(
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -677,8 +686,9 @@ pub(crate) fn presentation_input_system(
         #[cfg(not(target_arch = "wasm32"))]
         if keys.just_pressed(KeyCode::KeyR)
             && let Some(mut polls) = polls
+            && polls.press_reset()
         {
-            polls.press_reset();
+            restart_game(&mut timeline);
         }
     }
     if primary_focused && !pointer_captured && mouse.just_pressed(MouseButton::Left) {
@@ -2317,8 +2327,8 @@ pub(crate) fn presenter_view_system(
         if let Some(name) = &audience_requests.kick {
             polls.kick(name);
         }
-        if audience_requests.reset {
-            polls.press_reset();
+        if audience_requests.reset && polls.press_reset() {
+            restart_game(&mut timeline);
         }
         if audience_requests.cancel_reset {
             polls.cancel_reset();

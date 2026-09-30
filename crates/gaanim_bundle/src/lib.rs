@@ -378,6 +378,8 @@ struct SessionRecord {
     code: String,
     #[serde(default)]
     lobby: bool,
+    #[serde(default)]
+    game_segment: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -408,6 +410,7 @@ fn write_polls(scene: &SceneData) -> Result<Vec<u8>> {
             relay: session.relay.clone(),
             code: session.code.clone(),
             lobby: session.lobby,
+            game_segment: session.game_segment,
         }),
         polls: scene
             .polls
@@ -450,6 +453,7 @@ fn read_polls(bytes: &[u8], scene: &mut SceneData) -> Result<()> {
         relay: session.relay,
         code: session.code,
         lobby: session.lobby,
+        game_segment: session.game_segment,
     });
     scene.polls = entry
         .polls
@@ -1598,6 +1602,7 @@ mod tests {
                 relay: Some("https://relay.example.dev".into()),
                 code: "ABC234".into(),
                 lobby: true,
+                game_segment: Some(3),
             }),
             stop_gates: vec![gate.clone()],
             ..Default::default()
@@ -1607,6 +1612,7 @@ mod tests {
         // No poll, yet the session and its lobby are kept.
         assert!(bundle.scene.polls.is_empty());
         assert!(bundle.scene.poll_session.as_ref().unwrap().lobby);
+        assert_eq!(bundle.scene.poll_session.as_ref().unwrap().game_segment, Some(3));
         assert_eq!(bundle.scene.stop_gates, [gate]);
     }
 
@@ -1622,6 +1628,7 @@ mod tests {
                     relay: Some("https://relay.example.dev".into()),
                     code: "ABC234".into(),
                     lobby: false,
+                    game_segment: None,
                 }),
                 polls,
                 ..scene

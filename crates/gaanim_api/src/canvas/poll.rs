@@ -322,6 +322,9 @@ impl SceneModel {
                 return Err(PollError::NoSession);
             }
             state.poll_lobby = true;
+            if state.poll_lobby_segment.is_none() {
+                state.poll_lobby_segment = Some(state.active_idx);
+            }
         }
         Ok(AudienceHandle {
             state: self.state.clone(),

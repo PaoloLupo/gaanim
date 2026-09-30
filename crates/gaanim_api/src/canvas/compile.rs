@@ -2721,12 +2721,13 @@ impl SceneModel {
                 },
             )
             .collect();
-        let (polls, poll_session, poll_lobby, stop_gates, live_zones) = {
+        let (polls, poll_session, poll_lobby, lobby_segment, stop_gates, live_zones) = {
             let state = self.state.lock().expect("canvas state poisoned");
             (
                 state.polls.clone(),
                 state.poll_session.clone(),
                 state.poll_lobby,
+                state.poll_lobby_segment,
                 state.stop_gates.clone(),
                 state.live_zones.clone(),
             )
@@ -2736,6 +2737,15 @@ impl SceneModel {
                 .get(segment)
                 .map(|metadata: &SegmentMetadata| metadata.start_time + local)
         };
+        // The game begins at the segment that first shows the audience or
+        // opens a poll.
+        let game_segment = polls
+            .iter()
+            .map(|poll| poll.open.0)
+            .chain(lobby_segment)
+            .min()
+            .and_then(|segment| segment_metadata.get(segment))
+            .map(|metadata| metadata.id);
         builder.timeline.set_polls(
             polls
                 .into_iter()
@@ -2768,6 +2778,7 @@ impl SceneModel {
                 relay: session.relay,
                 code: session.code,
                 lobby: poll_lobby,
+                game_segment,
             }),
         );
         // Always set, so a reload without zones clears the previous ones.
@@ -14849,6 +14860,8 @@ mod tests {
             relay: Some("https://relay.example.dev".into()),
             code: "ABC234".into(),
         });
+        canvas.segment("Intro", None).unwrap();
+        canvas.wait(2.0);
         canvas.segment("Lobby", None).unwrap();
         let audience = canvas
             .audience(vec![" Ana ".into(), "Beto".into()])
@@ -14872,6 +14885,8 @@ mod tests {
         let timeline = compiled_timeline(&canvas);
         assert!(timeline.polls.is_empty());
         assert!(timeline.poll_session.as_ref().unwrap().lobby);
+        // A new game goes back to the lobby, after the intro.
+        assert_eq!(timeline.game_start(), Some(2.0));
     }
 
     #[test]

@@ -515,6 +515,10 @@ pub struct PollSessionInfo {
     /// nickname as soon as they open the page, not at the first quiz.
     #[cfg_attr(feature = "serde", serde(default))]
     pub lobby: bool,
+    /// Where the game begins: the segment (by id) that first shows the
+    /// audience or opens a poll. A new game goes back to its start.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub game_segment: Option<u32>,
 }
 
 /// Most segment checkpoints kept at once; each holds a whole world snapshot.
@@ -656,6 +660,20 @@ impl Timeline {
     /// opens, the poll of the segment shown there wins: a stop at the end
     /// of a segment keeps that segment, and its poll, until the
     /// presentation advances.
+    /// Where the game begins, for starting a new one: the start of the
+    /// segment the scene set, or of the first poll's.
+    pub fn game_start(&self) -> Option<f64> {
+        let segment = self
+            .poll_session
+            .as_ref()
+            .and_then(|session| session.game_segment)
+            .or_else(|| self.polls.first().map(|poll| poll.segment))?;
+        self.segments
+            .iter()
+            .find(|candidate| candidate.id == segment)
+            .map(|segment| segment.start_time)
+    }
+
     pub fn poll_open_at(&self, time: f64) -> Option<&TimelinePoll> {
         const EPSILON: f64 = 1e-5;
         let shown = self

@@ -59,6 +59,8 @@ pub(crate) struct CanvasState {
     pub(crate) poll_session: Option<super::poll::PollSession>,
     /// The scene shows its audience, so phones join as they arrive.
     pub(crate) poll_lobby: bool,
+    /// Segment where the scene first showed its audience.
+    pub(crate) poll_lobby_segment: Option<usize>,
     /// Stops that advance once the audience meets a condition: segment
     /// index, local time of the stop, condition.
     pub(crate) stop_gates: Vec<(usize, f64, gaanim_timeline::timeline::GateCondition)>,
@@ -90,6 +92,7 @@ impl CanvasState {
             polls: Vec::new(),
             poll_session: None,
             poll_lobby: false,
+            poll_lobby_segment: None,
             stop_gates: Vec::new(),
             live_zones: Vec::new(),
         }
