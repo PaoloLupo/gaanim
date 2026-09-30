@@ -494,20 +494,41 @@ scene.stop("dos-placas", loop=sequence(
 ]
 
 #api-entry(
+  name: "Scene.rehearsal",
+  kind: "method",
+  params: (
+    (name: "players", type: "int | Sequence[str]", default: "12", desc: [Cuántos jugadores (Ana, Beto, Caro…) o sus apodos, en orden de llegada; de 1 a 200.]),
+    (name: "seed", type: "int", default: "0", desc: [Elige otro grupo: otros tiempos, respuestas y personajes.]),
+    (name: "arrive", type: "float | None", default: "None", desc: [Segundos en que entran todos; por defecto, entre `scene.audience()` y la primera pausa de la sala.]),
+    (name: "skill", type: "float", default: "0.6", desc: [Qué parte de las preguntas aciertan en promedio, de 0 a 1.]),
+    (name: "speed", type: "float", default: "0.5", desc: [Qué tan pronto responden, de 0 (al final) a 1 (al instante).]),
+  ),
+  returns: (type: "None", desc: []),
+  desc: [Describe el público inventado que juega la escena fuera de una presentación en vivo. En la previsualización, la exportación y las capturas sus jugadores entran a la sala, responden cada encuesta y cuestionario, el reloj baja y la clasificación suma sus puntos; las zonas vivas también lo usan. Las respuestas de una pregunta llegan entre que se abre y la pausa donde la presentación las esperaría. Los mismos argumentos dan siempre el mismo ensayo. Sin llamarlo ensayan 12 jugadores. Sin jugadores o con más de 200, un apodo vacío o repetido, `skill` o `speed` fuera de 0–1 o un `arrive` negativo lanzan `ValueError`. Ver #link("/guias/presentaciones/#ensayo")[Ensayo].],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.rehearsal(24, seed=3, skill=0.7)
+audience = scene.audience()
+```
+]
+
+#api-entry(
   name: "Scene.poll",
   kind: "method",
   params: (
     (name: "question", type: "str", desc: [Pregunta que responde la audiencia.]),
     (name: "options", type: "Sequence[str]", desc: [Entre 2 y 6 respuestas distintas.]),
-    (name: "preview", type: "Sequence[int] | None", default: "None", desc: [Un conteo por respuesta que se usa en la previsualización, la exportación y las capturas en lugar de los votos reales; ceros por defecto.]),
+    (name: "rehearse", type: "Sequence[float] | None", default: "None", desc: [Un peso por respuesta para el voto del ensayo (`[1, 3]` hace la segunda tres veces más popular); sin él vota al azar.]),
   ),
   returns: (type: "Poll", desc: [Los datos de la encuesta; no dibuja nada.]),
-  desc: [Abre una encuesta en el cursor. Recibe votos mientras una presentación está entre este punto y `poll.close()`, o el final del segmento. La escena decide cómo mostrarla con los datos de `Poll`: `qr(tamaño)` y `bar(respuesta, ...)` devuelven drawables; `votes(i)`, `share(i)` y `total()` devuelven `Parameter` que siguen los votos en vivo; `code` y `url` son el código de la sesión y la dirección de votación. Al presentar un paquete `.gaanim` solo las barras siguen los votos en vivo; lo que dependa de un `Parameter` muestra los valores de `preview`. Ver #link("/guias/presentaciones/#encuestas-a-la-audiencia")[Encuestas a la audiencia]. Una pregunta o respuesta vacía, una respuesta repetida, menos de 2 o más de 6 respuestas, o un `preview` de otro largo lanzan `ValueError`.],
+  desc: [Abre una encuesta en el cursor. Recibe votos mientras una presentación está entre este punto y `poll.close()`, o el final del segmento. La escena decide cómo mostrarla con los datos de `Poll`: `qr(tamaño)` y `bar(respuesta, ...)` devuelven drawables; `votes(i)`, `share(i)` y `total()` devuelven `Parameter` que siguen los votos en vivo; `code` y `url` son el código de la sesión y la dirección de votación. Al presentar un paquete `.gaanim` solo las barras siguen los votos en vivo; lo que pase por un `computed` muestra lo que se grabó. Fuera de una presentación vota el ensayo (`scene.rehearsal`). Ver #link("/guias/presentaciones/#encuestas-a-la-audiencia")[Encuestas a la audiencia]. Una pregunta o respuesta vacía, una respuesta repetida, menos de 2 o más de 6 respuestas, o pesos de `rehearse` que no sean uno por respuesta, negativos o todos cero lanzan `ValueError`.],
 )[
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
-poll = scene.poll("¿Qué crece más rápido?", ["x²", "2ˣ"], preview=[4, 9])
+poll = scene.poll("¿Qué crece más rápido?", ["x²", "2ˣ"], rehearse=[1, 2])
 card = scene.geometry.rounded_rect(3.4, 3.4, 0.2).fill(WHITE).no_stroke().move_to(-4, 0)
 qr = poll.qr(3.0).move_to(-4, 0)
 bar = poll.bar(1, length=6).fill(GOLD).no_stroke().move_to(2, 0)
@@ -525,15 +546,15 @@ scene.stop()
     (name: "correct", type: "int", desc: [Índice de la respuesta correcta (0 para la primera).]),
     (name: "time", type: "int", default: "20", desc: [Segundos para responder, de 5 a 300, medidos por el reloj del relay.]),
     (name: "points", type: "int", default: "1000", desc: [Puntos máximos de una respuesta correcta, de 100 a 10000.]),
-    (name: "preview", type: "Sequence[int] | None", default: "None", desc: [Conteos por respuesta para la previsualización y la exportación.]),
+    (name: "rehearse", type: "float | Sequence[float] | None", default: "None", desc: [La parte del ensayo que acierta, de 0 a 1 (`0.3` para una pregunta difícil), o un peso por respuesta; sin él responden según su `skill`.]),
   ),
   returns: (type: "Poll", desc: [Los datos del cuestionario, como `scene.poll`.]),
-  desc: [Abre un cuestionario al estilo Kahoot: una encuesta con respuesta correcta. Los teléfonos se unen al juego con un apodo, responden una sola vez antes de que se acabe el tiempo y una respuesta correcta gana `points × (1 − tiempo / time / 2)`. `quiz.reveal()` marca dónde la presentación revela la respuesta en los teléfonos, `quiz.remaining()` es la cuenta atrás en segundos y `scene.leaderboard` da la clasificación. Ver #link("/guias/presentaciones/#modo-competencia")[Modo competencia].],
+  desc: [Abre un cuestionario al estilo Kahoot: una encuesta con respuesta correcta. Los teléfonos se unen al juego con un apodo, responden una sola vez antes de que se acabe el tiempo y una respuesta correcta gana `points × (1 − tiempo / time / 2)`. `quiz.reveal()` marca dónde la presentación revela la respuesta en los teléfonos, `quiz.remaining()` es la cuenta atrás en segundos y `scene.leaderboard` da la clasificación. Una parte de `rehearse` fuera de 0–1 lanza `ValueError`. Ver #link("/guias/presentaciones/#modo-competencia")[Modo competencia].],
 )[
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
-quiz = scene.quiz("¿Derivada de x²?", ["x", "2x", "x²/2"], correct=1, time=20)
+quiz = scene.quiz("¿Derivada de x²?", ["x", "2x", "x²/2"], correct=1, time=20, rehearse=0.6)
 clock = scene.viz.readout(quiz.remaining(), format=".0f").move_to(-5, 3)
 scene.stop()
 quiz.reveal()
@@ -544,16 +565,13 @@ scene.stop()
 #api-entry(
   name: "Scene.leaderboard",
   kind: "method",
-  params: (
-    (name: "preview", type: "Sequence[tuple[str, int]]", default: "()", desc: [Apodos y puntos que se muestran fuera de una presentación en vivo.]),
-  ),
   returns: (type: "Leaderboard", desc: [Los datos de la clasificación; no dibuja nada.]),
-  desc: [La clasificación del juego: los jugadores de los cuestionarios de la escena, de mejor a peor. Cada método recibe un puesto (0 para el primero): `name(i, size=, weight=, font=, align=)` devuelve el apodo como texto en vivo, `points(i)` y `players()` devuelven `Parameter` y `bar(i, ...)` una barra relativa al primero. Con ellos diseñas una lista, un podio o lo que quieras. Todo sigue a los resultados en vivo también al presentar un `.gaanim`, que guarda los glifos de los apodos.],
+  desc: [La clasificación del juego: los jugadores de los cuestionarios de la escena, de mejor a peor. Cada método recibe un puesto (0 para el primero): `name(i, size=, weight=, font=, align=)` devuelve el apodo como texto en vivo, `points(i)` y `players()` devuelven `Parameter` y `bar(i, ...)` una barra relativa al primero. Con ellos diseñas una lista, un podio o lo que quieras. Todo sigue a los resultados en vivo también al presentar un `.gaanim`, que guarda los glifos de los apodos; fuera de una presentación ordena a los jugadores del ensayo por los puntos de sus respuestas.],
 )[
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
-board = scene.leaderboard(preview=[("Ana", 2890), ("Beto", 2410)])
+board = scene.leaderboard()
 for rank in range(2):
     board.name(rank, size=0.5).move_to(-3, 1 - rank)
     scene.viz.readout(board.points(rank), format=".0f").move_to(3, 1 - rank)
@@ -597,16 +615,13 @@ scene.stop(until=quiz.answered(share=0.8) | quiz.time_up())
 #api-entry(
   name: "Scene.audience",
   kind: "method",
-  params: (
-    (name: "preview", type: "Sequence[str]", default: "()", desc: [Apodos que se muestran fuera de una presentación en vivo, en orden de llegada.]),
-  ),
   returns: (type: "Audience", desc: [Los datos del público; no dibuja nada.]),
-  desc: [El público del juego: los jugadores en el orden en que entraron, cada uno en un puesto (0 para el primero). `name(i, size=, weight=, font=, align=)` devuelve el apodo como texto en vivo; `count()`, `joined(i)` (1 si el puesto está ocupado, 0 si no) y `age(i)` (segundos desde que entró, hasta 60) devuelven `Parameter`; `qr(size)`, `url` y `code` sirven para invitar. Con ellos diseñas una sala de espera, una arena o lo que quieras. Una escena que lo usa pide el apodo en cuanto el teléfono abre la página. Ver #link("/guias/presentaciones/#sala-de-espera")[Sala de espera].],
+  desc: [El público del juego: los jugadores en el orden en que entraron, cada uno en un puesto (0 para el primero). `name(i, size=, weight=, font=, align=)` devuelve el apodo como texto en vivo; `count()`, `joined(i)` (1 si el puesto está ocupado, 0 si no) y `age(i)` (segundos desde que entró, hasta 60) devuelven `Parameter`; `qr(size)`, `url` y `code` sirven para invitar. Con ellos diseñas una sala de espera, una arena o lo que quieras. Una escena que lo usa pide el apodo en cuanto el teléfono abre la página. Fuera de una presentación entran los jugadores del ensayo, uno tras otro. Ver #link("/guias/presentaciones/#sala-de-espera")[Sala de espera].],
 )[
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
-audience = scene.audience(preview=["Ana", "Beto", "Caro"])
+audience = scene.audience()
 for slot in range(6):
     audience.name(slot, size=0.4).move_to((slot - 2.5) * 2, 0)
 ```

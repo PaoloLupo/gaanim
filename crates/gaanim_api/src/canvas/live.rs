@@ -88,17 +88,15 @@ impl SceneModel {
     /// their character, posed every frame by `behavior`. `bounds` is
     /// [x0, y0, x1, y1]; characters are `size` units tall at scale 1, and
     /// `motion` deforms them from how they move. Previews and exports show
-    /// `preview` players, or the audience's.
+    /// the scene's rehearsal.
     pub fn live_zone(
         &mut self,
-        audience: &AudienceHandle,
+        _audience: &AudienceHandle,
         behavior: Program,
         bounds: [f64; 4],
         size: f64,
         motion: Motion,
         names: Option<ZoneNames>,
-        preview: Option<Vec<String>>,
-        preview_every: f64,
     ) -> Result<LiveZoneHandle, LiveZoneError> {
         let [x0, y0, x1, y1] = bounds;
         if !(bounds.iter().all(|value| value.is_finite()) && x1 > x0 && y1 > y0) {
@@ -107,7 +105,6 @@ impl SceneModel {
             )));
         }
         let size = positive(size, "size")?;
-        let preview_every = positive(preview_every, "preview_every")?;
         let settings = [
             (motion.squash, "squash"),
             (motion.max_stretch, "max_stretch"),
@@ -133,7 +130,6 @@ impl SceneModel {
             )));
         }
         let behavior = check_behavior(behavior)?;
-        let preview = preview.unwrap_or_else(|| audience.preview());
         let mut state = self.state.lock().expect("canvas state poisoned");
         let index = state.live_zones.len();
         let open = (state.active_idx, state.active().cursor);
@@ -146,8 +142,6 @@ impl SceneModel {
                 stop_at_close: false,
                 bounds,
                 size,
-                preview,
-                preview_every,
                 behavior,
                 motion,
                 names,

@@ -10,8 +10,9 @@
 //!
 //! While presenting, a zone the timeline is in runs on the wall clock: each
 //! player who joins arrives in it as their own character. Everywhere else
-//! (previews, exports, snapshots) it replays its preview players as a pure
-//! function of the timeline's time, so seeks and exports stay exact. Either
+//! (previews, exports, snapshots) it replays the scene's rehearsal
+//! ([`crate::rehearsal`]) as a pure function of the timeline's time, so
+//! seeks and exports stay exact. Either
 //! way it draws into [`LiveOverlay`], which the renderer draws above the
 //! scene and bundle recordings leave out.
 
@@ -27,6 +28,7 @@ use gaanim_core::kurbo::{BezPath, Rect};
 use gaanim_core::peniko::Brush;
 
 use crate::polls::PollResults;
+use crate::rehearsal::Rehearsal;
 use crate::updaters::PlaybackState;
 pub use program::{Inputs, Pose, Program, ProgramError};
 pub use run::{Player, STEP, ZoneRun};
@@ -89,30 +91,32 @@ fn player(results: &PollResults, name: &std::sync::Arc<str>) -> Player {
     }
 }
 
-/// Replay `zone`'s preview players up to the timeline's `now`: a pure
-/// function of time, reusing `run` while time moves forward.
-pub fn replay_preview(zone: &LiveZone, now: f64, run: &mut ZoneRun) {
+/// Replay the rehearsal's players in `zone` up to the timeline's `now`: a
+/// pure function of time, reusing `run` while time moves forward. Players
+/// arrive as they join, or as the zone opens for those already in the room.
+pub fn replay_rehearsal(zone: &LiveZone, now: f64, run: &mut ZoneRun, rehearsal: &Rehearsal) {
     let clock = (now - zone.open).max(0.0);
     if run.clock > clock + 1e-9 {
         *run = ZoneRun::default();
     }
-    let every = zone.preview_every.max(STEP);
-    let count = zone.preview.len();
-    // Preview players keep the order they are listed in.
-    let preview_score = |name: &str| {
-        zone.preview
-            .iter()
-            .position(|other| other == name)
-            .map_or(0.0, |rank| ((count - rank) * 100) as f64)
-    };
     let arrive = |run: &mut ZoneRun, until: f64| {
-        for (index, name) in zone.preview.iter().enumerate() {
-            let joined = index as f64 * every;
-            if joined <= until + 1e-9 && !run.has(name) {
-                run.arrive(Player::named(name), joined);
+        let time = zone.open + until;
+        for (index, player) in rehearsal.players.iter().enumerate() {
+            if player.joined <= time + 1e-9 && !run.has(&player.name) {
+                run.arrive(
+                    rehearsal.player(index),
+                    (player.joined - zone.open).max(0.0),
+                );
             }
         }
-        run.standings(preview_score);
+        let scores = rehearsal.scores(time);
+        run.standings(|name| {
+            rehearsal
+                .players
+                .iter()
+                .position(|player| player.name == name)
+                .map_or(0.0, |index| scores[index].0 as f64)
+        });
     };
     while run.next_step() <= clock + 1e-9 {
         let next = run.next_step();
@@ -123,7 +127,7 @@ pub fn replay_preview(zone: &LiveZone, now: f64, run: &mut ZoneRun) {
     arrive(run, clock);
 }
 
-/// Replays of zones' preview players, for drawing them over recorded frames
+/// Replays of the rehearsal in zones, for drawing them over recorded frames
 /// (a bundle exported to video) as the scene draws them.
 #[derive(Default)]
 pub struct PreviewReplay {
@@ -131,14 +135,23 @@ pub struct PreviewReplay {
 }
 
 impl PreviewReplay {
-    /// What `zones` draw at the timeline's `time`.
-    pub fn overlay(&mut self, zones: &[LiveZone], time: f64) -> LiveOverlay {
+    /// What `zones` draw at the timeline's `time`, with `rehearsal`'s
+    /// players; nothing without one.
+    pub fn overlay(
+        &mut self,
+        zones: &[LiveZone],
+        rehearsal: Option<&Rehearsal>,
+        time: f64,
+    ) -> LiveOverlay {
+        let Some(rehearsal) = rehearsal else {
+            return LiveOverlay::default();
+        };
         let groups = zones
             .iter()
             .filter(|zone| zone_contains(zone, time))
             .map(|zone| {
                 let run = self.runs.entry(zone.id.clone()).or_default();
-                replay_preview(zone, time, run);
+                replay_rehearsal(zone, time, run, rehearsal);
                 let [x0, y0, x1, y1] = zone.bounds;
                 OverlayGroup {
                     clip: Rect::new(x0, y0, x1, y1),
@@ -154,6 +167,7 @@ impl PreviewReplay {
 pub fn live_zone_system(
     zones: Option<Res<LiveZones>>,
     results: Option<Res<PollResults>>,
+    rehearsal: Option<Res<Rehearsal>>,
     playback: Option<Res<PlaybackState>>,
     time: Option<Res<Time<Real>>>,
     mut runs: bevy::prelude::Local<LiveRuns>,
@@ -201,10 +215,12 @@ pub fn live_zone_system(
             }
             run.settle(target);
             run
-        } else {
+        } else if let Some(rehearsal) = rehearsal.as_deref() {
             let run = runs.previews.entry(zone.id.clone()).or_default();
-            replay_preview(zone, now, run);
+            replay_rehearsal(zone, now, run, rehearsal);
             run
+        } else {
+            continue;
         };
         let [x0, y0, x1, y1] = zone.bounds;
         groups.push(OverlayGroup {
@@ -232,8 +248,6 @@ mod tests {
             stop_at_close: false,
             bounds: [0.0, 0.0, 1.0, 1.0],
             size: 1.0,
-            preview: Vec::new(),
-            preview_every: 1.0,
             behavior: Program::from_json(json).unwrap(),
             motion: Motion::default(),
             names: None,

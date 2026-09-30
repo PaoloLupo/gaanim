@@ -15,6 +15,28 @@ pub(crate) fn poll_error(error: PollError) -> PyErr {
     PyValueError::new_err(error.to_string())
 }
 
+/// How a poll's `rehearse=` leans: a share that answers a quiz right, or
+/// one weight per answer.
+pub(crate) fn lean(
+    rehearse: Option<&Bound<'_, PyAny>>,
+) -> PyResult<gaanim_animation::rehearsal::Lean> {
+    use gaanim_animation::rehearsal::Lean;
+    let Some(rehearse) = rehearse else {
+        return Ok(Lean::Auto);
+    };
+    if let Ok(share) = rehearse.extract::<f64>() {
+        return Ok(Lean::Right(share));
+    }
+    rehearse
+        .extract::<Vec<f64>>()
+        .map(Lean::Weights)
+        .map_err(|_| {
+            pyo3::exceptions::PyTypeError::new_err(
+                "rehearse is the share that answers right (a quiz) or one weight per answer",
+            )
+        })
+}
+
 fn bar_options(
     length: f64,
     thickness: f64,
@@ -79,12 +101,6 @@ impl PyPoll {
     #[getter]
     fn options(&self) -> Vec<String> {
         self.inner.options()
-    }
-
-    /// Counts shown outside a live presentation.
-    #[getter]
-    fn preview(&self) -> Vec<u32> {
-        self.inner.preview()
     }
 
     /// Six-character code phones type at the relay's address.
@@ -281,12 +297,6 @@ pub struct PyLeaderboard {
 
 #[pymethods]
 impl PyLeaderboard {
-    /// Nicknames and scores shown outside a live presentation, best first.
-    #[getter]
-    fn preview(&self) -> Vec<(String, u64)> {
-        self.inner.preview()
-    }
-
     /// The nickname at `rank` (0 for the leader) as live text.
     #[pyo3(signature = (rank, *, size=None, weight=None, font=None, align="left"))]
     fn name(
@@ -334,7 +344,7 @@ impl PyLeaderboard {
     }
 
     fn __repr__(&self) -> String {
-        format!("Leaderboard(preview={:?})", self.inner.preview())
+        "Leaderboard()".to_string()
     }
 }
 
@@ -347,12 +357,6 @@ pub struct PyAudience {
 
 #[pymethods]
 impl PyAudience {
-    /// Nicknames shown outside a live presentation, in joining order.
-    #[getter]
-    fn preview(&self) -> Vec<String> {
-        self.inner.preview()
-    }
-
     /// The session code phones type.
     #[getter]
     fn code(&self) -> String {
@@ -419,10 +423,6 @@ impl PyAudience {
     }
 
     fn __repr__(&self) -> String {
-        format!(
-            "Audience(preview={:?}, code={:?})",
-            self.inner.preview(),
-            self.inner.code()
-        )
+        format!("Audience(code={:?})", self.inner.code())
     }
 }

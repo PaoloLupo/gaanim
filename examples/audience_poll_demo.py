@@ -16,7 +16,7 @@ COLORS = [RED, BLUE, GOLD, GREEN]
 # --- Slide 1: horizontal bars next to the QR code ---------------------------
 scene.segment("Pregunta", notes="Wait for the room to scan the code.")
 answers = ["x²", "2ˣ", "x log x"]
-poll = scene.poll("¿Qué curva crece más rápido?", answers, preview=[6, 14, 4])
+poll = scene.poll("¿Qué curva crece más rápido?", answers, rehearse=[3, 7, 2])
 
 card = scene.geometry.rounded_rect(4.2, 4.2, 0.25).fill(WHITE).no_stroke().move_to(-5, -0.3)
 qr = poll.qr(3.6).move_to(-5, -0.3)
@@ -48,7 +48,7 @@ scene.stop("votando")
 
 # --- Slide 2: columns with percentages, from the same kind of data ----------
 scene.segment("Opinión", notes="Close the poll before commenting.")
-feedback = scene.poll("¿Te sirvió la explicación?", ["Sí", "Más o menos", "No"], preview=[18, 7, 2])
+feedback = scene.poll("¿Te sirvió la explicación?", ["Sí", "Más o menos", "No"], rehearse=[9, 4, 1])
 title = scene.text(feedback.question, role="title", color=GOLD).move_to(0, 3.3)
 scene.text(f"Vota en {feedback.url}", size=0.35, color=GRAY).move_to(0, 2.5)
 

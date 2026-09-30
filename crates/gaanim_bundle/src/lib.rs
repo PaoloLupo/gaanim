@@ -77,6 +77,9 @@ pub const THUMBNAIL: &str = "thumbnail.png";
 const POLLS: &str = "polls.json";
 /// Live zones, as JSON: the player runs them, so frames never hold them.
 const LIVE: &str = "live.json";
+/// The scene's rehearsal, as JSON: live zones replay it outside a
+/// presentation.
+const REHEARSAL: &str = "rehearsal.json";
 /// Frames per chunk: one second at the default rate.
 const CHUNK_FRAMES: usize = 60;
 
@@ -166,6 +169,8 @@ pub struct SceneData {
     pub stop_gates: Vec<StopGate>,
     /// Live zones, which the player runs while presenting.
     pub live_zones: Vec<gaanim_animation::live::LiveZone>,
+    /// The made-up audience live zones replay outside a presentation.
+    pub rehearsal: Option<gaanim_animation::rehearsal::Rehearsal>,
     /// Elements drawn as poll bars, which a live presentation redraws.
     pub poll_bars: Vec<PollBarRecord>,
     /// Elements drawn as live text, such as leaderboard nicknames.
@@ -746,6 +751,7 @@ impl SceneData {
             poll_session: None,
             stop_gates: Vec::new(),
             live_zones: Vec::new(),
+            rehearsal: None,
             poll_bars: Vec::new(),
             poll_texts: Vec::new(),
             poll_readouts: Vec::new(),
@@ -1058,6 +1064,15 @@ impl<W: Write + Seek> BundleWriter<W> {
                 .map_err(|error| BundleError::Corrupt(error.to_string()))?;
             self.write_entry(LIVE, &json)?;
         }
+        if let Some(rehearsal) = scene
+            .rehearsal
+            .as_ref()
+            .filter(|_| !scene.live_zones.is_empty())
+        {
+            let json = serde_json::to_vec(rehearsal)
+                .map_err(|error| BundleError::Corrupt(error.to_string()))?;
+            self.write_entry(REHEARSAL, &json)?;
+        }
 
         let manifest = Manifest {
             format: FORMAT.into(),
@@ -1278,6 +1293,12 @@ impl Bundle {
             scene.live_zones =
                 serde_json::from_slice(&read_entry(&mut archive, Some(&manifest), LIVE)?)
                     .map_err(|error| BundleError::Corrupt(format!("{LIVE}: {error}")))?;
+        }
+        if manifest.entries.contains_key(REHEARSAL) {
+            scene.rehearsal = Some(
+                serde_json::from_slice(&read_entry(&mut archive, Some(&manifest), REHEARSAL)?)
+                    .map_err(|error| BundleError::Corrupt(format!("{REHEARSAL}: {error}")))?,
+            );
         }
 
         let index = read_entry(&mut archive, Some(&manifest), "index.bin")?;
@@ -1612,7 +1633,10 @@ mod tests {
         // No poll, yet the session and its lobby are kept.
         assert!(bundle.scene.polls.is_empty());
         assert!(bundle.scene.poll_session.as_ref().unwrap().lobby);
-        assert_eq!(bundle.scene.poll_session.as_ref().unwrap().game_segment, Some(3));
+        assert_eq!(
+            bundle.scene.poll_session.as_ref().unwrap().game_segment,
+            Some(3)
+        );
         assert_eq!(bundle.scene.stop_gates, [gate]);
     }
 

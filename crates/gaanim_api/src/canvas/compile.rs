@@ -2721,17 +2721,19 @@ impl SceneModel {
                 },
             )
             .collect();
-        let (polls, poll_session, poll_lobby, lobby_segment, stop_gates, live_zones) = {
+        let (polls, poll_session, poll_lobby, lobby_at, stop_gates, live_zones, rehearsal) = {
             let state = self.state.lock().expect("canvas state poisoned");
             (
                 state.polls.clone(),
                 state.poll_session.clone(),
                 state.poll_lobby,
-                state.poll_lobby_segment,
+                state.poll_lobby_at,
                 state.stop_gates.clone(),
                 state.live_zones.clone(),
+                state.rehearsal.clone(),
             )
         };
+        let lobby_segment = lobby_at.map(|(segment, _)| segment);
         let at = |(segment, local): (usize, f64)| {
             segment_metadata
                 .get(segment)
@@ -2746,6 +2748,55 @@ impl SceneModel {
             .min()
             .and_then(|segment| segment_metadata.get(segment))
             .map(|metadata| metadata.id);
+        // The first stop after `time`, before `until`: where a presentation
+        // waits.
+        let stop_after = |time: f64, until: f64| {
+            segment_metadata
+                .iter()
+                .flat_map(|metadata| &metadata.stops)
+                .map(|stop| stop.time)
+                .filter(|stop| *stop > time + 1e-6 && *stop <= until + 1e-6)
+                .fold(None, |first: Option<f64>, stop| {
+                    Some(first.map_or(stop, |first| first.min(stop)))
+                })
+        };
+        // The made-up audience previews and exports show: players join
+        // until the room's first stop, and answer each poll until the stop
+        // where a presentation would wait for them.
+        let rehearsal = poll_session.is_some().then(|| {
+            let room = lobby_at.and_then(|lobby| {
+                let open = at(lobby)?;
+                let end = segment_metadata.get(lobby.0)?.end_time;
+                Some((open, stop_after(open, end).unwrap_or(end)))
+            });
+            let planned: Vec<gaanim_animation::rehearsal::PlannedPoll> = polls
+                .iter()
+                .filter_map(|poll| {
+                    let open = at(poll.open)?;
+                    let close = match poll.close {
+                        Some(close) => at(close)?,
+                        None => segment_metadata.get(poll.open.0)?.end_time,
+                    }
+                    .max(open);
+                    let due = stop_after(open, close).unwrap_or(match &poll.quiz {
+                        Some(quiz) => close.min(open + f64::from(quiz.time)),
+                        None => close,
+                    });
+                    Some(gaanim_animation::rehearsal::PlannedPoll {
+                        id: poll.id.clone(),
+                        answers: poll.options.len(),
+                        open,
+                        due,
+                        quiz: poll
+                            .quiz
+                            .as_ref()
+                            .map(|quiz| (quiz.correct, quiz.time, quiz.points)),
+                        lean: poll.lean.clone(),
+                    })
+                })
+                .collect();
+            gaanim_animation::rehearsal::Rehearsal::plan(&rehearsal, room, &planned)
+        });
         builder.timeline.set_polls(
             polls
                 .into_iter()
@@ -2755,11 +2806,20 @@ impl SceneModel {
                         Some(close) => at(close)?,
                         None => segment_metadata.get(poll.open.0)?.end_time,
                     };
+                    // The counts the rehearsal ends with stand for the poll
+                    // where nothing plays it, such as the presenter's notes.
+                    let preview = rehearsal
+                        .as_ref()
+                        .map(|rehearsal| {
+                            let results = rehearsal.results_at(close.max(open));
+                            results.live_counts(&poll.id, poll.options.len())
+                        })
+                        .unwrap_or_else(|| vec![0; poll.options.len()]);
                     Some(gaanim_timeline::timeline::TimelinePoll {
                         id: poll.id,
                         question: poll.question,
                         options: poll.options,
-                        preview: poll.preview.to_vec(),
+                        preview,
                         segment: segment_metadata.get(poll.open.0)?.id,
                         open,
                         close: close.max(open),
@@ -2827,6 +2887,12 @@ impl SceneModel {
         builder
             .commands
             .insert_resource(gaanim_animation::live::LiveZones(live_zones));
+        match rehearsal {
+            Some(rehearsal) => builder.commands.insert_resource(rehearsal),
+            None => builder
+                .commands
+                .remove_resource::<gaanim_animation::rehearsal::Rehearsal>(),
+        }
         builder.timeline.set_stop_gates(
             stop_gates
                 .into_iter()
@@ -10793,6 +10859,7 @@ pub(crate) fn reveal_groups(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gaanim_animation::rehearsal::Lean;
     use crate::canvas::{Anchor, DrawableHandle, TextAnchor};
     use bevy::ecs::world::CommandQueue;
     use gaanim_core::peniko::Brush;
@@ -12452,6 +12519,69 @@ mod tests {
                 assert_eq!(!shape.0.elements().is_empty(), shown, "tip at {time}");
             }
         }
+    }
+
+    #[test]
+    fn the_rehearsal_plays_the_audience_and_its_answers_along_the_timeline() {
+        use bevy::prelude::App;
+        let mut canvas = SceneModel::new(640, 360);
+        canvas.set_poll_session(crate::canvas::PollSession {
+            relay: Some("https://relay.example.dev".into()),
+            code: "ABC234".into(),
+        });
+        canvas
+            .rehearsal(gaanim_animation::rehearsal::RehearsalSpec {
+                names: gaanim_animation::rehearsal::RehearsalSpec::names(10),
+                ..Default::default()
+            })
+            .unwrap();
+        canvas.segment("Sala", None).unwrap();
+        let audience = canvas.audience().unwrap();
+        let count = audience.count().unwrap();
+        canvas.wait(10.0);
+        canvas.stop(None).unwrap();
+        canvas.segment("Pregunta", None).unwrap();
+        let quiz = canvas
+            .quiz("¿2 + 2?", ["3", "4"], 1, 20, 1000, Lean::Right(1.0))
+            .unwrap();
+        let right = quiz.votes(1).unwrap();
+        canvas.wait(4.0);
+        canvas.stop(None).unwrap();
+        canvas.wait(1.0);
+        let board = canvas.leaderboard();
+        let leader = board.points(0).unwrap();
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        let mut value_at = |parameter: &crate::canvas::visualization::Parameter, time: f64| {
+            app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
+            app.update();
+            let entity = entity_of(app.world_mut(), parameter.drawable());
+            app.world()
+                .get::<gaanim_animation::FloatSignal>(entity)
+                .unwrap()
+                .value
+        };
+        // Players join over the room's ten seconds.
+        assert_eq!(value_at(&count, 0.0), 0.0);
+        let half = value_at(&count, 5.0);
+        assert!(half > 2.0 && half < 8.0, "{half}");
+        assert_eq!(value_at(&count, 10.0), 10.0);
+        // Everyone answers right by the stop, and scores.
+        assert_eq!(value_at(&right, 10.0), 0.0);
+        assert_eq!(value_at(&right, 14.0), 10.0);
+        assert!(value_at(&leader, 15.0) > 500.0);
+        // Back in the room, fewer players again.
+        assert_eq!(value_at(&count, 3.0) < 5.0, true);
     }
 
     #[test]
@@ -15506,7 +15636,7 @@ mod tests {
         canvas.wait(1.0);
         canvas.segment("Vote", None).unwrap();
         canvas.wait(0.5);
-        let whole = canvas.poll("Whole?", ["A", "B"], Some(vec![2, 1])).unwrap();
+        let whole = canvas.poll("Whole?", ["A", "B"], Lean::Weights(vec![1.0, 0.0])).unwrap();
         let bar = whole
             .bar(
                 0,
@@ -15521,7 +15651,7 @@ mod tests {
             .unwrap();
         let share = whole.share(0).unwrap();
         canvas.wait(2.0);
-        let early = canvas.poll("Early?", ["X", "Y", "Z"], None).unwrap();
+        let early = canvas.poll("Early?", ["X", "Y", "Z"], Lean::Auto).unwrap();
         canvas.wait(1.0);
         early.close().unwrap();
         canvas.wait(0.5);
@@ -15533,8 +15663,9 @@ mod tests {
             .map(|poll| (poll.question.as_str(), poll.open, poll.close))
             .collect();
         assert_eq!(windows, [("Whole?", 1.5, 5.0), ("Early?", 3.5, 4.5)]);
-        assert_eq!(timeline.polls[0].preview, [2, 1]);
-        assert_eq!(timeline.polls[1].preview, [0, 0, 0]);
+        // The rehearsal's twelve players all voted, as the poll leans.
+        assert_eq!(timeline.polls[0].preview, [12, 0]);
+        assert_eq!(timeline.polls[1].preview.iter().sum::<u32>(), 12);
         let session = timeline.poll_session.as_ref().unwrap();
         assert_eq!(session.code, "ABC234");
         // Only a scene that shows its audience opens a lobby.
@@ -15587,7 +15718,7 @@ mod tests {
         canvas.wait(1.0);
         canvas.segment("Quiz", None).unwrap();
         let quiz = canvas
-            .quiz("¿2 + 2?", ["3", "4"], 1, 20, 1000, None)
+            .quiz("¿2 + 2?", ["3", "4"], 1, 20, 1000, Lean::Auto)
             .unwrap();
         canvas.wait(0.5);
         let before = canvas.stop_count();
@@ -15612,7 +15743,7 @@ mod tests {
     fn showing_the_audience_opens_a_lobby_for_phones() {
         let mut canvas = SceneModel::new(640, 360);
         assert_eq!(
-            canvas.audience(Vec::new()).unwrap_err(),
+            canvas.audience().unwrap_err(),
             crate::canvas::PollError::NoSession
         );
         canvas.set_poll_session(crate::canvas::PollSession {
@@ -15622,10 +15753,7 @@ mod tests {
         canvas.segment("Intro", None).unwrap();
         canvas.wait(2.0);
         canvas.segment("Lobby", None).unwrap();
-        let audience = canvas
-            .audience(vec![" Ana ".into(), "Beto".into()])
-            .unwrap();
-        assert_eq!(audience.preview(), ["Ana", "Beto"]);
+        let audience = canvas.audience().unwrap();
         assert_eq!(audience.url(), "https://relay.example.dev/s/ABC234");
         let options = crate::canvas::LiveTextOptions {
             size: Some(0.4),

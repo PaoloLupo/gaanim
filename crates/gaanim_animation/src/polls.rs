@@ -19,8 +19,8 @@ use gaanim_scene::{LocalBounds, Path2D, PathSource};
 
 use crate::updaters::{SampledProperty, SampledSeriesDrivers};
 
-/// What a live presentation reported. Outside one it is not live, and every
-/// poll value shows its preview.
+/// What a live presentation reported. Outside one it is not live, and poll
+/// values show the scene's rehearsal instead (see [`crate::rehearsal`]).
 #[derive(Resource, Debug, Clone, Default, PartialEq)]
 pub struct PollResults {
     /// Whether a presentation is collecting votes.
@@ -354,10 +354,11 @@ pub struct PollBar {
 /// Runs before the sampled series system, which writes the signal from it.
 pub fn poll_value_system(
     results: Option<Res<PollResults>>,
+    rehearsed: Option<Res<crate::rehearsal::RehearsedResults>>,
     mut values: Query<(&PollValue, &mut SampledSeriesDrivers)>,
 ) {
     let empty = PollResults::default();
-    let results = results.as_deref().unwrap_or(&empty);
+    let results = crate::rehearsal::shown_results(results.as_deref(), rehearsed.as_deref(), &empty);
     for (value, mut drivers) in &mut values {
         let live = results.value(&value.source);
         let wanted = |len: usize| -> Arc<[f64]> {
@@ -387,6 +388,7 @@ pub fn poll_value_system(
 /// animation's reveal.
 pub fn poll_bar_system(
     results: Option<Res<PollResults>>,
+    rehearsed: Option<Res<crate::rehearsal::RehearsedResults>>,
     mut bars: Query<(
         &mut PollBar,
         &mut Path2D,
@@ -396,7 +398,7 @@ pub fn poll_bar_system(
     )>,
 ) {
     let empty = PollResults::default();
-    let results = results.as_deref().unwrap_or(&empty);
+    let results = crate::rehearsal::shown_results(results.as_deref(), rehearsed.as_deref(), &empty);
     for (mut bar, mut path, source, mut bounds, reveal) in &mut bars {
         let fraction = bar
             .source
@@ -622,6 +624,7 @@ pub struct GlyphCache(HashMap<(String, Option<u16>, u64, char), Option<(Arc<BezP
 pub fn live_text_system(
     registry: Option<Res<gaanim_text::font::FontRegistry>>,
     results: Option<Res<PollResults>>,
+    rehearsed: Option<Res<crate::rehearsal::RehearsedResults>>,
     mut cache: bevy::prelude::Local<GlyphCache>,
     mut texts: Query<(
         &mut LiveText,
@@ -632,7 +635,7 @@ pub fn live_text_system(
     )>,
 ) {
     let empty = PollResults::default();
-    let results = results.as_deref().unwrap_or(&empty);
+    let results = crate::rehearsal::shown_results(results.as_deref(), rehearsed.as_deref(), &empty);
     for (mut live, mut path, source, mut bounds, reveal) in &mut texts {
         let text = live.text(results);
         let (outline, placed) = match &live.last {

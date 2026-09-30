@@ -36,7 +36,7 @@ def answer_shape(index: int, size: float):
 # --- Lobby: scan while the answer shapes orbit the code ------------------------
 # A warm-up poll gives the QR code and gets the room voting while it waits.
 scene.segment("Lobby", notes="Wait until the room has scanned the code.")
-warmup = scene.poll("¿Cómo llegas hoy?", ["¡Con todo!", "Tranqui", "Con sueño"], preview=[9, 6, 3])
+warmup = scene.poll("¿Cómo llegas hoy?", ["¡Con todo!", "Tranqui", "Con sueño"], rehearse=[3, 2, 1])
 center = (-4.0, -0.2)
 halo = scene.geometry.circle(3.3).no_fill().stroke(VIOLET, 0.02).move_to(*center).opacity(0.35)
 card = scene.geometry.rounded_rect(4.4, 4.4, 0.35).fill(WHITE).no_stroke().move_to(*center)
@@ -172,7 +172,7 @@ first = scene.quiz(
     ["x", "2x", "x²/2", "2"],
     correct=1,
     time=TIME,
-    preview=[4, 19, 6, 2],
+    rehearse=0.75,
 )
 question_slide(1, first, ["x", "2x", "x²/2", "2"])
 
@@ -182,15 +182,13 @@ second = scene.quiz(
     ["Triángulo", "Cuadrado", "Hexágono", "Pentágono"],
     correct=2,
     time=TIME,
-    preview=[1, 3, 21, 6],
+    rehearse=0.6,
 )
 question_slide(2, second, ["Triángulo", "Cuadrado", "Hexágono", "Pentágono"])
 
 # --- Podium ----------------------------------------------------------------------
 scene.segment("Podio", notes="Celebrate the top three.")
-board = scene.leaderboard(
-    preview=[("Ana", 2871), ("Beto", 2410), ("Carla", 1995), ("Dani", 880), ("Eva", 420)]
-)
+board = scene.leaderboard()
 heading = scene.text("Podio", size=0.85, color=WHITE, weight=800).move_to(0, 3.45)
 players = scene.viz.readout(
     board.players(), format=".0f", suffix=" jugadores", color=MUTED, font_size=0.34

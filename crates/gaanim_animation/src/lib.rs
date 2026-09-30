@@ -22,6 +22,7 @@ pub mod procedural;
 pub mod progress_arc;
 pub mod property_bindings;
 pub mod reactive;
+pub mod rehearsal;
 pub use procedural::{
     DashFlow, OscillatedChannel, ProceduralLayer, ProceduralMotion, ProceduralOffset,
     ScheduledLayer, StrokeCycle, Waveform,
@@ -65,10 +66,9 @@ pub use tween::{
     sync_delta_time_system,
 };
 pub use updaters::{
-    AngleArrowheads, AngleLabelPlacement, AngleSweep, DimensionLabelOrientation,
+    AmbientClock, AngleArrowheads, AngleLabelPlacement, AngleSweep, DimensionLabelOrientation,
     DimensionLabelPlacement, DimensionSide, EndpointAngle, EndpointDistance, EndpointFollow,
-    AmbientClock, FollowOffsetSpace, InvalidFixedStep, InvalidSampledSeries, PlaybackState,
-    RotationBinding,
+    FollowOffsetSpace, InvalidFixedStep, InvalidSampledSeries, PlaybackState, RotationBinding,
     RotationTranslationBinding, SampledInterpolation, SampledProperty, SampledSeriesDriver,
     SampledSeriesDrivers, SurroundingRect, SurroundingShape, TracedPath, TracedPath3D,
     TrackingAngle, TrackingAnglePart, TrackingEndpoint, TrackingLine, TrackingRay, TrackingScalar,
@@ -100,6 +100,7 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
         app.init_resource::<PlaybackState>();
         app.init_resource::<AmbientClock>();
         app.init_resource::<polls::PollResults>();
+        app.init_resource::<rehearsal::RehearsedResults>();
         app.init_resource::<live::LiveZones>();
         app.init_resource::<live::LiveOverlay>();
 
@@ -143,6 +144,16 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
                 evaluate_custom_tweens_system.after(evaluate_line_path_ranges_system),
             )
                 .in_set(SceneSet::Animation),
+        );
+
+        // Outside a live presentation, the rehearsal stands in for the
+        // audience at the time the seek just reached, before anything reads
+        // audience data.
+        app.add_systems(
+            Update,
+            rehearsal::rehearsal_system
+                .in_set(SceneSet::Updaters)
+                .before(polls::poll_value_system),
         );
 
         // Register standard signal binders and continuous updaters in the Updaters Phase.

@@ -939,7 +939,11 @@ impl BundleRenderer {
             .bundle
             .frame(index)
             .map_err(|error| ExportError::General(error.to_string()))?;
-        let overlay = self.zones.overlay(&self.bundle.scene.live_zones, time);
+        let overlay = self.zones.overlay(
+            &self.bundle.scene.live_zones,
+            self.bundle.scene.rehearsal.as_ref(),
+            time,
+        );
         self.frames.render_with(&frame, time, Some(&overlay))
     }
 }

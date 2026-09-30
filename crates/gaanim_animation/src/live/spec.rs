@@ -26,10 +26,6 @@ pub struct LiveZone {
     pub bounds: [f64; 4],
     /// Height of a character at scale 1, in scene units.
     pub size: f64,
-    /// Nicknames shown outside a live presentation, arriving one every
-    /// `preview_every` seconds from `open`.
-    pub preview: Vec<String>,
-    pub preview_every: f64,
     /// Poses each player's character from what the engine tells it.
     #[serde(deserialize_with = "checked_program")]
     pub behavior: Program,

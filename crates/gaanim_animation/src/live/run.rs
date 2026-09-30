@@ -150,7 +150,10 @@ impl ZoneRun {
             self.names.retain(|name, _| here(name));
         }
         for actor in &mut self.actors {
-            if let Some(player) = roster.iter().find(|player| player.name == actor.player.name) {
+            if let Some(player) = roster
+                .iter()
+                .find(|player| player.name == actor.player.name)
+            {
                 actor.player.character = player.character;
             }
         }
@@ -231,7 +234,9 @@ impl ZoneRun {
     /// How fast the pose's feet move now, measured across two grid steps.
     fn velocity(&mut self, zone: &LiveZone, index: usize) -> Vec2 {
         let inputs = self.inputs(index);
-        let before = zone.behavior.eval(&inputs.later(-STEP), &mut self.registers);
+        let before = zone
+            .behavior
+            .eval(&inputs.later(-STEP), &mut self.registers);
         let after = zone.behavior.eval(&inputs.later(STEP), &mut self.registers);
         let velocity = Vec2::new(after.x - before.x, after.y - before.y) / (2.0 * STEP);
         if velocity.is_finite() {
@@ -291,10 +296,7 @@ impl ZoneRun {
         let mirror = if pose.flip { -1.0 } else { 1.0 };
         let look = match pose.look {
             Some((x, y)) => (mirror * x, -y),
-            None => (
-                mirror * motion.look * velocity.x,
-                -motion.look * velocity.y,
-            ),
+            None => (mirror * motion.look * velocity.x, -motion.look * velocity.y),
         };
         let mut drive = CharacterDrive {
             lag: (0.0, 0.0),
@@ -310,7 +312,10 @@ impl ZoneRun {
                     (pose.x, pose.y)
                 })
                 .collect();
-            if positions.iter().all(|(x, y)| x.is_finite() && y.is_finite()) {
+            if positions
+                .iter()
+                .all(|(x, y)| x.is_finite() && y.is_finite())
+            {
                 let (x, y) = follow_lag(&positions, step, frequency, damping);
                 // Into the body's frame, then character units.
                 let turned = Affine::rotate(-(pose.rotation + lean)) * Point::new(x, y);
@@ -406,7 +411,9 @@ impl ZoneRun {
             let expression = pose.express.map(|express| {
                 let start = match (pose.since, actor.latch) {
                     (Some(since), _) => actor.joined + since,
-                    (None, Some(latch)) if latch.express == express && latch.looped == pose.looped => {
+                    (None, Some(latch))
+                        if latch.express == express && latch.looped == pose.looped =>
+                    {
                         latch.start
                     }
                     // Changed since the last grid point: it started there.
@@ -442,7 +449,12 @@ impl ZoneRun {
     /// Each character's pose now, by arrival, for tests and tools.
     pub fn poses(&mut self, zone: &LiveZone) -> Vec<(Arc<str>, Pose)> {
         (0..self.actors.len())
-            .map(|index| (self.actors[index].player.name.clone(), self.pose(zone, index)))
+            .map(|index| {
+                (
+                    self.actors[index].player.name.clone(),
+                    self.pose(zone, index),
+                )
+            })
             .collect()
     }
 
@@ -473,8 +485,7 @@ mod tests {
 
     /// The zipline of `tests/live/behaviors.py`, from the compiled cases.
     fn zipline() -> LiveZone {
-        let entries: serde_json::Value =
-            serde_json::from_str(include_str!("cases.json")).unwrap();
+        let entries: serde_json::Value = serde_json::from_str(include_str!("cases.json")).unwrap();
         let behavior: Program = serde_json::from_value(entries[0]["program"].clone()).unwrap();
         assert_eq!(behavior.name, "zipline");
         LiveZone {
@@ -485,8 +496,6 @@ mod tests {
             stop_at_close: false,
             bounds: [-8.0, -4.5, 8.0, 4.5],
             size: 1.0,
-            preview: Vec::new(),
-            preview_every: 0.5,
             behavior: behavior.checked().unwrap(),
             motion: Default::default(),
             names: None,
@@ -541,8 +550,14 @@ mod tests {
         }
         run.standings(|name| if name == "Ana" { 900.0 } else { 1200.0 });
         let beto = run.inputs(1);
-        assert_eq!((beto.rank, beto.previous_rank, beto.rank_since), (0.0, 1.0, 0.0));
-        assert_eq!((beto.previous_score, beto.score, beto.leader), (500.0, 1200.0, 1200.0));
+        assert_eq!(
+            (beto.rank, beto.previous_rank, beto.rank_since),
+            (0.0, 1.0, 0.0)
+        );
+        assert_eq!(
+            (beto.previous_score, beto.score, beto.leader),
+            (500.0, 1200.0, 1200.0)
+        );
         run.step(&zone);
         let ana = run.inputs(0);
         assert_eq!((ana.rank, ana.previous_rank), (1.0, 0.0));
@@ -586,7 +601,11 @@ mod tests {
             .iter()
             .map(|(path, _)| gaanim_core::kurbo::Shape::bounding_box(path).y0)
             .fold(f64::INFINITY, f64::min);
-        assert!((bottom - pose.y).abs() < zone.size * 0.1, "{bottom} vs {}", pose.y);
+        assert!(
+            (bottom - pose.y).abs() < zone.size * 0.1,
+            "{bottom} vs {}",
+            pose.y
+        );
     }
 
     #[test]
@@ -613,7 +632,11 @@ mod tests {
                 .map(|(path, _)| gaanim_core::kurbo::Shape::bounding_box(path))
                 .reduce(|a, b| a.union(b))
                 .unwrap();
-            (bounds.width(), bounds.height(), bounds.center().x - run.poses(&zone)[0].1.x)
+            (
+                bounds.width(),
+                bounds.height(),
+                bounds.center().x - run.poses(&zone)[0].1.x,
+            )
         };
         let motion = Motion {
             squash: 0.05,
@@ -629,7 +652,10 @@ mod tests {
             "only motion deforms: {still:?} vs {plain:?}"
         );
         // Stretched along the run and squashed across it.
-        assert!(running.0 > still.0 && running.1 < still.1, "{running:?} vs {still:?}");
+        assert!(
+            running.0 > still.0 && running.1 < still.1,
+            "{running:?} vs {still:?}"
+        );
         // Leaning forward puts the body ahead of the feet.
         assert!(running.2 > still.2 + 0.01, "{running:?} vs {still:?}");
     }
@@ -668,7 +694,10 @@ mod tests {
         assert!(running.look.0 > 0.5, "{running:?}");
         // Just stopped: the ears keep going forward, then settle.
         assert!(stopped.lag.0 > 1.0, "{stopped:?}");
-        assert!(settled.lag.0.abs() < 1e-6 && settled.look == (0.0, -0.0), "{settled:?}");
+        assert!(
+            settled.lag.0.abs() < 1e-6 && settled.look == (0.0, -0.0),
+            "{settled:?}"
+        );
     }
 
     #[test]

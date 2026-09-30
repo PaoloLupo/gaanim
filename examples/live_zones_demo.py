@@ -29,7 +29,8 @@ from gaanim.live import (
 )
 
 scene = Scene(frame=(16, 9), background="#0f1b2d")
-audience = scene.audience(preview=["Ana", "Beto", "Caro", "Dani", "Eli", "Fede", "Gabi", "Hugo"])
+scene.rehearsal(8)
+audience = scene.audience()
 
 # --- Zipline: joiners crouch, get launched at a sweeping angle, and land -------------
 GRAVITY = 16.0
@@ -83,7 +84,7 @@ scene.geometry.rect(8.2, 1.3).fill("#2d7fd3").no_stroke().move_to(4.5, -3.85)
 scene.geometry.rect(0.5, 3.4).fill("#8a5a33").no_stroke().move_to(-7.2, 0.9)
 scene.geometry.rect(1.6, 0.25).fill("#a86d3e").no_stroke().move_to(-7.0, 2.7)
 scene.text("¡Entra y salta!", size=0.7, color="#f7f6ff", weight=800).move_to(2.5, 3.3)
-scene.live_zone(audience, zipline, size=1.1, squash=0.03, lean=0.0, preview_every=0.45)
+scene.live_zone(audience, zipline, size=1.1, squash=0.03, lean=0.0)
 scene.wait(8)
 scene.stop("sala")
 
@@ -124,7 +125,7 @@ for lane in range(LANES):
     scene.geometry.rect(TRACK_LENGTH + 1, 0.08).fill("#2a3a55").no_stroke().move_to(
         TRACK_START + TRACK_LENGTH / 2, lane_y(lane) - 0.05
     )
-scene.live_zone(audience, race, size=0.9, squash=0.02, lean=0.06, preview_every=0.2)
+scene.live_zone(audience, race, size=0.9, squash=0.02, lean=0.06)
 scene.wait(4)
 scene.stop("carrera")
 
@@ -165,7 +166,7 @@ def podium(p):
 scene.segment("Podio", notes="Celebrate the top three.")
 for (x, y), height, color in zip(PLACES, (3.6, 2.6, 2.0), ("#ffc933", "#d7dbe8", "#e39b5f")):
     scene.geometry.rect(2.6, height).fill(color).no_stroke().move_to(x, y - height / 2)
-scene.live_zone(audience, podium, size=1.2, preview_every=0.1)
+scene.live_zone(audience, podium, size=1.2)
 scene.wait(4)
 scene.stop("podio")
 

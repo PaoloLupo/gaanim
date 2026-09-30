@@ -5104,14 +5104,14 @@ class Poll:
     """An audience poll created with ``scene.poll`` or ``scene.quiz``: its
     data, for the scene to present as it likes.
 
-    Values are live while a presentation collects votes and show the
-    ``preview`` counts everywhere else. ``votes``, ``share``, ``percent``,
+    Values are live while a presentation collects votes and follow the
+    scene's rehearsal everywhere else. ``votes``, ``share``, ``percent``,
     ``total`` and ``remaining`` return ``Parameter`` objects: follow them with
     readouts, ``computed`` values, reactive points or anything else that
     accepts a parameter. Presenting a ``.gaanim`` bundle replays what was
     recorded; there, ``bar`` drawables and readouts that show one of these
     parameters directly (``scene.viz.readout(poll.votes(0))``) follow the live
-    votes, while drawables driven through ``computed`` keep their preview.
+    votes, while drawables driven through ``computed`` keep what was recorded.
     """
     @property
     def id(self) -> str:
@@ -5121,10 +5121,6 @@ class Poll:
     def question(self) -> str: ...
     @property
     def options(self) -> list[str]: ...
-    @property
-    def preview(self) -> list[int]:
-        """Counts shown outside a live presentation."""
-        ...
     @property
     def code(self) -> str:
         """Six-character session code phones can type on the relay's page."""
@@ -5179,9 +5175,9 @@ class Poll:
     def remaining(self) -> Parameter:
         """Seconds left to answer a quiz, as a parameter.
 
-        In previews and exports it counts down along the timeline from where
-        the quiz opens; while presenting it follows the relay's clock, which
-        ends the quiz. Raises ``ValueError`` for a poll that is not a quiz.
+        In previews and exports it runs down with the rehearsal, reaching 0
+        at the stop where a presentation waits for the answers; while
+        presenting it follows the relay's clock, which ends the quiz. Raises ``ValueError`` for a poll that is not a quiz.
 
         Example:
             clock = scene.viz.readout(quiz.remaining(), format=".0f", suffix=" s")
@@ -5262,15 +5258,11 @@ class Leaderboard:
     Every method takes a ``rank`` (0 for the leader) and returns something to
     place and style: ``name`` a live text drawable, ``points`` a parameter,
     ``bar`` a bar drawable. Outside a live presentation they show the
-    ``preview`` players; while presenting, the relay's. A rank past the last
+    rehearsal's players; while presenting, the relay's. A rank past the last
     player shows an empty name, 0 points and an empty bar. All of them follow
     the live results when a ``.gaanim`` bundle is presented, including the
     nicknames, whose glyphs the bundle stores.
     """
-    @property
-    def preview(self) -> list[tuple[str, int]]:
-        """Nicknames and scores shown outside a live presentation, best first."""
-        ...
     def name(
         self,
         rank: int,
@@ -5326,14 +5318,10 @@ class Audience:
     Each player takes a ``slot``, 0 for the first to join. ``name`` gives a
     live text drawable, ``count``, ``joined`` and ``age`` give parameters to
     drive visibility, placement and entrances. Outside a live presentation
-    they show the ``preview`` players, joined long ago; while presenting,
+    they show the rehearsal's players as they join; while presenting,
     the relay's. A slot past the last player shows an empty name, ``joined``
     0 and ``age`` 0. Removing a player moves the later ones up one slot.
     """
-    @property
-    def preview(self) -> list[str]:
-        """Nicknames shown outside a live presentation, in joining order."""
-        ...
     @property
     def code(self) -> str:
         """The session code phones type."""
@@ -5423,15 +5411,11 @@ class LiveZone:
 
     While presenting, each player arrives in it as the character they made
     on their phone, and the zone's behavior poses that character every
-    frame. Previews and exports replay the preview players the same way
+    frame. Previews and exports replay the scene's rehearsal the same way
     every time. The behavior is compiled into the scene, so a presented
     ``.gaanim`` runs it without Python. Characters are drawn above the rest
     of the scene, clipped to the zone's bounds.
     """
-    @property
-    def preview(self) -> list[str]:
-        """Nicknames replayed outside a live presentation."""
-        ...
     @property
     def instructions(self) -> int:
         """How many instructions the compiled behavior runs per player."""
@@ -8516,12 +8500,49 @@ class Scene:
             scene.stop(until=quiz.answered(share=0.8) | quiz.time_up())
         """
         ...
+    def rehearsal(
+        self,
+        players: int | Sequence[str] = 12,
+        *,
+        seed: int = 0,
+        arrive: Optional[float] = None,
+        skill: float = 0.6,
+        speed: float = 0.5,
+    ) -> None:
+        """Describe the made-up audience that plays the scene outside a live
+        presentation, so previews, exports and snapshots show a real session.
+
+        Every poll, quiz, leaderboard, audience and live zone reads it the
+        way it reads a presentation: players join, answers arrive, quiz
+        clocks run down and scores climb, all from one crowd, so the numbers
+        agree everywhere. It plays at the scene's own pace: players join
+        between ``scene.audience()`` and the room's first stop (or over
+        ``arrive`` seconds), and each poll's answers arrive between its
+        opening and the stop where a presentation would wait for them.
+
+        ``players`` is how many (named Ana, Beto, Caro…) or their nicknames,
+        in joining order. ``skill`` is how often they answer a quiz right
+        and ``speed`` how early they answer (both 0 to 1); each player is a
+        little better or faster than the next. ``seed`` picks another crowd:
+        other join times, answers and characters. The same arguments always
+        play the same session. Without a call, 12 players with these
+        defaults rehearse. Tune single questions with ``rehearse=`` on
+        ``poll`` and ``quiz``.
+
+        Raises ``ValueError`` for no players or more than 200, an empty or
+        repeated nickname, ``skill`` or ``speed`` outside 0–1, or a negative
+        ``arrive``, and ``TypeError`` for ``players`` that is neither.
+
+        Example:
+            scene.rehearsal(24, seed=3, skill=0.7)
+        """
+        ...
     def poll(
         self,
         question: str,
         options: Sequence[str],
         *,
-        preview: Optional[Sequence[int]] = None,
+        rehearse: Optional[Sequence[float]] = None,
     ) -> Poll:
         """Open an audience poll at the cursor and return its data.
 
@@ -8533,19 +8554,20 @@ class Scene:
         join once per presentation: the session code is fixed for the
         project, so the QR code is ordinary scene content.
 
-        ``preview`` gives one count per answer, used in previews, exports and
-        snapshots instead of live votes (zeros by default), so a design can
-        be judged with plausible numbers. The relay comes from
+        Outside a live presentation the scene's rehearsal
+        (``scene.rehearsal``) votes, leaning some random way; ``rehearse``
+        gives one weight per answer to lean it (``[1, 3]`` makes the second
+        three times as popular). The relay comes from
         ``GAANIM_POLL_RELAY``, the project's ``[polls] relay`` or
         ``gaanim relay use``; without one a ``UserWarning`` says so and the QR
         code leads nowhere. ``question`` and each answer are trimmed.
 
         Raises ``ValueError`` for an empty question or answer, a repeated
-        answer, fewer than 2 or more than 6 answers, or a ``preview`` whose
-        length differs from the answers.
+        answer, fewer than 2 or more than 6 answers, or ``rehearse`` weights
+        that are not one per answer, are negative or are all zero.
 
         Example:
-            poll = scene.poll("¿Qué crece más rápido?", ["x²", "2ˣ"], preview=[4, 9])
+            poll = scene.poll("¿Qué crece más rápido?", ["x²", "2ˣ"], rehearse=[1, 2])
             qr = poll.qr(3.0).move_to(-4, 0)
             bar = poll.bar(1, length=6).fill(GOLD).move_to(2, 0)
             scene.stop()
@@ -8559,7 +8581,7 @@ class Scene:
         *,
         time: int = 20,
         points: int = 1000,
-        preview: Optional[Sequence[int]] = None,
+        rehearse: Optional[float | Sequence[float]] = None,
     ) -> Poll:
         """Open a quiz at the cursor, as in Kahoot, and return its data.
 
@@ -8572,32 +8594,33 @@ class Scene:
         ``scene.leaderboard`` gives the players' standings. It takes answers in
         the same window as a poll and presents like one.
 
+        The rehearsal answers it by the players' skill; ``rehearse`` sets the
+        share that gets this question right (``0.3`` for a hard one), or one
+        weight per answer like ``poll``.
+
         Raises ``ValueError`` like ``poll``, and for a ``correct`` answer the
-        quiz does not have, ``time`` outside 5–300 seconds or ``points``
-        outside 100–10000.
+        quiz does not have, ``time`` outside 5–300 seconds, ``points``
+        outside 100–10000 or a ``rehearse`` share outside 0–1.
 
         Example:
-            quiz = scene.quiz("¿Derivada de x²?", ["x", "2x", "x²/2"], correct=1, time=20)
+            quiz = scene.quiz("¿Derivada de x²?", ["x", "2x", "x²/2"], correct=1,
+                              time=20, rehearse=0.4)
             clock = scene.viz.readout(quiz.remaining(), format=".0f")
             scene.wait(20)
             quiz.reveal()
             scene.stop()
         """
         ...
-    def leaderboard(
-        self,
-        *,
-        preview: Sequence[tuple[str, int]] = (),
-    ) -> Leaderboard:
+    def leaderboard(self) -> Leaderboard:
         """The game's leaderboard: the players of the scene's quizzes, as data.
 
         Draws nothing: ``name``, ``points``, ``players`` and ``bar`` give the
-        pieces to lay out a list, a podium or anything else. ``preview`` names
-        and scores (sorted best first) stand in for players in previews,
-        exports and snapshots.
+        pieces to lay out a list, a podium or anything else. Outside a live
+        presentation it ranks the rehearsal's players by the points their
+        made-up answers earned.
 
         Example:
-            board = scene.leaderboard(preview=[("Ana", 2890), ("Beto", 2410)])
+            board = scene.leaderboard()
             for rank in range(3):
                 y = 1 - rank
                 board.name(rank, size=0.5).move_to(-3, y)
@@ -8622,8 +8645,6 @@ class Scene:
         name_color: str = "#ffffff",
         name_gap: float = 0.08,
         name_weight: Optional[int] = 700,
-        preview: Optional[Sequence[str]] = None,
-        preview_every: float = 0.6,
     ) -> LiveZone:
         """A live zone at the cursor, running until ``zone.close()`` or the
         end of the segment: while presenting, each player of ``audience``
@@ -8657,8 +8678,8 @@ class Scene:
         their feet, ``name_size`` tall in ``name_color``, whenever their
         pose has ``show_name`` (the default); the glyphs travel with the
         zone, so a ``.gaanim`` draws names without fonts. Previews and exports replay
-        ``preview`` players (the audience's by default), one arriving every
-        ``preview_every`` seconds and ranked in the order given. Raises
+        the scene's rehearsal: its players arrive as they join the room, or
+        as the zone opens, and rank by their made-up scores. Raises
         ``gaanim.live.BehaviorError`` (a ``ValueError``) pointing at the
         line the compiler does not support, and ``ValueError`` for empty
         bounds, a non-positive size or an unknown expression.
@@ -8694,21 +8715,18 @@ class Scene:
             hero.express("happy")
         """
         ...
-    def audience(
-        self,
-        *,
-        preview: Sequence[str] = (),
-    ) -> Audience:
+    def audience(self) -> Audience:
         """The game's audience: the players in the order they joined, as data.
 
         Draws nothing: ``name``, ``count``, ``joined`` and ``age`` give the
         pieces to fill a lobby, an arena or anything else. A scene that uses
         it asks each phone for a nickname as soon as the page opens, so the
-        room fills before the first question. ``preview`` nicknames stand in
-        for players in previews, exports and snapshots.
+        room fills before the first question. Outside a live presentation
+        the rehearsal's players join here, one after another, until the
+        room's first stop.
 
         Example:
-            audience = scene.audience(preview=["Ana", "Beto", "Caro"])
+            audience = scene.audience()
             for slot in range(12):
                 x, y = (slot % 6 - 2.5) * 2, 1 - slot // 6 * 1.5
                 audience.name(slot, size=0.4).move_to(x, y)

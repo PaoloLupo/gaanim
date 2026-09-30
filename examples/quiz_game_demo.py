@@ -16,9 +16,9 @@ COLORS = [RED, BLUE, GOLD, GREEN]
 # --- Slide 1: the question -----------------------------------------------------
 scene.segment("Pregunta", notes="Wait while phones answer, then advance to reveal.")
 answers = ["x", "2x", "x²/2", "2"]
-quiz = scene.quiz(
-    "¿Cuál es la derivada de x²?", answers, correct=1, time=20, preview=[3, 17, 5, 2]
-)
+# Previews and exports play a made-up class of 20: they join, answer and score.
+scene.rehearsal(20, seed=1)
+quiz = scene.quiz("¿Cuál es la derivada de x²?", answers, correct=1, time=20, rehearse=0.7)
 
 title = scene.text(quiz.question, role="title", color=WHITE).move_to(0, 3.4)
 card = scene.geometry.rounded_rect(3.0, 3.0, 0.2).fill(WHITE).no_stroke().move_to(-6.0, 1.2)
@@ -57,7 +57,7 @@ scene.stop("respuesta")
 
 # --- Slide 2: the podium ------------------------------------------------------
 scene.segment("Podio", notes="The top three so far.")
-board = scene.leaderboard(preview=[("Ana", 2890), ("Beto", 2410), ("Carla", 1995), ("Dani", 880)])
+board = scene.leaderboard()
 heading = scene.text("Podio", role="title", color=GOLD).move_to(0, 3.4)
 players = scene.viz.readout(board.players(), format=".0f", suffix=" jugadores", color=GRAY, font_size=0.35)
 players.move_to(0, 2.6)

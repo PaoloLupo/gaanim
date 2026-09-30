@@ -5982,16 +5982,53 @@ impl PyScene {
         Ok(())
     }
 
+    /// Describe the made-up audience that plays the scene's polls outside a
+    /// live presentation.
+    #[pyo3(signature = (players=None, *, seed=0, arrive=None, skill=0.6, speed=0.5))]
+    fn rehearsal(
+        &self,
+        players: Option<&Bound<'_, PyAny>>,
+        seed: u64,
+        arrive: Option<f64>,
+        skill: f64,
+        speed: f64,
+    ) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        let names = match players {
+            None => gaanim_animation::rehearsal::RehearsalSpec::default().names,
+            Some(players) => match players.extract::<usize>() {
+                Ok(count) => gaanim_animation::rehearsal::RehearsalSpec::names(count),
+                Err(_) => players.extract::<Vec<String>>().map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err(
+                        "players is a number of players or a list of nicknames",
+                    )
+                })?,
+            },
+        };
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .rehearsal(gaanim_animation::rehearsal::RehearsalSpec {
+                names,
+                seed,
+                arrive,
+                skill,
+                speed,
+            })
+            .map_err(crate::poll::poll_error)
+    }
+
     /// Open an audience poll at the cursor and return its data: the QR code,
     /// session code and live values the scene presents as it likes.
-    #[pyo3(signature = (question, options, *, preview=None))]
+    #[pyo3(signature = (question, options, *, rehearse=None))]
     fn poll(
         &self,
         py: Python<'_>,
         question: String,
         options: Vec<String>,
-        preview: Option<Vec<u32>>,
+        rehearse: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<crate::poll::PyPoll> {
+        let lean = crate::poll::lean(rehearse)?;
         crate::custom::ensure_authoring_allowed()?;
         let mut scene = self.inner.lock().expect("scene canvas poisoned");
         if scene.poll_session().is_none() {
@@ -6009,14 +6046,14 @@ impl PyScene {
             scene.set_poll_session(session);
         }
         let inner = scene
-            .poll(question, options, preview)
+            .poll(question, options, lean)
             .map_err(crate::poll::poll_error)?;
         Ok(crate::poll::PyPoll { inner })
     }
 
     /// Open a quiz at the cursor: a poll with a correct answer, `time`
     /// seconds to answer once, and up to `points` for a fast correct answer.
-    #[pyo3(signature = (question, options, correct, *, time=20, points=1000, preview=None))]
+    #[pyo3(signature = (question, options, correct, *, time=20, points=1000, rehearse=None))]
     #[allow(clippy::too_many_arguments)]
     fn quiz(
         &self,
@@ -6026,30 +6063,30 @@ impl PyScene {
         correct: usize,
         time: u32,
         points: u32,
-        preview: Option<Vec<u32>>,
+        rehearse: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<crate::poll::PyPoll> {
         crate::custom::ensure_authoring_allowed()?;
+        let lean = crate::poll::lean(rehearse)?;
         let mut scene = self.inner.lock().expect("scene canvas poisoned");
         if scene.poll_session().is_none() {
             let session = resolve_poll_session(py)?;
             scene.set_poll_session(session);
         }
         let inner = scene
-            .quiz(question, options, correct, time, points, preview)
+            .quiz(question, options, correct, time, points, lean)
             .map_err(crate::poll::poll_error)?;
         Ok(crate::poll::PyPoll { inner })
     }
 
     /// The game's leaderboard: players of the scene's quizzes, best first,
     /// as data the scene presents as it likes.
-    #[pyo3(signature = (*, preview=Vec::new()))]
-    fn leaderboard(&self, preview: Vec<(String, u64)>) -> PyResult<crate::poll::PyLeaderboard> {
+    fn leaderboard(&self) -> PyResult<crate::poll::PyLeaderboard> {
         crate::custom::ensure_authoring_allowed()?;
         let inner = self
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .leaderboard(preview);
+            .leaderboard();
         Ok(crate::poll::PyLeaderboard { inner })
     }
 
@@ -6057,7 +6094,7 @@ impl PyScene {
     /// `audience` arrives in it as their character, posed every frame by
     /// `behavior`, a Python function compiled now. It runs until
     /// `zone.close()` or the end of the segment.
-    #[pyo3(signature = (audience, behavior, *, bounds=(-8.0, -4.5, 8.0, 4.5), size=1.2, squash=0.04, max_stretch=1.4, lean=0.05, max_lean=0.35, follow=1.0, look=0.4, names=false, name_size=0.24, name_color="#ffffff".to_string(), name_gap=0.08, name_weight=Some(700), preview=None, preview_every=0.6))]
+    #[pyo3(signature = (audience, behavior, *, bounds=(-8.0, -4.5, 8.0, 4.5), size=1.2, squash=0.04, max_stretch=1.4, lean=0.05, max_lean=0.35, follow=1.0, look=0.4, names=false, name_size=0.24, name_color="#ffffff".to_string(), name_gap=0.08, name_weight=Some(700)))]
     #[allow(clippy::too_many_arguments)]
     fn live_zone(
         &self,
@@ -6076,8 +6113,6 @@ impl PyScene {
         name_color: String,
         name_gap: f64,
         name_weight: Option<u16>,
-        preview: Option<Vec<String>>,
-        preview_every: f64,
     ) -> PyResult<crate::live::PyLiveZone> {
         crate::custom::ensure_authoring_allowed()?;
         let motion = gaanim_api::canvas::LiveMotion {
@@ -6108,8 +6143,6 @@ impl PyScene {
                 size,
                 motion,
                 names,
-                preview,
-                preview_every,
             )
             .map_err(crate::live::live_error)?;
         Ok(crate::live::PyLiveZone { inner })
@@ -6147,15 +6180,14 @@ impl PyScene {
     /// The game's audience: players in the order they joined, as data the
     /// scene arranges and animates as it likes. Phones ask for a nickname as
     /// soon as they open the page.
-    #[pyo3(signature = (*, preview=Vec::new()))]
-    fn audience(&self, py: Python<'_>, preview: Vec<String>) -> PyResult<crate::poll::PyAudience> {
+    fn audience(&self, py: Python<'_>) -> PyResult<crate::poll::PyAudience> {
         crate::custom::ensure_authoring_allowed()?;
         let mut scene = self.inner.lock().expect("scene canvas poisoned");
         if scene.poll_session().is_none() {
             let session = resolve_poll_session(py)?;
             scene.set_poll_session(session);
         }
-        let inner = scene.audience(preview).map_err(crate::poll::poll_error)?;
+        let inner = scene.audience().map_err(crate::poll::poll_error)?;
         Ok(crate::poll::PyAudience { inner })
     }
 

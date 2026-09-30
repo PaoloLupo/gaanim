@@ -172,7 +172,7 @@ audiencia.
 datos para que tú decidas cómo presentarla:
 
 ```python
-poll = scene.poll("¿Qué curva crece más rápido?", ["x²", "2ˣ", "x log x"], preview=[6, 14, 4])
+poll = scene.poll("¿Qué curva crece más rápido?", ["x²", "2ˣ", "x log x"], rehearse=[3, 7, 2])
 
 card = scene.geometry.rounded_rect(4.2, 4.2, 0.25).fill(WHITE).no_stroke().move_to(-5, 0)
 qr = poll.qr(3.6).move_to(-5, 0)                        # el QR, un drawable más
@@ -209,9 +209,9 @@ La encuesta no dibuja nada por sí misma. Te da:
 Al presentar, mientras la charla está dentro de la encuesta, los votos llegan
 en vivo. Cada teléfono cuenta una vez y puede cambiar su voto mientras la
 pregunta sigue abierta. Si vuelves a una encuesta, conserva sus votos. En la
-previsualización, la exportación y las capturas se usan los conteos de
-`preview` (ceros si no los das), así que puedes diseñar con números creíbles y
-el resultado es siempre el mismo.
+previsualización, la exportación y las capturas vota el
+#link("#ensayo")[ensayo], un público inventado; `rehearse` le da un peso por
+respuesta (`[3, 7, 2]` hace la segunda más popular).
 
 El código de la sesión es fijo para cada proyecto y el QR es contenido normal
 de la escena: se ve igual en la previsualización, en un vídeo exportado o en
@@ -225,7 +225,7 @@ paquete reproduce lo grabado. Se redibujan con los datos reales las barras de
 `poll.bar`, los apodos de la clasificación y las lecturas que muestran
 directamente un valor de la encuesta, como
 `scene.viz.readout(poll.votes(0))` o `poll.percent(0)`. Lo que pase por un
-`computed` con Python muestra los valores de `preview`. El reproductor web
+`computed` con Python muestra lo que se grabó. El reproductor web
 todavía no recibe votos.
 
 == Modo competencia <modo-competencia>
@@ -240,13 +240,13 @@ espera mientras la presentación descansa en la pausa y revela al avanzar.
 
 ```python
 quiz = scene.quiz("¿Cuál es la derivada de x²?", ["x", "2x", "x²/2", "2"],
-                  correct=1, time=20, preview=[3, 17, 5, 2])
+                  correct=1, time=20, rehearse=0.7)
 clock = scene.viz.readout(quiz.remaining(), format=".0f")   # la cuenta atrás
 scene.stop()        # el público responde
 quiz.reveal()       # al avanzar, los teléfonos ven el resultado
 scene.stop()
 
-board = scene.leaderboard(preview=[("Ana", 2890), ("Beto", 2410), ("Carla", 1995)])
+board = scene.leaderboard()
 for rank, x in [(1, -4), (0, 0), (2, 4)]:
     board.bar(rank, length=4, thickness=2.6, direction="up").fill(GOLD).move_to(x, -1.2)
     board.name(rank, size=0.55, align="center").move_to(x, 1.9)
@@ -254,9 +254,9 @@ for rank, x in [(1, -4), (0, 0), (2, 4)]:
 ```
 
 Como las encuestas, el cuestionario y la clasificación solo dan datos: el
-podio, la lista o las tarjetas los diseñas tú. `quiz.remaining()` cuenta hacia
-atrás a lo largo de la línea de tiempo en la previsualización y sigue el reloj
-del relay al presentar. `board.name(i)` es texto en vivo con el apodo del
+podio, la lista o las tarjetas los diseñas tú. `quiz.remaining()` sigue el
+reloj del relay al presentar; en la previsualización llega a 0 en la pausa
+donde la presentación espera las respuestas. `board.name(i)` es texto en vivo con el apodo del
 puesto `i`; `board.points(i)` y `board.players()` son `Parameter`.
 
 La vista del presentador tiene una sección *Audience* con el código de la
@@ -265,9 +265,10 @@ puedes quitar a un jugador (su teléfono ya no puede volver a unirse) o empezar
 una partida nueva con *New game*, que borra votos, respuestas y jugadores y
 pide una segunda pulsación para confirmar. Pulsar `R` dos veces seguidas hace
 lo mismo desde cualquier ventana de la presentación, y
-`gaanim relay reset [ruta]` lo hace desde la terminal. Volver a presentar el
-proyecto conserva la partida, así que si algo se cierra a mitad de la charla no
-se pierde nada. Los apodos admiten de 2 a 20 letras, números o espacios y no se
+`gaanim relay reset [ruta]` lo hace desde la terminal. Al terminar la
+presentación los teléfonos muestran el podio y una despedida, y la siguiente
+presentación empieza una partida nueva; si la presentación se cae a mitad de
+la charla, al volver a abrirla la partida sigue donde estaba. Los apodos admiten de 2 a 20 letras, números o espacios y no se
 repiten en la sesión.
 
 == Avanzar por sí sola <avanzar-sola>
@@ -303,7 +304,7 @@ cuestionario. Como la clasificación, solo da datos: cómo se acomodan y cómo
 entran los decides tú.
 
 ```python
-audience = scene.audience(preview=["Ana", "Beto", "Caro", "Dani"])
+audience = scene.audience()
 audience.qr(3).move_to(-5, 0)
 for slot in range(12):
     x, y = (slot % 4) * 2.2 - 1, 1.5 - slot // 4 * 1.5
@@ -315,9 +316,48 @@ players = scene.viz.readout(audience.count(), format=".0f", suffix=" jugadores")
 `audience.name(i)` es el apodo de quien entró en el puesto `i`, vacío mientras
 nadie lo ocupa. `audience.joined(i)` vale 1 cuando el puesto está ocupado y
 `audience.age(i)` cuenta los segundos desde que entró, hasta 60, para animar
-su llegada. En la previsualización los jugadores de `preview` aparecen como si
-hubieran entrado hace rato. Si quitas a un jugador, los siguientes suben un
-puesto.
+su llegada. En la previsualización entran los jugadores del
+#link("#ensayo")[ensayo], uno tras otro. Si quitas a un jugador, los
+siguientes suben un puesto.
+
+== Ensayo <ensayo>
+
+Fuera de una presentación en vivo, un público inventado juega la escena: en
+la previsualización, la exportación y las capturas los jugadores entran a la
+sala, responden cada pregunta, el reloj baja y los puntos suben, como en una
+sesión real. Todo sale del mismo grupo, así que los números cuadran en todas
+partes: los votos de una pregunta suman los jugadores que había, y la
+clasificación suma los puntos que ganaron sus respuestas. Las zonas vivas
+también lo usan.
+
+```python
+scene.rehearsal(24, seed=3, skill=0.65, speed=0.5)
+
+audience = scene.audience()                  # entran uno tras otro
+quiz = scene.quiz("¿Capital de Australia?", ["Sídney", "Canberra", "Perth"],
+                  correct=1, rehearse=0.4)   # solo el 40 % acierta
+poll = scene.poll("¿Te gustó?", ["Sí", "No"], rehearse=[5, 1])
+board = scene.leaderboard()                  # puntos de sus respuestas
+```
+
+- `players`: cuántos jugadores (se llaman Ana, Beto, Caro…) o una lista de
+  apodos, en el orden en que entran. Sin llamar a `scene.rehearsal` ensayan
+  12.
+- `skill` (0 a 1): cuántas preguntas aciertan en promedio; cada jugador es
+  algo mejor o peor que el resto, así que la clasificación se reparte.
+- `speed` (0 a 1): qué tan pronto responden.
+- `arrive`: en cuántos segundos entran todos; por defecto, entre
+  `scene.audience()` y la primera pausa de la sala.
+- `seed`: otro grupo, con otros tiempos, respuestas y personajes.
+
+Por pregunta, `rehearse=` en `scene.quiz` es la parte que acierta, y en
+`scene.poll` (o en un cuestionario) un peso por respuesta.
+
+El ensayo sigue el ritmo de la escena: las respuestas de una pregunta llegan
+entre que se abre y la pausa donde la presentación esperaría por ellas, así
+que la previsualización es una versión acelerada de lo que pasará en vivo. Con
+los mismos argumentos el ensayo es siempre el mismo, en cada vista previa y
+en cada exportación.
 
 == El relay
 

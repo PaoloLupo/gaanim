@@ -22,7 +22,7 @@ pub(crate) fn compile_behavior(behavior: &Bound<'_, PyAny>) -> PyResult<LiveProg
 
 /// A live zone: while presenting, each player arrives in it as their
 /// character, posed every frame by the zone's behavior. Previews and
-/// exports replay its preview players. The behavior is compiled into the
+/// exports replay the scene's rehearsal. The behavior is compiled into the
 /// scene, so a presented `.gaanim` runs it without Python.
 #[pyclass(name = "LiveZone", module = "gaanim_core", frozen)]
 pub struct PyLiveZone {
@@ -31,12 +31,6 @@ pub struct PyLiveZone {
 
 #[pymethods]
 impl PyLiveZone {
-    /// Nicknames replayed outside a live presentation.
-    #[getter]
-    fn preview(&self) -> Vec<String> {
-        self.inner.zone().preview
-    }
-
     /// How many instructions the compiled behavior runs per player.
     #[getter]
     fn instructions(&self) -> usize {

@@ -7,15 +7,17 @@
 //! percent, total, a quiz's seconds left) as parameters any reactive
 //! drawable can follow, and bars whose length follows an answer. The
 //! leaderboard gives the players' nicknames as live text, their scores as
-//! parameters and bars. Outside a live presentation every value is its
-//! preview, so previews and exports stay deterministic.
+//! parameters and bars. Outside a live presentation every value comes from
+//! the scene's rehearsal ([`SceneModel::rehearsal`]), a made-up audience
+//! that plays the same way on every preview and export.
 
 use std::sync::Arc;
 
 use gaanim_animation::polls::{
-    AUDIENCE_AGE_CAP, BarSource, BarSpec, LiveTextSource, PollBar, PollMeasure, PollSource,
-    PollValue, TextAlign, leader_fraction,
+    BarSource, BarSpec, LiveTextSource, PollBar, PollMeasure, PollSource, PollValue, TextAlign,
+    leader_fraction,
 };
+use gaanim_animation::rehearsal::{Lean, MAX_PLAYERS, RehearsalSpec};
 use gaanim_animation::{SampledInterpolation, SampledProperty};
 use gaanim_core::peniko::Color;
 pub use gaanim_timeline::timeline::GateCondition;
@@ -66,8 +68,8 @@ pub enum PollError {
     EmptyOption,
     #[error("the poll answer {option:?} appears twice")]
     DuplicateOption { option: String },
-    #[error("preview needs one count per answer: {expected}, got {got}")]
-    PreviewLength { expected: usize, got: usize },
+    #[error("rehearse needs one weight per answer: {expected}, got {got}")]
+    LeanLength { expected: usize, got: usize },
     #[error("answer {answer} does not exist; this poll has {count} answers")]
     UnknownAnswer { answer: usize, count: usize },
     #[error("the scene has no poll session")]
@@ -98,7 +100,8 @@ pub(crate) struct PollRecord {
     pub id: String,
     pub question: String,
     pub options: Vec<String>,
-    pub preview: Arc<[u32]>,
+    /// How the rehearsal answers it.
+    pub lean: Lean,
     pub open: (usize, f64),
     pub close: Option<(usize, f64)>,
     pub quiz: Option<QuizRecord>,
@@ -143,6 +146,62 @@ impl SceneModel {
             .poll_session = Some(session);
     }
 
+    /// Describe the made-up audience that plays the scene's polls outside a
+    /// live presentation: previews, exports and snapshots show it joining,
+    /// answering and climbing the leaderboard, the same every time.
+    pub fn rehearsal(&mut self, spec: RehearsalSpec) -> Result<(), PollError> {
+        let names: Vec<String> = spec
+            .names
+            .iter()
+            .map(|name| name.trim().to_string())
+            .collect();
+        if !(1..=MAX_PLAYERS).contains(&names.len()) {
+            return Err(PollError::Invalid(format!(
+                "a rehearsal has between 1 and {MAX_PLAYERS} players, got {}",
+                names.len()
+            )));
+        }
+        for (index, name) in names.iter().enumerate() {
+            if name.is_empty() {
+                return Err(PollError::Invalid("player names must not be empty".into()));
+            }
+            if names[..index]
+                .iter()
+                .any(|other| other.to_lowercase() == name.to_lowercase())
+            {
+                return Err(PollError::Invalid(format!(
+                    "the player name {name:?} appears twice"
+                )));
+            }
+        }
+        for (value, name) in [(spec.skill, "skill"), (spec.speed, "speed")] {
+            if !(0.0..=1.0).contains(&value) {
+                return Err(PollError::Invalid(format!(
+                    "{name} goes from 0 to 1, got {value}"
+                )));
+            }
+        }
+        if let Some(arrive) = spec.arrive
+            && !(arrive.is_finite() && arrive >= 0.0)
+        {
+            return Err(PollError::Invalid(format!(
+                "arrive must be zero or positive seconds, got {arrive}"
+            )));
+        }
+        self.state.lock().expect("canvas state poisoned").rehearsal =
+            RehearsalSpec { names, ..spec };
+        Ok(())
+    }
+
+    /// The made-up audience of [`Self::rehearsal`].
+    pub fn rehearsal_spec(&self) -> RehearsalSpec {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .rehearsal
+            .clone()
+    }
+
     pub fn poll_session(&self) -> Option<PollSession> {
         self.state
             .lock()
@@ -153,14 +212,19 @@ impl SceneModel {
 
     /// Open a poll at the cursor. It takes votes while a presentation is
     /// between here and [`PollHandle::close`], or the end of this segment.
-    /// `preview` counts stand in for votes outside a live presentation.
+    /// `lean` is how the rehearsal votes (weights per answer, or made up).
     pub fn poll(
         &mut self,
         question: impl Into<String>,
         options: impl IntoIterator<Item = impl Into<String>>,
-        preview: Option<Vec<u32>>,
+        lean: Lean,
     ) -> Result<PollHandle, PollError> {
-        self.open_poll(question.into(), options, preview, None)
+        if matches!(lean, Lean::Right(_)) {
+            return Err(PollError::Invalid(
+                "only a quiz has a right answer to rehearse; give a poll weights".into(),
+            ));
+        }
+        self.open_poll(question.into(), options, lean, None)
     }
 
     /// Open a quiz at the cursor: a poll with a correct answer, `time`
@@ -172,7 +236,7 @@ impl SceneModel {
         correct: usize,
         time: u32,
         points: u32,
-        preview: Option<Vec<u32>>,
+        lean: Lean,
     ) -> Result<PollHandle, PollError> {
         if !QUIZ_TIME.contains(&time) {
             return Err(PollError::Invalid(format!(
@@ -194,14 +258,14 @@ impl SceneModel {
             points,
             reveal: None,
         };
-        self.open_poll(question.into(), options, preview, Some(quiz))
+        self.open_poll(question.into(), options, lean, Some(quiz))
     }
 
     fn open_poll(
         &mut self,
         question: String,
         options: impl IntoIterator<Item = impl Into<String>>,
-        preview: Option<Vec<u32>>,
+        lean: Lean,
         quiz: Option<QuizRecord>,
     ) -> Result<PollHandle, PollError> {
         let question = question.trim().to_string();
@@ -235,12 +299,31 @@ impl SceneModel {
                 count: options.len(),
             });
         }
-        let preview = preview.unwrap_or_else(|| vec![0; options.len()]);
-        if preview.len() != options.len() {
-            return Err(PollError::PreviewLength {
-                expected: options.len(),
-                got: preview.len(),
-            });
+        match &lean {
+            Lean::Auto => {}
+            Lean::Right(share) if (0.0..=1.0).contains(share) => {}
+            Lean::Right(share) => {
+                return Err(PollError::Invalid(format!(
+                    "the share that answers right goes from 0 to 1, got {share}"
+                )));
+            }
+            Lean::Weights(weights) => {
+                if weights.len() != options.len() {
+                    return Err(PollError::LeanLength {
+                        expected: options.len(),
+                        got: weights.len(),
+                    });
+                }
+                if weights
+                    .iter()
+                    .any(|weight| !(weight.is_finite() && *weight >= 0.0))
+                    || weights.iter().sum::<f64>() <= 0.0
+                {
+                    return Err(PollError::Invalid(format!(
+                        "rehearse weights must be zero or positive, and not all zero, got {weights:?}"
+                    )));
+                }
+            }
         }
         let mut state = self.state.lock().expect("canvas state poisoned");
         if state.poll_session.is_none() {
@@ -252,7 +335,7 @@ impl SceneModel {
             id: poll_id(index, &question, &options, quiz.as_ref()),
             question,
             options,
-            preview: preview.into(),
+            lean,
             open,
             close: None,
             quiz,
@@ -264,21 +347,14 @@ impl SceneModel {
     }
 
     /// The game's leaderboard: the players of every quiz in this scene,
-    /// best first. `preview` names and scores stand in for players outside a
-    /// live presentation. Text uses `color`, or the theme's foreground.
-    pub fn leaderboard(&mut self, preview: Vec<(String, u64)>) -> LeaderboardHandle {
-        let mut preview = preview;
-        preview.sort_by(|a, b| b.1.cmp(&a.1));
+    /// best first. Text uses the theme's foreground.
+    pub fn leaderboard(&mut self) -> LeaderboardHandle {
         let color = self
             .theme_style
             .as_ref()
             .map_or(Color::WHITE, |theme| theme.palette.foreground);
         LeaderboardHandle {
             state: self.state.clone(),
-            preview: preview
-                .into_iter()
-                .map(|(name, score)| (Arc::from(name.trim()), score))
-                .collect(),
             color,
         }
     }
@@ -309,9 +385,8 @@ impl SceneModel {
     /// The game's audience: the players in the order they joined, as data
     /// for the scene to arrange and animate. A scene that uses it asks each
     /// phone for a nickname as soon as it opens the page, so a lobby fills
-    /// before the first question. `preview` nicknames stand in for players
-    /// outside a live presentation. Text uses the theme's foreground.
-    pub fn audience(&mut self, preview: Vec<String>) -> Result<AudienceHandle, PollError> {
+    /// before the first question. Text uses the theme's foreground.
+    pub fn audience(&mut self) -> Result<AudienceHandle, PollError> {
         let color = self
             .theme_style
             .as_ref()
@@ -322,16 +397,12 @@ impl SceneModel {
                 return Err(PollError::NoSession);
             }
             state.poll_lobby = true;
-            if state.poll_lobby_segment.is_none() {
-                state.poll_lobby_segment = Some(state.active_idx);
+            if state.poll_lobby_at.is_none() {
+                state.poll_lobby_at = Some((state.active_idx, state.active().cursor));
             }
         }
         Ok(AudienceHandle {
             state: self.state.clone(),
-            preview: preview
-                .into_iter()
-                .map(|name| Arc::from(name.trim()))
-                .collect(),
             color,
         })
     }
@@ -479,10 +550,6 @@ impl PollHandle {
         self.record().options
     }
 
-    pub fn preview(&self) -> Vec<u32> {
-        self.record().preview.to_vec()
-    }
-
     /// The correct answer of a quiz; `None` for a poll.
     pub fn correct(&self) -> Option<usize> {
         self.record().quiz.map(|quiz| quiz.correct)
@@ -523,7 +590,7 @@ impl PollHandle {
             &self.state,
             source,
             vec![0.0],
-            vec![measure.value(&record.preview)],
+            vec![measure.value(&vec![0; record.options.len()])],
             SampledInterpolation::Step,
         )
     }
@@ -589,7 +656,7 @@ impl PollHandle {
         self.check_answer(answer)?;
         let spec = options.spec()?;
         let record = self.record();
-        let preview = spec.fraction(answer, &record.preview);
+        let preview = spec.fraction(answer, &vec![0; record.options.len()]);
         Ok(spawn_bar(
             &self.state,
             spec,
@@ -689,7 +756,6 @@ impl PollHandle {
 #[derive(Clone)]
 pub struct LeaderboardHandle {
     state: SharedCanvasState,
-    preview: Vec<(Arc<str>, u64)>,
     color: Color,
 }
 
@@ -697,7 +763,6 @@ impl std::fmt::Debug for LeaderboardHandle {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("LeaderboardHandle")
-            .field("preview", &self.preview)
             .finish_non_exhaustive()
     }
 }
@@ -714,30 +779,14 @@ pub struct LiveTextOptions {
 }
 
 impl LeaderboardHandle {
-    fn preview_score(&self, rank: usize) -> u64 {
-        self.preview.get(rank).map_or(0, |(_, score)| *score)
-    }
-
-    /// Nicknames and scores shown outside a live presentation, best first.
-    pub fn preview(&self) -> Vec<(String, u64)> {
-        self.preview
-            .iter()
-            .map(|(name, score)| (name.to_string(), *score))
-            .collect()
-    }
-
     /// The nickname at `rank` (0 for the leader) as live text; empty when
     /// fewer players joined.
     pub fn name(&self, rank: usize, options: LiveTextOptions) -> Result<DrawableHandle, PollError> {
-        let preview = self
-            .preview
-            .get(rank)
-            .map_or_else(|| Arc::from(""), |(name, _)| name.clone());
         live_text(
             &self.state,
             self.color,
             LiveTextSource::LeaderName { rank },
-            preview,
+            Arc::from(""),
             options,
         )
     }
@@ -748,7 +797,7 @@ impl LeaderboardHandle {
             &self.state,
             PollSource::LeaderScore { rank },
             vec![0.0],
-            vec![self.preview_score(rank) as f64],
+            vec![0.0],
             SampledInterpolation::Step,
         )
     }
@@ -759,7 +808,7 @@ impl LeaderboardHandle {
             &self.state,
             PollSource::Players,
             vec![0.0],
-            vec![self.preview.len() as f64],
+            vec![0.0],
             SampledInterpolation::Step,
         )
     }
@@ -767,12 +816,11 @@ impl LeaderboardHandle {
     /// A bar whose length is the score at `rank` against the leader's.
     pub fn bar(&self, rank: usize, options: PollBarOptions) -> Result<DrawableHandle, PollError> {
         let spec = options.spec()?;
-        let preview = leader_fraction(self.preview.iter().map(|(_, score)| *score), rank);
         Ok(spawn_bar(
             &self.state,
             spec,
             BarSource::Leader { rank },
-            preview,
+            leader_fraction([], rank),
         ))
     }
 }
@@ -782,7 +830,6 @@ impl LeaderboardHandle {
 #[derive(Clone)]
 pub struct AudienceHandle {
     state: SharedCanvasState,
-    preview: Vec<Arc<str>>,
     color: Color,
 }
 
@@ -790,17 +837,11 @@ impl std::fmt::Debug for AudienceHandle {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("AudienceHandle")
-            .field("preview", &self.preview)
             .finish_non_exhaustive()
     }
 }
 
 impl AudienceHandle {
-    /// Nicknames shown outside a live presentation, in joining order.
-    pub fn preview(&self) -> Vec<String> {
-        self.preview.iter().map(|name| name.to_string()).collect()
-    }
-
     fn session(&self) -> PollSession {
         self.state
             .lock()
@@ -835,16 +876,11 @@ impl AudienceHandle {
     /// The nickname in `slot` as live text; empty until that many players
     /// joined.
     pub fn name(&self, slot: usize, options: LiveTextOptions) -> Result<DrawableHandle, PollError> {
-        let preview = self
-            .preview
-            .get(slot)
-            .cloned()
-            .unwrap_or_else(|| Arc::from(""));
         live_text(
             &self.state,
             self.color,
             LiveTextSource::AudienceName { slot },
-            preview,
+            Arc::from(""),
             options,
         )
     }
@@ -861,37 +897,31 @@ impl AudienceHandle {
             &self.state,
             PollSource::Players,
             vec![0.0],
-            vec![self.preview.len() as f64],
+            vec![0.0],
             SampledInterpolation::Step,
         )
     }
 
     /// 1 once a player took `slot`, else 0: drive a slot's visibility.
     pub fn joined(&self, slot: usize) -> Result<Parameter, PollError> {
-        let preview = if slot < self.preview.len() { 1.0 } else { 0.0 };
         live_parameter(
             &self.state,
             PollSource::AudienceJoined { slot },
             vec![0.0],
-            vec![preview],
+            vec![0.0],
             SampledInterpolation::Step,
         )
     }
 
     /// Seconds since the player in `slot` joined, up to
-    /// [`AUDIENCE_AGE_CAP`]; 0 while the slot is empty. Drive an entrance
-    /// with it. Preview players count as long settled.
+    /// [`gaanim_animation::polls::AUDIENCE_AGE_CAP`]; 0 while the slot is empty. Drive an entrance
+    /// with it.
     pub fn age(&self, slot: usize) -> Result<Parameter, PollError> {
-        let preview = if slot < self.preview.len() {
-            AUDIENCE_AGE_CAP
-        } else {
-            0.0
-        };
         live_parameter(
             &self.state,
             PollSource::AudienceAge { slot },
             vec![0.0],
-            vec![preview],
+            vec![0.0],
             SampledInterpolation::Step,
         )
     }
@@ -990,39 +1020,55 @@ mod tests {
     }
 
     #[test]
-    fn polls_validate_their_question_answers_and_preview() {
+    fn polls_validate_their_question_answers_and_rehearsal() {
         let mut scene = scene();
         let error = |result: Result<PollHandle, PollError>| result.unwrap_err();
         assert_eq!(
-            error(scene.poll(" ", ["A", "B"], None)),
+            error(scene.poll(" ", ["A", "B"], Lean::Auto)),
             PollError::EmptyQuestion
         );
         assert_eq!(
-            error(scene.poll("Q", ["A"], None)),
+            error(scene.poll("Q", ["A"], Lean::Auto)),
             PollError::OptionCount { count: 1 }
         );
         assert_eq!(
-            error(scene.poll("Q", ["1", "2", "3", "4", "5", "6", "7"], None)),
+            error(scene.poll("Q", ["1", "2", "3", "4", "5", "6", "7"], Lean::Auto)),
             PollError::OptionCount { count: 7 }
         );
         assert_eq!(
-            error(scene.poll("Q", ["A", " "], None)),
+            error(scene.poll("Q", ["A", " "], Lean::Auto)),
             PollError::EmptyOption
         );
         assert!(matches!(
-            error(scene.poll("Q", ["A", "A "], None)),
+            error(scene.poll("Q", ["A", "A "], Lean::Auto)),
             PollError::DuplicateOption { .. }
         ));
         assert_eq!(
-            error(scene.poll("Q", ["A", "B"], Some(vec![1]))),
-            PollError::PreviewLength {
+            error(scene.poll("Q", ["A", "B"], Lean::Weights(vec![1.0]))),
+            PollError::LeanLength {
                 expected: 2,
                 got: 1
             }
         );
+        assert!(
+            scene
+                .poll("Q", ["A", "B"], Lean::Weights(vec![0.0, 0.0]))
+                .is_err()
+        );
+        assert!(scene.poll("Q", ["A", "B"], Lean::Right(0.5)).is_err());
+        assert!(
+            scene
+                .quiz("Q", ["A", "B"], 0, 20, 1000, Lean::Right(1.5))
+                .is_err()
+        );
+        assert!(
+            scene
+                .quiz("Q", ["A", "B"], 0, 20, 1000, Lean::Right(0.8))
+                .is_ok()
+        );
         let mut bare = SceneModel::new(640, 360);
         assert_eq!(
-            error(bare.poll("Q", ["A", "B"], None)),
+            error(bare.poll("Q", ["A", "B"], Lean::Auto)),
             PollError::NoSession
         );
     }
@@ -1031,20 +1077,24 @@ mod tests {
     fn quizzes_validate_their_answer_time_and_points() {
         let mut scene = scene();
         assert_eq!(
-            scene.quiz("Q", ["A", "B"], 2, 20, 1000, None).unwrap_err(),
+            scene
+                .quiz("Q", ["A", "B"], 2, 20, 1000, Lean::Auto)
+                .unwrap_err(),
             PollError::UnknownAnswer {
                 answer: 2,
                 count: 2
             }
         );
-        assert!(scene.quiz("Q", ["A", "B"], 0, 2, 1000, None).is_err());
-        assert!(scene.quiz("Q", ["A", "B"], 0, 20, 50, None).is_err());
-        let quiz = scene.quiz("Q", ["A", "B"], 1, 20, 1000, None).unwrap();
+        assert!(scene.quiz("Q", ["A", "B"], 0, 2, 1000, Lean::Auto).is_err());
+        assert!(scene.quiz("Q", ["A", "B"], 0, 20, 50, Lean::Auto).is_err());
+        let quiz = scene
+            .quiz("Q", ["A", "B"], 1, 20, 1000, Lean::Auto)
+            .unwrap();
         assert_eq!((quiz.correct(), quiz.time()), (Some(1), Some(20)));
         assert!(quiz.id().starts_with("q0-"));
         assert!(quiz.reveal().is_ok());
         assert_eq!(quiz.reveal(), Err(PollError::AlreadyRevealed));
-        let poll = scene.poll("Plain", ["A", "B"], None).unwrap();
+        let poll = scene.poll("Plain", ["A", "B"], Lean::Auto).unwrap();
         assert_eq!(poll.correct(), None);
         assert_eq!(poll.reveal(), Err(PollError::NotQuiz));
         assert!(matches!(poll.remaining(), Err(PollError::NotQuiz)));
@@ -1082,12 +1132,11 @@ mod tests {
     fn a_poll_reports_its_session_and_rejects_unknown_answers() {
         let mut scene = scene();
         let poll = scene
-            .poll(" ¿Cuál? ", ["x²", "2ˣ"], Some(vec![3, 1]))
+            .poll(" ¿Cuál? ", ["x²", "2ˣ"], Lean::Weights(vec![3.0, 1.0]))
             .unwrap();
         assert_eq!(poll.question(), "¿Cuál?");
         assert_eq!(poll.code(), "ABC234");
         assert_eq!(poll.url(), "https://relay.example.dev/s/ABC234");
-        assert_eq!(poll.preview(), [3, 1]);
         assert!(matches!(
             poll.votes(2),
             Err(PollError::UnknownAnswer {
@@ -1102,13 +1151,9 @@ mod tests {
     }
 
     #[test]
-    fn the_leaderboard_sorts_its_preview_and_validates_text() {
+    fn the_leaderboard_validates_text() {
         let mut scene = scene();
-        let board = scene.leaderboard(vec![("Beto".into(), 300), (" Ana ".into(), 900)]);
-        assert_eq!(
-            board.preview(),
-            [("Ana".to_string(), 900), ("Beto".to_string(), 300)]
-        );
+        let board = scene.leaderboard();
         let options = |size| LiveTextOptions {
             size,
             weight: None,
@@ -1120,6 +1165,30 @@ mod tests {
         assert!(board.name(0, options(Some(-1.0))).is_err());
         assert!(board.points(1).is_ok());
         assert!(board.players().is_ok());
+    }
+
+    #[test]
+    fn a_rehearsal_validates_its_crowd() {
+        let mut scene = scene();
+        let spec = |names: Vec<&str>| RehearsalSpec {
+            names: names.into_iter().map(String::from).collect(),
+            ..Default::default()
+        };
+        assert!(scene.rehearsal(spec(vec![])).is_err());
+        assert!(scene.rehearsal(spec(vec!["Ana", " ana "])).is_err());
+        assert!(scene.rehearsal(spec(vec!["Ana", " "])).is_err());
+        let too_fast = RehearsalSpec {
+            speed: 1.5,
+            ..spec(vec!["Ana"])
+        };
+        assert!(scene.rehearsal(too_fast).is_err());
+        let late = RehearsalSpec {
+            arrive: Some(-1.0),
+            ..spec(vec!["Ana"])
+        };
+        assert!(scene.rehearsal(late).is_err());
+        scene.rehearsal(spec(vec![" Ana ", "Beto"])).unwrap();
+        assert_eq!(scene.rehearsal_spec().names, ["Ana", "Beto"]);
     }
 
     #[test]
