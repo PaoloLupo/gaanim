@@ -67,7 +67,8 @@ pub use tween::{
 pub use updaters::{
     AngleArrowheads, AngleLabelPlacement, AngleSweep, DimensionLabelOrientation,
     DimensionLabelPlacement, DimensionSide, EndpointAngle, EndpointDistance, EndpointFollow,
-    FollowOffsetSpace, InvalidFixedStep, InvalidSampledSeries, PlaybackState, RotationBinding,
+    AmbientClock, FollowOffsetSpace, InvalidFixedStep, InvalidSampledSeries, PlaybackState,
+    RotationBinding,
     RotationTranslationBinding, SampledInterpolation, SampledProperty, SampledSeriesDriver,
     SampledSeriesDrivers, SurroundingRect, SurroundingShape, TracedPath, TracedPath3D,
     TrackingAngle, TrackingAnglePart, TrackingEndpoint, TrackingLine, TrackingRay, TrackingScalar,
@@ -97,6 +98,7 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
         // Register DeltaTime resource
         app.init_resource::<DeltaTime>();
         app.init_resource::<PlaybackState>();
+        app.init_resource::<AmbientClock>();
         app.init_resource::<polls::PollResults>();
         app.init_resource::<live::LiveZones>();
         app.init_resource::<live::LiveOverlay>();

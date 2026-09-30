@@ -258,6 +258,9 @@ impl Plugin for GaanimEditorPlugin {
                         .after(sync_editor_input_ignore_system)
                         .before(gaanim_timeline::timeline_playback_system),
                     presenter::sync_presentation_timer_system,
+                    ambient_clock_system
+                        .in_set(gaanim_scene::hierarchy::SceneSet::Input)
+                        .after(gaanim_timeline::timeline_playback_system),
                     sync_fullscreen_letterbox_color_system
                         .after(editor_fullscreen_keys_system)
                         .after(presentation_escape_system),
@@ -328,6 +331,21 @@ impl Plugin for GaanimEditorPlugin {
         // polled stops as plain stops.
         #[cfg(not(target_arch = "wasm32"))]
         app.add_plugins(polls::AudiencePollsPlugin);
+    }
+}
+
+/// While a presentation rests (at a stop, or paused), shader backgrounds and
+/// post-processing keep moving on the wall clock.
+fn ambient_clock_system(
+    mode: Res<PresentationMode>,
+    timeline: Res<Timeline>,
+    time: Res<Time<bevy::time::Real>>,
+    mut clock: ResMut<gaanim_animation::AmbientClock>,
+) {
+    if mode.active && !timeline.is_playing {
+        clock.rest += time
+            .delta_secs_f64()
+            .min(gaanim_animation::AmbientClock::MAX_STEP);
     }
 }
 

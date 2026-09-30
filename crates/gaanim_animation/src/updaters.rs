@@ -31,6 +31,30 @@ impl Default for PlaybackState {
     }
 }
 
+/// Time of ambient motion: shader backgrounds and post-processing.
+///
+/// A presentation resting at a stop leaves the timeline still, but its
+/// backgrounds should not freeze: while it rests, `rest` gathers the wall
+/// clock and ambient motion runs at the timeline's time plus `rest`. It is
+/// never reset, so the motion carries on without a jump when the timeline
+/// moves again. Outside presentations it stays zero, and previews, seeks and
+/// exports draw ambient motion at the exact timeline time.
+#[derive(bevy::prelude::Resource, Debug, Clone, Copy, Default, PartialEq)]
+pub struct AmbientClock {
+    /// Seconds the presentation spent resting so far.
+    pub rest: f64,
+}
+
+impl AmbientClock {
+    /// Longest wall-clock step taken in one frame, so a stall does not jump.
+    pub const MAX_STEP: f64 = 0.1;
+
+    /// Ambient time at timeline time `time`.
+    pub fn at(&self, time: f64) -> f64 {
+        time + self.rest
+    }
+}
+
 /// Componente que define una función de actualización continua para una entidad.
 /// Se ejecuta cada frame durante SceneSet::Updaters.
 #[derive(Component, Clone)]
