@@ -10,6 +10,8 @@
 //! network; outside a presentation the results are not live and the scene
 //! shows its previews. The relay pushes the results over a WebSocket as they
 //! change; while it cannot, the thread asks for them every [`REFRESH`].
+//! A stop authored with `until` advances by itself once the audience meets
+//! its condition, when the presentation came to it going forward.
 //! Presenter View shows the audience and can remove a
 //! player or start a new game; so can `R` twice in a row, and
 //! `gaanim relay reset` from a terminal. A presentation that starts again
@@ -45,7 +47,9 @@ impl Plugin for AudiencePollsPlugin {
             .init_resource::<PollResults>()
             .add_systems(
                 Update,
-                audience_poll_system.in_set(gaanim_scene::hierarchy::SceneSet::Input),
+                (audience_poll_system, stop_gate_system)
+                    .chain()
+                    .in_set(gaanim_scene::hierarchy::SceneSet::Input),
             );
     }
 }
@@ -61,6 +65,60 @@ pub(crate) struct AudiencePolls {
     confirm_reset: Option<Instant>,
     /// The relay answer the results were last built from.
     seen: Option<u64>,
+    /// The playhead on the previous frame, to tell arriving at a stop going
+    /// forward from going back to it.
+    previous_time: Option<f64>,
+    /// The stop the presentation rests on, and whether its gate may
+    /// advance it.
+    resting: Option<(f64, bool)>,
+    /// Where the gated stop the presentation rests on stands, for the
+    /// speaker.
+    gate: Option<String>,
+}
+
+/// Advance a gated stop once its condition holds. Only a stop reached going
+/// forward advances by itself, so going back to one whose condition still
+/// holds does not throw the presentation forward again; the stop a
+/// presentation starts on counts as reached going forward.
+fn stop_gate_system(
+    presentation: Res<PresentationMode>,
+    results: Res<PollResults>,
+    mut timeline: ResMut<Timeline>,
+    mut polls: ResMut<AudiencePolls>,
+) {
+    if !presentation.active {
+        polls.previous_time = None;
+        polls.resting = None;
+        polls.gate = None;
+        return;
+    }
+    let now = timeline.current_time;
+    let previous = polls.previous_time.replace(now);
+    let resting = timeline.resting_stop().filter(|_| results.live);
+    let Some(stop) = resting else {
+        polls.resting = None;
+        polls.gate = None;
+        return;
+    };
+    let Some(until) = timeline.stop_gate_at(stop).map(|gate| gate.until.clone()) else {
+        polls.resting = None;
+        polls.gate = None;
+        return;
+    };
+    if polls.resting.map(|(time, _)| time) != Some(stop) {
+        let forward = previous.is_none_or(|previous| previous < stop - 1e-5);
+        polls.resting = Some((stop, forward));
+    }
+    let armed = polls.resting.is_some_and(|(_, armed)| armed);
+    polls.gate = Some(if armed {
+        format!("Advances by itself: {}", until.progress(&results))
+    } else {
+        format!("Would advance by itself: {}", until.progress(&results))
+    });
+    if armed && until.holds(&results) {
+        polls.resting = Some((stop, false));
+        timeline.advance();
+    }
 }
 
 /// Keep the relay's open poll on the one the playhead is in, reveal quizzes
@@ -346,6 +404,7 @@ impl PollClient {
                 .collect(),
             leaderboard: snapshot.leaderboard,
             players: snapshot.players,
+            connected: snapshot.connected,
         }
     }
 }
@@ -839,6 +898,7 @@ impl AudiencePolls {
                 })
                 .unwrap_or_default(),
             confirm_reset: self.reset_armed(),
+            gate: self.gate.clone(),
         })
     }
 
@@ -918,6 +978,89 @@ mod tests {
             close: 1.0,
             quiz: None,
         }
+    }
+
+    /// A timeline with a stop at 1 s that advances once 3 players joined,
+    /// in an app presenting live results.
+    fn gated_app() -> App {
+        use gaanim_timeline::timeline::{GateCondition, SegmentMetadata, SegmentStop, StopGate};
+        let mut timeline = Timeline::new();
+        timeline.cached_duration = 3.0;
+        timeline.set_segments(vec![SegmentMetadata {
+            id: 1,
+            name: "lobby".into(),
+            notes: None,
+            start_time: 0.0,
+            end_time: 3.0,
+            stops: vec![SegmentStop {
+                name: None,
+                time: 1.0,
+                ambient: None,
+            }],
+        }]);
+        timeline.set_stop_gates(vec![StopGate {
+            time: 1.0,
+            until: GateCondition::Players { count: 3 },
+        }]);
+        let mut app = App::new();
+        app.insert_resource(timeline)
+            .insert_resource(PresentationMode { active: true })
+            .insert_resource(PollResults {
+                live: true,
+                ..Default::default()
+            })
+            .init_resource::<AudiencePolls>()
+            .add_systems(Update, stop_gate_system);
+        app
+    }
+
+    fn frame(app: &mut App, time: f64, playing: bool) {
+        let mut timeline = app.world_mut().resource_mut::<Timeline>();
+        timeline.current_time = time;
+        timeline.is_playing = playing;
+        app.update();
+    }
+
+    #[test]
+    fn a_gated_stop_reached_going_forward_advances_once_the_audience_is_there() {
+        let mut app = gated_app();
+        frame(&mut app, 0.9, true);
+        frame(&mut app, 1.0, false);
+        assert!(!app.world().resource::<Timeline>().is_playing);
+        assert_eq!(
+            app.world().resource::<AudiencePolls>().gate.as_deref(),
+            Some("Advances by itself: 0/3 players")
+        );
+        app.world_mut().resource_mut::<PollResults>().players = 3;
+        app.update();
+        // Advancing from a paused stop resumes playback.
+        assert!(app.world().resource::<Timeline>().is_playing);
+    }
+
+    #[test]
+    fn a_presentation_starting_on_a_gated_stop_advances_from_it() {
+        let mut app = gated_app();
+        app.world_mut().resource_mut::<PollResults>().players = 3;
+        // The editor was elsewhere before presenting.
+        app.world_mut().resource_mut::<PresentationMode>().active = false;
+        frame(&mut app, 2.5, false);
+        app.world_mut().resource_mut::<PresentationMode>().active = true;
+        frame(&mut app, 1.0, false);
+        assert!(app.world().resource::<Timeline>().is_playing);
+    }
+
+    #[test]
+    fn going_back_to_a_gated_stop_does_not_advance_it() {
+        let mut app = gated_app();
+        app.world_mut().resource_mut::<PollResults>().players = 5;
+        frame(&mut app, 2.0, false);
+        frame(&mut app, 1.0, false);
+        app.update();
+        assert!(!app.world().resource::<Timeline>().is_playing);
+        assert_eq!(
+            app.world().resource::<AudiencePolls>().gate.as_deref(),
+            Some("Would advance by itself: 5/3 players")
+        );
     }
 
     #[test]

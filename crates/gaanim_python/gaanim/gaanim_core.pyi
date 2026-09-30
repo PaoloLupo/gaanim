@@ -4911,6 +4911,29 @@ class Poll:
         ``.gaanim`` bundle is presented.
         """
         ...
+    def answered(
+        self,
+        *,
+        at_least: Optional[int] = None,
+        share: Optional[float] = None,
+    ) -> Condition:
+        """A condition for ``scene.stop(until=...)``: at least ``at_least``
+        answers, or answers from at least ``share`` (0 to 1) of the
+        audience: the players for a quiz, the phones on the voting page for
+        a poll. Never met with nobody there.
+
+        Raises ``ValueError`` unless exactly one of the two is given, or for
+        a share outside (0, 1].
+
+        Example:
+            scene.stop(until=quiz.answered(at_least=10))
+        """
+        ...
+    def time_up(self) -> Condition:
+        """A condition for ``scene.stop(until=...)``: the quiz is out of time
+        on the relay's clock. Raises ``ValueError`` for a poll that is not a
+        quiz."""
+        ...
     def remaining(self) -> Parameter:
         """Seconds left to answer a quiz, as a parameter.
 
@@ -5102,6 +5125,14 @@ class Audience:
     def count(self) -> Parameter:
         """How many players joined, as a parameter."""
         ...
+    def at_least(self, count: int) -> Condition:
+        """A condition for ``scene.stop(until=...)``: at least ``count``
+        players joined.
+
+        Example:
+            scene.stop("sala", until=audience.at_least(5))
+        """
+        ...
     def joined(self, slot: int) -> Parameter:
         """1 once a player took ``slot``, else 0.
 
@@ -5117,6 +5148,15 @@ class Audience:
             pop = computed(lambda a: min(a / 0.4, 1), inputs=[audience.age(3)])
         """
         ...
+
+class Condition:
+    """What the audience must do before a stop advances by itself, from
+    ``poll.answered``, ``quiz.time_up`` or ``audience.at_least``.
+
+    ``a | b`` holds when either holds and ``a & b`` when both do.
+    """
+    def __or__(self, other: Condition) -> Condition: ...
+    def __and__(self, other: Condition) -> Condition: ...
 
 class Parameter:
     """An animatable scalar usable directly or as an explicit callback input."""
@@ -7926,6 +7966,7 @@ class Scene:
         name: Optional[str] = None,
         *,
         loop: Optional[Playable | Sequence[Playable]] = None,
+        until: Optional[Condition] = None,
     ) -> None:
         """Pause interactive playback at the current timeline position.
 
@@ -7944,11 +7985,19 @@ class Scene:
         where it starts for a seamless repeat. Raises ``ValueError`` for an
         empty loop.
 
+        ``until`` makes the stop advance by itself: while presenting, once
+        the audience meets the condition, a presentation that reached the
+        stop going forward moves on as if the speaker pressed next. Going
+        back to it does not, and previews and exports treat it as an
+        ordinary stop. Presenter View shows how far the audience is. It
+        works the same when a ``.gaanim`` bundle is presented.
+
         Example:
             scene.stop("dos-placas", loop=sequence(
                 arrow.animate.shift_by(0.6, 0).duration(0.75),
                 arrow.animate.shift_by(-0.6, 0).duration(0.75),
             ))
+            scene.stop(until=quiz.answered(share=0.8) | quiz.time_up())
         """
         ...
     def poll(

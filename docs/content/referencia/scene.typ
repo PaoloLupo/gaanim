@@ -472,6 +472,7 @@ scene.link(overview, detail, Transition.morph(0.8, pairs=[(card, panel)]))
   params: (
     (name: "name", type: "str | None", default: "None", desc: [Etiqueta de la pausa en Presenter View.]),
     (name: "loop", type: "Anim | list | None", default: "None", desc: [Animación ambiental, con la misma forma que `scene.play`, que se repite mientras la presentación descansa en la pausa.]),
+    (name: "until", type: "Condition | None", default: "None", desc: [Condición del público con la que la pausa avanza sola al presentar. Ver #link("/guias/presentaciones/#avanzar-sola")[Avanzar por sí sola].]),
   ),
   returns: (type: "None", desc: [Sin `loop`, no añade duración ni cambia la imagen; con `loop`, avanza el cursor lo que dura el bucle.]),
   desc: [Pausa la reproducción interactiva cuando el cursor llega a este instante. En el límite de un segmento, el segmento saliente sigue visible hasta que se avanza, así que no hace falta un `wait()` final. La exportación, las capturas y los seeks ignoran las pausas. Después de un `live_take()` grabado, la pausa espera tanto como la pausa real del orador (ver #link("/referencia/audio/")[Audio]). Con `loop`, la animación se coloca justo después de la pausa y, en lugar de congelar la imagen, se repite mientras el orador habla: el siguiente paso sale del bucle y sigue desde su final, y retroceder lo salta. Al exportar se reproduce una vez. Para que la repetición no salte, haz que el bucle termine como empieza. Un nombre vacío, una segunda pausa en el mismo instante del segmento o un bucle sin duración lanzan `ValueError`.],
@@ -556,6 +557,19 @@ board = scene.leaderboard(preview=[("Ana", 2890), ("Beto", 2410)])
 for rank in range(2):
     board.name(rank, size=0.5).move_to(-3, 1 - rank)
     scene.viz.readout(board.points(rank), format=".0f").move_to(3, 1 - rank)
+```
+]
+
+#api-entry(
+  name: "Condition",
+  kind: "class",
+  desc: [Lo que el público debe hacer para que una pausa avance sola con `scene.stop(until=...)`. Se crea con `poll.answered(at_least=)` o `poll.answered(share=)`, `quiz.time_up()` y `audience.at_least(n)`, y se combina con `|` (cualquiera) y `&` (todas). Ver #link("/guias/presentaciones/#avanzar-sola")[Avanzar por sí sola].],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+quiz = scene.quiz("¿2 + 2?", ["3", "4"], correct=1)
+scene.stop(until=quiz.answered(share=0.8) | quiz.time_up())
 ```
 ]
 

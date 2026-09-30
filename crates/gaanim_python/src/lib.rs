@@ -156,6 +156,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<poll::PyPoll>()?;
     m.add_class::<poll::PyLeaderboard>()?;
     m.add_class::<poll::PyAudience>()?;
+    m.add_class::<poll::PyCondition>()?;
     m.add_class::<visualization::PyReadout>()?;
     m.add_class::<visualization::PyVariable>()?;
     m.add_class::<rolling_number::PyRollingNumber>()?;

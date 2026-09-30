@@ -33,6 +33,8 @@ pub struct PollResults {
     pub leaderboard: Vec<(Arc<str>, u64)>,
     /// Everyone who joined the game.
     pub players: u32,
+    /// Phones on the voting page now.
+    pub connected: u32,
     /// The players in the order they joined: nickname and seconds since
     /// joining, up to [`AUDIENCE_AGE_CAP`].
     pub audience: Vec<(Arc<str>, f64)>,

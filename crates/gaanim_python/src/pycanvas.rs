@@ -5807,23 +5807,44 @@ impl PyScene {
     /// ambient loop that repeats while the presentation rests there.
     ///
     /// A terminal stop holds the completed segment until playback advances.
-    #[pyo3(signature = (name=None, *, r#loop=None))]
-    fn stop(&self, name: Option<String>, r#loop: Option<&Bound<'_, PyAny>>) -> PyResult<()> {
+    /// With `until`, a presentation that reaches the stop going forward
+    /// advances by itself once the audience meets the condition.
+    #[pyo3(signature = (name=None, *, r#loop=None, until=None))]
+    fn stop(
+        &self,
+        name: Option<String>,
+        r#loop: Option<&Bound<'_, PyAny>>,
+        until: Option<PyRef<'_, crate::poll::PyCondition>>,
+    ) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        let Some(ambient) = r#loop else {
-            return self
+        let stops_before = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .stop_count();
+        match r#loop {
+            None => self
                 .inner
                 .lock()
                 .expect("scene canvas poisoned")
                 .stop(name)
-                .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()));
-        };
-        let composition = crate::composition::extract_play_root(ambient)?;
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .stop_with_loop(name, composition)
-            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+                .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?,
+            Some(ambient) => {
+                let composition = crate::composition::extract_play_root(ambient)?;
+                self.inner
+                    .lock()
+                    .expect("scene canvas poisoned")
+                    .stop_with_loop(name, composition)
+                    .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?
+            }
+        }
+        if let Some(until) = until {
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .gate_stop(stops_before, until.inner.clone());
+        }
+        Ok(())
     }
 
     /// Open an audience poll at the cursor and return its data: the QR code,

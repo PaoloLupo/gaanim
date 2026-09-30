@@ -307,6 +307,10 @@ pub struct Timeline {
     /// The relay session of those polls.
     #[cfg_attr(feature = "serde", serde(default))]
     pub poll_session: Option<PollSessionInfo>,
+    /// Stops that advance by themselves once the audience meets a
+    /// condition, by time.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub stop_gates: Vec<StopGate>,
 }
 
 /// A musical tempo: `bpm` beats per minute from `offset` seconds, grouped
@@ -370,6 +374,121 @@ pub struct TimelinePoll {
     /// Set for a quiz, authored with `scene.quiz`.
     #[cfg_attr(feature = "serde", serde(default))]
     pub quiz: Option<TimelineQuiz>,
+}
+
+/// A stop that advances by itself: while a presentation takes votes and
+/// rests on the stop at `time`, having arrived there going forward, it
+/// advances once `until` holds. Elsewhere it is an ordinary stop.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StopGate {
+    pub time: f64,
+    pub until: GateCondition,
+}
+
+/// What the audience must do before a gated stop advances.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GateCondition {
+    /// At least `count` answers on poll `poll`: votes, or a quiz's answers.
+    Answers { poll: String, count: u32 },
+    /// Answers on `poll` from at least `share` (0 to 1) of the audience:
+    /// of the players for a quiz (`players`), else of the phones on the
+    /// voting page. Never with nobody there.
+    AnswerShare {
+        poll: String,
+        share: f64,
+        players: bool,
+    },
+    /// The quiz `poll` is out of time on the relay's clock.
+    TimeUp { poll: String },
+    /// At least `count` players joined the game.
+    Players { count: u32 },
+    /// Every condition holds.
+    All(Vec<GateCondition>),
+    /// Any condition holds.
+    Any(Vec<GateCondition>),
+}
+
+impl GateCondition {
+    /// How many answers `poll` has in `results`.
+    fn answers(results: &gaanim_animation::polls::PollResults, poll: &str) -> u32 {
+        results
+            .counts
+            .get(poll)
+            .map_or(0, |counts| counts.iter().sum())
+    }
+
+    /// The answers an `AnswerShare` needs: at least one.
+    fn needed(results: &gaanim_animation::polls::PollResults, share: f64, players: bool) -> u32 {
+        let audience = if players {
+            results.players
+        } else {
+            results.connected
+        };
+        ((share * f64::from(audience)).ceil() as u32).max(1)
+    }
+
+    /// Whether the condition holds for live `results`; never outside a
+    /// live presentation.
+    pub fn holds(&self, results: &gaanim_animation::polls::PollResults) -> bool {
+        if !results.live {
+            return false;
+        }
+        match self {
+            Self::Answers { poll, count } => Self::answers(results, poll) >= *count,
+            Self::AnswerShare {
+                poll,
+                share,
+                players,
+            } => {
+                let audience = if *players {
+                    results.players
+                } else {
+                    results.connected
+                };
+                audience > 0
+                    && Self::answers(results, poll) >= Self::needed(results, *share, *players)
+            }
+            Self::TimeUp { poll } => results.remaining.get(poll.as_str()) == Some(&0.0),
+            Self::Players { count } => results.players >= *count,
+            Self::All(conditions) => conditions.iter().all(|condition| condition.holds(results)),
+            Self::Any(conditions) => conditions.iter().any(|condition| condition.holds(results)),
+        }
+    }
+
+    /// Where the audience is, for the speaker: "7/10 answered".
+    pub fn progress(&self, results: &gaanim_animation::polls::PollResults) -> String {
+        match self {
+            Self::Answers { poll, count } => {
+                format!("{}/{count} answered", Self::answers(results, poll))
+            }
+            Self::AnswerShare {
+                poll,
+                share,
+                players,
+            } => format!(
+                "{}/{} answered ({:.0}% of the {})",
+                Self::answers(results, poll),
+                Self::needed(results, *share, *players),
+                share * 100.0,
+                if *players { "players" } else { "phones" }
+            ),
+            Self::TimeUp { poll } => match results.remaining.get(poll.as_str()) {
+                Some(left) => format!("time up in {left:.0} s"),
+                None => "when time is up".into(),
+            },
+            Self::Players { count } => format!("{}/{count} players", results.players),
+            Self::All(conditions) => conditions
+                .iter()
+                .map(|condition| condition.progress(results))
+                .collect::<Vec<_>>()
+                .join(" and "),
+            Self::Any(conditions) => conditions
+                .iter()
+                .map(|condition| condition.progress(results))
+                .collect::<Vec<_>>()
+                .join(" or "),
+        }
+    }
 }
 
 /// What makes a poll a quiz: its correct answer, the seconds to answer, the
@@ -479,6 +598,7 @@ impl Default for Timeline {
             beat_grid: None,
             polls: Vec::new(),
             poll_session: None,
+            stop_gates: Vec::new(),
         }
     }
 }
@@ -500,6 +620,36 @@ impl Timeline {
         polls.sort_by(|left, right| left.open.total_cmp(&right.open));
         self.polls = polls;
         self.poll_session = session;
+    }
+
+    /// Set the stops that advance by themselves.
+    pub fn set_stop_gates(&mut self, mut gates: Vec<StopGate>) {
+        gates.sort_by(|left, right| left.time.total_cmp(&right.time));
+        self.stop_gates = gates;
+    }
+
+    /// The gate of the stop at `time`, if it has one.
+    pub fn stop_gate_at(&self, time: f64) -> Option<&StopGate> {
+        const EPSILON: f64 = 1e-5;
+        self.stop_gates
+            .iter()
+            .find(|gate| (gate.time - time).abs() <= EPSILON)
+    }
+
+    /// The stop a presentation rests on now: the one the playhead is
+    /// paused at, or whose ambient loop plays.
+    pub fn resting_stop(&self) -> Option<f64> {
+        if let Some((start, _)) = self.ambient_loop_at(self.current_time) {
+            return Some(start);
+        }
+        if self.is_playing {
+            return None;
+        }
+        self.segments
+            .iter()
+            .flat_map(|segment| &segment.stops)
+            .map(|stop| stop.time)
+            .find(|time| (time - self.current_time).abs() <= 1e-5)
     }
 
     /// The poll taking votes at `time`. Where one poll closes as the next
@@ -4040,6 +4190,87 @@ mod tests {
     use gaanim_math::{RateFunc, SpatialTransform};
     use gaanim_scene::{FillLevel, Material3D, MobjectId, PathSource};
     use std::sync::Arc;
+
+    #[test]
+    fn gate_conditions_read_live_results_only() {
+        use gaanim_animation::polls::PollResults;
+        let answers = GateCondition::Answers {
+            poll: "q0".into(),
+            count: 3,
+        };
+        let mut results = PollResults::default();
+        results.counts.insert("q0".into(), vec![2, 1]);
+        // Previews and exports never advance a stop.
+        assert!(!answers.holds(&results));
+        results.live = true;
+        assert!(answers.holds(&results));
+        assert_eq!(answers.progress(&results), "3/3 answered");
+
+        let share = GateCondition::AnswerShare {
+            poll: "q0".into(),
+            share: 0.8,
+            players: true,
+        };
+        // Nobody playing: not met, even with answers.
+        assert!(!share.holds(&results));
+        results.players = 4;
+        // 80% of 4 players is 3.2: four answers are needed.
+        assert!(!share.holds(&results));
+        results.counts.insert("q0".into(), vec![3, 1]);
+        assert!(share.holds(&results));
+
+        let time_up = GateCondition::TimeUp { poll: "q0".into() };
+        assert!(!time_up.holds(&results));
+        results.remaining.insert("q0".into(), 0.0);
+        assert!(time_up.holds(&results));
+
+        let crowd = GateCondition::Players { count: 10 };
+        assert!(!crowd.holds(&results));
+        assert!(GateCondition::Any(vec![crowd.clone(), time_up.clone()]).holds(&results));
+        assert!(!GateCondition::All(vec![crowd, time_up]).holds(&results));
+    }
+
+    #[test]
+    fn the_resting_stop_is_the_paused_one_or_the_looping_one() {
+        let mut timeline = Timeline::new();
+        timeline.cached_duration = 4.0;
+        timeline.set_segments(vec![SegmentMetadata {
+            id: 1,
+            name: "gates".into(),
+            notes: None,
+            start_time: 0.0,
+            end_time: 4.0,
+            stops: vec![
+                SegmentStop {
+                    name: None,
+                    time: 1.0,
+                    ambient: None,
+                },
+                SegmentStop {
+                    name: None,
+                    time: 2.0,
+                    ambient: Some(1.0),
+                },
+            ],
+        }]);
+        timeline.set_stop_gates(vec![StopGate {
+            time: 1.0,
+            until: GateCondition::Players { count: 1 },
+        }]);
+        timeline.current_time = 1.0;
+        timeline.is_playing = false;
+        assert_eq!(timeline.resting_stop(), Some(1.0));
+        assert!(timeline.stop_gate_at(1.0).is_some());
+        assert!(timeline.stop_gate_at(2.0).is_none());
+        timeline.is_playing = true;
+        assert_eq!(timeline.resting_stop(), None);
+        // Inside an ambient loop the presentation rests on its stop.
+        timeline.current_time = 2.5;
+        assert_eq!(timeline.resting_stop(), Some(2.0));
+        timeline.is_playing = false;
+        timeline.current_time = 0.5;
+        assert_eq!(timeline.resting_stop(), None);
+    }
 
     #[test]
     fn morph_transition_shares_one_box_between_pairs() {

@@ -4,8 +4,8 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 use gaanim_api::canvas::{
-    AudienceHandle, BarDirection, BarScale, LeaderboardHandle, LiveTextOptions, PollBarOptions,
-    PollError, PollHandle, TextAlign,
+    AudienceHandle, BarDirection, BarScale, GateCondition, LeaderboardHandle, LiveTextOptions,
+    PollBarOptions, PollError, PollHandle, TextAlign,
 };
 
 use crate::pydrawable::PyDrawable;
@@ -50,6 +50,21 @@ pub struct PyPoll {
 
 #[pymethods]
 impl PyPoll {
+    /// A condition for `scene.stop(until=...)`: at least `at_least` answers,
+    /// or answers from at least `share` (0 to 1) of the audience. Exactly
+    /// one of the two.
+    #[pyo3(signature = (*, at_least=None, share=None))]
+    fn answered(&self, at_least: Option<u32>, share: Option<f64>) -> PyResult<PyCondition> {
+        let inner = self.inner.answered(at_least, share).map_err(poll_error)?;
+        Ok(PyCondition { inner })
+    }
+
+    /// A condition for `scene.stop(until=...)`: the quiz is out of time.
+    fn time_up(&self) -> PyResult<PyCondition> {
+        let inner = self.inner.time_up().map_err(poll_error)?;
+        Ok(PyCondition { inner })
+    }
+
     /// Stable id of the poll on the relay.
     #[getter]
     fn id(&self) -> String {
@@ -202,6 +217,61 @@ fn text_options(
     })
 }
 
+/// What the audience must do before a stop advances by itself, for
+/// `scene.stop(until=...)`. `a | b` holds when either does, `a & b` when both
+/// do.
+#[pyclass(name = "Condition", module = "gaanim_core", frozen)]
+pub struct PyCondition {
+    pub(crate) inner: GateCondition,
+}
+
+impl PyCondition {
+    fn join(
+        left: &GateCondition,
+        right: &GateCondition,
+        make: fn(Vec<GateCondition>) -> GateCondition,
+        unwrap: fn(&GateCondition) -> Option<&Vec<GateCondition>>,
+    ) -> GateCondition {
+        let mut parts = Vec::new();
+        for side in [left, right] {
+            match unwrap(side) {
+                Some(inner) => parts.extend(inner.iter().cloned()),
+                None => parts.push(side.clone()),
+            }
+        }
+        make(parts)
+    }
+}
+
+#[pymethods]
+impl PyCondition {
+    fn __or__(&self, other: &PyCondition) -> PyCondition {
+        PyCondition {
+            inner: Self::join(&self.inner, &other.inner, GateCondition::Any, |condition| {
+                match condition {
+                    GateCondition::Any(parts) => Some(parts),
+                    _ => None,
+                }
+            }),
+        }
+    }
+
+    fn __and__(&self, other: &PyCondition) -> PyCondition {
+        PyCondition {
+            inner: Self::join(&self.inner, &other.inner, GateCondition::All, |condition| {
+                match condition {
+                    GateCondition::All(parts) => Some(parts),
+                    _ => None,
+                }
+            }),
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("Condition({:?})", self.inner)
+    }
+}
+
 /// The game's leaderboard: the players of every quiz, best first, as data
 /// for the scene to present as it likes.
 #[pyclass(name = "Leaderboard", module = "gaanim_core", frozen)]
@@ -317,6 +387,14 @@ impl PyAudience {
         let options = text_options(size, weight, font, align)?;
         let handle = self.inner.name(slot, options).map_err(poll_error)?;
         Ok(PyDrawable(handle))
+    }
+
+    /// A condition for `scene.stop(until=...)`: at least `count` players
+    /// joined.
+    fn at_least(&self, count: u32) -> PyCondition {
+        PyCondition {
+            inner: self.inner.at_least(count),
+        }
     }
 
     /// How many players joined.

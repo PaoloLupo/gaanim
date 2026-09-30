@@ -18,6 +18,7 @@ use gaanim_animation::polls::{
 };
 use gaanim_animation::{SampledInterpolation, SampledProperty};
 use gaanim_core::peniko::Color;
+pub use gaanim_timeline::timeline::GateCondition;
 use qrcodegen::{QrCode, QrCodeEcc};
 
 use super::SceneModel;
@@ -279,6 +280,29 @@ impl SceneModel {
                 .map(|(name, score)| (Arc::from(name.trim()), score))
                 .collect(),
             color,
+        }
+    }
+
+    /// How many stops the active segment has: pass it to
+    /// [`Self::gate_stop`] after authoring the next one.
+    pub fn stop_count(&self) -> usize {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active()
+            .stops
+            .len()
+    }
+
+    /// Make the stop authored after the segment had `stops_before` stops
+    /// advance by itself once `until` holds while presenting. Nothing
+    /// happens when no stop was authored (a live narration take holds
+    /// instead of stopping).
+    pub fn gate_stop(&mut self, stops_before: usize, until: GateCondition) {
+        let mut state = self.state.lock().expect("canvas state poisoned");
+        let segment = state.active_idx;
+        if let Some(time) = state.active().stops.get(stops_before).map(|stop| stop.time) {
+            state.stop_gates.push((segment, time, until));
         }
     }
 
@@ -575,6 +599,44 @@ impl PollHandle {
         ))
     }
 
+    /// A condition for [`SceneModel::gate_stop`]: at least `at_least`
+    /// answers, or answers from at least `share` (0 to 1) of the audience
+    /// (the players for a quiz, the phones on the voting page for a poll).
+    /// Exactly one of the two.
+    pub fn answered(
+        &self,
+        at_least: Option<u32>,
+        share: Option<f64>,
+    ) -> Result<GateCondition, PollError> {
+        let record = self.record();
+        match (at_least, share) {
+            (Some(count), None) => Ok(GateCondition::Answers {
+                poll: record.id,
+                count,
+            }),
+            (None, Some(share)) if share > 0.0 && share <= 1.0 => Ok(GateCondition::AnswerShare {
+                poll: record.id,
+                share,
+                players: record.quiz.is_some(),
+            }),
+            (None, Some(share)) => Err(PollError::Invalid(format!(
+                "share must be above 0 and at most 1, got {share}"
+            ))),
+            _ => Err(PollError::Invalid(
+                "give exactly one of at_least and share".into(),
+            )),
+        }
+    }
+
+    /// A condition for [`SceneModel::gate_stop`]: the quiz is out of time.
+    pub fn time_up(&self) -> Result<GateCondition, PollError> {
+        let record = self.record();
+        if record.quiz.is_none() {
+            return Err(PollError::NotQuiz);
+        }
+        Ok(GateCondition::TimeUp { poll: record.id })
+    }
+
     /// The QR code of [`Self::url`], `size` scene units on a side, as one
     /// path of its dark modules centered on the origin, filled black. Put
     /// it on a light background with a margin of a few modules so phones
@@ -782,6 +844,12 @@ impl AudienceHandle {
             preview,
             options,
         )
+    }
+
+    /// A condition for [`SceneModel::gate_stop`]: at least `count` players
+    /// joined.
+    pub fn at_least(&self, count: u32) -> GateCondition {
+        GateCondition::Players { count }
     }
 
     /// How many players joined.

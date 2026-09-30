@@ -59,6 +59,9 @@ pub(crate) struct AudienceView {
     pub(crate) leaderboard: Vec<(String, u64)>,
     /// "New game" was pressed once and waits for a second press.
     pub(crate) confirm_reset: bool,
+    /// How far the audience is from advancing the gated stop the
+    /// presentation rests on.
+    pub(crate) gate: Option<String>,
 }
 
 /// What the speaker asked of the audience from Presenter View.
@@ -1656,6 +1659,14 @@ fn show_audience(ui: &mut egui::Ui, audience: &AudienceView, requests: &mut Audi
             },
         );
     });
+    if let Some(gate) = &audience.gate {
+        ui.label(
+            egui::RichText::new(gate)
+                .size(14.0)
+                .strong()
+                .color(palette::ACCENT),
+        );
+    }
     ui.add_space(4.0);
     egui::Frame::new()
         .fill(palette::SURFACE)

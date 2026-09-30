@@ -2721,12 +2721,13 @@ impl SceneModel {
                 },
             )
             .collect();
-        let (polls, poll_session, poll_lobby) = {
+        let (polls, poll_session, poll_lobby, stop_gates) = {
             let state = self.state.lock().expect("canvas state poisoned");
             (
                 state.polls.clone(),
                 state.poll_session.clone(),
                 state.poll_lobby,
+                state.stop_gates.clone(),
             )
         };
         let at = |(segment, local): (usize, f64)| {
@@ -2767,6 +2768,17 @@ impl SceneModel {
                 code: session.code,
                 lobby: poll_lobby,
             }),
+        );
+        builder.timeline.set_stop_gates(
+            stop_gates
+                .into_iter()
+                .filter_map(|(segment, local, until)| {
+                    Some(gaanim_timeline::timeline::StopGate {
+                        time: at((segment, local))?,
+                        until,
+                    })
+                })
+                .collect(),
         );
         builder.timeline.set_segments(segment_metadata);
 
@@ -14671,6 +14683,38 @@ mod tests {
         // Only a scene that shows its audience opens a lobby.
         assert!(!session.lobby);
         assert!(bar.id != share.drawable().id);
+    }
+
+    #[test]
+    fn a_gated_stop_compiles_at_its_absolute_time() {
+        let mut canvas = SceneModel::new(640, 360);
+        canvas.set_poll_session(crate::canvas::PollSession {
+            relay: Some("https://relay.example.dev".into()),
+            code: "ABC234".into(),
+        });
+        canvas.segment("Intro", None).unwrap();
+        canvas.wait(1.0);
+        canvas.segment("Quiz", None).unwrap();
+        let quiz = canvas
+            .quiz("¿2 + 2?", ["3", "4"], 1, 20, 1000, None)
+            .unwrap();
+        canvas.wait(0.5);
+        let before = canvas.stop_count();
+        canvas.stop(None).unwrap();
+        let until = quiz.answered(None, Some(0.8)).unwrap();
+        canvas.gate_stop(before, until.clone());
+        assert!(quiz.answered(Some(3), Some(0.5)).is_err());
+        assert!(quiz.answered(None, Some(1.5)).is_err());
+        canvas.wait(1.0);
+
+        let timeline = compiled_timeline(&canvas);
+        assert_eq!(timeline.stop_gates.len(), 1);
+        assert!((timeline.stop_gates[0].time - 1.5).abs() < 1e-9);
+        assert_eq!(timeline.stop_gates[0].until, until);
+        assert!(matches!(
+            until,
+            crate::canvas::GateCondition::AnswerShare { players: true, .. }
+        ));
     }
 
     #[test]

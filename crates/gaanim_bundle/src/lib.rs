@@ -41,7 +41,8 @@ use gaanim_renderer::pipeline::{
 };
 use gaanim_renderer::post_process::PostProcessShader;
 use gaanim_timeline::timeline::{
-    PollSessionInfo, SegmentMetadata, SegmentStop, TimelineMarker, TimelinePoll, TimelineQuiz,
+    GateCondition, PollSessionInfo, SegmentMetadata, SegmentStop, StopGate, TimelineMarker,
+    TimelinePoll, TimelineQuiz,
 };
 use serde::{Deserialize, Serialize};
 
@@ -159,6 +160,8 @@ pub struct SceneData {
     /// Audience polls, stored in their own entry (see [`POLLS`]).
     pub polls: Vec<TimelinePoll>,
     pub poll_session: Option<PollSessionInfo>,
+    /// Stops that advance once the audience meets a condition.
+    pub stop_gates: Vec<StopGate>,
     /// Elements drawn as poll bars, which a live presentation redraws.
     pub poll_bars: Vec<PollBarRecord>,
     /// Elements drawn as live text, such as leaderboard nicknames.
@@ -281,6 +284,88 @@ struct PollsEntry {
     texts: Vec<LiveTextRecord>,
     #[serde(default)]
     readouts: Vec<LiveReadoutRecord>,
+    #[serde(default)]
+    gates: Vec<GateRecord>,
+}
+
+/// A stop that advances by itself, and its condition.
+#[derive(Serialize, Deserialize)]
+struct GateRecord {
+    time: f64,
+    until: ConditionRecord,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum ConditionRecord {
+    Answers {
+        poll: String,
+        count: u32,
+    },
+    AnswerShare {
+        poll: String,
+        share: f64,
+        players: bool,
+    },
+    TimeUp {
+        poll: String,
+    },
+    Players {
+        count: u32,
+    },
+    All {
+        of: Vec<ConditionRecord>,
+    },
+    Any {
+        of: Vec<ConditionRecord>,
+    },
+}
+
+impl ConditionRecord {
+    fn of(condition: &GateCondition) -> Self {
+        match condition {
+            GateCondition::Answers { poll, count } => Self::Answers {
+                poll: poll.clone(),
+                count: *count,
+            },
+            GateCondition::AnswerShare {
+                poll,
+                share,
+                players,
+            } => Self::AnswerShare {
+                poll: poll.clone(),
+                share: *share,
+                players: *players,
+            },
+            GateCondition::TimeUp { poll } => Self::TimeUp { poll: poll.clone() },
+            GateCondition::Players { count } => Self::Players { count: *count },
+            GateCondition::All(conditions) => Self::All {
+                of: conditions.iter().map(Self::of).collect(),
+            },
+            GateCondition::Any(conditions) => Self::Any {
+                of: conditions.iter().map(Self::of).collect(),
+            },
+        }
+    }
+
+    fn condition(self) -> GateCondition {
+        match self {
+            Self::Answers { poll, count } => GateCondition::Answers { poll, count },
+            Self::AnswerShare {
+                poll,
+                share,
+                players,
+            } => GateCondition::AnswerShare {
+                poll,
+                share,
+                players,
+            },
+            Self::TimeUp { poll } => GateCondition::TimeUp { poll },
+            Self::Players { count } => GateCondition::Players { count },
+            Self::All { of } => GateCondition::All(of.into_iter().map(Self::condition).collect()),
+            Self::Any { of } => GateCondition::Any(of.into_iter().map(Self::condition).collect()),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -342,6 +427,14 @@ fn write_polls(scene: &SceneData) -> Result<Vec<u8>> {
         bars: scene.poll_bars.clone(),
         texts: scene.poll_texts.clone(),
         readouts: scene.poll_readouts.clone(),
+        gates: scene
+            .stop_gates
+            .iter()
+            .map(|gate| GateRecord {
+                time: gate.time,
+                until: ConditionRecord::of(&gate.until),
+            })
+            .collect(),
     };
     serde_json::to_vec(&entry).map_err(|error| BundleError::Corrupt(error.to_string()))
 }
@@ -376,6 +469,14 @@ fn read_polls(bytes: &[u8], scene: &mut SceneData) -> Result<()> {
     scene.poll_bars = entry.bars;
     scene.poll_texts = entry.texts;
     scene.poll_readouts = entry.readouts;
+    scene.stop_gates = entry
+        .gates
+        .into_iter()
+        .map(|gate| StopGate {
+            time: gate.time,
+            until: gate.until.condition(),
+        })
+        .collect();
     Ok(())
 }
 
@@ -635,6 +736,7 @@ impl SceneData {
             audio,
             polls: Vec::new(),
             poll_session: None,
+            stop_gates: Vec::new(),
             poll_bars: Vec::new(),
             poll_texts: Vec::new(),
             poll_readouts: Vec::new(),
@@ -938,7 +1040,8 @@ impl<W: Write + Seek> BundleWriter<W> {
             digests.extend_from_slice(digest);
         }
         self.write_entry("digests.bin", &digests)?;
-        if !scene.polls.is_empty() {
+        // A scene can take its audience without a poll: a lobby, a gate.
+        if !scene.polls.is_empty() || scene.poll_session.is_some() || !scene.stop_gates.is_empty() {
             self.write_entry(POLLS, &write_polls(scene)?)?;
         }
 
@@ -1453,6 +1556,43 @@ mod tests {
             assert_eq!(decoded.camera, frame(time).camera, "frame {index}");
         }
         assert!(bundle.cached.len() <= CACHED_CHUNKS);
+    }
+
+    #[test]
+    fn a_lobby_and_its_gates_round_trip_without_polls() {
+        let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
+        writer.push_frame(&frame(0.0), [0; 32]).unwrap();
+        let gate = StopGate {
+            time: 0.5,
+            until: GateCondition::Any(vec![
+                GateCondition::Players { count: 5 },
+                GateCondition::All(vec![
+                    GateCondition::AnswerShare {
+                        poll: "q0".into(),
+                        share: 0.8,
+                        players: true,
+                    },
+                    GateCondition::TimeUp { poll: "q0".into() },
+                ]),
+            ]),
+        };
+        let scene = SceneData {
+            fps: 60,
+            duration: 1.0 / 60.0,
+            poll_session: Some(PollSessionInfo {
+                relay: Some("https://relay.example.dev".into()),
+                code: "ABC234".into(),
+                lobby: true,
+            }),
+            stop_gates: vec![gate.clone()],
+            ..Default::default()
+        };
+        let bundle =
+            Bundle::from_bytes(writer.finish(&scene).unwrap().into_inner().into()).unwrap();
+        // No poll, yet the session and its lobby are kept.
+        assert!(bundle.scene.polls.is_empty());
+        assert!(bundle.scene.poll_session.as_ref().unwrap().lobby);
+        assert_eq!(bundle.scene.stop_gates, [gate]);
     }
 
     #[test]

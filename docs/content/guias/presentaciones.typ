@@ -270,6 +270,30 @@ proyecto conserva la partida, así que si algo se cierra a mitad de la charla no
 se pierde nada. Los apodos admiten de 2 a 20 letras, números o espacios y no se
 repiten en la sesión.
 
+== Avanzar por sí sola <avanzar-sola>
+
+`scene.stop(until=...)` hace que una pausa avance sola cuando el público
+cumple una condición: al presentar, en cuanto se cumple, la presentación
+sigue como si hubieras pulsado siguiente.
+
+```python
+quiz = scene.quiz("¿Cuál es la derivada de x²?", ["x", "2x", "x²/2", "2"], correct=1)
+scene.stop(until=quiz.answered(share=0.8) | quiz.time_up())
+quiz.reveal()
+```
+
+- `poll.answered(at_least=10)`: al menos 10 respuestas.
+- `poll.answered(share=0.8)`: respondió el 80 % del público, los jugadores
+  en un cuestionario y los teléfonos conectados en una encuesta.
+- `quiz.time_up()`: se acabó el tiempo del cuestionario.
+- `audience.at_least(5)`: entraron al menos 5 jugadores.
+
+Se combinan con `|` (cualquiera) y `&` (todas). Solo avanza sola una pausa a
+la que llegaste avanzando: si vuelves atrás a una cuya condición ya se
+cumple, se queda ahí hasta que pulses siguiente. La vista del presentador
+muestra cuánto falta, y en la previsualización y la exportación es una pausa
+normal. Funciona igual al presentar un paquete `.gaanim`.
+
 == Sala de espera <sala-de-espera>
 
 `scene.audience` da los jugadores en el orden en que entran, para llenar una
