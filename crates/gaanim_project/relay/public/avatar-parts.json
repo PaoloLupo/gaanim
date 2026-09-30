@@ -1,0 +1,844 @@
+{
+  "about": "Parts of the players' characters, in a 100-unit square, and how they move. A character is [body, color, eyes, mouth, extra], indexes into these lists. A layer is filled (fill) or stroked with round caps (stroke, width); 'body' is the character's color, 'ink' and 'white' the palette's. Eyes, mouths and faces are drawn for a face at y = 50 and move to the body's face; an extra or effect is drawn around (50, 0) at its anchor (the body's top or chin, or the face), an extra behind the body when it says so. Motion: at time t (seconds) a character breathes, scaling its whole drawing about (50, base) by sy = 1 + a, sx = 1 - a / 2 with a = idle.breathe.amount * sin(2 pi t / idle.breathe.period). Eyes whose part allows it blink: with h the FNV-1a hash of the nickname's UTF-8 bytes, period P = every[0] + (every[1] - every[0]) * (h & 0xffff) / 65535 and offset o = P * ((h >> 16) & 0xffff) / 65535; while x = (t + o) mod P is under duration the eyes scale vertically about (50, face) by 1 - 0.9 * sin(pi * x / duration). An expression started at time s shows, while t - s < hold (or always when looped), its eyes and mouth from faces (or eyes and mouths) by name, instead of the character's, except eyes marked keep; its effects; and its motion at progress p = min((t - s) / duration, 1), or ((t - s) mod duration) / duration when looped. A motion's keys are [p, dx, dy, sx, sy, rot]; between two keys each value is interpolated with smoothstep on the segment's fraction (linear when ease is linear), and the transform is translate(pivot + (dx, dy)) rotate(rot degrees) scale(sx, sy) translate(-pivot), with the pivot (50, base) for the body and the effect's pivot for an effect. The body's motion applies to the whole drawing after breathing; an effect's loops with t - s on top of it.",
+  "ink": "#1d1b26",
+  "white": "#ffffff",
+  "colors": [
+    "#ffcc33",
+    "#3fa9f5",
+    "#7ed957",
+    "#ff7eb6",
+    "#c86bfa",
+    "#ff8a3d",
+    "#2ec4b6",
+    "#8e7dff",
+    "#ff5a5f",
+    "#f4f1e8"
+  ],
+  "bodies": [
+    {
+      "name": "round",
+      "top": 18,
+      "face": 52,
+      "chin": 80,
+      "layers": [
+        {
+          "d": "M50 18a36 36 0 1 1 0 72a36 36 0 1 1 0-72z",
+          "fill": "body"
+        }
+      ],
+      "base": 90
+    },
+    {
+      "name": "triangle",
+      "top": 16,
+      "face": 60,
+      "chin": 82,
+      "layers": [
+        {
+          "d": "M44 22Q50 11 56 22L87 76Q93 88 79 88H21Q7 88 13 76Z",
+          "fill": "body"
+        }
+      ],
+      "base": 88
+    },
+    {
+      "name": "cloud",
+      "top": 26,
+      "face": 58,
+      "chin": 81,
+      "layers": [
+        {
+          "d": "M26 88C14 88 8 80 8 70C8 60 15 53 24 52C23 36 35 24 50 24C62 24 71 31 74 42C86 42 94 52 94 64C94 78 84 88 70 88Z",
+          "fill": "body"
+        }
+      ],
+      "base": 88
+    },
+    {
+      "name": "heart",
+      "top": 22,
+      "face": 46,
+      "chin": 76,
+      "layers": [
+        {
+          "d": "M50 90C22 72 8 58 8 42C8 28 18 18 31 18C39 18 46 22 50 29C54 22 61 18 69 18C82 18 92 28 92 42C92 58 78 72 50 90Z",
+          "fill": "body"
+        }
+      ],
+      "base": 90
+    },
+    {
+      "name": "square",
+      "top": 18,
+      "face": 52,
+      "chin": 80,
+      "layers": [
+        {
+          "d": "M30 18H70Q88 18 88 36V72Q88 90 70 90H30Q12 90 12 72V36Q12 18 30 18Z",
+          "fill": "body"
+        }
+      ],
+      "base": 90
+    },
+    {
+      "name": "ghost",
+      "top": 14,
+      "face": 46,
+      "chin": 72,
+      "layers": [
+        {
+          "d": "M50 14C71 14 86 29 86 50V88L77 82L68 88L59 82L50 88L41 82L32 88L23 82L14 88V50C14 29 29 14 50 14Z",
+          "fill": "body"
+        }
+      ],
+      "base": 88
+    },
+    {
+      "name": "egg",
+      "top": 12,
+      "face": 52,
+      "chin": 80,
+      "layers": [
+        {
+          "d": "M50 12C72 12 86 36 86 58C86 78 70 90 50 90C30 90 14 78 14 58C14 36 28 12 50 12Z",
+          "fill": "body"
+        }
+      ],
+      "base": 90
+    }
+  ],
+  "eyes": [
+    {
+      "name": "dots",
+      "layers": [
+        {
+          "d": "M38 44.5a5.5 5.5 0 1 1 0 11a5.5 5.5 0 1 1 0-11zM62 44.5a5.5 5.5 0 1 1 0 11a5.5 5.5 0 1 1 0-11z",
+          "fill": "ink"
+        }
+      ]
+    },
+    {
+      "name": "big",
+      "layers": [
+        {
+          "d": "M37 38a10 10 0 1 1 0 20a10 10 0 1 1 0-20zM63 38a10 10 0 1 1 0 20a10 10 0 1 1 0-20z",
+          "fill": "white"
+        },
+        {
+          "d": "M39 44a5 5 0 1 1 0 10a5 5 0 1 1 0-10zM65 44a5 5 0 1 1 0 10a5 5 0 1 1 0-10z",
+          "fill": "ink"
+        },
+        {
+          "d": "M41 44.7a1.8 1.8 0 1 1 0 3.6a1.8 1.8 0 1 1 0-3.6zM67 44.7a1.8 1.8 0 1 1 0 3.6a1.8 1.8 0 1 1 0-3.6z",
+          "fill": "white"
+        }
+      ]
+    },
+    {
+      "name": "happy",
+      "layers": [
+        {
+          "d": "M31 52Q37 43 43 52M57 52Q63 43 69 52",
+          "stroke": "ink",
+          "width": 4
+        }
+      ],
+      "blink": false
+    },
+    {
+      "name": "sleepy",
+      "layers": [
+        {
+          "d": "M31 49Q37 55 43 49M57 49Q63 55 69 49",
+          "stroke": "ink",
+          "width": 4
+        }
+      ],
+      "blink": false
+    },
+    {
+      "name": "glasses",
+      "layers": [
+        {
+          "d": "M26 48a11 11 0 1 0 22 0a11 11 0 1 0-22 0zM52 48a11 11 0 1 0 22 0a11 11 0 1 0-22 0z",
+          "fill": "white"
+        },
+        {
+          "d": "M37 43.5a4.5 4.5 0 1 1 0 9a4.5 4.5 0 1 1 0-9zM63 43.5a4.5 4.5 0 1 1 0 9a4.5 4.5 0 1 1 0-9z",
+          "fill": "ink"
+        },
+        {
+          "d": "M26 48a11 11 0 1 0 22 0a11 11 0 1 0-22 0zM52 48a11 11 0 1 0 22 0a11 11 0 1 0-22 0zM48 47Q50 44 52 47",
+          "stroke": "ink",
+          "width": 3.5
+        }
+      ],
+      "keep": true,
+      "blink": true
+    },
+    {
+      "name": "wink",
+      "layers": [
+        {
+          "d": "M38 44.5a5.5 5.5 0 1 1 0 11a5.5 5.5 0 1 1 0-11z",
+          "fill": "ink"
+        },
+        {
+          "d": "M57 51Q63 45 69 51",
+          "stroke": "ink",
+          "width": 4
+        }
+      ],
+      "blink": false
+    },
+    {
+      "name": "shades",
+      "layers": [
+        {
+          "d": "M24 43H48Q49 43 48 49Q46 57 37 57Q27 57 25 49Q23 43 24 43ZM52 43H76Q77 43 75 49Q73 57 63 57Q54 57 52 49Q51 43 52 43Z",
+          "fill": "ink"
+        },
+        {
+          "d": "M48 46H52",
+          "stroke": "ink",
+          "width": 3
+        },
+        {
+          "d": "M29 46L33 46M57 46L61 46",
+          "stroke": "white",
+          "width": 2
+        }
+      ],
+      "keep": true,
+      "blink": false
+    }
+  ],
+  "mouths": [
+    {
+      "name": "none",
+      "layers": []
+    },
+    {
+      "name": "smile",
+      "layers": [
+        {
+          "d": "M42 64Q50 72 58 64",
+          "stroke": "ink",
+          "width": 3.5
+        }
+      ]
+    },
+    {
+      "name": "grin",
+      "layers": [
+        {
+          "d": "M40 62H60Q60 74 50 74Q40 74 40 62Z",
+          "fill": "ink"
+        },
+        {
+          "d": "M44 70Q50 66 56 70Q54 74 50 74Q46 74 44 70Z",
+          "fill": "#ff6b8a"
+        }
+      ]
+    },
+    {
+      "name": "o",
+      "layers": [
+        {
+          "d": "M50 61a5 6 0 1 1 0 12a5 6 0 1 1 0-12z",
+          "fill": "ink"
+        }
+      ]
+    },
+    {
+      "name": "cat",
+      "layers": [
+        {
+          "d": "M40 64Q45 70 50 64Q55 70 60 64",
+          "stroke": "ink",
+          "width": 3.5
+        }
+      ]
+    },
+    {
+      "name": "flat",
+      "layers": [
+        {
+          "d": "M43 67H57",
+          "stroke": "ink",
+          "width": 3.5
+        }
+      ]
+    },
+    {
+      "name": "tongue",
+      "layers": [
+        {
+          "d": "M47 66H55V71Q55 75 51 75Q47 75 47 71Z",
+          "fill": "#ff6b8a"
+        },
+        {
+          "d": "M41 64Q50 70 59 64",
+          "stroke": "ink",
+          "width": 3.5
+        }
+      ]
+    }
+  ],
+  "extras": [
+    {
+      "name": "none",
+      "anchor": "top",
+      "layers": []
+    },
+    {
+      "name": "bowtie",
+      "anchor": "chin",
+      "layers": [
+        {
+          "d": "M50 0L36 -7Q33 -8 33 -5V5Q33 8 36 7L50 0L64 7Q67 8 67 5V-5Q67 -8 64 -7Z",
+          "fill": "ink"
+        },
+        {
+          "d": "M50 -4a4 4 0 1 1 0 8a4 4 0 1 1 0-8z",
+          "fill": "ink"
+        }
+      ]
+    },
+    {
+      "name": "beret",
+      "anchor": "top",
+      "layers": [
+        {
+          "d": "M50 -13L53 -19",
+          "stroke": "#8f2438",
+          "width": 3
+        },
+        {
+          "d": "M18 3Q20 -13 50 -13Q82 -13 82 1Q82 8 50 8Q18 10 18 3Z",
+          "fill": "#c0394f"
+        }
+      ]
+    },
+    {
+      "name": "headphones",
+      "anchor": "face",
+      "layers": [
+        {
+          "d": "M13 -2Q13 -44 50 -44Q87 -44 87 -2",
+          "stroke": "#8a87a3",
+          "width": 5
+        },
+        {
+          "d": "M9 -10H19V12H9Q4 12 4 7V-5Q4 -10 9 -10ZM81 -10H91Q96 -10 96 -5V7Q96 12 91 12H81Z",
+          "fill": "#5e5b78"
+        }
+      ]
+    },
+    {
+      "name": "bunny",
+      "anchor": "top",
+      "behind": true,
+      "layers": [
+        {
+          "d": "M33 8Q22 -30 31 -35Q42 -38 44 6ZM67 8Q78 -30 69 -35Q58 -38 56 6Z",
+          "fill": "body"
+        },
+        {
+          "d": "M35 4Q28 -24 33 -28Q39 -29 40 4ZM65 4Q72 -24 67 -28Q61 -29 60 4Z",
+          "fill": "#ffb3cf"
+        }
+      ]
+    },
+    {
+      "name": "party",
+      "anchor": "top",
+      "layers": [
+        {
+          "d": "M37 4L50 -30L63 4Z",
+          "fill": "#ff5a8a"
+        },
+        {
+          "d": "M42 -8L55 -4M46 -19L52 -17",
+          "stroke": "white",
+          "width": 2.5
+        },
+        {
+          "d": "M50 -36a5 5 0 1 1 0 10a5 5 0 1 1 0-10z",
+          "fill": "#ffcc33"
+        }
+      ]
+    },
+    {
+      "name": "crown",
+      "anchor": "top",
+      "layers": [
+        {
+          "d": "M31 5L30 -16L40 -6L50 -20L60 -6L70 -16L69 5Z",
+          "fill": "#ffc933"
+        },
+        {
+          "d": "M50 -9a3 3 0 1 1 0 6a3 3 0 1 1 0-6z",
+          "fill": "#ff5a5f"
+        }
+      ]
+    },
+    {
+      "name": "sprout",
+      "anchor": "top",
+      "layers": [
+        {
+          "d": "M50 4Q50 -8 50 -14",
+          "stroke": "#3c9a48",
+          "width": 3
+        },
+        {
+          "d": "M50 -12Q38 -26 30 -16Q40 -8 50 -12ZM50 -14Q60 -30 70 -22Q62 -12 50 -14Z",
+          "fill": "#57c26a"
+        }
+      ]
+    },
+    {
+      "name": "blush",
+      "anchor": "face",
+      "layers": [
+        {
+          "d": "M24 10a6 4 0 1 1 12 0a6 4 0 1 1-12 0zM64 10a6 4 0 1 1 12 0a6 4 0 1 1-12 0z",
+          "fill": "#ff8fab"
+        }
+      ]
+    }
+  ],
+  "faces": {
+    "sad": {
+      "layers": [
+        {
+          "d": "M38 47a5 5 0 1 1 0 10a5 5 0 1 1 0-10zM62 47a5 5 0 1 1 0 10a5 5 0 1 1 0-10z",
+          "fill": "ink"
+        },
+        {
+          "d": "M30 44L43 39M57 39L70 44",
+          "stroke": "ink",
+          "width": 3.5
+        }
+      ]
+    },
+    "cross": {
+      "layers": [
+        {
+          "d": "M33 44L43 54M43 44L33 54M57 44L67 54M67 44L57 54",
+          "stroke": "ink",
+          "width": 3.5
+        }
+      ]
+    },
+    "star": {
+      "layers": [
+        {
+          "d": "M38.0 40.0L40.2 45.9L46.6 46.2L41.6 50.2L43.3 56.3L38.0 52.8L32.7 56.3L34.4 50.2L29.4 46.2L35.8 45.9ZM62.0 40.0L64.2 45.9L70.6 46.2L65.6 50.2L67.3 56.3L62.0 52.8L56.7 56.3L58.4 50.2L53.4 46.2L59.8 45.9Z",
+          "fill": "#ffc933"
+        },
+        {
+          "d": "M38.0 40.0L40.2 45.9L46.6 46.2L41.6 50.2L43.3 56.3L38.0 52.8L32.7 56.3L34.4 50.2L29.4 46.2L35.8 45.9ZM62.0 40.0L64.2 45.9L70.6 46.2L65.6 50.2L67.3 56.3L62.0 52.8L56.7 56.3L58.4 50.2L53.4 46.2L59.8 45.9Z",
+          "stroke": "ink",
+          "width": 2
+        }
+      ]
+    },
+    "wide": {
+      "layers": [
+        {
+          "d": "M37 37a11 11 0 1 1 0 22a11 11 0 1 1 0-22zM63 37a11 11 0 1 1 0 22a11 11 0 1 1 0-22z",
+          "fill": "white"
+        },
+        {
+          "d": "M37 45a3 3 0 1 1 0 6a3 3 0 1 1 0-6zM63 45a3 3 0 1 1 0 6a3 3 0 1 1 0-6z",
+          "fill": "ink"
+        }
+      ]
+    },
+    "frown": {
+      "layers": [
+        {
+          "d": "M42 70Q50 62 58 70",
+          "stroke": "ink",
+          "width": 3.5
+        }
+      ]
+    },
+    "wavy": {
+      "layers": [
+        {
+          "d": "M40 68Q44 64 48 68Q52 72 56 68Q58 66 60 67",
+          "stroke": "ink",
+          "width": 3.5
+        }
+      ]
+    }
+  },
+  "effects": {
+    "tear": {
+      "anchor": "face",
+      "motion": "fall",
+      "pivot": [
+        64,
+        6
+      ],
+      "layers": [
+        {
+          "d": "M64 2Q68 9 64 12Q60 9 64 2Z",
+          "fill": "#5ec8ff"
+        }
+      ]
+    },
+    "dizzy": {
+      "anchor": "top",
+      "motion": "orbit",
+      "pivot": [
+        50,
+        -12
+      ],
+      "layers": [
+        {
+          "d": "M38.0 -14.5L39.1 -11.5L42.3 -11.4L39.8 -9.4L40.6 -6.4L38.0 -8.1L35.4 -6.4L36.2 -9.4L33.7 -11.4L36.9 -11.5ZM62.0 -14.5L63.1 -11.5L66.3 -11.4L63.8 -9.4L64.6 -6.4L62.0 -8.1L59.4 -6.4L60.2 -9.4L57.7 -11.4L60.9 -11.5ZM50.0 -20.5L51.1 -17.5L54.3 -17.4L51.8 -15.4L52.6 -12.4L50.0 -14.1L47.4 -12.4L48.2 -15.4L45.7 -17.4L48.9 -17.5Z",
+          "fill": "#ffc933"
+        }
+      ]
+    },
+    "sparkles": {
+      "anchor": "face",
+      "motion": "twinkle",
+      "pivot": [
+        50,
+        0
+      ],
+      "layers": [
+        {
+          "d": "M18.0 -13.0L19.4 -7.4L25.0 -6.0L19.4 -4.6L18.0 1.0L16.6 -4.6L11.0 -6.0L16.6 -7.4ZM84.0 -19.0L85.1 -15.1L89.0 -14.0L85.1 -12.9L84.0 -9.0L82.9 -12.9L79.0 -14.0L82.9 -15.1ZM80.0 10.0L80.8 13.2L84.0 14.0L80.8 14.8L80.0 18.0L79.2 14.8L76.0 14.0L79.2 13.2Z",
+          "fill": "#ffe066"
+        }
+      ]
+    }
+  },
+  "motions": {
+    "hop": {
+      "duration": 0.5,
+      "keys": [
+        [
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        [
+          0.15,
+          0,
+          1,
+          1.08,
+          0.92,
+          0
+        ],
+        [
+          0.45,
+          0,
+          -10,
+          0.95,
+          1.07,
+          0
+        ],
+        [
+          0.75,
+          0,
+          0,
+          1.06,
+          0.94,
+          0
+        ],
+        [
+          1,
+          0,
+          0,
+          1,
+          1,
+          0
+        ]
+      ]
+    },
+    "droop": {
+      "duration": 0.6,
+      "keys": [
+        [
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        [
+          1,
+          0,
+          3,
+          1.04,
+          0.9,
+          0
+        ]
+      ]
+    },
+    "shake": {
+      "duration": 0.6,
+      "keys": [
+        [
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        [
+          0.15,
+          -4,
+          0,
+          1,
+          1,
+          -6
+        ],
+        [
+          0.35,
+          4,
+          0,
+          1,
+          1,
+          6
+        ],
+        [
+          0.55,
+          -3,
+          0,
+          1,
+          1,
+          -4
+        ],
+        [
+          0.75,
+          2,
+          0,
+          1,
+          1,
+          3
+        ],
+        [
+          1,
+          0,
+          0,
+          1,
+          1,
+          0
+        ]
+      ]
+    },
+    "jump": {
+      "duration": 0.9,
+      "keys": [
+        [
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        [
+          0.12,
+          0,
+          2,
+          1.1,
+          0.88,
+          0
+        ],
+        [
+          0.45,
+          0,
+          -22,
+          0.92,
+          1.1,
+          0
+        ],
+        [
+          0.8,
+          0,
+          0,
+          1.1,
+          0.9,
+          0
+        ],
+        [
+          1,
+          0,
+          0,
+          1,
+          1,
+          0
+        ]
+      ]
+    },
+    "pop": {
+      "duration": 0.35,
+      "keys": [
+        [
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        [
+          0.4,
+          0,
+          -2,
+          1.14,
+          1.14,
+          0
+        ],
+        [
+          1,
+          0,
+          0,
+          1,
+          1,
+          0
+        ]
+      ]
+    },
+    "fall": {
+      "duration": 1.0,
+      "keys": [
+        [
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        [
+          1,
+          0,
+          10,
+          0.6,
+          0.6,
+          0
+        ]
+      ]
+    },
+    "orbit": {
+      "duration": 1.2,
+      "ease": "linear",
+      "keys": [
+        [
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        [
+          1,
+          0,
+          0,
+          1,
+          1,
+          360
+        ]
+      ]
+    },
+    "twinkle": {
+      "duration": 0.8,
+      "keys": [
+        [
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        [
+          0.5,
+          0,
+          0,
+          0.88,
+          0.88,
+          0
+        ],
+        [
+          1,
+          0,
+          0,
+          1,
+          1,
+          0
+        ]
+      ]
+    }
+  },
+  "idle": {
+    "breathe": {
+      "period": 2.6,
+      "amount": 0.025
+    },
+    "blink": {
+      "every": [
+        2.5,
+        5.0
+      ],
+      "duration": 0.16
+    }
+  },
+  "expressions": {
+    "happy": {
+      "eyes": "happy",
+      "mouth": "grin",
+      "motion": "hop",
+      "hold": 1.6
+    },
+    "sad": {
+      "eyes": "sad",
+      "mouth": "frown",
+      "motion": "droop",
+      "effects": [
+        "tear"
+      ],
+      "hold": 2.2
+    },
+    "hurt": {
+      "eyes": "cross",
+      "mouth": "wavy",
+      "motion": "shake",
+      "effects": [
+        "dizzy"
+      ],
+      "hold": 1.8
+    },
+    "winner": {
+      "eyes": "star",
+      "mouth": "grin",
+      "motion": "jump",
+      "effects": [
+        "sparkles"
+      ],
+      "hold": 1.8
+    },
+    "surprised": {
+      "eyes": "wide",
+      "mouth": "o",
+      "motion": "pop",
+      "hold": 1.2
+    }
+  }
+}

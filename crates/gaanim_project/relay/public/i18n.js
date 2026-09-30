@@ -1,6 +1,7 @@
 // Texts of the relay pages in Spanish and English, chosen by the phone's
 // language. Elements with data-t="<key>" get the text of <key>, and
-// elements with data-tp="<key>" get it as their placeholder.
+// elements with data-tp="<key>" get it as their placeholder, and elements
+// with data-tl="<key>" as their accessible label and tooltip.
 "use strict";
 
 const TEXTS = {
@@ -39,6 +40,24 @@ const TEXTS = {
     total: "en total",
     kickedTitle: "Saliste del juego",
     kickedHint: "El presentador te quitó de esta sesión.",
+    lobbyTitle: "¡Entra a la sala!",
+    lobbyHint: "Crea tu personaje y elige un apodo: aparecerás en la pantalla.",
+    lobbyButton: "Entrar",
+    inTitle: (name) => `¡Ya estás dentro, ${name}!`,
+    inHint: "Mira la pantalla. La pregunta aparecerá aquí.",
+    randomButton: "Al azar",
+    randomName: "Apodo al azar",
+    editButton: "Cambiar personaje",
+    partBodies: "Cuerpo",
+    partColors: "Color",
+    partEyes: "Ojos",
+    partMouths: "Boca",
+    partExtras: "Extra",
+    previous: "Anterior",
+    next: "Siguiente",
+    avatarLabel: "Tu personaje",
+    nameAdjectives: ["Veloz", "Feliz", "Astuto", "Valiente", "Curioso", "Brillante", "Tranqui", "Épico", "Sabio", "Risueño"],
+    nameNouns: ["Pingüino", "Zorro", "Panda", "Búho", "Gato", "Pulpo", "Koala", "Tigre", "Delfín", "Mapache"],
   },
   en: {
     joinTitle: "Join the presentation",
@@ -75,6 +94,24 @@ const TEXTS = {
     total: "in total",
     kickedTitle: "You left the game",
     kickedHint: "The presenter removed you from this session.",
+    lobbyTitle: "Join the room!",
+    lobbyHint: "Make your character and pick a nickname: you will show up on the screen.",
+    lobbyButton: "Join",
+    inTitle: (name) => `You're in, ${name}!`,
+    inHint: "Watch the screen. The question will appear here.",
+    randomButton: "Random",
+    randomName: "Random nickname",
+    editButton: "Change character",
+    partBodies: "Body",
+    partColors: "Color",
+    partEyes: "Eyes",
+    partMouths: "Mouth",
+    partExtras: "Extra",
+    previous: "Previous",
+    next: "Next",
+    avatarLabel: "Your character",
+    nameAdjectives: ["Swift", "Happy", "Clever", "Brave", "Curious", "Shiny", "Chill", "Epic", "Wise", "Jolly"],
+    nameNouns: ["Penguin", "Fox", "Panda", "Owl", "Cat", "Octopus", "Koala", "Tiger", "Dolphin", "Raccoon"],
   },
 };
 
@@ -101,5 +138,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   for (const element of document.querySelectorAll("[data-tp]")) {
     element.placeholder = t(element.dataset.tp);
+  }
+  for (const element of document.querySelectorAll("[data-tl]")) {
+    element.setAttribute("aria-label", t(element.dataset.tl));
+    element.title = t(element.dataset.tl);
   }
 });

@@ -1,7 +1,20 @@
 # Gaanim relay: carries audience votes from phones to a Gaanim presentation.
 name = "gaanim-relay"
 main = "src/index.js"
-compatibility_date = "2025-09-01"
+compatibility_date = "2026-09-30"
+
+# Logs and traces, sampled: every phone message is an invocation, so a full
+# room does not use up the plan's daily log events.
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 0.1
+
+[observability.traces]
+enabled = true
+head_sampling_rate = 0.01
 
 # The join and voting pages. A request for a file is served from here
 # without running the Worker; everything else (/s/<code>, the API) runs it.

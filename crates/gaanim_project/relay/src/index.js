@@ -22,7 +22,7 @@
 //   GET    /                  join page: type a code (static asset)
 //   GET    /s/<code>          voting page (public)
 //   GET    /s/<code>/ws       WebSocket for phones (public), see below
-//   GET    /s/<code>/poll     current question, without counts (public)
+//   GET    /s/<code>/poll?voter=<id>  current question, without counts (public)
 //   POST   /s/<code>/vote     {poll, option, voter} (public)
 //   POST   /s/<code>/join     {voter, name} -> {player} (public)
 //   GET    /s/<code>/player?voter=<id>  {player} (public)
@@ -31,24 +31,37 @@
 //   POST   /s/<code>/reveal   {id}: show a quiz's answer    (presenter)
 //   POST   /s/<code>/kick     {name}: remove and ban a player (presenter)
 //   POST   /s/<code>/reset    forget every poll, vote and player (presenter)
-//   GET    /s/<code>/results  {current, connected, polls, players} (presenter)
+//   POST   /s/<code>/lobby    {open}: phones join as they arrive (presenter)
+//   GET    /s/<code>/results  {current, connected, polls, players, audience} (presenter)
+//   GET    /s/<code>/presenter  WebSocket pushing {type: "results", ...} (presenter)
 //   GET    /health            {relay, version}
 //
 // WebSocket messages are JSON, except the keepalive "ping", answered "pong"
-// without waking the session. The relay sends {type: "poll", open, id,
-// question, options, quiz?} on connect and whenever the question changes.
-// A phone introduces itself with {type: "hello", voter} and gets {type:
-// "player", player}; joins with {type: "join", voter, name}; and votes with
+// without waking the session. The relay sends {type: "poll", lobby, open,
+// id, question, options, quiz?, chosen} on connect and whenever the question
+// changes; `chosen` is the phone's own vote or answer (null for none), so a
+// phone never trusts a vote it remembers from an earlier game, and `lobby`
+// asks a phone that has not joined for a nickname right away. A phone
+// introduces itself with {type: "hello", voter} and gets {type: "player",
+// player} and the question with its `chosen`; joins with {type: "join", voter, name}; and votes with
 // {type: "vote", poll, option, voter}, answered {type: "voted", poll,
 // option} or {type: "error", status, error, poll?}. When a quiz is revealed
 // each phone gets {type: "result", poll, correct, option, points, player}.
-// A removed player gets {type: "kicked"}.
+// A removed player gets {type: "kicked"}. A join may carry the player's
+// character, `avatar`: [body, color, eyes, mouth, extra], indexes into
+// public/avatar-parts.json; players and the audience carry it back.
+//
+// The presentation holds its own WebSocket, opened with its key: the relay
+// sends it the results on connect and again whenever they change, at most
+// every PUSH_MS, so it never asks. It only sends keepalives.
 //
 // Votes are anonymous: a voter is a random id the page keeps in the phone's
 // storage, and a nickname is all a quiz asks. A session and everything in it
 // is deleted after SESSION_TTL_MS without activity.
 
 import { DurableObject } from "cloudflare:workers";
+// The characters' parts, the same file the voting page draws from.
+import avatarParts from "../public/avatar-parts.json";
 
 const CODE = /^[A-HJ-NP-Z2-9]{6}$/;
 const VOTER = /^[0-9a-f]{32}$/;
@@ -73,8 +86,17 @@ const DEFAULT_POINTS = 1000;
 const GRACE_MS = 500;
 /** Players listed in the presenter's results. */
 const LEADERBOARD = 100;
+/** Players listed in joining order in the presenter's results. */
+const AUDIENCE = 200;
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-const API_VERSION = 4;
+/** How far behind the alarm may fall before activity moves it: a session
+ * lasts between SESSION_TTL_MS minus this and SESSION_TTL_MS after its last
+ * activity. */
+const ALARM_SLACK_MS = 30 * 60 * 1000;
+const API_VERSION = 6;
+/** How long changes gather before the presenter's socket hears of them, so
+ * a burst of votes is one message. */
+const PUSH_MS = 250;
 
 /** Headers every page and API response carries. */
 const SECURITY_HEADERS = {
@@ -101,7 +123,7 @@ export default {
       return votePage(env, url);
     }
     const session = env.SESSIONS.get(env.SESSIONS.idFromName(code));
-    if (parts[2] === "ws") {
+    if (parts[2] === "ws" || parts[2] === "presenter") {
       if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
         return json({ error: "expected a WebSocket upgrade" }, 426);
       }
@@ -109,8 +131,10 @@ export default {
     }
     try {
       switch (`${request.method} ${parts[2]}`) {
-        case "GET poll":
-          return json(await session.current());
+        case "GET poll": {
+          const voter = url.searchParams.get("voter");
+          return json(await session.current(VOTER.test(voter ?? "") ? voter : null));
+        }
         case "POST vote":
           return reply(await session.vote(await body(request)));
         case "POST join":
@@ -127,6 +151,8 @@ export default {
           return reply(await session.kick(bearer(request), await body(request)));
         case "POST reset":
           return reply(await session.reset(bearer(request)));
+        case "POST lobby":
+          return reply(await session.lobby(bearer(request), await body(request)));
         case "GET results":
           return reply(await session.results(bearer(request)));
         default:
@@ -144,35 +170,142 @@ const fail = (status, error) => ({ status, body: { error } });
 export class PollSession extends DurableObject {
   // Storage:
   //   "key"                  presenter key hash
+  //   "lobby"                true when phones join as soon as they arrive
   //   "current"              id of the open poll, absent when none is
-  //   "poll:<id>"            {question, options, counts, quiz?}; a quiz is
+  //   "revealed"             id of the quiz revealed last
+  //   "poll:<id>"            {question, options, quiz?}; a quiz is
   //                          {correct, time, points, openedAt, deadline, revealed}
   //   "vote:<id>:<voter>"    answer index of a poll's voter
   //   "answer:<id>:<voter>"  {option, elapsed, points} of a quiz's player
-  //   "player:<voter>"       {name, score, correct, answered, last}
-  //   "name:<lowercase>"     voter holding a nickname
+  //   "player:<voter>"       {name, score, correct, answered, joined, avatar}
   //   "banned:<voter>"       a phone the presenter removed
   // Every poll keeps its votes, so a presentation that comes back to a
   // question finds them again.
+  //
+  // Storage is billed by the row, and the presenter reads the results every
+  // second, so the session reads all of it once when it wakes and answers
+  // from memory: vote counts, nicknames and the ranking are derived there.
+  // Each change is stored first and then applied to memory, so a session
+  // evicted at any moment wakes to the same state.
 
   constructor(ctx, env) {
     super(ctx, env);
     // Keepalives are answered by the runtime: they never wake the session.
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+    /** The session in memory, loaded on first use. */
+    this.loading = null;
+    /** The presenter key last checked, so its hash is computed once. */
+    this.verified = null;
+    /** A push of the results to the presentation, while one is due. */
+    this.pushTimer = null;
+  }
+
+  /** The session's state, read from storage once per wake. */
+  state() {
+    this.loading ??= this.load().catch((error) => {
+      this.loading = null;
+      throw error;
+    });
+    return this.loading;
+  }
+
+  async load() {
+    const s = {
+      key: null,
+      lobby: false,
+      current: null,
+      revealed: null,
+      polls: new Map(),
+      votes: new Map(),
+      answers: new Map(),
+      players: new Map(),
+      names: new Map(),
+      banned: new Set(),
+      alarmAt: await this.ctx.storage.getAlarm(),
+    };
+    const byPoll = (map, id) => map.get(id) ?? map.set(id, new Map()).get(id);
+    for (const [key, value] of await this.ctx.storage.list()) {
+      const [kind, id, voter] = key.split(":");
+      switch (kind) {
+        case "key":
+          s.key = value;
+          break;
+        case "lobby":
+          s.lobby = value === true;
+          break;
+        case "current":
+          s.current = value;
+          break;
+        case "revealed":
+          s.revealed = value;
+          break;
+        case "poll":
+          s.polls.set(id, { question: value.question, options: value.options, quiz: value.quiz ?? null });
+          break;
+        case "vote":
+          byPoll(s.votes, id).set(voter, value);
+          break;
+        case "answer":
+          byPoll(s.answers, id).set(voter, value);
+          break;
+        case "player":
+          s.players.set(id, value);
+          s.names.set(value.name.toLocaleLowerCase(), id);
+          break;
+        case "banned":
+          s.banned.add(id);
+          break;
+      }
+    }
+    for (const [id, poll] of s.polls) poll.counts = countVotes(s, id, poll);
+    return s;
   }
 
   // --- Phones --------------------------------------------------------------
 
   // A phone's WebSocket. Accepted through the hibernation API, so the
   // session sleeps between messages while its sockets stay open.
-  async fetch() {
+  // Phones' sockets are tagged "phone", the presentation's "presenter".
+  async fetch(request) {
+    const presenter = new URL(request.url).pathname.endsWith("/presenter");
+    if (presenter) {
+      const denied = await this.authorize(bearer(request), true);
+      if (denied) return json(denied.body, denied.status);
+    }
     const [client, server] = Object.values(new WebSocketPair());
-    this.ctx.acceptWebSocket(server);
-    server.send(JSON.stringify({ type: "poll", ...(await this.current()) }));
+    this.ctx.acceptWebSocket(server, [presenter ? "presenter" : "phone"]);
+    if (presenter) {
+      server.send(JSON.stringify({ type: "results", ...(await this.summary()) }));
+    } else {
+      server.send(JSON.stringify({ type: "poll", ...(await this.current()) }));
+      // One more phone connected.
+      this.schedulePush();
+    }
     return new Response(null, { status: 101, webSocket: client });
   }
 
+  /** Tell the presentation the results soon: changes within PUSH_MS go
+   * out together. */
+  schedulePush() {
+    if (this.pushTimer || this.ctx.getWebSockets("presenter").length === 0) return;
+    this.pushTimer = setTimeout(async () => {
+      this.pushTimer = null;
+      const sockets = this.ctx.getWebSockets("presenter");
+      if (sockets.length === 0) return;
+      const message = JSON.stringify({ type: "results", ...(await this.summary()) });
+      for (const socket of sockets) {
+        try {
+          socket.send(message);
+        } catch {
+          // Closing; the presentation reconnects and gets the results then.
+        }
+      }
+    }, PUSH_MS);
+  }
+
   async webSocketMessage(socket, message) {
+    // The presentation's socket only listens.
+    if (this.ctx.getTags(socket).includes("presenter")) return;
     const send = (value) => socket.send(JSON.stringify(value));
     let input;
     try {
@@ -188,11 +321,12 @@ export class PollSession extends DurableObject {
       case "hello": {
         remember(input.voter);
         const result = await this.player(input.voter);
-        return send(
-          result.status === 200
-            ? { type: "player", player: result.body.player }
-            : { type: "error", status: result.status, error: result.body.error },
-        );
+        if (result.status !== 200) {
+          return send({ type: "error", status: result.status, error: result.body.error });
+        }
+        send({ type: "player", player: result.body.player });
+        // The question again, now with this phone's own vote.
+        return send({ type: "poll", ...(await this.current(input.voter)) });
       }
       case "join": {
         const result = await this.join(input);
@@ -222,13 +356,15 @@ export class PollSession extends DurableObject {
     } catch {
       // Already closed, or a code that cannot be sent back (1005, 1006).
     }
+    // One phone fewer.
+    if (this.ctx.getTags(socket).includes("phone")) this.schedulePush();
   }
 
   async webSocketError() {}
 
   /** Send `message(voter)` to every phone, or skip a phone when it is null. */
   send(message) {
-    for (const socket of this.ctx.getWebSockets()) {
+    for (const socket of this.ctx.getWebSockets("phone")) {
       const voter = socket.deserializeAttachment()?.voter ?? null;
       const value = message(voter);
       if (value === null) continue;
@@ -240,19 +376,30 @@ export class PollSession extends DurableObject {
     }
   }
 
-  /** Tell every connected phone what the question is now. */
+  /** Tell every connected phone what the question is now, and what it
+   * chose there. */
   async broadcast() {
+    const s = await this.state();
     const state = { type: "poll", ...(await this.current()) };
-    this.send(() => state);
+    this.send((voter) => ({ ...state, chosen: choiceOf(s, state.id, voter) }));
   }
 
-  async current() {
-    const id = await this.ctx.storage.get("current");
-    const poll = id && (await this.ctx.storage.get(`poll:${id}`));
+  /** The open question; with a `voter`, also what that phone chose. */
+  async current(voter = null) {
+    const s = await this.state();
+    const id = s.current;
+    const poll = id && s.polls.get(id);
     if (!poll) {
-      return { open: false };
+      return { lobby: s.lobby, open: false };
     }
-    const state = { open: true, id, question: poll.question, options: poll.options };
+    const state = {
+      lobby: s.lobby,
+      open: true,
+      id,
+      question: poll.question,
+      options: poll.options,
+      chosen: voter ? choiceOf(s, id, voter) : null,
+    };
     if (poll.quiz) {
       // The deadline is on the relay's clock; `now` lets a phone correct
       // for the difference with its own.
@@ -272,38 +419,12 @@ export class PollSession extends DurableObject {
     if (typeof voter !== "string" || !VOTER.test(voter)) {
       return fail(400, "invalid voter");
     }
-    if (await this.ctx.storage.get(`banned:${voter}`)) {
+    const s = await this.state();
+    if (s.banned.has(voter)) {
       return fail(403, "removed by the presenter");
     }
-    const player = await this.ctx.storage.get(`player:${voter}`);
-    return ok({ player: player ? await this.describe(voter, player) : null });
-  }
-
-  /** A player as the phone sees it: with its place among all players. */
-  async describe(voter, player, ranking = null) {
-    const players = ranking ?? (await this.ranking());
-    const rank = players.findIndex((entry) => entry.voter === voter) + 1;
-    return {
-      name: player.name,
-      score: player.score,
-      correct: player.correct,
-      answered: player.answered,
-      rank: rank || null,
-      players: players.length,
-      last: player.last ?? null,
-    };
-  }
-
-  /** Every player, best first; ties go to the most correct answers. */
-  async ranking() {
-    const players = [];
-    for (const [key, player] of await this.ctx.storage.list({ prefix: "player:" })) {
-      players.push({ voter: key.slice("player:".length), ...player });
-    }
-    players.sort(
-      (a, b) => b.score - a.score || b.correct - a.correct || a.name.localeCompare(b.name),
-    );
-    return players;
+    const player = s.players.get(voter);
+    return ok({ player: player ? describe(s, voter, player) : null });
   }
 
   async join(input) {
@@ -311,7 +432,8 @@ export class PollSession extends DurableObject {
     if (typeof voter !== "string" || !VOTER.test(voter)) {
       return fail(400, "invalid voter");
     }
-    if (await this.ctx.storage.get(`banned:${voter}`)) {
+    const s = await this.state();
+    if (s.banned.has(voter)) {
       return fail(403, "removed by the presenter");
     }
     const name = typeof input.name === "string" ? input.name.trim().replace(/\s+/g, " ") : "";
@@ -319,32 +441,32 @@ export class PollSession extends DurableObject {
       return fail(400, "invalid name");
     }
     const lower = name.toLocaleLowerCase();
-    const holder = await this.ctx.storage.get(`name:${lower}`);
+    const holder = s.names.get(lower);
     if (holder && holder !== voter) {
       return fail(409, "name taken");
     }
-    const player = (await this.ctx.storage.get(`player:${voter}`)) ?? {
-      name,
-      score: 0,
-      correct: 0,
-      answered: 0,
-      last: null,
-    };
-    if (player.name.toLocaleLowerCase() !== lower) {
-      await this.ctx.storage.delete(`name:${player.name.toLocaleLowerCase()}`);
+    const previous = s.players.get(voter);
+    const avatar = checkAvatar(input.avatar) ?? previous?.avatar ?? defaultAvatar(voter);
+    if (previous?.name !== name || String(previous?.avatar) !== String(avatar)) {
+      const player = previous
+        ? { ...previous, name, avatar }
+        : { name, score: 0, correct: 0, answered: 0, joined: Date.now(), avatar };
+      await this.ctx.storage.put(`player:${voter}`, player);
+      if (previous) s.names.delete(previous.name.toLocaleLowerCase());
+      s.players.set(voter, player);
+      s.names.set(lower, voter);
     }
-    player.name = name;
-    await this.ctx.storage.put({ [`player:${voter}`]: player, [`name:${lower}`]: voter });
-    await this.touch();
-    return ok({ player: await this.describe(voter, player) });
+    await this.touch(s);
+    return ok({ player: describe(s, voter, s.players.get(voter)) });
   }
 
   async vote(input) {
-    const id = await this.ctx.storage.get("current");
+    const s = await this.state();
+    const id = s.current;
     if (!id || input?.poll !== id) {
       return fail(409, "this question is closed");
     }
-    const poll = await this.ctx.storage.get(`poll:${id}`);
+    const poll = s.polls.get(id);
     const option = input.option;
     if (!Number.isInteger(option) || option < 0 || option >= poll.options.length) {
       return fail(400, "unknown answer");
@@ -354,55 +476,56 @@ export class PollSession extends DurableObject {
       return fail(400, "invalid voter");
     }
     if (poll.quiz) {
-      return this.answer(id, poll, voter, option);
+      return this.answer(s, id, poll, voter, option);
     }
-    const key = `vote:${id}:${voter}`;
-    const previous = await this.ctx.storage.get(key);
+    const votes = s.votes.get(id) ?? s.votes.set(id, new Map()).get(id);
+    const previous = votes.get(voter);
     if (previous === option) {
       return ok({ ok: true });
     }
-    if (previous !== undefined) {
-      poll.counts[previous] = Math.max(0, poll.counts[previous] - 1);
-    }
+    await this.ctx.storage.put(`vote:${id}:${voter}`, option);
+    if (previous !== undefined) poll.counts[previous] = Math.max(0, poll.counts[previous] - 1);
     poll.counts[option] += 1;
-    await this.ctx.storage.put({ [key]: option, [`poll:${id}`]: poll });
-    await this.touch();
+    votes.set(voter, option);
+    await this.touch(s);
     return ok({ ok: true });
   }
 
   /** A quiz answer: once per player, before the deadline, scored by speed. */
-  async answer(id, poll, voter, option) {
+  async answer(s, id, poll, voter, option) {
     const quiz = poll.quiz;
     const now = Date.now();
     if (quiz.revealed || now > quiz.deadline + GRACE_MS) {
       return fail(409, "time is up");
     }
-    if (await this.ctx.storage.get(`banned:${voter}`)) {
+    if (s.banned.has(voter)) {
       return fail(403, "removed by the presenter");
     }
-    const player = await this.ctx.storage.get(`player:${voter}`);
+    const player = s.players.get(voter);
     if (!player) {
       return fail(401, "join with a name first");
     }
-    const key = `answer:${id}:${voter}`;
-    if (await this.ctx.storage.get(key)) {
+    const answers = s.answers.get(id) ?? s.answers.set(id, new Map()).get(id);
+    if (answers.has(voter)) {
       return fail(409, "already answered");
     }
     const limit = quiz.time * 1000;
     const elapsed = Math.min(Math.max(now - quiz.openedAt, 0), limit);
     const points = option === quiz.correct ? Math.round(quiz.points * (1 - elapsed / limit / 2)) : 0;
-    poll.counts[option] += 1;
-    player.answered += 1;
     // The score changes now, but phones learn it only when the answer is
     // revealed; the leaderboard is the presenter's to show.
-    player.score += points;
-    if (points > 0) player.correct += 1;
-    await this.ctx.storage.put({
-      [key]: { option, elapsed, points },
-      [`poll:${id}`]: poll,
-      [`player:${voter}`]: player,
-    });
-    await this.touch();
+    const scored = {
+      ...player,
+      score: player.score + points,
+      correct: player.correct + (points > 0 ? 1 : 0),
+      answered: player.answered + 1,
+    };
+    const answer = { option, elapsed, points };
+    await this.ctx.storage.put({ [`answer:${id}:${voter}`]: answer, [`player:${voter}`]: scored });
+    answers.set(voter, answer);
+    s.players.set(voter, scored);
+    poll.counts[option] += 1;
+    await this.touch(s);
     return ok({ ok: true });
   }
 
@@ -444,7 +567,8 @@ export class PollSession extends DurableObject {
       }
       quiz = { correct: input.correct, time, points };
     }
-    const existing = await this.ctx.storage.get(`poll:${id}`);
+    const s = await this.state();
+    const existing = s.polls.get(id);
     const same =
       existing &&
       existing.question === question &&
@@ -455,19 +579,23 @@ export class PollSession extends DurableObject {
       (existing.quiz?.points ?? null) === (quiz?.points ?? null);
     if (!same) {
       // A new question, or one whose text or scoring changed: start from zero.
-      if (existing) await this.forget(id);
+      if (existing) await this.forget(s, id);
       const now = Date.now();
-      await this.ctx.storage.put(`poll:${id}`, {
+      const poll = {
         question,
         options,
-        counts: options.map(() => 0),
         quiz: quiz && { ...quiz, openedAt: now, deadline: now + quiz.time * 1000, revealed: false },
-      });
+      };
+      await this.ctx.storage.put(`poll:${id}`, poll);
+      s.polls.set(id, { ...poll, counts: options.map(() => 0) });
     }
     // Coming back to a quiz keeps its clock: its time may already be up.
-    const previous = await this.ctx.storage.get("current");
-    await this.ctx.storage.put("current", id);
-    await this.touch();
+    const previous = s.current;
+    if (previous !== id) {
+      await this.ctx.storage.put("current", id);
+      s.current = id;
+    }
+    await this.touch(s);
     if (previous !== id || !same) {
       await this.broadcast();
     }
@@ -475,27 +603,42 @@ export class PollSession extends DurableObject {
   }
 
   /** Drop a poll's votes and answers, and the points its answers gave. */
-  async forget(id) {
-    const votes = await this.ctx.storage.list({ prefix: `vote:${id}:` });
-    const answers = await this.ctx.storage.list({ prefix: `answer:${id}:` });
-    for (const [key, answer] of answers) {
-      const voter = key.slice(`answer:${id}:`.length);
-      const player = await this.ctx.storage.get(`player:${voter}`);
-      if (player) {
-        player.score -= answer.points;
-        player.answered -= 1;
-        if (answer.points > 0) player.correct -= 1;
-        await this.ctx.storage.put(`player:${voter}`, player);
-      }
+  async forget(s, id) {
+    const answers = s.answers.get(id) ?? new Map();
+    const players = {};
+    for (const [voter, answer] of answers) {
+      const player = s.players.get(voter);
+      if (!player) continue;
+      players[`player:${voter}`] = {
+        ...player,
+        score: player.score - answer.points,
+        answered: player.answered - 1,
+        correct: player.correct - (answer.points > 0 ? 1 : 0),
+      };
     }
-    await this.ctx.storage.delete([...votes.keys(), ...answers.keys()]);
+    await putAll(this.ctx.storage, players);
+    const keys = [
+      ...[...(s.votes.get(id)?.keys() ?? [])].map((voter) => `vote:${id}:${voter}`),
+      ...[...answers.keys()].map((voter) => `answer:${id}:${voter}`),
+    ];
+    await deleteAll(this.ctx.storage, keys);
+    for (const [key, player] of Object.entries(players)) {
+      s.players.set(key.slice("player:".length), player);
+    }
+    s.votes.delete(id);
+    s.answers.delete(id);
   }
 
   async close(key) {
     const denied = await this.authorize(key, false);
     if (denied) return denied;
-    const open = await this.ctx.storage.delete("current");
-    await this.touch();
+    const s = await this.state();
+    const open = s.current !== null;
+    if (open) {
+      await this.ctx.storage.delete("current");
+      s.current = null;
+    }
+    await this.touch(s);
     if (open) {
       await this.broadcast();
     }
@@ -507,45 +650,34 @@ export class PollSession extends DurableObject {
   async reveal(key, input) {
     const denied = await this.authorize(key, false);
     if (denied) return denied;
+    const s = await this.state();
     const id = input?.id;
-    const poll = typeof id === "string" && (await this.ctx.storage.get(`poll:${id}`));
+    const poll = typeof id === "string" && s.polls.get(id);
     if (!poll?.quiz) {
       return fail(404, "no such quiz");
     }
-    poll.quiz.revealed = true;
-    await this.ctx.storage.put(`poll:${id}`, poll);
-    const answers = await this.ctx.storage.list({ prefix: `answer:${id}:` });
-    const results = new Map();
-    for (const [key, player] of await this.ctx.storage.list({ prefix: "player:" })) {
-      const voter = key.slice("player:".length);
-      const answer = answers.get(`answer:${id}:${voter}`);
-      player.last = {
-        poll: id,
-        correct: poll.quiz.correct,
-        option: answer?.option ?? null,
-        points: answer?.points ?? 0,
-      };
-      await this.ctx.storage.put(`player:${voter}`, player);
-      results.set(voter, player);
-    }
+    const quiz = { ...poll.quiz, revealed: true };
+    await this.ctx.storage.put({
+      [`poll:${id}`]: { question: poll.question, options: poll.options, quiz },
+      revealed: id,
+    });
+    poll.quiz = quiz;
+    s.revealed = id;
     // Every phone learns the answer; players also learn their result.
-    const ranking = await this.ranking();
-    const outcomes = new Map();
-    for (const [voter, player] of results) {
-      outcomes.set(voter, await this.describe(voter, player, ranking));
-    }
+    const ranking = rank(s);
     this.send((voter) => {
-      const player = voter && outcomes.get(voter);
+      const player = voter && s.players.get(voter);
+      const described = player ? describe(s, voter, player, ranking) : null;
       return {
         type: "result",
         poll: id,
-        correct: poll.quiz.correct,
-        option: player?.last.option ?? null,
-        points: player?.last.points ?? 0,
-        player: player ?? null,
+        correct: quiz.correct,
+        option: described?.last.option ?? null,
+        points: described?.last.points ?? 0,
+        player: described,
       };
     });
-    await this.touch();
+    await this.touch(s);
     return ok({ ok: true });
   }
 
@@ -553,14 +685,18 @@ export class PollSession extends DurableObject {
   async kick(key, input) {
     const denied = await this.authorize(key, false);
     if (denied) return denied;
+    const s = await this.state();
     const name = typeof input?.name === "string" ? input.name.trim().toLocaleLowerCase() : "";
-    const voter = name && (await this.ctx.storage.get(`name:${name}`));
+    const voter = name && s.names.get(name);
     if (!voter) {
       return fail(404, "no such player");
     }
-    await this.ctx.storage.delete([`player:${voter}`, `name:${name}`]);
+    await this.ctx.storage.delete(`player:${voter}`);
     await this.ctx.storage.put(`banned:${voter}`, true);
-    for (const socket of this.ctx.getWebSockets()) {
+    s.players.delete(voter);
+    s.names.delete(name);
+    s.banned.add(voter);
+    for (const socket of this.ctx.getWebSockets("phone")) {
       if (socket.deserializeAttachment()?.voter !== voter) continue;
       try {
         socket.send(JSON.stringify({ type: "kicked" }));
@@ -569,32 +705,67 @@ export class PollSession extends DurableObject {
         // Already gone.
       }
     }
-    await this.touch();
+    await this.touch(s);
     return ok({ ok: true });
   }
 
-  /** Start over: no polls, votes, players or bans; the key stays. */
+  /** Start over: no polls, votes, players or bans; the key and the lobby
+   * stay. */
   async reset(key) {
     const denied = await this.authorize(key, false);
     if (denied) return denied;
-    const stored = await this.ctx.storage.get("key");
+    const s = await this.state();
+    // Also removes the alarm; `touch` sets it again.
     await this.ctx.storage.deleteAll();
-    await this.ctx.storage.put("key", stored);
-    await this.touch();
+    await this.ctx.storage.put(s.lobby ? { key: s.key, lobby: true } : { key: s.key });
+    this.loading = Promise.resolve({
+      ...s,
+      current: null,
+      revealed: null,
+      polls: new Map(),
+      votes: new Map(),
+      answers: new Map(),
+      players: new Map(),
+      names: new Map(),
+      banned: new Set(),
+      alarmAt: null,
+    });
+    await this.touch(await this.state());
     await this.broadcast();
     this.send(() => ({ type: "player", player: null }));
+    return ok({ ok: true });
+  }
+
+  /** Whether phones join as soon as they open the page, for a
+   * presentation that shows its audience. */
+  async lobby(key, input) {
+    const denied = await this.authorize(key, true);
+    if (denied) return denied;
+    const s = await this.state();
+    const open = input?.open === true;
+    if (open !== s.lobby) {
+      if (open) await this.ctx.storage.put("lobby", true);
+      else await this.ctx.storage.delete("lobby");
+      s.lobby = open;
+      await this.broadcast();
+    }
+    await this.touch(s);
     return ok({ ok: true });
   }
 
   async results(key) {
     const denied = await this.authorize(key, false);
     if (denied) return denied;
-    const current = await this.ctx.storage.get("current");
+    return ok(await this.summary());
+  }
+
+  /** What the presentation reads: counts, quizzes, players, audience. */
+  async summary() {
+    const s = await this.state();
     const polls = {};
-    for (const [name, poll] of await this.ctx.storage.list({ prefix: "poll:" })) {
-      const id = name.slice("poll:".length);
+    for (const [id, poll] of s.polls) {
       polls[id] = {
-        open: id === current,
+        open: id === s.current,
         counts: poll.counts,
         total: poll.counts.reduce((sum, count) => sum + count, 0),
       };
@@ -606,22 +777,32 @@ export class PollSession extends DurableObject {
         };
       }
     }
-    const ranking = await this.ranking();
+    const ranking = rank(s);
     const players = ranking.slice(0, LEADERBOARD).map((player) => ({
       name: player.name,
       score: player.score,
       correct: player.correct,
       answered: player.answered,
+      avatar: player.avatar ?? defaultAvatar(player.voter),
     }));
-    const connected = this.ctx.getWebSockets().length;
-    return ok({
-      current: current ?? null,
-      connected,
+    // Everyone in the order they joined, for the scene's audience.
+    const audience = ranking
+      .map((player) => ({
+        name: player.name,
+        joined: player.joined ?? 0,
+        avatar: player.avatar ?? defaultAvatar(player.voter),
+      }))
+      .sort((a, b) => a.joined - b.joined || a.name.localeCompare(b.name))
+      .slice(0, AUDIENCE);
+    return {
+      current: s.current,
+      connected: this.ctx.getWebSockets("phone").length,
       now: Date.now(),
       polls,
       players,
       playerCount: ranking.length,
-    });
+      audience,
+    };
   }
 
   // The first presenter request claims the session with its key.
@@ -629,22 +810,125 @@ export class PollSession extends DurableObject {
     if (typeof key !== "string" || !KEY.test(key)) {
       return fail(401, "missing presenter key");
     }
+    const s = await this.state();
+    if (s.key && key === this.verified) return null;
     const hash = await sha256(key);
-    const stored = await this.ctx.storage.get("key");
-    if (!stored) {
+    if (!s.key) {
       if (!claim) return fail(401, "unknown session");
       await this.ctx.storage.put("key", hash);
-      return null;
+      s.key = hash;
     }
-    return stored === hash ? null : fail(403, "wrong presenter key");
+    if (s.key !== hash) return fail(403, "wrong presenter key");
+    this.verified = key;
+    return null;
   }
 
-  async touch() {
-    await this.ctx.storage.setAlarm(Date.now() + SESSION_TTL_MS);
+  /** Record activity: tell the presentation, and keep the session for
+   * SESSION_TTL_MS. Each `setAlarm` is a billed write, so it moves only
+   * once the alarm is ALARM_SLACK_MS behind. */
+  async touch(s) {
+    this.schedulePush();
+    const due = Date.now() + SESSION_TTL_MS;
+    if (s.alarmAt !== null && due - s.alarmAt < ALARM_SLACK_MS) return;
+    await this.ctx.storage.setAlarm(due);
+    s.alarmAt = due;
   }
 
   async alarm() {
     await this.ctx.storage.deleteAll();
+    this.loading = null;
+    this.verified = null;
+  }
+}
+
+/** The vote counts of a poll, from its votes or a quiz's answers. */
+function countVotes(s, id, poll) {
+  const counts = poll.options.map(() => 0);
+  const choices = poll.quiz ? s.answers.get(id) : s.votes.get(id);
+  for (const choice of choices?.values() ?? []) {
+    const option = typeof choice === "number" ? choice : choice.option;
+    if (option >= 0 && option < counts.length) counts[option] += 1;
+  }
+  return counts;
+}
+
+/** What `voter` chose on poll `id`: its vote, or its quiz answer. */
+function choiceOf(s, id, voter) {
+  if (!id || !voter) return null;
+  const choice = s.polls.get(id)?.quiz ? s.answers.get(id)?.get(voter)?.option : s.votes.get(id)?.get(voter);
+  return choice ?? null;
+}
+
+/** Every player, best first; ties go to the most correct answers. */
+function rank(s) {
+  const players = [];
+  for (const [voter, player] of s.players) players.push({ voter, ...player });
+  players.sort(
+    (a, b) => b.score - a.score || b.correct - a.correct || a.name.localeCompare(b.name),
+  );
+  return players;
+}
+
+/** A player as the phone sees it: with its place among all players and its
+ * result on the quiz open now, if revealed, or else on the last one
+ * revealed. */
+function describe(s, voter, player, ranking = rank(s)) {
+  const place = ranking.findIndex((entry) => entry.voter === voter) + 1;
+  const open = s.current && s.polls.get(s.current);
+  const id = open?.quiz?.revealed ? s.current : s.revealed;
+  const quiz = id && s.polls.get(id)?.quiz;
+  const answer = quiz?.revealed ? s.answers.get(id)?.get(voter) : null;
+  return {
+    name: player.name,
+    avatar: player.avatar ?? defaultAvatar(voter),
+    score: player.score,
+    correct: player.correct,
+    answered: player.answered,
+    rank: place || null,
+    players: ranking.length,
+    last: quiz?.revealed
+      ? { poll: id, correct: quiz.correct, option: answer?.option ?? null, points: answer?.points ?? 0 }
+      : null,
+  };
+}
+
+/** The lists a character indexes, in its order. */
+const AVATAR_PARTS = ["bodies", "colors", "eyes", "mouths", "extras"];
+
+/** `value` if it is a character of the catalog, else null. */
+function checkAvatar(value) {
+  const valid =
+    Array.isArray(value) &&
+    value.length === AVATAR_PARTS.length &&
+    value.every(
+      (index, part) =>
+        Number.isInteger(index) && index >= 0 && index < avatarParts[AVATAR_PARTS[part]].length,
+    );
+  return valid ? [...value] : null;
+}
+
+/** The character of a phone that did not choose one, the same every time:
+ * read from its voter id. */
+function defaultAvatar(voter) {
+  return AVATAR_PARTS.map(
+    (part, index) =>
+      parseInt(voter.slice(index * 4, index * 4 + 4), 16) % avatarParts[part].length,
+  );
+}
+
+/** Storage takes at most 128 keys per call. */
+const STORAGE_BATCH = 128;
+
+async function putAll(storage, entries) {
+  const pairs = Object.entries(entries);
+  for (let start = 0; start < pairs.length; start += STORAGE_BATCH) {
+    await storage.put(Object.fromEntries(pairs.slice(start, start + STORAGE_BATCH)));
+  }
+}
+
+async function deleteAll(storage, keys) {
+  for (let start = 0; start < keys.length; start += STORAGE_BATCH) {
+    await storage.delete(keys.slice(start, start + STORAGE_BATCH));
   }
 }
 
@@ -676,9 +960,32 @@ function bearer(request) {
   return header.startsWith("Bearer ") ? header.slice(7).trim() : null;
 }
 
+/** The request's JSON body, read up to MAX_BODY bytes. */
 async function body(request) {
-  const raw = await request.text();
-  if (raw.length > MAX_BODY) throw new Error("request too large");
+  if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY) {
+    throw new Error("request too large");
+  }
+  const reader = request.body?.getReader();
+  if (!reader) return {};
+  const chunks = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > MAX_BODY) {
+      await reader.cancel();
+      throw new Error("request too large");
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  const raw = new TextDecoder().decode(bytes);
   return raw ? JSON.parse(raw) : {};
 }
 

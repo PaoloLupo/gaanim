@@ -573,3 +573,133 @@ body {
   font-size: 30px;
   font-weight: 800;
 }
+
+/* ---- Character creator ------------------------------------------------ */
+
+.creator {
+  width: 100%;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+}
+
+.avatar-stage {
+  display: grid;
+  place-items: center;
+  width: 150px;
+  height: 168px;
+}
+
+.avatar-stage .avatar {
+  filter: drop-shadow(0 8px 10px rgb(0 0 0 / 0.25));
+}
+
+.avatar-stage.pop .avatar {
+  animation: pop 0.28s ease-out;
+}
+
+.avatar-stage.bounce .avatar {
+  animation: bounce 1.8s ease-in-out infinite;
+}
+
+@keyframes pop {
+  0% {
+    transform: scale(0.86);
+  }
+  60% {
+    transform: scale(1.06);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+.secondary {
+  height: 44px;
+  padding: 0 18px;
+  border: 2px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.secondary:active {
+  transform: scale(0.97);
+}
+
+.parts {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.part {
+  display: grid;
+  grid-template-columns: 44px 1fr 44px;
+  align-items: center;
+  height: 48px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+/* An odd last row (the extras) spans both columns. */
+.part:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
+.part-name {
+  font-size: 15px;
+  font-weight: 650;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.step {
+  height: 100%;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: 700 26px/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.step:active {
+  transform: scale(0.9);
+}
+
+.name-row {
+  display: grid;
+  grid-template-columns: 1fr 64px;
+  gap: 8px;
+}
+
+.name-dice {
+  height: 64px;
+  padding: 0;
+  border-radius: var(--radius);
+  font-size: 26px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .avatar-stage .avatar {
+    animation: none !important;
+  }
+}

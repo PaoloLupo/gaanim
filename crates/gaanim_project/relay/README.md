@@ -18,6 +18,16 @@ plan's 100,000 daily requests. (Asking over HTTP every couple of seconds
 instead would use them up with about forty phones in an hour.) Networks
 that block WebSockets fall back to that HTTP polling automatically.
 
+The presentation holds a WebSocket too, on which the relay pushes the
+results as they change, so it never asks for them; a relay older than
+version 6, or a network that blocks the socket, has it ask every second.
+
+Storage is billed by the row, and the plan's tightest limit is 100,000 rows
+written a day. A session reads its storage once when it wakes and then
+answers from memory, so the results cost no reads; a vote writes one row, a quiz answer two, a reveal two
+whatever the number of players, and the session's twelve-hour expiry moves
+at most every half hour.
+
 ## Pages
 
 - `/`: type the six-character code shown on the screen.
@@ -39,6 +49,11 @@ quiz, every phone shows the answer, and each player whether it was right,
 the points it earned, its total and its place. The presentation reads the
 leaderboard from `results`, can remove a player (who cannot join again from
 that phone) and can reset the session before a new game.
+
+A presentation that shows its audience opens a *lobby*: phones ask for the
+nickname as soon as they open the page and wait in the room with it, and
+`results` lists the players in the order they joined, so the presentation
+can fill a waiting room before the first question.
 
 ## Deploy
 
@@ -91,19 +106,24 @@ question or answers starts it from zero. One poll is open at a time.
 | `DELETE /s/<code>/poll` | presenter | closes the open poll |
 | `POST /s/<code>/reveal` | presenter | `{id}`: shows a quiz's answer; it takes no more answers |
 | `POST /s/<code>/kick` | presenter | `{name}`: removes a player and bans its phone |
-| `POST /s/<code>/reset` | presenter | forgets every poll, vote, player and ban |
-| `GET /s/<code>/results` | presenter | `{current, connected, now, polls: {<id>: {open, counts, total, quiz?}}, players, playerCount}`; `connected` counts the phones' sockets, `players` is the leaderboard (top 100) |
+| `POST /s/<code>/reset` | presenter | forgets every poll, vote, player and ban; the lobby stays |
+| `POST /s/<code>/lobby` | presenter | `{open}`: phones ask for a nickname as soon as they open the page |
+| `GET /s/<code>/results` | presenter | `{current, connected, now, polls: {<id>: {open, counts, total, quiz?}}, players, playerCount, audience}`; `connected` counts the phones' sockets, `players` is the leaderboard (top 100), `audience` the players in joining order as `{name, joined}` (first 200) |
+| `GET /s/<code>/presenter` | presenter | WebSocket that pushes `{type: "results", ...}`, the body of `GET results`, on connect and whenever it changes (at most every 250 ms) |
 | `GET /s/<code>/ws` | phones | WebSocket, see below |
-| `GET /s/<code>/poll` | phones | `{open: false}` or `{open, id, question, options}` |
+| `GET /s/<code>/poll?voter=<id>` | phones | `{lobby, open: false}` or `{lobby, open, id, question, options, chosen}`; `chosen` is that phone's vote or answer, or `null` |
 | `POST /s/<code>/vote` | phones | `{poll, option, voter}`; 409 unless that poll is open (and, for a quiz, before its time is up and only once) |
 | `POST /s/<code>/join` | phones | `{voter, name}` → `{player}`; 409 for a name in use |
 | `GET /s/<code>/player?voter=<id>` | phones | `{player}`: name, score, place and last result, or `null` |
-| `GET /health` | anyone | `{relay: "gaanim", version: 4}` |
+| `GET /health` | anyone | `{relay: "gaanim", version: 6}` |
 
 On the WebSocket the relay sends `{type: "poll", ...}` (the same body as
 `GET /poll`, with `quiz: {time, deadline, now, revealed}` for a quiz) on
-connect and whenever the question changes. A phone introduces itself with
-`{type: "hello", voter}` (answered `{type: "player", player}`), joins a game
+connect and whenever the question changes, each phone with its own `chosen`.
+The phone does not keep its votes: the relay reports them, so a new game
+starts clean everywhere. A phone introduces itself with
+`{type: "hello", voter}` (answered `{type: "player", player}` and the
+question with its `chosen`), joins a game
 with `{type: "join", voter, name}` (answered `{type: "joined", player}`) and
 votes with `{type: "vote", poll, option, voter}`, answered `{type: "voted",
 poll, option}` or `{type: "error", status, error, poll}`. A reveal sends

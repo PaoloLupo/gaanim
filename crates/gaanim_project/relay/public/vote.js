@@ -4,10 +4,13 @@
 // it opens or closes and takes the votes on the same connection. Networks
 // that block WebSockets fall back to asking over HTTP every few seconds.
 // The answers show as large tiles, one vote per phone; the phone keeps a
-// random voter id, so reloading the page keeps its vote.
+// random voter id, and the relay tells it what it chose on each question,
+// so reloading the page keeps its vote and a new game starts clean.
 //
-// A poll's vote can change while the question is open. A quiz asks for a
-// nickname first, counts down its time, takes one answer, and when the
+// A poll's vote can change while the question is open. A presentation that
+// shows its audience asks for a nickname and a character as soon as the page
+// opens, and the phone waits in the room with them. The phone remembers both
+// for the next presentation on this relay. A quiz asks for a nickname first, counts down its time, takes one answer, and when the
 // presenter reveals it shows whether the answer was right, the points it
 // earned and the player's place.
 "use strict";
@@ -53,6 +56,16 @@ const store = {
   },
 };
 
+// Earlier versions kept each vote on the phone, which outlived a reset of
+// the game; the relay reports it now.
+try {
+  for (const key of Object.keys(localStorage)) {
+    if (key.startsWith("gaanim-vote-")) localStorage.removeItem(key);
+  }
+} catch {
+  // No storage: nothing to clean.
+}
+
 function voterId() {
   let id = store.get("gaanim-voter");
   if (!id || !/^[0-9a-f]{32}$/.test(id)) {
@@ -88,6 +101,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const nameInput = $("name");
   const nameError = $("name-error");
 
+  const creator = $("creator");
+  const stage = $("avatar-stage");
+  const partRows = $("avatar-parts");
+
   $("session").textContent = code;
   $("session").parentElement.title = t("sessionTitle");
   document.title = `Gaanim · ${code}`;
@@ -95,8 +112,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   /** The question the relay last reported. */
   let poll = { open: false };
-  /** The question drawn as tiles. */
+  /** The question drawn as tiles, and the answer marked on them. */
   let shown = null;
+  let shownChoice = null;
   let current = "waiting";
   let player = null;
   /** Whether the relay said who this phone is, so a missing player means
@@ -111,8 +129,132 @@ document.addEventListener("DOMContentLoaded", () => {
   let pingTimer = null;
   let tick = null;
   let joining = false;
+  /** Changing the character after joining, from the waiting room. */
+  let editing = false;
+  /** The part catalog, once loaded, and the character being made. */
+  let catalog = null;
+  let avatar = null;
   /** The vote waiting for the relay's answer: {poll, option, button, timer}. */
   let pending = null;
+
+  /** The join form, worded for a lobby or for a quiz. */
+  function showJoin(lobby) {
+    $("join-title").textContent = t(lobby ? "lobbyTitle" : "gameTitle");
+    $("join-hint").textContent = t(lobby ? "lobbyHint" : "gameHint");
+    $("join-button").textContent = t(lobby ? "lobbyButton" : "gameButton");
+    view("join");
+  }
+
+  /** Waiting for a question: in the room, with its character, once this
+   * phone joined. `cheer` makes the character celebrate arriving. */
+  function showWaiting(cheer = false) {
+    const inside = poll.lobby && player;
+    $("wait-title").textContent = inside ? t("inTitle", player.name) : t("waitTitle");
+    $("wait-hint").textContent = inside ? t("inHint") : t("waitHint");
+    const stageElement = $("wait-avatar");
+    const shown = inside && catalog && live(stageElement, player.avatar ?? avatar, player.name);
+    stageElement.hidden = !shown;
+    $("wait-pulse").hidden = Boolean(shown);
+    $("edit-button").hidden = !shown;
+    if (shown && cheer) shown.express("happy");
+    view("waiting");
+  }
+
+  /** The living characters on this page, by the element that holds them. */
+  const living = new Map();
+
+  /** Show `character` alive in `container`, keeping the one already there
+   * when it is the same. Returns it, to play expressions on, or null. */
+  function live(container, character, name) {
+    if (!catalog || !isAvatar(catalog, character)) return null;
+    const key = `${character}|${name}`;
+    const current = living.get(container);
+    if (current?.key === key) return current.avatar;
+    current?.avatar.stop();
+    const alive = animateAvatar(catalog, character, 150, name, t("avatarLabel"));
+    container.replaceChildren(alive.element);
+    living.set(container, { key, avatar: alive });
+    return alive;
+  }
+
+  // --- The character ------------------------------------------------------
+
+  /** Draw the character being made, alive; it reacts when it changed. */
+  function drawCreator(changed = false) {
+    if (!catalog || !avatar) return;
+    const alive = live(stage, avatar, nameInput.value.trim() || code);
+    if (changed) alive?.express("surprised");
+  }
+
+  function setAvatar(value) {
+    avatar = value;
+    store.set("gaanim-avatar", JSON.stringify(value));
+    drawCreator(true);
+  }
+
+  /** A row per part, stepping through its choices. */
+  function buildParts() {
+    const labels = ["partBodies", "partColors", "partEyes", "partMouths", "partExtras"];
+    partRows.replaceChildren();
+    AVATAR_PARTS.forEach((part, index) => {
+      const row = $("part-template").content.firstElementChild.cloneNode(true);
+      row.querySelector(".part-name").textContent = t(labels[index]);
+      for (const button of row.querySelectorAll(".step")) {
+        const step = Number(button.dataset.step);
+        button.setAttribute("aria-label", `${t(step < 0 ? "previous" : "next")}: ${t(labels[index])}`);
+        button.addEventListener("click", () => {
+          const count = catalog[part].length;
+          const next = [...avatar];
+          next[index] = (next[index] + step + count) % count;
+          setAvatar(next);
+        });
+      }
+      partRows.append(row);
+    });
+  }
+
+  /** A nickname made of an animal and an adjective. */
+  function randomName() {
+    const pick = (list) => list[Math.floor(Math.random() * list.length)];
+    return `${pick(t("nameNouns"))} ${pick(t("nameAdjectives"))}`;
+  }
+
+  $("avatar-random").addEventListener("click", () => {
+    setAvatar(randomAvatar(catalog));
+    living.get(stage)?.avatar.express("happy");
+  });
+  $("name-random").addEventListener("click", () => {
+    nameInput.value = randomName();
+    nameError.textContent = "";
+  });
+  $("edit-button").addEventListener("click", () => {
+    editing = true;
+    if (player?.avatar && catalog && isAvatar(catalog, player.avatar)) avatar = player.avatar;
+    nameInput.value = player?.name ?? nameInput.value;
+    drawCreator();
+    showJoin(true);
+  });
+
+  loadAvatarCatalog()
+    .then((loaded) => {
+      catalog = loaded;
+      let saved = null;
+      try {
+        saved = JSON.parse(store.get("gaanim-avatar") ?? "null");
+      } catch {
+        // Not a character: make a new one.
+      }
+      avatar = isAvatar(catalog, saved) ? saved : randomAvatar(catalog);
+      store.set("gaanim-avatar", JSON.stringify(avatar));
+      buildParts();
+      drawCreator();
+      creator.hidden = false;
+      if (current === "waiting") showWaiting();
+      if (current === "result") showResultAvatar();
+    })
+    .catch(() => {
+      // Without the catalog a phone joins with a nickname alone.
+    });
 
   function view(name) {
     current = name;
@@ -149,6 +291,18 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  /** Mark this phone's choice as the relay reports it: after a reset or a
+   * new game there is none, and a quiz takes an answer again. */
+  function applyChoice(choice, quiz) {
+    shownChoice = choice;
+    markChosen(choice);
+    if (quiz && choice !== null) return lock(t("locked"));
+    answers.removeAttribute("data-locked");
+    for (const button of answers.querySelectorAll(".answer")) button.disabled = false;
+    if (choice === null) setStatus("");
+    else setStatus(t("change"), t("sent"));
+  }
+
   function lock(message) {
     answers.setAttribute("data-locked", "");
     for (const button of answers.querySelectorAll(".answer")) button.disabled = true;
@@ -161,11 +315,12 @@ document.addEventListener("DOMContentLoaded", () => {
     poll = next;
     if (kicked) return;
     if (!poll.open) {
-      // A revealed result stays until the next question.
-      if (current !== "result") {
-        shown = null;
-        view("waiting");
-      }
+      // A revealed result stays until the next question, and a character
+      // being changed until it is saved.
+      if (current === "result" || (editing && current === "join")) return;
+      shown = null;
+      if (poll.lobby && known && !player) showJoin(true);
+      else showWaiting();
       return;
     }
     if (poll.quiz?.revealed) {
@@ -174,7 +329,8 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
     if (poll.quiz && !player) {
-      view(known ? "join" : "waiting");
+      if (known) showJoin(poll.lobby);
+      else showWaiting();
       return;
     }
     drawQuestion();
@@ -182,8 +338,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function drawQuestion() {
     const quiz = poll.quiz;
+    const choice = Number.isInteger(poll.chosen) ? poll.chosen : null;
     if (shown !== poll.id) {
       shown = poll.id;
+      shownChoice = undefined;
       questionText.textContent = poll.question;
       answers.replaceChildren();
       answers.removeAttribute("data-locked");
@@ -199,11 +357,9 @@ document.addEventListener("DOMContentLoaded", () => {
         button.addEventListener("click", () => vote(id, index, button));
         answers.append(item);
       });
-      const saved = store.get(`gaanim-vote-${poll.id}`);
-      markChosen(saved === null ? null : Number(saved));
-      if (quiz && saved !== null) lock(t("locked"));
-      else setStatus(saved === null ? "" : t("change"), saved === null ? "" : t("sent"));
     }
+    // A vote on its way is settled by the relay's answer to it.
+    if (!pending && choice !== shownChoice) applyChoice(choice, quiz);
     view("question");
     if (quiz) startTimer(quiz);
     else timer.hidden = true;
@@ -234,6 +390,16 @@ document.addEventListener("DOMContentLoaded", () => {
     tick = null;
   }
 
+  /** The character on the result, reacting to how the answer went. */
+  let resultOutcome = null;
+  function showResultAvatar() {
+    const holder = $("result-avatar");
+    const shown = player && catalog && live(holder, player.avatar ?? avatar, player.name);
+    holder.hidden = !shown;
+    const reaction = { correct: "happy", wrong: "sad", missed: "hurt" }[resultOutcome];
+    if (shown && reaction) shown.express(reaction, { loop: reaction === "happy" });
+  }
+
   function showResult({ correct, option, points = 0, player: result }) {
     if (result) setPlayer(result);
     const outcome = !result ? "answer" : option === null ? "missed" : option === correct ? "correct" : "wrong";
@@ -254,7 +420,9 @@ document.addEventListener("DOMContentLoaded", () => {
       detail.textContent = `${reminder}${place}${formatScore(result.score)} ${t("points")} ${t("total")}`;
     }
     shown = null;
+    resultOutcome = outcome;
     view("result");
+    showResultAvatar();
     if (outcome === "correct") navigator.vibrate?.([30, 40, 30]);
   }
 
@@ -272,10 +440,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function joined(value) {
     joining = false;
+    editing = false;
     nameError.textContent = "";
     setPlayer(value);
     store.set("gaanim-name", value.name);
     show(poll);
+    if (current === "waiting") showWaiting(true);
   }
 
   function joinFailed(statusCode) {
@@ -290,15 +460,16 @@ document.addEventListener("DOMContentLoaded", () => {
     if (joining) return;
     joining = true;
     nameError.textContent = "";
+    const request = { voter, name, ...(avatar && { avatar }) };
     if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "join", voter, name }));
+      socket.send(JSON.stringify({ type: "join", ...request }));
       return;
     }
     try {
       const response = await fetch(`/s/${code}/join`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ voter, name }),
+        body: JSON.stringify(request),
       });
       if (response.ok) joined((await response.json()).player);
       else joinFailed(response.status);
@@ -329,8 +500,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const quiz = poll.id === pollId && poll.quiz;
     switch (outcome) {
       case "voted":
-        store.set(`gaanim-vote-${pollId}`, String(option));
-        if (shown === pollId) markChosen(option);
+        if (poll.id === pollId) poll.chosen = option;
+        if (shown === pollId) {
+          shownChoice = option;
+          markChosen(option);
+        }
         if (quiz) lock(t("locked"));
         else setStatus(t("change"), t("sent"));
         navigator.vibrate?.(18);
@@ -343,7 +517,7 @@ document.addEventListener("DOMContentLoaded", () => {
         break;
       case "join":
         setPlayer(null);
-        view("join");
+        showJoin(poll.lobby);
         break;
       case "kicked":
         showKicked();
@@ -481,7 +655,7 @@ document.addEventListener("DOMContentLoaded", () => {
     clearTimeout(pollTimer);
     if (kicked) return;
     try {
-      const response = await fetch(`/s/${code}/poll`, { cache: "no-store" });
+      const response = await fetch(`/s/${code}/poll?voter=${voter}`, { cache: "no-store" });
       if (!response.ok) throw new Error(String(response.status));
       const next = await response.json();
       // A newly revealed quiz: fetch this player's result first.

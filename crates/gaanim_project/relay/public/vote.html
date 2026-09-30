@@ -12,6 +12,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="stylesheet" href="/app.css" />
     <script src="/i18n.js" defer></script>
+    <script src="/avatar.js" defer></script>
     <script src="/vote.js" defer></script>
   </head>
   <body>
@@ -37,31 +38,49 @@
 
       <!-- Waiting for the presenter to open a question. -->
       <section class="center" id="waiting">
-        <div class="pulse" aria-hidden="true"></div>
-        <h1 data-t="waitTitle">Esperando la pregunta</h1>
-        <p data-t="waitHint">Deja esta página abierta: la pregunta aparecerá aquí.</p>
+        <div class="pulse" id="wait-pulse" aria-hidden="true"></div>
+        <div class="avatar-stage" id="wait-avatar" hidden></div>
+        <h1 id="wait-title" data-t="waitTitle">Esperando la pregunta</h1>
+        <p id="wait-hint" data-t="waitHint">Deja esta página abierta: la pregunta aparecerá aquí.</p>
+        <button class="secondary" id="edit-button" type="button" hidden data-t="editButton">
+          Cambiar personaje
+        </button>
       </section>
 
-      <!-- A quiz needs a nickname before its first answer. -->
+      <!-- A quiz needs a nickname before its first answer; a presentation
+           that shows its audience asks for it as soon as the page opens. -->
       <section class="center" id="join-view" hidden>
-        <h1 data-t="gameTitle">¡Empieza el juego!</h1>
-        <p data-t="gameHint">Elige un apodo para competir.</p>
+        <h1 id="join-title" data-t="gameTitle">¡Empieza el juego!</h1>
+        <p id="join-hint" data-t="gameHint">Elige un apodo para competir.</p>
+        <!-- The character: a preview, a random one, and a row per part. -->
+        <div class="creator" id="creator" hidden>
+          <div class="avatar-stage" id="avatar-stage"></div>
+          <button class="secondary dice" id="avatar-random" type="button">
+            <span aria-hidden="true">🎲</span> <span data-t="randomButton">Al azar</span>
+          </button>
+          <div class="parts" id="avatar-parts"></div>
+        </div>
         <form class="join" id="join-form" novalidate>
           <label class="sr-only" for="name" data-t="nameLabel">Apodo</label>
-          <input
-            id="name"
-            class="name-input"
-            name="name"
-            maxlength="20"
-            autocomplete="nickname"
-            autocapitalize="words"
-            spellcheck="false"
-            enterkeyhint="go"
-            data-tp="namePlaceholder"
-            aria-describedby="name-error"
-            required
-          />
-          <button class="primary" type="submit" data-t="gameButton">Jugar</button>
+          <div class="name-row">
+            <input
+              id="name"
+              class="name-input"
+              name="name"
+              maxlength="20"
+              autocomplete="nickname"
+              autocapitalize="words"
+              spellcheck="false"
+              enterkeyhint="go"
+              data-tp="namePlaceholder"
+              aria-describedby="name-error"
+              required
+            />
+            <button class="secondary name-dice" id="name-random" type="button" data-tl="randomName">
+              <span aria-hidden="true">🎲</span>
+            </button>
+          </div>
+          <button class="primary" id="join-button" type="submit" data-t="gameButton">Jugar</button>
           <p class="error" id="name-error" role="alert"></p>
         </form>
       </section>
@@ -79,6 +98,7 @@
 
       <!-- How a quiz answer went. -->
       <section class="center result" id="result-view" hidden>
+        <div class="avatar-stage" id="result-avatar" hidden></div>
         <div class="verdict" id="verdict" aria-hidden="true"></div>
         <h1 id="result-title"></h1>
         <p class="points" id="result-points"></p>
@@ -90,6 +110,14 @@
         <h1 data-t="kickedTitle">Saliste del juego</h1>
         <p data-t="kickedHint">El presentador te quitó de esta sesión.</p>
       </section>
+
+      <template id="part-template">
+        <div class="part">
+          <button class="step" type="button" data-step="-1" aria-label="‹">‹</button>
+          <span class="part-name"></span>
+          <button class="step" type="button" data-step="1" aria-label="›">›</button>
+        </div>
+      </template>
 
       <template id="answer-template">
         <li>

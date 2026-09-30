@@ -24,7 +24,7 @@ pub const CODE_ALPHABET: &[u8; 32] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 pub const CODE_LENGTH: usize = 6;
 
 /// Files of the relay template, relative to the directory it is written to.
-const TEMPLATE: [(&str, &[u8]); 17] = [
+const TEMPLATE: [(&str, &[u8]); 19] = [
     ("wrangler.toml", include_bytes!("../relay/wrangler.toml")),
     ("package.json", include_bytes!("../relay/package.json")),
     ("README.md", include_bytes!("../relay/README.md")),
@@ -34,6 +34,14 @@ const TEMPLATE: [(&str, &[u8]); 17] = [
         include_bytes!("../relay/public/_headers"),
     ),
     ("public/app.css", include_bytes!("../relay/public/app.css")),
+    (
+        "public/avatar-parts.json",
+        include_bytes!("../relay/public/avatar-parts.json"),
+    ),
+    (
+        "public/avatar.js",
+        include_bytes!("../relay/public/avatar.js"),
+    ),
     (
         "public/apple-touch-icon.png",
         include_bytes!("../relay/public/apple-touch-icon.png"),
@@ -238,6 +246,21 @@ fn scope_name(scope: &Path) -> String {
         .unwrap_or_else(|_| scope.to_path_buf())
         .to_string_lossy()
         .into_owned()
+}
+
+/// Where the polls of a script in `directory` belong: the nearest folder
+/// with a `gaanim.toml` (searched upward, as `git` finds `.git`), else
+/// `directory` itself; and that project's `[polls] relay`.
+pub fn scope_of(directory: &Path) -> (PathBuf, Option<String>) {
+    let project = directory
+        .ancestors()
+        .find(|folder| folder.join("gaanim.toml").is_file())
+        .map(Path::to_path_buf);
+    let relay = project
+        .as_deref()
+        .and_then(|root| crate::resolve_project(root).ok())
+        .and_then(|project| project.manifest.poll_relay);
+    (project.unwrap_or_else(|| directory.to_path_buf()), relay)
 }
 
 /// The session of the project folder (or script) `scope`, created on first
