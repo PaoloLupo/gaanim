@@ -1,5 +1,6 @@
-//! Audience polls, quizzes and the game's leaderboard:
-//! [`SceneModel::poll`], [`SceneModel::quiz`], [`SceneModel::leaderboard`].
+//! Audience polls, quizzes, the game's leaderboard and its audience:
+//! [`SceneModel::poll`], [`SceneModel::quiz`], [`SceneModel::leaderboard`],
+//! [`SceneModel::audience`].
 //!
 //! A poll gives the scene its data and leaves the presentation to it: the
 //! session code and address, a QR code drawable, live values (votes, share,
@@ -12,8 +13,8 @@
 use std::sync::Arc;
 
 use gaanim_animation::polls::{
-    BarSource, BarSpec, LiveTextSource, PollBar, PollMeasure, PollSource, PollValue, TextAlign,
-    leader_fraction,
+    AUDIENCE_AGE_CAP, BarSource, BarSpec, LiveTextSource, PollBar, PollMeasure, PollSource,
+    PollValue, TextAlign, leader_fraction,
 };
 use gaanim_animation::{SampledInterpolation, SampledProperty};
 use gaanim_core::peniko::Color;
@@ -279,6 +280,33 @@ impl SceneModel {
                 .collect(),
             color,
         }
+    }
+
+    /// The game's audience: the players in the order they joined, as data
+    /// for the scene to arrange and animate. A scene that uses it asks each
+    /// phone for a nickname as soon as it opens the page, so a lobby fills
+    /// before the first question. `preview` nicknames stand in for players
+    /// outside a live presentation. Text uses the theme's foreground.
+    pub fn audience(&mut self, preview: Vec<String>) -> Result<AudienceHandle, PollError> {
+        let color = self
+            .theme_style
+            .as_ref()
+            .map_or(Color::WHITE, |theme| theme.palette.foreground);
+        {
+            let mut state = self.state.lock().expect("canvas state poisoned");
+            if state.poll_session.is_none() {
+                return Err(PollError::NoSession);
+            }
+            state.poll_lobby = true;
+        }
+        Ok(AudienceHandle {
+            state: self.state.clone(),
+            preview: preview
+                .into_iter()
+                .map(|name| Arc::from(name.trim()))
+                .collect(),
+            color,
+        })
     }
 }
 
@@ -636,31 +664,17 @@ impl LeaderboardHandle {
     /// The nickname at `rank` (0 for the leader) as live text; empty when
     /// fewer players joined.
     pub fn name(&self, rank: usize, options: LiveTextOptions) -> Result<DrawableHandle, PollError> {
-        if let Some(size) = options.size
-            && !(size.is_finite() && size > 0.0)
-        {
-            return Err(PollError::Invalid(format!(
-                "text size must be positive, got {size}"
-            )));
-        }
         let preview = self
             .preview
             .get(rank)
             .map_or_else(|| Arc::from(""), |(name, _)| name.clone());
-        let handle = super::canvas_impl::spawn_in(&self.state, SpawnKind::Curve(Vec::new()), true);
-        let handle = handle.fill(self.color).no_stroke();
-        self.state
-            .lock()
-            .expect("canvas state poisoned")
-            .active_mut()
-            .ops
-            .push(Op::AttachLiveText {
-                target: handle.id,
-                source: LiveTextSource::LeaderName { rank },
-                preview,
-                options,
-            });
-        Ok(handle)
+        live_text(
+            &self.state,
+            self.color,
+            LiveTextSource::LeaderName { rank },
+            preview,
+            options,
+        )
     }
 
     /// The score of the player at `rank`, live while presenting.
@@ -696,6 +710,151 @@ impl LeaderboardHandle {
             preview,
         ))
     }
+}
+
+/// The game's audience, from [`SceneModel::audience`]: each player has a
+/// slot, its place in joining order (0 for the first to join).
+#[derive(Clone)]
+pub struct AudienceHandle {
+    state: SharedCanvasState,
+    preview: Vec<Arc<str>>,
+    color: Color,
+}
+
+impl std::fmt::Debug for AudienceHandle {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AudienceHandle")
+            .field("preview", &self.preview)
+            .finish_non_exhaustive()
+    }
+}
+
+impl AudienceHandle {
+    /// Nicknames shown outside a live presentation, in joining order.
+    pub fn preview(&self) -> Vec<String> {
+        self.preview.iter().map(|name| name.to_string()).collect()
+    }
+
+    fn session(&self) -> PollSession {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .poll_session
+            .clone()
+            .expect("an audience exists only with a session")
+    }
+
+    /// The session code phones type.
+    pub fn code(&self) -> String {
+        self.session().code
+    }
+
+    /// The address phones open to join.
+    pub fn url(&self) -> String {
+        self.session().url()
+    }
+
+    /// The QR code of [`Self::url`], as [`PollHandle::qr`] draws it.
+    pub fn qr(&self, size: f64) -> Result<DrawableHandle, PollError> {
+        if !(size.is_finite() && size > 0.0) {
+            return Err(PollError::Invalid(format!(
+                "QR size must be positive, got {size}"
+            )));
+        }
+        let elements = qr_elements(&self.url(), size)?;
+        let handle = super::canvas_impl::spawn_in(&self.state, SpawnKind::Curve(elements), true);
+        Ok(handle.fill(Color::BLACK).no_stroke())
+    }
+
+    /// The nickname in `slot` as live text; empty until that many players
+    /// joined.
+    pub fn name(&self, slot: usize, options: LiveTextOptions) -> Result<DrawableHandle, PollError> {
+        let preview = self
+            .preview
+            .get(slot)
+            .cloned()
+            .unwrap_or_else(|| Arc::from(""));
+        live_text(
+            &self.state,
+            self.color,
+            LiveTextSource::AudienceName { slot },
+            preview,
+            options,
+        )
+    }
+
+    /// How many players joined.
+    pub fn count(&self) -> Result<Parameter, PollError> {
+        live_parameter(
+            &self.state,
+            PollSource::Players,
+            vec![0.0],
+            vec![self.preview.len() as f64],
+            SampledInterpolation::Step,
+        )
+    }
+
+    /// 1 once a player took `slot`, else 0: drive a slot's visibility.
+    pub fn joined(&self, slot: usize) -> Result<Parameter, PollError> {
+        let preview = if slot < self.preview.len() { 1.0 } else { 0.0 };
+        live_parameter(
+            &self.state,
+            PollSource::AudienceJoined { slot },
+            vec![0.0],
+            vec![preview],
+            SampledInterpolation::Step,
+        )
+    }
+
+    /// Seconds since the player in `slot` joined, up to
+    /// [`AUDIENCE_AGE_CAP`]; 0 while the slot is empty. Drive an entrance
+    /// with it. Preview players count as long settled.
+    pub fn age(&self, slot: usize) -> Result<Parameter, PollError> {
+        let preview = if slot < self.preview.len() {
+            AUDIENCE_AGE_CAP
+        } else {
+            0.0
+        };
+        live_parameter(
+            &self.state,
+            PollSource::AudienceAge { slot },
+            vec![0.0],
+            vec![preview],
+            SampledInterpolation::Step,
+        )
+    }
+}
+
+/// Live text following `source`, `preview` outside a live presentation.
+fn live_text(
+    state: &SharedCanvasState,
+    color: Color,
+    source: LiveTextSource,
+    preview: Arc<str>,
+    options: LiveTextOptions,
+) -> Result<DrawableHandle, PollError> {
+    if let Some(size) = options.size
+        && !(size.is_finite() && size > 0.0)
+    {
+        return Err(PollError::Invalid(format!(
+            "text size must be positive, got {size}"
+        )));
+    }
+    let handle = super::canvas_impl::spawn_in(state, SpawnKind::Curve(Vec::new()), true);
+    let handle = handle.fill(color).no_stroke();
+    state
+        .lock()
+        .expect("canvas state poisoned")
+        .active_mut()
+        .ops
+        .push(Op::AttachLiveText {
+            target: handle.id,
+            source,
+            preview,
+            options,
+        });
+    Ok(handle)
 }
 
 /// The dark modules of the QR code of `text`, merged into one rectangle per

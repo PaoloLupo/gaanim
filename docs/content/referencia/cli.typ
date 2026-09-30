@@ -270,11 +270,16 @@ gaanim relay                          # muestra el relay en uso y de dónde sale
 gaanim relay init [CARPETA] [--force] # escribe el relay (por defecto ./gaanim-relay)
 gaanim relay use https://…workers.dev # lo guarda para todas tus presentaciones
 gaanim relay forget                   # olvida el relay guardado
+gaanim relay reset [RUTA]             # partida nueva en la sesión del proyecto de RUTA
 ```
 
 El orden de prioridad es `GAANIM_POLL_RELAY`, luego `[polls] relay` del
 proyecto y por último el guardado con `gaanim relay use`. La dirección debe
 empezar por `https://` (o `http://` para probar con `npx wrangler dev`).
+
+`gaanim relay reset` empieza una partida nueva, como *New game* en la vista
+del presentador: borra votos, respuestas y jugadores de la sesión del proyecto
+al que pertenece `RUTA`, un script o una carpeta (por defecto la actual).
 
 = `gaanim --diff`
 

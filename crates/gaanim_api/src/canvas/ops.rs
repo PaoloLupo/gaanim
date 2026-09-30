@@ -57,6 +57,8 @@ pub(crate) struct CanvasState {
     /// Audience polls in authoring order and the session they take votes on.
     pub(crate) polls: Vec<super::poll::PollRecord>,
     pub(crate) poll_session: Option<super::poll::PollSession>,
+    /// The scene shows its audience, so phones join as they arrive.
+    pub(crate) poll_lobby: bool,
 }
 
 impl CanvasState {
@@ -82,6 +84,7 @@ impl CanvasState {
             owner: None,
             polls: Vec::new(),
             poll_session: None,
+            poll_lobby: false,
         }
     }
 

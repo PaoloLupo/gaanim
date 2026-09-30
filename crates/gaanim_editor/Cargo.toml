@@ -53,6 +53,9 @@ open = "5.3"
 # Audience polls: the relay client (same ureq build typst-kit already uses).
 ureq = { version = "2.12", default-features = false, features = ["native-tls", "json"] }
 native-tls = "0.2"
+# The presentation's socket on the relay, which pushes the results; blocking,
+# like the rest of the relay client, over the same native TLS.
+tungstenite = { version = "0.30", default-features = false, features = ["handshake", "native-tls"] }
 
 # The presenter's clock reads the browser's local time on the web.
 [target.'cfg(target_arch = "wasm32")'.dependencies]

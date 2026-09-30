@@ -1,10 +1,10 @@
 //! Audience poll data inside a scene (`scene.poll`, `scene.quiz`,
-//! `scene.leaderboard`).
+//! `scene.leaderboard`, `scene.audience`).
 //!
 //! A poll exposes its data as values the scene reads: parameters
 //! ([`PollValue`]) that any reactive drawable can follow, bars ([`PollBar`])
 //! whose length follows an answer or a player's score, and live text
-//! ([`LiveText`]) for the leaderboard's nicknames. While a presentation
+//! ([`LiveText`]) for the players' nicknames. While a presentation
 //! collects votes the host fills [`PollResults`] and marks it live;
 //! everywhere else each value shows its authored preview, so previews,
 //! exports and snapshots are deterministic.
@@ -33,7 +33,14 @@ pub struct PollResults {
     pub leaderboard: Vec<(Arc<str>, u64)>,
     /// Everyone who joined the game.
     pub players: u32,
+    /// The players in the order they joined: nickname and seconds since
+    /// joining, up to [`AUDIENCE_AGE_CAP`].
+    pub audience: Vec<(Arc<str>, f64)>,
 }
+
+/// The age a player stops counting at, and the one preview players have:
+/// long enough for any entrance, so a scene's layout settles.
+pub const AUDIENCE_AGE_CAP: f64 = 60.0;
 
 impl PollResults {
     /// The counts to show for `poll` while live: the relay's, or zeros for a
@@ -67,7 +74,30 @@ impl PollResults {
                 .get(*rank)
                 .map_or(0.0, |(_, score)| *score as f64),
             PollSource::Players => f64::from(self.players),
+            PollSource::AudienceJoined { slot } => {
+                if self.audience.get(*slot).is_some() {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            PollSource::AudienceAge { slot } => {
+                self.audience.get(*slot).map_or(0.0, |(_, age)| *age)
+            }
         })
+    }
+
+    /// The live nickname of the player who joined `slot`-th (0 first), empty
+    /// past the last one.
+    pub fn audience_name(&self, slot: usize) -> Option<Arc<str>> {
+        if !self.live {
+            return None;
+        }
+        Some(
+            self.audience
+                .get(slot)
+                .map_or_else(|| Arc::from(""), |(name, _)| name.clone()),
+        )
     }
 
     /// The live nickname at `rank`, empty past the last player.
@@ -130,6 +160,10 @@ pub enum PollSource {
     LeaderScore { rank: usize },
     /// How many players joined.
     Players,
+    /// 1 once a player took audience `slot` (in joining order), else 0.
+    AudienceJoined { slot: usize },
+    /// Seconds since the player at audience `slot` joined, 0 while empty.
+    AudienceAge { slot: usize },
 }
 
 /// Makes a parameter report a live value: its sampled driver holds the
@@ -505,6 +539,8 @@ pub fn atlas_characters() -> impl Iterator<Item = char> {
 pub enum LiveTextSource {
     /// The nickname of the player at `rank` (0 for the leader).
     LeaderName { rank: usize },
+    /// The nickname of the player who joined `slot`-th (0 first).
+    AudienceName { slot: usize },
 }
 
 /// Text that follows live data, drawn from a glyph atlas.
@@ -527,6 +563,7 @@ impl LiveText {
     fn text(&self, results: &PollResults) -> Arc<str> {
         match self.source {
             LiveTextSource::LeaderName { rank } => results.leader_name(rank),
+            LiveTextSource::AudienceName { slot } => results.audience_name(slot),
         }
         .unwrap_or_else(|| self.preview.clone())
     }
@@ -693,6 +730,23 @@ mod tests {
         assert_eq!(results.value(&PollSource::Players), Some(5.0));
         assert_eq!(results.leader_name(0).as_deref(), Some("Ana"));
         assert_eq!(results.leader_name(3).as_deref(), Some(""));
+    }
+
+    #[test]
+    fn the_audience_lists_players_in_joining_order() {
+        let mut results = PollResults::default();
+        let joined = PollSource::AudienceJoined { slot: 1 };
+        let age = PollSource::AudienceAge { slot: 1 };
+        assert_eq!(results.value(&joined), None);
+        assert_eq!(results.audience_name(0), None);
+        results.live = true;
+        assert_eq!(results.value(&joined), Some(0.0));
+        assert_eq!(results.value(&age), Some(0.0));
+        assert_eq!(results.audience_name(1).as_deref(), Some(""));
+        results.audience = vec![("Beto".into(), 12.0), ("Ana".into(), 0.5)];
+        assert_eq!(results.value(&joined), Some(1.0));
+        assert_eq!(results.value(&age), Some(0.5));
+        assert_eq!(results.audience_name(0).as_deref(), Some("Beto"));
     }
 
     #[test]

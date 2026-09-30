@@ -47,6 +47,31 @@ pub(crate) struct PresenterOverviewState {
     focus_search: bool,
 }
 
+/// What Presenter View shows of a presentation's audience polls: the
+/// session code phones join with, the phones connected and the players.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AudienceView {
+    pub(crate) code: String,
+    /// `None` until the relay first answers.
+    pub(crate) connected: Option<u32>,
+    pub(crate) players: u32,
+    /// Nicknames and scores, best first.
+    pub(crate) leaderboard: Vec<(String, u64)>,
+    /// "New game" was pressed once and waits for a second press.
+    pub(crate) confirm_reset: bool,
+}
+
+/// What the speaker asked of the audience from Presenter View.
+#[derive(Debug, Default)]
+struct AudienceRequests {
+    kick: Option<String>,
+    reset: bool,
+    cancel_reset: bool,
+}
+
+/// Players the audience section lists before it scrolls.
+const AUDIENCE_ROWS: f32 = 5.0;
+
 const NOTES_SIZE_MIN: f32 = 14.0;
 const NOTES_SIZE_MAX: f32 = 44.0;
 
@@ -592,6 +617,7 @@ pub(crate) fn presentation_input_system(
     timeline: Option<ResMut<Timeline>>,
     mut audience_blank: ResMut<AudienceBlank>,
     mut overview: ResMut<PresenterOverviewState>,
+    #[cfg(not(target_arch = "wasm32"))] polls: Option<ResMut<crate::polls::AudiencePolls>>,
     mut commands: Commands,
 ) {
     if !presentation_mode.active {
@@ -644,6 +670,12 @@ pub(crate) fn presentation_input_system(
         }
         if keys.just_pressed(KeyCode::KeyP) && presenter_windows.is_empty() {
             actions.push(PresentationAction::ReopenPresenter);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if keys.just_pressed(KeyCode::KeyR)
+            && let Some(mut polls) = polls
+        {
+            polls.press_reset();
         }
     }
     if primary_focused && !pointer_captured && mouse.just_pressed(MouseButton::Left) {
@@ -990,6 +1022,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("B  W", "Black or white audience screen"),
     ("Click", "Advance (on the audience screen)"),
     ("P", "Reopen Presenter View"),
+    ("R  R", "New game: erase every poll vote and player"),
     ("Esc", "Close overview, clear blank, then exit"),
 ];
 
@@ -1210,6 +1243,8 @@ struct PresenterFrame {
     clock: String,
     current_time: f64,
     total_time: f64,
+    /// The audience, while a presentation with polls runs.
+    audience: Option<AudienceView>,
 }
 
 impl PresenterFrame {
@@ -1471,6 +1506,7 @@ fn show_speaker_column(
     frame: &PresenterFrame,
     preferences: &mut PresenterPreferences,
     notes_min_height: f32,
+    requests: &mut AudienceRequests,
 ) {
     section_label(ui, "UP NEXT");
     let (title, detail) = match &frame.next {
@@ -1505,6 +1541,11 @@ fn show_speaker_column(
         PreviewOverlay::default(),
         egui::Sense::hover(),
     );
+
+    if let Some(audience) = &frame.audience {
+        ui.add_space(14.0);
+        show_audience(ui, audience, requests);
+    }
 
     ui.add_space(14.0);
     ui.horizontal(|ui| {
@@ -1561,6 +1602,149 @@ fn show_speaker_column(
                     }
                 });
         });
+}
+
+/// The audience of the presentation's polls: the code phones join with, the
+/// phones connected, the players by score (each can be removed), and "New
+/// game", which asks for a second press before it erases the game.
+fn show_audience(ui: &mut egui::Ui, audience: &AudienceView, requests: &mut AudienceRequests) {
+    ui.horizontal(|ui| {
+        section_label(ui, "AUDIENCE");
+        ui.label(
+            egui::RichText::new(&audience.code)
+                .monospace()
+                .strong()
+                .size(13.0)
+                .color(palette::ACCENT),
+        )
+        .on_hover_text("The code phones join with");
+        ui.with_layout(
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| match audience.connected {
+                Some(connected) => {
+                    let phones = if connected == 1 { "phone" } else { "phones" };
+                    let players = if audience.players == 1 {
+                        "player"
+                    } else {
+                        "players"
+                    };
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{connected} {phones} · {} {players}",
+                            audience.players
+                        ))
+                        .size(13.0)
+                        .color(palette::MUTED),
+                    );
+                    let (rect, _) =
+                        ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
+                    let color = if connected > 0 {
+                        palette::LIVE
+                    } else {
+                        palette::FAINT
+                    };
+                    ui.painter().circle_filled(rect.center(), 4.0, color);
+                }
+                None => {
+                    ui.label(
+                        egui::RichText::new("Connecting to the relay…")
+                            .size(13.0)
+                            .color(palette::MUTED),
+                    );
+                    ui.spinner();
+                }
+            },
+        );
+    });
+    ui.add_space(4.0);
+    egui::Frame::new()
+        .fill(palette::SURFACE)
+        .inner_margin(egui::Margin::symmetric(12, 8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            if audience.leaderboard.is_empty() {
+                ui.label(
+                    egui::RichText::new("No players yet.")
+                        .size(14.0)
+                        .italics()
+                        .color(palette::FAINT),
+                );
+                return;
+            }
+            let row_height = 24.0;
+            egui::ScrollArea::vertical()
+                .id_salt("presenter-audience")
+                .auto_shrink([false, true])
+                .max_height(row_height * AUDIENCE_ROWS)
+                .show(ui, |ui| {
+                    for (rank, (name, score)) in audience.leaderboard.iter().enumerate() {
+                        ui.horizontal(|ui| {
+                            ui.set_min_height(row_height);
+                            ui.add_sized(
+                                [22.0, row_height],
+                                egui::Label::new(
+                                    egui::RichText::new(format!("{}", rank + 1))
+                                        .size(13.0)
+                                        .color(if rank == 0 {
+                                            palette::WARN
+                                        } else {
+                                            palette::FAINT
+                                        }),
+                                ),
+                            );
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(name).size(15.0).color(palette::TEXT),
+                                )
+                                .truncate(),
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if small_button(ui, "Remove", true)
+                                        .on_hover_text("Remove this player and block the phone")
+                                        .clicked()
+                                    {
+                                        requests.kick = Some(name.clone());
+                                    }
+                                    ui.label(
+                                        egui::RichText::new(score.to_string())
+                                            .monospace()
+                                            .size(14.0)
+                                            .color(palette::MUTED),
+                                    );
+                                },
+                            );
+                        });
+                    }
+                });
+        });
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        if audience.confirm_reset {
+            let erase = egui::Button::new(
+                egui::RichText::new("Erase every vote and player")
+                    .size(13.0)
+                    .color(palette::BACKGROUND),
+            )
+            .fill(palette::DANGER);
+            if ui
+                .add(erase)
+                .on_hover_text("Press again (or R) to confirm")
+                .clicked()
+            {
+                requests.reset = true;
+            }
+            if small_button(ui, "Cancel", true).clicked() {
+                requests.cancel_reset = true;
+            }
+        } else if small_button(ui, "New game", true)
+            .on_hover_text("Erase every poll vote, answer and player · R R")
+            .clicked()
+        {
+            requests.reset = true;
+        }
+    });
 }
 
 /// Icon plus short text, for status readouts inside a right-to-left row.
@@ -1942,6 +2126,7 @@ pub(crate) fn presenter_view_system(
     mut overview: ResMut<PresenterOverviewState>,
     mut presentation_timer: ResMut<PresentationTimer>,
     mut preferences: ResMut<PresenterPreferences>,
+    #[cfg(not(target_arch = "wasm32"))] mut polls: Option<ResMut<crate::polls::AudiencePolls>>,
 ) {
     let Ok((camera_entity, mut context)) = contexts.single_mut() else {
         return;
@@ -1994,10 +2179,15 @@ pub(crate) fn presenter_view_system(
         clock: chrono::Local::now().format("%H:%M").to_string(),
         current_time,
         total_time: timeline.cached_duration,
+        #[cfg(not(target_arch = "wasm32"))]
+        audience: polls.as_deref().and_then(crate::polls::AudiencePolls::view),
+        #[cfg(target_arch = "wasm32")]
+        audience: None,
     };
     let mut actions = Vec::new();
     let mut requested_seek = None;
     let mut retry = false;
+    let mut audience_requests = AudienceRequests::default();
 
     let mut viewport_ui = egui::Ui::new(
         ctx.clone(),
@@ -2041,7 +2231,7 @@ pub(crate) fn presenter_view_system(
                     .inner_margin(egui::Margin::same(18)),
             )
             .show(&mut viewport_ui, |ui| {
-                show_speaker_column(ui, &frame, &mut preferences, 120.0);
+                show_speaker_column(ui, &frame, &mut preferences, 120.0, &mut audience_requests);
             });
     }
 
@@ -2064,7 +2254,13 @@ pub(crate) fn presenter_view_system(
                         &mut requested_seek,
                     );
                     ui.add_space(18.0);
-                    show_speaker_column(ui, &frame, &mut preferences, 220.0);
+                    show_speaker_column(
+                        ui,
+                        &frame,
+                        &mut preferences,
+                        220.0,
+                        &mut audience_requests,
+                    );
                 });
             }
             Some(slide) => {
@@ -2104,6 +2300,18 @@ pub(crate) fn presenter_view_system(
 
     if retry {
         thumbnails.retry();
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(polls) = polls.as_deref_mut() {
+        if let Some(name) = &audience_requests.kick {
+            polls.kick(name);
+        }
+        if audience_requests.reset {
+            polls.press_reset();
+        }
+        if audience_requests.cancel_reset {
+            polls.cancel_reset();
+        }
     }
     for action in actions {
         apply_presentation_action(action, &mut timeline, &mut audience_blank, &mut overview);

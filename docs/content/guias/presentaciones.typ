@@ -259,11 +259,41 @@ atrás a lo largo de la línea de tiempo en la previsualización y sigue el relo
 del relay al presentar. `board.name(i)` es texto en vivo con el apodo del
 puesto `i`; `board.points(i)` y `board.players()` son `Parameter`.
 
-En la vista del presentador aparece un panel con los teléfonos conectados, los
-jugadores y sus puntos, un botón para quitar a un jugador (su teléfono ya no
-puede volver a unirse) y otro para empezar el juego de nuevo, que borra votos
-y jugadores. Los apodos admiten de 2 a 20 letras, números o espacios y no se
+La vista del presentador tiene una sección *Audience* con el código de la
+sesión, los teléfonos conectados y los jugadores con sus puntos. Desde ahí
+puedes quitar a un jugador (su teléfono ya no puede volver a unirse) o empezar
+una partida nueva con *New game*, que borra votos, respuestas y jugadores y
+pide una segunda pulsación para confirmar. Pulsar `R` dos veces seguidas hace
+lo mismo desde cualquier ventana de la presentación, y
+`gaanim relay reset [ruta]` lo hace desde la terminal. Volver a presentar el
+proyecto conserva la partida, así que si algo se cierra a mitad de la charla no
+se pierde nada. Los apodos admiten de 2 a 20 letras, números o espacios y no se
 repiten en la sesión.
+
+== Sala de espera <sala-de-espera>
+
+`scene.audience` da los jugadores en el orden en que entran, para llenar una
+sala de espera mientras el público escanea el QR. Una escena que lo usa pide
+el apodo en cuanto el teléfono abre la página, en vez de esperar al primer
+cuestionario. Como la clasificación, solo da datos: cómo se acomodan y cómo
+entran los decides tú.
+
+```python
+audience = scene.audience(preview=["Ana", "Beto", "Caro", "Dani"])
+audience.qr(3).move_to(-5, 0)
+for slot in range(12):
+    x, y = (slot % 4) * 2.2 - 1, 1.5 - slot // 4 * 1.5
+    pop = computed(lambda a: min(a / 0.4, 1), inputs=[audience.age(slot)])
+    audience.name(slot, size=0.4).move_to(x, y).scale(pop)
+players = scene.viz.readout(audience.count(), format=".0f", suffix=" jugadores")
+```
+
+`audience.name(i)` es el apodo de quien entró en el puesto `i`, vacío mientras
+nadie lo ocupa. `audience.joined(i)` vale 1 cuando el puesto está ocupado y
+`audience.age(i)` cuenta los segundos desde que entró, hasta 60, para animar
+su llegada. En la previsualización los jugadores de `preview` aparecen como si
+hubieran entrado hace rato. Si quitas a un jugador, los siguientes suben un
+puesto.
 
 == El relay
 
@@ -290,7 +320,8 @@ avisa y el QR no lleva a ninguna parte. La dirección queda grabada en el QR,
 así que si cambias de relay vuelve a exportar.
 
 Los votos son anónimos: el teléfono guarda un identificador al azar y el relay
-no pide nombres ni cuentas. El relay borra la sesión y sus votos doce horas
+no pide nombres ni cuentas. Lo que cada teléfono votó lo recuerda el relay, no
+el teléfono, así que una partida nueva empieza limpia en todos. El relay borra la sesión y sus votos doce horas
 después de su última actividad. Si pierde la conexión, la presentación sigue
 y la terminal avisa mientras reintenta.
 

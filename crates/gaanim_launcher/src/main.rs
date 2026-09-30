@@ -128,14 +128,15 @@ fn run_thumbnail(args: &[String]) -> ! {
     std::process::exit(0);
 }
 
-/// `gaanim relay [init [DIR] [--force] | use <URL> | forget]`: set up the
-/// relay that carries audience poll votes to a presentation.
+/// `gaanim relay [init [DIR] [--force] | use <URL> | forget | reset [PATH]]`:
+/// set up the relay that carries audience poll votes to a presentation, or
+/// start a new game on a project's session.
 fn run_relay(args: &[String]) -> ! {
     use gaanim_project::relay::{self, RelaySource};
     let usage = || -> ! {
         console::error(
             "relay",
-            "usage: gaanim relay [init [DIR] [--force] | use <URL> | forget]",
+            "usage: gaanim relay [init [DIR] [--force] | use <URL> | forget | reset [PATH]]",
         );
         std::process::exit(2);
     };
@@ -191,6 +192,19 @@ fn run_relay(args: &[String]) -> ! {
         ["forget"] => {
             relay::save(None).unwrap_or_else(|error| fail(error));
             console::success("relay", "Forgot the saved relay");
+        }
+        ["reset", rest @ ..] => {
+            let path = match rest {
+                [] => PathBuf::from("."),
+                [path] => PathBuf::from(path),
+                _ => usage(),
+            };
+            let code =
+                gaanim_editor::reset_relay_session(&path).unwrap_or_else(|error| fail(error));
+            console::success(
+                "relay",
+                format!("Started a new game on {code}: every vote, answer and player is gone"),
+            );
         }
         _ => usage(),
     }

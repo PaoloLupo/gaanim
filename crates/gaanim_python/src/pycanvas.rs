@@ -68,14 +68,9 @@ fn find_manifest_upward(start: &std::path::Path) -> Option<PathBuf> {
 /// set, and the session code kept for that project on this computer.
 fn resolve_poll_session(py: Python<'_>) -> PyResult<gaanim_api::canvas::PollSession> {
     let directory = caller_directory(py)?;
-    let project = find_manifest_upward(&directory)
-        .and_then(|manifest| manifest.parent().map(std::path::Path::to_path_buf));
-    let project_relay = project
-        .as_deref()
-        .and_then(|root| gaanim_project::resolve_project(root).ok())
-        .and_then(|project| project.manifest.poll_relay);
+    let (scope, project_relay) = gaanim_project::relay::scope_of(&directory);
     let relay = gaanim_project::relay::resolve(project_relay.as_deref()).map(|(url, _)| url);
-    let session = gaanim_project::relay::session_for(project.as_deref().unwrap_or(&directory))
+    let session = gaanim_project::relay::session_for(&scope)
         .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
     Ok(gaanim_api::canvas::PollSession {
         relay,
@@ -5900,6 +5895,21 @@ impl PyScene {
             .expect("scene canvas poisoned")
             .leaderboard(preview);
         Ok(crate::poll::PyLeaderboard { inner })
+    }
+
+    /// The game's audience: players in the order they joined, as data the
+    /// scene arranges and animates as it likes. Phones ask for a nickname as
+    /// soon as they open the page.
+    #[pyo3(signature = (*, preview=Vec::new()))]
+    fn audience(&self, py: Python<'_>, preview: Vec<String>) -> PyResult<crate::poll::PyAudience> {
+        crate::custom::ensure_authoring_allowed()?;
+        let mut scene = self.inner.lock().expect("scene canvas poisoned");
+        if scene.poll_session().is_none() {
+            let session = resolve_poll_session(py)?;
+            scene.set_poll_session(session);
+        }
+        let inner = scene.audience(preview).map_err(crate::poll::poll_error)?;
+        Ok(crate::poll::PyAudience { inner })
     }
 
     /// Start a voiceover block at the cursor, timed by `narration/<key>.*`.

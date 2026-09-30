@@ -2721,9 +2721,13 @@ impl SceneModel {
                 },
             )
             .collect();
-        let (polls, poll_session) = {
+        let (polls, poll_session, poll_lobby) = {
             let state = self.state.lock().expect("canvas state poisoned");
-            (state.polls.clone(), state.poll_session.clone())
+            (
+                state.polls.clone(),
+                state.poll_session.clone(),
+                state.poll_lobby,
+            )
         };
         let at = |(segment, local): (usize, f64)| {
             segment_metadata
@@ -2761,6 +2765,7 @@ impl SceneModel {
             poll_session.map(|session| gaanim_timeline::timeline::PollSessionInfo {
                 relay: session.relay,
                 code: session.code,
+                lobby: poll_lobby,
             }),
         );
         builder.timeline.set_segments(segment_metadata);
@@ -14663,7 +14668,45 @@ mod tests {
         assert_eq!(timeline.polls[1].preview, [0, 0, 0]);
         let session = timeline.poll_session.as_ref().unwrap();
         assert_eq!(session.code, "ABC234");
+        // Only a scene that shows its audience opens a lobby.
+        assert!(!session.lobby);
         assert!(bar.id != share.drawable().id);
+    }
+
+    #[test]
+    fn showing_the_audience_opens_a_lobby_for_phones() {
+        let mut canvas = SceneModel::new(640, 360);
+        assert_eq!(
+            canvas.audience(Vec::new()).unwrap_err(),
+            crate::canvas::PollError::NoSession
+        );
+        canvas.set_poll_session(crate::canvas::PollSession {
+            relay: Some("https://relay.example.dev".into()),
+            code: "ABC234".into(),
+        });
+        canvas.segment("Lobby", None).unwrap();
+        let audience = canvas
+            .audience(vec![" Ana ".into(), "Beto".into()])
+            .unwrap();
+        assert_eq!(audience.preview(), ["Ana", "Beto"]);
+        assert_eq!(audience.url(), "https://relay.example.dev/s/ABC234");
+        let options = crate::canvas::LiveTextOptions {
+            size: Some(0.4),
+            weight: None,
+            font: None,
+            align: crate::canvas::TextAlign::Center,
+        };
+        audience.name(0, options.clone()).unwrap();
+        audience.name(5, options).unwrap();
+        audience.count().unwrap();
+        audience.joined(1).unwrap();
+        audience.age(1).unwrap();
+        audience.qr(2.0).unwrap();
+        canvas.wait(1.0);
+
+        let timeline = compiled_timeline(&canvas);
+        assert!(timeline.polls.is_empty());
+        assert!(timeline.poll_session.as_ref().unwrap().lobby);
     }
 
     #[test]

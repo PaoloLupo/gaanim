@@ -560,6 +560,24 @@ for rank in range(2):
 ]
 
 #api-entry(
+  name: "Scene.audience",
+  kind: "method",
+  params: (
+    (name: "preview", type: "Sequence[str]", default: "()", desc: [Apodos que se muestran fuera de una presentación en vivo, en orden de llegada.]),
+  ),
+  returns: (type: "Audience", desc: [Los datos del público; no dibuja nada.]),
+  desc: [El público del juego: los jugadores en el orden en que entraron, cada uno en un puesto (0 para el primero). `name(i, size=, weight=, font=, align=)` devuelve el apodo como texto en vivo; `count()`, `joined(i)` (1 si el puesto está ocupado, 0 si no) y `age(i)` (segundos desde que entró, hasta 60) devuelven `Parameter`; `qr(size)`, `url` y `code` sirven para invitar. Con ellos diseñas una sala de espera, una arena o lo que quieras. Una escena que lo usa pide el apodo en cuanto el teléfono abre la página. Ver #link("/guias/presentaciones/#sala-de-espera")[Sala de espera].],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+audience = scene.audience(preview=["Ana", "Beto", "Caro"])
+for slot in range(6):
+    audience.name(slot, size=0.4).move_to((slot - 2.5) * 2, 0)
+```
+]
+
+#api-entry(
   name: "Scene.stops",
   kind: "property",
   returns: (type: "list[SceneStop]", desc: [Las pausas creadas hasta ahora, en orden temporal.]),

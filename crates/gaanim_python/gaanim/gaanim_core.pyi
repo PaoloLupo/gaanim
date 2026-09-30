@@ -5054,6 +5054,70 @@ class Leaderboard:
         """
         ...
 
+class Audience:
+    """The game's audience from ``scene.audience``: the players in the order
+    they joined, as data for the scene to arrange and animate as it likes.
+
+    Each player takes a ``slot``, 0 for the first to join. ``name`` gives a
+    live text drawable, ``count``, ``joined`` and ``age`` give parameters to
+    drive visibility, placement and entrances. Outside a live presentation
+    they show the ``preview`` players, joined long ago; while presenting,
+    the relay's. A slot past the last player shows an empty name, ``joined``
+    0 and ``age`` 0. Removing a player moves the later ones up one slot.
+    """
+    @property
+    def preview(self) -> list[str]:
+        """Nicknames shown outside a live presentation, in joining order."""
+        ...
+    @property
+    def code(self) -> str:
+        """The session code phones type."""
+        ...
+    @property
+    def url(self) -> str:
+        """The address phones open to join."""
+        ...
+    def qr(self, size: float = 3.0) -> Drawable:
+        """The QR code of ``url``, ``size`` units on a side, filled black.
+
+        Put it on a light background with a margin so phones read it.
+        Raises ``ValueError`` for a non-positive size.
+        """
+        ...
+    def name(
+        self,
+        slot: int,
+        *,
+        size: Optional[float] = None,
+        weight: Optional[int] = None,
+        font: Optional[str] = None,
+        align: Literal["left", "center", "right"] = "center",
+    ) -> Drawable:
+        """The nickname in ``slot`` as live text, like ``Leaderboard.name``.
+
+        Example:
+            audience.name(0, size=0.4).move_to(0, -1.2)
+        """
+        ...
+    def count(self) -> Parameter:
+        """How many players joined, as a parameter."""
+        ...
+    def joined(self, slot: int) -> Parameter:
+        """1 once a player took ``slot``, else 0.
+
+        Example:
+            face.opacity(computed(lambda j: j, inputs=[audience.joined(3)]))
+        """
+        ...
+    def age(self, slot: int) -> Parameter:
+        """Seconds since the player in ``slot`` joined, up to 60; 0 while
+        the slot is empty. Preview players count as joined 60 seconds ago.
+
+        Example:
+            pop = computed(lambda a: min(a / 0.4, 1), inputs=[audience.age(3)])
+        """
+        ...
+
 class Parameter:
     """An animatable scalar usable directly or as an explicit callback input."""
     @property
@@ -7973,6 +8037,26 @@ class Scene:
                 y = 1 - rank
                 board.name(rank, size=0.5).move_to(-3, y)
                 scene.viz.readout(board.points(rank), format=".0f").move_to(3, y)
+        """
+        ...
+    def audience(
+        self,
+        *,
+        preview: Sequence[str] = (),
+    ) -> Audience:
+        """The game's audience: the players in the order they joined, as data.
+
+        Draws nothing: ``name``, ``count``, ``joined`` and ``age`` give the
+        pieces to fill a lobby, an arena or anything else. A scene that uses
+        it asks each phone for a nickname as soon as the page opens, so the
+        room fills before the first question. ``preview`` nicknames stand in
+        for players in previews, exports and snapshots.
+
+        Example:
+            audience = scene.audience(preview=["Ana", "Beto", "Caro"])
+            for slot in range(12):
+                x, y = (slot % 6 - 2.5) * 2, 1 - slot // 6 * 1.5
+                audience.name(slot, size=0.4).move_to(x, y)
         """
         ...
     def voiceover(

@@ -92,6 +92,8 @@ fn source_record(source: &PollSource) -> LiveSourceRecord {
         }
         PollSource::LeaderScore { rank } => LiveSourceRecord::LeaderScore { rank: *rank },
         PollSource::Players => LiveSourceRecord::Players,
+        PollSource::AudienceJoined { slot } => LiveSourceRecord::AudienceJoined { slot: *slot },
+        PollSource::AudienceAge { slot } => LiveSourceRecord::AudienceAge { slot: *slot },
     }
 }
 
@@ -117,6 +119,8 @@ fn source_from(record: &LiveSourceRecord) -> Option<PollSource> {
         },
         LiveSourceRecord::LeaderScore { rank } => PollSource::LeaderScore { rank: *rank },
         LiveSourceRecord::Players => PollSource::Players,
+        LiveSourceRecord::AudienceJoined { slot } => PollSource::AudienceJoined { slot: *slot },
+        LiveSourceRecord::AudienceAge { slot } => PollSource::AudienceAge { slot: *slot },
     })
 }
 
@@ -232,9 +236,13 @@ pub fn record<W: Write + Seek>(
             if let Some(registry) = registry {
                 text.learn_with(registry, &characters, &mut cache);
             }
-            let LiveTextSource::LeaderName { rank } = text.source;
+            let (list, rank) = match text.source {
+                LiveTextSource::LeaderName { rank } => (String::new(), rank),
+                LiveTextSource::AudienceName { slot } => ("audience".to_string(), slot),
+            };
             LiveTextRecord {
                 key: writer.entity_key(entity),
+                list,
                 rank,
                 align: text.align.name().to_string(),
                 glyphs: glyph_records(&text.atlas),
@@ -300,7 +308,7 @@ enum Piece {
         spec: BarSpec,
     },
     Text {
-        rank: usize,
+        source: LiveTextSource,
         align: TextAlign,
         atlas: GlyphAtlas,
     },
@@ -369,10 +377,15 @@ impl LiveElements {
             else {
                 continue;
             };
+            let source = match text.list.as_str() {
+                "" => LiveTextSource::LeaderName { rank: text.rank },
+                "audience" => LiveTextSource::AudienceName { slot: text.rank },
+                _ => continue,
+            };
             pieces.insert(
                 entity,
                 Piece::Text {
-                    rank: text.rank,
+                    source,
                     align,
                     atlas: atlas_from(&text.glyphs),
                 },
@@ -443,7 +456,10 @@ impl Piece {
             Self::Bar { source, spec } => {
                 Shown::Fraction(source.live_fraction(spec, results)?.to_bits())
             }
-            Self::Text { rank, .. } => Shown::Text(results.leader_name(*rank)?),
+            Self::Text { source, .. } => Shown::Text(match *source {
+                LiveTextSource::LeaderName { rank } => results.leader_name(rank)?,
+                LiveTextSource::AudienceName { slot } => results.audience_name(slot)?,
+            }),
             Self::Readout {
                 source,
                 format,
@@ -556,7 +572,7 @@ mod tests {
             atlas.glyphs.insert(ch, (square(size), size + 0.25));
         }
         let text = Piece::Text {
-            rank: 0,
+            source: LiveTextSource::LeaderName { rank: 0 },
             align: TextAlign::Left,
             atlas: atlas.clone(),
         };

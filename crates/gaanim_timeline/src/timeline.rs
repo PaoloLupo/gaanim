@@ -282,7 +282,10 @@ pub struct Timeline {
     /// timeline with scenes or reactive state: a write from outside the
     /// timeline to a channel no clip drives is undone, where replaying over
     /// the world from t=0 would have kept it.
-    #[cfg_attr(feature = "serde", serde(skip, default = "segment_checkpoints_enabled"))]
+    #[cfg_attr(
+        feature = "serde",
+        serde(skip, default = "segment_checkpoints_enabled")
+    )]
     pub segment_checkpoints: bool,
     #[cfg_attr(feature = "serde", serde(skip))]
     checkpoints: Checkpoints,
@@ -389,6 +392,10 @@ pub struct PollSessionInfo {
     /// `None` when no relay was set while the scene was authored.
     pub relay: Option<String>,
     pub code: String,
+    /// The scene shows its audience (`scene.audience`): phones ask for a
+    /// nickname as soon as they open the page, not at the first quiz.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub lobby: bool,
 }
 
 /// Most segment checkpoints kept at once; each holds a whole world snapshot.
@@ -1194,7 +1201,11 @@ impl Timeline {
         {
             self.checkpoints = Checkpoints {
                 revision: Some(self.property_revision),
-                starts: self.segments.iter().map(|segment| segment.start_time).collect(),
+                starts: self
+                    .segments
+                    .iter()
+                    .map(|segment| segment.start_time)
+                    .collect(),
                 times: self.settled_segment_starts(),
                 ..Checkpoints::default()
             };
@@ -1265,7 +1276,12 @@ impl Timeline {
         // on either rewrites its absolute channel or marks its target for
         // a restore, and nothing else differs from the snapshot.
         self.last_restore_kf_time = None;
-        self.replay_baseline = Some(replay_baseline_now(world, time, time.0, self.property_revision));
+        self.replay_baseline = Some(replay_baseline_now(
+            world,
+            time,
+            time.0,
+            self.property_revision,
+        ));
         self.checkpoints.insert(time, snapshot);
     }
 
@@ -1548,8 +1564,7 @@ impl Timeline {
             Some(before) => self.capture_base(before),
             None => self.restore_base(world, clamped_target),
         };
-        let from_checkpoint =
-            keyframe_time.is_some_and(|time| !self.keyframes.contains_key(&time));
+        let from_checkpoint = keyframe_time.is_some_and(|time| !self.keyframes.contains_key(&time));
 
         let mut restored_entity_map = None;
         let mut replay_without_restore = false;
@@ -1567,7 +1582,8 @@ impl Timeline {
                 // A capture replays forward like any seek: entities that no
                 // clip up to it restores keep what the last seek left, and
                 // its absolute clips rewrite their channels.
-                dirty = self.dirty_entities(world, kf_time, clamped_target);                let restore_scene_visibility = self.scenes.is_empty();
+                dirty = self.dirty_entities(world, kf_time, clamped_target);
+                let restore_scene_visibility = self.scenes.is_empty();
                 let snapshot = self.base_snapshot(kf_time);
                 restored_entity_map = Some(match &dirty {
                     Some(dirty) => {
@@ -5689,18 +5705,77 @@ mod tests {
         let at = |x| DVec3::new(x, 0.0, 0.0);
         // Written in the first segment, then undone later from another
         // start: before that clip starts, the earlier write still shows.
-        clip(1, 0.0, 0.8, PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 });
-        clip(1, 2.2, 0.4, PropertyLensSpec::PathCompletion { from: 0.5, to: 0.3 });
-        clip(1, 0.2, 0.5, PropertyLensSpec::Translation { from: at(0.0), to: at(2.0) });
-        clip(1, 1.0, 0.0, PropertyLensSpec::Translation { from: at(2.0), to: at(-1.0) });
-        clip(1, 2.0, 0.5, PropertyLensSpec::Translation { from: at(-1.0), to: at(4.0) });
+        clip(
+            1,
+            0.0,
+            0.8,
+            PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
+        );
+        clip(
+            1,
+            2.2,
+            0.4,
+            PropertyLensSpec::PathCompletion { from: 0.5, to: 0.3 },
+        );
+        clip(
+            1,
+            0.2,
+            0.5,
+            PropertyLensSpec::Translation {
+                from: at(0.0),
+                to: at(2.0),
+            },
+        );
+        clip(
+            1,
+            1.0,
+            0.0,
+            PropertyLensSpec::Translation {
+                from: at(2.0),
+                to: at(-1.0),
+            },
+        );
+        clip(
+            1,
+            2.0,
+            0.5,
+            PropertyLensSpec::Translation {
+                from: at(-1.0),
+                to: at(4.0),
+            },
+        );
         // Hidden until its clip, a segment later.
-        clip(2, 1.2, 0.4, PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 });
-        clip(2, 0.5, 0.5, PropertyLensSpec::Opacity { from: 1.0, to: 0.2 });
-        clip(2, 1.0, 0.5, PropertyLensSpec::Opacity { from: 0.2, to: 0.9 });
+        clip(
+            2,
+            1.2,
+            0.4,
+            PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
+        );
+        clip(
+            2,
+            0.5,
+            0.5,
+            PropertyLensSpec::Opacity { from: 1.0, to: 0.2 },
+        );
+        clip(
+            2,
+            1.0,
+            0.5,
+            PropertyLensSpec::Opacity { from: 0.2, to: 0.9 },
+        );
         // Runs across the last segment start.
-        clip(3, 2.9, 0.4, PropertyLensSpec::Opacity { from: 1.0, to: 0.0 });
-        clip(3, 3.4, 0.3, PropertyLensSpec::PathCompletion { from: 1.0, to: 0.2 });
+        clip(
+            3,
+            2.9,
+            0.4,
+            PropertyLensSpec::Opacity { from: 1.0, to: 0.0 },
+        );
+        clip(
+            3,
+            3.4,
+            0.3,
+            PropertyLensSpec::PathCompletion { from: 1.0, to: 0.2 },
+        );
         if scenes {
             let ids = ["first", "second", "third", "fourth"].map(|name| timeline.add_scene(name));
             for (index, &scene) in ids.iter().enumerate() {
@@ -5768,9 +5843,7 @@ mod tests {
         let backward: Vec<f64> = forward.iter().rev().copied().collect();
         for (signal, scenes, times) in [(false, false), (true, false), (false, true)]
             .into_iter()
-            .flat_map(|(signal, scenes)| {
-                [(signal, scenes, &forward), (signal, scenes, &backward)]
-            })
+            .flat_map(|(signal, scenes)| [(signal, scenes, &forward), (signal, scenes, &backward)])
         {
             let (mut world, mut timeline, entities) = checkpoint_fixture(true, signal, scenes);
             let (mut reference_world, mut reference, reference_entities) =
@@ -5849,7 +5922,12 @@ mod tests {
         timeline.seek(&mut world, 2.6);
         assert_eq!(timeline.checkpoints.times, [OrderedFloat(1.0)]);
         assert_eq!(
-            timeline.checkpoints.snapshots.keys().copied().collect::<Vec<_>>(),
+            timeline
+                .checkpoints
+                .snapshots
+                .keys()
+                .copied()
+                .collect::<Vec<_>>(),
             [OrderedFloat(1.0)]
         );
     }

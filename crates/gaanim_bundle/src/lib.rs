@@ -204,6 +204,12 @@ pub enum LiveSourceRecord {
         rank: usize,
     },
     Players,
+    AudienceJoined {
+        slot: usize,
+    },
+    AudienceAge {
+        slot: usize,
+    },
 }
 
 /// What a bar's length follows.
@@ -235,10 +241,14 @@ pub struct PollBarRecord {
     pub scale: String,
 }
 
-/// A recorded element whose outline is a leaderboard nickname.
+/// A recorded element whose outline is a player's nickname.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LiveTextRecord {
     pub key: u32,
+    /// The list the nickname comes from: empty for the leaderboard, where
+    /// `rank` is the place, or `audience`, where it is the joining order.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub list: String,
     pub rank: usize,
     /// `left`, `center` or `right`.
     pub align: String,
@@ -277,6 +287,8 @@ struct PollsEntry {
 struct SessionRecord {
     relay: Option<String>,
     code: String,
+    #[serde(default)]
+    lobby: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -306,6 +318,7 @@ fn write_polls(scene: &SceneData) -> Result<Vec<u8>> {
         session: scene.poll_session.as_ref().map(|session| SessionRecord {
             relay: session.relay.clone(),
             code: session.code.clone(),
+            lobby: session.lobby,
         }),
         polls: scene
             .polls
@@ -339,6 +352,7 @@ fn read_polls(bytes: &[u8], scene: &mut SceneData) -> Result<()> {
     scene.poll_session = entry.session.map(|session| PollSessionInfo {
         relay: session.relay,
         code: session.code,
+        lobby: session.lobby,
     });
     scene.polls = entry
         .polls
@@ -1452,6 +1466,7 @@ mod tests {
                 poll_session: (!polls.is_empty()).then(|| PollSessionInfo {
                     relay: Some("https://relay.example.dev".into()),
                     code: "ABC234".into(),
+                    lobby: false,
                 }),
                 polls,
                 ..scene
@@ -1490,6 +1505,7 @@ mod tests {
             }],
             poll_texts: vec![LiveTextRecord {
                 key: 8,
+                list: String::new(),
                 rank: 0,
                 align: "left".into(),
                 glyphs: vec![glyph.clone()],

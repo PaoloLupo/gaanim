@@ -4,8 +4,8 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 use gaanim_api::canvas::{
-    BarDirection, BarScale, LeaderboardHandle, LiveTextOptions, PollBarOptions, PollError,
-    PollHandle, TextAlign,
+    AudienceHandle, BarDirection, BarScale, LeaderboardHandle, LiveTextOptions, PollBarOptions,
+    PollError, PollHandle, TextAlign,
 };
 
 use crate::pydrawable::PyDrawable;
@@ -183,6 +183,25 @@ impl PyPoll {
     }
 }
 
+fn text_options(
+    size: Option<f64>,
+    weight: Option<u16>,
+    font: Option<String>,
+    align: &str,
+) -> PyResult<LiveTextOptions> {
+    let align = TextAlign::from_name(align).ok_or_else(|| {
+        PyValueError::new_err(format!(
+            "align must be \"left\", \"center\" or \"right\", got {align:?}"
+        ))
+    })?;
+    Ok(LiveTextOptions {
+        size,
+        weight,
+        font,
+        align,
+    })
+}
+
 /// The game's leaderboard: the players of every quiz, best first, as data
 /// for the scene to present as it likes.
 #[pyclass(name = "Leaderboard", module = "gaanim_core", frozen)]
@@ -209,23 +228,8 @@ impl PyLeaderboard {
         align: &str,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
-        let align = TextAlign::from_name(align).ok_or_else(|| {
-            PyValueError::new_err(format!(
-                "align must be \"left\", \"center\" or \"right\", got {align:?}"
-            ))
-        })?;
-        let handle = self
-            .inner
-            .name(
-                rank,
-                LiveTextOptions {
-                    size,
-                    weight,
-                    font,
-                    align,
-                },
-            )
-            .map_err(poll_error)?;
+        let options = text_options(size, weight, font, align)?;
+        let handle = self.inner.name(rank, options).map_err(poll_error)?;
         Ok(PyDrawable(handle))
     }
 
@@ -261,5 +265,86 @@ impl PyLeaderboard {
 
     fn __repr__(&self) -> String {
         format!("Leaderboard(preview={:?})", self.inner.preview())
+    }
+}
+
+/// The game's audience: the players in the order they joined, each in a
+/// slot (0 for the first), as data for the scene to arrange and animate.
+#[pyclass(name = "Audience", module = "gaanim_core", frozen)]
+pub struct PyAudience {
+    pub(crate) inner: AudienceHandle,
+}
+
+#[pymethods]
+impl PyAudience {
+    /// Nicknames shown outside a live presentation, in joining order.
+    #[getter]
+    fn preview(&self) -> Vec<String> {
+        self.inner.preview()
+    }
+
+    /// The session code phones type.
+    #[getter]
+    fn code(&self) -> String {
+        self.inner.code()
+    }
+
+    /// The address phones open to join.
+    #[getter]
+    fn url(&self) -> String {
+        self.inner.url()
+    }
+
+    /// The QR code of `url`, `size` units on a side, filled black.
+    #[pyo3(signature = (size=3.0))]
+    fn qr(&self, size: f64) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        let handle = self.inner.qr(size).map_err(poll_error)?;
+        Ok(PyDrawable(handle))
+    }
+
+    /// The nickname in `slot` as live text; empty until that many joined.
+    #[pyo3(signature = (slot, *, size=None, weight=None, font=None, align="center"))]
+    fn name(
+        &self,
+        slot: usize,
+        size: Option<f64>,
+        weight: Option<u16>,
+        font: Option<String>,
+        align: &str,
+    ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        let options = text_options(size, weight, font, align)?;
+        let handle = self.inner.name(slot, options).map_err(poll_error)?;
+        Ok(PyDrawable(handle))
+    }
+
+    /// How many players joined.
+    fn count(&self) -> PyResult<PyParameter> {
+        crate::custom::ensure_authoring_allowed()?;
+        let inner = self.inner.count().map_err(poll_error)?;
+        Ok(PyParameter { inner })
+    }
+
+    /// 1 once a player took `slot`, else 0.
+    fn joined(&self, slot: usize) -> PyResult<PyParameter> {
+        crate::custom::ensure_authoring_allowed()?;
+        let inner = self.inner.joined(slot).map_err(poll_error)?;
+        Ok(PyParameter { inner })
+    }
+
+    /// Seconds since the player in `slot` joined, up to 60; 0 while empty.
+    fn age(&self, slot: usize) -> PyResult<PyParameter> {
+        crate::custom::ensure_authoring_allowed()?;
+        let inner = self.inner.age(slot).map_err(poll_error)?;
+        Ok(PyParameter { inner })
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Audience(preview={:?}, code={:?})",
+            self.inner.preview(),
+            self.inner.code()
+        )
     }
 }
