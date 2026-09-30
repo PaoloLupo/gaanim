@@ -4925,10 +4925,12 @@ class Poll:
     def reveal(self) -> None:
         """Reveal a quiz's answer at the cursor.
 
-        When a presentation's playhead reaches this point, every phone shows
+        When a presentation's playhead passes this point, every phone shows
         the correct answer and each player whether it was right, the points
-        it earned and its place; the quiz takes no more answers. Raises
-        ``ValueError`` for a poll that is not a quiz, or a second reveal.
+        it earned and its place; the quiz takes no more answers. Written right
+        after a ``scene.stop()``, it waits while the presentation rests on the
+        stop and reveals when you advance. Raises ``ValueError`` for a poll
+        that is not a quiz, or a second reveal.
         """
         ...
     @property

@@ -235,7 +235,8 @@ teléfonos se unen al juego con un apodo, ven una cuenta atrás, responden una
 sola vez y una respuesta correcta gana más puntos cuanto antes llega: todos
 los puntos al instante y la mitad en el último segundo. `quiz.reveal()` marca
 el punto en que la presentación revela la respuesta: cada teléfono muestra si
-acertó, cuántos puntos ganó y su puesto.
+acertó, cuántos puntos ganó y su puesto. Justo después de un `scene.stop()`,
+espera mientras la presentación descansa en la pausa y revela al avanzar.
 
 ```python
 quiz = scene.quiz("¿Cuál es la derivada de x²?", ["x", "2x", "x²/2", "2"],

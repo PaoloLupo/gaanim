@@ -101,7 +101,7 @@ fn audience_poll_system(
     client.show(timeline.poll_open_at(now));
     for poll in &timeline.polls {
         if let Some(reveal) = poll.quiz.as_ref().and_then(|quiz| quiz.reveal)
-            && now >= reveal - 1e-5
+            && passed(reveal, now)
         {
             client.reveal(&poll.id);
         }
@@ -111,6 +111,13 @@ fn audience_poll_system(
         .client
         .as_ref()
         .and_then(|client| client.update(&mut results, seen));
+}
+
+/// Whether the playhead at `now` went past a quiz's `reveal` time. Resting
+/// on it is not enough: a `reveal()` written right after a stop shares the
+/// stop's time, and must wait until the presentation advances from it.
+fn passed(reveal: f64, now: f64) -> bool {
+    now > reveal + 1e-4
 }
 
 // ---------------------------------------------------------------------------
@@ -600,6 +607,15 @@ mod tests {
             close: 1.0,
             quiz: None,
         }
+    }
+
+    #[test]
+    fn a_quiz_is_revealed_once_the_playhead_leaves_its_stop() {
+        // Resting on the stop the reveal shares keeps the quiz open.
+        assert!(!passed(19.5, 19.5));
+        assert!(!passed(19.5, 18.0));
+        // The first frame after advancing reveals it.
+        assert!(passed(19.5, 19.5 + 1.0 / 60.0));
     }
 
     /// Wait until `check` accepts the client's results.
