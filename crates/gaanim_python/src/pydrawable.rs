@@ -1456,6 +1456,20 @@ impl PyCanvasAnim {
         })
     }
 
+    /// Add an inertial bounce after the last value (see ``Anim.settle``).
+    #[pyo3(signature = (overshoot=0.12, frequency=3.0, decay=6.0))]
+    fn settle(&self, overshoot: f64, frequency: f64, decay: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        Ok(Self {
+            inner: self
+                .inner
+                .clone()
+                .settle(overshoot, frequency, decay)
+                .map_err(PyValueError::new_err)?,
+        })
+    }
+
     #[pyo3(signature = (count, *, yoyo=false, delay=0.0))]
     fn repeat(&self, count: i64, yoyo: bool, delay: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
@@ -2841,10 +2855,16 @@ impl PyDrawable {
         source: Bound<'_, PyAny>,
         offset: (f64, f64),
         offset_space: &str,
+        delay: f64,
     ) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         if !offset.0.is_finite() || !offset.1.is_finite() {
             return Err(PyValueError::new_err("offset must be finite"));
+        }
+        if !delay.is_finite() || delay < 0.0 {
+            return Err(PyValueError::new_err(
+                "delay must be a finite non-negative number of seconds",
+            ));
         }
         let space = match offset_space {
             "world" => gaanim_animation::FollowOffsetSpace::World,
@@ -2855,11 +2875,21 @@ impl PyDrawable {
                 ));
             }
         };
-        Ok(Self(self.0.follow_endpoint(
-            crate::pycanvas::resolve_endpoint(&source)?,
-            gaanim_core::glam::DVec3::new(offset.0, offset.1, 0.0),
-            space,
-        )))
+        let endpoint = crate::pycanvas::resolve_endpoint(&source)?;
+        if delay > 0.0 && !matches!(endpoint, gaanim_api::canvas::CanvasEndpoint::Entity(_)) {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "follow(delay=...) needs a Drawable to follow",
+            ));
+        }
+        self.0
+            .follow_endpoint_delayed(
+                endpoint,
+                gaanim_core::glam::DVec3::new(offset.0, offset.1, 0.0),
+                space,
+                delay,
+            )
+            .map(Self)
+            .map_err(PyValueError::new_err)
     }
 
     pub(crate) fn bind_rotation_from_impl(
@@ -3661,14 +3691,19 @@ impl PyDrawable {
     }
 
     /// Follow any endpoint and return this drawable for fluent chaining.
-    #[pyo3(signature = (source, *, offset=(0.0, 0.0), offset_space="world"))]
+    /// With ``delay`` it copies a drawable leader as it was ``delay``
+    /// seconds earlier.
+    #[pyo3(signature = (source, *, offset=(0.0, 0.0), offset_space="world", delay=0.0))]
     fn follow<'py>(
         slf: &Bound<'py, Self>,
         source: Bound<'_, PyAny>,
         offset: (f64, f64),
         offset_space: &str,
+        delay: f64,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let result = slf.borrow().follow_impl(source, offset, offset_space);
+        let result = slf
+            .borrow()
+            .follow_impl(source, offset, offset_space, delay);
         same_drawable(slf, result)
     }
 
@@ -4010,11 +4045,12 @@ macro_rules! media_drawable_methods {
         PyDrawable(slf.handle()).drive_from_samples_impl(times, &values, property, interpolation, scale, offset)?;
         Ok(slf)
     }
-    #[pyo3(signature = (source, *, offset=(0.0, 0.0), offset_space="world"))]
+    #[pyo3(signature = (source, *, offset=(0.0, 0.0), offset_space="world", delay=0.0))]
     fn follow<'py>(slf: PyRef<'py, Self>, source: Bound<'_, PyAny>,
         offset: (f64, f64),
-        offset_space: &str,) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).follow_impl(source, offset, offset_space)?;
+        offset_space: &str,
+        delay: f64,) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).follow_impl(source, offset, offset_space, delay)?;
         Ok(slf)
     }
     #[pyo3(signature = (source, *, ratio=1.0, phase=0.0))]

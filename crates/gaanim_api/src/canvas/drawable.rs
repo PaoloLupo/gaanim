@@ -2185,6 +2185,48 @@ impl DrawableHandle {
         self.clone()
     }
 
+    /// Follow `endpoint` as it was `delay` seconds earlier (After Effects'
+    /// `valueAtTime(time - delay)`), for trails and tails. The timeline
+    /// evaluates the leader's own animations at `t - delay` after every
+    /// seek, so the trail needs no history; until the current segment has
+    /// run for `delay` seconds the follower holds the leader's position at
+    /// the segment start. A `delay` of 0 is [`Self::follow_endpoint`]; a
+    /// positive one needs a drawable endpoint.
+    pub fn follow_endpoint_delayed(
+        &self,
+        endpoint: crate::canvas::CanvasEndpoint,
+        offset: DVec3,
+        offset_space: gaanim_animation::FollowOffsetSpace,
+        delay: f64,
+    ) -> Result<Self, String> {
+        if !(delay.is_finite() && delay >= 0.0) {
+            return Err(format!("delay must be a finite number >= 0, got {delay}"));
+        }
+        if delay == 0.0 {
+            return Ok(self.follow_endpoint(endpoint, offset, offset_space));
+        }
+        let crate::canvas::CanvasEndpoint::Entity(source) = endpoint else {
+            return Err("a delayed follow needs a drawable to follow".to_string());
+        };
+        if source == self.id {
+            return Err("a drawable cannot follow itself".to_string());
+        }
+        self.defer_visibility_until_play();
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachDelayedFollow {
+                target: self.id,
+                source,
+                delay,
+                offset,
+                offset_space,
+            });
+        Ok(self.clone())
+    }
+
     /// Couple this drawable's world Z rotation to another drawable.
     pub fn bind_rotation_from(&self, source: &DrawableHandle, ratio: f64, phase: f64) -> Self {
         self.state

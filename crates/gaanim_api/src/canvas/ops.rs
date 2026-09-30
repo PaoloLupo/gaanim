@@ -601,6 +601,14 @@ pub(crate) enum Op {
         offset: DVec3,
         offset_space: FollowOffsetSpace,
     },
+    /// Follow a drawable's position as it was `delay` seconds earlier.
+    AttachDelayedFollow {
+        target: ObjectId,
+        source: ObjectId,
+        delay: f64,
+        offset: DVec3,
+        offset_space: FollowOffsetSpace,
+    },
     /// Attach a TrackingLine — reactive line between two endpoints.
     AttachTrackingLine {
         target: ObjectId,

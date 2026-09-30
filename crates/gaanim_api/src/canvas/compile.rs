@@ -5735,6 +5735,29 @@ impl SceneModel {
                     }
                 }
 
+                Op::AttachDelayedFollow {
+                    target,
+                    source,
+                    delay,
+                    offset,
+                    offset_space,
+                } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(source_id) = id_map.get(source).copied()
+                        && let Some(target_state) = builder.states.get(target_id)
+                        && builder.states.get(source_id).is_some()
+                    {
+                        builder.commands.entity(target_state.entity).insert(
+                            gaanim_animation::DelayedFollow::new(
+                                source_id,
+                                *delay,
+                                *offset,
+                                *offset_space,
+                            ),
+                        );
+                    }
+                }
+
                 Op::AttachTrackingLine { target, from, to } => {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(st) = builder.states.get(target_id)
@@ -13777,6 +13800,110 @@ mod tests {
         assert!((moving[3] - 1.0 / 1.5).abs() < 1e-9, "{moving:?}");
         assert_eq!(deform_at(1.8), kurbo::Affine::IDENTITY);
         assert!((deform_at(0.5).as_coeffs()[0] - 1.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn settle_bounces_past_the_target_and_extends_the_clip() {
+        let mut canvas = SceneModel::new(640, 360);
+        let card = canvas.square(1.0).move_to(-1.0, 0.0);
+        assert!(card.animate().settle(-0.1, 3.0, 6.0).is_err());
+        assert!(card.animate().settle(0.1, 0.0, 6.0).is_err());
+        assert!(card.animate().settle(0.1, 3.0, f64::NAN).is_err());
+        canvas.play(vec![
+            card.animate()
+                .move_to(1.0, 0.0)
+                .duration(0.5)
+                .rate_func(gaanim_math::RateFunc::Linear)
+                .settle(0.12, 3.0, 6.0)
+                .unwrap(),
+        ]);
+        let after = canvas.circle(0.2);
+        canvas.play(vec![after.fade_in(0.1)]);
+        // 2 distances per second: amplitude 0.24 of the 2-unit move (0.48
+        // units), settled below 0.1% of the distance; the
+        // next play starts after the bounce.
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let tail = (0.24f64 / gaanim_math::RateFunc::SETTLE_EPSILON).ln() / 6.0;
+        assert!(
+            timeline.cached_duration >= 0.5 + tail + 0.1 - 1e-6,
+            "{}",
+            timeline.cached_duration
+        );
+        let mut x_at = |time: f64| {
+            timeline.seek(&mut world, time);
+            transform_of(&mut world, &card).translation.x
+        };
+        assert!((x_at(0.25) - 0.0).abs() < 1e-9);
+        // A quarter period after arriving it has overshot the target.
+        let peak = 0.48 * (-0.5f64).exp();
+        assert!((x_at(0.5 + 1.0 / 12.0) - 1.0 - peak).abs() < 1e-3);
+        assert!(x_at(0.75) < 1.0);
+        assert!((x_at(0.5 + tail) - 1.0).abs() < 1e-6);
+        // Seeking back reproduces the bounce.
+        assert!((x_at(0.5 + 1.0 / 12.0) - 1.0 - peak).abs() < 1e-3);
+    }
+
+    #[test]
+    fn delayed_follow_reads_the_leader_in_the_past_at_any_seek() {
+        let mut canvas = SceneModel::new(640, 360);
+        let leader = canvas.circle(0.3).move_to(-2.0, 0.0);
+        let dots: Vec<_> = (1..=3)
+            .map(|index| {
+                let dot = canvas.circle(0.1);
+                dot.follow_endpoint_delayed(
+                    CanvasEndpoint::Entity(leader.id),
+                    DVec3::new(0.0, -0.5, 0.0),
+                    gaanim_animation::FollowOffsetSpace::World,
+                    0.25 * index as f64,
+                )
+                .unwrap()
+            })
+            .collect();
+        assert!(
+            dots[0]
+                .follow_endpoint_delayed(
+                    CanvasEndpoint::Static(DVec3::ZERO),
+                    DVec3::ZERO,
+                    gaanim_animation::FollowOffsetSpace::World,
+                    0.1,
+                )
+                .is_err()
+        );
+        assert!(
+            dots[0]
+                .follow_endpoint_delayed(
+                    CanvasEndpoint::Entity(leader.id),
+                    DVec3::ZERO,
+                    gaanim_animation::FollowOffsetSpace::World,
+                    -0.1,
+                )
+                .is_err()
+        );
+        canvas.play(dots.iter().map(|dot| dot.fade_in(0.01)).collect());
+        canvas.play(vec![
+            leader
+                .animate()
+                .move_to(2.0, 0.0)
+                .duration(1.0)
+                .rate_func(gaanim_math::RateFunc::Linear),
+        ]);
+        canvas.wait(1.0);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let start = 0.01;
+        let leader_x = |time: f64| -2.0 + 4.0 * (time - start).clamp(0.0, 1.0);
+        // Out of order, so no state can carry over between seeks.
+        for time in [1.3, 0.2, 0.9, 0.5, 2.0, 0.0, 0.6, 1.3] {
+            timeline.seek(&mut world, time);
+            for (index, dot) in dots.iter().enumerate() {
+                let delay = 0.25 * (index + 1) as f64;
+                let position = transform_of(&mut world, dot).translation;
+                let expected = leader_x((time - delay).max(0.0));
+                assert!(
+                    (position.x - expected).abs() < 1e-9 && (position.y + 0.5).abs() < 1e-9,
+                    "dot {index} at {time}: {position:?}, expected x {expected}"
+                );
+            }
+        }
     }
 
     #[test]

@@ -1406,6 +1406,25 @@ scene.play(arrow.animate.shift_by(0.3, 0).duration(0.5).loop("pingpong", until=4
 ```
 ]
 
+#api-entry(
+  name: "Anim.settle",
+  kind: "method",
+  params: (
+    (name: "overshoot", type: "float", default: "0.12", desc: [Segundos de rebote por unidad de velocidad final (el `amp` de After Effects); `0` desactiva el rebote.]),
+    (name: "frequency", type: "float", default: "3.0", desc: [Oscilaciones por segundo; positiva.]),
+    (name: "decay", type: "float", default: "6.0", desc: [Amortiguación exponencial en 1/s; positiva.]),
+  ),
+  returns: (type: "Anim", desc: [El `Anim` con rebote inercial.]),
+  desc: [_Follow-through_: al terminar el movimiento, cada propiedad animada rebasa su destino y vuelve oscilando como `v * overshoot * sin(2π * frequency * t) / e^(decay * t)`, donde `t` son los segundos tras el movimiento y `v` su velocidad final en unidades por segundo. Si el easing termina en reposo (como `smooth`) se usa la velocidad media, así que un movimiento suavizado también rebota. El clip se alarga hasta que el rebote cae bajo el 0,1 % de la distancia recorrida (como mucho 10 s más) y termina exactamente en el destino; `play` lo espera. Va después del último ciclo de `repeat` o `loop`. Es una función pura del tiempo, así que cualquier seek es exacto. Valores negativos o no finitos lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>card = scene.geometry.rounded_rect(2.4, 1.4, 0.2).fill(BLUE).move_to(-5, 0)
+scene.play(card.animate.move_to(0, 0).duration(0.5).settle(overshoot=0.12, frequency=3.0, decay=6.0))
+```
+]
+
 == Easing <easing>
 
 Un `Easing` es una función de tiempo inmutable: convierte el progreso lineal

@@ -671,6 +671,7 @@ impl Composition {
                 if let PlayItem::Animation(anim) = &mut item {
                     anim.apply_play_defaults(duration, rate.clone());
                     anim.apply_repeat();
+                    anim.apply_settle();
                 }
                 let (start, item_duration) = match &mut item {
                     PlayItem::Animation(anim) => {
