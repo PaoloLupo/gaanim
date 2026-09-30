@@ -86,7 +86,10 @@ pub use narration::{
 };
 mod character;
 pub use character::{CharacterError, CharacterHandle};
+mod live;
+pub use gaanim_animation::live::{Event as LiveEvent, Express as LiveExpress, LiveZone};
 pub use gaanim_objects::character::Character;
+pub use live::{LiveZoneError, LiveZoneHandle, express as live_express};
 mod poll;
 pub use gaanim_animation::polls::{BarDirection, BarScale, TextAlign};
 pub use poll::{

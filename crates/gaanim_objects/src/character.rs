@@ -402,6 +402,12 @@ impl CharacterCatalog {
         })
     }
 
+    /// Where `character` stands, in its 100-unit square: the y of the base
+    /// of its body.
+    pub fn feet(&self, character: &Character) -> f64 {
+        self.bodies[character[0] % self.bodies.len().max(1)].base
+    }
+
     /// The expressions characters can play, sorted.
     pub fn expressions(&self) -> Vec<&str> {
         let mut names: Vec<&str> = self.expressions.keys().map(String::as_str).collect();

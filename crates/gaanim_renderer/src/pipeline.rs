@@ -1901,13 +1901,42 @@ fn compile_scene_with_pins(
 ) -> vello::Scene {
     let extraction = extract_world(world, camera, pins, true);
     let background = world.get_resource::<CanvasBackground>();
-    compose_elements(
+    let mut scene = compose_elements(
         &extraction.elements,
         extraction.transition.as_ref(),
         background.map(|background| (background, background.pixel_size)),
         extraction.background_time,
         None,
-    )
+    );
+    if let Some(overlay) = world.get_resource::<gaanim_animation::live::LiveOverlay>() {
+        append_live_overlay(&mut scene, overlay);
+    }
+    scene
+}
+
+/// Draw what live zones show above the scene, in scene units: each zone's
+/// characters clipped to it. Bundle recordings capture drawables, not this,
+/// so a bundle stores its zones and draws them when played.
+pub fn append_live_overlay(
+    scene: &mut vello::Scene,
+    overlay: &gaanim_animation::live::LiveOverlay,
+) {
+    for group in &overlay.groups {
+        if group.paths.is_empty() {
+            continue;
+        }
+        scene.push_clip_layer(peniko::Fill::NonZero, kurbo::Affine::IDENTITY, &group.clip);
+        for (path, brush) in &group.paths {
+            scene.fill(
+                peniko::Fill::NonZero,
+                kurbo::Affine::IDENTITY,
+                brush,
+                None,
+                path,
+            );
+        }
+        scene.pop_layer();
+    }
 }
 
 /// The drawables of a frame, sorted in draw order, with the transition and
@@ -2841,6 +2870,7 @@ pub fn external_frame_system(
         Option<Res<crate::canvas::PreviewResolution>>,
     ),
     mut query_vello_scene: Query<&mut VelloScene2d, With<MainVelloScene>>,
+    live: Option<Res<gaanim_animation::live::LiveOverlay>>,
 ) {
     let external = &mut *external;
     let Some(frame) = external.frame.clone() else {
@@ -2862,13 +2892,16 @@ pub fn external_frame_system(
         _ => None,
     });
     let mut shader_request = None;
-    let main_scene = compose_captured(
+    let mut main_scene = compose_captured(
         &frame,
         &mut external.store,
         background,
         pixels_per_unit,
         shader_frame.is_some().then_some(&mut shader_request),
     );
+    if let Some(overlay) = live.as_deref() {
+        append_live_overlay(&mut main_scene, overlay);
+    }
     external.store.end_frame();
     if let Some(frame) = shader_frame.as_mut() {
         frame.0 = shader_request;
@@ -2994,9 +3027,10 @@ pub fn gaanim_render_system(
         Option<Ref<StrokeProfile>>,
     )>,
     mut query_vello_scene: Query<&mut VelloScene2d, With<MainVelloScene>>,
-    (mut shader_frame, preview): (
+    (mut shader_frame, preview, live): (
         Option<ResMut<ShaderBackgroundFrame>>,
         Option<Res<crate::canvas::PreviewResolution>>,
+        Option<Res<gaanim_animation::live::LiveOverlay>>,
     ),
     (camera_screens, camera_sources, hud_query, layer_query, float_signals): CameraViewQueries,
     mut scratch: Local<(Vec<ExtractedElement>, std::collections::HashSet<Entity>)>,
@@ -3376,6 +3410,9 @@ pub fn gaanim_render_system(
     );
     if let Some(frame) = shader_frame.as_mut() {
         frame.0 = shader_request;
+    }
+    if let Some(overlay) = live.as_deref() {
+        append_live_overlay(&mut main_scene, overlay);
     }
     local_extracted.clear();
 

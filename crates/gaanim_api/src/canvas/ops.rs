@@ -62,6 +62,8 @@ pub(crate) struct CanvasState {
     /// Stops that advance once the audience meets a condition: segment
     /// index, local time of the stop, condition.
     pub(crate) stop_gates: Vec<(usize, f64, gaanim_timeline::timeline::GateCondition)>,
+    /// Live zones in authoring order.
+    pub(crate) live_zones: Vec<super::live::LiveZoneRecord>,
 }
 
 impl CanvasState {
@@ -89,6 +91,7 @@ impl CanvasState {
             poll_session: None,
             poll_lobby: false,
             stop_gates: Vec::new(),
+            live_zones: Vec::new(),
         }
     }
 

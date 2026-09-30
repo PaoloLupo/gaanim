@@ -142,6 +142,9 @@ pub fn open_bundle_bytes(world: &mut World, path: &Path, bytes: Arc<[u8]>) -> Re
     });
 
     world.insert_resource(bundle_timeline(&bundle));
+    world.insert_resource(gaanim_animation::live::LiveZones(
+        bundle.scene.live_zones.clone(),
+    ));
     world.insert_resource(first.camera);
     if let Some(background) = bundle.scene.background.clone() {
         world.insert_resource(background);

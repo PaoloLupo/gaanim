@@ -14,6 +14,9 @@ use gaanim_scene::{FillBrush, LocalBounds, Path2D, PathSource};
 
 use crate::updaters::PlaybackState;
 
+/// The character catalog, for crates that reach it through animation.
+pub use gaanim_objects::character::{Character as CharacterParts, catalog as character_catalog};
+
 /// A character on the group entity that holds its layers.
 #[derive(Component, Debug, Clone)]
 pub struct CharacterRig {

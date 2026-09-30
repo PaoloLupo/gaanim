@@ -14,6 +14,7 @@ mod composition;
 mod custom;
 mod easing;
 mod falloff;
+mod live;
 mod poll;
 mod procedural;
 mod progress_ring;
@@ -159,6 +160,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<poll::PyAudience>()?;
     m.add_class::<poll::PyCondition>()?;
     m.add_class::<character::PyCharacter>()?;
+    m.add_class::<live::PyLiveZone>()?;
     m.add_class::<visualization::PyReadout>()?;
     m.add_class::<visualization::PyVariable>()?;
     m.add_class::<rolling_number::PyRollingNumber>()?;

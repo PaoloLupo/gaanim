@@ -4,6 +4,7 @@ pub mod custom;
 pub mod echo;
 pub use echo::EchoGhost;
 pub mod falloff;
+pub mod live;
 pub use falloff::{
     ColorRamp, FalloffChannel, FalloffDrive, FalloffEffect, FalloffExpr, FalloffOffset,
     FalloffShape, FalloffTarget, ScheduledEffect,
@@ -93,6 +94,8 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
         app.init_resource::<DeltaTime>();
         app.init_resource::<PlaybackState>();
         app.init_resource::<polls::PollResults>();
+        app.init_resource::<live::LiveZones>();
+        app.init_resource::<live::LiveOverlay>();
 
         // Sync Bevy's Time -> DeltaTime before animation evaluation.
         app.add_systems(Update, sync_delta_time_system.in_set(SceneSet::Input));
@@ -115,6 +118,7 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
                 polls::poll_bar_system,
                 polls::live_text_system,
                 characters::character_system,
+                live::live_zone_system,
             )
                 .in_set(SceneSet::Visualization),
         );

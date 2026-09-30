@@ -38,6 +38,8 @@ pub struct PollResults {
     /// The players in the order they joined: nickname and seconds since
     /// joining, up to [`AUDIENCE_AGE_CAP`].
     pub audience: Vec<(Arc<str>, f64)>,
+    /// The character each player made on the phone, by nickname.
+    pub avatars: HashMap<Arc<str>, gaanim_objects::character::Character>,
 }
 
 /// The age a player stops counting at, and the one preview players have:

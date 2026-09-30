@@ -215,6 +215,8 @@ struct Snapshot {
     leaderboard: Vec<(Arc<str>, u64)>,
     /// Players in joining order, with when they joined on the relay's clock.
     audience: Vec<(Arc<str>, f64)>,
+    /// The character each player made, by nickname.
+    avatars: HashMap<Arc<str>, gaanim_animation::characters::CharacterParts>,
     players: u32,
     connected: u32,
 }
@@ -224,6 +226,20 @@ impl Snapshot {
     fn from_results(results: Results, received: Instant) -> Self {
         let mut counts = HashMap::new();
         let mut deadlines = HashMap::new();
+        let catalog = gaanim_animation::characters::character_catalog();
+        let avatars = results
+            .audience
+            .iter()
+            .filter_map(|arrival| Some((arrival.name.as_str(), arrival.avatar?)))
+            .chain(
+                results
+                    .players
+                    .iter()
+                    .filter_map(|player| Some((player.name.as_str(), player.avatar?))),
+            )
+            .filter(|(_, character)| catalog.contains(character))
+            .map(|(name, character)| (Arc::from(name), character))
+            .collect();
         for (id, poll) in results.polls {
             let id: Arc<str> = id.into();
             if let Some(quiz) = poll.quiz {
@@ -247,6 +263,7 @@ impl Snapshot {
                 .into_iter()
                 .map(|arrival| (Arc::from(arrival.name), arrival.joined))
                 .collect(),
+            avatars,
             players: results.player_count,
             connected: results.connected,
         }
@@ -405,6 +422,7 @@ impl PollClient {
             leaderboard: snapshot.leaderboard,
             players: snapshot.players,
             connected: snapshot.connected,
+            avatars: snapshot.avatars,
         }
     }
 }
@@ -450,6 +468,8 @@ struct QuizState {
 struct Player {
     name: String,
     score: u64,
+    #[serde(default)]
+    avatar: Option<gaanim_animation::characters::CharacterParts>,
 }
 
 #[derive(Deserialize)]
@@ -458,6 +478,8 @@ struct Arrival {
     /// When the player joined, milliseconds on the relay's clock.
     #[serde(default)]
     joined: f64,
+    #[serde(default)]
+    avatar: Option<gaanim_animation::characters::CharacterParts>,
 }
 
 /// An HTTP agent with the system's TLS, which ureq is built with here.

@@ -5175,6 +5175,110 @@ class Character(Drawable):
         """The expressions characters can play."""
         ...
 
+class LiveZone:
+    """A part of the scene where the audience plays, from
+    ``scene.live_zone``.
+
+    While presenting, each player arrives in it as the character they made
+    on their phone: launched and landing on surfaces, standing at podium
+    places, or running a race, and reacting by the zone's rules. Previews
+    and exports replay the preview players the same way every time. A zone
+    is data, so a presented ``.gaanim`` runs it without Python. Characters
+    are drawn above the rest of the scene, clipped to the zone's bounds.
+
+    Every method returns the zone, so calls chain.
+    """
+    @property
+    def preview(self) -> list[str]:
+        """Nicknames replayed outside a live presentation."""
+        ...
+    def surface(
+        self,
+        start: tuple[float, float],
+        end: tuple[float, float],
+        *,
+        tag: str,
+        sink: float = 0.0,
+    ) -> LiveZone:
+        """A segment characters land on, tagged for rules (``"floor"``,
+        ``"water"``). ``sink`` is how deep they sink into it, in character
+        heights. Raises ``ValueError`` for a vertical segment or empty tag."""
+        ...
+    def launcher(
+        self,
+        start: tuple[float, float],
+        *,
+        angle: tuple[float, float] = (15.0, 65.0),
+        period: float = 3.0,
+        speed: float = 8.0,
+        every: float = 0.8,
+        toward: Literal["right", "left"] = "right",
+    ) -> LiveZone:
+        """Launch arriving characters from ``start``, one every ``every``
+        seconds, at an angle that sweeps between ``angle`` degrees above
+        the horizontal every ``period`` seconds, so each lands elsewhere.
+        Without a launcher, characters drop in from the top."""
+        ...
+    def place(
+        self,
+        rank: int,
+        at: tuple[float, float],
+        *,
+        express: Optional[str] = None,
+        loop: bool = True,
+    ) -> LiveZone:
+        """The player at ``rank`` (0 for the leader) stands with their feet
+        at ``at``, playing ``express`` while there.
+
+        Example:
+            podium.place(0, (0, 1), express="winner")
+        """
+        ...
+    def race(
+        self,
+        origin: tuple[float, float],
+        *,
+        step: tuple[float, float] = (0.0, -1.0),
+        direction: tuple[float, float] = (1.0, 0.0),
+        length: float = 10.0,
+        count: int = 5,
+    ) -> LiveZone:
+        """The first ``count`` players run along lanes: rank ``r`` stands
+        at ``origin + step * r + direction * length * score / leader's
+        score``, gliding when the standings change. Match it to
+        ``Leaderboard.bar`` lanes to run beside the bars."""
+        ...
+    def on_join(self, express: str, *, loop: bool = False) -> LiveZone:
+        """A character that arrives plays ``express``."""
+        ...
+    def on_land(
+        self,
+        express: str,
+        *,
+        tag: Optional[str] = None,
+        loop: bool = False,
+    ) -> LiveZone:
+        """A character that lands plays ``express``: on surfaces tagged
+        ``tag``, or on any. The zone's bottom is tagged ``"bottom"``.
+
+        Example:
+            zone.on_land("sad", tag="water").on_land("happy", tag="floor")
+        """
+        ...
+    def on_rank_up(self, express: str, *, loop: bool = False) -> LiveZone:
+        """A character that goes up the leaderboard plays ``express``."""
+        ...
+    def on_rank_down(self, express: str, *, loop: bool = False) -> LiveZone:
+        """A character that goes down the leaderboard plays ``express``."""
+        ...
+    def on_leader(self, express: str, *, loop: bool = False) -> LiveZone:
+        """A character that becomes the leader plays ``express``."""
+        ...
+    def close(self) -> None:
+        """Stop the zone at the cursor instead of at the end of the segment
+        where it opened. Raises ``ValueError`` if already closed."""
+        ...
+
 class Condition:
     """What the audience must do before a stop advances by itself, from
     ``poll.answered``, ``quiz.time_up`` or ``audience.at_least``.
@@ -8112,6 +8216,35 @@ class Scene:
                 y = 1 - rank
                 board.name(rank, size=0.5).move_to(-3, y)
                 scene.viz.readout(board.points(rank), format=".0f").move_to(3, y)
+        """
+        ...
+    def live_zone(
+        self,
+        audience: Audience,
+        *,
+        bounds: tuple[float, float, float, float] = (-8.0, -4.5, 8.0, 4.5),
+        size: float = 1.2,
+        gravity: float = 20.0,
+        preview: Optional[Sequence[str]] = None,
+        preview_every: float = 0.6,
+    ) -> LiveZone:
+        """A live zone at the cursor, running until ``zone.close()`` or the
+        end of the segment: while presenting, each player of ``audience``
+        arrives in it as their character.
+
+        ``bounds`` is (x0, y0, x1, y1): characters are clipped to it and
+        land on its bottom at the latest. They are ``size`` units tall and
+        fall with ``gravity``. Previews and exports replay ``preview``
+        players (the audience's by default), one every ``preview_every``
+        seconds. Raises ``ValueError`` for empty bounds or a non-positive
+        size.
+
+        Example:
+            zone = scene.live_zone(audience, size=1.2)
+            zone.launcher((-7, 3), angle=(10, 60))
+            zone.surface((-8, -3), (0, -3), tag="floor")
+            zone.surface((0, -3.4), (8, -3.4), tag="water", sink=0.3)
+            zone.on_land("happy", tag="floor").on_land("sad", tag="water")
         """
         ...
     def character(

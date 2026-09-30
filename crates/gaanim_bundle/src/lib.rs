@@ -75,6 +75,8 @@ pub const EXTENSION: &str = "gaanim";
 pub const THUMBNAIL: &str = "thumbnail.png";
 /// Optional audience polls, as JSON.
 const POLLS: &str = "polls.json";
+/// Live zones, as JSON: the player runs them, so frames never hold them.
+const LIVE: &str = "live.json";
 /// Frames per chunk: one second at the default rate.
 const CHUNK_FRAMES: usize = 60;
 
@@ -162,6 +164,8 @@ pub struct SceneData {
     pub poll_session: Option<PollSessionInfo>,
     /// Stops that advance once the audience meets a condition.
     pub stop_gates: Vec<StopGate>,
+    /// Live zones, which the player runs while presenting.
+    pub live_zones: Vec<gaanim_animation::live::LiveZone>,
     /// Elements drawn as poll bars, which a live presentation redraws.
     pub poll_bars: Vec<PollBarRecord>,
     /// Elements drawn as live text, such as leaderboard nicknames.
@@ -737,6 +741,7 @@ impl SceneData {
             polls: Vec::new(),
             poll_session: None,
             stop_gates: Vec::new(),
+            live_zones: Vec::new(),
             poll_bars: Vec::new(),
             poll_texts: Vec::new(),
             poll_readouts: Vec::new(),
@@ -1044,6 +1049,11 @@ impl<W: Write + Seek> BundleWriter<W> {
         if !scene.polls.is_empty() || scene.poll_session.is_some() || !scene.stop_gates.is_empty() {
             self.write_entry(POLLS, &write_polls(scene)?)?;
         }
+        if !scene.live_zones.is_empty() {
+            let json = serde_json::to_vec(&scene.live_zones)
+                .map_err(|error| BundleError::Corrupt(error.to_string()))?;
+            self.write_entry(LIVE, &json)?;
+        }
 
         let manifest = Manifest {
             format: FORMAT.into(),
@@ -1259,6 +1269,11 @@ impl Bundle {
                 &read_entry(&mut archive, Some(&manifest), POLLS)?,
                 &mut scene,
             )?;
+        }
+        if manifest.entries.contains_key(LIVE) {
+            scene.live_zones =
+                serde_json::from_slice(&read_entry(&mut archive, Some(&manifest), LIVE)?)
+                    .map_err(|error| BundleError::Corrupt(format!("{LIVE}: {error}")))?;
         }
 
         let index = read_entry(&mut archive, Some(&manifest), "index.bin")?;

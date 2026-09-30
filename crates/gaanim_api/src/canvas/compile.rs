@@ -2721,13 +2721,14 @@ impl SceneModel {
                 },
             )
             .collect();
-        let (polls, poll_session, poll_lobby, stop_gates) = {
+        let (polls, poll_session, poll_lobby, stop_gates, live_zones) = {
             let state = self.state.lock().expect("canvas state poisoned");
             (
                 state.polls.clone(),
                 state.poll_session.clone(),
                 state.poll_lobby,
                 state.stop_gates.clone(),
+                state.live_zones.clone(),
             )
         };
         let at = |(segment, local): (usize, f64)| {
@@ -2769,6 +2770,23 @@ impl SceneModel {
                 lobby: poll_lobby,
             }),
         );
+        // Always set, so a reload without zones clears the previous ones.
+        let live_zones: Vec<gaanim_animation::live::LiveZone> = live_zones
+            .into_iter()
+            .filter_map(|record| {
+                let mut zone = record.zone;
+                zone.open = at(record.open)?;
+                zone.close = match record.close {
+                    Some(close) => at(close)?,
+                    None => segment_metadata.get(record.open.0)?.end_time,
+                }
+                .max(zone.open);
+                Some(zone)
+            })
+            .collect();
+        builder
+            .commands
+            .insert_resource(gaanim_animation::live::LiveZones(live_zones));
         builder.timeline.set_stop_gates(
             stop_gates
                 .into_iter()

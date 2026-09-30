@@ -465,6 +465,11 @@ where
         )
     };
     let post_shaders = post_shader_table(app.world().get_resource::<CanvasPostProcess>());
+    let live_zones = app
+        .world()
+        .get_resource::<gaanim_animation::live::LiveZones>()
+        .map(|zones| zones.0.clone())
+        .unwrap_or_default();
     let background = app.world().get_resource::<CanvasBackground>().cloned();
 
     if let Some(parent) = config
@@ -576,6 +581,7 @@ where
         polls,
         poll_session,
         stop_gates,
+        live_zones,
         poll_bars,
         poll_texts,
         poll_readouts,
