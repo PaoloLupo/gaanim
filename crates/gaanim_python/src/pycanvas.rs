@@ -5922,7 +5922,7 @@ impl PyScene {
     /// `audience` arrives in it as their character, posed every frame by
     /// `behavior`, a Python function compiled now. It runs until
     /// `zone.close()` or the end of the segment.
-    #[pyo3(signature = (audience, behavior, *, bounds=(-8.0, -4.5, 8.0, 4.5), size=1.2, squash=0.04, max_stretch=1.4, lean=0.05, max_lean=0.35, follow=1.0, look=0.4, preview=None, preview_every=0.6))]
+    #[pyo3(signature = (audience, behavior, *, bounds=(-8.0, -4.5, 8.0, 4.5), size=1.2, squash=0.04, max_stretch=1.4, lean=0.05, max_lean=0.35, follow=1.0, look=0.4, names=false, name_size=0.24, name_color="#ffffff".to_string(), name_gap=0.08, name_weight=Some(700), preview=None, preview_every=0.6))]
     #[allow(clippy::too_many_arguments)]
     fn live_zone(
         &self,
@@ -5936,6 +5936,11 @@ impl PyScene {
         max_lean: f64,
         follow: f64,
         look: f64,
+        names: bool,
+        name_size: f64,
+        name_color: String,
+        name_gap: f64,
+        name_weight: Option<u16>,
         preview: Option<Vec<String>>,
         preview_every: f64,
     ) -> PyResult<crate::live::PyLiveZone> {
@@ -5948,6 +5953,14 @@ impl PyScene {
             follow,
             look,
         };
+        let names = names.then(|| gaanim_api::canvas::LiveZoneNames {
+            size: name_size,
+            color: name_color,
+            gap: name_gap,
+            font: None,
+            weight: name_weight,
+            glyphs: Vec::new(),
+        });
         let program = crate::live::compile_behavior(behavior)?;
         let inner = self
             .inner
@@ -5959,6 +5972,7 @@ impl PyScene {
                 [bounds.0, bounds.1, bounds.2, bounds.3],
                 size,
                 motion,
+                names,
                 preview,
                 preview_every,
             )

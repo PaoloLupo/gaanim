@@ -36,6 +36,38 @@ pub struct LiveZone {
     /// How the engine deforms characters from how their poses move.
     #[serde(default)]
     pub motion: Motion,
+    /// Nicknames drawn under the characters' feet, or none.
+    #[serde(default)]
+    pub names: Option<ZoneNames>,
+}
+
+/// How a zone draws each player's nickname under their character, when the
+/// pose shows it. The glyphs are shaped when the scene compiles and travel
+/// with the zone, so a bundle draws names without fonts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ZoneNames {
+    /// Font size, in scene units.
+    pub size: f64,
+    /// `#rrggbb` or `#rrggbbaa`.
+    pub color: String,
+    /// Gap between the feet and the top of the name.
+    pub gap: f64,
+    #[serde(default)]
+    pub font: Option<String>,
+    #[serde(default)]
+    pub weight: Option<u16>,
+    /// Printable ASCII and Latin-1 glyphs, filled when the scene compiles.
+    #[serde(default)]
+    pub glyphs: Vec<NameGlyph>,
+}
+
+/// One character's outline (SVG path data, baseline at y = 0, y up) and
+/// advance, in scene units.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NameGlyph {
+    pub ch: char,
+    pub advance: f64,
+    pub path: String,
 }
 
 /// Deformations the engine adds from how a pose moves, measured by

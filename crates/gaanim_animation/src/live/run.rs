@@ -7,18 +7,32 @@
 //! plays from then. That check runs on a fixed grid of [`STEP`]s from the
 //! zone's opening, so a replay seeked to a time is the one played to it.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use gaanim_core::kurbo::{Affine, BezPath, Point, Vec2};
-use gaanim_core::peniko::Brush;
+use gaanim_core::kurbo::{Affine, BezPath, Point, Shape, Vec2};
+use gaanim_core::peniko::{Brush, Color};
 use gaanim_objects::character::{
     CHARACTER_ENVELOPE, Character, CharacterDrive, ExpressionPlay, catalog, character_seed,
     follow_lag, to_scene,
 };
 
 use super::program::{Inputs, Pose};
-use super::spec::LiveZone;
+use super::spec::{LiveZone, ZoneNames};
+
+/// `#rrggbb` or `#rrggbbaa`; white when unreadable.
+fn hex_color(text: &str) -> Color {
+    let hex = text.trim_start_matches('#');
+    let channel = |at: usize| {
+        hex.get(at..at + 2)
+            .and_then(|pair| u8::from_str_radix(pair, 16).ok())
+    };
+    match (channel(0), channel(2), channel(4), hex.len()) {
+        (Some(r), Some(g), Some(b), 6) => Color::from_rgb8(r, g, b),
+        (Some(r), Some(g), Some(b), 8) => Color::from_rgba8(r, g, b, channel(6).unwrap_or(255)),
+        _ => Color::WHITE,
+    }
+}
 
 fn finite_or(value: f64, fallback: f64) -> f64 {
     if value.is_finite() { value } else { fallback }
@@ -81,6 +95,10 @@ pub struct ZoneRun {
     actors: Vec<Actor>,
     arrived: HashSet<Arc<str>>,
     registers: Vec<f64>,
+    /// Name outlines laid out from the zone's glyphs, centred on x = 0 with
+    /// their top at y = 0.
+    names: HashMap<Arc<str>, BezPath>,
+    glyphs: Option<HashMap<char, (BezPath, f64)>>,
 }
 
 impl ZoneRun {
@@ -301,6 +319,42 @@ impl ZoneRun {
         self.clock = clock.max(self.stepped);
     }
 
+    /// `name` laid out from the zone's glyphs: centred on x = 0, its top at
+    /// y = 0. Characters without a glyph show as `?`.
+    fn name_path(&mut self, names: &ZoneNames, name: &Arc<str>) -> BezPath {
+        if let Some(path) = self.names.get(name) {
+            return path.clone();
+        }
+        let glyphs = self.glyphs.get_or_insert_with(|| {
+            names
+                .glyphs
+                .iter()
+                .filter_map(|glyph| {
+                    let path = BezPath::from_svg(&glyph.path).ok()?;
+                    Some((glyph.ch, (path, glyph.advance)))
+                })
+                .collect()
+        });
+        let mut path = BezPath::new();
+        let mut pen = 0.0;
+        for ch in name.chars() {
+            let Some((outline, advance)) = glyphs.get(&ch).or_else(|| glyphs.get(&'?')) else {
+                continue;
+            };
+            let mut glyph = outline.clone();
+            glyph.apply_affine(Affine::translate((pen, 0.0)));
+            path.extend(glyph);
+            pen += advance;
+        }
+        // Capitals hang from y = 0 whatever the name's descenders.
+        let cap = glyphs
+            .get(&'H')
+            .map_or(names.size * 0.7, |(outline, _)| outline.bounding_box().y1);
+        path.apply_affine(Affine::translate((-pen / 2.0, -cap)));
+        self.names.insert(name.clone(), path.clone());
+        path
+    }
+
     /// The zone's characters as filled paths in scene units, back to front.
     pub fn draw(&mut self, zone: &LiveZone) -> Vec<(BezPath, Brush)> {
         let catalog = catalog();
@@ -341,6 +395,12 @@ impl ZoneRun {
                 let mut path = (*layer.outline).clone();
                 path.apply_affine(place * layer.transform);
                 paths.push((path, Brush::Solid(layer.color)));
+            }
+            if let Some(names) = zone.names.as_ref().filter(|_| pose.show_name) {
+                let name = self.actors[index].player.name.clone();
+                let mut path = self.name_path(names, &name);
+                path.apply_affine(Affine::translate((pose.x, pose.y - names.gap)));
+                paths.push((path, Brush::Solid(hex_color(&names.color))));
             }
         }
         paths
@@ -396,6 +456,7 @@ mod tests {
             preview_every: 0.5,
             behavior: behavior.checked().unwrap(),
             motion: Default::default(),
+            names: None,
         }
     }
 
@@ -461,7 +522,7 @@ mod tests {
         let json = r#"{"version":[1,0],"name":"f","strings":["happy"],
             "code":[{"input":"t"},{"const":"1.0"},{"ge":[0,1]},{"const":"0.0"},
                     {"const":"-1.0"},{"select":[2,3,4]},{"const":"nan"}],
-            "pose":{"x":3,"y":3,"rotation":3,"scale":1,"sx":1,"sy":1,"lean":3,"look_x":6,"look_y":6,"flip":3,"visible":1,
+            "pose":{"x":3,"y":3,"rotation":3,"scale":1,"sx":1,"sy":1,"lean":3,"look_x":6,"look_y":6,"show_name":4,"flip":3,"visible":1,
                     "express":5,"since":6,"loop":3}}"#;
         let mut zone = zipline();
         zone.behavior = Program::from_json(json).unwrap();
@@ -503,7 +564,7 @@ mod tests {
                 r#"{{"version":[1,0],"name":"run","strings":[],
                 "code":[{{"input":"t"}},{{"const":"{speed}"}},{{"mul":[0,1]}},{{"const":"0.0"}},
                         {{"const":"1.0"}},{{"const":"-1.0"}},{{"const":"nan"}}],
-                "pose":{{"x":2,"y":3,"rotation":3,"scale":4,"sx":4,"sy":4,"lean":3,"look_x":6,"look_y":6,"flip":3,
+                "pose":{{"x":2,"y":3,"rotation":3,"scale":4,"sx":4,"sy":4,"lean":3,"look_x":6,"look_y":6,"show_name":4,"flip":3,
                         "visible":4,"express":5,"since":6,"loop":3}}}}"#
             );
             Program::from_json(&json).unwrap()
@@ -547,7 +608,7 @@ mod tests {
             "code":[{"input":"t"},{"const":"4.0"},{"mul":[0,1]},{"min":[2,1]},
                     {"const":"0.0"},{"const":"1.0"},{"const":"-1.0"},{"const":"nan"}],
             "pose":{"x":3,"y":4,"rotation":4,"scale":5,"sx":5,"sy":5,"lean":4,
-                    "look_x":7,"look_y":7,"flip":4,"visible":5,"express":6,"since":7,"loop":4}}"#;
+                    "look_x":7,"look_y":7,"show_name":5,"flip":4,"visible":5,"express":6,"since":7,"loop":4}}"#;
         let mut zone = zipline();
         zone.behavior = Program::from_json(json).unwrap();
         let bunny = Player {

@@ -30,7 +30,7 @@ use crate::polls::PollResults;
 use crate::updaters::PlaybackState;
 pub use program::{Inputs, Pose, Program, ProgramError};
 pub use run::{Player, STEP, ZoneRun};
-pub use spec::{LiveZone, Motion};
+pub use spec::{LiveZone, Motion, NameGlyph, ZoneNames};
 
 /// The live zones of the scene, as compiled or read from a bundle.
 #[derive(Resource, Debug, Clone, Default, PartialEq)]
@@ -186,7 +186,7 @@ mod tests {
     fn a_stop_at_a_shared_boundary_holds_the_outgoing_zone() {
         let json = r#"{"version":[1,0],"code":[{"const":"0.0"}],
             "pose":{"x":0,"y":0,"rotation":0,"scale":0,"sx":0,"sy":0,"lean":0,
-                    "look_x":0,"look_y":0,"flip":0,"visible":0,"express":0,"since":0,"loop":0}}"#;
+                    "look_x":0,"look_y":0,"show_name":0,"flip":0,"visible":0,"express":0,"since":0,"loop":0}}"#;
         let zone = |open: f64, close: f64| LiveZone {
             id: "z".into(),
             open,
@@ -199,6 +199,7 @@ mod tests {
             preview_every: 1.0,
             behavior: Program::from_json(json).unwrap(),
             motion: Motion::default(),
+            names: None,
         };
         // Two segments meeting at 8, the first ending in a stop.
         let mut sala = zone(0.0, 8.0);

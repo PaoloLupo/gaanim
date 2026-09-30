@@ -2789,6 +2789,27 @@ impl SceneModel {
                 .max(zone.open);
                 zone.stop_at_open = stop_at(zone.open);
                 zone.stop_at_close = stop_at(zone.close);
+                if let Some(names) = zone.names.as_mut() {
+                    // Shape the glyphs now, so bundles draw names without fonts.
+                    let body = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
+                    let family = names.font.clone().unwrap_or_else(|| body.font_family.clone());
+                    names.glyphs = gaanim_animation::polls::atlas_characters()
+                        .filter_map(|ch| {
+                            let (path, advance) = gaanim_animation::polls::shape_glyph(
+                                font_registry,
+                                ch,
+                                &family,
+                                names.weight,
+                                names.size,
+                            )?;
+                            Some(gaanim_animation::live::NameGlyph {
+                                ch,
+                                advance,
+                                path: path.to_svg(),
+                            })
+                        })
+                        .collect();
+                }
                 Some(zone)
             })
             .collect();

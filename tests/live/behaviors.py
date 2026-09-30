@@ -121,6 +121,7 @@ def animated(p):
         sy=sy,
         lean=-0.1 * spring(p.t - land, damping=0.2),
         look_x=-1 if p.rank else 0.5,
+        show_name=p.t > land,
         look_y=0.3,
     )
 

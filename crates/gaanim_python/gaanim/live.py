@@ -98,6 +98,7 @@ class Pose(NamedTuple):
     lean: float = 0.0
     look_x: Optional[float] = None
     look_y: Optional[float] = None
+    show_name: bool = True
     flip: bool = False
     visible: bool = True
     express: Optional[str] = None
@@ -116,6 +117,7 @@ def pose(
     lean: float = 0.0,
     look_x: Optional[float] = None,
     look_y: Optional[float] = None,
+    show_name: bool = True,
     flip: bool = False,
     visible: bool = True,
     express: Optional[str] = None,
@@ -130,15 +132,17 @@ def pose(
     about the feet, for squash and stretch (``impact`` and ``anticipate``
     give them); ``lean`` tilts it about the feet. ``look_x`` and ``look_y``
     (each from -1 to 1, right and up) turn its eyes; without them it looks
-    where it moves. ``flip`` mirrors it left to right; ``visible=False``
-    hides it. ``express`` plays an expression (``"happy"``, ``"sad"``, ``"hurt"``,
+    where it moves. ``show_name=False`` hides the nickname under its feet
+    in a zone that draws names. ``flip`` mirrors it left to right;
+    ``visible=False`` hides it. ``express`` plays an expression (``"happy"``, ``"sad"``, ``"hurt"``,
     ``"winner"``, ``"surprised"``), once or with ``loop=True`` until another
     one. It starts when it first appears, or at ``since``: the player's
     ``t`` when it started, for expressions that follow a moment the behavior
     computes, like landing.
     """
     return Pose(
-        x, y, rotation, scale, sx, sy, lean, look_x, look_y, flip, visible, express, since, loop
+        x, y, rotation, scale, sx, sy, lean, look_x, look_y, show_name, flip, visible, express,
+        since, loop,
     )
 
 
@@ -1178,7 +1182,7 @@ class _Compiler:
                     value = _Value("num", self.const(math.nan))
                 elif value.kind not in ("num", "bool"):
                     raise self.fail(node, f"{name} must be a number or None, got {self.describe(value)}")
-            elif name in ("flip", "visible", "loop"):
+            elif name in ("flip", "visible", "loop", "show_name"):
                 value = _Value("bool", self.truth(value, node))
             else:
                 value = _Value("num", self.scalar(value, node, f"{name} as a number"))

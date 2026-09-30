@@ -8152,6 +8152,11 @@ class Scene:
         max_lean: float = 0.35,
         follow: float = 1.0,
         look: float = 0.4,
+        names: bool = False,
+        name_size: float = 0.24,
+        name_color: str = "#ffffff",
+        name_gap: float = 0.08,
+        name_weight: Optional[int] = 700,
         preview: Optional[Sequence[str]] = None,
         preview_every: float = 0.6,
     ) -> LiveZone:
@@ -8181,7 +8186,12 @@ class Scene:
         like a spring, ``follow`` times as much as the catalog tunes it,
         and the eyes look toward the motion by ``look`` per unit of speed.
         Pass 0 to turn any off; ``pose(sx=, sy=, lean=, look_x=, look_y=)``
-        sets your own. Previews and exports replay
+        sets your own.
+
+        ``names=True`` draws each player's nickname ``name_gap`` below
+        their feet, ``name_size`` tall in ``name_color``, whenever their
+        pose has ``show_name`` (the default); the glyphs travel with the
+        zone, so a ``.gaanim`` draws names without fonts. Previews and exports replay
         ``preview`` players (the audience's by default), one arriving every
         ``preview_every`` seconds and ranked in the order given. Raises
         ``gaanim.live.BehaviorError`` (a ``ValueError``) pointing at the

@@ -4,7 +4,7 @@
 //! while a presentation takes votes (see `gaanim_animation::live`), and in
 //! previews and exports it replays its preview players.
 
-use gaanim_animation::live::{LiveZone, Motion, Program, ProgramError};
+use gaanim_animation::live::{LiveZone, Motion, Program, ProgramError, ZoneNames};
 use gaanim_objects::character::catalog;
 
 use super::SceneModel;
@@ -96,6 +96,7 @@ impl SceneModel {
         bounds: [f64; 4],
         size: f64,
         motion: Motion,
+        names: Option<ZoneNames>,
         preview: Option<Vec<String>>,
         preview_every: f64,
     ) -> Result<LiveZoneHandle, LiveZoneError> {
@@ -123,6 +124,14 @@ impl SceneModel {
                 "{name} must be zero or positive, got {value}"
             )));
         }
+        if let Some(names) = &names
+            && !(names.size.is_finite() && names.size > 0.0 && names.gap.is_finite())
+        {
+            return Err(LiveZoneError::Invalid(format!(
+                "name size must be positive and the gap finite, got {} and {}",
+                names.size, names.gap
+            )));
+        }
         let behavior = check_behavior(behavior)?;
         let preview = preview.unwrap_or_else(|| audience.preview());
         let mut state = self.state.lock().expect("canvas state poisoned");
@@ -141,6 +150,7 @@ impl SceneModel {
                 preview_every,
                 behavior,
                 motion,
+                names,
             },
             open,
             close: None,

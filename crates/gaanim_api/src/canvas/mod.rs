@@ -89,6 +89,7 @@ pub use character::{CharacterError, CharacterHandle};
 mod live;
 pub use gaanim_animation::live::{
     LiveZone, Motion as LiveMotion, Program as LiveProgram, ProgramError as LiveProgramError,
+    ZoneNames as LiveZoneNames,
 };
 pub use gaanim_objects::character::Character;
 pub use live::{LiveZoneError, LiveZoneHandle, check_behavior};
