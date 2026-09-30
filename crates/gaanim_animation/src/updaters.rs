@@ -1939,7 +1939,9 @@ pub fn tracking_world_to_local(entity: Entity, point: DVec3, world: &World) -> D
         .unwrap_or(point)
 }
 
-fn entity_world_matrix(entity: Entity, world: &World) -> Option<DMat4> {
+/// World matrix of `entity` composed from its `SpatialTransform` chain,
+/// independent of transform propagation order.
+pub fn entity_world_matrix(entity: Entity, world: &World) -> Option<DMat4> {
     let mut chain = Vec::new();
     let mut hud = false;
     let mut current = entity;

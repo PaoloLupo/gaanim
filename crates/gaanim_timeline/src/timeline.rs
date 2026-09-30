@@ -1977,8 +1977,10 @@ impl Timeline {
     }
 
     /// Show every [`gaanim_animation::EchoGhost`] as its source was `lag`
-    /// seconds before the current time, and deform every
-    /// [`gaanim_animation::SquashStretch`] drawable along its velocity.
+    /// seconds before the current time, deform every
+    /// [`gaanim_animation::SquashStretch`] drawable along its velocity, and
+    /// place every [`gaanim_animation::DelayedFollow`] where its leader was
+    /// `delay` seconds earlier.
     ///
     /// Both evaluate a drawable at another time the same way: restore its
     /// keyframe state onto another entity and replay the drawable's own
@@ -2001,7 +2003,12 @@ impl Timeline {
             .iter(world)
             .map(|(entity, id, squash)| (entity, id.0, squash.clone()))
             .collect();
-        if ghosts.is_empty() && squashes.is_empty() {
+        let follows: Vec<(Entity, gaanim_animation::DelayedFollow)> = world
+            .query::<(Entity, &gaanim_animation::DelayedFollow)>()
+            .iter(world)
+            .map(|(entity, follow)| (entity, follow.clone()))
+            .collect();
+        if ghosts.is_empty() && squashes.is_empty() && follows.is_empty() {
             return;
         }
         let entity_map: HashMap<gaanim_core::ObjectId, Entity> = world
@@ -2020,6 +2027,7 @@ impl Timeline {
                 })
             })
             .chain(squashes.iter().map(|(_, id, _)| *id))
+            .chain(follows.iter().map(|(_, follow)| follow.source))
             .collect();
         let mut source_clips: HashMap<gaanim_core::ObjectId, Vec<&Clip>> = HashMap::new();
         for clip in self
@@ -2045,6 +2053,18 @@ impl Timeline {
                 .map(|position| position.segment_id)
         };
         let current_segment = segment(self.current_time);
+        // Start and end of the segment holding the current time.
+        let (segment_start, segment_end) = self
+            .segments
+            .iter()
+            .rev()
+            .find(|segment| {
+                segment.start_time <= self.current_time + 1e-9
+                    && self.current_time <= segment.end_time + 1e-9
+            })
+            .map_or((0.0, self.cached_duration), |segment| {
+                (segment.start_time, segment.end_time)
+            });
 
         for (ghost, echo) in ghosts {
             let time = if echo.hold {
@@ -2108,17 +2128,7 @@ impl Timeline {
                 }
             };
             // A centred difference inside the current segment and timeline.
-            let (low, high) = self
-                .segments
-                .iter()
-                .rev()
-                .find(|segment| {
-                    segment.start_time <= self.current_time + 1e-9
-                        && self.current_time <= segment.end_time + 1e-9
-                })
-                .map_or((0.0, self.cached_duration), |segment| {
-                    (segment.start_time, segment.end_time)
-                });
+            let (low, high) = (segment_start, segment_end);
             let before = (self.current_time - gaanim_animation::SQUASH_STEP)
                 .max(low)
                 .max(0.0);
@@ -2139,6 +2149,60 @@ impl Timeline {
             let deform = gaanim_scene::ShapeDeform(squash.deform(velocity));
             if world.get::<gaanim_scene::ShapeDeform>(entity) != Some(&deform) {
                 world.entity_mut(entity).insert(deform);
+            }
+        }
+
+        for (entity, follow) in follows {
+            let probe = match follow
+                .probe
+                .filter(|probe| world.get_entity(*probe).is_ok())
+            {
+                Some(probe) => probe,
+                None => {
+                    let probe = world.spawn_empty().id();
+                    if let Some(mut stored) =
+                        world.get_mut::<gaanim_animation::DelayedFollow>(entity)
+                    {
+                        stored.probe = Some(probe);
+                    }
+                    probe
+                }
+            };
+            let time = follow.source_time(self.current_time, segment_start.max(0.0));
+            let Some(parent) = self.replay_source_into(
+                world,
+                follow.source,
+                clips_of(&follow.source),
+                time,
+                probe,
+                |state| {
+                    state.scene = None;
+                    state.visible = false;
+                },
+            ) else {
+                continue;
+            };
+            let Some(local) = world.get::<SpatialTransform>(probe).map(|t| t.to_mat4()) else {
+                continue;
+            };
+            // The leader's delayed local transform under its current parent.
+            let source_world = parent
+                .and_then(|parent| entity_map.get(&parent).copied())
+                .and_then(|parent| gaanim_animation::entity_world_matrix(parent, world))
+                .map_or(local, |parent| parent * local);
+            let world_position = follow.position(source_world);
+            let position = world
+                .get::<ChildOf>(entity)
+                .map(|relation| relation.parent())
+                .and_then(|parent| gaanim_animation::entity_world_matrix(parent, world))
+                .filter(|matrix| matrix.determinant().abs() > f64::EPSILON)
+                .map_or(world_position, |matrix| {
+                    matrix.inverse().transform_point3(world_position)
+                });
+            if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity)
+                && transform.translation != position
+            {
+                transform.translation = position;
             }
         }
     }

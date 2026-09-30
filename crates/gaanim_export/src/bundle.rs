@@ -328,9 +328,9 @@ where
 /// frames leaves the following grid frames unchanged.
 ///
 /// Updaters advance by the seek deltas, traced paths and sampled series
-/// accumulate, echoes and squash read earlier frames, and custom animations
-/// and signal bindings run user code that may keep state; any of them keeps
-/// the second world. Reactive callables (value trackers, property bindings,
+/// accumulate, echoes, squash and delayed follows read earlier frames, and
+/// custom animations and signal bindings run user code that may keep state;
+/// any of them keeps the second world. Reactive callables (value trackers, property bindings,
 /// redraw functions) must already be pure functions of their declared inputs
 /// and time, since the editor seeks anywhere, and built-in lenses that report
 /// [`history_free`](gaanim_animation::AnimatableLens::history_free) are pure.
@@ -344,6 +344,7 @@ fn history_free(world: &mut World) -> bool {
         With<anim::TracedPath3D>,
         With<anim::SurroundingRect>,
         With<anim::SquashStretch>,
+        With<anim::DelayedFollow>,
         With<anim::EchoGhost>,
         With<anim::SignalBinding>,
     )>>();

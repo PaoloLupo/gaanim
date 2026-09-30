@@ -1151,6 +1151,19 @@ pub struct Anim {
     repeat: Option<AnimRepeat>,
     /// Sound effect anchored to the animation's resolved start.
     sound: Option<gaanim_timeline::sound::SoundCue>,
+    settle: Option<AnimSettle>,
+}
+
+/// Inertial bounce requested on an [`Anim`], appended once its duration,
+/// easing, and repetition are final (see [`Anim::apply_settle`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AnimSettle {
+    /// Seconds of bounce per unit of final velocity (After Effects' `amp`).
+    pub overshoot: f64,
+    /// Oscillations per second.
+    pub frequency: f64,
+    /// Exponential decay rate per second.
+    pub decay: f64,
 }
 
 /// Repetition requested on an [`Anim`], expanded once its duration and
@@ -1271,6 +1284,7 @@ impl Anim {
             camera_capture_before_play: None,
             repeat: None,
             sound: None,
+            settle: None,
         }
     }
 
@@ -2594,6 +2608,51 @@ impl Anim {
             gap: gap.max(0.0),
         });
         self
+    }
+
+    /// Adds an inertial bounce after the last value: the animated property
+    /// overshoots its target and oscillates back as
+    /// `v * overshoot * sin(2π * frequency * t) / e^(decay * t)`, where `v` is
+    /// the final velocity of the motion (the average one when the easing
+    /// ends at rest). The animation lasts until the bounce settles below
+    /// 0.1% of the distance travelled; `overshoot = 0` removes the bounce.
+    pub fn settle(mut self, overshoot: f64, frequency: f64, decay: f64) -> Result<Self, String> {
+        if !(overshoot.is_finite() && overshoot >= 0.0) {
+            return Err(format!(
+                "overshoot must be a finite number >= 0, got {overshoot}"
+            ));
+        }
+        if !(frequency.is_finite() && frequency > 0.0) {
+            return Err(format!(
+                "frequency must be a finite number > 0, got {frequency}"
+            ));
+        }
+        if !(decay.is_finite() && decay > 0.0) {
+            return Err(format!("decay must be a finite number > 0, got {decay}"));
+        }
+        self.settle = (overshoot > 0.0).then_some(AnimSettle {
+            overshoot,
+            frequency,
+            decay,
+        });
+        Ok(self)
+    }
+
+    /// Appends the requested bounce to the duration and rate function.
+    /// Called after [`Self::apply_repeat`], so it follows the last cycle.
+    pub(crate) fn apply_settle(&mut self) {
+        let Some(settle) = self.settle.take() else {
+            return;
+        };
+        let (rate_func, duration) = RateFunc::settle(
+            self.inner.rate_func.clone(),
+            self.inner.duration,
+            settle.overshoot,
+            settle.frequency,
+            settle.decay,
+        );
+        self.inner.rate_func = rate_func;
+        self.inner.duration = duration;
     }
 
     /// Folds the requested repetition into the duration and rate function.

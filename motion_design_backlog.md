@@ -166,7 +166,7 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
 | ☑ | [TR-05](#tr-05--trazo-con-grosor-variable) | Trazo con grosor variable (taper) | M | ★★ | — | [#155](https://github.com/PaoloLupo/gaanim/issues/155) |
 | ☐ | [TM-04](#tm-04--keyframes-multicanal) | Keyframes multicanal | M | ★★ | — | [#156](https://github.com/PaoloLupo/gaanim/issues/156) |
 | ☐ | [TM-06](#tm-06--rampas-de-velocidad-y-time-remap) | Rampas de velocidad y time remap | M | ★★ | — | [#157](https://github.com/PaoloLupo/gaanim/issues/157) |
-| ☐ | [TM-07](#tm-07--follow-through-settle-y-cadenas-con-retardo) | Follow-through: `settle` y `follow(delay=)` | M | ★★ | — | [#158](https://github.com/PaoloLupo/gaanim/issues/158) |
+| ☑ | [TM-07](#tm-07--follow-through-settle-y-cadenas-con-retardo) | Follow-through: `settle` y `follow(delay=)` | M | ★★ | — | [#158](https://github.com/PaoloLupo/gaanim/issues/158) |
 | ☑ | [TM-08](#tm-08--squash-and-stretch-por-velocidad) | Squash & stretch por velocidad | S | ★ | — | [#159](https://github.com/PaoloLupo/gaanim/issues/159) |
 
 ### Ola 5: narrativa, audio y explicación

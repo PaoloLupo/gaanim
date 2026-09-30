@@ -2032,6 +2032,30 @@ class Anim:
             scene.play(title.animate.write().sound("typing.wav", volume=0.6))
         """
         ...
+    def settle(self, overshoot: float = 0.12, frequency: float = 3.0, decay: float = 6.0) -> Anim:
+        """Add an inertial bounce after the last value (follow-through).
+
+        When the motion ends, every animated property overshoots its target
+        and swings back as ``v * overshoot * sin(2π * frequency * t) /
+        e^(decay * t)``, with ``t`` in seconds after the motion and ``v`` its
+        final velocity in units per second (the average velocity when the
+        easing ends at rest, as ``smooth`` does, so an eased move still
+        bounces). ``overshoot`` is After Effects' ``amp``: seconds of
+        bounce per unit of velocity. ``frequency`` is in oscillations per
+        second and ``decay`` in 1/s.
+
+        The animation grows until the bounce settles below 0.1% of the
+        distance travelled (at most 10 s more) and ends exactly on the
+        target, so ``play`` waits for it and later animations start from
+        rest. It follows the last cycle of ``repeat``/``loop``. The curve is
+        a pure function of time, so any seek is exact. ``overshoot = 0``
+        keeps the plain motion; a negative ``overshoot`` or a non-positive
+        ``frequency``/``decay`` raises ``ValueError``.
+
+        Example:
+            card.animate.move_to(0, 0).duration(0.5).settle(overshoot=0.12, frequency=3.0, decay=6.0)
+        """
+        ...
     def repeat(self, count: int, *, yoyo: bool = False, delay: float = 0.0) -> Anim:
         """Play this animation ``count`` times; ``duration`` and ``easing`` describe one cycle.
 
@@ -3502,12 +3526,27 @@ class Drawable:
             drawable.follow_to(source, (0.0, 0.0))
         """
         ...
-    def follow(self, source: Endpoint, *, offset: tuple[float, float] = (0.0, 0.0), offset_space: Literal["world", "local"] = "world") -> Self:
+    def follow(self, source: Endpoint, *, offset: tuple[float, float] = (0.0, 0.0), offset_space: Literal["world", "local"] = "world", delay: float = 0.0) -> Self:
         """Follow any endpoint in the same frame and return this drawable.
 
         World offsets remain screen-aligned; local offsets rotate and scale with
         drawable or anchored sources. Non-finite offsets and invalid modes error.
         The drawable stays hidden until its entry animation is played.
+
+        ``delay`` (seconds) places this drawable where a Drawable ``source``
+        was ``delay`` seconds earlier, like After Effects'
+        ``valueAtTime(time - delay)``: chain followers with growing delays
+        for trails and tails (overlapping action). The leader's animations
+        are re-evaluated at ``t - delay`` on every frame, so any seek
+        reproduces the trail without accumulated state. Until the current
+        segment has run for ``delay`` seconds the follower holds the
+        leader's position at the segment start. A positive ``delay`` needs a
+        Drawable ``source`` (``TypeError`` otherwise); a negative or
+        non-finite one raises ``ValueError``.
+
+        Example:
+            for i, dot in enumerate(dots):
+                dot.follow(leader, delay=0.06 * (i + 1))
         """
         ...
     def bind_rotation_from(self, source: Drawable, *, ratio: float = 1.0, phase: float = 0.0) -> Self:
