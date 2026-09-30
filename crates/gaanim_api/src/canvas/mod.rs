@@ -34,6 +34,11 @@ pub use types::{
 /// Raster image handle; remains compatible with every DrawableHandle consumer.
 pub type ImageHandle = DrawableHandle;
 
+mod bar_race;
+pub use bar_race::{
+    BAR_RACE_PALETTE, BarRace, BarRaceBar, BarRaceLabels, BarRaceOptions,
+};
+pub use gaanim_visualization::{BarRaceModel, ValueFormat};
 mod camera_view;
 mod drawable;
 mod duplicate;

@@ -184,7 +184,7 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
 | ☐ | [AN-01](#an-01--anotaciones-a-mano-alzada) | Anotaciones a mano alzada | M | ★★★ | TR-01, PR-02 | [#168](https://github.com/PaoloLupo/gaanim/issues/168) |
 | ☑ | [AN-03](#an-03--puntas-de-flecha-en-cualquier-trazo) | Puntas de flecha en cualquier trazo | S | ★ | TR-01 | [#169](https://github.com/PaoloLupo/gaanim/issues/169) |
 | ☑ | [AN-04](#an-04--énfasis-adicionales) | Énfasis adicionales (broadcast, spotlight…) | S | ★★ | — | [#170](https://github.com/PaoloLupo/gaanim/issues/170) |
-| ☐ | [AN-05](#an-05--carrera-de-barras) | Carrera de barras (bar chart race) | M | ★★ | — | [#171](https://github.com/PaoloLupo/gaanim/issues/171) |
+| ☑ | [AN-05](#an-05--carrera-de-barras) | Carrera de barras (bar chart race) | M | ★★ | — | [#171](https://github.com/PaoloLupo/gaanim/issues/171) |
 | ☑ | [AN-07](#an-07--anillos-de-progreso-y-temporizadores) | Anillos de progreso y temporizadores | S | ★ | TR-01 | [#172](https://github.com/PaoloLupo/gaanim/issues/172) |
 
 ### Ola 6: apuestas grandes
@@ -1517,6 +1517,12 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
   las barras se adelanten con fluidez y etiquetas con ticker).
 - **Implementación:** Extiende `scene.viz` y las charts declarativas, y reutiliza
   `rolling_number` para las etiquetas.
+- **Hecho:** `scene.viz.bar_race(frames, ...)` devuelve un `BarRace` cuyo estado es
+  función pura de una posición de fotograma clave (`BarRaceModel` en
+  `gaanim_visualization`): valores interpolados, rango suavizado por pares con
+  `rank_smoothing`, barras que salen del `top` desvanecidas y valores y ticker con
+  `rolling_number`. `race.animate.play()` y `race.animate.to(posición)` la animan.
+  El ejemplo `bar_race_demo` aún no tiene baseline.
 
 ### AN-06 · Rutas y mapas
 

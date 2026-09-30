@@ -9320,6 +9320,7 @@ impl SceneModel {
                             number: id_map.get(&layout.number).copied().unwrap_or(layout.number),
                             unit: layout.unit.and_then(|id| id_map.get(&id).copied()),
                             spacing: layout.spacing,
+                            align: layout.align,
                         },
                     );
                 }

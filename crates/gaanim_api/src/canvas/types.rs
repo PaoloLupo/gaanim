@@ -924,6 +924,8 @@ pub(crate) struct ReactiveReadoutLayoutSpec {
     pub number: ObjectId,
     pub unit: Option<ObjectId>,
     pub spacing: f64,
+    /// Row alignment on the group origin; see `ReactiveReadoutLayout::align`.
+    pub align: f64,
 }
 
 #[derive(Debug, Clone)]

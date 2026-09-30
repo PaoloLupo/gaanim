@@ -5049,6 +5049,88 @@ class ProgressRing(Drawable):
         """
         ...
 
+class BarRaceAnimation:
+    """Animation proxy of a ``BarRace``: ``race.animate.play()``."""
+    def play(self) -> Anim:
+        """Run from the current position to the last keyframe at a constant rate.
+
+        The default duration is one second per keyframe still to play;
+        chain ``.duration(seconds)`` to fit the whole race in a fixed time.
+
+        Example:
+            scene.play([race.animate.play().duration(20)])
+        """
+        ...
+    def to(self, position: float) -> Anim:
+        """Move to a keyframe ``position`` at a constant rate.
+
+        ``0`` is the first keyframe and fractional positions lie between
+        keyframes. Raise ValueError outside ``[0, frame_count - 1]``.
+        """
+        ...
+
+class BarRace(Drawable):
+    """A bar chart race: ranked bars that grow, overtake and leave the top.
+
+    The race is a pure function of one keyframe position: values interpolate
+    linearly between keyframes, each bar's slot follows its smoothed rank so
+    overtakes glide instead of jumping, bars leaving the ``top`` ranks fade out
+    below the last slot, and the longest bar always spans the bar area. Names
+    sit in a column left of the bars, rolling numbers follow each bar's end and
+    the ticker in the bottom-right corner shows the keyframe label (whole
+    number labels such as years roll; other labels crossfade). Seeking shows
+    the same frame as playing up to it.
+    """
+    @property
+    def visual(self) -> Drawable:
+        """The group of every row and the ticker; use ``visual.animate`` to move or fade the race."""
+        ...
+    def move_to(self, x: Any, y: Any = None, anchor: Anchor | None = None) -> BarRace:
+        """Position the race by its center and return this BarRace."""
+        ...
+    def shift_by(self, dx: float, dy: float) -> BarRace:
+        """Move the race and return this BarRace."""
+        ...
+    def opacity(self, op: ScalarSource) -> BarRace:
+        """Set or bind the race's opacity and return this BarRace."""
+        ...
+    @property
+    def parameter(self) -> Parameter:
+        """Keyframe position, usable in computed inputs, readouts and sampled drivers."""
+        ...
+    @property
+    def position(self) -> float:
+        """Authoring-side keyframe position; ``0.0`` until set or animated."""
+        ...
+    @property
+    def frame_count(self) -> int:
+        """Number of keyframes."""
+        ...
+    @property
+    def names(self) -> list[str]:
+        """Bar names in the order they first appear in ``frames``."""
+        ...
+    @property
+    def ticker(self) -> Optional[Drawable]:
+        """The keyframe label, or ``None`` with ``ticker=False``."""
+        ...
+    def bar(self, name: str) -> Drawable:
+        """The row of bar ``name``: its bar, name and value, moving between slots.
+
+        Raise KeyError for an unknown name.
+        """
+        ...
+    def set(self, position: float) -> BarRace:
+        """Jump to a keyframe position and return self; after declaration this is a reversible cut.
+
+        Raise ValueError outside ``[0, frame_count - 1]``.
+        """
+        ...
+    @property
+    def animate(self) -> BarRaceAnimation:
+        """Animation proxy: ``animate.play()`` runs the race, ``animate.to(position)`` moves to a keyframe."""
+        ...
+
 class Variable(Drawable):
     """A visible ``Parameter`` with an equation-aligned reactive readout group."""
     @property
@@ -6596,6 +6678,43 @@ class Visualization:
         Example:
             timer = scene.viz.countdown(10)
             scene.play([timer.count_down()])
+        """
+        ...
+    def bar_race(
+        self, frames: Mapping[Any, Mapping[str, float]] | Sequence[tuple[Any, Mapping[str, float]]], *,
+        top: int = 10, rank_smoothing: float = 0.3, value_format: str = "{:,.0f}",
+        width: float = 10.0, height: float = 6.0, label_width: Optional[float] = None,
+        bar_gap: float = 0.18, colors: Mapping[str, ColorLike] | Sequence[ColorLike] | None = None,
+        label_color: Optional[ColorLike] = None, font_size: Optional[float] = None,
+        ticker: bool = True, ticker_size: Optional[float] = None, ticker_color: Optional[ColorLike] = None,
+    ) -> BarRace:
+        """Create a bar chart race centered on the origin, at its first keyframe.
+
+        ``frames`` maps each keyframe label (a year, a date string…) to the
+        ``{name: value}`` of that keyframe, in order; a sequence of
+        ``(label, {name: value})`` pairs works too. A name missing from a
+        keyframe counts as zero there. ``top`` ranks are shown, the leader on
+        top. ``rank_smoothing`` is the number of keyframes (0 to 4) over which
+        an overtake is eased; ``0`` swaps slots instantly. ``value_format`` is
+        a Python format field with optional literal text around it —
+        ``"{}"``, ``"{:,.0f}"``, ``"{:_.2f}"`` or ``"${:,.1f} M"`` — shown by a
+        rolling number (at most 6 decimals).
+
+        ``width`` and ``height`` size the whole race in scene units;
+        ``label_width`` (default 22% of ``width``) is the name column and
+        ``bar_gap`` the empty fraction of each slot. ``colors`` maps names to
+        colors or lists colors to cycle; other bars use a ten-color
+        categorical palette. ``label_color`` defaults to the theme
+        foreground, ``font_size`` to 55% of the bar thickness, ``ticker_size``
+        to 15% of ``height`` and ``ticker_color`` to the theme's muted color.
+
+        Raise ValueError for empty or non-finite data, duplicate names, an
+        unsupported ``value_format``, or non-positive sizes, and TypeError for
+        frames of another shape.
+
+        Example:
+            race = scene.viz.bar_race(frames, top=10, rank_smoothing=0.3, value_format="{:,.0f}")
+            scene.play([race.animate.play().duration(20)])
         """
         ...
     def rolling_number(
