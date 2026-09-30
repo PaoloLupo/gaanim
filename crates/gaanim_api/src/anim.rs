@@ -492,6 +492,15 @@ pub enum AnimationType {
     ReplacementTransform {
         target: ObjectId,
     },
+    /// Keyed "magic move" from the source hierarchy to `target`: each
+    /// `(source, target)` pair morphs position, size, color and shape, other
+    /// visual leaves appear or disappear as `unmatched` says, and the target
+    /// hierarchy takes over at the end.
+    MagicMove {
+        target: ObjectId,
+        pairs: Vec<(ObjectId, ObjectId)>,
+        unmatched: crate::canvas::MagicMoveUnmatched,
+    },
     /// Oscillating wiggle vibration (horizontal).
     Wiggle,
     /// Scale from 0 at a specific anchor point, growing to full size.

@@ -996,6 +996,10 @@ pub struct ObjectSpec {
     pub fragment_fills: Vec<(String, Color)>,
     /// Named fragment queries attached by the high-level equation API.
     pub fragment_tags: Vec<(String, String, Option<usize>)>,
+    /// Author-given name used as a magic-move key (`Drawable.named`).
+    pub(crate) name: Option<String>,
+    /// `id` attribute of the imported SVG group or path this drawable came from.
+    pub(crate) svg_id: Option<String>,
     /// Layout v2 container that owns this drawable's translation.
     pub layout_owner: Option<ObjectId>,
     /// Whether the author has queued a manual translation animation.
@@ -1114,6 +1118,8 @@ impl ObjectSpec {
             exclude_from_parent_draw: false,
             fragment_fills: Vec::new(),
             fragment_tags: Vec::new(),
+            name: None,
+            svg_id: None,
             layout_owner: None,
             manual_position_animation: false,
             material_animation_cursor: None,

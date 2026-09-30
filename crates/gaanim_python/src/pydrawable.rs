@@ -3312,6 +3312,22 @@ impl PyDrawable {
         let result = slf.borrow().opacity_impl(op);
         same_drawable(slf, result)
     }
+    /// Name this drawable; names are the default key of ``magic_move``.
+    fn named<'py>(slf: PyRef<'py, Self>, name: &str) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        if name.trim().is_empty() {
+            return Err(PyValueError::new_err("name must not be empty"));
+        }
+        slf.0.named(name);
+        Ok(slf)
+    }
+
+    /// The name given with ``named()``, or ``None``.
+    #[getter]
+    fn name(&self) -> Option<String> {
+        self.0.name()
+    }
+
     fn z_index<'py>(slf: &Bound<'py, Self>, z: i32) -> PyResult<Bound<'py, PyAny>> {
         let result = slf.borrow().z_index_impl(z);
         same_drawable(slf, result)

@@ -35,6 +35,11 @@ pub enum TransitionType {
         duration: f64,
         mappings: Vec<MorphMapping>,
     },
+    /// Keyed morph ("magic move"): drawables of both segments that share a
+    /// key morph into each other and the rest cross-fade. The authoring layer
+    /// resolves the keys into a [`TransitionType::Morph`] when the scene is
+    /// compiled; the runtime treats an unresolved one as a morph without pairs.
+    MagicMove { duration: f64, key: MagicMoveKey },
     /// A straight edge sweeps across the frame, revealing the incoming scene.
     ///
     /// `direction` is the unit vector the edge travels along; `feather` is the
@@ -87,7 +92,7 @@ impl TransitionType {
             Self::FadeThrough { duration, .. } => *duration,
             Self::Slide { duration, .. } => *duration,
             Self::ZoomThrough { duration, .. } => *duration,
-            Self::Morph { duration, .. } => *duration,
+            Self::Morph { duration, .. } | Self::MagicMove { duration, .. } => *duration,
             Self::Wipe { duration, .. }
             | Self::ClockWipe { duration, .. }
             | Self::Iris { duration, .. }
@@ -257,6 +262,11 @@ impl TransitionType {
         }
     }
 
+    /// Creates a keyed morph between the drawables of two segments.
+    pub fn magic_move(duration: f64, key: MagicMoveKey) -> Self {
+        Self::MagicMove { duration, key }
+    }
+
     /// Creates a cut (instant) transition.
     pub fn cut() -> Self {
         Self::Cut
@@ -370,6 +380,35 @@ impl TransitionOverlay {
     }
 }
 
+/// What identifies the same drawable on both sides of a magic move.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum MagicMoveKey {
+    /// The name given to the drawable by the author, or else its SVG `id`.
+    Name,
+    /// Only the `id` attribute of an imported SVG group or path.
+    SvgId,
+}
+
+impl MagicMoveKey {
+    /// Parse the Python spelling: `"name"` or `"id"`.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "name" => Some(Self::Name),
+            "id" | "svg_id" => Some(Self::SvgId),
+            _ => None,
+        }
+    }
+
+    /// The Python spelling of this key.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Name => "name",
+            Self::SvgId => "id",
+        }
+    }
+}
+
 /// Maps a source mobject to a target mobject for morph transitions.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -430,5 +469,29 @@ mod tests {
             .with_sound(first)
             .with_sound(second.clone());
         assert_eq!(transition.sound(), Some(&second));
+    }
+
+    #[test]
+    fn magic_move_keys_parse_their_python_spelling() {
+        assert_eq!(MagicMoveKey::parse("name"), Some(MagicMoveKey::Name));
+        assert_eq!(MagicMoveKey::parse(" ID "), Some(MagicMoveKey::SvgId));
+        assert_eq!(MagicMoveKey::parse("color"), None);
+        for key in [MagicMoveKey::Name, MagicMoveKey::SvgId] {
+            assert_eq!(MagicMoveKey::parse(key.as_str()), Some(key));
+        }
+    }
+
+    #[test]
+    fn magic_move_keeps_its_duration_under_styling() {
+        let transition =
+            TransitionType::magic_move(0.8, MagicMoveKey::Name).with_easing(RateFunc::Smooth);
+        assert_eq!(transition.duration(), 0.8);
+        assert!(matches!(
+            transition.base(),
+            TransitionType::MagicMove {
+                key: MagicMoveKey::Name,
+                ..
+            }
+        ));
     }
 }

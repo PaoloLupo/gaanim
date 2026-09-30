@@ -1,4 +1,5 @@
 use crate::anim::{AnimationBuilder, AnimationType, TextSelectionEffect, ValueTrackerRef};
+use crate::canvas::MagicMoveUnmatched;
 use bevy::prelude::{
     BuildChildrenTransformExt, Commands, Entity, GlobalTransform, Transform, Visibility,
 };
@@ -1558,6 +1559,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::FadeTransform { .. }
             | AnimationType::Transform { .. }
             | AnimationType::ReplacementTransform { .. } => "Morph",
+            AnimationType::MagicMove { .. } => "MagicMove",
             AnimationType::Wiggle => "Wiggle",
             AnimationType::GrowFromPoint { .. } | AnimationType::GrowFromEdge { .. } => "Grow",
             AnimationType::CameraViewZoomTo { .. } => "ViewZoom",
@@ -3156,6 +3158,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_transform_internal(anim, track);
             return;
         }
+        if matches!(anim.anim_type, AnimationType::MagicMove { .. }) {
+            self.play_magic_move_internal(anim, track);
+            return;
+        }
         if matches!(anim.anim_type, AnimationType::Wiggle) {
             self.play_wiggle_internal(anim, track);
             return;
@@ -3534,6 +3540,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::MoveAlongPath3D { .. }
             | AnimationType::Transform { .. }
             | AnimationType::ReplacementTransform { .. }
+            | AnimationType::MagicMove { .. }
             | AnimationType::GrowArrow
             | AnimationType::Blink { .. }
             | AnimationType::Broadcast { .. }
@@ -5379,6 +5386,148 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             };
             self.timeline
                 .add_clip(parent_track, end, 0.0, zero_opacity_clip(id, from, 0.0));
+            if let Some(state) = self.states.get_mut(id) {
+                state.opacity = 0.0;
+            }
+        }
+        self.schedule_show_hierarchy(target, &target_state, parent_track, end);
+    }
+
+    /// Keyed magic move between two hierarchies. Each keyed pair runs the
+    /// leaf matching of `transform_matching`, so a pair of groups morphs
+    /// their parts too; leaves outside every pair fade (or cut) out and in.
+    /// Like `play_hierarchy_replacement`, the target is a state template
+    /// that takes over at the end, so later animations continue from it.
+    fn play_magic_move_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
+        let AnimationType::MagicMove {
+            target,
+            pairs,
+            unmatched,
+        } = &anim.anim_type
+        else {
+            return;
+        };
+        let (target, unmatched) = (*target, *unmatched);
+        let source = anim.target;
+        if source == target || self.states.get(source).is_none() {
+            return;
+        }
+        let Some(target_state) = self.states.get(target).cloned() else {
+            return;
+        };
+        let duration = anim.duration.max(0.0);
+        let start = self.current_time + anim.delay.max(0.0);
+        let end = start + duration;
+        let opacity_clip = |target: ObjectId, from: f32, to: f32, rate_func: RateFunc| {
+            ClipPayload::Animation(AnimationSpec {
+                target,
+                lens: PropertyLensSpec::Opacity { from, to },
+                rate_func,
+                delay: 0.0,
+                label: Some("MagicMove".to_string()),
+            })
+        };
+        let source_ids = self.hierarchy_ids(source);
+        let target_ids = self.hierarchy_ids(target);
+        let (source_leaves, _) = self.collect_leaf_match_data(source);
+        let (target_leaves, _) = self.collect_leaf_match_data(target);
+
+        // Only the target's containers appear at the start, so that entering
+        // leaves can fade in through them; its leaves stay hidden.
+        self.hide_visuals_now(&target_state);
+        for &id in &target_ids {
+            if let Some(state) = self.states.get(id) {
+                self.commands.entity(state.entity).insert(Opacity(0.0));
+            }
+        }
+        for &id in &target_ids {
+            if target_leaves.contains(&id) {
+                continue;
+            }
+            if let Some(opacity) = self.states.get(id).map(|state| state.opacity) {
+                self.timeline.add_clip(
+                    parent_track,
+                    start,
+                    0.0,
+                    opacity_clip(id, 0.0, opacity, RateFunc::Linear),
+                );
+            }
+        }
+
+        let mut paired_sources = HashSet::new();
+        let mut paired_targets = HashSet::new();
+        for &(from, to) in pairs {
+            if from == to || self.states.get(from).is_none() || self.states.get(to).is_none() {
+                continue;
+            }
+            paired_sources.extend(self.collect_leaf_match_data(from).0);
+            paired_targets.extend(self.collect_leaf_match_data(to).0);
+            self.schedule_leaf_matching(
+                from,
+                to,
+                MatchingMode::Shapes,
+                start,
+                duration,
+                anim.rate_func.clone(),
+            );
+        }
+
+        // Leaves outside every pair leave or enter on their own.
+        for &id in &source_leaves {
+            if paired_sources.contains(&id) {
+                continue;
+            }
+            let Some(from) = self.states.get(id).map(|state| state.opacity) else {
+                continue;
+            };
+            let clip = match unmatched {
+                MagicMoveUnmatched::Fade => (start, duration, anim.rate_func.clone()),
+                MagicMoveUnmatched::Cut => (start, 0.0, RateFunc::Linear),
+            };
+            self.timeline.add_clip(
+                parent_track,
+                clip.0,
+                clip.1,
+                opacity_clip(id, from, 0.0, clip.2),
+            );
+            if let Some(state) = self.states.get_mut(id) {
+                state.opacity = 0.0;
+            }
+        }
+        for &id in &target_leaves {
+            if paired_targets.contains(&id) {
+                continue;
+            }
+            let Some(to) = self.states.get(id).map(|state| state.opacity) else {
+                continue;
+            };
+            self.timeline.add_clip(
+                parent_track,
+                start,
+                0.0,
+                opacity_clip(id, to, 0.0, RateFunc::Linear),
+            );
+            if unmatched == MagicMoveUnmatched::Fade {
+                self.timeline.add_clip(
+                    parent_track,
+                    start,
+                    duration,
+                    opacity_clip(id, 0.0, to, anim.rate_func.clone()),
+                );
+            }
+        }
+
+        // Handoff: the source hierarchy ends where the target begins.
+        for &id in &source_ids {
+            let Some(from) = self.states.get(id).map(|state| state.opacity) else {
+                continue;
+            };
+            self.timeline.add_clip(
+                parent_track,
+                end,
+                0.0,
+                opacity_clip(id, from, 0.0, RateFunc::Linear),
+            );
             if let Some(state) = self.states.get_mut(id) {
                 state.opacity = 0.0;
             }
