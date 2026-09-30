@@ -1457,7 +1457,7 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
         SpinInFromNothing => &["scale", "rotation"],
         Create3D => &["scale", "opacity"],
         Indicate { .. } => &["scale", "fill"],
-        Transform { .. } | ReplacementTransform { .. } => &[
+        Transform { .. } | ReplacementTransform { .. } | MagicMove { .. } => &[
             "translation",
             "rotation",
             "scale",
@@ -4095,6 +4095,8 @@ impl SceneModel {
                     );
                     leaf_specs.push(handle.spec.clone());
                     if !path.id.is_empty() {
+                        handle.spec.lock().expect("SVG path spec poisoned").svg_id =
+                            Some(path.id.clone());
                         parts.insert(path.id.clone(), handle.clone());
                     }
                     children.push(handle);
@@ -4149,6 +4151,7 @@ impl SceneModel {
             handle = handle.clip(&mask, gaanim_core::peniko::Fill::NonZero);
         }
         if !group.id.is_empty() {
+            handle.spec.lock().expect("SVG group spec poisoned").svg_id = Some(group.id.clone());
             parts.insert(group.id.clone(), handle.clone());
         }
         (handle, leaf_specs)

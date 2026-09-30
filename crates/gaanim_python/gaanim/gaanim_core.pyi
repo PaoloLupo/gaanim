@@ -1185,6 +1185,32 @@ class Transition:
         """
         ...
     @staticmethod
+    def magic_move(
+        duration: float,
+        *,
+        key: Literal["name", "id"] = "name",
+        easing: Optional[Easing] = None,
+        overlay: Optional[Overlay] = None,
+    ) -> Transition:
+        """Morph drawables that share a key from the outgoing segment into the incoming one.
+
+        Like ``Transition.morph``, but the pairs are found by key when the
+        scene compiles: ``key="name"`` matches the names given with
+        ``Drawable.named`` (an imported SVG part answers to its ``id`` when it
+        has no name) and ``key="id"`` matches only SVG ``id`` attributes.
+        Every visible top-level drawable of either segment and every member of
+        its groups is a candidate; a keyed group moves as a whole, so keys
+        inside it are not used. Repeated keys pair in declaration order, and
+        drawables hidden when the outgoing segment ends (such as the source of
+        a finished ``magic_move``) are skipped. Unmatched content cross-fades.
+        Use ``magic_move(...)`` for key callables. Raises ``ValueError`` for a
+        non-positive duration or an unknown key.
+
+        Example:
+            scene.segment("v2", transition=Transition.magic_move(0.8, key="name"))
+        """
+        ...
+    @staticmethod
     def wipe(
         duration: float,
         direction: str = "left",
@@ -2168,6 +2194,39 @@ def stagger(
     """
     ...
 
+def magic_move(
+    before: Drawable,
+    after: Drawable,
+    *,
+    key: Literal["name", "id"] | Callable[[Drawable], object] = "name",
+    unmatched: Literal["fade", "cut"] = "fade",
+    duration: float = 1.0,
+) -> Anim:
+    """Animate ``before`` into ``after``, morphing the members that share a key.
+
+    Members of both drawables with the same key interpolate position, size,
+    color and shape; a pair of groups also morphs their parts, like
+    ``transform_matching``. Keys come from ``key``: ``"name"`` (the default)
+    uses ``Drawable.named`` names, falling back to the SVG ``id`` of imported
+    parts; ``"id"`` uses only SVG ``id`` attributes; a callable receives each
+    candidate as a ``Drawable`` and returns its key, or ``None`` to look inside
+    it (other return values are converted with ``str()``). Candidates are
+    searched depth-first under each drawable, and a keyed member moves as a
+    whole. Keys are read when ``magic_move`` is called and repeated keys pair
+    in declaration order. With ``unmatched="fade"`` the other members fade out
+    and in during the move; with ``"cut"`` they disappear at its start and
+    appear at its end. ``after`` stays hidden until the move and takes over
+    at its end, so later animations continue from it. Returns an ``Anim`` to
+    pass to ``scene.play``; chain ``.duration()`` or an easing as usual.
+    Raises ``ValueError`` for drawables of different scenes, the same
+    drawable twice, a non-positive duration, or an unknown ``key`` or
+    ``unmatched``; an exception raised by a key callable propagates.
+
+    Example:
+        scene.play([magic_move(before, after, key="name", unmatched="fade").duration(0.8)])
+    """
+    ...
+
 def distribute(
     items: Sequence[Drawable],
     low: float,
@@ -2909,6 +2968,26 @@ class Drawable:
 
         Its ``anchor`` meets the same anchor of the target, inset by
         ``padding`` and shifted by ``offset``; ``fit`` scales it to the target.
+        """
+        ...
+    def named(self, name: str) -> Self:
+        """Name this drawable and return it.
+
+        Names identify the same object in two states: ``magic_move`` and
+        ``Transition.magic_move`` pair drawables whose names are equal. Names
+        need not be unique; repeated names pair in declaration order. Raises
+        ``ValueError`` for a blank name.
+
+        Example:
+            bar = scene.geometry.rect(3, 0.5).named("ana")
+        """
+        ...
+    @property
+    def name(self) -> Optional[str]:
+        """The name given with ``named()``, or ``None``.
+
+        Example:
+            key = bar.name
         """
         ...
     def z_index(self, z: int) -> Self:

@@ -2768,10 +2768,25 @@ impl SceneModel {
                 && prev < scene_ids.len()
                 && let Some(tr) = &seg.transition
             {
+                // Drawables hidden when the outgoing segment ends (such as the
+                // source of a finished magic move) cannot stand in for a key.
+                let shown_at_end = |id: ObjectId| {
+                    id_map
+                        .get(&id)
+                        .and_then(|actual| builder.states.get(*actual))
+                        .is_some_and(|state| state.opacity > 1.0e-6)
+                };
+                let tr = Self::resolve_magic_move(
+                    tr,
+                    &segments[prev],
+                    seg,
+                    &object_specs,
+                    &shown_at_end,
+                );
                 builder.timeline.connect(
                     scene_ids[prev],
                     scene_ids[i],
-                    Self::runtime_transition(tr, &id_map),
+                    Self::runtime_transition(&tr, &id_map),
                 );
             }
         }
@@ -6724,6 +6739,74 @@ impl SceneModel {
         }
     }
 
+    /// Resolves a keyed magic-move transition into a morph between the
+    /// outermost keyed drawables of the outgoing and incoming segments.
+    /// Drawables shown in both segments are the same object and do not pair.
+    fn resolve_magic_move(
+        transition: &gaanim_timeline::transition::TransitionType,
+        from: &super::ops::Segment,
+        to: &super::ops::Segment,
+        object_specs: &HashMap<ObjectId, ObjectSpec>,
+        shown_at_end: &dyn Fn(ObjectId) -> bool,
+    ) -> gaanim_timeline::transition::TransitionType {
+        use gaanim_timeline::transition::{MorphMapping, MorphProperty, TransitionType};
+        match transition {
+            TransitionType::Styled {
+                base,
+                easing,
+                overlay,
+            } => TransitionType::Styled {
+                base: Box::new(Self::resolve_magic_move(
+                    base,
+                    from,
+                    to,
+                    object_specs,
+                    shown_at_end,
+                )),
+                easing: easing.clone(),
+                overlay: overlay.clone(),
+            },
+            TransitionType::MagicMove { duration, key } => {
+                let keyed = |segment: &super::ops::Segment, outgoing: bool| {
+                    super::magic_move::keyed_outermost(
+                        &segment.mobject_ids,
+                        true,
+                        |id| {
+                            object_specs
+                                .get(&id)
+                                .map(super::magic_move::spec_children)
+                                .unwrap_or_default()
+                        },
+                        |id| {
+                            if outgoing && !shown_at_end(id) {
+                                return Ok::<_, std::convert::Infallible>(None);
+                            }
+                            Ok(object_specs
+                                .get(&id)
+                                .and_then(|spec| super::magic_move::spec_key(spec, *key)))
+                        },
+                    )
+                    .unwrap_or_else(|never| match never {})
+                };
+                let pairs = super::magic_move::pair_by_key(&keyed(from, true), &keyed(to, false));
+                TransitionType::Morph {
+                    duration: *duration,
+                    mappings: pairs
+                        .pairs
+                        .into_iter()
+                        .filter(|(source, target)| source != target)
+                        .map(|(source, target)| MorphMapping {
+                            source,
+                            target,
+                            property: MorphProperty::All,
+                        })
+                        .collect(),
+                }
+            }
+            other => other.clone(),
+        }
+    }
+
     /// Rewrites authored morph pairs to runtime object ids, dropping pairs
     /// whose drawables were never compiled.
     fn runtime_transition(
@@ -6877,6 +6960,7 @@ impl SceneModel {
                 Op::Animate { anim, active } if *active => match &anim.anim_type {
                     AnimationType::Transform { target }
                     | AnimationType::ReplacementTransform { target }
+                    | AnimationType::MagicMove { target, .. }
                     | AnimationType::FadeTransform { target }
                     | AnimationType::TextTransition {
                         target,
@@ -6892,6 +6976,7 @@ impl SceneModel {
                         match &anim.anim_type {
                             AnimationType::Transform { target }
                             | AnimationType::ReplacementTransform { target }
+                            | AnimationType::MagicMove { target, .. }
                             | AnimationType::FadeTransform { target }
                             | AnimationType::TextTransition {
                                 target,
@@ -7761,6 +7846,20 @@ impl SceneModel {
             },
             AnimationType::ReplacementTransform { target } => AnimationType::ReplacementTransform {
                 target: *id_map.get(target)?,
+            },
+            AnimationType::MagicMove {
+                target,
+                pairs,
+                unmatched,
+            } => AnimationType::MagicMove {
+                target: *id_map.get(target)?,
+                pairs: pairs
+                    .iter()
+                    .filter_map(|(source, target)| {
+                        Some((*id_map.get(source)?, *id_map.get(target)?))
+                    })
+                    .collect(),
+                unmatched: *unmatched,
             },
             AnimationType::TextTransition {
                 target,
@@ -17181,5 +17280,149 @@ mod tests {
         assert_eq!(driver.scale, 10.0);
         assert_eq!(driver.start_at, 1.5, "driver starts at the authored cursor");
         assert!(driver.base.is_none());
+    }
+
+    /// Bars of a leaderboard, named after their player, grouped in rank order.
+    fn magic_move_board(canvas: &mut SceneModel, rows: &[(&str, f64)]) -> DrawableHandle {
+        let bars: Vec<DrawableHandle> = rows
+            .iter()
+            .enumerate()
+            .map(|(rank, (name, score))| {
+                canvas
+                    .rect(*score, 0.6)
+                    .move_to(score / 2.0 - 3.0, 1.5 - rank as f64)
+                    .named(*name)
+            })
+            .collect();
+        canvas.group(&bars.iter().collect::<Vec<_>>())
+    }
+
+    fn labelled_clips(timeline: &Timeline, label: &str) -> Vec<(f64, f64)> {
+        let mut clips: Vec<(f64, f64)> = timeline
+            .clips
+            .values()
+            .filter_map(|clip| match &clip.payload {
+                gaanim_timeline::clip::ClipPayload::Animation(
+                    gaanim_timeline::clip::AnimationSpec {
+                        label: Some(found), ..
+                    },
+                ) if found == label => Some((clip.start, clip.duration)),
+                _ => None,
+            })
+            .collect();
+        clips.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+        clips
+    }
+
+    #[test]
+    fn magic_move_morphs_keyed_members_and_fades_the_rest() {
+        let mut canvas = SceneModel::new(640, 360);
+        let before = magic_move_board(&mut canvas, &[("ana", 4.0), ("bo", 3.0), ("cy", 2.0)]);
+        let after = magic_move_board(&mut canvas, &[("bo", 5.0), ("ana", 3.5), ("dee", 1.0)]);
+        let anim = before
+            .magic_move_to(
+                &after,
+                crate::canvas::MagicMoveKey::Name,
+                crate::canvas::MagicMoveUnmatched::Fade,
+                0.8,
+            )
+            .unwrap();
+        canvas.play(vec![anim]);
+        let timeline = compiled_timeline(&canvas);
+
+        // "ana" and "bo" morph; "cy" fades out and "dee" fades in.
+        let morphs = labelled_clips(&timeline, "TransformMatching");
+        assert_eq!(morphs, vec![(0.0, 0.8), (0.0, 0.8)]);
+        let fades: Vec<_> = labelled_clips(&timeline, "MagicMove")
+            .into_iter()
+            .filter(|(_, duration)| *duration > 0.0)
+            .collect();
+        assert_eq!(fades, vec![(0.0, 0.8), (0.0, 0.8)]);
+        assert!((timeline.cached_duration - 0.8).abs() < 1e-9);
+    }
+
+    #[test]
+    fn magic_move_cut_swaps_unmatched_members_without_fading() {
+        let mut canvas = SceneModel::new(640, 360);
+        let before = magic_move_board(&mut canvas, &[("ana", 4.0), ("cy", 2.0)]);
+        let after = magic_move_board(&mut canvas, &[("ana", 3.0), ("dee", 1.0)]);
+        let anim = before
+            .magic_move_to(
+                &after,
+                crate::canvas::MagicMoveKey::Name,
+                crate::canvas::MagicMoveUnmatched::Cut,
+                0.5,
+            )
+            .unwrap();
+        canvas.play(vec![anim]);
+        let timeline = compiled_timeline(&canvas);
+        assert_eq!(labelled_clips(&timeline, "TransformMatching").len(), 1);
+        assert!(
+            labelled_clips(&timeline, "MagicMove")
+                .iter()
+                .all(|(_, duration)| *duration == 0.0)
+        );
+    }
+
+    #[test]
+    fn magic_move_rejects_invalid_arguments_and_reads_callback_keys() {
+        let mut canvas = SceneModel::new(640, 360);
+        let before = magic_move_board(&mut canvas, &[("ana", 4.0)]);
+        let after = magic_move_board(&mut canvas, &[("ana", 3.0)]);
+        let key = crate::canvas::MagicMoveKey::Name;
+        let fade = crate::canvas::MagicMoveUnmatched::Fade;
+        assert_eq!(
+            before.magic_move_to(&before, key, fade, 1.0).unwrap_err(),
+            crate::canvas::MagicMoveError::SameDrawable
+        );
+        assert_eq!(
+            before.magic_move_to(&after, key, fade, 0.0).unwrap_err(),
+            crate::canvas::MagicMoveError::InvalidDuration
+        );
+        let mut other = SceneModel::new(640, 360);
+        let foreign = other.circle(1.0);
+        assert_eq!(
+            before.magic_move_to(&foreign, key, fade, 1.0).unwrap_err(),
+            crate::canvas::MagicMoveError::ForeignScene
+        );
+        let members = before
+            .magic_move_members(|member| Ok::<_, ()>(member.name().map(|name| name.to_uppercase())))
+            .unwrap();
+        assert_eq!(members.len(), 1);
+        assert_eq!(members[0].1, "ANA");
+        let failed = before.magic_move_to_by(&after, |_| Err("no key"), fade, 1.0);
+        assert!(matches!(
+            failed,
+            Err(crate::canvas::MagicMoveFailure::Key("no key"))
+        ));
+    }
+
+    #[test]
+    fn magic_move_transition_pairs_named_drawables_across_segments() {
+        use gaanim_timeline::transition::{MagicMoveKey, TransitionType};
+        let mut canvas = SceneModel::new(640, 360);
+        canvas.segment("before", None).unwrap();
+        let source = magic_move_board(&mut canvas, &[("ana", 4.0), ("bo", 3.0), ("cy", 2.0)]);
+        canvas.wait(1.0);
+        canvas
+            .segment(
+                "after",
+                Some(TransitionType::magic_move(0.6, MagicMoveKey::Name)),
+            )
+            .unwrap();
+        let target = magic_move_board(&mut canvas, &[("bo", 5.0), ("ana", 3.5)]);
+        canvas.wait(1.0);
+        let timeline = compiled_timeline(&canvas);
+
+        let connection = timeline
+            .scene_connections
+            .first()
+            .expect("segments are linked");
+        let TransitionType::Morph { duration, mappings } = &connection.transition else {
+            panic!("a magic move compiles into a morph");
+        };
+        assert_eq!(*duration, 0.6);
+        assert_eq!(mappings.len(), 2, "ana and bo pair; cy cross-fades");
+        let _ = (source, target);
     }
 }

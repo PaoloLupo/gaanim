@@ -331,6 +331,130 @@ impl DrawableHandle {
         Ok(())
     }
 
+    /// Name this drawable. Names are the default key of a magic move
+    /// ([`DrawableHandle::magic_move_to`]); a blank name clears it.
+    pub fn named(&self, name: impl Into<String>) -> Self {
+        let name = name.into();
+        let name = name.trim();
+        self.update_spec(|spec| spec.name = (!name.is_empty()).then(|| name.to_string()))
+    }
+
+    /// The name given with [`DrawableHandle::named`], if any.
+    pub fn name(&self) -> Option<String> {
+        self.spec.lock().expect("object spec poisoned").name.clone()
+    }
+
+    /// The key this drawable answers to in a magic move: its name (or SVG
+    /// `id`) for [`MagicMoveKey::Name`], its SVG `id` for
+    /// [`MagicMoveKey::SvgId`].
+    pub fn magic_move_key(&self, key: super::MagicMoveKey) -> Option<String> {
+        super::magic_move::spec_key(&self.spec.lock().expect("object spec poisoned"), key)
+    }
+
+    /// Handle of another drawable of this canvas, for key callbacks.
+    fn sibling_handle(&self, id: ObjectId) -> Option<Self> {
+        let spec = self
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .object_specs
+            .get(&id)?
+            .clone();
+        Some(Self {
+            id,
+            spec,
+            state: self.state.clone(),
+            segment_idx: self.segment_idx,
+            named_parts: None,
+            style_targets: Arc::new(Vec::new()),
+        })
+    }
+
+    /// Keyed members of this drawable: the outermost descendants for which
+    /// `key` returns a non-empty key, in depth-first declaration order.
+    pub fn magic_move_members<E>(
+        &self,
+        mut key: impl FnMut(&Self) -> Result<Option<String>, E>,
+    ) -> Result<Vec<(ObjectId, String)>, E> {
+        super::magic_move::keyed_outermost(
+            &[self.id],
+            false,
+            |id| {
+                self.sibling_handle(id)
+                    .map(|handle| {
+                        super::magic_move::spec_children(
+                            &handle.spec.lock().expect("object spec poisoned"),
+                        )
+                    })
+                    .unwrap_or_default()
+            },
+            |id| match self.sibling_handle(id) {
+                Some(handle) => key(&handle),
+                None => Ok(None),
+            },
+        )
+    }
+
+    /// Keyed "magic move" into `target`: members of both drawables that
+    /// share a key morph position, size, color and shape (a pair of groups
+    /// also morphs their parts), the other members appear or disappear as
+    /// `unmatched` says, and `target` takes over at the end.
+    pub fn magic_move_to(
+        &self,
+        target: &DrawableHandle,
+        key: super::MagicMoveKey,
+        unmatched: super::MagicMoveUnmatched,
+        duration: f64,
+    ) -> Result<Anim, super::MagicMoveError> {
+        self.magic_move_to_by(
+            target,
+            |member| Ok::<_, std::convert::Infallible>(member.magic_move_key(key)),
+            unmatched,
+            duration,
+        )
+        .map_err(|failure| match failure {
+            super::MagicMoveFailure::Invalid(error) => error,
+            super::MagicMoveFailure::Key(never) => match never {},
+        })
+    }
+
+    /// [`DrawableHandle::magic_move_to`] with keys computed by `key`, which
+    /// is called once per candidate member of both drawables while the
+    /// scene is built. Returning `None` (or an empty key) descends into the
+    /// member's own members.
+    pub fn magic_move_to_by<E>(
+        &self,
+        target: &DrawableHandle,
+        mut key: impl FnMut(&Self) -> Result<Option<String>, E>,
+        unmatched: super::MagicMoveUnmatched,
+        duration: f64,
+    ) -> Result<Anim, super::MagicMoveFailure<E>> {
+        if !self.same_canvas(target) {
+            return Err(super::MagicMoveError::ForeignScene.into());
+        }
+        if self.id == target.id {
+            return Err(super::MagicMoveError::SameDrawable.into());
+        }
+        if !duration.is_finite() || duration <= 0.0 {
+            return Err(super::MagicMoveError::InvalidDuration.into());
+        }
+        let sources = self
+            .magic_move_members(&mut key)
+            .map_err(super::MagicMoveFailure::Key)?;
+        let targets = target
+            .magic_move_members(&mut key)
+            .map_err(super::MagicMoveFailure::Key)?;
+        let pairs = super::pair_by_key(&sources, &targets).pairs;
+        Ok(self.anim_dur(
+            AnimationType::MagicMove {
+                target: target.id,
+                pairs,
+                unmatched,
+            },
+            Some(duration),
+        ))
+    }
+
     /// General text/math morph. Semantic paths are paired before the existing
     /// order-preserving grapheme and shape matching stages.
     pub fn morph_to(

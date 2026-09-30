@@ -3835,6 +3835,11 @@ fn apply_transition(
         TransitionType::Morph { mappings, .. } => {
             apply_morph_transition(world, scene_entities, mappings, t.clamp(0.0, 1.0), from, to);
         }
+        // Keys are resolved into `Morph` pairs by the authoring layer; an
+        // unresolved magic move has no pairs and cross-fades like a morph.
+        TransitionType::MagicMove { .. } => {
+            apply_morph_transition(world, scene_entities, &[], t.clamp(0.0, 1.0), from, to);
+        }
     }
 }
 

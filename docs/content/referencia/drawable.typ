@@ -159,6 +159,20 @@ back = scene.geometry.rect(3, 1).fill(BLUE)
 ```
 ]
 
+#api-entry(
+  name: "Drawable.named",
+  kind: "method",
+  params: ((name: "name", type: "str", default: none, desc: [Nombre no vacío; no hace falta que sea único.]),),
+  desc: [Da un nombre al objeto y lo devuelve; `Drawable.name` lo lee (`None` si no tiene). El nombre identifica al mismo objeto en dos estados: `magic_move` y `Transition.magic_move` emparejan los objetos con el mismo nombre. Un nombre en blanco lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+bar = scene.geometry.rect(3, 0.5).fill(BLUE).named("ana")
+print(bar.name)
+```
+]
+
 == Posición y transformaciones
 
 Setters absolutos (`move_to`, `scale_to`, `rotate_to`, `skew_to`) y relativos (`shift_by`,

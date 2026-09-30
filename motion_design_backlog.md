@@ -180,7 +180,7 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
 | ☐ | [TX-07](#tx-07--subtítulos-karaoke) | Subtítulos karaoke (SRT/VTT/Whisper) | M | ★★★ | TX-02 | [#164](https://github.com/PaoloLupo/gaanim/issues/164) |
 | ☐ | [TX-09](#tx-09--animación-de-código-por-diff) | Animación de código por diff | M | ★★★ | — | [#165](https://github.com/PaoloLupo/gaanim/issues/165) |
 | ☐ | [TX-06](#tx-06--texto-sobre-trayectoria) | Texto sobre trayectoria | M | ★★ | TR-03 | [#166](https://github.com/PaoloLupo/gaanim/issues/166) |
-| ☐ | [TS-03](#ts-03--magic-move-por-claves) | Magic move por claves | M | ★★★ | QW-04 | [#167](https://github.com/PaoloLupo/gaanim/issues/167) |
+| ☑ | [TS-03](#ts-03--magic-move-por-claves) | Magic move por claves | M | ★★★ | QW-04 | [#167](https://github.com/PaoloLupo/gaanim/issues/167) |
 | ☐ | [AN-01](#an-01--anotaciones-a-mano-alzada) | Anotaciones a mano alzada | M | ★★★ | TR-01, PR-02 | [#168](https://github.com/PaoloLupo/gaanim/issues/168) |
 | ☑ | [AN-03](#an-03--puntas-de-flecha-en-cualquier-trazo) | Puntas de flecha en cualquier trazo | S | ★ | TR-01 | [#169](https://github.com/PaoloLupo/gaanim/issues/169) |
 | ☑ | [AN-04](#an-04--énfasis-adicionales) | Énfasis adicionales (broadcast, spotlight…) | S | ★★ | — | [#170](https://github.com/PaoloLupo/gaanim/issues/170) |

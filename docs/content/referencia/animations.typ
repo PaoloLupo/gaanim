@@ -1116,6 +1116,39 @@ scene.render()
   none,
 )
 
+#api-entry(
+  name: "magic_move",
+  kind: "function",
+  signature: "magic_move(before: Drawable, after: Drawable, *, key: str | Callable[[Drawable], object] = \"name\", unmatched: str = \"fade\", duration: float = 1.0) -> Anim",
+  params: (
+    (name: "before, after", type: "Drawable", default: none, desc: [Estados de origen y destino, normalmente grupos de la misma escena.]),
+    (name: "key", type: "str | Callable[[Drawable], object]", default: "\"name\"", desc: [`"name"` usa los nombres de `Drawable.named` (una parte SVG sin nombre responde a su `id`); `"id"` usa solo los `id` SVG; una función recibe cada candidato y devuelve su clave, o `None` para buscar dentro de él.]),
+    (name: "unmatched", type: "str", default: "\"fade\"", desc: [`"fade"` funde a la vez los miembros sin pareja; `"cut"` los quita al empezar y muestra los nuevos al terminar.]),
+    (name: "duration", type: "float", default: "1.0", desc: [Segundos; finito y positivo.]),
+  ),
+  returns: (type: "Anim", desc: [Magic move listo para `scene.play`.]),
+  desc: [Los miembros de `before` y `after` con la misma clave interpolan posición, tamaño, color y forma; una pareja de grupos transforma también sus piezas, como `transform_matching`. Los candidatos se buscan en profundidad y un miembro con clave se mueve entero. Las claves se leen al llamar a `magic_move` y las repetidas se emparejan en orden de declaración. `after` queda oculto hasta el movimiento y lo sustituye al final, así que las animaciones siguientes continúan desde él. Objetos de escenas distintas, el mismo objeto dos veces, una duración no positiva o un `key`/`unmatched` desconocido lanzan `ValueError`; una excepción de la función clave se propaga.],
+)[
+```python
+# show-code: true
+from gaanim import BLUE, GOLD, GREEN, RED, Scene, magic_move
+scene = Scene(frame=(16, 9), background="#0f172a")
+def board(rows):
+    bars = [
+        scene.geometry.rect(score, 0.6).fill(color).move_to(score / 2 - 4, 1.5 - rank).named(name)
+        for rank, (name, score, color) in enumerate(rows)
+    ]
+    return scene.geometry.group(bars)
+before = board([("ana", 5, BLUE), ("bo", 4, GOLD), ("cy", 3, RED)])
+after = board([("bo", 6, GOLD), ("ana", 4.5, BLUE), ("dee", 2, GREEN)])
+scene.wait(0.3)
+scene.play([magic_move(before, after, key="name", unmatched="fade").duration(0.8)])
+scene.wait(0.3)
+# output: preview.webp
+scene.render()
+```
+]
+
 == Animaciones personalizadas <personalizadas>
 
 #api-entry(
@@ -2618,6 +2651,29 @@ detail = scene.segment("Detalle")
 panel = scene.geometry.rect(12, 6).fill(BLUE)
 scene.wait(1)
 scene.link(overview, detail, Transition.morph(0.8, pairs=[(card, panel)]))
+```
+]
+
+#api-entry(
+  name: "Transition.magic_move",
+  kind: "factory",
+  params: (
+    (name: "duration", type: "float", default: none, desc: [Segundos, positivo.]),
+    (name: "key", type: "str", default: "\"name\"", desc: [`"name"` empareja los nombres de `Drawable.named` (o el `id` de una parte SVG sin nombre); `"id"`, solo los `id` SVG.]),
+    (name: "easing, overlay", type: "Easing | None, Overlay | None", default: "None", desc: [Comunes a todas las transiciones.]),
+  ),
+  returns: (type: "Transition", desc: [`Transition.morph` con parejas por clave.]),
+  desc: [Como `Transition.morph`, pero las parejas se buscan al compilar entre los objetos de los dos segmentos que comparten clave: los de primer nivel y los miembros de sus grupos, donde un grupo con clave se mueve entero. Las claves repetidas se emparejan en orden de declaración y se ignoran los objetos ocultos al final del segmento saliente, como el origen de un `magic_move` terminado. El resto hace un fundido cruzado. Para claves calculadas con una función, usa `magic_move`. Una duración no positiva o una clave desconocida lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.segment("v1")
+scene.geometry.rect(3, 2).fill(BLUE).move_to(-4, 0).named("card")
+scene.wait(1)
+scene.segment("v2", transition=Transition.magic_move(0.8, key="name"))
+scene.geometry.rect(8, 5).fill(GOLD).named("card")
+scene.wait(1)
 ```
 ]
 

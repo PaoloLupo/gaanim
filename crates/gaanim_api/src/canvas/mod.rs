@@ -54,6 +54,10 @@ pub use editorial::{
     EditorialError, EditorialStyle, EditorialVariant, LowerThirdSide, LowerThirdSpec,
     QuoteCardSpec, SectionHeaderSpec, StatCardSpec,
 };
+mod magic_move;
+pub use magic_move::{
+    KeyedPairs, MagicMoveError, MagicMoveFailure, MagicMoveKey, MagicMoveUnmatched, pair_by_key,
+};
 mod view_ticks;
 mod visualization;
 pub use gaanim_visualization::{

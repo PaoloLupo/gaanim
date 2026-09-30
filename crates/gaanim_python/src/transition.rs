@@ -211,6 +211,25 @@ impl PyTransitionType {
         ))
     }
 
+    /// Keyed morph: drawables of both segments that share a key morph into
+    /// each other, the rest cross-fade. `key` is "name" or "id".
+    #[staticmethod]
+    #[pyo3(signature = (duration, *, key="name", easing=None, overlay=None))]
+    fn magic_move(
+        duration: f64,
+        key: &str,
+        easing: Option<PyEasing>,
+        overlay: Option<PyOverlay>,
+    ) -> PyResult<Self> {
+        positive_duration(duration)?;
+        let key = crate::magic_move::parse_key(key)?;
+        Ok(Self::styled(
+            TransitionType::magic_move(duration, key),
+            easing,
+            overlay,
+        ))
+    }
+
     /// A straight edge travels across the frame in `direction`, revealing the next segment.
     #[staticmethod]
     #[pyo3(signature = (duration, direction="left", feather=0.1, *, easing=None, overlay=None))]
@@ -359,6 +378,9 @@ impl PyTransitionType {
                 duration,
                 mappings.len()
             ),
+            TransitionType::MagicMove { duration, key } => {
+                format!("Transition.magic_move({}, key={:?}", duration, key.as_str())
+            }
             TransitionType::Wipe {
                 duration, feather, ..
             } => format!("Transition.wipe({}, feather={}", duration, feather),

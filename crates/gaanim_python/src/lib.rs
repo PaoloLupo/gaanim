@@ -14,6 +14,7 @@ mod composition;
 mod custom;
 mod easing;
 mod falloff;
+mod magic_move;
 mod procedural;
 mod progress_ring;
 mod py3d;
@@ -100,6 +101,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(composition::stagger, m)?)?;
     m.add_function(wrap_pyfunction!(composition::distribute, m)?)?;
     m.add_function(wrap_pyfunction!(composition::label, m)?)?;
+    m.add_function(wrap_pyfunction!(magic_move::magic_move, m)?)?;
     m.add_class::<pycanvas::PySceneMarker>()?;
     m.add_class::<pydrawable::PyCanvasAnim>()?;
     m.add_class::<pydrawable::PyAnchorPoint>()?;
