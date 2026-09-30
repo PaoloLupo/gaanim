@@ -3,7 +3,7 @@
 //! The engine is a shared library (`gaanim_engine`) and Python support a
 //! plugin loaded when a script runs (see `python.rs`), so this executable
 //! starts without Python: Home, playback bundles (`.gaanim`), and commands
-//! such as `init`, `thumbnail` and `register` need none.
+//! such as `init`, `thumbnail`, `register` and `relay` need none.
 
 // Take the engine crates from the shared engine library.
 use gaanim_engine as _;
@@ -50,6 +50,7 @@ fn handle_no_python_commands(args: &[String]) -> bool {
         Some("thumbnail") => run_thumbnail(&args[2..]),
         Some("register") => run_association(true),
         Some("unregister") => run_association(false),
+        Some("relay") => run_relay(&args[2..]),
         Some("init") => {}
         _ => return false,
     }
@@ -123,6 +124,75 @@ fn run_thumbnail(args: &[String]) -> ! {
     if let Err(error) = gaanim_thumbnail::extract(input, output, size) {
         console::error("thumbnail", error);
         std::process::exit(1);
+    }
+    std::process::exit(0);
+}
+
+/// `gaanim relay [init [DIR] [--force] | use <URL> | forget]`: set up the
+/// relay that carries audience poll votes to a presentation.
+fn run_relay(args: &[String]) -> ! {
+    use gaanim_project::relay::{self, RelaySource};
+    let usage = || -> ! {
+        console::error(
+            "relay",
+            "usage: gaanim relay [init [DIR] [--force] | use <URL> | forget]",
+        );
+        std::process::exit(2);
+    };
+    let fail = |error: String| -> ! {
+        console::error("relay", error);
+        std::process::exit(1);
+    };
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    match args.as_slice() {
+        [] => match relay::resolve(None) {
+            Some((url, source)) => {
+                let from = match source {
+                    RelaySource::Environment => relay::RELAY_ENV,
+                    RelaySource::Project => "gaanim.toml",
+                    RelaySource::User => "gaanim relay use",
+                };
+                console::info("relay", format!("{url} (from {from})"));
+                console::hint("A project's `[polls] relay` in gaanim.toml overrides it.");
+            }
+            None => {
+                console::info("relay", "no relay is set; audience polls cannot take votes");
+                console::hint("Run `gaanim relay init` to write one you can deploy for free.");
+            }
+        },
+        ["init", rest @ ..] => {
+            let force = rest.contains(&"--force");
+            let paths: Vec<&&str> = rest.iter().filter(|arg| **arg != "--force").collect();
+            let directory = match paths.as_slice() {
+                [] => PathBuf::from("gaanim-relay"),
+                [directory] => PathBuf::from(directory),
+                _ => usage(),
+            };
+            relay::write_template(&directory, force).unwrap_or_else(|error| fail(error));
+            console::success(
+                "relay",
+                format!("Wrote the relay to {}", directory.display()),
+            );
+            console::detail(
+                "Deploy",
+                format!("cd {} && npx wrangler deploy", directory.display()),
+            );
+            console::detail(
+                "Then",
+                "gaanim relay use <the https address wrangler prints>",
+            );
+        }
+        ["use", url] => {
+            let url = relay::save(Some(url))
+                .unwrap_or_else(|error| fail(error))
+                .expect("a saved relay has an address");
+            console::success("relay", format!("Audience polls use {url}"));
+        }
+        ["forget"] => {
+            relay::save(None).unwrap_or_else(|error| fail(error));
+            console::success("relay", "Forgot the saved relay");
+        }
+        _ => usage(),
     }
     std::process::exit(0);
 }

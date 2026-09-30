@@ -47,6 +47,51 @@ pub struct SegmentStop {
     pub time: f64,
     /// Length of the ambient loop that plays while the stop rests.
     pub ambient: Option<f64>,
+    /// The audience poll shown while a presentation rests here.
+    pub poll: Option<StopPoll>,
+}
+
+/// Most answers a poll accepts: they must fit on a phone and on the slide.
+pub const MAX_POLL_OPTIONS: usize = 6;
+
+/// An audience poll authored with [`SceneModel::poll`](super::SceneModel::poll).
+#[derive(Debug, Clone, PartialEq)]
+pub struct StopPoll {
+    pub question: String,
+    pub options: Vec<String>,
+}
+
+impl StopPoll {
+    /// Trim and validate a question and its answers.
+    pub fn new(
+        question: impl Into<String>,
+        options: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Result<Self, SegmentError> {
+        let question = question.into().trim().to_string();
+        if question.is_empty() {
+            return Err(SegmentError::EmptyPollQuestion);
+        }
+        let options: Vec<String> = options
+            .into_iter()
+            .map(|option| option.into().trim().to_string())
+            .collect();
+        if !(2..=MAX_POLL_OPTIONS).contains(&options.len()) {
+            return Err(SegmentError::PollOptionCount {
+                count: options.len(),
+            });
+        }
+        if options.iter().any(String::is_empty) {
+            return Err(SegmentError::EmptyPollOption);
+        }
+        for (index, option) in options.iter().enumerate() {
+            if options[..index].contains(option) {
+                return Err(SegmentError::DuplicatePollOption {
+                    option: option.clone(),
+                });
+            }
+        }
+        Ok(Self { question, options })
+    }
 }
 
 /// A named instant on the global timeline authored with `scene.marker`.
@@ -143,4 +188,12 @@ pub enum SegmentError {
     NumericMarkerName { name: String },
     #[error("a marker named {name:?} already exists at {time:.6}s")]
     DuplicateMarker { name: String, time: f64 },
+    #[error("poll questions must not be empty")]
+    EmptyPollQuestion,
+    #[error("a poll needs between 2 and {MAX_POLL_OPTIONS} answers, got {count}")]
+    PollOptionCount { count: usize },
+    #[error("poll answers must not be empty")]
+    EmptyPollOption,
+    #[error("the poll answer {option:?} appears twice")]
+    DuplicatePollOption { option: String },
 }

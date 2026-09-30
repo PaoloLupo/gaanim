@@ -887,6 +887,7 @@ fn resolve_project_paths(
             project_dir: project.root.clone(),
             output_dir,
             script_path: script_path.to_path_buf(),
+            poll_relay: project.manifest.poll_relay.clone(),
         }
     } else {
         let proj = script_parent.canonicalize().unwrap_or(script_parent);
@@ -895,6 +896,7 @@ fn resolve_project_paths(
             project_dir: proj.clone(),
             output_dir: out,
             script_path: script_path.to_path_buf(),
+            poll_relay: None,
         }
     }
 }

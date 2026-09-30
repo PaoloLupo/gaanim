@@ -27,6 +27,8 @@ pub struct ProjectPaths {
     pub project_dir: PathBuf,
     pub output_dir: PathBuf,
     pub script_path: PathBuf,
+    /// The project's `[polls] relay`, for audience polls.
+    pub poll_relay: Option<String>,
 }
 
 #[derive(Resource, Clone, Default)]

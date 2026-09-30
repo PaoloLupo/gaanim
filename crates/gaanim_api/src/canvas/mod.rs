@@ -21,8 +21,8 @@ pub use gaanim_layout::{Anchor, Direction};
 pub use gaanim_text::prelude::TextAnchor;
 pub use segment::SceneMarker;
 pub use segment::{
-    PresentationBrand, SegmentError, SegmentHandle, SegmentId, SegmentManifest, SegmentSpec,
-    SegmentStop,
+    MAX_POLL_OPTIONS, PresentationBrand, SegmentError, SegmentHandle, SegmentId, SegmentManifest,
+    SegmentSpec, SegmentStop, StopPoll,
 };
 pub use types::{
     Anim, Axes3DConfig, AxesConfig, BooleanOperation, BooleanRule, CurveControl, CurveElement,

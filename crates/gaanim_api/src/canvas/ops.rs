@@ -996,6 +996,8 @@ pub(crate) struct LocalSegmentStop {
     pub time: f64,
     /// Length of the ambient loop authored right after the stop.
     pub ambient: Option<f64>,
+    /// The audience poll shown while a presentation rests here.
+    pub poll: Option<super::StopPoll>,
 }
 
 /// A named segment (≈ scene) within a [`SceneModel`](super::SceneModel).

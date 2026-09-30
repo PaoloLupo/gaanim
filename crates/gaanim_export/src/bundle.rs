@@ -451,12 +451,13 @@ where
         background.pixel_size = (config.width, config.height);
     }
 
-    let (plan, segments, markers, scenes, duration) = {
+    let (plan, segments, markers, polls, scenes, duration) = {
         let timeline = app.world().resource::<Timeline>();
         (
             RecordingPlan::new(timeline, config.fps),
             timeline.segments.clone(),
             timeline.markers.clone(),
+            timeline.polls.clone(),
             scene_spans(timeline),
             timeline.cached_duration.max(0.0),
         )
@@ -565,6 +566,7 @@ where
         markers,
         scenes,
         audio,
+        polls,
     };
     if let Some(frame) = cover.and_then(ThumbnailPicker::into_frame) {
         match render_thumbnail(&scene, &frame) {

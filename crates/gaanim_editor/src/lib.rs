@@ -19,6 +19,8 @@ pub mod host;
 pub mod narration;
 pub mod overlays;
 pub mod platform;
+#[cfg(not(target_arch = "wasm32"))]
+mod polls;
 
 /// Built for the web player: no native windows, file system or FFmpeg, so
 /// pinning, exporting and the separate Presenter View window are left out.
@@ -301,6 +303,10 @@ impl Plugin for GaanimEditorPlugin {
                 presenter::PresenterEguiPass,
                 presenter::presenter_view_system,
             );
+        // The relay client needs native networking; the web player shows
+        // polled stops as plain stops.
+        #[cfg(not(target_arch = "wasm32"))]
+        app.add_plugins(polls::AudiencePollsPlugin);
     }
 }
 

@@ -298,6 +298,9 @@ pub struct Timeline {
     /// Tempo set with `scene.tempo`, drawn as bar lines on the seek bar.
     #[cfg_attr(feature = "serde", serde(default))]
     pub beat_grid: Option<BeatGrid>,
+    /// Audience polls authored with `scene.poll`, in time order.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub polls: Vec<TimelinePoll>,
 }
 
 /// A musical tempo: `bpm` beats per minute from `offset` seconds, grouped
@@ -340,6 +343,16 @@ impl BeatGrid {
 pub struct TimelineMarker {
     pub name: String,
     pub time: f64,
+}
+
+/// An audience poll authored with `scene.poll`: a question and its answers,
+/// shown while a presentation rests at the stop at `time`.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct TimelinePoll {
+    pub time: f64,
+    pub question: String,
+    pub options: Vec<String>,
 }
 
 /// Most segment checkpoints kept at once; each holds a whole world snapshot.
@@ -421,6 +434,7 @@ impl Default for Timeline {
             scene_connections: Vec::new(),
             markers: Vec::new(),
             beat_grid: None,
+            polls: Vec::new(),
         }
     }
 }
@@ -435,6 +449,23 @@ impl Timeline {
     pub fn set_markers(&mut self, mut markers: Vec<TimelineMarker>) {
         markers.sort_by(|left, right| left.time.total_cmp(&right.time));
         self.markers = markers;
+    }
+
+    /// Replace the audience polls compiled from the current canvas.
+    pub fn set_polls(&mut self, mut polls: Vec<TimelinePoll>) {
+        polls.sort_by(|left, right| left.time.total_cmp(&right.time));
+        self.polls = polls;
+    }
+
+    /// The poll a presentation shows at `time`: the one whose stop it rests
+    /// on while paused.
+    pub fn poll_at(&self, time: f64) -> Option<&TimelinePoll> {
+        if self.is_playing {
+            return None;
+        }
+        self.polls
+            .iter()
+            .find(|poll| (poll.time - time).abs() < 1e-5)
     }
 
     /// Absolute time of the marker named `name`.
@@ -5769,5 +5800,31 @@ mod tests {
             timeline.checkpoints.snapshots.keys().copied().collect::<Vec<_>>(),
             [OrderedFloat(1.0)]
         );
+    }
+
+    #[test]
+    fn a_poll_shows_only_while_resting_on_its_stop() {
+        let mut timeline = Timeline::new();
+        timeline.set_polls(vec![
+            TimelinePoll {
+                time: 4.0,
+                question: "Second?".to_string(),
+                options: vec!["A".to_string(), "B".to_string()],
+            },
+            TimelinePoll {
+                time: 1.0,
+                question: "First?".to_string(),
+                options: vec!["Yes".to_string(), "No".to_string()],
+            },
+        ]);
+
+        assert_eq!(timeline.polls[0].question, "First?");
+        assert_eq!(
+            timeline.poll_at(4.0).map(|poll| poll.question.as_str()),
+            Some("Second?")
+        );
+        assert!(timeline.poll_at(2.0).is_none());
+        timeline.is_playing = true;
+        assert!(timeline.poll_at(4.0).is_none());
     }
 }

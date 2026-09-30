@@ -76,6 +76,10 @@ const GENERAL: Page = Page {
                     "register",
                     "Open .gaanim files with Gaanim on double click, with a\nPresent action and cover images; unregister undoes it",
                 ),
+                (
+                    "relay init [DIR] | use <URL>",
+                    "Write the relay that carries audience poll votes, or set\nthe deployed one; `relay` alone shows the current one",
+                ),
             ],
         ),
         Block::Rows(

@@ -7691,6 +7691,32 @@ class Scene:
             ))
         """
         ...
+    def poll(
+        self,
+        question: str,
+        options: Sequence[str],
+        *,
+        name: Optional[str] = None,
+    ) -> None:
+        """Pause like ``stop`` and ask the audience a question.
+
+        While a presentation (``gaanim --present``, from the script or from a
+        ``.gaanim`` bundle) rests on this stop, the audience screen shows a QR
+        code and a six-character code that open a voting page on phones, and
+        a bar per answer that fills as votes arrive. Leaving the stop closes
+        the question. Phones scan once per presentation and follow every
+        poll. Votes travel through the relay set with ``gaanim relay``;
+        without one the poll shows how to set it up. Previews, exports and
+        the web player treat the poll as a plain stop.
+
+        ``question`` and each answer are trimmed. Raises ``ValueError`` for an
+        empty question or answer, a repeated answer, or fewer than 2 or more
+        than 6 answers.
+
+        Example:
+            scene.poll("¿Qué curva crece más rápido?", ["x²", "2ˣ", "x log x"])
+        """
+        ...
     def voiceover(
         self,
         key: str,

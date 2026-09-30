@@ -166,6 +166,55 @@ ofrece `Retry` y conserva las vistas ya generadas.
 Las vistas previas incluyen el contenido 3D, igual que la pantalla de la
 audiencia.
 
+= Encuestas a la audiencia <encuestas-a-la-audiencia>
+
+`scene.poll` crea una pausa con una pregunta para el público, al estilo de
+Kahoot:
+
+```python
+scene.poll("¿Qué curva crece más rápido?", ["x²", "2ˣ", "x log x"])
+```
+
+Al presentar, cuando la charla llega a esa pausa, la pantalla muestra un código
+QR, la dirección que abre y un código de seis caracteres. Quien lo escanea vota
+desde su teléfono, sin instalar nada ni iniciar sesión, y las barras de cada
+respuesta crecen en directo. Al avanzar, la pregunta se cierra. El código es el
+mismo durante toda la presentación: basta con escanearlo una vez y el teléfono
+muestra cada nueva pregunta en cuanto aparece. Cada teléfono cuenta una vez y
+puede cambiar su voto mientras la pregunta sigue abierta.
+
+Las encuestas funcionan igual al presentar un paquete `.gaanim`, sin Python. La
+previsualización y la exportación las tratan como pausas normales, y el
+reproductor web todavía no las muestra.
+
+== El relay
+
+Los votos viajan a través de un *relay*, un pequeño servicio web que despliegas
+tú, gratis, en tu propia cuenta de Cloudflare. Como teléfonos y presentación
+solo se conectan hacia fuera, por HTTPS, funciona en redes universitarias que
+aíslan a los dispositivos entre sí y con datos móviles.
+
+```bash
+gaanim relay init            # escribe el relay en ./gaanim-relay
+cd gaanim-relay
+npx wrangler login           # necesita Node.js y una cuenta gratuita
+npx wrangler deploy          # imprime https://gaanim-relay.<tú>.workers.dev
+gaanim relay use https://gaanim-relay.<tú>.workers.dev
+```
+
+`gaanim relay` sin argumentos muestra el relay en uso. Un proyecto puede usar
+otro con `[polls] relay` en su
+#link("/referencia/gaanim-toml/")[`gaanim.toml`], y la variable
+`GAANIM_POLL_RELAY` tiene prioridad sobre ambos. Sin relay, la encuesta muestra
+cómo configurarlo.
+
+Los votos son anónimos: el teléfono guarda un identificador al azar y el relay
+no pide nombres ni cuentas. Solo la presentación que abrió la sesión, con una
+clave que nunca sale de tu equipo, puede abrir preguntas y leer los votos. El
+relay borra la sesión y sus votos doce horas después de su última actividad.
+Si pierde la conexión, la encuesta lo indica y reintenta sin detener la
+presentación.
+
 = Revisar sin pausas
 
 Para revisar una animación de corrido en el editor, activa *Continuous* junto

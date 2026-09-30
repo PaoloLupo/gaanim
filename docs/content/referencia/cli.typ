@@ -258,6 +258,24 @@ gaanim export mi-charla.gaanim --output mi-charla.mp4 --quality production
 La guía #link("/guias/compartir/")[Compartir sin Python] explica qué guarda
 un paquete, cómo se reproducen los callbacks y sus límites.
 
+= `gaanim relay`
+
+Configura el relay que lleva los votos de las encuestas (`scene.poll`) a la
+presentación. No necesita Python. La guía
+#link("/guias/presentaciones/#encuestas-a-la-audiencia")[Encuestas a la audiencia]
+explica el despliegue.
+
+```bash
+gaanim relay                          # muestra el relay en uso y de dónde sale
+gaanim relay init [CARPETA] [--force] # escribe el relay (por defecto ./gaanim-relay)
+gaanim relay use https://…workers.dev # lo guarda para todas tus presentaciones
+gaanim relay forget                   # olvida el relay guardado
+```
+
+El orden de prioridad es `GAANIM_POLL_RELAY`, luego `[polls] relay` del
+proyecto y por último el guardado con `gaanim relay use`. La dirección debe
+empezar por `https://` (o `http://` para probar con `npx wrangler dev`).
+
 = `gaanim --diff`
 
 ```bash
@@ -312,4 +330,5 @@ gaanim --diff --example mi-charla --capture-stops --stops 3-7 --capture-only
   [`GAANIM_FRAME_PROFILE=1`], [Reproduce la línea de tiempo entera sin detenerse en las pausas y escribe en la terminal, una vez por segundo, el coste del seek, de la composición y del render, la resolución de la previsualización y cuántos objetos están visibles. Al terminar lista los segundos más lentos y cierra el editor.],
   [`GAANIM_SEGMENT_CHECKPOINTS=0`], [Desactiva los puntos de control por segmento. Por defecto, al reproducir o recorrer un segmento, Gaanim guarda el estado de la escena en su inicio y cada fotograma parte de ahí, así que el coste de un fotograma no crece a lo largo de la presentación. Con `0`, cada fotograma se reconstruye desde el principio de la escena. El resultado es idéntico en ambos casos.],
   [`GAANIM_CHECKPOINT_TIMINGS=1`], [Escribe en la terminal cuánto tarda cada punto de control por segmento en guardarse.],
+  [`GAANIM_POLL_RELAY`], [Dirección del relay de las encuestas. Tiene prioridad sobre `[polls] relay` y `gaanim relay use`.],
 )

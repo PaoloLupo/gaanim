@@ -50,6 +50,12 @@ cpal = { version = "0.17", default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 open = "5.3"
+# Audience polls: the relay client (same ureq build typst-kit already
+# uses), the QR code shown to the audience, and the session secret.
+ureq = { version = "2.12", default-features = false, features = ["native-tls", "json"] }
+native-tls = "0.2"
+qrcodegen = "1.8"
+getrandom = "0.3"
 
 # The presenter's clock reads the browser's local time on the web.
 [target.'cfg(target_arch = "wasm32")'.dependencies]

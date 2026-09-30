@@ -493,6 +493,25 @@ scene.stop("dos-placas", loop=sequence(
 ]
 
 #api-entry(
+  name: "Scene.poll",
+  kind: "method",
+  params: (
+    (name: "question", type: "str", desc: [Pregunta que ve la audiencia.]),
+    (name: "options", type: "Sequence[str]", desc: [Entre 2 y 6 respuestas distintas.]),
+    (name: "name", type: "str | None", default: "None", desc: [Etiqueta de la pausa en Presenter View.]),
+  ),
+  returns: (type: "None", desc: [Como `stop()`: no añade duración ni cambia la imagen.]),
+  desc: [Crea una pausa con una encuesta. Mientras una presentación descansa en ella, la pantalla de la audiencia muestra un código QR y un código de seis caracteres que abren la página de votación en el teléfono, y una barra por respuesta que se llena a medida que llegan los votos. Avanzar cierra la pregunta. Funciona igual al presentar un paquete `.gaanim`. La previsualización, la exportación y el reproductor web la tratan como una pausa normal. Los votos pasan por el relay configurado con `gaanim relay` (ver #link("/guias/presentaciones/#encuestas-a-la-audiencia")[Encuestas a la audiencia]). La pregunta y las respuestas se recortan; una pregunta o respuesta vacía, una respuesta repetida, o menos de 2 o más de 6 respuestas lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.text("¿Qué crece más rápido?", role="title")
+scene.poll("¿Qué crece más rápido?", ["x²", "2ˣ", "x log x"], name="votación")
+```
+]
+
+#api-entry(
   name: "Scene.stops",
   kind: "property",
   returns: (type: "list[SceneStop]", desc: [Las pausas creadas hasta ahora, en orden temporal.]),

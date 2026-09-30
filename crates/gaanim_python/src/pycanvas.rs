@@ -5811,6 +5811,23 @@ impl PyScene {
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
 
+    /// Insert a stop that asks the audience `question`: while a presentation
+    /// rests there, it shows a QR code to vote from a phone and the live
+    /// results. Exports ignore it like any stop.
+    #[pyo3(signature = (question, options, *, name=None))]
+    fn poll(&self, question: String, options: Vec<String>, name: Option<String>) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        let to_error = |error: gaanim_api::canvas::SegmentError| {
+            pyo3::exceptions::PyValueError::new_err(error.to_string())
+        };
+        let poll = gaanim_api::canvas::StopPoll::new(question, options).map_err(to_error)?;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .poll(poll, name)
+            .map_err(to_error)
+    }
+
     /// Start a voiceover block at the cursor, timed by `narration/<key>.*`.
     #[pyo3(signature = (key, *, text=None, volume=1.0))]
     fn voiceover(

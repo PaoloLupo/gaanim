@@ -75,6 +75,7 @@ fn bundle_timeline(bundle: &Bundle) -> Timeline {
     }
     timeline.set_segments(scene.segments.clone());
     timeline.set_markers(scene.markers.clone());
+    timeline.set_polls(scene.polls.clone());
     timeline.cached_duration = scene.duration;
     timeline.is_playing = true;
     timeline

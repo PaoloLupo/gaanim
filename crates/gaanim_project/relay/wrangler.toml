@@ -1,0 +1,14 @@
+# Gaanim poll relay: carries audience votes from phones to a presentation.
+# Deploy with `npx wrangler deploy`; see README.md.
+name = "gaanim-relay"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+[[durable_objects.bindings]]
+name = "SESSIONS"
+class_name = "PollSession"
+
+# SQLite-backed Durable Objects are available on the Workers Free plan.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PollSession"]
