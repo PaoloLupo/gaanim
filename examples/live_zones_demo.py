@@ -153,11 +153,13 @@ def podium(p):
         return celebrate(p.t, x, y)
     if p.rank < len(PLACES):
         x, y = PLACES[p.rank]
-        # Runners-up sway, clapping along.
-        return pose(x, y, scale=1.3, lean=0.08 * math.sin(2 * math.pi * p.t / 1.3))
+        # Runners-up sway, clapping along, and look up at the winner.
+        sway = 0.08 * math.sin(2 * math.pi * p.t / 1.3)
+        return pose(x, y, scale=1.3, lean=sway, look_x=-x / abs(x), look_y=0.6)
     column = (p.rank - 3) % 8
+    x = -6.3 + column * 1.8
     sway = 0.1 * math.sin(2 * math.pi * (p.t / 1.6 + column / 8))
-    return pose(-6.3 + column * 1.8, -3.9, scale=0.7, lean=sway, flip=column % 2 == 1)
+    return pose(x, -3.9, scale=0.7, lean=sway, look_x=-x / 4, look_y=1)
 
 
 scene.segment("Podio", notes="Celebrate the top three.")

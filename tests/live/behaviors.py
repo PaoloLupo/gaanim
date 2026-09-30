@@ -114,7 +114,15 @@ def animated(p):
     x = -6 + vx * (land - launch)
     sx, sy = impact(p.t - land, amount=0.4)
     bounce = spring(p.rank_since, frequency=3) * ease_out_back(p.score_since) + ease_in_out(p.t / 9)
-    return pose(x, -1 + 0.1 * bounce, sx=sx, sy=sy, lean=-0.1 * spring(p.t - land, damping=0.2))
+    return pose(
+        x,
+        -1 + 0.1 * bounce,
+        sx=sx,
+        sy=sy,
+        lean=-0.1 * spring(p.t - land, damping=0.2),
+        look_x=-1 if p.rank else 0.5,
+        look_y=0.3,
+    )
 
 
 BEHAVIORS = [zipline, podium, race, corners, animated]

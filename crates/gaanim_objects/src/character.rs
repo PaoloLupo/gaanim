@@ -61,6 +61,41 @@ pub fn to_scene(size: f64) -> Affine {
     Affine::scale_non_uniform(scale, -scale) * Affine::translate((-center.x, -center.y))
 }
 
+/// What moves a character besides its own breathing and expressions: a
+/// presentation moving it across the scene. Both are zero on phones.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct CharacterDrive {
+    /// Lag of hanging extras, in character units (y down), from the
+    /// character's motion across the scene: see [`follow_lag`].
+    pub lag: (f64, f64),
+    /// Where the eyes look, each in [-1, 1] (y down).
+    pub look: (f64, f64),
+}
+
+/// The catalog's spring response to a point's motion: `positions[j]` is
+/// where it was `j * step` seconds ago, for `j` in `0..=samples + 1`. The
+/// lag is how far a mass hanging from it trails behind, opposite to its
+/// acceleration and ringing after it stops.
+pub fn follow_lag(
+    positions: &[(f64, f64)],
+    step: f64,
+    frequency: f64,
+    damping: f64,
+) -> (f64, f64) {
+    let omega = std::f64::consts::TAU * frequency;
+    let damped = omega * (1.0 - damping * damping).max(1e-6).sqrt();
+    let mut lag = (0.0, 0.0);
+    for j in 1..positions.len().saturating_sub(1) {
+        let u = j as f64 * step;
+        let h = (-damping * omega * u).exp() * (damped * u).sin() / damped;
+        let (a, b, c) = (positions[j - 1], positions[j], positions[j + 1]);
+        let weight = h / step;
+        lag.0 -= weight * (a.0 - 2.0 * b.0 + c.0);
+        lag.1 -= weight * (a.1 - 2.0 * b.1 + c.1);
+    }
+    lag
+}
+
 /// An expression playing: `start` and the pose's time share one clock.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExpressionPlay {
@@ -154,8 +189,18 @@ struct Part {
     keep: bool,
     #[serde(default = "yes")]
     blink: bool,
+    /// Degrees an extra swings per unit of lag (follow-through).
+    #[serde(default)]
+    follow: f64,
+    /// Where an extra hangs from, around (50, 0) at its anchor.
+    #[serde(default = "hang")]
+    pivot: (f64, f64),
     #[serde(deserialize_with = "layers")]
     layers: Vec<Layer>,
+}
+
+fn hang() -> (f64, f64) {
+    (50.0, 0.0)
 }
 
 fn yes() -> bool {
@@ -221,10 +266,23 @@ struct Blink {
     duration: f64,
 }
 
+/// The damped spring extras hang from.
+#[derive(Debug, Deserialize)]
+struct Follow {
+    frequency: f64,
+    damping: f64,
+    step: f64,
+    samples: usize,
+    max: f64,
+    stretch: f64,
+}
+
 #[derive(Debug, Deserialize)]
 struct Idle {
     breathe: Breathe,
     blink: Blink,
+    follow: Follow,
+    look: (f64, f64),
 }
 
 #[derive(Debug, Deserialize)]
@@ -446,6 +504,56 @@ impl CharacterCatalog {
         t: f64,
         expression: Option<&ExpressionPlay>,
     ) -> Vec<CharacterLayer> {
+        self.pose_driven(character, seed, t, expression, &CharacterDrive::default())
+    }
+
+    /// Whether `character` wears an extra that hangs and swings.
+    pub fn hangs(&self, character: &Character) -> bool {
+        self.extras[character[4] % self.extras.len().max(1)].follow != 0.0
+    }
+
+    /// How the follow-through spring samples motion: (step, samples,
+    /// frequency, damping), for measuring a character's motion across the
+    /// scene the same way.
+    pub fn follow_sampling(&self) -> (f64, usize, f64, f64) {
+        let follow = &self.idle.follow;
+        (follow.step, follow.samples, follow.frequency, follow.damping)
+    }
+
+    /// The whole drawing's transform at `t`: breathing, then the
+    /// expression's motion.
+    fn whole_at(&self, base: (f64, f64), t: f64, expression: Option<&ExpressionPlay>) -> Affine {
+        let breathe = &self.idle.breathe;
+        let breath = breathe.amount * (std::f64::consts::TAU * t / breathe.period).sin();
+        let mut whole = motion_affine(base, [0.0, 0.0, 1.0 - breath / 2.0, 1.0 + breath, 0.0]);
+        if let Some(play) = expression
+            && let Some(shown) = self.expressions.get(&play.name)
+            && let Some(motion) = shown.motion.as_ref().and_then(|name| self.motions.get(name))
+        {
+            let since = t - play.start;
+            if since >= 0.0 && (play.looped || since < shown.hold) {
+                let p = if play.looped {
+                    since.rem_euclid(motion.duration) / motion.duration
+                } else {
+                    (since / motion.duration).min(1.0)
+                };
+                whole = motion_affine(base, motion.at(p)) * whole;
+            }
+        }
+        whole
+    }
+
+    /// [`CharacterCatalog::pose`] moved by `drive`: hanging extras also lag
+    /// behind the character's motion across the scene, and the eyes look
+    /// where it says.
+    pub fn pose_driven(
+        &self,
+        character: &Character,
+        seed: u32,
+        t: f64,
+        expression: Option<&ExpressionPlay>,
+        drive: &CharacterDrive,
+    ) -> Vec<CharacterLayer> {
         let character: Character =
             std::array::from_fn(|part| character[part] % self.counts()[part].max(1));
         let body = &self.bodies[character[0]];
@@ -453,9 +561,7 @@ impl CharacterCatalog {
         let extra = &self.extras[character[4]];
         let base = (50.0, body.base);
 
-        let breathe = &self.idle.breathe;
-        let breath = breathe.amount * (std::f64::consts::TAU * t / breathe.period).sin();
-        let mut whole = motion_affine(base, [0.0, 0.0, 1.0 - breath / 2.0, 1.0 + breath, 0.0]);
+        let whole = self.whole_at(base, t, expression);
 
         let mut eyes: &[Layer] = &own_eyes.layers;
         let mut own = true;
@@ -477,18 +583,6 @@ impl CharacterCatalog {
                     && let Some(layers) = self.face_part(&self.mouths, name)
                 {
                     mouth = layers;
-                }
-                if let Some(motion) = shown
-                    .motion
-                    .as_ref()
-                    .and_then(|name| self.motions.get(name))
-                {
-                    let p = if play.looped {
-                        since.rem_euclid(motion.duration) / motion.duration
-                    } else {
-                        (since / motion.duration).min(1.0)
-                    };
-                    whole = motion_affine(base, motion.at(p)) * whole;
                 }
                 for effect in shown
                     .effects
@@ -516,9 +610,30 @@ impl CharacterCatalog {
             }
         }
         let face = Affine::translate((0.0, body.face - 50.0));
-        let eyes_at = face * motion_affine((50.0, 50.0), [0.0, 0.0, 1.0, blink, 0.0]);
-        let extra_at =
-            Affine::translate((0.0, body.anchor(extra.anchor.as_deref().unwrap_or("top"))));
+        let look = (
+            drive.look.0.clamp(-1.0, 1.0) * self.idle.look.0,
+            drive.look.1.clamp(-1.0, 1.0) * self.idle.look.1,
+        );
+        let eyes_at = face
+            * Affine::translate(look)
+            * motion_affine((50.0, 50.0), [0.0, 0.0, 1.0, blink, 0.0]);
+        let anchor = body.anchor(extra.anchor.as_deref().unwrap_or("top"));
+        let mut extra_at = Affine::translate((0.0, anchor));
+        if extra.follow != 0.0 {
+            let follow = &self.idle.follow;
+            let pivot = kurbo::Point::new(extra.pivot.0, anchor + extra.pivot.1);
+            let positions: Vec<(f64, f64)> = (0..=follow.samples + 1)
+                .map(|j| {
+                    let at = self.whole_at(base, t - j as f64 * follow.step, expression) * pivot;
+                    (at.x, at.y)
+                })
+                .collect();
+            let own = follow_lag(&positions, follow.step, follow.frequency, follow.damping);
+            let lag = (own.0 + drive.lag.0, own.1 + drive.lag.1);
+            let swing = (extra.follow * lag.0).clamp(-follow.max, follow.max);
+            let stretch = (1.0 - extra.follow * follow.stretch * lag.1).clamp(0.7, 1.3);
+            extra_at = extra_at * motion_affine(extra.pivot, [0.0, 0.0, 1.0, stretch, swing]);
+        }
 
         let mut out = Vec::new();
         let mut push = |layers: &[Layer], at: Affine| {

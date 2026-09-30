@@ -161,6 +161,9 @@ pub struct PoseRegs {
     pub sx: Reg,
     pub sy: Reg,
     pub lean: Reg,
+    /// NaN when the engine looks where the character moves.
+    pub look_x: Reg,
+    pub look_y: Reg,
     pub flip: Reg,
     pub visible: Reg,
     /// An index into [`Program::strings`], or negative for none.
@@ -172,7 +175,7 @@ pub struct PoseRegs {
 }
 
 impl PoseRegs {
-    fn all(&self) -> [Reg; 12] {
+    fn all(&self) -> [Reg; 14] {
         [
             self.x,
             self.y,
@@ -181,6 +184,8 @@ impl PoseRegs {
             self.sx,
             self.sy,
             self.lean,
+            self.look_x,
+            self.look_y,
             self.flip,
             self.visible,
             self.express,
@@ -242,6 +247,9 @@ pub struct Pose {
     pub sy: f64,
     /// Radians the body leans counterclockwise, about the feet.
     pub lean: f64,
+    /// Where the eyes look, each in [-1, 1] (right and up), or `None` for
+    /// where the character moves.
+    pub look: Option<(f64, f64)>,
     /// Mirrored left to right.
     pub flip: bool,
     pub visible: bool,
@@ -374,6 +382,10 @@ impl Program {
             sx: r(self.pose.sx),
             sy: r(self.pose.sy),
             lean: r(self.pose.lean),
+            look: {
+                let look = (r(self.pose.look_x), r(self.pose.look_y));
+                (!look.0.is_nan() && !look.1.is_nan()).then_some(look)
+            },
             flip: r(self.pose.flip) != 0.0,
             visible: r(self.pose.visible) != 0.0,
             express: (express >= 0.0 && (express as usize) < self.strings.len())
@@ -394,6 +406,7 @@ impl Default for Pose {
             sx: 1.0,
             sy: 1.0,
             lean: 0.0,
+            look: None,
             flip: false,
             visible: true,
             express: None,
@@ -535,6 +548,8 @@ mod tests {
                 sx: 0,
                 sy: 0,
                 lean: 0,
+                look_x: 0,
+                look_y: 0,
                 flip: 0,
                 visible: 0,
                 express: 0,
@@ -604,7 +619,7 @@ mod tests {
     fn a_program_reads_back_from_json() {
         let json = r#"{"version":[1,0],"name":"f","strings":["happy"],
             "code":[{"input":"t"},{"const":"0.1"},{"add":[0,1]},{"const":"0"},{"const":"nan"}],
-            "pose":{"x":2,"y":1,"rotation":3,"scale":1,"sx":1,"sy":1,"lean":3,"flip":3,"visible":1,
+            "pose":{"x":2,"y":1,"rotation":3,"scale":1,"sx":1,"sy":1,"lean":3,"look_x":4,"look_y":4,"flip":3,"visible":1,
                     "express":3,"since":4,"loop":3}}"#;
         let program = Program::from_json(json).unwrap();
         let pose = program.eval(
@@ -680,6 +695,16 @@ mod tests {
                 ] {
                     let want = number(&expected[field]);
                     assert!(close(got, want), "{field}: {got} != {want} in {context}");
+                }
+                let look = expected["look"].as_array().map(|look| {
+                    (number(&look[0]), number(&look[1]))
+                });
+                match (pose.look, look) {
+                    (Some(got), Some(want)) => assert!(
+                        close(got.0, want.0) && close(got.1, want.1),
+                        "look in {context}"
+                    ),
+                    (got, want) => assert_eq!(got, want, "look in {context}"),
                 }
                 assert_eq!(pose.flip, expected["flip"].as_bool().unwrap(), "{context}");
                 assert_eq!(pose.visible, expected["visible"].as_bool().unwrap(), "{context}");

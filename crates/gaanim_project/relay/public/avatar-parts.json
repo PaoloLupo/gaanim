@@ -1,5 +1,5 @@
 {
-  "about": "Parts of the players' characters, in a 100-unit square, and how they move. A character is [body, color, eyes, mouth, extra], indexes into these lists. A layer is filled (fill) or stroked with round caps (stroke, width); 'body' is the character's color, 'ink' and 'white' the palette's. Eyes, mouths and faces are drawn for a face at y = 50 and move to the body's face; an extra or effect is drawn around (50, 0) at its anchor (the body's top or chin, or the face), an extra behind the body when it says so. Motion: at time t (seconds) a character breathes, scaling its whole drawing about (50, base) by sy = 1 + a, sx = 1 - a / 2 with a = idle.breathe.amount * sin(2 pi t / idle.breathe.period). Eyes whose part allows it blink: with h the FNV-1a hash of the nickname's UTF-8 bytes, period P = every[0] + (every[1] - every[0]) * (h & 0xffff) / 65535 and offset o = P * ((h >> 16) & 0xffff) / 65535; while x = (t + o) mod P is under duration the eyes scale vertically about (50, face) by 1 - 0.9 * sin(pi * x / duration). An expression started at time s shows, while t - s < hold (or always when looped), its eyes and mouth from faces (or eyes and mouths) by name, instead of the character's, except eyes marked keep; its effects; and its motion at progress p = min((t - s) / duration, 1), or ((t - s) mod duration) / duration when looped. A motion's keys are [p, dx, dy, sx, sy, rot]; between two keys each value is interpolated with smoothstep on the segment's fraction (linear when ease is linear), and the transform is translate(pivot + (dx, dy)) rotate(rot degrees) scale(sx, sy) translate(-pivot), with the pivot (50, base) for the body and the effect's pivot for an effect. The body's motion applies to the whole drawing after breathing; an effect's loops with t - s on top of it.",
+  "about": "Parts of the players' characters, in a 100-unit square, and how they move. A character is [body, color, eyes, mouth, extra], indexes into these lists. A layer is filled (fill) or stroked with round caps (stroke, width); 'body' is the character's color, 'ink' and 'white' the palette's. Eyes, mouths and faces are drawn for a face at y = 50 and move to the body's face; an extra or effect is drawn around (50, 0) at its anchor (the body's top or chin, or the face), an extra behind the body when it says so. Motion: at time t (seconds) a character breathes, scaling its whole drawing about (50, base) by sy = 1 + a, sx = 1 - a / 2 with a = idle.breathe.amount * sin(2 pi t / idle.breathe.period). Eyes whose part allows it blink: with h the FNV-1a hash of the nickname's UTF-8 bytes, period P = every[0] + (every[1] - every[0]) * (h & 0xffff) / 65535 and offset o = P * ((h >> 16) & 0xffff) / 65535; while x = (t + o) mod P is under duration the eyes scale vertically about (50, face) by 1 - 0.9 * sin(pi * x / duration). An expression started at time s shows, while t - s < hold (or always when looped), its eyes and mouth from faces (or eyes and mouths) by name, instead of the character's, except eyes marked keep; its effects; and its motion at progress p = min((t - s) / duration, 1), or ((t - s) mod duration) / duration when looped. A motion's keys are [p, dx, dy, sx, sy, rot]; between two keys each value is interpolated with smoothstep on the segment's fraction (linear when ease is linear), and the transform is translate(pivot + (dx, dy)) rotate(rot degrees) scale(sx, sy) translate(-pivot), with the pivot (50, base) for the body and the effect's pivot for an effect. The body's motion applies to the whole drawing after breathing; an effect's loops with t - s on top of it. Follow-through: an extra with follow f swings about its pivot (x, y around its anchor; (50, 0) if it gives none) like a damped spring hanging from the body. With d = idle.follow.step and N = idle.follow.samples, P_j is the pivot moved by the whole drawing's transform at time t - j d, the same expression playing (j = 0 .. N + 1); A_j = (P_{j-1} - 2 P_j + P_{j+1}) / d^2 for j = 1 .. N; the lag is L = D - sum over j of h(j d) A_j d, with h(u) = exp(-z w u) sin(w' u) / w', w = 2 pi idle.follow.frequency, z = idle.follow.damping, w' = w sqrt(1 - z^2), and D a lag the presentation adds for motion across the scene (0 on phones). The extra rotates by clamp(f * L.x, -max, max) degrees (max = idle.follow.max) and scales vertically by clamp(1 - f * idle.follow.stretch * L.y, 0.7, 1.3), both about its pivot, before the whole drawing's transform. Eyes look: they move by (look.x * idle.look[0], look.y * idle.look[1]) before blinking, with look in [-1, 1] given by the presentation (0 on phones).",
   "ink": "#1d1b26",
   "white": "#ffffff",
   "colors": [
@@ -294,6 +294,11 @@
     {
       "name": "bowtie",
       "anchor": "chin",
+      "follow": 3,
+      "pivot": [
+        50,
+        0
+      ],
       "layers": [
         {
           "d": "M50 0L36 -7Q33 -8 33 -5V5Q33 8 36 7L50 0L64 7Q67 8 67 5V-5Q67 -8 64 -7Z",
@@ -308,6 +313,11 @@
     {
       "name": "beret",
       "anchor": "top",
+      "follow": 2,
+      "pivot": [
+        50,
+        6
+      ],
       "layers": [
         {
           "d": "M50 -13L53 -19",
@@ -339,6 +349,11 @@
       "name": "bunny",
       "anchor": "top",
       "behind": true,
+      "follow": 4,
+      "pivot": [
+        50,
+        6
+      ],
       "layers": [
         {
           "d": "M33 8Q22 -30 31 -35Q42 -38 44 6ZM67 8Q78 -30 69 -35Q58 -38 56 6Z",
@@ -353,6 +368,11 @@
     {
       "name": "party",
       "anchor": "top",
+      "follow": 3,
+      "pivot": [
+        50,
+        4
+      ],
       "layers": [
         {
           "d": "M37 4L50 -30L63 4Z",
@@ -372,6 +392,11 @@
     {
       "name": "crown",
       "anchor": "top",
+      "follow": 2,
+      "pivot": [
+        50,
+        5
+      ],
       "layers": [
         {
           "d": "M31 5L30 -16L40 -6L50 -20L60 -6L70 -16L69 5Z",
@@ -386,6 +411,11 @@
     {
       "name": "sprout",
       "anchor": "top",
+      "follow": 5,
+      "pivot": [
+        50,
+        4
+      ],
       "layers": [
         {
           "d": "M50 4Q50 -8 50 -14",
@@ -798,7 +828,19 @@
         5.0
       ],
       "duration": 0.16
-    }
+    },
+    "follow": {
+      "frequency": 2.2,
+      "damping": 0.3,
+      "step": 0.04,
+      "samples": 12,
+      "max": 35,
+      "stretch": 0.006
+    },
+    "look": [
+      3,
+      2
+    ]
   },
   "expressions": {
     "happy": {

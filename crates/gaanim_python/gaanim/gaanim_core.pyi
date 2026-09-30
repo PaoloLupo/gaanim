@@ -8150,6 +8150,8 @@ class Scene:
         max_stretch: float = 1.4,
         lean: float = 0.05,
         max_lean: float = 0.35,
+        follow: float = 1.0,
+        look: float = 0.4,
         preview: Optional[Sequence[str]] = None,
         preview_every: float = 0.6,
     ) -> LiveZone:
@@ -8175,7 +8177,11 @@ class Scene:
         frame: they stretch along their velocity by ``1 + squash * speed``
         (keeping their area, up to ``max_stretch``) and lean into
         horizontal motion by ``lean * speed`` radians (up to ``max_lean``).
-        Pass 0 to turn either off; ``pose(sx=, sy=, lean=)`` adds your own. Previews and exports replay
+        Hanging extras (bunny ears, hats, sprouts) swing behind the motion
+        like a spring, ``follow`` times as much as the catalog tunes it,
+        and the eyes look toward the motion by ``look`` per unit of speed.
+        Pass 0 to turn any off; ``pose(sx=, sy=, lean=, look_x=, look_y=)``
+        sets your own. Previews and exports replay
         ``preview`` players (the audience's by default), one arriving every
         ``preview_every`` seconds and ranked in the order given. Raises
         ``gaanim.live.BehaviorError`` (a ``ValueError``) pointing at the

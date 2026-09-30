@@ -96,6 +96,8 @@ class Pose(NamedTuple):
     sx: float = 1.0
     sy: float = 1.0
     lean: float = 0.0
+    look_x: Optional[float] = None
+    look_y: Optional[float] = None
     flip: bool = False
     visible: bool = True
     express: Optional[str] = None
@@ -112,6 +114,8 @@ def pose(
     sx: float = 1.0,
     sy: float = 1.0,
     lean: float = 0.0,
+    look_x: Optional[float] = None,
+    look_y: Optional[float] = None,
     flip: bool = False,
     visible: bool = True,
     express: Optional[str] = None,
@@ -124,14 +128,18 @@ def pose(
     about its middle, in radians counterclockwise; ``scale`` multiplies the
     zone's size. ``sx`` and ``sy`` stretch it across and along its body
     about the feet, for squash and stretch (``impact`` and ``anticipate``
-    give them); ``lean`` tilts it about the feet. ``flip`` mirrors it left
-    to right; ``visible=False`` hides it. ``express`` plays an expression (``"happy"``, ``"sad"``, ``"hurt"``,
+    give them); ``lean`` tilts it about the feet. ``look_x`` and ``look_y``
+    (each from -1 to 1, right and up) turn its eyes; without them it looks
+    where it moves. ``flip`` mirrors it left to right; ``visible=False``
+    hides it. ``express`` plays an expression (``"happy"``, ``"sad"``, ``"hurt"``,
     ``"winner"``, ``"surprised"``), once or with ``loop=True`` until another
     one. It starts when it first appears, or at ``since``: the player's
     ``t`` when it started, for expressions that follow a moment the behavior
     computes, like landing.
     """
-    return Pose(x, y, rotation, scale, sx, sy, lean, flip, visible, express, since, loop)
+    return Pose(
+        x, y, rotation, scale, sx, sy, lean, look_x, look_y, flip, visible, express, since, loop
+    )
 
 
 # --- Helpers ---------------------------------------------------------------
@@ -1165,11 +1173,11 @@ class _Compiler:
                     raise self.fail(node, f"express must be an expression name or None, got {self.describe(value)}")
                 if value.kind == "none":
                     value = _Value("optstr", value.reg)
-            elif name == "since":
+            elif name in ("since", "look_x", "look_y"):
                 if value.kind == "none":
                     value = _Value("num", self.const(math.nan))
                 elif value.kind not in ("num", "bool"):
-                    raise self.fail(node, f"since must be a number or None, got {self.describe(value)}")
+                    raise self.fail(node, f"{name} must be a number or None, got {self.describe(value)}")
             elif name in ("flip", "visible", "loop"):
                 value = _Value("bool", self.truth(value, node))
             else:

@@ -5922,7 +5922,7 @@ impl PyScene {
     /// `audience` arrives in it as their character, posed every frame by
     /// `behavior`, a Python function compiled now. It runs until
     /// `zone.close()` or the end of the segment.
-    #[pyo3(signature = (audience, behavior, *, bounds=(-8.0, -4.5, 8.0, 4.5), size=1.2, squash=0.04, max_stretch=1.4, lean=0.05, max_lean=0.35, preview=None, preview_every=0.6))]
+    #[pyo3(signature = (audience, behavior, *, bounds=(-8.0, -4.5, 8.0, 4.5), size=1.2, squash=0.04, max_stretch=1.4, lean=0.05, max_lean=0.35, follow=1.0, look=0.4, preview=None, preview_every=0.6))]
     #[allow(clippy::too_many_arguments)]
     fn live_zone(
         &self,
@@ -5934,6 +5934,8 @@ impl PyScene {
         max_stretch: f64,
         lean: f64,
         max_lean: f64,
+        follow: f64,
+        look: f64,
         preview: Option<Vec<String>>,
         preview_every: f64,
     ) -> PyResult<crate::live::PyLiveZone> {
@@ -5943,6 +5945,8 @@ impl PyScene {
             max_stretch,
             lean,
             max_lean,
+            follow,
+            look,
         };
         let program = crate::live::compile_behavior(behavior)?;
         let inner = self

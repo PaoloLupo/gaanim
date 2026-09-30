@@ -44,6 +44,21 @@ pub struct Motion {
     /// to `max_lean`.
     pub lean: f64,
     pub max_lean: f64,
+    /// How much hanging extras (ears, hats, sprouts) lag behind motion
+    /// across the scene, as a spring; 1 as the catalog tunes it.
+    #[serde(default = "one")]
+    pub follow: f64,
+    /// How far the eyes look toward the motion per unit of speed.
+    #[serde(default = "look")]
+    pub look: f64,
+}
+
+fn one() -> f64 {
+    1.0
+}
+
+fn look() -> f64 {
+    0.4
 }
 
 impl Default for Motion {
@@ -53,6 +68,8 @@ impl Default for Motion {
             max_stretch: 1.4,
             lean: 0.0,
             max_lean: 0.35,
+            follow: 1.0,
+            look: 0.4,
         }
     }
 }

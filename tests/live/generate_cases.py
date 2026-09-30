@@ -84,6 +84,9 @@ def main() -> None:
                         "sx": number(result.sx),
                         "sy": number(result.sy),
                         "lean": number(result.lean),
+                        "look": None
+                        if result.look_x is None or result.look_y is None
+                        else [number(result.look_x), number(result.look_y)],
                         "flip": bool(result.flip),
                         "visible": bool(result.visible),
                         "express": result.express,

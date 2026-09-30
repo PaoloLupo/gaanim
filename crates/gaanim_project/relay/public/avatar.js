@@ -106,13 +106,49 @@ function facePart(catalog, list, name) {
   return catalog.faces[name] ?? catalog[list].find((part) => part.name === name) ?? null;
 }
 
+/** The whole drawing's matrix at `t`: breathing, then the expression's motion. */
+function wholeAt(catalog, base, t, expression) {
+  const breathe = catalog.idle.breathe;
+  const breath = breathe.amount * Math.sin((2 * Math.PI * t) / breathe.period);
+  let whole = motionMatrix(base, 0, 0, 1 - breath / 2, 1 + breath, 0);
+  const shown = expression && catalog.expressions[expression.name];
+  if (shown && shown.motion) {
+    const since = t - expression.start;
+    if (since >= 0 && (expression.loop || since < shown.hold)) {
+      const motion = catalog.motions[shown.motion];
+      const p = expression.loop
+        ? (since % motion.duration) / motion.duration
+        : Math.min(since / motion.duration, 1);
+      whole = multiply(motionMatrix(base, ...motionAt(motion, p)), whole);
+    }
+  }
+  return whole;
+}
+
+/** How far a mass hanging from a point trails behind it: `positions[j]` is
+ * where the point was `j * step` seconds ago. See the catalog's `about`. */
+function followLag(positions, step, frequency, damping) {
+  const omega = 2 * Math.PI * frequency;
+  const damped = omega * Math.sqrt(Math.max(1 - damping * damping, 1e-6));
+  const lag = [0, 0];
+  for (let j = 1; j < positions.length - 1; j += 1) {
+    const u = j * step;
+    const weight = (Math.exp(-damping * omega * u) * Math.sin(damped * u)) / damped / step;
+    const [a, b, c] = [positions[j - 1], positions[j], positions[j + 1]];
+    lag[0] -= weight * (a[0] - 2 * b[0] + c[0]);
+    lag[1] -= weight * (a[1] - 2 * b[1] + c[1]);
+  }
+  return lag;
+}
+
 /**
  * How `avatar` looks at time `t`: `expression` is null or
- * {name, start, loop}. Returns the layers to draw and their matrices:
- * `whole` applies to everything, `eyes` to the eyes after it, and each
- * effect's own after it.
+ * {name, start, loop}; `drive` is null or {lag: [x, y], look: [x, y]}, what
+ * a presentation moving the character adds. Returns the layers to draw and
+ * their matrices: `whole` applies to everything, the eyes', the extra's and
+ * each effect's own after it.
  */
-function avatarPose(catalog, avatar, seed, t, expression = null) {
+function avatarPose(catalog, avatar, seed, t, expression = null, drive = null) {
   const [bodyIndex, , eyesIndex, mouthIndex, extraIndex] = avatar;
   const body = catalog.bodies[bodyIndex];
   const extra = catalog.extras[extraIndex];
@@ -120,8 +156,7 @@ function avatarPose(catalog, avatar, seed, t, expression = null) {
   const idle = catalog.idle;
   const base = [50, body.base];
 
-  const breath = idle.breathe.amount * Math.sin((2 * Math.PI * t) / idle.breathe.period);
-  let whole = motionMatrix(base, 0, 0, 1 - breath / 2, 1 + breath, 0);
+  const whole = wholeAt(catalog, base, t, expression);
 
   const since = expression ? t - expression.start : 0;
   const shown = expression && catalog.expressions[expression.name];
@@ -132,13 +167,6 @@ function avatarPose(catalog, avatar, seed, t, expression = null) {
   if (active) {
     if (shown.eyes && !ownEyes.keep) eyes = facePart(catalog, "eyes", shown.eyes) ?? eyes;
     if (shown.mouth) mouth = facePart(catalog, "mouths", shown.mouth) ?? mouth;
-    if (shown.motion) {
-      const motion = catalog.motions[shown.motion];
-      const p = expression.loop
-        ? (since % motion.duration) / motion.duration
-        : Math.min(since / motion.duration, 1);
-      whole = multiply(motionMatrix(base, ...motionAt(motion, p)), whole);
-    }
     for (const name of shown.effects ?? []) {
       const effect = catalog.effects[name];
       const motion = catalog.motions[effect.motion];
@@ -161,15 +189,41 @@ function avatarPose(catalog, avatar, seed, t, expression = null) {
     if (x < idle.blink.duration) blink = 1 - 0.9 * Math.sin((Math.PI * x) / idle.blink.duration);
   }
   const face = body.face - 50;
+  const clamp = (value, low, high) => Math.min(Math.max(value, low), high);
+  const look = drive?.look ?? [0, 0];
+  const lookAt = [clamp(look[0], -1, 1) * idle.look[0], clamp(look[1], -1, 1) * idle.look[1]];
+
+  // Follow-through: the extra hangs from the body like a damped spring.
+  const anchor = body[extra.anchor] ?? body.top;
+  let extraMatrix = [1, 0, 0, 1, 0, anchor];
+  if (extra.follow) {
+    const follow = idle.follow;
+    const pivot = extra.pivot ?? [50, 0];
+    const positions = [];
+    for (let j = 0; j <= follow.samples + 1; j += 1) {
+      const m = wholeAt(catalog, base, t - j * follow.step, expression);
+      const [x, y] = [pivot[0], anchor + pivot[1]];
+      positions.push([m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]);
+    }
+    const own = followLag(positions, follow.step, follow.frequency, follow.damping);
+    const added = drive?.lag ?? [0, 0];
+    const lag = [own[0] + added[0], own[1] + added[1]];
+    const swing = clamp(extra.follow * lag[0], -follow.max, follow.max);
+    const stretch = clamp(1 - extra.follow * follow.stretch * lag[1], 0.7, 1.3);
+    extraMatrix = multiply(extraMatrix, motionMatrix(pivot, 0, 0, 1, stretch, swing));
+  }
 
   return {
     whole,
     body: body.layers,
     extra: extra.layers,
     extraBehind: Boolean(extra.behind),
-    extraAt: body[extra.anchor] ?? body.top,
+    extraMatrix,
     eyes: eyes.layers,
-    eyesMatrix: multiply([1, 0, 0, 1, 0, face], motionMatrix([50, 50], 0, 0, 1, blink, 0)),
+    eyesMatrix: multiply(
+      [1, 0, 0, 1, lookAt[0], face + lookAt[1]],
+      motionMatrix([50, 50], 0, 0, 1, blink, 0),
+    ),
     mouth: mouth.layers,
     face,
     effects,
@@ -230,7 +284,7 @@ function paintPose(catalog, avatar, svg, pose, previous) {
   if (!same) {
     const whole = document.createElementNS(SVG_NS, "g");
     const extra = layerGroup(catalog, avatar, pose.extra);
-    extra.setAttribute("transform", `translate(0 ${pose.extraAt})`);
+    extra.dataset.part = "extra";
     if (pose.extraBehind) whole.append(extra);
     whole.append(layerGroup(catalog, avatar, pose.body));
     const eyes = layerGroup(catalog, avatar, pose.eyes);
@@ -250,6 +304,7 @@ function paintPose(catalog, avatar, svg, pose, previous) {
   const whole = svg.firstElementChild;
   whole.setAttribute("transform", matrixAttribute(pose.whole));
   whole.querySelector('[data-part="eyes"]').setAttribute("transform", matrixAttribute(pose.eyesMatrix));
+  whole.querySelector('[data-part="extra"]').setAttribute("transform", matrixAttribute(pose.extraMatrix));
   whole.querySelectorAll('[data-part="effect"]').forEach((g, index) => {
     g.setAttribute("transform", matrixAttribute(pose.effects[index].matrix));
   });

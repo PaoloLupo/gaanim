@@ -12,7 +12,10 @@ use std::sync::Arc;
 
 use gaanim_core::kurbo::{Affine, BezPath, Point, Vec2};
 use gaanim_core::peniko::Brush;
-use gaanim_objects::character::{Character, ExpressionPlay, catalog, character_seed, to_scene};
+use gaanim_objects::character::{
+    CHARACTER_ENVELOPE, Character, CharacterDrive, ExpressionPlay, catalog, character_seed,
+    follow_lag, to_scene,
+};
 
 use super::program::{Inputs, Pose};
 use super::spec::LiveZone;
@@ -187,14 +190,23 @@ impl ZoneRun {
         }
     }
 
-    /// Where a character's paths go: its feet at the pose, squashed and
-    /// leaning about them, turned and mirrored about its middle, and
-    /// stretched along its velocity when the zone asks.
-    fn placement(&mut self, zone: &LiveZone, index: usize, pose: &Pose, size: f64) -> Affine {
+    /// Where a character's paths go and what moves its parts: its feet
+    /// at the pose, squashed and leaning about them, turned and mirrored
+    /// about its middle and stretched along its velocity when the zone
+    /// asks; its hanging extras lag behind its motion and its eyes look
+    /// where it goes, unless the pose says where.
+    fn placement(
+        &mut self,
+        zone: &LiveZone,
+        index: usize,
+        pose: &Pose,
+        size: f64,
+    ) -> (Affine, CharacterDrive) {
+        let catalog = catalog();
         let local = to_scene(size);
-        let character = &self.actors[index].player.character;
+        let character = self.actors[index].player.character;
         // Feet at the origin; the middle is where the drawing is centred.
-        let feet = local * Point::new(50.0, catalog().feet(character));
+        let feet = local * Point::new(50.0, catalog.feet(&character));
         let middle = -feet.to_vec2();
         let about = |point: Vec2, transform: Affine| {
             Affine::translate(point) * transform * Affine::translate(-point)
@@ -209,22 +221,53 @@ impl ZoneRun {
             * Affine::translate(middle)
             * local;
         let motion = zone.motion;
+        let velocity = self.velocity(zone, index);
         let mut lean = finite_or(pose.lean, 0.0);
+        lean -= (motion.lean * velocity.x).clamp(-motion.max_lean, motion.max_lean);
         let mut stretch = Affine::IDENTITY;
-        if motion.squash > 0.0 || motion.lean > 0.0 {
-            let velocity = self.velocity(zone, index);
-            lean -= (motion.lean * velocity.x).clamp(-motion.max_lean, motion.max_lean);
-            let speed = velocity.hypot();
-            let ratio = (1.0 + motion.squash * speed).clamp(1.0, motion.max_stretch.max(1.0));
-            if ratio > 1.0 + 1e-9 {
-                let along = Affine::rotate(velocity.atan2());
-                stretch = about(
-                    middle,
-                    along * Affine::scale_non_uniform(ratio, 1.0 / ratio) * along.inverse(),
-                );
+        let speed = velocity.hypot();
+        let ratio = (1.0 + motion.squash * speed).clamp(1.0, motion.max_stretch.max(1.0));
+        if ratio > 1.0 + 1e-9 {
+            let along = Affine::rotate(velocity.atan2());
+            stretch = about(
+                middle,
+                along * Affine::scale_non_uniform(ratio, 1.0 / ratio) * along.inverse(),
+            );
+        }
+        let place = Affine::translate((pose.x, pose.y)) * Affine::rotate(lean) * stretch * body;
+
+        // Scene directions (y up) to the drawing's (y down, maybe mirrored).
+        let mirror = if pose.flip { -1.0 } else { 1.0 };
+        let look = match pose.look {
+            Some((x, y)) => (mirror * x, -y),
+            None => (
+                mirror * motion.look * velocity.x,
+                -motion.look * velocity.y,
+            ),
+        };
+        let mut drive = CharacterDrive {
+            lag: (0.0, 0.0),
+            look,
+        };
+        if motion.follow > 0.0 && catalog.hangs(&character) {
+            let (step, samples, frequency, damping) = catalog.follow_sampling();
+            let inputs = self.inputs(index);
+            let positions: Vec<(f64, f64)> = (0..=samples + 1)
+                .map(|j| {
+                    let then = inputs.later(-(j as f64) * step);
+                    let pose = zone.behavior.eval(&then, &mut self.registers);
+                    (pose.x, pose.y)
+                })
+                .collect();
+            if positions.iter().all(|(x, y)| x.is_finite() && y.is_finite()) {
+                let (x, y) = follow_lag(&positions, step, frequency, damping);
+                // Into the body's frame, then character units.
+                let turned = Affine::rotate(-(pose.rotation + lean)) * Point::new(x, y);
+                let units = CHARACTER_ENVELOPE.height() / size * motion.follow;
+                drive.lag = (mirror * turned.x * units, -turned.y * units);
             }
         }
-        Affine::translate((pose.x, pose.y)) * Affine::rotate(lean) * stretch * body
+        (place, drive)
     }
 
     /// The next grid point, where [`ZoneRun::step`] moves the clock.
@@ -271,7 +314,7 @@ impl ZoneRun {
             {
                 continue;
             }
-            let place = self.placement(zone, index, &pose, size);
+            let (place, drive) = self.placement(zone, index, &pose, size);
             let actor = &self.actors[index];
             let expression = pose.express.map(|express| {
                 let start = match (pose.since, actor.latch) {
@@ -288,11 +331,12 @@ impl ZoneRun {
                     looped: pose.looped,
                 }
             });
-            for layer in catalog.pose(
+            for layer in catalog.pose_driven(
                 &actor.player.character,
                 actor.seed,
                 self.clock,
                 expression.as_ref(),
+                &drive,
             ) {
                 let mut path = (*layer.outline).clone();
                 path.apply_affine(place * layer.transform);
@@ -415,7 +459,7 @@ mod tests {
         let json = r#"{"version":[1,0],"name":"f","strings":["happy"],
             "code":[{"input":"t"},{"const":"1.0"},{"ge":[0,1]},{"const":"0.0"},
                     {"const":"-1.0"},{"select":[2,3,4]},{"const":"nan"}],
-            "pose":{"x":3,"y":3,"rotation":3,"scale":1,"sx":1,"sy":1,"lean":3,"flip":3,"visible":1,
+            "pose":{"x":3,"y":3,"rotation":3,"scale":1,"sx":1,"sy":1,"lean":3,"look_x":6,"look_y":6,"flip":3,"visible":1,
                     "express":5,"since":6,"loop":3}}"#;
         let mut zone = zipline();
         zone.behavior = Program::from_json(json).unwrap();
@@ -457,7 +501,7 @@ mod tests {
                 r#"{{"version":[1,0],"name":"run","strings":[],
                 "code":[{{"input":"t"}},{{"const":"{speed}"}},{{"mul":[0,1]}},{{"const":"0.0"}},
                         {{"const":"1.0"}},{{"const":"-1.0"}},{{"const":"nan"}}],
-                "pose":{{"x":2,"y":3,"rotation":3,"scale":4,"sx":4,"sy":4,"lean":3,"flip":3,
+                "pose":{{"x":2,"y":3,"rotation":3,"scale":4,"sx":4,"sy":4,"lean":3,"look_x":6,"look_y":6,"flip":3,
                         "visible":4,"express":5,"since":6,"loop":3}}}}"#
             );
             Program::from_json(&json).unwrap()
@@ -492,5 +536,42 @@ mod tests {
         assert!(running.0 > still.0 && running.1 < still.1, "{running:?} vs {still:?}");
         // Leaning forward puts the body ahead of the feet.
         assert!(running.2 > still.2 + 0.01, "{running:?} vs {still:?}");
+    }
+
+    #[test]
+    fn ears_follow_through_after_a_stop_and_eyes_look_ahead() {
+        // Runs right at 4 units/s until t = 1, then stops dead.
+        let json = r#"{"version":[1,0],"name":"dash","strings":[],
+            "code":[{"input":"t"},{"const":"4.0"},{"mul":[0,1]},{"min":[2,1]},
+                    {"const":"0.0"},{"const":"1.0"},{"const":"-1.0"},{"const":"nan"}],
+            "pose":{"x":3,"y":4,"rotation":4,"scale":5,"sx":5,"sy":5,"lean":4,
+                    "look_x":7,"look_y":7,"flip":4,"visible":5,"express":6,"since":7,"loop":4}}"#;
+        let mut zone = zipline();
+        zone.behavior = Program::from_json(json).unwrap();
+        let bunny = Player {
+            name: "Ana".into(),
+            character: [3, 4, 6, 6, 4],
+        };
+        assert!(catalog().hangs(&bunny.character));
+        let drive_at = |seconds: f64| {
+            let mut run = ZoneRun::default();
+            run.arrive(bunny.clone(), 0.0);
+            run.standings(|_| 0.0);
+            while run.next_step() <= seconds {
+                run.step(&zone);
+            }
+            run.settle(seconds);
+            let pose = run.poses(&zone)[0].1;
+            run.placement(&zone, 0, &pose, zone.size).1
+        };
+        let running = drive_at(0.5);
+        let stopped = drive_at(1.15);
+        let settled = drive_at(4.0);
+        // Running steadily: no swing, eyes ahead.
+        assert!(running.lag.0.abs() < 1e-6, "{running:?}");
+        assert!(running.look.0 > 0.5, "{running:?}");
+        // Just stopped: the ears keep going forward, then settle.
+        assert!(stopped.lag.0 > 1.0, "{stopped:?}");
+        assert!(settled.lag.0.abs() < 1e-6 && settled.look == (0.0, -0.0), "{settled:?}");
     }
 }

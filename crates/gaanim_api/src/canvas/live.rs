@@ -112,6 +112,8 @@ impl SceneModel {
             (motion.max_stretch, "max_stretch"),
             (motion.lean, "lean"),
             (motion.max_lean, "max_lean"),
+            (motion.follow, "follow"),
+            (motion.look, "look"),
         ];
         if let Some((value, name)) = settings
             .iter()
