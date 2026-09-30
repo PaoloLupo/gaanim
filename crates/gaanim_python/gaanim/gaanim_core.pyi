@@ -1259,6 +1259,7 @@ class Transition:
         key: Literal["name", "id"] = "name",
         easing: Optional[Easing] = None,
         overlay: Optional[Overlay] = None,
+        sound: Optional[str] = None,
     ) -> Transition:
         """Morph drawables that share a key from the outgoing segment into the incoming one.
 
