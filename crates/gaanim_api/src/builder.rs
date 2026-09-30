@@ -1,4 +1,5 @@
 use crate::anim::{AnimationBuilder, AnimationType, TextSelectionEffect, ValueTrackerRef};
+use crate::canvas::MagicMoveUnmatched;
 use bevy::prelude::{
     BuildChildrenTransformExt, Commands, Entity, GlobalTransform, Transform, Visibility,
 };
@@ -1536,6 +1537,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::DashOffsetTo { .. } => "DashOffset",
             AnimationType::PathPointsTo { .. } => "Points",
             AnimationType::CountTo { .. } => "Count",
+            AnimationType::ParticleBurst { .. } => "Burst",
             AnimationType::SurroundingRectRetarget { .. } => "Retarget",
             AnimationType::StrokeColorTo { .. } => "Stroke",
             AnimationType::StrokeWidthTo { .. } => "StrokeW",
@@ -1558,6 +1560,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::FadeTransform { .. }
             | AnimationType::Transform { .. }
             | AnimationType::ReplacementTransform { .. } => "Morph",
+            AnimationType::MagicMove { .. } => "MagicMove",
             AnimationType::Wiggle => "Wiggle",
             AnimationType::GrowFromPoint { .. } | AnimationType::GrowFromEdge { .. } => "Grow",
             AnimationType::CameraViewZoomTo { .. } => "ViewZoom",
@@ -3156,6 +3159,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_transform_internal(anim, track);
             return;
         }
+        if matches!(anim.anim_type, AnimationType::MagicMove { .. }) {
+            self.play_magic_move_internal(anim, track);
+            return;
+        }
         if matches!(anim.anim_type, AnimationType::Wiggle) {
             self.play_wiggle_internal(anim, track);
             return;
@@ -3174,6 +3181,13 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
         if matches!(anim.anim_type, AnimationType::CountTo { .. }) {
             self.play_count_internal(anim, track);
+            return;
+        }
+        if let AnimationType::ParticleBurst { count } = anim.anim_type {
+            let start = self.current_time + anim.delay;
+            for time in burst_times(start, anim.duration, &anim.rate_func) {
+                self.schedule_particle_burst(anim.target, time, count);
+            }
             return;
         }
         if matches!(anim.anim_type, AnimationType::PathTrim { .. }) {
@@ -3527,6 +3541,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::DashOffsetTo { .. }
             | AnimationType::PathPointsTo { .. }
             | AnimationType::CountTo { .. }
+            | AnimationType::ParticleBurst { .. }
             | AnimationType::DrawBorderThenFill { .. }
             | AnimationType::Flash { .. }
             | AnimationType::Circumscribe { .. }
@@ -3534,6 +3549,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::MoveAlongPath3D { .. }
             | AnimationType::Transform { .. }
             | AnimationType::ReplacementTransform { .. }
+            | AnimationType::MagicMove { .. }
             | AnimationType::GrowArrow
             | AnimationType::Blink { .. }
             | AnimationType::Broadcast { .. }
@@ -5393,6 +5409,148 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         self.schedule_show_hierarchy(target, &target_state, parent_track, end);
     }
 
+    /// Keyed magic move between two hierarchies. Each keyed pair runs the
+    /// leaf matching of `transform_matching`, so a pair of groups morphs
+    /// their parts too; leaves outside every pair fade (or cut) out and in.
+    /// Like `play_hierarchy_replacement`, the target is a state template
+    /// that takes over at the end, so later animations continue from it.
+    fn play_magic_move_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
+        let AnimationType::MagicMove {
+            target,
+            pairs,
+            unmatched,
+        } = &anim.anim_type
+        else {
+            return;
+        };
+        let (target, unmatched) = (*target, *unmatched);
+        let source = anim.target;
+        if source == target || self.states.get(source).is_none() {
+            return;
+        }
+        let Some(target_state) = self.states.get(target).cloned() else {
+            return;
+        };
+        let duration = anim.duration.max(0.0);
+        let start = self.current_time + anim.delay.max(0.0);
+        let end = start + duration;
+        let opacity_clip = |target: ObjectId, from: f32, to: f32, rate_func: RateFunc| {
+            ClipPayload::Animation(AnimationSpec {
+                target,
+                lens: PropertyLensSpec::Opacity { from, to },
+                rate_func,
+                delay: 0.0,
+                label: Some("MagicMove".to_string()),
+            })
+        };
+        let source_ids = self.hierarchy_ids(source);
+        let target_ids = self.hierarchy_ids(target);
+        let (source_leaves, _) = self.collect_leaf_match_data(source);
+        let (target_leaves, _) = self.collect_leaf_match_data(target);
+
+        // Only the target's containers appear at the start, so that entering
+        // leaves can fade in through them; its leaves stay hidden.
+        self.hide_visuals_now(&target_state);
+        for &id in &target_ids {
+            if let Some(state) = self.states.get(id) {
+                self.commands.entity(state.entity).insert(Opacity(0.0));
+            }
+        }
+        for &id in &target_ids {
+            if target_leaves.contains(&id) {
+                continue;
+            }
+            if let Some(opacity) = self.states.get(id).map(|state| state.opacity) {
+                self.timeline.add_clip(
+                    parent_track,
+                    start,
+                    0.0,
+                    opacity_clip(id, 0.0, opacity, RateFunc::Linear),
+                );
+            }
+        }
+
+        let mut paired_sources = HashSet::new();
+        let mut paired_targets = HashSet::new();
+        for &(from, to) in pairs {
+            if from == to || self.states.get(from).is_none() || self.states.get(to).is_none() {
+                continue;
+            }
+            paired_sources.extend(self.collect_leaf_match_data(from).0);
+            paired_targets.extend(self.collect_leaf_match_data(to).0);
+            self.schedule_leaf_matching(
+                from,
+                to,
+                MatchingMode::Shapes,
+                start,
+                duration,
+                anim.rate_func.clone(),
+            );
+        }
+
+        // Leaves outside every pair leave or enter on their own.
+        for &id in &source_leaves {
+            if paired_sources.contains(&id) {
+                continue;
+            }
+            let Some(from) = self.states.get(id).map(|state| state.opacity) else {
+                continue;
+            };
+            let clip = match unmatched {
+                MagicMoveUnmatched::Fade => (start, duration, anim.rate_func.clone()),
+                MagicMoveUnmatched::Cut => (start, 0.0, RateFunc::Linear),
+            };
+            self.timeline.add_clip(
+                parent_track,
+                clip.0,
+                clip.1,
+                opacity_clip(id, from, 0.0, clip.2),
+            );
+            if let Some(state) = self.states.get_mut(id) {
+                state.opacity = 0.0;
+            }
+        }
+        for &id in &target_leaves {
+            if paired_targets.contains(&id) {
+                continue;
+            }
+            let Some(to) = self.states.get(id).map(|state| state.opacity) else {
+                continue;
+            };
+            self.timeline.add_clip(
+                parent_track,
+                start,
+                0.0,
+                opacity_clip(id, to, 0.0, RateFunc::Linear),
+            );
+            if unmatched == MagicMoveUnmatched::Fade {
+                self.timeline.add_clip(
+                    parent_track,
+                    start,
+                    duration,
+                    opacity_clip(id, 0.0, to, anim.rate_func.clone()),
+                );
+            }
+        }
+
+        // Handoff: the source hierarchy ends where the target begins.
+        for &id in &source_ids {
+            let Some(from) = self.states.get(id).map(|state| state.opacity) else {
+                continue;
+            };
+            self.timeline.add_clip(
+                parent_track,
+                end,
+                0.0,
+                opacity_clip(id, from, 0.0, RateFunc::Linear),
+            );
+            if let Some(state) = self.states.get_mut(id) {
+                state.opacity = 0.0;
+            }
+        }
+        self.schedule_show_hierarchy(target, &target_state, parent_track, end);
+    }
+
     fn play_wiggle_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         let state = match self.states.get(anim.target) {
             Some(s) => s,
@@ -5510,6 +5668,22 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 }),
             );
         }
+    }
+
+    /// Emit `count` particles from the emitter `target` at `time`. A burst is
+    /// part of the emitter's schedule rather than a clip: the particles are a
+    /// pure function of time, so seeks before `time` show none of them.
+    pub(crate) fn schedule_particle_burst(&mut self, target: ObjectId, time: f64, count: u32) {
+        let Some(entity) = self.states.get(target).map(|state| state.entity) else {
+            return;
+        };
+        self.commands
+            .entity(entity)
+            .queue(move |mut entity: bevy::prelude::EntityWorldMut| {
+                if let Some(mut emitter) = entity.get_mut::<gaanim_animation::ParticleEmitter>() {
+                    emitter.system.bursts.push((time, count));
+                }
+            });
     }
 
     /// One clip per member of a repeater group: copy `i` shows while the
@@ -9824,5 +9998,47 @@ mod tests {
                 .is_none()
         );
         assert_eq!(world.get::<Opacity>(child_entity), Some(&Opacity(1.0)));
+    }
+}
+
+/// When a burst animation starting at `start` fires: once at its start, or
+/// at the start of every cycle of a repeated animation (`Anim::repeat`, in
+/// any mode), `duration` being the whole repeated span.
+fn burst_times(start: f64, duration: f64, rate_func: &RateFunc) -> Vec<f64> {
+    let RateFunc::Repeat { count, gap, .. } = rate_func else {
+        return vec![start];
+    };
+    let count = (*count).max(1);
+    let gap = gap.max(0.0);
+    let cycle = duration.max(0.0) / (count as f64 + (count - 1) as f64 * gap);
+    (0..count)
+        .map(|index| start + index as f64 * cycle * (1.0 + gap))
+        .collect()
+}
+
+#[cfg(test)]
+mod burst_time_tests {
+    use super::*;
+
+    #[test]
+    fn repeated_bursts_fire_at_every_cycle_start() {
+        assert_eq!(burst_times(2.0, 0.5, &RateFunc::Linear), [2.0]);
+        let repeat = |mode| RateFunc::Repeat {
+            inner: Box::new(RateFunc::Smooth),
+            count: 3,
+            gap: 0.5,
+            mode,
+        };
+        // Three 0.4 s cycles separated by 0.2 s gaps span 1.6 s.
+        for mode in [
+            gaanim_math::RepeatMode::Cycle,
+            gaanim_math::RepeatMode::PingPong,
+        ] {
+            let times = burst_times(1.0, 1.6, &repeat(mode));
+            assert_eq!(times.len(), 3);
+            for (time, expected) in times.iter().zip([1.0, 1.6, 2.2]) {
+                assert!((time - expected).abs() < 1e-12, "{times:?}");
+            }
+        }
     }
 }

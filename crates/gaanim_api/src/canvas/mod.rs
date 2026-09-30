@@ -34,11 +34,17 @@ pub use types::{
 /// Raster image handle; remains compatible with every DrawableHandle consumer.
 pub type ImageHandle = DrawableHandle;
 
+mod bar_race;
+pub use bar_race::{
+    BAR_RACE_PALETTE, BarRace, BarRaceBar, BarRaceLabels, BarRaceOptions, MAX_AUTO_FONT_FRACTION,
+};
+pub use gaanim_visualization::{BarRaceModel, ValueFormat};
 mod camera_view;
 mod drawable;
 mod duplicate;
 mod emphasis;
 pub use duplicate::{Distribution, MAX_COPIES, RepeatStep};
+mod particles;
 mod property_bindings;
 pub use camera_view::{
     CameraInsetOptions, CameraInsetPlacement, CameraInsetShape, CameraViewError, CameraViewHandle,
@@ -48,11 +54,20 @@ pub use drawable::{
     ClipOptions, DrawableHandle, FragmentSelection, ImagePixelError, LayoutOwnershipError,
     Primitive3DHandleError, RotationAxisError, SvgPartError,
 };
+pub use particles::{
+    Emitter, EmitterShape, GRADIENT_PARTICLE_COLORS, MAX_BURST, MAX_LIVE_PARTICLES,
+    MAX_PARTICLE_COLORS, ParticleColors, ParticleOptions, ParticleShape, ParticleSpawn,
+    confetti_palette,
+};
 mod editorial;
 pub use editorial::{
     BadgeSpec, BannerPosition, BannerSpec, CardSpec, ChipSpec, EditorialAlign, EditorialAppearance,
     EditorialError, EditorialStyle, EditorialVariant, LowerThirdSide, LowerThirdSpec,
     QuoteCardSpec, SectionHeaderSpec, StatCardSpec,
+};
+mod magic_move;
+pub use magic_move::{
+    KeyedPairs, MagicMoveError, MagicMoveFailure, MagicMoveKey, MagicMoveUnmatched, pair_by_key,
 };
 mod view_ticks;
 mod visualization;

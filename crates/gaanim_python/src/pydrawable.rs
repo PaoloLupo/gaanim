@@ -424,6 +424,21 @@ impl PyCanvasAnim {
         })
     }
 
+    /// Emit `count` particles from a particle emitter at the start of this animation.
+    fn burst(&self, count: u32) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        self.require_drawable_effect("burst")?;
+        self.require_effect_slot("burst")?;
+        Ok(Self {
+            inner: self
+                .inner
+                .clone()
+                .burst(count)
+                .map_err(PyValueError::new_err)?,
+        })
+    }
+
     fn count(&self, count: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
@@ -1444,6 +1459,17 @@ impl PyCanvasAnim {
         })
     }
 
+    /// Play a sound effect when this animation starts, anchored to it.
+    #[pyo3(signature = (path, *, volume=1.0, offset=0.0))]
+    fn sound(&self, path: &str, volume: f64, offset: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        let cue = gaanim_timeline::sound::SoundCue::with_options(path, volume, offset)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Ok(Self {
+            inner: self.inner.clone().sound(cue),
+        })
+    }
+
     fn delay(&self, seconds: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         if !seconds.is_finite() || seconds < 0.0 {
@@ -1453,6 +1479,20 @@ impl PyCanvasAnim {
         }
         Ok(Self {
             inner: self.inner.clone().delay(seconds),
+        })
+    }
+
+    /// Add an inertial bounce after the last value (see ``Anim.settle``).
+    #[pyo3(signature = (overshoot=0.12, frequency=3.0, decay=6.0))]
+    fn settle(&self, overshoot: f64, frequency: f64, decay: f64) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        Ok(Self {
+            inner: self
+                .inner
+                .clone()
+                .settle(overshoot, frequency, decay)
+                .map_err(PyValueError::new_err)?,
         })
     }
 
@@ -2258,6 +2298,15 @@ impl PyDrawable {
             .map_err(PyValueError::new_err)
     }
 
+    pub(crate) fn burst_impl(&self, count: u32) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.0
+            .clone()
+            .burst(count)
+            .map(Self)
+            .map_err(PyValueError::new_err)
+    }
+
     pub(crate) fn count_impl(&self, count: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.0
@@ -2841,10 +2890,16 @@ impl PyDrawable {
         source: Bound<'_, PyAny>,
         offset: (f64, f64),
         offset_space: &str,
+        delay: f64,
     ) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         if !offset.0.is_finite() || !offset.1.is_finite() {
             return Err(PyValueError::new_err("offset must be finite"));
+        }
+        if !delay.is_finite() || delay < 0.0 {
+            return Err(PyValueError::new_err(
+                "delay must be a finite non-negative number of seconds",
+            ));
         }
         let space = match offset_space {
             "world" => gaanim_animation::FollowOffsetSpace::World,
@@ -2855,11 +2910,21 @@ impl PyDrawable {
                 ));
             }
         };
-        Ok(Self(self.0.follow_endpoint(
-            crate::pycanvas::resolve_endpoint(&source)?,
-            gaanim_core::glam::DVec3::new(offset.0, offset.1, 0.0),
-            space,
-        )))
+        let endpoint = crate::pycanvas::resolve_endpoint(&source)?;
+        if delay > 0.0 && !matches!(endpoint, gaanim_api::canvas::CanvasEndpoint::Entity(_)) {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "follow(delay=...) needs a Drawable to follow",
+            ));
+        }
+        self.0
+            .follow_endpoint_delayed(
+                endpoint,
+                gaanim_core::glam::DVec3::new(offset.0, offset.1, 0.0),
+                space,
+                delay,
+            )
+            .map(Self)
+            .map_err(PyValueError::new_err)
     }
 
     pub(crate) fn bind_rotation_from_impl(
@@ -3198,6 +3263,11 @@ impl PyDrawable {
         let result = slf.borrow().stroke_taper_impl(start, end);
         same_drawable(slf, result)
     }
+    /// Emit `count` particles from this particle emitter at the cursor.
+    fn burst<'py>(slf: &Bound<'py, Self>, count: u32) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().burst_impl(count);
+        same_drawable(slf, result)
+    }
     /// Show the first `count` copies of a `repeat` or `duplicate` group.
     fn count<'py>(slf: &Bound<'py, Self>, count: f64) -> PyResult<Bound<'py, PyAny>> {
         let result = slf.borrow().count_impl(count);
@@ -3301,6 +3371,22 @@ impl PyDrawable {
         let result = slf.borrow().opacity_impl(op);
         same_drawable(slf, result)
     }
+    /// Name this drawable; names are the default key of ``magic_move``.
+    fn named<'py>(slf: PyRef<'py, Self>, name: &str) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        if name.trim().is_empty() {
+            return Err(PyValueError::new_err("name must not be empty"));
+        }
+        slf.0.named(name);
+        Ok(slf)
+    }
+
+    /// The name given with ``named()``, or ``None``.
+    #[getter]
+    fn name(&self) -> Option<String> {
+        self.0.name()
+    }
+
     fn z_index<'py>(slf: &Bound<'py, Self>, z: i32) -> PyResult<Bound<'py, PyAny>> {
         let result = slf.borrow().z_index_impl(z);
         same_drawable(slf, result)
@@ -3661,14 +3747,19 @@ impl PyDrawable {
     }
 
     /// Follow any endpoint and return this drawable for fluent chaining.
-    #[pyo3(signature = (source, *, offset=(0.0, 0.0), offset_space="world"))]
+    /// With ``delay`` it copies a drawable leader as it was ``delay``
+    /// seconds earlier.
+    #[pyo3(signature = (source, *, offset=(0.0, 0.0), offset_space="world", delay=0.0))]
     fn follow<'py>(
         slf: &Bound<'py, Self>,
         source: Bound<'_, PyAny>,
         offset: (f64, f64),
         offset_space: &str,
+        delay: f64,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let result = slf.borrow().follow_impl(source, offset, offset_space);
+        let result = slf
+            .borrow()
+            .follow_impl(source, offset, offset_space, delay);
         same_drawable(slf, result)
     }
 
@@ -4010,11 +4101,12 @@ macro_rules! media_drawable_methods {
         PyDrawable(slf.handle()).drive_from_samples_impl(times, &values, property, interpolation, scale, offset)?;
         Ok(slf)
     }
-    #[pyo3(signature = (source, *, offset=(0.0, 0.0), offset_space="world"))]
+    #[pyo3(signature = (source, *, offset=(0.0, 0.0), offset_space="world", delay=0.0))]
     fn follow<'py>(slf: PyRef<'py, Self>, source: Bound<'_, PyAny>,
         offset: (f64, f64),
-        offset_space: &str,) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).follow_impl(source, offset, offset_space)?;
+        offset_space: &str,
+        delay: f64,) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).follow_impl(source, offset, offset_space, delay)?;
         Ok(slf)
     }
     #[pyo3(signature = (source, *, ratio=1.0, phase=0.0))]

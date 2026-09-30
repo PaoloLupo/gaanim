@@ -2501,6 +2501,66 @@ def validate_transition_contract(module: object) -> list[str]:
     return failures
 
 
+def validate_magic_move_contract(module: object) -> list[str]:
+    """Keyed magic move as an animation and as a segment transition."""
+    failures: list[str] = []
+    T = module.Transition
+    transition = T.magic_move(0.8, key="name")
+    if not isinstance(transition, T) or "magic_move" not in repr(transition):
+        failures.append("Transition.magic_move must return a magic-move Transition")
+    scene = module.Scene(frame=(16, 9))
+    scene.segment("before")
+
+    def board(rows):
+        bars = [
+            scene.geometry.rect(score, 0.5).move_to(score / 2 - 4, 1 - rank).named(name)
+            for rank, (name, score) in enumerate(rows)
+        ]
+        return scene.geometry.group(bars)
+
+    before = board([("ana", 3), ("bo", 2), ("cy", 1)])
+    after = board([("bo", 4), ("ana", 3), ("dee", 1)])
+    if before.name is not None or before.named("board").name != "board":
+        failures.append("Drawable.named/name must set and read the name")
+    for label, factory in [
+        ("blank name", lambda: after.named("  ")),
+        ("key", lambda: module.magic_move(before, after, key="color")),
+        ("unmatched mode", lambda: module.magic_move(before, after, unmatched="scale")),
+        ("duration", lambda: module.magic_move(before, after, duration=0.0)),
+        ("self move", lambda: module.magic_move(before, before)),
+        ("transition key", lambda: T.magic_move(0.8, key="color")),
+        ("transition duration", lambda: T.magic_move(0.0)),
+    ]:
+        try:
+            factory()
+        except ValueError:
+            pass
+        else:
+            failures.append(f"magic_move accepted an invalid {label}")
+    seen = []
+
+    def key(drawable):
+        seen.append(drawable)
+        return drawable.name
+
+    anim = module.magic_move(before, after, key=key, unmatched="cut")
+    if not isinstance(anim, module.Anim) or not seen:
+        failures.append("magic_move(key=callable) must call the key and return an Anim")
+    try:
+        module.magic_move(before, after, key=lambda drawable: 1 / 0)
+    except ZeroDivisionError:
+        pass
+    else:
+        failures.append("magic_move must propagate a key callable's exception")
+    scene.play([module.magic_move(before, after, key="name").duration(0.8)])
+    if abs(scene.cursor - 0.8) > 1e-9:
+        failures.append("magic_move must advance the cursor by its duration")
+    scene.segment("after", transition=T.magic_move(0.5, key="name"))
+    board([("dee", 2), ("bo", 1)])
+    scene.wait(0.5)
+    return failures
+
+
 def validate_text_scene_unit_defaults(module: object) -> list[str]:
     """Text placement and effect defaults are scene units, like Drawable's."""
     failures: list[str] = []
@@ -2571,7 +2631,7 @@ def main() -> int:
             missing.append(node.target.id)
         elif (
             isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and node.name in {"part", "parts", "parallel", "sequence", "stagger"}
+            and node.name in {"part", "parts", "parallel", "sequence", "stagger", "magic_move"}
         ):
             if not hasattr(module, node.name):
                 missing.append(node.name)
@@ -2607,6 +2667,7 @@ def main() -> int:
     missing.extend(validate_narration_contract(module))
     missing.extend(validate_text_animator_contract(module))
     missing.extend(validate_transition_contract(module))
+    missing.extend(validate_magic_move_contract(module))
     missing.extend(validate_text_scene_unit_defaults(module))
     missing.extend(validate_runtime_type_aliases(module))
     missing.extend(documented_text_api_failures(tree))

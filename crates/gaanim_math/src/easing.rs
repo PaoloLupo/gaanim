@@ -162,6 +162,19 @@ pub enum RateFunc {
     /// linearly interpolated. Built once from an authored curve, so
     /// evaluation needs no callback and serializes.
     Sampled(Arc<[f64]>),
+    /// Runs `inner` over the first `motion` of normalized time, then adds an
+    /// inertial bounce about its final value (After Effects' *inertial
+    /// bounce*): `amplitude * sin(2π * frequency * τ) * e^(-decay * τ)`, with
+    /// `τ = t - motion` and `frequency`/`decay` per unit of normalized time.
+    /// The residual at `t = 1` is removed linearly so the curve ends exactly
+    /// at `inner(1)`. Build it with [`RateFunc::settle`].
+    Settle {
+        inner: Box<RateFunc>,
+        motion: f64,
+        amplitude: f64,
+        frequency: f64,
+        decay: f64,
+    },
 }
 
 // Implement standard Debug since closures can't be debugged easily
@@ -237,6 +250,16 @@ impl std::fmt::Debug for RateFunc {
                     });
                 write!(f, "Sampled({} samples, {hash:016x})", samples.len())
             }
+            Self::Settle {
+                inner,
+                motion,
+                amplitude,
+                frequency,
+                decay,
+            } => write!(
+                f,
+                "Settle({inner:?}, {motion}, {amplitude}, {frequency}, {decay})"
+            ),
         }
     }
 }
@@ -362,6 +385,21 @@ impl serde::Serialize for RateFunc {
                 state.serialize_field("samples", &samples[..])?;
                 state.end()
             }
+            Self::Settle {
+                inner,
+                motion,
+                amplitude,
+                frequency,
+                decay,
+            } => {
+                let mut state = serializer.serialize_struct("Settle", 5)?;
+                state.serialize_field("settle_inner", inner)?;
+                state.serialize_field("motion", motion)?;
+                state.serialize_field("amplitude", amplitude)?;
+                state.serialize_field("frequency", frequency)?;
+                state.serialize_field("decay", decay)?;
+                state.end()
+            }
         }
     }
 }
@@ -376,6 +414,13 @@ impl<'de> serde::Deserialize<'de> for RateFunc {
         #[derive(serde::Deserialize)]
         #[serde(untagged)]
         enum RawRateFunc {
+            Settle {
+                settle_inner: Box<RateFunc>,
+                motion: f64,
+                amplitude: f64,
+                frequency: f64,
+                decay: f64,
+            },
             Repeat {
                 repeat_inner: Box<RateFunc>,
                 count: u32,
@@ -485,6 +530,19 @@ impl<'de> serde::Deserialize<'de> for RateFunc {
                 power,
             }),
             RawRateFunc::SteppedJump { count, jump } => Ok(Self::SteppedJump { count, jump }),
+            RawRateFunc::Settle {
+                settle_inner,
+                motion,
+                amplitude,
+                frequency,
+                decay,
+            } => Ok(Self::Settle {
+                inner: settle_inner,
+                motion,
+                amplitude,
+                frequency,
+                decay,
+            }),
             RawRateFunc::Repeat {
                 repeat_inner,
                 count,
@@ -711,7 +769,99 @@ impl RateFunc {
                     samples[index] + (samples[index + 1] - samples[index]) * fraction
                 }
             },
+            Self::Settle {
+                inner,
+                motion,
+                amplitude,
+                frequency,
+                decay,
+            } => {
+                let motion = motion.clamp(0.0, 1.0);
+                if t < motion {
+                    return inner.evaluate(t / motion);
+                }
+                let tail = 1.0 - motion;
+                let wobble = |tau: f64| {
+                    amplitude
+                        * (std::f64::consts::TAU * frequency * tau).sin()
+                        * (-decay * tau).exp()
+                };
+                let tau = t - motion;
+                let residual = if tail > 0.0 {
+                    wobble(tail) * tau / tail
+                } else {
+                    0.0
+                };
+                inner.evaluate(1.0) + wobble(tau) - residual
+            }
         }
+    }
+
+    /// Envelope below which a [`RateFunc::settle`] bounce counts as settled,
+    /// as a fraction of the distance the animation travels.
+    pub const SETTLE_EPSILON: f64 = 1e-3;
+
+    /// Longest bounce, in seconds, that [`RateFunc::settle`] appends.
+    pub const SETTLE_MAX_SECONDS: f64 = 10.0;
+
+    /// Appends an inertial bounce to `inner`, which runs over
+    /// `motion_seconds`. After the last value the curve adds
+    /// `v * overshoot * sin(2π * frequency * τ) / e^(decay * τ)` (τ in seconds
+    /// after the motion), where `v` is the evaluated final velocity of
+    /// `inner` in distances per second. When `inner` eases out (its final
+    /// velocity is below the average one) the average velocity is used, so
+    /// an eased move still bounces.
+    ///
+    /// Returns the rate function and the total duration in seconds: the
+    /// bounce lasts until its envelope falls below [`Self::SETTLE_EPSILON`]
+    /// (at most [`Self::SETTLE_MAX_SECONDS`]).
+    pub fn settle(
+        inner: RateFunc,
+        motion_seconds: f64,
+        overshoot: f64,
+        frequency: f64,
+        decay: f64,
+    ) -> (Self, f64) {
+        let motion_seconds = motion_seconds.max(0.0);
+        let end = inner.evaluate(1.0);
+        let step = 1e-4;
+        let slope = (end - inner.evaluate(1.0 - step)) / step;
+        let average = end - inner.evaluate(0.0);
+        let velocity = if slope.abs() >= average.abs() {
+            slope
+        } else {
+            average
+        };
+        // Distances per second; a zero-length motion bounces as if it took 1 s.
+        let velocity = velocity
+            / if motion_seconds > 0.0 {
+                motion_seconds
+            } else {
+                1.0
+            };
+        let amplitude = velocity * overshoot;
+        let decay = decay.max(0.0);
+        let tail = if amplitude.abs() <= Self::SETTLE_EPSILON || !amplitude.is_finite() {
+            0.0
+        } else if decay <= 0.0 {
+            Self::SETTLE_MAX_SECONDS
+        } else {
+            ((amplitude.abs() / Self::SETTLE_EPSILON).ln() / decay).min(Self::SETTLE_MAX_SECONDS)
+        };
+        if tail <= 0.0 {
+            return (inner, motion_seconds);
+        }
+        let total = motion_seconds + tail;
+        (
+            Self::Settle {
+                inner: Box::new(inner),
+                motion: motion_seconds / total,
+                amplitude,
+                frequency: frequency * total,
+                decay: decay * total,
+            },
+            total,
+        )
     }
 
     /// Cycle index and progress within it for [`RateFunc::Repeat`] at `t`.
@@ -949,6 +1099,60 @@ impl RateFunc {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settle_bounces_past_the_end_and_finishes_exactly() {
+        let (settle, total) = RateFunc::settle(RateFunc::Linear, 0.5, 0.12, 3.0, 6.0);
+        // Linear over 0.5 s: 2 distances per second, amplitude 0.24.
+        let expected_tail = (0.24f64 / RateFunc::SETTLE_EPSILON).ln() / 6.0;
+        assert!((total - (0.5 + expected_tail)).abs() < 1e-9, "{total}");
+        let RateFunc::Settle { motion, .. } = &settle else {
+            panic!("expected a settle rate function, got {settle:?}");
+        };
+        assert!((motion * total - 0.5).abs() < 1e-9);
+        // The motion itself is unchanged.
+        let at = |seconds: f64| settle.evaluate(seconds / total);
+        assert!((at(0.25) - 0.5).abs() < 1e-9);
+        assert!((at(0.5) - 1.0).abs() < 1e-9);
+        // A quarter period in, the bounce is close to its analytic peak.
+        let tau = 1.0 / 12.0;
+        let peak = 0.24 * (-6.0f64 * tau).exp();
+        assert!(
+            (at(0.5 + tau) - 1.0 - peak).abs() < 1e-3,
+            "{}",
+            at(0.5 + tau)
+        );
+        // Half a period later it swings back below the target.
+        assert!(at(0.5 + 3.0 * tau) < 1.0);
+        // The curve ends exactly at the target.
+        assert_eq!(settle.evaluate(1.0), 1.0);
+        // Continuous where the bounce starts.
+        assert!((at(0.5 + 1e-6) - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn settle_uses_average_velocity_after_an_ease_out() {
+        let (smooth, smooth_total) = RateFunc::settle(RateFunc::Smooth, 1.0, 0.1, 2.0, 5.0);
+        let (linear, linear_total) = RateFunc::settle(RateFunc::Linear, 1.0, 0.1, 2.0, 5.0);
+        assert!((smooth_total - linear_total).abs() < 1e-9);
+        let tail = |rate: &RateFunc, total: f64| rate.evaluate((1.0 + 0.1) / total);
+        assert!((tail(&smooth, smooth_total) - tail(&linear, linear_total)).abs() < 1e-9);
+        // A faster final velocity bounces harder.
+        let ease_in = RateFunc::EaseIn(EasingCurve::Quadratic);
+        let (fast, fast_total) = RateFunc::settle(ease_in, 1.0, 0.1, 2.0, 5.0);
+        assert!(fast_total > linear_total);
+        assert!(tail(&fast, fast_total) - 1.0 > tail(&linear, linear_total) - 1.0);
+    }
+
+    #[test]
+    fn settle_without_amplitude_keeps_the_motion() {
+        let (rate, total) = RateFunc::settle(RateFunc::Linear, 1.5, 0.0, 3.0, 6.0);
+        assert_eq!(total, 1.5);
+        assert!(matches!(rate, RateFunc::Linear));
+        // No decay still ends.
+        let (_, total) = RateFunc::settle(RateFunc::Linear, 1.0, 0.1, 3.0, 0.0);
+        assert_eq!(total, 1.0 + RateFunc::SETTLE_MAX_SECONDS);
+    }
 
     #[test]
     fn repeat_cycles_ping_pongs_and_holds_gaps() {

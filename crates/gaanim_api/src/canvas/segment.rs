@@ -143,4 +143,6 @@ pub enum SegmentError {
     NumericMarkerName { name: String },
     #[error("a marker named {name:?} already exists at {time:.6}s")]
     DuplicateMarker { name: String, time: f64 },
+    #[error("invalid transition sound: {0}")]
+    Sound(#[source] crate::export::AudioTrackError),
 }

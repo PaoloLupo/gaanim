@@ -159,14 +159,14 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
 | ☑ | [PR-04](#pr-04--duplicador-y-repeater-con-distribuciones) | Duplicador/Repeater con distribuciones | M | ★★★ | — | [#148](https://github.com/PaoloLupo/gaanim/issues/148) |
 | ☑ | [PR-05](#pr-05--campos-y-falloffs) | Campos y falloffs estilo Cavalry | M | ★★★ | PR-02, PR-04 | [#149](https://github.com/PaoloLupo/gaanim/issues/149) |
 | ☑ | [PR-06](#pr-06--conexiones-tipo-plexus) | Conexiones tipo plexus | S | ★ | PR-04 | [#150](https://github.com/PaoloLupo/gaanim/issues/150) |
-| ☐ | [PR-07](#pr-07--emisor-de-partículas-determinista) | Emisor de partículas determinista | M | ★★★ | PR-02 | [#151](https://github.com/PaoloLupo/gaanim/issues/151) |
+| ☑ | [PR-07](#pr-07--emisor-de-partículas-determinista) | Emisor de partículas determinista | M | ★★★ | PR-02 | [#151](https://github.com/PaoloLupo/gaanim/issues/151) |
 | ☐ | [PR-08](#pr-08--física-analítica-ligera) | Física analítica ligera (`throw`, `inertia`) | M | ★★ | — | [#152](https://github.com/PaoloLupo/gaanim/issues/152) |
 | ☑ | [TR-02](#tr-02--dash-offset-animado) | Dash offset animado | S | ★★ | — | [#153](https://github.com/PaoloLupo/gaanim/issues/153) |
 | ☐ | [TR-04](#tr-04--modificadores-de-path) | Modificadores de path no destructivos | M | ★★ | — | [#154](https://github.com/PaoloLupo/gaanim/issues/154) |
 | ☑ | [TR-05](#tr-05--trazo-con-grosor-variable) | Trazo con grosor variable (taper) | M | ★★ | — | [#155](https://github.com/PaoloLupo/gaanim/issues/155) |
 | ☐ | [TM-04](#tm-04--keyframes-multicanal) | Keyframes multicanal | M | ★★ | — | [#156](https://github.com/PaoloLupo/gaanim/issues/156) |
 | ☐ | [TM-06](#tm-06--rampas-de-velocidad-y-time-remap) | Rampas de velocidad y time remap | M | ★★ | — | [#157](https://github.com/PaoloLupo/gaanim/issues/157) |
-| ☐ | [TM-07](#tm-07--follow-through-settle-y-cadenas-con-retardo) | Follow-through: `settle` y `follow(delay=)` | M | ★★ | — | [#158](https://github.com/PaoloLupo/gaanim/issues/158) |
+| ☑ | [TM-07](#tm-07--follow-through-settle-y-cadenas-con-retardo) | Follow-through: `settle` y `follow(delay=)` | M | ★★ | — | [#158](https://github.com/PaoloLupo/gaanim/issues/158) |
 | ☑ | [TM-08](#tm-08--squash-and-stretch-por-velocidad) | Squash & stretch por velocidad | S | ★ | — | [#159](https://github.com/PaoloLupo/gaanim/issues/159) |
 
 ### Ola 5: narrativa, audio y explicación
@@ -176,15 +176,15 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
 | ☐ | [AU-01](#au-01--marcadores-para-voz-en-off) | Marcadores para voz en off (`wait_until` + sidecar) | M | ★★★ | TM-05 | [#160](https://github.com/PaoloLupo/gaanim/issues/160) |
 | ☐ | [AU-02](#au-02--análisis-de-audio-como-señales-reactivas) | Análisis de audio como señales reactivas | M | ★★★ | — | [#161](https://github.com/PaoloLupo/gaanim/issues/161) |
 | ☐ | [AU-03](#au-03--waveform-y-espectro-como-drawables) | Waveform y espectro como drawables | S | ★★ | AU-02 | [#162](https://github.com/PaoloLupo/gaanim/issues/162) |
-| ☐ | [AU-04](#au-04--efectos-de-sonido-anclados) | Efectos de sonido anclados | S | ★★ | — | [#163](https://github.com/PaoloLupo/gaanim/issues/163) |
+| ☑ | [AU-04](#au-04--efectos-de-sonido-anclados) | Efectos de sonido anclados | S | ★★ | — | [#163](https://github.com/PaoloLupo/gaanim/issues/163) |
 | ☐ | [TX-07](#tx-07--subtítulos-karaoke) | Subtítulos karaoke (SRT/VTT/Whisper) | M | ★★★ | TX-02 | [#164](https://github.com/PaoloLupo/gaanim/issues/164) |
 | ☐ | [TX-09](#tx-09--animación-de-código-por-diff) | Animación de código por diff | M | ★★★ | — | [#165](https://github.com/PaoloLupo/gaanim/issues/165) |
 | ☐ | [TX-06](#tx-06--texto-sobre-trayectoria) | Texto sobre trayectoria | M | ★★ | TR-03 | [#166](https://github.com/PaoloLupo/gaanim/issues/166) |
-| ☐ | [TS-03](#ts-03--magic-move-por-claves) | Magic move por claves | M | ★★★ | QW-04 | [#167](https://github.com/PaoloLupo/gaanim/issues/167) |
+| ☑ | [TS-03](#ts-03--magic-move-por-claves) | Magic move por claves | M | ★★★ | QW-04 | [#167](https://github.com/PaoloLupo/gaanim/issues/167) |
 | ☐ | [AN-01](#an-01--anotaciones-a-mano-alzada) | Anotaciones a mano alzada | M | ★★★ | TR-01, PR-02 | [#168](https://github.com/PaoloLupo/gaanim/issues/168) |
 | ☑ | [AN-03](#an-03--puntas-de-flecha-en-cualquier-trazo) | Puntas de flecha en cualquier trazo | S | ★ | TR-01 | [#169](https://github.com/PaoloLupo/gaanim/issues/169) |
 | ☑ | [AN-04](#an-04--énfasis-adicionales) | Énfasis adicionales (broadcast, spotlight…) | S | ★★ | — | [#170](https://github.com/PaoloLupo/gaanim/issues/170) |
-| ☐ | [AN-05](#an-05--carrera-de-barras) | Carrera de barras (bar chart race) | M | ★★ | — | [#171](https://github.com/PaoloLupo/gaanim/issues/171) |
+| ☑ | [AN-05](#an-05--carrera-de-barras) | Carrera de barras (bar chart race) | M | ★★ | — | [#171](https://github.com/PaoloLupo/gaanim/issues/171) |
 | ☑ | [AN-07](#an-07--anillos-de-progreso-y-temporizadores) | Anillos de progreso y temporizadores | S | ★ | TR-01 | [#172](https://github.com/PaoloLupo/gaanim/issues/172) |
 
 ### Ola 6: apuestas grandes
@@ -722,6 +722,15 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
   - Los atributos salen de hash(seed, i).
   - Un seek cuesta O(partículas vivas).
   - `scene.fx` sería un namespace nuevo para partículas y presets de efectos.
+- **Hecho:** `scene.fx.particles(emitter, ...)` devuelve un `Drawable` cuyas partículas
+  se evalúan en forma cerrada (`gaanim_math::particles`) y se dibujan en una capa por
+  color y nivel de desvanecimiento. `Emitter.point/circle/rect/line(...).at(punto u
+  objeto)`: un emisor anclado a un objeto muestrea su posición en una rejilla fija de
+  1/30 s, así que cada partícula sale de donde estaba el ancla al nacer. Las ráfagas son
+  `Drawable.burst(n)` y `animate.burst(n)`; `scene.fx.confetti(origin, count, seed)` es
+  el preset. El benchmark es `examples/performance_particles.py` (unas 2 000 partículas
+  vivas por fotograma) con `tests/benchmark_runtime.py --scene`, más el test ignorado
+  `particles_benchmark_2000` de `gaanim_math`.
 - **Hecho cuando:** El seek es exacto, existe un preset `confetti` y hay benchmark con
   2 000 partículas.
 
@@ -1517,6 +1526,12 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
   las barras se adelanten con fluidez y etiquetas con ticker).
 - **Implementación:** Extiende `scene.viz` y las charts declarativas, y reutiliza
   `rolling_number` para las etiquetas.
+- **Hecho:** `scene.viz.bar_race(frames, ...)` devuelve un `BarRace` cuyo estado es
+  función pura de una posición de fotograma clave (`BarRaceModel` en
+  `gaanim_visualization`): valores interpolados, intercambios de puesto suavizados
+  alrededor de cada cruce con `rank_smoothing`, barras que salen del `top` desvanecidas y valores y ticker con
+  `rolling_number`. `race.animate.play()` y `race.animate.to(posición)` la animan.
+  El ejemplo `bar_race_demo` aún no tiene baseline.
 
 ### AN-06 · Rutas y mapas
 

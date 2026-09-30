@@ -3,7 +3,7 @@
 
 #show: docs-chapter.with(
   title: "Audio",
-  description: "Pistas sincronizadas, narración grabada en el editor y mezcla en la exportación de video",
+  description: "Pistas sincronizadas, efectos de sonido anclados, narración grabada en el editor y mezcla en la exportación de video",
   route: "/referencia/audio/",
 )
 
@@ -74,6 +74,72 @@ scene.play([musica])  # no mueve el cursor: lo que sigue suena sobre la música
   desc: [Declaración de audio ligada a la escena que la creó. Solo se usa pasándola a `scene.play`.],
   none,
 )
+
+== Efectos de sonido anclados
+
+Sonidos cortos que se colocan en la línea de tiempo sin `scene.play`. Usan el
+mismo mezclador que `scene.media.audio`: suenan en la vista previa (con pausa,
+seek y velocidad) y MP4/WebM los mezclan con el video. Un seek al segundo `t`
+oye lo mismo que la reproducción continua, porque cada efecto tiene un inicio
+absoluto fijado al componer la escena. Ninguno alarga la línea de tiempo ni
+mueve el cursor. Hay tres formas de anclarlos:
+
+- `scene.media.sfx(...)`: en un segundo absoluto.
+- `anim.sound(...)`: al inicio de una animación. Si la animación se mueve (un
+  `delay`, su lugar en una `sequence` o un `stagger`), el sonido se mueve con
+  ella.
+- `Transition.*(..., sound=...)`: al inicio de la transición, que es el inicio
+  del segmento al que entra.
+
+#api-entry(
+  name: "MediaLibrary.sfx",
+  kind: "method",
+  params: ((name: "path", type: "str", default: none, desc: [Archivo de audio; una ruta relativa usa la carpeta de assets.]), (name: "at", type: "float | None", default: "None", desc: [Segundo absoluto de inicio; sin él, el cursor actual (`scene.cursor`).]), (name: "volume", type: "float", default: "1.0", desc: [Ganancia lineal.])),
+  returns: (type: "None", desc: [El efecto queda programado de inmediato.]),
+  desc: [Coloca un efecto que suena una vez, entero. Un archivo inexistente o un `at` o `volume` negativos o no finitos lanzan `ValueError`. Para que el sonido siga a una animación que puede moverse, usa `Anim.sound`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene()
+>>>scene.assets.assets_dir("assets")
+>>>title = scene.text("Hola", role="title")
+scene.play(title.animate.fade_in())
+scene.media.sfx("whoosh.wav", at=scene.cursor)
+scene.media.sfx("pop.wav", at=0.25, volume=0.6)
+scene.wait(1)
+```
+]
+
+#api-entry(
+  name: "Anim.sound",
+  kind: "method",
+  params: ((name: "path", type: "str", default: none, desc: [Archivo de audio; una ruta relativa usa la carpeta de assets.]), (name: "volume", type: "float", default: "1.0", desc: [Ganancia lineal.]), (name: "offset", type: "float", default: "0.0", desc: [Segundos desde el inicio de la animación hasta el sonido; negativo lo adelanta.])),
+  returns: (type: "Anim", desc: [Una copia con el efecto anclado; una segunda llamada lo reemplaza.]),
+  desc: [El sonido empieza cuando empieza la animación resuelta, incluidos su `delay` y su posición en composiciones, y suena una vez, entero, aunque la animación use `repeat`. Una ruta vacía, un `volume` negativo o no finito o un `offset` no finito lanzan `ValueError` al llamarlo; un archivo inexistente o un sonido que empezaría antes de 0 s lanzan `ValueError` desde `scene.play`, que entonces no programa nada.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene()
+>>>scene.assets.assets_dir("assets")
+title = scene.text("Efectos anclados", role="title")
+dot = scene.geometry.circle(0.5).move_to(0, -2)
+scene.play(title.animate.write().sound("typing.wav", volume=0.6))
+# El pop suena 0.3 s después, con el círculo.
+scene.play(dot.animate.grow_from_center().delay(0.3).sound("pop.wav"))
+```
+]
+
+Una transición con sonido:
+
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>scene.assets.assets_dir("assets")
+>>>scene.segment("intro")
+>>>scene.wait(1)
+scene.segment("detalle", Transition.slide(0.5, "left", sound="whoosh.wav"))
+scene.wait(1)
+```
 
 La vista previa reproduce varias pistas a la vez y aplica `volume`, `fade_in` y
 `fade_out`. MP4 usa AAC y WebM usa Opus. Las secuencias de imágenes, GIF y WebP

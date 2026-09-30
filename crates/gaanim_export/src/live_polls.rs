@@ -132,7 +132,7 @@ fn direct_parameter(
     use gaanim_animation::reactive::ScalarSource;
     match source {
         ScalarSource::Signal(id) => Some(*id),
-        ScalarSource::Function(function) if function.recipe() == Some("identity") => {
+        ScalarSource::Function(function) if function.recipe().as_deref() == Some("identity") => {
             match function.inputs() {
                 [gaanim_animation::ReactiveInput::Signal(id)] => Some(*id),
                 _ => None,

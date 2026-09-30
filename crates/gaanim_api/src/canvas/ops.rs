@@ -518,6 +518,8 @@ pub(crate) enum Op {
         target: ObjectId,
         layer: Option<Arc<str>>,
     },
+    /// Emit `count` particles from a particle emitter at the cursor.
+    ParticleBurst { target: ObjectId, count: u32 },
     /// Insert an explicit zero-duration interactive stop.
     Stop,
     /// Set an object visible (instant).
@@ -616,6 +618,14 @@ pub(crate) enum Op {
     AttachEndpointFollow {
         target: ObjectId,
         endpoint: CanvasEndpoint,
+        offset: DVec3,
+        offset_space: FollowOffsetSpace,
+    },
+    /// Follow a drawable's position as it was `delay` seconds earlier.
+    AttachDelayedFollow {
+        target: ObjectId,
+        source: ObjectId,
+        delay: f64,
         offset: DVec3,
         offset_space: FollowOffsetSpace,
     },
