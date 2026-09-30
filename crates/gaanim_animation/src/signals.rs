@@ -62,6 +62,9 @@ pub struct ReactiveReadoutLayout {
     pub number: gaanim_core::ObjectId,
     pub unit: Option<gaanim_core::ObjectId>,
     pub spacing: f64,
+    /// Horizontal alignment of the row on the group origin: `-1.0` starts it
+    /// there, `0.0` centers it and `1.0` ends it there.
+    pub align: f64,
 }
 
 /// Replace the `.` of a formatted number with `separator`. With a comma
@@ -424,7 +427,7 @@ pub fn reactive_readout_layout_system(
             .map(|((_, _, local, _), translation)| local.max.y + translation)
             .fold(f64::NEG_INFINITY, f64::max);
         let vertical_centering = -(row_min_y + row_max_y) * 0.5;
-        let mut cursor = -total_width * 0.5;
+        let mut cursor = -total_width * 0.5 * (1.0 + layout.align.clamp(-1.0, 1.0));
 
         for (((_, entity, local, _), width), translation_y) in
             parts.into_iter().zip(widths).zip(provisional_y)
@@ -1240,6 +1243,7 @@ mod tests {
             number: number_id,
             unit: Some(unit_id),
             spacing: 10.0,
+            align: 0.0,
         });
 
         app.update();
@@ -1289,6 +1293,46 @@ mod tests {
         assert_eq!(unit_edges.0 - number_edges.1, 10.0);
         assert_eq!(label_edges.0, -75.0);
         assert_eq!(unit_edges.1, 75.0);
+    }
+
+    #[test]
+    fn reactive_readout_layout_aligns_a_changing_number_on_its_start() {
+        let number_id = gaanim_core::ObjectId::from_raw(21);
+        let mut app = App::new();
+        app.add_systems(Update, reactive_readout_layout_system);
+        // Rolling numbers are right anchored: their outline ends at x = 0.
+        let number = app
+            .world_mut()
+            .spawn((
+                MobjectId(number_id),
+                LocalBounds(Bounds3D::new_2d(-30.0, -5.0, 0.0, 5.0)),
+                SpatialTransform::default(),
+            ))
+            .id();
+        app.world_mut().spawn(ReactiveReadoutLayout {
+            label: None,
+            equals: None,
+            number: number_id,
+            unit: None,
+            spacing: 0.0,
+            align: -1.0,
+        });
+        let start = |app: &App| {
+            app.world().get::<LocalBounds>(number).unwrap().0.min.x
+                + app
+                    .world()
+                    .get::<SpatialTransform>(number)
+                    .unwrap()
+                    .translation
+                    .x
+        };
+        app.update();
+        assert_eq!(start(&app), 0.0);
+        app.world_mut()
+            .entity_mut(number)
+            .insert(LocalBounds(Bounds3D::new_2d(-80.0, -5.0, 0.0, 5.0)));
+        app.update();
+        assert_eq!(start(&app), 0.0);
     }
 
     #[test]

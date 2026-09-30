@@ -734,6 +734,61 @@ scene.render()
   none,
 )
 
+== Carrera de barras
+
+Una _bar chart race_: barras ordenadas por valor que crecen, se adelantan unas a
+otras y salen del ranking. Todo es función pura de una única posición de
+fotograma clave, así que un seek muestra lo mismo que la reproducción continua.
+
+#api-entry(
+  name: "Visualization.bar_race",
+  kind: "factory",
+  params: (
+    (name: "frames", type: "Mapping[Any, Mapping[str, float]] | Sequence[tuple[Any, Mapping[str, float]]]", default: none, desc: [Cada etiqueta de fotograma clave (un año, una fecha…) con los `{nombre: valor}` de ese instante, en orden. Un nombre ausente vale cero en ese fotograma.]),
+    (name: "top", type: "int", default: "10", desc: [Puestos visibles; el líder arriba.]),
+    (name: "rank_smoothing", type: "float", default: "0.3", desc: [Fotogramas clave (de 0 a 2) que dura el intercambio de dos barras, centrado en el instante en que se cruzan y acortado para que termine antes de que esas dos barras vuelvan a cruzarse; con `0` cambian de puesto al instante.]),
+    (name: "value_format", type: "str", default: "\"{:,.0f}\"", desc: [Campo de formato de Python con texto opcional alrededor: `"{}"`, `"{:,.0f}"`, `"{:_.2f}"` o `"${:,.1f} M"`, hasta 6 decimales.]),
+    (name: "width / height", type: "float", default: "10.0 / 6.0", desc: [Tamaño de toda la carrera, centrada en su origen, en unidades de escena.]),
+    (name: "label_width / bar_gap", type: "float | None / float", default: "None / 0.18", desc: [Ancho de la columna de nombres (por defecto el 22% de `width`) y fracción vacía de cada puesto. Un nombre más ancho que la columna se dibuja más pequeño, hasta que cabe.]),
+    (name: "colors", type: "Mapping[str, Color] | Sequence[Color] | None", default: "None", desc: [Colores por nombre o una lista que se repite; el resto usa una paleta categórica de diez colores.]),
+    (name: "label_color / font_size", type: "Color | None / float | None", default: "None / None", desc: [Color y tamaño de nombres y valores; por defecto el color de texto del tema y el 55% del grosor de la barra, sin pasar del 12% de `height` para que las carreras de pocos puestos sigan legibles.]),
+    (name: "ticker / ticker_size / ticker_color", type: "bool / float | None / Color | None", default: "True / None / None", desc: [Etiqueta del fotograma clave abajo a la derecha, por defecto al 15% de `height` y con el color atenuado del tema.]),
+  ),
+  desc: [Los valores se interpolan linealmente entre fotogramas clave. Cuando dos barras se cruzan, intercambian sus puestos con un movimiento suavizado en vez de saltar; entre cruces, cada barra ocupa su propio puesto. Las barras que salen del `top` se desvanecen por debajo del último puesto y la barra más larga ocupa siempre todo el ancho disponible. Los nombres van en una columna a la izquierda y un contador rodante (`rolling_number`) sigue el extremo de cada barra. Si todas las etiquetas son números enteros, como años, el ticker rueda entre ellos; si no, cambia de texto con un fundido. Datos vacíos o no finitos, nombres repetidos, un `value_format` no admitido o tamaños no positivos lanzan `ValueError`; otra forma de `frames`, `TypeError`.],
+)[
+```python
+# show-code: true
+from gaanim import Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+frames = {
+    2020: {"Ana": 12, "Luis": 30, "Marta": 18, "Noé": 5},
+    2021: {"Ana": 35, "Luis": 34, "Marta": 22, "Noé": 20},
+    2022: {"Ana": 48, "Luis": 40, "Marta": 51, "Noé": 38},
+    2023: {"Ana": 60, "Luis": 44, "Marta": 58, "Noé": 71},
+}
+race = scene.viz.bar_race(frames, top=3, width=12, height=6)
+scene.play([race.animate.play().duration(4)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "BarRaceAnimation.play / to",
+  kind: "method",
+  signature: "play() -> Anim · to(position: float) -> Anim",
+  desc: [`race.animate.play()` avanza desde la posición actual hasta el último fotograma clave a ritmo constante, un segundo por fotograma pendiente salvo que encadenes `.duration(segundos)`. `to(position)` va a una posición concreta: `0` es el primer fotograma clave y las posiciones fraccionarias quedan entre dos. Una posición fuera de `[0, frame_count - 1]` lanza `ValueError`.],
+  none,
+)
+
+#api-entry(
+  name: "BarRace.parameter / position / frame_count / names / ticker / bar / set / visual",
+  kind: "property",
+  signature: "parameter: Parameter · position: float · frame_count: int · names: list[str] · ticker: Drawable | None · bar(name) -> Drawable · set(position) · visual: Drawable",
+  desc: [`parameter` es la posición de fotograma clave, reutilizable en `computed` o lecturas. `bar(name)` devuelve la fila de una barra (barra, nombre y valor), que se mueve entre puestos; un nombre desconocido lanza `KeyError`. `set` salta a una posición (un corte reversible tras la declaración). `visual` es el grupo de todas las filas y el ticker; `move_to`, `shift_by` y `opacity` devuelven la carrera.],
+  none,
+)
+
 == Recta numérica, plano polar y plano complejo
 
 Espacios tipados de una dimensión, polares y complejos.

@@ -2768,10 +2768,25 @@ impl SceneModel {
                 && prev < scene_ids.len()
                 && let Some(tr) = &seg.transition
             {
+                // Drawables hidden when the outgoing segment ends (such as the
+                // source of a finished magic move) cannot stand in for a key.
+                let shown_at_end = |id: ObjectId| {
+                    id_map
+                        .get(&id)
+                        .and_then(|actual| builder.states.get(*actual))
+                        .is_some_and(|state| state.opacity > 1.0e-6)
+                };
+                let tr = Self::resolve_magic_move(
+                    tr,
+                    &segments[prev],
+                    seg,
+                    &object_specs,
+                    &shown_at_end,
+                );
                 builder.timeline.connect(
                     scene_ids[prev],
                     scene_ids[i],
-                    Self::runtime_transition(tr, &id_map),
+                    Self::runtime_transition(&tr, &id_map),
                 );
             }
         }
@@ -5608,6 +5623,11 @@ impl SceneModel {
                     }
                 }
 
+                Op::ParticleBurst { target, count } => {
+                    if let Some(target) = id_map.get(target).copied() {
+                        builder.schedule_particle_burst(target, builder.current_time, *count);
+                    }
+                }
                 Op::AttachFalloff { target, effect } => {
                     if let Some(target_id) = id_map.get(target).copied() {
                         let mut effect = effect.clone();
@@ -5732,6 +5752,29 @@ impl SceneModel {
                                 offset: *offset,
                                 offset_space: *offset_space,
                             });
+                    }
+                }
+
+                Op::AttachDelayedFollow {
+                    target,
+                    source,
+                    delay,
+                    offset,
+                    offset_space,
+                } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(source_id) = id_map.get(source).copied()
+                        && let Some(target_state) = builder.states.get(target_id)
+                        && builder.states.get(source_id).is_some()
+                    {
+                        builder.commands.entity(target_state.entity).insert(
+                            gaanim_animation::DelayedFollow::new(
+                                source_id,
+                                *delay,
+                                *offset,
+                                *offset_space,
+                            ),
+                        );
                     }
                 }
 
@@ -6724,6 +6767,76 @@ impl SceneModel {
         }
     }
 
+    /// Resolves a keyed magic-move transition into a morph between the
+    /// outermost keyed drawables of the outgoing and incoming segments.
+    /// Drawables shown in both segments are the same object and do not pair.
+    fn resolve_magic_move(
+        transition: &gaanim_timeline::transition::TransitionType,
+        from: &super::ops::Segment,
+        to: &super::ops::Segment,
+        object_specs: &HashMap<ObjectId, ObjectSpec>,
+        shown_at_end: &dyn Fn(ObjectId) -> bool,
+    ) -> gaanim_timeline::transition::TransitionType {
+        use gaanim_timeline::transition::{MorphMapping, MorphProperty, TransitionType};
+        match transition {
+            TransitionType::Styled {
+                base,
+                easing,
+                overlay,
+                sound,
+            } => TransitionType::Styled {
+                base: Box::new(Self::resolve_magic_move(
+                    base,
+                    from,
+                    to,
+                    object_specs,
+                    shown_at_end,
+                )),
+                easing: easing.clone(),
+                overlay: overlay.clone(),
+                sound: sound.clone(),
+            },
+            TransitionType::MagicMove { duration, key } => {
+                let keyed = |segment: &super::ops::Segment, outgoing: bool| {
+                    super::magic_move::keyed_outermost(
+                        &segment.mobject_ids,
+                        true,
+                        |id| {
+                            object_specs
+                                .get(&id)
+                                .map(super::magic_move::spec_children)
+                                .unwrap_or_default()
+                        },
+                        |id| {
+                            if outgoing && !shown_at_end(id) {
+                                return Ok::<_, std::convert::Infallible>(None);
+                            }
+                            Ok(object_specs
+                                .get(&id)
+                                .and_then(|spec| super::magic_move::spec_key(spec, *key)))
+                        },
+                    )
+                    .unwrap_or_else(|never| match never {})
+                };
+                let pairs = super::magic_move::pair_by_key(&keyed(from, true), &keyed(to, false));
+                TransitionType::Morph {
+                    duration: *duration,
+                    mappings: pairs
+                        .pairs
+                        .into_iter()
+                        .filter(|(source, target)| source != target)
+                        .map(|(source, target)| MorphMapping {
+                            source,
+                            target,
+                            property: MorphProperty::All,
+                        })
+                        .collect(),
+                }
+            }
+            other => other.clone(),
+        }
+    }
+
     /// Rewrites authored morph pairs to runtime object ids, dropping pairs
     /// whose drawables were never compiled.
     fn runtime_transition(
@@ -6737,11 +6850,13 @@ impl SceneModel {
                 base,
                 easing,
                 overlay,
+                sound,
             } => {
                 return TransitionType::Styled {
                     base: Box::new(Self::runtime_transition(base, id_map)),
                     easing: easing.clone(),
                     overlay: overlay.clone(),
+                    sound: sound.clone(),
                 };
             }
             TransitionType::Iris {
@@ -6877,6 +6992,7 @@ impl SceneModel {
                 Op::Animate { anim, active } if *active => match &anim.anim_type {
                     AnimationType::Transform { target }
                     | AnimationType::ReplacementTransform { target }
+                    | AnimationType::MagicMove { target, .. }
                     | AnimationType::FadeTransform { target }
                     | AnimationType::TextTransition {
                         target,
@@ -6892,6 +7008,7 @@ impl SceneModel {
                         match &anim.anim_type {
                             AnimationType::Transform { target }
                             | AnimationType::ReplacementTransform { target }
+                            | AnimationType::MagicMove { target, .. }
                             | AnimationType::FadeTransform { target }
                             | AnimationType::TextTransition {
                                 target,
@@ -7762,6 +7879,20 @@ impl SceneModel {
             AnimationType::ReplacementTransform { target } => AnimationType::ReplacementTransform {
                 target: *id_map.get(target)?,
             },
+            AnimationType::MagicMove {
+                target,
+                pairs,
+                unmatched,
+            } => AnimationType::MagicMove {
+                target: *id_map.get(target)?,
+                pairs: pairs
+                    .iter()
+                    .filter_map(|(source, target)| {
+                        Some((*id_map.get(source)?, *id_map.get(target)?))
+                    })
+                    .collect(),
+                unmatched: *unmatched,
+            },
             AnimationType::TextTransition {
                 target,
                 copy,
@@ -8041,6 +8172,80 @@ impl SceneModel {
                 }
                 let mr = builder.group(&refs);
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
+                mr
+            }
+            SpawnKind::Particles(particles) => {
+                let colors = if particles.colors.is_empty() {
+                    vec![PenikoColor::WHITE]
+                } else {
+                    particles.colors.clone()
+                };
+                let levels = if particles.system.fade > 0.0 {
+                    gaanim_animation::PARTICLE_FADE_LEVELS
+                } else {
+                    1
+                };
+                let mut layer_spec = spec.clone();
+                layer_spec.stroke = None;
+                layer_spec.stroke_overridden = true;
+                layer_spec.fill_overridden = true;
+                let mut refs = Vec::with_capacity(colors.len() * levels);
+                let mut layers = Vec::with_capacity(colors.len() * levels);
+                for color in &colors {
+                    for level in 0..levels {
+                        // Fainter levels hold particles further into their fade.
+                        layer_spec.fill = Some(gaanim_core::peniko::Brush::Solid(*color));
+                        layer_spec.opacity = (level + 1) as f32 / levels as f32;
+                        let path = gaanim_objects::prelude::SvgPath {
+                            id: "Particles".into(),
+                            path: BezPath::new(),
+                            bounds: Bounds3D::default(),
+                            fill: None,
+                            stroke: StrokeBrush::transparent(),
+                        };
+                        let layer_ref =
+                            Self::finish_spawn_builder(builder.svg_path(&path), &layer_spec);
+                        let entity = builder
+                            .states
+                            .get(layer_ref.id)
+                            .map_or(Entity::PLACEHOLDER, |state| state.entity);
+                        if entity != Entity::PLACEHOLDER {
+                            builder
+                                .commands
+                                .entity(entity)
+                                .insert(gaanim_animation::ParticleLayer);
+                        }
+                        layers.push(entity);
+                        refs.push(layer_ref);
+                    }
+                }
+                let mr = builder.group(&refs);
+                Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
+                // Continuous emission and the first burst start at the declaration.
+                let start = builder.current_time;
+                let mut system = particles.system.clone();
+                system.colors = colors.len();
+                system.start = start;
+                system.stop = particles.duration.map(|duration| start + duration);
+                if particles.initial_burst > 0 {
+                    system.bursts.insert(0, (start, particles.initial_burst));
+                }
+                let anchor = particles
+                    .anchor
+                    .and_then(|anchor| id_map.get(&anchor).copied());
+                if let Some(state) = builder.states.get(mr.id) {
+                    builder.commands.entity(state.entity).insert(
+                        gaanim_animation::ParticleEmitter {
+                            system,
+                            position: particles.position,
+                            layers,
+                            levels,
+                            anchor,
+                            trail: gaanim_animation::AnchorTrail::default(),
+                            probe: None,
+                        },
+                    );
+                }
                 mr
             }
             SpawnKind::Boolean {
@@ -9320,6 +9525,7 @@ impl SceneModel {
                             number: id_map.get(&layout.number).copied().unwrap_or(layout.number),
                             unit: layout.unit.and_then(|id| id_map.get(&id).copied()),
                             spacing: layout.spacing,
+                            align: layout.align,
                         },
                     );
                 }
@@ -13780,6 +13986,553 @@ mod tests {
     }
 
     #[test]
+    fn settle_bounces_past_the_target_and_extends_the_clip() {
+        let mut canvas = SceneModel::new(640, 360);
+        let card = canvas.square(1.0).move_to(-1.0, 0.0);
+        assert!(card.animate().settle(-0.1, 3.0, 6.0).is_err());
+        assert!(card.animate().settle(0.1, 0.0, 6.0).is_err());
+        assert!(card.animate().settle(0.1, 3.0, f64::NAN).is_err());
+        canvas.play(vec![
+            card.animate()
+                .move_to(1.0, 0.0)
+                .duration(0.5)
+                .rate_func(gaanim_math::RateFunc::Linear)
+                .settle(0.12, 3.0, 6.0)
+                .unwrap(),
+        ]);
+        let after = canvas.circle(0.2);
+        canvas.play(vec![after.fade_in(0.1)]);
+        // 2 distances per second: amplitude 0.24 of the 2-unit move (0.48
+        // units), settled below 0.1% of the distance; the
+        // next play starts after the bounce.
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let tail = (0.24f64 / gaanim_math::RateFunc::SETTLE_EPSILON).ln() / 6.0;
+        assert!(
+            timeline.cached_duration >= 0.5 + tail + 0.1 - 1e-6,
+            "{}",
+            timeline.cached_duration
+        );
+        let mut x_at = |time: f64| {
+            timeline.seek(&mut world, time);
+            transform_of(&mut world, &card).translation.x
+        };
+        assert!((x_at(0.25) - 0.0).abs() < 1e-9);
+        // A quarter period after arriving it has overshot the target.
+        let peak = 0.48 * (-0.5f64).exp();
+        assert!((x_at(0.5 + 1.0 / 12.0) - 1.0 - peak).abs() < 1e-3);
+        assert!(x_at(0.75) < 1.0);
+        assert!((x_at(0.5 + tail) - 1.0).abs() < 1e-6);
+        // Seeking back reproduces the bounce.
+        assert!((x_at(0.5 + 1.0 / 12.0) - 1.0 - peak).abs() < 1e-3);
+    }
+
+    #[test]
+    fn delayed_follow_reads_the_leader_in_the_past_at_any_seek() {
+        let mut canvas = SceneModel::new(640, 360);
+        let leader = canvas.circle(0.3).move_to(-2.0, 0.0);
+        let dots: Vec<_> = (1..=3)
+            .map(|index| {
+                let dot = canvas.circle(0.1);
+                dot.follow_endpoint_delayed(
+                    CanvasEndpoint::Entity(leader.id),
+                    DVec3::new(0.0, -0.5, 0.0),
+                    gaanim_animation::FollowOffsetSpace::World,
+                    0.25 * index as f64,
+                )
+                .unwrap()
+            })
+            .collect();
+        assert!(
+            dots[0]
+                .follow_endpoint_delayed(
+                    CanvasEndpoint::Static(DVec3::ZERO),
+                    DVec3::ZERO,
+                    gaanim_animation::FollowOffsetSpace::World,
+                    0.1,
+                )
+                .is_err()
+        );
+        assert!(
+            dots[0]
+                .follow_endpoint_delayed(
+                    CanvasEndpoint::Entity(leader.id),
+                    DVec3::ZERO,
+                    gaanim_animation::FollowOffsetSpace::World,
+                    -0.1,
+                )
+                .is_err()
+        );
+        canvas.play(dots.iter().map(|dot| dot.fade_in(0.01)).collect());
+        canvas.play(vec![
+            leader
+                .animate()
+                .move_to(2.0, 0.0)
+                .duration(1.0)
+                .rate_func(gaanim_math::RateFunc::Linear),
+        ]);
+        canvas.wait(1.0);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let start = 0.01;
+        let leader_x = |time: f64| -2.0 + 4.0 * (time - start).clamp(0.0, 1.0);
+        // Out of order, so no state can carry over between seeks.
+        for time in [1.3, 0.2, 0.9, 0.5, 2.0, 0.0, 0.6, 1.3] {
+            timeline.seek(&mut world, time);
+            for (index, dot) in dots.iter().enumerate() {
+                let delay = 0.25 * (index + 1) as f64;
+                let position = transform_of(&mut world, dot).translation;
+                let expected = leader_x((time - delay).max(0.0));
+                assert!(
+                    (position.x - expected).abs() < 1e-9 && (position.y + 0.5).abs() < 1e-9,
+                    "dot {index} at {time}: {position:?}, expected x {expected}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn particles_compile_to_layers_bursts_and_anchor_trails() {
+        use crate::canvas::{Emitter, EmitterShape, ParticleColors, ParticleOptions};
+        use gaanim_animation::{PARTICLE_FADE_LEVELS, ParticleEmitter};
+        let mut canvas = SceneModel::new(640, 360);
+        let logo = canvas.circle(0.2);
+        let emitter = Emitter::new(EmitterShape::Point)
+            .unwrap()
+            .at_drawable(&logo, 0.0, 0.5)
+            .unwrap();
+        let options = ParticleOptions {
+            rate: 10.0,
+            colors: ParticleColors::Palette(vec![PenikoColor::WHITE, PenikoColor::BLACK]),
+            seed: 9,
+            ..ParticleOptions::default()
+        };
+        let sparks = canvas.particles(&emitter, options).unwrap();
+        assert!(canvas.circle(0.1).burst(5).is_err());
+        assert!(canvas.circle(0.1).animate().burst(5).is_err());
+        assert!(sparks.clone().burst(0).is_err());
+        canvas.play(vec![
+            logo.animate()
+                .move_to(4.0, 0.0)
+                .duration(2.0)
+                .rate_func(gaanim_math::RateFunc::Linear),
+        ]);
+        // A burst lasts the longest life (1.2 s) unless given a duration.
+        canvas.play(vec![sparks.animate().burst(20).unwrap()]);
+        sparks.clone().burst(3).unwrap();
+        canvas.wait(0.5);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let emitter_of = |world: &mut World| {
+            world
+                .query::<&ParticleEmitter>()
+                .single(world)
+                .unwrap()
+                .clone()
+        };
+        let compiled = emitter_of(&mut world);
+        assert_eq!(compiled.layers.len(), 2 * PARTICLE_FADE_LEVELS);
+        assert_eq!(compiled.system.colors, 2);
+        assert_eq!(compiled.system.start, 0.0);
+        let bursts = &compiled.system.bursts;
+        assert_eq!(bursts.len(), 2);
+        assert!((bursts[0].0 - 2.0).abs() < 1e-9 && bursts[0].1 == 20);
+        assert!((bursts[1].0 - 3.2).abs() < 1e-9 && bursts[1].1 == 3);
+        assert!(compiled.anchor.is_some());
+
+        // The trail follows the anchor, so particles leave from where it was.
+        timeline.seek(&mut world, 1.0);
+        let at_one = emitter_of(&mut world);
+        assert!(
+            (at_one.trail.at(0.5).x - 1.0).abs() < 1e-6,
+            "{:?}",
+            at_one.trail
+        );
+        assert!(
+            (at_one.trail.at(1.0).x - 2.0).abs() < 1e-6,
+            "{:?}",
+            at_one.trail
+        );
+        assert!((at_one.origin_at(1.0).y - 0.5).abs() < 1e-6);
+        let outlines = at_one.outlines(1.0);
+        assert!(outlines.iter().any(|path| !path.elements().is_empty()));
+        // A seek elsewhere and back reproduces the frame exactly.
+        timeline.seek(&mut world, 3.0);
+        timeline.seek(&mut world, 1.0);
+        assert_eq!(emitter_of(&mut world).outlines(1.0), outlines);
+    }
+
+    #[test]
+    fn repeated_bursts_fire_once_per_cycle() {
+        use crate::canvas::{Emitter, EmitterShape, ParticleOptions};
+        let mut canvas = SceneModel::new(640, 360);
+        let emitter = Emitter::new(EmitterShape::Point).unwrap();
+        let options = ParticleOptions {
+            rate: 0.0,
+            ..ParticleOptions::default()
+        };
+        let sparks = canvas.particles(&emitter, options.clone()).unwrap();
+        let yoyo = canvas.particles(&emitter, options).unwrap();
+        canvas.play(vec![
+            sparks.animate().burst(40).unwrap().duration(0.5).repeat(
+                3,
+                gaanim_math::RepeatMode::Cycle,
+                0.0,
+            ),
+            yoyo.animate().burst(10).unwrap().duration(0.4).repeat(
+                3,
+                gaanim_math::RepeatMode::PingPong,
+                0.5,
+            ),
+        ]);
+        canvas.wait(0.5);
+        let (mut world, _) = compiled_world(&canvas);
+        let mut bursts: Vec<Vec<(f64, u32)>> = world
+            .query::<&gaanim_animation::ParticleEmitter>()
+            .iter(&world)
+            .map(|emitter| emitter.system.bursts.clone())
+            .collect();
+        bursts.sort_by_key(|bursts| bursts[0].1);
+        assert_eq!(bursts.len(), 2);
+        let close = |bursts: &[(f64, u32)], expected: &[(f64, u32)]| {
+            bursts.len() == expected.len()
+                && bursts
+                    .iter()
+                    .zip(expected)
+                    .all(|(a, b)| (a.0 - b.0).abs() < 1e-9 && a.1 == b.1)
+        };
+        // Yoyo: 0.4 s cycles separated by 0.5 s gaps.
+        assert!(
+            close(&bursts[0], &[(0.0, 10), (0.9, 10), (1.8, 10)]),
+            "{bursts:?}"
+        );
+        assert!(
+            close(&bursts[1], &[(0.0, 40), (0.5, 40), (1.0, 40)]),
+            "{bursts:?}"
+        );
+    }
+
+    #[test]
+    fn delayed_follow_chains_through_followers_at_any_seek() {
+        use gaanim_animation::FollowOffsetSpace;
+        let mut canvas = SceneModel::new(640, 360);
+        let leader = canvas.circle(0.3).move_to(-2.0, 0.0);
+        let follow = |follower: &DrawableHandle, source: &DrawableHandle, offset, delay| {
+            follower
+                .follow_endpoint_delayed(
+                    CanvasEndpoint::Entity(source.id),
+                    offset,
+                    FollowOffsetSpace::World,
+                    delay,
+                )
+                .unwrap()
+        };
+        // A chain of delayed followers of delayed followers.
+        let mut links: Vec<DrawableHandle> = Vec::new();
+        for index in 0..3 {
+            let link = canvas.circle(0.1);
+            let (source, offset) = match links.last() {
+                Some(previous) => (previous.clone(), DVec3::ZERO),
+                None => (leader.clone(), DVec3::new(0.0, -0.5, 0.0)),
+            };
+            links.push(follow(&link, &source, offset, 0.2));
+            assert_eq!(links.len(), index + 1);
+        }
+        // Delayed followers of an undelayed `follow` and of a `follow_to`.
+        let plain = canvas.circle(0.1);
+        follow(&plain, &leader, DVec3::new(0.0, 0.5, 0.0), 0.0);
+        let after_plain = canvas.circle(0.1);
+        follow(&after_plain, &plain, DVec3::ZERO, 0.3);
+        let bound = canvas.circle(0.1);
+        bound.follow_to(&leader, 0.0, 1.0);
+        let after_bound = canvas.circle(0.1);
+        follow(&after_bound, &bound, DVec3::ZERO, 0.3);
+        // A cycle stays finite and deterministic.
+        let (a, b) = (canvas.circle(0.1), canvas.circle(0.1));
+        follow(&a, &b, DVec3::ZERO, 0.1);
+        follow(&b, &a, DVec3::ZERO, 0.1);
+
+        let entered: Vec<DrawableHandle> = links
+            .iter()
+            .cloned()
+            .chain([plain, after_plain.clone(), bound, after_bound.clone(), a, b])
+            .collect();
+        canvas.play(
+            entered
+                .iter()
+                .map(|drawable| drawable.fade_in(0.01))
+                .collect(),
+        );
+        canvas.play(vec![
+            leader
+                .animate()
+                .move_to(2.0, 0.0)
+                .duration(1.0)
+                .rate_func(gaanim_math::RateFunc::Linear),
+        ]);
+        canvas.wait(1.0);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let start = 0.01;
+        let leader_x = |time: f64| -2.0 + 4.0 * (time - start).clamp(0.0, 1.0);
+        let expected =
+            |time: f64, delay: f64, y: f64| DVec3::new(leader_x((time - delay).max(0.0)), y, 0.0);
+        for time in [1.5, 0.3, 0.95, 0.1, 2.0, 0.0, 0.7, 1.5] {
+            timeline.seek(&mut world, time);
+            let mut checks: Vec<(&DrawableHandle, DVec3)> = links
+                .iter()
+                .enumerate()
+                .map(|(index, link)| (link, expected(time, 0.2 * (index + 1) as f64, -0.5)))
+                .collect();
+            checks.push((&after_plain, expected(time, 0.3, 0.5)));
+            checks.push((&after_bound, expected(time, 0.3, 1.0)));
+            for (drawable, expected) in checks {
+                let position = transform_of(&mut world, drawable).translation;
+                assert!(
+                    (position - expected).length() < 1e-9,
+                    "at {time}: {position:?}, expected {expected:?}"
+                );
+            }
+        }
+    }
+
+    /// Leader x in the echo-of-follower tests: -2 to 2 over 1 s, linearly,
+    /// starting at 0.01 s (after the subject's entry).
+    fn echo_leader_x(time: f64) -> f64 {
+        -2.0 + 4.0 * (time - 0.01).clamp(0.0, 1.0)
+    }
+
+    /// Builds a moving leader and the drawable `make` returns, gives that
+    /// drawable a 2-copy echo 0.1 s apart, and checks at out-of-order seeks
+    /// that the copy `lag` seconds back sits at `position_at(t - lag)`, the
+    /// drawable's own position then.
+    fn assert_echo_copies_trail(
+        make: impl FnOnce(&mut SceneModel, &DrawableHandle) -> DrawableHandle,
+        position_at: impl Fn(f64) -> DVec3,
+    ) {
+        let mut canvas = SceneModel::new(640, 360);
+        let leader = canvas.circle(0.3).move_to(-2.0, 0.0);
+        let subject = make(&mut canvas, &leader).echo(Some(
+            super::super::types::EchoSpec::new(2, 0.1, 0.5).unwrap(),
+        ));
+        canvas.play(vec![subject.fade_in(0.01)]);
+        canvas.play(vec![
+            leader
+                .animate()
+                .move_to(2.0, 0.0)
+                .duration(1.0)
+                .rate_func(gaanim_math::RateFunc::Linear),
+        ]);
+        canvas.wait(1.0);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let source = ObjectId::from_raw(subject.id.as_raw() - 1);
+        let mut copies: Vec<(Entity, f64)> = world
+            .query::<(Entity, &gaanim_animation::EchoGhost)>()
+            .iter(&world)
+            .filter(|(_, echo)| echo.source == source)
+            .map(|(entity, echo)| (entity, echo.lag))
+            .collect();
+        copies.sort_by(|left, right| left.1.total_cmp(&right.1));
+        assert_eq!(copies.len(), 2, "expected two echo copies of the subject");
+        // Every copy time t - lag is inside the timeline and after the entry.
+        for time in [1.5, 0.35, 0.95, 0.25, 2.0, 0.6, 1.5] {
+            timeline.seek(&mut world, time);
+            for &(copy, lag) in &copies {
+                assert!(
+                    world.get::<gaanim_scene::Visible>(copy).is_some(),
+                    "copy {lag} hidden at {time}"
+                );
+                let actual = world.get::<SpatialTransform>(copy).unwrap().translation;
+                let expected = position_at(time - lag);
+                assert!(
+                    (actual - expected).length() < 1e-9,
+                    "copy {lag} at {time}: {actual:?}, expected {expected:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn echo_of_follower_control_echo_of_the_animated_leader() {
+        assert_echo_copies_trail(
+            |_: &mut SceneModel, leader: &DrawableHandle| leader.clone(),
+            |time| DVec3::new(echo_leader_x(time), 0.0, 0.0),
+        );
+    }
+
+    #[test]
+    fn echo_of_follower_plain_follow_with_offset() {
+        assert_echo_copies_trail(
+            |canvas: &mut SceneModel, leader: &DrawableHandle| {
+                canvas.circle(0.1).follow_endpoint(
+                    CanvasEndpoint::Entity(leader.id),
+                    DVec3::new(0.0, 0.5, 0.0),
+                    gaanim_animation::FollowOffsetSpace::World,
+                )
+            },
+            |time| DVec3::new(echo_leader_x(time), 0.5, 0.0),
+        );
+    }
+
+    #[test]
+    fn echo_of_follower_delayed_follow() {
+        assert_echo_copies_trail(
+            |canvas: &mut SceneModel, leader: &DrawableHandle| {
+                canvas
+                    .circle(0.1)
+                    .follow_endpoint_delayed(
+                        CanvasEndpoint::Entity(leader.id),
+                        DVec3::new(0.0, -0.5, 0.0),
+                        gaanim_animation::FollowOffsetSpace::World,
+                        0.3,
+                    )
+                    .unwrap()
+            },
+            // Holds the leader's start until 0.3 s have passed.
+            |time| DVec3::new(echo_leader_x((time - 0.3).max(0.0)), -0.5, 0.0),
+        );
+    }
+
+    #[test]
+    fn echo_of_follower_follow_to() {
+        assert_echo_copies_trail(
+            |canvas: &mut SceneModel, leader: &DrawableHandle| {
+                let follower = canvas.circle(0.1);
+                follower.follow_to(leader, 0.0, 1.0);
+                follower
+            },
+            |time| DVec3::new(echo_leader_x(time), 1.0, 0.0),
+        );
+    }
+
+    #[test]
+    fn echo_of_follower_attach_to() {
+        assert_echo_copies_trail(
+            |canvas: &mut SceneModel, leader: &DrawableHandle| {
+                let follower = canvas.circle(0.1);
+                follower.attach_to(leader);
+                follower
+            },
+            |time| DVec3::new(echo_leader_x(time), 0.0, 0.0),
+        );
+    }
+
+    #[test]
+    fn squash_stretch_of_a_follower_deforms_along_the_followed_motion() {
+        // (make the follower, its delay behind the leader)
+        let followers: [(fn(&mut SceneModel, &DrawableHandle) -> DrawableHandle, f64); 2] = [
+            (
+                |canvas: &mut SceneModel, leader: &DrawableHandle| {
+                    let follower = canvas.circle(0.5).squash_stretch(0.1, 1.5).unwrap();
+                    follower.follow_to(leader, 0.0, 1.0);
+                    follower
+                },
+                0.0,
+            ),
+            (
+                |canvas: &mut SceneModel, leader: &DrawableHandle| {
+                    canvas
+                        .circle(0.5)
+                        .squash_stretch(0.1, 1.5)
+                        .unwrap()
+                        .follow_endpoint_delayed(
+                            CanvasEndpoint::Entity(leader.id),
+                            DVec3::ZERO,
+                            gaanim_animation::FollowOffsetSpace::World,
+                            0.3,
+                        )
+                        .unwrap()
+                },
+                0.3,
+            ),
+        ];
+        for (make, delay) in followers {
+            let mut canvas = SceneModel::new(640, 360);
+            let leader = canvas.circle(0.3).move_to(-3.0, 0.0);
+            let follower = make(&mut canvas, &leader);
+            canvas.play(vec![
+                follower.fade_in(0.01),
+                leader
+                    .animate()
+                    .move_to(3.0, 0.0)
+                    .duration(1.0)
+                    .rate_func(gaanim_math::RateFunc::Linear),
+            ]);
+            canvas.wait(1.0);
+            let (mut world, mut timeline) = compiled_world(&canvas);
+            let id = ObjectId::from_raw(follower.id.as_raw() - 1);
+            let mut deform_at = |time: f64| {
+                timeline.seek(&mut world, time);
+                world
+                    .query::<(&MobjectId, Option<&gaanim_scene::ShapeDeform>)>()
+                    .iter(&world)
+                    .find(|(object, _)| object.0 == id)
+                    .unwrap()
+                    .1
+                    .map_or(kurbo::Affine::IDENTITY, |deform| deform.0)
+            };
+            // 6 units per second along x, so the stretch is capped at 1.5.
+            for time in [0.5 + delay, 1.8, 0.4 + delay] {
+                let coeffs = deform_at(time).as_coeffs();
+                if time > 1.5 {
+                    assert_eq!(coeffs, kurbo::Affine::IDENTITY.as_coeffs(), "delay {delay}");
+                } else {
+                    assert!(
+                        (coeffs[0] - 1.5).abs() < 1e-9 && (coeffs[3] - 1.0 / 1.5).abs() < 1e-9,
+                        "delay {delay} at {time}: {coeffs:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn particles_anchored_on_a_follower_trail_the_followed_motion() {
+        use crate::canvas::{Emitter, EmitterShape, ParticleOptions};
+        use gaanim_animation::ParticleEmitter;
+        let mut canvas = SceneModel::new(640, 360);
+        let leader = canvas.circle(0.3);
+        let logo = canvas.circle(0.2);
+        logo.follow_to(&leader, 0.0, 0.0);
+        let emitter = Emitter::new(EmitterShape::Point)
+            .unwrap()
+            .at_drawable(&logo, 0.0, 0.5)
+            .unwrap();
+        let options = ParticleOptions {
+            rate: 10.0,
+            seed: 9,
+            ..ParticleOptions::default()
+        };
+        let _sparks = canvas.particles(&emitter, options).unwrap();
+        canvas.play(vec![
+            logo.fade_in(0.01),
+            leader
+                .animate()
+                .move_to(4.0, 0.0)
+                .duration(2.0)
+                .rate_func(gaanim_math::RateFunc::Linear),
+        ]);
+        canvas.wait(0.5);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let emitter_of = |world: &mut World| {
+            world
+                .query::<&ParticleEmitter>()
+                .single(world)
+                .unwrap()
+                .clone()
+        };
+        // Out of order: the trail is rebuilt from the leader at every seek.
+        for time in [1.0, 2.3, 0.4, 1.0] {
+            timeline.seek(&mut world, time);
+            let trail = emitter_of(&mut world).trail;
+            for sample in [time * 0.5, time] {
+                let expected = 2.0 * sample.min(2.0);
+                assert!(
+                    (trail.at(sample).x - expected).abs() < 1e-6,
+                    "at {time}, sample {sample}: {:?}",
+                    trail
+                );
+            }
+        }
+    }
+
+    #[test]
     fn repeater_count_shows_copies_in_order_and_seeks_back() {
         let mut canvas = SceneModel::new(640, 360);
         let dot = canvas.circle(0.1);
@@ -17181,5 +17934,149 @@ mod tests {
         assert_eq!(driver.scale, 10.0);
         assert_eq!(driver.start_at, 1.5, "driver starts at the authored cursor");
         assert!(driver.base.is_none());
+    }
+
+    /// Bars of a leaderboard, named after their player, grouped in rank order.
+    fn magic_move_board(canvas: &mut SceneModel, rows: &[(&str, f64)]) -> DrawableHandle {
+        let bars: Vec<DrawableHandle> = rows
+            .iter()
+            .enumerate()
+            .map(|(rank, (name, score))| {
+                canvas
+                    .rect(*score, 0.6)
+                    .move_to(score / 2.0 - 3.0, 1.5 - rank as f64)
+                    .named(*name)
+            })
+            .collect();
+        canvas.group(&bars.iter().collect::<Vec<_>>())
+    }
+
+    fn labelled_clips(timeline: &Timeline, label: &str) -> Vec<(f64, f64)> {
+        let mut clips: Vec<(f64, f64)> = timeline
+            .clips
+            .values()
+            .filter_map(|clip| match &clip.payload {
+                gaanim_timeline::clip::ClipPayload::Animation(
+                    gaanim_timeline::clip::AnimationSpec {
+                        label: Some(found), ..
+                    },
+                ) if found == label => Some((clip.start, clip.duration)),
+                _ => None,
+            })
+            .collect();
+        clips.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+        clips
+    }
+
+    #[test]
+    fn magic_move_morphs_keyed_members_and_fades_the_rest() {
+        let mut canvas = SceneModel::new(640, 360);
+        let before = magic_move_board(&mut canvas, &[("ana", 4.0), ("bo", 3.0), ("cy", 2.0)]);
+        let after = magic_move_board(&mut canvas, &[("bo", 5.0), ("ana", 3.5), ("dee", 1.0)]);
+        let anim = before
+            .magic_move_to(
+                &after,
+                crate::canvas::MagicMoveKey::Name,
+                crate::canvas::MagicMoveUnmatched::Fade,
+                0.8,
+            )
+            .unwrap();
+        canvas.play(vec![anim]);
+        let timeline = compiled_timeline(&canvas);
+
+        // "ana" and "bo" morph; "cy" fades out and "dee" fades in.
+        let morphs = labelled_clips(&timeline, "TransformMatching");
+        assert_eq!(morphs, vec![(0.0, 0.8), (0.0, 0.8)]);
+        let fades: Vec<_> = labelled_clips(&timeline, "MagicMove")
+            .into_iter()
+            .filter(|(_, duration)| *duration > 0.0)
+            .collect();
+        assert_eq!(fades, vec![(0.0, 0.8), (0.0, 0.8)]);
+        assert!((timeline.cached_duration - 0.8).abs() < 1e-9);
+    }
+
+    #[test]
+    fn magic_move_cut_swaps_unmatched_members_without_fading() {
+        let mut canvas = SceneModel::new(640, 360);
+        let before = magic_move_board(&mut canvas, &[("ana", 4.0), ("cy", 2.0)]);
+        let after = magic_move_board(&mut canvas, &[("ana", 3.0), ("dee", 1.0)]);
+        let anim = before
+            .magic_move_to(
+                &after,
+                crate::canvas::MagicMoveKey::Name,
+                crate::canvas::MagicMoveUnmatched::Cut,
+                0.5,
+            )
+            .unwrap();
+        canvas.play(vec![anim]);
+        let timeline = compiled_timeline(&canvas);
+        assert_eq!(labelled_clips(&timeline, "TransformMatching").len(), 1);
+        assert!(
+            labelled_clips(&timeline, "MagicMove")
+                .iter()
+                .all(|(_, duration)| *duration == 0.0)
+        );
+    }
+
+    #[test]
+    fn magic_move_rejects_invalid_arguments_and_reads_callback_keys() {
+        let mut canvas = SceneModel::new(640, 360);
+        let before = magic_move_board(&mut canvas, &[("ana", 4.0)]);
+        let after = magic_move_board(&mut canvas, &[("ana", 3.0)]);
+        let key = crate::canvas::MagicMoveKey::Name;
+        let fade = crate::canvas::MagicMoveUnmatched::Fade;
+        assert_eq!(
+            before.magic_move_to(&before, key, fade, 1.0).unwrap_err(),
+            crate::canvas::MagicMoveError::SameDrawable
+        );
+        assert_eq!(
+            before.magic_move_to(&after, key, fade, 0.0).unwrap_err(),
+            crate::canvas::MagicMoveError::InvalidDuration
+        );
+        let mut other = SceneModel::new(640, 360);
+        let foreign = other.circle(1.0);
+        assert_eq!(
+            before.magic_move_to(&foreign, key, fade, 1.0).unwrap_err(),
+            crate::canvas::MagicMoveError::ForeignScene
+        );
+        let members = before
+            .magic_move_members(|member| Ok::<_, ()>(member.name().map(|name| name.to_uppercase())))
+            .unwrap();
+        assert_eq!(members.len(), 1);
+        assert_eq!(members[0].1, "ANA");
+        let failed = before.magic_move_to_by(&after, |_| Err("no key"), fade, 1.0);
+        assert!(matches!(
+            failed,
+            Err(crate::canvas::MagicMoveFailure::Key("no key"))
+        ));
+    }
+
+    #[test]
+    fn magic_move_transition_pairs_named_drawables_across_segments() {
+        use gaanim_timeline::transition::{MagicMoveKey, TransitionType};
+        let mut canvas = SceneModel::new(640, 360);
+        canvas.segment("before", None).unwrap();
+        let source = magic_move_board(&mut canvas, &[("ana", 4.0), ("bo", 3.0), ("cy", 2.0)]);
+        canvas.wait(1.0);
+        canvas
+            .segment(
+                "after",
+                Some(TransitionType::magic_move(0.6, MagicMoveKey::Name)),
+            )
+            .unwrap();
+        let target = magic_move_board(&mut canvas, &[("bo", 5.0), ("ana", 3.5)]);
+        canvas.wait(1.0);
+        let timeline = compiled_timeline(&canvas);
+
+        let connection = timeline
+            .scene_connections
+            .first()
+            .expect("segments are linked");
+        let TransitionType::Morph { duration, mappings } = &connection.transition else {
+            panic!("a magic move compiles into a morph");
+        };
+        assert_eq!(*duration, 0.6);
+        assert_eq!(mappings.len(), 2, "ana and bo pair; cy cross-fades");
+        let _ = (source, target);
     }
 }

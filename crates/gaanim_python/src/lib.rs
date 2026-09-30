@@ -7,6 +7,7 @@ pyo3::create_exception!(
     pyo3::exceptions::PyException
 );
 
+mod bar_race;
 mod brush;
 mod callback_recipe;
 mod color;
@@ -14,6 +15,8 @@ mod composition;
 mod custom;
 mod easing;
 mod falloff;
+mod magic_move;
+mod particles;
 mod procedural;
 mod progress_ring;
 mod py3d;
@@ -60,6 +63,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<brush::PyBrush>()?;
     m.add_class::<brush::PyBackground>()?;
     m.add_class::<pyduplicate::PyDistribution>()?;
+    m.add_class::<particles::PyEmitter>()?;
     m.add_class::<brush::PyPostProcess>()?;
     m.add_class::<pylayout::PyAnchor>()?;
     m.add_class::<pylayout::PyDirection>()?;
@@ -100,6 +104,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(composition::stagger, m)?)?;
     m.add_function(wrap_pyfunction!(composition::distribute, m)?)?;
     m.add_function(wrap_pyfunction!(composition::label, m)?)?;
+    m.add_function(wrap_pyfunction!(magic_move::magic_move, m)?)?;
     m.add_class::<pycanvas::PySceneMarker>()?;
     m.add_class::<pydrawable::PyCanvasAnim>()?;
     m.add_class::<pydrawable::PyAnchorPoint>()?;
@@ -157,6 +162,8 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<visualization::PyVariable>()?;
     m.add_class::<rolling_number::PyRollingNumber>()?;
     m.add_class::<progress_ring::PyProgressRing>()?;
+    m.add_class::<bar_race::PyBarRace>()?;
+    m.add_class::<bar_race::PyBarRaceAnimation>()?;
     m.add_class::<visualization::PyCoordinateRef>()?;
     m.add_class::<visualization::PyCoordinateSpace>()?;
     m.add_class::<visualization::PyCoordinateSpaceAnimation>()?;

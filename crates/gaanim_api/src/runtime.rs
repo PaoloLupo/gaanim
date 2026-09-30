@@ -1118,6 +1118,54 @@ mod tests {
         }
     }
 
+    /// A leaderboard reordered by a keyed magic move, then carried into a
+    /// second segment by a keyed magic-move transition.
+    fn magic_move_deck() -> SceneModel {
+        use crate::canvas::{DrawableHandle, MagicMoveKey, MagicMoveUnmatched};
+        let mut canvas = SceneModel::new(640, 360);
+        let board = |canvas: &mut SceneModel, rows: &[(&str, f64)]| {
+            let bars: Vec<DrawableHandle> = rows
+                .iter()
+                .enumerate()
+                .map(|(rank, (name, score))| {
+                    canvas
+                        .rect(*score, 0.6)
+                        .move_to(score / 2.0 - 3.0, 1.5 - rank as f64)
+                        .named(*name)
+                })
+                .collect();
+            canvas.group(&bars.iter().collect::<Vec<_>>())
+        };
+        canvas.segment("before", None).unwrap();
+        let before = board(&mut canvas, &[("ana", 4.0), ("bo", 3.0), ("cy", 2.0)]);
+        canvas.wait(0.5);
+        let after = board(&mut canvas, &[("bo", 5.0), ("ana", 3.5), ("dee", 1.0)]);
+        let anim = before
+            .magic_move_to(&after, MagicMoveKey::Name, MagicMoveUnmatched::Fade, 0.8)
+            .unwrap();
+        canvas.play(vec![anim]);
+        canvas.wait(0.5);
+        canvas
+            .segment(
+                "next",
+                Some(gaanim_timeline::transition::TransitionType::magic_move(
+                    0.6,
+                    MagicMoveKey::Name,
+                )),
+            )
+            .unwrap();
+        board(&mut canvas, &[("dee", 2.0), ("bo", 1.0)]);
+        canvas.wait(1.0);
+        canvas
+    }
+
+    #[test]
+    fn magic_move_seeks_like_real_time_playback() {
+        let mut world = incremental_world();
+        hot_reload(&mut world, magic_move_deck());
+        assert_seek_history_independent(&mut world);
+    }
+
     #[test]
     fn drawn_objects_stay_hidden_until_their_animation_after_any_seek() {
         let mut world = incremental_world();

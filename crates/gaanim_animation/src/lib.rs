@@ -1,5 +1,7 @@
 pub mod camera;
 pub mod custom;
+pub mod delayed_follow;
+pub use delayed_follow::DelayedFollow;
 pub mod echo;
 pub use echo::EchoGhost;
 pub mod falloff;
@@ -7,6 +9,8 @@ pub use falloff::{
     ColorRamp, FalloffChannel, FalloffDrive, FalloffEffect, FalloffExpr, FalloffOffset,
     FalloffShape, FalloffTarget, ScheduledEffect,
 };
+pub mod particles;
+pub use particles::{AnchorTrail, PARTICLE_FADE_LEVELS, ParticleEmitter, ParticleLayer};
 pub mod squash;
 pub use squash::{SQUASH_STEP, SquashStretch};
 pub mod paint;
@@ -66,7 +70,7 @@ pub use updaters::{
     TrackingAngle, TrackingAnglePart, TrackingEndpoint, TrackingLine, TrackingRay, TrackingScalar,
     TrackingVectorHead, Updater, advance_updaters_by, advance_x_updater,
     angle_label_placement_system, bob_updater, dimension_label_placement_system,
-    endpoint_angle_system, endpoint_distance_system, endpoint_follow_system,
+    endpoint_angle_system, endpoint_distance_system, endpoint_follow_system, entity_world_matrix,
     evaluate_reactive_positions, follow_updater, mechanism_binding_system, orbit_updater,
     pulse_updater, resolve_entity_bounds, resolve_tracking_endpoint,
     resolve_tracking_endpoint_with_offset, rotate_updater, sampled_series_system, seek_updaters,

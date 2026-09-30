@@ -159,6 +159,20 @@ back = scene.geometry.rect(3, 1).fill(BLUE)
 ```
 ]
 
+#api-entry(
+  name: "Drawable.named",
+  kind: "method",
+  params: ((name: "name", type: "str", default: none, desc: [Nombre no vacío; no hace falta que sea único.]),),
+  desc: [Da un nombre al objeto y lo devuelve; `Drawable.name` lo lee (`None` si no tiene). El nombre identifica al mismo objeto en dos estados: `magic_move` y `Transition.magic_move` emparejan los objetos con el mismo nombre. Un nombre en blanco lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+bar = scene.geometry.rect(3, 0.5).fill(BLUE).named("ana")
+print(bar.name)
+```
+]
+
 == Posición y transformaciones
 
 Setters absolutos (`move_to`, `scale_to`, `rotate_to`, `skew_to`) y relativos (`shift_by`,
@@ -806,8 +820,8 @@ series muestreadas, consulta `add_updater_fn` y `drive_from_samples` en
 #api-entry(
   name: "Drawable.follow",
   kind: "method",
-  params: ((name: "source", type: "Endpoint", default: none, desc: [Drawable, `AnchorPoint`, `PointRef` o tupla.]), (name: "offset", type: "tuple[float, float]", default: "(0.0, 0.0)", desc: [Desplazamiento respecto a la fuente.]), (name: "offset_space", type: "str", default: "\"world\"", desc: [`"world"` mantiene el desplazamiento alineado con la pantalla; `"local"` lo rota y escala con la fuente.])),
-  desc: [Sigue cualquier extremo en el mismo fotograma y devuelve el objeto. Offsets no finitos o modos inválidos lanzan `ValueError`.],
+  params: ((name: "source", type: "Endpoint", default: none, desc: [Drawable, `AnchorPoint`, `PointRef` o tupla.]), (name: "offset", type: "tuple[float, float]", default: "(0.0, 0.0)", desc: [Desplazamiento respecto a la fuente.]), (name: "offset_space", type: "str", default: "\"world\"", desc: [`"world"` mantiene el desplazamiento alineado con la pantalla; `"local"` lo rota y escala con la fuente.]), (name: "delay", type: "float", default: "0.0", desc: [Segundos de retardo: el objeto va donde estaba `source` hace `delay` segundos. Con un valor positivo `source` debe ser un Drawable.])),
+  desc: [Sigue cualquier extremo en el mismo fotograma y devuelve el objeto. Con `delay` copia al líder con retardo, como `valueAtTime(time - delay)` de After Effects: encadena seguidores con retardos crecientes para estelas y colas (_overlapping action_). Las animaciones del líder se evalúan de nuevo en `t - delay` en cada fotograma, así que un seek a cualquier instante reproduce la estela sin estado acumulado. El líder puede seguir a su vez a otro objeto (`follow` con o sin retardo, `follow_to`, `attach_to`), así que los seguidores de seguidores forman cadenas; hasta que el segmento actual lleva `delay` segundos, el seguidor espera en la posición del líder al inicio del segmento. Offsets o retardos no finitos, retardos negativos o modos inválidos lanzan `ValueError`; un retardo positivo con una fuente que no es Drawable lanza `TypeError`.],
 )[
 ```python
 # show-code: true
@@ -818,6 +832,24 @@ tip = scene.geometry.polar_point((0, 0), 1.5, theta)
 bar = scene.mechanics.bar_between((0, 0), tip).stroke(WHITE, 0.09)
 label = scene.text("punta").fill(GOLD).follow(tip, offset=(0, 0.225))
 scene.play([bar.animate.fade_in(), label.animate.write(), theta.animate.set(2.2).duration(1.4)])
+# output: preview.webp
+scene.render()
+```
+
+Una cola que sigue al líder con retardo:
+
+```python
+# show-code: true
+from gaanim import CORAL, GOLD, Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+leader = scene.geometry.circle(0.35).fill(GOLD).move_to(-5, 0)
+dots = [scene.geometry.circle(0.25 - 0.04 * i).fill(CORAL) for i in range(5)]
+for i, dot in enumerate(dots):
+    dot.follow(leader, delay=0.06 * (i + 1))
+scene.play([dot.animate.fade_in().duration(0.01) for dot in dots])
+scene.play(leader.animate.move_to(5, 1.5).duration(1.2))
+scene.play(leader.animate.move_to(0, -2).duration(0.8))
+scene.wait(0.5)
 # output: preview.webp
 scene.render()
 ```

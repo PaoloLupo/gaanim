@@ -331,6 +331,130 @@ impl DrawableHandle {
         Ok(())
     }
 
+    /// Name this drawable. Names are the default key of a magic move
+    /// ([`DrawableHandle::magic_move_to`]); a blank name clears it.
+    pub fn named(&self, name: impl Into<String>) -> Self {
+        let name = name.into();
+        let name = name.trim();
+        self.update_spec(|spec| spec.name = (!name.is_empty()).then(|| name.to_string()))
+    }
+
+    /// The name given with [`DrawableHandle::named`], if any.
+    pub fn name(&self) -> Option<String> {
+        self.spec.lock().expect("object spec poisoned").name.clone()
+    }
+
+    /// The key this drawable answers to in a magic move: its name (or SVG
+    /// `id`) for [`MagicMoveKey::Name`], its SVG `id` for
+    /// [`MagicMoveKey::SvgId`].
+    pub fn magic_move_key(&self, key: super::MagicMoveKey) -> Option<String> {
+        super::magic_move::spec_key(&self.spec.lock().expect("object spec poisoned"), key)
+    }
+
+    /// Handle of another drawable of this canvas, for key callbacks.
+    fn sibling_handle(&self, id: ObjectId) -> Option<Self> {
+        let spec = self
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .object_specs
+            .get(&id)?
+            .clone();
+        Some(Self {
+            id,
+            spec,
+            state: self.state.clone(),
+            segment_idx: self.segment_idx,
+            named_parts: None,
+            style_targets: Arc::new(Vec::new()),
+        })
+    }
+
+    /// Keyed members of this drawable: the outermost descendants for which
+    /// `key` returns a non-empty key, in depth-first declaration order.
+    pub fn magic_move_members<E>(
+        &self,
+        mut key: impl FnMut(&Self) -> Result<Option<String>, E>,
+    ) -> Result<Vec<(ObjectId, String)>, E> {
+        super::magic_move::keyed_outermost(
+            &[self.id],
+            false,
+            |id| {
+                self.sibling_handle(id)
+                    .map(|handle| {
+                        super::magic_move::spec_children(
+                            &handle.spec.lock().expect("object spec poisoned"),
+                        )
+                    })
+                    .unwrap_or_default()
+            },
+            |id| match self.sibling_handle(id) {
+                Some(handle) => key(&handle),
+                None => Ok(None),
+            },
+        )
+    }
+
+    /// Keyed "magic move" into `target`: members of both drawables that
+    /// share a key morph position, size, color and shape (a pair of groups
+    /// also morphs their parts), the other members appear or disappear as
+    /// `unmatched` says, and `target` takes over at the end.
+    pub fn magic_move_to(
+        &self,
+        target: &DrawableHandle,
+        key: super::MagicMoveKey,
+        unmatched: super::MagicMoveUnmatched,
+        duration: f64,
+    ) -> Result<Anim, super::MagicMoveError> {
+        self.magic_move_to_by(
+            target,
+            |member| Ok::<_, std::convert::Infallible>(member.magic_move_key(key)),
+            unmatched,
+            duration,
+        )
+        .map_err(|failure| match failure {
+            super::MagicMoveFailure::Invalid(error) => error,
+            super::MagicMoveFailure::Key(never) => match never {},
+        })
+    }
+
+    /// [`DrawableHandle::magic_move_to`] with keys computed by `key`, which
+    /// is called once per candidate member of both drawables while the
+    /// scene is built. Returning `None` (or an empty key) descends into the
+    /// member's own members.
+    pub fn magic_move_to_by<E>(
+        &self,
+        target: &DrawableHandle,
+        mut key: impl FnMut(&Self) -> Result<Option<String>, E>,
+        unmatched: super::MagicMoveUnmatched,
+        duration: f64,
+    ) -> Result<Anim, super::MagicMoveFailure<E>> {
+        if !self.same_canvas(target) {
+            return Err(super::MagicMoveError::ForeignScene.into());
+        }
+        if self.id == target.id {
+            return Err(super::MagicMoveError::SameDrawable.into());
+        }
+        if !duration.is_finite() || duration <= 0.0 {
+            return Err(super::MagicMoveError::InvalidDuration.into());
+        }
+        let sources = self
+            .magic_move_members(&mut key)
+            .map_err(super::MagicMoveFailure::Key)?;
+        let targets = target
+            .magic_move_members(&mut key)
+            .map_err(super::MagicMoveFailure::Key)?;
+        let pairs = super::pair_by_key(&sources, &targets).pairs;
+        Ok(self.anim_dur(
+            AnimationType::MagicMove {
+                target: target.id,
+                pairs,
+                unmatched,
+            },
+            Some(duration),
+        ))
+    }
+
     /// General text/math morph. Semantic paths are paired before the existing
     /// order-preserving grapheme and shape matching stages.
     pub fn morph_to(
@@ -1414,6 +1538,30 @@ impl DrawableHandle {
         Ok(self)
     }
 
+    /// Emits `count` particles at once from this particle emitter at the
+    /// cursor, without moving it. Before the first `play` the burst happens
+    /// at the declaration time.
+    pub fn burst(self, count: u32) -> Result<Self, String> {
+        if super::particles::emitter_longest_life(
+            &self.spec.lock().expect("object spec poisoned").kind,
+        )
+        .is_none()
+        {
+            return Err("burst() requires a particle emitter made by scene.fx".to_string());
+        }
+        super::particles::check_burst(count)?;
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::ParticleBurst {
+                target: self.id,
+                count,
+            });
+        Ok(self)
+    }
+
     /// Set every vertex of a polygon or polyline, in the coordinates it was
     /// declared in. Before the first play this is the declared shape; after
     /// it, a cut at the cursor that `animate.points` can continue from.
@@ -2183,6 +2331,48 @@ impl DrawableHandle {
                 offset_space,
             });
         self.clone()
+    }
+
+    /// Follow `endpoint` as it was `delay` seconds earlier (After Effects'
+    /// `valueAtTime(time - delay)`), for trails and tails. The timeline
+    /// evaluates the leader's own animations at `t - delay` after every
+    /// seek, so the trail needs no history; until the current segment has
+    /// run for `delay` seconds the follower holds the leader's position at
+    /// the segment start. A `delay` of 0 is [`Self::follow_endpoint`]; a
+    /// positive one needs a drawable endpoint.
+    pub fn follow_endpoint_delayed(
+        &self,
+        endpoint: crate::canvas::CanvasEndpoint,
+        offset: DVec3,
+        offset_space: gaanim_animation::FollowOffsetSpace,
+        delay: f64,
+    ) -> Result<Self, String> {
+        if !(delay.is_finite() && delay >= 0.0) {
+            return Err(format!("delay must be a finite number >= 0, got {delay}"));
+        }
+        if delay == 0.0 {
+            return Ok(self.follow_endpoint(endpoint, offset, offset_space));
+        }
+        let crate::canvas::CanvasEndpoint::Entity(source) = endpoint else {
+            return Err("a delayed follow needs a drawable to follow".to_string());
+        };
+        if source == self.id {
+            return Err("a drawable cannot follow itself".to_string());
+        }
+        self.defer_visibility_until_play();
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachDelayedFollow {
+                target: self.id,
+                source,
+                delay,
+                offset,
+                offset_space,
+            });
+        Ok(self.clone())
     }
 
     /// Couple this drawable's world Z rotation to another drawable.

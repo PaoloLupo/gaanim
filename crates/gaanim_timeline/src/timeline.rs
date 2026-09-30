@@ -20,6 +20,9 @@ use gaanim_scene::{
 
 static NEXT_PROPERTY_REVISION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
+/// Seconds between the samples of a moving particle anchor.
+pub const PARTICLE_ANCHOR_STEP: f64 = 1.0 / 30.0;
+
 #[derive(Resource)]
 struct PreparedPropertyTimeline(u64);
 
@@ -1969,6 +1972,7 @@ impl Timeline {
         self.restore_followed_shake_origin(world);
         gaanim_animation::apply_property_bindings(world, self.current_time);
         self.evaluate_delayed_states(world);
+        self.evaluate_particle_anchors(world);
         if let Some(mut playback_state) =
             world.get_resource_mut::<gaanim_animation::PlaybackState>()
         {
@@ -1977,15 +1981,20 @@ impl Timeline {
     }
 
     /// Show every [`gaanim_animation::EchoGhost`] as its source was `lag`
-    /// seconds before the current time, and deform every
-    /// [`gaanim_animation::SquashStretch`] drawable along its velocity.
+    /// seconds before the current time, deform every
+    /// [`gaanim_animation::SquashStretch`] drawable along its velocity, and
+    /// place every [`gaanim_animation::DelayedFollow`] where its leader was
+    /// `delay` seconds earlier.
     ///
     /// Both evaluate a drawable at another time the same way: restore its
     /// keyframe state onto another entity and replay the drawable's own
     /// animation clips up to that time, exactly as a seek rebuilds it. That
-    /// needs no history, so the result matches at any time. A copy is hidden
-    /// while its source is, before the timeline starts and when its time
-    /// falls in another segment.
+    /// needs no history, so the result matches at any time. A drawable whose
+    /// position comes from a follow binding (`follow`, delayed `follow`,
+    /// `follow_to`, `attach_to`, `bind_position_from`) has no clips for that
+    /// motion, so its position is rebuilt with [`Self::delayed_world_matrix`].
+    /// A copy is hidden while its source is, before the timeline starts and
+    /// when its time falls in another segment.
     fn evaluate_delayed_states(&self, world: &mut World) {
         let ghosts: Vec<(Entity, gaanim_animation::EchoGhost)> = world
             .query::<(Entity, &gaanim_animation::EchoGhost)>()
@@ -2001,7 +2010,12 @@ impl Timeline {
             .iter(world)
             .map(|(entity, id, squash)| (entity, id.0, squash.clone()))
             .collect();
-        if ghosts.is_empty() && squashes.is_empty() {
+        let follows: Vec<(Entity, gaanim_animation::DelayedFollow)> = world
+            .query::<(Entity, &gaanim_animation::DelayedFollow)>()
+            .iter(world)
+            .map(|(entity, follow)| (entity, follow.clone()))
+            .collect();
+        if ghosts.is_empty() && squashes.is_empty() && follows.is_empty() {
             return;
         }
         let entity_map: HashMap<gaanim_core::ObjectId, Entity> = world
@@ -2009,6 +2023,17 @@ impl Timeline {
             .iter(world)
             .map(|(entity, id)| (id.0, entity))
             .collect();
+        // A drawable positioned by a follow binding is rebuilt from the
+        // drawables it follows, possibly a chain of them.
+        let needs_every_clip = !follows.is_empty()
+            || ghosts.iter().any(|(_, echo)| {
+                entity_map
+                    .get(&echo.source)
+                    .is_some_and(|&source| follows_binding(world, source))
+            })
+            || squashes
+                .iter()
+                .any(|(entity, ..)| follows_binding(world, *entity));
         // Each source's animation clips, in start order.
         let sources: HashSet<_> = ghosts
             .iter()
@@ -2020,6 +2045,7 @@ impl Timeline {
                 })
             })
             .chain(squashes.iter().map(|(_, id, _)| *id))
+            .chain(follows.iter().map(|(_, follow)| follow.source))
             .collect();
         let mut source_clips: HashMap<gaanim_core::ObjectId, Vec<&Clip>> = HashMap::new();
         for clip in self
@@ -2029,7 +2055,7 @@ impl Timeline {
             .filter_map(|id| self.clips.get(*id))
         {
             if let ClipPayload::Animation(anim) = &clip.payload
-                && sources.contains(&anim.target)
+                && (needs_every_clip || sources.contains(&anim.target))
             {
                 source_clips.entry(anim.target).or_default().push(clip);
             }
@@ -2045,6 +2071,13 @@ impl Timeline {
                 .map(|position| position.segment_id)
         };
         let current_segment = segment(self.current_time);
+        let (segment_start, segment_end) = self.current_segment_bounds();
+        let object_of: HashMap<Entity, gaanim_core::ObjectId> = entity_map
+            .iter()
+            .map(|(id, entity)| (*entity, *id))
+            .collect();
+        // Scratch entity for rebuilding followers behind echo copies.
+        let mut scratch: Option<Entity> = None;
 
         for (ghost, echo) in ghosts {
             let time = if echo.hold {
@@ -2089,6 +2122,32 @@ impl Timeline {
             if let Some(mut opacity) = world.get_mut::<Opacity>(ghost) {
                 opacity.0 *= echo.opacity;
             }
+            // A follower's clips do not move it: rebuild its position then.
+            if entity_map
+                .get(&echo.source)
+                .is_some_and(|&source| follows_binding(world, source))
+            {
+                let probe = *scratch.get_or_insert_with(|| world.spawn_empty().id());
+                let context = DelayedContext {
+                    clips: &source_clips,
+                    entity_map: &entity_map,
+                    object_of: &object_of,
+                    start: segment_start.max(0.0),
+                    probe,
+                };
+                if let Some(matrix) =
+                    self.delayed_world_matrix(world, &context, echo.source, time, 0)
+                {
+                    let world_position = matrix.transform_point3(gaanim_core::glam::DVec3::ZERO);
+                    let position = parent_local_point(world, ghost, world_position);
+                    if let Some(mut transform) = world.get_mut::<SpatialTransform>(ghost) {
+                        transform.translation = position;
+                    }
+                }
+            }
+        }
+        if let Some(scratch) = scratch {
+            world.despawn(scratch);
         }
 
         for (entity, id, squash) in squashes {
@@ -2108,22 +2167,30 @@ impl Timeline {
                 }
             };
             // A centred difference inside the current segment and timeline.
-            let (low, high) = self
-                .segments
-                .iter()
-                .rev()
-                .find(|segment| {
-                    segment.start_time <= self.current_time + 1e-9
-                        && self.current_time <= segment.end_time + 1e-9
-                })
-                .map_or((0.0, self.cached_duration), |segment| {
-                    (segment.start_time, segment.end_time)
-                });
+            let (low, high) = (segment_start, segment_end);
             let before = (self.current_time - gaanim_animation::SQUASH_STEP)
                 .max(low)
                 .max(0.0);
             let after = (self.current_time + gaanim_animation::SQUASH_STEP).min(high);
+            // A follower moves by its binding, not its clips.
+            let bound = follows_binding(world, entity);
+            let context = DelayedContext {
+                clips: &source_clips,
+                entity_map: &entity_map,
+                object_of: &object_of,
+                start: segment_start.max(0.0),
+                probe,
+            };
             let mut position_at = |time: f64| {
+                if bound {
+                    return self
+                        .delayed_world_matrix(world, &context, id, time, 0)
+                        .map(|matrix| {
+                            matrix
+                                .transform_point3(gaanim_core::glam::DVec3::ZERO)
+                                .truncate()
+                        });
+                }
                 self.replay_source_into(world, id, clips_of(&id), time, probe, |state| {
                     state.scene = None;
                     state.visible = false;
@@ -2141,6 +2208,324 @@ impl Timeline {
                 world.entity_mut(entity).insert(deform);
             }
         }
+
+        for (entity, follow) in follows {
+            let probe = match follow
+                .probe
+                .filter(|probe| world.get_entity(*probe).is_ok())
+            {
+                Some(probe) => probe,
+                None => {
+                    let probe = world.spawn_empty().id();
+                    if let Some(mut stored) =
+                        world.get_mut::<gaanim_animation::DelayedFollow>(entity)
+                    {
+                        stored.probe = Some(probe);
+                    }
+                    probe
+                }
+            };
+            let start = segment_start.max(0.0);
+            let time = follow.source_time(self.current_time, start);
+            let context = DelayedContext {
+                clips: &source_clips,
+                entity_map: &entity_map,
+                object_of: &object_of,
+                start,
+                probe,
+            };
+            let Some(source_world) =
+                self.delayed_world_matrix(world, &context, follow.source, time, 0)
+            else {
+                continue;
+            };
+            let world_position = follow.position(source_world);
+            let position = parent_local_point(world, entity, world_position);
+            if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity)
+                && transform.translation != position
+            {
+                transform.translation = position;
+            }
+        }
+    }
+
+    /// Sample where the anchor of every anchored
+    /// [`gaanim_animation::ParticleEmitter`] was while its live
+    /// particles were born: on a grid of [`PARTICLE_ANCHOR_STEP`] seconds
+    /// fixed in timeline time, replaying the anchor's own clips as
+    /// [`Self::evaluate_delayed_states`] does. The samples are a pure
+    /// function of time, so a seek places particles exactly as playback. An
+    /// anchor without animations is sampled once.
+    fn evaluate_particle_anchors(&self, world: &mut World) {
+        let emitters: Vec<(Entity, gaanim_core::ObjectId, f64, f64, Option<Entity>)> = world
+            .query::<(Entity, &gaanim_animation::ParticleEmitter)>()
+            .iter(world)
+            .filter_map(|(entity, emitter)| {
+                let earliest = emitter.system.bursts.iter().map(|(time, _)| *time).fold(
+                    if emitter.system.rate > 0.0 {
+                        emitter.system.start
+                    } else {
+                        f64::INFINITY
+                    },
+                    f64::min,
+                );
+                Some((
+                    entity,
+                    emitter.anchor?,
+                    earliest,
+                    emitter.system.longest_life(),
+                    emitter.probe,
+                ))
+            })
+            .collect();
+        if emitters.is_empty() {
+            return;
+        }
+        let anchors: HashSet<_> = emitters.iter().map(|(_, anchor, ..)| *anchor).collect();
+        let entity_map: HashMap<gaanim_core::ObjectId, Entity> = world
+            .query::<(Entity, &MobjectId)>()
+            .iter(world)
+            .map(|(entity, id)| (id.0, entity))
+            .collect();
+        let object_of: HashMap<Entity, gaanim_core::ObjectId> = entity_map
+            .iter()
+            .map(|(id, entity)| (*entity, *id))
+            .collect();
+        // Anchors that move by a follow binding rather than their own clips;
+        // rebuilding them may read any drawable they follow.
+        let bound: HashSet<gaanim_core::ObjectId> = anchors
+            .iter()
+            .filter(|&&anchor| {
+                entity_map
+                    .get(&anchor)
+                    .is_some_and(|&entity| follows_binding(world, entity))
+            })
+            .copied()
+            .collect();
+        let start = self.current_segment_bounds().0.max(0.0);
+        let mut anchor_clips: HashMap<gaanim_core::ObjectId, Vec<&Clip>> = HashMap::new();
+        for clip in self
+            .clip_index
+            .values()
+            .flatten()
+            .filter_map(|id| self.clips.get(*id))
+        {
+            if let ClipPayload::Animation(anim) = &clip.payload
+                && (!bound.is_empty() || anchors.contains(&anim.target))
+            {
+                anchor_clips.entry(anim.target).or_default().push(clip);
+            }
+        }
+        for (entity, anchor, earliest, longest, probe) in emitters {
+            let probe = match probe.filter(|probe| world.get_entity(*probe).is_ok()) {
+                Some(probe) => probe,
+                None => {
+                    let probe = world.spawn_empty().id();
+                    if let Some(mut emitter) =
+                        world.get_mut::<gaanim_animation::ParticleEmitter>(entity)
+                    {
+                        emitter.probe = Some(probe);
+                    }
+                    probe
+                }
+            };
+            let clips = anchor_clips
+                .get(&anchor)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            let is_bound = bound.contains(&anchor);
+            let context = DelayedContext {
+                clips: &anchor_clips,
+                entity_map: &entity_map,
+                object_of: &object_of,
+                start,
+                probe,
+            };
+            let mut position_at = |time: f64| {
+                if is_bound {
+                    return self
+                        .delayed_world_matrix(world, &context, anchor, time, 0)
+                        .map(|matrix| {
+                            matrix
+                                .transform_point3(gaanim_core::glam::DVec3::ZERO)
+                                .truncate()
+                        });
+                }
+                self.replay_source_into(world, anchor, clips, time, probe, |state| {
+                    state.scene = None;
+                    state.visible = false;
+                })?;
+                world
+                    .get::<SpatialTransform>(probe)
+                    .map(|transform| transform.translation.truncate())
+            };
+            let trail = if clips.is_empty() && !is_bound {
+                position_at(self.current_time.max(0.0))
+                    .map(gaanim_animation::AnchorTrail::constant)
+                    .unwrap_or_default()
+            } else if earliest > self.current_time {
+                gaanim_animation::AnchorTrail::default()
+            } else {
+                let from = (self.current_time - longest).max(earliest).max(0.0);
+                let first = (from / PARTICLE_ANCHOR_STEP).floor() as i64;
+                let last = (self.current_time / PARTICLE_ANCHOR_STEP).ceil() as i64;
+                let mut points = Vec::with_capacity((last - first + 1).max(0) as usize);
+                let mut known = None;
+                let mut missing = 0;
+                for index in first..=last {
+                    match position_at(index as f64 * PARTICLE_ANCHOR_STEP) {
+                        Some(point) => {
+                            // Samples before the anchor existed take its first position.
+                            points.extend(std::iter::repeat_n(point, missing));
+                            missing = 0;
+                            points.push(point);
+                            known = Some(point);
+                        }
+                        None => match known {
+                            Some(point) => points.push(point),
+                            None => missing += 1,
+                        },
+                    }
+                }
+                gaanim_animation::AnchorTrail {
+                    step: PARTICLE_ANCHOR_STEP,
+                    first,
+                    points,
+                }
+            };
+            if let Some(mut emitter) = world.get_mut::<gaanim_animation::ParticleEmitter>(entity)
+                && emitter.trail != trail
+            {
+                emitter.trail = trail;
+            }
+        }
+    }
+
+    /// Start and end of the segment holding the current time, or the whole
+    /// timeline without segments.
+    fn current_segment_bounds(&self) -> (f64, f64) {
+        self.segments
+            .iter()
+            .rev()
+            .find(|segment| {
+                segment.start_time <= self.current_time + 1e-9
+                    && self.current_time <= segment.end_time + 1e-9
+            })
+            .map_or((0.0, self.cached_duration), |segment| {
+                (segment.start_time, segment.end_time)
+            })
+    }
+
+    /// World matrix of the drawable `source` at `time`, rebuilt from its
+    /// keyframe and animation clips like a seek. When `source` is itself
+    /// positioned by a binding its position is rebuilt too, recursively:
+    ///
+    /// - a [`gaanim_animation::DelayedFollow`] reads its own leader at
+    ///   `time - delay` (held at the segment start), so chains of delayed
+    ///   followers trail one another;
+    /// - an [`gaanim_animation::EndpointFollow`] on a drawable (`follow`
+    ///   with no delay) reads that drawable at `time`;
+    /// - a [`gaanim_animation::PositionBinding`] (`attach_to`, `follow_to`,
+    ///   `bind_position_from`) copies the selected axes of its source at
+    ///   `time` plus its offset, in scene axes.
+    ///
+    /// Other endpoints (anchors, expressions) have no past to replay: they
+    /// resolve against the current world, undelayed. Chains deeper than
+    /// [`MAX_DELAYED_DEPTH`], including cycles, stop at the replayed
+    /// position of the drawable where the depth runs out.
+    fn delayed_world_matrix(
+        &self,
+        world: &mut World,
+        context: &DelayedContext<'_, '_>,
+        source: gaanim_core::ObjectId,
+        time: f64,
+        depth: u32,
+    ) -> Option<gaanim_core::glam::DMat4> {
+        use gaanim_animation::{FollowOffsetSpace, TrackingEndpoint};
+        use gaanim_core::glam::DVec3;
+        let clips = context
+            .clips
+            .get(&source)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let parent =
+            self.replay_source_into(world, source, clips, time, context.probe, |state| {
+                state.scene = None;
+                state.visible = false;
+            })?;
+        let local = world.get::<SpatialTransform>(context.probe)?.to_mat4();
+        let mut matrix = parent
+            .and_then(|parent| context.entity_map.get(&parent).copied())
+            .and_then(|parent| gaanim_animation::entity_world_matrix(parent, world))
+            .map_or(local, |parent| parent * local);
+        let Some(entity) = context.entity_map.get(&source).copied() else {
+            return Some(matrix);
+        };
+        if depth >= MAX_DELAYED_DEPTH {
+            return Some(matrix);
+        }
+        let delayed = world
+            .get::<gaanim_animation::DelayedFollow>(entity)
+            .cloned();
+        let endpoint = world
+            .get::<gaanim_animation::EndpointFollow>(entity)
+            .cloned();
+        // (source, copied axes, offset); the component is not `Clone`.
+        let binding = world
+            .get::<gaanim_animation::PositionBinding>(entity)
+            .map(|binding| {
+                let axes = (binding.axes.x, binding.axes.y, binding.axes.z);
+                (binding.source, axes, binding.offset)
+            });
+        let position = if let Some(follow) = delayed {
+            let leader_time = follow.source_time(time, context.start);
+            self.delayed_world_matrix(world, context, follow.source, leader_time, depth + 1)
+                .map(|leader| follow.position(leader))
+        } else if let Some(follow) = endpoint {
+            let offset = |basis: gaanim_core::glam::DMat4| match follow.offset_space {
+                FollowOffsetSpace::World => follow.offset,
+                FollowOffsetSpace::Local => basis.transform_vector3(follow.offset),
+            };
+            match &follow.endpoint {
+                TrackingEndpoint::Entity(leader) => context
+                    .object_of
+                    .get(leader)
+                    .copied()
+                    .and_then(|leader| {
+                        self.delayed_world_matrix(world, context, leader, time, depth + 1)
+                    })
+                    .map(|leader| leader.transform_point3(DVec3::ZERO) + offset(leader)),
+                _ => gaanim_animation::resolve_tracking_endpoint_with_offset(
+                    &follow.endpoint,
+                    follow.offset,
+                    follow.offset_space,
+                    world,
+                ),
+            }
+        } else if let Some((source, axes, offset)) = binding {
+            context
+                .object_of
+                .get(&source)
+                .copied()
+                .and_then(|leader| {
+                    self.delayed_world_matrix(world, context, leader, time, depth + 1)
+                })
+                .map(|leader| {
+                    let copied = leader.transform_point3(DVec3::ZERO) + offset;
+                    let own = matrix.transform_point3(DVec3::ZERO);
+                    DVec3::new(
+                        if axes.0 { copied.x } else { own.x },
+                        if axes.1 { copied.y } else { own.y },
+                        if axes.2 { copied.z } else { own.z },
+                    )
+                })
+        } else {
+            None
+        };
+        if let Some(position) = position {
+            matrix.w_axis = position.extend(1.0);
+        }
+        Some(matrix)
     }
 
     /// Restore `source`'s keyframe state at `time`, adjusted by `prepare`,
@@ -2720,6 +3105,51 @@ impl Timeline {
             }
         }
     }
+}
+
+/// Whether `entity` takes its position from a follow binding, which its own
+/// animation clips do not rebuild.
+fn follows_binding(world: &World, entity: Entity) -> bool {
+    world
+        .get::<gaanim_animation::DelayedFollow>(entity)
+        .is_some()
+        || world
+            .get::<gaanim_animation::EndpointFollow>(entity)
+            .is_some()
+        || world
+            .get::<gaanim_animation::PositionBinding>(entity)
+            .is_some()
+}
+
+/// `point`, in scene space, in the frame of `entity`'s parent.
+fn parent_local_point(
+    world: &World,
+    entity: Entity,
+    point: gaanim_core::glam::DVec3,
+) -> gaanim_core::glam::DVec3 {
+    world
+        .get::<ChildOf>(entity)
+        .map(|relation| relation.parent())
+        .and_then(|parent| gaanim_animation::entity_world_matrix(parent, world))
+        .filter(|matrix| matrix.determinant().abs() > f64::EPSILON)
+        .map_or(point, |matrix| matrix.inverse().transform_point3(point))
+}
+
+/// How many followers deep [`Timeline::delayed_world_matrix`] rebuilds a
+/// delayed follower's leader; it also bounds follow cycles.
+const MAX_DELAYED_DEPTH: u32 = 64;
+
+/// What [`Timeline::delayed_world_matrix`] needs to replay drawables at
+/// another time.
+struct DelayedContext<'a, 'c> {
+    /// Animation clips of every drawable, in start order.
+    clips: &'a HashMap<gaanim_core::ObjectId, Vec<&'c Clip>>,
+    entity_map: &'a HashMap<gaanim_core::ObjectId, Entity>,
+    object_of: &'a HashMap<Entity, gaanim_core::ObjectId>,
+    /// Start of the segment holding the current time.
+    start: f64,
+    /// Scratch entity the drawables are replayed into.
+    probe: Entity,
 }
 
 /// The time a held echo copy shows at `time`: `lag` seconds back along the
@@ -3834,6 +4264,11 @@ fn apply_transition(
         }
         TransitionType::Morph { mappings, .. } => {
             apply_morph_transition(world, scene_entities, mappings, t.clamp(0.0, 1.0), from, to);
+        }
+        // Keys are resolved into `Morph` pairs by the authoring layer; an
+        // unresolved magic move has no pairs and cross-fades like a morph.
+        TransitionType::MagicMove { .. } => {
+            apply_morph_transition(world, scene_entities, &[], t.clamp(0.0, 1.0), from, to);
         }
     }
 }

@@ -5,6 +5,7 @@ pub mod prelude;
 pub mod scene;
 pub mod selection;
 pub mod snapshot;
+pub mod sound;
 pub mod timeline;
 pub mod transition;
 pub mod transition_mask;

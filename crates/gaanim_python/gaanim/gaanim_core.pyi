@@ -401,6 +401,57 @@ class Background:
 
 BackgroundLike: TypeAlias = Paint | Background
 
+class Emitter:
+    """Where ``scene.fx.particles`` releases its particles: a shape at a point or on a drawable.
+
+    Every factory raises ``ValueError`` for negative or non-finite dimensions.
+    """
+    @staticmethod
+    def point() -> Emitter:
+        """Every particle leaves from one point, the origin until ``at`` moves it.
+
+        Example:
+            emitter = Emitter.point().at((0, -2))
+        """
+        ...
+    @staticmethod
+    def circle(radius: float, *, edge: bool = False) -> Emitter:
+        """Particles leave from uniform points inside a disc of ``radius``, or on its rim with ``edge``.
+
+        Example:
+            emitter = Emitter.circle(radius=0.2).at(logo)
+        """
+        ...
+    @staticmethod
+    def rect(width: float, height: float) -> Emitter:
+        """Particles leave from uniform points inside a ``width`` x ``height`` rectangle.
+
+        Example:
+            snow = scene.fx.particles(Emitter.rect(16, 0.1).at((0, 4.6)), direction=-math.pi / 2, spread=0.3)
+        """
+        ...
+    @staticmethod
+    def line(length: float, angle: float = 0.0) -> Emitter:
+        """Particles leave from uniform points along a segment of ``length`` turned by ``angle`` radians.
+
+        Example:
+            emitter = Emitter.line(6.0).at((0, -3))
+        """
+        ...
+    def at(self, target: tuple[float, float] | Drawable, *, offset: tuple[float, float] = (0.0, 0.0)) -> Emitter:
+        """The same emitter centred on a scene point, or following a drawable, shifted by ``offset``.
+
+        With a drawable, each particle leaves from where the drawable's
+        position was at the particle's birth, following its animations; the
+        drawable must belong to the same scene as the emitter. Returns a new
+        ``Emitter``. A non-finite point raises ``ValueError``; any other target
+        raises ``TypeError``.
+
+        Example:
+            sparks = scene.fx.particles(Emitter.circle(0.2).at(logo, offset=(0, 0.5)))
+        """
+        ...
+
 class Distribution:
     """Where ``Geometry.duplicate`` places copies: a grid, circle, path, random cloud or spiral.
 
@@ -1090,10 +1141,22 @@ class Transition:
     ``blinds``, ``push``, ``slide``) use ``Easing.SMOOTH``. Vector reveals
     clip both segments with animated paths in the visible camera frame, so
     they stay sharp at any resolution and need no textures.
+
+    Every transition also accepts ``sound=`` (an audio file path, relative to
+    the assets folder): the sound effect plays once, at full volume, when the
+    transition starts, which is the start of the segment it enters. It is
+    placed when the transition is passed to ``scene.segment`` or
+    ``scene.link`` (a later ``link`` into the same segment replaces it), is
+    mixed like ``scene.media.audio`` in preview and MP4/WebM exports and
+    never changes a duration. An empty path raises ``ValueError`` here; a
+    missing file raises ``ValueError`` from ``segment``/``link``.
+
+    Example:
+        scene.segment("detalle", transition=Transition.slide(0.5, "left", sound="whoosh.wav"))
     """
 
     @staticmethod
-    def cut(*, overlay: Optional[Overlay] = None) -> Transition:
+    def cut(*, overlay: Optional[Overlay] = None, sound: Optional[str] = None) -> Transition:
         """Switch segments instantly, optionally under an ``overlay``.
 
         Example:
@@ -1106,6 +1169,7 @@ class Transition:
         *,
         easing: Optional[Easing] = None,
         overlay: Optional[Overlay] = None,
+        sound: Optional[str] = None,
     ) -> Transition:
         """Fade the outgoing segment out while the incoming one fades in.
 
@@ -1120,6 +1184,7 @@ class Transition:
         *,
         easing: Optional[Easing] = None,
         overlay: Optional[Overlay] = None,
+        sound: Optional[str] = None,
     ) -> Transition:
         """Fade out during the first half and fade the next segment in during the second.
 
@@ -1134,6 +1199,7 @@ class Transition:
         *,
         easing: Optional[Easing] = None,
         overlay: Optional[Overlay] = None,
+        sound: Optional[str] = None,
     ) -> Transition:
         """Slide the incoming segment over the still outgoing one.
 
@@ -1154,6 +1220,7 @@ class Transition:
         max_zoom: float = 4.0,
         easing: Optional[Easing] = None,
         overlay: Optional[Overlay] = None,
+        sound: Optional[str] = None,
     ) -> Transition:
         """Zoom the camera into the outgoing segment and back out on the incoming one.
 
@@ -1168,6 +1235,7 @@ class Transition:
         pairs: Sequence[tuple[Drawable, Drawable]] = (),
         easing: Optional[Easing] = None,
         overlay: Optional[Overlay] = None,
+        sound: Optional[str] = None,
     ) -> Transition:
         """Carry paired drawables from the outgoing segment into the incoming one.
 
@@ -1185,6 +1253,33 @@ class Transition:
         """
         ...
     @staticmethod
+    def magic_move(
+        duration: float,
+        *,
+        key: Literal["name", "id"] = "name",
+        easing: Optional[Easing] = None,
+        overlay: Optional[Overlay] = None,
+        sound: Optional[str] = None,
+    ) -> Transition:
+        """Morph drawables that share a key from the outgoing segment into the incoming one.
+
+        Like ``Transition.morph``, but the pairs are found by key when the
+        scene compiles: ``key="name"`` matches the names given with
+        ``Drawable.named`` (an imported SVG part answers to its ``id`` when it
+        has no name) and ``key="id"`` matches only SVG ``id`` attributes.
+        Every visible top-level drawable of either segment and every member of
+        its groups is a candidate; a keyed group moves as a whole, so keys
+        inside it are not used. Repeated keys pair in declaration order, and
+        drawables hidden when the outgoing segment ends (such as the source of
+        a finished ``magic_move``) are skipped. Unmatched content cross-fades.
+        Use ``magic_move(...)`` for key callables. Raises ``ValueError`` for a
+        non-positive duration or an unknown key.
+
+        Example:
+            scene.segment("v2", transition=Transition.magic_move(0.8, key="name"))
+        """
+        ...
+    @staticmethod
     def wipe(
         duration: float,
         direction: str = "left",
@@ -1192,6 +1287,7 @@ class Transition:
         *,
         easing: Optional[Easing] = None,
         overlay: Optional[Overlay] = None,
+        sound: Optional[str] = None,
     ) -> Transition:
         """Sweep a straight edge across the frame to reveal the next segment.
 
@@ -1214,6 +1310,7 @@ class Transition:
         *,
         easing: Optional[Easing] = None,
         overlay: Optional[Overlay] = None,
+        sound: Optional[str] = None,
     ) -> Transition:
         """Reveal the next segment behind a hand sweeping clockwise around the frame center.
 
@@ -1233,6 +1330,7 @@ class Transition:
         *,
         easing: Optional[Easing] = None,
         overlay: Optional[Overlay] = None,
+        sound: Optional[str] = None,
     ) -> Transition:
         """Open a shape from ``center`` (scene units) until the next segment fills the frame.
 
@@ -1255,6 +1353,7 @@ class Transition:
         *,
         easing: Optional[Easing] = None,
         overlay: Optional[Overlay] = None,
+        sound: Optional[str] = None,
     ) -> Transition:
         """Open ``count`` parallel slats together to reveal the next segment.
 
@@ -1273,6 +1372,7 @@ class Transition:
         *,
         easing: Optional[Easing] = None,
         overlay: Optional[Overlay] = None,
+        sound: Optional[str] = None,
     ) -> Transition:
         """Let the incoming segment push the outgoing one out of the frame.
 
@@ -1805,6 +1905,20 @@ class Anim:
             scene.play([tri.animate.points([(-1, 1), (1, 1), (0, -1)]).duration(1.0)])
         """
         ...
+    def burst(self, count: int) -> Anim:
+        """Emit ``count`` particles at once from a ``scene.fx`` emitter when this animation starts.
+
+        The particles leave together, each with its own seeded lifetime,
+        speed, heading, size and color. Unless ``duration`` is set, the
+        animation lasts the particles' longest life, so the cursor waits for
+        them to settle. It cannot share an ``Anim`` with property targets or
+        another effect. A count below 1 or above 100000, or a drawable that is
+        not a particle emitter, raises ``ValueError``.
+
+        Example:
+            scene.play([sparks.animate.burst(80)])
+        """
+        ...
     def count(self, count: float) -> Anim:
         """Animate how many copies of a ``repeat`` or ``duplicate`` group show.
 
@@ -1963,6 +2077,50 @@ class Anim:
         ...
     def delay(self, seconds: float) -> Anim:
         """Return a copy delayed by finite, non-negative ``seconds``."""
+        ...
+    def sound(self, path: str, *, volume: float = 1.0, offset: float = 0.0) -> Anim:
+        """Return a copy that plays the sound effect ``path`` when the animation starts.
+
+        The sound is anchored to the animation, not to the cursor where it was
+        written: it starts at the animation's resolved start, including its
+        ``delay`` and its place inside ``sequence``, ``stagger`` or
+        ``Composition`` inserts, so moving the animation moves the sound.
+        ``offset`` seconds shift it from that start (negative anticipates
+        it). The file plays once, whole, with linear gain ``volume``; it does
+        not lengthen the play, and it is mixed like ``scene.media.audio`` in
+        preview (including seeks) and MP4/WebM exports. A relative path uses
+        the assets folder. A second call replaces the sound. An empty path, a
+        negative or non-finite ``volume`` or a non-finite ``offset`` raise
+        ``ValueError``; a missing file, or a sound that would start before
+        0 s, raises ``ValueError`` from ``scene.play`` and nothing is played.
+
+        Example:
+            scene.play(title.animate.write().sound("typing.wav", volume=0.6))
+        """
+        ...
+    def settle(self, overshoot: float = 0.12, frequency: float = 3.0, decay: float = 6.0) -> Anim:
+        """Add an inertial bounce after the last value (follow-through).
+
+        When the motion ends, every animated property overshoots its target
+        and swings back as ``v * overshoot * sin(2π * frequency * t) /
+        e^(decay * t)``, with ``t`` in seconds after the motion and ``v`` its
+        final velocity in units per second (the average velocity when the
+        easing ends at rest, as ``smooth`` does, so an eased move still
+        bounces). ``overshoot`` is After Effects' ``amp``: seconds of
+        bounce per unit of velocity. ``frequency`` is in oscillations per
+        second and ``decay`` in 1/s.
+
+        The animation grows until the bounce settles below 0.1% of the
+        distance travelled (at most 10 s more) and ends exactly on the
+        target, so ``play`` waits for it and later animations start from
+        rest. It follows the last cycle of ``repeat``/``loop``. The curve is
+        a pure function of time, so any seek is exact. ``overshoot = 0``
+        keeps the plain motion; a negative ``overshoot`` or a non-positive
+        ``frequency``/``decay`` raises ``ValueError``.
+
+        Example:
+            card.animate.move_to(0, 0).duration(0.5).settle(overshoot=0.12, frequency=3.0, decay=6.0)
+        """
         ...
     def repeat(self, count: int, *, yoyo: bool = False, delay: float = 0.0) -> Anim:
         """Play this animation ``count`` times; ``duration`` and ``easing`` describe one cycle.
@@ -2165,6 +2323,39 @@ def stagger(
 
     Example:
         scene.play(stagger(*[d.animate.grow_from_center() for d in dots], each=0.03, origin="center"))
+    """
+    ...
+
+def magic_move(
+    before: Drawable,
+    after: Drawable,
+    *,
+    key: Literal["name", "id"] | Callable[[Drawable], object] = "name",
+    unmatched: Literal["fade", "cut"] = "fade",
+    duration: float = 1.0,
+) -> Anim:
+    """Animate ``before`` into ``after``, morphing the members that share a key.
+
+    Members of both drawables with the same key interpolate position, size,
+    color and shape; a pair of groups also morphs their parts, like
+    ``transform_matching``. Keys come from ``key``: ``"name"`` (the default)
+    uses ``Drawable.named`` names, falling back to the SVG ``id`` of imported
+    parts; ``"id"`` uses only SVG ``id`` attributes; a callable receives each
+    candidate as a ``Drawable`` and returns its key, or ``None`` to look inside
+    it (other return values are converted with ``str()``). Candidates are
+    searched depth-first under each drawable, and a keyed member moves as a
+    whole. Keys are read when ``magic_move`` is called and repeated keys pair
+    in declaration order. With ``unmatched="fade"`` the other members fade out
+    and in during the move; with ``"cut"`` they disappear at its start and
+    appear at its end. ``after`` stays hidden until the move and takes over
+    at its end, so later animations continue from it. Returns an ``Anim`` to
+    pass to ``scene.play``; chain ``.duration()`` or an easing as usual.
+    Raises ``ValueError`` for drawables of different scenes, the same
+    drawable twice, a non-positive duration, or an unknown ``key`` or
+    ``unmatched``; an exception raised by a key callable propagates.
+
+    Example:
+        scene.play([magic_move(before, after, key="name", unmatched="fade").duration(0.8)])
     """
     ...
 
@@ -2684,6 +2875,17 @@ class Drawable:
             stroke = scene.geometry.arc(0, 0, 2.0, 0.0, 3.0).no_fill().stroke(GOLD, 0.2).stroke_taper(0.3, 0.5)
         """
         ...
+    def burst(self, count: int) -> Drawable:
+        """Emit ``count`` particles at once from this ``scene.fx`` emitter at the cursor.
+
+        The cursor does not move; before the first ``scene.play`` the burst
+        happens at the declaration time. A count below 1 or above 100000, or a
+        drawable that is not a particle emitter, raises ``ValueError``.
+
+        Example:
+            sparks.burst(40)
+        """
+        ...
     def count(self, count: float) -> Drawable:
         """Show the first ``count`` copies of a ``repeat`` or ``duplicate`` group.
 
@@ -2909,6 +3111,26 @@ class Drawable:
 
         Its ``anchor`` meets the same anchor of the target, inset by
         ``padding`` and shifted by ``offset``; ``fit`` scales it to the target.
+        """
+        ...
+    def named(self, name: str) -> Self:
+        """Name this drawable and return it.
+
+        Names identify the same object in two states: ``magic_move`` and
+        ``Transition.magic_move`` pair drawables whose names are equal. Names
+        need not be unique; repeated names pair in declaration order. Raises
+        ``ValueError`` for a blank name.
+
+        Example:
+            bar = scene.geometry.rect(3, 0.5).named("ana")
+        """
+        ...
+    @property
+    def name(self) -> Optional[str]:
+        """The name given with ``named()``, or ``None``.
+
+        Example:
+            key = bar.name
         """
         ...
     def z_index(self, z: int) -> Self:
@@ -3381,12 +3603,31 @@ class Drawable:
             drawable.follow_to(source, (0.0, 0.0))
         """
         ...
-    def follow(self, source: Endpoint, *, offset: tuple[float, float] = (0.0, 0.0), offset_space: Literal["world", "local"] = "world") -> Self:
+    def follow(self, source: Endpoint, *, offset: tuple[float, float] = (0.0, 0.0), offset_space: Literal["world", "local"] = "world", delay: float = 0.0) -> Self:
         """Follow any endpoint in the same frame and return this drawable.
 
         World offsets remain screen-aligned; local offsets rotate and scale with
         drawable or anchored sources. Non-finite offsets and invalid modes error.
         The drawable stays hidden until its entry animation is played.
+
+        ``delay`` (seconds) places this drawable where a Drawable ``source``
+        was ``delay`` seconds earlier, like After Effects'
+        ``valueAtTime(time - delay)``: chain followers with growing delays
+        for trails and tails (overlapping action). The leader's animations
+        are re-evaluated at ``t - delay`` on every frame, so any seek
+        reproduces the trail without accumulated state. The leader may itself
+        follow another drawable (``follow`` with or without ``delay``,
+        ``follow_to``, ``attach_to``), so followers of followers trail one
+        another; anchor and expression endpoints further up such a chain are
+        read undelayed. Until the current
+        segment has run for ``delay`` seconds the follower holds the
+        leader's position at the segment start. A positive ``delay`` needs a
+        Drawable ``source`` (``TypeError`` otherwise); a negative or
+        non-finite one raises ``ValueError``.
+
+        Example:
+            for i, dot in enumerate(dots):
+                dot.follow(leader, delay=0.06 * (i + 1))
         """
         ...
     def bind_rotation_from(self, source: Drawable, *, ratio: float = 1.0, phase: float = 0.0) -> Self:
@@ -5049,6 +5290,88 @@ class ProgressRing(Drawable):
         """
         ...
 
+class BarRaceAnimation:
+    """Animation proxy of a ``BarRace``: ``race.animate.play()``."""
+    def play(self) -> Anim:
+        """Run from the current position to the last keyframe at a constant rate.
+
+        The default duration is one second per keyframe still to play;
+        chain ``.duration(seconds)`` to fit the whole race in a fixed time.
+
+        Example:
+            scene.play([race.animate.play().duration(20)])
+        """
+        ...
+    def to(self, position: float) -> Anim:
+        """Move to a keyframe ``position`` at a constant rate.
+
+        ``0`` is the first keyframe and fractional positions lie between
+        keyframes. Raise ValueError outside ``[0, frame_count - 1]``.
+        """
+        ...
+
+class BarRace(Drawable):
+    """A bar chart race: ranked bars that grow, overtake and leave the top.
+
+    The race is a pure function of one keyframe position: values interpolate
+    linearly between keyframes, two bars that cross swap slots with an eased
+    motion instead of jumping (every bar has its own slot between crossings), bars leaving the ``top`` ranks fade out
+    below the last slot, and the longest bar always spans the bar area. Names
+    sit in a column left of the bars, rolling numbers follow each bar's end and
+    the ticker in the bottom-right corner shows the keyframe label (whole
+    number labels such as years roll; other labels crossfade). Seeking shows
+    the same frame as playing up to it.
+    """
+    @property
+    def visual(self) -> Drawable:
+        """The group of every row and the ticker; use ``visual.animate`` to move or fade the race."""
+        ...
+    def move_to(self, x: Any, y: Any = None, anchor: Anchor | None = None) -> BarRace:
+        """Position the race by its center and return this BarRace."""
+        ...
+    def shift_by(self, dx: float, dy: float) -> BarRace:
+        """Move the race and return this BarRace."""
+        ...
+    def opacity(self, op: ScalarSource) -> BarRace:
+        """Set or bind the race's opacity and return this BarRace."""
+        ...
+    @property
+    def parameter(self) -> Parameter:
+        """Keyframe position, usable in computed inputs, readouts and sampled drivers."""
+        ...
+    @property
+    def position(self) -> float:
+        """Authoring-side keyframe position; ``0.0`` until set or animated."""
+        ...
+    @property
+    def frame_count(self) -> int:
+        """Number of keyframes."""
+        ...
+    @property
+    def names(self) -> list[str]:
+        """Bar names in the order they first appear in ``frames``."""
+        ...
+    @property
+    def ticker(self) -> Optional[Drawable]:
+        """The keyframe label, or ``None`` with ``ticker=False``."""
+        ...
+    def bar(self, name: str) -> Drawable:
+        """The row of bar ``name``: its bar, name and value, moving between slots.
+
+        Raise KeyError for an unknown name.
+        """
+        ...
+    def set(self, position: float) -> BarRace:
+        """Jump to a keyframe position and return self; after declaration this is a reversible cut.
+
+        Raise ValueError outside ``[0, frame_count - 1]``.
+        """
+        ...
+    @property
+    def animate(self) -> BarRaceAnimation:
+        """Animation proxy: ``animate.play()`` runs the race, ``animate.to(position)`` moves to a keyframe."""
+        ...
+
 class Variable(Drawable):
     """A visible ``Parameter`` with an equation-aligned reactive readout group."""
     @property
@@ -6434,6 +6757,22 @@ class MediaLibrary:
             scene.play([music, title.animate.write()])
         """
         ...
+    def sfx(self, path: str, at: Optional[float] = None, *, volume: float = 1.0) -> None:
+        """Place a sound effect at absolute timeline second ``at``.
+
+        ``at`` defaults to the current ``scene.cursor``. Unlike ``audio``, the
+        sound needs no ``play``: it is scheduled immediately, plays its whole
+        file once with linear gain ``volume``, never moves the cursor and
+        never lengthens the timeline. It is mixed on the same track mixer as
+        ``audio`` in preview (pause, seek and speed included) and MP4/WebM
+        exports. To keep a sound attached to an animation that may move, use
+        ``Anim.sound`` instead. A missing file, a negative or non-finite
+        ``at`` or ``volume`` raise ``ValueError``.
+
+        Example:
+            scene.media.sfx("whoosh.wav", at=scene.cursor)
+        """
+        ...
     def image(
         self,
         path: str,
@@ -6596,6 +6935,47 @@ class Visualization:
         Example:
             timer = scene.viz.countdown(10)
             scene.play([timer.count_down()])
+        """
+        ...
+    def bar_race(
+        self, frames: Mapping[Any, Mapping[str, float]] | Sequence[tuple[Any, Mapping[str, float]]], *,
+        top: int = 10, rank_smoothing: float = 0.3, value_format: str = "{:,.0f}",
+        width: float = 10.0, height: float = 6.0, label_width: Optional[float] = None,
+        bar_gap: float = 0.18, colors: Mapping[str, ColorLike] | Sequence[ColorLike] | None = None,
+        label_color: Optional[ColorLike] = None, font_size: Optional[float] = None,
+        ticker: bool = True, ticker_size: Optional[float] = None, ticker_color: Optional[ColorLike] = None,
+    ) -> BarRace:
+        """Create a bar chart race centered on the origin, at its first keyframe.
+
+        ``frames`` maps each keyframe label (a year, a date string…) to the
+        ``{name: value}`` of that keyframe, in order; a sequence of
+        ``(label, {name: value})`` pairs works too. A name missing from a
+        keyframe counts as zero there. ``top`` ranks are shown, the leader on
+        top. ``rank_smoothing`` is how many keyframes (0 to 2) a swap between
+        two bars takes, centered on the moment they cross and shortened so it
+        ends before the same two bars cross again; away from crossings every
+        bar has its own slot, and ``0`` swaps slots instantly. ``value_format`` is
+        a Python format field with optional literal text around it —
+        ``"{}"``, ``"{:,.0f}"``, ``"{:_.2f}"`` or ``"${:,.1f} M"`` — shown by a
+        rolling number (at most 6 decimals).
+
+        ``width`` and ``height`` size the whole race in scene units;
+        ``label_width`` (default 22% of ``width``) is the name column; a
+        name wider than it is drawn at a smaller size that fits. ``bar_gap``
+        is the empty fraction of each slot. ``colors`` maps names to
+        colors or lists colors to cycle; other bars use a ten-color
+        categorical palette. ``label_color`` defaults to the theme
+        foreground, ``font_size`` to 55% of the bar thickness but at most 12%
+        of ``height`` (so races with few ranks stay readable), ``ticker_size``
+        to 15% of ``height`` and ``ticker_color`` to the theme's muted color.
+
+        Raise ValueError for empty or non-finite data, duplicate names, an
+        unsupported ``value_format``, or non-positive sizes, and TypeError for
+        frames of another shape.
+
+        Example:
+            race = scene.viz.bar_race(frames, top=10, rank_smoothing=0.3, value_format="{:,.0f}")
+            scene.play([race.animate.play().duration(20)])
         """
         ...
     def rolling_number(
@@ -7151,7 +7531,92 @@ class SlideKit:
         ...
 
 class Fx:
-    """Scene-owned screen effects: emphasis that acts on the whole frame."""
+    """Scene-owned effects: whole-frame emphasis, particle emitters and effect presets."""
+    def particles(
+        self,
+        emitter: Emitter | tuple[float, float] | Drawable | None = None,
+        *,
+        rate: float = 30.0,
+        duration: Optional[float] = None,
+        lifetime: float | tuple[float, float] | None = None,
+        speed: float | tuple[float, float] | None = None,
+        direction: float = 1.5707963267948966,
+        spread: float = 6.283185307179586,
+        gravity: tuple[float, float] = (0.0, 0.0),
+        drag: float = 0.0,
+        size: float | tuple[float, float] | None = None,
+        size_end: float = 1.0,
+        fade: float = 0.3,
+        spin: float | tuple[float, float] | None = None,
+        flutter: float = 0.0,
+        shape: Literal["circle", "square", "rect", "triangle", "streak"] = "circle",
+        color: ColorLike | Sequence[ColorLike] | Brush | None = None,
+        seed: int = 0,
+    ) -> Drawable:
+        """Create a deterministic particle emitter and return it as a drawable.
+
+        Particles leave ``emitter`` (an ``Emitter``, an ``(x, y)`` point or a
+        drawable to follow; the origin by default) continuously, ``rate`` per
+        second from the cursor, for ``duration`` seconds (``None`` never
+        stops; ``rate=0`` emits only bursts), and in bursts from
+        ``Drawable.burst`` and ``animate.burst``. Each particle is a closed-form
+        function of the timeline time and of its index and ``seed``, so a seek
+        shows exactly what playback shows, and a frame only evaluates the
+        particles alive then.
+
+        Ranges accept a number or a ``(low, high)`` pair; each particle draws
+        inside them. ``lifetime`` (0.6 to 1.2 s by default) must be positive.
+        ``speed`` (1 to 2 units/s) heads within ``spread`` radians around
+        ``direction`` (up by default; ``spread`` defaults to a full turn).
+        ``gravity`` accelerates every particle and ``drag`` slows it linearly
+        (per second). ``size`` (0.03 to 0.06 units) is the diameter or side and
+        scales to ``size * size_end`` by the end of each life; the last
+        ``fade`` fraction of each life fades it out. ``spin`` is a rotation
+        speed in radians per second (a single number spins either way up to
+        it) and ``flutter`` sways particles sideways by that many units.
+        ``shape`` is ``"circle"``, ``"square"``, ``"rect"`` (a 2:1 strip),
+        ``"triangle"`` or ``"streak"`` (a spark stretched along its velocity).
+        ``color`` is one color (white by default), a sequence of colors each
+        particle picks from, or a gradient ``Brush`` each particle takes a
+        color along. Opacity, fades and transforms of the returned drawable
+        apply to all its particles.
+
+        Invalid values, more than 16 colors, ``rate * lifetime`` above 100000
+        or a drawable of another scene raise ``ValueError``; an unknown
+        ``shape`` raises ``ValueError``.
+
+        Example:
+            sparks = scene.fx.particles(Emitter.circle(0.2).at(logo), rate=60, speed=(2, 4), gravity=(0, -3), drag=0.8, color=[GOLD, RED], seed=9)
+        """
+        ...
+    def confetti(
+        self,
+        origin: Emitter | tuple[float, float] | Drawable | None = None,
+        count: int = 120,
+        *,
+        seed: int = 0,
+        colors: ColorLike | Sequence[ColorLike] | Brush | None = None,
+        speed: float | tuple[float, float] | None = None,
+        direction: float = 1.5707963267948966,
+        spread: float = 0.9,
+        gravity: tuple[float, float] = (0.0, -6.0),
+        lifetime: float | tuple[float, float] | None = None,
+        size: float | tuple[float, float] | None = None,
+    ) -> Drawable:
+        """Throw ``count`` pieces of confetti from ``origin`` at the cursor and return the emitter.
+
+        A preset of ``particles``: paper strips (``shape="rect"``, 0.12 to 0.2
+        units) leave upward within ``spread`` radians of ``direction`` at 6 to
+        10 units/s, spin, sway and fall under ``gravity`` with drag for 2.6 to
+        3.6 s, in a festive palette unless ``colors`` is given. ``count=0``
+        throws nothing until ``burst``/``animate.burst``, which throw more of
+        the same confetti. The same ``seed`` throws the same confetti.
+        ``count`` above 100000 or invalid values raise ``ValueError``.
+
+        Example:
+            confetti = scene.fx.confetti(origin=(0, -4), count=120, seed=2)
+        """
+        ...
     def spotlight(self, target: Drawable | TextSelection | Sequence[Drawable | TextSelection], *, dim: float = 0.7, padding: Optional[Padding] = None, corner_radius: float = 0.1) -> Anim:
         """Dim everything outside ``target`` while an overlay with a hole around it fades in and out.
 

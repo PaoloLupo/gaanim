@@ -671,6 +671,7 @@ impl Composition {
                 if let PlayItem::Animation(anim) = &mut item {
                     anim.apply_play_defaults(duration, rate.clone());
                     anim.apply_repeat();
+                    anim.apply_settle();
                 }
                 let (start, item_duration) = match &mut item {
                     PlayItem::Animation(anim) => {
@@ -1355,6 +1356,8 @@ pub enum PlayError {
     InvalidCompositionTiming(&'static str),
     #[error("a negative sequence gap cannot start a step before the previous step")]
     SequenceOverlapTooLarge,
+    #[error("invalid animation sound: {0}")]
+    InvalidSound(String),
     #[error("stretch() cannot contain Audio, Video, or Lottie leaves")]
     StretchContainsMedia,
     #[error("a zero-span composition can only be stretched to zero seconds")]
@@ -1457,7 +1460,7 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
         SpinInFromNothing => &["scale", "rotation"],
         Create3D => &["scale", "opacity"],
         Indicate { .. } => &["scale", "fill"],
-        Transform { .. } | ReplacementTransform { .. } => &[
+        Transform { .. } | ReplacementTransform { .. } | MagicMove { .. } => &[
             "translation",
             "rotation",
             "scale",
@@ -2099,6 +2102,9 @@ pub struct SceneModel {
     pub asset_root: Option<PathBuf>,
     /// Audio sources synchronized in preview and mixed by FFmpeg during export.
     pub audio_tracks: Vec<AudioTrack>,
+    /// Index in `audio_tracks` of each segment's transition sound, so that a
+    /// later `link` that replaces the transition also replaces its sound.
+    pub(crate) transition_sounds: Vec<(super::SegmentId, usize)>,
     /// Musical tempo set with [`Self::set_tempo`], for beat-timed cuts and
     /// the editor's bar lines.
     pub(crate) tempo: Option<gaanim_timeline::timeline::BeatGrid>,
@@ -2149,6 +2155,7 @@ impl SceneModel {
             design_resolution: 1080.0,
             asset_root: None,
             audio_tracks: Vec::new(),
+            transition_sounds: Vec::new(),
             tempo: None,
             launched_channels: Vec::new(),
             thumbnail_time: None,
@@ -2677,6 +2684,62 @@ impl SceneModel {
         })
     }
 
+    /// Schedule a sound effect at the absolute timeline second `at` (the
+    /// current cursor when `None`).
+    ///
+    /// The sound plays its whole file once and never lengthens the timeline.
+    /// Unlike [`Self::audio`], it needs no `play`: it is placed immediately.
+    pub fn sfx(
+        &mut self,
+        path: impl AsRef<Path>,
+        at: Option<f64>,
+        volume: f64,
+    ) -> Result<(), AudioTrackError> {
+        let start = at.unwrap_or_else(|| self.current_time());
+        let track = AudioTrack::new(self.resolve_asset_path(path), start, None, volume, 0.0, 0.0)?;
+        self.audio_tracks.push(track);
+        Ok(())
+    }
+
+    /// Resolve `cue` into a track for an event that starts at `event_start`.
+    fn sound_track(
+        &self,
+        cue: &gaanim_timeline::sound::SoundCue,
+        event_start: f64,
+    ) -> Result<AudioTrack, AudioTrackError> {
+        AudioTrack::new(
+            self.resolve_asset_path(&cue.path),
+            cue.start_for(event_start),
+            None,
+            cue.volume,
+            0.0,
+            0.0,
+        )
+    }
+
+    /// Place (or replace) the sound of the transition entering `segment`,
+    /// which starts at `segment_start`.
+    fn set_transition_sound(&mut self, segment: super::SegmentId, track: Option<AudioTrack>) {
+        if let Some(position) = self
+            .transition_sounds
+            .iter()
+            .position(|(id, _)| *id == segment)
+        {
+            let (_, index) = self.transition_sounds.remove(position);
+            self.audio_tracks.remove(index);
+            for (_, other) in &mut self.transition_sounds {
+                if *other > index {
+                    *other -= 1;
+                }
+            }
+        }
+        if let Some(track) = track {
+            self.transition_sounds
+                .push((segment, self.audio_tracks.len()));
+            self.audio_tracks.push(track);
+        }
+    }
+
     /// Resolve and validate assets before playback. Raster images and Lottie
     /// compositions are also decoded into their process-local caches.
     pub fn preload(&self, paths: &[PathBuf]) -> Result<(), AssetPreloadError> {
@@ -2803,6 +2866,14 @@ impl SceneModel {
         if name.is_empty() {
             return Err(SegmentError::EmptyName);
         }
+        // A new segment starts where the timeline currently ends, and so does
+        // the transition that enters it.
+        let transition_sound = transition
+            .as_ref()
+            .and_then(TransitionType::sound)
+            .map(|cue| self.sound_track(cue, self.current_time()))
+            .transpose()
+            .map_err(SegmentError::Sound)?;
         let mut guard = self.state.lock().expect("canvas state poisoned");
         let normalized_name = name.to_lowercase();
         if guard
@@ -2842,6 +2913,9 @@ impl SceneModel {
             .count();
         drop(guard);
 
+        if !replace_implicit {
+            self.set_transition_sound(id, transition_sound);
+        }
         self.spawn_segment_branding(template.as_deref(), segment_number)?;
         Ok(SegmentHandle::new(id, self.state.clone()))
     }
@@ -2856,7 +2930,7 @@ impl SceneModel {
         if !from.belongs_to(&self.state) || !to.belongs_to(&self.state) {
             return Err(SegmentError::ForeignSegment);
         }
-        let mut guard = self.state.lock().expect("canvas state poisoned");
+        let guard = self.state.lock().expect("canvas state poisoned");
         let from_index = guard
             .segments
             .iter()
@@ -2870,8 +2944,22 @@ impl SceneModel {
         if from_index >= to_index {
             return Err(SegmentError::InvalidLink);
         }
+        let segment_start: f64 = guard.segments[..to_index]
+            .iter()
+            .map(|segment| segment.cursor)
+            .sum();
+        let to_id = guard.segments[to_index].id;
+        drop(guard);
+        let sound = transition
+            .sound()
+            .map(|cue| self.sound_track(cue, segment_start))
+            .transpose()
+            .map_err(SegmentError::Sound)?;
+        let mut guard = self.state.lock().expect("canvas state poisoned");
         guard.segments[to_index].transition = Some(transition);
         guard.segments[to_index].prev_segment = Some(from_index);
+        drop(guard);
+        self.set_transition_sound(to_id, sound);
         Ok(())
     }
 
@@ -4095,6 +4183,8 @@ impl SceneModel {
                     );
                     leaf_specs.push(handle.spec.clone());
                     if !path.id.is_empty() {
+                        handle.spec.lock().expect("SVG path spec poisoned").svg_id =
+                            Some(path.id.clone());
                         parts.insert(path.id.clone(), handle.clone());
                     }
                     children.push(handle);
@@ -4149,6 +4239,7 @@ impl SceneModel {
             handle = handle.clip(&mask, gaanim_core::peniko::Fill::NonZero);
         }
         if !group.id.is_empty() {
+            handle.spec.lock().expect("SVG group spec poisoned").svg_id = Some(group.id.clone());
             parts.insert(group.id.clone(), handle.clone());
         }
         (handle, leaf_specs)
@@ -4196,6 +4287,7 @@ impl SceneModel {
             number: number.id,
             unit: unit.map(|part| part.id),
             spacing,
+            align: 0.0,
         });
         group
     }
@@ -5234,6 +5326,22 @@ impl SceneModel {
         ) {
             return Err(PlayError::ForeignAudio);
         }
+        // Anchored sounds start with their animation's resolved start, so a
+        // delay, sequence position or stagger that moves the animation moves
+        // the sound too.
+        let mut anchored_sounds = Vec::new();
+        for resolved_item in &resolved {
+            let PlayItem::Animation(anim) = &resolved_item.item else {
+                continue;
+            };
+            if let Some(cue) = anim.sound_cue() {
+                let start = cursor + resolved_item.start + anim.inner.delay.max(0.0);
+                anchored_sounds.push(
+                    self.sound_track(cue, start)
+                        .map_err(|error| PlayError::InvalidSound(error.to_string()))?,
+                );
+            }
+        }
         if resolved.iter().any(
             |item| matches!(&item.item, PlayItem::Video(video) if !video.belongs_to(&self.state)),
         ) {
@@ -5332,6 +5440,7 @@ impl SceneModel {
         self.launched_channels
             .retain(|launched| launched.end > cursor + OVERLAP_EPSILON);
         self.launched_channels.extend(launched);
+        self.audio_tracks.extend(anchored_sounds);
         let play_start = self.current_time();
         let mut builders = Vec::new();
         let mut camera_captures = Vec::new();
@@ -10623,6 +10732,156 @@ mod tests {
         ));
         assert!(matches!(state.active().ops.last(), Some(Op::Wait(2.0))));
         drop(state);
+        let _ = std::fs::remove_file(path);
+    }
+
+    fn sfx_fixture(name: &str) -> PathBuf {
+        let path =
+            std::env::temp_dir().join(format!("gaanim-sfx-{name}-{}.wav", std::process::id()));
+        std::fs::write(&path, b"fixture").unwrap();
+        path
+    }
+
+    #[test]
+    fn sfx_places_a_short_track_at_the_cursor_or_an_explicit_time() {
+        let path = sfx_fixture("placed");
+        let mut canvas = SceneModel::new(1280, 720);
+        canvas.wait(1.5);
+        canvas.sfx(&path, None, 0.7).unwrap();
+        canvas.sfx(&path, Some(0.25), 1.0).unwrap();
+
+        assert_eq!(canvas.audio_tracks.len(), 2);
+        assert_eq!(canvas.audio_tracks[0].start_time, 1.5);
+        assert_eq!(canvas.audio_tracks[0].volume, 0.7);
+        assert_eq!(canvas.audio_tracks[0].duration, None);
+        assert_eq!(canvas.audio_tracks[1].start_time, 0.25);
+        assert_eq!(canvas.current_time(), 1.5, "an sfx never moves the cursor");
+        assert!(canvas.sfx(&path, Some(-1.0), 1.0).is_err());
+        assert!(canvas.sfx(&path, None, f64::NAN).is_err());
+        assert!(canvas.sfx("missing-sfx.wav", None, 1.0).is_err());
+        assert_eq!(canvas.audio_tracks.len(), 2);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn animation_sound_follows_the_animation_start() {
+        use gaanim_timeline::sound::SoundCue;
+        let path = sfx_fixture("anchored");
+        let mut canvas = SceneModel::new(1280, 720);
+        let dot = canvas.circle(0.5);
+        let square = canvas.square(1.0);
+        canvas.wait(1.0);
+        let cue = SoundCue::new(&path).unwrap();
+        // The second step of a sequence starts after the first one ends,
+        // plus its own delay: the sound follows it there.
+        let first = Composition::leaf(dot.animate().fade_in().duration(2.0));
+        let second = Composition::leaf(
+            square
+                .animate()
+                .fade_in()
+                .duration(1.0)
+                .delay(0.5)
+                .sound(cue.clone()),
+        );
+        canvas
+            .play_composition_configured(
+                Composition::sequence(vec![first, second], 0.0).unwrap(),
+                None,
+                None,
+            )
+            .unwrap();
+        assert_eq!(canvas.audio_tracks.len(), 1);
+        assert!((canvas.audio_tracks[0].start_time - 3.5).abs() < 1e-9);
+
+        // A delayed animation in a plain play shifts its sound too, and an
+        // offset anticipates it.
+        let early = SoundCue::with_options(&path, 0.4, -0.25).unwrap();
+        canvas.play(vec![dot.animate().fade_out().delay(0.75).sound(early)]);
+        assert_eq!(canvas.audio_tracks.len(), 2);
+        assert!((canvas.audio_tracks[1].start_time - (4.5 + 0.75 - 0.25)).abs() < 1e-9);
+        assert_eq!(canvas.audio_tracks[1].volume, 0.4);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn invalid_animation_sound_rejects_the_whole_play() {
+        use gaanim_timeline::sound::SoundCue;
+        let mut canvas = SceneModel::new(1280, 720);
+        let dot = canvas.circle(0.5);
+        let result = canvas.play_items(vec![
+            dot.animate()
+                .fade_in()
+                .sound(SoundCue::new("missing-sfx.wav").unwrap())
+                .into(),
+        ]);
+        assert!(matches!(result, Err(PlayError::InvalidSound(_))));
+        assert_eq!(
+            canvas.current_time(),
+            0.0,
+            "a rejected play schedules nothing"
+        );
+        assert!(canvas.audio_tracks.is_empty());
+        // A sound that would start before the timeline is rejected as well.
+        let path = sfx_fixture("early");
+        let early = SoundCue::with_options(&path, 1.0, -0.5).unwrap();
+        let result = canvas.play_items(vec![dot.animate().fade_in().sound(early).into()]);
+        assert!(matches!(result, Err(PlayError::InvalidSound(_))));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn transition_sound_starts_with_the_segment_it_enters() {
+        use gaanim_timeline::sound::SoundCue;
+        let path = sfx_fixture("transition");
+        let whoosh = SoundCue::new(&path).unwrap();
+        let mut canvas = SceneModel::new(1280, 720);
+        let first = canvas.segment("first", None).unwrap();
+        canvas.wait(2.0);
+        canvas
+            .segment(
+                "second",
+                Some(TransitionType::CrossFade { duration: 0.5 }.with_sound(whoosh.clone())),
+            )
+            .unwrap();
+        canvas.wait(1.0);
+        assert_eq!(canvas.audio_tracks.len(), 1);
+        assert_eq!(canvas.audio_tracks[0].start_time, 2.0);
+
+        let third = canvas.segment("third", None).unwrap();
+        canvas.wait(1.0);
+        // Relinking replaces the transition and places its sound at the
+        // start of the segment it enters.
+        canvas
+            .link(
+                &first,
+                &third,
+                TransitionType::Slide {
+                    duration: 0.5,
+                    direction: gaanim_timeline::transition::SlideDirection::Left,
+                }
+                .with_sound(whoosh.clone()),
+            )
+            .unwrap();
+        assert_eq!(canvas.audio_tracks.len(), 2);
+        assert_eq!(canvas.audio_tracks[1].start_time, 3.0);
+        canvas.link(&first, &third, TransitionType::Cut).unwrap();
+        assert_eq!(
+            canvas.audio_tracks.len(),
+            1,
+            "a soundless relink drops the sound"
+        );
+        assert_eq!(canvas.audio_tracks[0].start_time, 2.0);
+
+        let missing = TransitionType::Cut.with_sound(SoundCue::new("missing-sfx.wav").unwrap());
+        assert!(matches!(
+            canvas.segment("fourth", Some(missing)),
+            Err(SegmentError::Sound(_))
+        ));
+        assert_eq!(
+            canvas.segment_count(),
+            3,
+            "an invalid sound creates no segment"
+        );
         let _ = std::fs::remove_file(path);
     }
 

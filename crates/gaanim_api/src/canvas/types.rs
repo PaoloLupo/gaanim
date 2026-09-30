@@ -547,6 +547,8 @@ pub enum SpawnKind {
         /// Draw longer links fainter.
         fade: bool,
     },
+    /// Deterministic particles, drawn in one layer per color and fade level.
+    Particles(Box<super::particles::ParticleSpawn>),
     /// A materialized vector boolean. Sources remain visible and independent.
     Boolean {
         sources: Vec<ObjectId>,
@@ -924,6 +926,8 @@ pub(crate) struct ReactiveReadoutLayoutSpec {
     pub number: ObjectId,
     pub unit: Option<ObjectId>,
     pub spacing: f64,
+    /// Row alignment on the group origin; see `ReactiveReadoutLayout::align`.
+    pub align: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -994,6 +998,10 @@ pub struct ObjectSpec {
     pub fragment_fills: Vec<(String, Color)>,
     /// Named fragment queries attached by the high-level equation API.
     pub fragment_tags: Vec<(String, String, Option<usize>)>,
+    /// Author-given name used as a magic-move key (`Drawable.named`).
+    pub(crate) name: Option<String>,
+    /// `id` attribute of the imported SVG group or path this drawable came from.
+    pub(crate) svg_id: Option<String>,
     /// Layout v2 container that owns this drawable's translation.
     pub layout_owner: Option<ObjectId>,
     /// Whether the author has queued a manual translation animation.
@@ -1112,6 +1120,8 @@ impl ObjectSpec {
             exclude_from_parent_draw: false,
             fragment_fills: Vec::new(),
             fragment_tags: Vec::new(),
+            name: None,
+            svg_id: None,
             layout_owner: None,
             manual_position_animation: false,
             material_animation_cursor: None,
@@ -1141,6 +1151,21 @@ pub struct Anim {
     pub(crate) property_spec: Option<std::sync::Arc<std::sync::Mutex<ObjectSpec>>>,
     camera_capture_before_play: Option<u64>,
     repeat: Option<AnimRepeat>,
+    /// Sound effect anchored to the animation's resolved start.
+    sound: Option<gaanim_timeline::sound::SoundCue>,
+    settle: Option<AnimSettle>,
+}
+
+/// Inertial bounce requested on an [`Anim`], appended once its duration,
+/// easing, and repetition are final (see [`Anim::apply_settle`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AnimSettle {
+    /// Seconds of bounce per unit of final velocity (After Effects' `amp`).
+    pub overshoot: f64,
+    /// Oscillations per second.
+    pub frequency: f64,
+    /// Exponential decay rate per second.
+    pub decay: f64,
 }
 
 /// Repetition requested on an [`Anim`], expanded once its duration and
@@ -1260,6 +1285,8 @@ impl Anim {
             property_spec: None,
             camera_capture_before_play: None,
             repeat: None,
+            sound: None,
+            settle: None,
         }
     }
 
@@ -1930,6 +1957,32 @@ impl Anim {
         Ok(self.update_properties(|properties| properties.count = Some((from, count))))
     }
 
+    /// Emits `count` particles at once from a particle emitter
+    /// (`SceneModel::particles` or `SceneModel::confetti`) at the start of
+    /// this animation. Unless a duration is set, the animation lasts the
+    /// particles' longest life, so the cursor waits for them to settle.
+    pub fn burst(mut self, count: u32) -> Result<Self, String> {
+        let spec = self
+            .property_spec
+            .as_ref()
+            .ok_or("burst() requires Drawable.animate()")?;
+        let longest = super::particles::emitter_longest_life(
+            &spec.lock().expect("object spec poisoned").kind,
+        )
+        .ok_or("burst() requires a particle emitter made by scene.fx")?;
+        super::particles::check_burst(count)?;
+        if !self.inner.anim_type.is_empty_properties() {
+            return Err(
+                "burst() cannot be combined with property targets or another effect in one Anim"
+                    .to_string(),
+            );
+        }
+        if !self.duration_explicit {
+            self.inner.duration = longest;
+        }
+        Ok(self.effect(AnimationType::ParticleBurst { count }))
+    }
+
     /// Animates the dash offset of every stroke, in scene units.
     pub fn dash_offset(self, offset: f64) -> Self {
         self.update_properties(|properties| properties.dash_offset = Some(offset))
@@ -2542,6 +2595,22 @@ impl Anim {
         self.pivot(x, y)
     }
 
+    /// Play `cue` when this animation starts.
+    ///
+    /// The sound is anchored to the animation, not to the cursor: it is
+    /// scheduled at the animation's resolved start (including its own
+    /// `delay` and its position inside sequences, staggers and inserts), so
+    /// moving the animation moves the sound. A second call replaces the cue.
+    pub fn sound(mut self, cue: gaanim_timeline::sound::SoundCue) -> Self {
+        self.sound = Some(cue);
+        self
+    }
+
+    /// The sound effect anchored to this animation, if any.
+    pub fn sound_cue(&self) -> Option<&gaanim_timeline::sound::SoundCue> {
+        self.sound.as_ref()
+    }
+
     pub fn delay(mut self, sec: f64) -> Self {
         let delay = sec.max(0.0);
         self.inner.delay = delay;
@@ -2567,6 +2636,51 @@ impl Anim {
             gap: gap.max(0.0),
         });
         self
+    }
+
+    /// Adds an inertial bounce after the last value: the animated property
+    /// overshoots its target and oscillates back as
+    /// `v * overshoot * sin(2π * frequency * t) / e^(decay * t)`, where `v` is
+    /// the final velocity of the motion (the average one when the easing
+    /// ends at rest). The animation lasts until the bounce settles below
+    /// 0.1% of the distance travelled; `overshoot = 0` removes the bounce.
+    pub fn settle(mut self, overshoot: f64, frequency: f64, decay: f64) -> Result<Self, String> {
+        if !(overshoot.is_finite() && overshoot >= 0.0) {
+            return Err(format!(
+                "overshoot must be a finite number >= 0, got {overshoot}"
+            ));
+        }
+        if !(frequency.is_finite() && frequency > 0.0) {
+            return Err(format!(
+                "frequency must be a finite number > 0, got {frequency}"
+            ));
+        }
+        if !(decay.is_finite() && decay > 0.0) {
+            return Err(format!("decay must be a finite number > 0, got {decay}"));
+        }
+        self.settle = (overshoot > 0.0).then_some(AnimSettle {
+            overshoot,
+            frequency,
+            decay,
+        });
+        Ok(self)
+    }
+
+    /// Appends the requested bounce to the duration and rate function.
+    /// Called after [`Self::apply_repeat`], so it follows the last cycle.
+    pub(crate) fn apply_settle(&mut self) {
+        let Some(settle) = self.settle.take() else {
+            return;
+        };
+        let (rate_func, duration) = RateFunc::settle(
+            self.inner.rate_func.clone(),
+            self.inner.duration,
+            settle.overshoot,
+            settle.frequency,
+            settle.decay,
+        );
+        self.inner.rate_func = rate_func;
+        self.inner.duration = duration;
     }
 
     /// Folds the requested repetition into the duration and rate function.

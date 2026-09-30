@@ -384,6 +384,11 @@ pub enum AnimationType {
         from: f64,
         to: f64,
     },
+    /// Emit `count` particles at once from a particle emitter, at the start
+    /// of the animation; its duration only holds the cursor.
+    ParticleBurst {
+        count: u32,
+    },
     /// Move the dash pattern of every drawn stroke to `to` (scene units).
     DashOffsetTo {
         to: f64,
@@ -491,6 +496,15 @@ pub enum AnimationType {
     /// actual target object at the end of the animation.
     ReplacementTransform {
         target: ObjectId,
+    },
+    /// Keyed "magic move" from the source hierarchy to `target`: each
+    /// `(source, target)` pair morphs position, size, color and shape, other
+    /// visual leaves appear or disappear as `unmatched` says, and the target
+    /// hierarchy takes over at the end.
+    MagicMove {
+        target: ObjectId,
+        pairs: Vec<(ObjectId, ObjectId)>,
+        unmatched: crate::canvas::MagicMoveUnmatched,
     },
     /// Oscillating wiggle vibration (horizontal).
     Wiggle,
