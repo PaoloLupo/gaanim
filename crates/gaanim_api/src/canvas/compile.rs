@@ -14292,6 +14292,127 @@ mod tests {
         }
     }
 
+    /// Leader x in the echo-of-follower tests: -2 to 2 over 1 s, linearly,
+    /// starting at 0.01 s (after the subject's entry).
+    fn echo_leader_x(time: f64) -> f64 {
+        -2.0 + 4.0 * (time - 0.01).clamp(0.0, 1.0)
+    }
+
+    /// Builds a moving leader and the drawable `make` returns, gives that
+    /// drawable a 2-copy echo 0.1 s apart, and checks at out-of-order seeks
+    /// that the copy `lag` seconds back sits at `position_at(t - lag)`, the
+    /// drawable's own position then.
+    fn assert_echo_copies_trail(
+        make: impl FnOnce(&mut SceneModel, &DrawableHandle) -> DrawableHandle,
+        position_at: impl Fn(f64) -> DVec3,
+    ) {
+        let mut canvas = SceneModel::new(640, 360);
+        let leader = canvas.circle(0.3).move_to(-2.0, 0.0);
+        let subject = make(&mut canvas, &leader).echo(Some(
+            super::super::types::EchoSpec::new(2, 0.1, 0.5).unwrap(),
+        ));
+        canvas.play(vec![subject.fade_in(0.01)]);
+        canvas.play(vec![
+            leader
+                .animate()
+                .move_to(2.0, 0.0)
+                .duration(1.0)
+                .rate_func(gaanim_math::RateFunc::Linear),
+        ]);
+        canvas.wait(1.0);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let source = ObjectId::from_raw(subject.id.as_raw() - 1);
+        let mut copies: Vec<(Entity, f64)> = world
+            .query::<(Entity, &gaanim_animation::EchoGhost)>()
+            .iter(&world)
+            .filter(|(_, echo)| echo.source == source)
+            .map(|(entity, echo)| (entity, echo.lag))
+            .collect();
+        copies.sort_by(|left, right| left.1.total_cmp(&right.1));
+        assert_eq!(copies.len(), 2, "expected two echo copies of the subject");
+        // Every copy time t - lag is inside the timeline and after the entry.
+        for time in [1.5, 0.35, 0.95, 0.25, 2.0, 0.6, 1.5] {
+            timeline.seek(&mut world, time);
+            for &(copy, lag) in &copies {
+                assert!(
+                    world.get::<gaanim_scene::Visible>(copy).is_some(),
+                    "copy {lag} hidden at {time}"
+                );
+                let actual = world.get::<SpatialTransform>(copy).unwrap().translation;
+                let expected = position_at(time - lag);
+                assert!(
+                    (actual - expected).length() < 1e-9,
+                    "copy {lag} at {time}: {actual:?}, expected {expected:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn echo_of_follower_control_echo_of_the_animated_leader() {
+        assert_echo_copies_trail(
+            |_: &mut SceneModel, leader: &DrawableHandle| leader.clone(),
+            |time| DVec3::new(echo_leader_x(time), 0.0, 0.0),
+        );
+    }
+
+    #[test]
+    fn echo_of_follower_plain_follow_with_offset() {
+        assert_echo_copies_trail(
+            |canvas: &mut SceneModel, leader: &DrawableHandle| {
+                canvas.circle(0.1).follow_endpoint(
+                    CanvasEndpoint::Entity(leader.id),
+                    DVec3::new(0.0, 0.5, 0.0),
+                    gaanim_animation::FollowOffsetSpace::World,
+                )
+            },
+            |time| DVec3::new(echo_leader_x(time), 0.5, 0.0),
+        );
+    }
+
+    #[test]
+    fn echo_of_follower_delayed_follow() {
+        assert_echo_copies_trail(
+            |canvas: &mut SceneModel, leader: &DrawableHandle| {
+                canvas
+                    .circle(0.1)
+                    .follow_endpoint_delayed(
+                        CanvasEndpoint::Entity(leader.id),
+                        DVec3::new(0.0, -0.5, 0.0),
+                        gaanim_animation::FollowOffsetSpace::World,
+                        0.3,
+                    )
+                    .unwrap()
+            },
+            // Holds the leader's start until 0.3 s have passed.
+            |time| DVec3::new(echo_leader_x((time - 0.3).max(0.0)), -0.5, 0.0),
+        );
+    }
+
+    #[test]
+    fn echo_of_follower_follow_to() {
+        assert_echo_copies_trail(
+            |canvas: &mut SceneModel, leader: &DrawableHandle| {
+                let follower = canvas.circle(0.1);
+                follower.follow_to(leader, 0.0, 1.0);
+                follower
+            },
+            |time| DVec3::new(echo_leader_x(time), 1.0, 0.0),
+        );
+    }
+
+    #[test]
+    fn echo_of_follower_attach_to() {
+        assert_echo_copies_trail(
+            |canvas: &mut SceneModel, leader: &DrawableHandle| {
+                let follower = canvas.circle(0.1);
+                follower.attach_to(leader);
+                follower
+            },
+            |time| DVec3::new(echo_leader_x(time), 0.0, 0.0),
+        );
+    }
+
     #[test]
     fn repeater_count_shows_copies_in_order_and_seeks_back() {
         let mut canvas = SceneModel::new(640, 360);
