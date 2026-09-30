@@ -1,10 +1,12 @@
 //! Live zones: parts of a scene where the audience's characters play while
 //! a presentation takes votes (`scene.live_zone`).
 //!
-//! A scene authors a zone as data ([`LiveZone`]): its surfaces, launchers,
-//! podium places or race, and rules that make characters react. The data
-//! travels in a `.gaanim` bundle and runs here, in Rust, so a presented
-//! bundle plays the zone without Python.
+//! A scene authors a zone's behavior as a plain Python function, compiled
+//! when the scene is authored into a [`Program`]: data that travels in a
+//! `.gaanim` bundle and runs here, in Rust, so a presented bundle plays the
+//! zone without Python. The engine gives the behavior facts about each
+//! player (see [`program::Input`]); the behavior decides where the
+//! character stands and which expression it plays.
 //!
 //! While presenting, a zone the timeline is in runs on the wall clock: each
 //! player who joins arrives in it as their own character. Everywhere else
@@ -13,7 +15,8 @@
 //! way it draws into [`LiveOverlay`], which the renderer draws above the
 //! scene and bundle recordings leave out.
 
-pub mod sim;
+pub mod program;
+pub mod run;
 pub mod spec;
 
 use std::collections::HashMap;
@@ -25,8 +28,9 @@ use gaanim_core::peniko::Brush;
 
 use crate::polls::PollResults;
 use crate::updaters::PlaybackState;
-pub use sim::{Player, STEP, ZoneRun};
-pub use spec::{Event, Express, Launcher, LiveZone, Place, Race, Rule, Surface, Wave};
+pub use program::{Inputs, Pose, Program, ProgramError};
+pub use run::{Player, STEP, ZoneRun};
+pub use spec::LiveZone;
 
 /// The live zones of the scene, as compiled or read from a bundle.
 #[derive(Resource, Debug, Clone, Default, PartialEq)]
@@ -61,25 +65,6 @@ const MAX_FRAME: f64 = 0.1;
 
 fn zone_contains(zone: &LiveZone, time: f64) -> bool {
     time >= zone.open - 1e-6 && time <= zone.close + 1e-6
-}
-
-/// The standings for places and races: live, or the preview players with
-/// scores from best to worst.
-fn standings(zone: &LiveZone, results: &PollResults, live: bool) -> Vec<(Player, u64)> {
-    if live {
-        results
-            .leaderboard
-            .iter()
-            .map(|(name, score)| (player(results, name), *score))
-            .collect()
-    } else {
-        let count = zone.preview.len() as u64;
-        zone.preview
-            .iter()
-            .enumerate()
-            .map(|(rank, name)| (Player::named(name), (count - rank as u64) * 100))
-            .collect()
-    }
 }
 
 /// A live player: with the character the phone made, or one read from the
@@ -121,16 +106,23 @@ pub fn live_zone_system(
         .min(MAX_FRAME);
     let mut groups = Vec::new();
     for zone in zones.iter().filter(|zone| zone_contains(zone, now)) {
-        let standings = standings(zone, results, live);
         let run = if live {
             let run = runs.live.entry(zone.id.clone()).or_default();
+            let joined = run.clock;
             for (name, _) in &results.audience {
-                run.arrive(zone, player(results, name));
+                run.arrive(player(results, name), joined);
             }
+            let scores: HashMap<&str, f64> = results
+                .leaderboard
+                .iter()
+                .map(|(name, score)| (&**name, *score as f64))
+                .collect();
+            run.standings(|name| scores.get(name).copied().unwrap_or(0.0));
             let target = run.clock + dt;
-            while run.clock + STEP <= target {
-                run.step(zone, &standings);
+            while run.next_step() <= target {
+                run.step(zone);
             }
+            run.settle(target);
             run
         } else {
             // A pure function of the timeline's time: replay from the
@@ -140,13 +132,31 @@ pub fn live_zone_system(
             if run.clock > clock + 1e-9 {
                 *run = ZoneRun::default();
             }
-            while run.clock + STEP <= clock {
-                let arrivals = (run.clock / zone.preview_every.max(STEP)).floor() as usize + 1;
-                for name in zone.preview.iter().take(arrivals) {
-                    run.arrive(zone, Player::named(name));
+            let every = zone.preview_every.max(STEP);
+            let count = zone.preview.len();
+            // Preview players keep the order they are listed in.
+            let preview_score = |name: &str| {
+                zone.preview
+                    .iter()
+                    .position(|other| other == name)
+                    .map_or(0.0, |rank| ((count - rank) * 100) as f64)
+            };
+            let arrive = |run: &mut ZoneRun, until: f64| {
+                for (index, name) in zone.preview.iter().enumerate() {
+                    let joined = index as f64 * every;
+                    if joined <= until + 1e-9 && !run.has(name) {
+                        run.arrive(Player::named(name), joined);
+                    }
                 }
-                run.step(zone, &standings);
+                run.standings(preview_score);
+            };
+            while run.next_step() <= clock + 1e-9 {
+                let next = run.next_step();
+                arrive(run, next);
+                run.step(zone);
             }
+            run.settle(clock);
+            arrive(run, clock);
             run
         };
         let [x0, y0, x1, y1] = zone.bounds;

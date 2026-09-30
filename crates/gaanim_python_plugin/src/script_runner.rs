@@ -211,6 +211,7 @@ const GAANIM_TEMPLATES: &str = include_str!("../../gaanim_python/gaanim/template
 const GAANIM_SECTIONS: &str = include_str!("../../gaanim_python/gaanim/sections.py");
 const GAANIM_MATRIX: &str = include_str!("../../gaanim_python/gaanim/matrix.py");
 const GAANIM_ANIMATION_TYPES: &str = include_str!("../../gaanim_python/gaanim/animation_types.py");
+const GAANIM_LIVE: &str = include_str!("../../gaanim_python/gaanim/live.py");
 
 /// Build the public `gaanim` package around the builtin `gaanim_core` module.
 ///
@@ -261,6 +262,15 @@ fn bootstrap_gaanim_package(py: Python<'_>) -> PyResult<()> {
     let types_name = std::ffi::CString::new("gaanim.animation_types").unwrap();
     let animation_types = PyModule::from_code(py, &types_source, &types_file, &types_name)?;
     modules.set_item("gaanim.animation_types", &animation_types)?;
+
+    // Live behaviors: the compiler scene.live_zone calls. Registered before
+    // execution, like sections, so its dataclasses resolve their module.
+    let live = PyModule::new(py, "gaanim.live")?;
+    live.setattr("__package__", "gaanim")?;
+    live.setattr("__file__", "gaanim/live.py")?;
+    modules.set_item("gaanim.live", &live)?;
+    let live_source = std::ffi::CString::new(GAANIM_LIVE).unwrap();
+    py.run(&live_source, Some(&live.dict()), None)?;
 
     let init_source = std::ffi::CString::new(GAANIM_PACKAGE_INIT).unwrap();
     py.run(&init_source, Some(&package.dict()), None)

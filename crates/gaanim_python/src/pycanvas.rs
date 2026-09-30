@@ -5919,29 +5919,30 @@ impl PyScene {
     }
 
     /// A live zone at the cursor: while presenting, each player of
-    /// `audience` arrives in it as their character. It runs until
+    /// `audience` arrives in it as their character, posed every frame by
+    /// `behavior`, a Python function compiled now. It runs until
     /// `zone.close()` or the end of the segment.
-    #[pyo3(signature = (audience, *, bounds=(-8.0, -4.5, 8.0, 4.5), size=1.2, gravity=20.0, preview=None, preview_every=0.6))]
-    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (audience, behavior, *, bounds=(-8.0, -4.5, 8.0, 4.5), size=1.2, preview=None, preview_every=0.6))]
     fn live_zone(
         &self,
         audience: PyRef<'_, crate::poll::PyAudience>,
+        behavior: &Bound<'_, PyAny>,
         bounds: (f64, f64, f64, f64),
         size: f64,
-        gravity: f64,
         preview: Option<Vec<String>>,
         preview_every: f64,
     ) -> PyResult<crate::live::PyLiveZone> {
         crate::custom::ensure_authoring_allowed()?;
+        let program = crate::live::compile_behavior(behavior)?;
         let inner = self
             .inner
             .lock()
             .expect("scene canvas poisoned")
             .live_zone(
                 &audience.inner,
+                program,
                 [bounds.0, bounds.1, bounds.2, bounds.3],
                 size,
-                gravity,
                 preview,
                 preview_every,
             )

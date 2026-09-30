@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from typing import Any, Callable, ClassVar, Iterator, Literal, Mapping, Optional, Self, Sequence, TypeAlias, overload
+from .live import Player, Pose
 from .matrix import Matrix
 from .sections import SceneSections
 from .animation_types import AnimationChannel, CustomAnimationValues
@@ -5180,99 +5181,19 @@ class LiveZone:
     ``scene.live_zone``.
 
     While presenting, each player arrives in it as the character they made
-    on their phone: launched and landing on surfaces, standing at podium
-    places, or running a race, and reacting by the zone's rules. Previews
-    and exports replay the preview players the same way every time. A zone
-    is data, so a presented ``.gaanim`` runs it without Python. Characters
-    are drawn above the rest of the scene, clipped to the zone's bounds.
-
-    Every method returns the zone, so calls chain.
+    on their phone, and the zone's behavior poses that character every
+    frame. Previews and exports replay the preview players the same way
+    every time. The behavior is compiled into the scene, so a presented
+    ``.gaanim`` runs it without Python. Characters are drawn above the rest
+    of the scene, clipped to the zone's bounds.
     """
     @property
     def preview(self) -> list[str]:
         """Nicknames replayed outside a live presentation."""
         ...
-    def surface(
-        self,
-        start: tuple[float, float],
-        end: tuple[float, float],
-        *,
-        tag: str,
-        sink: float = 0.0,
-    ) -> LiveZone:
-        """A segment characters land on, tagged for rules (``"floor"``,
-        ``"water"``). ``sink`` is how deep they sink into it, in character
-        heights. Raises ``ValueError`` for a vertical segment or empty tag."""
-        ...
-    def launcher(
-        self,
-        start: tuple[float, float],
-        *,
-        angle: tuple[float, float] = (15.0, 65.0),
-        period: float = 3.0,
-        speed: float = 8.0,
-        every: float = 0.8,
-        toward: Literal["right", "left"] = "right",
-    ) -> LiveZone:
-        """Launch arriving characters from ``start``, one every ``every``
-        seconds, at an angle that sweeps between ``angle`` degrees above
-        the horizontal every ``period`` seconds, so each lands elsewhere.
-        Without a launcher, characters drop in from the top."""
-        ...
-    def place(
-        self,
-        rank: int,
-        at: tuple[float, float],
-        *,
-        express: Optional[str] = None,
-        loop: bool = True,
-    ) -> LiveZone:
-        """The player at ``rank`` (0 for the leader) stands with their feet
-        at ``at``, playing ``express`` while there.
-
-        Example:
-            podium.place(0, (0, 1), express="winner")
-        """
-        ...
-    def race(
-        self,
-        origin: tuple[float, float],
-        *,
-        step: tuple[float, float] = (0.0, -1.0),
-        direction: tuple[float, float] = (1.0, 0.0),
-        length: float = 10.0,
-        count: int = 5,
-    ) -> LiveZone:
-        """The first ``count`` players run along lanes: rank ``r`` stands
-        at ``origin + step * r + direction * length * score / leader's
-        score``, gliding when the standings change. Match it to
-        ``Leaderboard.bar`` lanes to run beside the bars."""
-        ...
-    def on_join(self, express: str, *, loop: bool = False) -> LiveZone:
-        """A character that arrives plays ``express``."""
-        ...
-    def on_land(
-        self,
-        express: str,
-        *,
-        tag: Optional[str] = None,
-        loop: bool = False,
-    ) -> LiveZone:
-        """A character that lands plays ``express``: on surfaces tagged
-        ``tag``, or on any. The zone's bottom is tagged ``"bottom"``.
-
-        Example:
-            zone.on_land("sad", tag="water").on_land("happy", tag="floor")
-        """
-        ...
-    def on_rank_up(self, express: str, *, loop: bool = False) -> LiveZone:
-        """A character that goes up the leaderboard plays ``express``."""
-        ...
-    def on_rank_down(self, express: str, *, loop: bool = False) -> LiveZone:
-        """A character that goes down the leaderboard plays ``express``."""
-        ...
-    def on_leader(self, express: str, *, loop: bool = False) -> LiveZone:
-        """A character that becomes the leader plays ``express``."""
+    @property
+    def instructions(self) -> int:
+        """How many instructions the compiled behavior runs per player."""
         ...
     def close(self) -> None:
         """Stop the zone at the cursor instead of at the end of the segment
@@ -8221,30 +8142,42 @@ class Scene:
     def live_zone(
         self,
         audience: Audience,
+        behavior: Callable[[Player], Pose],
         *,
         bounds: tuple[float, float, float, float] = (-8.0, -4.5, 8.0, 4.5),
         size: float = 1.2,
-        gravity: float = 20.0,
         preview: Optional[Sequence[str]] = None,
         preview_every: float = 0.6,
     ) -> LiveZone:
         """A live zone at the cursor, running until ``zone.close()`` or the
         end of the segment: while presenting, each player of ``audience``
-        arrives in it as their character.
+        arrives in it as their character, and ``behavior(p)`` poses it
+        every frame.
 
-        ``bounds`` is (x0, y0, x1, y1): characters are clipped to it and
-        land on its bottom at the latest. They are ``size`` units tall and
-        fall with ``gravity``. Previews and exports replay ``preview``
-        players (the audience's by default), one every ``preview_every``
-        seconds. Raises ``ValueError`` for empty bounds or a non-positive
-        size.
+        ``behavior`` is a plain Python function of the player that returns
+        ``gaanim.live.pose(...)``. It may use ``math``, ``if``, conditional
+        expressions, ``for ... in range(N)``, module constants and helper
+        functions; it is compiled now, so the ``.gaanim`` runs it without
+        Python. ``p`` has ``t``, ``time``, ``joined``, ``index``,
+        ``count``, ``rank``, ``score``, ``leader``, ``previous_rank``,
+        ``rank_since``, ``previous_score``, ``score_since`` and
+        ``random(k)``; see ``gaanim.live``.
+
+        ``bounds`` is (x0, y0, x1, y1): characters are clipped to it. They
+        are ``size`` units tall at scale 1. Previews and exports replay
+        ``preview`` players (the audience's by default), one arriving every
+        ``preview_every`` seconds and ranked in the order given. Raises
+        ``gaanim.live.BehaviorError`` (a ``ValueError``) pointing at the
+        line the compiler does not support, and ``ValueError`` for empty
+        bounds, a non-positive size or an unknown expression.
 
         Example:
-            zone = scene.live_zone(audience, size=1.2)
-            zone.launcher((-7, 3), angle=(10, 60))
-            zone.surface((-8, -3), (0, -3), tag="floor")
-            zone.surface((0, -3.4), (8, -3.4), tag="water", sink=0.3)
-            zone.on_land("happy", tag="floor").on_land("sad", tag="water")
+            from gaanim.live import pose
+
+            def stand_in_line(p):
+                return pose(-6 + p.index * 1.2, -3, express="happy")
+
+            zone = scene.live_zone(audience, stand_in_line)
         """
         ...
     def character(
