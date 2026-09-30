@@ -658,17 +658,20 @@ impl Timeline {
     /// presentation advances.
     pub fn poll_open_at(&self, time: f64) -> Option<&TimelinePoll> {
         const EPSILON: f64 = 1e-5;
-        let mut open = self
-            .polls
-            .iter()
-            .filter(|poll| poll.open - EPSILON <= time && time <= poll.close + EPSILON);
+        let shown = self
+            .segment_position_at(time)
+            .map(|position| position.segment_id);
+        // At a shared boundary a stop holds the outgoing segment: a poll
+        // opening there waits until its own segment shows.
+        let mut open = self.polls.iter().filter(|poll| {
+            poll.open - EPSILON <= time
+                && time <= poll.close + EPSILON
+                && ((time - poll.open).abs() > EPSILON || shown == Some(poll.segment))
+        });
         let first = open.next()?;
         let Some(second) = open.next() else {
             return Some(first);
         };
-        let shown = self
-            .segment_position_at(time)
-            .map(|position| position.segment_id);
         [first, second]
             .into_iter()
             .chain(open)
@@ -6213,5 +6216,11 @@ mod tests {
             segment(2, 4.0, 6.0, &[]),
         ]);
         assert_eq!(open_at(&timeline, 4.0).as_deref(), Some("first"));
+
+        // A lobby without polls ending in a stop: resting there must not
+        // open the next segment's question on the phones.
+        timeline.set_polls(vec![poll("second", 2, 4.0, 6.0)], None);
+        assert_eq!(open_at(&timeline, 4.0), None);
+        assert_eq!(open_at(&timeline, 4.01).as_deref(), Some("second"));
     }
 }

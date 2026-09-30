@@ -4249,9 +4249,16 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 )
             };
             root_state.transform.anchor = pivot;
-            self.commands
-                .entity(root_state.entity)
-                .insert(root_state.transform);
+            // Only the pivot changes: the entity's spawned transform is the
+            // state before any clip, and an object that enters later (spun in
+            // from nothing, grown from its center) must stay hidden until then.
+            self.commands.entity(root_state.entity).queue(
+                move |mut entity: bevy::prelude::EntityWorldMut| {
+                    if let Some(mut transform) = entity.get_mut::<SpatialTransform>() {
+                        transform.anchor = pivot;
+                    }
+                },
+            );
         }
         // Grow in place around the pivot; translating here would make the
         // target drift away from its baseline instead of pulsing.

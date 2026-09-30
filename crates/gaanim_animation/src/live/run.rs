@@ -123,6 +123,39 @@ impl ZoneRun {
         });
     }
 
+    /// Follow the audience: `roster` is every player there now, in the
+    /// order they joined. A player who left (kicked, or a new game) takes
+    /// their character away. One leaving while one new name appears is a
+    /// nickname changed on the phone: the character stays where it is and
+    /// takes the new name. Characters edited on the phone change here too.
+    /// New players are not added; see [`ZoneRun::arrive`].
+    pub fn follow(&mut self, roster: &[Player]) {
+        let here = |name: &str| roster.iter().any(|player| &*player.name == name);
+        let gone: Vec<usize> = (0..self.actors.len())
+            .filter(|&index| !here(&self.actors[index].player.name))
+            .collect();
+        let new: Vec<&Player> = roster
+            .iter()
+            .filter(|player| !self.arrived.contains(&player.name))
+            .collect();
+        if let ([index], [renamed]) = (gone.as_slice(), new.as_slice()) {
+            let old = self.actors[*index].player.name.clone();
+            self.arrived.remove(&old);
+            self.names.remove(&old);
+            self.arrived.insert(renamed.name.clone());
+            self.actors[*index].player.name = renamed.name.clone();
+        } else if !gone.is_empty() {
+            self.actors.retain(|actor| here(&actor.player.name));
+            self.arrived.retain(|name| here(name));
+            self.names.retain(|name, _| here(name));
+        }
+        for actor in &mut self.actors {
+            if let Some(player) = roster.iter().find(|player| player.name == actor.player.name) {
+                actor.player.character = player.character;
+            }
+        }
+    }
+
     /// Whether `name` has arrived.
     pub fn has(&self, name: &str) -> bool {
         self.arrived.contains(name)
@@ -636,5 +669,32 @@ mod tests {
         // Just stopped: the ears keep going forward, then settle.
         assert!(stopped.lag.0 > 1.0, "{stopped:?}");
         assert!(settled.lag.0.abs() < 1e-6 && settled.look == (0.0, -0.0), "{settled:?}");
+    }
+
+    #[test]
+    fn the_zone_follows_kicks_renames_and_new_games() {
+        let mut run = ZoneRun::default();
+        let roster = |names: &[&str]| -> Vec<Player> {
+            names.iter().map(|name| Player::named(name)).collect()
+        };
+        for player in roster(&["Ana", "Beto", "Caro"]) {
+            run.arrive(player, 0.0);
+        }
+        // Beto renames himself: same place, new name.
+        run.follow(&roster(&["Ana", "Bet0", "Caro"]));
+        assert!(run.has("Bet0") && !run.has("Beto"));
+        assert_eq!(&*run.actors[1].player.name, "Bet0");
+        // A new character made on the phone shows at once.
+        let mut edited = roster(&["Ana", "Bet0", "Caro"]);
+        edited[0].character = [6, 9, 6, 6, 8];
+        run.follow(&edited);
+        assert_eq!(run.actors[0].player.character, [6, 9, 6, 6, 8]);
+        // Caro is removed by the presenter.
+        run.follow(&roster(&["Ana", "Bet0"]));
+        assert_eq!(run.len(), 2);
+        assert!(!run.has("Caro"));
+        // A new game empties the room; the same names can join again.
+        run.follow(&[]);
+        assert!(run.is_empty() && !run.has("Ana"));
     }
 }

@@ -118,9 +118,15 @@ pub fn live_zone_system(
     for zone in zones.iter().filter(|zone| zone_contains(zone, now)) {
         let run = if live {
             let run = runs.live.entry(zone.id.clone()).or_default();
+            let roster: Vec<Player> = results
+                .audience
+                .iter()
+                .map(|(name, _)| player(results, name))
+                .collect();
+            run.follow(&roster);
             let joined = run.clock;
-            for (name, _) in &results.audience {
-                run.arrive(player(results, name), joined);
+            for player in roster {
+                run.arrive(player, joined);
             }
             let scores: HashMap<&str, f64> = results
                 .leaderboard

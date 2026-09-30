@@ -17435,6 +17435,21 @@ mod tests {
     }
 
     #[test]
+    fn an_entry_stays_hidden_when_the_object_is_indicated_later() {
+        // A quiz tile: it enters after a while, then the right answer pulses.
+        let mut canvas = SceneModel::new(640, 360);
+        let tile = canvas.rect(2.0, 1.0);
+        canvas.wait(1.0);
+        canvas.play(vec![tile.animate().grow_from_center().duration(0.5)]);
+        canvas.play(vec![tile.animate().indicate().duration(0.6)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        timeline.seek(&mut world, 0.5);
+        assert_eq!(transform_of(&mut world, &tile).scale, DVec3::ZERO);
+        timeline.seek(&mut world, 2.5);
+        assert!((transform_of(&mut world, &tile).scale.x - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
     fn points_compile_to_one_path_with_a_circle_per_position() {
         let mut canvas = SceneModel::new(640, 360);
         assert!(canvas.points(Vec::new(), 0.1).is_err());
