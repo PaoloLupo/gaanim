@@ -7,6 +7,7 @@ pyo3::create_exception!(
     pyo3::exceptions::PyException
 );
 
+mod bar_race;
 mod brush;
 mod callback_recipe;
 mod color;
@@ -157,6 +158,8 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<visualization::PyVariable>()?;
     m.add_class::<rolling_number::PyRollingNumber>()?;
     m.add_class::<progress_ring::PyProgressRing>()?;
+    m.add_class::<bar_race::PyBarRace>()?;
+    m.add_class::<bar_race::PyBarRaceAnimation>()?;
     m.add_class::<visualization::PyCoordinateRef>()?;
     m.add_class::<visualization::PyCoordinateSpace>()?;
     m.add_class::<visualization::PyCoordinateSpaceAnimation>()?;

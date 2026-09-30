@@ -4283,6 +4283,7 @@ impl SceneModel {
             number: number.id,
             unit: unit.map(|part| part.id),
             spacing,
+            align: 0.0,
         });
         group
     }

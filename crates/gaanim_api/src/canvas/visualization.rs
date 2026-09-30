@@ -3555,6 +3555,7 @@ impl SceneModel {
                 number: label.id,
                 unit: None,
                 spacing: 0.0,
+                align: 0.0,
             });
         }
         Ok(ProgressRing {

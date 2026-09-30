@@ -1,6 +1,7 @@
 //! Coordinate systems and data visualization geometry for Gaanim.
 
 pub mod axis;
+pub mod bar_race;
 pub mod chart;
 pub mod data;
 pub mod sampling;
@@ -11,6 +12,10 @@ pub mod vector_field;
 pub use axis::{
     Axis, AxisError, AxisLabelPosition, AxisStyle, AxisStylePatch, Crossing, NumberFormat, Scale,
     Tick,
+};
+pub use bar_race::{
+    BarRaceError, BarRaceModel, BarRaceSlots, BarRaceState, ValueFormat, interpolate_label,
+    label_opacity,
 };
 pub use chart::{
     BatchDatum, Channel, ChartError, ChartSpec, ColorRowGroups, ConstantValue,
