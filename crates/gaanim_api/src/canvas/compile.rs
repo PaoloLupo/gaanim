@@ -14160,6 +14160,56 @@ mod tests {
     }
 
     #[test]
+    fn repeated_bursts_fire_once_per_cycle() {
+        use crate::canvas::{Emitter, EmitterShape, ParticleOptions};
+        let mut canvas = SceneModel::new(640, 360);
+        let emitter = Emitter::new(EmitterShape::Point).unwrap();
+        let options = ParticleOptions {
+            rate: 0.0,
+            ..ParticleOptions::default()
+        };
+        let sparks = canvas.particles(&emitter, options.clone()).unwrap();
+        let yoyo = canvas.particles(&emitter, options).unwrap();
+        canvas.play(vec![
+            sparks.animate().burst(40).unwrap().duration(0.5).repeat(
+                3,
+                gaanim_math::RepeatMode::Cycle,
+                0.0,
+            ),
+            yoyo.animate().burst(10).unwrap().duration(0.4).repeat(
+                3,
+                gaanim_math::RepeatMode::PingPong,
+                0.5,
+            ),
+        ]);
+        canvas.wait(0.5);
+        let (mut world, _) = compiled_world(&canvas);
+        let mut bursts: Vec<Vec<(f64, u32)>> = world
+            .query::<&gaanim_animation::ParticleEmitter>()
+            .iter(&world)
+            .map(|emitter| emitter.system.bursts.clone())
+            .collect();
+        bursts.sort_by_key(|bursts| bursts[0].1);
+        assert_eq!(bursts.len(), 2);
+        let close = |bursts: &[(f64, u32)], expected: &[(f64, u32)]| {
+            bursts.len() == expected.len()
+                && bursts
+                    .iter()
+                    .zip(expected)
+                    .all(|(a, b)| (a.0 - b.0).abs() < 1e-9 && a.1 == b.1)
+        };
+        // Yoyo: 0.4 s cycles separated by 0.5 s gaps.
+        assert!(
+            close(&bursts[0], &[(0.0, 10), (0.9, 10), (1.8, 10)]),
+            "{bursts:?}"
+        );
+        assert!(
+            close(&bursts[1], &[(0.0, 40), (0.5, 40), (1.0, 40)]),
+            "{bursts:?}"
+        );
+    }
+
+    #[test]
     fn repeater_count_shows_copies_in_order_and_seeks_back() {
         let mut canvas = SceneModel::new(640, 360);
         let dot = canvas.circle(0.1);

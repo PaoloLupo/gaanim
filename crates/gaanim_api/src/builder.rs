@@ -3184,7 +3184,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             return;
         }
         if let AnimationType::ParticleBurst { count } = anim.anim_type {
-            self.schedule_particle_burst(anim.target, self.current_time + anim.delay, count);
+            let start = self.current_time + anim.delay;
+            for time in burst_times(start, anim.duration, &anim.rate_func) {
+                self.schedule_particle_burst(anim.target, time, count);
+            }
             return;
         }
         if matches!(anim.anim_type, AnimationType::PathTrim { .. }) {
@@ -9988,5 +9991,47 @@ mod tests {
                 .is_none()
         );
         assert_eq!(world.get::<Opacity>(child_entity), Some(&Opacity(1.0)));
+    }
+}
+
+/// When a burst animation starting at `start` fires: once at its start, or
+/// at the start of every cycle of a repeated animation (`Anim::repeat`, in
+/// any mode), `duration` being the whole repeated span.
+fn burst_times(start: f64, duration: f64, rate_func: &RateFunc) -> Vec<f64> {
+    let RateFunc::Repeat { count, gap, .. } = rate_func else {
+        return vec![start];
+    };
+    let count = (*count).max(1);
+    let gap = gap.max(0.0);
+    let cycle = duration.max(0.0) / (count as f64 + (count - 1) as f64 * gap);
+    (0..count)
+        .map(|index| start + index as f64 * cycle * (1.0 + gap))
+        .collect()
+}
+
+#[cfg(test)]
+mod burst_time_tests {
+    use super::*;
+
+    #[test]
+    fn repeated_bursts_fire_at_every_cycle_start() {
+        assert_eq!(burst_times(2.0, 0.5, &RateFunc::Linear), [2.0]);
+        let repeat = |mode| RateFunc::Repeat {
+            inner: Box::new(RateFunc::Smooth),
+            count: 3,
+            gap: 0.5,
+            mode,
+        };
+        // Three 0.4 s cycles separated by 0.2 s gaps span 1.6 s.
+        for mode in [
+            gaanim_math::RepeatMode::Cycle,
+            gaanim_math::RepeatMode::PingPong,
+        ] {
+            let times = burst_times(1.0, 1.6, &repeat(mode));
+            assert_eq!(times.len(), 3);
+            for (time, expected) in times.iter().zip([1.0, 1.6, 2.2]) {
+                assert!((time - expected).abs() < 1e-12, "{times:?}");
+            }
+        }
     }
 }
