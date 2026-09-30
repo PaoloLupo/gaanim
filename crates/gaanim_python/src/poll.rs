@@ -5,7 +5,7 @@ use pyo3::prelude::*;
 
 use gaanim_api::canvas::{
     AudienceHandle, BarDirection, BarScale, GateCondition, LeaderboardHandle, LiveTextOptions,
-    PollBarOptions, PollError, PollHandle, TextAlign,
+    PollBarOptions, PollError, PollHandle, TeamsHandle, TextAlign,
 };
 
 use crate::pydrawable::PyDrawable;
@@ -345,6 +345,83 @@ impl PyLeaderboard {
 
     fn __repr__(&self) -> String {
         "Leaderboard()".to_string()
+    }
+}
+
+/// The game's teams, as data for the scene to present as it likes.
+#[pyclass(name = "Teams", module = "gaanim_core", frozen)]
+pub struct PyTeams {
+    pub(crate) inner: TeamsHandle,
+}
+
+#[pymethods]
+impl PyTeams {
+    #[getter]
+    fn names(&self) -> Vec<String> {
+        self.inner.names()
+    }
+
+    #[getter]
+    fn colors(&self) -> Vec<String> {
+        self.inner.colors()
+    }
+
+    /// Whether players choose their team on the phone.
+    #[getter]
+    fn choose(&self) -> bool {
+        self.inner.choose()
+    }
+
+    fn __len__(&self) -> usize {
+        self.inner.names().len()
+    }
+
+    /// The points of `team`'s players added up.
+    fn score(&self, team: usize) -> PyResult<PyParameter> {
+        crate::custom::ensure_authoring_allowed()?;
+        let inner = self.inner.score(team).map_err(poll_error)?;
+        Ok(PyParameter { inner })
+    }
+
+    /// How many players `team` has.
+    fn players(&self, team: usize) -> PyResult<PyParameter> {
+        crate::custom::ensure_authoring_allowed()?;
+        let inner = self.inner.players(team).map_err(poll_error)?;
+        Ok(PyParameter { inner })
+    }
+
+    /// `team`'s points per player.
+    fn average(&self, team: usize) -> PyResult<PyParameter> {
+        crate::custom::ensure_authoring_allowed()?;
+        let inner = self.inner.average(team).map_err(poll_error)?;
+        Ok(PyParameter { inner })
+    }
+
+    /// The index of the team leading on points.
+    fn leader(&self) -> PyResult<PyParameter> {
+        crate::custom::ensure_authoring_allowed()?;
+        let inner = self.inner.leader().map_err(poll_error)?;
+        Ok(PyParameter { inner })
+    }
+
+    /// A bar whose length is `team`'s points against the leading team's.
+    #[pyo3(signature = (team, *, length=6.0, thickness=0.5, direction="right", radius=0.0))]
+    fn bar(
+        &self,
+        team: usize,
+        length: f64,
+        thickness: f64,
+        direction: &str,
+        radius: f64,
+    ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        let options = bar_options(length, thickness, direction, "leader", radius)?;
+        let handle = self.inner.bar(team, options).map_err(poll_error)?;
+        Ok(PyDrawable(handle))
+    }
+
+    fn __repr__(&self) -> String {
+        format!("Teams({:?})", self.inner.names())
     }
 }
 

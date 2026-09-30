@@ -82,12 +82,17 @@ pub fn zone_contains(zone: &LiveZone, time: f64) -> bool {
 /// A live player: with the character the phone made, or one read from the
 /// nickname.
 fn player(results: &PollResults, name: &std::sync::Arc<str>) -> Player {
+    let team = results.player_teams.get(name).copied().unwrap_or(0);
     match results.avatars.get(name) {
         Some(character) => Player {
             name: name.clone(),
             character: *character,
+            team,
         },
-        None => Player::named(name),
+        None => Player {
+            team,
+            ..Player::named(name)
+        },
     }
 }
 

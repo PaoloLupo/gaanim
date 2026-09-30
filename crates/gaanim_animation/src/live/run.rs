@@ -46,6 +46,8 @@ pub const STEP: f64 = 1.0 / 60.0;
 pub struct Player {
     pub name: Arc<str>,
     pub character: Character,
+    /// The player's team, 0 in a game without teams.
+    pub team: usize,
 }
 
 impl Player {
@@ -56,6 +58,7 @@ impl Player {
         Self {
             name: name.into(),
             character,
+            team: 0,
         }
     }
 }
@@ -155,6 +158,7 @@ impl ZoneRun {
                 .find(|player| player.name == actor.player.name)
             {
                 actor.player.character = player.character;
+                actor.player.team = player.team;
             }
         }
     }
@@ -205,6 +209,28 @@ impl ZoneRun {
     fn inputs(&self, index: usize) -> Inputs {
         let actor = &self.actors[index];
         let clock = self.clock;
+        let team = actor.player.team;
+        let mates = self.actors.iter().filter(|other| other.player.team == team);
+        let team_index = self.actors[..index]
+            .iter()
+            .filter(|other| other.player.team == team)
+            .count();
+        // Teams by score, best first; ties go to the lower team.
+        let mut totals: Vec<(usize, f64)> = Vec::new();
+        for other in &self.actors {
+            match totals.iter_mut().find(|(id, _)| *id == other.player.team) {
+                Some((_, total)) => *total += other.score,
+                None => totals.push((other.player.team, other.score)),
+            }
+        }
+        let team_score = totals
+            .iter()
+            .find(|(id, _)| *id == team)
+            .map_or(0.0, |(_, total)| *total);
+        let team_rank = totals
+            .iter()
+            .filter(|(id, total)| *total > team_score || (*total == team_score && *id < team))
+            .count();
         Inputs {
             t: clock - actor.joined,
             time: clock,
@@ -222,6 +248,11 @@ impl ZoneRun {
             rank_since: clock - actor.rank_changed,
             previous_score: actor.previous_score,
             score_since: clock - actor.score_changed,
+            team: team as f64,
+            team_index: team_index as f64,
+            team_count: mates.count() as f64,
+            team_score,
+            team_rank: team_rank as f64,
             seed: actor.seed,
         }
     }
@@ -673,6 +704,7 @@ mod tests {
         let bunny = Player {
             name: "Ana".into(),
             character: [3, 4, 6, 6, 4],
+            team: 0,
         };
         assert!(catalog().hangs(&bunny.character));
         let drive_at = |seconds: f64| {

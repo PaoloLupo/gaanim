@@ -67,7 +67,7 @@ __all__ = [
 ]
 
 #: Version of the compiled programs; Rust refuses a newer major version.
-PROGRAM_VERSION = (1, 0)
+PROGRAM_VERSION = (1, 1)
 
 #: What a behavior reads from its player, as ``p.<name>``.
 PLAYER_FIELDS = {
@@ -83,6 +83,11 @@ PLAYER_FIELDS = {
     "rank_since": "seconds since the rank last changed",
     "previous_score": "the score before the last change",
     "score_since": "seconds since the score last changed",
+    "team": "the player's team, from 0 (0 for everyone without teams)",
+    "team_index": "order of arrival within the team, from 0",
+    "team_count": "players of the team in the zone",
+    "team_score": "the team's score: its players' scores added up",
+    "team_rank": "position of the team, 0 for the leading one",
 }
 
 
@@ -297,6 +302,11 @@ class Player:
     rank_since: float = 0.0
     previous_score: float = 0.0
     score_since: float = 0.0
+    team: int = 0
+    team_index: int = 0
+    team_count: int = 1
+    team_score: float = 0.0
+    team_rank: int = 0
     seed: int = field(default=-1)
 
     def __post_init__(self) -> None:

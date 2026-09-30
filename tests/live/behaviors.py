@@ -126,4 +126,17 @@ def animated(p):
     )
 
 
-BEHAVIORS = [zipline, podium, race, corners, animated]
+def battle(p):
+    """Two teams face each other; the leading one jumps."""
+    side = -1 if p.team == 0 else 1
+    row = p.team_index % 4
+    x = side * (2 + p.team_index // 4 * 1.2)
+    y = -2 + row * 1.1
+    if p.team_rank == 0:
+        y += 0.5 * abs(math.sin(3 * p.t))
+    push = 0.3 * math.tanh((p.team_score - 500) / 200)
+    return pose(x + side * push, y, flip=side > 0, express="winner" if p.team_rank == 0 else None,
+                loop=True)
+
+
+BEHAVIORS = [zipline, podium, race, corners, animated, battle]

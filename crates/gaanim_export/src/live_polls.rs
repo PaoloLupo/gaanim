@@ -94,6 +94,11 @@ fn source_record(source: &PollSource) -> LiveSourceRecord {
         PollSource::Players => LiveSourceRecord::Players,
         PollSource::AudienceJoined { slot } => LiveSourceRecord::AudienceJoined { slot: *slot },
         PollSource::AudienceAge { slot } => LiveSourceRecord::AudienceAge { slot: *slot },
+        PollSource::Team { team, measure } => LiveSourceRecord::Team {
+            team: *team,
+            measure: measure.name().to_string(),
+        },
+        PollSource::LeadingTeam => LiveSourceRecord::LeadingTeam,
     }
 }
 
@@ -121,6 +126,11 @@ fn source_from(record: &LiveSourceRecord) -> Option<PollSource> {
         LiveSourceRecord::Players => PollSource::Players,
         LiveSourceRecord::AudienceJoined { slot } => PollSource::AudienceJoined { slot: *slot },
         LiveSourceRecord::AudienceAge { slot } => PollSource::AudienceAge { slot: *slot },
+        LiveSourceRecord::Team { team, measure } => PollSource::Team {
+            team: *team,
+            measure: gaanim_animation::polls::TeamMeasure::from_name(measure)?,
+        },
+        LiveSourceRecord::LeadingTeam => PollSource::LeadingTeam,
     })
 }
 
@@ -218,6 +228,7 @@ pub fn record<W: Write + Seek>(
                     answers: *answers,
                 },
                 BarSource::Leader { rank } => BarSourceRecord::Leader { rank: *rank },
+                BarSource::Team { team } => BarSourceRecord::Team { team: *team },
             },
             length: bar.spec.length,
             thickness: bar.spec.thickness,
@@ -362,6 +373,7 @@ impl LiveElements {
                     answers: *answers,
                 },
                 BarSourceRecord::Leader { rank } => BarSource::Leader { rank: *rank },
+                BarSourceRecord::Team { team } => BarSource::Team { team: *team },
             };
             let spec = BarSpec {
                 length: bar.length,

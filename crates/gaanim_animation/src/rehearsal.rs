@@ -50,6 +50,18 @@ pub struct RehearsalSpec {
     pub skill: f64,
     /// How fast players answer, from 0 (at the last moment) to 1 (at once).
     pub speed: f64,
+    /// The skill of each team's players, in the scene's team order; empty
+    /// gives every team `skill`.
+    pub team_skill: Vec<f64>,
+}
+
+/// A game's teams, as a rehearsal joins them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RehearsalTeams {
+    pub count: usize,
+    /// Players choose their team, so teams come out uneven; otherwise each
+    /// joins the smallest, as the relay deals them.
+    pub choose: bool,
 }
 
 impl RehearsalSpec {
@@ -75,6 +87,7 @@ impl Default for RehearsalSpec {
             arrive: None,
             skill: 0.6,
             speed: 0.5,
+            team_skill: Vec::new(),
         }
     }
 }
@@ -114,6 +127,9 @@ pub struct RehearsedPlayer {
     pub joined: f64,
     /// Seed of the character the player made.
     pub character: u32,
+    /// The player's team, 0 in a game without teams.
+    #[serde(default)]
+    pub team: usize,
 }
 
 /// A made-up answer.
@@ -145,6 +161,9 @@ pub struct RehearsedPoll {
 pub struct Rehearsal {
     pub players: Vec<RehearsedPlayer>,
     pub polls: Vec<RehearsedPoll>,
+    /// How many teams the game has, 0 without teams.
+    #[serde(default)]
+    pub teams: usize,
 }
 
 /// SplitMix64: a random number from a seed and the path to it, so each
@@ -170,6 +189,7 @@ mod about {
     pub const RIGHT: u64 = 6;
     pub const PICK: u64 = 7;
     pub const WHEN: u64 = 8;
+    pub const TEAM: u64 = 9;
 }
 
 /// The index `weights` pick for a draw `u` in [0, 1).
@@ -188,8 +208,13 @@ fn pick(weights: &[f64], u: f64) -> usize {
 impl Rehearsal {
     /// Plan the session of `spec`: the room is open from `room.0` and its
     /// first stop is at `room.1`, if the scene shows its audience; `polls`
-    /// are the scene's polls in order.
-    pub fn plan(spec: &RehearsalSpec, room: Option<(f64, f64)>, polls: &[PlannedPoll]) -> Self {
+    /// are the scene's polls in order, `teams` the game's teams.
+    pub fn plan(
+        spec: &RehearsalSpec,
+        room: Option<(f64, f64)>,
+        polls: &[PlannedPoll],
+        teams: Option<RehearsalTeams>,
+    ) -> Self {
         let seed = spec.seed;
         let count = spec.names.len();
         // Players join over the room's time, in order and a little apart;
@@ -200,25 +225,45 @@ impl Rehearsal {
             (None, Some(arrive)) => (polls.first().map_or(0.0, |poll| poll.open), arrive),
             (None, None) => (-AUDIENCE_AGE_CAP, 0.0),
         };
+        let mut sizes = vec![0usize; teams.map_or(0, |teams| teams.count)];
         let players: Vec<RehearsedPlayer> = spec
             .names
             .iter()
             .enumerate()
             .map(|(index, name)| {
+                let team = match teams {
+                    None => 0,
+                    Some(RehearsalTeams {
+                        count,
+                        choose: true,
+                    }) => {
+                        let draw = random(seed, &[about::TEAM, index as u64]);
+                        ((draw * count as f64) as usize).min(count - 1)
+                    }
+                    // The smallest team, the first on a tie.
+                    Some(_) => (0..sizes.len())
+                        .min_by_key(|team| sizes[*team])
+                        .unwrap_or(0),
+                };
+                if let Some(size) = sizes.get_mut(team) {
+                    *size += 1;
+                }
                 let jitter = 0.2 + 0.6 * random(seed, &[about::JOIN, index as u64]);
                 RehearsedPlayer {
                     name: name.clone(),
                     joined: start + span * (index as f64 + jitter) / count.max(1) as f64,
                     character: (random(seed, &[about::CHARACTER, index as u64])
                         * f64::from(u32::MAX)) as u32,
+                    team,
                 }
             })
             .collect();
         // Each player is a little better or worse, faster or slower.
+        let base = |team: usize| spec.team_skill.get(team).copied().unwrap_or(spec.skill);
         let skill: Vec<f64> = (0..count)
             .map(|index| {
                 let spread = random(seed, &[about::SKILL, index as u64]) - 0.5;
-                (spec.skill + 0.5 * spread).clamp(0.02, 0.98)
+                (base(players[index].team) + 0.5 * spread).clamp(0.02, 0.98)
             })
             .collect();
         let speed: Vec<f64> = (0..count)
@@ -258,7 +303,7 @@ impl Rehearsal {
                             (Some((correct, _, _)), Lean::Auto | Lean::Right(_)) => {
                                 let right = match poll.lean {
                                     Lean::Right(share) => {
-                                        (share + skill[index] - spec.skill).clamp(0.0, 1.0)
+                                        (share + skill[index] - base(player.team)).clamp(0.0, 1.0)
                                     }
                                     _ => skill[index],
                                 };
@@ -299,7 +344,12 @@ impl Rehearsal {
                 }
             })
             .collect();
-        Self { players, polls }
+        let teams = teams.map_or(0, |teams| teams.count);
+        Self {
+            players,
+            polls,
+            teams,
+        }
     }
 
     /// The players' scores and correct answers at `time`, in player order.
@@ -325,6 +375,7 @@ impl Rehearsal {
         crate::live::Player {
             name: player.name.as_str().into(),
             character: gaanim_objects::character::catalog().character_from_seed(player.character),
+            team: player.team,
         }
     }
 
@@ -369,7 +420,26 @@ impl Rehearsal {
             }
         }
         let catalog = gaanim_objects::character::catalog();
+        let mut teams = vec![crate::polls::TeamResult::default(); self.teams];
+        for index in &joined {
+            if let Some(team) = teams.get_mut(self.players[*index].team) {
+                team.score += scores[*index].0;
+                team.players += 1;
+            }
+        }
         PollResults {
+            teams,
+            player_teams: if self.teams == 0 {
+                HashMap::new()
+            } else {
+                joined
+                    .iter()
+                    .map(|index| {
+                        let player = &self.players[*index];
+                        (player.name.as_str().into(), player.team)
+                    })
+                    .collect()
+            },
             live: true,
             counts,
             remaining,
@@ -472,7 +542,7 @@ mod tests {
             names: RehearsalSpec::names(10),
             ..Default::default()
         };
-        let rehearsal = Rehearsal::plan(&spec, Some((2.0, 12.0)), &[]);
+        let rehearsal = Rehearsal::plan(&spec, Some((2.0, 12.0)), &[], None);
         let joined: Vec<f64> = rehearsal
             .players
             .iter()
@@ -487,7 +557,7 @@ mod tests {
         assert_eq!(middle.audience[0].0.as_ref(), "Ana");
         assert_eq!(middle.avatars.len(), middle.players as usize);
         // Without a room, everyone joined long ago.
-        let early = Rehearsal::plan(&spec, None, &[]).results_at(0.0);
+        let early = Rehearsal::plan(&spec, None, &[], None).results_at(0.0);
         assert_eq!(early.players, 10);
         assert!(
             early
@@ -504,7 +574,7 @@ mod tests {
             ..Default::default()
         };
         let polls = [quiz("q1", 20.0, 24.0, Lean::Auto)];
-        let rehearsal = Rehearsal::plan(&spec, None, &polls);
+        let rehearsal = Rehearsal::plan(&spec, None, &polls, None);
         let total = |time: f64| -> u32 { rehearsal.results_at(time).counts["q1"].iter().sum() };
         assert_eq!(total(20.0), 0);
         assert!(total(22.0) > 0 && total(22.0) < 24);
@@ -530,8 +600,8 @@ mod tests {
             names: RehearsalSpec::names(100),
             ..Default::default()
         };
-        let easy = Rehearsal::plan(&spec, None, &[quiz("q", 0.0, 5.0, Lean::Right(0.95))]);
-        let hard = Rehearsal::plan(&spec, None, &[quiz("q", 0.0, 5.0, Lean::Right(0.1))]);
+        let easy = Rehearsal::plan(&spec, None, &[quiz("q", 0.0, 5.0, Lean::Right(0.95))], None);
+        let hard = Rehearsal::plan(&spec, None, &[quiz("q", 0.0, 5.0, Lean::Right(0.1))], None);
         let right = |rehearsal: &Rehearsal| rehearsal.results_at(5.0).counts["q"][1];
         assert!(right(&easy) > 80, "{}", right(&easy));
         assert!(right(&hard) < 30, "{}", right(&hard));
@@ -543,24 +613,50 @@ mod tests {
             quiz: None,
             lean: Lean::Weights(vec![0.0, 1.0, 3.0]),
         };
-        let counts = &Rehearsal::plan(&spec, None, &[poll.clone()])
+        let counts = &Rehearsal::plan(&spec, None, &[poll.clone()], None)
             .results_at(5.0)
             .counts["p"];
         assert_eq!(counts[0], 0);
         assert!(counts[2] > counts[1]);
         // The same spec plans the same session; another seed, another one.
         assert_eq!(
-            Rehearsal::plan(&spec, None, &[poll.clone()]),
-            Rehearsal::plan(&spec, None, &[poll.clone()])
+            Rehearsal::plan(&spec, None, &[poll.clone()], None),
+            Rehearsal::plan(&spec, None, &[poll.clone()], None)
         );
         let other = RehearsalSpec {
             seed: 9,
             ..spec.clone()
         };
         assert_ne!(
-            Rehearsal::plan(&spec, None, &[poll.clone()]),
-            Rehearsal::plan(&other, None, &[poll])
+            Rehearsal::plan(&spec, None, &[poll.clone()], None),
+            Rehearsal::plan(&other, None, &[poll], None)
         );
+    }
+
+    #[test]
+    fn teams_are_dealt_evenly_and_score_what_their_players_earn() {
+        let spec = RehearsalSpec {
+            names: RehearsalSpec::names(9),
+            team_skill: vec![0.95, 0.05],
+            ..Default::default()
+        };
+        let teams = Some(RehearsalTeams {
+            count: 2,
+            choose: false,
+        });
+        let polls = [quiz("q", 0.0, 5.0, Lean::Auto)];
+        let rehearsal = Rehearsal::plan(&spec, None, &polls, teams);
+        let dealt: Vec<usize> = rehearsal.players.iter().map(|player| player.team).collect();
+        assert_eq!(dealt, [0, 1, 0, 1, 0, 1, 0, 1, 0]);
+        let results = rehearsal.results_at(5.0);
+        assert_eq!(results.teams.len(), 2);
+        assert_eq!((results.teams[0].players, results.teams[1].players), (5, 4));
+        let total: u64 = results.leaderboard.iter().map(|(_, score)| score).sum();
+        assert_eq!(results.teams[0].score + results.teams[1].score, total);
+        // The skilled team wins.
+        assert!(results.teams[0].score > results.teams[1].score);
+        assert_eq!(results.leading_team(), 0);
+        assert_eq!(results.player_teams["Beto"], 1);
     }
 
     #[test]

@@ -5984,16 +5984,33 @@ impl PyScene {
 
     /// Describe the made-up audience that plays the scene's polls outside a
     /// live presentation.
-    #[pyo3(signature = (players=None, *, seed=0, arrive=None, skill=0.6, speed=0.5))]
+    #[pyo3(signature = (players=None, *, seed=0, arrive=None, skill=None, speed=0.5))]
     fn rehearsal(
         &self,
         players: Option<&Bound<'_, PyAny>>,
         seed: u64,
         arrive: Option<f64>,
-        skill: f64,
+        skill: Option<&Bound<'_, PyAny>>,
         speed: f64,
     ) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
+        let defaults = gaanim_animation::rehearsal::RehearsalSpec::default();
+        // One skill for everyone, or one per team.
+        let (skill, team_skill) = match skill {
+            None => (defaults.skill, Vec::new()),
+            Some(skill) => match skill.extract::<f64>() {
+                Ok(skill) => (skill, Vec::new()),
+                Err(_) => {
+                    let skills = skill.extract::<Vec<f64>>().map_err(|_| {
+                        pyo3::exceptions::PyTypeError::new_err(
+                            "skill is a number from 0 to 1, or one per team",
+                        )
+                    })?;
+                    let mean = skills.iter().sum::<f64>() / skills.len().max(1) as f64;
+                    (mean, skills)
+                }
+            },
+        };
         let names = match players {
             None => gaanim_animation::rehearsal::RehearsalSpec::default().names,
             Some(players) => match players.extract::<usize>() {
@@ -6014,6 +6031,7 @@ impl PyScene {
                 arrive,
                 skill,
                 speed,
+                team_skill,
             })
             .map_err(crate::poll::poll_error)
     }
@@ -6076,6 +6094,28 @@ impl PyScene {
             .quiz(question, options, correct, time, points, lean)
             .map_err(crate::poll::poll_error)?;
         Ok(crate::poll::PyPoll { inner })
+    }
+
+    /// Play the game in teams: players are dealt to the smallest team, or
+    /// choose theirs on the phone with `choose`.
+    #[pyo3(signature = (names, *, choose=false, colors=None))]
+    fn teams(
+        &self,
+        py: Python<'_>,
+        names: Vec<String>,
+        choose: bool,
+        colors: Option<Vec<String>>,
+    ) -> PyResult<crate::poll::PyTeams> {
+        crate::custom::ensure_authoring_allowed()?;
+        let mut scene = self.inner.lock().expect("scene canvas poisoned");
+        if scene.poll_session().is_none() {
+            let session = resolve_poll_session(py)?;
+            scene.set_poll_session(session);
+        }
+        let inner = scene
+            .teams(names, colors, choose)
+            .map_err(crate::poll::poll_error)?;
+        Ok(crate::poll::PyTeams { inner })
     }
 
     /// The game's leaderboard: players of the scene's quizzes, best first,

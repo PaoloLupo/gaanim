@@ -112,7 +112,8 @@ mod poll;
 pub use gaanim_animation::polls::{BarDirection, BarScale, TextAlign};
 pub use poll::{
     AudienceHandle, GateCondition, LeaderboardHandle, LiveTextOptions, MAX_POLL_OPTIONS,
-    PollBarOptions, PollError, PollHandle, PollSession, QUIZ_POINTS, QUIZ_TIME,
+    MAX_TEAMS, PollBarOptions, PollError, PollHandle, PollSession, QUIZ_POINTS, QUIZ_TIME,
+    TEAM_COLORS, TeamsHandle,
 };
 mod theme;
 pub use gaanim_objects::prelude::SvgLoadError;

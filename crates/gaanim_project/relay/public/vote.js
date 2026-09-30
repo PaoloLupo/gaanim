@@ -171,9 +171,57 @@ document.addEventListener("DOMContentLoaded", () => {
   let avatar = null;
   /** The vote waiting for the relay's answer: {poll, option, button, timer}. */
   let pending = null;
+  /** The team picked on the join form, when players choose. */
+  let pickedTeam = null;
+
+  /** The game's teams, or null without teams. */
+  const teams = () => poll.teams ?? null;
+
+  /** Tint the page with this player's team. */
+  function showTeam() {
+    const team = teams() && player && Number.isInteger(player.team) ? player.team : null;
+    const badge = $("wait-team");
+    if (team === null) {
+      document.body.style.removeProperty("--team");
+      badge.hidden = true;
+      return;
+    }
+    const color = teams().colors[team];
+    document.body.style.setProperty("--team", color);
+    badge.textContent = t("teamLabel", teams().names[team]);
+    badge.hidden = false;
+  }
+
+  /** The team buttons of the join form, when players choose. */
+  function drawTeamPicker() {
+    const picker = $("team-picker");
+    const game = teams();
+    picker.hidden = !game?.choose;
+    if (!game?.choose) return;
+    if (pickedTeam === null && Number.isInteger(player?.team)) pickedTeam = player.team;
+    const options = $("team-options");
+    options.replaceChildren();
+    game.names.forEach((name, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "team-option";
+      button.style.setProperty("--team-color", game.colors[index]);
+      button.textContent = name;
+      button.setAttribute("aria-pressed", String(pickedTeam === index));
+      // A player who answered keeps the team.
+      button.disabled = Boolean(player?.answered) && Number.isInteger(player?.team) && player.team !== index;
+      button.addEventListener("click", () => {
+        pickedTeam = index;
+        nameError.textContent = "";
+        drawTeamPicker();
+      });
+      options.append(button);
+    });
+  }
 
   /** The join form, worded for a lobby or for a quiz. */
   function showJoin(lobby) {
+    drawTeamPicker();
     $("join-title").textContent = t(lobby ? "lobbyTitle" : "gameTitle");
     $("join-hint").textContent = t(lobby ? "lobbyHint" : "gameHint");
     $("join-button").textContent = t(lobby ? "lobbyButton" : "gameButton");
@@ -184,6 +232,7 @@ document.addEventListener("DOMContentLoaded", () => {
    * phone joined. `cheer` makes the character celebrate arriving. */
   function showWaiting(cheer = false) {
     const inside = poll.lobby && player;
+    showTeam();
     $("wait-title").textContent = inside ? t("inTitle", player.name) : t("waitTitle");
     $("wait-hint").textContent = inside ? t("inHint") : t("waitHint");
     const stageElement = $("wait-avatar");
@@ -317,6 +366,12 @@ document.addEventListener("DOMContentLoaded", () => {
     player = value;
     me.hidden = !player;
     if (player) me.textContent = `${player.name} · ${formatScore(player.score)}`;
+    showTeam();
+  }
+
+  /** A player who must pick a team first: teams changed, or it never did. */
+  function needsTeam() {
+    return Boolean(teams()?.choose && known && player && !Number.isInteger(player.team));
   }
 
   function markChosen(index) {
@@ -359,6 +414,10 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!poll.open && (poll.stage === "podium" || poll.stage === "end")) {
       shown = null;
       return showFinale();
+    }
+    if (needsTeam() && !(editing && current === "join")) {
+      shown = null;
+      return showJoin(poll.lobby);
     }
     if (!poll.open) {
       // A revealed result stays until the next question, and a character
@@ -538,6 +597,28 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
     podium.hidden = standings.length === 0;
+    // In teams, the teams' standings, this player's team marked.
+    const board = $("standings");
+    const teamStandings = poll.standings ?? [];
+    board.hidden = teamStandings.length === 0;
+    board.replaceChildren(
+      ...teamStandings.map((team, place) => {
+        const item = document.createElement("li");
+        item.className = "standing";
+        item.style.setProperty("--team-color", team.color);
+        item.toggleAttribute("data-mine", team.team === player?.team);
+        item.innerHTML = `<span class="standing-place"></span><span class="standing-name"></span><span class="standing-score"></span>`;
+        item.querySelector(".standing-place").textContent = String(place + 1);
+        item.querySelector(".standing-name").textContent = team.name;
+        item.querySelector(".standing-score").textContent = `${formatScore(team.score)} ${t("points")}`;
+        return item;
+      }),
+    );
+    if (teamStandings.length > 0 && !ended) {
+      const [first, second] = teamStandings;
+      $("finale-title").textContent =
+        second && second.score === first.score ? t("teamTie") : t("teamWon", first.name);
+    }
     const holder = $("finale-avatar");
     const mine = player && catalog && live(holder, player.avatar ?? avatar, player.name);
     holder.hidden = !mine;
@@ -580,9 +661,13 @@ document.addEventListener("DOMContentLoaded", () => {
     if (current === "waiting") showWaiting(true);
   }
 
-  function joinFailed(statusCode) {
+  function joinFailed(statusCode, error) {
     joining = false;
     if (statusCode === 403) return showKicked();
+    if (error === "choose a team") {
+      nameError.textContent = t("teamRequired");
+      return;
+    }
     nameError.textContent = statusCode === 409 ? t("nameTaken") : t("nameInvalid");
   }
 
@@ -590,9 +675,18 @@ document.addEventListener("DOMContentLoaded", () => {
     event.preventDefault();
     const name = nameInput.value.trim();
     if (joining) return;
+    if (teams()?.choose && pickedTeam === null) {
+      nameError.textContent = t("teamRequired");
+      return;
+    }
     joining = true;
     nameError.textContent = "";
-    const request = { voter, name, ...(avatar && { avatar }) };
+    const request = {
+      voter,
+      name,
+      ...(avatar && { avatar }),
+      ...(teams()?.choose && { team: pickedTeam }),
+    };
     if (socket?.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: "join", ...request }));
       return;
@@ -604,7 +698,7 @@ document.addEventListener("DOMContentLoaded", () => {
         body: JSON.stringify(request),
       });
       if (response.ok) joined((await response.json()).player);
-      else joinFailed(response.status);
+      else joinFailed(response.status, (await response.json().catch(() => ({}))).error);
     } catch {
       joining = false;
       nameError.textContent = t("failed");
@@ -712,7 +806,7 @@ document.addEventListener("DOMContentLoaded", () => {
       case "kicked":
         return showKicked();
       case "error":
-        if (joining) return joinFailed(message.status);
+        if (joining) return joinFailed(message.status, message.error);
         if (message.status === 403) return showKicked();
         if (pending?.poll === message.poll) {
           return settle(message.poll, pending.option, refusal(message.status, message.error));

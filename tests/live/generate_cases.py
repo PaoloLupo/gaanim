@@ -61,6 +61,11 @@ def players():
                 rank_since=t / 2,
                 previous_score=score - 100 * (index % 3),
                 score_since=t / 3,
+                team=index % 2,
+                team_index=index // 2,
+                team_count=len(names) // 2,
+                team_score=float(500 + 137 * (index % 2)),
+                team_rank=1 - index % 2,
             )
 
 

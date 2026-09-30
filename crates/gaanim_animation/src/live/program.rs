@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 /// The IR's version: a program with a newer major version is refused, a
 /// newer minor one may only add instructions this build refuses by name.
-pub const PROGRAM_VERSION: [u32; 2] = [1, 0];
+pub const PROGRAM_VERSION: [u32; 2] = [1, 1];
 
 /// A register: the index of the instruction that writes it.
 pub type Reg = u32;
@@ -44,10 +44,20 @@ pub enum Input {
     RankSince,
     PreviousScore,
     ScoreSince,
+    /// The player's team, from 0 (0 for everyone in a game without teams).
+    Team,
+    /// Order of arrival within the team, from 0.
+    TeamIndex,
+    /// Players of the team in the zone.
+    TeamCount,
+    /// The team's score: its players' scores added up.
+    TeamScore,
+    /// Position of the team, from 0 for the leading one.
+    TeamRank,
 }
 
 impl Input {
-    pub const ALL: [Input; 12] = [
+    pub const ALL: [Input; 17] = [
         Input::T,
         Input::Time,
         Input::Joined,
@@ -60,6 +70,11 @@ impl Input {
         Input::RankSince,
         Input::PreviousScore,
         Input::ScoreSince,
+        Input::Team,
+        Input::TeamIndex,
+        Input::TeamCount,
+        Input::TeamScore,
+        Input::TeamRank,
     ];
 }
 
@@ -281,6 +296,11 @@ pub struct Inputs {
     pub rank_since: f64,
     pub previous_score: f64,
     pub score_since: f64,
+    pub team: f64,
+    pub team_index: f64,
+    pub team_count: f64,
+    pub team_score: f64,
+    pub team_rank: f64,
     /// Read by `p.random(k)`: the player's character seed.
     pub seed: u32,
 }
@@ -312,6 +332,11 @@ impl Inputs {
             Input::RankSince => self.rank_since,
             Input::PreviousScore => self.previous_score,
             Input::ScoreSince => self.score_since,
+            Input::Team => self.team,
+            Input::TeamIndex => self.team_index,
+            Input::TeamCount => self.team_count,
+            Input::TeamScore => self.team_score,
+            Input::TeamRank => self.team_rank,
         }
     }
 }
@@ -666,7 +691,8 @@ mod tests {
             let program = program.checked().unwrap();
             for case in entry["cases"].as_array().unwrap() {
                 let given = &case["inputs"];
-                let input = |name: &str| number(&given[name]);
+                // Cases written before teams have none.
+                let input = |name: &str| given.get(name).map_or(0.0, number);
                 let inputs = Inputs {
                     t: input("t"),
                     time: input("time"),
@@ -680,6 +706,11 @@ mod tests {
                     rank_since: input("rank_since"),
                     previous_score: input("previous_score"),
                     score_since: input("score_since"),
+                    team: input("team"),
+                    team_index: input("team_index"),
+                    team_count: input("team_count"),
+                    team_score: input("team_score"),
+                    team_rank: input("team_rank"),
                     seed: given["seed"].as_u64().unwrap() as u32,
                 };
                 let pose = program.eval(&inputs, &mut registers);

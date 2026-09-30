@@ -40,6 +40,7 @@
       <section class="center" id="waiting">
         <div class="pulse" id="wait-pulse" aria-hidden="true"></div>
         <div class="avatar-stage" id="wait-avatar" hidden></div>
+        <p class="team-badge" id="wait-team" hidden></p>
         <h1 id="wait-title" data-t="waitTitle">Esperando la pregunta</h1>
         <p id="wait-hint" data-t="waitHint">Deja esta página abierta: la pregunta aparecerá aquí.</p>
         <button class="secondary" id="edit-button" type="button" hidden data-t="editButton">
@@ -61,6 +62,11 @@
           <div class="parts" id="avatar-parts"></div>
         </div>
         <form class="join" id="join-form" novalidate>
+          <!-- The teams, when the presentation lets players choose. -->
+          <fieldset class="team-picker" id="team-picker" hidden>
+            <legend data-t="chooseTeam">Elige tu equipo</legend>
+            <div class="team-options" id="team-options"></div>
+          </fieldset>
           <label class="sr-only" for="name" data-t="nameLabel">Apodo</label>
           <div class="name-row">
             <input
@@ -118,6 +124,7 @@
       <section class="center finale" id="finale-view" hidden>
         <h1 id="finale-title"></h1>
         <p id="finale-hint"></p>
+        <ol class="standings" id="standings" hidden></ol>
         <ol class="podium" id="podium"></ol>
         <div class="avatar-stage" id="finale-avatar" hidden></div>
         <p class="points" id="finale-place"></p>

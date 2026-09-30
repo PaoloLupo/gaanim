@@ -40,6 +40,33 @@ pub struct PollResults {
     pub audience: Vec<(Arc<str>, f64)>,
     /// The character each player made on the phone, by nickname.
     pub avatars: HashMap<Arc<str>, gaanim_objects::character::Character>,
+    /// Each team's points and players, in the scene's order; empty in a
+    /// game without teams.
+    pub teams: Vec<TeamResult>,
+    /// The team each player is in, by nickname.
+    pub player_teams: HashMap<Arc<str>, usize>,
+}
+
+/// A team's standing.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct TeamResult {
+    /// Its players' points added up.
+    pub score: u64,
+    pub players: u32,
+}
+
+impl PollResults {
+    /// The team leading on points, the lower one on a tie; 0 without teams.
+    pub fn leading_team(&self) -> usize {
+        self.teams
+            .iter()
+            .enumerate()
+            .fold(None, |best: Option<(usize, u64)>, (index, team)| match best {
+                Some((_, score)) if score >= team.score => best,
+                _ => Some((index, team.score)),
+            })
+            .map_or(0, |(index, _)| index)
+    }
 }
 
 /// The age a player stops counting at, and the one preview players have:
@@ -88,6 +115,18 @@ impl PollResults {
             PollSource::AudienceAge { slot } => {
                 self.audience.get(*slot).map_or(0.0, |(_, age)| *age)
             }
+            PollSource::Team { team, measure } => {
+                let result = self.teams.get(*team).copied().unwrap_or_default();
+                match measure {
+                    TeamMeasure::Score => result.score as f64,
+                    TeamMeasure::Players => f64::from(result.players),
+                    TeamMeasure::Average if result.players > 0 => {
+                        result.score as f64 / f64::from(result.players)
+                    }
+                    TeamMeasure::Average => 0.0,
+                }
+            }
+            PollSource::LeadingTeam => self.leading_team() as f64,
         })
     }
 
@@ -168,6 +207,37 @@ pub enum PollSource {
     AudienceJoined { slot: usize },
     /// Seconds since the player at audience `slot` joined, 0 while empty.
     AudienceAge { slot: usize },
+    /// A number about one team.
+    Team { team: usize, measure: TeamMeasure },
+    /// The team leading on points.
+    LeadingTeam,
+}
+
+/// A number a team reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TeamMeasure {
+    /// Its players' points added up.
+    Score,
+    /// Its players.
+    Players,
+    /// Points per player.
+    Average,
+}
+
+impl TeamMeasure {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Score => "score",
+            Self::Players => "players",
+            Self::Average => "average",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        [Self::Score, Self::Players, Self::Average]
+            .into_iter()
+            .find(|measure| measure.name() == name)
+    }
 }
 
 /// Makes a parameter report a live value: its sampled driver holds the
@@ -307,6 +377,8 @@ pub enum BarSource {
     },
     /// The score of the player at `rank`, against the leader's.
     Leader { rank: usize },
+    /// A team's score, against the leading team's.
+    Team { team: usize },
 }
 
 impl BarSource {
@@ -323,6 +395,13 @@ impl BarSource {
             } => spec.fraction(*answer, &results.live_counts(poll, *answers)),
             Self::Leader { rank } => {
                 leader_fraction(results.leaderboard.iter().map(|(_, score)| *score), *rank)
+            }
+            Self::Team { team } => {
+                let best = results.teams.iter().map(|team| team.score).max().unwrap_or(0);
+                match results.teams.get(*team) {
+                    Some(result) if best > 0 => result.score as f64 / best as f64,
+                    _ => 0.0,
+                }
             }
         })
     }

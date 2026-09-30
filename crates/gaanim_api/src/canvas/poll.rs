@@ -14,8 +14,8 @@
 use std::sync::Arc;
 
 use gaanim_animation::polls::{
-    BarSource, BarSpec, LiveTextSource, PollBar, PollMeasure, PollSource, PollValue, TextAlign,
-    leader_fraction,
+    BarSource, BarSpec, LiveTextSource, PollBar, PollMeasure, PollSource, PollValue, TeamMeasure,
+    TextAlign, leader_fraction,
 };
 use gaanim_animation::rehearsal::{Lean, MAX_PLAYERS, RehearsalSpec};
 use gaanim_animation::{SampledInterpolation, SampledProperty};
@@ -28,6 +28,13 @@ use super::drawable::DrawableHandle;
 use super::ops::{Op, SharedCanvasState};
 use super::types::{CurveElement, SpawnKind};
 use super::visualization::{Parameter, parameter_in};
+
+/// Most teams a game has: their buttons must fit on a phone.
+pub const MAX_TEAMS: usize = 6;
+/// Colors teams get when the scene gives none, in order.
+pub const TEAM_COLORS: [&str; MAX_TEAMS] = [
+    "#ff4f8b", "#2fb8ff", "#ff9f1c", "#2ed47a", "#9b5de5", "#00c2c7",
+];
 
 /// Most answers a poll takes: they must fit on a phone.
 pub const MAX_POLL_OPTIONS: usize = 6;
@@ -174,7 +181,10 @@ impl SceneModel {
                 )));
             }
         }
-        for (value, name) in [(spec.skill, "skill"), (spec.speed, "speed")] {
+        for (value, name) in [(spec.skill, "skill"), (spec.speed, "speed")]
+            .into_iter()
+            .chain(spec.team_skill.iter().map(|skill| (*skill, "skill")))
+        {
             if !(0.0..=1.0).contains(&value) {
                 return Err(PollError::Invalid(format!(
                     "{name} goes from 0 to 1, got {value}"
@@ -191,6 +201,84 @@ impl SceneModel {
         self.state.lock().expect("canvas state poisoned").rehearsal =
             RehearsalSpec { names, ..spec };
         Ok(())
+    }
+
+    /// Play the game in teams: each player joins one of `names`, dealt to
+    /// the smallest team, or chosen on the phone with `choose`. `colors`
+    /// (`#rrggbb`, one per team) tint the phones; `None` picks
+    /// [`TEAM_COLORS`]. A scene has one set of teams.
+    pub fn teams(
+        &mut self,
+        names: Vec<String>,
+        colors: Option<Vec<String>>,
+        choose: bool,
+    ) -> Result<TeamsHandle, PollError> {
+        let names: Vec<String> = names.iter().map(|name| name.trim().to_string()).collect();
+        if !(2..=MAX_TEAMS).contains(&names.len()) {
+            return Err(PollError::Invalid(format!(
+                "a game has between 2 and {MAX_TEAMS} teams, got {}",
+                names.len()
+            )));
+        }
+        for (index, name) in names.iter().enumerate() {
+            if name.is_empty() || name.chars().count() > 20 {
+                return Err(PollError::Invalid(format!(
+                    "team names have 1 to 20 characters, got {name:?}"
+                )));
+            }
+            if names[..index]
+                .iter()
+                .any(|other| other.to_lowercase() == name.to_lowercase())
+            {
+                return Err(PollError::Invalid(format!(
+                    "the team name {name:?} appears twice"
+                )));
+            }
+        }
+        let colors = match colors {
+            Some(colors) => colors
+                .iter()
+                .map(|color| color.trim().to_lowercase())
+                .collect(),
+            None => TEAM_COLORS[..names.len()]
+                .iter()
+                .map(|color| color.to_string())
+                .collect::<Vec<_>>(),
+        };
+        let hex = |color: &str| {
+            color.len() == 7
+                && color.starts_with('#')
+                && color[1..].chars().all(|ch| ch.is_ascii_hexdigit())
+        };
+        if colors.len() != names.len() || !colors.iter().all(|color| hex(color)) {
+            return Err(PollError::Invalid(format!(
+                "give one #rrggbb color per team, got {colors:?}"
+            )));
+        }
+        let info = gaanim_timeline::timeline::TeamsInfo {
+            names,
+            colors,
+            choose,
+        };
+        let mut state = self.state.lock().expect("canvas state poisoned");
+        if state.poll_session.is_none() {
+            return Err(PollError::NoSession);
+        }
+        if state
+            .poll_teams
+            .as_ref()
+            .is_some_and(|teams| *teams != info)
+        {
+            return Err(PollError::Invalid(
+                "the scene already has other teams; a game has one set".into(),
+            ));
+        }
+        state.poll_teams = Some(info.clone());
+        drop(state);
+        Ok(TeamsHandle {
+            state: self.state.clone(),
+            info,
+        })
     }
 
     /// The made-up audience of [`Self::rehearsal`].
@@ -825,6 +913,93 @@ impl LeaderboardHandle {
     }
 }
 
+/// The game's teams, from [`SceneModel::teams`]: each has an index, in the
+/// order given.
+#[derive(Clone)]
+pub struct TeamsHandle {
+    state: SharedCanvasState,
+    info: gaanim_timeline::timeline::TeamsInfo,
+}
+
+impl std::fmt::Debug for TeamsHandle {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("TeamsHandle")
+            .field("names", &self.info.names)
+            .finish_non_exhaustive()
+    }
+}
+
+impl TeamsHandle {
+    pub fn names(&self) -> Vec<String> {
+        self.info.names.clone()
+    }
+
+    pub fn colors(&self) -> Vec<String> {
+        self.info.colors.clone()
+    }
+
+    /// Whether players choose their team on the phone.
+    pub fn choose(&self) -> bool {
+        self.info.choose
+    }
+
+    fn check(&self, team: usize) -> Result<(), PollError> {
+        if team < self.info.names.len() {
+            Ok(())
+        } else {
+            Err(PollError::Invalid(format!(
+                "team {team} does not exist; the game has {} teams",
+                self.info.names.len()
+            )))
+        }
+    }
+
+    fn value(&self, team: usize, measure: TeamMeasure) -> Result<Parameter, PollError> {
+        self.check(team)?;
+        live_parameter(
+            &self.state,
+            PollSource::Team { team, measure },
+            vec![0.0],
+            vec![0.0],
+            SampledInterpolation::Step,
+        )
+    }
+
+    /// The points of `team`'s players added up.
+    pub fn score(&self, team: usize) -> Result<Parameter, PollError> {
+        self.value(team, TeamMeasure::Score)
+    }
+
+    /// How many players `team` has.
+    pub fn players(&self, team: usize) -> Result<Parameter, PollError> {
+        self.value(team, TeamMeasure::Players)
+    }
+
+    /// `team`'s points per player, 0 while it has none.
+    pub fn average(&self, team: usize) -> Result<Parameter, PollError> {
+        self.value(team, TeamMeasure::Average)
+    }
+
+    /// The index of the team leading on points (the first on a tie).
+    pub fn leader(&self) -> Result<Parameter, PollError> {
+        live_parameter(
+            &self.state,
+            PollSource::LeadingTeam,
+            vec![0.0],
+            vec![0.0],
+            SampledInterpolation::Step,
+        )
+    }
+
+    /// A bar whose length is `team`'s points against the leading team's.
+    pub fn bar(&self, team: usize, options: PollBarOptions) -> Result<DrawableHandle, PollError> {
+        self.check(team)?;
+        let spec = options.spec()?;
+        Ok(spawn_bar(&self.state, spec, BarSource::Team { team }, 0.0))
+    }
+}
+
 /// The game's audience, from [`SceneModel::audience`]: each player has a
 /// slot, its place in joining order (0 for the first to join).
 #[derive(Clone)]
@@ -1189,6 +1364,35 @@ mod tests {
         assert!(scene.rehearsal(late).is_err());
         scene.rehearsal(spec(vec![" Ana ", "Beto"])).unwrap();
         assert_eq!(scene.rehearsal_spec().names, ["Ana", "Beto"]);
+    }
+
+    #[test]
+    fn teams_validate_their_names_and_colors() {
+        let mut scene = scene();
+        let names = |list: &[&str]| list.iter().map(|name| name.to_string()).collect();
+        assert!(scene.teams(names(&["Solo"]), None, false).is_err());
+        assert!(scene.teams(names(&["A", "a"]), None, false).is_err());
+        assert!(scene.teams(names(&["A", ""]), None, false).is_err());
+        let colors = |list: &[&str]| Some(list.iter().map(|color| color.to_string()).collect());
+        assert!(
+            scene
+                .teams(names(&["A", "B"]), colors(&["#ff0000"]), false)
+                .is_err()
+        );
+        assert!(
+            scene
+                .teams(names(&["A", "B"]), colors(&["red", "#0000ff"]), false)
+                .is_err()
+        );
+        let teams = scene.teams(names(&[" Rojo ", "Azul"]), None, true).unwrap();
+        assert_eq!(teams.names(), ["Rojo", "Azul"]);
+        assert_eq!(teams.colors(), [TEAM_COLORS[0], TEAM_COLORS[1]]);
+        assert!(teams.choose());
+        assert!(teams.score(1).is_ok());
+        assert!(teams.score(2).is_err());
+        // The same teams again are fine; others are not.
+        assert!(scene.teams(names(&["Rojo", "Azul"]), None, true).is_ok());
+        assert!(scene.teams(names(&["Rojo", "Verde"]), None, true).is_err());
     }
 
     #[test]

@@ -522,6 +522,21 @@ pub struct PollSessionInfo {
     /// audience or opens a poll. A new game goes back to its start.
     #[cfg_attr(feature = "serde", serde(default))]
     pub game_segment: Option<u32>,
+    /// The game's teams (`scene.teams`), if it plays in teams.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub teams: Option<TeamsInfo>,
+}
+
+/// A game's teams, as the phones show them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct TeamsInfo {
+    pub names: Vec<String>,
+    /// `#rrggbb`, one per team.
+    pub colors: Vec<String>,
+    /// Players choose their team on the phone; otherwise the relay deals
+    /// each one to the smallest.
+    pub choose: bool,
 }
 
 /// Where a presentation's game is, for the phones.

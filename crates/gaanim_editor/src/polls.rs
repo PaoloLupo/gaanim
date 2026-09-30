@@ -199,6 +199,8 @@ enum Command {
     Reset,
     /// Phones ask for a nickname as soon as they open the page.
     Lobby,
+    /// The game plays in these teams.
+    Teams(gaanim_timeline::timeline::TeamsInfo),
     /// Where the game is: "play", "podium", or "end" when the
     /// presentation ends.
     Stage(&'static str),
@@ -223,6 +225,8 @@ struct Snapshot {
     avatars: HashMap<Arc<str>, gaanim_animation::characters::CharacterParts>,
     players: u32,
     connected: u32,
+    teams: Vec<gaanim_animation::polls::TeamResult>,
+    player_teams: HashMap<Arc<str>, usize>,
 }
 
 impl Snapshot {
@@ -243,6 +247,26 @@ impl Snapshot {
             )
             .filter(|(_, character)| catalog.contains(character))
             .map(|(name, character)| (Arc::from(name), character))
+            .collect();
+        let player_teams = results
+            .audience
+            .iter()
+            .filter_map(|arrival| Some((arrival.name.as_str(), arrival.team?)))
+            .chain(
+                results
+                    .players
+                    .iter()
+                    .filter_map(|player| Some((player.name.as_str(), player.team?))),
+            )
+            .map(|(name, team)| (Arc::from(name), team))
+            .collect();
+        let teams = results
+            .teams
+            .iter()
+            .map(|team| gaanim_animation::polls::TeamResult {
+                score: team.score,
+                players: team.players,
+            })
             .collect();
         for (id, poll) in results.polls {
             let id: Arc<str> = id.into();
@@ -270,6 +294,8 @@ impl Snapshot {
             avatars,
             players: results.player_count,
             connected: results.connected,
+            teams,
+            player_teams,
         }
     }
 
@@ -320,6 +346,9 @@ impl PollClient {
         let (commands, receiver) = mpsc::channel();
         if session.lobby {
             let _ = commands.send(Command::Lobby);
+        }
+        if let Some(teams) = &session.teams {
+            let _ = commands.send(Command::Teams(teams.clone()));
         }
         let thread_snapshot = snapshot.clone();
         let pushed = socket.live.clone();
@@ -437,6 +466,8 @@ impl PollClient {
             players: snapshot.players,
             connected: snapshot.connected,
             avatars: snapshot.avatars,
+            teams: snapshot.teams,
+            player_teams: snapshot.player_teams,
         }
     }
 }
@@ -463,6 +494,17 @@ struct Results {
     connected: u32,
     #[serde(default)]
     now: f64,
+    /// Each team's standing, in the scene's order.
+    #[serde(default)]
+    teams: Vec<TeamState>,
+}
+
+#[derive(Deserialize)]
+struct TeamState {
+    #[serde(default)]
+    score: u64,
+    #[serde(default)]
+    players: u32,
 }
 
 #[derive(Deserialize)]
@@ -484,6 +526,8 @@ struct Player {
     score: u64,
     #[serde(default)]
     avatar: Option<gaanim_animation::characters::CharacterParts>,
+    #[serde(default)]
+    team: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -494,6 +538,8 @@ struct Arrival {
     joined: f64,
     #[serde(default)]
     avatar: Option<gaanim_animation::characters::CharacterParts>,
+    #[serde(default)]
+    team: Option<usize>,
 }
 
 /// An HTTP agent with the system's TLS, which ureq is built with here.
@@ -644,6 +690,14 @@ fn run_relay_session(
                 Command::Kick(name) => api.post("kick", serde_json::json!({ "name": name })),
                 Command::Reset => api.post("reset", serde_json::json!({})),
                 Command::Lobby => api.post("lobby", serde_json::json!({ "open": true })),
+                Command::Teams(teams) => api.post(
+                    "teams",
+                    serde_json::json!({
+                        "names": teams.names,
+                        "colors": teams.colors,
+                        "choose": teams.choose,
+                    }),
+                ),
                 Command::Stage(stage) => api.post("stage", serde_json::json!({ "stage": stage })),
                 Command::Open(_) | Command::Close => Ok(()),
             };
@@ -1145,6 +1199,7 @@ mod tests {
             code: code.into(),
             lobby: true,
             game_segment: None,
+            teams: None,
         })
         .unwrap();
         let phone = https_agent().unwrap();

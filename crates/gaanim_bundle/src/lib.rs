@@ -222,6 +222,12 @@ pub enum LiveSourceRecord {
     AudienceAge {
         slot: usize,
     },
+    /// `measure` is `score`, `players` or `average`.
+    Team {
+        team: usize,
+        measure: String,
+    },
+    LeadingTeam,
 }
 
 /// What a bar's length follows.
@@ -235,6 +241,9 @@ pub enum BarSourceRecord {
     },
     Leader {
         rank: usize,
+    },
+    Team {
+        team: usize,
     },
 }
 
@@ -385,6 +394,16 @@ struct SessionRecord {
     lobby: bool,
     #[serde(default)]
     game_segment: Option<u32>,
+    #[serde(default)]
+    teams: Option<TeamsRecord>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct TeamsRecord {
+    names: Vec<String>,
+    colors: Vec<String>,
+    #[serde(default)]
+    choose: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -416,6 +435,11 @@ fn write_polls(scene: &SceneData) -> Result<Vec<u8>> {
             code: session.code.clone(),
             lobby: session.lobby,
             game_segment: session.game_segment,
+            teams: session.teams.as_ref().map(|teams| TeamsRecord {
+                names: teams.names.clone(),
+                colors: teams.colors.clone(),
+                choose: teams.choose,
+            }),
         }),
         polls: scene
             .polls
@@ -459,6 +483,13 @@ fn read_polls(bytes: &[u8], scene: &mut SceneData) -> Result<()> {
         code: session.code,
         lobby: session.lobby,
         game_segment: session.game_segment,
+        teams: session
+            .teams
+            .map(|teams| gaanim_timeline::timeline::TeamsInfo {
+                names: teams.names,
+                colors: teams.colors,
+                choose: teams.choose,
+            }),
     });
     scene.polls = entry
         .polls
@@ -1624,6 +1655,11 @@ mod tests {
                 code: "ABC234".into(),
                 lobby: true,
                 game_segment: Some(3),
+                teams: Some(gaanim_timeline::timeline::TeamsInfo {
+                    names: vec!["Rojo".into(), "Azul".into()],
+                    colors: vec!["#ff0000".into(), "#0000ff".into()],
+                    choose: true,
+                }),
             }),
             stop_gates: vec![gate.clone()],
             ..Default::default()
@@ -1637,6 +1673,9 @@ mod tests {
             bundle.scene.poll_session.as_ref().unwrap().game_segment,
             Some(3)
         );
+        let teams = bundle.scene.poll_session.as_ref().unwrap().teams.as_ref().unwrap();
+        assert_eq!(teams.names, ["Rojo", "Azul"]);
+        assert!(teams.choose);
         assert_eq!(bundle.scene.stop_gates, [gate]);
     }
 
@@ -1653,6 +1692,7 @@ mod tests {
                     code: "ABC234".into(),
                     lobby: false,
                     game_segment: None,
+                    teams: None,
                 }),
                 polls,
                 ..scene

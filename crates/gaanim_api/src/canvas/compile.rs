@@ -2721,7 +2721,7 @@ impl SceneModel {
                 },
             )
             .collect();
-        let (polls, poll_session, poll_lobby, lobby_at, stop_gates, live_zones, rehearsal) = {
+        let (polls, poll_session, poll_lobby, lobby_at, stop_gates, live_zones, rehearsal, teams) = {
             let state = self.state.lock().expect("canvas state poisoned");
             (
                 state.polls.clone(),
@@ -2731,6 +2731,7 @@ impl SceneModel {
                 state.stop_gates.clone(),
                 state.live_zones.clone(),
                 state.rehearsal.clone(),
+                state.poll_teams.clone(),
             )
         };
         let lobby_segment = lobby_at.map(|(segment, _)| segment);
@@ -2795,7 +2796,13 @@ impl SceneModel {
                     })
                 })
                 .collect();
-            gaanim_animation::rehearsal::Rehearsal::plan(&rehearsal, room, &planned)
+            let teams = teams
+                .as_ref()
+                .map(|teams| gaanim_animation::rehearsal::RehearsalTeams {
+                    count: teams.names.len(),
+                    choose: teams.choose,
+                });
+            gaanim_animation::rehearsal::Rehearsal::plan(&rehearsal, room, &planned, teams)
         });
         builder.timeline.set_polls(
             polls
@@ -2839,6 +2846,7 @@ impl SceneModel {
                 code: session.code,
                 lobby: poll_lobby,
                 game_segment,
+                teams,
             }),
         );
         // Always set, so a reload without zones clears the previous ones.
@@ -12582,6 +12590,69 @@ mod tests {
         assert!(value_at(&leader, 15.0) > 500.0);
         // Back in the room, fewer players again.
         assert_eq!(value_at(&count, 3.0) < 5.0, true);
+    }
+
+    #[test]
+    fn a_rehearsal_deals_its_players_to_teams_that_score_their_points() {
+        use bevy::prelude::App;
+        let mut canvas = SceneModel::new(640, 360);
+        canvas.set_poll_session(crate::canvas::PollSession {
+            relay: Some("https://relay.example.dev".into()),
+            code: "ABC234".into(),
+        });
+        canvas
+            .rehearsal(gaanim_animation::rehearsal::RehearsalSpec {
+                names: gaanim_animation::rehearsal::RehearsalSpec::names(8),
+                team_skill: vec![0.95, 0.05],
+                ..Default::default()
+            })
+            .unwrap();
+        canvas.segment("Pregunta", None).unwrap();
+        let teams = canvas
+            .teams(vec!["Rojo".into(), "Azul".into()], None, false)
+            .unwrap();
+        let quiz = canvas
+            .quiz("¿2 + 2?", ["3", "4", "5"], 1, 20, 1000, Lean::Auto)
+            .unwrap();
+        let (red, blue, players, leader) = (
+            teams.score(0).unwrap(),
+            teams.score(1).unwrap(),
+            teams.players(1).unwrap(),
+            teams.leader().unwrap(),
+        );
+        canvas.wait(4.0);
+        canvas.stop(None).unwrap();
+        quiz.reveal().unwrap();
+        canvas.wait(1.0);
+        let timeline = compiled_timeline(&canvas);
+        let session = timeline.poll_session.as_ref().unwrap();
+        assert_eq!(session.teams.as_ref().unwrap().names, ["Rojo", "Azul"]);
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        let mut value_at = |parameter: &crate::canvas::visualization::Parameter, time: f64| {
+            app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
+            app.update();
+            let entity = entity_of(app.world_mut(), parameter.drawable());
+            app.world()
+                .get::<gaanim_animation::FloatSignal>(entity)
+                .unwrap()
+                .value
+        };
+        assert_eq!(value_at(&players, 4.5), 4.0);
+        assert_eq!(value_at(&red, 0.0), 0.0);
+        // The skilled team answers right and leads.
+        assert!(value_at(&red, 4.5) > value_at(&blue, 4.5));
+        assert_eq!(value_at(&leader, 4.5), 0.0);
     }
 
     #[test]

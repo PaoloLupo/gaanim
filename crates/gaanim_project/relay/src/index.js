@@ -32,6 +32,7 @@
 //   POST   /s/<code>/kick     {name}: remove and ban a player (presenter)
 //   POST   /s/<code>/reset    forget every poll, vote and player (presenter)
 //   POST   /s/<code>/lobby    {open}: phones join as they arrive (presenter)
+//   POST   /s/<code>/teams    {names, colors, choose}: play in teams (presenter)
 //   GET    /s/<code>/results  {current, connected, polls, players, audience} (presenter)
 //   GET    /s/<code>/presenter  WebSocket pushing {type: "results", ...} (presenter)
 //   GET    /health            {relay, version}
@@ -93,7 +94,11 @@ const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
  * lasts between SESSION_TTL_MS minus this and SESSION_TTL_MS after its last
  * activity. */
 const ALARM_SLACK_MS = 30 * 60 * 1000;
-const API_VERSION = 8;
+const API_VERSION = 9;
+/** Teams a game may have, and the longest team name. */
+const MAX_TEAMS = 6;
+const MAX_TEAM_NAME = 20;
+const COLOR = /^#[0-9a-f]{6}$/;
 /** Where the game is: questions, the final standings, or over. */
 const STAGES = new Set(["play", "podium", "end"]);
 /** Players a podium shows. */
@@ -157,6 +162,8 @@ export default {
           return reply(await session.reset(bearer(request)));
         case "POST lobby":
           return reply(await session.lobby(bearer(request), await body(request)));
+        case "POST teams":
+          return reply(await session.teams(bearer(request), await body(request)));
         case "POST stage":
           return reply(await session.stage(bearer(request), await body(request)));
         case "GET results":
@@ -178,6 +185,7 @@ export class PollSession extends DurableObject {
   //   "key"                  presenter key hash
   //   "lobby"                true when phones join as soon as they arrive
   //   "stage"                "podium" or "end" once the questions are over
+  //   "teams"                {names, colors, choose} when the game plays in teams
   //   "current"              id of the open poll, absent when none is
   //   "revealed"             id of the quiz revealed last
   //   "poll:<id>"            {question, options, quiz?}; a quiz is
@@ -220,6 +228,7 @@ export class PollSession extends DurableObject {
     const s = {
       key: null,
       lobby: false,
+      teams: null,
       stage: "play",
       current: null,
       revealed: null,
@@ -243,6 +252,9 @@ export class PollSession extends DurableObject {
           break;
         case "stage":
           if (STAGES.has(value)) s.stage = value;
+          break;
+        case "teams":
+          s.teams = value;
           break;
         case "current":
           s.current = value;
@@ -403,8 +415,9 @@ export class PollSession extends DurableObject {
     // A phone asking with its id learns whether it still plays: a new game
     // forgets every player.
     const joined = voter ? { joined: s.players.has(voter) } : {};
+    const teams = s.teams ? { teams: s.teams } : {};
     if (!poll) {
-      const state = { lobby: s.lobby, open: false, stage: s.stage, ...joined };
+      const state = { lobby: s.lobby, open: false, stage: s.stage, ...joined, ...teams };
       if (s.stage !== "play") {
         // The final standings, for phones to show their podium.
         const ranking = rank(s);
@@ -414,11 +427,13 @@ export class PollSession extends DurableObject {
           score: player.score,
           avatar: player.avatar ?? defaultAvatar(player.voter),
         }));
+        if (s.teams) state.standings = teamStandings(s);
       }
       return state;
     }
     const state = {
       ...joined,
+      ...teams,
       lobby: s.lobby,
       stage: s.stage,
       open: true,
@@ -474,10 +489,28 @@ export class PollSession extends DurableObject {
     }
     const previous = s.players.get(voter);
     const avatar = checkAvatar(input.avatar) ?? previous?.avatar ?? defaultAvatar(voter);
-    if (previous?.name !== name || String(previous?.avatar) !== String(avatar)) {
+    // A team: kept once dealt; a chosen one may change until the player
+    // answers a question.
+    let team = previous?.team ?? null;
+    if (s.teams) {
+      const count = s.teams.names.length;
+      const wanted = input.team;
+      const valid = Number.isInteger(wanted) && wanted >= 0 && wanted < count;
+      if (s.teams.choose) {
+        if (valid && (team === null || !previous?.answered)) team = wanted;
+        if (team === null) return fail(400, "choose a team");
+      } else if (team === null || team >= count) {
+        team = smallestTeam(s);
+      }
+    }
+    if (
+      previous?.name !== name ||
+      String(previous?.avatar) !== String(avatar) ||
+      (previous?.team ?? null) !== team
+    ) {
       const player = previous
-        ? { ...previous, name, avatar }
-        : { name, score: 0, correct: 0, answered: 0, joined: Date.now(), avatar };
+        ? { ...previous, name, avatar, team }
+        : { name, score: 0, correct: 0, answered: 0, joined: Date.now(), avatar, team };
       await this.ctx.storage.put(`player:${voter}`, player);
       if (previous) s.names.delete(previous.name.toLocaleLowerCase());
       s.players.set(voter, player);
@@ -755,7 +788,11 @@ export class PollSession extends DurableObject {
   async restart(s) {
     // Also removes the alarm; `touch` sets it again.
     await this.ctx.storage.deleteAll();
-    await this.ctx.storage.put(s.lobby ? { key: s.key, lobby: true } : { key: s.key });
+    await this.ctx.storage.put({
+      key: s.key,
+      ...(s.lobby && { lobby: true }),
+      ...(s.teams && { teams: s.teams }),
+    });
     this.loading = Promise.resolve({
       ...s,
       stage: "play",
@@ -792,6 +829,51 @@ export class PollSession extends DurableObject {
       else await this.ctx.storage.put("stage", stage);
       s.stage = stage;
       await this.broadcast();
+    }
+    await this.touch(s);
+    return ok({ ok: true });
+  }
+
+  /** The teams the game plays in, or none with no names. Declaring other
+   * teams deals every player again. */
+  async teams(key, input) {
+    const denied = await this.authorize(key, true);
+    if (denied) return denied;
+    const names = Array.isArray(input?.names) ? input.names.map((name) => text(name, MAX_TEAM_NAME)) : [];
+    const colors = Array.isArray(input?.colors) ? input.colors : [];
+    let teams = null;
+    if (names.length > 0) {
+      if (
+        names.length < 2 ||
+        names.length > MAX_TEAMS ||
+        names.some((name) => !name) ||
+        colors.length !== names.length ||
+        colors.some((color) => typeof color !== "string" || !COLOR.test(color))
+      ) {
+        return fail(400, "invalid teams");
+      }
+      teams = { names, colors, choose: input.choose === true };
+    }
+    const s = await this.startOver(await this.state());
+    if (JSON.stringify(teams) !== JSON.stringify(s.teams)) {
+      if (teams) await this.ctx.storage.put("teams", teams);
+      else await this.ctx.storage.delete("teams");
+      s.teams = teams;
+      // Players of other teams join again: dealt anew, or choosing.
+      const changed = {};
+      for (const [voter, player] of s.players) s.players.set(voter, { ...player, team: null });
+      const joining = [...s.players].sort(([, a], [, b]) => (a.joined ?? 0) - (b.joined ?? 0));
+      for (const [voter, player] of joining) {
+        const next = { ...player, team: teams && !teams.choose ? smallestTeam(s) : null };
+        s.players.set(voter, next);
+        changed[`player:${voter}`] = next;
+      }
+      await putAll(this.ctx.storage, changed);
+      await this.broadcast();
+      this.send((voter) => {
+        const player = voter && s.players.get(voter);
+        return { type: "player", player: player ? describe(s, voter, player) : null };
+      });
     }
     await this.touch(s);
     return ok({ ok: true });
@@ -845,6 +927,7 @@ export class PollSession extends DurableObject {
       correct: player.correct,
       answered: player.answered,
       avatar: player.avatar ?? defaultAvatar(player.voter),
+      team: player.team ?? null,
     }));
     // Everyone in the order they joined, for the scene's audience.
     const audience = ranking
@@ -852,6 +935,7 @@ export class PollSession extends DurableObject {
         name: player.name,
         joined: player.joined ?? 0,
         avatar: player.avatar ?? defaultAvatar(player.voter),
+        team: player.team ?? null,
       }))
       .sort((a, b) => a.joined - b.joined || a.name.localeCompare(b.name))
       .slice(0, AUDIENCE);
@@ -863,6 +947,8 @@ export class PollSession extends DurableObject {
       players,
       playerCount: ranking.length,
       audience,
+      // Each team's standing, in the scene's order.
+      teams: s.teams ? teamTotals(s) : [],
     };
   }
 
@@ -950,10 +1036,39 @@ function describe(s, voter, player, ranking = rank(s)) {
     answered: player.answered,
     rank: place || null,
     players: ranking.length,
+    team: player.team ?? null,
     last: quiz?.revealed
       ? { poll: id, correct: quiz.correct, option: answer?.option ?? null, points: answer?.points ?? 0 }
       : null,
   };
+}
+
+/** Each team's points and players, in the scene's order. */
+function teamTotals(s) {
+  const totals = s.teams.names.map(() => ({ score: 0, players: 0 }));
+  for (const player of s.players.values()) {
+    const total = totals[player.team];
+    if (!total) continue;
+    total.score += player.score;
+    total.players += 1;
+  }
+  return totals;
+}
+
+/** The teams best first, for the phones' final screen. */
+function teamStandings(s) {
+  return teamTotals(s)
+    .map((total, team) => ({ team, name: s.teams.names[team], color: s.teams.colors[team], ...total }))
+    .sort((a, b) => b.score - a.score || a.team - b.team);
+}
+
+/** The team with the fewest players, the first on a tie. */
+function smallestTeam(s) {
+  const sizes = s.teams.names.map(() => 0);
+  for (const player of s.players.values()) {
+    if (Number.isInteger(player.team) && player.team < sizes.length) sizes[player.team] += 1;
+  }
+  return sizes.indexOf(Math.min(...sizes));
 }
 
 /** The lists a character indexes, in its order. */

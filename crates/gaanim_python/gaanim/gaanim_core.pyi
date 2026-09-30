@@ -5311,6 +5311,64 @@ class Leaderboard:
         """
         ...
 
+class Teams:
+    """The game's teams from ``scene.teams``, as data for the scene to present
+    as it likes: a battle, a tug of war, two scoreboards.
+
+    Every method takes a ``team`` index, in the order the names were given.
+    ``score``, ``players``, ``average`` and ``leader`` return ``Parameter``
+    objects and ``bar`` a bar drawable. Outside a live presentation they
+    follow the scene's rehearsal, whose players are dealt to teams the same
+    way. Live zones tell each player's team to their behavior (``p.team``,
+    ``p.team_index``, ``p.team_count``, ``p.team_score``, ``p.team_rank``).
+    """
+    @property
+    def names(self) -> list[str]: ...
+    @property
+    def colors(self) -> list[str]:
+        """``#rrggbb`` per team, as the phones show them."""
+        ...
+    @property
+    def choose(self) -> bool:
+        """Whether players choose their team on the phone."""
+        ...
+    def __len__(self) -> int: ...
+    def score(self, team: int) -> Parameter:
+        """The points of ``team``'s players added up.
+
+        Raises ``ValueError`` for a team the game does not have.
+
+        Example:
+            scene.viz.readout(teams.score(0), format=".0f", suffix=" pts")
+        """
+        ...
+    def players(self, team: int) -> Parameter:
+        """How many players ``team`` has."""
+        ...
+    def average(self, team: int) -> Parameter:
+        """``team``'s points per player (0 while it has none): fairer than the
+        total when teams are uneven."""
+        ...
+    def leader(self) -> Parameter:
+        """The index of the team leading on points, the first on a tie."""
+        ...
+    def bar(
+        self,
+        team: int,
+        *,
+        length: float = 6.0,
+        thickness: float = 0.5,
+        direction: Literal["right", "left", "up", "down"] = "right",
+        radius: float = 0.0,
+    ) -> Drawable:
+        """A bar whose length is ``team``'s points against the leading team's.
+
+        Its bounds are the full ``length`` by ``thickness`` box, centered on
+        its position, and it grows from the edge opposite ``direction``.
+        Raises ``ValueError`` like ``Poll.bar``.
+        """
+        ...
+
 class Audience:
     """The game's audience from ``scene.audience``: the players in the order
     they joined, as data for the scene to arrange and animate as it likes.
@@ -8506,7 +8564,7 @@ class Scene:
         *,
         seed: int = 0,
         arrive: Optional[float] = None,
-        skill: float = 0.6,
+        skill: float | Sequence[float] = 0.6,
         speed: float = 0.5,
     ) -> None:
         """Describe the made-up audience that plays the scene outside a live
@@ -8523,14 +8581,16 @@ class Scene:
         ``players`` is how many (named Ana, Beto, Caro…) or their nicknames,
         in joining order. ``skill`` is how often they answer a quiz right
         and ``speed`` how early they answer (both 0 to 1); each player is a
-        little better or faster than the next. ``seed`` picks another crowd:
+        little better or faster than the next. In a game with teams
+        (``scene.teams``), ``skill`` may give one value per team, to rehearse
+        an uneven battle. ``seed`` picks another crowd:
         other join times, answers and characters. The same arguments always
         play the same session. Without a call, 12 players with these
         defaults rehearse. Tune single questions with ``rehearse=`` on
         ``poll`` and ``quiz``.
 
         Raises ``ValueError`` for no players or more than 200, an empty or
-        repeated nickname, ``skill`` or ``speed`` outside 0–1, or a negative
+        repeated nickname, a ``skill`` or ``speed`` outside 0–1, or a negative
         ``arrive``, and ``TypeError`` for ``players`` that is neither.
 
         Example:
@@ -8611,6 +8671,35 @@ class Scene:
             scene.stop()
         """
         ...
+    def teams(
+        self,
+        names: Sequence[str],
+        *,
+        choose: bool = False,
+        colors: Optional[Sequence[str]] = None,
+    ) -> Teams:
+        """Play the game in teams, and return their data.
+
+        Each player joins one of ``names``: the relay deals each new player
+        to the smallest team, or with ``choose`` the phone asks which one to
+        join. Phones show their team in its color (``colors``, ``#rrggbb``
+        per team; pink, blue, orange, green, purple and teal by default) and
+        tell the winning team at the end. A player's points count for the
+        team; ``Teams`` gives each team's score, players and average, and
+        live zones tell each player's team to their behavior, so the scene
+        designs the battle. The rehearsal deals its players the same way.
+
+        Raises ``ValueError`` for fewer than 2 or more than 6 teams, an empty,
+        long (over 20 characters) or repeated name, colors that are not one
+        ``#rrggbb`` per team, or a second, different set of teams.
+
+        Example:
+            teams = scene.teams(["Rojo", "Azul"], colors=["#ff4f8b", "#2fb8ff"])
+            for team, x in [(0, -4), (1, 4)]:
+                scene.text(teams.names[team], size=0.6).move_to(x, 3)
+                scene.viz.readout(teams.score(team), format=".0f").move_to(x, 2)
+        """
+        ...
     def leaderboard(self) -> Leaderboard:
         """The game's leaderboard: the players of the scene's quizzes, as data.
 
@@ -8657,8 +8746,10 @@ class Scene:
         functions; it is compiled now, so the ``.gaanim`` runs it without
         Python. ``p`` has ``t``, ``time``, ``joined``, ``index``,
         ``count``, ``rank``, ``score``, ``leader``, ``previous_rank``,
-        ``rank_since``, ``previous_score``, ``score_since`` and
-        ``random(k)``; see ``gaanim.live``.
+        ``rank_since``, ``previous_score``, ``score_since``, the team fields
+        ``team``, ``team_index``, ``team_count``, ``team_score`` and
+        ``team_rank`` (see ``scene.teams``; without teams everyone is in team
+        0) and ``random(k)``; see ``gaanim.live``.
 
         ``bounds`` is (x0, y0, x1, y1): characters are clipped to it. They
         are ``size`` units tall at scale 1.
