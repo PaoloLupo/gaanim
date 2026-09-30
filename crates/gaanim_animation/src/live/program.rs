@@ -158,6 +158,9 @@ pub struct PoseRegs {
     pub y: Reg,
     pub rotation: Reg,
     pub scale: Reg,
+    pub sx: Reg,
+    pub sy: Reg,
+    pub lean: Reg,
     pub flip: Reg,
     pub visible: Reg,
     /// An index into [`Program::strings`], or negative for none.
@@ -169,12 +172,15 @@ pub struct PoseRegs {
 }
 
 impl PoseRegs {
-    fn all(&self) -> [Reg; 9] {
+    fn all(&self) -> [Reg; 12] {
         [
             self.x,
             self.y,
             self.rotation,
             self.scale,
+            self.sx,
+            self.sy,
+            self.lean,
             self.flip,
             self.visible,
             self.express,
@@ -230,6 +236,12 @@ pub struct Pose {
     /// Radians, counterclockwise, about the character's middle.
     pub rotation: f64,
     pub scale: f64,
+    /// Stretch across and along the body, about the feet: squash and
+    /// stretch. 1 leaves it as drawn.
+    pub sx: f64,
+    pub sy: f64,
+    /// Radians the body leans counterclockwise, about the feet.
+    pub lean: f64,
     /// Mirrored left to right.
     pub flip: bool,
     pub visible: bool,
@@ -261,6 +273,18 @@ pub struct Inputs {
 }
 
 impl Inputs {
+    /// The same player `dt` seconds later, for measuring how a pose moves:
+    /// the clocks advance, the standings stay.
+    pub fn later(&self, dt: f64) -> Self {
+        Self {
+            t: self.t + dt,
+            time: self.time + dt,
+            rank_since: self.rank_since + dt,
+            score_since: self.score_since + dt,
+            ..*self
+        }
+    }
+
     pub fn get(&self, input: Input) -> f64 {
         match input {
             Input::T => self.t,
@@ -347,6 +371,9 @@ impl Program {
             y: r(self.pose.y),
             rotation: r(self.pose.rotation),
             scale: r(self.pose.scale),
+            sx: r(self.pose.sx),
+            sy: r(self.pose.sy),
+            lean: r(self.pose.lean),
             flip: r(self.pose.flip) != 0.0,
             visible: r(self.pose.visible) != 0.0,
             express: (express >= 0.0 && (express as usize) < self.strings.len())
@@ -364,6 +391,9 @@ impl Default for Pose {
             y: 0.0,
             rotation: 0.0,
             scale: 1.0,
+            sx: 1.0,
+            sy: 1.0,
+            lean: 0.0,
             flip: false,
             visible: true,
             express: None,
@@ -502,6 +532,9 @@ mod tests {
                 y: 0,
                 rotation: 0,
                 scale: 0,
+                sx: 0,
+                sy: 0,
+                lean: 0,
                 flip: 0,
                 visible: 0,
                 express: 0,
@@ -571,7 +604,7 @@ mod tests {
     fn a_program_reads_back_from_json() {
         let json = r#"{"version":[1,0],"name":"f","strings":["happy"],
             "code":[{"input":"t"},{"const":"0.1"},{"add":[0,1]},{"const":"0"},{"const":"nan"}],
-            "pose":{"x":2,"y":1,"rotation":3,"scale":1,"flip":3,"visible":1,
+            "pose":{"x":2,"y":1,"rotation":3,"scale":1,"sx":1,"sy":1,"lean":3,"flip":3,"visible":1,
                     "express":3,"since":4,"loop":3}}"#;
         let program = Program::from_json(json).unwrap();
         let pose = program.eval(
@@ -641,6 +674,9 @@ mod tests {
                     ("y", pose.y),
                     ("rotation", pose.rotation),
                     ("scale", pose.scale),
+                    ("sx", pose.sx),
+                    ("sy", pose.sy),
+                    ("lean", pose.lean),
                 ] {
                     let want = number(&expected[field]);
                     assert!(close(got, want), "{field}: {got} != {want} in {context}");

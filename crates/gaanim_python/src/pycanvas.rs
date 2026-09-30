@@ -5922,17 +5922,28 @@ impl PyScene {
     /// `audience` arrives in it as their character, posed every frame by
     /// `behavior`, a Python function compiled now. It runs until
     /// `zone.close()` or the end of the segment.
-    #[pyo3(signature = (audience, behavior, *, bounds=(-8.0, -4.5, 8.0, 4.5), size=1.2, preview=None, preview_every=0.6))]
+    #[pyo3(signature = (audience, behavior, *, bounds=(-8.0, -4.5, 8.0, 4.5), size=1.2, squash=0.04, max_stretch=1.4, lean=0.05, max_lean=0.35, preview=None, preview_every=0.6))]
+    #[allow(clippy::too_many_arguments)]
     fn live_zone(
         &self,
         audience: PyRef<'_, crate::poll::PyAudience>,
         behavior: &Bound<'_, PyAny>,
         bounds: (f64, f64, f64, f64),
         size: f64,
+        squash: f64,
+        max_stretch: f64,
+        lean: f64,
+        max_lean: f64,
         preview: Option<Vec<String>>,
         preview_every: f64,
     ) -> PyResult<crate::live::PyLiveZone> {
         crate::custom::ensure_authoring_allowed()?;
+        let motion = gaanim_api::canvas::LiveMotion {
+            squash,
+            max_stretch,
+            lean,
+            max_lean,
+        };
         let program = crate::live::compile_behavior(behavior)?;
         let inner = self
             .inner
@@ -5943,6 +5954,7 @@ impl PyScene {
                 program,
                 [bounds.0, bounds.1, bounds.2, bounds.3],
                 size,
+                motion,
                 preview,
                 preview_every,
             )

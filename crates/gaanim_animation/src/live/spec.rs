@@ -26,6 +26,35 @@ pub struct LiveZone {
     /// Poses each player's character from what the engine tells it.
     #[serde(deserialize_with = "checked_program")]
     pub behavior: Program,
+    /// How the engine deforms characters from how their poses move.
+    #[serde(default)]
+    pub motion: Motion,
+}
+
+/// Deformations the engine adds from how a pose moves, measured by
+/// evaluating the behavior just before and after the frame, so they stay
+/// a pure function of time. Zero turns one off.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Motion {
+    /// Stretch along the velocity and squash across, keeping the area:
+    /// `1 + squash * speed` (scene units per second), up to `max_stretch`.
+    pub squash: f64,
+    pub max_stretch: f64,
+    /// Lean into horizontal motion: `lean * horizontal speed` radians, up
+    /// to `max_lean`.
+    pub lean: f64,
+    pub max_lean: f64,
+}
+
+impl Default for Motion {
+    fn default() -> Self {
+        Self {
+            squash: 0.0,
+            max_stretch: 1.4,
+            lean: 0.0,
+            max_lean: 0.35,
+        }
+    }
 }
 
 fn checked_program<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Program, D::Error> {

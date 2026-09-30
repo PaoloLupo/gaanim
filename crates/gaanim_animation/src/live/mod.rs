@@ -30,7 +30,7 @@ use crate::polls::PollResults;
 use crate::updaters::PlaybackState;
 pub use program::{Inputs, Pose, Program, ProgramError};
 pub use run::{Player, STEP, ZoneRun};
-pub use spec::LiveZone;
+pub use spec::{LiveZone, Motion};
 
 /// The live zones of the scene, as compiled or read from a bundle.
 #[derive(Resource, Debug, Clone, Default, PartialEq)]

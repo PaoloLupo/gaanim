@@ -6,7 +6,17 @@ a bar race) plus corners where Python's numbers differ from Rust's.
 
 import math
 
-from gaanim.live import pose
+from gaanim.live import (
+    anticipate,
+    ballistic,
+    ease_in_out,
+    ease_out_back,
+    impact,
+    landing,
+    pose,
+    spring,
+    wobble,
+)
 
 GRAVITY = 20.0
 START = (-7.0, 3.0)
@@ -90,4 +100,21 @@ def corners(p):
     return pose(a + b + c, d + e, rotation=f + g, scale=h, flip=p.index % 2 == 1)
 
 
-BEHAVIORS = [zipline, podium, race, corners]
+def animated(p):
+    """The helpers: anticipation, an arc, an impact and springs."""
+    launch = 0.4
+    vx, vy = 5 + 2 * p.random(3), 6 + 3 * p.random(4)
+    land = launch + landing(vy, 2.0, gravity=GRAVITY)
+    sx, sy = anticipate(p.t, at=launch)
+    if p.t < launch:
+        return pose(-6, 1, sx=sx, sy=sy)
+    if p.t < land:
+        x, y = ballistic(p.t - launch, -6, 1, vx, vy, gravity=GRAVITY)
+        return pose(x, y, sx=sx, sy=sy, rotation=wobble(p.t - launch, amount=0.4))
+    x = -6 + vx * (land - launch)
+    sx, sy = impact(p.t - land, amount=0.4)
+    bounce = spring(p.rank_since, frequency=3) * ease_out_back(p.score_since) + ease_in_out(p.t / 9)
+    return pose(x, -1 + 0.1 * bounce, sx=sx, sy=sy, lean=-0.1 * spring(p.t - land, damping=0.2))
+
+
+BEHAVIORS = [zipline, podium, race, corners, animated]

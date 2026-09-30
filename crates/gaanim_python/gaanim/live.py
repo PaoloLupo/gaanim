@@ -48,8 +48,22 @@ __all__ = [
     "PLAYER_FIELDS",
     "Player",
     "Pose",
+    "anticipate",
+    "ballistic",
+    "clamp",
     "compile_behavior",
+    "ease_in",
+    "ease_in_out",
+    "ease_out",
+    "ease_out_back",
+    "impact",
+    "landing",
+    "lerp",
     "pose",
+    "progress",
+    "smoothstep",
+    "spring",
+    "wobble",
 ]
 
 #: Version of the compiled programs; Rust refuses a newer major version.
@@ -79,6 +93,9 @@ class Pose(NamedTuple):
     y: float
     rotation: float = 0.0
     scale: float = 1.0
+    sx: float = 1.0
+    sy: float = 1.0
+    lean: float = 0.0
     flip: bool = False
     visible: bool = True
     express: Optional[str] = None
@@ -92,6 +109,9 @@ def pose(
     *,
     rotation: float = 0.0,
     scale: float = 1.0,
+    sx: float = 1.0,
+    sy: float = 1.0,
+    lean: float = 0.0,
     flip: bool = False,
     visible: bool = True,
     express: Optional[str] = None,
@@ -102,14 +122,125 @@ def pose(
 
     ``(x, y)`` is where its feet are, in scene units. ``rotation`` turns it
     about its middle, in radians counterclockwise; ``scale`` multiplies the
-    zone's size; ``flip`` mirrors it left to right; ``visible=False`` hides
-    it. ``express`` plays an expression (``"happy"``, ``"sad"``, ``"hurt"``,
+    zone's size. ``sx`` and ``sy`` stretch it across and along its body
+    about the feet, for squash and stretch (``impact`` and ``anticipate``
+    give them); ``lean`` tilts it about the feet. ``flip`` mirrors it left
+    to right; ``visible=False`` hides it. ``express`` plays an expression (``"happy"``, ``"sad"``, ``"hurt"``,
     ``"winner"``, ``"surprised"``), once or with ``loop=True`` until another
     one. It starts when it first appears, or at ``since``: the player's
     ``t`` when it started, for expressions that follow a moment the behavior
     computes, like landing.
     """
-    return Pose(x, y, rotation, scale, flip, visible, express, since, loop)
+    return Pose(x, y, rotation, scale, sx, sy, lean, flip, visible, express, since, loop)
+
+
+# --- Helpers ---------------------------------------------------------------
+# Plain Python like any behavior: the compiler inlines them, and they run as
+# they are in Python. Times are seconds; before its moment each returns rest.
+
+
+def clamp(x: float, low: float = 0.0, high: float = 1.0) -> float:
+    """``x`` kept between ``low`` and ``high``."""
+    return min(max(x, low), high)
+
+
+def lerp(a: float, b: float, u: float) -> float:
+    """From ``a`` (u = 0) to ``b`` (u = 1)."""
+    return a + (b - a) * u
+
+
+def progress(t: float, start: float = 0.0, duration: float = 1.0) -> float:
+    """0 before ``start``, 1 after ``start + duration``, linear between."""
+    return clamp((t - start) / duration)
+
+
+def smoothstep(u: float) -> float:
+    """Slow in and slow out over u in [0, 1]."""
+    u = clamp(u)
+    return u * u * (3 - 2 * u)
+
+
+def ease_in(u: float) -> float:
+    """Slow in: starts gently, arrives fast (cubic)."""
+    u = clamp(u)
+    return u * u * u
+
+
+def ease_out(u: float) -> float:
+    """Slow out: leaves fast, arrives gently (cubic)."""
+    u = 1 - clamp(u)
+    return 1 - u * u * u
+
+
+def ease_in_out(u: float) -> float:
+    """Slow in and slow out (cubic)."""
+    u = clamp(u)
+    if u < 0.5:
+        return 4 * u * u * u
+    v = -2 * u + 2
+    return 1 - v * v * v / 2
+
+
+def ease_out_back(u: float, overshoot: float = 1.7) -> float:
+    """Arrives past 1 and settles back: overshoot for exaggeration."""
+    u = clamp(u) - 1
+    return 1 + (overshoot + 1) * u * u * u + overshoot * u * u
+
+
+def spring(t: float, frequency: float = 2.0, damping: float = 0.3) -> float:
+    """A spring released at t = 0 going from 0 to 1: it overshoots and
+    rings ``frequency`` times a second, dying out with ``damping`` (0 rings
+    forever, 1 barely overshoots). 0 before release."""
+    if t <= 0:
+        return 0.0
+    omega = 2 * math.pi * frequency
+    return 1 - math.exp(-damping * omega * t) * math.cos(omega * t)
+
+
+def wobble(t: float, amount: float = 1.0, frequency: float = 3.0, decay: float = 4.0) -> float:
+    """A shake started at t = 0 that fades: follow-through after a stop.
+    0 before it starts."""
+    if t <= 0:
+        return 0.0
+    return amount * math.exp(-decay * t) * math.sin(2 * math.pi * frequency * t)
+
+
+def impact(t: float, amount: float = 0.35, frequency: float = 2.5, decay: float = 6.0) -> tuple:
+    """Squash on landing at t = 0, bouncing back: returns ``(sx, sy)`` for
+    ``pose``, keeping the area. (1, 1) before the landing.
+
+    Example: ``sx, sy = impact(p.t - land)``
+    """
+    if t <= 0:
+        return 1.0, 1.0
+    squash = amount * math.exp(-decay * t) * math.cos(2 * math.pi * frequency * t)
+    return 1 + squash, 1 / (1 + squash)
+
+
+def anticipate(t: float, at: float, amount: float = 0.25, duration: float = 0.3) -> tuple:
+    """Crouch before an action at ``at``: the body squashes over the
+    ``duration`` before it and springs up to a stretch as it happens.
+    Returns ``(sx, sy)``; (1, 1) away from the action.
+
+    Example: ``sx, sy = anticipate(p.t, at=0.4)`` then launch at 0.4.
+    """
+    if t < at:
+        crouch = amount * ease_in(progress(t, at - duration, duration))
+        return 1 + crouch * 0.6, 1 - crouch
+    stretch = amount * 0.8 * math.exp(-8 * (t - at)) * math.cos(2 * math.pi * 1.5 * (t - at))
+    return 1 / (1 + stretch), 1 + stretch
+
+
+def ballistic(t: float, x: float, y: float, vx: float, vy: float, gravity: float = 9.8) -> tuple:
+    """Where a throw from (x, y) with velocity (vx, vy) is after ``t``
+    seconds: an arc. Returns ``(x, y)``."""
+    return x + vx * t, y + vy * t - gravity * t * t / 2
+
+
+def landing(vy: float, drop: float, gravity: float = 9.8) -> float:
+    """Seconds until a throw going up at ``vy`` falls ``drop`` below its
+    start."""
+    return (vy + math.sqrt(vy * vy + 2 * gravity * drop)) / gravity
 
 
 def _fnv1a(text: str) -> int:
@@ -410,6 +541,13 @@ class _Compiler:
     def select(self, cond: int, a: _Value, b: _Value, node: ast.AST) -> _Value:
         if a == b:
             return a
+        for value in (a, b):
+            if value.kind == "object" and isinstance(value.obj, _Unbound):
+                raise self.fail(
+                    node,
+                    f"{value.obj.name!r} is assigned on some paths only; "
+                    "give it a value before the if",
+                )
         if a.kind == "tuple" or b.kind == "tuple":
             if a.kind != b.kind or len(a.items) != len(b.items):
                 raise self.fail(
@@ -463,7 +601,13 @@ class _Compiler:
 
     # -- functions ------------------------------------------------------------
 
-    def function(self, function: Callable, args: list, node: Optional[ast.AST]) -> _Value:
+    def function(
+        self,
+        function: Callable,
+        args: list,
+        node: Optional[ast.AST],
+        keywords: Optional[dict] = None,
+    ) -> _Value:
         if function in self.stack:
             raise self.fail(node, f"{function.__qualname__} calls itself; recursion is not supported")
         source = _source_of(function)
@@ -474,26 +618,33 @@ class _Compiler:
                 node, f"{function.__qualname__} must take plain positional parameters"
             )
         params = [arg.arg for arg in spec.args]
-        defaults = function.__defaults__ or ()
+        given_defaults = function.__defaults__ or ()
+        defaults = dict(zip(params[len(params) - len(given_defaults):], given_defaults))
+        keywords = keywords or {}
         if len(args) > len(params):
             raise self.fail(
                 node,
                 f"{function.__qualname__} takes {len(params)} arguments, got {len(args)}",
             )
-        missing = len(params) - len(args)
-        if missing > len(defaults):
-            raise self.fail(
-                node,
-                f"{function.__qualname__} needs {len(params) - len(defaults)} arguments, got {len(args)}",
-            )
+        bound = dict(zip(params, args))
+        for name, value in keywords.items():
+            if name not in params:
+                raise self.fail(node, f"{function.__qualname__} has no parameter {name!r}")
+            if name in bound:
+                raise self.fail(node, f"{function.__qualname__} got {name!r} twice")
+            bound[name] = value
         caller = self.frame
+        values = {}
+        for name in params:
+            if name in bound:
+                values[name] = bound[name]
+            elif name in defaults:
+                values[name] = self.lift(defaults[name], tree)
+            else:
+                raise self.fail(node, f"{function.__qualname__} needs {name!r}")
         frame = _Frame(source)
         self.frame = frame
-        for name, value in zip(params, args):
-            frame.env[name] = value
-        if missing:
-            for name, default in zip(params[len(args):], defaults[len(defaults) - missing:]):
-                frame.env[name] = self.lift(default, tree)
+        frame.env.update(values)
         self.stack.append(function)
         try:
             if not self.block(tree.body, None):
@@ -562,7 +713,9 @@ class _Compiler:
             if node.value is None:
                 raise self.fail(node, "return a value")
             self.ret(self.expr(node.value), guard, node)
-            return guard is None
+            # The rest of this block never runs; the guard already says
+            # when this return does.
+            return True
         if isinstance(node, ast.Assign):
             value = self.expr(node.value)
             for target in node.targets:
@@ -894,9 +1047,9 @@ class _Compiler:
         keywords = {keyword.arg: self.expr(keyword.value) for keyword in node.keywords}
         if callee is pose or callee is Pose:
             return self.pose(node, args, keywords)
+        if inspect.isfunction(callee):
+            return self.function(callee, args, node, keywords)
         if keywords:
-            if inspect.isfunction(callee):
-                raise self.fail(node, "pass helper arguments by position")
             raise self.fail(node, f"{getattr(callee, '__name__', callee)} takes no keywords here")
         return self.builtin(node, callee, args)
 

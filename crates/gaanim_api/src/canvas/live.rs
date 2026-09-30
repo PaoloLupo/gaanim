@@ -4,7 +4,7 @@
 //! while a presentation takes votes (see `gaanim_animation::live`), and in
 //! previews and exports it replays its preview players.
 
-use gaanim_animation::live::{LiveZone, Program, ProgramError};
+use gaanim_animation::live::{LiveZone, Motion, Program, ProgramError};
 use gaanim_objects::character::catalog;
 
 use super::SceneModel;
@@ -86,14 +86,16 @@ impl SceneModel {
     /// the timeline is between here and [`LiveZoneHandle::close`] (or the
     /// end of this segment), each player of `audience` arrives in it as
     /// their character, posed every frame by `behavior`. `bounds` is
-    /// [x0, y0, x1, y1]; characters are `size` units tall at scale 1.
-    /// Previews and exports show `preview` players, or the audience's.
+    /// [x0, y0, x1, y1]; characters are `size` units tall at scale 1, and
+    /// `motion` deforms them from how they move. Previews and exports show
+    /// `preview` players, or the audience's.
     pub fn live_zone(
         &mut self,
         audience: &AudienceHandle,
         behavior: Program,
         bounds: [f64; 4],
         size: f64,
+        motion: Motion,
         preview: Option<Vec<String>>,
         preview_every: f64,
     ) -> Result<LiveZoneHandle, LiveZoneError> {
@@ -105,6 +107,20 @@ impl SceneModel {
         }
         let size = positive(size, "size")?;
         let preview_every = positive(preview_every, "preview_every")?;
+        let settings = [
+            (motion.squash, "squash"),
+            (motion.max_stretch, "max_stretch"),
+            (motion.lean, "lean"),
+            (motion.max_lean, "max_lean"),
+        ];
+        if let Some((value, name)) = settings
+            .iter()
+            .find(|(value, _)| !(value.is_finite() && *value >= 0.0))
+        {
+            return Err(LiveZoneError::Invalid(format!(
+                "{name} must be zero or positive, got {value}"
+            )));
+        }
         let behavior = check_behavior(behavior)?;
         let preview = preview.unwrap_or_else(|| audience.preview());
         let mut state = self.state.lock().expect("canvas state poisoned");
@@ -120,6 +136,7 @@ impl SceneModel {
                 preview,
                 preview_every,
                 behavior,
+                motion,
             },
             open,
             close: None,

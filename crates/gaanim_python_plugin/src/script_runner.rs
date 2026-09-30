@@ -269,8 +269,19 @@ fn bootstrap_gaanim_package(py: Python<'_>) -> PyResult<()> {
     live.setattr("__package__", "gaanim")?;
     live.setattr("__file__", "gaanim/live.py")?;
     modules.set_item("gaanim.live", &live)?;
-    let live_source = std::ffi::CString::new(GAANIM_LIVE).unwrap();
-    py.run(&live_source, Some(&live.dict()), None)?;
+    // The compiler reads its helpers' source with `inspect`, so the embedded
+    // file goes in `linecache` under the name its code objects carry.
+    let loader = pyo3::types::PyDict::new(py);
+    loader.set_item("source", GAANIM_LIVE)?;
+    loader.set_item("namespace", live.dict())?;
+    let load = std::ffi::CString::new(concat!(
+        "import linecache\n",
+        "linecache.cache['gaanim/live.py'] = ",
+        "(len(source), None, source.splitlines(True), 'gaanim/live.py')\n",
+        "exec(compile(source, 'gaanim/live.py', 'exec'), namespace)\n",
+    ))
+    .unwrap();
+    py.run(&load, Some(&loader), None)?;
 
     let init_source = std::ffi::CString::new(GAANIM_PACKAGE_INIT).unwrap();
     py.run(&init_source, Some(&package.dict()), None)

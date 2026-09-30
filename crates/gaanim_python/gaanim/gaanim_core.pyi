@@ -8146,6 +8146,10 @@ class Scene:
         *,
         bounds: tuple[float, float, float, float] = (-8.0, -4.5, 8.0, 4.5),
         size: float = 1.2,
+        squash: float = 0.04,
+        max_stretch: float = 1.4,
+        lean: float = 0.05,
+        max_lean: float = 0.35,
         preview: Optional[Sequence[str]] = None,
         preview_every: float = 0.6,
     ) -> LiveZone:
@@ -8164,7 +8168,14 @@ class Scene:
         ``random(k)``; see ``gaanim.live``.
 
         ``bounds`` is (x0, y0, x1, y1): characters are clipped to it. They
-        are ``size`` units tall at scale 1. Previews and exports replay
+        are ``size`` units tall at scale 1.
+
+        The engine also deforms characters from how their poses move,
+        measured by evaluating the behavior just before and after each
+        frame: they stretch along their velocity by ``1 + squash * speed``
+        (keeping their area, up to ``max_stretch``) and lean into
+        horizontal motion by ``lean * speed`` radians (up to ``max_lean``).
+        Pass 0 to turn either off; ``pose(sx=, sy=, lean=)`` adds your own. Previews and exports replay
         ``preview`` players (the audience's by default), one arriving every
         ``preview_every`` seconds and ranked in the order given. Raises
         ``gaanim.live.BehaviorError`` (a ``ValueError``) pointing at the

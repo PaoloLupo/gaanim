@@ -17,6 +17,10 @@ use gaanim_objects::character::{Character, ExpressionPlay, catalog, character_se
 use super::program::{Inputs, Pose};
 use super::spec::LiveZone;
 
+fn finite_or(value: f64, fallback: f64) -> f64 {
+    if value.is_finite() { value } else { fallback }
+}
+
 /// The grid expressions are checked on, in seconds.
 pub const STEP: f64 = 1.0 / 60.0;
 
@@ -170,6 +174,59 @@ impl ZoneRun {
         zone.behavior.eval(&inputs, &mut self.registers)
     }
 
+    /// How fast the pose's feet move now, measured across two grid steps.
+    fn velocity(&mut self, zone: &LiveZone, index: usize) -> Vec2 {
+        let inputs = self.inputs(index);
+        let before = zone.behavior.eval(&inputs.later(-STEP), &mut self.registers);
+        let after = zone.behavior.eval(&inputs.later(STEP), &mut self.registers);
+        let velocity = Vec2::new(after.x - before.x, after.y - before.y) / (2.0 * STEP);
+        if velocity.is_finite() {
+            velocity
+        } else {
+            Vec2::ZERO
+        }
+    }
+
+    /// Where a character's paths go: its feet at the pose, squashed and
+    /// leaning about them, turned and mirrored about its middle, and
+    /// stretched along its velocity when the zone asks.
+    fn placement(&mut self, zone: &LiveZone, index: usize, pose: &Pose, size: f64) -> Affine {
+        let local = to_scene(size);
+        let character = &self.actors[index].player.character;
+        // Feet at the origin; the middle is where the drawing is centred.
+        let feet = local * Point::new(50.0, catalog().feet(character));
+        let middle = -feet.to_vec2();
+        let about = |point: Vec2, transform: Affine| {
+            Affine::translate(point) * transform * Affine::translate(-point)
+        };
+        let flip = if pose.flip {
+            Affine::scale_non_uniform(-1.0, 1.0)
+        } else {
+            Affine::IDENTITY
+        };
+        let body = about(middle, Affine::rotate(pose.rotation) * flip)
+            * Affine::scale_non_uniform(finite_or(pose.sx, 1.0), finite_or(pose.sy, 1.0))
+            * Affine::translate(middle)
+            * local;
+        let motion = zone.motion;
+        let mut lean = finite_or(pose.lean, 0.0);
+        let mut stretch = Affine::IDENTITY;
+        if motion.squash > 0.0 || motion.lean > 0.0 {
+            let velocity = self.velocity(zone, index);
+            lean -= (motion.lean * velocity.x).clamp(-motion.max_lean, motion.max_lean);
+            let speed = velocity.hypot();
+            let ratio = (1.0 + motion.squash * speed).clamp(1.0, motion.max_stretch.max(1.0));
+            if ratio > 1.0 + 1e-9 {
+                let along = Affine::rotate(velocity.atan2());
+                stretch = about(
+                    middle,
+                    along * Affine::scale_non_uniform(ratio, 1.0 / ratio) * along.inverse(),
+                );
+            }
+        }
+        Affine::translate((pose.x, pose.y)) * Affine::rotate(lean) * stretch * body
+    }
+
     /// The next grid point, where [`ZoneRun::step`] moves the clock.
     pub fn next_step(&self) -> f64 {
         self.stepped + STEP
@@ -207,7 +264,6 @@ impl ZoneRun {
         let mut paths = Vec::new();
         for index in 0..self.actors.len() {
             let pose = self.pose(zone, index);
-            let actor = &self.actors[index];
             let size = zone.size * pose.scale;
             if !pose.visible
                 || !(size.is_finite() && size > 0.0)
@@ -215,6 +271,8 @@ impl ZoneRun {
             {
                 continue;
             }
+            let place = self.placement(zone, index, &pose, size);
+            let actor = &self.actors[index];
             let expression = pose.express.map(|express| {
                 let start = match (pose.since, actor.latch) {
                     (Some(since), _) => actor.joined + since,
@@ -230,16 +288,6 @@ impl ZoneRun {
                     looped: pose.looped,
                 }
             });
-            let local = to_scene(size);
-            // The pose puts the feet at (x, y) and turns about the middle.
-            let feet = local * Point::new(50.0, catalog.feet(&actor.player.character));
-            let middle = Vec2::new(pose.x, pose.y) - feet.to_vec2();
-            let flip = if pose.flip {
-                Affine::scale_non_uniform(-1.0, 1.0)
-            } else {
-                Affine::IDENTITY
-            };
-            let place = Affine::translate(middle) * Affine::rotate(pose.rotation) * flip * local;
             for layer in catalog.pose(
                 &actor.player.character,
                 actor.seed,
@@ -284,6 +332,7 @@ impl ZoneRun {
 mod tests {
     use super::*;
     use crate::live::program::Program;
+    use crate::live::spec::Motion;
 
     /// The zipline of `tests/live/behaviors.py`, from the compiled cases.
     fn zipline() -> LiveZone {
@@ -300,6 +349,7 @@ mod tests {
             preview: Vec::new(),
             preview_every: 0.5,
             behavior: behavior.checked().unwrap(),
+            motion: Default::default(),
         }
     }
 
@@ -365,7 +415,7 @@ mod tests {
         let json = r#"{"version":[1,0],"name":"f","strings":["happy"],
             "code":[{"input":"t"},{"const":"1.0"},{"ge":[0,1]},{"const":"0.0"},
                     {"const":"-1.0"},{"select":[2,3,4]},{"const":"nan"}],
-            "pose":{"x":3,"y":3,"rotation":3,"scale":1,"flip":3,"visible":1,
+            "pose":{"x":3,"y":3,"rotation":3,"scale":1,"sx":1,"sy":1,"lean":3,"flip":3,"visible":1,
                     "express":5,"since":6,"loop":3}}"#;
         let mut zone = zipline();
         zone.behavior = Program::from_json(json).unwrap();
@@ -397,5 +447,50 @@ mod tests {
             .map(|(path, _)| gaanim_core::kurbo::Shape::bounding_box(path).y0)
             .fold(f64::INFINITY, f64::min);
         assert!((bottom - pose.y).abs() < zone.size * 0.1, "{bottom} vs {}", pose.y);
+    }
+
+    #[test]
+    fn moving_characters_stretch_and_lean_into_their_motion() {
+        // x = speed * t, standing on y = 0.
+        let behavior = |speed: &str| {
+            let json = format!(
+                r#"{{"version":[1,0],"name":"run","strings":[],
+                "code":[{{"input":"t"}},{{"const":"{speed}"}},{{"mul":[0,1]}},{{"const":"0.0"}},
+                        {{"const":"1.0"}},{{"const":"-1.0"}},{{"const":"nan"}}],
+                "pose":{{"x":2,"y":3,"rotation":3,"scale":4,"sx":4,"sy":4,"lean":3,"flip":3,
+                        "visible":4,"express":5,"since":6,"loop":3}}}}"#
+            );
+            Program::from_json(&json).unwrap()
+        };
+        let extent = |speed: &str, motion: Motion| {
+            let mut zone = zipline();
+            zone.behavior = behavior(speed);
+            zone.motion = motion;
+            let mut run = played(&zone, &["Ana"], 1.0);
+            let bounds = run
+                .draw(&zone)
+                .iter()
+                .map(|(path, _)| gaanim_core::kurbo::Shape::bounding_box(path))
+                .reduce(|a, b| a.union(b))
+                .unwrap();
+            (bounds.width(), bounds.height(), bounds.center().x - run.poses(&zone)[0].1.x)
+        };
+        let motion = Motion {
+            squash: 0.05,
+            lean: 0.05,
+            ..Motion::default()
+        };
+        let still = extent("0.0", motion);
+        let running = extent("4.0", motion);
+        let plain = extent("4.0", Motion::default());
+        let same = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        assert!(
+            same(still.0, plain.0) && same(still.1, plain.1) && same(still.2, plain.2),
+            "only motion deforms: {still:?} vs {plain:?}"
+        );
+        // Stretched along the run and squashed across it.
+        assert!(running.0 > still.0 && running.1 < still.1, "{running:?} vs {still:?}");
+        // Leaning forward puts the body ahead of the feet.
+        assert!(running.2 > still.2 + 0.01, "{running:?} vs {still:?}");
     }
 }
