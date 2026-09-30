@@ -424,6 +424,21 @@ impl PyCanvasAnim {
         })
     }
 
+    /// Emit `count` particles from a particle emitter at the start of this animation.
+    fn burst(&self, count: u32) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        self.require_drawable_effect("burst")?;
+        self.require_effect_slot("burst")?;
+        Ok(Self {
+            inner: self
+                .inner
+                .clone()
+                .burst(count)
+                .map_err(PyValueError::new_err)?,
+        })
+    }
+
     fn count(&self, count: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
@@ -2258,6 +2273,15 @@ impl PyDrawable {
             .map_err(PyValueError::new_err)
     }
 
+    pub(crate) fn burst_impl(&self, count: u32) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.0
+            .clone()
+            .burst(count)
+            .map(Self)
+            .map_err(PyValueError::new_err)
+    }
+
     pub(crate) fn count_impl(&self, count: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.0
@@ -3196,6 +3220,11 @@ impl PyDrawable {
         end: f64,
     ) -> PyResult<Bound<'py, PyAny>> {
         let result = slf.borrow().stroke_taper_impl(start, end);
+        same_drawable(slf, result)
+    }
+    /// Emit `count` particles from this particle emitter at the cursor.
+    fn burst<'py>(slf: &Bound<'py, Self>, count: u32) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().burst_impl(count);
         same_drawable(slf, result)
     }
     /// Show the first `count` copies of a `repeat` or `duplicate` group.

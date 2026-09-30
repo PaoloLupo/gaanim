@@ -1534,6 +1534,43 @@ pub fn resolve_connect_system(
     }
 }
 
+/// Rebuild the layers of every [`crate::effects::ParticleEmitter`] at the
+/// timeline time. Each frame only evaluates the particles alive then.
+#[allow(clippy::type_complexity)]
+pub fn resolve_particles_system(
+    playback: Option<Res<gaanim_animation::PlaybackState>>,
+    emitters: Query<&crate::effects::ParticleEmitter>,
+    mut layers: Query<
+        (
+            &GlobalSpatialTransform,
+            &mut Path2D,
+            &mut PathSource,
+            &mut LocalBounds,
+        ),
+        With<crate::effects::ParticleLayer>,
+    >,
+) {
+    let time = playback.map_or(0.0, |state| state.current_time);
+    for emitter in &emitters {
+        for (entity, mut output) in emitter.layers.iter().zip(emitter.outlines(time)) {
+            let Ok((transform, mut path, mut source_path, mut bounds)) = layers.get_mut(*entity)
+            else {
+                continue;
+            };
+            output.apply_affine(transform.affine_2d.inverse());
+            if *path.0 != output {
+                let rect = output.bounding_box();
+                *bounds = LocalBounds(gaanim_math::Bounds3D::new_2d(
+                    rect.x0, rect.y0, rect.x1, rect.y1,
+                ));
+                let output = Arc::new(output);
+                *path = Path2D(output.clone());
+                *source_path = PathSource(output);
+            }
+        }
+    }
+}
+
 #[allow(clippy::type_complexity)]
 pub fn resolve_vector_outline_system(
     mut queries: ParamSet<(

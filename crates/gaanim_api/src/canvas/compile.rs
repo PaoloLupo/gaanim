@@ -5608,6 +5608,11 @@ impl SceneModel {
                     }
                 }
 
+                Op::ParticleBurst { target, count } => {
+                    if let Some(target) = id_map.get(target).copied() {
+                        builder.schedule_particle_burst(target, builder.current_time, *count);
+                    }
+                }
                 Op::AttachFalloff { target, effect } => {
                     if let Some(target_id) = id_map.get(target).copied() {
                         let mut effect = effect.clone();
@@ -8041,6 +8046,80 @@ impl SceneModel {
                 }
                 let mr = builder.group(&refs);
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
+                mr
+            }
+            SpawnKind::Particles(particles) => {
+                let colors = if particles.colors.is_empty() {
+                    vec![PenikoColor::WHITE]
+                } else {
+                    particles.colors.clone()
+                };
+                let levels = if particles.system.fade > 0.0 {
+                    gaanim_renderer::effects::PARTICLE_FADE_LEVELS
+                } else {
+                    1
+                };
+                let mut layer_spec = spec.clone();
+                layer_spec.stroke = None;
+                layer_spec.stroke_overridden = true;
+                layer_spec.fill_overridden = true;
+                let mut refs = Vec::with_capacity(colors.len() * levels);
+                let mut layers = Vec::with_capacity(colors.len() * levels);
+                for color in &colors {
+                    for level in 0..levels {
+                        // Fainter levels hold particles further into their fade.
+                        layer_spec.fill = Some(gaanim_core::peniko::Brush::Solid(*color));
+                        layer_spec.opacity = (level + 1) as f32 / levels as f32;
+                        let path = gaanim_objects::prelude::SvgPath {
+                            id: "Particles".into(),
+                            path: BezPath::new(),
+                            bounds: Bounds3D::default(),
+                            fill: None,
+                            stroke: StrokeBrush::transparent(),
+                        };
+                        let layer_ref =
+                            Self::finish_spawn_builder(builder.svg_path(&path), &layer_spec);
+                        let entity = builder
+                            .states
+                            .get(layer_ref.id)
+                            .map_or(Entity::PLACEHOLDER, |state| state.entity);
+                        if entity != Entity::PLACEHOLDER {
+                            builder
+                                .commands
+                                .entity(entity)
+                                .insert(gaanim_renderer::effects::ParticleLayer);
+                        }
+                        layers.push(entity);
+                        refs.push(layer_ref);
+                    }
+                }
+                let mr = builder.group(&refs);
+                Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
+                // Continuous emission and the first burst start at the declaration.
+                let start = builder.current_time;
+                let mut system = particles.system.clone();
+                system.colors = colors.len();
+                system.start = start;
+                system.stop = particles.duration.map(|duration| start + duration);
+                if particles.initial_burst > 0 {
+                    system.bursts.insert(0, (start, particles.initial_burst));
+                }
+                let anchor = particles
+                    .anchor
+                    .and_then(|anchor| id_map.get(&anchor).copied());
+                if let Some(state) = builder.states.get(mr.id) {
+                    builder.commands.entity(state.entity).insert(
+                        gaanim_renderer::effects::ParticleEmitter {
+                            system,
+                            position: particles.position,
+                            layers,
+                            levels,
+                            anchor,
+                            trail: gaanim_renderer::effects::AnchorTrail::default(),
+                            probe: None,
+                        },
+                    );
+                }
                 mr
             }
             SpawnKind::Boolean {
@@ -13777,6 +13856,76 @@ mod tests {
         assert!((moving[3] - 1.0 / 1.5).abs() < 1e-9, "{moving:?}");
         assert_eq!(deform_at(1.8), kurbo::Affine::IDENTITY);
         assert!((deform_at(0.5).as_coeffs()[0] - 1.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn particles_compile_to_layers_bursts_and_anchor_trails() {
+        use crate::canvas::{Emitter, EmitterShape, ParticleColors, ParticleOptions};
+        use gaanim_renderer::effects::{PARTICLE_FADE_LEVELS, ParticleEmitter};
+        let mut canvas = SceneModel::new(640, 360);
+        let logo = canvas.circle(0.2);
+        let emitter = Emitter::new(EmitterShape::Point)
+            .unwrap()
+            .at_drawable(&logo, 0.0, 0.5)
+            .unwrap();
+        let options = ParticleOptions {
+            rate: 10.0,
+            colors: ParticleColors::Palette(vec![PenikoColor::WHITE, PenikoColor::BLACK]),
+            seed: 9,
+            ..ParticleOptions::default()
+        };
+        let sparks = canvas.particles(&emitter, options).unwrap();
+        assert!(canvas.circle(0.1).burst(5).is_err());
+        assert!(canvas.circle(0.1).animate().burst(5).is_err());
+        assert!(sparks.clone().burst(0).is_err());
+        canvas.play(vec![
+            logo.animate()
+                .move_to(4.0, 0.0)
+                .duration(2.0)
+                .rate_func(gaanim_math::RateFunc::Linear),
+        ]);
+        // A burst lasts the longest life (1.2 s) unless given a duration.
+        canvas.play(vec![sparks.animate().burst(20).unwrap()]);
+        sparks.clone().burst(3).unwrap();
+        canvas.wait(0.5);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let emitter_of = |world: &mut World| {
+            world
+                .query::<&ParticleEmitter>()
+                .single(world)
+                .unwrap()
+                .clone()
+        };
+        let compiled = emitter_of(&mut world);
+        assert_eq!(compiled.layers.len(), 2 * PARTICLE_FADE_LEVELS);
+        assert_eq!(compiled.system.colors, 2);
+        assert_eq!(compiled.system.start, 0.0);
+        let bursts = &compiled.system.bursts;
+        assert_eq!(bursts.len(), 2);
+        assert!((bursts[0].0 - 2.0).abs() < 1e-9 && bursts[0].1 == 20);
+        assert!((bursts[1].0 - 3.2).abs() < 1e-9 && bursts[1].1 == 3);
+        assert!(compiled.anchor.is_some());
+
+        // The trail follows the anchor, so particles leave from where it was.
+        timeline.seek(&mut world, 1.0);
+        let at_one = emitter_of(&mut world);
+        assert!(
+            (at_one.trail.at(0.5).x - 1.0).abs() < 1e-6,
+            "{:?}",
+            at_one.trail
+        );
+        assert!(
+            (at_one.trail.at(1.0).x - 2.0).abs() < 1e-6,
+            "{:?}",
+            at_one.trail
+        );
+        assert!((at_one.origin_at(1.0).y - 0.5).abs() < 1e-6);
+        let outlines = at_one.outlines(1.0);
+        assert!(outlines.iter().any(|path| !path.elements().is_empty()));
+        // A seek elsewhere and back reproduces the frame exactly.
+        timeline.seek(&mut world, 3.0);
+        timeline.seek(&mut world, 1.0);
+        assert_eq!(emitter_of(&mut world).outlines(1.0), outlines);
     }
 
     #[test]

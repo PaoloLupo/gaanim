@@ -3734,6 +3734,130 @@ impl PyFx {
             .map_err(pyo3::exceptions::PyValueError::new_err)?;
         Ok(PyCanvasAnim { inner })
     }
+
+    /// A deterministic particle emitter: continuous emission at `rate` from
+    /// the cursor plus bursts from `burst` and `animate.burst`.
+    #[pyo3(signature = (
+        emitter=None,
+        *,
+        rate=30.0,
+        duration=None,
+        lifetime=None,
+        speed=None,
+        direction=std::f64::consts::FRAC_PI_2,
+        spread=std::f64::consts::TAU,
+        gravity=(0.0, 0.0),
+        drag=0.0,
+        size=None,
+        size_end=1.0,
+        fade=0.3,
+        spin=None,
+        flutter=0.0,
+        shape="circle",
+        color=None,
+        seed=0,
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn particles<'py>(
+        &self,
+        py: Python<'py>,
+        emitter: Option<Bound<'py, PyAny>>,
+        rate: f64,
+        duration: Option<f64>,
+        lifetime: Option<Bound<'py, PyAny>>,
+        speed: Option<Bound<'py, PyAny>>,
+        direction: f64,
+        spread: f64,
+        gravity: (f64, f64),
+        drag: f64,
+        size: Option<Bound<'py, PyAny>>,
+        size_end: f64,
+        fade: f64,
+        spin: Option<Bound<'py, PyAny>>,
+        flutter: f64,
+        shape: &str,
+        color: Option<Bound<'py, PyAny>>,
+        seed: u64,
+    ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        let or =
+            |value: Option<Bound<'py, PyAny>>, default: Bound<'py, PyAny>| value.unwrap_or(default);
+        let pair = |low: f64, high: f64| -> PyResult<Bound<'py, PyAny>> {
+            Ok((low, high).into_pyobject(py)?.into_any())
+        };
+        let emitter = match emitter {
+            Some(emitter) => emitter,
+            None => (0.0, 0.0).into_pyobject(py)?.into_any(),
+        };
+        let args = crate::particles::ParticleArgs {
+            rate,
+            duration,
+            lifetime: or(lifetime, pair(0.6, 1.2)?),
+            speed: or(speed, pair(1.0, 2.0)?),
+            direction,
+            spread,
+            gravity,
+            drag,
+            size: or(size, pair(0.03, 0.06)?),
+            size_end,
+            fade,
+            spin: or(spin, 0.0f64.into_pyobject(py)?.into_any()),
+            flutter,
+            shape: shape.to_string(),
+            color: or(color, "#ffffff".into_pyobject(py)?.into_any()),
+            seed,
+        };
+        crate::particles::particles(&self.inner, &emitter, args)
+    }
+
+    /// Confetti thrown up from `origin`: `count` spinning paper strips burst
+    /// at the cursor, then fall and sway.
+    #[pyo3(signature = (
+        origin=None,
+        count=120,
+        *,
+        seed=0,
+        colors=None,
+        speed=None,
+        direction=std::f64::consts::FRAC_PI_2,
+        spread=0.9,
+        gravity=(0.0, -6.0),
+        lifetime=None,
+        size=None,
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn confetti<'py>(
+        &self,
+        py: Python<'py>,
+        origin: Option<Bound<'py, PyAny>>,
+        count: u32,
+        seed: u64,
+        colors: Option<Bound<'py, PyAny>>,
+        speed: Option<Bound<'py, PyAny>>,
+        direction: f64,
+        spread: f64,
+        gravity: (f64, f64),
+        lifetime: Option<Bound<'py, PyAny>>,
+        size: Option<Bound<'py, PyAny>>,
+    ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        let origin = match origin {
+            Some(origin) => origin,
+            None => (0.0, 0.0).into_pyobject(py)?.into_any(),
+        };
+        let args = crate::particles::ConfettiArgs {
+            count,
+            seed,
+            colors,
+            speed,
+            direction,
+            spread,
+            gravity,
+            lifetime,
+            size,
+        };
+        crate::particles::confetti(&self.inner, &origin, args)
+    }
 }
 
 #[pymethods]

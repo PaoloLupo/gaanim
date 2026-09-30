@@ -500,6 +500,8 @@ pub(crate) enum Op {
         target: ObjectId,
         layer: Option<Arc<str>>,
     },
+    /// Emit `count` particles from a particle emitter at the cursor.
+    ParticleBurst { target: ObjectId, count: u32 },
     /// Insert an explicit zero-duration interactive stop.
     Stop,
     /// Set an object visible (instant).

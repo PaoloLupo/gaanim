@@ -39,6 +39,7 @@ mod drawable;
 mod duplicate;
 mod emphasis;
 pub use duplicate::{Distribution, MAX_COPIES, RepeatStep};
+mod particles;
 mod property_bindings;
 pub use camera_view::{
     CameraInsetOptions, CameraInsetPlacement, CameraInsetShape, CameraViewError, CameraViewHandle,
@@ -47,6 +48,11 @@ pub use camera_view::{
 pub use drawable::{
     ClipOptions, DrawableHandle, FragmentSelection, ImagePixelError, LayoutOwnershipError,
     Primitive3DHandleError, RotationAxisError, SvgPartError,
+};
+pub use particles::{
+    Emitter, EmitterShape, GRADIENT_PARTICLE_COLORS, MAX_BURST, MAX_LIVE_PARTICLES,
+    MAX_PARTICLE_COLORS, ParticleColors, ParticleOptions, ParticleShape, ParticleSpawn,
+    confetti_palette,
 };
 mod editorial;
 pub use editorial::{

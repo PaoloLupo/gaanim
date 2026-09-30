@@ -20,6 +20,9 @@ use gaanim_scene::{
 
 static NEXT_PROPERTY_REVISION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
+/// Seconds between the samples of a moving particle anchor.
+pub const PARTICLE_ANCHOR_STEP: f64 = 1.0 / 30.0;
+
 #[derive(Resource)]
 struct PreparedPropertyTimeline(u64);
 
@@ -1969,6 +1972,7 @@ impl Timeline {
         self.restore_followed_shake_origin(world);
         gaanim_animation::apply_property_bindings(world, self.current_time);
         self.evaluate_delayed_states(world);
+        self.evaluate_particle_anchors(world);
         if let Some(mut playback_state) =
             world.get_resource_mut::<gaanim_animation::PlaybackState>()
         {
@@ -2139,6 +2143,121 @@ impl Timeline {
             let deform = gaanim_scene::ShapeDeform(squash.deform(velocity));
             if world.get::<gaanim_scene::ShapeDeform>(entity) != Some(&deform) {
                 world.entity_mut(entity).insert(deform);
+            }
+        }
+    }
+
+    /// Sample where the anchor of every anchored
+    /// [`gaanim_renderer::effects::ParticleEmitter`] was while its live
+    /// particles were born: on a grid of [`PARTICLE_ANCHOR_STEP`] seconds
+    /// fixed in timeline time, replaying the anchor's own clips as
+    /// [`Self::evaluate_delayed_states`] does. The samples are a pure
+    /// function of time, so a seek places particles exactly as playback. An
+    /// anchor without animations is sampled once.
+    fn evaluate_particle_anchors(&self, world: &mut World) {
+        let emitters: Vec<(Entity, gaanim_core::ObjectId, f64, f64, Option<Entity>)> = world
+            .query::<(Entity, &gaanim_renderer::effects::ParticleEmitter)>()
+            .iter(world)
+            .filter_map(|(entity, emitter)| {
+                let earliest = emitter.system.bursts.iter().map(|(time, _)| *time).fold(
+                    if emitter.system.rate > 0.0 {
+                        emitter.system.start
+                    } else {
+                        f64::INFINITY
+                    },
+                    f64::min,
+                );
+                Some((
+                    entity,
+                    emitter.anchor?,
+                    earliest,
+                    emitter.system.longest_life(),
+                    emitter.probe,
+                ))
+            })
+            .collect();
+        if emitters.is_empty() {
+            return;
+        }
+        let anchors: HashSet<_> = emitters.iter().map(|(_, anchor, ..)| *anchor).collect();
+        let mut anchor_clips: HashMap<gaanim_core::ObjectId, Vec<&Clip>> = HashMap::new();
+        for clip in self
+            .clip_index
+            .values()
+            .flatten()
+            .filter_map(|id| self.clips.get(*id))
+        {
+            if let ClipPayload::Animation(anim) = &clip.payload
+                && anchors.contains(&anim.target)
+            {
+                anchor_clips.entry(anim.target).or_default().push(clip);
+            }
+        }
+        for (entity, anchor, earliest, longest, probe) in emitters {
+            let probe = match probe.filter(|probe| world.get_entity(*probe).is_ok()) {
+                Some(probe) => probe,
+                None => {
+                    let probe = world.spawn_empty().id();
+                    if let Some(mut emitter) =
+                        world.get_mut::<gaanim_renderer::effects::ParticleEmitter>(entity)
+                    {
+                        emitter.probe = Some(probe);
+                    }
+                    probe
+                }
+            };
+            let clips = anchor_clips
+                .get(&anchor)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            let mut position_at = |time: f64| {
+                self.replay_source_into(world, anchor, clips, time, probe, |state| {
+                    state.scene = None;
+                    state.visible = false;
+                })?;
+                world
+                    .get::<SpatialTransform>(probe)
+                    .map(|transform| transform.translation.truncate())
+            };
+            let trail = if clips.is_empty() {
+                position_at(self.current_time.max(0.0))
+                    .map(gaanim_renderer::effects::AnchorTrail::constant)
+                    .unwrap_or_default()
+            } else if earliest > self.current_time {
+                gaanim_renderer::effects::AnchorTrail::default()
+            } else {
+                let from = (self.current_time - longest).max(earliest).max(0.0);
+                let first = (from / PARTICLE_ANCHOR_STEP).floor() as i64;
+                let last = (self.current_time / PARTICLE_ANCHOR_STEP).ceil() as i64;
+                let mut points = Vec::with_capacity((last - first + 1).max(0) as usize);
+                let mut known = None;
+                let mut missing = 0;
+                for index in first..=last {
+                    match position_at(index as f64 * PARTICLE_ANCHOR_STEP) {
+                        Some(point) => {
+                            // Samples before the anchor existed take its first position.
+                            points.extend(std::iter::repeat_n(point, missing));
+                            missing = 0;
+                            points.push(point);
+                            known = Some(point);
+                        }
+                        None => match known {
+                            Some(point) => points.push(point),
+                            None => missing += 1,
+                        },
+                    }
+                }
+                gaanim_renderer::effects::AnchorTrail {
+                    step: PARTICLE_ANCHOR_STEP,
+                    first,
+                    points,
+                }
+            };
+            if let Some(mut emitter) =
+                world.get_mut::<gaanim_renderer::effects::ParticleEmitter>(entity)
+                && emitter.trail != trail
+            {
+                emitter.trail = trail;
             }
         }
     }
