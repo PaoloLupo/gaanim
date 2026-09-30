@@ -93,7 +93,7 @@ const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
  * lasts between SESSION_TTL_MS minus this and SESSION_TTL_MS after its last
  * activity. */
 const ALARM_SLACK_MS = 30 * 60 * 1000;
-const API_VERSION = 7;
+const API_VERSION = 8;
 /** Where the game is: questions, the final standings, or over. */
 const STAGES = new Set(["play", "podium", "end"]);
 /** Players a podium shows. */
@@ -400,8 +400,11 @@ export class PollSession extends DurableObject {
     const s = await this.state();
     const id = s.current;
     const poll = id && s.polls.get(id);
+    // A phone asking with its id learns whether it still plays: a new game
+    // forgets every player.
+    const joined = voter ? { joined: s.players.has(voter) } : {};
     if (!poll) {
-      const state = { lobby: s.lobby, open: false, stage: s.stage };
+      const state = { lobby: s.lobby, open: false, stage: s.stage, ...joined };
       if (s.stage !== "play") {
         // The final standings, for phones to show their podium.
         const ranking = rank(s);
@@ -415,6 +418,7 @@ export class PollSession extends DurableObject {
       return state;
     }
     const state = {
+      ...joined,
       lobby: s.lobby,
       stage: s.stage,
       open: true,
@@ -590,7 +594,7 @@ export class PollSession extends DurableObject {
       }
       quiz = { correct: input.correct, time, points };
     }
-    const s = await this.state();
+    const s = await this.startOver(await this.state());
     const existing = s.polls.get(id);
     const same =
       existing &&
@@ -737,7 +741,18 @@ export class PollSession extends DurableObject {
   async reset(key) {
     const denied = await this.authorize(key, false);
     if (denied) return denied;
-    const s = await this.state();
+    await this.restart(await this.state());
+    return ok({ ok: true });
+  }
+
+  /** The session `s`, or a new game when the presentation that played the
+   * last one ended: a presentation starts with nobody's points. */
+  async startOver(s) {
+    return s.stage === "end" ? this.restart(s) : s;
+  }
+
+  /** Forget the game in `s` and tell the phones; returns the new state. */
+  async restart(s) {
     // Also removes the alarm; `touch` sets it again.
     await this.ctx.storage.deleteAll();
     await this.ctx.storage.put(s.lobby ? { key: s.key, lobby: true } : { key: s.key });
@@ -754,10 +769,11 @@ export class PollSession extends DurableObject {
       banned: new Set(),
       alarmAt: null,
     });
-    await this.touch(await this.state());
+    const fresh = await this.state();
+    await this.touch(fresh);
     await this.broadcast();
     this.send(() => ({ type: "player", player: null }));
-    return ok({ ok: true });
+    return fresh;
   }
 
   /** Where the game is, as the presentation says: "play" while there are
@@ -769,7 +785,8 @@ export class PollSession extends DurableObject {
     if (!STAGES.has(stage)) {
       return fail(400, "invalid stage");
     }
-    const s = await this.state();
+    let s = await this.state();
+    if (stage !== "end") s = await this.startOver(s);
     if (stage !== s.stage) {
       if (stage === "play") await this.ctx.storage.delete("stage");
       else await this.ctx.storage.put("stage", stage);
@@ -785,7 +802,7 @@ export class PollSession extends DurableObject {
   async lobby(key, input) {
     const denied = await this.authorize(key, true);
     if (denied) return denied;
-    const s = await this.state();
+    const s = await this.startOver(await this.state());
     const open = input?.open === true;
     if (open !== s.lobby) {
       if (open) await this.ctx.storage.put("lobby", true);
@@ -922,11 +939,14 @@ function describe(s, voter, player, ranking = rank(s)) {
   const id = open?.quiz?.revealed ? s.current : s.revealed;
   const quiz = id && s.polls.get(id)?.quiz;
   const answer = quiz?.revealed ? s.answers.get(id)?.get(voter) : null;
+  // A quiz still taking answers keeps its points secret: a phone showing a
+  // new score would tell its neighbors the answer.
+  const hidden = open?.quiz && !open.quiz.revealed ? s.answers.get(s.current)?.get(voter) : null;
   return {
     name: player.name,
     avatar: player.avatar ?? defaultAvatar(voter),
-    score: player.score,
-    correct: player.correct,
+    score: player.score - (hidden?.points ?? 0),
+    correct: player.correct - (hidden?.points > 0 ? 1 : 0),
     answered: player.answered,
     rank: place || null,
     players: ranking.length,

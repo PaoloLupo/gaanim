@@ -7,7 +7,10 @@
 // random voter id, and the relay tells it what it chose on each question,
 // so reloading the page keeps its vote and a new game starts clean.
 //
-// A poll's vote can change while the question is open. A presentation that
+// A quiz shows its answers in an order and colors of each phone's own, and
+// once answered only says so, until the presenter reveals the answer: a
+// neighbor's phone tells nothing. A poll's vote can change while the
+// question is open. A presentation that
 // shows its audience asks for a nickname and a character as soon as the page
 // opens, and the phone waits in the room with them. The phone remembers both
 // for the next presentation on this relay. A quiz asks for a nickname first, counts down its time, takes one answer, and when the
@@ -37,6 +40,36 @@ const SHAPES = [
   '<path d="M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3l-5.9 3.3 1.3-6.6L2.5 9.4l6.6-.8z"/>',
   '<path d="M7 3h10l5 9-5 9H7l-5-9z"/>',
 ];
+
+/** A 32-bit hash of `text` (FNV-1a). */
+function hash(text) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+/** 0..count-1 in an order that depends on `seed` alone, so a phone shows a
+ * question the same way after reloading. */
+function shuffled(count, seed) {
+  let state = hash(seed);
+  const random = () => {
+    // mulberry32
+    state = (state + 0x6d2b79f5) >>> 0;
+    let x = state;
+    x = Math.imul(x ^ (x >>> 15), x | 1);
+    x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+  const order = [...Array(count).keys()];
+  for (let i = count - 1; i > 0; i -= 1) {
+    const j = Math.floor(random() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  return order;
+}
 
 const code = location.pathname.split("/")[2]?.toUpperCase() ?? "";
 const store = {
@@ -84,6 +117,7 @@ document.addEventListener("DOMContentLoaded", () => {
     waiting: $("waiting"),
     join: $("join-view"),
     question: $("question"),
+    sent: $("sent-view"),
     result: $("result-view"),
     finale: $("finale-view"),
     kicked: $("kicked-view"),
@@ -312,6 +346,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // --- What the relay reports ----------------------------------------------
 
+  /** When a quiz's time is up, on this phone's clock. */
+  function deadlineOf(quiz) {
+    // The deadline is on the relay's clock, measured when it arrived.
+    quiz.skew ??= quiz.now - Date.now();
+    return quiz.deadline - quiz.skew;
+  }
+
   function show(next) {
     poll = next;
     if (kicked) return;
@@ -338,6 +379,10 @@ document.addEventListener("DOMContentLoaded", () => {
       else showWaiting();
       return;
     }
+    if (poll.quiz && !pending) {
+      if (Number.isInteger(poll.chosen)) return showSent(true);
+      if (Date.now() >= deadlineOf(poll.quiz)) return showSent(false);
+    }
     drawQuestion();
   }
 
@@ -350,14 +395,23 @@ document.addEventListener("DOMContentLoaded", () => {
       questionText.textContent = poll.question;
       answers.replaceChildren();
       answers.removeAttribute("data-locked");
-      poll.options.forEach((option, index) => {
+      // A poll matches the screen's letters and colors; a quiz is this
+      // phone's own, colored by place, so neighbors cannot copy a tile.
+      const order = quiz
+        ? shuffled(poll.options.length, `${voter}:${poll.id}`)
+        : poll.options.map((_, index) => index);
+      order.forEach((index, place) => {
+        const option = poll.options[index];
+        const look = (quiz ? place : index) % SHAPES.length;
         const item = template.content.firstElementChild.cloneNode(true);
         const button = item.querySelector(".answer");
         button.dataset.index = String(index);
-        button.querySelector(".shape").innerHTML =
-          `<svg viewBox="0 0 24 24">${SHAPES[index % SHAPES.length]}</svg>`;
+        button.dataset.look = String(look);
+        button.querySelector(".shape").innerHTML = `<svg viewBox="0 0 24 24">${SHAPES[look]}</svg>`;
         button.querySelector(".label").textContent = option;
-        button.querySelector(".letter").textContent = String.fromCharCode(65 + index);
+        const letter = button.querySelector(".letter");
+        if (quiz) letter.remove();
+        else letter.textContent = String.fromCharCode(65 + index);
         const id = poll.id;
         button.addEventListener("click", () => vote(id, index, button));
         answers.append(item);
@@ -373,8 +427,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function startTimer(quiz) {
     stopTimer();
     timer.hidden = false;
-    // The deadline is on the relay's clock: shift it to this phone's.
-    const deadline = quiz.deadline - (quiz.now - Date.now());
+    const deadline = deadlineOf(quiz);
     const total = quiz.time * 1000;
     const update = () => {
       const remaining = Math.max(0, deadline - Date.now());
@@ -383,7 +436,8 @@ document.addEventListener("DOMContentLoaded", () => {
       timer.toggleAttribute("data-urgent", remaining < URGENT_MS);
       if (remaining === 0) {
         stopTimer();
-        if (!answers.hasAttribute("data-locked")) lock(t("timeUp"));
+        // An answer on its way is settled by the relay.
+        if (!pending) showSent(false);
       }
     };
     update();
@@ -393,6 +447,28 @@ document.addEventListener("DOMContentLoaded", () => {
   function stopTimer() {
     clearInterval(tick);
     tick = null;
+  }
+
+  /** A quiz answered (or not, when `answered` is false and its time is
+   * up): the same words for everyone, whichever answer they chose. */
+  let sentKey = null;
+  function showSent(answered) {
+    shown = null;
+    const key = `${poll.id}|${answered}`;
+    const phrases = t("sentPhrases");
+    $("sent-title").textContent = t(answered ? "sentTitle" : "timeUp");
+    $("sent-hint").textContent = answered
+      ? phrases[hash(`${voter}:${poll.id}`) % phrases.length]
+      : t("timeUpHint");
+    const holder = $("sent-avatar");
+    const mine = player && catalog && live(holder, player.avatar ?? avatar, player.name);
+    holder.hidden = !mine;
+    $("sent-pulse").hidden = Boolean(mine);
+    if (current !== "sent" || sentKey !== key) {
+      sentKey = key;
+      view("sent");
+      if (mine) mine.express(answered ? "surprised" : "sad");
+    }
   }
 
   /** The character on the result, reacting to how the answer went. */
@@ -561,14 +637,16 @@ document.addEventListener("DOMContentLoaded", () => {
           shownChoice = option;
           markChosen(option);
         }
-        if (quiz) lock(t("locked"));
-        else setStatus(t("change"), t("sent"));
         navigator.vibrate?.(18);
+        if (quiz) return showSent(true);
+        setStatus(t("change"), t("sent"));
         break;
       case "timeUp":
+        if (quiz) return showSent(false);
         lock(t("timeUp"));
         break;
       case "answered":
+        if (quiz) return showSent(true);
         lock(t("locked"));
         break;
       case "join":
@@ -714,6 +792,8 @@ document.addEventListener("DOMContentLoaded", () => {
       const response = await fetch(`/s/${code}/poll?voter=${voter}`, { cache: "no-store" });
       if (!response.ok) throw new Error(String(response.status));
       const next = await response.json();
+      // A new game forgot this player.
+      if (player && next.joined === false) setPlayer(null);
       // A newly revealed quiz: fetch this player's result first.
       if (next.quiz?.revealed && player && player.last?.poll !== next.id) await fetchPlayer();
       show(next);

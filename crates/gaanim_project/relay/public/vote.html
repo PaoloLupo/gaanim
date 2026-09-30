@@ -96,6 +96,15 @@
         <p class="status" id="status" aria-live="polite"></p>
       </section>
 
+      <!-- A quiz answered, or its time up: nothing that tells a neighbor
+           which answer was chosen, or whether it was right. -->
+      <section class="center sent" id="sent-view" hidden>
+        <div class="avatar-stage" id="sent-avatar" hidden></div>
+        <div class="pulse" id="sent-pulse" aria-hidden="true"></div>
+        <h1 id="sent-title"></h1>
+        <p id="sent-hint"></p>
+      </section>
+
       <!-- How a quiz answer went. -->
       <section class="center result" id="result-view" hidden>
         <div class="avatar-stage" id="result-avatar" hidden></div>

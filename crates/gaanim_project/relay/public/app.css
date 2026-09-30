@@ -427,24 +427,24 @@ body {
   font-size: 17px;
 }
 
-/* Answer colors: the same letters and hues as the presentation screen,
-   dark enough for white text. */
-.answer[data-index="0"] {
+/* Answer colors: a poll's are the presentation screen's letters and hues;
+   a quiz's go by place on the phone. Dark enough for white text. */
+.answer[data-look="0"] {
   --tile: #d63a50;
 }
-.answer[data-index="1"] {
+.answer[data-look="1"] {
   --tile: #2f6fd0;
 }
-.answer[data-index="2"] {
+.answer[data-look="2"] {
   --tile: #a86f00;
 }
-.answer[data-index="3"] {
+.answer[data-look="3"] {
   --tile: #23824a;
 }
-.answer[data-index="4"] {
+.answer[data-look="4"] {
   --tile: #7a48c7;
 }
-.answer[data-index="5"] {
+.answer[data-look="5"] {
   --tile: #137f89;
 }
 

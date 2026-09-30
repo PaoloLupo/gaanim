@@ -44,11 +44,16 @@ asks each phone for a nickname (2 to 20 letters, digits or spaces, unique in
 the session). The phone counts down the quiz's time, measured by the relay's
 clock so a phone cannot stretch it, and takes one answer. A correct answer
 earns `points × (1 − elapsed / time / 2)`: all the points at once, half at the
-last moment; a wrong one earns nothing. When the presentation reveals the
-quiz, every phone shows the answer, and each player whether it was right,
-the points it earned, its total and its place. The presentation reads the
-leaderboard from `results`, can remove a player (who cannot join again from
-that phone) and can reset the session before a new game.
+last moment; a wrong one earns nothing. So that students sitting together
+cannot copy, each phone shows a quiz's answers in its own order, colored by
+place rather than like the screen, and once answered it only says so, the
+same for everyone; its score does not change either. When the presentation
+reveals the quiz, every phone shows the answer, and each player whether it
+was right, the points it earned, its total and its place. The presentation
+reads the leaderboard from `results`, can remove a player (who cannot join
+again from that phone) and can reset the session before a new game. When the
+questions are over, phones show the podium, and a goodbye once the
+presentation ends; the next presentation on the session starts a new game.
 
 A presentation that shows its audience opens a *lobby*: phones ask for the
 nickname as soon as they open the page and wait in the room with it, and
@@ -108,14 +113,15 @@ question or answers starts it from zero. One poll is open at a time.
 | `POST /s/<code>/kick` | presenter | `{name}`: removes a player and bans its phone |
 | `POST /s/<code>/reset` | presenter | forgets every poll, vote, player and ban; the lobby stays |
 | `POST /s/<code>/lobby` | presenter | `{open}`: phones ask for a nickname as soon as they open the page |
+| `POST /s/<code>/stage` | presenter | `{stage}`: `"play"`, `"podium"` once the questions are over, `"end"` when the presentation ends; after `"end"`, the next `poll`, `lobby` or `stage` starts a new game, as `reset` does |
 | `GET /s/<code>/results` | presenter | `{current, connected, now, polls: {<id>: {open, counts, total, quiz?}}, players, playerCount, audience}`; `connected` counts the phones' sockets, `players` is the leaderboard (top 100), `audience` the players in joining order as `{name, joined}` (first 200) |
 | `GET /s/<code>/presenter` | presenter | WebSocket that pushes `{type: "results", ...}`, the body of `GET results`, on connect and whenever it changes (at most every 250 ms) |
 | `GET /s/<code>/ws` | phones | WebSocket, see below |
-| `GET /s/<code>/poll?voter=<id>` | phones | `{lobby, open: false}` or `{lobby, open, id, question, options, chosen}`; `chosen` is that phone's vote or answer, or `null` |
+| `GET /s/<code>/poll?voter=<id>` | phones | `{lobby, stage, joined, open: false, podium?}` or `{lobby, stage, joined, open, id, question, options, chosen}`; `chosen` is that phone's vote or answer, or `null`; `joined` whether it plays in this game; `podium` the top three once the stage is not `"play"` |
 | `POST /s/<code>/vote` | phones | `{poll, option, voter}`; 409 unless that poll is open (and, for a quiz, before its time is up and only once) |
 | `POST /s/<code>/join` | phones | `{voter, name}` → `{player}`; 409 for a name in use |
-| `GET /s/<code>/player?voter=<id>` | phones | `{player}`: name, score, place and last result, or `null` |
-| `GET /health` | anyone | `{relay: "gaanim", version: 6}` |
+| `GET /s/<code>/player?voter=<id>` | phones | `{player}`: name, score, place and last result, or `null`; the score leaves out a quiz not revealed yet |
+| `GET /health` | anyone | `{relay: "gaanim", version: 8}` |
 
 On the WebSocket the relay sends `{type: "poll", ...}` (the same body as
 `GET /poll`, with `quiz: {time, deadline, now, revealed}` for a quiz) on
