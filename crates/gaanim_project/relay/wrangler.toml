@@ -1,8 +1,13 @@
-# Gaanim poll relay: carries audience votes from phones to a presentation.
-# Deploy with `npx wrangler deploy`; see README.md.
+# Gaanim relay: carries audience votes from phones to a Gaanim presentation.
 name = "gaanim-relay"
 main = "src/index.js"
 compatibility_date = "2025-09-01"
+
+# The join and voting pages. A request for a file is served from here
+# without running the Worker; everything else (/s/<code>, the API) runs it.
+[assets]
+directory = "./public"
+binding = "ASSETS"
 
 [[durable_objects.bindings]]
 name = "SESSIONS"
@@ -12,3 +17,16 @@ class_name = "PollSession"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["PollSession"]
+
+# A separate test deployment: `npm run deploy:test` publishes
+# gaanim-relay-test.<account>.workers.dev with its own sessions.
+[env.test]
+name = "gaanim-relay-test"
+
+[env.test.assets]
+directory = "./public"
+binding = "ASSETS"
+
+[[env.test.durable_objects.bindings]]
+name = "SESSIONS"
+class_name = "PollSession"

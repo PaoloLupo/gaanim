@@ -1,0 +1,467 @@
+/* Gaanim relay pages: designed for a phone held in one hand.
+   Colors follow the Gaanim brand (docs/assets/brand in the gaanim repo). */
+
+:root {
+  --bg: #121212;
+  --surface: #1a1a1a;
+  --surface-2: #242424;
+  --line: #333333;
+  --text: #f7f6ff;
+  --muted: #a8a6b8;
+  --accent: #a99fff;
+  --on-accent: #14112e;
+  --good: #4fd18b;
+  --warn: #f5c056;
+  --danger: #ff7676;
+  --radius: 18px;
+  --tap: 64px;
+  --gutter: max(16px, env(safe-area-inset-left));
+  --shadow: 0 10px 30px rgb(0 0 0 / 0.35);
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #faf9f6;
+    --surface: #ffffff;
+    --surface-2: #f0eee8;
+    --line: #dddad2;
+    --text: #14112e;
+    --muted: #5d5a70;
+    --accent: #5b4af0;
+    --on-accent: #ffffff;
+    --good: #1f8f52;
+    --warn: #a86f00;
+    --danger: #c9304a;
+    --shadow: 0 10px 30px rgb(20 24 40 / 0.12);
+    color-scheme: light;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Views switch with the hidden attribute; a display rule must not undo it. */
+[hidden] {
+  display: none !important;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: var(--bg);
+  color: var(--text);
+  font: 17px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: max(12px, env(safe-area-inset-top)) var(--gutter)
+    max(20px, env(safe-area-inset-bottom));
+}
+
+/* ---- Top bar ---------------------------------------------------------- */
+
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.brand .symbol {
+  width: 36px;
+  height: 24px;
+  image-rendering: pixelated;
+}
+
+.brand .symbol-light {
+  display: none;
+}
+
+@media (prefers-color-scheme: light) {
+  .brand .symbol-dark {
+    display: none;
+  }
+  .brand .symbol-light {
+    display: block;
+  }
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font: 600 15px/1 ui-monospace, "SF Mono", Consolas, monospace;
+  letter-spacing: 0.12em;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.dot[data-state="live"] {
+  background: var(--good);
+}
+
+.dot[data-state="offline"] {
+  background: var(--danger);
+}
+
+/* ---- Banner (offline) ------------------------------------------------- */
+
+.banner {
+  margin-top: 10px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--danger) 16%, var(--surface));
+  color: var(--text);
+  font-size: 15px;
+}
+
+/* ---- Centered states (join, waiting, errors) -------------------------- */
+
+.center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  gap: 14px;
+  padding: 24px 0;
+}
+
+.center h1 {
+  margin: 0;
+  font-size: clamp(24px, 7vw, 32px);
+  line-height: 1.2;
+}
+
+.center p {
+  margin: 0;
+  color: var(--muted);
+  max-width: 30ch;
+}
+
+.pulse {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  display: grid;
+  place-items: center;
+  animation: pulse 1.8s ease-in-out infinite;
+}
+
+.pulse::after {
+  content: "";
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    transform: scale(0.9);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 1;
+  }
+}
+
+/* ---- Join form -------------------------------------------------------- */
+
+.join {
+  width: 100%;
+  display: grid;
+  gap: 14px;
+  margin-top: 8px;
+}
+
+.code-input {
+  width: 100%;
+  height: 72px;
+  border-radius: var(--radius);
+  border: 2px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  text-align: center;
+  font: 700 34px/1 ui-monospace, "SF Mono", Consolas, monospace;
+  letter-spacing: 0.35em;
+  padding-left: 0.35em; /* balance the trailing letter-spacing */
+  text-transform: uppercase;
+  outline: none;
+}
+
+.code-input:focus {
+  border-color: var(--accent);
+}
+
+.code-input::placeholder {
+  color: var(--line);
+}
+
+.primary {
+  height: var(--tap);
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-family: inherit;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.hint {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.center .error {
+  justify-self: center;
+  color: var(--danger);
+  min-height: 1.45em;
+  font-size: 15px;
+}
+
+/* ---- Question --------------------------------------------------------- */
+
+.question {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding-top: 18px;
+}
+
+.question h1 {
+  margin: 4px 0 20px;
+  font-size: clamp(22px, 6.4vw, 30px);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.answers {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Tiles in one row share its height. */
+.answers li {
+  display: flex;
+}
+
+/* Two columns once there is room: landscape phones and tablets. */
+@media (min-width: 560px) {
+  .answers {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.answer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 76px;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--tile);
+  color: #fff;
+  font-family: inherit;
+  font-size: 19px;
+  font-weight: 650;
+  line-height: 1.25;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  transition:
+    transform 120ms ease,
+    opacity 160ms ease,
+    outline-color 160ms ease;
+  outline: 4px solid transparent;
+  outline-offset: 3px;
+  touch-action: manipulation;
+}
+
+/* Landscape phones: keep the answers in view. */
+@media (max-height: 500px) {
+  .question {
+    padding-top: 8px;
+  }
+  .question h1 {
+    margin: 2px 0 12px;
+    font-size: 20px;
+  }
+  .answer {
+    min-height: 56px;
+    padding: 10px 14px;
+    font-size: 17px;
+  }
+}
+
+.answer:active {
+  transform: scale(0.98);
+}
+
+.answer:focus-visible {
+  outline-color: var(--accent);
+}
+
+.answer .shape {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgb(0 0 0 / 0.22);
+}
+
+.answer .shape svg {
+  width: 22px;
+  height: 22px;
+  fill: #fff;
+}
+
+.answer .label {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
+.answer .letter {
+  flex: none;
+  font: 700 15px/1 ui-monospace, Consolas, monospace;
+  opacity: 0.75;
+}
+
+.answer .check {
+  display: none;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #fff;
+  color: var(--tile);
+  place-items: center;
+}
+
+.answer .check svg {
+  width: 18px;
+  height: 18px;
+}
+
+.answers[data-voted] .answer:not([aria-pressed="true"]) {
+  opacity: 0.45;
+}
+
+.answer[aria-pressed="true"] {
+  outline-color: var(--text);
+}
+
+.answer[aria-pressed="true"] .check {
+  display: grid;
+}
+
+.answer[aria-busy="true"] {
+  opacity: 0.7;
+}
+
+.status {
+  margin-top: auto;
+  padding-top: 20px;
+  min-height: 3em;
+  text-align: center;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.status strong {
+  display: block;
+  color: var(--good);
+  font-size: 17px;
+}
+
+/* Answer colors: the same letters and hues as the presentation screen,
+   dark enough for white text. */
+.answer[data-index="0"] {
+  --tile: #d63a50;
+}
+.answer[data-index="1"] {
+  --tile: #2f6fd0;
+}
+.answer[data-index="2"] {
+  --tile: #a86f00;
+}
+.answer[data-index="3"] {
+  --tile: #23824a;
+}
+.answer[data-index="4"] {
+  --tile: #7a48c7;
+}
+.answer[data-index="5"] {
+  --tile: #137f89;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

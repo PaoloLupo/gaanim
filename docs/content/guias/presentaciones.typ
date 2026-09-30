@@ -168,31 +168,72 @@ audiencia.
 
 = Encuestas a la audiencia <encuestas-a-la-audiencia>
 
-`scene.poll` crea una pausa con una pregunta para el público, al estilo de
-Kahoot:
+`scene.poll` hace una pregunta al público, al estilo de Kahoot, y te da los
+datos para que tú decidas cómo presentarla:
 
 ```python
-scene.poll("¿Qué curva crece más rápido?", ["x²", "2ˣ", "x log x"])
+poll = scene.poll("¿Qué curva crece más rápido?", ["x²", "2ˣ", "x log x"], preview=[6, 14, 4])
+
+card = scene.geometry.rounded_rect(4.2, 4.2, 0.25).fill(WHITE).no_stroke().move_to(-5, 0)
+qr = poll.qr(3.6).move_to(-5, 0)                        # el QR, un drawable más
+code = scene.text(poll.code, size=0.55).move_to(-5, -2.7)  # el código, por si no pueden escanear
+
+for i, answer in enumerate(poll.options):
+    y = 1.2 - 1.4 * i
+    scene.text(answer, size=0.5).move_to(-1.6, y)
+    poll.bar(i, length=6, thickness=0.6, radius=0.3).fill(RED).no_stroke().move_to(3.2, y)
+    scene.viz.readout(poll.votes(i), format=".0f").move_to(6.8, y)
+
+scene.stop()
 ```
 
-Al presentar, cuando la charla llega a esa pausa, la pantalla muestra un código
-QR, la dirección que abre y un código de seis caracteres. Quien lo escanea vota
-desde su teléfono, sin instalar nada ni iniciar sesión, y las barras de cada
-respuesta crecen en directo. Al avanzar, la pregunta se cierra. El código es el
-mismo durante toda la presentación: basta con escanearlo una vez y el teléfono
-muestra cada nueva pregunta en cuanto aparece. Cada teléfono cuenta una vez y
-puede cambiar su voto mientras la pregunta sigue abierta.
+La encuesta no dibuja nada por sí misma. Te da:
 
-Las encuestas funcionan igual al presentar un paquete `.gaanim`, sin Python. La
-previsualización y la exportación las tratan como pausas normales, y el
-reproductor web todavía no las muestra.
+- `poll.qr(tamaño)`: el código QR como drawable, relleno de negro. Ponlo sobre
+  un fondo claro con algo de margen para que los teléfonos lo lean.
+- `poll.code` y `poll.url`: el código de seis caracteres y la dirección de
+  votación, para mostrarlos como texto.
+- `poll.votes(i)`, `poll.share(i)` (de 0 a 1) y `poll.total()`: `Parameter`
+  que siguen los votos. Úsalos como cualquier parámetro: en `readout`, en
+  `computed`, en puntos o en líneas reactivas (ver
+  #link("/guias/reactividad/")[Reactividad]).
+- `poll.bar(i, ...)`: una barra lista cuya longitud sigue a la respuesta `i`.
+  Con `direction` crece hacia la derecha, la izquierda, arriba o abajo; con
+  `scale="leader"` (por defecto) la respuesta que va ganando llena su barra, y
+  con `"total"` cada barra mide su porcentaje. Sus límites son los de la barra
+  completa, así que el layout no se mueve al llegar votos.
+- `poll.close()`: deja de recibir votos en ese punto. Sin él, la encuesta se
+  cierra al terminar el segmento donde se abrió. Los valores conservan el
+  último conteo, así que un paso posterior puede comentar el resultado.
+
+Al presentar, mientras la charla está dentro de la encuesta, los votos llegan
+en vivo. Cada teléfono cuenta una vez y puede cambiar su voto mientras la
+pregunta sigue abierta. Si vuelves a una encuesta, conserva sus votos. En la
+previsualización, la exportación y las capturas se usan los conteos de
+`preview` (ceros si no los das), así que puedes diseñar con números creíbles y
+el resultado es siempre el mismo.
+
+El código de la sesión es fijo para cada proyecto y el QR es contenido normal
+de la escena: se ve igual en la previsualización, en un vídeo exportado o en
+un paquete `.gaanim`, y los teléfonos lo escanean una vez por presentación. La
+clave que permite abrir preguntas y leer votos se guarda solo en tu equipo.
+Para fijar el código, por ejemplo si varias personas presentan el mismo
+proyecto, usa la variable `GAANIM_POLL_SESSION`.
+
+Al presentar un paquete `.gaanim` los votos también llegan en vivo, pero el
+paquete reproduce lo grabado: solo las barras de `poll.bar` se redibujan con
+los votos reales, y lo que dependa de un `Parameter` muestra los valores de
+`preview`. Si quieres resultados en vivo en un paquete, construye la
+visualización con barras. El reproductor web todavía no recibe votos.
 
 == El relay
 
 Los votos viajan a través de un *relay*, un pequeño servicio web que despliegas
 tú, gratis, en tu propia cuenta de Cloudflare. Como teléfonos y presentación
 solo se conectan hacia fuera, por HTTPS, funciona en redes universitarias que
-aíslan a los dispositivos entre sí y con datos móviles.
+aíslan a los dispositivos entre sí y con datos móviles. La página de votación
+está pensada para el teléfono: respuestas grandes con color, letra y forma,
+tema claro u oscuro y español o inglés según el teléfono.
 
 ```bash
 gaanim relay init            # escribe el relay en ./gaanim-relay
@@ -205,15 +246,14 @@ gaanim relay use https://gaanim-relay.<tú>.workers.dev
 `gaanim relay` sin argumentos muestra el relay en uso. Un proyecto puede usar
 otro con `[polls] relay` en su
 #link("/referencia/gaanim-toml/")[`gaanim.toml`], y la variable
-`GAANIM_POLL_RELAY` tiene prioridad sobre ambos. Sin relay, la encuesta muestra
-cómo configurarlo.
+`GAANIM_POLL_RELAY` tiene prioridad sobre ambos. Sin relay, `scene.poll`
+avisa y el QR no lleva a ninguna parte. La dirección queda grabada en el QR,
+así que si cambias de relay vuelve a exportar.
 
 Los votos son anónimos: el teléfono guarda un identificador al azar y el relay
-no pide nombres ni cuentas. Solo la presentación que abrió la sesión, con una
-clave que nunca sale de tu equipo, puede abrir preguntas y leer los votos. El
-relay borra la sesión y sus votos doce horas después de su última actividad.
-Si pierde la conexión, la encuesta lo indica y reintenta sin detener la
-presentación.
+no pide nombres ni cuentas. El relay borra la sesión y sus votos doce horas
+después de su última actividad. Si pierde la conexión, la presentación sigue
+y la terminal avisa mientras reintenta.
 
 = Revisar sin pausas
 

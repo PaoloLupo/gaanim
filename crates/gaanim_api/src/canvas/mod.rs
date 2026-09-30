@@ -21,8 +21,8 @@ pub use gaanim_layout::{Anchor, Direction};
 pub use gaanim_text::prelude::TextAnchor;
 pub use segment::SceneMarker;
 pub use segment::{
-    MAX_POLL_OPTIONS, PresentationBrand, SegmentError, SegmentHandle, SegmentId, SegmentManifest,
-    SegmentSpec, SegmentStop, StopPoll,
+    PresentationBrand, SegmentError, SegmentHandle, SegmentId, SegmentManifest, SegmentSpec,
+    SegmentStop,
 };
 pub use types::{
     Anim, Axes3DConfig, AxesConfig, BooleanOperation, BooleanRule, CurveControl, CurveElement,
@@ -84,6 +84,9 @@ pub use narration::{
     LiveTakeSpec, MarkerSpec, NarrationManifest, ScriptSpec, TextSource, VoiceoverError,
     VoiceoverHandle, VoiceoverSpec, live_take_recording, set_live_take_recording,
 };
+mod poll;
+pub use gaanim_animation::polls::{BarDirection, BarScale};
+pub use poll::{MAX_POLL_OPTIONS, PollBarOptions, PollError, PollHandle, PollSession};
 mod theme;
 pub use gaanim_objects::prelude::SvgLoadError;
 pub use theme::{

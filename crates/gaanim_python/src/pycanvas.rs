@@ -63,6 +63,26 @@ fn find_manifest_upward(start: &std::path::Path) -> Option<PathBuf> {
         .find(|manifest| manifest.is_file())
 }
 
+/// The relay session of the project the calling script belongs to (or of
+/// its folder, outside a project): the relay its `[polls] relay` or the user
+/// set, and the session code kept for that project on this computer.
+fn resolve_poll_session(py: Python<'_>) -> PyResult<gaanim_api::canvas::PollSession> {
+    let directory = caller_directory(py)?;
+    let project = find_manifest_upward(&directory)
+        .and_then(|manifest| manifest.parent().map(std::path::Path::to_path_buf));
+    let project_relay = project
+        .as_deref()
+        .and_then(|root| gaanim_project::resolve_project(root).ok())
+        .and_then(|project| project.manifest.poll_relay);
+    let relay = gaanim_project::relay::resolve(project_relay.as_deref()).map(|(url, _)| url);
+    let session = gaanim_project::relay::session_for(project.as_deref().unwrap_or(&directory))
+        .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
+    Ok(gaanim_api::canvas::PollSession {
+        relay,
+        code: session.code,
+    })
+}
+
 fn default_project_manifest(py: Python<'_>) -> PyResult<PathBuf> {
     let directory = caller_directory(py)?;
     find_manifest_upward(&directory).ok_or_else(|| {
@@ -5811,21 +5831,36 @@ impl PyScene {
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
 
-    /// Insert a stop that asks the audience `question`: while a presentation
-    /// rests there, it shows a QR code to vote from a phone and the live
-    /// results. Exports ignore it like any stop.
-    #[pyo3(signature = (question, options, *, name=None))]
-    fn poll(&self, question: String, options: Vec<String>, name: Option<String>) -> PyResult<()> {
+    /// Open an audience poll at the cursor and return its data: the QR code,
+    /// session code and live values the scene presents as it likes.
+    #[pyo3(signature = (question, options, *, preview=None))]
+    fn poll(
+        &self,
+        py: Python<'_>,
+        question: String,
+        options: Vec<String>,
+        preview: Option<Vec<u32>>,
+    ) -> PyResult<crate::poll::PyPoll> {
         crate::custom::ensure_authoring_allowed()?;
-        let to_error = |error: gaanim_api::canvas::SegmentError| {
-            pyo3::exceptions::PyValueError::new_err(error.to_string())
-        };
-        let poll = gaanim_api::canvas::StopPoll::new(question, options).map_err(to_error)?;
-        self.inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .poll(poll, name)
-            .map_err(to_error)
+        let mut scene = self.inner.lock().expect("scene canvas poisoned");
+        if scene.poll_session().is_none() {
+            let session = resolve_poll_session(py)?;
+            if session.relay.is_none() {
+                let category = py.get_type::<pyo3::exceptions::PyUserWarning>();
+                PyErr::warn(
+                    py,
+                    category.as_any(),
+                    c"no poll relay is set, so poll QR codes lead nowhere; deploy one \
+                      with `gaanim relay init` and set it with `gaanim relay use <URL>`",
+                    1,
+                )?;
+            }
+            scene.set_poll_session(session);
+        }
+        let inner = scene
+            .poll(question, options, preview)
+            .map_err(crate::poll::poll_error)?;
+        Ok(crate::poll::PyPoll { inner })
     }
 
     /// Start a voiceover block at the cursor, timed by `narration/<key>.*`.

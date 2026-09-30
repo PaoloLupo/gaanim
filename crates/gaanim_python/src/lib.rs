@@ -13,6 +13,7 @@ mod composition;
 mod custom;
 mod easing;
 mod falloff;
+mod poll;
 mod procedural;
 mod progress_ring;
 mod py3d;
@@ -152,6 +153,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<visualization::PyTimeInput>()?;
     m.add_function(wrap_pyfunction!(visualization::computed, m)?)?;
     m.add_class::<visualization::PyParameter>()?;
+    m.add_class::<poll::PyPoll>()?;
     m.add_class::<visualization::PyReadout>()?;
     m.add_class::<visualization::PyVariable>()?;
     m.add_class::<rolling_number::PyRollingNumber>()?;

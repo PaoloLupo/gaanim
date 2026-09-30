@@ -10,6 +10,7 @@ pub use falloff::{
 pub mod squash;
 pub use squash::{SQUASH_STEP, SquashStretch};
 pub mod paint;
+pub mod polls;
 pub mod prelude;
 pub mod procedural;
 pub mod progress_arc;
@@ -90,6 +91,7 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
         // Register DeltaTime resource
         app.init_resource::<DeltaTime>();
         app.init_resource::<PlaybackState>();
+        app.init_resource::<polls::PollResults>();
 
         // Sync Bevy's Time -> DeltaTime before animation evaluation.
         app.add_systems(Update, sync_delta_time_system.in_set(SceneSet::Input));
@@ -109,6 +111,7 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
                 reactive_readout_update_system,
                 reactive_readout_layout_system.after(reactive_readout_update_system),
                 progress_arc::progress_arc_system,
+                polls::poll_bar_system,
             )
                 .in_set(SceneSet::Visualization),
         );
@@ -136,6 +139,7 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
             Update,
             (
                 updater_system,
+                polls::poll_value_system.before(sampled_series_system),
                 sampled_series_system.after(updater_system),
                 (
                     property_binding_system.after(sampled_series_system),

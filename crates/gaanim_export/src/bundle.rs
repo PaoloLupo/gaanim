@@ -451,13 +451,14 @@ where
         background.pixel_size = (config.width, config.height);
     }
 
-    let (plan, segments, markers, polls, scenes, duration) = {
+    let (plan, segments, markers, polls, poll_session, scenes, duration) = {
         let timeline = app.world().resource::<Timeline>();
         (
             RecordingPlan::new(timeline, config.fps),
             timeline.segments.clone(),
             timeline.markers.clone(),
             timeline.polls.clone(),
+            timeline.poll_session.clone(),
             scene_spans(timeline),
             timeline.cached_duration.max(0.0),
         )
@@ -533,6 +534,29 @@ where
         ]
     });
 
+    // Name the elements drawn as poll bars, so presenting the bundle can
+    // redraw them at the live votes.
+    let poll_bars = {
+        let world = app.world_mut();
+        let mut bars = world.query::<(Entity, &gaanim_animation::polls::PollBar)>();
+        bars.iter(world)
+            .map(|(entity, bar)| (entity, bar.clone()))
+            .collect::<Vec<_>>()
+    }
+    .into_iter()
+    .map(|(entity, bar)| gaanim_bundle::PollBarRecord {
+        key: writer.entity_key(entity),
+        poll: bar.poll.to_string(),
+        answer: bar.answer,
+        preview: bar.preview.to_vec(),
+        length: bar.spec.length,
+        thickness: bar.spec.thickness,
+        radius: bar.spec.radius,
+        direction: bar.spec.direction.name().to_string(),
+        scale: bar.spec.scale.name().to_string(),
+    })
+    .collect();
+
     if !single_world {
         drop(app);
         writer.start_pass().map_err(bundle_error)?;
@@ -567,6 +591,8 @@ where
         scenes,
         audio,
         polls,
+        poll_session,
+        poll_bars,
     };
     if let Some(frame) = cover.and_then(ThumbnailPicker::into_frame) {
         match render_thumbnail(&scene, &frame) {

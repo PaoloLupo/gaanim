@@ -2519,22 +2519,6 @@ impl SceneModel {
             .expect("canvas state poisoned")
             .layout_diagnostics = layout_diagnostics;
         let manifest = self.segment_manifest();
-        // Polls as (segment, stop, poll): their times come from the stops
-        // once the builder clock has settled them.
-        let poll_slots: Vec<(usize, usize, crate::canvas::StopPoll)> = manifest
-            .segments
-            .iter()
-            .enumerate()
-            .flat_map(|(segment_index, segment)| {
-                segment
-                    .stops
-                    .iter()
-                    .enumerate()
-                    .filter_map(move |(stop_index, stop)| {
-                        Some((segment_index, stop_index, stop.poll.clone()?))
-                    })
-            })
-            .collect();
         let mut segment_metadata = manifest
             .segments
             .into_iter()
@@ -2737,17 +2721,39 @@ impl SceneModel {
                 },
             )
             .collect();
+        let (polls, poll_session) = {
+            let state = self.state.lock().expect("canvas state poisoned");
+            (state.polls.clone(), state.poll_session.clone())
+        };
+        let at = |(segment, local): (usize, f64)| {
+            segment_metadata
+                .get(segment)
+                .map(|metadata: &SegmentMetadata| metadata.start_time + local)
+        };
         builder.timeline.set_polls(
-            poll_slots
+            polls
                 .into_iter()
-                .filter_map(|(segment, stop, poll)| {
+                .filter_map(|poll| {
+                    let open = at(poll.open)?;
+                    let close = match poll.close {
+                        Some(close) => at(close)?,
+                        None => segment_metadata.get(poll.open.0)?.end_time,
+                    };
                     Some(gaanim_timeline::timeline::TimelinePoll {
-                        time: segment_metadata.get(segment)?.stops.get(stop)?.time,
+                        id: poll.id,
                         question: poll.question,
                         options: poll.options,
+                        preview: poll.preview.to_vec(),
+                        segment: segment_metadata.get(poll.open.0)?.id,
+                        open,
+                        close: close.max(open),
                     })
                 })
                 .collect(),
+            poll_session.map(|session| gaanim_timeline::timeline::PollSessionInfo {
+                relay: session.relay,
+                code: session.code,
+            }),
         );
         builder.timeline.set_segments(segment_metadata);
 
@@ -6269,6 +6275,34 @@ impl SceneModel {
                                         driver,
                                     ));
                                 }
+                            }
+                        });
+                    }
+                }
+
+                Op::AttachPollValue { target, value } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(target_st) = builder.states.get(target_id)
+                    {
+                        let entity = target_st.entity;
+                        let value = value.clone();
+                        builder.commands.queue(move |world: &mut World| {
+                            if let Ok(mut target) = world.get_entity_mut(entity) {
+                                target.insert(value);
+                            }
+                        });
+                    }
+                }
+
+                Op::AttachPollBar { target, bar } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(target_st) = builder.states.get(target_id)
+                    {
+                        let entity = target_st.entity;
+                        let bar = bar.clone();
+                        builder.commands.queue(move |world: &mut World| {
+                            if let Ok(mut target) = world.get_entity_mut(entity) {
+                                target.insert(bar);
                             }
                         });
                     }
@@ -14547,53 +14581,49 @@ mod tests {
     }
 
     #[test]
-    fn polls_compile_onto_their_stops() {
+    fn polls_take_votes_from_their_cursor_to_their_close_or_segment_end() {
         let mut canvas = SceneModel::new(640, 360);
+        canvas.set_poll_session(crate::canvas::PollSession {
+            relay: Some("https://relay.example.dev".into()),
+            code: "ABC234".into(),
+        });
+        canvas.segment("Intro", None).unwrap();
         canvas.dot(0.1);
         canvas.wait(1.0);
-        canvas.stop(None).unwrap();
-        canvas.wait(1.5);
-        let poll = crate::canvas::StopPoll::new(" Which? ", ["A", " B "]).unwrap();
-        canvas.poll(poll, Some("vote".into())).unwrap();
+        canvas.segment("Vote", None).unwrap();
+        canvas.wait(0.5);
+        let whole = canvas.poll("Whole?", ["A", "B"], Some(vec![2, 1])).unwrap();
+        let bar = whole
+            .bar(
+                0,
+                crate::canvas::PollBarOptions {
+                    length: 4.0,
+                    thickness: 0.5,
+                    radius: 0.0,
+                    direction: crate::canvas::BarDirection::Right,
+                    scale: crate::canvas::BarScale::Total,
+                },
+            )
+            .unwrap();
+        let share = whole.share(0).unwrap();
+        canvas.wait(2.0);
+        let early = canvas.poll("Early?", ["X", "Y", "Z"], None).unwrap();
         canvas.wait(1.0);
-
-        let stops = &canvas.segment_manifest().segments[0].stops;
-        assert_eq!(stops.len(), 2);
-        assert!(stops[0].poll.is_none());
-        assert_eq!(stops[1].name.as_deref(), Some("vote"));
+        early.close().unwrap();
+        canvas.wait(0.5);
 
         let timeline = compiled_timeline(&canvas);
-        assert_eq!(timeline.polls.len(), 1);
-        let compiled = &timeline.polls[0];
-        assert!((compiled.time - 2.5).abs() < 1e-9);
-        assert_eq!(compiled.question, "Which?");
-        assert_eq!(compiled.options, ["A", "B"]);
-        assert!(timeline.poll_at(stops[1].time).is_some());
-    }
-
-    #[test]
-    fn polls_reject_unusable_questions_and_answers() {
-        use crate::canvas::{SegmentError, StopPoll};
-        assert!(matches!(
-            StopPoll::new("  ", ["A", "B"]),
-            Err(SegmentError::EmptyPollQuestion)
-        ));
-        assert!(matches!(
-            StopPoll::new("Q", ["A"]),
-            Err(SegmentError::PollOptionCount { count: 1 })
-        ));
-        assert!(matches!(
-            StopPoll::new("Q", ["1", "2", "3", "4", "5", "6", "7"]),
-            Err(SegmentError::PollOptionCount { count: 7 })
-        ));
-        assert!(matches!(
-            StopPoll::new("Q", ["A", " "]),
-            Err(SegmentError::EmptyPollOption)
-        ));
-        assert!(matches!(
-            StopPoll::new("Q", ["A", "A "]),
-            Err(SegmentError::DuplicatePollOption { .. })
-        ));
+        let windows: Vec<(&str, f64, f64)> = timeline
+            .polls
+            .iter()
+            .map(|poll| (poll.question.as_str(), poll.open, poll.close))
+            .collect();
+        assert_eq!(windows, [("Whole?", 1.5, 5.0), ("Early?", 3.5, 4.5)]);
+        assert_eq!(timeline.polls[0].preview, [2, 1]);
+        assert_eq!(timeline.polls[1].preview, [0, 0, 0]);
+        let session = timeline.poll_session.as_ref().unwrap();
+        assert_eq!(session.code, "ABC234");
+        assert!(bar.id != share.drawable().id);
     }
 
     #[test]

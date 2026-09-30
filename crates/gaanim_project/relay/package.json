@@ -1,0 +1,19 @@
+{
+  "name": "gaanim-relay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Carries audience votes from phones to a Gaanim presentation",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:test": "wrangler deploy --env test",
+    "test": "node --test \"test/**/*.test.js\""
+  },
+  "devDependencies": {
+    "wrangler": "^4.144.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

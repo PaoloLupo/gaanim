@@ -496,18 +496,22 @@ scene.stop("dos-placas", loop=sequence(
   name: "Scene.poll",
   kind: "method",
   params: (
-    (name: "question", type: "str", desc: [Pregunta que ve la audiencia.]),
+    (name: "question", type: "str", desc: [Pregunta que responde la audiencia.]),
     (name: "options", type: "Sequence[str]", desc: [Entre 2 y 6 respuestas distintas.]),
-    (name: "name", type: "str | None", default: "None", desc: [Etiqueta de la pausa en Presenter View.]),
+    (name: "preview", type: "Sequence[int] | None", default: "None", desc: [Un conteo por respuesta que se usa en la previsualización, la exportación y las capturas en lugar de los votos reales; ceros por defecto.]),
   ),
-  returns: (type: "None", desc: [Como `stop()`: no añade duración ni cambia la imagen.]),
-  desc: [Crea una pausa con una encuesta. Mientras una presentación descansa en ella, la pantalla de la audiencia muestra un código QR y un código de seis caracteres que abren la página de votación en el teléfono, y una barra por respuesta que se llena a medida que llegan los votos. Avanzar cierra la pregunta. Funciona igual al presentar un paquete `.gaanim`. La previsualización, la exportación y el reproductor web la tratan como una pausa normal. Los votos pasan por el relay configurado con `gaanim relay` (ver #link("/guias/presentaciones/#encuestas-a-la-audiencia")[Encuestas a la audiencia]). La pregunta y las respuestas se recortan; una pregunta o respuesta vacía, una respuesta repetida, o menos de 2 o más de 6 respuestas lanzan `ValueError`.],
+  returns: (type: "Poll", desc: [Los datos de la encuesta; no dibuja nada.]),
+  desc: [Abre una encuesta en el cursor. Recibe votos mientras una presentación está entre este punto y `poll.close()`, o el final del segmento. La escena decide cómo mostrarla con los datos de `Poll`: `qr(tamaño)` y `bar(respuesta, ...)` devuelven drawables; `votes(i)`, `share(i)` y `total()` devuelven `Parameter` que siguen los votos en vivo; `code` y `url` son el código de la sesión y la dirección de votación. Al presentar un paquete `.gaanim` solo las barras siguen los votos en vivo; lo que dependa de un `Parameter` muestra los valores de `preview`. Ver #link("/guias/presentaciones/#encuestas-a-la-audiencia")[Encuestas a la audiencia]. Una pregunta o respuesta vacía, una respuesta repetida, menos de 2 o más de 6 respuestas, o un `preview` de otro largo lanzan `ValueError`.],
 )[
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
-scene.text("¿Qué crece más rápido?", role="title")
-scene.poll("¿Qué crece más rápido?", ["x²", "2ˣ", "x log x"], name="votación")
+poll = scene.poll("¿Qué crece más rápido?", ["x²", "2ˣ"], preview=[4, 9])
+card = scene.geometry.rounded_rect(3.4, 3.4, 0.2).fill(WHITE).no_stroke().move_to(-4, 0)
+qr = poll.qr(3.0).move_to(-4, 0)
+bar = poll.bar(1, length=6).fill(GOLD).no_stroke().move_to(2, 0)
+votes = scene.viz.readout(poll.votes(1), format=".0f").move_to(5.6, 0)
+scene.stop()
 ```
 ]
 

@@ -20,6 +20,7 @@ use gaanim_text::prelude::TextRole;
 use gaanim_timeline::transition::TransitionType;
 
 use crate::anim::{AnimationBuilder, AnimationType, BoundsTarget};
+use crate::canvas::SceneMarker;
 use crate::canvas::drawable::DrawableHandle;
 use crate::canvas::ops::{
     CameraBindingSpec, CameraBindingWindowSpec, CanvasCameraBindingKind, CanvasEndpoint, CanvasRay,
@@ -35,7 +36,6 @@ use crate::canvas::{
     Anchor, CanvasTheme, PresentationBrand, SegmentError, SegmentHandle, SegmentManifest,
     SegmentSpec, SegmentStop,
 };
-use crate::canvas::{SceneMarker, StopPoll};
 use crate::export::{AudioTrack, AudioTrackError};
 
 /// A validated audio declaration that can be activated by [`SceneModel::play_items`].
@@ -5575,7 +5575,6 @@ impl SceneModel {
             name,
             time,
             ambient: None,
-            poll: None,
         });
         segment.ops.push(Op::Stop);
         Ok(())
@@ -5609,26 +5608,6 @@ impl SceneModel {
         // A live narration take holds instead of stopping; it has no loop.
         if let Some(stop) = state.active_mut().stops.get_mut(stops) {
             stop.ambient = Some(length);
-        }
-        Ok(())
-    }
-
-    /// Pause like [`Self::stop`] and ask the audience `poll`: while a
-    /// presentation rests at this stop, it shows a QR code to vote from a
-    /// phone and the live results. Exports and editing ignore the poll.
-    pub fn poll(&mut self, poll: StopPoll, name: Option<String>) -> Result<(), SegmentError> {
-        let stops = self
-            .state
-            .lock()
-            .expect("canvas state poisoned")
-            .active()
-            .stops
-            .len();
-        self.stop(name)?;
-        let mut state = self.state.lock().expect("canvas state poisoned");
-        // A live narration take holds instead of stopping; it has no poll.
-        if let Some(stop) = state.active_mut().stops.get_mut(stops) {
-            stop.poll = Some(poll);
         }
         Ok(())
     }
@@ -5711,7 +5690,6 @@ impl SceneModel {
                             name: stop.name.clone(),
                             time: start_time + stop.time,
                             ambient: stop.ambient,
-                            poll: stop.poll.clone(),
                         })
                         .collect(),
                 };

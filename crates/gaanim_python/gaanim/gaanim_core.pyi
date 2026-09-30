@@ -4858,6 +4858,94 @@ def computed(callback: Callable[..., float], *, inputs: Sequence[Parameter | Var
     """
     ...
 
+class Poll:
+    """An audience poll created with ``scene.poll``: its data, for the scene
+    to present as it likes.
+
+    Values are live while a presentation collects votes and show the
+    ``preview`` counts everywhere else. ``votes``, ``share`` and ``total``
+    return ``Parameter`` objects: follow them with readouts, ``computed``
+    values, reactive points or anything else that accepts a parameter.
+    Presenting a ``.gaanim`` bundle replays what was recorded, so there
+    only ``bar`` drawables follow the live votes; parameter-driven
+    drawables keep the preview values.
+    """
+    @property
+    def id(self) -> str:
+        """Stable id of the poll on the relay."""
+        ...
+    @property
+    def question(self) -> str: ...
+    @property
+    def options(self) -> list[str]: ...
+    @property
+    def preview(self) -> list[int]:
+        """Counts shown outside a live presentation."""
+        ...
+    @property
+    def code(self) -> str:
+        """Six-character session code phones can type on the relay's page."""
+        ...
+    @property
+    def url(self) -> str:
+        """Address the QR code opens, e.g. ``https://relay.example/s/K7M2QX``."""
+        ...
+    def votes(self, answer: int) -> Parameter:
+        """Votes for ``answer`` (0 for the first) as a parameter.
+
+        Raises ``ValueError`` for an answer the poll does not have.
+        """
+        ...
+    def share(self, answer: int) -> Parameter:
+        """``answer``'s fraction of all votes, from 0 to 1 (0 without votes)."""
+        ...
+    def total(self) -> Parameter:
+        """Votes for every answer as a parameter."""
+        ...
+    def bar(
+        self,
+        answer: int,
+        *,
+        length: float = 6.0,
+        thickness: float = 0.5,
+        direction: Literal["right", "left", "up", "down"] = "right",
+        scale: Literal["leader", "total"] = "leader",
+        radius: float = 0.0,
+    ) -> Drawable:
+        """A bar whose length follows ``answer``'s votes.
+
+        The drawable's bounds are the full ``length`` by ``thickness`` box,
+        centered on its position, so layouts do not move as votes arrive; the
+        bar grows from the edge opposite ``direction``. With
+        ``scale="leader"`` the leading answer fills its bar; with ``"total"``
+        a bar's length is its answer's share. Style, position and animate it
+        like any drawable (``create`` grows it in). It also follows live
+        votes when a ``.gaanim`` bundle is presented.
+
+        Raises ``ValueError`` for an unknown answer, direction or scale, a
+        non-positive length or thickness, or a negative radius.
+
+        Example:
+            poll.bar(0, length=5, thickness=0.4, radius=0.2).fill(RED).move_to(1, 1)
+        """
+        ...
+    def qr(self, size: float = 3.0) -> Drawable:
+        """The QR code of ``url``, ``size`` scene units on a side.
+
+        One drawable of the dark modules, filled black and centered on its
+        position; restyle it like any drawable. Phones read it best on a
+        light background with a margin of a few modules. Raises
+        ``ValueError`` for a non-positive size.
+        """
+        ...
+    def close(self) -> None:
+        """Stop taking votes at the cursor instead of at the end of the
+        segment where the poll opened. The values keep their last counts.
+
+        Raises ``ValueError`` if the poll is already closed.
+        """
+        ...
+
 class Parameter:
     """An animatable scalar usable directly or as an explicit callback input."""
     @property
@@ -7696,25 +7784,34 @@ class Scene:
         question: str,
         options: Sequence[str],
         *,
-        name: Optional[str] = None,
-    ) -> None:
-        """Pause like ``stop`` and ask the audience a question.
+        preview: Optional[Sequence[int]] = None,
+    ) -> Poll:
+        """Open an audience poll at the cursor and return its data.
 
-        While a presentation (``gaanim --present``, from the script or from a
-        ``.gaanim`` bundle) rests on this stop, the audience screen shows a QR
-        code and a six-character code that open a voting page on phones, and
-        a bar per answer that fills as votes arrive. Leaving the stop closes
-        the question. Phones scan once per presentation and follow every
-        poll. Votes travel through the relay set with ``gaanim relay``;
-        without one the poll shows how to set it up. Previews, exports and
-        the web player treat the poll as a plain stop.
+        The poll draws nothing: it gives the scene what it needs to present
+        the question its own way (see ``Poll``). While a presentation
+        (``gaanim --present``, from the script or a ``.gaanim`` bundle) is
+        between here and ``poll.close()``, or the end of this segment, the
+        relay takes votes for it and the poll's values follow them. Phones
+        join once per presentation: the session code is fixed for the
+        project, so the QR code is ordinary scene content.
 
-        ``question`` and each answer are trimmed. Raises ``ValueError`` for an
-        empty question or answer, a repeated answer, or fewer than 2 or more
-        than 6 answers.
+        ``preview`` gives one count per answer, used in previews, exports and
+        snapshots instead of live votes (zeros by default), so a design can
+        be judged with plausible numbers. The relay comes from
+        ``GAANIM_POLL_RELAY``, the project's ``[polls] relay`` or
+        ``gaanim relay use``; without one a ``UserWarning`` says so and the QR
+        code leads nowhere. ``question`` and each answer are trimmed.
+
+        Raises ``ValueError`` for an empty question or answer, a repeated
+        answer, fewer than 2 or more than 6 answers, or a ``preview`` whose
+        length differs from the answers.
 
         Example:
-            scene.poll("¿Qué curva crece más rápido?", ["x²", "2ˣ", "x log x"])
+            poll = scene.poll("¿Qué crece más rápido?", ["x²", "2ˣ"], preview=[4, 9])
+            qr = poll.qr(3.0).move_to(-4, 0)
+            bar = poll.bar(1, length=6).fill(GOLD).move_to(2, 0)
+            scene.stop()
         """
         ...
     def voiceover(

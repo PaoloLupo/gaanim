@@ -88,8 +88,8 @@ ruta de `--output`, relativa al directorio actual.
 relay = "https://gaanim-relay.<tú>.workers.dev"
 ```
 
-Relay que usan las encuestas (`scene.poll`) al presentar este proyecto, en
-lugar del guardado con `gaanim relay use`. `GAANIM_POLL_RELAY` tiene prioridad
+Relay al que apuntan los códigos QR de las encuestas (`scene.poll`) de este
+proyecto, en lugar del guardado con `gaanim relay use`. `GAANIM_POLL_RELAY` tiene prioridad
 sobre ambos. Ver
 #link("/guias/presentaciones/#encuestas-a-la-audiencia")[Encuestas a la audiencia].
 

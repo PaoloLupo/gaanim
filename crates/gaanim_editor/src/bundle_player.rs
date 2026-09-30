@@ -75,7 +75,7 @@ fn bundle_timeline(bundle: &Bundle) -> Timeline {
     }
     timeline.set_segments(scene.segments.clone());
     timeline.set_markers(scene.markers.clone());
-    timeline.set_polls(scene.polls.clone());
+    timeline.set_polls(scene.polls.clone(), scene.poll_session.clone());
     timeline.cached_duration = scene.duration;
     timeline.is_playing = true;
     timeline
@@ -206,6 +206,51 @@ impl BundlePlayback {
     }
 }
 
+/// Redraw the elements recorded as poll bars at the live votes; everything
+/// else of each element stays as recorded. Outside a live presentation the
+/// results are empty and the recorded frame is shown as is.
+fn draw_live_poll_bars(
+    bars: &[gaanim_bundle::PollBarRecord],
+    results: &gaanim_animation::polls::PollResults,
+    capture: &mut gaanim_renderer::pipeline::FrameCapture,
+) {
+    use gaanim_animation::polls::{BarDirection, BarScale, BarSpec};
+    if results.0.is_empty() {
+        return;
+    }
+    for bar in bars {
+        let counts = results.counts(&bar.poll, &bar.preview);
+        if counts == bar.preview.as_slice() {
+            continue;
+        }
+        let (Ok(entity), Some(direction), Some(scale)) = (
+            gaanim_bundle::element_entity(bar.key),
+            BarDirection::from_name(&bar.direction),
+            BarScale::from_name(&bar.scale),
+        ) else {
+            continue;
+        };
+        let spec = BarSpec {
+            length: bar.length,
+            thickness: bar.thickness,
+            radius: bar.radius,
+            direction,
+            scale,
+        };
+        let outline = Arc::new(spec.path(spec.fraction(bar.answer, counts)));
+        for element in capture
+            .elements
+            .iter_mut()
+            .filter(|element| element.entity == entity)
+        {
+            let mut recipe = (*element.recipe).clone();
+            recipe.path = Some(outline.clone());
+            recipe.source = Some(outline.clone());
+            element.recipe = Arc::new(recipe);
+        }
+    }
+}
+
 /// System: show the recorded frame at the playhead.
 pub fn bundle_frame_system(
     mut playback: ResMut<BundlePlayback>,
@@ -213,9 +258,11 @@ pub fn bundle_frame_system(
     mut external: ResMut<ExternalFrame>,
     mut camera: ResMut<gaanim_math::Camera>,
     mut post: ResMut<CanvasPostProcess>,
+    results: Option<Res<gaanim_animation::polls::PollResults>>,
 ) {
     let index = playback.bundle.frame_index_at(timeline.current_time);
-    if playback.shown == Some(index) || playback.failed {
+    let votes_changed = results.as_ref().is_some_and(|results| results.is_changed());
+    if (playback.shown == Some(index) && !votes_changed) || playback.failed {
         if *camera != playback.camera {
             *camera = playback.camera;
         }
@@ -249,7 +296,11 @@ pub fn bundle_frame_system(
             .collect();
         playback.post = frame.post.clone();
     }
-    external.frame = Some(Arc::new(frame.capture));
+    let mut capture = frame.capture;
+    if let Some(results) = &results {
+        draw_live_poll_bars(&playback.bundle.scene.poll_bars, results, &mut capture);
+    }
+    external.frame = Some(Arc::new(capture));
 }
 
 /// Plays bundles opened with [`open_bundle`].

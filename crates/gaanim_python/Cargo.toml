@@ -11,6 +11,8 @@ crate-type = ["rlib"]
 [dependencies]
 pyo3 = { version = "0.28", features = ["abi3-py314", "multiple-pymethods", "py-clone"] }
 gaanim_core = { path = "../gaanim_core" }
+# Poll relay and session of the scene's project.
+gaanim_project = { path = "../gaanim_project" }
 gaanim_api = { path = "../gaanim_api" }
 gaanim_animation = { path = "../gaanim_animation" }
 gaanim_math = { path = "../gaanim_math" }

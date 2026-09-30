@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#faf9f6" media="(prefers-color-scheme: light)" />
+    <meta name="robots" content="noindex" />
+    <title>Gaanim · Votar</title>
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="stylesheet" href="/app.css" />
+    <script src="/i18n.js" defer></script>
+    <script src="/vote.js" defer></script>
+  </head>
+  <body>
+    <main class="page">
+      <header class="bar">
+        <a class="brand" href="/">
+          <img class="symbol symbol-dark" src="/symbol-dark.svg" alt="" width="36" height="24" />
+          <img class="symbol symbol-light" src="/symbol-light.svg" alt="" width="36" height="24" />
+          Gaanim
+        </a>
+        <span class="pill" title="Código de la presentación">
+          <span class="dot" id="dot" aria-hidden="true"></span>
+          <span id="session"></span>
+        </span>
+      </header>
+
+      <div class="banner" id="offline" role="status" hidden data-t="offline">
+        Sin conexión. Reintentando…
+      </div>
+
+      <!-- Waiting for the presenter to open a question. -->
+      <section class="center" id="waiting">
+        <div class="pulse" aria-hidden="true"></div>
+        <h1 data-t="waitTitle">Esperando la pregunta</h1>
+        <p data-t="waitHint">Deja esta página abierta: la pregunta aparecerá aquí.</p>
+      </section>
+
+      <!-- An open question. -->
+      <section class="question" id="question" hidden>
+        <h1 id="question-text"></h1>
+        <ul class="answers" id="answers" aria-labelledby="question-text"></ul>
+        <p class="status" id="status" aria-live="polite"></p>
+      </section>
+
+      <template id="answer-template">
+        <li>
+          <button class="answer" type="button" aria-pressed="false">
+            <span class="shape" aria-hidden="true"></span>
+            <span class="label"></span>
+            <span class="letter" aria-hidden="true"></span>
+            <span class="check" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 12.5l4.5 4.5L19 7.5" />
+              </svg>
+            </span>
+          </button>
+        </li>
+      </template>
+    </main>
+  </body>
+</html>

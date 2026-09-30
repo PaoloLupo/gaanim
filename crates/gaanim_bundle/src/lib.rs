@@ -18,8 +18,9 @@
 //! - `frames/NNNNNN.bin`: chunks of frames, each frame encoded against the
 //!   one before it; a chunk starts with a whole frame.
 //! - `media/*`: embedded audio files.
-//! - `polls.json`: audience polls, only when the scene has any. Readers
-//!   that predate it ignore it, so it needs no new format version.
+//! - `polls.json`: audience polls, their relay session and the elements
+//!   drawn as poll bars, only when the scene has polls. Readers that predate
+//!   it ignore it, so it needs no new format version.
 //!
 //! [`FragmentRecipe`]: gaanim_renderer::fragment::FragmentRecipe
 
@@ -38,13 +39,20 @@ use gaanim_renderer::pipeline::{
     CanvasBackground, CapturedElement, SegmentBackgroundPaint, compose_captured,
 };
 use gaanim_renderer::post_process::PostProcessShader;
-use gaanim_timeline::timeline::{SegmentMetadata, SegmentStop, TimelineMarker, TimelinePoll};
+use gaanim_timeline::timeline::{
+    PollSessionInfo, SegmentMetadata, SegmentStop, TimelineMarker, TimelinePoll,
+};
 use serde::{Deserialize, Serialize};
 
 use codec::{Reader, Writer};
 pub use digest::scene_digest;
 use model::{DecodedTables, DeltaDecoder, DeltaEncoder, FrameRecord, Tables};
 pub use model::{EntityKeys, Frame, PostPass};
+
+/// The entity that stands for element key `key` in decoded frames.
+pub fn element_entity(key: u32) -> Result<bevy::prelude::Entity> {
+    model::key_entity(key)
+}
 
 /// Identifies the file type in `manifest.json`.
 pub const FORMAT: &str = "gaanim-bundle";
@@ -149,39 +157,104 @@ pub struct SceneData {
     pub audio: Vec<AudioData>,
     /// Audience polls, stored in their own entry (see [`POLLS`]).
     pub polls: Vec<TimelinePoll>,
+    pub poll_session: Option<PollSessionInfo>,
+    /// Elements drawn as poll bars, which a live presentation redraws.
+    pub poll_bars: Vec<PollBarRecord>,
 }
 
-/// One audience poll as `polls.json` stores it.
+/// A recorded element whose outline is a poll bar: presenting the bundle
+/// replaces its path with the bar at the live votes, and keeps everything
+/// else the frame recorded (paint, transform, opacity, effects).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PollBarRecord {
+    /// Element key in the recorded frames.
+    pub key: u32,
+    pub poll: String,
+    pub answer: usize,
+    pub preview: Vec<u32>,
+    pub length: f64,
+    pub thickness: f64,
+    pub radius: f64,
+    /// `right`, `left`, `up` or `down`.
+    pub direction: String,
+    /// `total` or `leader`.
+    pub scale: String,
+}
+
+/// `polls.json`.
+#[derive(Serialize, Deserialize)]
+struct PollsEntry {
+    #[serde(default)]
+    session: Option<SessionRecord>,
+    polls: Vec<PollRecord>,
+    #[serde(default)]
+    bars: Vec<PollBarRecord>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SessionRecord {
+    relay: Option<String>,
+    code: String,
+}
+
 #[derive(Serialize, Deserialize)]
 struct PollRecord {
-    time: f64,
+    id: String,
     question: String,
     options: Vec<String>,
+    preview: Vec<u32>,
+    #[serde(default)]
+    segment: u32,
+    open: f64,
+    close: f64,
 }
 
-fn write_polls(polls: &[TimelinePoll]) -> Result<Vec<u8>> {
-    let records: Vec<PollRecord> = polls
-        .iter()
-        .map(|poll| PollRecord {
-            time: poll.time,
-            question: poll.question.clone(),
-            options: poll.options.clone(),
+fn write_polls(scene: &SceneData) -> Result<Vec<u8>> {
+    let entry = PollsEntry {
+        session: scene.poll_session.as_ref().map(|session| SessionRecord {
+            relay: session.relay.clone(),
+            code: session.code.clone(),
+        }),
+        polls: scene
+            .polls
+            .iter()
+            .map(|poll| PollRecord {
+                id: poll.id.clone(),
+                question: poll.question.clone(),
+                options: poll.options.clone(),
+                preview: poll.preview.clone(),
+                segment: poll.segment,
+                open: poll.open,
+                close: poll.close,
+            })
+            .collect(),
+        bars: scene.poll_bars.clone(),
+    };
+    serde_json::to_vec(&entry).map_err(|error| BundleError::Corrupt(error.to_string()))
+}
+
+fn read_polls(bytes: &[u8], scene: &mut SceneData) -> Result<()> {
+    let entry: PollsEntry = serde_json::from_slice(bytes)
+        .map_err(|error| BundleError::Corrupt(format!("{POLLS}: {error}")))?;
+    scene.poll_session = entry.session.map(|session| PollSessionInfo {
+        relay: session.relay,
+        code: session.code,
+    });
+    scene.polls = entry
+        .polls
+        .into_iter()
+        .map(|poll| TimelinePoll {
+            id: poll.id,
+            question: poll.question,
+            options: poll.options,
+            preview: poll.preview,
+            segment: poll.segment,
+            open: poll.open,
+            close: poll.close,
         })
         .collect();
-    serde_json::to_vec(&records).map_err(|error| BundleError::Corrupt(error.to_string()))
-}
-
-fn read_polls(bytes: &[u8]) -> Result<Vec<TimelinePoll>> {
-    let records: Vec<PollRecord> = serde_json::from_slice(bytes)
-        .map_err(|error| BundleError::Corrupt(format!("{POLLS}: {error}")))?;
-    Ok(records
-        .into_iter()
-        .map(|record| TimelinePoll {
-            time: record.time,
-            question: record.question,
-            options: record.options,
-        })
-        .collect())
+    scene.poll_bars = entry.bars;
+    Ok(())
 }
 
 fn write_paint(w: &mut Writer, tables: &mut Tables, paint: &BackgroundPaint) {
@@ -439,6 +512,8 @@ impl SceneData {
             scenes,
             audio,
             polls: Vec::new(),
+            poll_session: None,
+            poll_bars: Vec::new(),
         })
     }
 }
@@ -555,6 +630,12 @@ impl<W: Write + Seek> BundleWriter<W> {
         self.entries
             .insert(name.to_owned(), blake3::hash(bytes).to_hex().to_string());
         Ok(())
+    }
+
+    /// The key frames use for `entity`, e.g. to name the elements drawn as
+    /// poll bars.
+    pub fn entity_key(&mut self, entity: bevy::prelude::Entity) -> u32 {
+        self.keys.key(entity)
     }
 
     /// Embed a media file and return its entry name. Identical files are
@@ -734,7 +815,7 @@ impl<W: Write + Seek> BundleWriter<W> {
         }
         self.write_entry("digests.bin", &digests)?;
         if !scene.polls.is_empty() {
-            self.write_entry(POLLS, &write_polls(&scene.polls)?)?;
+            self.write_entry(POLLS, &write_polls(scene)?)?;
         }
 
         let manifest = Manifest {
@@ -947,7 +1028,10 @@ impl Bundle {
         let scene_bytes = read_entry(&mut archive, Some(&manifest), "scene.bin")?;
         let mut scene = SceneData::read(&mut Reader::new(&scene_bytes), &tables)?;
         if manifest.entries.contains_key(POLLS) {
-            scene.polls = read_polls(&read_entry(&mut archive, Some(&manifest), POLLS)?)?;
+            read_polls(
+                &read_entry(&mut archive, Some(&manifest), POLLS)?,
+                &mut scene,
+            )?;
         }
 
         let index = read_entry(&mut archive, Some(&manifest), "index.bin")?;
@@ -1249,29 +1333,52 @@ mod tests {
 
     #[test]
     fn polls_round_trip_in_their_own_entry() {
-        let record = |polls: Vec<TimelinePoll>| {
+        let record = |polls: Vec<TimelinePoll>, bars: Vec<PollBarRecord>| {
             let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
             writer.push_frame(&frame(0.0), [0; 32]).unwrap();
             let scene = SceneData {
                 fps: 60,
                 duration: 1.0 / 60.0,
+                poll_session: (!polls.is_empty()).then(|| PollSessionInfo {
+                    relay: Some("https://relay.example.dev".into()),
+                    code: "ABC234".into(),
+                }),
                 polls,
+                poll_bars: bars,
                 ..Default::default()
             };
             Bundle::from_bytes(writer.finish(&scene).unwrap().into_inner().into()).unwrap()
         };
         let poll = TimelinePoll {
-            time: 0.0,
+            id: "p0-0badf00d".into(),
             question: "¿Cuál?".into(),
             options: vec!["A".into(), "B".into()],
+            preview: vec![3, 1],
+            segment: 1,
+            open: 0.0,
+            close: 1.0,
         };
-        let bundle = record(vec![poll.clone()]);
+        let bar = PollBarRecord {
+            key: 7,
+            poll: poll.id.clone(),
+            answer: 1,
+            preview: vec![3, 1],
+            length: 4.0,
+            thickness: 0.5,
+            radius: 0.1,
+            direction: "up".into(),
+            scale: "leader".into(),
+        };
+        let bundle = record(vec![poll.clone()], vec![bar.clone()]);
         assert!(bundle.manifest.entries.contains_key(POLLS));
         assert_eq!(bundle.scene.polls, [poll]);
+        assert_eq!(bundle.scene.poll_bars, [bar]);
+        assert_eq!(bundle.scene.poll_session.as_ref().unwrap().code, "ABC234");
 
         // A scene without polls writes no entry, as bundles did before.
-        let bundle = record(Vec::new());
+        let bundle = record(Vec::new(), Vec::new());
         assert!(!bundle.manifest.entries.contains_key(POLLS));
         assert!(bundle.scene.polls.is_empty());
+        assert!(bundle.scene.poll_session.is_none());
     }
 }

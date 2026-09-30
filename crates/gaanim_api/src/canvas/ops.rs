@@ -54,6 +54,9 @@ pub(crate) struct CanvasState {
     /// The shared scene that owns this state, which drawables compile to
     /// measure themselves.
     pub(crate) owner: Option<std::sync::Weak<Mutex<crate::canvas::SceneModel>>>,
+    /// Audience polls in authoring order and the session they take votes on.
+    pub(crate) polls: Vec<super::poll::PollRecord>,
+    pub(crate) poll_session: Option<super::poll::PollSession>,
 }
 
 impl CanvasState {
@@ -77,6 +80,8 @@ impl CanvasState {
             object_specs: HashMap::new(),
             frozen_spawn_specs: HashMap::new(),
             owner: None,
+            polls: Vec::new(),
+            poll_session: None,
         }
     }
 
@@ -735,6 +740,16 @@ pub(crate) enum Op {
         target: ObjectId,
         driver: SampledSeriesDriver,
     },
+    /// Make a parameter report a poll's live value.
+    AttachPollValue {
+        target: ObjectId,
+        value: gaanim_animation::polls::PollValue,
+    },
+    /// Make a rectangle a bar that follows a poll answer.
+    AttachPollBar {
+        target: ObjectId,
+        bar: gaanim_animation::polls::PollBar,
+    },
     /// Regenerate a curved arrow arc from a float signal every frame.
     AttachTrackerArc {
         target: ObjectId,
@@ -996,8 +1011,6 @@ pub(crate) struct LocalSegmentStop {
     pub time: f64,
     /// Length of the ambient loop authored right after the stop.
     pub ambient: Option<f64>,
-    /// The audience poll shown while a presentation rests here.
-    pub poll: Option<super::StopPoll>,
 }
 
 /// A named segment (≈ scene) within a [`SceneModel`](super::SceneModel).

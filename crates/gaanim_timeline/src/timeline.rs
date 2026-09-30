@@ -298,9 +298,12 @@ pub struct Timeline {
     /// Tempo set with `scene.tempo`, drawn as bar lines on the seek bar.
     #[cfg_attr(feature = "serde", serde(default))]
     pub beat_grid: Option<BeatGrid>,
-    /// Audience polls authored with `scene.poll`, in time order.
+    /// Audience polls authored with `scene.poll`, by opening time.
     #[cfg_attr(feature = "serde", serde(default))]
     pub polls: Vec<TimelinePoll>,
+    /// The relay session of those polls.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub poll_session: Option<PollSessionInfo>,
 }
 
 /// A musical tempo: `bpm` beats per minute from `offset` seconds, grouped
@@ -345,14 +348,32 @@ pub struct TimelineMarker {
     pub time: f64,
 }
 
-/// An audience poll authored with `scene.poll`: a question and its answers,
-/// shown while a presentation rests at the stop at `time`.
+/// An audience poll authored with `scene.poll`. A presentation takes votes
+/// for it while its playhead is inside `[open, close]`.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TimelinePoll {
-    pub time: f64,
+    /// Stable id on the relay, so a poll keeps its votes across presentations.
+    pub id: String,
     pub question: String,
     pub options: Vec<String>,
+    /// Counts shown outside a live presentation.
+    pub preview: Vec<u32>,
+    /// Id of the segment where the poll opens.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub segment: u32,
+    pub open: f64,
+    pub close: f64,
+}
+
+/// Where a scene's polls take votes: the relay and the session code its QR
+/// codes point to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct PollSessionInfo {
+    /// `None` when no relay was set while the scene was authored.
+    pub relay: Option<String>,
+    pub code: String,
 }
 
 /// Most segment checkpoints kept at once; each holds a whole world snapshot.
@@ -435,6 +456,7 @@ impl Default for Timeline {
             markers: Vec::new(),
             beat_grid: None,
             polls: Vec::new(),
+            poll_session: None,
         }
     }
 }
@@ -452,20 +474,35 @@ impl Timeline {
     }
 
     /// Replace the audience polls compiled from the current canvas.
-    pub fn set_polls(&mut self, mut polls: Vec<TimelinePoll>) {
-        polls.sort_by(|left, right| left.time.total_cmp(&right.time));
+    pub fn set_polls(&mut self, mut polls: Vec<TimelinePoll>, session: Option<PollSessionInfo>) {
+        polls.sort_by(|left, right| left.open.total_cmp(&right.open));
         self.polls = polls;
+        self.poll_session = session;
     }
 
-    /// The poll a presentation shows at `time`: the one whose stop it rests
-    /// on while paused.
-    pub fn poll_at(&self, time: f64) -> Option<&TimelinePoll> {
-        if self.is_playing {
-            return None;
-        }
-        self.polls
+    /// The poll taking votes at `time`. Where one poll closes as the next
+    /// opens, the poll of the segment shown there wins: a stop at the end
+    /// of a segment keeps that segment, and its poll, until the
+    /// presentation advances.
+    pub fn poll_open_at(&self, time: f64) -> Option<&TimelinePoll> {
+        const EPSILON: f64 = 1e-5;
+        let mut open = self
+            .polls
             .iter()
-            .find(|poll| (poll.time - time).abs() < 1e-5)
+            .filter(|poll| poll.open - EPSILON <= time && time <= poll.close + EPSILON);
+        let first = open.next()?;
+        let Some(second) = open.next() else {
+            return Some(first);
+        };
+        let shown = self
+            .segment_position_at(time)
+            .map(|position| position.segment_id);
+        [first, second]
+            .into_iter()
+            .chain(open)
+            .rev()
+            .find(|poll| Some(poll.segment) == shown)
+            .or(Some(second))
     }
 
     /// Absolute time of the marker named `name`.
@@ -5803,28 +5840,53 @@ mod tests {
     }
 
     #[test]
-    fn a_poll_shows_only_while_resting_on_its_stop() {
+    fn a_poll_takes_votes_inside_its_window() {
+        let poll = |id: &str, segment: u32, open: f64, close: f64| TimelinePoll {
+            id: id.to_string(),
+            question: format!("{id}?"),
+            options: vec!["A".to_string(), "B".to_string()],
+            preview: vec![0, 0],
+            segment,
+            open,
+            close,
+        };
+        let segment = |id: u32, start_time: f64, end_time: f64, stops: &[f64]| SegmentMetadata {
+            id,
+            name: format!("segment {id}"),
+            notes: None,
+            start_time,
+            end_time,
+            stops: stops
+                .iter()
+                .map(|time| SegmentStop {
+                    name: None,
+                    time: *time,
+                    ambient: None,
+                })
+                .collect(),
+        };
         let mut timeline = Timeline::new();
-        timeline.set_polls(vec![
-            TimelinePoll {
-                time: 4.0,
-                question: "Second?".to_string(),
-                options: vec!["A".to_string(), "B".to_string()],
-            },
-            TimelinePoll {
-                time: 1.0,
-                question: "First?".to_string(),
-                options: vec!["Yes".to_string(), "No".to_string()],
-            },
-        ]);
-
-        assert_eq!(timeline.polls[0].question, "First?");
-        assert_eq!(
-            timeline.poll_at(4.0).map(|poll| poll.question.as_str()),
-            Some("Second?")
+        timeline.set_segments(vec![segment(1, 0.0, 4.0, &[]), segment(2, 4.0, 6.0, &[])]);
+        timeline.set_polls(
+            vec![poll("second", 2, 4.0, 6.0), poll("first", 1, 1.0, 4.0)],
+            None,
         );
-        assert!(timeline.poll_at(2.0).is_none());
-        timeline.is_playing = true;
-        assert!(timeline.poll_at(4.0).is_none());
+
+        assert_eq!(timeline.polls[0].id, "first");
+        let open_at =
+            |timeline: &Timeline, time| timeline.poll_open_at(time).map(|poll| poll.id.clone());
+        assert_eq!(open_at(&timeline, 0.5), None);
+        assert_eq!(open_at(&timeline, 1.0).as_deref(), Some("first"));
+        // Playing through the boundary shows the next segment and its poll.
+        assert_eq!(open_at(&timeline, 4.0).as_deref(), Some("second"));
+        assert_eq!(open_at(&timeline, 6.0).as_deref(), Some("second"));
+        assert_eq!(open_at(&timeline, 6.5), None);
+
+        // A stop at the end of the first segment keeps its poll open there.
+        timeline.set_segments(vec![
+            segment(1, 0.0, 4.0, &[4.0]),
+            segment(2, 4.0, 6.0, &[]),
+        ]);
+        assert_eq!(open_at(&timeline, 4.0).as_deref(), Some("first"));
     }
 }

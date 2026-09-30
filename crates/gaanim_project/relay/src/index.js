@@ -1,16 +1,19 @@
-// Gaanim poll relay.
+// Gaanim relay.
 //
 // A presentation opens a session under a six-character code and holds a
-// secret key for it. The audience scans a QR code to /s/<code>, a page that
+// secret key for it. Each poll has an id the presentation chooses, so a poll
+// keeps its votes when the presentation comes back to it. The audience scans a QR code to /s/<code>, a page that
 // shows the current question and sends one vote per phone. The presentation
 // opens and closes questions and reads the counts with its key.
 //
+//   GET    /                  join page: type a code (static asset)
 //   GET    /s/<code>          voting page (public)
 //   GET    /s/<code>/poll     current question, without counts (public)
 //   POST   /s/<code>/vote     {poll, option, voter} (public)
-//   PUT    /s/<code>/poll     {question, options} -> {id}   (presenter)
-//   DELETE /s/<code>/poll     close the question            (presenter)
-//   GET    /s/<code>/results  {id, counts, total}           (presenter)
+//   PUT    /s/<code>/poll     {id, question, options}       (presenter)
+//   DELETE /s/<code>/poll     close the open question       (presenter)
+//   GET    /s/<code>/results  {current, polls: {id: {open, counts, total}}}
+//   GET    /health            {relay, version}
 //
 // Votes are anonymous: a voter is a random id the page keeps in the phone's
 // storage. A session and its votes are deleted after SESSION_TTL_MS without
@@ -21,29 +24,42 @@ import { DurableObject } from "cloudflare:workers";
 const CODE = /^[A-HJ-NP-Z2-9]{6}$/;
 const VOTER = /^[0-9a-f]{32}$/;
 const KEY = /^[0-9a-f]{64}$/;
+/** Poll ids are chosen by the presentation: stable across presentations. */
+const POLL_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const MAX_OPTIONS = 6;
 const MAX_QUESTION = 300;
 const MAX_OPTION = 120;
+const MAX_BODY = 8192;
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const API_VERSION = 2;
+
+/** Headers every page and API response carries. */
+const SECURITY_HEADERS = {
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer",
+  "x-frame-options": "DENY",
+};
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const parts = url.pathname.split("/").filter(Boolean);
-    if (parts.length === 0) {
-      return json({ relay: "gaanim", version: 1 });
+    if (url.pathname === "/health") {
+      return json({ relay: "gaanim", version: API_VERSION });
     }
     const code = (parts[1] ?? "").toUpperCase();
     if (parts[0] !== "s" || !CODE.test(code) || parts.length > 3) {
       return json({ error: "not found" }, 404);
     }
     if (parts.length === 2) {
-      return request.method === "GET" ? page(code) : json({ error: "method" }, 405);
+      if (request.method !== "GET") return json({ error: "method not allowed" }, 405);
+      // Short, shareable address: /s/abc234 → /s/ABC234.
+      if (parts[1] !== code) return Response.redirect(`${url.origin}/s/${code}`, 302);
+      return votePage(env, url);
     }
     const session = env.SESSIONS.get(env.SESSIONS.idFromName(code));
-    const route = `${request.method} ${parts[2]}`;
     try {
-      switch (route) {
+      switch (`${request.method} ${parts[2]}`) {
         case "GET poll":
           return json(await session.current());
         case "POST vote":
@@ -64,19 +80,26 @@ export default {
 };
 
 export class PollSession extends DurableObject {
+  // Storage: "key" (presenter key hash), "current" (open poll id or absent),
+  // "poll:<id>" ({question, options, counts}) and "vote:<id>:<voter>"
+  // (the answer index). Every poll keeps its votes, so a presentation that
+  // comes back to a question finds them again.
+
   async current() {
-    const poll = await this.ctx.storage.get("poll");
-    if (!poll || !poll.open) {
+    const id = await this.ctx.storage.get("current");
+    const poll = id && (await this.ctx.storage.get(`poll:${id}`));
+    if (!poll) {
       return { open: false };
     }
-    return { open: true, id: poll.id, question: poll.question, options: poll.options };
+    return { open: true, id, question: poll.question, options: poll.options };
   }
 
   async vote(input) {
-    const poll = await this.ctx.storage.get("poll");
-    if (!poll || !poll.open || input?.poll !== poll.id) {
+    const id = await this.ctx.storage.get("current");
+    if (!id || input?.poll !== id) {
       return { status: 409, body: { error: "this question is closed" } };
     }
+    const poll = await this.ctx.storage.get(`poll:${id}`);
     const option = input.option;
     if (!Number.isInteger(option) || option < 0 || option >= poll.options.length) {
       return { status: 400, body: { error: "unknown answer" } };
@@ -84,17 +107,16 @@ export class PollSession extends DurableObject {
     if (typeof input.voter !== "string" || !VOTER.test(input.voter)) {
       return { status: 400, body: { error: "invalid voter" } };
     }
-    const key = `vote:${input.voter}`;
+    const key = `vote:${id}:${input.voter}`;
     const previous = await this.ctx.storage.get(key);
-    const counts = (await this.ctx.storage.get("counts")) ?? poll.options.map(() => 0);
-    if (previous && previous.poll === poll.id) {
-      if (previous.option === option) {
-        return { status: 200, body: { ok: true } };
-      }
-      counts[previous.option] = Math.max(0, counts[previous.option] - 1);
+    if (previous === option) {
+      return { status: 200, body: { ok: true } };
     }
-    counts[option] += 1;
-    await this.ctx.storage.put({ [key]: { poll: poll.id, option }, counts });
+    if (previous !== undefined) {
+      poll.counts[previous] = Math.max(0, poll.counts[previous] - 1);
+    }
+    poll.counts[option] += 1;
+    await this.ctx.storage.put({ [key]: option, [`poll:${id}`]: poll });
     await this.touch();
     return { status: 200, body: { ok: true } };
   }
@@ -102,19 +124,39 @@ export class PollSession extends DurableObject {
   async open(key, input) {
     const denied = await this.authorize(key, true);
     if (denied) return denied;
+    const id = typeof input?.id === "string" ? input.id : "";
     const question = text(input?.question, MAX_QUESTION);
     const options = Array.isArray(input?.options)
       ? input.options.map((option) => text(option, MAX_OPTION))
       : [];
-    if (!question || options.length < 2 || options.length > MAX_OPTIONS || options.some((o) => !o)) {
+    if (
+      !POLL_ID.test(id) ||
+      !question ||
+      options.length < 2 ||
+      options.length > MAX_OPTIONS ||
+      options.some((option) => !option)
+    ) {
       return { status: 400, body: { error: "invalid question" } };
     }
-    const id = crypto.randomUUID();
-    // Earlier votes keep their poll id, so they no longer count.
-    await this.ctx.storage.put({
-      poll: { id, question, options, open: true },
-      counts: options.map(() => 0),
-    });
+    const existing = await this.ctx.storage.get(`poll:${id}`);
+    const same =
+      existing &&
+      existing.question === question &&
+      existing.options.length === options.length &&
+      existing.options.every((option, index) => option === options[index]);
+    if (!same) {
+      // A new question, or one whose text changed: start from zero.
+      if (existing) {
+        const stale = await this.ctx.storage.list({ prefix: `vote:${id}:` });
+        await this.ctx.storage.delete([...stale.keys()]);
+      }
+      await this.ctx.storage.put(`poll:${id}`, {
+        question,
+        options,
+        counts: options.map(() => 0),
+      });
+    }
+    await this.ctx.storage.put("current", id);
     await this.touch();
     return { status: 200, body: { id } };
   }
@@ -122,10 +164,7 @@ export class PollSession extends DurableObject {
   async close(key) {
     const denied = await this.authorize(key, false);
     if (denied) return denied;
-    const poll = await this.ctx.storage.get("poll");
-    if (poll && poll.open) {
-      await this.ctx.storage.put("poll", { ...poll, open: false });
-    }
+    await this.ctx.storage.delete("current");
     await this.touch();
     return { status: 200, body: { ok: true } };
   }
@@ -133,13 +172,17 @@ export class PollSession extends DurableObject {
   async results(key) {
     const denied = await this.authorize(key, false);
     if (denied) return denied;
-    const poll = await this.ctx.storage.get("poll");
-    if (!poll) {
-      return { status: 200, body: { id: null, counts: [], total: 0 } };
+    const current = await this.ctx.storage.get("current");
+    const polls = {};
+    for (const [name, poll] of await this.ctx.storage.list({ prefix: "poll:" })) {
+      const id = name.slice("poll:".length);
+      polls[id] = {
+        open: id === current,
+        counts: poll.counts,
+        total: poll.counts.reduce((sum, count) => sum + count, 0),
+      };
     }
-    const counts = (await this.ctx.storage.get("counts")) ?? poll.options.map(() => 0);
-    const total = counts.reduce((sum, count) => sum + count, 0);
-    return { status: 200, body: { id: poll.id, open: poll.open, counts, total } };
+    return { status: 200, body: { current: current ?? null, polls } };
   }
 
   // The first presenter request claims the session with its key.
@@ -166,6 +209,16 @@ export class PollSession extends DurableObject {
   }
 }
 
+async function votePage(env, url) {
+  const page = await env.ASSETS.fetch(new URL("/vote", url.origin));
+  const response = new Response(page.body, page);
+  response.headers.set("cache-control", "no-store");
+  for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+    response.headers.set(name, value);
+  }
+  return response;
+}
+
 function text(value, limit) {
   return typeof value === "string" ? value.trim().slice(0, limit) : "";
 }
@@ -177,7 +230,7 @@ function bearer(request) {
 
 async function body(request) {
   const raw = await request.text();
-  if (raw.length > 8192) throw new Error("request too large");
+  if (raw.length > MAX_BODY) throw new Error("request too large");
   return raw ? JSON.parse(raw) : {};
 }
 
@@ -193,124 +246,10 @@ function reply(result) {
 function json(value, status = 200) {
   return new Response(JSON.stringify(value), {
     status,
-    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      ...SECURITY_HEADERS,
+    },
   });
 }
-
-function page(code) {
-  return new Response(VOTE_PAGE.replaceAll("__CODE__", code), {
-    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
-  });
-}
-
-const VOTE_PAGE = `<!doctype html>
-<html lang="es">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Gaanim · __CODE__</title>
-<style>
-  :root { color-scheme: dark; --bg: #11131a; --card: #1b1e28; --text: #f1f2f6; --muted: #a2a7b4; }
-  * { box-sizing: border-box; }
-  body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
-         font: 17px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  main { max-width: 560px; margin: 0 auto; padding: 20px 16px 32px; }
-  header { display: flex; justify-content: space-between; color: var(--muted); font-size: 14px; }
-  h1 { font-size: 24px; margin: 20px 0; }
-  .options { display: grid; gap: 12px; }
-  button { display: flex; gap: 12px; align-items: center; width: 100%; min-height: 64px;
-           padding: 14px 16px; border: 3px solid transparent; border-radius: 14px;
-           color: #fff; font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
-  button .letter { flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid;
-                   place-items: center; background: rgba(0,0,0,.25); }
-  button.chosen { border-color: #fff; }
-  button:disabled { opacity: .6; }
-  .status { margin-top: 18px; color: var(--muted); text-align: center; min-height: 1.4em; }
-  .waiting { margin-top: 30vh; text-align: center; color: var(--muted); }
-</style>
-</head>
-<body>
-<main>
-  <header><span>Gaanim</span><span>__CODE__</span></header>
-  <div id="app"><p class="waiting" id="waiting"></p></div>
-</main>
-<script>
-const CODE = "__CODE__";
-const COLORS = ["#e2475b", "#3b7ddd", "#d9a21b", "#2f9e5b", "#8e5bd6", "#1f9ea8"];
-const es = (navigator.language || "es").toLowerCase().startsWith("es");
-const T = es
-  ? { wait: "Esperando la siguiente pregunta…", sent: "Voto registrado. Puedes cambiarlo mientras la pregunta siga abierta.",
-      closed: "La pregunta se cerró.", offline: "Sin conexión; reintentando…", sending: "Enviando…" }
-  : { wait: "Waiting for the next question…", sent: "Vote received. You can change it while the question is open.",
-      closed: "The question closed.", offline: "Offline; retrying…", sending: "Sending…" };
-function storage(key, value) {
-  try {
-    if (value === undefined) return localStorage.getItem(key);
-    localStorage.setItem(key, value);
-  } catch (_) {}
-  return null;
-}
-let voter = storage("gaanim-voter");
-if (!voter || !/^[0-9a-f]{32}$/.test(voter)) {
-  voter = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
-  storage("gaanim-voter", voter);
-}
-const app = document.getElementById("app");
-let shown = null;
-function render(poll) {
-  if (!poll.open) {
-    shown = null;
-    app.innerHTML = '<p class="waiting"></p>';
-    app.firstChild.textContent = T.wait;
-    return;
-  }
-  if (shown === poll.id) return;
-  shown = poll.id;
-  app.innerHTML = '<h1></h1><div class="options"></div><p class="status"></p>';
-  app.querySelector("h1").textContent = poll.question;
-  const list = app.querySelector(".options");
-  const status = app.querySelector(".status");
-  const chosen = storage("gaanim-vote-" + poll.id);
-  poll.options.forEach((option, index) => {
-    const button = document.createElement("button");
-    button.style.background = COLORS[index % COLORS.length];
-    button.innerHTML = '<span class="letter"></span><span class="label"></span>';
-    button.querySelector(".letter").textContent = String.fromCharCode(65 + index);
-    button.querySelector(".label").textContent = option;
-    if (chosen === String(index)) button.classList.add("chosen");
-    button.onclick = async () => {
-      status.textContent = T.sending;
-      try {
-        const response = await fetch("/s/" + CODE + "/vote", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ poll: poll.id, option: index, voter }),
-        });
-        if (response.status === 409) { status.textContent = T.closed; return; }
-        if (!response.ok) throw new Error(String(response.status));
-        storage("gaanim-vote-" + poll.id, String(index));
-        list.querySelectorAll("button").forEach((b) => b.classList.remove("chosen"));
-        button.classList.add("chosen");
-        status.textContent = T.sent;
-      } catch (_) {
-        status.textContent = T.offline;
-      }
-    };
-    list.appendChild(button);
-  });
-  if (chosen !== null) status.textContent = T.sent;
-}
-async function refresh() {
-  try {
-    const response = await fetch("/s/" + CODE + "/poll", { cache: "no-store" });
-    render(await response.json());
-  } catch (_) {
-    if (shown === null) app.firstChild.textContent = T.offline;
-  }
-  setTimeout(refresh, 2000);
-}
-document.getElementById("waiting").textContent = T.wait;
-refresh();
-</script>
-</body>
-</html>`;
