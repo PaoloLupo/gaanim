@@ -20,8 +20,10 @@ thiserror = { workspace = true }
 i_overlay = { workspace = true }
 usvg = { version = "0.47", default-features = false, features = ["text", "system-fonts"] }
 
-# Serialization (conditional)
-serde = { version = "1.0", features = ["derive"], optional = true }
+# Serialization: the character catalog is JSON; the `serde` feature also
+# derives it for the other types.
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { workspace = true }
 
 [features]
 dev-dynamic = [
@@ -31,7 +33,6 @@ dev-dynamic = [
 ]
 default = []
 serde = [
-    "dep:serde",
     "gaanim_core/serde",
     "gaanim_math/serde",
     "gaanim_scene/serde",
