@@ -1549,6 +1549,12 @@ impl Timeline {
         // channel no clip has touched since keeps it, and a clip that has
         // run since replays over its channel. Rewriting one would instead
         // undo the clips before the checkpoint on the same channel.
+        //
+        // Held channels are the exception: snapshots do not record them, so
+        // after a checkpoint each one still shows what the last seek left,
+        // e.g. a Text revealed by earlier playback of this very segment.
+        // They are set as replaying from t=0 would: held by their earliest
+        // future clip, then settled by the last clip before the checkpoint.
         let mut future_property_initials = HashMap::new();
         let future_starts = (
             match before {
@@ -1561,8 +1567,7 @@ impl Timeline {
             .clip_index
             .range(future_starts)
             .flat_map(|(_, ids)| ids)
-            .filter_map(|id| self.clips.get(*id))
-            .filter(|_| !from_checkpoint);
+            .filter_map(|id| self.clips.get(*id));
         for clip in future_clips {
             let ClipPayload::Animation(anim) = &clip.payload else {
                 continue;
@@ -1584,6 +1589,9 @@ impl Timeline {
                 restored_future_channel(&anim.lens)
             };
             let Some(channel) = channel else { continue };
+            if from_checkpoint && !matches!(channel, AbsoluteLensChannel::Held(_)) {
+                continue;
+            }
             let initial_t = anim.rate_func.evaluate(0.0);
             future_property_initials
                 .entry((anim.target, channel))
@@ -1599,6 +1607,41 @@ impl Timeline {
                 match &lens {
                     PropertyLensSpec::Dynamic(lens) => lens.0.hold(world, target_entity, initial_t),
                     _ => apply_lens_spec(world, target_entity, &lens, initial_t, false),
+                }
+            }
+        }
+
+        if from_checkpoint {
+            // The last clip before the checkpoint on each held channel.
+            let mut settled = HashMap::new();
+            let earlier = self
+                .clip_index
+                .range(..OrderedFloat(kf_start_time))
+                .flat_map(|(_, ids)| ids)
+                .filter_map(|id| self.clips.get(*id));
+            for clip in earlier {
+                let ClipPayload::Animation(anim) = &clip.payload else {
+                    continue;
+                };
+                let PropertyLensSpec::Dynamic(lens) = &anim.lens else {
+                    continue;
+                };
+                let Some(channel) = lens.0.hold_channel() else {
+                    continue;
+                };
+                if restored_objects.as_ref().is_some_and(
+                    |restored: &bevy::platform::collections::HashSet<_>| {
+                        !restored.contains(&anim.target)
+                    },
+                ) {
+                    continue;
+                }
+                settled.insert((anim.target, channel), anim);
+            }
+            for ((target, _), anim) in settled {
+                if let Some(&target_entity) = entity_map.get(&target) {
+                    let final_t = anim.rate_func.evaluate(1.0);
+                    apply_lens_spec(world, target_entity, &anim.lens, final_t, true);
                 }
             }
         }

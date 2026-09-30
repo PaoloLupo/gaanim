@@ -1418,6 +1418,71 @@ mod tests {
     }
 
     #[test]
+    fn segment_checkpoints_keep_reveals_hidden_or_shown_like_a_seek_from_the_start() {
+        use gaanim_scene::MobjectId;
+        use gaanim_timeline::snapshot::WorldSnapshot;
+        use gaanim_timeline::timeline::Timeline;
+
+        // Slides whose title a reveal brings in after a short lead, like a
+        // section divider staggering its elements.
+        let mut canvas = super::super::SceneModel::new(640, 360);
+        for index in 0..4 {
+            canvas.segment(format!("Slide {index}"), None).unwrap();
+            let rule = canvas.square(0.4);
+            let title = canvas.text(&format!("Slide {index} title"));
+            canvas.play(vec![rule.animate().fade_in().duration(0.3)]);
+            canvas.play(vec![
+                title
+                    .animate()
+                    .text_reveal(TextRevealUnit::Word, TextRevealStyle::SlideUp, true, 0.06)
+                    .unwrap()
+                    .duration(0.7),
+            ]);
+            canvas.stop(Some(format!("end {index}"))).unwrap();
+        }
+        let compiled = |checkpoints: bool| {
+            let mut world = World::new();
+            world.insert_resource(Timeline::new());
+            world.insert_resource(gaanim_text::font::FontRegistry::new());
+            world.insert_resource(gaanim_text::prelude::TextConfig::default());
+            canvas.compile(&mut world);
+            world.flush();
+            let mut timeline = world.remove_resource::<Timeline>().expect("timeline");
+            timeline.segment_checkpoints = checkpoints;
+            timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+            (world, timeline)
+        };
+        let state = |world: &mut World| {
+            let mut glyphs = world
+                .query::<(&MobjectId, Option<&ClipMask>, &SpatialTransform)>()
+                .iter(world)
+                .map(|(id, mask, transform)| format!("{:?} {mask:?} {transform:?}", id.0))
+                .collect::<Vec<_>>();
+            glyphs.sort();
+            glyphs
+        };
+        let (mut world, mut timeline) = compiled(true);
+        let (mut reference_world, mut reference) = compiled(false);
+        let starts: Vec<f64> = timeline.segments.iter().map(|s| s.start_time).collect();
+        let end = timeline.cached_duration;
+        // Play every slide, then jump around as slide navigation does: back
+        // to a slide already shown, forward over reveals, and back again.
+        let mut path: Vec<f64> = (0..=40).map(|step| end * f64::from(step) / 40.0).collect();
+        for &start in [starts[2], starts[1], starts[3], starts[1], starts[2]].iter() {
+            path.extend([start, start + 0.05, start + 0.2, start + 0.35, end]);
+        }
+        for time in path {
+            timeline.seek(&mut world, time);
+            reference.seek(&mut reference_world, time);
+            assert_eq!(
+                state(&mut world),
+                state(&mut reference_world),
+                "state at {time:.3}s differs from a seek without checkpoints"
+            );
+        }
+    }
+
+    #[test]
     fn line_reveal_gives_every_glyph_its_own_line() {
         let mut canvas = super::super::SceneModel::new(640, 360);
         let text = canvas.text("para la\nautomatizacion\nconfinada");
