@@ -6783,6 +6783,7 @@ impl SceneModel {
                 base,
                 easing,
                 overlay,
+                sound,
             } => TransitionType::Styled {
                 base: Box::new(Self::resolve_magic_move(
                     base,
@@ -6793,6 +6794,7 @@ impl SceneModel {
                 )),
                 easing: easing.clone(),
                 overlay: overlay.clone(),
+                sound: sound.clone(),
             },
             TransitionType::MagicMove { duration, key } => {
                 let keyed = |segment: &super::ops::Segment, outgoing: bool| {
