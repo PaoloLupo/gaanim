@@ -93,7 +93,11 @@ const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
  * lasts between SESSION_TTL_MS minus this and SESSION_TTL_MS after its last
  * activity. */
 const ALARM_SLACK_MS = 30 * 60 * 1000;
-const API_VERSION = 6;
+const API_VERSION = 7;
+/** Where the game is: questions, the final standings, or over. */
+const STAGES = new Set(["play", "podium", "end"]);
+/** Players a podium shows. */
+const PODIUM = 3;
 /** How long changes gather before the presenter's socket hears of them, so
  * a burst of votes is one message. */
 const PUSH_MS = 250;
@@ -153,6 +157,8 @@ export default {
           return reply(await session.reset(bearer(request)));
         case "POST lobby":
           return reply(await session.lobby(bearer(request), await body(request)));
+        case "POST stage":
+          return reply(await session.stage(bearer(request), await body(request)));
         case "GET results":
           return reply(await session.results(bearer(request)));
         default:
@@ -171,6 +177,7 @@ export class PollSession extends DurableObject {
   // Storage:
   //   "key"                  presenter key hash
   //   "lobby"                true when phones join as soon as they arrive
+  //   "stage"                "podium" or "end" once the questions are over
   //   "current"              id of the open poll, absent when none is
   //   "revealed"             id of the quiz revealed last
   //   "poll:<id>"            {question, options, quiz?}; a quiz is
@@ -213,6 +220,7 @@ export class PollSession extends DurableObject {
     const s = {
       key: null,
       lobby: false,
+      stage: "play",
       current: null,
       revealed: null,
       polls: new Map(),
@@ -232,6 +240,9 @@ export class PollSession extends DurableObject {
           break;
         case "lobby":
           s.lobby = value === true;
+          break;
+        case "stage":
+          if (STAGES.has(value)) s.stage = value;
           break;
         case "current":
           s.current = value;
@@ -390,10 +401,22 @@ export class PollSession extends DurableObject {
     const id = s.current;
     const poll = id && s.polls.get(id);
     if (!poll) {
-      return { lobby: s.lobby, open: false };
+      const state = { lobby: s.lobby, open: false, stage: s.stage };
+      if (s.stage !== "play") {
+        // The final standings, for phones to show their podium.
+        const ranking = rank(s);
+        state.players = ranking.length;
+        state.podium = ranking.slice(0, PODIUM).map((player) => ({
+          name: player.name,
+          score: player.score,
+          avatar: player.avatar ?? defaultAvatar(player.voter),
+        }));
+      }
+      return state;
     }
     const state = {
       lobby: s.lobby,
+      stage: s.stage,
       open: true,
       id,
       question: poll.question,
@@ -720,6 +743,7 @@ export class PollSession extends DurableObject {
     await this.ctx.storage.put(s.lobby ? { key: s.key, lobby: true } : { key: s.key });
     this.loading = Promise.resolve({
       ...s,
+      stage: "play",
       current: null,
       revealed: null,
       polls: new Map(),
@@ -733,6 +757,26 @@ export class PollSession extends DurableObject {
     await this.touch(await this.state());
     await this.broadcast();
     this.send(() => ({ type: "player", player: null }));
+    return ok({ ok: true });
+  }
+
+  /** Where the game is, as the presentation says: "play" while there are
+   * questions ahead, "podium" once they are over, "end" when it ends. */
+  async stage(key, input) {
+    const denied = await this.authorize(key, true);
+    if (denied) return denied;
+    const stage = input?.stage;
+    if (!STAGES.has(stage)) {
+      return fail(400, "invalid stage");
+    }
+    const s = await this.state();
+    if (stage !== s.stage) {
+      if (stage === "play") await this.ctx.storage.delete("stage");
+      else await this.ctx.storage.put("stage", stage);
+      s.stage = stage;
+      await this.broadcast();
+    }
+    await this.touch(s);
     return ok({ ok: true });
   }
 

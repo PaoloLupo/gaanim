@@ -521,6 +521,24 @@ pub struct PollSessionInfo {
     pub game_segment: Option<u32>,
 }
 
+/// Where a presentation's game is, for the phones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameStage {
+    /// Questions ahead, or none in the scene.
+    Play,
+    /// Every question is behind: phones show the final standings.
+    Podium,
+}
+
+impl GameStage {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Play => "play",
+            Self::Podium => "podium",
+        }
+    }
+}
+
 /// Most segment checkpoints kept at once; each holds a whole world snapshot.
 const MAX_CHECKPOINTS: usize = 4;
 
@@ -672,6 +690,20 @@ impl Timeline {
             .iter()
             .find(|candidate| candidate.id == segment)
             .map(|segment| segment.start_time)
+    }
+
+    /// Where the game is at `time`: the podium once every poll closed and
+    /// none is shown (resting on a question's last stop still plays).
+    pub fn game_stage(&self, time: f64) -> GameStage {
+        const EPSILON: f64 = 1e-5;
+        let over = !self.polls.is_empty()
+            && self.polls.iter().all(|poll| poll.close <= time + EPSILON)
+            && self.poll_open_at(time).is_none();
+        if over {
+            GameStage::Podium
+        } else {
+            GameStage::Play
+        }
     }
 
     pub fn poll_open_at(&self, time: f64) -> Option<&TimelinePoll> {
@@ -6240,5 +6272,16 @@ mod tests {
         timeline.set_polls(vec![poll("second", 2, 4.0, 6.0)], None);
         assert_eq!(open_at(&timeline, 4.0), None);
         assert_eq!(open_at(&timeline, 4.01).as_deref(), Some("second"));
+
+        // The podium comes once the last question is behind.
+        timeline.set_segments(vec![
+            segment(1, 0.0, 4.0, &[4.0]),
+            segment(2, 4.0, 6.0, &[6.0]),
+            segment(3, 6.0, 9.0, &[9.0]),
+        ]);
+        assert_eq!(timeline.game_stage(4.0), GameStage::Play);
+        assert_eq!(timeline.game_stage(6.0), GameStage::Play);
+        assert_eq!(timeline.game_stage(6.5), GameStage::Podium);
+        assert_eq!(timeline.game_stage(9.0), GameStage::Podium);
     }
 }

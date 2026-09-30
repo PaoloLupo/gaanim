@@ -85,6 +85,7 @@ document.addEventListener("DOMContentLoaded", () => {
     join: $("join-view"),
     question: $("question"),
     result: $("result-view"),
+    finale: $("finale-view"),
     kicked: $("kicked-view"),
   };
   const questionText = $("question-text");
@@ -165,13 +166,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
   /** Show `character` alive in `container`, keeping the one already there
    * when it is the same. Returns it, to play expressions on, or null. */
-  function live(container, character, name) {
+  function live(container, character, name, size = 150) {
     if (!catalog || !isAvatar(catalog, character)) return null;
-    const key = `${character}|${name}`;
+    const key = `${character}|${name}|${size}`;
     const current = living.get(container);
     if (current?.key === key) return current.avatar;
     current?.avatar.stop();
-    const alive = animateAvatar(catalog, character, 150, name, t("avatarLabel"));
+    const alive = animateAvatar(catalog, character, size, name, t("avatarLabel"));
     container.replaceChildren(alive.element);
     living.set(container, { key, avatar: alive });
     return alive;
@@ -314,6 +315,10 @@ document.addEventListener("DOMContentLoaded", () => {
   function show(next) {
     poll = next;
     if (kicked) return;
+    if (!poll.open && (poll.stage === "podium" || poll.stage === "end")) {
+      shown = null;
+      return showFinale();
+    }
     if (!poll.open) {
       // A revealed result stays until the next question, and a character
       // being changed until it is saved.
@@ -424,6 +429,57 @@ document.addEventListener("DOMContentLoaded", () => {
     view("result");
     showResultAvatar();
     if (outcome === "correct") navigator.vibrate?.([30, 40, 30]);
+  }
+
+  /** The questions are over: the podium while the presentation shows it,
+   * then a goodbye with this player's place. */
+  function showFinale() {
+    const ended = poll.stage === "end";
+    $("finale-title").textContent = t(ended ? "endTitle" : "podiumTitle");
+    $("finale-hint").textContent = t(ended ? "endHint" : "podiumHint");
+    const podium = $("podium");
+    const standings = poll.podium ?? [];
+    const key = JSON.stringify(standings);
+    if (podium.dataset.key !== key) {
+      podium.dataset.key = key;
+      for (const holder of podium.querySelectorAll(".podium-avatar")) {
+        living.get(holder)?.avatar.stop();
+        living.delete(holder);
+      }
+      podium.replaceChildren();
+      // Second, first, third, as podiums stand.
+      for (const rank of [1, 0, 2]) {
+        const entry = standings[rank];
+        if (!entry) continue;
+        const item = $("podium-template").content.firstElementChild.cloneNode(true);
+        item.dataset.rank = String(rank + 1);
+        item.querySelector(".podium-name").textContent = entry.name;
+        item.querySelector(".podium-score").textContent = `${formatScore(entry.score)} ${t("points")}`;
+        item.querySelector(".podium-step").textContent = String(rank + 1);
+        podium.append(item);
+        const alive = live(item.querySelector(".podium-avatar"), entry.avatar, entry.name, 64);
+        if (alive && rank === 0) alive.express("winner", { loop: true });
+      }
+    }
+    podium.hidden = standings.length === 0;
+    const holder = $("finale-avatar");
+    const mine = player && catalog && live(holder, player.avatar ?? avatar, player.name);
+    holder.hidden = !mine;
+    if (player?.rank) {
+      $("finale-place").textContent = t("place", player.rank, player.players);
+      $("finale-detail").textContent = `${formatScore(player.score)} ${t("points")} ${t("total")}`;
+    } else {
+      $("finale-place").textContent = "";
+      $("finale-detail").textContent = "";
+    }
+    if (current !== "finale" || views.finale.dataset.stage !== poll.stage) {
+      views.finale.dataset.stage = poll.stage;
+      view("finale");
+      if (mine && player?.rank) {
+        const reaction = player.rank === 1 ? "winner" : player.rank <= 3 ? "happy" : "surprised";
+        mine.express(reaction, { loop: player.rank <= 3 });
+      }
+    }
   }
 
   function showKicked() {

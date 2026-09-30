@@ -158,6 +158,7 @@ fn audience_poll_system(
     };
     let now = timeline.current_time;
     client.show(timeline.poll_open_at(now));
+    client.stage(timeline.game_stage(now));
     // After a new game, the quizzes already behind the playhead stay
     // unrevealed: revealing them would show phones old questions.
     let quiet = std::mem::take(&mut client.after_reset);
@@ -198,6 +199,9 @@ enum Command {
     Reset,
     /// Phones ask for a nickname as soon as they open the page.
     Lobby,
+    /// Where the game is: "play", "podium", or "end" when the
+    /// presentation ends.
+    Stage(&'static str),
 }
 
 /// What the relay last reported, and when it arrived.
@@ -290,6 +294,8 @@ struct PollClient {
     revealed: HashSet<String>,
     /// A new game was just started.
     after_reset: bool,
+    /// The game stage the relay was last told.
+    stage: Option<gaanim_timeline::timeline::GameStage>,
     commands: Sender<Command>,
     snapshot: Arc<Mutex<Option<Snapshot>>>,
     /// Receives the results the relay pushes; ends with the client.
@@ -327,6 +333,7 @@ impl PollClient {
             open: None,
             revealed: HashSet::new(),
             after_reset: false,
+            stage: None,
             commands,
             snapshot,
             socket,
@@ -348,6 +355,13 @@ impl PollClient {
             Some(poll) => Command::Open(poll.clone()),
             None => Command::Close,
         });
+    }
+
+    fn stage(&mut self, stage: gaanim_timeline::timeline::GameStage) {
+        if self.stage != Some(stage) {
+            self.stage = Some(stage);
+            self.send(Command::Stage(stage.name()));
+        }
     }
 
     fn reveal(&mut self, id: &str) {
@@ -605,6 +619,11 @@ fn run_relay_session(
                     wanted = None;
                     synced = false;
                 }
+                // Only the latest stage matters.
+                Command::Stage(stage) => {
+                    queued.retain(|queued| !matches!(queued, Command::Stage(_)));
+                    queued.push(Command::Stage(stage));
+                }
                 command => queued.push(command),
             }
         }
@@ -625,6 +644,7 @@ fn run_relay_session(
                 Command::Kick(name) => api.post("kick", serde_json::json!({ "name": name })),
                 Command::Reset => api.post("reset", serde_json::json!({})),
                 Command::Lobby => api.post("lobby", serde_json::json!({ "open": true })),
+                Command::Stage(stage) => api.post("stage", serde_json::json!({ "stage": stage })),
                 Command::Open(_) | Command::Close => Ok(()),
             };
             report(&result);
@@ -649,10 +669,11 @@ fn run_relay_session(
             report(&result);
         }
     }
-    // The presentation ended: stop taking votes.
+    // The presentation ended: stop taking votes, and phones say goodbye.
     if wanted.is_some() {
         let _ = api.close();
     }
+    let _ = api.post("stage", serde_json::json!({ "stage": "end" }));
 }
 
 // ---------------------------------------------------------------------------
@@ -951,8 +972,10 @@ impl AudiencePolls {
         self.confirm_reset = None;
         if let Some(client) = &mut self.client {
             client.send(Command::Reset);
-            // Quizzes revealed before can be revealed again.
+            // Quizzes revealed before can be revealed again, and the relay
+            // forgot the stage.
             client.revealed.clear();
+            client.stage = None;
             client.after_reset = true;
             gaanim_core::console::success("polls", "started a new game");
         }

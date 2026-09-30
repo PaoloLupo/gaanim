@@ -105,6 +105,25 @@
         <p id="result-detail"></p>
       </section>
 
+      <!-- The questions are over: the podium, then the end. -->
+      <section class="center finale" id="finale-view" hidden>
+        <h1 id="finale-title"></h1>
+        <p id="finale-hint"></p>
+        <ol class="podium" id="podium"></ol>
+        <div class="avatar-stage" id="finale-avatar" hidden></div>
+        <p class="points" id="finale-place"></p>
+        <p id="finale-detail"></p>
+      </section>
+
+      <template id="podium-template">
+        <li class="podium-place">
+          <div class="podium-avatar"></div>
+          <span class="podium-name"></span>
+          <span class="podium-score"></span>
+          <span class="podium-step"></span>
+        </li>
+      </template>
+
       <!-- Removed by the presenter. -->
       <section class="center" id="kicked-view" hidden>
         <h1 data-t="kickedTitle">Saliste del juego</h1>
