@@ -44,13 +44,44 @@ pub enum LottieError {
 }
 
 /// One parsed Lottie composition shared by every drawable using the same file.
-#[derive(Debug)]
 pub struct LottieAsset {
     path: PathBuf,
+    /// Hash of the source JSON, which fully determines the composition.
+    source_digest: u64,
     composition: velato::Composition,
     image_layers: Vec<LottieImageLayer>,
     solid_layers: Vec<LottieSolidLayer>,
     warnings: Vec<String>,
+}
+
+/// Hot reload fingerprints scenes through `Debug`: the parsed composition is
+/// large and prints hash maps in no fixed order, so the source digest stands
+/// for it, and image layers print their size instead of their pixels.
+impl std::fmt::Debug for LottieAsset {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LottieAsset")
+            .field("path", &self.path)
+            .field("source_digest", &self.source_digest)
+            .field(
+                "image_layers",
+                &self
+                    .image_layers
+                    .iter()
+                    .map(|layer| {
+                        (
+                            &layer.precomposition,
+                            layer.layer_index,
+                            layer.width,
+                            layer.height,
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .field("solid_layers", &self.solid_layers)
+            .field("warnings", &self.warnings)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -147,6 +178,12 @@ impl LottieAsset {
         mut json: Value,
         package: Option<&package::Package>,
     ) -> Result<Arc<Self>, LottieError> {
+        let source_digest = {
+            use std::hash::{DefaultHasher, Hasher};
+            let mut hasher = DefaultHasher::new();
+            hasher.write(json.to_string().as_bytes());
+            hasher.finish()
+        };
         let image_assets = image_asset_specs(&json);
         let mut warnings = compatibility_warnings(&mut json);
         let image_layer_specs = image_layer_specs(&json);
@@ -185,6 +222,7 @@ impl LottieAsset {
 
         let asset = Arc::new(Self {
             path: cache_key.clone(),
+            source_digest,
             composition,
             image_layers,
             solid_layers,
@@ -1405,6 +1443,7 @@ mod tests {
     fn asset() -> Arc<LottieAsset> {
         Arc::new(LottieAsset {
             path: PathBuf::from("test.json"),
+            source_digest: 0,
             composition: velato::Composition {
                 frames: 10.0..70.0,
                 frame_rate: 30.0,
@@ -1926,6 +1965,7 @@ mod tests {
         };
         let without_custom_content = Arc::new(LottieAsset {
             path: json_path.clone(),
+            source_digest: asset.source_digest,
             composition: asset.composition.clone(),
             image_layers: Vec::new(),
             solid_layers: Vec::new(),
@@ -1994,6 +2034,7 @@ mod tests {
         };
         let without_solid = Arc::new(LottieAsset {
             path: PathBuf::from("solid.json"),
+            source_digest: 0,
             composition: composition.clone(),
             image_layers: Vec::new(),
             solid_layers: Vec::new(),
@@ -2004,6 +2045,7 @@ mod tests {
         );
         let with_solid = Arc::new(LottieAsset {
             path: PathBuf::from("solid.json"),
+            source_digest: 0,
             composition,
             image_layers: Vec::new(),
             solid_layers,

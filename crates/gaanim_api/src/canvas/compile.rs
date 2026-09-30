@@ -2744,8 +2744,14 @@ impl SceneModel {
                     _ => None,
                 })
                 .collect();
-            // Untweened sources (e.g. sample drivers) keep free continuous wheels.
+            // Untweened sources (e.g. sample drivers) keep free continuous
+            // wheels. A resumed compile may find the windows a previous
+            // revision inserted on a kept entity.
             if windows.is_empty() {
+                builder
+                    .commands
+                    .entity(entity)
+                    .remove::<gaanim_animation::RollingTweens>();
                 continue;
             }
             windows.sort_by(|a, b| a.0.total_cmp(&b.0));

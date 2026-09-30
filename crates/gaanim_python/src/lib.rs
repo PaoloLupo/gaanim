@@ -8,6 +8,7 @@ pyo3::create_exception!(
 );
 
 mod brush;
+mod callback_recipe;
 mod color;
 mod composition;
 mod custom;

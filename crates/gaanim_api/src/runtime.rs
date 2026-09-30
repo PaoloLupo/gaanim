@@ -7,7 +7,7 @@ use gaanim_renderer::prelude::VelloView;
 use gaanim_timeline::timeline::Timeline;
 
 use crate::canvas::{CompileCheckpoint, SceneFingerprints, SceneModel, SegmentMarker};
-use gaanim_scene::prelude::{ArchetypeId, Tick};
+use gaanim_scene::prelude::{ArchetypeId, ComponentId, Tick};
 use std::sync::{Arc, Mutex};
 
 /// Replay a [`SceneModel`] into a Bevy world.
@@ -158,6 +158,24 @@ struct RetainedCheckpoint {
     compile: CompileCheckpoint,
     /// Entities spawned after this tick were compiled from the checkpoint on.
     spawned_after: Tick,
+    /// The entities spawned before the checkpoint, as compiled up to it.
+    /// Later segments may only have changed what restoring this undoes.
+    base: gaanim_timeline::snapshot::WorldSnapshot,
+    /// Their archetypes then: an entity since moved to another one lost or
+    /// gained a component, which no change tick records.
+    archetypes: std::collections::HashMap<Entity, ArchetypeId>,
+}
+
+impl RetainedCheckpoint {
+    /// The checkpoint `record` marked, if it captured one.
+    fn marked(compile: CompileCheckpoint, record: &mut MarkerRecord) -> Option<Self> {
+        Some(Self {
+            compile,
+            spawned_after: record.tick?,
+            base: record.snapshot.take()?,
+            archetypes: record.existing.iter().copied().collect(),
+        })
+    }
 }
 
 /// How a hot reload rebuilt the scene.
@@ -177,8 +195,7 @@ pub enum ReplayKind {
 /// compiled. Either way the world keeps a [`RetainedReplay`] for the next
 /// revision; `allow_reuse = false` forces a full replay but still retains it.
 ///
-/// After an incremental replay a [`gaanim_timeline::KeyframeCaptureBase`] is
-/// pending, so the t=0 keyframe must be captured with
+/// Either way the t=0 keyframe must then be captured with
 /// [`gaanim_timeline::capture_reload_keyframe`] (or the deferred capture that
 /// `NeedsKeyframeCapture` schedules) once the new entities exist.
 pub fn replay_canvas_incremental(
@@ -217,49 +234,106 @@ fn scene_fingerprints(world: &mut World, canvas: &SceneModel) -> Option<SceneFin
     Some(canvas.fingerprints(&text_config, &fonts))
 }
 
-/// Scene-owned entities present when a marker ran, and the tick after which
-/// later commands are stamped.
+/// Scene-owned entities present when a marker ran, the tick after which
+/// later commands are stamped, whether the segments after the marker touched
+/// those entities (see [`segments_end_marker`]) and, for a checkpoint, their
+/// compiled state when it ran.
 #[derive(Default)]
 struct MarkerRecord {
     tick: Option<Tick>,
     existing: Vec<(Entity, ArchetypeId)>,
+    touched: Option<bool>,
+    snapshot: Option<gaanim_timeline::snapshot::WorldSnapshot>,
 }
 
-fn segment_marker(record: Arc<Mutex<MarkerRecord>>) -> SegmentMarker {
+/// Record the entities that exist when the marker runs; `snapshot` also
+/// captures their state, the base of a [`RetainedCheckpoint`].
+fn segment_marker(record: Arc<Mutex<MarkerRecord>>, snapshot: bool) -> SegmentMarker {
     Box::new(move |world: &mut World| {
         let mut query = world.query_filtered::<Entity, SceneOwned>();
         let existing = query
             .iter(world)
             .map(|entity| (entity, world.entity(entity).archetype().id()))
             .collect();
+        let snapshot = snapshot.then(|| gaanim_timeline::snapshot::WorldSnapshot::capture(world));
         let tick = world.change_tick();
         // Every later command is stamped with a newer tick.
         world.increment_change_tick();
         *record.lock().expect("segment marker poisoned") = MarkerRecord {
             tick: Some(tick),
             existing,
+            touched: None,
+            snapshot,
         };
     })
 }
 
-/// Whether commands applied after the marker spawned into, changed, removed
-/// from, or despawned any entity that existed when it ran.
-fn marker_entities_touched(world: &World, record: &Mutex<MarkerRecord>) -> bool {
-    let record = record.lock().expect("segment marker poisoned");
+/// Runs after the last segment, before compilation derives state from the
+/// whole timeline (rolling-number tween windows) and applies it to every
+/// entity, kept ones included. That pass rebuilds such state completely on
+/// every compile, so only what the segments did counts against reuse.
+fn segments_end_marker(records: Vec<Arc<Mutex<MarkerRecord>>>) -> SegmentMarker {
+    Box::new(move |world: &mut World| {
+        for record in &records {
+            let mut record = record.lock().expect("segment marker poisoned");
+            record.touched = Some(touched_since(world, &record));
+        }
+    })
+}
+
+/// Whether the segments after the marker despawned an entity that existed
+/// when it ran, or changed, added or removed one of its components that
+/// restoring a snapshot does not set back.
+fn marker_entities_touched(record: &Mutex<MarkerRecord>) -> bool {
+    record
+        .lock()
+        .expect("segment marker poisoned")
+        .touched
+        .unwrap_or(true)
+}
+
+fn touched_since(world: &World, record: &MarkerRecord) -> bool {
     let Some(tick) = record.tick else {
         return true;
     };
     let this_run = world.read_change_tick();
+    let restorable = |component: ComponentId| {
+        world
+            .components()
+            .get_info(component)
+            .and_then(|info| info.type_id())
+            .is_some_and(gaanim_timeline::snapshot::restores_component)
+    };
     record.existing.iter().any(|&(entity, archetype)| {
         let Ok(entity) = world.get_entity(entity) else {
             return true;
         };
-        entity.archetype().id() != archetype
-            || entity.archetype().components().iter().any(|&component| {
-                entity
+        let now = entity.archetype();
+        if now.id() != archetype {
+            let Some(before) = world.archetypes().get(archetype) else {
+                return true;
+            };
+            let added = now
+                .components()
+                .iter()
+                .filter(|&&component| !before.contains(component));
+            let removed = before
+                .components()
+                .iter()
+                .filter(|&&component| !now.contains(component));
+            if added
+                .chain(removed)
+                .any(|&component| !restorable(component))
+            {
+                return true;
+            }
+        }
+        now.components().iter().any(|&component| {
+            !restorable(component)
+                && entity
                     .get_change_ticks_by_id(component)
                     .is_some_and(|ticks| ticks.is_changed(tick, this_run))
-            })
+        })
     })
 }
 
@@ -276,7 +350,15 @@ fn replay_full_retained(
         .filter(|&index| index > 0);
     let record = Arc::new(Mutex::new(MarkerRecord::default()));
     let markers = checkpoint_at
-        .map(|index| vec![(index, segment_marker(record.clone()))])
+        .map(|index| {
+            vec![
+                (index, segment_marker(record.clone(), true)),
+                (
+                    fingerprints.segment_count(),
+                    segments_end_marker(vec![record.clone()]),
+                ),
+            ]
+        })
         .unwrap_or_default();
     let checkpoint = replay_prepared(world, &canvas, |commands, timeline, fonts, text_config| {
         canvas.compile_resumable(
@@ -292,13 +374,12 @@ fn replay_full_retained(
     .flatten();
     world.flush();
     let checkpoint = checkpoint
-        .filter(|_| !marker_entities_touched(world, &record))
+        .filter(|_| !marker_entities_touched(&record))
         .and_then(|compile| {
-            let spawned_after = record.lock().expect("segment marker poisoned").tick?;
-            Some(RetainedCheckpoint {
+            RetainedCheckpoint::marked(
                 compile,
-                spawned_after,
-            })
+                &mut record.lock().expect("segment marker poisoned"),
+            )
         });
     world.insert_resource(RetainedReplay {
         _canvas: canvas,
@@ -336,21 +417,11 @@ fn try_incremental(
     if age > u32::MAX / 4 {
         return Err(Some(previous_fingerprints));
     }
-    // Kept Mobjects have been changed by playback, so their original t=0
-    // baseline must come from the previous keyframe.
-    let has_baseline = world
-        .get_resource::<Timeline>()
-        .and_then(|timeline| timeline.keyframes.first_key_value())
-        .is_some_and(|(time, _)| time.0 == 0.0);
-    if !has_baseline {
-        return Err(Some(previous_fingerprints));
-    }
     let resume_at = checkpoint.compile.cursor.next_segment;
 
     // Remove everything the previous revision compiled from the checkpoint on.
     let this_run = world.change_tick();
     let mut stale = Vec::new();
-    let mut kept = std::collections::HashSet::new();
     let mut query =
         world.query_filtered::<(Entity, Option<&gaanim_scene::MobjectId>), SceneOwned>();
     for (entity, id) in query.iter(world) {
@@ -360,8 +431,6 @@ fn try_incremental(
             .is_newer_than(checkpoint.spawned_after, this_run)
         {
             stale.push((entity, id.map(|id| id.0)));
-        } else if let Some(id) = id {
-            kept.insert(id.0);
         }
     }
     let stale_ids = stale.iter().filter_map(|(_, id)| *id).collect::<Vec<_>>();
@@ -382,27 +451,40 @@ fn try_incremental(
     world.remove_resource::<gaanim_animation::PropertyBindingDiagnostics>();
     world.remove_resource::<gaanim_animation::PropertySignalTimeline>();
     world.remove_resource::<gaanim_animation::PropertySignalStops>();
+    // Playback and the segments the previous revision compiled after the
+    // checkpoint changed the kept entities; set them back to the checkpoint.
+    // The segments compiled next apply their own changes again, so the t=0
+    // keyframe is then captured from the world as after a full replay.
+    let this_run = world.read_change_tick();
+    checkpoint.base.restore_selected(world, |world, _, entity| {
+        let entity = world.entity(entity);
+        checkpoint.archetypes.get(&entity.id()) != Some(&entity.archetype().id())
+            || entity.archetype().components().iter().any(|&component| {
+                entity
+                    .get_change_ticks_by_id(component)
+                    .is_some_and(|ticks| ticks.is_changed(checkpoint.spawned_after, this_run))
+            })
+    });
     let mut restored = checkpoint.compile.timeline.clone();
     let mut timeline = world.resource_mut::<Timeline>();
     restored.playback_rate = timeline.playback_rate;
     restored.loop_range = timeline.loop_range;
     restored.is_playing = false;
-    let mut base = std::mem::replace(&mut *timeline, restored)
-        .keyframes
-        .pop_first()
-        .map(|(_, snapshot)| snapshot)
-        .unwrap_or_default();
-    base.entities.retain(|id, _| kept.contains(id));
+    *timeline = restored;
 
     // Move the checkpoint to this revision's first change so the next edit
     // at the same place recompiles as little as possible.
     let advance_to = (shared > resume_at).then_some(shared);
     let kept_record = Arc::new(Mutex::new(MarkerRecord::default()));
     let advanced_record = Arc::new(Mutex::new(MarkerRecord::default()));
-    let mut markers = vec![(resume_at, segment_marker(kept_record.clone()))];
+    let mut markers = vec![(resume_at, segment_marker(kept_record.clone(), false))];
     if let Some(index) = advance_to {
-        markers.push((index, segment_marker(advanced_record.clone())));
+        markers.push((index, segment_marker(advanced_record.clone(), true)));
     }
+    markers.push((
+        fingerprints.segment_count(),
+        segments_end_marker(vec![kept_record.clone(), advanced_record.clone()]),
+    ));
     let advanced = replay_prepared(world, canvas, |commands, timeline, fonts, text_config| {
         canvas.compile_resumable(
             commands,
@@ -418,31 +500,18 @@ fn try_incremental(
     let Some(advanced) = advanced else {
         return Err(Some(previous_fingerprints));
     };
-    if marker_entities_touched(world, &kept_record) {
-        // A later segment modified kept entities; only a full replay undoes
-        // what the previous revision did to them.
+    if marker_entities_touched(&kept_record) {
+        // A later segment changed kept entities beyond what the checkpoint
+        // restores; only a full replay undoes what it did to them.
         return Err(Some(previous_fingerprints));
     }
-    let Some(spawned_after) = kept_record.lock().expect("segment marker poisoned").tick else {
-        return Err(Some(previous_fingerprints));
-    };
-    world.insert_resource(gaanim_timeline::KeyframeCaptureBase {
-        base,
-        spawned_after,
-    });
 
     let checkpoint = match advanced {
-        Some(compile) if !marker_entities_touched(world, &advanced_record) => match advanced_record
-            .lock()
-            .expect("segment marker poisoned")
-            .tick
-        {
-            Some(spawned_after) => RetainedCheckpoint {
-                compile,
-                spawned_after,
-            },
-            None => checkpoint,
-        },
+        Some(compile) if !marker_entities_touched(&advanced_record) => RetainedCheckpoint::marked(
+            compile,
+            &mut advanced_record.lock().expect("segment marker poisoned"),
+        )
+        .unwrap_or(checkpoint),
         _ => checkpoint,
     };
     world.insert_resource(RetainedReplay {
@@ -650,7 +719,6 @@ mod tests {
     /// The editor's scene clear, reduced to what these tests observe.
     fn clear_scene(world: &mut World) {
         world.remove_resource::<RetainedReplay>();
-        world.remove_resource::<gaanim_timeline::KeyframeCaptureBase>();
         let entities: Vec<Entity> = world
             .query_filtered::<Entity, SceneOwned>()
             .iter(world)
@@ -1105,6 +1173,158 @@ mod tests {
             full.flush();
             gaanim_timeline::capture_reload_keyframe(&mut full);
             assert_eq!(incremental, observe(&mut full));
+        }
+    }
+
+    /// A counter declared first, animated in its own slide and, after
+    /// `Edit::Insert(n)`, again in slide `n`. Compilation writes the tween
+    /// windows of the counter onto its entity after every segment. The extra
+    /// animation ends at the same value, so only those windows change.
+    fn counter_deck(slides: usize, edits: &[Edit]) -> SceneModel {
+        let mut canvas = SceneModel::new(640, 360);
+        canvas.segment("Counter", None).unwrap();
+        let count = canvas.parameter(0.0).unwrap();
+        canvas
+            .rolling_number(
+                count.source(),
+                gaanim_animation::RollingNumberOptions {
+                    mode: gaanim_animation::RollingMode::Continuous,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        canvas.play(vec![count.animate().set(42.0).duration(1.0)]);
+        canvas.stop(Some("counted".into())).unwrap();
+        for index in 1..slides {
+            canvas.segment(format!("Slide {index}"), None).unwrap();
+            let retitled = edits
+                .iter()
+                .filter(|edit| matches!(edit, Edit::Retitle(slide) if *slide == index))
+                .count();
+            let title = canvas.text(&format!("Slide {index} revision {retitled}"));
+            canvas.play(vec![title.animate().fade_in().duration(0.5)]);
+            if edits
+                .iter()
+                .any(|edit| matches!(edit, Edit::Insert(slide) if *slide == index))
+            {
+                canvas.play(vec![count.animate().set(7.0).duration(0.5)]);
+                canvas.play(vec![count.animate().set(42.0).duration(0.5)]);
+            }
+            canvas.stop(Some(format!("end {index}"))).unwrap();
+        }
+        canvas
+    }
+
+    fn rolling_tweens(world: &mut World) -> Vec<Option<Vec<(f64, f64)>>> {
+        let mut tweens = world
+            .query_filtered::<(
+                &gaanim_scene::MobjectId,
+                Option<&gaanim_animation::RollingTweens>,
+            ), With<gaanim_animation::RollingNumber>>()
+            .iter(world)
+            .map(|(id, tweens)| (id.0, tweens.map(|tweens| tweens.0.clone())))
+            .collect::<Vec<_>>();
+        tweens.sort_by_key(|(id, _)| *id);
+        tweens.into_iter().map(|(_, tweens)| tweens).collect()
+    }
+
+    #[test]
+    fn a_counter_before_the_checkpoint_still_reloads_incrementally() {
+        let slides = 4;
+        let mut world = incremental_world();
+        let mut edits = vec![Edit::None];
+        hot_reload(&mut world, counter_deck(slides, &edits));
+        edits.push(Edit::Retitle(3));
+        assert_eq!(
+            hot_reload(&mut world, counter_deck(slides, &edits)),
+            ReplayKind::Full
+        );
+        // Slide 3 animates the counter again, then stops doing so: the kept
+        // counter must gain and lose those tween windows like a full replay.
+        for edit in [Edit::Retitle(3), Edit::Insert(3), Edit::Retitle(3)] {
+            seek(&mut world, 1.5);
+            if matches!(edit, Edit::Retitle(_)) {
+                edits.retain(|edit| !matches!(edit, Edit::Insert(_)));
+            }
+            edits.push(edit);
+            assert_eq!(
+                hot_reload(&mut world, counter_deck(slides, &edits)),
+                ReplayKind::Incremental {
+                    reused: 3,
+                    segments: slides
+                }
+            );
+            let mut full = incremental_world();
+            replay_canvas_into(&mut full, counter_deck(slides, &edits));
+            full.flush();
+            gaanim_timeline::capture_reload_keyframe(&mut full);
+            assert_eq!(rolling_tweens(&mut world), rolling_tweens(&mut full));
+            assert_eq!(observe(&mut world), observe(&mut full));
+        }
+    }
+
+    /// A persistent badge that every slide fades out and back in, like a
+    /// logo hidden on section dividers. Compiling a fade-in sets the badge's
+    /// opacity to zero, so every slide changes an entity the first one spawned.
+    fn badge_deck(slides: usize, edits: &[Edit]) -> SceneModel {
+        let mut canvas = SceneModel::new(640, 360);
+        let badge = canvas.circle(0.2).move_to(2.5, 1.2);
+        canvas.persist(&badge).unwrap();
+        for index in 0..slides {
+            canvas.segment(format!("Slide {index}"), None).unwrap();
+            let retitled = edits
+                .iter()
+                .filter(|edit| matches!(edit, Edit::Retitle(slide) if *slide == index))
+                .count();
+            let title = canvas.text(&format!("Slide {index} revision {retitled}"));
+            canvas.play(vec![badge.animate().fade_out().duration(0.25)]);
+            canvas.play(vec![title.animate().fade_in().duration(0.5)]);
+            if !edits
+                .iter()
+                .any(|edit| matches!(edit, Edit::Insert(slide) if *slide == index))
+            {
+                canvas.play(vec![badge.animate().fade_in().duration(0.25)]);
+            }
+            canvas.stop(Some(format!("end {index}"))).unwrap();
+        }
+        canvas
+    }
+
+    #[test]
+    fn restorable_changes_to_kept_entities_still_reload_incrementally() {
+        let slides = 5;
+        // Slide `n` is segment `n + 1`, after the implicit badge segment.
+        let segments = slides + 1;
+        let mut world = incremental_world();
+        let mut edits = vec![Edit::None];
+        hot_reload(&mut world, badge_deck(slides, &edits));
+        edits.push(Edit::Retitle(2));
+        assert_eq!(
+            hot_reload(&mut world, badge_deck(slides, &edits)),
+            ReplayKind::Full
+        );
+        // Slide 2 stops fading the badge back in, and later starts again.
+        for (edit, reused) in [
+            (Edit::Retitle(2), 3),
+            (Edit::Insert(2), 3),
+            (Edit::Retitle(2), 3),
+            (Edit::Retitle(4), 3),
+            (Edit::Retitle(4), 5),
+        ] {
+            seek(&mut world, 2.2);
+            if matches!(edit, Edit::Retitle(2)) {
+                edits.retain(|edit| !matches!(edit, Edit::Insert(_)));
+            }
+            edits.push(edit);
+            assert_eq!(
+                hot_reload(&mut world, badge_deck(slides, &edits)),
+                ReplayKind::Incremental { reused, segments }
+            );
+            let mut full = incremental_world();
+            replay_canvas_into(&mut full, badge_deck(slides, &edits));
+            full.flush();
+            gaanim_timeline::capture_reload_keyframe(&mut full);
+            assert_eq!(observe(&mut world), observe(&mut full));
         }
     }
 
