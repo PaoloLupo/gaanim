@@ -1,4 +1,5 @@
 use gaanim_core::glam::DVec2;
+use gaanim_timeline::sound::SoundCue;
 use gaanim_timeline::transition::{
     IrisShape, MorphMapping, MorphProperty, SlideDirection, TransitionOverlay, TransitionType,
 };
@@ -31,6 +32,14 @@ fn finite(name: &str, value: f64) -> PyResult<()> {
         return Err(PyValueError::new_err(format!("{name} must be finite")));
     }
     Ok(())
+}
+
+/// Validate the optional `sound=` file of a transition constructor.
+fn sound_cue(sound: Option<String>) -> PyResult<Option<SoundCue>> {
+    sound
+        .map(SoundCue::new)
+        .transpose()
+        .map_err(|error| PyValueError::new_err(error.to_string()))
 }
 
 fn slide_direction(direction: &str) -> PyResult<SlideDirection> {
@@ -68,11 +77,12 @@ fn wipe_direction(direction: &str) -> PyResult<DVec2> {
 }
 
 impl PyTransitionType {
-    /// Attach the optional easing and overlay shared by every constructor.
+    /// Attach the optional easing, overlay and sound shared by every constructor.
     fn styled(
         transition: TransitionType,
         easing: Option<PyEasing>,
         overlay: Option<PyOverlay>,
+        sound: Option<SoundCue>,
     ) -> Self {
         let mut transition = transition;
         if let Some(easing) = easing {
@@ -80,6 +90,9 @@ impl PyTransitionType {
         }
         if let Some(overlay) = overlay {
             transition = transition.with_overlay(overlay.0);
+        }
+        if let Some(sound) = sound {
+            transition = transition.with_sound(sound);
         }
         Self(transition)
     }
@@ -89,45 +102,63 @@ impl PyTransitionType {
 impl PyTransitionType {
     /// Instant cut (no transition), optionally decorated by an overlay.
     #[staticmethod]
-    #[pyo3(signature = (*, overlay=None))]
-    fn cut(overlay: Option<PyOverlay>) -> Self {
-        Self::styled(TransitionType::Cut, None, overlay)
+    #[pyo3(signature = (*, overlay=None, sound=None))]
+    fn cut(overlay: Option<PyOverlay>, sound: Option<String>) -> PyResult<Self> {
+        Ok(Self::styled(
+            TransitionType::Cut,
+            None,
+            overlay,
+            sound_cue(sound)?,
+        ))
     }
 
     /// Cross-fade: outgoing scene fades out, incoming scene fades in.
     #[staticmethod]
-    #[pyo3(signature = (duration, *, easing=None, overlay=None))]
-    fn cross_fade(duration: f64, easing: Option<PyEasing>, overlay: Option<PyOverlay>) -> Self {
-        Self::styled(TransitionType::CrossFade { duration }, easing, overlay)
+    #[pyo3(signature = (duration, *, easing=None, overlay=None, sound=None))]
+    fn cross_fade(
+        duration: f64,
+        easing: Option<PyEasing>,
+        overlay: Option<PyOverlay>,
+        sound: Option<String>,
+    ) -> PyResult<Self> {
+        Ok(Self::styled(
+            TransitionType::CrossFade { duration },
+            easing,
+            overlay,
+            sound_cue(sound)?,
+        ))
     }
 
     /// Fade to a color, then fade in from that color.
     #[staticmethod]
-    #[pyo3(signature = (duration, color, *, easing=None, overlay=None))]
+    #[pyo3(signature = (duration, color, *, easing=None, overlay=None, sound=None))]
     fn fade_through(
         duration: f64,
         color: super::color::PyColor,
         easing: Option<PyEasing>,
         overlay: Option<PyOverlay>,
-    ) -> Self {
-        Self::styled(
+        sound: Option<String>,
+    ) -> PyResult<Self> {
+        Ok(Self::styled(
             TransitionType::FadeThrough {
                 duration,
                 fade_color: color.0,
             },
             easing,
             overlay,
-        )
+            sound_cue(sound)?,
+        ))
     }
 
     /// The incoming scene slides in over the outgoing one ("left", "right", "up", "down").
     #[staticmethod]
-    #[pyo3(signature = (duration, direction, *, easing=None, overlay=None))]
+    #[pyo3(signature = (duration, direction, *, easing=None, overlay=None, sound=None))]
     fn slide(
         duration: f64,
         direction: &str,
         easing: Option<PyEasing>,
         overlay: Option<PyOverlay>,
+        sound: Option<String>,
     ) -> PyResult<Self> {
         let direction = slide_direction(direction)?;
         Ok(Self::styled(
@@ -137,18 +168,20 @@ impl PyTransitionType {
             },
             easing,
             overlay,
+            sound_cue(sound)?,
         ))
     }
 
     /// Zoom through a point in the outgoing scene before revealing the next one.
     #[staticmethod]
-    #[pyo3(signature = (duration, *, center=(0.0, 0.0), max_zoom=4.0, easing=None, overlay=None))]
+    #[pyo3(signature = (duration, *, center=(0.0, 0.0), max_zoom=4.0, easing=None, overlay=None, sound=None))]
     fn zoom_through(
         duration: f64,
         center: (f64, f64),
         max_zoom: f64,
         easing: Option<PyEasing>,
         overlay: Option<PyOverlay>,
+        sound: Option<String>,
     ) -> PyResult<Self> {
         positive_duration(duration)?;
         if !center.0.is_finite() || !center.1.is_finite() {
@@ -167,12 +200,13 @@ impl PyTransitionType {
             },
             easing,
             overlay,
+            sound_cue(sound)?,
         ))
     }
 
     /// Morph paired drawables of the outgoing segment into the incoming one.
     #[staticmethod]
-    #[pyo3(signature = (duration, *, pairs=Vec::new(), easing=None, overlay=None))]
+    #[pyo3(signature = (duration, *, pairs=Vec::new(), easing=None, overlay=None, sound=None))]
     fn morph(
         duration: f64,
         pairs: Vec<(
@@ -181,6 +215,7 @@ impl PyTransitionType {
         )>,
         easing: Option<PyEasing>,
         overlay: Option<PyOverlay>,
+        sound: Option<String>,
     ) -> PyResult<Self> {
         positive_duration(duration)?;
         let mut sources = std::collections::HashSet::new();
@@ -208,18 +243,20 @@ impl PyTransitionType {
             TransitionType::Morph { duration, mappings },
             easing,
             overlay,
+            sound_cue(sound)?,
         ))
     }
 
     /// A straight edge travels across the frame in `direction`, revealing the next segment.
     #[staticmethod]
-    #[pyo3(signature = (duration, direction="left", feather=0.1, *, easing=None, overlay=None))]
+    #[pyo3(signature = (duration, direction="left", feather=0.1, *, easing=None, overlay=None, sound=None))]
     fn wipe(
         duration: f64,
         direction: &str,
         feather: f64,
         easing: Option<PyEasing>,
         overlay: Option<PyOverlay>,
+        sound: Option<String>,
     ) -> PyResult<Self> {
         positive_duration(duration)?;
         let direction = wipe_direction(direction)?;
@@ -230,17 +267,19 @@ impl PyTransitionType {
             TransitionType::wipe(duration, direction, feather),
             easing,
             overlay,
+            sound_cue(sound)?,
         ))
     }
 
     /// A clock hand sweeps clockwise from `start_angle` degrees (90 = twelve o'clock).
     #[staticmethod]
-    #[pyo3(signature = (duration, start_angle=90.0, *, easing=None, overlay=None))]
+    #[pyo3(signature = (duration, start_angle=90.0, *, easing=None, overlay=None, sound=None))]
     fn clock_wipe(
         duration: f64,
         start_angle: f64,
         easing: Option<PyEasing>,
         overlay: Option<PyOverlay>,
+        sound: Option<String>,
     ) -> PyResult<Self> {
         positive_duration(duration)?;
         finite("start_angle", start_angle)?;
@@ -248,18 +287,20 @@ impl PyTransitionType {
             TransitionType::clock_wipe(duration, start_angle),
             easing,
             overlay,
+            sound_cue(sound)?,
         ))
     }
 
     /// A shape opens from `center` until the next segment covers the frame.
     #[staticmethod]
-    #[pyo3(signature = (duration, center=(0.0, 0.0), shape=None, *, easing=None, overlay=None))]
+    #[pyo3(signature = (duration, center=(0.0, 0.0), shape=None, *, easing=None, overlay=None, sound=None))]
     fn iris(
         duration: f64,
         center: (f64, f64),
         shape: Option<&Bound<'_, PyAny>>,
         easing: Option<PyEasing>,
         overlay: Option<PyOverlay>,
+        sound: Option<String>,
     ) -> PyResult<Self> {
         positive_duration(duration)?;
         finite("center x", center.0)?;
@@ -295,18 +336,20 @@ impl PyTransitionType {
             TransitionType::iris(duration, DVec2::new(center.0, center.1), shape),
             easing,
             overlay,
+            sound_cue(sound)?,
         ))
     }
 
     /// `count` parallel slats open together; `angle` tilts the slats in degrees.
     #[staticmethod]
-    #[pyo3(signature = (duration, count=8, angle=0.0, *, easing=None, overlay=None))]
+    #[pyo3(signature = (duration, count=8, angle=0.0, *, easing=None, overlay=None, sound=None))]
     fn blinds(
         duration: f64,
         count: u32,
         angle: f64,
         easing: Option<PyEasing>,
         overlay: Option<PyOverlay>,
+        sound: Option<String>,
     ) -> PyResult<Self> {
         positive_duration(duration)?;
         if !(1..=512).contains(&count) {
@@ -317,17 +360,19 @@ impl PyTransitionType {
             TransitionType::blinds(duration, count, angle),
             easing,
             overlay,
+            sound_cue(sound)?,
         ))
     }
 
     /// The incoming segment pushes the outgoing one out of the frame.
     #[staticmethod]
-    #[pyo3(signature = (duration, direction="up", *, easing=None, overlay=None))]
+    #[pyo3(signature = (duration, direction="up", *, easing=None, overlay=None, sound=None))]
     fn push(
         duration: f64,
         direction: &str,
         easing: Option<PyEasing>,
         overlay: Option<PyOverlay>,
+        sound: Option<String>,
     ) -> PyResult<Self> {
         positive_duration(duration)?;
         let direction = slide_direction(direction)?;
@@ -335,6 +380,7 @@ impl PyTransitionType {
             TransitionType::push(duration, direction),
             easing,
             overlay,
+            sound_cue(sound)?,
         ))
     }
 
@@ -398,6 +444,9 @@ impl PyTransitionType {
         }
         if let Some(overlay) = self.0.overlay() {
             extras.push_str(&format!(", overlay={}", overlay_repr(overlay)));
+        }
+        if let Some(sound) = self.0.sound() {
+            extras.push_str(&format!(", sound={:?}", sound.path.display().to_string()));
         }
         if base.ends_with('(') {
             format!("{}{})", base, extras.trim_start_matches(", "))

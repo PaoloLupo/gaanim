@@ -1090,10 +1090,22 @@ class Transition:
     ``blinds``, ``push``, ``slide``) use ``Easing.SMOOTH``. Vector reveals
     clip both segments with animated paths in the visible camera frame, so
     they stay sharp at any resolution and need no textures.
+
+    Every transition also accepts ``sound=`` (an audio file path, relative to
+    the assets folder): the sound effect plays once, at full volume, when the
+    transition starts, which is the start of the segment it enters. It is
+    placed when the transition is passed to ``scene.segment`` or
+    ``scene.link`` (a later ``link`` into the same segment replaces it), is
+    mixed like ``scene.media.audio`` in preview and MP4/WebM exports and
+    never changes a duration. An empty path raises ``ValueError`` here; a
+    missing file raises ``ValueError`` from ``segment``/``link``.
+
+    Example:
+        scene.segment("detalle", transition=Transition.slide(0.5, "left", sound="whoosh.wav"))
     """
 
     @staticmethod
-    def cut(*, overlay: Optional[Overlay] = None) -> Transition:
+    def cut(*, overlay: Optional[Overlay] = None, sound: Optional[str] = None) -> Transition:
         """Switch segments instantly, optionally under an ``overlay``.
 
         Example:
@@ -1106,6 +1118,7 @@ class Transition:
         *,
         easing: Optional[Easing] = None,
         overlay: Optional[Overlay] = None,
+        sound: Optional[str] = None,
     ) -> Transition:
         """Fade the outgoing segment out while the incoming one fades in.
 
@@ -1120,6 +1133,7 @@ class Transition:
         *,
         easing: Optional[Easing] = None,
         overlay: Optional[Overlay] = None,
+        sound: Optional[str] = None,
     ) -> Transition:
         """Fade out during the first half and fade the next segment in during the second.
 
@@ -1134,6 +1148,7 @@ class Transition:
         *,
         easing: Optional[Easing] = None,
         overlay: Optional[Overlay] = None,
+        sound: Optional[str] = None,
     ) -> Transition:
         """Slide the incoming segment over the still outgoing one.
 
@@ -1154,6 +1169,7 @@ class Transition:
         max_zoom: float = 4.0,
         easing: Optional[Easing] = None,
         overlay: Optional[Overlay] = None,
+        sound: Optional[str] = None,
     ) -> Transition:
         """Zoom the camera into the outgoing segment and back out on the incoming one.
 
@@ -1168,6 +1184,7 @@ class Transition:
         pairs: Sequence[tuple[Drawable, Drawable]] = (),
         easing: Optional[Easing] = None,
         overlay: Optional[Overlay] = None,
+        sound: Optional[str] = None,
     ) -> Transition:
         """Carry paired drawables from the outgoing segment into the incoming one.
 
@@ -1192,6 +1209,7 @@ class Transition:
         *,
         easing: Optional[Easing] = None,
         overlay: Optional[Overlay] = None,
+        sound: Optional[str] = None,
     ) -> Transition:
         """Sweep a straight edge across the frame to reveal the next segment.
 
@@ -1214,6 +1232,7 @@ class Transition:
         *,
         easing: Optional[Easing] = None,
         overlay: Optional[Overlay] = None,
+        sound: Optional[str] = None,
     ) -> Transition:
         """Reveal the next segment behind a hand sweeping clockwise around the frame center.
 
@@ -1233,6 +1252,7 @@ class Transition:
         *,
         easing: Optional[Easing] = None,
         overlay: Optional[Overlay] = None,
+        sound: Optional[str] = None,
     ) -> Transition:
         """Open a shape from ``center`` (scene units) until the next segment fills the frame.
 
@@ -1255,6 +1275,7 @@ class Transition:
         *,
         easing: Optional[Easing] = None,
         overlay: Optional[Overlay] = None,
+        sound: Optional[str] = None,
     ) -> Transition:
         """Open ``count`` parallel slats together to reveal the next segment.
 
@@ -1273,6 +1294,7 @@ class Transition:
         *,
         easing: Optional[Easing] = None,
         overlay: Optional[Overlay] = None,
+        sound: Optional[str] = None,
     ) -> Transition:
         """Let the incoming segment push the outgoing one out of the frame.
 
@@ -1963,6 +1985,26 @@ class Anim:
         ...
     def delay(self, seconds: float) -> Anim:
         """Return a copy delayed by finite, non-negative ``seconds``."""
+        ...
+    def sound(self, path: str, *, volume: float = 1.0, offset: float = 0.0) -> Anim:
+        """Return a copy that plays the sound effect ``path`` when the animation starts.
+
+        The sound is anchored to the animation, not to the cursor where it was
+        written: it starts at the animation's resolved start, including its
+        ``delay`` and its place inside ``sequence``, ``stagger`` or
+        ``Composition`` inserts, so moving the animation moves the sound.
+        ``offset`` seconds shift it from that start (negative anticipates
+        it). The file plays once, whole, with linear gain ``volume``; it does
+        not lengthen the play, and it is mixed like ``scene.media.audio`` in
+        preview (including seeks) and MP4/WebM exports. A relative path uses
+        the assets folder. A second call replaces the sound. An empty path, a
+        negative or non-finite ``volume`` or a non-finite ``offset`` raise
+        ``ValueError``; a missing file, or a sound that would start before
+        0 s, raises ``ValueError`` from ``scene.play`` and nothing is played.
+
+        Example:
+            scene.play(title.animate.write().sound("typing.wav", volume=0.6))
+        """
         ...
     def repeat(self, count: int, *, yoyo: bool = False, delay: float = 0.0) -> Anim:
         """Play this animation ``count`` times; ``duration`` and ``easing`` describe one cycle.
@@ -6432,6 +6474,22 @@ class MediaLibrary:
         Example:
             music = scene.media.audio("music.ogg", end=30.0, fade_out=1.5, volume=0.5)
             scene.play([music, title.animate.write()])
+        """
+        ...
+    def sfx(self, path: str, at: Optional[float] = None, *, volume: float = 1.0) -> None:
+        """Place a sound effect at absolute timeline second ``at``.
+
+        ``at`` defaults to the current ``scene.cursor``. Unlike ``audio``, the
+        sound needs no ``play``: it is scheduled immediately, plays its whole
+        file once with linear gain ``volume``, never moves the cursor and
+        never lengthens the timeline. It is mixed on the same track mixer as
+        ``audio`` in preview (pause, seek and speed included) and MP4/WebM
+        exports. To keep a sound attached to an animation that may move, use
+        ``Anim.sound`` instead. A missing file, a negative or non-finite
+        ``at`` or ``volume`` raise ``ValueError``.
+
+        Example:
+            scene.media.sfx("whoosh.wav", at=scene.cursor)
         """
         ...
     def image(

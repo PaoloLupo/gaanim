@@ -6,6 +6,7 @@ use gaanim_core::peniko::Color;
 use gaanim_math::RateFunc;
 
 use crate::clip::SceneId;
+use crate::sound::SoundCue;
 
 /// The type of transition between two scenes.
 #[derive(Debug, Clone)]
@@ -66,12 +67,14 @@ pub enum TransitionType {
         duration: f64,
         direction: SlideDirection,
     },
-    /// Another transition shaped by an easing curve and/or decorated by an
-    /// overlay drawn above the cut.
+    /// Another transition shaped by an easing curve, decorated by an
+    /// overlay drawn above the cut and/or accompanied by a sound effect that
+    /// starts with the transition.
     Styled {
         base: Box<TransitionType>,
         easing: Option<RateFunc>,
         overlay: Option<TransitionOverlay>,
+        sound: Option<SoundCue>,
     },
 }
 
@@ -110,6 +113,14 @@ impl TransitionType {
         }
     }
 
+    /// Sound effect that starts with the transition, if any.
+    pub fn sound(&self) -> Option<&SoundCue> {
+        match self {
+            Self::Styled { sound, base, .. } => sound.as_ref().or_else(|| base.sound()),
+            _ => None,
+        }
+    }
+
     /// Eased progress of the effect at linear progress `t` in `[0, 1]`.
     ///
     /// Without an explicit easing, the original transitions stay linear and
@@ -134,15 +145,22 @@ impl TransitionType {
     /// Wrap this transition with an easing curve (replacing a previous one).
     pub fn with_easing(self, easing: RateFunc) -> Self {
         match self {
-            Self::Styled { base, overlay, .. } => Self::Styled {
+            Self::Styled {
+                base,
+                overlay,
+                sound,
+                ..
+            } => Self::Styled {
                 base,
                 easing: Some(easing),
                 overlay,
+                sound,
             },
             base => Self::Styled {
                 base: Box::new(base),
                 easing: Some(easing),
                 overlay: None,
+                sound: None,
             },
         }
     }
@@ -150,15 +168,48 @@ impl TransitionType {
     /// Wrap this transition with an overlay drawn above the cut.
     pub fn with_overlay(self, overlay: TransitionOverlay) -> Self {
         match self {
-            Self::Styled { base, easing, .. } => Self::Styled {
+            Self::Styled {
+                base,
+                easing,
+                sound,
+                ..
+            } => Self::Styled {
                 base,
                 easing,
                 overlay: Some(overlay),
+                sound,
             },
             base => Self::Styled {
                 base: Box::new(base),
                 easing: None,
                 overlay: Some(overlay),
+                sound: None,
+            },
+        }
+    }
+
+    /// Play `sound` when the transition starts (replacing a previous one).
+    ///
+    /// The cue carries no absolute time: the scene resolves it at the start
+    /// of the segment the transition enters, so it follows that segment.
+    pub fn with_sound(self, sound: SoundCue) -> Self {
+        match self {
+            Self::Styled {
+                base,
+                easing,
+                overlay,
+                ..
+            } => Self::Styled {
+                base,
+                easing,
+                overlay,
+                sound: Some(sound),
+            },
+            base => Self::Styled {
+                base: Box::new(base),
+                easing: None,
+                overlay: None,
+                sound: Some(sound),
             },
         }
     }
@@ -345,4 +396,39 @@ pub struct SceneConnection {
     pub from: SceneId,
     pub to: SceneId,
     pub transition: TransitionType,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sound_survives_easing_and_overlay_wrappers() {
+        let cue = SoundCue::new("whoosh.wav").unwrap();
+        let transition = TransitionType::Slide {
+            duration: 0.5,
+            direction: SlideDirection::Left,
+        }
+        .with_sound(cue.clone())
+        .with_easing(RateFunc::Linear)
+        .with_overlay(TransitionOverlay::Flash {
+            color: Color::WHITE,
+            duration: 0.2,
+        });
+        assert_eq!(transition.sound(), Some(&cue));
+        assert_eq!(transition.duration(), 0.5);
+        assert!(matches!(transition.base(), TransitionType::Slide { .. }));
+        assert!(transition.overlay().is_some());
+        assert!(TransitionType::Cut.sound().is_none());
+    }
+
+    #[test]
+    fn with_sound_replaces_a_previous_sound() {
+        let first = SoundCue::new("a.wav").unwrap();
+        let second = SoundCue::new("b.wav").unwrap();
+        let transition = TransitionType::CrossFade { duration: 0.3 }
+            .with_sound(first)
+            .with_sound(second.clone());
+        assert_eq!(transition.sound(), Some(&second));
+    }
 }

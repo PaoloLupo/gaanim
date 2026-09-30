@@ -176,7 +176,7 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
 | ☐ | [AU-01](#au-01--marcadores-para-voz-en-off) | Marcadores para voz en off (`wait_until` + sidecar) | M | ★★★ | TM-05 | [#160](https://github.com/PaoloLupo/gaanim/issues/160) |
 | ☐ | [AU-02](#au-02--análisis-de-audio-como-señales-reactivas) | Análisis de audio como señales reactivas | M | ★★★ | — | [#161](https://github.com/PaoloLupo/gaanim/issues/161) |
 | ☐ | [AU-03](#au-03--waveform-y-espectro-como-drawables) | Waveform y espectro como drawables | S | ★★ | AU-02 | [#162](https://github.com/PaoloLupo/gaanim/issues/162) |
-| ☐ | [AU-04](#au-04--efectos-de-sonido-anclados) | Efectos de sonido anclados | S | ★★ | — | [#163](https://github.com/PaoloLupo/gaanim/issues/163) |
+| ☑ | [AU-04](#au-04--efectos-de-sonido-anclados) | Efectos de sonido anclados | S | ★★ | — | [#163](https://github.com/PaoloLupo/gaanim/issues/163) |
 | ☐ | [TX-07](#tx-07--subtítulos-karaoke) | Subtítulos karaoke (SRT/VTT/Whisper) | M | ★★★ | TX-02 | [#164](https://github.com/PaoloLupo/gaanim/issues/164) |
 | ☐ | [TX-09](#tx-09--animación-de-código-por-diff) | Animación de código por diff | M | ★★★ | — | [#165](https://github.com/PaoloLupo/gaanim/issues/165) |
 | ☐ | [TX-06](#tx-06--texto-sobre-trayectoria) | Texto sobre trayectoria | M | ★★ | TR-03 | [#166](https://github.com/PaoloLupo/gaanim/issues/166) |
