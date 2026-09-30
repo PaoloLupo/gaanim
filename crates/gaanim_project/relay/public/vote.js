@@ -4,8 +4,12 @@
 // it opens or closes and takes the votes on the same connection. Networks
 // that block WebSockets fall back to asking over HTTP every few seconds.
 // The answers show as large tiles, one vote per phone; the phone keeps a
-// random voter id, so reloading the page keeps its vote, and a vote can
-// change while the question is open.
+// random voter id, so reloading the page keeps its vote.
+//
+// A poll's vote can change while the question is open. A quiz asks for a
+// nickname first, counts down its time, takes one answer, and when the
+// presenter reveals it shows whether the answer was right, the points it
+// earned and the player's place.
 "use strict";
 
 /** Keepalive, answered by the relay without waking the session. */
@@ -17,6 +21,8 @@ const MAX_BACKOFF_MS = 15000;
 const SOCKET_ATTEMPTS = 3;
 /** How long a vote sent on the socket may wait for its answer. */
 const VOTE_TIMEOUT_MS = 5000;
+/** The timer turns red below this. */
+const URGENT_MS = 5000;
 
 // A shape per answer, so an answer is recognizable without telling its
 // color apart; the letter matches the bars on the presentation screen.
@@ -61,28 +67,58 @@ function voterId() {
 document.addEventListener("DOMContentLoaded", () => {
   const voter = voterId();
   const $ = (id) => document.getElementById(id);
-  const waiting = $("waiting");
-  const questionView = $("question");
+  const views = {
+    waiting: $("waiting"),
+    join: $("join-view"),
+    question: $("question"),
+    result: $("result-view"),
+    kicked: $("kicked-view"),
+  };
   const questionText = $("question-text");
   const answers = $("answers");
   const status = $("status");
   const offline = $("offline");
   const dot = $("dot");
+  const me = $("me");
   const template = $("answer-template");
+  const timer = $("timer");
+  const timerFill = $("timer-fill");
+  const timerText = $("timer-text");
+  const joinForm = $("join-form");
+  const nameInput = $("name");
+  const nameError = $("name-error");
 
   $("session").textContent = code;
   $("session").parentElement.title = t("sessionTitle");
   document.title = `Gaanim · ${code}`;
+  nameInput.value = store.get("gaanim-name") ?? "";
 
+  /** The question the relay last reported. */
+  let poll = { open: false };
+  /** The question drawn as tiles. */
   let shown = null;
+  let current = "waiting";
+  let player = null;
+  /** Whether the relay said who this phone is, so a missing player means
+   * it has not joined yet. */
+  let known = false;
+  let kicked = false;
   let socket = null;
   let socketFailures = 0;
   let usePolling = false;
   let retry = null;
   let pollTimer = null;
   let pingTimer = null;
+  let tick = null;
+  let joining = false;
   /** The vote waiting for the relay's answer: {poll, option, button, timer}. */
   let pending = null;
+
+  function view(name) {
+    current = name;
+    for (const [key, element] of Object.entries(views)) element.hidden = key !== name;
+    if (name !== "question") stopTimer();
+  }
 
   function setStatus(message, emphasis) {
     status.replaceChildren();
@@ -95,14 +131,15 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function setConnection(live) {
-    offline.hidden = live;
+    offline.hidden = live || kicked;
     dot.dataset.state = live ? "live" : "offline";
   }
 
-  function showWaiting() {
-    shown = null;
-    questionView.hidden = true;
-    waiting.hidden = false;
+  function setPlayer(value) {
+    known = true;
+    player = value;
+    me.hidden = !player;
+    if (player) me.textContent = `${player.name} · ${formatScore(player.score)}`;
   }
 
   function markChosen(index) {
@@ -112,86 +149,272 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  function show(poll) {
+  function lock(message) {
+    answers.setAttribute("data-locked", "");
+    for (const button of answers.querySelectorAll(".answer")) button.disabled = true;
+    if (message) setStatus(message);
+  }
+
+  // --- What the relay reports ----------------------------------------------
+
+  function show(next) {
+    poll = next;
+    if (kicked) return;
     if (!poll.open) {
-      showWaiting();
+      // A revealed result stays until the next question.
+      if (current !== "result") {
+        shown = null;
+        view("waiting");
+      }
       return;
     }
-    if (shown === poll.id) return;
-    shown = poll.id;
-    questionText.textContent = poll.question;
-    answers.replaceChildren();
-    poll.options.forEach((option, index) => {
-      const item = template.content.firstElementChild.cloneNode(true);
-      const button = item.querySelector(".answer");
-      button.dataset.index = String(index);
-      button.querySelector(".shape").innerHTML =
-        `<svg viewBox="0 0 24 24">${SHAPES[index % SHAPES.length]}</svg>`;
-      button.querySelector(".label").textContent = option;
-      button.querySelector(".letter").textContent = String.fromCharCode(65 + index);
-      button.addEventListener("click", () => vote(poll.id, index, button));
-      answers.append(item);
-    });
-    const saved = store.get(`gaanim-vote-${poll.id}`);
-    markChosen(saved === null ? null : Number(saved));
-    setStatus(saved === null ? "" : t("change"), saved === null ? "" : t("sent"));
-    waiting.hidden = true;
-    questionView.hidden = false;
+    if (poll.quiz?.revealed) {
+      if (player?.last?.poll === poll.id) showResult({ ...player.last, player });
+      else showResult({ poll: poll.id, correct: poll.quiz.correct, option: null, player: null });
+      return;
+    }
+    if (poll.quiz && !player) {
+      view(known ? "join" : "waiting");
+      return;
+    }
+    drawQuestion();
   }
+
+  function drawQuestion() {
+    const quiz = poll.quiz;
+    if (shown !== poll.id) {
+      shown = poll.id;
+      questionText.textContent = poll.question;
+      answers.replaceChildren();
+      answers.removeAttribute("data-locked");
+      poll.options.forEach((option, index) => {
+        const item = template.content.firstElementChild.cloneNode(true);
+        const button = item.querySelector(".answer");
+        button.dataset.index = String(index);
+        button.querySelector(".shape").innerHTML =
+          `<svg viewBox="0 0 24 24">${SHAPES[index % SHAPES.length]}</svg>`;
+        button.querySelector(".label").textContent = option;
+        button.querySelector(".letter").textContent = String.fromCharCode(65 + index);
+        const id = poll.id;
+        button.addEventListener("click", () => vote(id, index, button));
+        answers.append(item);
+      });
+      const saved = store.get(`gaanim-vote-${poll.id}`);
+      markChosen(saved === null ? null : Number(saved));
+      if (quiz && saved !== null) lock(t("locked"));
+      else setStatus(saved === null ? "" : t("change"), saved === null ? "" : t("sent"));
+    }
+    view("question");
+    if (quiz) startTimer(quiz);
+    else timer.hidden = true;
+  }
+
+  function startTimer(quiz) {
+    stopTimer();
+    timer.hidden = false;
+    // The deadline is on the relay's clock: shift it to this phone's.
+    const deadline = quiz.deadline - (quiz.now - Date.now());
+    const total = quiz.time * 1000;
+    const update = () => {
+      const remaining = Math.max(0, deadline - Date.now());
+      timerFill.style.transform = `scaleX(${remaining / total})`;
+      timerText.textContent = `${Math.ceil(remaining / 1000)}${t("seconds")}`;
+      timer.toggleAttribute("data-urgent", remaining < URGENT_MS);
+      if (remaining === 0) {
+        stopTimer();
+        if (!answers.hasAttribute("data-locked")) lock(t("timeUp"));
+      }
+    };
+    update();
+    tick = setInterval(update, 100);
+  }
+
+  function stopTimer() {
+    clearInterval(tick);
+    tick = null;
+  }
+
+  function showResult({ correct, option, points = 0, player: result }) {
+    if (result) setPlayer(result);
+    const outcome = !result ? "answer" : option === null ? "missed" : option === correct ? "correct" : "wrong";
+    const answer = poll.options?.[correct];
+    views.result.dataset.outcome = outcome;
+    $("verdict").textContent = { correct: "✓", wrong: "✗", missed: "–", answer: "✓" }[outcome];
+    $("result-title").textContent =
+      outcome === "answer" ? t("answerWas") : t(outcome);
+    const pointsLine = $("result-points");
+    const detail = $("result-detail");
+    if (outcome === "answer") {
+      pointsLine.textContent = answer ?? "";
+      detail.textContent = "";
+    } else {
+      pointsLine.textContent = `+${formatScore(points)} ${t("points")}`;
+      const place = result.rank ? `${t("place", result.rank, result.players)} · ` : "";
+      const reminder = outcome === "correct" || answer === undefined ? "" : `${t("answerWas")}: ${answer}. `;
+      detail.textContent = `${reminder}${place}${formatScore(result.score)} ${t("points")} ${t("total")}`;
+    }
+    shown = null;
+    view("result");
+    if (outcome === "correct") navigator.vibrate?.([30, 40, 30]);
+  }
+
+  function showKicked() {
+    kicked = true;
+    clearTimeout(retry);
+    clearTimeout(pollTimer);
+    socket?.close();
+    setPlayer(null);
+    offline.hidden = true;
+    view("kicked");
+  }
+
+  // --- Joining a game ------------------------------------------------------
+
+  function joined(value) {
+    joining = false;
+    nameError.textContent = "";
+    setPlayer(value);
+    store.set("gaanim-name", value.name);
+    show(poll);
+  }
+
+  function joinFailed(statusCode) {
+    joining = false;
+    if (statusCode === 403) return showKicked();
+    nameError.textContent = statusCode === 409 ? t("nameTaken") : t("nameInvalid");
+  }
+
+  joinForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const name = nameInput.value.trim();
+    if (joining) return;
+    joining = true;
+    nameError.textContent = "";
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "join", voter, name }));
+      return;
+    }
+    try {
+      const response = await fetch(`/s/${code}/join`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ voter, name }),
+      });
+      if (response.ok) joined((await response.json()).player);
+      else joinFailed(response.status);
+    } catch {
+      joining = false;
+      nameError.textContent = t("failed");
+    }
+  });
 
   // --- Votes --------------------------------------------------------------
 
-  function settle(poll, option, outcome) {
-    if (pending && pending.poll === poll) {
+  /** What a refused vote means, from the relay's status and error. */
+  function refusal(statusCode, error) {
+    if (statusCode === 401) return "join";
+    if (statusCode === 403) return "kicked";
+    if (error === "time is up") return "timeUp";
+    if (error === "already answered") return "answered";
+    if (statusCode === 409) return "closed";
+    return "failed";
+  }
+
+  function settle(pollId, option, outcome) {
+    if (pending && pending.poll === pollId) {
       clearTimeout(pending.timer);
       pending.button.removeAttribute("aria-busy");
       pending = null;
     }
-    if (outcome === "voted") {
-      store.set(`gaanim-vote-${poll}`, String(option));
-      if (shown === poll) markChosen(option);
-      setStatus(t("change"), t("sent"));
-      navigator.vibrate?.(18);
-    } else if (outcome === "closed") {
-      setStatus(t("closed"));
-      showWaiting();
-    } else {
-      setStatus(t("failed"));
+    const quiz = poll.id === pollId && poll.quiz;
+    switch (outcome) {
+      case "voted":
+        store.set(`gaanim-vote-${pollId}`, String(option));
+        if (shown === pollId) markChosen(option);
+        if (quiz) lock(t("locked"));
+        else setStatus(t("change"), t("sent"));
+        navigator.vibrate?.(18);
+        break;
+      case "timeUp":
+        lock(t("timeUp"));
+        break;
+      case "answered":
+        lock(t("locked"));
+        break;
+      case "join":
+        setPlayer(null);
+        view("join");
+        break;
+      case "kicked":
+        showKicked();
+        break;
+      case "closed":
+        setStatus(t("closed"));
+        break;
+      default:
+        setStatus(t("failed"));
     }
   }
 
-  async function voteOverHttp(poll, option) {
+  async function voteOverHttp(pollId, option) {
     try {
       const response = await fetch(`/s/${code}/vote`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ poll, option, voter }),
+        body: JSON.stringify({ poll: pollId, option, voter }),
       });
-      settle(poll, option, response.ok ? "voted" : response.status === 409 ? "closed" : "failed");
+      if (response.ok) return settle(pollId, option, "voted");
+      const { error } = await response.json().catch(() => ({}));
+      settle(pollId, option, refusal(response.status, error));
     } catch {
-      settle(poll, option, "failed");
+      settle(pollId, option, "failed");
     }
   }
 
-  function vote(poll, option, button) {
-    if (pending) return;
+  function vote(pollId, option, button) {
+    if (pending || answers.hasAttribute("data-locked")) return;
     button.setAttribute("aria-busy", "true");
     setStatus(t("sending"));
-    pending = { poll, option, button, timer: null };
+    pending = { poll: pollId, option, button, timer: null };
     if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "vote", poll, option, voter }));
+      socket.send(JSON.stringify({ type: "vote", poll: pollId, option, voter }));
       // No answer on the socket: try once more over HTTP.
-      pending.timer = setTimeout(() => voteOverHttp(poll, option), VOTE_TIMEOUT_MS);
+      pending.timer = setTimeout(() => voteOverHttp(pollId, option), VOTE_TIMEOUT_MS);
     } else {
-      voteOverHttp(poll, option);
+      voteOverHttp(pollId, option);
     }
   }
 
   // --- WebSocket ----------------------------------------------------------
 
+  function onMessage(message) {
+    switch (message.type) {
+      case "poll":
+        return show(message);
+      case "player":
+        setPlayer(message.player);
+        return show(poll);
+      case "joined":
+        return joined(message.player);
+      case "voted":
+        return settle(message.poll, message.option, "voted");
+      case "result":
+        if (message.player) setPlayer(message.player);
+        return showResult(message);
+      case "kicked":
+        return showKicked();
+      case "error":
+        if (joining) return joinFailed(message.status);
+        if (message.status === 403) return showKicked();
+        if (pending?.poll === message.poll) {
+          return settle(message.poll, pending.option, refusal(message.status, message.error));
+        }
+    }
+  }
+
   function connect() {
     clearTimeout(retry);
-    if (usePolling || (socket && socket.readyState <= WebSocket.OPEN)) return;
+    if (kicked || usePolling || (socket && socket.readyState <= WebSocket.OPEN)) return;
     const scheme = location.protocol === "https:" ? "wss" : "ws";
     let opened = false;
     let ws;
@@ -206,27 +429,25 @@ document.addEventListener("DOMContentLoaded", () => {
       opened = true;
       socketFailures = 0;
       setConnection(true);
+      // Introduce this phone, so a reveal reaches it and a player gets its
+      // nickname and score back.
+      ws.send(JSON.stringify({ type: "hello", voter }));
       pingTimer = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) ws.send("ping");
       }, PING_MS);
     });
     ws.addEventListener("message", (event) => {
       if (event.data === "pong") return;
-      let message;
       try {
-        message = JSON.parse(event.data);
+        onMessage(JSON.parse(event.data));
       } catch {
-        return;
-      }
-      if (message.type === "poll") show(message);
-      else if (message.type === "voted") settle(message.poll, message.option, "voted");
-      else if (message.type === "error" && pending?.poll === message.poll) {
-        settle(message.poll, pending.option, message.status === 409 ? "closed" : "failed");
+        // A message this page does not understand.
       }
     });
     ws.addEventListener("close", () => {
       clearInterval(pingTimer);
       if (socket === ws) socket = null;
+      if (kicked) return;
       setConnection(false);
       socketFailures += 1;
       if (!opened && socketFailures >= SOCKET_ATTEMPTS) {
@@ -240,17 +461,32 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // --- HTTP fallback ------------------------------------------------------
 
-  function startPolling() {
+  async function fetchPlayer() {
+    const response = await fetch(`/s/${code}/player?voter=${voter}`, { cache: "no-store" });
+    if (response.status === 403) return showKicked();
+    if (response.ok) setPlayer((await response.json()).player);
+  }
+
+  async function startPolling() {
     usePolling = true;
+    try {
+      await fetchPlayer();
+    } catch {
+      // Retried with the next refresh.
+    }
     refresh();
   }
 
   async function refresh() {
     clearTimeout(pollTimer);
+    if (kicked) return;
     try {
       const response = await fetch(`/s/${code}/poll`, { cache: "no-store" });
       if (!response.ok) throw new Error(String(response.status));
-      show(await response.json());
+      const next = await response.json();
+      // A newly revealed quiz: fetch this player's result first.
+      if (next.quiz?.revealed && player && player.last?.poll !== next.id) await fetchPlayer();
+      show(next);
       setConnection(true);
     } catch {
       setConnection(false);

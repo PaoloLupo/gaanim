@@ -1,5 +1,6 @@
 // Texts of the relay pages in Spanish and English, chosen by the phone's
-// language. Elements with data-t="<key>" get the text of <key>.
+// language. Elements with data-t="<key>" get the text of <key>, and
+// elements with data-tp="<key>" get it as their placeholder.
 "use strict";
 
 const TEXTS = {
@@ -19,6 +20,25 @@ const TEXTS = {
     closed: "La pregunta se cerró.",
     failed: "No se pudo enviar. Toca de nuevo.",
     sessionTitle: "Código de la presentación",
+    gameTitle: "¡Empieza el juego!",
+    gameHint: "Elige un apodo para competir.",
+    nameLabel: "Apodo",
+    namePlaceholder: "Tu apodo",
+    gameButton: "Jugar",
+    nameInvalid: "Usa de 2 a 20 letras, números o espacios.",
+    nameTaken: "Ese apodo ya está en uso. Prueba otro.",
+    locked: "¡Respuesta enviada! Espera el resultado.",
+    timeUp: "¡Se acabó el tiempo!",
+    seconds: "s",
+    correct: "¡Correcto!",
+    wrong: "Incorrecto",
+    missed: "Sin respuesta",
+    answerWas: "La respuesta era",
+    points: "pts",
+    place: (rank, players) => `Puesto ${rank} de ${players}`,
+    total: "en total",
+    kickedTitle: "Saliste del juego",
+    kickedHint: "El presentador te quitó de esta sesión.",
   },
   en: {
     joinTitle: "Join the presentation",
@@ -36,6 +56,25 @@ const TEXTS = {
     closed: "The question closed.",
     failed: "Could not send. Tap again.",
     sessionTitle: "Presentation code",
+    gameTitle: "The game is on!",
+    gameHint: "Pick a nickname to play.",
+    nameLabel: "Nickname",
+    namePlaceholder: "Your nickname",
+    gameButton: "Play",
+    nameInvalid: "Use 2 to 20 letters, digits or spaces.",
+    nameTaken: "That nickname is taken. Try another.",
+    locked: "Answer sent! Wait for the result.",
+    timeUp: "Time's up!",
+    seconds: "s",
+    correct: "Correct!",
+    wrong: "Wrong",
+    missed: "No answer",
+    answerWas: "The answer was",
+    points: "pts",
+    place: (rank, players) => `Place ${rank} of ${players}`,
+    total: "in total",
+    kickedTitle: "You left the game",
+    kickedHint: "The presenter removed you from this session.",
   },
 };
 
@@ -45,13 +84,22 @@ const LANG = (navigator.languages?.[0] ?? navigator.language ?? "es")
   ? "es"
   : "en";
 
-function t(key) {
-  return TEXTS[LANG][key] ?? TEXTS.es[key] ?? key;
+function t(key, ...args) {
+  const value = TEXTS[LANG][key] ?? TEXTS.es[key] ?? key;
+  return typeof value === "function" ? value(...args) : value;
+}
+
+/** A score with the phone's digit grouping, e.g. 1.745 or 1,745. */
+function formatScore(score) {
+  return new Intl.NumberFormat(LANG === "es" ? "es" : "en").format(score);
 }
 
 document.documentElement.lang = LANG;
 document.addEventListener("DOMContentLoaded", () => {
   for (const element of document.querySelectorAll("[data-t]")) {
     element.textContent = t(element.dataset.t);
+  }
+  for (const element of document.querySelectorAll("[data-tp]")) {
+    element.placeholder = t(element.dataset.tp);
   }
 });

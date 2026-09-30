@@ -22,9 +22,12 @@
           <img class="symbol symbol-light" src="/symbol-light.svg" alt="" width="36" height="24" />
           Gaanim
         </a>
-        <span class="pill" title="Código de la presentación">
-          <span class="dot" id="dot" aria-hidden="true"></span>
-          <span id="session"></span>
+        <span class="bar-end">
+          <span class="chip" id="me" hidden></span>
+          <span class="pill" title="Código de la presentación">
+            <span class="dot" id="dot" aria-hidden="true"></span>
+            <span id="session"></span>
+          </span>
         </span>
       </header>
 
@@ -39,11 +42,53 @@
         <p data-t="waitHint">Deja esta página abierta: la pregunta aparecerá aquí.</p>
       </section>
 
+      <!-- A quiz needs a nickname before its first answer. -->
+      <section class="center" id="join-view" hidden>
+        <h1 data-t="gameTitle">¡Empieza el juego!</h1>
+        <p data-t="gameHint">Elige un apodo para competir.</p>
+        <form class="join" id="join-form" novalidate>
+          <label class="sr-only" for="name" data-t="nameLabel">Apodo</label>
+          <input
+            id="name"
+            class="name-input"
+            name="name"
+            maxlength="20"
+            autocomplete="nickname"
+            autocapitalize="words"
+            spellcheck="false"
+            enterkeyhint="go"
+            data-tp="namePlaceholder"
+            aria-describedby="name-error"
+            required
+          />
+          <button class="primary" type="submit" data-t="gameButton">Jugar</button>
+          <p class="error" id="name-error" role="alert"></p>
+        </form>
+      </section>
+
       <!-- An open question. -->
       <section class="question" id="question" hidden>
+        <div class="timer" id="timer" hidden>
+          <div class="timer-track"><div class="timer-fill" id="timer-fill"></div></div>
+          <span class="timer-text" id="timer-text" aria-live="off"></span>
+        </div>
         <h1 id="question-text"></h1>
         <ul class="answers" id="answers" aria-labelledby="question-text"></ul>
         <p class="status" id="status" aria-live="polite"></p>
+      </section>
+
+      <!-- How a quiz answer went. -->
+      <section class="center result" id="result-view" hidden>
+        <div class="verdict" id="verdict" aria-hidden="true"></div>
+        <h1 id="result-title"></h1>
+        <p class="points" id="result-points"></p>
+        <p id="result-detail"></p>
+      </section>
+
+      <!-- Removed by the presenter. -->
+      <section class="center" id="kicked-view" hidden>
+        <h1 data-t="kickedTitle">Saliste del juego</h1>
+        <p data-t="kickedHint">El presentador te quitó de esta sesión.</p>
       </section>
 
       <template id="answer-template">

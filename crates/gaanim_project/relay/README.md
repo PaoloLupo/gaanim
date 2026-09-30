@@ -27,6 +27,19 @@ that block WebSockets fall back to that HTTP polling automatically.
   by itself, and it pauses while the phone is locked. Spanish or English by
   the phone's language; light or dark by its theme.
 
+## Quizzes
+
+A poll opened with a correct answer is a quiz, as in Kahoot. The first quiz
+asks each phone for a nickname (2 to 20 letters, digits or spaces, unique in
+the session). The phone counts down the quiz's time, measured by the relay's
+clock so a phone cannot stretch it, and takes one answer. A correct answer
+earns `points × (1 − elapsed / time / 2)`: all the points at once, half at the
+last moment; a wrong one earns nothing. When the presentation reveals the
+quiz, every phone shows the answer, and each player whether it was right,
+the points it earned, its total and its place. The presentation reads the
+leaderboard from `results`, can remove a player (who cannot join again from
+that phone) and can reset the session before a new game.
+
 ## Deploy
 
 Requires Node.js 20+ and a free Cloudflare account.
@@ -74,19 +87,29 @@ question or answers starts it from zero. One poll is open at a time.
 
 | Request | Who | Body / reply |
 | --- | --- | --- |
-| `PUT /s/<code>/poll` | presenter | `{id, question, options}` → `{id}`; opens that poll |
+| `PUT /s/<code>/poll` | presenter | `{id, question, options, correct?, time?, points?}` → `{id}`; opens that poll, a quiz with `correct` (time 5–300 s, default 20; points 100–10000, default 1000) |
 | `DELETE /s/<code>/poll` | presenter | closes the open poll |
-| `GET /s/<code>/results` | presenter | `{current, connected, polls: {<id>: {open, counts, total}}}`; `connected` counts the phones' sockets |
+| `POST /s/<code>/reveal` | presenter | `{id}`: shows a quiz's answer; it takes no more answers |
+| `POST /s/<code>/kick` | presenter | `{name}`: removes a player and bans its phone |
+| `POST /s/<code>/reset` | presenter | forgets every poll, vote, player and ban |
+| `GET /s/<code>/results` | presenter | `{current, connected, now, polls: {<id>: {open, counts, total, quiz?}}, players, playerCount}`; `connected` counts the phones' sockets, `players` is the leaderboard (top 100) |
 | `GET /s/<code>/ws` | phones | WebSocket, see below |
 | `GET /s/<code>/poll` | phones | `{open: false}` or `{open, id, question, options}` |
-| `POST /s/<code>/vote` | phones | `{poll, option, voter}`; 409 unless that poll is open |
-| `GET /health` | anyone | `{relay: "gaanim", version: 3}` |
+| `POST /s/<code>/vote` | phones | `{poll, option, voter}`; 409 unless that poll is open (and, for a quiz, before its time is up and only once) |
+| `POST /s/<code>/join` | phones | `{voter, name}` → `{player}`; 409 for a name in use |
+| `GET /s/<code>/player?voter=<id>` | phones | `{player}`: name, score, place and last result, or `null` |
+| `GET /health` | anyone | `{relay: "gaanim", version: 4}` |
 
 On the WebSocket the relay sends `{type: "poll", ...}` (the same body as
-`GET /poll`) on connect and whenever the question changes. A phone votes
-with `{type: "vote", poll, option, voter}` and gets `{type: "voted", poll,
-option}` or `{type: "error", status, error, poll}`; `"ping"` is answered
-`"pong"` without waking the session. The HTTP routes stay for networks that
+`GET /poll`, with `quiz: {time, deadline, now, revealed}` for a quiz) on
+connect and whenever the question changes. A phone introduces itself with
+`{type: "hello", voter}` (answered `{type: "player", player}`), joins a game
+with `{type: "join", voter, name}` (answered `{type: "joined", player}`) and
+votes with `{type: "vote", poll, option, voter}`, answered `{type: "voted",
+poll, option}` or `{type: "error", status, error, poll}`. A reveal sends
+each phone `{type: "result", poll, correct, option, points, player}`, and a
+removed player gets `{type: "kicked"}`. `"ping"` is answered `"pong"` without
+waking the session. The HTTP routes stay for networks that
 block WebSockets.
 
 Presenter requests send `Authorization: Bearer <key>`. Codes use
@@ -95,6 +118,6 @@ Presenter requests send `Authorization: Bearer <key>`. Codes use
 ## Privacy
 
 Votes are anonymous: a voter is a random id the page keeps in the phone's
-storage, with no names, accounts or cookies. Only the presentation's key can
+storage, with no accounts or cookies; a quiz asks only for a nickname. Only the presentation's key can
 read counts. A session and its votes are deleted twelve hours after its last
 activity.

@@ -465,3 +465,111 @@ body {
     transition: none !important;
   }
 }
+
+/* ---- Game: nickname, timer and results ------------------------------- */
+
+.bar-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chip {
+  max-width: 44vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.name-input {
+  width: 100%;
+  height: 64px;
+  border-radius: var(--radius);
+  border: 2px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  text-align: center;
+  font-family: inherit;
+  font-size: 24px;
+  font-weight: 650;
+  outline: none;
+}
+
+.name-input:focus {
+  border-color: var(--accent);
+}
+
+.timer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.timer-track {
+  flex: 1;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.timer-fill {
+  height: 100%;
+  width: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transform-origin: left center;
+}
+
+.timer[data-urgent] .timer-fill {
+  background: var(--danger);
+}
+
+.timer-text {
+  min-width: 3ch;
+  text-align: right;
+  font: 700 18px/1 ui-monospace, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.answers[data-locked] .answer {
+  cursor: default;
+}
+
+.answers[data-locked] .answer:active {
+  transform: none;
+}
+
+.result .verdict {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 64px;
+  font-weight: 800;
+  line-height: 1;
+  background: var(--muted);
+}
+
+.result[data-outcome="correct"] .verdict {
+  background: var(--good);
+}
+
+.result[data-outcome="wrong"] .verdict {
+  background: var(--danger);
+}
+
+.result .points {
+  color: var(--text);
+  font-size: 30px;
+  font-weight: 800;
+}
