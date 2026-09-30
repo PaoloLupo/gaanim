@@ -14414,6 +14414,125 @@ mod tests {
     }
 
     #[test]
+    fn squash_stretch_of_a_follower_deforms_along_the_followed_motion() {
+        // (make the follower, its delay behind the leader)
+        let followers: [(fn(&mut SceneModel, &DrawableHandle) -> DrawableHandle, f64); 2] = [
+            (
+                |canvas: &mut SceneModel, leader: &DrawableHandle| {
+                    let follower = canvas.circle(0.5).squash_stretch(0.1, 1.5).unwrap();
+                    follower.follow_to(leader, 0.0, 1.0);
+                    follower
+                },
+                0.0,
+            ),
+            (
+                |canvas: &mut SceneModel, leader: &DrawableHandle| {
+                    canvas
+                        .circle(0.5)
+                        .squash_stretch(0.1, 1.5)
+                        .unwrap()
+                        .follow_endpoint_delayed(
+                            CanvasEndpoint::Entity(leader.id),
+                            DVec3::ZERO,
+                            gaanim_animation::FollowOffsetSpace::World,
+                            0.3,
+                        )
+                        .unwrap()
+                },
+                0.3,
+            ),
+        ];
+        for (make, delay) in followers {
+            let mut canvas = SceneModel::new(640, 360);
+            let leader = canvas.circle(0.3).move_to(-3.0, 0.0);
+            let follower = make(&mut canvas, &leader);
+            canvas.play(vec![
+                follower.fade_in(0.01),
+                leader
+                    .animate()
+                    .move_to(3.0, 0.0)
+                    .duration(1.0)
+                    .rate_func(gaanim_math::RateFunc::Linear),
+            ]);
+            canvas.wait(1.0);
+            let (mut world, mut timeline) = compiled_world(&canvas);
+            let id = ObjectId::from_raw(follower.id.as_raw() - 1);
+            let mut deform_at = |time: f64| {
+                timeline.seek(&mut world, time);
+                world
+                    .query::<(&MobjectId, Option<&gaanim_scene::ShapeDeform>)>()
+                    .iter(&world)
+                    .find(|(object, _)| object.0 == id)
+                    .unwrap()
+                    .1
+                    .map_or(kurbo::Affine::IDENTITY, |deform| deform.0)
+            };
+            // 6 units per second along x, so the stretch is capped at 1.5.
+            for time in [0.5 + delay, 1.8, 0.4 + delay] {
+                let coeffs = deform_at(time).as_coeffs();
+                if time > 1.5 {
+                    assert_eq!(coeffs, kurbo::Affine::IDENTITY.as_coeffs(), "delay {delay}");
+                } else {
+                    assert!(
+                        (coeffs[0] - 1.5).abs() < 1e-9 && (coeffs[3] - 1.0 / 1.5).abs() < 1e-9,
+                        "delay {delay} at {time}: {coeffs:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn particles_anchored_on_a_follower_trail_the_followed_motion() {
+        use crate::canvas::{Emitter, EmitterShape, ParticleOptions};
+        use gaanim_animation::ParticleEmitter;
+        let mut canvas = SceneModel::new(640, 360);
+        let leader = canvas.circle(0.3);
+        let logo = canvas.circle(0.2);
+        logo.follow_to(&leader, 0.0, 0.0);
+        let emitter = Emitter::new(EmitterShape::Point)
+            .unwrap()
+            .at_drawable(&logo, 0.0, 0.5)
+            .unwrap();
+        let options = ParticleOptions {
+            rate: 10.0,
+            seed: 9,
+            ..ParticleOptions::default()
+        };
+        let _sparks = canvas.particles(&emitter, options).unwrap();
+        canvas.play(vec![
+            logo.fade_in(0.01),
+            leader
+                .animate()
+                .move_to(4.0, 0.0)
+                .duration(2.0)
+                .rate_func(gaanim_math::RateFunc::Linear),
+        ]);
+        canvas.wait(0.5);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let emitter_of = |world: &mut World| {
+            world
+                .query::<&ParticleEmitter>()
+                .single(world)
+                .unwrap()
+                .clone()
+        };
+        // Out of order: the trail is rebuilt from the leader at every seek.
+        for time in [1.0, 2.3, 0.4, 1.0] {
+            timeline.seek(&mut world, time);
+            let trail = emitter_of(&mut world).trail;
+            for sample in [time * 0.5, time] {
+                let expected = 2.0 * sample.min(2.0);
+                assert!(
+                    (trail.at(sample).x - expected).abs() < 1e-6,
+                    "at {time}, sample {sample}: {:?}",
+                    trail
+                );
+            }
+        }
+    }
+
+    #[test]
     fn repeater_count_shows_copies_in_order_and_seeks_back() {
         let mut canvas = SceneModel::new(640, 360);
         let dot = canvas.circle(0.1);
