@@ -69,13 +69,13 @@ races = [
         {"P": 2, "Q": 3, "R": 1},
     ), top=1, rank_smoothing=0.0),
     # 6. Maximum smoothing with a zig-zag that crosses at every midpoint.
-    panel(2, 1, "rank_smoothing=4 · cruces constantes", by_year(
+    panel(2, 1, "rank_smoothing=2 · cruces constantes", by_year(
         {"N1": 40, "N2": 30, "N3": 20, "N4": 10},
         {"N1": 10, "N2": 20, "N3": 30, "N4": 40},
         {"N1": 40, "N2": 30, "N3": 20, "N4": 10},
         {"N1": 10, "N2": 20, "N3": 30, "N4": 40},
         {"N1": 40, "N2": 30, "N3": 20, "N4": 10},
-    ), top=4, rank_smoothing=4.0),
+    ), top=4, rank_smoothing=2.0),
     # 7. Negative, tiny and 1e9 values with prefix, suffix and two decimals.
     panel(0, 2, "negativos y 1e9 · prefijo, sufijo y 2 decimales", by_year(
         {"Mega": 1e9, "Neg": -5e8, "Cero": 0, "Micro": 0.004},
@@ -113,7 +113,7 @@ invalid = [
     ("fmt dos campos", ValueError, good, {"value_format": "{}{}"}),
     ("top=0", ValueError, good, {"top": 0}),
     ("vacío", ValueError, {}, {}),
-    ("smoothing=5", ValueError, good, {"rank_smoothing": 5.0}),
+    ("smoothing=2.5", ValueError, good, {"rank_smoothing": 2.5}),
     ("nan", ValueError, {2020: {"a": float("nan")}}, {}),
     ("1e20", ValueError, {2020: {"a": 1e20}}, {}),
     ("bar_gap=1", ValueError, good, {"bar_gap": 1.0}),

@@ -36,7 +36,7 @@ pub type ImageHandle = DrawableHandle;
 
 mod bar_race;
 pub use bar_race::{
-    BAR_RACE_PALETTE, BarRace, BarRaceBar, BarRaceLabels, BarRaceOptions,
+    BAR_RACE_PALETTE, BarRace, BarRaceBar, BarRaceLabels, BarRaceOptions, MAX_AUTO_FONT_FRACTION,
 };
 pub use gaanim_visualization::{BarRaceModel, ValueFormat};
 mod camera_view;

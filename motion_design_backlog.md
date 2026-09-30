@@ -1528,8 +1528,8 @@ La columna *Depende* lista los ítems que conviene cerrar antes.
   `rolling_number` para las etiquetas.
 - **Hecho:** `scene.viz.bar_race(frames, ...)` devuelve un `BarRace` cuyo estado es
   función pura de una posición de fotograma clave (`BarRaceModel` en
-  `gaanim_visualization`): valores interpolados, rango suavizado por pares con
-  `rank_smoothing`, barras que salen del `top` desvanecidas y valores y ticker con
+  `gaanim_visualization`): valores interpolados, intercambios de puesto suavizados
+  alrededor de cada cruce con `rank_smoothing`, barras que salen del `top` desvanecidas y valores y ticker con
   `rolling_number`. `race.animate.play()` y `race.animate.to(posición)` la animan.
   El ejemplo `bar_race_demo` aún no tiene baseline.
 

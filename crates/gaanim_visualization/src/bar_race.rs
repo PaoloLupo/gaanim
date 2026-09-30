@@ -3,11 +3,12 @@
 //! Everything here is a pure function of a fractional keyframe `position`:
 //! `0.0` is the first keyframe, `1.5` lies halfway between the second and the
 //! third. Values interpolate linearly between keyframes. A bar's rank is the
-//! number of bars ahead of it, and overtakes are smoothed by averaging each
-//! pairwise comparison over a window of `rank_smoothing` keyframes centered on
-//! the position, so two bars that cross swap places with an eased motion
-//! instead of jumping. Nothing accumulates between evaluations, so seeking to
-//! a position always gives the same state as playing up to it.
+//! number of bars ahead of it. When two bars cross, their swap is eased over
+//! `rank_smoothing` keyframes centered on the crossing, and shortened so it
+//! never overlaps the previous or next crossing of the same two bars; away
+//! from crossings every bar sits in its own whole slot. Nothing accumulates
+//! between evaluations, so seeking to a position always gives the same state
+//! as playing up to it.
 
 use std::hash::{Hash, Hasher};
 
@@ -28,11 +29,18 @@ pub enum BarRaceError {
     DuplicateName(String),
     #[error("top must be at least 1")]
     Top,
-    #[error("rank_smoothing must be finite and between 0 and 4 keyframes")]
+    #[error("rank_smoothing must be finite and between 0 and 2 keyframes")]
     Smoothing,
     #[error("invalid value format {0:?}: {1}")]
     Format(String, &'static str),
 }
+
+/// Longest swap between two bars, in keyframes. A longer swap would lag the
+/// data it animates by more than two keyframe intervals.
+pub const MAX_RANK_SMOOTHING: f64 = 2.0;
+
+/// Offset used to read which bar leads on each side of a crossing or a tie.
+const SIDE: f64 = 1e-7;
 
 /// Values of every bar at one position, with their smoothed ranks.
 #[derive(Debug, Clone, PartialEq)]
@@ -61,6 +69,9 @@ pub struct BarRaceModel {
     values: Vec<Vec<f64>>,
     top: usize,
     rank_smoothing: f64,
+    /// Sorted positions where the lead of each pair changes, at
+    /// `behind * bar_count + ahead` for `behind < ahead`.
+    crossings: Vec<Vec<f64>>,
 }
 
 impl BarRaceModel {
@@ -94,15 +105,25 @@ impl BarRaceModel {
         if top == 0 {
             return Err(BarRaceError::Top);
         }
-        if !rank_smoothing.is_finite() || !(0.0..=4.0).contains(&rank_smoothing) {
+        if !rank_smoothing.is_finite() || !(0.0..=MAX_RANK_SMOOTHING).contains(&rank_smoothing) {
             return Err(BarRaceError::Smoothing);
         }
-        Ok(Self {
+        let mut model = Self {
             names,
             values,
             top,
             rank_smoothing,
-        })
+            crossings: Vec::new(),
+        };
+        let count = model.names.len();
+        let mut crossings = vec![Vec::new(); count * count];
+        for behind in 0..count {
+            for ahead in (behind + 1)..count {
+                crossings[behind * count + ahead] = model.pair_crossings(ahead, behind);
+            }
+        }
+        model.crossings = crossings;
+        Ok(model)
     }
 
     pub fn names(&self) -> &[String] {
@@ -166,56 +187,100 @@ impl BarRaceModel {
         difference > 0.0 || (difference == 0.0 && ahead < behind)
     }
 
-    /// Length of `[start, end]` during which bar `ahead` leads bar `behind`.
-    fn lead_measure(&self, ahead: usize, behind: usize, start: f64, end: f64) -> f64 {
-        let difference = |position: f64| self.value(ahead, position) - self.value(behind, position);
-        let mut total = 0.0;
-        let mut from = start;
-        while from < end {
-            // Values are linear between keyframes, so split at every integer.
-            let to = (from.floor() + 1.0).min(end);
-            let length = to - from;
-            let (d0, d1) = (difference(from), difference(to));
-            total += if d0 == 0.0 && d1 == 0.0 {
-                if ahead < behind { length } else { 0.0 }
-            } else if d0 >= 0.0 && d1 >= 0.0 {
-                length
-            } else if d0 <= 0.0 && d1 <= 0.0 {
-                0.0
-            } else {
-                let crossing = d0 / (d0 - d1);
-                if d0 > 0.0 {
-                    length * crossing
-                } else {
-                    length * (1.0 - crossing)
-                }
-            };
-            from = to;
-        }
-        total
+    fn difference(&self, ahead: usize, behind: usize, position: f64) -> f64 {
+        self.value(ahead, position) - self.value(behind, position)
     }
 
-    /// Eased share of the smoothing window during which `ahead` leads `behind`.
-    fn lead_share(&self, ahead: usize, behind: usize, position: f64) -> f64 {
-        let window = self.rank_smoothing;
-        if window == 0.0 {
-            let difference = self.value(ahead, position) - self.value(behind, position);
-            return if Self::leads(ahead, behind, difference) {
-                1.0
-            } else {
-                0.0
-            };
+    /// Whether `ahead` leads `behind` at exactly `position`.
+    fn leads_at(&self, ahead: usize, behind: usize, position: f64) -> bool {
+        Self::leads(ahead, behind, self.difference(ahead, behind, position))
+    }
+
+    /// Positions strictly between the first and last keyframes where the
+    /// lead of the pair changes. Values are linear between keyframes, so the
+    /// lead can only change where the difference crosses zero inside a
+    /// segment, or at a keyframe where it is zero.
+    fn pair_crossings(&self, ahead: usize, behind: usize) -> Vec<f64> {
+        let last = self.values.len() - 1;
+        let at = |frame: usize| self.values[frame][ahead] - self.values[frame][behind];
+        let mut candidates = Vec::new();
+        for frame in 0..last {
+            let (d0, d1) = (at(frame), at(frame + 1));
+            if (d0 > 0.0 && d1 < 0.0) || (d0 < 0.0 && d1 > 0.0) {
+                candidates.push(frame as f64 + d0 / (d0 - d1));
+            }
+            if d1 == 0.0 && frame + 1 < last {
+                candidates.push((frame + 1) as f64);
+            }
         }
-        let share = (self.lead_measure(
-            ahead,
-            behind,
-            position - window * 0.5,
-            position + window * 0.5,
-        ) / window)
-            .clamp(0.0, 1.0);
+        // A tie the pair touches and leaves on the same side is no crossing.
+        candidates.retain(|&position| {
+            self.leads_at(ahead, behind, position - SIDE)
+                != self.leads_at(ahead, behind, position + SIDE)
+        });
+        candidates
+    }
+
+    /// Whether `ahead` leads `behind` at `position` when no swap is under
+    /// way. At a tie this is the order the pair is heading into (the order it
+    /// arrives in at the last keyframe), so a momentary tie never flips it.
+    fn settled_lead(&self, ahead: usize, behind: usize, position: f64) -> bool {
+        let difference = self.difference(ahead, behind, position);
+        if difference != 0.0 {
+            return difference > 0.0;
+        }
+        let side = if position + SIDE < self.last_position() {
+            self.difference(ahead, behind, position + SIDE)
+        } else {
+            self.difference(ahead, behind, position - SIDE)
+        };
+        Self::leads(ahead, behind, side)
+    }
+
+    /// Eased share in `[0, 1]` of the slot swap by which `ahead` leads `behind`.
+    fn lead_share(&self, ahead: usize, behind: usize, position: f64) -> f64 {
+        let settled = if self.settled_lead(ahead, behind, position) {
+            1.0
+        } else {
+            0.0
+        };
+        let crossings = &self.crossings[behind * self.names.len() + ahead];
+        if self.rank_smoothing == 0.0 || crossings.is_empty() {
+            return settled;
+        }
+        // The crossing nearest to the position.
+        let next = crossings.partition_point(|&crossing| crossing < position);
+        let index = match (next.checked_sub(1), crossings.get(next)) {
+            (Some(previous), Some(&following))
+                if position - crossings[previous] > following - position =>
+            {
+                next
+            }
+            (Some(previous), _) => previous,
+            (None, _) => next,
+        };
+        let crossing = crossings[index];
+        // Swaps of one pair never overlap: each ends before the next begins.
+        let mut half = self.rank_smoothing * 0.5;
+        if index > 0 {
+            half = half.min((crossing - crossings[index - 1]) * 0.5);
+        }
+        if let Some(&following) = crossings.get(index + 1) {
+            half = half.min((following - crossing) * 0.5);
+        }
+        let offset = position - crossing;
+        if half <= 0.0 || offset.abs() >= half {
+            return settled;
+        }
+        let t = offset / (2.0 * half) + 0.5;
         // Smoothstep is symmetric, so the two shares of a pair still add up to
         // one and the ranks of all bars remain a blend of permutations.
-        share * share * (3.0 - 2.0 * share)
+        let eased = t * t * (3.0 - 2.0 * t);
+        if self.leads_at(ahead, behind, crossing + SIDE) {
+            eased
+        } else {
+            1.0 - eased
+        }
     }
 
     /// Values, smoothed ranks and full-bar length at `position`.
@@ -425,6 +490,10 @@ mod tests {
             BarRaceModel::new(names.clone(), vec![vec![1.0, 2.0]], 1, -0.1),
             Err(BarRaceError::Smoothing)
         );
+        assert_eq!(
+            BarRaceModel::new(names.clone(), vec![vec![1.0, 2.0]], 1, 2.5),
+            Err(BarRaceError::Smoothing)
+        );
         assert!(matches!(
             BarRaceModel::new(vec!["a".into(), "a".into()], vec![vec![1.0, 2.0]], 1, 0.0),
             Err(BarRaceError::DuplicateName(_))
@@ -474,14 +543,67 @@ mod tests {
     }
 
     #[test]
-    fn smoothing_windows_span_keyframes() {
-        // The crossing sits on keyframe 1; the window covers two segments.
+    fn swaps_centered_on_a_keyframe_span_both_segments() {
+        // The crossing sits on keyframe 1; the swap covers two segments.
         let race = model(vec![vec![3.0, 0.0], vec![1.0, 1.0], vec![0.0, 3.0]], 1.0);
         let state = race.state(1.0);
         // Ties go to bar 0 only at a single instant, so the shares are even.
         assert!((state.ranks[0] - 0.5).abs() < 1e-12);
         assert!(race.state(0.75).ranks[0] < 0.5);
         assert!(race.state(1.25).ranks[0] > 0.5);
+    }
+
+    #[test]
+    fn wide_smoothing_never_merges_bars_between_crossings() {
+        // Four bars reverse their order at every midpoint, and the swaps of
+        // each pair are shortened so they never overlap the next crossing.
+        let forward = vec![40.0, 30.0, 20.0, 10.0];
+        let backward = vec![10.0, 20.0, 30.0, 40.0];
+        let race = model(
+            vec![
+                forward.clone(),
+                backward.clone(),
+                forward.clone(),
+                backward,
+                forward,
+            ],
+            MAX_RANK_SMOOTHING,
+        );
+        for keyframe in 0..5 {
+            let mut ranks = race.state(keyframe as f64).ranks;
+            ranks.sort_by(f64::total_cmp);
+            assert_eq!(ranks, vec![0.0, 1.0, 2.0, 3.0], "keyframe {keyframe}");
+        }
+        for crossing in [0.5, 1.5, 2.5, 3.5] {
+            for offset in [-0.45, -0.3, -0.185, -0.15, 0.15, 0.185, 0.3, 0.45] {
+                let position = crossing + offset;
+                let mut ranks = race.state(position).ranks;
+                ranks.sort_by(f64::total_cmp);
+                for pair in ranks.windows(2) {
+                    assert!(
+                        pair[1] - pair[0] > 0.3,
+                        "bars share a slot at {position}: {ranks:?}"
+                    );
+                }
+            }
+        }
+        let mut settled = race.state(1.685).ranks;
+        settled.sort_by(f64::total_cmp);
+        assert!(settled.windows(2).all(|pair| pair[1] - pair[0] > 0.5));
+    }
+
+    #[test]
+    fn momentary_ties_do_not_flip_the_order() {
+        // Bar 1 touches bar 0 at keyframe 1 and falls back: no crossing.
+        let race = model(vec![vec![3.0, 1.0], vec![2.0, 2.0], vec![3.0, 1.0]], 1.0);
+        for position in [0.0, 0.9, 1.0, 1.1, 2.0] {
+            assert_eq!(race.state(position).ranks, vec![0.0, 1.0], "{position}");
+        }
+        // Bar 1 ties the leader from keyframe 1 on; bar 0, listed first,
+        // stays ahead through the tie.
+        let race = model(vec![vec![3.0, 1.0], vec![2.0, 2.0], vec![2.0, 2.0]], 0.0);
+        assert_eq!(race.state(1.5).ranks, vec![0.0, 1.0]);
+        assert_eq!(race.state(2.0).ranks, vec![0.0, 1.0]);
     }
 
     #[test]

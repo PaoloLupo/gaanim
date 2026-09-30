@@ -5314,8 +5314,8 @@ class BarRace(Drawable):
     """A bar chart race: ranked bars that grow, overtake and leave the top.
 
     The race is a pure function of one keyframe position: values interpolate
-    linearly between keyframes, each bar's slot follows its smoothed rank so
-    overtakes glide instead of jumping, bars leaving the ``top`` ranks fade out
+    linearly between keyframes, two bars that cross swap slots with an eased
+    motion instead of jumping (every bar has its own slot between crossings), bars leaving the ``top`` ranks fade out
     below the last slot, and the longest bar always spans the bar area. Names
     sit in a column left of the bars, rolling numbers follow each bar's end and
     the ticker in the bottom-right corner shows the keyframe label (whole
@@ -6951,18 +6951,22 @@ class Visualization:
         ``{name: value}`` of that keyframe, in order; a sequence of
         ``(label, {name: value})`` pairs works too. A name missing from a
         keyframe counts as zero there. ``top`` ranks are shown, the leader on
-        top. ``rank_smoothing`` is the number of keyframes (0 to 4) over which
-        an overtake is eased; ``0`` swaps slots instantly. ``value_format`` is
+        top. ``rank_smoothing`` is how many keyframes (0 to 2) a swap between
+        two bars takes, centered on the moment they cross and shortened so it
+        ends before the same two bars cross again; away from crossings every
+        bar has its own slot, and ``0`` swaps slots instantly. ``value_format`` is
         a Python format field with optional literal text around it —
         ``"{}"``, ``"{:,.0f}"``, ``"{:_.2f}"`` or ``"${:,.1f} M"`` — shown by a
         rolling number (at most 6 decimals).
 
         ``width`` and ``height`` size the whole race in scene units;
-        ``label_width`` (default 22% of ``width``) is the name column and
-        ``bar_gap`` the empty fraction of each slot. ``colors`` maps names to
+        ``label_width`` (default 22% of ``width``) is the name column; a
+        name wider than it is drawn at a smaller size that fits. ``bar_gap``
+        is the empty fraction of each slot. ``colors`` maps names to
         colors or lists colors to cycle; other bars use a ten-color
         categorical palette. ``label_color`` defaults to the theme
-        foreground, ``font_size`` to 55% of the bar thickness, ``ticker_size``
+        foreground, ``font_size`` to 55% of the bar thickness but at most 12%
+        of ``height`` (so races with few ranks stay readable), ``ticker_size``
         to 15% of ``height`` and ``ticker_color`` to the theme's muted color.
 
         Raise ValueError for empty or non-finite data, duplicate names, an

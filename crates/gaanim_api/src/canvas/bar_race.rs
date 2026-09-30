@@ -30,6 +30,9 @@ pub const BAR_RACE_PALETTE: [Color; 10] = [
     Color::from_rgb8(0xBA, 0xB0, 0xAC),
 ];
 
+/// Largest automatic name and value size, as a fraction of the race height.
+pub const MAX_AUTO_FONT_FRACTION: f64 = 0.12;
+
 /// Keyframe labels shown by the ticker.
 #[derive(Debug, Clone, PartialEq)]
 pub enum BarRaceLabels {
@@ -60,6 +63,7 @@ pub struct BarRaceOptions {
     pub width: f64,
     pub height: f64,
     /// Width of the name column left of the bars; `None` uses 22% of `width`.
+    /// A name wider than the column is drawn at a smaller size that fits.
     pub label_width: Option<f64>,
     /// Fraction of each slot left empty between bars, in `[0, 0.9]`.
     pub bar_gap: f64,
@@ -67,7 +71,8 @@ pub struct BarRaceOptions {
     pub colors: Vec<Color>,
     /// Name and value color; `None` uses the theme foreground or white.
     pub label_color: Option<Color>,
-    /// Name and value size; `None` scales with the bar thickness.
+    /// Name and value size; `None` uses 55% of the bar thickness, at most
+    /// [`MAX_AUTO_FONT_FRACTION`] of `height` so races of few ranks stay readable.
     pub font_size: Option<f64>,
     /// Show the keyframe label in the bottom-right corner.
     pub ticker: bool,
@@ -220,6 +225,10 @@ fn position_source(
     )
 }
 
+/// Share of the name column a shrunk name fills, leaving room for font
+/// differences between measuring and rendering.
+const NAME_FIT_MARGIN: f64 = 0.97;
+
 /// Smallest horizontal scale of a bar, which keeps its transform invertible.
 const MIN_BAR_SCALE: f64 = 1e-4;
 
@@ -282,7 +291,9 @@ impl SceneModel {
             gap: options.bar_gap,
         };
         let thickness = slots.bar_thickness();
-        let font_size = options.font_size.unwrap_or(thickness * 0.55);
+        let font_size = options
+            .font_size
+            .unwrap_or((thickness * 0.55).min(options.height * MAX_AUTO_FONT_FRACTION));
         let pad = font_size * 0.4;
         let label_width = options.label_width.unwrap_or(options.width * 0.22);
         let bar_start = -options.width * 0.5 + label_width;
@@ -322,12 +333,12 @@ impl SceneModel {
                     anchor: Some(DVec3::new(-1.0, 0.0, 0.0)),
                 })?;
 
-            let label = self.text_spec(
+            let name_spec = |size: f64| {
                 TextSpec::new_with_markup(
                     vec![name.clone().into()],
                     None,
                     TextStyle {
-                        size: Some(font_size),
+                        size: Some(size),
                         weight: Some(600),
                         color: Some(label_color),
                         ..Default::default()
@@ -338,8 +349,22 @@ impl SceneModel {
                     },
                     false,
                 )
-                .map_err(|error| error.to_string())?,
-            );
+                .map_err(|error| error.to_string())
+            };
+            let label = self.text_spec(name_spec(font_size)?);
+            // Names fit their column: a wider one is set smaller, and text
+            // width is proportional to its size.
+            let column = label_width - 2.0 * pad;
+            // Measuring compiles the name, so skip names that clearly fit.
+            let may_overflow = name.chars().count() as f64 * font_size * 0.75 > column;
+            if may_overflow && let Ok(bounds) = self.bounds_of(&label) {
+                let width = bounds.max.x - bounds.min.x;
+                if column > 0.0 && width > column {
+                    let fitted = name_spec(font_size * column / width * NAME_FIT_MARGIN)?;
+                    label.spec.lock().expect("bar race name spec poisoned").kind =
+                        super::SpawnKind::Text(fitted);
+                }
+            }
             let label = label.at_anchor(bar_start - pad, 0.0, Anchor::Right);
 
             let number = self
@@ -561,6 +586,48 @@ mod tests {
                 )
                 .is_err()
         );
+    }
+
+    #[test]
+    fn long_names_fit_their_column_and_few_ranks_cap_the_font() {
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        let race = canvas
+            .bar_race(
+                BarRaceLabels::Text(vec!["uno".into(), "dos".into()]),
+                vec!["Organización Internacional de Pruebas".into(), "Q".into()],
+                vec![vec![3.0, 1.0], vec![1.0, 3.0]],
+                BarRaceOptions {
+                    top: 1,
+                    height: 2.0,
+                    label_width: Some(1.2),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let font_size = 2.0 * MAX_AUTO_FONT_FRACTION;
+        let column = 1.2 - 2.0 * font_size * 0.4;
+        let name = canvas.bounds_of(&race.bars[0].label).unwrap();
+        assert!(
+            name.max.x - name.min.x <= column + 1e-6,
+            "{} > {column}",
+            name.max.x - name.min.x
+        );
+        let short = canvas.bounds_of(&race.bars[1].label).unwrap();
+        assert!(short.max.y - short.min.y <= font_size * 2.0);
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        let sizes = world
+            .query::<&gaanim_animation::RollingNumber>()
+            .iter(&world)
+            .map(|rolling| rolling.options.font_size)
+            .collect::<Vec<_>>();
+        assert_eq!(sizes.len(), 2);
+        assert!(sizes.iter().all(|size| (size - font_size).abs() < 1e-12));
     }
 
     #[test]

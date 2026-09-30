@@ -14,8 +14,8 @@ pub use axis::{
     Tick,
 };
 pub use bar_race::{
-    BarRaceError, BarRaceModel, BarRaceSlots, BarRaceState, ValueFormat, interpolate_label,
-    label_opacity,
+    BarRaceError, BarRaceModel, BarRaceSlots, BarRaceState, MAX_RANK_SMOOTHING, ValueFormat,
+    interpolate_label, label_opacity,
 };
 pub use chart::{
     BatchDatum, Channel, ChartError, ChartSpec, ColorRowGroups, ConstantValue,
