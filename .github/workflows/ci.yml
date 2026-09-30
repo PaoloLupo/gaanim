@@ -122,6 +122,11 @@ jobs:
             primitives_3d_demo
             vector_field_streamlines
             presentation_demo
+            stress_bar_race
+            stress_magic_move
+            stress_sfx
+            stress_particles
+            stress_follow_through
           )
           hybrid=" chart_marks_gallery primitives_3d_demo "
           for example in "${examples[@]}"; do
