@@ -36,8 +36,12 @@ members = [
 # See vendor/vello_encoding/GAANIM-PATCH.md for the upstream source and fixes.
 vello_encoding = { path = "vendor/vello_encoding" }
 
+# Workspace crates build at opt-level 2: at 0 or 1 rustc shares generic
+# instances between crates, and gaanim_engine.dll then exports every one it
+# holds (core, alloc and bevy_ecs instances alone passed 30 000), which reached
+# the 65 535 exports a Windows DLL can have.
 [profile.dev]
-opt-level = 1
+opt-level = 2
 debug = "line-tables-only"
 
 [profile.dev.package."*"]
