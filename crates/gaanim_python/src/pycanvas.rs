@@ -5977,8 +5977,10 @@ impl PyScene {
             .fade_out_all(seconds);
         Ok(())
     }
-    fn render(&self) -> PyResult<()> {
+    fn render(&self, py: Python<'_>) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
+        // Every value a callback reads is final now; see `callback_recipe`.
+        crate::callback_recipe::resolve_pending(py)?;
         if self
             .inner
             .lock()

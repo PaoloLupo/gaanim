@@ -18,17 +18,6 @@ use timeline::{PlaybackStopPolicy, Timeline};
 #[derive(Resource)]
 pub struct NeedsKeyframeCapture;
 
-/// The previous t=0 keyframe of the Mobjects an incremental reload kept.
-///
-/// Kept Mobjects have since been changed by playback, so the deferred capture
-/// reuses their original baseline and captures only the Mobjects spawned
-/// after `spawned_after`.
-#[derive(Resource)]
-pub struct KeyframeCaptureBase {
-    pub base: snapshot::WorldSnapshot,
-    pub spawned_after: gaanim_scene::prelude::Tick,
-}
-
 /// The Bevy plugin that registers the `Timeline` resource and its scheduling systems.
 pub struct GaanimTimelinePlugin;
 
@@ -78,29 +67,13 @@ fn deferred_keyframe_capture_system(world: &mut World) {
     }
 }
 
-/// Capture the t=0 keyframe of a freshly replayed scene without seeking,
-/// reusing a pending [`KeyframeCaptureBase`] for the Mobjects a reload kept.
+/// Capture the t=0 keyframe of a freshly replayed scene without seeking.
 pub fn capture_reload_keyframe(world: &mut World) {
-    let base = world.remove_resource::<KeyframeCaptureBase>();
     let Some(mut tl) = world.remove_resource::<Timeline>() else {
         return;
     };
     if !tl.keyframes.contains_key(&ordered_float::OrderedFloat(0.0)) {
-        let snapshot = match base {
-            Some(KeyframeCaptureBase {
-                mut base,
-                spawned_after,
-            }) => {
-                let fresh =
-                    snapshot::WorldSnapshot::capture_spawned_after(world, Some(spawned_after));
-                base.entities.extend(fresh.entities);
-                base.camera = fresh.camera;
-                base.camera_states = fresh.camera_states;
-                base
-            }
-            None => snapshot::WorldSnapshot::capture(world),
-        };
-        tl.add_keyframe(0.0, snapshot);
+        tl.add_keyframe(0.0, snapshot::WorldSnapshot::capture(world));
     }
     world.insert_resource(tl);
 }

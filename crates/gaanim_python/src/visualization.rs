@@ -148,27 +148,34 @@ fn python_function(
     output_arity: usize,
     inputs: Vec<ScalarSource>,
 ) -> ReactiveFunction {
-    ReactiveFunction::from_sources(coordinate_arity, output_arity, inputs, move |arguments| {
-        crate::custom::with_pure_callback(|| {
-            Python::attach(|py| {
-                let tuple = PyTuple::new(py, arguments).map_err(|error| error.to_string())?;
-                let result = callback
-                    .bind(py)
-                    .call1(tuple)
-                    .map_err(|error| error.to_string())?;
-                if output_arity == 1 {
-                    result
-                        .extract::<f64>()
-                        .map(|value| vec![value])
-                        .map_err(|error| error.to_string())
-                } else {
-                    result
-                        .extract::<Vec<f64>>()
-                        .map_err(|error| error.to_string())
-                }
+    let recipe = Python::attach(|py| crate::callback_recipe::deferred(py, &callback));
+    ReactiveFunction::from_sources_with_deferred_recipe(
+        coordinate_arity,
+        output_arity,
+        inputs,
+        recipe,
+        move |arguments| {
+            crate::custom::with_pure_callback(|| {
+                Python::attach(|py| {
+                    let tuple = PyTuple::new(py, arguments).map_err(|error| error.to_string())?;
+                    let result = callback
+                        .bind(py)
+                        .call1(tuple)
+                        .map_err(|error| error.to_string())?;
+                    if output_arity == 1 {
+                        result
+                            .extract::<f64>()
+                            .map(|value| vec![value])
+                            .map_err(|error| error.to_string())
+                    } else {
+                        result
+                            .extract::<Vec<f64>>()
+                            .map_err(|error| error.to_string())
+                    }
+                })
             })
-        })
-    })
+        },
+    )
 }
 
 pub(crate) fn validate_callback(

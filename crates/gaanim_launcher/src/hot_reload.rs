@@ -62,7 +62,6 @@ pub fn clear_scene_entities(world: &mut World) {
     world.remove_resource::<gaanim_animation::PropertySignalStops>();
     // Retained compilation state describes the entities removed below.
     world.remove_resource::<runtime::RetainedReplay>();
-    world.remove_resource::<gaanim_timeline::KeyframeCaptureBase>();
     let to_despawn: Vec<Entity> = {
         let mut q = world.query_filtered::<Entity, runtime::SceneOwned>();
         q.iter(world).collect()

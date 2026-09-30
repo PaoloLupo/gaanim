@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use bevy::prelude::{Entity, World};
 use gaanim_core::ObjectId;
@@ -83,8 +83,19 @@ pub struct ReactiveFunction {
     scene_owners: Arc<[u64]>,
     callback: ReactiveCallback,
     /// Complete description of a deterministic callback; see [`Self::with_recipe`].
-    recipe: Option<Arc<str>>,
+    recipe: Option<Recipe>,
     cache: Arc<Mutex<FunctionCache>>,
+}
+
+/// Produces a function's recipe when its fingerprint is taken; `None` while
+/// the callback cannot be described, e.g. before a deferred recipe is known.
+#[derive(Clone)]
+struct Recipe(Arc<dyn Fn() -> Option<Arc<str>> + Send + Sync>);
+
+impl Recipe {
+    fn get(&self) -> Option<Arc<str>> {
+        (self.0)()
+    }
 }
 
 impl fmt::Debug for ReactiveFunction {
@@ -95,8 +106,8 @@ impl fmt::Debug for ReactiveFunction {
             .field("output_arity", &self.output_arity)
             .field("inputs", &self.inputs);
         if gaanim_core::fingerprint::identity_debug() {
-            match &self.recipe {
-                Some(recipe) => debug.field("recipe", recipe),
+            match self.recipe.as_ref().and_then(Recipe::get) {
+                Some(recipe) => debug.field("recipe", &recipe),
                 None => debug.field(
                     "callback",
                     &gaanim_core::fingerprint::identity(&*self.callback),
@@ -135,7 +146,8 @@ impl ReactiveFunction {
     /// Only for deterministic callbacks without hidden captured state.
     #[doc(hidden)]
     pub fn with_recipe(mut self, recipe: impl Into<Arc<str>>) -> Self {
-        self.recipe = Some(recipe.into());
+        let recipe: Arc<str> = recipe.into();
+        self.recipe = Some(Recipe(Arc::new(move || Some(recipe.clone()))));
         self
     }
 
@@ -212,6 +224,30 @@ impl ReactiveFunction {
             callback(&values)
         });
         composed.scene_owners = owners.into();
+        composed
+    }
+
+    /// [`Self::from_sources`] for a callback that `recipe` describes once it
+    /// is set; a binding may describe its callback only when every value the
+    /// callback reads is final. The recipe also covers `sources`, which the
+    /// composed function hides. Until `recipe` is set, the function
+    /// fingerprints by identity.
+    #[doc(hidden)]
+    pub fn from_sources_with_deferred_recipe(
+        coordinate_arity: usize,
+        output_arity: usize,
+        sources: Vec<ScalarSource>,
+        recipe: Arc<OnceLock<Arc<str>>>,
+        callback: impl Fn(&[f64]) -> Result<Vec<f64>, String> + Send + Sync + 'static,
+    ) -> Self {
+        let described = sources.clone();
+        let mut composed = Self::from_sources(coordinate_arity, output_arity, sources, callback);
+        composed.recipe = Some(Recipe(Arc::new(move || {
+            let callback = recipe.get()?;
+            let sources =
+                gaanim_core::fingerprint::with_identity_debug(|| format!("{described:?}"));
+            Some(format!("{callback} of {sources}").into())
+        })));
         composed
     }
 
@@ -420,7 +456,16 @@ impl ScalarSource {
                     .map_scalar(move |value| value * factor)
                     .expect("ScalarSource functions always have scalar arity");
                 Self::Function(match &function.recipe {
-                    Some(inner) => scaled.with_recipe(format!("scale {factor:?} of ({inner})")),
+                    Some(inner) => {
+                        let inner = inner.clone();
+                        ReactiveFunction {
+                            recipe: Some(Recipe(Arc::new(move || {
+                                let inner = inner.get()?;
+                                Some(format!("scale {factor:?} of ({inner})").into())
+                            }))),
+                            ..scaled
+                        }
+                    }
                     None => scaled,
                 })
             }
@@ -529,6 +574,47 @@ mod tests {
             fingerprint(&second),
             "callbacks without a recipe must never compare equal"
         );
+    }
+
+    #[test]
+    fn deferred_recipes_count_once_they_are_known() {
+        let input = ScalarSource::signal(ObjectId::from_raw(7));
+        let deferred = |recipe: &Arc<OnceLock<Arc<str>>>| {
+            ScalarSource::Function(ReactiveFunction::from_sources_with_deferred_recipe(
+                0,
+                1,
+                vec![input.clone()],
+                recipe.clone(),
+                |v| Ok(vec![v[0]]),
+            ))
+        };
+        let (first_recipe, second_recipe) = (Arc::default(), Arc::default());
+        let (first, second) = (deferred(&first_recipe), deferred(&second_recipe));
+        let (scaled_first, scaled_second) = (first.scaled(2.0), second.scaled(2.0));
+        assert_ne!(fingerprint(&first), fingerprint(&second));
+        assert_ne!(fingerprint(&scaled_first), fingerprint(&scaled_second));
+
+        first_recipe.set("one".into()).unwrap();
+        second_recipe.set("one".into()).unwrap();
+        assert_eq!(fingerprint(&first), fingerprint(&second));
+        assert_eq!(fingerprint(&scaled_first), fingerprint(&scaled_second));
+
+        let third_recipe = Arc::new(OnceLock::new());
+        third_recipe.set("two".into()).unwrap();
+        assert_ne!(fingerprint(&first), fingerprint(&deferred(&third_recipe)));
+
+        // The recipe covers the sources hidden in the composed callback.
+        let other_input = Arc::new(OnceLock::new());
+        other_input.set("one".into()).unwrap();
+        let other_input =
+            ScalarSource::Function(ReactiveFunction::from_sources_with_deferred_recipe(
+                0,
+                1,
+                vec![ScalarSource::constant(2.0)],
+                other_input,
+                |v| Ok(vec![v[0]]),
+            ));
+        assert_ne!(fingerprint(&first), fingerprint(&other_input));
     }
 
     #[test]

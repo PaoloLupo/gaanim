@@ -3,7 +3,6 @@ use bevy::prelude::{
 };
 use gaanim_core::ObjectId;
 use gaanim_math::{GlobalSpatialTransform, SpatialTransform};
-use gaanim_scene::prelude::Tick;
 use gaanim_scene::{
     FillBrush, FillLevel, GlobalOpacity, LocalBounds, MobjectId, ObjectTag, Opacity, Path2D,
     PathSource, RenderLayer, RenderOrder, StrokeBrush, Visible, WorldBounds,
@@ -312,9 +311,44 @@ pub(crate) fn insert_snapshot_components(
     sync_optional(entity_mut, snap.scene.map(SceneMember));
 }
 
+/// Whether restoring a snapshot fully determines a component of type
+/// `component`: [`insert_snapshot_components`] sets or removes it from the
+/// captured value alone. Keep this list in sync with that function.
+pub fn restores_component(component: std::any::TypeId) -> bool {
+    use std::any::TypeId;
+    [
+        TypeId::of::<SpatialTransform>(),
+        TypeId::of::<Opacity>(),
+        TypeId::of::<RenderOrder>(),
+        TypeId::of::<RenderLayer>(),
+        TypeId::of::<GlobalSpatialTransform>(),
+        TypeId::of::<GlobalOpacity>(),
+        TypeId::of::<FillBrush>(),
+        TypeId::of::<StrokeBrush>(),
+        TypeId::of::<Visible>(),
+        TypeId::of::<ObjectTag>(),
+        TypeId::of::<Path2D>(),
+        TypeId::of::<PathSource>(),
+        TypeId::of::<gaanim_animation::FillDrawProgress>(),
+        TypeId::of::<FillLevel>(),
+        TypeId::of::<gaanim_scene::MediaFrame>(),
+        TypeId::of::<gaanim_scene::CoordinateViewRole>(),
+        TypeId::of::<gaanim_animation::SurroundingRect>(),
+        TypeId::of::<gaanim_animation::WriteTipGlow>(),
+        TypeId::of::<gaanim_animation::PathReveal>(),
+        TypeId::of::<gaanim_animation::PathTrimWindow>(),
+        TypeId::of::<gaanim_animation::FloatSignal>(),
+        TypeId::of::<gaanim_scene::Material3D>(),
+        TypeId::of::<gaanim_scene::GroupMarker>(),
+        TypeId::of::<LocalBounds>(),
+        TypeId::of::<WorldBounds>(),
+        TypeId::of::<SceneMember>(),
+    ]
+    .contains(&component)
+}
+
 /// Identity, hierarchy, style and geometry read by [`WorldSnapshot::capture`].
 type CaptureCore = (
-    Entity,
     &'static MobjectId,
     Option<&'static bevy::prelude::ChildOf>,
     Option<&'static SpatialTransform>,
@@ -360,14 +394,6 @@ type CaptureDerived = (
 impl WorldSnapshot {
     /// Captures a new `WorldSnapshot` of all Mobjects currently registered in the Bevy `World`.
     pub fn capture(world: &mut World) -> Self {
-        Self::capture_spawned_after(world, None)
-    }
-
-    /// Capture only the Mobjects spawned after `tick`, or all when `None`.
-    ///
-    /// Camera state is always captured in full.
-    pub fn capture_spawned_after(world: &mut World, tick: Option<Tick>) -> Self {
-        let this_run = world.change_tick();
         let camera = world.get_resource::<gaanim_math::Camera>().copied();
         let camera_states = world
             .get_resource::<CapturedCameraStates>()
@@ -383,7 +409,6 @@ impl WorldSnapshot {
         let mut entities = bevy::platform::collections::HashMap::new();
         for (core, state, derived) in query.iter(world) {
             let (
-                entity,
                 mobj_id,
                 child_of,
                 transform,
@@ -401,14 +426,6 @@ impl WorldSnapshot {
             ) = core;
             // Echo copies are re-evaluated from their sources after every seek.
             if echo {
-                continue;
-            }
-            if let Some(tick) = tick
-                && !world
-                    .entity(entity)
-                    .spawn_tick()
-                    .is_newer_than(tick, this_run)
-            {
                 continue;
             }
             let (
@@ -483,6 +500,16 @@ impl WorldSnapshot {
     /// Restores the states stored in this snapshot back to the Bevy `World`.
     pub fn restore(&self, world: &mut World) {
         let _ = self.restore_with_entity_map(world, true, |_, _, _| true);
+    }
+
+    /// Like [`Self::restore`], rewriting only the existing entities that
+    /// `selected` picks; the caller knows the others still match.
+    pub fn restore_selected(
+        &self,
+        world: &mut World,
+        selected: impl FnMut(&World, ObjectId, Entity) -> bool,
+    ) {
+        let _ = self.restore_with_entity_map(world, true, selected);
     }
 
     /// Restore a snapshot and return the identity map built as part of the work.
@@ -689,8 +716,7 @@ mod tests {
 
     /// The capture as it read each component by entity, to check the
     /// query-based one against.
-    fn capture_by_lookup(world: &mut World, tick: Option<Tick>) -> WorldSnapshot {
-        let this_run = world.change_tick();
+    fn capture_by_lookup(world: &mut World) -> WorldSnapshot {
         let mut entities = bevy::platform::collections::HashMap::new();
         let camera = world.get_resource::<gaanim_math::Camera>().copied();
         let camera_states = world
@@ -706,14 +732,6 @@ mod tests {
         for (entity, mobj_id) in query.iter(world) {
             // Echo copies are re-evaluated from their sources after every seek.
             if world.get::<gaanim_animation::EchoGhost>(entity).is_some() {
-                continue;
-            }
-            if let Some(tick) = tick
-                && !world
-                    .entity(entity)
-                    .spawn_tick()
-                    .is_newer_than(tick, this_run)
-            {
                 continue;
             }
             let obj_id = mobj_id.0;
@@ -902,21 +920,16 @@ mod tests {
             let entity = entity.id();
             match index % 4 {
                 0 => world.entity_mut(entity).set_parent_in_place(group),
-                1 => world.entity_mut(entity).set_parent_in_place(unregistered_parent),
+                1 => world
+                    .entity_mut(entity)
+                    .set_parent_in_place(unregistered_parent),
                 _ => &mut world.entity_mut(entity),
             };
         }
-        assert_eq!(WorldSnapshot::capture(&mut world), capture_by_lookup(&mut world, None));
-
-        let tick = world.change_tick();
-        world.increment_change_tick();
-        world.spawn((
-            MobjectId(ObjectId::from_parts(900, 1)),
-            SpatialTransform::default(),
-        ));
-        let later = WorldSnapshot::capture_spawned_after(&mut world, Some(tick));
-        assert_eq!(later.entities.len(), 1);
-        assert_eq!(later, capture_by_lookup(&mut world, Some(tick)));
+        assert_eq!(
+            WorldSnapshot::capture(&mut world),
+            capture_by_lookup(&mut world)
+        );
     }
 
     #[test]

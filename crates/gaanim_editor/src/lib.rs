@@ -31,6 +31,22 @@ pub mod python_plugin;
 mod touch;
 mod ui_kit;
 
+/// Whether the timeline ignores its keys and its advancing click. The
+/// pointer over a panel (such as the playback bar) only blocks the click;
+/// the keys stop only when a widget takes the keyboard, as a text field does.
+/// In interactive mode a left click starts a camera drag, not the next stop.
+fn timeline_input_ignored(
+    presentation_active: bool,
+    egui_wants_keyboard: bool,
+    egui_wants_pointer: bool,
+    interactive_preview: bool,
+) -> (bool, bool) {
+    (
+        presentation_active || egui_wants_keyboard,
+        presentation_active || egui_wants_pointer || interactive_preview,
+    )
+}
+
 fn sync_editor_input_ignore_system(
     egui_wants: Res<EguiWantsInput>,
     presentation_mode: Res<PresentationMode>,
@@ -40,17 +56,20 @@ fn sync_editor_input_ignore_system(
     mut timeline: ResMut<Timeline>,
     mut stop_policy: ResMut<PlaybackStopPolicy>,
 ) {
-    // In interactive mode a left click starts a camera drag, not the next stop.
-    timeline.ignore_pointer = interactive.is_some_and(|interactive| interactive.enabled);
+    let (ignore_input, ignore_pointer) = timeline_input_ignored(
+        presentation_mode.active,
+        egui_wants.wants_keyboard_input(),
+        egui_wants.wants_any_pointer_input(),
+        interactive.is_some_and(|interactive| interactive.enabled),
+    );
+    timeline.ignore_pointer = ignore_pointer;
     // While recording narration, the recorder owns the keyboard and playback.
     if let Some(policy) = narration.as_ref().and_then(|session| session.stop_policy()) {
         timeline.ignore_input = true;
         *stop_policy = policy;
         return;
     }
-    timeline.ignore_input = presentation_mode.active
-        || egui_wants.wants_keyboard_input()
-        || egui_wants.wants_any_pointer_input();
+    timeline.ignore_input = ignore_input;
     *stop_policy = if presentation_mode.active
         || (!editor_state.continuous_preview && !editor_state.segment_loop.is_active())
     {
@@ -858,9 +877,9 @@ fn editor_ui_system(
                                         if !WEB
                                             && icon_button(ui, Icon::Pin, pin_tone, true)
                                             .on_hover_text(if pinned {
-                                                "Desfijar ventana"
+                                                "Desfijar ventana (P)"
                                             } else {
-                                                "Fijar ventana encima"
+                                                "Fijar ventana encima (P)"
                                             })
                                             .clicked()
                                         {
@@ -1064,9 +1083,9 @@ fn editor_ui_system(
                                                 }
                                             }
                                             let pin_label = if pinned {
-                                                "Desfijar ventana"
+                                                "Desfijar ventana (P)"
                                             } else {
-                                                "Fijar ventana encima"
+                                                "Fijar ventana encima (P)"
                                             };
                                             if ui.button(pin_label).clicked() {
                                                 actions.push(PlaybackAction::TogglePin);
@@ -2145,15 +2164,20 @@ fn toggle_editor_fullscreen(window: &mut Window, state: &mut EditorFullscreenSta
     }
 }
 
+/// `F11`/`Esc` for the editor's fullscreen and `P` for pinning its window.
 fn editor_fullscreen_keys_system(
     egui_wants: Res<EguiWantsInput>,
     keys: Res<ButtonInput<KeyCode>>,
     presentation_mode: Res<PresentationMode>,
     mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
     mut state: ResMut<EditorFullscreenState>,
+    mut editor_state: ResMut<EditorState>,
 ) {
     if !editor_shortcuts_allowed(presentation_mode.active, egui_wants.wants_keyboard_input()) {
         return;
+    }
+    if !WEB && keys.just_pressed(KeyCode::KeyP) {
+        toggle_pinned_on_top(&mut editor_state, &mut windows);
     }
     if let Ok(mut window) = windows.single_mut() {
         let escape_from_fullscreen = keys.just_pressed(KeyCode::Escape)
@@ -3204,6 +3228,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<bevy_egui::input::EguiWantsInput>()
+            .init_resource::<EditorState>()
             .insert_resource(EditorFullscreenState {
                 previous_mode: Some(bevy::window::WindowMode::Windowed),
             })
@@ -3237,6 +3262,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<bevy_egui::input::EguiWantsInput>()
+            .init_resource::<EditorState>()
             .init_resource::<EditorFullscreenState>()
             .insert_resource(PresentationMode { active: true })
             .add_systems(Update, editor_fullscreen_keys_system);
@@ -3763,6 +3789,18 @@ mod tests {
             *app.world().resource::<PlaybackStopPolicy>(),
             PlaybackStopPolicy::Ignore
         );
+    }
+
+    #[test]
+    fn the_pointer_over_a_panel_blocks_the_click_but_not_the_keys() {
+        // Pointer over the playback bar: arrows still move between stops.
+        assert_eq!(timeline_input_ignored(false, false, true, false), (false, true));
+        // A focused text field takes the keys.
+        assert_eq!(timeline_input_ignored(false, true, false, false), (true, false));
+        // Interactive preview: clicks drag the camera.
+        assert_eq!(timeline_input_ignored(false, false, false, true), (false, true));
+        assert_eq!(timeline_input_ignored(true, false, false, false), (true, true));
+        assert_eq!(timeline_input_ignored(false, false, false, false), (false, false));
     }
 
     #[test]

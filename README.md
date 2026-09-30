@@ -158,7 +158,8 @@ segmento. **Continuous** reproduce la escena completa sin detenerse en
 El playback reduce márgenes y controles según el ancho disponible; en ventanas
 estrechas mueve velocidad, Continuous, fullscreen, Present, Export y Pin al
 menú **More**. `F11` alterna fullscreen del editor en el monitor actual sin
-cambiar el playback ni activar Presenter Mode. **Present** sigue siendo un modo
+cambiar el playback ni activar Presenter Mode, y `P` fija la ventana encima de
+las demás (Pin). **Present** sigue siendo un modo
 independiente, pensado para audiencia y con su propio dock seguro.
 
 Presenter Mode siempre respeta los stops. Durante una presentación,
