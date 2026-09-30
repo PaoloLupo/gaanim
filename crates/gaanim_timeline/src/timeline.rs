@@ -2148,7 +2148,7 @@ impl Timeline {
     }
 
     /// Sample where the anchor of every anchored
-    /// [`gaanim_renderer::effects::ParticleEmitter`] was while its live
+    /// [`gaanim_animation::ParticleEmitter`] was while its live
     /// particles were born: on a grid of [`PARTICLE_ANCHOR_STEP`] seconds
     /// fixed in timeline time, replaying the anchor's own clips as
     /// [`Self::evaluate_delayed_states`] does. The samples are a pure
@@ -2156,7 +2156,7 @@ impl Timeline {
     /// anchor without animations is sampled once.
     fn evaluate_particle_anchors(&self, world: &mut World) {
         let emitters: Vec<(Entity, gaanim_core::ObjectId, f64, f64, Option<Entity>)> = world
-            .query::<(Entity, &gaanim_renderer::effects::ParticleEmitter)>()
+            .query::<(Entity, &gaanim_animation::ParticleEmitter)>()
             .iter(world)
             .filter_map(|(entity, emitter)| {
                 let earliest = emitter.system.bursts.iter().map(|(time, _)| *time).fold(
@@ -2199,7 +2199,7 @@ impl Timeline {
                 None => {
                     let probe = world.spawn_empty().id();
                     if let Some(mut emitter) =
-                        world.get_mut::<gaanim_renderer::effects::ParticleEmitter>(entity)
+                        world.get_mut::<gaanim_animation::ParticleEmitter>(entity)
                     {
                         emitter.probe = Some(probe);
                     }
@@ -2221,10 +2221,10 @@ impl Timeline {
             };
             let trail = if clips.is_empty() {
                 position_at(self.current_time.max(0.0))
-                    .map(gaanim_renderer::effects::AnchorTrail::constant)
+                    .map(gaanim_animation::AnchorTrail::constant)
                     .unwrap_or_default()
             } else if earliest > self.current_time {
-                gaanim_renderer::effects::AnchorTrail::default()
+                gaanim_animation::AnchorTrail::default()
             } else {
                 let from = (self.current_time - longest).max(earliest).max(0.0);
                 let first = (from / PARTICLE_ANCHOR_STEP).floor() as i64;
@@ -2247,14 +2247,13 @@ impl Timeline {
                         },
                     }
                 }
-                gaanim_renderer::effects::AnchorTrail {
+                gaanim_animation::AnchorTrail {
                     step: PARTICLE_ANCHOR_STEP,
                     first,
                     points,
                 }
             };
-            if let Some(mut emitter) =
-                world.get_mut::<gaanim_renderer::effects::ParticleEmitter>(entity)
+            if let Some(mut emitter) = world.get_mut::<gaanim_animation::ParticleEmitter>(entity)
                 && emitter.trail != trail
             {
                 emitter.trail = trail;

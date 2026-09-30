@@ -8055,7 +8055,7 @@ impl SceneModel {
                     particles.colors.clone()
                 };
                 let levels = if particles.system.fade > 0.0 {
-                    gaanim_renderer::effects::PARTICLE_FADE_LEVELS
+                    gaanim_animation::PARTICLE_FADE_LEVELS
                 } else {
                     1
                 };
@@ -8087,7 +8087,7 @@ impl SceneModel {
                             builder
                                 .commands
                                 .entity(entity)
-                                .insert(gaanim_renderer::effects::ParticleLayer);
+                                .insert(gaanim_animation::ParticleLayer);
                         }
                         layers.push(entity);
                         refs.push(layer_ref);
@@ -8109,13 +8109,13 @@ impl SceneModel {
                     .and_then(|anchor| id_map.get(&anchor).copied());
                 if let Some(state) = builder.states.get(mr.id) {
                     builder.commands.entity(state.entity).insert(
-                        gaanim_renderer::effects::ParticleEmitter {
+                        gaanim_animation::ParticleEmitter {
                             system,
                             position: particles.position,
                             layers,
                             levels,
                             anchor,
-                            trail: gaanim_renderer::effects::AnchorTrail::default(),
+                            trail: gaanim_animation::AnchorTrail::default(),
                             probe: None,
                         },
                     );
@@ -13861,7 +13861,7 @@ mod tests {
     #[test]
     fn particles_compile_to_layers_bursts_and_anchor_trails() {
         use crate::canvas::{Emitter, EmitterShape, ParticleColors, ParticleOptions};
-        use gaanim_renderer::effects::{PARTICLE_FADE_LEVELS, ParticleEmitter};
+        use gaanim_animation::{PARTICLE_FADE_LEVELS, ParticleEmitter};
         let mut canvas = SceneModel::new(640, 360);
         let logo = canvas.circle(0.2);
         let emitter = Emitter::new(EmitterShape::Point)

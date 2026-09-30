@@ -5521,9 +5521,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         self.commands
             .entity(entity)
             .queue(move |mut entity: bevy::prelude::EntityWorldMut| {
-                if let Some(mut emitter) =
-                    entity.get_mut::<gaanim_renderer::effects::ParticleEmitter>()
-                {
+                if let Some(mut emitter) = entity.get_mut::<gaanim_animation::ParticleEmitter>() {
                     emitter.system.bursts.push((time, count));
                 }
             });

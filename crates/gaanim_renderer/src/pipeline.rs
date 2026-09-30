@@ -1534,12 +1534,12 @@ pub fn resolve_connect_system(
     }
 }
 
-/// Rebuild the layers of every [`crate::effects::ParticleEmitter`] at the
+/// Rebuild the layers of every [`gaanim_animation::ParticleEmitter`] at the
 /// timeline time. Each frame only evaluates the particles alive then.
 #[allow(clippy::type_complexity)]
 pub fn resolve_particles_system(
     playback: Option<Res<gaanim_animation::PlaybackState>>,
-    emitters: Query<&crate::effects::ParticleEmitter>,
+    emitters: Query<&gaanim_animation::ParticleEmitter>,
     mut layers: Query<
         (
             &GlobalSpatialTransform,
@@ -1547,7 +1547,7 @@ pub fn resolve_particles_system(
             &mut PathSource,
             &mut LocalBounds,
         ),
-        With<crate::effects::ParticleLayer>,
+        With<gaanim_animation::ParticleLayer>,
     >,
 ) {
     let time = playback.map_or(0.0, |state| state.current_time);
