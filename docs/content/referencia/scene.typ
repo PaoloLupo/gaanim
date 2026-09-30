@@ -500,7 +500,7 @@ scene.stop("dos-placas", loop=sequence(
     (name: "players", type: "int | Sequence[str]", default: "12", desc: [Cuántos jugadores (Ana, Beto, Caro…) o sus apodos, en orden de llegada; de 1 a 200.]),
     (name: "seed", type: "int", default: "0", desc: [Elige otro grupo: otros tiempos, respuestas y personajes.]),
     (name: "arrive", type: "float | None", default: "None", desc: [Segundos en que entran todos; por defecto, entre `scene.audience()` y la primera pausa de la sala.]),
-    (name: "skill", type: "float", default: "0.6", desc: [Qué parte de las preguntas aciertan en promedio, de 0 a 1.]),
+    (name: "skill", type: "float | Sequence[float]", default: "0.6", desc: [Qué parte de las preguntas aciertan en promedio, de 0 a 1; con equipos, puede ser un valor por equipo.]),
     (name: "speed", type: "float", default: "0.5", desc: [Qué tan pronto responden, de 0 (al final) a 1 (al instante).]),
   ),
   returns: (type: "None", desc: []),
@@ -511,6 +511,26 @@ scene.stop("dos-placas", loop=sequence(
 >>>scene = Scene(frame=(16, 9))
 scene.rehearsal(24, seed=3, skill=0.7)
 audience = scene.audience()
+```
+]
+
+#api-entry(
+  name: "Scene.teams",
+  kind: "method",
+  params: (
+    (name: "names", type: "Sequence[str]", desc: [Los equipos, de 2 a 6, con nombres de hasta 20 caracteres.]),
+    (name: "choose", type: "bool", default: "False", desc: [Si el teléfono pregunta a qué equipo unirse; si no, el relay pone a cada jugador en el que tiene menos.]),
+    (name: "colors", type: "Sequence[str] | None", default: "None", desc: [Un `#rrggbb` por equipo, como lo muestran los teléfonos; por defecto rosa, azul, naranja, verde, violeta y turquesa.]),
+  ),
+  returns: (type: "Teams", desc: [Los datos de los equipos; no dibuja nada.]),
+  desc: [Hace que el juego se juegue por equipos. Los puntos de cada jugador suman para su equipo. `Teams` da `names`, `colors`, `score(i)`, `players(i)` y `average(i)` (`Parameter`), `leader()` (el índice del equipo que va ganando) y `bar(i, ...)`. En las zonas vivas cada jugador sabe `p.team`, `p.team_index`, `p.team_count`, `p.team_score` y `p.team_rank`. El ensayo reparte a sus jugadores igual. Menos de 2 o más de 6 equipos, un nombre vacío, largo o repetido, colores que no sean un `#rrggbb` por equipo, u otros equipos distintos en la misma escena lanzan `ValueError`. Ver #link("/guias/presentaciones/#equipos")[Equipos].],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+teams = scene.teams(["Rojo", "Azul"])
+for team, x in [(0, -4), (1, 4)]:
+    scene.viz.readout(teams.score(team), format=".0f").move_to(x, 0)
 ```
 ]
 

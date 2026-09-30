@@ -359,6 +359,50 @@ que la previsualización es una versión acelerada de lo que pasará en vivo. Co
 los mismos argumentos el ensayo es siempre el mismo, en cada vista previa y
 en cada exportación.
 
+== Equipos <equipos>
+
+`scene.teams` hace que el juego se juegue por equipos, por ejemplo una
+batalla entre dos grupos del curso. Cada jugador entra a un equipo: el relay
+lo pone en el que tiene menos jugadores, o con `choose=True` el teléfono le
+pregunta a cuál quiere unirse (hasta que responda su primera pregunta puede
+cambiar). El teléfono muestra su equipo con su color y, al final, qué equipo
+ganó. Los puntos de cada jugador suman para su equipo.
+
+```python
+teams = scene.teams(["Rojo", "Azul"], colors=["#ff4f8b", "#2fb8ff"])
+scene.rehearsal(20, skill=[0.7, 0.5])     # un ensayo con un equipo más fuerte
+
+for team, x in [(0, -4), (1, 4)]:
+    scene.text(teams.names[team], size=0.6).move_to(x, 3)
+    scene.viz.readout(teams.score(team), format=".0f", suffix=" pts").move_to(x, 2)
+    teams.bar(team, length=5, direction="up").fill(teams.colors[team]).move_to(x, -1)
+```
+
+Como el resto, solo da datos y la batalla la diseñas tú:
+
+- `teams.score(i)`, `teams.players(i)` y `teams.average(i)` (puntos por
+  jugador, más justo si los equipos quedan desparejos) son `Parameter`.
+- `teams.leader()` es el índice del equipo que va ganando.
+- `teams.bar(i, ...)` es una barra que mide los puntos del equipo frente al
+  que va primero.
+- En una zona viva, cada jugador sabe su equipo: `p.team`, su orden de
+  llegada dentro del equipo `p.team_index`, cuántos son `p.team_count`, los
+  puntos del equipo `p.team_score` y su puesto `p.team_rank` (0 para el que
+  va ganando). Sin equipos, todos están en el equipo 0.
+
+```python
+def battle(p):
+    side = -1 if p.team == 0 else 1         # cada equipo en su lado
+    x = side * (2 + p.team_index // 4 * 1.2)
+    y = -2 + p.team_index % 4 * 1.1
+    if p.team_rank == 0:                      # el que va ganando salta
+        y += 0.5 * abs(math.sin(3 * p.t))
+    return pose(x, y, flip=side > 0, express="winner" if p.team_rank == 0 else None, loop=True)
+```
+
+El #link("#ensayo")[ensayo] reparte a sus jugadores igual que el relay, y
+`skill` acepta un valor por equipo para ensayar una batalla despareja.
+
 == El relay
 
 Los votos viajan a través de un *relay*, un pequeño servicio web que despliegas

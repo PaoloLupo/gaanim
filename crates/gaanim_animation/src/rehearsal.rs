@@ -302,8 +302,10 @@ impl Rehearsal {
                         let option = match (poll.quiz, &poll.lean) {
                             (Some((correct, _, _)), Lean::Auto | Lean::Right(_)) => {
                                 let right = match poll.lean {
+                                    // The question sets the average; players (and
+                                    // teams) keep how far they are from it.
                                     Lean::Right(share) => {
-                                        (share + skill[index] - base(player.team)).clamp(0.0, 1.0)
+                                        (share + skill[index] - spec.skill).clamp(0.0, 1.0)
                                     }
                                     _ => skill[index],
                                 };
@@ -657,6 +659,16 @@ mod tests {
         assert!(results.teams[0].score > results.teams[1].score);
         assert_eq!(results.leading_team(), 0);
         assert_eq!(results.player_teams["Beto"], 1);
+        // A question's own share keeps the skilled team ahead.
+        let spec = RehearsalSpec {
+            names: RehearsalSpec::names(40),
+            skill: 0.6,
+            team_skill: vec![0.8, 0.4],
+            ..Default::default()
+        };
+        let polls = [quiz("q", 0.0, 5.0, Lean::Right(0.6))];
+        let results = Rehearsal::plan(&spec, None, &polls, teams).results_at(5.0);
+        assert!(results.teams[0].score > results.teams[1].score);
     }
 
     #[test]

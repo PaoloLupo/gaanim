@@ -241,6 +241,53 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_rehearsed_zone_ranks_teams_by_their_points() {
+        use crate::rehearsal::{Lean, PlannedPoll, Rehearsal, RehearsalSpec, RehearsalTeams};
+        // x is the player's team rank, y its team.
+        let json = r#"{"version":[1,1],"code":[{"input":"team_rank"},{"input":"team"},{"const":"1.0"},{"const":"0.0"}],
+            "pose":{"x":0,"y":1,"rotation":3,"scale":2,"sx":2,"sy":2,"lean":3,
+                    "look_x":3,"look_y":3,"show_name":3,"flip":3,"visible":2,"express":3,"since":3,"loop":3}}"#;
+        let zone = LiveZone {
+            id: "z".into(),
+            open: 10.0,
+            close: 20.0,
+            stop_at_open: false,
+            stop_at_close: false,
+            bounds: [-8.0, -4.5, 8.0, 4.5],
+            size: 1.0,
+            behavior: Program::from_json(json).unwrap(),
+            motion: Motion::default(),
+            names: None,
+        };
+        let spec = RehearsalSpec {
+            names: RehearsalSpec::names(19),
+            team_skill: vec![0.9, 0.1],
+            ..Default::default()
+        };
+        let polls = [PlannedPoll {
+            id: "q".into(),
+            answers: 4,
+            open: 0.0,
+            due: 5.0,
+            quiz: Some((1, 20, 1000)),
+            lean: Lean::Right(0.6),
+        }];
+        let teams = Some(RehearsalTeams {
+            count: 2,
+            choose: false,
+        });
+        let rehearsal = Rehearsal::plan(&spec, None, &polls, teams);
+        let results = rehearsal.results_at(12.0);
+        assert!(results.teams[0].score > results.teams[1].score);
+        let mut run = ZoneRun::default();
+        replay_rehearsal(&zone, 12.0, &mut run, &rehearsal);
+        for (name, pose) in run.poses(&zone) {
+            let expected = if pose.y == 0.0 { 0.0 } else { 1.0 };
+            assert_eq!(pose.x, expected, "{name} in team {}", pose.y);
+        }
+    }
+
+    #[test]
     fn a_stop_at_a_shared_boundary_holds_the_outgoing_zone() {
         let json = r#"{"version":[1,0],"code":[{"const":"0.0"}],
             "pose":{"x":0,"y":0,"rotation":0,"scale":0,"sx":0,"sy":0,"lean":0,
