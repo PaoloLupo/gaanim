@@ -223,6 +223,12 @@ impl ReactiveFunction {
         &self.inputs
     }
 
+    /// The description given with [`Self::with_recipe`], such as
+    /// `"identity"` for a parameter read as it is.
+    pub fn recipe(&self) -> Option<&str> {
+        self.recipe.as_deref()
+    }
+
     pub fn parameter_ids(&self) -> Vec<ObjectId> {
         self.inputs
             .iter()

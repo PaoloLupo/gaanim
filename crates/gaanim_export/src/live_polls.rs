@@ -120,6 +120,24 @@ fn source_from(record: &LiveSourceRecord) -> Option<PollSource> {
     })
 }
 
+/// The parameter a readout shows as it is: a signal, or the identity
+/// function a `Parameter` passes to a readout.
+fn direct_parameter(
+    source: &gaanim_animation::reactive::ScalarSource,
+) -> Option<gaanim_core::ObjectId> {
+    use gaanim_animation::reactive::ScalarSource;
+    match source {
+        ScalarSource::Signal(id) => Some(*id),
+        ScalarSource::Function(function) if function.recipe() == Some("identity") => {
+            match function.inputs() {
+                [gaanim_animation::ReactiveInput::Signal(id)] => Some(*id),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Shape `text` as one run, as a readout shapes its prefix and suffix.
 fn shape_run(
     registry: &FontRegistry,
@@ -163,7 +181,7 @@ pub fn record<W: Write + Seek>(
         .iter(world)
     {
         // Only a readout of one poll value, without Python, can be redrawn.
-        let gaanim_animation::reactive::ScalarSource::Signal(id) = &readout.source else {
+        let Some(id) = direct_parameter(&readout.source) else {
             continue;
         };
         if rolling.is_some() {
@@ -172,7 +190,7 @@ pub fn record<W: Write + Seek>(
         let Some(parameter) = readout
             .parameters
             .iter()
-            .find_map(|(logical, parameter)| (logical == id).then_some(*parameter))
+            .find_map(|(logical, parameter)| (*logical == id).then_some(*parameter))
         else {
             continue;
         };
@@ -508,6 +526,27 @@ mod tests {
             back.glyphs[&'Ñ'].0.bounding_box(),
             Rect::new(0.0, 0.0, 1.0, 1.0)
         );
+    }
+
+    #[test]
+    fn readouts_of_a_parameter_as_it_is_are_recognized() {
+        use gaanim_animation::ReactiveInput;
+        use gaanim_animation::reactive::{ReactiveFunction, ScalarSource};
+        let id = gaanim_core::ObjectId::from_parts(7, 1);
+        let identity = |recipe: &str| {
+            ScalarSource::Function(
+                ReactiveFunction::new(0, 1, vec![ReactiveInput::Signal(id)], |values| {
+                    Ok(vec![values[0]])
+                })
+                .with_recipe(recipe),
+            )
+        };
+        assert_eq!(direct_parameter(&ScalarSource::Signal(id)), Some(id));
+        // What `scene.viz.readout(parameter)` builds.
+        assert_eq!(direct_parameter(&identity("identity")), Some(id));
+        // Any other function, such as a `computed` in Python, is not.
+        assert_eq!(direct_parameter(&identity("python:lambda")), None);
+        assert_eq!(direct_parameter(&ScalarSource::Time), None);
     }
 
     #[test]
