@@ -206,6 +206,7 @@ impl BundlePlayback {
             width,
             height,
             gaanim_export::config::OutputFit::Contain,
+            None,
         );
         let base = self
             .bundle

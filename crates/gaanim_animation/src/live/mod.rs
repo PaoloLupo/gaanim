@@ -89,6 +89,67 @@ fn player(results: &PollResults, name: &std::sync::Arc<str>) -> Player {
     }
 }
 
+/// Replay `zone`'s preview players up to the timeline's `now`: a pure
+/// function of time, reusing `run` while time moves forward.
+pub fn replay_preview(zone: &LiveZone, now: f64, run: &mut ZoneRun) {
+    let clock = (now - zone.open).max(0.0);
+    if run.clock > clock + 1e-9 {
+        *run = ZoneRun::default();
+    }
+    let every = zone.preview_every.max(STEP);
+    let count = zone.preview.len();
+    // Preview players keep the order they are listed in.
+    let preview_score = |name: &str| {
+        zone.preview
+            .iter()
+            .position(|other| other == name)
+            .map_or(0.0, |rank| ((count - rank) * 100) as f64)
+    };
+    let arrive = |run: &mut ZoneRun, until: f64| {
+        for (index, name) in zone.preview.iter().enumerate() {
+            let joined = index as f64 * every;
+            if joined <= until + 1e-9 && !run.has(name) {
+                run.arrive(Player::named(name), joined);
+            }
+        }
+        run.standings(preview_score);
+    };
+    while run.next_step() <= clock + 1e-9 {
+        let next = run.next_step();
+        arrive(run, next);
+        run.step(zone);
+    }
+    run.settle(clock);
+    arrive(run, clock);
+}
+
+/// Replays of zones' preview players, for drawing them over recorded frames
+/// (a bundle exported to video) as the scene draws them.
+#[derive(Default)]
+pub struct PreviewReplay {
+    runs: HashMap<String, ZoneRun>,
+}
+
+impl PreviewReplay {
+    /// What `zones` draw at the timeline's `time`.
+    pub fn overlay(&mut self, zones: &[LiveZone], time: f64) -> LiveOverlay {
+        let groups = zones
+            .iter()
+            .filter(|zone| zone_contains(zone, time))
+            .map(|zone| {
+                let run = self.runs.entry(zone.id.clone()).or_default();
+                replay_preview(zone, time, run);
+                let [x0, y0, x1, y1] = zone.bounds;
+                OverlayGroup {
+                    clip: Rect::new(x0, y0, x1, y1),
+                    paths: run.draw(zone),
+                }
+            })
+            .collect();
+        LiveOverlay { groups }
+    }
+}
+
 /// Run the zones the timeline is in and draw them into [`LiveOverlay`].
 pub fn live_zone_system(
     zones: Option<Res<LiveZones>>,
@@ -141,38 +202,8 @@ pub fn live_zone_system(
             run.settle(target);
             run
         } else {
-            // A pure function of the timeline's time: replay from the
-            // zone's opening, reusing the last replay while time moves on.
-            let clock = (now - zone.open).max(0.0);
             let run = runs.previews.entry(zone.id.clone()).or_default();
-            if run.clock > clock + 1e-9 {
-                *run = ZoneRun::default();
-            }
-            let every = zone.preview_every.max(STEP);
-            let count = zone.preview.len();
-            // Preview players keep the order they are listed in.
-            let preview_score = |name: &str| {
-                zone.preview
-                    .iter()
-                    .position(|other| other == name)
-                    .map_or(0.0, |rank| ((count - rank) * 100) as f64)
-            };
-            let arrive = |run: &mut ZoneRun, until: f64| {
-                for (index, name) in zone.preview.iter().enumerate() {
-                    let joined = index as f64 * every;
-                    if joined <= until + 1e-9 && !run.has(name) {
-                        run.arrive(Player::named(name), joined);
-                    }
-                }
-                run.standings(preview_score);
-            };
-            while run.next_step() <= clock + 1e-9 {
-                let next = run.next_step();
-                arrive(run, next);
-                run.step(zone);
-            }
-            run.settle(clock);
-            arrive(run, clock);
+            replay_preview(zone, now, run);
             run
         };
         let [x0, y0, x1, y1] = zone.bounds;
