@@ -1,4 +1,5 @@
 pub mod camera;
+pub mod characters;
 pub mod custom;
 pub mod echo;
 pub use echo::EchoGhost;
@@ -113,6 +114,7 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
                 progress_arc::progress_arc_system,
                 polls::poll_bar_system,
                 polls::live_text_system,
+                characters::character_system,
             )
                 .in_set(SceneSet::Visualization),
         );

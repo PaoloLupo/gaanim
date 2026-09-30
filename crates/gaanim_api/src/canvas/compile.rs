@@ -6319,6 +6319,46 @@ impl SceneModel {
                     }
                 }
 
+                Op::AttachCharacter {
+                    target,
+                    layers,
+                    rig,
+                } => {
+                    let entity_of = |id: &ObjectId| {
+                        id_map
+                            .get(id)
+                            .copied()
+                            .and_then(|index| builder.states.get(index))
+                            .map(|state| state.entity)
+                    };
+                    if let Some(entity) = entity_of(target) {
+                        let mut rig = rig.clone();
+                        rig.layers = layers.iter().filter_map(entity_of).collect();
+                        builder.commands.queue(move |world: &mut World| {
+                            if let Ok(mut target) = world.get_entity_mut(entity) {
+                                target.insert(rig);
+                            }
+                        });
+                    }
+                }
+
+                Op::CharacterExpress { target, expression } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(target_st) = builder.states.get(target_id)
+                    {
+                        let entity = target_st.entity;
+                        let time = builder.current_time;
+                        let expression = expression.clone();
+                        builder.commands.queue(move |world: &mut World| {
+                            if let Some(mut rig) =
+                                world.get_mut::<gaanim_animation::characters::CharacterRig>(entity)
+                            {
+                                rig.schedule(time, expression);
+                            }
+                        });
+                    }
+                }
+
                 Op::AttachPollBar { target, bar } => {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(target_st) = builder.states.get(target_id)
@@ -14683,6 +14723,40 @@ mod tests {
         // Only a scene that shows its audience opens a lobby.
         assert!(!session.lobby);
         assert!(bar.id != share.drawable().id);
+    }
+
+    #[test]
+    fn a_character_schedules_its_expressions_at_the_cursor() {
+        let mut canvas = SceneModel::new(640, 360);
+        canvas.segment("Intro", None).unwrap();
+        let hero = canvas.character(None, "Ana", 2.0).unwrap();
+        assert_eq!(
+            hero.character(),
+            gaanim_objects::character::catalog()
+                .character_from_seed(gaanim_objects::character::character_seed("Ana"))
+        );
+        canvas.wait(1.0);
+        hero.express(Some("happy"), false).unwrap();
+        canvas.wait(1.0);
+        hero.express(Some("winner"), true).unwrap();
+        canvas.wait(1.0);
+        assert!(hero.express(Some("dancing"), false).is_err());
+        assert!(canvas.character(Some([9, 0, 0, 0, 0]), "", 2.0).is_err());
+        assert!(canvas.character(None, "", 0.0).is_err());
+
+        let (mut world, _) = compiled_world(&canvas);
+        let rig = world
+            .query::<&gaanim_animation::characters::CharacterRig>()
+            .single(&world)
+            .unwrap()
+            .clone();
+        let times: Vec<f64> = rig.schedule.iter().map(|(time, _)| *time).collect();
+        assert_eq!(times, [1.0, 2.0]);
+        assert_eq!(
+            rig.layers.len(),
+            gaanim_objects::character::catalog().max_layers()
+        );
+        assert_eq!(rig.expression_at(2.5).unwrap().name, "winner");
     }
 
     #[test]

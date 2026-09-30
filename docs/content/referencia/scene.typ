@@ -561,6 +561,27 @@ for rank in range(2):
 ]
 
 #api-entry(
+  name: "Scene.character",
+  kind: "method",
+  params: (
+    (name: "avatar", type: "Sequence[int] | None", default: "None", desc: [Las partes: cuerpo, color, ojos, boca y extra. Sin ellas se deducen de `name`.]),
+    (name: "name", type: "str", default: "\"\"", desc: [El apodo, que también marca el ritmo con que parpadea.]),
+    (name: "size", type: "float", default: "2.0", desc: [Alto en unidades, con sombreros y orejas.]),
+  ),
+  returns: (type: "Character", desc: [Un dibujable que respira, parpadea y hace expresiones.]),
+  desc: [Un personaje como los que crea el público en su teléfono, y que se mueve igual que allí. `character.express("happy")` hace una expresión desde el cursor; con `loop=True` la repite hasta la siguiente, y `express()` vuelve a su cara. Expresiones: `happy`, `sad`, `hurt`, `winner` y `surprised`. Como todo depende del tiempo de la línea de tiempo, saltar y exportar dan el mismo resultado.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+hero = scene.character([1, 0, 4, 2, 1], name="Ana").move_to(-3, 0)
+scene.wait(1)
+hero.express("winner", loop=True)
+scene.wait(2)
+```
+]
+
+#api-entry(
   name: "Condition",
   kind: "class",
   desc: [Lo que el público debe hacer para que una pausa avance sola con `scene.stop(until=...)`. Se crea con `poll.answered(at_least=)` o `poll.answered(share=)`, `quiz.time_up()` y `audience.at_least(n)`, y se combina con `|` (cualquiera) y `&` (todas). Ver #link("/guias/presentaciones/#avanzar-sola")[Avanzar por sí sola].],

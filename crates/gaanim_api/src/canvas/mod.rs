@@ -84,6 +84,9 @@ pub use narration::{
     LiveTakeSpec, MarkerSpec, NarrationManifest, ScriptSpec, TextSource, VoiceoverError,
     VoiceoverHandle, VoiceoverSpec, live_take_recording, set_live_take_recording,
 };
+mod character;
+pub use character::{CharacterError, CharacterHandle};
+pub use gaanim_objects::character::Character;
 mod poll;
 pub use gaanim_animation::polls::{BarDirection, BarScale, TextAlign};
 pub use poll::{

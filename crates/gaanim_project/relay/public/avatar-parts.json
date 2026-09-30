@@ -32,7 +32,7 @@
       "name": "triangle",
       "top": 16,
       "face": 60,
-      "chin": 82,
+      "chin": 86,
       "layers": [
         {
           "d": "M44 22Q50 11 56 22L87 76Q93 88 79 88H21Q7 88 13 76Z",

@@ -9,6 +9,7 @@ description = "Tween systems, interpolation lenses, keyframes, and reactive sign
 # Local workspace dependencies
 gaanim_core = { path = "../gaanim_core" }
 gaanim_math = { path = "../gaanim_math" }
+gaanim_objects = { path = "../gaanim_objects" }
 gaanim_scene = { path = "../gaanim_scene" }
 gaanim_text = { path = "../gaanim_text" }
 
@@ -24,6 +25,7 @@ serde = { version = "1.0", features = ["derive"], optional = true }
 dev-dynamic = [
     "bevy/dynamic_linking",
     "gaanim_math/dev-dynamic",
+    "gaanim_objects/dev-dynamic",
     "gaanim_scene/dev-dynamic",
     "gaanim_text/dev-dynamic",
 ]

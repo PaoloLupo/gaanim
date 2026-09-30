@@ -5149,6 +5149,32 @@ class Audience:
         """
         ...
 
+class Character(Drawable):
+    """A character like the ones phones make, from ``scene.character``: it
+    breathes, blinks and plays expressions, the same way it moves on a
+    phone. Place, scale and animate it like any drawable.
+    """
+    @property
+    def avatar(self) -> list[int]:
+        """Its parts: [body, color, eyes, mouth, extra]."""
+        ...
+    def express(self, expression: Optional[str] = None, *, loop: bool = False) -> None:
+        """Play ``expression`` from the cursor: once, or with ``loop=True``
+        until the next one. ``None`` goes back to the character's own face.
+
+        Expressions: ``happy``, ``sad``, ``hurt``, ``winner`` and
+        ``surprised``. Glasses and sunglasses stay on through them. Raises
+        ``ValueError`` for an unknown expression.
+
+        Example:
+            hero.express("winner", loop=True)
+        """
+        ...
+    @staticmethod
+    def expressions() -> list[str]:
+        """The expressions characters can play."""
+        ...
+
 class Condition:
     """What the audience must do before a stop advances by itself, from
     ``poll.answered``, ``quiz.time_up`` or ``audience.at_least``.
@@ -8086,6 +8112,28 @@ class Scene:
                 y = 1 - rank
                 board.name(rank, size=0.5).move_to(-3, y)
                 scene.viz.readout(board.points(rank), format=".0f").move_to(3, y)
+        """
+        ...
+    def character(
+        self,
+        avatar: Optional[Sequence[int]] = None,
+        *,
+        name: str = "",
+        size: float = 2.0,
+    ) -> Character:
+        """A character like the ones phones make, at the origin, ``size``
+        units tall (hats and ears included).
+
+        ``avatar`` is [body, color, eyes, mouth, extra]; without one it is
+        read from ``name``, the nickname that also sets how it blinks. It
+        breathes and blinks along the timeline, so seeks and exports are
+        exact. Raises ``ValueError`` for a part out of range or a
+        non-positive size.
+
+        Example:
+            hero = scene.character([1, 0, 4, 2, 1], name="Ana").move_to(-3, 0)
+            scene.wait(1)
+            hero.express("happy")
         """
         ...
     def audience(

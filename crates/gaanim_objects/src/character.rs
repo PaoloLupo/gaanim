@@ -40,9 +40,25 @@ pub struct CharacterLayer {
     pub color: Color,
     /// Stroke width with round caps, or `None` for a fill.
     pub stroke: Option<f64>,
+    /// The layer as a filled outline: `path` itself, or its stroke with
+    /// round caps and joins. Transform it like `path`.
+    pub outline: Arc<BezPath>,
     /// Where the layer sits now: breathing, blinking and the expression's
     /// motion.
     pub transform: Affine,
+}
+
+/// The drawing's envelope in its 100-unit square: room for hats, ears and
+/// headphones around the body. A character's bounds are this box, so
+/// layouts do not move as it breathes or jumps.
+pub const CHARACTER_ENVELOPE: kurbo::Rect = kurbo::Rect::new(-6.0, -30.0, 106.0, 96.0);
+
+/// From the 100-unit square (y down) to a scene where the character is
+/// `size` units tall (the envelope's height), centered on the origin, y up.
+pub fn to_scene(size: f64) -> Affine {
+    let scale = size / CHARACTER_ENVELOPE.height();
+    let center = CHARACTER_ENVELOPE.center();
+    Affine::scale_non_uniform(scale, -scale) * Affine::translate((-center.x, -center.y))
 }
 
 /// An expression playing: `start` and the pose's time share one clock.
@@ -57,6 +73,7 @@ pub struct ExpressionPlay {
 #[derive(Debug, Clone)]
 struct Layer {
     path: Arc<BezPath>,
+    outline: Arc<BezPath>,
     paint: String,
     stroke: Option<f64>,
 }
@@ -85,8 +102,20 @@ fn layers<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<Layer
                     return Err(serde::de::Error::custom("a layer needs fill or stroke"));
                 }
             };
+            let outline = match stroke {
+                Some(width) => kurbo::stroke(
+                    path.iter(),
+                    &kurbo::Stroke::new(width)
+                        .with_caps(kurbo::Cap::Round)
+                        .with_join(kurbo::Join::Round),
+                    &kurbo::StrokeOpts::default(),
+                    0.01,
+                ),
+                None => path.clone(),
+            };
             Ok(Layer {
                 path: Arc::new(path),
+                outline: Arc::new(outline),
                 paint,
                 stroke,
             })
@@ -316,6 +345,63 @@ impl CharacterCatalog {
             .all(|(index, count)| *index < count)
     }
 
+    /// The most layers a pose of any character can have: how many paths to
+    /// keep ready for one.
+    pub fn max_layers(&self) -> usize {
+        let most = |lists: &[&[Layer]]| lists.iter().map(|layers| layers.len()).max().unwrap_or(0);
+        let parts = |parts: &[Part]| {
+            parts
+                .iter()
+                .map(|part| part.layers.len())
+                .max()
+                .unwrap_or(0)
+        };
+        let faces = most(
+            &self
+                .faces
+                .values()
+                .map(|face| face.layers.as_slice())
+                .collect::<Vec<_>>(),
+        );
+        let effects = self
+            .expressions
+            .values()
+            .map(|expression| {
+                expression
+                    .effects
+                    .iter()
+                    .filter_map(|name| self.effects.get(name))
+                    .map(|effect| effect.layers.len())
+                    .sum::<usize>()
+            })
+            .max()
+            .unwrap_or(0);
+        most(
+            &self
+                .bodies
+                .iter()
+                .map(|body| body.layers.as_slice())
+                .collect::<Vec<_>>(),
+        ) + parts(&self.eyes).max(faces)
+            + parts(&self.mouths).max(faces)
+            + parts(&self.extras)
+            + effects
+    }
+
+    /// A character read from `seed`, the same every time, as the relay
+    /// gives a phone that did not choose one.
+    pub fn character_from_seed(&self, seed: u32) -> Character {
+        let counts = self.counts();
+        let mut state = seed;
+        std::array::from_fn(|part| {
+            // xorshift32: spreads the bits of a small seed.
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            state as usize % counts[part].max(1)
+        })
+    }
+
     /// The expressions characters can play, sorted.
     pub fn expressions(&self) -> Vec<&str> {
         let mut names: Vec<&str> = self.expressions.keys().map(String::as_str).collect();
@@ -433,6 +519,7 @@ impl CharacterCatalog {
             for layer in layers {
                 out.push(CharacterLayer {
                     path: layer.path.clone(),
+                    outline: layer.outline.clone(),
                     color: self.paint(&character, &layer.paint),
                     stroke: layer.stroke,
                     transform: whole * at,

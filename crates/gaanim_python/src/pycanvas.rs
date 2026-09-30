@@ -5918,6 +5918,35 @@ impl PyScene {
         Ok(crate::poll::PyLeaderboard { inner })
     }
 
+    /// A character, like the ones phones make: it breathes, blinks and
+    /// plays expressions. `avatar` is [body, color, eyes, mouth, extra];
+    /// without one it is read from `name`, which also sets how it blinks.
+    #[pyo3(signature = (avatar=None, *, name=String::new(), size=2.0))]
+    fn character(
+        &self,
+        py: Python<'_>,
+        avatar: Option<Vec<usize>>,
+        name: String,
+        size: f64,
+    ) -> PyResult<Py<crate::character::PyCharacter>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let avatar = match avatar {
+            Some(parts) => Some(<[usize; 5]>::try_from(parts.as_slice()).map_err(|_| {
+                pyo3::exceptions::PyValueError::new_err(format!(
+                    "avatar is five indexes (body, color, eyes, mouth, extra), got {parts:?}"
+                ))
+            })?),
+            None => None,
+        };
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .character(avatar, &name, size)
+            .map_err(crate::character::character_error)?;
+        crate::character::PyCharacter::create(py, inner)
+    }
+
     /// The game's audience: players in the order they joined, as data the
     /// scene arranges and animates as it likes. Phones ask for a nickname as
     /// soon as they open the page.

@@ -752,6 +752,18 @@ pub(crate) enum Op {
         target: ObjectId,
         value: gaanim_animation::polls::PollValue,
     },
+    /// Make a group of empty paths a character, posed every frame.
+    AttachCharacter {
+        target: ObjectId,
+        /// The group's paths, back to front.
+        layers: Vec<ObjectId>,
+        rig: gaanim_animation::characters::CharacterRig,
+    },
+    /// Play an expression on a character from the cursor.
+    CharacterExpress {
+        target: ObjectId,
+        expression: Option<(String, bool)>,
+    },
     /// Make a rectangle a bar that follows a poll answer or a score.
     AttachPollBar {
         target: ObjectId,
