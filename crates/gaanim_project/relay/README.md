@@ -7,8 +7,16 @@ the presentation reads the counts while it runs.
 
 It runs on Cloudflare Workers with a Durable Object per presentation, which
 fits in the **Workers Free** plan. Phones and the presentation only make
-outbound HTTPS requests, so it works on campus networks that isolate devices
-and on mobile data.
+outbound HTTPS connections, so it works on campus networks that isolate
+devices and on mobile data.
+
+Each phone holds one WebSocket: the relay pushes every question the moment
+it opens and takes the votes on it. A connection costs one request, incoming
+messages count 20 to 1, outgoing ones are free, and an idle session
+hibernates, so a room of a few hundred phones uses a few thousand of the
+plan's 100,000 daily requests. (Asking over HTTP every couple of seconds
+instead would use them up with about forty phones in an hour.) Networks
+that block WebSockets fall back to that HTTP polling automatically.
 
 ## Pages
 
@@ -68,10 +76,18 @@ question or answers starts it from zero. One poll is open at a time.
 | --- | --- | --- |
 | `PUT /s/<code>/poll` | presenter | `{id, question, options}` → `{id}`; opens that poll |
 | `DELETE /s/<code>/poll` | presenter | closes the open poll |
-| `GET /s/<code>/results` | presenter | `{current, polls: {<id>: {open, counts, total}}}` |
+| `GET /s/<code>/results` | presenter | `{current, connected, polls: {<id>: {open, counts, total}}}`; `connected` counts the phones' sockets |
+| `GET /s/<code>/ws` | phones | WebSocket, see below |
 | `GET /s/<code>/poll` | phones | `{open: false}` or `{open, id, question, options}` |
 | `POST /s/<code>/vote` | phones | `{poll, option, voter}`; 409 unless that poll is open |
-| `GET /health` | anyone | `{relay: "gaanim", version: 2}` |
+| `GET /health` | anyone | `{relay: "gaanim", version: 3}` |
+
+On the WebSocket the relay sends `{type: "poll", ...}` (the same body as
+`GET /poll`) on connect and whenever the question changes. A phone votes
+with `{type: "vote", poll, option, voter}` and gets `{type: "voted", poll,
+option}` or `{type: "error", status, error, poll}`; `"ping"` is answered
+`"pong"` without waking the session. The HTTP routes stay for networks that
+block WebSockets.
 
 Presenter requests send `Authorization: Bearer <key>`. Codes use
 `A–Z` and `2–9` without `I` and `O`. A question has 2 to 6 answers.

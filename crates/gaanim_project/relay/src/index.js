@@ -2,18 +2,32 @@
 //
 // A presentation opens a session under a six-character code and holds a
 // secret key for it. Each poll has an id the presentation chooses, so a poll
-// keeps its votes when the presentation comes back to it. The audience scans a QR code to /s/<code>, a page that
-// shows the current question and sends one vote per phone. The presentation
-// opens and closes questions and reads the counts with its key.
+// keeps its votes when the presentation comes back to it. The audience scans
+// a QR code to /s/<code>, a page that shows the current question and sends
+// one vote per phone. The presentation opens and closes questions and reads
+// the counts with its key.
+//
+// Phones hold one WebSocket to the session: the relay pushes every change of
+// question to all of them and takes their votes on it. A connection costs
+// one request, incoming messages are billed 20 to 1 and outgoing ones are
+// free, and an idle session hibernates, so a full room fits in the Workers
+// Free plan. Plain HTTP stays for networks that block WebSockets.
 //
 //   GET    /                  join page: type a code (static asset)
 //   GET    /s/<code>          voting page (public)
+//   GET    /s/<code>/ws       WebSocket for phones (public), see below
 //   GET    /s/<code>/poll     current question, without counts (public)
 //   POST   /s/<code>/vote     {poll, option, voter} (public)
 //   PUT    /s/<code>/poll     {id, question, options}       (presenter)
 //   DELETE /s/<code>/poll     close the open question       (presenter)
-//   GET    /s/<code>/results  {current, polls: {id: {open, counts, total}}}
+//   GET    /s/<code>/results  {current, connected, polls: {id: {open, counts, total}}}
 //   GET    /health            {relay, version}
+//
+// WebSocket messages are JSON, except the keepalive "ping", answered "pong"
+// without waking the session. The relay sends {type: "poll", open, id,
+// question, options} on connect and whenever the question changes, and
+// answers a phone's {type: "vote", poll, option, voter} with {type: "voted",
+// poll, option} or {type: "error", status, error, poll}.
 //
 // Votes are anonymous: a voter is a random id the page keeps in the phone's
 // storage. A session and its votes are deleted after SESSION_TTL_MS without
@@ -31,7 +45,7 @@ const MAX_QUESTION = 300;
 const MAX_OPTION = 120;
 const MAX_BODY = 8192;
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-const API_VERSION = 2;
+const API_VERSION = 3;
 
 /** Headers every page and API response carries. */
 const SECURITY_HEADERS = {
@@ -58,6 +72,12 @@ export default {
       return votePage(env, url);
     }
     const session = env.SESSIONS.get(env.SESSIONS.idFromName(code));
+    if (parts[2] === "ws") {
+      if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+        return json({ error: "expected a WebSocket upgrade" }, 426);
+      }
+      return session.fetch(request);
+    }
     try {
       switch (`${request.method} ${parts[2]}`) {
         case "GET poll":
@@ -84,6 +104,63 @@ export class PollSession extends DurableObject {
   // "poll:<id>" ({question, options, counts}) and "vote:<id>:<voter>"
   // (the answer index). Every poll keeps its votes, so a presentation that
   // comes back to a question finds them again.
+
+  constructor(ctx, env) {
+    super(ctx, env);
+    // Keepalives are answered by the runtime: they never wake the session.
+    this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+  }
+
+  // A phone's WebSocket. Accepted through the hibernation API, so the
+  // session sleeps between messages while its sockets stay open.
+  async fetch() {
+    const [client, server] = Object.values(new WebSocketPair());
+    this.ctx.acceptWebSocket(server);
+    server.send(JSON.stringify({ type: "poll", ...(await this.current()) }));
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  async webSocketMessage(socket, message) {
+    const send = (value) => socket.send(JSON.stringify(value));
+    let input;
+    try {
+      if (typeof message !== "string" || message.length > MAX_BODY) throw new Error();
+      input = JSON.parse(message);
+    } catch {
+      return send({ type: "error", status: 400, error: "invalid message" });
+    }
+    if (input?.type !== "vote") {
+      return send({ type: "error", status: 400, error: "unknown message" });
+    }
+    const result = await this.vote(input);
+    if (result.status === 200) {
+      send({ type: "voted", poll: input.poll, option: input.option });
+    } else {
+      send({ type: "error", status: result.status, error: result.body.error, poll: input.poll });
+    }
+  }
+
+  async webSocketClose(socket, code, reason) {
+    try {
+      socket.close(code, reason);
+    } catch {
+      // Already closed, or a code that cannot be sent back (1005, 1006).
+    }
+  }
+
+  async webSocketError() {}
+
+  /** Tell every connected phone what the question is now. */
+  async broadcast() {
+    const message = JSON.stringify({ type: "poll", ...(await this.current()) });
+    for (const socket of this.ctx.getWebSockets()) {
+      try {
+        socket.send(message);
+      } catch {
+        // A socket closing right now; its phone reconnects and catches up.
+      }
+    }
+  }
 
   async current() {
     const id = await this.ctx.storage.get("current");
@@ -156,16 +233,23 @@ export class PollSession extends DurableObject {
         counts: options.map(() => 0),
       });
     }
+    const previous = await this.ctx.storage.get("current");
     await this.ctx.storage.put("current", id);
     await this.touch();
+    if (previous !== id || !same) {
+      await this.broadcast();
+    }
     return { status: 200, body: { id } };
   }
 
   async close(key) {
     const denied = await this.authorize(key, false);
     if (denied) return denied;
-    await this.ctx.storage.delete("current");
+    const open = await this.ctx.storage.delete("current");
     await this.touch();
+    if (open) {
+      await this.broadcast();
+    }
     return { status: 200, body: { ok: true } };
   }
 
@@ -182,7 +266,8 @@ export class PollSession extends DurableObject {
         total: poll.counts.reduce((sum, count) => sum + count, 0),
       };
     }
-    return { status: 200, body: { current: current ?? null, polls } };
+    const connected = this.ctx.getWebSockets().length;
+    return { status: 200, body: { current: current ?? null, connected, polls } };
   }
 
   // The first presenter request claims the session with its key.
@@ -216,6 +301,15 @@ async function votePage(env, url) {
   for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
     response.headers.set(name, value);
   }
+  // Older Safari does not count this host's WebSocket as 'self'.
+  const socket = `${url.protocol === "https:" ? "wss" : "ws"}://${url.host}`;
+  response.headers.set(
+    "content-security-policy",
+    (page.headers.get("content-security-policy") ?? "default-src 'self'").replace(
+      "connect-src 'self'",
+      `connect-src 'self' ${socket}`,
+    ),
+  );
   return response;
 }
 

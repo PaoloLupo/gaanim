@@ -1,12 +1,22 @@
 // Voting page for one presentation session, at /s/<code>.
 //
-// It polls the current question, shows its answers as large tiles and sends
-// one vote per phone. The phone keeps a random voter id, so reloading the
-// page keeps its vote; a vote can change while the question is open.
+// It keeps one WebSocket to the session: the relay pushes each question as
+// it opens or closes and takes the votes on the same connection. Networks
+// that block WebSockets fall back to asking over HTTP every few seconds.
+// The answers show as large tiles, one vote per phone; the phone keeps a
+// random voter id, so reloading the page keeps its vote, and a vote can
+// change while the question is open.
 "use strict";
 
-const REFRESH_MS = 1500;
-const MAX_BACKOFF_MS = 10000;
+/** Keepalive, answered by the relay without waking the session. */
+const PING_MS = 25000;
+/** How often the HTTP fallback asks for the question. */
+const POLL_MS = 3000;
+const MAX_BACKOFF_MS = 15000;
+/** Failed connections before assuming the network blocks WebSockets. */
+const SOCKET_ATTEMPTS = 3;
+/** How long a vote sent on the socket may wait for its answer. */
+const VOTE_TIMEOUT_MS = 5000;
 
 // A shape per answer, so an answer is recognizable without telling its
 // color apart; the letter matches the bars on the presentation screen.
@@ -65,8 +75,14 @@ document.addEventListener("DOMContentLoaded", () => {
   document.title = `Gaanim · ${code}`;
 
   let shown = null;
-  let timer = null;
-  let failures = 0;
+  let socket = null;
+  let socketFailures = 0;
+  let usePolling = false;
+  let retry = null;
+  let pollTimer = null;
+  let pingTimer = null;
+  /** The vote waiting for the relay's answer: {poll, option, button, timer}. */
+  let pending = null;
 
   function setStatus(message, emphasis) {
     status.replaceChildren();
@@ -76,6 +92,11 @@ document.addEventListener("DOMContentLoaded", () => {
       status.append(strong);
     }
     if (message) status.append(message);
+  }
+
+  function setConnection(live) {
+    offline.hidden = live;
+    dot.dataset.state = live ? "live" : "offline";
   }
 
   function showWaiting() {
@@ -91,7 +112,11 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  function showQuestion(poll) {
+  function show(poll) {
+    if (!poll.open) {
+      showWaiting();
+      return;
+    }
     if (shown === poll.id) return;
     shown = poll.id;
     questionText.textContent = poll.question;
@@ -104,7 +129,7 @@ document.addEventListener("DOMContentLoaded", () => {
         `<svg viewBox="0 0 24 24">${SHAPES[index % SHAPES.length]}</svg>`;
       button.querySelector(".label").textContent = option;
       button.querySelector(".letter").textContent = String.fromCharCode(65 + index);
-      button.addEventListener("click", () => vote(poll, index, button));
+      button.addEventListener("click", () => vote(poll.id, index, button));
       answers.append(item);
     });
     const saved = store.get(`gaanim-vote-${poll.id}`);
@@ -114,63 +139,136 @@ document.addEventListener("DOMContentLoaded", () => {
     questionView.hidden = false;
   }
 
-  async function vote(poll, index, button) {
-    if (button.getAttribute("aria-busy") === "true") return;
-    button.setAttribute("aria-busy", "true");
-    setStatus(t("sending"));
+  // --- Votes --------------------------------------------------------------
+
+  function settle(poll, option, outcome) {
+    if (pending && pending.poll === poll) {
+      clearTimeout(pending.timer);
+      pending.button.removeAttribute("aria-busy");
+      pending = null;
+    }
+    if (outcome === "voted") {
+      store.set(`gaanim-vote-${poll}`, String(option));
+      if (shown === poll) markChosen(option);
+      setStatus(t("change"), t("sent"));
+      navigator.vibrate?.(18);
+    } else if (outcome === "closed") {
+      setStatus(t("closed"));
+      showWaiting();
+    } else {
+      setStatus(t("failed"));
+    }
+  }
+
+  async function voteOverHttp(poll, option) {
     try {
       const response = await fetch(`/s/${code}/vote`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ poll: poll.id, option: index, voter }),
+        body: JSON.stringify({ poll, option, voter }),
       });
-      if (response.status === 409) {
-        setStatus(t("closed"));
-        showWaiting();
-        return;
-      }
-      if (!response.ok) throw new Error(String(response.status));
-      store.set(`gaanim-vote-${poll.id}`, String(index));
-      markChosen(index);
-      setStatus(t("change"), t("sent"));
-      navigator.vibrate?.(18);
+      settle(poll, option, response.ok ? "voted" : response.status === 409 ? "closed" : "failed");
     } catch {
-      setStatus(t("failed"));
-    } finally {
-      button.removeAttribute("aria-busy");
+      settle(poll, option, "failed");
     }
   }
 
-  function setConnection(live) {
-    offline.hidden = live;
-    dot.dataset.state = live ? "live" : "offline";
+  function vote(poll, option, button) {
+    if (pending) return;
+    button.setAttribute("aria-busy", "true");
+    setStatus(t("sending"));
+    pending = { poll, option, button, timer: null };
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "vote", poll, option, voter }));
+      // No answer on the socket: try once more over HTTP.
+      pending.timer = setTimeout(() => voteOverHttp(poll, option), VOTE_TIMEOUT_MS);
+    } else {
+      voteOverHttp(poll, option);
+    }
+  }
+
+  // --- WebSocket ----------------------------------------------------------
+
+  function connect() {
+    clearTimeout(retry);
+    if (usePolling || (socket && socket.readyState <= WebSocket.OPEN)) return;
+    const scheme = location.protocol === "https:" ? "wss" : "ws";
+    let opened = false;
+    let ws;
+    try {
+      ws = new WebSocket(`${scheme}://${location.host}/s/${code}/ws`);
+    } catch {
+      startPolling();
+      return;
+    }
+    socket = ws;
+    ws.addEventListener("open", () => {
+      opened = true;
+      socketFailures = 0;
+      setConnection(true);
+      pingTimer = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) ws.send("ping");
+      }, PING_MS);
+    });
+    ws.addEventListener("message", (event) => {
+      if (event.data === "pong") return;
+      let message;
+      try {
+        message = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      if (message.type === "poll") show(message);
+      else if (message.type === "voted") settle(message.poll, message.option, "voted");
+      else if (message.type === "error" && pending?.poll === message.poll) {
+        settle(message.poll, pending.option, message.status === 409 ? "closed" : "failed");
+      }
+    });
+    ws.addEventListener("close", () => {
+      clearInterval(pingTimer);
+      if (socket === ws) socket = null;
+      setConnection(false);
+      socketFailures += 1;
+      if (!opened && socketFailures >= SOCKET_ATTEMPTS) {
+        startPolling();
+        return;
+      }
+      const wait = Math.min(1000 * 2 ** (socketFailures - 1), MAX_BACKOFF_MS);
+      if (!document.hidden) retry = setTimeout(connect, wait);
+    });
+  }
+
+  // --- HTTP fallback ------------------------------------------------------
+
+  function startPolling() {
+    usePolling = true;
+    refresh();
   }
 
   async function refresh() {
-    clearTimeout(timer);
+    clearTimeout(pollTimer);
     try {
       const response = await fetch(`/s/${code}/poll`, { cache: "no-store" });
       if (!response.ok) throw new Error(String(response.status));
-      const poll = await response.json();
-      failures = 0;
+      show(await response.json());
       setConnection(true);
-      if (poll.open) showQuestion(poll);
-      else showWaiting();
     } catch {
-      failures += 1;
       setConnection(false);
     }
-    // Back off while offline so a dead network does not drain the battery.
-    const wait = Math.min(REFRESH_MS * 2 ** Math.max(0, failures - 1), MAX_BACKOFF_MS);
-    if (!document.hidden) timer = setTimeout(refresh, wait);
+    if (!document.hidden) pollTimer = setTimeout(refresh, POLL_MS);
   }
 
-  // A phone in a pocket stops asking; it catches up the moment it is back.
+  // A phone in a pocket may lose its connection; it catches up as soon as
+  // it is back, and the relay sends the current question on connect.
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) clearTimeout(timer);
-    else refresh();
+    if (document.hidden) {
+      clearTimeout(pollTimer);
+      return;
+    }
+    if (usePolling) refresh();
+    else connect();
   });
-  window.addEventListener("online", refresh);
+  window.addEventListener("online", () => (usePolling ? refresh() : connect()));
 
-  refresh();
+  connect();
 });
