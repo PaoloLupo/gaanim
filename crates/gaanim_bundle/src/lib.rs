@@ -19,7 +19,8 @@
 //!   one before it; a chunk starts with a whole frame.
 //! - `media/*`: embedded audio files.
 //! - `polls.json`: audience polls, their relay session and the elements
-//!   drawn as poll bars, only when the scene has polls. Readers that predate
+//!   drawn from live poll data (bars, nicknames, readouts) with the glyphs
+//!   to redraw them, only when the scene has polls. Readers that predate
 //!   it ignore it, so it needs no new format version.
 //!
 //! [`FragmentRecipe`]: gaanim_renderer::fragment::FragmentRecipe
@@ -40,7 +41,7 @@ use gaanim_renderer::pipeline::{
 };
 use gaanim_renderer::post_process::PostProcessShader;
 use gaanim_timeline::timeline::{
-    PollSessionInfo, SegmentMetadata, SegmentStop, TimelineMarker, TimelinePoll,
+    PollSessionInfo, SegmentMetadata, SegmentStop, TimelineMarker, TimelinePoll, TimelineQuiz,
 };
 use serde::{Deserialize, Serialize};
 
@@ -160,18 +161,71 @@ pub struct SceneData {
     pub poll_session: Option<PollSessionInfo>,
     /// Elements drawn as poll bars, which a live presentation redraws.
     pub poll_bars: Vec<PollBarRecord>,
+    /// Elements drawn as live text, such as leaderboard nicknames.
+    pub poll_texts: Vec<LiveTextRecord>,
+    /// Readouts of live poll values.
+    pub poll_readouts: Vec<LiveReadoutRecord>,
 }
 
-/// A recorded element whose outline is a poll bar: presenting the bundle
-/// replaces its path with the bar at the live votes, and keeps everything
-/// else the frame recorded (paint, transform, opacity, effects).
+// A presented bundle redraws these recorded elements from the live results:
+// it replaces an element's outline and keeps everything else the frame
+// recorded (paint, transform, opacity, effects).
+
+/// One character of a glyph atlas: its outline (SVG path data) and advance.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GlyphRecord {
+    pub ch: char,
+    pub advance: f64,
+    pub path: String,
+}
+
+/// A run of text shaped as a whole, such as a readout's prefix.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct RunRecord {
+    pub advance: f64,
+    pub path: String,
+}
+
+/// Where a live value comes from.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum LiveSourceRecord {
+    /// `measure` is `votes`, `share`, `percent`, `total` or `remaining`.
+    Poll {
+        poll: String,
+        answers: usize,
+        measure: String,
+        #[serde(default)]
+        answer: usize,
+        #[serde(default)]
+        time: f64,
+    },
+    LeaderScore {
+        rank: usize,
+    },
+    Players,
+}
+
+/// What a bar's length follows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BarSourceRecord {
+    Answer {
+        poll: String,
+        answer: usize,
+        answers: usize,
+    },
+    Leader {
+        rank: usize,
+    },
+}
+
+/// A recorded element whose outline is a poll bar.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PollBarRecord {
     /// Element key in the recorded frames.
     pub key: u32,
-    pub poll: String,
-    pub answer: usize,
-    pub preview: Vec<u32>,
+    pub source: BarSourceRecord,
     pub length: f64,
     pub thickness: f64,
     pub radius: f64,
@@ -179,6 +233,30 @@ pub struct PollBarRecord {
     pub direction: String,
     /// `total` or `leader`.
     pub scale: String,
+}
+
+/// A recorded element whose outline is a leaderboard nickname.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LiveTextRecord {
+    pub key: u32,
+    pub rank: usize,
+    /// `left`, `center` or `right`.
+    pub align: String,
+    pub glyphs: Vec<GlyphRecord>,
+}
+
+/// A recorded readout of a live value: its format and the glyphs to draw
+/// any number with it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LiveReadoutRecord {
+    pub key: u32,
+    pub source: LiveSourceRecord,
+    pub format: String,
+    pub invalid: String,
+    pub decimal_separator: char,
+    pub prefix: RunRecord,
+    pub suffix: RunRecord,
+    pub glyphs: Vec<GlyphRecord>,
 }
 
 /// `polls.json`.
@@ -189,6 +267,10 @@ struct PollsEntry {
     polls: Vec<PollRecord>,
     #[serde(default)]
     bars: Vec<PollBarRecord>,
+    #[serde(default)]
+    texts: Vec<LiveTextRecord>,
+    #[serde(default)]
+    readouts: Vec<LiveReadoutRecord>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -207,6 +289,16 @@ struct PollRecord {
     segment: u32,
     open: f64,
     close: f64,
+    #[serde(default)]
+    quiz: Option<QuizRecord>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct QuizRecord {
+    correct: usize,
+    time: u32,
+    points: u32,
+    reveal: Option<f64>,
 }
 
 fn write_polls(scene: &SceneData) -> Result<Vec<u8>> {
@@ -226,9 +318,17 @@ fn write_polls(scene: &SceneData) -> Result<Vec<u8>> {
                 segment: poll.segment,
                 open: poll.open,
                 close: poll.close,
+                quiz: poll.quiz.as_ref().map(|quiz| QuizRecord {
+                    correct: quiz.correct,
+                    time: quiz.time,
+                    points: quiz.points,
+                    reveal: quiz.reveal,
+                }),
             })
             .collect(),
         bars: scene.poll_bars.clone(),
+        texts: scene.poll_texts.clone(),
+        readouts: scene.poll_readouts.clone(),
     };
     serde_json::to_vec(&entry).map_err(|error| BundleError::Corrupt(error.to_string()))
 }
@@ -251,9 +351,17 @@ fn read_polls(bytes: &[u8], scene: &mut SceneData) -> Result<()> {
             segment: poll.segment,
             open: poll.open,
             close: poll.close,
+            quiz: poll.quiz.map(|quiz| TimelineQuiz {
+                correct: quiz.correct,
+                time: quiz.time,
+                points: quiz.points,
+                reveal: quiz.reveal,
+            }),
         })
         .collect();
     scene.poll_bars = entry.bars;
+    scene.poll_texts = entry.texts;
+    scene.poll_readouts = entry.readouts;
     Ok(())
 }
 
@@ -514,6 +622,8 @@ impl SceneData {
             polls: Vec::new(),
             poll_session: None,
             poll_bars: Vec::new(),
+            poll_texts: Vec::new(),
+            poll_readouts: Vec::new(),
         })
     }
 }
@@ -1333,7 +1443,7 @@ mod tests {
 
     #[test]
     fn polls_round_trip_in_their_own_entry() {
-        let record = |polls: Vec<TimelinePoll>, bars: Vec<PollBarRecord>| {
+        let record = |polls: Vec<TimelinePoll>, scene: SceneData| {
             let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
             writer.push_frame(&frame(0.0), [0; 32]).unwrap();
             let scene = SceneData {
@@ -1344,39 +1454,77 @@ mod tests {
                     code: "ABC234".into(),
                 }),
                 polls,
-                poll_bars: bars,
-                ..Default::default()
+                ..scene
             };
             Bundle::from_bytes(writer.finish(&scene).unwrap().into_inner().into()).unwrap()
         };
-        let poll = TimelinePoll {
-            id: "p0-0badf00d".into(),
+        let quiz = TimelinePoll {
+            id: "q0-0badf00d".into(),
             question: "¿Cuál?".into(),
             options: vec!["A".into(), "B".into()],
             preview: vec![3, 1],
             segment: 1,
             open: 0.0,
             close: 1.0,
+            quiz: Some(TimelineQuiz {
+                correct: 1,
+                time: 20,
+                points: 1000,
+                reveal: Some(0.9),
+            }),
         };
-        let bar = PollBarRecord {
-            key: 7,
-            poll: poll.id.clone(),
-            answer: 1,
-            preview: vec![3, 1],
-            length: 4.0,
-            thickness: 0.5,
-            radius: 0.1,
-            direction: "up".into(),
-            scale: "leader".into(),
+        let glyph = GlyphRecord {
+            ch: 'Ñ',
+            advance: 0.6,
+            path: "M0 0L1 0L1 1Z".into(),
         };
-        let bundle = record(vec![poll.clone()], vec![bar.clone()]);
+        let live = SceneData {
+            poll_bars: vec![PollBarRecord {
+                key: 7,
+                source: BarSourceRecord::Leader { rank: 1 },
+                length: 4.0,
+                thickness: 0.5,
+                radius: 0.1,
+                direction: "up".into(),
+                scale: "leader".into(),
+            }],
+            poll_texts: vec![LiveTextRecord {
+                key: 8,
+                rank: 0,
+                align: "left".into(),
+                glyphs: vec![glyph.clone()],
+            }],
+            poll_readouts: vec![LiveReadoutRecord {
+                key: 9,
+                source: LiveSourceRecord::Poll {
+                    poll: quiz.id.clone(),
+                    answers: 2,
+                    measure: "percent".into(),
+                    answer: 1,
+                    time: 0.0,
+                },
+                format: ".0f".into(),
+                invalid: "?".into(),
+                decimal_separator: ',',
+                prefix: RunRecord::default(),
+                suffix: RunRecord {
+                    advance: 0.5,
+                    path: "M0 0L1 1".into(),
+                },
+                glyphs: vec![glyph],
+            }],
+            ..Default::default()
+        };
+        let bundle = record(vec![quiz.clone()], live.clone());
         assert!(bundle.manifest.entries.contains_key(POLLS));
-        assert_eq!(bundle.scene.polls, [poll]);
-        assert_eq!(bundle.scene.poll_bars, [bar]);
+        assert_eq!(bundle.scene.polls, [quiz]);
+        assert_eq!(bundle.scene.poll_bars, live.poll_bars);
+        assert_eq!(bundle.scene.poll_texts, live.poll_texts);
+        assert_eq!(bundle.scene.poll_readouts, live.poll_readouts);
         assert_eq!(bundle.scene.poll_session.as_ref().unwrap().code, "ABC234");
 
         // A scene without polls writes no entry, as bundles did before.
-        let bundle = record(Vec::new(), Vec::new());
+        let bundle = record(Vec::new(), SceneData::default());
         assert!(!bundle.manifest.entries.contains_key(POLLS));
         assert!(bundle.scene.polls.is_empty());
         assert!(bundle.scene.poll_session.is_none());

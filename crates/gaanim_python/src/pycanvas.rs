@@ -5863,6 +5863,45 @@ impl PyScene {
         Ok(crate::poll::PyPoll { inner })
     }
 
+    /// Open a quiz at the cursor: a poll with a correct answer, `time`
+    /// seconds to answer once, and up to `points` for a fast correct answer.
+    #[pyo3(signature = (question, options, correct, *, time=20, points=1000, preview=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn quiz(
+        &self,
+        py: Python<'_>,
+        question: String,
+        options: Vec<String>,
+        correct: usize,
+        time: u32,
+        points: u32,
+        preview: Option<Vec<u32>>,
+    ) -> PyResult<crate::poll::PyPoll> {
+        crate::custom::ensure_authoring_allowed()?;
+        let mut scene = self.inner.lock().expect("scene canvas poisoned");
+        if scene.poll_session().is_none() {
+            let session = resolve_poll_session(py)?;
+            scene.set_poll_session(session);
+        }
+        let inner = scene
+            .quiz(question, options, correct, time, points, preview)
+            .map_err(crate::poll::poll_error)?;
+        Ok(crate::poll::PyPoll { inner })
+    }
+
+    /// The game's leaderboard: players of the scene's quizzes, best first,
+    /// as data the scene presents as it likes.
+    #[pyo3(signature = (*, preview=Vec::new()))]
+    fn leaderboard(&self, preview: Vec<(String, u64)>) -> PyResult<crate::poll::PyLeaderboard> {
+        crate::custom::ensure_authoring_allowed()?;
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .leaderboard(preview);
+        Ok(crate::poll::PyLeaderboard { inner })
+    }
+
     /// Start a voiceover block at the cursor, timed by `narration/<key>.*`.
     #[pyo3(signature = (key, *, text=None, volume=1.0))]
     fn voiceover(

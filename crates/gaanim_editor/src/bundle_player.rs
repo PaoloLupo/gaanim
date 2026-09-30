@@ -32,6 +32,10 @@ pub struct BundlePlayback {
     failed: bool,
     /// Fragments of the frames composed for previews, apart from playback's.
     preview_store: gaanim_renderer::fragment::FragmentStore,
+    /// Elements redrawn from live poll results while presenting.
+    live: gaanim_export::live_polls::LiveElements,
+    /// What they showed in the frame on screen.
+    live_shown: Option<Vec<gaanim_export::live_polls::Shown>>,
 }
 
 impl BundlePlayback {
@@ -160,7 +164,10 @@ pub fn open_bundle_bytes(world: &mut World, path: &Path, bytes: Arc<[u8]>) -> Re
     {
         window.title = format!("Gaanim — {}", bundle.scene.title);
     }
+    let live = gaanim_export::live_polls::LiveElements::from_scene(&bundle.scene);
     world.insert_resource(BundlePlayback {
+        live,
+        live_shown: None,
         bundle,
         path: path.to_path_buf(),
         shown: None,
@@ -206,51 +213,6 @@ impl BundlePlayback {
     }
 }
 
-/// Redraw the elements recorded as poll bars at the live votes; everything
-/// else of each element stays as recorded. Outside a live presentation the
-/// results are empty and the recorded frame is shown as is.
-fn draw_live_poll_bars(
-    bars: &[gaanim_bundle::PollBarRecord],
-    results: &gaanim_animation::polls::PollResults,
-    capture: &mut gaanim_renderer::pipeline::FrameCapture,
-) {
-    use gaanim_animation::polls::{BarDirection, BarScale, BarSpec};
-    if results.0.is_empty() {
-        return;
-    }
-    for bar in bars {
-        let counts = results.counts(&bar.poll, &bar.preview);
-        if counts == bar.preview.as_slice() {
-            continue;
-        }
-        let (Ok(entity), Some(direction), Some(scale)) = (
-            gaanim_bundle::element_entity(bar.key),
-            BarDirection::from_name(&bar.direction),
-            BarScale::from_name(&bar.scale),
-        ) else {
-            continue;
-        };
-        let spec = BarSpec {
-            length: bar.length,
-            thickness: bar.thickness,
-            radius: bar.radius,
-            direction,
-            scale,
-        };
-        let outline = Arc::new(spec.path(spec.fraction(bar.answer, counts)));
-        for element in capture
-            .elements
-            .iter_mut()
-            .filter(|element| element.entity == entity)
-        {
-            let mut recipe = (*element.recipe).clone();
-            recipe.path = Some(outline.clone());
-            recipe.source = Some(outline.clone());
-            element.recipe = Arc::new(recipe);
-        }
-    }
-}
-
 /// System: show the recorded frame at the playhead.
 pub fn bundle_frame_system(
     mut playback: ResMut<BundlePlayback>,
@@ -261,7 +223,16 @@ pub fn bundle_frame_system(
     results: Option<Res<gaanim_animation::polls::PollResults>>,
 ) {
     let index = playback.bundle.frame_index_at(timeline.current_time);
-    let votes_changed = results.as_ref().is_some_and(|results| results.is_changed());
+    // Redraw for new votes only when a live element would look different: a
+    // quiz's clock changes the results every frame.
+    let live_shown = results
+        .as_ref()
+        .filter(|results| results.is_changed())
+        .map_or_else(
+            || playback.live_shown.clone(),
+            |results| playback.live.shown(results),
+        );
+    let votes_changed = live_shown != playback.live_shown;
     if (playback.shown == Some(index) && !votes_changed) || playback.failed {
         if *camera != playback.camera {
             *camera = playback.camera;
@@ -298,8 +269,9 @@ pub fn bundle_frame_system(
     }
     let mut capture = frame.capture;
     if let Some(results) = &results {
-        draw_live_poll_bars(&playback.bundle.scene.poll_bars, results, &mut capture);
+        playback.live.apply(results, &mut capture);
     }
+    playback.live_shown = live_shown;
     external.frame = Some(Arc::new(capture));
 }
 

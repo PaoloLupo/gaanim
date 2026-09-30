@@ -112,6 +112,7 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
                 reactive_readout_layout_system.after(reactive_readout_update_system),
                 progress_arc::progress_arc_system,
                 polls::poll_bar_system,
+                polls::live_text_system,
             )
                 .in_set(SceneSet::Visualization),
         );

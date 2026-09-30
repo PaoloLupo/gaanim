@@ -745,10 +745,17 @@ pub(crate) enum Op {
         target: ObjectId,
         value: gaanim_animation::polls::PollValue,
     },
-    /// Make a rectangle a bar that follows a poll answer.
+    /// Make a rectangle a bar that follows a poll answer or a score.
     AttachPollBar {
         target: ObjectId,
         bar: gaanim_animation::polls::PollBar,
+    },
+    /// Make an empty path live text, such as a leaderboard nickname.
+    AttachLiveText {
+        target: ObjectId,
+        source: gaanim_animation::polls::LiveTextSource,
+        preview: std::sync::Arc<str>,
+        options: super::poll::LiveTextOptions,
     },
     /// Regenerate a curved arrow arc from a float signal every frame.
     AttachTrackerArc {

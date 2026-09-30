@@ -2747,6 +2747,14 @@ impl SceneModel {
                         segment: segment_metadata.get(poll.open.0)?.id,
                         open,
                         close: close.max(open),
+                        quiz: poll
+                            .quiz
+                            .map(|quiz| gaanim_timeline::timeline::TimelineQuiz {
+                                correct: quiz.correct,
+                                time: quiz.time,
+                                points: quiz.points,
+                                reveal: quiz.reveal.and_then(|reveal| at(reveal)),
+                            }),
                     })
                 })
                 .collect(),
@@ -6303,6 +6311,38 @@ impl SceneModel {
                         builder.commands.queue(move |world: &mut World| {
                             if let Ok(mut target) = world.get_entity_mut(entity) {
                                 target.insert(bar);
+                            }
+                        });
+                    }
+                }
+
+                Op::AttachLiveText {
+                    target,
+                    source,
+                    preview,
+                    options,
+                } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(target_st) = builder.states.get(target_id)
+                    {
+                        let entity = target_st.entity;
+                        let body = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
+                        let live = gaanim_animation::polls::LiveText {
+                            source: source.clone(),
+                            preview: preview.clone(),
+                            font_family: options
+                                .font
+                                .clone()
+                                .unwrap_or_else(|| body.font_family.clone()),
+                            font_weight: options.weight,
+                            font_size: options.size.unwrap_or(body.size),
+                            align: options.align,
+                            atlas: Default::default(),
+                            last: None,
+                        };
+                        builder.commands.queue(move |world: &mut World| {
+                            if let Ok(mut target) = world.get_entity_mut(entity) {
+                                target.insert(live);
                             }
                         });
                     }

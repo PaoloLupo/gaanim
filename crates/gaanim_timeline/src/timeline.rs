@@ -364,6 +364,21 @@ pub struct TimelinePoll {
     pub segment: u32,
     pub open: f64,
     pub close: f64,
+    /// Set for a quiz, authored with `scene.quiz`.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub quiz: Option<TimelineQuiz>,
+}
+
+/// What makes a poll a quiz: its correct answer, the seconds to answer, the
+/// most points an answer earns, and when the presentation reveals it.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct TimelineQuiz {
+    pub correct: usize,
+    pub time: u32,
+    pub points: u32,
+    /// Timeline time of `quiz.reveal()`, if the scene reveals it.
+    pub reveal: Option<f64>,
 }
 
 /// Where a scene's polls take votes: the relay and the session code its QR
@@ -5849,6 +5864,7 @@ mod tests {
             segment,
             open,
             close,
+            quiz: None,
         };
         let segment = |id: u32, start_time: f64, end_time: f64, stops: &[f64]| SegmentMetadata {
             id,

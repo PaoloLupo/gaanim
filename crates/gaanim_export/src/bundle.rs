@@ -534,28 +534,10 @@ where
         ]
     });
 
-    // Name the elements drawn as poll bars, so presenting the bundle can
-    // redraw them at the live votes.
-    let poll_bars = {
-        let world = app.world_mut();
-        let mut bars = world.query::<(Entity, &gaanim_animation::polls::PollBar)>();
-        bars.iter(world)
-            .map(|(entity, bar)| (entity, bar.clone()))
-            .collect::<Vec<_>>()
-    }
-    .into_iter()
-    .map(|(entity, bar)| gaanim_bundle::PollBarRecord {
-        key: writer.entity_key(entity),
-        poll: bar.poll.to_string(),
-        answer: bar.answer,
-        preview: bar.preview.to_vec(),
-        length: bar.spec.length,
-        thickness: bar.spec.thickness,
-        radius: bar.spec.radius,
-        direction: bar.spec.direction.name().to_string(),
-        scale: bar.spec.scale.name().to_string(),
-    })
-    .collect();
+    // Name the elements drawn from live poll data, so presenting the bundle
+    // can redraw them at the live votes.
+    let (poll_bars, poll_texts, poll_readouts) =
+        crate::live_polls::record(app.world_mut(), &mut writer);
 
     if !single_world {
         drop(app);
@@ -593,6 +575,8 @@ where
         polls,
         poll_session,
         poll_bars,
+        poll_texts,
+        poll_readouts,
     };
     if let Some(frame) = cover.and_then(ThumbnailPicker::into_frame) {
         match render_thumbnail(&scene, &frame) {

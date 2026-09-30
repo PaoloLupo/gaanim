@@ -3,13 +3,42 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
-use gaanim_api::canvas::{BarDirection, BarScale, PollBarOptions, PollError, PollHandle};
+use gaanim_api::canvas::{
+    BarDirection, BarScale, LeaderboardHandle, LiveTextOptions, PollBarOptions, PollError,
+    PollHandle, TextAlign,
+};
 
 use crate::pydrawable::PyDrawable;
 use crate::visualization::PyParameter;
 
 pub(crate) fn poll_error(error: PollError) -> PyErr {
     PyValueError::new_err(error.to_string())
+}
+
+fn bar_options(
+    length: f64,
+    thickness: f64,
+    direction: &str,
+    scale: &str,
+    radius: f64,
+) -> PyResult<PollBarOptions> {
+    let direction = BarDirection::from_name(direction).ok_or_else(|| {
+        PyValueError::new_err(format!(
+            "direction must be \"right\", \"left\", \"up\" or \"down\", got {direction:?}"
+        ))
+    })?;
+    let scale = BarScale::from_name(scale).ok_or_else(|| {
+        PyValueError::new_err(format!(
+            "scale must be \"leader\" or \"total\", got {scale:?}"
+        ))
+    })?;
+    Ok(PollBarOptions {
+        length,
+        thickness,
+        radius,
+        direction,
+        scale,
+    })
 }
 
 /// An audience poll: the data of a question the audience answers from their
@@ -76,6 +105,44 @@ impl PyPoll {
         Ok(PyParameter { inner })
     }
 
+    /// `answer`'s share of all votes, from 0 to 100.
+    fn percent(&self, answer: usize) -> PyResult<PyParameter> {
+        crate::custom::ensure_authoring_allowed()?;
+        let inner = self.inner.percent(answer).map_err(poll_error)?;
+        Ok(PyParameter { inner })
+    }
+
+    /// Seconds left to answer a quiz.
+    fn remaining(&self) -> PyResult<PyParameter> {
+        crate::custom::ensure_authoring_allowed()?;
+        let inner = self.inner.remaining().map_err(poll_error)?;
+        Ok(PyParameter { inner })
+    }
+
+    /// Reveal a quiz's answer at the cursor.
+    fn reveal(&self) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.inner.reveal().map_err(poll_error)
+    }
+
+    /// Whether the poll is a quiz.
+    #[getter]
+    fn is_quiz(&self) -> bool {
+        self.inner.correct().is_some()
+    }
+
+    /// A quiz's correct answer; `None` for a poll.
+    #[getter]
+    fn correct(&self) -> Option<usize> {
+        self.inner.correct()
+    }
+
+    /// Seconds a quiz gives to answer; `None` for a poll.
+    #[getter]
+    fn time(&self) -> Option<u32> {
+        self.inner.time()
+    }
+
     /// A bar whose length follows `answer`.
     #[pyo3(signature = (answer, *, length=6.0, thickness=0.5, direction="right", scale="leader", radius=0.0))]
     fn bar(
@@ -88,29 +155,8 @@ impl PyPoll {
         radius: f64,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
-        let direction = BarDirection::from_name(direction).ok_or_else(|| {
-            PyValueError::new_err(format!(
-                "direction must be \"right\", \"left\", \"up\" or \"down\", got {direction:?}"
-            ))
-        })?;
-        let scale = BarScale::from_name(scale).ok_or_else(|| {
-            PyValueError::new_err(format!(
-                "scale must be \"leader\" or \"total\", got {scale:?}"
-            ))
-        })?;
-        let handle = self
-            .inner
-            .bar(
-                answer,
-                PollBarOptions {
-                    length,
-                    thickness,
-                    radius,
-                    direction,
-                    scale,
-                },
-            )
-            .map_err(poll_error)?;
+        let options = bar_options(length, thickness, direction, scale, radius)?;
+        let handle = self.inner.bar(answer, options).map_err(poll_error)?;
         Ok(PyDrawable(handle))
     }
 
@@ -134,5 +180,86 @@ impl PyPoll {
             self.inner.options(),
             self.inner.code()
         )
+    }
+}
+
+/// The game's leaderboard: the players of every quiz, best first, as data
+/// for the scene to present as it likes.
+#[pyclass(name = "Leaderboard", module = "gaanim_core", frozen)]
+pub struct PyLeaderboard {
+    pub(crate) inner: LeaderboardHandle,
+}
+
+#[pymethods]
+impl PyLeaderboard {
+    /// Nicknames and scores shown outside a live presentation, best first.
+    #[getter]
+    fn preview(&self) -> Vec<(String, u64)> {
+        self.inner.preview()
+    }
+
+    /// The nickname at `rank` (0 for the leader) as live text.
+    #[pyo3(signature = (rank, *, size=None, weight=None, font=None, align="left"))]
+    fn name(
+        &self,
+        rank: usize,
+        size: Option<f64>,
+        weight: Option<u16>,
+        font: Option<String>,
+        align: &str,
+    ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        let align = TextAlign::from_name(align).ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "align must be \"left\", \"center\" or \"right\", got {align:?}"
+            ))
+        })?;
+        let handle = self
+            .inner
+            .name(
+                rank,
+                LiveTextOptions {
+                    size,
+                    weight,
+                    font,
+                    align,
+                },
+            )
+            .map_err(poll_error)?;
+        Ok(PyDrawable(handle))
+    }
+
+    /// The score of the player at `rank`.
+    fn points(&self, rank: usize) -> PyResult<PyParameter> {
+        crate::custom::ensure_authoring_allowed()?;
+        let inner = self.inner.points(rank).map_err(poll_error)?;
+        Ok(PyParameter { inner })
+    }
+
+    /// How many players joined.
+    fn players(&self) -> PyResult<PyParameter> {
+        crate::custom::ensure_authoring_allowed()?;
+        let inner = self.inner.players().map_err(poll_error)?;
+        Ok(PyParameter { inner })
+    }
+
+    /// A bar whose length is the score at `rank` against the leader's.
+    #[pyo3(signature = (rank, *, length=6.0, thickness=0.5, direction="right", radius=0.0))]
+    fn bar(
+        &self,
+        rank: usize,
+        length: f64,
+        thickness: f64,
+        direction: &str,
+        radius: f64,
+    ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        let options = bar_options(length, thickness, direction, "leader", radius)?;
+        let handle = self.inner.bar(rank, options).map_err(poll_error)?;
+        Ok(PyDrawable(handle))
+    }
+
+    fn __repr__(&self) -> String {
+        format!("Leaderboard(preview={:?})", self.inner.preview())
     }
 }

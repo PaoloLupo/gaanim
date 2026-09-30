@@ -516,6 +516,50 @@ scene.stop()
 ]
 
 #api-entry(
+  name: "Scene.quiz",
+  kind: "method",
+  params: (
+    (name: "question", type: "str", desc: [Pregunta del juego.]),
+    (name: "options", type: "Sequence[str]", desc: [Entre 2 y 6 respuestas distintas.]),
+    (name: "correct", type: "int", desc: [Índice de la respuesta correcta (0 para la primera).]),
+    (name: "time", type: "int", default: "20", desc: [Segundos para responder, de 5 a 300, medidos por el reloj del relay.]),
+    (name: "points", type: "int", default: "1000", desc: [Puntos máximos de una respuesta correcta, de 100 a 10000.]),
+    (name: "preview", type: "Sequence[int] | None", default: "None", desc: [Conteos por respuesta para la previsualización y la exportación.]),
+  ),
+  returns: (type: "Poll", desc: [Los datos del cuestionario, como `scene.poll`.]),
+  desc: [Abre un cuestionario al estilo Kahoot: una encuesta con respuesta correcta. Los teléfonos se unen al juego con un apodo, responden una sola vez antes de que se acabe el tiempo y una respuesta correcta gana `points × (1 − tiempo / time / 2)`. `quiz.reveal()` marca dónde la presentación revela la respuesta en los teléfonos, `quiz.remaining()` es la cuenta atrás en segundos y `scene.leaderboard` da la clasificación. Ver #link("/guias/presentaciones/#modo-competencia")[Modo competencia].],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+quiz = scene.quiz("¿Derivada de x²?", ["x", "2x", "x²/2"], correct=1, time=20)
+clock = scene.viz.readout(quiz.remaining(), format=".0f").move_to(-5, 3)
+scene.stop()
+quiz.reveal()
+scene.stop()
+```
+]
+
+#api-entry(
+  name: "Scene.leaderboard",
+  kind: "method",
+  params: (
+    (name: "preview", type: "Sequence[tuple[str, int]]", default: "()", desc: [Apodos y puntos que se muestran fuera de una presentación en vivo.]),
+  ),
+  returns: (type: "Leaderboard", desc: [Los datos de la clasificación; no dibuja nada.]),
+  desc: [La clasificación del juego: los jugadores de los cuestionarios de la escena, de mejor a peor. Cada método recibe un puesto (0 para el primero): `name(i, size=, weight=, font=, align=)` devuelve el apodo como texto en vivo, `points(i)` y `players()` devuelven `Parameter` y `bar(i, ...)` una barra relativa al primero. Con ellos diseñas una lista, un podio o lo que quieras. Todo sigue a los resultados en vivo también al presentar un `.gaanim`, que guarda los glifos de los apodos.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+board = scene.leaderboard(preview=[("Ana", 2890), ("Beto", 2410)])
+for rank in range(2):
+    board.name(rank, size=0.5).move_to(-3, 1 - rank)
+    scene.viz.readout(board.points(rank), format=".0f").move_to(3, 1 - rank)
+```
+]
+
+#api-entry(
   name: "Scene.stops",
   kind: "property",
   returns: (type: "list[SceneStop]", desc: [Las pausas creadas hasta ahora, en orden temporal.]),

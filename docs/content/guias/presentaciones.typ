@@ -221,10 +221,48 @@ Para fijar el código, por ejemplo si varias personas presentan el mismo
 proyecto, usa la variable `GAANIM_POLL_SESSION`.
 
 Al presentar un paquete `.gaanim` los votos también llegan en vivo, pero el
-paquete reproduce lo grabado: solo las barras de `poll.bar` se redibujan con
-los votos reales, y lo que dependa de un `Parameter` muestra los valores de
-`preview`. Si quieres resultados en vivo en un paquete, construye la
-visualización con barras. El reproductor web todavía no recibe votos.
+paquete reproduce lo grabado. Se redibujan con los datos reales las barras de
+`poll.bar`, los apodos de la clasificación y las lecturas que muestran
+directamente un valor de la encuesta, como
+`scene.viz.readout(poll.votes(0))` o `poll.percent(0)`. Lo que pase por un
+`computed` con Python muestra los valores de `preview`. El reproductor web
+todavía no recibe votos.
+
+== Modo competencia <modo-competencia>
+
+`scene.quiz` es una encuesta con respuesta correcta, al estilo de Kahoot. Los
+teléfonos se unen al juego con un apodo, ven una cuenta atrás, responden una
+sola vez y una respuesta correcta gana más puntos cuanto antes llega: todos
+los puntos al instante y la mitad en el último segundo. `quiz.reveal()` marca
+el punto en que la presentación revela la respuesta: cada teléfono muestra si
+acertó, cuántos puntos ganó y su puesto.
+
+```python
+quiz = scene.quiz("¿Cuál es la derivada de x²?", ["x", "2x", "x²/2", "2"],
+                  correct=1, time=20, preview=[3, 17, 5, 2])
+clock = scene.viz.readout(quiz.remaining(), format=".0f")   # la cuenta atrás
+scene.stop()        # el público responde
+quiz.reveal()       # al avanzar, los teléfonos ven el resultado
+scene.stop()
+
+board = scene.leaderboard(preview=[("Ana", 2890), ("Beto", 2410), ("Carla", 1995)])
+for rank, x in [(1, -4), (0, 0), (2, 4)]:
+    board.bar(rank, length=4, thickness=2.6, direction="up").fill(GOLD).move_to(x, -1.2)
+    board.name(rank, size=0.55, align="center").move_to(x, 1.9)
+    scene.viz.readout(board.points(rank), format=".0f", suffix=" pts").move_to(x, 1.3)
+```
+
+Como las encuestas, el cuestionario y la clasificación solo dan datos: el
+podio, la lista o las tarjetas los diseñas tú. `quiz.remaining()` cuenta hacia
+atrás a lo largo de la línea de tiempo en la previsualización y sigue el reloj
+del relay al presentar. `board.name(i)` es texto en vivo con el apodo del
+puesto `i`; `board.points(i)` y `board.players()` son `Parameter`.
+
+En la vista del presentador aparece un panel con los teléfonos conectados, los
+jugadores y sus puntos, un botón para quitar a un jugador (su teléfono ya no
+puede volver a unirse) y otro para empezar el juego de nuevo, que borra votos
+y jugadores. Los apodos admiten de 2 a 20 letras, números o espacios y no se
+repiten en la sesión.
 
 == El relay
 

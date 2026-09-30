@@ -1,15 +1,22 @@
-//! Audience polls: [`SceneModel::poll`].
+//! Audience polls, quizzes and the game's leaderboard:
+//! [`SceneModel::poll`], [`SceneModel::quiz`], [`SceneModel::leaderboard`].
 //!
 //! A poll gives the scene its data and leaves the presentation to it: the
 //! session code and address, a QR code drawable, live values (votes, share,
-//! total) as parameters any reactive drawable can follow, and bars whose
-//! length follows an answer. Outside a live presentation the values are the
-//! poll's preview counts, so previews and exports stay deterministic.
+//! percent, total, a quiz's seconds left) as parameters any reactive
+//! drawable can follow, and bars whose length follows an answer. The
+//! leaderboard gives the players' nicknames as live text, their scores as
+//! parameters and bars. Outside a live presentation every value is its
+//! preview, so previews and exports stay deterministic.
 
 use std::sync::Arc;
 
-use gaanim_animation::polls::{BarSpec, PollBar, PollMeasure, PollValue};
+use gaanim_animation::polls::{
+    BarSource, BarSpec, LiveTextSource, PollBar, PollMeasure, PollSource, PollValue, TextAlign,
+    leader_fraction,
+};
 use gaanim_animation::{SampledInterpolation, SampledProperty};
+use gaanim_core::peniko::Color;
 use qrcodegen::{QrCode, QrCodeEcc};
 
 use super::SceneModel;
@@ -20,6 +27,10 @@ use super::visualization::{Parameter, parameter_in};
 
 /// Most answers a poll takes: they must fit on a phone.
 pub const MAX_POLL_OPTIONS: usize = 6;
+/// Seconds a quiz may give to answer, as the relay accepts.
+pub const QUIZ_TIME: std::ops::RangeInclusive<u32> = 5..=300;
+/// Points a quiz may give for a correct answer, as the relay accepts.
+pub const QUIZ_POINTS: std::ops::RangeInclusive<u32> = 100..=10_000;
 
 /// Where a scene's polls take votes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,8 +72,21 @@ pub enum PollError {
     NoSession,
     #[error("the poll is already closed")]
     AlreadyClosed,
+    #[error("this poll is not a quiz; create it with scene.quiz")]
+    NotQuiz,
+    #[error("the quiz is already revealed")]
+    AlreadyRevealed,
     #[error("{0}")]
     Invalid(String),
+}
+
+/// Scoring of a quiz as authored.
+#[derive(Debug, Clone)]
+pub(crate) struct QuizRecord {
+    pub correct: usize,
+    pub time: u32,
+    pub points: u32,
+    pub reveal: Option<(usize, f64)>,
 }
 
 /// A poll as authored: its window is `open` to `close` (or the end of the
@@ -75,20 +99,36 @@ pub(crate) struct PollRecord {
     pub preview: Arc<[u32]>,
     pub open: (usize, f64),
     pub close: Option<(usize, f64)>,
+    pub quiz: Option<QuizRecord>,
 }
 
 /// Stable id on the relay: the poll's position and a hash of its text, so
 /// editing a question starts it from zero while re-running keeps its votes.
-fn poll_id(index: usize, question: &str, options: &[String]) -> String {
+fn poll_id(index: usize, question: &str, options: &[String], quiz: Option<&QuizRecord>) -> String {
     // FNV-1a: stable across platforms and releases, unlike `DefaultHasher`.
     let mut hash: u32 = 0x811c_9dc5;
-    for text in std::iter::once(question).chain(options.iter().map(String::as_str)) {
+    let scoring = quiz.map(|quiz| format!("{}/{}/{}", quiz.correct, quiz.time, quiz.points));
+    let texts = std::iter::once(question)
+        .chain(options.iter().map(String::as_str))
+        .chain(scoring.as_deref());
+    for text in texts {
         for byte in text.bytes().chain(std::iter::once(0)) {
             hash ^= u32::from(byte);
             hash = hash.wrapping_mul(0x0100_0193);
         }
     }
-    format!("p{index}-{hash:08x}")
+    let kind = if quiz.is_some() { "q" } else { "p" };
+    format!("{kind}{index}-{hash:08x}")
+}
+
+/// The authoring clock at a segment's local cursor: segments before it
+/// span their authored length.
+fn authored_time(state: &super::ops::CanvasState, (segment, local): (usize, f64)) -> f64 {
+    state.segments[..segment]
+        .iter()
+        .map(|segment| segment.cursor)
+        .sum::<f64>()
+        + local
 }
 
 impl SceneModel {
@@ -118,7 +158,51 @@ impl SceneModel {
         options: impl IntoIterator<Item = impl Into<String>>,
         preview: Option<Vec<u32>>,
     ) -> Result<PollHandle, PollError> {
-        let question = question.into().trim().to_string();
+        self.open_poll(question.into(), options, preview, None)
+    }
+
+    /// Open a quiz at the cursor: a poll with a correct answer, `time`
+    /// seconds to answer once and up to `points` for a fast correct answer.
+    pub fn quiz(
+        &mut self,
+        question: impl Into<String>,
+        options: impl IntoIterator<Item = impl Into<String>>,
+        correct: usize,
+        time: u32,
+        points: u32,
+        preview: Option<Vec<u32>>,
+    ) -> Result<PollHandle, PollError> {
+        if !QUIZ_TIME.contains(&time) {
+            return Err(PollError::Invalid(format!(
+                "a quiz gives between {} and {} seconds, got {time}",
+                QUIZ_TIME.start(),
+                QUIZ_TIME.end()
+            )));
+        }
+        if !QUIZ_POINTS.contains(&points) {
+            return Err(PollError::Invalid(format!(
+                "a quiz gives between {} and {} points, got {points}",
+                QUIZ_POINTS.start(),
+                QUIZ_POINTS.end()
+            )));
+        }
+        let quiz = QuizRecord {
+            correct,
+            time,
+            points,
+            reveal: None,
+        };
+        self.open_poll(question.into(), options, preview, Some(quiz))
+    }
+
+    fn open_poll(
+        &mut self,
+        question: String,
+        options: impl IntoIterator<Item = impl Into<String>>,
+        preview: Option<Vec<u32>>,
+        quiz: Option<QuizRecord>,
+    ) -> Result<PollHandle, PollError> {
+        let question = question.trim().to_string();
         if question.is_empty() {
             return Err(PollError::EmptyQuestion);
         }
@@ -141,6 +225,14 @@ impl SceneModel {
                 });
             }
         }
+        if let Some(quiz) = &quiz
+            && quiz.correct >= options.len()
+        {
+            return Err(PollError::UnknownAnswer {
+                answer: quiz.correct,
+                count: options.len(),
+            });
+        }
         let preview = preview.unwrap_or_else(|| vec![0; options.len()]);
         if preview.len() != options.len() {
             return Err(PollError::PreviewLength {
@@ -155,21 +247,42 @@ impl SceneModel {
         let index = state.polls.len();
         let open = (state.active_idx, state.active().cursor);
         state.polls.push(PollRecord {
-            id: poll_id(index, &question, &options),
+            id: poll_id(index, &question, &options, quiz.as_ref()),
             question,
             options,
             preview: preview.into(),
             open,
             close: None,
+            quiz,
         });
         Ok(PollHandle {
             index,
             state: self.state.clone(),
         })
     }
+
+    /// The game's leaderboard: the players of every quiz in this scene,
+    /// best first. `preview` names and scores stand in for players outside a
+    /// live presentation. Text uses `color`, or the theme's foreground.
+    pub fn leaderboard(&mut self, preview: Vec<(String, u64)>) -> LeaderboardHandle {
+        let mut preview = preview;
+        preview.sort_by(|a, b| b.1.cmp(&a.1));
+        let color = self
+            .theme_style
+            .as_ref()
+            .map_or(Color::WHITE, |theme| theme.palette.foreground);
+        LeaderboardHandle {
+            state: self.state.clone(),
+            preview: preview
+                .into_iter()
+                .map(|(name, score)| (Arc::from(name.trim()), score))
+                .collect(),
+            color,
+        }
+    }
 }
 
-/// A poll authored with [`SceneModel::poll`].
+/// A poll authored with [`SceneModel::poll`] or [`SceneModel::quiz`].
 #[derive(Clone)]
 pub struct PollHandle {
     index: usize,
@@ -185,7 +298,7 @@ impl std::fmt::Debug for PollHandle {
     }
 }
 
-/// How [`PollHandle::bar`] draws.
+/// How [`PollHandle::bar`] and [`LeaderboardHandle::bar`] draw.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PollBarOptions {
     pub length: f64,
@@ -193,6 +306,96 @@ pub struct PollBarOptions {
     pub radius: f64,
     pub direction: gaanim_animation::polls::BarDirection,
     pub scale: gaanim_animation::polls::BarScale,
+}
+
+impl PollBarOptions {
+    fn spec(&self) -> Result<BarSpec, PollError> {
+        for (name, value) in [("length", self.length), ("thickness", self.thickness)] {
+            if !(value.is_finite() && value > 0.0) {
+                return Err(PollError::Invalid(format!(
+                    "bar {name} must be positive, got {value}"
+                )));
+            }
+        }
+        if !(self.radius.is_finite() && self.radius >= 0.0) {
+            return Err(PollError::Invalid(format!(
+                "bar radius must not be negative, got {}",
+                self.radius
+            )));
+        }
+        Ok(BarSpec {
+            length: self.length,
+            thickness: self.thickness,
+            radius: self.radius,
+            direction: self.direction,
+            scale: self.scale,
+        })
+    }
+}
+
+/// Spawn the rectangle of a bar and make it follow `source`.
+fn spawn_bar(
+    state: &SharedCanvasState,
+    spec: BarSpec,
+    source: BarSource,
+    preview: f64,
+) -> DrawableHandle {
+    let full = spec.full();
+    let handle =
+        super::canvas_impl::spawn_in(state, SpawnKind::Rect(full.width(), full.height()), true);
+    state
+        .lock()
+        .expect("canvas state poisoned")
+        .active_mut()
+        .ops
+        .push(Op::AttachPollBar {
+            target: handle.id,
+            bar: PollBar {
+                source,
+                spec,
+                preview,
+                last: None,
+            },
+        });
+    handle
+}
+
+/// A parameter whose value follows `source`: constant `preview` samples, or
+/// a series such as a countdown, replaced by the live value while
+/// presenting.
+fn live_parameter(
+    state: &SharedCanvasState,
+    source: PollSource,
+    times: Vec<f64>,
+    values: Vec<f64>,
+    interpolation: SampledInterpolation,
+) -> Result<Parameter, PollError> {
+    let parameter =
+        parameter_in(state, values[0]).map_err(|error| PollError::Invalid(error.to_string()))?;
+    parameter
+        .drawable()
+        .drive_from_samples(
+            times,
+            values.clone(),
+            SampledProperty::Signal,
+            interpolation,
+            1.0,
+            0.0,
+        )
+        .map_err(|_| PollError::Invalid("could not drive the poll value".into()))?;
+    state
+        .lock()
+        .expect("canvas state poisoned")
+        .active_mut()
+        .ops
+        .push(Op::AttachPollValue {
+            target: parameter.drawable().id,
+            value: PollValue {
+                source,
+                preview: values.into(),
+            },
+        });
+    Ok(parameter)
 }
 
 impl PollHandle {
@@ -225,6 +428,16 @@ impl PollHandle {
         self.record().preview.to_vec()
     }
 
+    /// The correct answer of a quiz; `None` for a poll.
+    pub fn correct(&self) -> Option<usize> {
+        self.record().quiz.map(|quiz| quiz.correct)
+    }
+
+    /// Seconds a quiz gives to answer; `None` for a poll.
+    pub fn time(&self) -> Option<u32> {
+        self.record().quiz.map(|quiz| quiz.time)
+    }
+
     /// The session code phones type.
     pub fn code(&self) -> String {
         self.session().code
@@ -246,34 +459,18 @@ impl PollHandle {
 
     fn value(&self, measure: PollMeasure) -> Result<Parameter, PollError> {
         let record = self.record();
-        let initial = measure.value(&record.preview);
-        let parameter = parameter_in(&self.state, initial)
-            .map_err(|error| PollError::Invalid(error.to_string()))?;
-        parameter
-            .drawable()
-            .drive_from_samples(
-                vec![0.0],
-                vec![initial],
-                SampledProperty::Signal,
-                SampledInterpolation::Step,
-                1.0,
-                0.0,
-            )
-            .map_err(|_| PollError::Invalid("could not drive the poll value".into()))?;
-        self.state
-            .lock()
-            .expect("canvas state poisoned")
-            .active_mut()
-            .ops
-            .push(Op::AttachPollValue {
-                target: parameter.drawable().id,
-                value: PollValue {
-                    poll: record.id.into(),
-                    measure,
-                    preview: record.preview,
-                },
-            });
-        Ok(parameter)
+        let source = PollSource::Poll {
+            poll: record.id.as_str().into(),
+            answers: record.options.len(),
+            measure,
+        };
+        live_parameter(
+            &self.state,
+            source,
+            vec![0.0],
+            vec![measure.value(&record.preview)],
+            SampledInterpolation::Step,
+        )
     }
 
     /// Votes for `answer`, live while presenting.
@@ -288,58 +485,66 @@ impl PollHandle {
         self.value(PollMeasure::Share(answer))
     }
 
+    /// `answer`'s share of all votes, from 0 to 100.
+    pub fn percent(&self, answer: usize) -> Result<Parameter, PollError> {
+        self.check_answer(answer)?;
+        self.value(PollMeasure::Percent(answer))
+    }
+
     /// Votes for every answer.
     pub fn total(&self) -> Result<Parameter, PollError> {
         self.value(PollMeasure::Total)
+    }
+
+    /// Seconds left to answer a quiz. In previews and exports it counts
+    /// down from where the quiz opens; while presenting it follows the
+    /// relay's clock.
+    pub fn remaining(&self) -> Result<Parameter, PollError> {
+        let (record, elapsed) = {
+            let state = self.state.lock().expect("canvas state poisoned");
+            let record = state.polls[self.index].clone();
+            let now = authored_time(&state, (state.active_idx, state.active().cursor));
+            let elapsed = (now - authored_time(&state, record.open)).max(0.0);
+            (record, elapsed)
+        };
+        let quiz = record.quiz.as_ref().ok_or(PollError::NotQuiz)?;
+        let time = f64::from(quiz.time);
+        let left = (time - elapsed).max(0.0);
+        let (times, values) = if left > 0.0 {
+            (vec![0.0, left], vec![left, 0.0])
+        } else {
+            (vec![0.0], vec![0.0])
+        };
+        live_parameter(
+            &self.state,
+            PollSource::Poll {
+                poll: record.id.as_str().into(),
+                answers: record.options.len(),
+                measure: PollMeasure::Remaining { time },
+            },
+            times,
+            values,
+            SampledInterpolation::Linear,
+        )
     }
 
     /// A bar whose length follows `answer`. Its bounds are the full-length
     /// box, centered on its position, and it grows from its start edge.
     pub fn bar(&self, answer: usize, options: PollBarOptions) -> Result<DrawableHandle, PollError> {
         self.check_answer(answer)?;
-        for (name, value) in [("length", options.length), ("thickness", options.thickness)] {
-            if !(value.is_finite() && value > 0.0) {
-                return Err(PollError::Invalid(format!(
-                    "bar {name} must be positive, got {value}"
-                )));
-            }
-        }
-        if !(options.radius.is_finite() && options.radius >= 0.0) {
-            return Err(PollError::Invalid(format!(
-                "bar radius must not be negative, got {}",
-                options.radius
-            )));
-        }
+        let spec = options.spec()?;
         let record = self.record();
-        let spec = BarSpec {
-            length: options.length,
-            thickness: options.thickness,
-            radius: options.radius,
-            direction: options.direction,
-            scale: options.scale,
-        };
-        let full = spec.full();
-        let handle = super::canvas_impl::spawn_in(
+        let preview = spec.fraction(answer, &record.preview);
+        Ok(spawn_bar(
             &self.state,
-            SpawnKind::Rect(full.width(), full.height()),
-            true,
-        );
-        self.state
-            .lock()
-            .expect("canvas state poisoned")
-            .active_mut()
-            .ops
-            .push(Op::AttachPollBar {
-                target: handle.id,
-                bar: PollBar {
-                    poll: record.id.into(),
-                    answer,
-                    preview: record.preview,
-                    spec,
-                    last: None,
-                },
-            });
-        Ok(handle)
+            spec,
+            BarSource::Answer {
+                poll: record.id.as_str().into(),
+                answer,
+                answers: record.options.len(),
+            },
+            preview,
+        ))
     }
 
     /// The QR code of [`Self::url`], `size` scene units on a side, as one
@@ -354,7 +559,7 @@ impl PollHandle {
         }
         let elements = qr_elements(&self.url(), size)?;
         let handle = super::canvas_impl::spawn_in(&self.state, SpawnKind::Curve(elements), true);
-        Ok(handle.fill(gaanim_core::peniko::Color::BLACK).no_stroke())
+        Ok(handle.fill(Color::BLACK).no_stroke())
     }
 
     /// Stop taking votes at the cursor instead of at the end of the
@@ -368,6 +573,128 @@ impl PollHandle {
         }
         record.close = Some(at);
         Ok(())
+    }
+
+    /// Reveal a quiz's answer at the cursor: from here a presentation tells
+    /// every phone whether it was right, and takes no more answers.
+    pub fn reveal(&self) -> Result<(), PollError> {
+        let mut state = self.state.lock().expect("canvas state poisoned");
+        let at = (state.active_idx, state.active().cursor);
+        let quiz = state.polls[self.index]
+            .quiz
+            .as_mut()
+            .ok_or(PollError::NotQuiz)?;
+        if quiz.reveal.is_some() {
+            return Err(PollError::AlreadyRevealed);
+        }
+        quiz.reveal = Some(at);
+        Ok(())
+    }
+}
+
+/// The game's leaderboard, from [`SceneModel::leaderboard`].
+#[derive(Clone)]
+pub struct LeaderboardHandle {
+    state: SharedCanvasState,
+    preview: Vec<(Arc<str>, u64)>,
+    color: Color,
+}
+
+impl std::fmt::Debug for LeaderboardHandle {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LeaderboardHandle")
+            .field("preview", &self.preview)
+            .finish_non_exhaustive()
+    }
+}
+
+/// How [`LeaderboardHandle::name`] sets its text.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LiveTextOptions {
+    /// Font size in scene units; `None` uses the theme's body size.
+    pub size: Option<f64>,
+    pub weight: Option<u16>,
+    /// Font family; `None` uses the theme's body font.
+    pub font: Option<String>,
+    pub align: TextAlign,
+}
+
+impl LeaderboardHandle {
+    fn preview_score(&self, rank: usize) -> u64 {
+        self.preview.get(rank).map_or(0, |(_, score)| *score)
+    }
+
+    /// Nicknames and scores shown outside a live presentation, best first.
+    pub fn preview(&self) -> Vec<(String, u64)> {
+        self.preview
+            .iter()
+            .map(|(name, score)| (name.to_string(), *score))
+            .collect()
+    }
+
+    /// The nickname at `rank` (0 for the leader) as live text; empty when
+    /// fewer players joined.
+    pub fn name(&self, rank: usize, options: LiveTextOptions) -> Result<DrawableHandle, PollError> {
+        if let Some(size) = options.size
+            && !(size.is_finite() && size > 0.0)
+        {
+            return Err(PollError::Invalid(format!(
+                "text size must be positive, got {size}"
+            )));
+        }
+        let preview = self
+            .preview
+            .get(rank)
+            .map_or_else(|| Arc::from(""), |(name, _)| name.clone());
+        let handle = super::canvas_impl::spawn_in(&self.state, SpawnKind::Curve(Vec::new()), true);
+        let handle = handle.fill(self.color).no_stroke();
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachLiveText {
+                target: handle.id,
+                source: LiveTextSource::LeaderName { rank },
+                preview,
+                options,
+            });
+        Ok(handle)
+    }
+
+    /// The score of the player at `rank`, live while presenting.
+    pub fn points(&self, rank: usize) -> Result<Parameter, PollError> {
+        live_parameter(
+            &self.state,
+            PollSource::LeaderScore { rank },
+            vec![0.0],
+            vec![self.preview_score(rank) as f64],
+            SampledInterpolation::Step,
+        )
+    }
+
+    /// How many players joined.
+    pub fn players(&self) -> Result<Parameter, PollError> {
+        live_parameter(
+            &self.state,
+            PollSource::Players,
+            vec![0.0],
+            vec![self.preview.len() as f64],
+            SampledInterpolation::Step,
+        )
+    }
+
+    /// A bar whose length is the score at `rank` against the leader's.
+    pub fn bar(&self, rank: usize, options: PollBarOptions) -> Result<DrawableHandle, PollError> {
+        let spec = options.spec()?;
+        let preview = leader_fraction(self.preview.iter().map(|(_, score)| *score), rank);
+        Ok(spawn_bar(
+            &self.state,
+            spec,
+            BarSource::Leader { rank },
+            preview,
+        ))
     }
 }
 
@@ -471,12 +798,54 @@ mod tests {
     }
 
     #[test]
-    fn poll_ids_are_stable_and_follow_the_text() {
+    fn quizzes_validate_their_answer_time_and_points() {
+        let mut scene = scene();
+        assert_eq!(
+            scene.quiz("Q", ["A", "B"], 2, 20, 1000, None).unwrap_err(),
+            PollError::UnknownAnswer {
+                answer: 2,
+                count: 2
+            }
+        );
+        assert!(scene.quiz("Q", ["A", "B"], 0, 2, 1000, None).is_err());
+        assert!(scene.quiz("Q", ["A", "B"], 0, 20, 50, None).is_err());
+        let quiz = scene.quiz("Q", ["A", "B"], 1, 20, 1000, None).unwrap();
+        assert_eq!((quiz.correct(), quiz.time()), (Some(1), Some(20)));
+        assert!(quiz.id().starts_with("q0-"));
+        assert!(quiz.reveal().is_ok());
+        assert_eq!(quiz.reveal(), Err(PollError::AlreadyRevealed));
+        let poll = scene.poll("Plain", ["A", "B"], None).unwrap();
+        assert_eq!(poll.correct(), None);
+        assert_eq!(poll.reveal(), Err(PollError::NotQuiz));
+        assert!(matches!(poll.remaining(), Err(PollError::NotQuiz)));
+    }
+
+    #[test]
+    fn poll_ids_are_stable_and_follow_the_text_and_scoring() {
         let options = ["A".to_string(), "B".to_string()];
-        assert_eq!(poll_id(0, "Q", &options), poll_id(0, "Q", &options));
-        assert_ne!(poll_id(0, "Q", &options), poll_id(0, "Q?", &options));
-        assert_ne!(poll_id(0, "Q", &options), poll_id(1, "Q", &options));
-        assert!(poll_id(3, "¿Cuál?", &options).starts_with("p3-"));
+        let quiz = |correct| QuizRecord {
+            correct,
+            time: 20,
+            points: 1000,
+            reveal: None,
+        };
+        assert_eq!(
+            poll_id(0, "Q", &options, None),
+            poll_id(0, "Q", &options, None)
+        );
+        assert_ne!(
+            poll_id(0, "Q", &options, None),
+            poll_id(0, "Q?", &options, None)
+        );
+        assert_ne!(
+            poll_id(0, "Q", &options, None),
+            poll_id(1, "Q", &options, None)
+        );
+        assert_ne!(
+            poll_id(0, "Q", &options, Some(&quiz(0))),
+            poll_id(0, "Q", &options, Some(&quiz(1)))
+        );
+        assert!(poll_id(3, "¿Cuál?", &options, None).starts_with("p3-"));
     }
 
     #[test]
@@ -497,8 +866,30 @@ mod tests {
             })
         ));
         assert!(poll.share(1).is_ok());
+        assert!(poll.percent(0).is_ok());
         assert!(poll.close().is_ok());
         assert_eq!(poll.close(), Err(PollError::AlreadyClosed));
+    }
+
+    #[test]
+    fn the_leaderboard_sorts_its_preview_and_validates_text() {
+        let mut scene = scene();
+        let board = scene.leaderboard(vec![("Beto".into(), 300), (" Ana ".into(), 900)]);
+        assert_eq!(
+            board.preview(),
+            [("Ana".to_string(), 900), ("Beto".to_string(), 300)]
+        );
+        let options = |size| LiveTextOptions {
+            size,
+            weight: None,
+            font: None,
+            align: TextAlign::Left,
+        };
+        assert!(board.name(0, options(Some(0.5))).is_ok());
+        assert!(board.name(7, options(None)).is_ok());
+        assert!(board.name(0, options(Some(-1.0))).is_err());
+        assert!(board.points(1).is_ok());
+        assert!(board.players().is_ok());
     }
 
     #[test]

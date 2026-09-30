@@ -85,8 +85,11 @@ pub use narration::{
     VoiceoverHandle, VoiceoverSpec, live_take_recording, set_live_take_recording,
 };
 mod poll;
-pub use gaanim_animation::polls::{BarDirection, BarScale};
-pub use poll::{MAX_POLL_OPTIONS, PollBarOptions, PollError, PollHandle, PollSession};
+pub use gaanim_animation::polls::{BarDirection, BarScale, TextAlign};
+pub use poll::{
+    LeaderboardHandle, LiveTextOptions, MAX_POLL_OPTIONS, PollBarOptions, PollError, PollHandle,
+    PollSession, QUIZ_POINTS, QUIZ_TIME,
+};
 mod theme;
 pub use gaanim_objects::prelude::SvgLoadError;
 pub use theme::{

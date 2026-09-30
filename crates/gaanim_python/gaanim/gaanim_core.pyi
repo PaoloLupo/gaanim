@@ -4859,16 +4859,17 @@ def computed(callback: Callable[..., float], *, inputs: Sequence[Parameter | Var
     ...
 
 class Poll:
-    """An audience poll created with ``scene.poll``: its data, for the scene
-    to present as it likes.
+    """An audience poll created with ``scene.poll`` or ``scene.quiz``: its
+    data, for the scene to present as it likes.
 
     Values are live while a presentation collects votes and show the
-    ``preview`` counts everywhere else. ``votes``, ``share`` and ``total``
-    return ``Parameter`` objects: follow them with readouts, ``computed``
-    values, reactive points or anything else that accepts a parameter.
-    Presenting a ``.gaanim`` bundle replays what was recorded, so there
-    only ``bar`` drawables follow the live votes; parameter-driven
-    drawables keep the preview values.
+    ``preview`` counts everywhere else. ``votes``, ``share``, ``percent``,
+    ``total`` and ``remaining`` return ``Parameter`` objects: follow them with
+    readouts, ``computed`` values, reactive points or anything else that
+    accepts a parameter. Presenting a ``.gaanim`` bundle replays what was
+    recorded; there, ``bar`` drawables and readouts that show one of these
+    parameters directly (``scene.viz.readout(poll.votes(0))``) follow the live
+    votes, while drawables driven through ``computed`` keep their preview.
     """
     @property
     def id(self) -> str:
@@ -4900,7 +4901,47 @@ class Poll:
         """``answer``'s fraction of all votes, from 0 to 1 (0 without votes)."""
         ...
     def total(self) -> Parameter:
-        """Votes for every answer as a parameter."""
+        """Votes for every answer as a parameter; for a quiz, how many
+        players answered."""
+        ...
+    def percent(self, answer: int) -> Parameter:
+        """``answer``'s share of all votes, from 0 to 100 (0 without votes).
+
+        Unlike ``computed`` from ``share``, a readout of it stays live when a
+        ``.gaanim`` bundle is presented.
+        """
+        ...
+    def remaining(self) -> Parameter:
+        """Seconds left to answer a quiz, as a parameter.
+
+        In previews and exports it counts down along the timeline from where
+        the quiz opens; while presenting it follows the relay's clock, which
+        ends the quiz. Raises ``ValueError`` for a poll that is not a quiz.
+
+        Example:
+            clock = scene.viz.readout(quiz.remaining(), format=".0f", suffix=" s")
+        """
+        ...
+    def reveal(self) -> None:
+        """Reveal a quiz's answer at the cursor.
+
+        When a presentation's playhead reaches this point, every phone shows
+        the correct answer and each player whether it was right, the points
+        it earned and its place; the quiz takes no more answers. Raises
+        ``ValueError`` for a poll that is not a quiz, or a second reveal.
+        """
+        ...
+    @property
+    def is_quiz(self) -> bool:
+        """Whether the poll was created with ``scene.quiz``."""
+        ...
+    @property
+    def correct(self) -> Optional[int]:
+        """A quiz's correct answer (0 for the first); ``None`` for a poll."""
+        ...
+    @property
+    def time(self) -> Optional[int]:
+        """Seconds a quiz gives to answer; ``None`` for a poll."""
         ...
     def bar(
         self,
@@ -4943,6 +4984,71 @@ class Poll:
         segment where the poll opened. The values keep their last counts.
 
         Raises ``ValueError`` if the poll is already closed.
+        """
+        ...
+
+class Leaderboard:
+    """The game's leaderboard from ``scene.leaderboard``: the players of the
+    scene's quizzes, best first, as data for the scene to present as it
+    likes.
+
+    Every method takes a ``rank`` (0 for the leader) and returns something to
+    place and style: ``name`` a live text drawable, ``points`` a parameter,
+    ``bar`` a bar drawable. Outside a live presentation they show the
+    ``preview`` players; while presenting, the relay's. A rank past the last
+    player shows an empty name, 0 points and an empty bar. All of them follow
+    the live results when a ``.gaanim`` bundle is presented, including the
+    nicknames, whose glyphs the bundle stores.
+    """
+    @property
+    def preview(self) -> list[tuple[str, int]]:
+        """Nicknames and scores shown outside a live presentation, best first."""
+        ...
+    def name(
+        self,
+        rank: int,
+        *,
+        size: Optional[float] = None,
+        weight: Optional[int] = None,
+        font: Optional[str] = None,
+        align: Literal["left", "center", "right"] = "left",
+    ) -> Drawable:
+        """The nickname at ``rank`` as live text.
+
+        ``size`` and ``font`` default to the theme's body text, and ``align``
+        places the text's left edge, center or right edge on the drawable's
+        position, so names of any length line up. Style it like any drawable
+        (``fill``, ``fade_in``…); it is filled with the theme's foreground.
+        Raises ``ValueError`` for an unknown ``align`` or a non-positive size.
+
+        Example:
+            board.name(0, size=0.6, align="left").fill(GOLD).move_to(-3, 1)
+        """
+        ...
+    def points(self, rank: int) -> Parameter:
+        """The score of the player at ``rank`` as a parameter.
+
+        Example:
+            scene.viz.readout(board.points(0), format=".0f", suffix=" pts")
+        """
+        ...
+    def players(self) -> Parameter:
+        """How many players joined, as a parameter."""
+        ...
+    def bar(
+        self,
+        rank: int,
+        *,
+        length: float = 6.0,
+        thickness: float = 0.5,
+        direction: Literal["right", "left", "up", "down"] = "right",
+        radius: float = 0.0,
+    ) -> Drawable:
+        """A bar whose length is the score at ``rank`` against the leader's.
+
+        Its bounds are the full ``length`` by ``thickness`` box, centered on
+        its position, and it grows from the edge opposite ``direction``.
+        Raises ``ValueError`` like ``Poll.bar``.
         """
         ...
 
@@ -7812,6 +7918,59 @@ class Scene:
             qr = poll.qr(3.0).move_to(-4, 0)
             bar = poll.bar(1, length=6).fill(GOLD).move_to(2, 0)
             scene.stop()
+        """
+        ...
+    def quiz(
+        self,
+        question: str,
+        options: Sequence[str],
+        correct: int,
+        *,
+        time: int = 20,
+        points: int = 1000,
+        preview: Optional[Sequence[int]] = None,
+    ) -> Poll:
+        """Open a quiz at the cursor, as in Kahoot, and return its data.
+
+        A quiz is a poll with a ``correct`` answer (0 for the first). Phones
+        join the game with a nickname, have ``time`` seconds by the relay's
+        clock to answer once, and a correct answer earns
+        ``points × (1 − elapsed / time / 2)``: all of them at once, half at
+        the last moment. Call ``reveal()`` where the answer should show on the
+        phones; ``remaining()`` counts the seconds down, and
+        ``scene.leaderboard`` gives the players' standings. It takes answers in
+        the same window as a poll and presents like one.
+
+        Raises ``ValueError`` like ``poll``, and for a ``correct`` answer the
+        quiz does not have, ``time`` outside 5–300 seconds or ``points``
+        outside 100–10000.
+
+        Example:
+            quiz = scene.quiz("¿Derivada de x²?", ["x", "2x", "x²/2"], correct=1, time=20)
+            clock = scene.viz.readout(quiz.remaining(), format=".0f")
+            scene.wait(20)
+            quiz.reveal()
+            scene.stop()
+        """
+        ...
+    def leaderboard(
+        self,
+        *,
+        preview: Sequence[tuple[str, int]] = (),
+    ) -> Leaderboard:
+        """The game's leaderboard: the players of the scene's quizzes, as data.
+
+        Draws nothing: ``name``, ``points``, ``players`` and ``bar`` give the
+        pieces to lay out a list, a podium or anything else. ``preview`` names
+        and scores (sorted best first) stand in for players in previews,
+        exports and snapshots.
+
+        Example:
+            board = scene.leaderboard(preview=[("Ana", 2890), ("Beto", 2410)])
+            for rank in range(3):
+                y = 1 - rank
+                board.name(rank, size=0.5).move_to(-3, y)
+                scene.viz.readout(board.points(rank), format=".0f").move_to(3, y)
         """
         ...
     def voiceover(
