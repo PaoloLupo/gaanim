@@ -438,10 +438,13 @@ impl Rehearsal {
         stats
     }
 
-    /// The poll open at `time`, or else the last one opened.
+    /// The poll open at `time`, or else the last one opened. A poll that
+    /// opens exactly at `time` is not open yet: that instant is also the end
+    /// of the segment before it, where a presenter still stands on the last
+    /// poll's stop (the two times may differ by rounding, hence the margin).
     pub fn latest_at(&self, time: f64) -> Option<usize> {
         (0..self.polls.len())
-            .filter(|index| self.polls[*index].open <= time)
+            .filter(|index| self.polls[*index].open < time - 1e-6)
             .max_by(|a, b| self.polls[*a].open.total_cmp(&self.polls[*b].open))
     }
 
@@ -823,6 +826,11 @@ mod tests {
         // Before the second quiz is over, the run is one long.
         assert_eq!(rehearsal.results_at(4.5).stats["Ana"].streak, 1);
         assert_eq!(rehearsal.results_at(4.5).latest.as_deref(), Some("m"));
+        // At the instant the next poll opens, the stop before it still shows
+        // the last one's answers.
+        assert_eq!(rehearsal.results_at(5.0).latest.as_deref(), Some("m"));
+        assert_eq!(rehearsal.latest_at(5.0), Some(0));
+        assert!(rehearsal.answer_of(0, 0, 5.0).is_some());
     }
 
     #[test]
