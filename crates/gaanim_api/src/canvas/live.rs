@@ -4,7 +4,9 @@
 //! while a presentation takes votes (see `gaanim_animation::live`), and in
 //! previews and exports it replays its preview players.
 
-use gaanim_animation::live::{LiveZone, Motion, Program, ProgramError, ZoneNames};
+use gaanim_animation::live::{
+    LiveZone, MAX_STATE, Motion, Program, ProgramError, ZoneNames, ZoneState,
+};
 use gaanim_objects::character::catalog;
 
 use super::SceneModel;
@@ -63,9 +65,16 @@ fn positive(value: f64, what: &str) -> Result<f64, LiveZoneError> {
     }
 }
 
-/// Check a behavior: it must run here and play only known expressions.
+/// Check a behavior: it must run here, return a pose and play only known
+/// expressions.
 pub fn check_behavior(behavior: Program) -> Result<Program, LiveZoneError> {
     let behavior = behavior.checked()?;
+    if behavior.pose.is_none() {
+        return Err(LiveZoneError::Invalid(format!(
+            "{} returns state(...); a behavior returns pose(...)",
+            behavior.name
+        )));
+    }
     let known = catalog().expressions();
     if let Some(name) = behavior
         .strings
@@ -79,6 +88,42 @@ pub fn check_behavior(behavior: Program) -> Result<Program, LiveZoneError> {
         });
     }
     Ok(behavior)
+}
+
+/// Check what a zone keeps per player: named numbers, at most
+/// [`MAX_STATE`], and an update that returns one value for each.
+fn check_state(kept: &ZoneState) -> Result<(), LiveZoneError> {
+    let count = kept.names.len();
+    if !(1..=MAX_STATE).contains(&count) || kept.initial.len() != count {
+        return Err(LiveZoneError::Invalid(format!(
+            "a zone keeps 1 to {MAX_STATE} numbers per player, each with a starting value; got {count}"
+        )));
+    }
+    for (index, name) in kept.names.iter().enumerate() {
+        let identifier = name
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_alphabetic() || ch == '_')
+            && name.chars().all(|ch| ch.is_alphanumeric() || ch == '_');
+        if !identifier || kept.names[..index].contains(name) {
+            return Err(LiveZoneError::Invalid(format!(
+                "state names are distinct Python names, got {name:?}"
+            )));
+        }
+    }
+    if let Some(value) = kept.initial.iter().find(|value| !value.is_finite()) {
+        return Err(LiveZoneError::Invalid(format!(
+            "state starts with finite numbers, got {value}"
+        )));
+    }
+    let update = kept.update.clone().checked()?;
+    if update.pose.is_some() || update.next.len() != count {
+        return Err(LiveZoneError::Invalid(format!(
+            "{} must return state(...) with the zone's {count} numbers",
+            update.name
+        )));
+    }
+    Ok(())
 }
 
 impl SceneModel {
@@ -97,6 +142,7 @@ impl SceneModel {
         size: f64,
         motion: Motion,
         names: Option<ZoneNames>,
+        kept: Option<ZoneState>,
     ) -> Result<LiveZoneHandle, LiveZoneError> {
         let [x0, y0, x1, y1] = bounds;
         if !(bounds.iter().all(|value| value.is_finite()) && x1 > x0 && y1 > y0) {
@@ -130,6 +176,9 @@ impl SceneModel {
             )));
         }
         let behavior = check_behavior(behavior)?;
+        if let Some(kept) = &kept {
+            check_state(kept)?;
+        }
         let mut state = self.state.lock().expect("canvas state poisoned");
         let index = state.live_zones.len();
         let open = (state.active_idx, state.active().cursor);
@@ -145,6 +194,7 @@ impl SceneModel {
                 behavior,
                 motion,
                 names,
+                state: kept,
             },
             open,
             close: None,

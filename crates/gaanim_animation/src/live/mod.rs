@@ -30,9 +30,9 @@ use gaanim_core::peniko::Brush;
 use crate::polls::PollResults;
 use crate::rehearsal::Rehearsal;
 use crate::updaters::PlaybackState;
-pub use program::{Inputs, Pose, Program, ProgramError};
+pub use program::{Inputs, MAX_STATE, Pose, Program, ProgramError};
 pub use run::{Player, STEP, ZoneRun};
-pub use spec::{LiveZone, Motion, NameGlyph, ZoneNames};
+pub use spec::{LiveZone, Motion, NameGlyph, ZoneNames, ZoneState};
 
 /// The live zones of the scene, as compiled or read from a bundle.
 #[derive(Resource, Debug, Clone, Default, PartialEq)]
@@ -258,6 +258,7 @@ mod tests {
             behavior: Program::from_json(json).unwrap(),
             motion: Motion::default(),
             names: None,
+            state: None,
         };
         let spec = RehearsalSpec {
             names: RehearsalSpec::names(19),
@@ -288,6 +289,52 @@ mod tests {
     }
 
     #[test]
+    fn kept_numbers_step_with_the_zone_and_replay_the_same() {
+        use crate::rehearsal::{Rehearsal, RehearsalSpec};
+        // Compiled by gaanim.live: count(p) returns state(steps=p.state.steps + 1)
+        // and show(p) poses at (p.state.steps, p.state.start).
+        let update = r#"{"version":[1,2],"name":"count","strings":[],"code":[{"state":0},{"const":"1.0"},{"add":[0,1]},{"state":1}],"next":[2,3]}"#;
+        let behavior = r#"{"version":[1,2],"name":"show","strings":[],"code":[{"state":0},{"state":1},{"const":"0.0"},{"const":"1.0"},{"const":"-1.0"},{"const":"nan"}],"pose":{"x":0,"y":1,"rotation":2,"scale":3,"sx":3,"sy":3,"lean":2,"look_x":5,"look_y":5,"show_name":3,"flip":2,"visible":3,"express":4,"since":5,"loop":2}}"#;
+        let zone = LiveZone {
+            id: "z".into(),
+            open: 0.0,
+            close: 10.0,
+            stop_at_open: false,
+            stop_at_close: false,
+            bounds: [-8.0, -4.5, 8.0, 4.5],
+            size: 1.0,
+            behavior: Program::from_json(behavior).unwrap(),
+            motion: Motion::default(),
+            names: None,
+            state: Some(ZoneState {
+                names: vec!["steps".into(), "start".into()],
+                initial: vec![0.0, 7.0],
+                update: Program::from_json(update).unwrap(),
+            }),
+        };
+        let spec = RehearsalSpec {
+            names: RehearsalSpec::names(1),
+            ..Default::default()
+        };
+        // One player, there since long before the zone opens.
+        let rehearsal = Rehearsal::plan(&spec, None, &[], None);
+        let pose_at = |run: &mut ZoneRun, time: f64| {
+            replay_rehearsal(&zone, time, run, &rehearsal);
+            run.poses(&zone)[0].1
+        };
+        let mut going = ZoneRun::default();
+        let half = pose_at(&mut going, 0.5);
+        // A step every sixtieth of a second; the start kept as given.
+        assert!((half.x - 30.0).abs() <= 1.0, "{}", half.x);
+        assert_eq!(half.y, 7.0);
+        let later = pose_at(&mut going, 1.0);
+        assert!((later.x - 60.0).abs() <= 1.0, "{}", later.x);
+        // Seeking replays from the opening and lands on the same numbers.
+        assert_eq!(pose_at(&mut ZoneRun::default(), 1.0).x, later.x);
+        assert_eq!(pose_at(&mut going, 0.5).x, half.x);
+    }
+
+    #[test]
     fn a_stop_at_a_shared_boundary_holds_the_outgoing_zone() {
         let json = r#"{"version":[1,0],"code":[{"const":"0.0"}],
             "pose":{"x":0,"y":0,"rotation":0,"scale":0,"sx":0,"sy":0,"lean":0,
@@ -303,6 +350,7 @@ mod tests {
             behavior: Program::from_json(json).unwrap(),
             motion: Motion::default(),
             names: None,
+            state: None,
         };
         // Two segments meeting at 8, the first ending in a stop.
         let mut sala = zone(0.0, 8.0);

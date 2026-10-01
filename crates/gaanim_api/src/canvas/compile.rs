@@ -18230,7 +18230,7 @@ mod tests {
     fn connectors_with_fixed_points_are_placed_by_the_box_that_holds_them() {
         use crate::canvas::ops::CanvasEndpoint;
         let mut canvas = SceneModel::new(640, 360);
-        let mut connector = |canvas: &mut SceneModel| {
+        let connector = |canvas: &mut SceneModel| {
             canvas
                 .connector(
                     CanvasEndpoint::Static(DVec3::ZERO),

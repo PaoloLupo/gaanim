@@ -576,8 +576,10 @@ scene.stop()
 >>>scene = Scene(frame=(16, 9))
 quiz = scene.quiz("¿Derivada de x²?", ["x", "2x", "x²/2"], correct=1, time=20, rehearse=0.6)
 clock = scene.viz.readout(quiz.remaining(), format=".0f").move_to(-5, 3)
+scene.wait(1)
 scene.stop()
 quiz.reveal()
+scene.wait(1)
 scene.stop()
 ```
 ]
@@ -595,6 +597,38 @@ board = scene.leaderboard()
 for rank in range(2):
     board.name(rank, size=0.5).move_to(-3, 1 - rank)
     scene.viz.readout(board.points(rank), format=".0f").move_to(3, 1 - rank)
+```
+]
+
+#api-entry(
+  name: "Scene.live_zone",
+  kind: "method",
+  params: (
+    (name: "audience", type: "Audience", desc: [El público de `scene.audience()`.]),
+    (name: "behavior", type: "Callable[[Player], Pose]", desc: [Una función de Python que recibe al jugador `p` y devuelve `pose(x, y, ...)`; se compila al llamar.]),
+    (name: "bounds", type: "tuple[float, float, float, float]", default: "(-8, -4.5, 8, 4.5)", desc: [`(x0, y0, x1, y1)`: los personajes se recortan a esta caja.]),
+    (name: "size", type: "float", default: "1.2", desc: [Alto de un personaje a escala 1.]),
+    (name: "squash", type: "float", default: "0.04", desc: [Cuánto se estira en la dirección en que se mueve, por unidad de velocidad (hasta `max_stretch`, 1,4).]),
+    (name: "lean", type: "float", default: "0.05", desc: [Cuánto se inclina al moverse de lado (hasta `max_lean`, 0,35 radianes).]),
+    (name: "follow", type: "float", default: "1.0", desc: [Cuánto se balancean orejas, sombreros y brotes detrás del movimiento.]),
+    (name: "look", type: "float", default: "0.4", desc: [Cuánto miran los ojos hacia donde va.]),
+    (name: "names", type: "bool", default: "False", desc: [Dibuja el apodo bajo los pies (`name_size`, `name_color`, `name_gap`, `name_weight`).]),
+    (name: "state", type: "Mapping[str, float] | None", default: "None", desc: [Números que la zona guarda por jugador (hasta 8) y dónde empieza cada uno.]),
+    (name: "update", type: "Callable[[Player], State] | None", default: "None", desc: [Calcula cada `STEP` (1/60 s) los siguientes números de `state` y devuelve `state(...)`.]),
+  ),
+  returns: (type: "LiveZone", desc: [La zona; `close()` la cierra en el cursor.]),
+  desc: [Abre una zona viva en el cursor, hasta `zone.close()` o el final del segmento: al presentar, cada jugador llega como su personaje y el comportamiento lo coloca en cada cuadro; fuera de una presentación juega el ensayo. El comportamiento y la actualización se compilan, así que un `.gaanim` los ejecuta sin Python. Algo que el compilador no admite lanza `gaanim.live.BehaviorError` señalando la línea; unos límites vacíos, un tamaño no positivo, una expresión desconocida, `state` sin `update` (o al revés) o más de 8 números lanzan `ValueError`. Ver #link("/guias/zonas-vivas/")[Zonas vivas].],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+from gaanim.live import pose
+audience = scene.audience()
+
+def en_fila(p):
+    return pose(-6 + p.index * 1.2, -3, express="happy")
+
+zone = scene.live_zone(audience, en_fila, names=True)
 ```
 ]
 

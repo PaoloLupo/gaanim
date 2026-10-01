@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 from typing import Any, Callable, ClassVar, Iterator, Literal, Mapping, Optional, Self, Sequence, TypeAlias, overload
-from .live import Player, Pose
+from .live import Player, Pose, State
 from .matrix import Matrix
 from .sections import SceneSections
 from .animation_types import AnimationChannel, CustomAnimationValues
@@ -8734,6 +8734,8 @@ class Scene:
         name_color: str = "#ffffff",
         name_gap: float = 0.08,
         name_weight: Optional[int] = 700,
+        state: Optional[Mapping[str, float]] = None,
+        update: Optional[Callable[[Player], State]] = None,
     ) -> LiveZone:
         """A live zone at the cursor, running until ``zone.close()`` or the
         end of the segment: while presenting, each player of ``audience``
@@ -8765,6 +8767,15 @@ class Scene:
         Pass 0 to turn any off; ``pose(sx=, sy=, lean=, look_x=, look_y=)``
         sets your own.
 
+        ``state`` keeps numbers per player from one moment to the next (up to
+        8, e.g. ``{"lives": 3, "energy": 0.0}``, where each starts), and
+        ``update(p)`` computes the next ones every ``gaanim.live.STEP``
+        (1/60 s): it returns ``gaanim.live.state(lives=...)``, and the
+        numbers it leaves out keep their value. The behavior and the update
+        read them as ``p.state.lives``. The zone steps them from its
+        opening, so previews, seeks and exports replay them exactly. Give
+        both or neither.
+
         ``names=True`` draws each player's nickname ``name_gap`` below
         their feet, ``name_size`` tall in ``name_color``, whenever their
         pose has ``show_name`` (the default); the glyphs travel with the
@@ -8773,7 +8784,9 @@ class Scene:
         as the zone opens, and rank by their made-up scores. Raises
         ``gaanim.live.BehaviorError`` (a ``ValueError``) pointing at the
         line the compiler does not support, and ``ValueError`` for empty
-        bounds, a non-positive size or an unknown expression.
+        bounds, a non-positive size, an unknown expression, ``state``
+        without ``update`` (or the other way around), more than 8 kept
+        numbers or names that are not Python names.
 
         Example:
             from gaanim.live import pose

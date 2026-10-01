@@ -32,6 +32,9 @@ pub struct LiveZone {
     /// How the engine deforms characters from how their poses move.
     #[serde(default)]
     pub motion: Motion,
+    /// Numbers each player keeps from step to step, or none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<ZoneState>,
     /// Nicknames drawn under the characters' feet, or none.
     #[serde(default)]
     pub names: Option<ZoneNames>,
@@ -55,6 +58,31 @@ pub struct ZoneNames {
     /// Printable ASCII and Latin-1 glyphs, filled when the scene compiles.
     #[serde(default)]
     pub glyphs: Vec<NameGlyph>,
+}
+
+/// The numbers a zone keeps for each player (`state=` and `update=`): they
+/// start at `initial` when the player arrives, and every step of
+/// [`super::STEP`] seconds `update` computes the next ones from the player
+/// and the current ones. Behaviors read them as `p.state.<name>`. Stepping
+/// from the zone's opening keeps them a function of time, so previews and
+/// exports replay them exactly.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ZoneState {
+    pub names: Vec<String>,
+    pub initial: Vec<f64>,
+    #[serde(deserialize_with = "checked_program")]
+    pub update: Program,
+}
+
+impl ZoneState {
+    /// The kept numbers a player starts with, by slot.
+    pub fn start(&self) -> [f64; super::program::MAX_STATE] {
+        let mut state = [0.0; super::program::MAX_STATE];
+        for (slot, value) in self.initial.iter().take(state.len()).enumerate() {
+            state[slot] = *value;
+        }
+        state
+    }
 }
 
 /// One character's outline (SVG path data, baseline at y = 0, y up) and

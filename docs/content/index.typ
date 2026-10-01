@@ -29,6 +29,7 @@
 #include "guias/reactividad.typ"
 #include "guias/camara-y-3d.typ"
 #include "guias/presentaciones.typ"
+#include "guias/zonas-vivas.typ"
 #include "guias/proyectos.typ"
 #include "guias/compartir.typ"
 #include "guias/capturas-y-comparacion.typ"

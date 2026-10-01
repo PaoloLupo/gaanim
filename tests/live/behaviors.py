@@ -15,6 +15,7 @@ from gaanim.live import (
     landing,
     pose,
     spring,
+    state,
     wobble,
 )
 
@@ -139,4 +140,28 @@ def battle(p):
                 loop=True)
 
 
+# A zone that keeps numbers per player (state=, update=).
+STEP_SECONDS = 1 / 60
+KEPT = ("energy", "hops", "best")
+
+
+def charge(p):
+    """Energy fills while the player leads and drains otherwise; a full
+    charge counts a hop and empties it."""
+    gain = 0.8 if p.rank == 0 else -0.3
+    energy = min(max(p.state.energy + gain * STEP_SECONDS, 0), 1)
+    if energy >= 1:
+        return state(energy=0, hops=p.state.hops + 1, best=max(p.state.best, p.score))
+    return state(energy=energy)
+
+
+def hopper(p):
+    lift = p.state.energy * 2 + 0.3 * p.state.hops
+    return pose(-6 + p.index, -2 + lift, scale=1 + 0.1 * min(p.state.hops, 5),
+                express="winner" if p.state.best > 900 else None)
+
+
 BEHAVIORS = [zipline, podium, race, corners, animated, battle]
+#: Behaviors and updates of a zone that keeps KEPT.
+KEPT_BEHAVIORS = [hopper]
+KEPT_UPDATES = [charge]

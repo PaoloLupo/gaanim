@@ -17,7 +17,7 @@ use gaanim_objects::character::{
     follow_lag, to_scene,
 };
 
-use super::program::{Inputs, Pose};
+use super::program::{Inputs, MAX_STATE, Pose};
 use super::spec::{LiveZone, ZoneNames};
 
 /// `#rrggbb` or `#rrggbbaa`; white when unreadable.
@@ -86,6 +86,9 @@ struct Actor {
     previous_score: f64,
     score_changed: f64,
     latch: Option<Latch>,
+    /// The numbers the zone keeps for the player; `None` until the zone
+    /// gives their start.
+    state: Option<[f64; MAX_STATE]>,
 }
 
 /// A zone's state: its clock, its players and what they remember.
@@ -123,6 +126,7 @@ impl ZoneRun {
             previous_score: 0.0,
             score_changed: joined,
             latch: None,
+            state: None,
         });
     }
 
@@ -253,6 +257,7 @@ impl ZoneRun {
             team_count: mates.count() as f64,
             team_score,
             team_rank: team_rank as f64,
+            state: actor.state.unwrap_or([0.0; MAX_STATE]),
             seed: actor.seed,
         }
     }
@@ -368,6 +373,15 @@ impl ZoneRun {
         let previous = self.stepped;
         self.stepped += STEP;
         self.clock = self.stepped;
+        self.prime(zone);
+        // The kept numbers move on first, so this step's poses read them.
+        if let Some(state) = &zone.state {
+            for index in 0..self.actors.len() {
+                let inputs = self.inputs(index);
+                let next = state.update.advance(&inputs, &mut self.registers);
+                self.actors[index].state = Some(next);
+            }
+        }
         for index in 0..self.actors.len() {
             let pose = self.pose(zone, index);
             let actor = &mut self.actors[index];
@@ -379,6 +393,14 @@ impl ZoneRun {
                     start: previous.max(actor.joined),
                 },
             });
+        }
+    }
+
+    /// Give players who just arrived the numbers the zone starts them with.
+    fn prime(&mut self, zone: &LiveZone) {
+        let start = zone.state.as_ref().map(|state| state.start());
+        for actor in self.actors.iter_mut().filter(|actor| actor.state.is_none()) {
+            actor.state = Some(start.unwrap_or([0.0; MAX_STATE]));
         }
     }
 
@@ -426,6 +448,7 @@ impl ZoneRun {
 
     /// The zone's characters as filled paths in scene units, back to front.
     pub fn draw(&mut self, zone: &LiveZone) -> Vec<(BezPath, Brush)> {
+        self.prime(zone);
         let catalog = catalog();
         let mut paths = Vec::new();
         for index in 0..self.actors.len() {
@@ -479,6 +502,7 @@ impl ZoneRun {
 
     /// Each character's pose now, by arrival, for tests and tools.
     pub fn poses(&mut self, zone: &LiveZone) -> Vec<(Arc<str>, Pose)> {
+        self.prime(zone);
         (0..self.actors.len())
             .map(|index| {
                 (
@@ -530,6 +554,7 @@ mod tests {
             behavior: behavior.checked().unwrap(),
             motion: Default::default(),
             names: None,
+            state: None,
         }
     }
 

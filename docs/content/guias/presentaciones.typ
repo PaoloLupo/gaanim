@@ -172,6 +172,8 @@ audiencia.
 datos para que tú decidas cómo presentarla:
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 poll = scene.poll("¿Qué curva crece más rápido?", ["x²", "2ˣ", "x log x"], rehearse=[3, 7, 2])
 
 card = scene.geometry.rounded_rect(4.2, 4.2, 0.25).fill(WHITE).no_stroke().move_to(-5, 0)
@@ -239,11 +241,14 @@ acertó, cuántos puntos ganó y su puesto. Justo después de un `scene.stop()`,
 espera mientras la presentación descansa en la pausa y revela al avanzar.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 quiz = scene.quiz("¿Cuál es la derivada de x²?", ["x", "2x", "x²/2", "2"],
                   correct=1, time=20, rehearse=0.7)
 clock = scene.viz.readout(quiz.remaining(), format=".0f")   # la cuenta atrás
 scene.stop()        # el público responde
 quiz.reveal()       # al avanzar, los teléfonos ven el resultado
+scene.wait(2)
 scene.stop()
 
 board = scene.leaderboard()
@@ -278,6 +283,8 @@ cumple una condición: al presentar, en cuanto se cumple, la presentación
 sigue como si hubieras pulsado siguiente.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 quiz = scene.quiz("¿Cuál es la derivada de x²?", ["x", "2x", "x²/2", "2"], correct=1)
 scene.stop(until=quiz.answered(share=0.8) | quiz.time_up())
 quiz.reveal()
@@ -304,12 +311,14 @@ cuestionario. Como la clasificación, solo da datos: cómo se acomodan y cómo
 entran los decides tú.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 audience = scene.audience()
 audience.qr(3).move_to(-5, 0)
 for slot in range(12):
     x, y = (slot % 4) * 2.2 - 1, 1.5 - slot // 4 * 1.5
     pop = computed(lambda a: min(a / 0.4, 1), inputs=[audience.age(slot)])
-    audience.name(slot, size=0.4).move_to(x, y).scale(pop)
+    audience.name(slot, size=0.4).move_to(x, y).scale_to(pop)
 players = scene.viz.readout(audience.count(), format=".0f", suffix=" jugadores")
 ```
 
@@ -331,6 +340,8 @@ clasificación suma los puntos que ganaron sus respuestas. Las zonas vivas
 también lo usan.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 scene.rehearsal(24, seed=3, skill=0.65, speed=0.5)
 
 audience = scene.audience()                  # entran uno tras otro
@@ -369,6 +380,8 @@ cambiar). El teléfono muestra su equipo con su color y, al final, qué equipo
 ganó. Los puntos de cada jugador suman para su equipo.
 
 ```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
 teams = scene.teams(["Rojo", "Azul"], colors=["#ff4f8b", "#2fb8ff"])
 scene.rehearsal(20, skill=[0.7, 0.5])     # un ensayo con un equipo más fuerte
 

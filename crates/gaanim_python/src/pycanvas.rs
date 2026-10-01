@@ -6134,7 +6134,7 @@ impl PyScene {
     /// `audience` arrives in it as their character, posed every frame by
     /// `behavior`, a Python function compiled now. It runs until
     /// `zone.close()` or the end of the segment.
-    #[pyo3(signature = (audience, behavior, *, bounds=(-8.0, -4.5, 8.0, 4.5), size=1.2, squash=0.04, max_stretch=1.4, lean=0.05, max_lean=0.35, follow=1.0, look=0.4, names=false, name_size=0.24, name_color="#ffffff".to_string(), name_gap=0.08, name_weight=Some(700)))]
+    #[pyo3(signature = (audience, behavior, *, bounds=(-8.0, -4.5, 8.0, 4.5), size=1.2, squash=0.04, max_stretch=1.4, lean=0.05, max_lean=0.35, follow=1.0, look=0.4, names=false, name_size=0.24, name_color="#ffffff".to_string(), name_gap=0.08, name_weight=Some(700), state=None, update=None))]
     #[allow(clippy::too_many_arguments)]
     fn live_zone(
         &self,
@@ -6153,6 +6153,8 @@ impl PyScene {
         name_color: String,
         name_gap: f64,
         name_weight: Option<u16>,
+        state: Option<&Bound<'_, pyo3::types::PyDict>>,
+        update: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<crate::live::PyLiveZone> {
         crate::custom::ensure_authoring_allowed()?;
         let motion = gaanim_api::canvas::LiveMotion {
@@ -6171,7 +6173,43 @@ impl PyScene {
             weight: name_weight,
             glyphs: Vec::new(),
         });
-        let program = crate::live::compile_behavior(behavior)?;
+        // The numbers kept per player: their names in order and where they
+        // start; the update and the behavior read them by name.
+        let kept = match (state, update) {
+            (None, None) => None,
+            (Some(state), Some(update)) => {
+                let mut names = Vec::new();
+                let mut initial = Vec::new();
+                for (name, value) in state.iter() {
+                    names.push(name.extract::<String>().map_err(|_| {
+                        pyo3::exceptions::PyTypeError::new_err("state names are strings")
+                    })?);
+                    initial.push(value.extract::<f64>().map_err(|_| {
+                        pyo3::exceptions::PyTypeError::new_err(
+                            "state starts with numbers, like state={\"lives\": 3}",
+                        )
+                    })?);
+                }
+                let update = crate::live::compile_update(update, &names)?;
+                Some(gaanim_api::canvas::LiveZoneState {
+                    names,
+                    initial,
+                    update,
+                })
+            }
+            (Some(_), None) => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "state= needs update=, the function that computes the next numbers",
+                ));
+            }
+            (None, Some(_)) => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "update= needs state=, the numbers to keep and where they start",
+                ));
+            }
+        };
+        let state_names = kept.as_ref().map_or_else(Vec::new, |kept| kept.names.clone());
+        let program = crate::live::compile_behavior(behavior, &state_names)?;
         let inner = self
             .inner
             .lock()
@@ -6183,6 +6221,7 @@ impl PyScene {
                 size,
                 motion,
                 names,
+                kept,
             )
             .map_err(crate::live::live_error)?;
         Ok(crate::live::PyLiveZone { inner })

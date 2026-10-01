@@ -69,15 +69,34 @@ def players():
             )
 
 
+def kept_players():
+    """The sample players, each keeping some numbers."""
+    for index, player in enumerate(players()):
+        player.state = live.State(
+            energy=(index * 0.37) % 1.0,
+            hops=float(index % 4),
+            best=float(index * 113 % 1000),
+        )
+        yield player
+
+
+def inputs_of(player) -> dict:
+    inputs = {name: number(getattr(player, name)) for name in live.PLAYER_FIELDS}
+    inputs["seed"] = player.seed
+    if player.state.__dict__:
+        inputs["state"] = [number(value) for value in player.state.__dict__.values()]
+    return inputs
+
+
 def main() -> None:
     programs = []
-    for function in behaviors.BEHAVIORS:
-        program = json.loads(live.compile_behavior(function))
+    kept = [(function, behaviors.KEPT) for function in behaviors.KEPT_BEHAVIORS]
+    for function, state in [(function, ()) for function in behaviors.BEHAVIORS] + kept:
+        program = json.loads(live.compile_behavior(function, state))
         cases = []
-        for player in players():
+        for player in kept_players() if state else players():
             result = function(player)
-            inputs = {name: number(getattr(player, name)) for name in live.PLAYER_FIELDS}
-            inputs["seed"] = player.seed
+            inputs = inputs_of(player)
             cases.append(
                 {
                     "inputs": inputs,
@@ -99,6 +118,20 @@ def main() -> None:
                         "since": None if result.since is None else number(result.since),
                         "loop": bool(result.loop),
                     },
+                }
+            )
+        programs.append({"program": program, "cases": cases})
+    for function in behaviors.KEPT_UPDATES:
+        program = json.loads(live.compile_update(function, behaviors.KEPT))
+        cases = []
+        for player in kept_players():
+            result = function(player)
+            # The numbers the update leaves out keep their value.
+            after = {**player.state.__dict__, **result.__dict__}
+            cases.append(
+                {
+                    "inputs": inputs_of(player),
+                    "next": [number(after[name]) for name in behaviors.KEPT],
                 }
             )
         programs.append({"program": program, "cases": cases})

@@ -14,7 +14,10 @@ use serde::{Deserialize, Serialize};
 
 /// The IR's version: a program with a newer major version is refused, a
 /// newer minor one may only add instructions this build refuses by name.
-pub const PROGRAM_VERSION: [u32; 2] = [1, 1];
+pub const PROGRAM_VERSION: [u32; 2] = [1, 2];
+
+/// Most numbers a zone keeps per player (`state=`).
+pub const MAX_STATE: usize = 8;
 
 /// A register: the index of the instruction that writes it.
 pub type Reg = u32;
@@ -86,6 +89,8 @@ pub enum Inst {
     /// `"inf"`, `"nan"`) so it parses back to the same bits.
     Const(String),
     Input(Input),
+    /// One of the player's kept numbers (`p.state.<name>`), by slot.
+    State(u32),
     /// A number in [0, 1) read from the player and the operand, the same
     /// for the same player everywhere.
     Random(Reg),
@@ -152,15 +157,32 @@ impl Inst {
     fn operands(&self) -> Vec<Reg> {
         use Inst::*;
         match *self {
-            Const(_) | Input(_) => Vec::new(),
+            Const(_) | Input(_) | State(_) => Vec::new(),
             Random(a) | Neg(a) | Not(a) | Truth(a) | Abs(a) | Floor(a) | Ceil(a) | Trunc(a)
             | Round(a) | Sqrt(a) | Exp(a) | Expm1(a) | Ln(a) | Log1p(a) | Log2(a) | Log10(a)
             | Sin(a) | Cos(a) | Tan(a) | Asin(a) | Acos(a) | Atan(a) | Sinh(a) | Cosh(a)
             | Tanh(a) | IsNan(a) | IsInf(a) | IsFinite(a) => vec![a],
-            Add(a, b) | Sub(a, b) | Mul(a, b) | Div(a, b) | FloorDiv(a, b) | Mod(a, b)
-            | Fmod(a, b) | Pow(a, b) | Atan2(a, b) | Hypot(a, b) | CopySign(a, b) | Max(a, b)
-            | Min(a, b) | Lt(a, b) | Le(a, b) | Gt(a, b) | Ge(a, b) | Eq(a, b) | Ne(a, b)
-            | And(a, b) | Or(a, b) => vec![a, b],
+            Add(a, b)
+            | Sub(a, b)
+            | Mul(a, b)
+            | Div(a, b)
+            | FloorDiv(a, b)
+            | Mod(a, b)
+            | Fmod(a, b)
+            | Pow(a, b)
+            | Atan2(a, b)
+            | Hypot(a, b)
+            | CopySign(a, b)
+            | Max(a, b)
+            | Min(a, b)
+            | Lt(a, b)
+            | Le(a, b)
+            | Gt(a, b)
+            | Ge(a, b)
+            | Eq(a, b)
+            | Ne(a, b)
+            | And(a, b)
+            | Or(a, b) => vec![a, b],
             Select(c, a, b) => vec![c, a, b],
         }
     }
@@ -213,7 +235,8 @@ impl PoseRegs {
     }
 }
 
-/// A compiled behavior.
+/// A compiled behavior, or a zone's state update: a behavior returns a
+/// pose, an update the player's kept numbers for the next step.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Program {
     pub version: [u32; 2],
@@ -224,7 +247,12 @@ pub struct Program {
     #[serde(default)]
     pub strings: Vec<String>,
     pub code: Vec<Inst>,
-    pub pose: PoseRegs,
+    /// What a behavior returns; `None` for an update.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pose: Option<PoseRegs>,
+    /// What an update returns: each kept number's next value, by slot.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub next: Vec<Reg>,
     /// Constants parsed from `code`, so evaluating never parses.
     #[serde(skip)]
     constants: Vec<f64>,
@@ -246,6 +274,10 @@ pub enum ProgramError {
     Constant { at: usize, text: String },
     #[error("pose reads register {reg}, but the program has {len}")]
     Pose { reg: Reg, len: usize },
+    #[error("instruction {at} reads kept number {slot}; a zone keeps at most {MAX_STATE}")]
+    State { at: usize, slot: u32 },
+    #[error("the program returns neither a pose nor kept numbers")]
+    Output,
     #[error("the behavior has no instructions")]
     Empty,
 }
@@ -301,6 +333,8 @@ pub struct Inputs {
     pub team_count: f64,
     pub team_score: f64,
     pub team_rank: f64,
+    /// The player's kept numbers (`p.state`), by slot.
+    pub state: [f64; MAX_STATE],
     /// Read by `p.random(k)`: the player's character seed.
     pub seed: u32,
 }
@@ -365,6 +399,11 @@ impl Program {
             if let Some(&reg) = inst.operands().iter().find(|&&reg| reg as usize >= at) {
                 return Err(ProgramError::Operand { at, reg });
             }
+            if let Inst::State(slot) = inst
+                && *slot as usize >= MAX_STATE
+            {
+                return Err(ProgramError::State { at, slot: *slot });
+            }
             if let Inst::Const(text) = inst {
                 constants[at] = text.parse().map_err(|_| ProgramError::Constant {
                     at,
@@ -373,7 +412,15 @@ impl Program {
             }
         }
         let len = self.code.len();
-        if let Some(&reg) = self.pose.all().iter().find(|&&reg| reg as usize >= len) {
+        if self.pose.is_none() && self.next.is_empty() || self.next.len() > MAX_STATE {
+            return Err(ProgramError::Output);
+        }
+        let outputs = self
+            .pose
+            .iter()
+            .flat_map(PoseRegs::all)
+            .chain(self.next.iter().copied());
+        if let Some(reg) = outputs.into_iter().find(|&reg| reg as usize >= len) {
             return Err(ProgramError::Pose { reg, len });
         }
         self.constants = constants;
@@ -395,34 +442,58 @@ impl Program {
                 Err(_) => Pose::default(),
             };
         }
+        let Some(pose) = &self.pose else {
+            return Pose::default();
+        };
+        self.run(inputs, registers);
+        let r = |reg: Reg| registers[reg as usize];
+        let express = r(pose.express);
+        let since = r(pose.since);
+        Pose {
+            x: r(pose.x),
+            y: r(pose.y),
+            rotation: r(pose.rotation),
+            scale: r(pose.scale),
+            sx: r(pose.sx),
+            sy: r(pose.sy),
+            lean: r(pose.lean),
+            show_name: r(pose.show_name) != 0.0,
+            look: {
+                let look = (r(pose.look_x), r(pose.look_y));
+                (!look.0.is_nan() && !look.1.is_nan()).then_some(look)
+            },
+            flip: r(pose.flip) != 0.0,
+            visible: r(pose.visible) != 0.0,
+            express: (express >= 0.0 && (express as usize) < self.strings.len())
+                .then_some(express as usize),
+            since: (!since.is_nan()).then_some(since),
+            looped: r(pose.looped) != 0.0,
+        }
+    }
+
+    /// Run an update for one player: its kept numbers for the next step.
+    /// Numbers the update does not return keep their value.
+    pub fn advance(&self, inputs: &Inputs, registers: &mut Vec<f64>) -> [f64; MAX_STATE] {
+        let mut state = inputs.state;
+        if !self.ready() {
+            return match self.clone().checked() {
+                Ok(program) => program.advance(inputs, registers),
+                Err(_) => state,
+            };
+        }
+        self.run(inputs, registers);
+        for (slot, reg) in self.next.iter().enumerate() {
+            state[slot] = registers[*reg as usize];
+        }
+        state
+    }
+
+    fn run(&self, inputs: &Inputs, registers: &mut Vec<f64>) {
         registers.clear();
         registers.reserve(self.code.len());
         for (at, inst) in self.code.iter().enumerate() {
             let value = step(inst, registers, self.constants[at], inputs);
             registers.push(value);
-        }
-        let r = |reg: Reg| registers[reg as usize];
-        let express = r(self.pose.express);
-        let since = r(self.pose.since);
-        Pose {
-            x: r(self.pose.x),
-            y: r(self.pose.y),
-            rotation: r(self.pose.rotation),
-            scale: r(self.pose.scale),
-            sx: r(self.pose.sx),
-            sy: r(self.pose.sy),
-            lean: r(self.pose.lean),
-            show_name: r(self.pose.show_name) != 0.0,
-            look: {
-                let look = (r(self.pose.look_x), r(self.pose.look_y));
-                (!look.0.is_nan() && !look.1.is_nan()).then_some(look)
-            },
-            flip: r(self.pose.flip) != 0.0,
-            visible: r(self.pose.visible) != 0.0,
-            express: (express >= 0.0 && (express as usize) < self.strings.len())
-                .then_some(express as usize),
-            since: (!since.is_nan()).then_some(since),
-            looped: r(self.pose.looped) != 0.0,
         }
     }
 }
@@ -458,6 +529,7 @@ fn step(inst: &Inst, registers: &[f64], constant: f64, inputs: &Inputs) -> f64 {
     match *inst {
         Const(_) => constant,
         Input(input) => inputs.get(input),
+        State(slot) => inputs.state.get(slot as usize).copied().unwrap_or(0.0),
         Random(k) => random(inputs.seed, r(k)),
         Neg(a) => -r(a),
         Not(a) => boolean(r(a) == 0.0),
@@ -572,7 +644,7 @@ mod tests {
             version: PROGRAM_VERSION,
             name: "test".into(),
             strings: Vec::new(),
-            pose: PoseRegs {
+            pose: Some(PoseRegs {
                 x,
                 y: 0,
                 rotation: 0,
@@ -588,7 +660,8 @@ mod tests {
                 express: 0,
                 since: 0,
                 looped: 0,
-            },
+            }),
+            next: Vec::new(),
             code,
             constants: Vec::new(),
         }
@@ -682,9 +755,9 @@ mod tests {
     /// must give the same.
     #[test]
     fn compiled_behaviors_pose_like_python() {
-        let entries: serde_json::Value =
-            serde_json::from_str(include_str!("cases.json")).unwrap();
-        let number = |value: &serde_json::Value| -> f64 { value.as_str().unwrap().parse().unwrap() };
+        let entries: serde_json::Value = serde_json::from_str(include_str!("cases.json")).unwrap();
+        let number =
+            |value: &serde_json::Value| -> f64 { value.as_str().unwrap().parse().unwrap() };
         let mut registers = Vec::new();
         for entry in entries.as_array().unwrap() {
             let program: Program = serde_json::from_value(entry["program"].clone()).unwrap();
@@ -711,10 +784,21 @@ mod tests {
                     team_count: input("team_count"),
                     team_score: input("team_score"),
                     team_rank: input("team_rank"),
+                    state: {
+                        let mut state = [0.0; MAX_STATE];
+                        for (slot, value) in given
+                            .get("state")
+                            .and_then(|state| state.as_array())
+                            .into_iter()
+                            .flatten()
+                            .enumerate()
+                        {
+                            state[slot] = number(value);
+                        }
+                        state
+                    },
                     seed: given["seed"].as_u64().unwrap() as u32,
                 };
-                let pose = program.eval(&inputs, &mut registers);
-                let expected = &case["pose"];
                 let context = format!("{} with {given}", program.name);
                 // Transcendental functions may differ from the platform's
                 // C library in the last bit; everything else is exact.
@@ -723,6 +807,21 @@ mod tests {
                         || (got.is_nan() && want.is_nan())
                         || (got - want).abs() <= 1e-12 * want.abs().max(1.0)
                 };
+                // An update: the kept numbers it returns.
+                if let Some(next) = case.get("next").and_then(|next| next.as_array()) {
+                    let got = program.advance(&inputs, &mut registers);
+                    for (slot, want) in next.iter().enumerate() {
+                        let want = number(want);
+                        assert!(
+                            close(got[slot], want),
+                            "slot {slot}: {} != {want} in {context}",
+                            got[slot]
+                        );
+                    }
+                    continue;
+                }
+                let pose = program.eval(&inputs, &mut registers);
+                let expected = &case["pose"];
                 for (field, got) in [
                     ("x", pose.x),
                     ("y", pose.y),
@@ -735,9 +834,9 @@ mod tests {
                     let want = number(&expected[field]);
                     assert!(close(got, want), "{field}: {got} != {want} in {context}");
                 }
-                let look = expected["look"].as_array().map(|look| {
-                    (number(&look[0]), number(&look[1]))
-                });
+                let look = expected["look"]
+                    .as_array()
+                    .map(|look| (number(&look[0]), number(&look[1])));
                 match (pose.look, look) {
                     (Some(got), Some(want)) => assert!(
                         close(got.0, want.0) && close(got.1, want.1),
@@ -751,8 +850,16 @@ mod tests {
                     expected["show_name"].as_bool().unwrap(),
                     "{context}"
                 );
-                assert_eq!(pose.visible, expected["visible"].as_bool().unwrap(), "{context}");
-                assert_eq!(pose.looped, expected["loop"].as_bool().unwrap(), "{context}");
+                assert_eq!(
+                    pose.visible,
+                    expected["visible"].as_bool().unwrap(),
+                    "{context}"
+                );
+                assert_eq!(
+                    pose.looped,
+                    expected["loop"].as_bool().unwrap(),
+                    "{context}"
+                );
                 assert_eq!(
                     pose.express.map(|index| program.strings[index].as_str()),
                     expected["express"].as_str(),

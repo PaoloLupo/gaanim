@@ -8,14 +8,29 @@ pub(crate) fn live_error(error: LiveZoneError) -> PyErr {
     PyValueError::new_err(error.to_string())
 }
 
-/// Compile a behavior function with `gaanim.live.compile_behavior`. Its
-/// `BehaviorError` (a `ValueError` pointing at the line) propagates.
-pub(crate) fn compile_behavior(behavior: &Bound<'_, PyAny>) -> PyResult<LiveProgram> {
+/// Compile a behavior function with `gaanim.live.compile_behavior`; it reads
+/// the kept numbers `state` names. Its `BehaviorError` (a `ValueError`
+/// pointing at the line) propagates.
+pub(crate) fn compile_behavior(
+    behavior: &Bound<'_, PyAny>,
+    state: &[String],
+) -> PyResult<LiveProgram> {
     let json: String = behavior
         .py()
         .import("gaanim.live")?
         .getattr("compile_behavior")?
-        .call1((behavior,))?
+        .call1((behavior, state.to_vec()))?
+        .extract()?;
+    LiveProgram::from_json(&json).map_err(|error| PyValueError::new_err(error.to_string()))
+}
+
+/// Compile a zone's update with `gaanim.live.compile_update`.
+pub(crate) fn compile_update(update: &Bound<'_, PyAny>, state: &[String]) -> PyResult<LiveProgram> {
+    let json: String = update
+        .py()
+        .import("gaanim.live")?
+        .getattr("compile_update")?
+        .call1((update, state.to_vec()))?
         .extract()?;
     LiveProgram::from_json(&json).map_err(|error| PyValueError::new_err(error.to_string()))
 }

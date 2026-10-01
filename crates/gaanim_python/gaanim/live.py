@@ -45,13 +45,17 @@ from typing import Any, NamedTuple, Optional
 
 __all__ = [
     "BehaviorError",
+    "MAX_STATE",
     "PLAYER_FIELDS",
     "Player",
     "Pose",
+    "STEP",
+    "State",
     "anticipate",
     "ballistic",
     "clamp",
     "compile_behavior",
+    "compile_update",
     "ease_in",
     "ease_in_out",
     "ease_out",
@@ -63,11 +67,22 @@ __all__ = [
     "progress",
     "smoothstep",
     "spring",
+    "state",
     "wobble",
 ]
 
-#: Version of the compiled programs; Rust refuses a newer major version.
-PROGRAM_VERSION = (1, 1)
+#: Version of the compiled programs; Rust refuses a newer major version. A
+#: program asks for the oldest minor version that runs it: 1.1 added the team
+#: fields, 1.2 the numbers a zone keeps per player.
+PROGRAM_VERSION = (1, 2)
+
+#: Most numbers a zone keeps per player.
+MAX_STATE = 8
+
+#: Seconds between two updates of a zone's kept numbers.
+STEP = 1 / 60
+
+_TEAM_FIELDS = ("team", "team_index", "team_count", "team_score", "team_rank")
 
 #: What a behavior reads from its player, as ``p.<name>``.
 PLAYER_FIELDS = {
@@ -149,6 +164,30 @@ def pose(
         x, y, rotation, scale, sx, sy, lean, look_x, look_y, show_name, flip, visible, express,
         since, loop,
     )
+
+
+class State:
+    """The numbers a zone keeps for a player, read as ``p.state.<name>``."""
+
+    def __init__(self, **values: float) -> None:
+        self.__dict__.update(values)
+
+    def __repr__(self) -> str:
+        fields = ", ".join(f"{name}={value!r}" for name, value in self.__dict__.items())
+        return f"State({fields})"
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, State) and self.__dict__ == other.__dict__
+
+
+def state(**values: float) -> State:
+    """The next kept numbers, as an update returns them.
+
+    An update (``scene.live_zone(..., update=...)``) runs every ``STEP``
+    seconds for each player and returns ``state(name=value, ...)``: the
+    numbers it gives change, the ones it leaves out keep their value.
+    """
+    return State(**values)
 
 
 # --- Helpers ---------------------------------------------------------------
@@ -307,6 +346,7 @@ class Player:
     team_count: int = 1
     team_score: float = 0.0
     team_rank: int = 0
+    state: State = field(default_factory=State)
     seed: int = field(default=-1)
 
     def __post_init__(self) -> None:
@@ -391,7 +431,7 @@ class _Value:
     """A value while compiling: a register with a kind, a tuple of values,
     a pose, the player, or a Python object known while compiling."""
 
-    kind: str  # "num", "bool", "str", "none", "optstr", "tuple", "pose", "player", "object"
+    kind: str  # "num", "bool", "str", "none", "optstr", "tuple", "pose", "state", "kept", "player", "object"
     reg: int = -1
     items: tuple = ()
     obj: Any = None
@@ -455,7 +495,9 @@ class _Frame:
 
 
 class _Compiler:
-    def __init__(self) -> None:
+    def __init__(self, state_names: tuple = ()) -> None:
+        #: The numbers the zone keeps, in slot order.
+        self.state_names = tuple(state_names)
         self.code: list = []
         self.memo: dict = {}
         self.strings: list = []
@@ -557,6 +599,8 @@ class _Compiler:
             "optstr": "a string or None",
             "tuple": "a tuple",
             "pose": "a pose",
+            "state": "a state",
+            "kept": "the player's state",
             "player": "the player",
         }.get(value.kind, repr(value.obj))
 
@@ -581,16 +625,18 @@ class _Compiler:
                 "tuple",
                 items=tuple(self.select(cond, x, y, node) for x, y in zip(a.items, b.items)),
             )
-        if a.kind == "pose" or b.kind == "pose":
-            if a.kind != b.kind:
-                raise self.fail(
-                    node,
-                    f"one branch gives a pose and another {self.describe(b if a.kind == 'pose' else a)}",
+        for whole in ("pose", "state"):
+            if a.kind == whole or b.kind == whole:
+                if a.kind != b.kind:
+                    other = b if a.kind == whole else a
+                    raise self.fail(
+                        node,
+                        f"one branch gives {self.describe(_Value(whole))} and another {self.describe(other)}",
+                    )
+                return _Value(
+                    whole,
+                    items=tuple(self.select(cond, x, y, node) for x, y in zip(a.items, b.items)),
                 )
-            return _Value(
-                "pose",
-                items=tuple(self.select(cond, x, y, node) for x, y in zip(a.items, b.items)),
-            )
         kinds = {a.kind, b.kind}
         if kinds <= {"num", "bool"}:
             kind = "bool" if kinds == {"bool"} else "num"
@@ -927,7 +973,21 @@ class _Compiler:
 
     def attribute(self, node: ast.Attribute) -> _Value:
         base = self.expr(node.value)
+        if base.kind == "kept":
+            if node.attr in self.state_names:
+                return _Value("num", self.emit("state", self.state_names.index(node.attr)))
+            raise self.fail(
+                node,
+                f"the zone keeps no {node.attr!r}; it keeps {', '.join(self.state_names)}",
+            )
         if base.kind == "player":
+            if node.attr == "state":
+                if not self.state_names:
+                    raise self.fail(
+                        node,
+                        "p.state needs numbers to keep: scene.live_zone(..., state={...}, update=...)",
+                    )
+                return _Value("kept")
             if node.attr in PLAYER_FIELDS:
                 return _Value("num", self.emit("input", node.attr))
             if node.attr == "random":
@@ -1069,6 +1129,8 @@ class _Compiler:
         keywords = {keyword.arg: self.expr(keyword.value) for keyword in node.keywords}
         if callee is pose or callee is Pose:
             return self.pose(node, args, keywords)
+        if callee is state or callee is State:
+            return self.kept(node, args, keywords)
         if inspect.isfunction(callee):
             return self.function(callee, args, node, keywords)
         if keywords:
@@ -1158,6 +1220,29 @@ class _Compiler:
             "abs, min, max, round, int, float, bool, len, sum or your own functions",
         )
 
+    def kept(self, node: ast.Call, args: list, keywords: dict) -> _Value:
+        """``state(name=value, ...)``: each kept number, given or as it was."""
+        if args:
+            raise self.fail(node, "state() takes the numbers by name: state(lives=2)")
+        if not self.state_names:
+            raise self.fail(
+                node,
+                "state() needs numbers to keep: scene.live_zone(..., state={...}, update=...)",
+            )
+        unknown = [name for name in keywords if name not in self.state_names]
+        if unknown:
+            raise self.fail(
+                node,
+                f"the zone keeps no {unknown[0]!r}; it keeps {', '.join(self.state_names)}",
+            )
+        items = []
+        for slot, name in enumerate(self.state_names):
+            if name in keywords:
+                items.append(_Value("num", self.scalar(keywords[name], node, f"{name} as a number")))
+            else:
+                items.append(_Value("num", self.emit("state", slot)))
+        return _Value("state", items=tuple(items))
+
     def pose(self, node: ast.Call, args: list, keywords: dict) -> _Value:
         if len(args) > 2:
             raise self.fail(node, "pose() takes x and y by position and the rest by name")
@@ -1201,7 +1286,17 @@ class _Compiler:
 
     # -- entry --------------------------------------------------------------------
 
-    def compile(self, function: Callable) -> dict:
+    def version(self) -> list:
+        """The oldest program version that runs the code."""
+        ops = {next(iter(inst)) for inst in self.code}
+        inputs = {inst["input"] for inst in self.code if "input" in inst}
+        if "state" in ops:
+            return [1, 2]
+        if inputs & set(_TEAM_FIELDS):
+            return [1, 1]
+        return [1, 0]
+
+    def compile(self, function: Callable, update: bool = False) -> dict:
         source = _source_of(function)
         params = source.tree.args
         if (
@@ -1218,19 +1313,23 @@ class _Compiler:
             result = self.function(function, [_Value("player")], None)
         except _Fail as error:
             raise self.located(error) from None
-        if result is None or result.kind != "pose":
+        wanted = "state" if update else "pose"
+        if result is None or result.kind != wanted:
             self.frame = _Frame(source)
             raise self.located(
-                _Fail(source.tree, f"{function.__qualname__} must return pose(...), got {self.describe(result) if result else 'nothing'}")
+                _Fail(source.tree, f"{function.__qualname__} must return {wanted}(...), got {self.describe(result) if result else 'nothing'}")
             )
-        regs = dict(zip(_POSE_FIELDS, (item.reg for item in result.items)))
-        return {
-            "version": list(PROGRAM_VERSION),
+        program = {
+            "version": self.version(),
             "name": function.__qualname__,
             "strings": list(self.strings),
             "code": self.code,
-            "pose": regs,
         }
+        if update:
+            program["next"] = [item.reg for item in result.items]
+        else:
+            program["pose"] = dict(zip(_POSE_FIELDS, (item.reg for item in result.items)))
+        return program
 
 
 @dataclass(frozen=True)
@@ -1238,15 +1337,39 @@ class _Unbound:
     name: str
 
 
-def compile_behavior(function: Callable) -> str:
-    """Compile a behavior to the JSON program Rust runs.
+def _check_state_names(names: Any) -> tuple:
+    names = tuple(names)
+    if not 1 <= len(names) <= MAX_STATE:
+        raise BehaviorError(f"a zone keeps 1 to {MAX_STATE} numbers per player, got {len(names)}")
+    for name in names:
+        if not isinstance(name, str) or not name.isidentifier():
+            raise BehaviorError(f"state names are Python names, got {name!r}")
+    return names
+
+
+def compile_behavior(function: Callable, state: Any = ()) -> str:
+    """Compile a behavior to the JSON program Rust runs. ``state`` names the
+    numbers the zone keeps, which it reads as ``p.state.<name>``.
 
     Raises :class:`BehaviorError`, pointing at the line, for Python the
     compiler does not support.
     """
-    compiler = _Compiler()
+    compiler = _Compiler(_check_state_names(state) if state else ())
     try:
         program = compiler.compile(function)
     except _Fail as error:  # raised outside any frame
+        raise compiler.located(error) from None
+    return json.dumps(program, separators=(",", ":"))
+
+
+def compile_update(function: Callable, state: Any) -> str:
+    """Compile a zone's update, which returns ``state(...)``, to the JSON
+    program Rust runs every ``STEP`` for each player. ``state`` names the
+    numbers the zone keeps, in order.
+    """
+    compiler = _Compiler(_check_state_names(state))
+    try:
+        program = compiler.compile(function, update=True)
+    except _Fail as error:
         raise compiler.located(error) from None
     return json.dumps(program, separators=(",", ":"))
