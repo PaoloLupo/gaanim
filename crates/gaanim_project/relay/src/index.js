@@ -33,6 +33,8 @@
 //   POST   /s/<code>/reset    forget every poll, vote and player (presenter)
 //   POST   /s/<code>/lobby    {open}: phones join as they arrive (presenter)
 //   POST   /s/<code>/teams    {names, colors, choose}: play in teams (presenter)
+//   PUT    /s/<code>/image/<hash>  a poll's picture, its bytes (presenter)
+//   GET    /s/<code>/image/<hash>  that picture (public)
 //   GET    /s/<code>/results  {current, connected, polls, players, audience} (presenter)
 //   GET    /s/<code>/presenter  WebSocket pushing {type: "results", ...} (presenter)
 //   GET    /health            {relay, version}
@@ -94,7 +96,12 @@ const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
  * lasts between SESSION_TTL_MS minus this and SESSION_TTL_MS after its last
  * activity. */
 const ALARM_SLACK_MS = 30 * 60 * 1000;
-const API_VERSION = 9;
+const API_VERSION = 10;
+/** A poll picture's name: a hash of its bytes. */
+const IMAGE = /^[0-9a-f]{16}$/;
+/** Largest picture the presenter may store. */
+const MAX_IMAGE = 600_000;
+const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 /** Teams a game may have, and the longest team name. */
 const MAX_TEAMS = 6;
 const MAX_TEAM_NAME = 20;
@@ -122,7 +129,8 @@ export default {
       return json({ relay: "gaanim", version: API_VERSION });
     }
     const code = (parts[1] ?? "").toUpperCase();
-    if (parts[0] !== "s" || !CODE.test(code) || parts.length > 3) {
+    const picture = parts[2] === "image" && parts.length === 4;
+    if (parts[0] !== "s" || !CODE.test(code) || (parts.length > 3 && !picture)) {
       return json({ error: "not found" }, 404);
     }
     if (parts.length === 2) {
@@ -137,6 +145,33 @@ export default {
         return json({ error: "expected a WebSocket upgrade" }, 426);
       }
       return session.fetch(request);
+    }
+    if (picture) {
+      const hash = parts[3];
+      if (!IMAGE.test(hash)) return json({ error: "not found" }, 404);
+      if (request.method === "GET") {
+        const image = await session.image(hash);
+        if (!image) return json({ error: "not found" }, 404);
+        return new Response(image.bytes, {
+          headers: {
+            "content-type": image.mime,
+            // Named by its bytes: it never changes.
+            "cache-control": "public, max-age=31536000, immutable",
+          },
+        });
+      }
+      if (request.method === "PUT") {
+        const mime = (request.headers.get("content-type") ?? "").split(";")[0].trim();
+        if (!IMAGE_TYPES.has(mime) || Number(request.headers.get("content-length") ?? 0) > MAX_IMAGE) {
+          return json({ error: "invalid image" }, 400);
+        }
+        const bytes = await request.arrayBuffer();
+        if (bytes.byteLength === 0 || bytes.byteLength > MAX_IMAGE) {
+          return json({ error: "invalid image" }, 400);
+        }
+        return reply(await session.store(bearer(request), hash, mime, bytes));
+      }
+      return json({ error: "method not allowed" }, 405);
     }
     try {
       switch (`${request.method} ${parts[2]}`) {
@@ -188,11 +223,15 @@ export class PollSession extends DurableObject {
   //   "teams"                {names, colors, choose} when the game plays in teams
   //   "current"              id of the open poll, absent when none is
   //   "revealed"             id of the quiz revealed last
-  //   "poll:<id>"            {question, options, quiz?}; a quiz is
-  //                          {correct, time, points, openedAt, deadline, revealed}
-  //   "vote:<id>:<voter>"    answer index of a poll's voter
+  //   "latest"               id of the poll opened last
+  //   "game"                 id of the game, new with each one
+  //   "poll:<id>"            {question, options, multiple?, image?, quiz?}; a quiz is
+  //                          {correct, time, points, openedAt, deadline, revealed};
+  //                          `correct` is an index, or a list for multiple choice
+  //   "vote:<id>:<voter>"    a poll voter's answer: an index, or a list
   //   "answer:<id>:<voter>"  {option, elapsed, points} of a quiz's player
-  //   "player:<voter>"       {name, score, correct, answered, joined, avatar}
+  //   "player:<voter>"       {name, score, correct, answered, streak, joined, avatar}
+  //   "image:<hash>"         {mime, bytes} of a poll picture; kept across games
   //   "banned:<voter>"       a phone the presenter removed
   // Every poll keeps its votes, so a presentation that comes back to a
   // question finds them again.
@@ -231,6 +270,8 @@ export class PollSession extends DurableObject {
       teams: null,
       stage: "play",
       current: null,
+      latest: null,
+      game: null,
       revealed: null,
       polls: new Map(),
       votes: new Map(),
@@ -262,8 +303,20 @@ export class PollSession extends DurableObject {
         case "revealed":
           s.revealed = value;
           break;
+        case "latest":
+          s.latest = value;
+          break;
+        case "game":
+          s.game = value;
+          break;
         case "poll":
-          s.polls.set(id, { question: value.question, options: value.options, quiz: value.quiz ?? null });
+          s.polls.set(id, {
+            question: value.question,
+            options: value.options,
+            multiple: value.multiple === true,
+            image: value.image ?? null,
+            quiz: value.quiz ?? null,
+          });
           break;
         case "vote":
           byPoll(s.votes, id).set(voter, value);
@@ -298,7 +351,7 @@ export class PollSession extends DurableObject {
     const [client, server] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(server, [presenter ? "presenter" : "phone"]);
     if (presenter) {
-      server.send(JSON.stringify({ type: "results", ...(await this.summary()) }));
+      server.send(JSON.stringify({ type: "results", ...(await this.summary(true)) }));
     } else {
       server.send(JSON.stringify({ type: "poll", ...(await this.current()) }));
       // One more phone connected.
@@ -440,6 +493,8 @@ export class PollSession extends DurableObject {
       id,
       question: poll.question,
       options: poll.options,
+      multiple: poll.multiple,
+      image: poll.image,
       chosen: voter ? choiceOf(s, id, voter) : null,
     };
     if (poll.quiz) {
@@ -527,8 +582,8 @@ export class PollSession extends DurableObject {
       return fail(409, "this question is closed");
     }
     const poll = s.polls.get(id);
-    const option = input.option;
-    if (!Number.isInteger(option) || option < 0 || option >= poll.options.length) {
+    const option = checkChoice(input.option, poll);
+    if (option === null) {
       return fail(400, "unknown answer");
     }
     const voter = input.voter;
@@ -540,12 +595,14 @@ export class PollSession extends DurableObject {
     }
     const votes = s.votes.get(id) ?? s.votes.set(id, new Map()).get(id);
     const previous = votes.get(voter);
-    if (previous === option) {
+    if (previous !== undefined && sameChoice(previous, option)) {
       return ok({ ok: true });
     }
     await this.ctx.storage.put(`vote:${id}:${voter}`, option);
-    if (previous !== undefined) poll.counts[previous] = Math.max(0, poll.counts[previous] - 1);
-    poll.counts[option] += 1;
+    if (previous !== undefined) {
+      for (const chosen of choices(previous)) poll.counts[chosen] = Math.max(0, poll.counts[chosen] - 1);
+    }
+    for (const chosen of choices(option)) poll.counts[chosen] += 1;
     votes.set(voter, option);
     await this.touch(s);
     return ok({ ok: true });
@@ -571,7 +628,10 @@ export class PollSession extends DurableObject {
     }
     const limit = quiz.time * 1000;
     const elapsed = Math.min(Math.max(now - quiz.openedAt, 0), limit);
-    const points = option === quiz.correct ? Math.round(quiz.points * (1 - elapsed / limit / 2)) : 0;
+    // Right means every right answer and no other.
+    const points = sameChoice(option, quiz.correct)
+      ? Math.round(quiz.points * (1 - elapsed / limit / 2))
+      : 0;
     // The score changes now, but phones learn it only when the answer is
     // revealed; the leaderboard is the presenter's to show.
     const scored = {
@@ -584,7 +644,7 @@ export class PollSession extends DurableObject {
     await this.ctx.storage.put({ [`answer:${id}:${voter}`]: answer, [`player:${voter}`]: scored });
     answers.set(voter, answer);
     s.players.set(voter, scored);
-    poll.counts[option] += 1;
+    for (const chosen of choices(option)) poll.counts[chosen] += 1;
     await this.touch(s);
     return ok({ ok: true });
   }
@@ -608,14 +668,18 @@ export class PollSession extends DurableObject {
     ) {
       return fail(400, "invalid question");
     }
+    const multiple = input.multiple === true || Array.isArray(input.correct);
+    const image = input.image ?? null;
+    if (image !== null && (typeof image !== "string" || !IMAGE.test(image))) {
+      return fail(400, "invalid image");
+    }
     let quiz = null;
     if (input.correct !== undefined && input.correct !== null) {
       const time = input.time ?? DEFAULT_TIME;
       const points = input.points ?? DEFAULT_POINTS;
+      const correct = checkChoice(input.correct, { options, multiple });
       if (
-        !Number.isInteger(input.correct) ||
-        input.correct < 0 ||
-        input.correct >= options.length ||
+        correct === null ||
         !Number.isInteger(time) ||
         time < MIN_TIME ||
         time > MAX_TIME ||
@@ -625,7 +689,7 @@ export class PollSession extends DurableObject {
       ) {
         return fail(400, "invalid quiz");
       }
-      quiz = { correct: input.correct, time, points };
+      quiz = { correct, time, points };
     }
     const s = await this.startOver(await this.state());
     const existing = s.polls.get(id);
@@ -634,7 +698,9 @@ export class PollSession extends DurableObject {
       existing.question === question &&
       existing.options.length === options.length &&
       existing.options.every((option, index) => option === options[index]) &&
-      (existing.quiz?.correct ?? null) === (quiz?.correct ?? null) &&
+      existing.multiple === multiple &&
+      existing.image === image &&
+      JSON.stringify(existing.quiz?.correct ?? null) === JSON.stringify(quiz?.correct ?? null) &&
       (existing.quiz?.time ?? null) === (quiz?.time ?? null) &&
       (existing.quiz?.points ?? null) === (quiz?.points ?? null);
     if (!same) {
@@ -644,6 +710,8 @@ export class PollSession extends DurableObject {
       const poll = {
         question,
         options,
+        multiple,
+        image,
         quiz: quiz && { ...quiz, openedAt: now, deadline: now + quiz.time * 1000, revealed: false },
       };
       await this.ctx.storage.put(`poll:${id}`, poll);
@@ -652,8 +720,9 @@ export class PollSession extends DurableObject {
     // Coming back to a quiz keeps its clock: its time may already be up.
     const previous = s.current;
     if (previous !== id) {
-      await this.ctx.storage.put("current", id);
+      await this.ctx.storage.put({ current: id, latest: id });
       s.current = id;
+      s.latest = id;
     }
     await this.touch(s);
     if (previous !== id || !same) {
@@ -716,11 +785,29 @@ export class PollSession extends DurableObject {
     if (!poll?.quiz) {
       return fail(404, "no such quiz");
     }
+    const first = !poll.quiz.revealed;
     const quiz = { ...poll.quiz, revealed: true };
+    // The first reveal moves every player's run of right answers.
+    const streaks = {};
+    if (first) {
+      const answers = s.answers.get(id);
+      for (const [voter, player] of s.players) {
+        const right = (answers?.get(voter)?.points ?? 0) > 0;
+        streaks[`player:${voter}`] = { ...player, streak: right ? (player.streak ?? 0) + 1 : 0 };
+      }
+    }
     await this.ctx.storage.put({
-      [`poll:${id}`]: { question: poll.question, options: poll.options, quiz },
+      [`poll:${id}`]: {
+        question: poll.question,
+        options: poll.options,
+        multiple: poll.multiple,
+        image: poll.image,
+        quiz,
+      },
       revealed: id,
+      ...streaks,
     });
+    for (const [key, player] of Object.entries(streaks)) s.players.set(key.slice("player:".length), player);
     poll.quiz = quiz;
     s.revealed = id;
     // Every phone learns the answer; players also learn their result.
@@ -786,17 +873,24 @@ export class PollSession extends DurableObject {
 
   /** Forget the game in `s` and tell the phones; returns the new state. */
   async restart(s) {
+    // Pictures stay: the presentation uploaded them once.
+    const images = Object.fromEntries(await this.ctx.storage.list({ prefix: "image:" }));
     // Also removes the alarm; `touch` sets it again.
     await this.ctx.storage.deleteAll();
+    const game = crypto.randomUUID();
     await this.ctx.storage.put({
       key: s.key,
+      game,
       ...(s.lobby && { lobby: true }),
       ...(s.teams && { teams: s.teams }),
     });
+    await putAll(this.ctx.storage, images);
     this.loading = Promise.resolve({
       ...s,
       stage: "play",
       current: null,
+      latest: null,
+      game,
       revealed: null,
       polls: new Map(),
       votes: new Map(),
@@ -811,6 +905,20 @@ export class PollSession extends DurableObject {
     await this.broadcast();
     this.send(() => ({ type: "player", player: null }));
     return fresh;
+  }
+
+  /** Store a poll's picture, named by `hash`. */
+  async store(key, hash, mime, bytes) {
+    const denied = await this.authorize(key, true);
+    if (denied) return denied;
+    await this.ctx.storage.put(`image:${hash}`, { mime, bytes });
+    await this.touch(await this.state());
+    return ok({ ok: true });
+  }
+
+  /** A poll's picture, or null. */
+  async image(hash) {
+    return (await this.ctx.storage.get(`image:${hash}`)) ?? null;
   }
 
   /** Where the game is, as the presentation says: "play" while there are
@@ -899,19 +1007,39 @@ export class PollSession extends DurableObject {
   async results(key) {
     const denied = await this.authorize(key, false);
     if (denied) return denied;
-    return ok(await this.summary());
+    return ok(await this.summary(true));
   }
 
   /** What the presentation reads: counts, quizzes, players, audience. */
-  async summary() {
+  /** What the presentation reads. `all` sends every poll's answers, as a
+   * presentation that just connected needs; pushes send the open poll's. */
+  async summary(all = false) {
     const s = await this.state();
     const polls = {};
+    const names = new Map([...s.players].map(([voter, player]) => [voter, player.name]));
     for (const [id, poll] of s.polls) {
+      const chosen = poll.quiz ? s.answers.get(id) : s.votes.get(id);
       polls[id] = {
         open: id === s.current,
         counts: poll.counts,
         total: poll.counts.reduce((sum, count) => sum + count, 0),
+        respondents: chosen?.size ?? 0,
       };
+      if (all || id === s.current) {
+        // Each player's answer, for the scene to show who chose what.
+        polls[id].answers = [...(chosen ?? [])]
+          .filter(([voter]) => names.has(voter))
+          .map(([voter, answer]) => {
+            const option = typeof answer === "object" && !Array.isArray(answer) ? answer.option : answer;
+            return {
+              name: names.get(voter),
+              options: choices(option),
+              elapsed: answer?.elapsed ?? 0,
+              points: answer?.points ?? 0,
+              right: poll.quiz ? (answer?.points ?? 0) > 0 : null,
+            };
+          });
+      }
       if (poll.quiz) {
         polls[id].quiz = {
           correct: poll.quiz.correct,
@@ -926,6 +1054,7 @@ export class PollSession extends DurableObject {
       score: player.score,
       correct: player.correct,
       answered: player.answered,
+      streak: player.streak ?? 0,
       avatar: player.avatar ?? defaultAvatar(player.voter),
       team: player.team ?? null,
     }));
@@ -936,11 +1065,17 @@ export class PollSession extends DurableObject {
         joined: player.joined ?? 0,
         avatar: player.avatar ?? defaultAvatar(player.voter),
         team: player.team ?? null,
+        score: player.score,
+        correct: player.correct,
+        answered: player.answered,
+        streak: player.streak ?? 0,
       }))
       .sort((a, b) => a.joined - b.joined || a.name.localeCompare(b.name))
       .slice(0, AUDIENCE);
     return {
       current: s.current,
+      latest: s.latest,
+      game: s.game,
       connected: this.ctx.getWebSockets("phone").length,
       now: Date.now(),
       polls,
@@ -962,8 +1097,11 @@ export class PollSession extends DurableObject {
     const hash = await sha256(key);
     if (!s.key) {
       if (!claim) return fail(401, "unknown session");
-      await this.ctx.storage.put("key", hash);
+      // A claimed session starts its first game.
+      const game = s.game ?? crypto.randomUUID();
+      await this.ctx.storage.put({ key: hash, game });
       s.key = hash;
+      s.game = game;
     }
     if (s.key !== hash) return fail(403, "wrong presenter key");
     this.verified = key;
@@ -988,15 +1126,47 @@ export class PollSession extends DurableObject {
   }
 }
 
-/** The vote counts of a poll, from its votes or a quiz's answers. */
+/** The vote counts of a poll, from its votes or a quiz's answers: each
+ * answer chosen counts, so a multiple choice poll adds up to more votes
+ * than voters. */
 function countVotes(s, id, poll) {
   const counts = poll.options.map(() => 0);
-  const choices = poll.quiz ? s.answers.get(id) : s.votes.get(id);
-  for (const choice of choices?.values() ?? []) {
-    const option = typeof choice === "number" ? choice : choice.option;
-    if (option >= 0 && option < counts.length) counts[option] += 1;
+  const chosen = poll.quiz ? s.answers.get(id) : s.votes.get(id);
+  for (const choice of chosen?.values() ?? []) {
+    const option = typeof choice === "object" && !Array.isArray(choice) ? choice.option : choice;
+    for (const index of choices(option)) {
+      if (index >= 0 && index < counts.length) counts[index] += 1;
+    }
   }
   return counts;
+}
+
+/** The answers of a choice: an index, or a list of them. */
+function choices(choice) {
+  if (Array.isArray(choice)) return choice;
+  return Number.isInteger(choice) ? [choice] : [];
+}
+
+/** Whether two choices pick the same answers. */
+function sameChoice(a, b) {
+  const x = [...choices(a)].sort((m, n) => m - n);
+  const y = [...choices(b)].sort((m, n) => m - n);
+  return x.length === y.length && x.every((value, index) => value === y[index]);
+}
+
+/** `value` as a choice of `poll`: one index, or for a multiple choice
+ * poll a list of distinct indexes, sorted; null if it is neither. */
+function checkChoice(value, poll) {
+  const count = poll.options.length;
+  const valid = (index) => Number.isInteger(index) && index >= 0 && index < count;
+  if (!poll.multiple) {
+    if (Array.isArray(value) && value.length === 1) value = value[0];
+    return valid(value) ? value : null;
+  }
+  const list = Array.isArray(value) ? value : [value];
+  const distinct = [...new Set(list)];
+  if (distinct.length === 0 || distinct.length !== list.length || !distinct.every(valid)) return null;
+  return distinct.sort((a, b) => a - b);
 }
 
 /** What `voter` chose on poll `id`: its vote, or its quiz answer. */

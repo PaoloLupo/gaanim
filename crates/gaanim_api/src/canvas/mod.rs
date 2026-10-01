@@ -111,8 +111,9 @@ pub use live::{LiveZoneError, LiveZoneHandle, check_behavior};
 mod poll;
 pub use gaanim_animation::polls::{BarDirection, BarScale, TextAlign};
 pub use poll::{
-    AudienceHandle, GateCondition, LeaderboardHandle, LiveTextOptions, MAX_POLL_OPTIONS,
-    MAX_TEAMS, PollBarOptions, PollError, PollHandle, PollSession, QUIZ_POINTS, QUIZ_TIME,
+    ANSWER_COLORS, AudienceHandle, GateCondition, LeaderboardHandle, LiveTextOptions, MAX_POLL_OPTIONS,
+    MAX_TEAMS, POLL_IMAGE_SIZE, PollBarOptions, PollError, PollHandle, PollImage, PollSession,
+    PlayerFact, PollStyle, QUIZ_POINTS, QUIZ_TIME, poll_image,
     TEAM_COLORS, TeamsHandle,
 };
 mod theme;

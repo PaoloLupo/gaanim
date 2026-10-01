@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from typing import Any, Callable, ClassVar, Iterator, Literal, Mapping, Optional, Self, Sequence, TypeAlias, overload
 from .live import Player, Pose, State
+from .questions import Question
 from .matrix import Matrix
 from .sections import SceneSections
 from .animation_types import AnimationChannel, CustomAnimationValues
@@ -5199,8 +5200,34 @@ class Poll:
         """Whether the poll was created with ``scene.quiz``."""
         ...
     @property
-    def correct(self) -> Optional[int]:
-        """A quiz's correct answer (0 for the first); ``None`` for a poll."""
+    def correct(self) -> Optional[int | list[int]]:
+        """A quiz's right answer (0 for the first), or the list of them for a
+        multiple choice quiz; ``None`` for a poll."""
+        ...
+    @property
+    def multiple(self) -> bool:
+        """Whether players may choose several answers."""
+        ...
+    @property
+    def has_image(self) -> bool:
+        """Whether phones show a picture above the question."""
+        ...
+    def icon(self, answer: int, size: float = 0.6) -> Drawable:
+        """The shape ``answer`` has on phones (a triangle, diamond, circle,
+        square, star or hexagon), ``size`` units tall, centered on the origin
+        and filled with its color, to put on the scene's own tiles.
+
+        On a quiz, phones show the answers in an order of their own and color
+        them by place, so the screen's shapes match a poll's but not a quiz's.
+        Raises ``ValueError`` for an answer the poll does not have or a
+        non-positive size.
+
+        Example:
+            poll.icon(0, 0.5).move_to(-5, 1)
+        """
+        ...
+    def color(self, answer: int) -> str:
+        """The color ``answer`` has on phones, ``#rrggbb``."""
         ...
     @property
     def time(self) -> Optional[int]:
@@ -5293,6 +5320,38 @@ class Leaderboard:
         ...
     def players(self) -> Parameter:
         """How many players joined, as a parameter."""
+        ...
+    def correct(self, rank: int) -> Parameter:
+        """Quizzes the player at ``rank`` answered right."""
+        ...
+    def answered(self, rank: int) -> Parameter:
+        """Quizzes the player at ``rank`` answered."""
+        ...
+    def streak(self, rank: int) -> Parameter:
+        """Quizzes the player at ``rank`` answered right in a row, up to the
+        last one revealed."""
+        ...
+    def responded(self, rank: int, poll: Poll) -> Parameter:
+        """1 once the player at ``rank`` answered ``poll``, else 0."""
+        ...
+    def chose(self, rank: int, poll: Poll, answer: int) -> Parameter:
+        """1 if the player at ``rank`` chose ``answer`` on ``poll``, else 0: who
+        voted what, for a multiple choice poll too.
+
+        Example:
+            mark.opacity(computed(lambda c: c, inputs=[audience.chose(0, poll, 2)]))
+        """
+        ...
+    def right(self, rank: int, poll: Poll) -> Parameter:
+        """1 if the player at ``rank`` answered quiz ``poll`` right, else 0. Raises
+        ``ValueError`` for a poll that is not a quiz."""
+        ...
+    def earned(self, rank: int, poll: Poll) -> Parameter:
+        """Points the player at ``rank`` earned on quiz ``poll``."""
+        ...
+    def answer_time(self, rank: int, poll: Poll) -> Parameter:
+        """Seconds the player at ``rank`` took to answer quiz ``poll``, 0 without
+        an answer."""
         ...
     def bar(
         self,
@@ -5435,6 +5494,41 @@ class Audience:
         Example:
             pop = computed(lambda a: min(a / 0.4, 1), inputs=[audience.age(3)])
         """
+        ...
+    def score(self, slot: int) -> Parameter:
+        """The points of the player in ``slot``."""
+        ...
+    def correct(self, slot: int) -> Parameter:
+        """Quizzes the player in ``slot`` answered right."""
+        ...
+    def answered(self, slot: int) -> Parameter:
+        """Quizzes the player in ``slot`` answered."""
+        ...
+    def streak(self, slot: int) -> Parameter:
+        """Quizzes the player in ``slot`` answered right in a row, up to the
+        last one revealed."""
+        ...
+    def responded(self, slot: int, poll: Poll) -> Parameter:
+        """1 once the player in ``slot`` answered ``poll``, else 0."""
+        ...
+    def chose(self, slot: int, poll: Poll, answer: int) -> Parameter:
+        """1 if the player in ``slot`` chose ``answer`` on ``poll``, else 0: who
+        voted what, for a multiple choice poll too.
+
+        Example:
+            mark.opacity(computed(lambda c: c, inputs=[audience.chose(0, poll, 2)]))
+        """
+        ...
+    def right(self, slot: int, poll: Poll) -> Parameter:
+        """1 if the player in ``slot`` answered quiz ``poll`` right, else 0. Raises
+        ``ValueError`` for a poll that is not a quiz."""
+        ...
+    def earned(self, slot: int, poll: Poll) -> Parameter:
+        """Points the player in ``slot`` earned on quiz ``poll``."""
+        ...
+    def answer_time(self, slot: int, poll: Poll) -> Parameter:
+        """Seconds the player in ``slot`` took to answer quiz ``poll``, 0 without
+        an answer."""
         ...
 
 class Character(Drawable):
@@ -8602,6 +8696,8 @@ class Scene:
         question: str,
         options: Sequence[str],
         *,
+        multiple: bool = False,
+        image: Optional[str | os.PathLike[str]] = None,
         rehearse: Optional[Sequence[float]] = None,
     ) -> Poll:
         """Open an audience poll at the cursor and return its data.
@@ -8617,7 +8713,12 @@ class Scene:
         Outside a live presentation the scene's rehearsal
         (``scene.rehearsal``) votes, leaning some random way; ``rehearse``
         gives one weight per answer to lean it (``[1, 3]`` makes the second
-        three times as popular). The relay comes from
+        three times as popular). ``multiple=True`` lets each phone choose
+        several answers: ``votes`` count every choice, and ``total`` and
+        ``share`` count the phones that answered. ``image`` is a picture
+        (relative to the script) phones show above the question, scaled to
+        1024 pixels; show it in the scene with ``scene.media.image``. The
+        relay comes from
         ``GAANIM_POLL_RELAY``, the project's ``[polls] relay`` or
         ``gaanim relay use``; without one a ``UserWarning`` says so and the QR
         code leads nowhere. ``question`` and each answer are trimmed.
@@ -8641,6 +8742,7 @@ class Scene:
         *,
         time: int = 20,
         points: int = 1000,
+        image: Optional[str | os.PathLike[str]] = None,
         rehearse: Optional[float | Sequence[float]] = None,
     ) -> Poll:
         """Open a quiz at the cursor, as in Kahoot, and return its data.
@@ -8653,6 +8755,10 @@ class Scene:
         phones; ``remaining()`` counts the seconds down, and
         ``scene.leaderboard`` gives the players' standings. It takes answers in
         the same window as a poll and presents like one.
+
+        ``correct`` may be a list: the quiz is multiple choice, and an answer
+        is right (and earns points) only when it chose every right answer and
+        no other. ``image`` works as in ``poll``.
 
         The rehearsal answers it by the players' skill; ``rehearse`` sets the
         share that gets this question right (``0.3`` for a hard one), or one
@@ -8669,6 +8775,21 @@ class Scene:
             scene.wait(20)
             quiz.reveal()
             scene.stop()
+        """
+        ...
+    def question(self, question: Question) -> Poll:
+        """Open a question loaded with ``gaanim.load_questions``: a quiz when
+        it has right answers, else a poll, with its time, points, picture
+        and rehearsal.
+
+        Example:
+            from gaanim import load_questions
+
+            for q in load_questions("preguntas.md"):
+                scene.segment(q.text)
+                quiz = scene.question(q)
+                scene.text(q.text, size=0.6).move_to(0, 3)
+                scene.stop()
         """
         ...
     def teams(

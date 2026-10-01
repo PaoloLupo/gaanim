@@ -50,6 +50,10 @@ escena.
   `p.score_since`, para animar los cambios de puesto.
 - `p.team`, `p.team_index`, `p.team_count`, `p.team_score` y `p.team_rank`
   en un juego con #link("/guias/presentaciones/#equipos")[equipos].
+- `p.answer` (la respuesta que eligió en la pregunta abierta, o la última;
+  -1 si ninguna), `p.answer_mask` (todas las que eligió, un bit cada una),
+  `p.answer_time`, `p.answer_points`, y en el juego `p.answers`
+  (respondidas), `p.correct` (acertadas) y `p.streak` (aciertos seguidos).
 - `p.random(k)`: un número entre 0 y 1 que depende solo del jugador y de
   `k`, el mismo en cada cuadro y en cada equipo.
 - `p.state.<nombre>`: los números que la zona guarda para él (ver

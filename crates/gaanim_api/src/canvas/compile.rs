@@ -2788,10 +2788,14 @@ impl SceneModel {
                         answers: poll.options.len(),
                         open,
                         due,
-                        quiz: poll
-                            .quiz
-                            .as_ref()
-                            .map(|quiz| (quiz.correct, quiz.time, quiz.points)),
+                        quiz: poll.quiz.as_ref().map(|quiz| {
+                            let mask = quiz
+                                .correct
+                                .iter()
+                                .fold(0u32, |mask, answer| mask | 1 << answer);
+                            (mask, quiz.time, quiz.points)
+                        }),
+                        multiple: poll.multiple,
                         lean: poll.lean.clone(),
                     })
                 })
@@ -2838,6 +2842,8 @@ impl SceneModel {
                                 points: quiz.points,
                                 reveal: quiz.reveal.and_then(|reveal| at(reveal)),
                             }),
+                        multiple: poll.multiple,
+                        image: poll.image,
                     })
                 })
                 .collect(),
@@ -12550,7 +12556,7 @@ mod tests {
         canvas.stop(None).unwrap();
         canvas.segment("Pregunta", None).unwrap();
         let quiz = canvas
-            .quiz("¿2 + 2?", ["3", "4"], 1, 20, 1000, Lean::Right(1.0))
+            .quiz("¿2 + 2?", ["3", "4"], vec![1], 20, 1000, Lean::Right(1.0), crate::canvas::PollStyle::default())
             .unwrap();
         let right = quiz.votes(1).unwrap();
         canvas.wait(4.0);
@@ -12612,7 +12618,7 @@ mod tests {
             .teams(vec!["Rojo".into(), "Azul".into()], None, false)
             .unwrap();
         let quiz = canvas
-            .quiz("¿2 + 2?", ["3", "4", "5"], 1, 20, 1000, Lean::Auto)
+            .quiz("¿2 + 2?", ["3", "4", "5"], vec![1], 20, 1000, Lean::Auto, crate::canvas::PollStyle::default())
             .unwrap();
         let (red, blue, players, leader) = (
             teams.score(0).unwrap(),
@@ -15707,7 +15713,7 @@ mod tests {
         canvas.wait(1.0);
         canvas.segment("Vote", None).unwrap();
         canvas.wait(0.5);
-        let whole = canvas.poll("Whole?", ["A", "B"], Lean::Weights(vec![1.0, 0.0])).unwrap();
+        let whole = canvas.poll("Whole?", ["A", "B"], Lean::Weights(vec![1.0, 0.0]), crate::canvas::PollStyle::default()).unwrap();
         let bar = whole
             .bar(
                 0,
@@ -15722,7 +15728,7 @@ mod tests {
             .unwrap();
         let share = whole.share(0).unwrap();
         canvas.wait(2.0);
-        let early = canvas.poll("Early?", ["X", "Y", "Z"], Lean::Auto).unwrap();
+        let early = canvas.poll("Early?", ["X", "Y", "Z"], Lean::Auto, crate::canvas::PollStyle::default()).unwrap();
         canvas.wait(1.0);
         early.close().unwrap();
         canvas.wait(0.5);
@@ -15789,7 +15795,7 @@ mod tests {
         canvas.wait(1.0);
         canvas.segment("Quiz", None).unwrap();
         let quiz = canvas
-            .quiz("¿2 + 2?", ["3", "4"], 1, 20, 1000, Lean::Auto)
+            .quiz("¿2 + 2?", ["3", "4"], vec![1], 20, 1000, Lean::Auto, crate::canvas::PollStyle::default())
             .unwrap();
         canvas.wait(0.5);
         let before = canvas.stop_count();

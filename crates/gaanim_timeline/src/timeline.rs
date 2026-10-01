@@ -377,6 +377,23 @@ pub struct TimelinePoll {
     /// Set for a quiz, authored with `scene.quiz`.
     #[cfg_attr(feature = "serde", serde(default))]
     pub quiz: Option<TimelineQuiz>,
+    /// Players may choose several answers.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub multiple: bool,
+    /// A picture phones show above the question.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub image: Option<PollImage>,
+}
+
+/// A poll's picture, ready for phones: small enough to send, named by a
+/// hash of its bytes so the relay stores each picture once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PollImage {
+    /// 16 hex digits.
+    pub hash: String,
+    /// `image/jpeg` or `image/png`.
+    pub mime: String,
+    pub bytes: std::sync::Arc<[u8]>,
 }
 
 /// A stop that advances by itself: while a presentation takes votes and
@@ -499,7 +516,9 @@ impl GateCondition {
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TimelineQuiz {
-    pub correct: usize,
+    /// The right answers: one for a single choice quiz; all of them, and no
+    /// other, for a multiple choice one.
+    pub correct: Vec<usize>,
     pub time: u32,
     pub points: u32,
     /// Timeline time of `quiz.reveal()`, if the scene reveals it.
@@ -6720,6 +6739,8 @@ mod tests {
             open,
             close,
             quiz: None,
+            multiple: false,
+            image: None,
         };
         let segment = |id: u32, start_time: f64, end_time: f64, stops: &[f64]| SegmentMetadata {
             id,

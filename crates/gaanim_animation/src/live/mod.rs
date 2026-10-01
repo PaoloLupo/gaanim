@@ -82,17 +82,18 @@ pub fn zone_contains(zone: &LiveZone, time: f64) -> bool {
 /// A live player: with the character the phone made, or one read from the
 /// nickname.
 fn player(results: &PollResults, name: &std::sync::Arc<str>) -> Player {
-    let team = results.player_teams.get(name).copied().unwrap_or(0);
-    match results.avatars.get(name) {
-        Some(character) => Player {
-            name: name.clone(),
-            character: *character,
-            team,
-        },
-        None => Player {
-            team,
-            ..Player::named(name)
-        },
+    let named = Player::named(name);
+    Player {
+        character: results.avatars.get(name).copied().unwrap_or(named.character),
+        team: results.player_teams.get(name).copied().unwrap_or(0),
+        stats: results.stats.get(name).copied().unwrap_or_default(),
+        answer: results
+            .latest
+            .as_ref()
+            .and_then(|poll| results.answers.get(poll))
+            .and_then(|answers| answers.get(name))
+            .copied(),
+        ..named
     }
 }
 
@@ -115,12 +116,13 @@ pub fn replay_rehearsal(zone: &LiveZone, now: f64, run: &mut ZoneRun, rehearsal:
             }
         }
         let scores = rehearsal.scores(time);
-        run.standings(|name| {
-            rehearsal
-                .players
-                .iter()
-                .position(|player| player.name == name)
-                .map_or(0.0, |index| scores[index].0 as f64)
+        let index_of = |name: &str| rehearsal.players.iter().position(|player| player.name == name);
+        run.standings(|name| index_of(name).map_or(0.0, |index| scores[index].0 as f64));
+        let stats = rehearsal.stats_at(time);
+        let latest = rehearsal.latest_at(time);
+        run.facts(|name| match index_of(name) {
+            Some(index) => (stats[index], latest.and_then(|poll| rehearsal.answer_of(poll, index, time))),
+            None => Default::default(),
         });
     };
     while run.next_step() <= clock + 1e-9 {
@@ -270,7 +272,8 @@ mod tests {
             answers: 4,
             open: 0.0,
             due: 5.0,
-            quiz: Some((1, 20, 1000)),
+            quiz: Some((1 << 1, 20, 1000)),
+            multiple: false,
             lean: Lean::Right(0.6),
         }];
         let teams = Some(RehearsalTeams {

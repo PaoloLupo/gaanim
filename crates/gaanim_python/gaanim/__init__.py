@@ -177,6 +177,7 @@ from .templates import (
     vertical_short,
 )
 from .animation_types import AnimationChannel, CustomAnimationValues, Playable, ScalarSource
+from .questions import Question, QuestionError, load_questions
 from .matrix import (
     Matrix,
     MatrixAlgebraError,
@@ -313,6 +314,9 @@ __all__ = [
     "minimal",
     "lower_third",
     "credits",
+    "Question",
+    "QuestionError",
+    "load_questions",
     "Updater",
     "Falloff",
     "FalloffColor",

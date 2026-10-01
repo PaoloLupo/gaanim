@@ -1022,6 +1022,27 @@ fn voiceover_error(error: gaanim_api::canvas::VoiceoverError) -> PyErr {
     pyo3::exceptions::PyValueError::new_err(error.to_string())
 }
 
+/// How a poll asks: several answers, and the picture at `image` (relative
+/// to the calling script) read for phones.
+fn poll_style(
+    py: Python<'_>,
+    multiple: bool,
+    image: Option<PathBuf>,
+) -> PyResult<gaanim_api::canvas::PollStyle> {
+    let image = match image {
+        Some(path) => {
+            let path = if path.is_absolute() {
+                path
+            } else {
+                calling_script_dir(py)?.join(path)
+            };
+            Some(gaanim_api::canvas::poll_image(&path).map_err(crate::poll::poll_error)?)
+        }
+        None => None,
+    };
+    Ok(gaanim_api::canvas::PollStyle { multiple, image })
+}
+
 /// Directory of the script calling into the scene API.
 fn calling_script_dir(py: Python<'_>) -> PyResult<PathBuf> {
     let frame = py.import("inspect")?.call_method0("currentframe")?;
@@ -6038,15 +6059,18 @@ impl PyScene {
 
     /// Open an audience poll at the cursor and return its data: the QR code,
     /// session code and live values the scene presents as it likes.
-    #[pyo3(signature = (question, options, *, rehearse=None))]
+    #[pyo3(signature = (question, options, *, multiple=false, image=None, rehearse=None))]
     fn poll(
         &self,
         py: Python<'_>,
         question: String,
         options: Vec<String>,
+        multiple: bool,
+        image: Option<PathBuf>,
         rehearse: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<crate::poll::PyPoll> {
         let lean = crate::poll::lean(rehearse)?;
+        let style = poll_style(py, multiple, image)?;
         crate::custom::ensure_authoring_allowed()?;
         let mut scene = self.inner.lock().expect("scene canvas poisoned");
         if scene.poll_session().is_none() {
@@ -6064,34 +6088,48 @@ impl PyScene {
             scene.set_poll_session(session);
         }
         let inner = scene
-            .poll(question, options, lean)
+            .poll(question, options, lean, style)
             .map_err(crate::poll::poll_error)?;
         Ok(crate::poll::PyPoll { inner })
     }
 
     /// Open a quiz at the cursor: a poll with a correct answer, `time`
     /// seconds to answer once, and up to `points` for a fast correct answer.
-    #[pyo3(signature = (question, options, correct, *, time=20, points=1000, rehearse=None))]
+    #[pyo3(signature = (question, options, correct, *, time=20, points=1000, image=None, rehearse=None))]
     #[allow(clippy::too_many_arguments)]
     fn quiz(
         &self,
         py: Python<'_>,
         question: String,
         options: Vec<String>,
-        correct: usize,
+        correct: &Bound<'_, PyAny>,
         time: u32,
         points: u32,
+        image: Option<PathBuf>,
         rehearse: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<crate::poll::PyPoll> {
         crate::custom::ensure_authoring_allowed()?;
         let lean = crate::poll::lean(rehearse)?;
+        // One right answer, or a list of them for multiple choice.
+        let (correct, multiple) = match correct.extract::<usize>() {
+            Ok(one) => (vec![one], false),
+            Err(_) => (
+                correct.extract::<Vec<usize>>().map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err(
+                        "correct is an answer's index, or a list of them",
+                    )
+                })?,
+                true,
+            ),
+        };
+        let style = poll_style(py, multiple, image)?;
         let mut scene = self.inner.lock().expect("scene canvas poisoned");
         if scene.poll_session().is_none() {
             let session = resolve_poll_session(py)?;
             scene.set_poll_session(session);
         }
         let inner = scene
-            .quiz(question, options, correct, time, points, lean)
+            .quiz(question, options, correct, time, points, lean, style)
             .map_err(crate::poll::poll_error)?;
         Ok(crate::poll::PyPoll { inner })
     }
@@ -6116,6 +6154,29 @@ impl PyScene {
             .teams(names, colors, choose)
             .map_err(crate::poll::poll_error)?;
         Ok(crate::poll::PyTeams { inner })
+    }
+
+    /// Open a question loaded with `gaanim.load_questions`: a quiz when it
+    /// has right answers, else a poll. Its `image` is an absolute path.
+    fn question(&self, py: Python<'_>, question: &Bound<'_, PyAny>) -> PyResult<crate::poll::PyPoll> {
+        let text: String = question.getattr("text")?.extract()?;
+        let options: Vec<String> = question.getattr("options")?.extract()?;
+        let correct: Vec<usize> = question.getattr("correct")?.extract()?;
+        let multiple: bool = question.getattr("multiple")?.extract()?;
+        let image: Option<PathBuf> = question.getattr("image")?.extract()?;
+        let rehearse = question.getattr("rehearse")?;
+        let rehearse = (!rehearse.is_none()).then_some(&rehearse);
+        if correct.is_empty() {
+            return self.poll(py, text, options, multiple, image, rehearse);
+        }
+        let time: u32 = question.getattr("time")?.extract()?;
+        let points: u32 = question.getattr("points")?.extract()?;
+        let correct = if multiple || correct.len() > 1 {
+            correct.into_pyobject(py)?.into_any()
+        } else {
+            correct[0].into_pyobject(py)?.into_any()
+        };
+        self.quiz(py, text, options, &correct, time, points, image, rehearse)
     }
 
     /// The game's leaderboard: players of the scene's quizzes, best first,

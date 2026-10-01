@@ -71,6 +71,19 @@ function shuffled(count, seed) {
   return order;
 }
 
+/** The answers of a choice: an index, or a list of them. */
+function listOf(choice) {
+  if (Array.isArray(choice)) return choice;
+  return Number.isInteger(choice) ? [choice] : [];
+}
+
+/** Whether two choices pick the same answers. */
+function sameChoice(a, b) {
+  const x = [...listOf(a)].sort((m, n) => m - n);
+  const y = [...listOf(b)].sort((m, n) => m - n);
+  return x.length === y.length && x.every((value, index) => value === y[index]);
+}
+
 const code = location.pathname.split("/")[2]?.toUpperCase() ?? "";
 const store = {
   get(key) {
@@ -173,6 +186,10 @@ document.addEventListener("DOMContentLoaded", () => {
   let pending = null;
   /** The team picked on the join form, when players choose. */
   let pickedTeam = null;
+  /** The answers marked on a multiple choice question, not sent yet. */
+  let picked = new Set();
+  const submit = $("submit");
+  const questionImage = $("question-image");
 
   /** The game's teams, or null without teams. */
   const teams = () => poll.teams ?? null;
@@ -374,27 +391,39 @@ document.addEventListener("DOMContentLoaded", () => {
     return Boolean(teams()?.choose && known && player && !Number.isInteger(player.team));
   }
 
-  function markChosen(index) {
-    answers.toggleAttribute("data-voted", index !== null);
+  function markChosen(choice) {
+    const chosen = listOf(choice);
+    answers.toggleAttribute("data-voted", chosen.length > 0);
     for (const button of answers.querySelectorAll(".answer")) {
-      button.setAttribute("aria-pressed", String(Number(button.dataset.index) === index));
+      button.setAttribute("aria-pressed", String(chosen.includes(Number(button.dataset.index))));
     }
+  }
+
+  /** The send button of a multiple choice question. */
+  function drawSubmit() {
+    submit.hidden = !poll.multiple;
+    submit.disabled = picked.size === 0 || answers.hasAttribute("data-locked");
+    const sent = poll.chosen !== null && poll.chosen !== undefined;
+    submit.textContent = t(sent && !poll.quiz ? "update" : "submit");
   }
 
   /** Mark this phone's choice as the relay reports it: after a reset or a
    * new game there is none, and a quiz takes an answer again. */
   function applyChoice(choice, quiz) {
     shownChoice = choice;
+    picked = new Set(listOf(choice));
     markChosen(choice);
     if (quiz && choice !== null) return lock(t("locked"));
     answers.removeAttribute("data-locked");
     for (const button of answers.querySelectorAll(".answer")) button.disabled = false;
+    drawSubmit();
     if (choice === null) setStatus("");
     else setStatus(t("change"), t("sent"));
   }
 
   function lock(message) {
     answers.setAttribute("data-locked", "");
+    submit.disabled = true;
     for (const button of answers.querySelectorAll(".answer")) button.disabled = true;
     if (message) setStatus(message);
   }
@@ -439,7 +468,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
     if (poll.quiz && !pending) {
-      if (Number.isInteger(poll.chosen)) return showSent(true);
+      if (listOf(poll.chosen).length > 0) return showSent(true);
       if (Date.now() >= deadlineOf(poll.quiz)) return showSent(false);
     }
     drawQuestion();
@@ -447,11 +476,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function drawQuestion() {
     const quiz = poll.quiz;
-    const choice = Number.isInteger(poll.chosen) ? poll.chosen : null;
+    const choice = listOf(poll.chosen).length > 0 ? poll.chosen : null;
     if (shown !== poll.id) {
       shown = poll.id;
       shownChoice = undefined;
+      picked = new Set();
       questionText.textContent = poll.question;
+      questionImage.hidden = !poll.image;
+      if (poll.image) questionImage.src = `/s/${code}/image/${poll.image}`;
+      else questionImage.removeAttribute("src");
+      $("question-hint").hidden = !poll.multiple;
+      answers.toggleAttribute("data-multiple", Boolean(poll.multiple));
       answers.replaceChildren();
       answers.removeAttribute("data-locked");
       // A poll matches the screen's letters and colors; a quiz is this
@@ -472,12 +507,23 @@ document.addEventListener("DOMContentLoaded", () => {
         if (quiz) letter.remove();
         else letter.textContent = String.fromCharCode(65 + index);
         const id = poll.id;
-        button.addEventListener("click", () => vote(id, index, button));
+        button.addEventListener("click", () => {
+          if (!poll.multiple) return vote(id, index, button);
+          // Several answers: mark them, then send.
+          if (answers.hasAttribute("data-locked") || pending) return;
+          if (picked.has(index)) picked.delete(index);
+          else picked.add(index);
+          markChosen([...picked]);
+          drawSubmit();
+        });
         answers.append(item);
       });
     }
     // A vote on its way is settled by the relay's answer to it.
-    if (!pending && choice !== shownChoice) applyChoice(choice, quiz);
+    if (!pending && !(shownChoice !== undefined && sameChoice(choice, shownChoice))) {
+      applyChoice(choice, quiz);
+    }
+    drawSubmit();
     view("question");
     if (quiz) startTimer(quiz);
     else timer.hidden = true;
@@ -542,8 +588,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function showResult({ correct, option, points = 0, player: result }) {
     if (result) setPlayer(result);
-    const outcome = !result ? "answer" : option === null ? "missed" : option === correct ? "correct" : "wrong";
-    const answer = poll.options?.[correct];
+    const missed = listOf(option).length === 0;
+    const outcome = !result ? "answer" : missed ? "missed" : sameChoice(option, correct) ? "correct" : "wrong";
+    const named = listOf(correct).map((index) => poll.options?.[index]);
+    const answer = named.length > 0 && named.every((name) => name !== undefined) ? named.join(", ") : undefined;
     views.result.dataset.outcome = outcome;
     $("verdict").textContent = { correct: "✓", wrong: "✗", missed: "–", answer: "✓" }[outcome];
     $("result-title").textContent =
@@ -730,6 +778,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (shown === pollId) {
           shownChoice = option;
           markChosen(option);
+          drawSubmit();
         }
         navigator.vibrate?.(18);
         if (quiz) return showSent(true);
@@ -786,6 +835,11 @@ document.addEventListener("DOMContentLoaded", () => {
       voteOverHttp(pollId, option);
     }
   }
+
+  submit.addEventListener("click", () => {
+    if (picked.size === 0 || !poll.open) return;
+    vote(poll.id, [...picked].sort((a, b) => a - b), submit);
+  });
 
   // --- WebSocket ----------------------------------------------------------
 

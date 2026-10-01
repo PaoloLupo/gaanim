@@ -515,6 +515,24 @@ audience = scene.audience()
 ]
 
 #api-entry(
+  name: "Scene.question",
+  kind: "method",
+  params: (
+    (name: "question", type: "Question", desc: [Una pregunta de `gaanim.load_questions`, que lee un Markdown o un CSV.]),
+  ),
+  returns: (type: "Poll", desc: [Un cuestionario si la pregunta tiene respuestas correctas; si no, una encuesta.]),
+  desc: [Abre una pregunta escrita fuera de Python, con su tiempo, puntos, imagen, modo y ensayo. Ver #link("/guias/presentaciones/#preguntas-en-un-archivo")[Preguntas en un archivo].],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+# no-run: necesita un archivo de preguntas
+for q in load_questions("preguntas.md"):
+    poll = scene.question(q)
+```
+]
+
+#api-entry(
   name: "Scene.teams",
   kind: "method",
   params: (
@@ -540,6 +558,8 @@ for team, x in [(0, -4), (1, 4)]:
   params: (
     (name: "question", type: "str", desc: [Pregunta que responde la audiencia.]),
     (name: "options", type: "Sequence[str]", desc: [Entre 2 y 6 respuestas distintas.]),
+    (name: "multiple", type: "bool", default: "False", desc: [Deja elegir varias respuestas; `total()` y `share(i)` cuentan a los teléfonos que respondieron.]),
+    (name: "image", type: "str | PathLike | None", default: "None", desc: [Una imagen, relativa al script, que los teléfonos muestran sobre la pregunta.]),
     (name: "rehearse", type: "Sequence[float] | None", default: "None", desc: [Un peso por respuesta para el voto del ensayo (`[1, 3]` hace la segunda tres veces más popular); sin él vota al azar.]),
   ),
   returns: (type: "Poll", desc: [Los datos de la encuesta; no dibuja nada.]),
@@ -563,9 +583,10 @@ scene.stop()
   params: (
     (name: "question", type: "str", desc: [Pregunta del juego.]),
     (name: "options", type: "Sequence[str]", desc: [Entre 2 y 6 respuestas distintas.]),
-    (name: "correct", type: "int", desc: [Índice de la respuesta correcta (0 para la primera).]),
+    (name: "correct", type: "int | Sequence[int]", desc: [Índice de la respuesta correcta (0 para la primera), o una lista para selección múltiple: acierta quien marca todas y ninguna otra.]),
     (name: "time", type: "int", default: "20", desc: [Segundos para responder, de 5 a 300, medidos por el reloj del relay.]),
     (name: "points", type: "int", default: "1000", desc: [Puntos máximos de una respuesta correcta, de 100 a 10000.]),
+    (name: "image", type: "str | PathLike | None", default: "None", desc: [Una imagen que los teléfonos muestran sobre la pregunta.]),
     (name: "rehearse", type: "float | Sequence[float] | None", default: "None", desc: [La parte del ensayo que acierta, de 0 a 1 (`0.3` para una pregunta difícil), o un peso por respuesta; sin él responden según su `skill`.]),
   ),
   returns: (type: "Poll", desc: [Los datos del cuestionario, como `scene.poll`.]),

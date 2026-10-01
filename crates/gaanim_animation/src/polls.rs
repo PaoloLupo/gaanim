@@ -45,6 +45,108 @@ pub struct PollResults {
     pub teams: Vec<TeamResult>,
     /// The team each player is in, by nickname.
     pub player_teams: HashMap<Arc<str>, usize>,
+    /// Each player's game so far, by nickname.
+    pub stats: HashMap<Arc<str>, PlayerStats>,
+    /// What each player answered, by poll id and nickname.
+    pub answers: HashMap<Arc<str>, HashMap<Arc<str>, PlayerAnswer>>,
+    /// How many answered each poll, by id: a multiple choice poll's votes
+    /// add up to more.
+    pub respondents: HashMap<Arc<str>, u32>,
+    /// The poll open now, or else the last one opened.
+    pub latest: Option<Arc<str>>,
+}
+
+/// A player's game so far.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct PlayerStats {
+    pub score: u64,
+    /// Quizzes answered right, and answered at all.
+    pub correct: u32,
+    pub answered: u32,
+    /// Quizzes answered right in a row, up to the last one revealed.
+    pub streak: u32,
+}
+
+/// What a player answered on one poll.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct PlayerAnswer {
+    /// The answers chosen, one bit each (bit 0 for the first answer).
+    pub options: u32,
+    /// Seconds the player took, for a quiz.
+    pub elapsed: f64,
+    /// Points it earned, for a quiz.
+    pub points: u32,
+    /// Whether it was right, for a quiz.
+    pub right: Option<bool>,
+}
+
+impl PlayerAnswer {
+    /// The first answer chosen, or `None`.
+    pub fn first(&self) -> Option<usize> {
+        (self.options != 0).then(|| self.options.trailing_zeros() as usize)
+    }
+}
+
+/// Which player a value is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlayerRef {
+    /// The player who joined `slot`-th (0 first).
+    Slot(usize),
+    /// The player at `rank` in the leaderboard (0 for the leader).
+    Rank(usize),
+}
+
+/// A number about one player.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PlayerMeasure {
+    Score,
+    /// Quizzes answered right.
+    Correct,
+    /// Quizzes answered.
+    Answered,
+    /// Quizzes answered right in a row.
+    Streak,
+    /// 1 once the player answered `poll`, else 0.
+    Responded { poll: Arc<str> },
+    /// 1 if the player chose `option` on `poll`, else 0.
+    Chose { poll: Arc<str>, option: usize },
+    /// 1 if the player answered quiz `poll` right, else 0.
+    Right { poll: Arc<str> },
+    /// Points the player earned on quiz `poll`.
+    Points { poll: Arc<str> },
+    /// Seconds the player took on quiz `poll`, 0 without an answer.
+    Time { poll: Arc<str> },
+}
+
+impl PollResults {
+    /// The nickname `who` refers to now, if someone is there.
+    pub fn player_at(&self, who: PlayerRef) -> Option<&Arc<str>> {
+        match who {
+            PlayerRef::Slot(slot) => self.audience.get(slot).map(|(name, _)| name),
+            PlayerRef::Rank(rank) => self.leaderboard.get(rank).map(|(name, _)| name),
+        }
+    }
+
+    /// `measure` about the player `name`.
+    pub fn player_value(&self, name: &str, measure: &PlayerMeasure) -> f64 {
+        let stats = self.stats.get(name).copied().unwrap_or_default();
+        let answer = |poll: &str| self.answers.get(poll).and_then(|answers| answers.get(name));
+        match measure {
+            PlayerMeasure::Score => stats.score as f64,
+            PlayerMeasure::Correct => f64::from(stats.correct),
+            PlayerMeasure::Answered => f64::from(stats.answered),
+            PlayerMeasure::Streak => f64::from(stats.streak),
+            PlayerMeasure::Responded { poll } => f64::from(u8::from(answer(poll).is_some())),
+            PlayerMeasure::Chose { poll, option } => f64::from(u8::from(
+                answer(poll).is_some_and(|answer| *option < 32 && answer.options & (1 << option) != 0),
+            )),
+            PlayerMeasure::Right { poll } => {
+                f64::from(u8::from(answer(poll).is_some_and(|answer| answer.right == Some(true))))
+            }
+            PlayerMeasure::Points { poll } => answer(poll).map_or(0.0, |answer| f64::from(answer.points)),
+            PlayerMeasure::Time { poll } => answer(poll).map_or(0.0, |answer| answer.elapsed),
+        }
+    }
 }
 
 /// A team's standing.
@@ -99,7 +201,10 @@ impl PollResults {
                 poll,
                 answers,
                 measure,
-            } => measure.value(&self.live_counts(poll, *answers)),
+            } => measure.value_among(
+                &self.live_counts(poll, *answers),
+                self.respondents.get(poll.as_ref()).copied(),
+            ),
             PollSource::LeaderScore { rank } => self
                 .leaderboard
                 .get(*rank)
@@ -127,6 +232,9 @@ impl PollResults {
                 }
             }
             PollSource::LeadingTeam => self.leading_team() as f64,
+            PollSource::Player { who, measure } => self
+                .player_at(*who)
+                .map_or(0.0, |name| self.player_value(name, measure)),
         })
     }
 
@@ -173,7 +281,14 @@ pub enum PollMeasure {
 
 impl PollMeasure {
     pub fn value(self, counts: &[u32]) -> f64 {
-        let total: u32 = counts.iter().sum();
+        self.value_among(counts, None)
+    }
+
+    /// The value when `respondents` answered: a multiple choice poll's
+    /// total is its respondents, and each share is of them. Without it,
+    /// every vote is a respondent.
+    pub fn value_among(self, counts: &[u32], respondents: Option<u32>) -> f64 {
+        let total: u32 = respondents.unwrap_or_else(|| counts.iter().sum());
         let share = |answer: usize| {
             if total > 0 {
                 f64::from(counts.get(answer).copied().unwrap_or(0)) / f64::from(total)
@@ -211,6 +326,11 @@ pub enum PollSource {
     Team { team: usize, measure: TeamMeasure },
     /// The team leading on points.
     LeadingTeam,
+    /// A number about one player.
+    Player {
+        who: PlayerRef,
+        measure: PlayerMeasure,
+    },
 }
 
 /// A number a team reports.

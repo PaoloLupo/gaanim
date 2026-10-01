@@ -228,6 +228,19 @@ pub enum LiveSourceRecord {
         measure: String,
     },
     LeadingTeam,
+    /// A number about the player at `index` of `list` (`audience` or
+    /// `leaderboard`); `measure` is `score`, `correct`, `answered`,
+    /// `streak`, or `responded`, `chose`, `right`, `points` or `time` on
+    /// `poll` (`chose` of `option`).
+    Player {
+        list: String,
+        index: usize,
+        measure: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        poll: String,
+        #[serde(default)]
+        option: usize,
+    },
 }
 
 /// What a bar's length follows.
@@ -418,11 +431,47 @@ struct PollRecord {
     close: f64,
     #[serde(default)]
     quiz: Option<QuizRecord>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    multiple: bool,
+    /// The picture's hash and type; its bytes are the entry `images/<hash>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    image: Option<ImageRecord>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ImageRecord {
+    hash: String,
+    mime: String,
+}
+
+/// A quiz's right answers: one number, as bundles wrote them before
+/// multiple choice, or a list.
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum CorrectRecord {
+    One(usize),
+    Many(Vec<usize>),
+}
+
+impl CorrectRecord {
+    fn of(correct: &[usize]) -> Self {
+        match correct {
+            [one] => Self::One(*one),
+            many => Self::Many(many.to_vec()),
+        }
+    }
+
+    fn answers(self) -> Vec<usize> {
+        match self {
+            Self::One(one) => vec![one],
+            Self::Many(many) => many,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
 struct QuizRecord {
-    correct: usize,
+    correct: CorrectRecord,
     time: u32,
     points: u32,
     reveal: Option<f64>,
@@ -453,10 +502,15 @@ fn write_polls(scene: &SceneData) -> Result<Vec<u8>> {
                 open: poll.open,
                 close: poll.close,
                 quiz: poll.quiz.as_ref().map(|quiz| QuizRecord {
-                    correct: quiz.correct,
+                    correct: CorrectRecord::of(&quiz.correct),
                     time: quiz.time,
                     points: quiz.points,
                     reveal: quiz.reveal,
+                }),
+                multiple: poll.multiple,
+                image: poll.image.as_ref().map(|image| ImageRecord {
+                    hash: image.hash.clone(),
+                    mime: image.mime.clone(),
                 }),
             })
             .collect(),
@@ -475,7 +529,17 @@ fn write_polls(scene: &SceneData) -> Result<Vec<u8>> {
     serde_json::to_vec(&entry).map_err(|error| BundleError::Corrupt(error.to_string()))
 }
 
-fn read_polls(bytes: &[u8], scene: &mut SceneData) -> Result<()> {
+/// The entry holding a poll picture's bytes.
+fn image_entry(hash: &str) -> String {
+    format!("images/{hash}")
+}
+
+/// Read the polls entry; `image` reads a picture's bytes by entry name.
+fn read_polls(
+    bytes: &[u8],
+    scene: &mut SceneData,
+    mut image: impl FnMut(&str) -> Result<Vec<u8>>,
+) -> Result<()> {
     let entry: PollsEntry = serde_json::from_slice(bytes)
         .map_err(|error| BundleError::Corrupt(format!("{POLLS}: {error}")))?;
     scene.poll_session = entry.session.map(|session| PollSessionInfo {
@@ -494,22 +558,34 @@ fn read_polls(bytes: &[u8], scene: &mut SceneData) -> Result<()> {
     scene.polls = entry
         .polls
         .into_iter()
-        .map(|poll| TimelinePoll {
-            id: poll.id,
-            question: poll.question,
-            options: poll.options,
-            preview: poll.preview,
-            segment: poll.segment,
-            open: poll.open,
-            close: poll.close,
-            quiz: poll.quiz.map(|quiz| TimelineQuiz {
-                correct: quiz.correct,
-                time: quiz.time,
-                points: quiz.points,
-                reveal: quiz.reveal,
-            }),
+        .map(|poll| {
+            let image = match poll.image {
+                Some(record) => Some(gaanim_timeline::timeline::PollImage {
+                    bytes: image(&image_entry(&record.hash))?.into(),
+                    hash: record.hash,
+                    mime: record.mime,
+                }),
+                None => None,
+            };
+            Ok(TimelinePoll {
+                id: poll.id,
+                question: poll.question,
+                options: poll.options,
+                preview: poll.preview,
+                segment: poll.segment,
+                open: poll.open,
+                close: poll.close,
+                quiz: poll.quiz.map(|quiz| TimelineQuiz {
+                    correct: quiz.correct.answers(),
+                    time: quiz.time,
+                    points: quiz.points,
+                    reveal: quiz.reveal,
+                }),
+                multiple: poll.multiple,
+                image,
+            })
         })
-        .collect();
+        .collect::<Result<_>>()?;
     scene.poll_bars = entry.bars;
     scene.poll_texts = entry.texts;
     scene.poll_readouts = entry.readouts;
@@ -1089,6 +1165,12 @@ impl<W: Write + Seek> BundleWriter<W> {
         // A scene can take its audience without a poll: a lobby, a gate.
         if !scene.polls.is_empty() || scene.poll_session.is_some() || !scene.stop_gates.is_empty() {
             self.write_entry(POLLS, &write_polls(scene)?)?;
+            let mut written = std::collections::HashSet::new();
+            for image in scene.polls.iter().filter_map(|poll| poll.image.as_ref()) {
+                if written.insert(image.hash.clone()) {
+                    self.write_entry(&image_entry(&image.hash), &image.bytes)?;
+                }
+            }
         }
         if !scene.live_zones.is_empty() {
             let json = serde_json::to_vec(&scene.live_zones)
@@ -1315,10 +1397,10 @@ impl Bundle {
         let scene_bytes = read_entry(&mut archive, Some(&manifest), "scene.bin")?;
         let mut scene = SceneData::read(&mut Reader::new(&scene_bytes), &tables)?;
         if manifest.entries.contains_key(POLLS) {
-            read_polls(
-                &read_entry(&mut archive, Some(&manifest), POLLS)?,
-                &mut scene,
-            )?;
+            let polls = read_entry(&mut archive, Some(&manifest), POLLS)?;
+            read_polls(&polls, &mut scene, |name| {
+                read_entry(&mut archive, Some(&manifest), name)
+            })?;
         }
         if manifest.entries.contains_key(LIVE) {
             scene.live_zones =
@@ -1708,10 +1790,17 @@ mod tests {
             open: 0.0,
             close: 1.0,
             quiz: Some(TimelineQuiz {
-                correct: 1,
+                correct: vec![0, 1],
                 time: 20,
                 points: 1000,
                 reveal: Some(0.9),
+            }),
+            // Multiple choice, with a picture the bundle carries.
+            multiple: true,
+            image: Some(gaanim_timeline::timeline::PollImage {
+                hash: "0123456789abcdef".into(),
+                mime: "image/jpeg".into(),
+                bytes: vec![1, 2, 3].into(),
             }),
         };
         let glyph = GlyphRecord {

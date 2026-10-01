@@ -21,12 +21,13 @@ use gaanim_animation::rehearsal::{Lean, MAX_PLAYERS, RehearsalSpec};
 use gaanim_animation::{SampledInterpolation, SampledProperty};
 use gaanim_core::peniko::Color;
 pub use gaanim_timeline::timeline::GateCondition;
+pub use gaanim_timeline::timeline::PollImage;
 use qrcodegen::{QrCode, QrCodeEcc};
 
 use super::SceneModel;
 use super::drawable::DrawableHandle;
 use super::ops::{Op, SharedCanvasState};
-use super::types::{CurveElement, SpawnKind};
+use super::types::{CurveControl, CurveElement, SpawnKind};
 use super::visualization::{Parameter, parameter_in};
 
 /// Most teams a game has: their buttons must fit on a phone.
@@ -94,7 +95,8 @@ pub enum PollError {
 /// Scoring of a quiz as authored.
 #[derive(Debug, Clone)]
 pub(crate) struct QuizRecord {
-    pub correct: usize,
+    /// The right answers, in order.
+    pub correct: Vec<usize>,
     pub time: u32,
     pub points: u32,
     pub reveal: Option<(usize, f64)>,
@@ -112,17 +114,151 @@ pub(crate) struct PollRecord {
     pub open: (usize, f64),
     pub close: Option<(usize, f64)>,
     pub quiz: Option<QuizRecord>,
+    pub multiple: bool,
+    pub image: Option<PollImage>,
+}
+
+/// How a poll asks: several answers at once, a picture.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PollStyle {
+    /// Players may choose several answers.
+    pub multiple: bool,
+    /// A picture phones show above the question.
+    pub image: Option<PollImage>,
+}
+
+/// The colors of a poll's answers on phones, in order (the sixth answer
+/// is the last).
+pub const ANSWER_COLORS: [&str; MAX_POLL_OPTIONS] = [
+    "#d63a50", "#2f6fd0", "#a86f00", "#23824a", "#7a48c7", "#137f89",
+];
+
+/// The shapes of a poll's answers on phones, as SVG paths in a 24 unit box
+/// (y down): triangle, diamond, circle, square, star and hexagon.
+const ANSWER_SHAPES: [&str; MAX_POLL_OPTIONS] = [
+    "M12 3l9.5 17h-19z",
+    "M12 2l9 10-9 10-9-10z",
+    "M21.5 12a9.5 9.5 0 1 1-19 0a9.5 9.5 0 1 1 19 0z",
+    "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z",
+    "M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3l-5.9 3.3 1.3-6.6L2.5 9.4l6.6-.8z",
+    "M7 3h10l5 9-5 9H7l-5-9z",
+];
+
+/// The shape of answer `answer` on phones, `size` units tall and centered
+/// on the origin, y up.
+fn answer_shape(answer: usize, size: f64) -> Vec<CurveElement> {
+    use gaanim_core::kurbo::{BezPath, PathEl};
+    let path = BezPath::from_svg(ANSWER_SHAPES[answer % ANSWER_SHAPES.len()]).unwrap_or_default();
+    let scale = size / 20.0;
+    let point = |p: gaanim_core::kurbo::Point| ((p.x - 12.0) * scale, (12.0 - p.y) * scale);
+    path.elements()
+        .iter()
+        .flat_map(|element| match *element {
+            PathEl::MoveTo(p) => vec![CurveElement::Move {
+                to: point(p),
+                relative: false,
+            }],
+            PathEl::LineTo(p) => vec![CurveElement::Line {
+                to: point(p),
+                relative: false,
+            }],
+            PathEl::QuadTo(c, p) => vec![CurveElement::Quad {
+                control: CurveControl::Point(point(c)),
+                to: point(p),
+                relative: false,
+            }],
+            PathEl::CurveTo(a, b, p) => vec![CurveElement::Cubic {
+                control_start: CurveControl::Point(point(a)),
+                control_end: CurveControl::Point(point(b)),
+                to: point(p),
+                relative: false,
+            }],
+            PathEl::ClosePath => vec![CurveElement::Close { smooth: false }],
+        })
+        .collect()
+}
+
+/// Longest side of a poll's picture on phones, in pixels.
+pub const POLL_IMAGE_SIZE: u32 = 1024;
+
+/// Read the picture at `path` for phones: scaled to fit [`POLL_IMAGE_SIZE`],
+/// as a JPEG (or a PNG when it is transparent).
+pub fn poll_image(path: &std::path::Path) -> Result<PollImage, PollError> {
+    let image = image::open(path).map_err(|error| {
+        PollError::Invalid(format!(
+            "could not read the image {}: {error}",
+            path.display()
+        ))
+    })?;
+    let image = if image.width().max(image.height()) > POLL_IMAGE_SIZE {
+        image.resize(
+            POLL_IMAGE_SIZE,
+            POLL_IMAGE_SIZE,
+            image::imageops::FilterType::Triangle,
+        )
+    } else {
+        image
+    };
+    let transparent =
+        image.color().has_alpha() && image.to_rgba8().pixels().any(|pixel| pixel.0[3] < 255);
+    let mut bytes = Vec::new();
+    let mime = if transparent {
+        image
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
+            .map_err(|error| PollError::Invalid(error.to_string()))?;
+        "image/png"
+    } else {
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 82)
+            .encode_image(&image.to_rgb8())
+            .map_err(|error| PollError::Invalid(error.to_string()))?;
+        "image/jpeg"
+    };
+    // FNV-1a 64: stable everywhere.
+    let hash = bytes.iter().fold(0xcbf2_9ce4_8422_2325u64, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    });
+    Ok(PollImage {
+        hash: format!("{hash:016x}"),
+        mime: mime.into(),
+        bytes: bytes.into(),
+    })
 }
 
 /// Stable id on the relay: the poll's position and a hash of its text, so
 /// editing a question starts it from zero while re-running keeps its votes.
-fn poll_id(index: usize, question: &str, options: &[String], quiz: Option<&QuizRecord>) -> String {
+fn poll_id(
+    index: usize,
+    question: &str,
+    options: &[String],
+    quiz: Option<&QuizRecord>,
+    style: &PollStyle,
+) -> String {
     // FNV-1a: stable across platforms and releases, unlike `DefaultHasher`.
     let mut hash: u32 = 0x811c_9dc5;
-    let scoring = quiz.map(|quiz| format!("{}/{}/{}", quiz.correct, quiz.time, quiz.points));
+    // A single right answer keeps the ids polls had before multiple choice.
+    let scoring = quiz.map(|quiz| {
+        let correct = quiz
+            .correct
+            .iter()
+            .map(usize::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("{correct}/{}/{}", quiz.time, quiz.points)
+    });
+    let manner = (style.multiple || style.image.is_some()).then(|| {
+        format!(
+            "{}/{}",
+            style.multiple,
+            style.image.as_ref().map_or("", |image| image.hash.as_str())
+        )
+    });
     let texts = std::iter::once(question)
         .chain(options.iter().map(String::as_str))
-        .chain(scoring.as_deref());
+        .chain(scoring.as_deref())
+        .chain(manner.as_deref());
     for text in texts {
         for byte in text.bytes().chain(std::iter::once(0)) {
             hash ^= u32::from(byte);
@@ -306,26 +442,40 @@ impl SceneModel {
         question: impl Into<String>,
         options: impl IntoIterator<Item = impl Into<String>>,
         lean: Lean,
+        style: PollStyle,
     ) -> Result<PollHandle, PollError> {
         if matches!(lean, Lean::Right(_)) {
             return Err(PollError::Invalid(
                 "only a quiz has a right answer to rehearse; give a poll weights".into(),
             ));
         }
-        self.open_poll(question.into(), options, lean, None)
+        self.open_poll(question.into(), options, lean, None, style)
     }
 
-    /// Open a quiz at the cursor: a poll with a correct answer, `time`
-    /// seconds to answer once and up to `points` for a fast correct answer.
+    /// Open a quiz at the cursor: a poll with right answers, `time` seconds
+    /// to answer once and up to `points` for a fast right answer. Several
+    /// right answers make it multiple choice: an answer is right when it
+    /// chose all of them and no other.
     pub fn quiz(
         &mut self,
         question: impl Into<String>,
         options: impl IntoIterator<Item = impl Into<String>>,
-        correct: usize,
+        correct: Vec<usize>,
         time: u32,
         points: u32,
         lean: Lean,
+        style: PollStyle,
     ) -> Result<PollHandle, PollError> {
+        let mut correct = correct;
+        correct.sort_unstable();
+        correct.dedup();
+        if correct.is_empty() {
+            return Err(PollError::Invalid("a quiz needs a right answer".into()));
+        }
+        let style = PollStyle {
+            multiple: style.multiple || correct.len() > 1,
+            ..style
+        };
         if !QUIZ_TIME.contains(&time) {
             return Err(PollError::Invalid(format!(
                 "a quiz gives between {} and {} seconds, got {time}",
@@ -346,7 +496,7 @@ impl SceneModel {
             points,
             reveal: None,
         };
-        self.open_poll(question.into(), options, lean, Some(quiz))
+        self.open_poll(question.into(), options, lean, Some(quiz), style)
     }
 
     fn open_poll(
@@ -355,6 +505,7 @@ impl SceneModel {
         options: impl IntoIterator<Item = impl Into<String>>,
         lean: Lean,
         quiz: Option<QuizRecord>,
+        style: PollStyle,
     ) -> Result<PollHandle, PollError> {
         let question = question.trim().to_string();
         if question.is_empty() {
@@ -379,11 +530,13 @@ impl SceneModel {
                 });
             }
         }
-        if let Some(quiz) = &quiz
-            && quiz.correct >= options.len()
+        if let Some(answer) = quiz
+            .iter()
+            .flat_map(|quiz| &quiz.correct)
+            .find(|answer| **answer >= options.len())
         {
             return Err(PollError::UnknownAnswer {
-                answer: quiz.correct,
+                answer: *answer,
                 count: options.len(),
             });
         }
@@ -420,13 +573,15 @@ impl SceneModel {
         let index = state.polls.len();
         let open = (state.active_idx, state.active().cursor);
         state.polls.push(PollRecord {
-            id: poll_id(index, &question, &options, quiz.as_ref()),
+            id: poll_id(index, &question, &options, quiz.as_ref(), &style),
             question,
             options,
             lean,
             open,
             close: None,
             quiz,
+            multiple: style.multiple,
+            image: style.image,
         });
         Ok(PollHandle {
             index,
@@ -638,9 +793,19 @@ impl PollHandle {
         self.record().options
     }
 
-    /// The correct answer of a quiz; `None` for a poll.
-    pub fn correct(&self) -> Option<usize> {
+    /// The right answers of a quiz; `None` for a poll.
+    pub fn correct(&self) -> Option<Vec<usize>> {
         self.record().quiz.map(|quiz| quiz.correct)
+    }
+
+    /// Whether players may choose several answers.
+    pub fn multiple(&self) -> bool {
+        self.record().multiple
+    }
+
+    /// The picture phones show above the question.
+    pub fn image(&self) -> Option<PollImage> {
+        self.record().image
     }
 
     /// Seconds a quiz gives to answer; `None` for a poll.
@@ -658,7 +823,7 @@ impl PollHandle {
         self.session().url()
     }
 
-    fn check_answer(&self, answer: usize) -> Result<(), PollError> {
+    pub(crate) fn check_answer(&self, answer: usize) -> Result<(), PollError> {
         let count = self.record().options.len();
         if answer < count {
             Ok(())
@@ -755,6 +920,36 @@ impl PollHandle {
             },
             preview,
         ))
+    }
+
+    /// The shape answer `answer` has on phones (a triangle, diamond,
+    /// circle, square, star or hexagon), `size` units tall, centered on the
+    /// origin and filled with the answer's color.
+    pub fn icon(&self, answer: usize, size: f64) -> Result<DrawableHandle, PollError> {
+        self.check_answer(answer)?;
+        if !(size.is_finite() && size > 0.0) {
+            return Err(PollError::Invalid(format!(
+                "icon size must be positive, got {size}"
+            )));
+        }
+        let handle = super::canvas_impl::spawn_in(
+            &self.state,
+            SpawnKind::Curve(answer_shape(answer, size)),
+            true,
+        );
+        let color = Color::from_rgba8(
+            u8::from_str_radix(&ANSWER_COLORS[answer][1..3], 16).unwrap_or(0),
+            u8::from_str_radix(&ANSWER_COLORS[answer][3..5], 16).unwrap_or(0),
+            u8::from_str_radix(&ANSWER_COLORS[answer][5..7], 16).unwrap_or(0),
+            255,
+        );
+        Ok(handle.fill(color).no_stroke())
+    }
+
+    /// The color answer `answer` has on phones, `#rrggbb`.
+    pub fn color(&self, answer: usize) -> Result<&'static str, PollError> {
+        self.check_answer(answer)?;
+        Ok(ANSWER_COLORS[answer])
     }
 
     /// A condition for [`SceneModel::gate_stop`]: at least `at_least`
@@ -1102,6 +1297,109 @@ impl AudienceHandle {
     }
 }
 
+/// A number about one player, by slot in the audience or rank in the
+/// leaderboard: their game so far, or what they answered on one poll.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PlayerFact {
+    Score,
+    /// Quizzes answered right.
+    Correct,
+    /// Quizzes answered.
+    Answered,
+    /// Quizzes answered right in a row.
+    Streak,
+    /// 1 once they answered the poll.
+    Responded,
+    /// 1 if they chose this answer.
+    Chose(usize),
+    /// 1 if they answered the quiz right.
+    Right,
+    /// Points the answer earned.
+    Earned,
+    /// Seconds they took to answer.
+    Time,
+}
+
+/// A parameter following `fact` about the player `who`; `poll` for the
+/// facts about one poll.
+fn player_parameter(
+    state: &SharedCanvasState,
+    who: gaanim_animation::polls::PlayerRef,
+    fact: PlayerFact,
+    poll: Option<&PollHandle>,
+) -> Result<Parameter, PollError> {
+    use gaanim_animation::polls::PlayerMeasure;
+    let id = |poll: Option<&PollHandle>| -> Result<std::sync::Arc<str>, PollError> {
+        poll.map(|poll| poll.id().into())
+            .ok_or_else(|| PollError::Invalid("this fact is about a poll: pass one".into()))
+    };
+    let measure = match fact {
+        PlayerFact::Score => PlayerMeasure::Score,
+        PlayerFact::Correct => PlayerMeasure::Correct,
+        PlayerFact::Answered => PlayerMeasure::Answered,
+        PlayerFact::Streak => PlayerMeasure::Streak,
+        PlayerFact::Responded => PlayerMeasure::Responded { poll: id(poll)? },
+        PlayerFact::Chose(option) => {
+            if let Some(poll) = poll {
+                poll.check_answer(option)?;
+            }
+            PlayerMeasure::Chose {
+                poll: id(poll)?,
+                option,
+            }
+        }
+        PlayerFact::Right => {
+            if poll.is_some_and(|poll| poll.correct().is_none()) {
+                return Err(PollError::NotQuiz);
+            }
+            PlayerMeasure::Right { poll: id(poll)? }
+        }
+        PlayerFact::Earned => PlayerMeasure::Points { poll: id(poll)? },
+        PlayerFact::Time => PlayerMeasure::Time { poll: id(poll)? },
+    };
+    live_parameter(
+        state,
+        PollSource::Player { who, measure },
+        vec![0.0],
+        vec![0.0],
+        SampledInterpolation::Step,
+    )
+}
+
+impl AudienceHandle {
+    /// `fact` about the player who joined `slot`-th; 0 while nobody did.
+    pub fn player(
+        &self,
+        slot: usize,
+        fact: PlayerFact,
+        poll: Option<&PollHandle>,
+    ) -> Result<Parameter, PollError> {
+        player_parameter(
+            &self.state,
+            gaanim_animation::polls::PlayerRef::Slot(slot),
+            fact,
+            poll,
+        )
+    }
+}
+
+impl LeaderboardHandle {
+    /// `fact` about the player at `rank`; 0 past the last one.
+    pub fn player(
+        &self,
+        rank: usize,
+        fact: PlayerFact,
+        poll: Option<&PollHandle>,
+    ) -> Result<Parameter, PollError> {
+        player_parameter(
+            &self.state,
+            gaanim_animation::polls::PlayerRef::Rank(rank),
+            fact,
+            poll,
+        )
+    }
+}
+
 /// Live text following `source`, `preview` outside a live presentation.
 fn live_text(
     state: &SharedCanvasState,
@@ -1199,27 +1497,37 @@ mod tests {
         let mut scene = scene();
         let error = |result: Result<PollHandle, PollError>| result.unwrap_err();
         assert_eq!(
-            error(scene.poll(" ", ["A", "B"], Lean::Auto)),
+            error(scene.poll(" ", ["A", "B"], Lean::Auto, PollStyle::default())),
             PollError::EmptyQuestion
         );
         assert_eq!(
-            error(scene.poll("Q", ["A"], Lean::Auto)),
+            error(scene.poll("Q", ["A"], Lean::Auto, PollStyle::default())),
             PollError::OptionCount { count: 1 }
         );
         assert_eq!(
-            error(scene.poll("Q", ["1", "2", "3", "4", "5", "6", "7"], Lean::Auto)),
+            error(scene.poll(
+                "Q",
+                ["1", "2", "3", "4", "5", "6", "7"],
+                Lean::Auto,
+                PollStyle::default()
+            )),
             PollError::OptionCount { count: 7 }
         );
         assert_eq!(
-            error(scene.poll("Q", ["A", " "], Lean::Auto)),
+            error(scene.poll("Q", ["A", " "], Lean::Auto, PollStyle::default())),
             PollError::EmptyOption
         );
         assert!(matches!(
-            error(scene.poll("Q", ["A", "A "], Lean::Auto)),
+            error(scene.poll("Q", ["A", "A "], Lean::Auto, PollStyle::default())),
             PollError::DuplicateOption { .. }
         ));
         assert_eq!(
-            error(scene.poll("Q", ["A", "B"], Lean::Weights(vec![1.0]))),
+            error(scene.poll(
+                "Q",
+                ["A", "B"],
+                Lean::Weights(vec![1.0]),
+                PollStyle::default()
+            )),
             PollError::LeanLength {
                 expected: 2,
                 got: 1
@@ -1227,23 +1535,48 @@ mod tests {
         );
         assert!(
             scene
-                .poll("Q", ["A", "B"], Lean::Weights(vec![0.0, 0.0]))
+                .poll(
+                    "Q",
+                    ["A", "B"],
+                    Lean::Weights(vec![0.0, 0.0]),
+                    PollStyle::default()
+                )
                 .is_err()
         );
-        assert!(scene.poll("Q", ["A", "B"], Lean::Right(0.5)).is_err());
         assert!(
             scene
-                .quiz("Q", ["A", "B"], 0, 20, 1000, Lean::Right(1.5))
+                .poll("Q", ["A", "B"], Lean::Right(0.5), PollStyle::default())
                 .is_err()
         );
         assert!(
             scene
-                .quiz("Q", ["A", "B"], 0, 20, 1000, Lean::Right(0.8))
+                .quiz(
+                    "Q",
+                    ["A", "B"],
+                    vec![0],
+                    20,
+                    1000,
+                    Lean::Right(1.5),
+                    PollStyle::default()
+                )
+                .is_err()
+        );
+        assert!(
+            scene
+                .quiz(
+                    "Q",
+                    ["A", "B"],
+                    vec![0],
+                    20,
+                    1000,
+                    Lean::Right(0.8),
+                    PollStyle::default()
+                )
                 .is_ok()
         );
         let mut bare = SceneModel::new(640, 360);
         assert_eq!(
-            error(bare.poll("Q", ["A", "B"], Lean::Auto)),
+            error(bare.poll("Q", ["A", "B"], Lean::Auto, PollStyle::default())),
             PollError::NoSession
         );
     }
@@ -1253,61 +1586,188 @@ mod tests {
         let mut scene = scene();
         assert_eq!(
             scene
-                .quiz("Q", ["A", "B"], 2, 20, 1000, Lean::Auto)
+                .quiz(
+                    "Q",
+                    ["A", "B"],
+                    vec![2],
+                    20,
+                    1000,
+                    Lean::Auto,
+                    PollStyle::default()
+                )
                 .unwrap_err(),
             PollError::UnknownAnswer {
                 answer: 2,
                 count: 2
             }
         );
-        assert!(scene.quiz("Q", ["A", "B"], 0, 2, 1000, Lean::Auto).is_err());
-        assert!(scene.quiz("Q", ["A", "B"], 0, 20, 50, Lean::Auto).is_err());
+        assert!(
+            scene
+                .quiz(
+                    "Q",
+                    ["A", "B"],
+                    vec![0],
+                    2,
+                    1000,
+                    Lean::Auto,
+                    PollStyle::default()
+                )
+                .is_err()
+        );
+        assert!(
+            scene
+                .quiz(
+                    "Q",
+                    ["A", "B"],
+                    vec![0],
+                    20,
+                    50,
+                    Lean::Auto,
+                    PollStyle::default()
+                )
+                .is_err()
+        );
         let quiz = scene
-            .quiz("Q", ["A", "B"], 1, 20, 1000, Lean::Auto)
+            .quiz(
+                "Q",
+                ["A", "B"],
+                vec![1],
+                20,
+                1000,
+                Lean::Auto,
+                PollStyle::default(),
+            )
             .unwrap();
-        assert_eq!((quiz.correct(), quiz.time()), (Some(1), Some(20)));
+        assert_eq!((quiz.correct(), quiz.time()), (Some(vec![1]), Some(20)));
         assert!(quiz.id().starts_with("q0-"));
         assert!(quiz.reveal().is_ok());
         assert_eq!(quiz.reveal(), Err(PollError::AlreadyRevealed));
-        let poll = scene.poll("Plain", ["A", "B"], Lean::Auto).unwrap();
+        let poll = scene
+            .poll("Plain", ["A", "B"], Lean::Auto, PollStyle::default())
+            .unwrap();
         assert_eq!(poll.correct(), None);
         assert_eq!(poll.reveal(), Err(PollError::NotQuiz));
         assert!(matches!(poll.remaining(), Err(PollError::NotQuiz)));
     }
 
     #[test]
+    fn multiple_choice_quizzes_take_every_right_answer() {
+        let mut scene = scene();
+        let quiz = scene
+            .quiz(
+                "Q",
+                ["A", "B", "C"],
+                vec![2, 0, 2],
+                20,
+                1000,
+                Lean::Auto,
+                PollStyle::default(),
+            )
+            .unwrap();
+        assert_eq!(quiz.correct(), Some(vec![0, 2]));
+        assert!(quiz.multiple());
+        assert!(
+            scene
+                .quiz(
+                    "Q",
+                    ["A", "B"],
+                    vec![],
+                    20,
+                    1000,
+                    Lean::Auto,
+                    PollStyle::default()
+                )
+                .is_err()
+        );
+        assert!(
+            scene
+                .quiz(
+                    "Q",
+                    ["A", "B"],
+                    vec![0, 5],
+                    20,
+                    1000,
+                    Lean::Auto,
+                    PollStyle::default()
+                )
+                .is_err()
+        );
+        let several = PollStyle {
+            multiple: true,
+            image: None,
+        };
+        let poll = scene.poll("P", ["A", "B"], Lean::Auto, several).unwrap();
+        assert!(poll.multiple() && poll.correct().is_none());
+        // The manner of asking is part of a poll's identity.
+        assert_ne!(
+            poll.id(),
+            scene
+                .poll("P", ["A", "B"], Lean::Auto, PollStyle::default())
+                .unwrap()
+                .id()
+        );
+        assert!(poll.icon(1, 0.5).is_ok());
+        assert!(poll.icon(2, 0.5).is_err());
+        assert_eq!(poll.color(1), Ok(ANSWER_COLORS[1]));
+    }
+
+    #[test]
+    fn a_poll_picture_is_scaled_for_phones_and_named_by_its_bytes() {
+        let directory =
+            std::env::temp_dir().join(format!("gaanim-poll-image-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("big.png");
+        image::RgbImage::from_pixel(2000, 500, image::Rgb([20, 120, 220]))
+            .save(&path)
+            .unwrap();
+        let picture = poll_image(&path).unwrap();
+        assert_eq!(picture.mime, "image/jpeg");
+        assert_eq!(picture.hash.len(), 16);
+        let decoded = image::load_from_memory(&picture.bytes).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (POLL_IMAGE_SIZE, 256));
+        assert_eq!(poll_image(&path).unwrap().hash, picture.hash);
+        assert!(poll_image(&directory.join("missing.png")).is_err());
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
     fn poll_ids_are_stable_and_follow_the_text_and_scoring() {
         let options = ["A".to_string(), "B".to_string()];
         let quiz = |correct| QuizRecord {
-            correct,
+            correct: vec![correct],
             time: 20,
             points: 1000,
             reveal: None,
         };
         assert_eq!(
-            poll_id(0, "Q", &options, None),
-            poll_id(0, "Q", &options, None)
+            poll_id(0, "Q", &options, None, &PollStyle::default()),
+            poll_id(0, "Q", &options, None, &PollStyle::default())
         );
         assert_ne!(
-            poll_id(0, "Q", &options, None),
-            poll_id(0, "Q?", &options, None)
+            poll_id(0, "Q", &options, None, &PollStyle::default()),
+            poll_id(0, "Q?", &options, None, &PollStyle::default())
         );
         assert_ne!(
-            poll_id(0, "Q", &options, None),
-            poll_id(1, "Q", &options, None)
+            poll_id(0, "Q", &options, None, &PollStyle::default()),
+            poll_id(1, "Q", &options, None, &PollStyle::default())
         );
         assert_ne!(
-            poll_id(0, "Q", &options, Some(&quiz(0))),
-            poll_id(0, "Q", &options, Some(&quiz(1)))
+            poll_id(0, "Q", &options, Some(&quiz(0)), &PollStyle::default()),
+            poll_id(0, "Q", &options, Some(&quiz(1)), &PollStyle::default())
         );
-        assert!(poll_id(3, "¿Cuál?", &options, None).starts_with("p3-"));
+        assert!(poll_id(3, "¿Cuál?", &options, None, &PollStyle::default()).starts_with("p3-"));
     }
 
     #[test]
     fn a_poll_reports_its_session_and_rejects_unknown_answers() {
         let mut scene = scene();
         let poll = scene
-            .poll(" ¿Cuál? ", ["x²", "2ˣ"], Lean::Weights(vec![3.0, 1.0]))
+            .poll(
+                " ¿Cuál? ",
+                ["x²", "2ˣ"],
+                Lean::Weights(vec![3.0, 1.0]),
+                PollStyle::default(),
+            )
             .unwrap();
         assert_eq!(poll.question(), "¿Cuál?");
         assert_eq!(poll.code(), "ABC234");

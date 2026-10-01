@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 /// The IR's version: a program with a newer major version is refused, a
 /// newer minor one may only add instructions this build refuses by name.
-pub const PROGRAM_VERSION: [u32; 2] = [1, 2];
+pub const PROGRAM_VERSION: [u32; 2] = [1, 3];
 
 /// Most numbers a zone keeps per player (`state=`).
 pub const MAX_STATE: usize = 8;
@@ -57,10 +57,24 @@ pub enum Input {
     TeamScore,
     /// Position of the team, from 0 for the leading one.
     TeamRank,
+    /// The answer the player chose on the poll open now (or the last one),
+    /// from 0; the first one on a multiple choice poll; -1 for none.
+    Answer,
+    /// Every answer chosen there, one bit each (bit 0 for the first).
+    AnswerMask,
+    /// Seconds the player took there, 0 without an answer.
+    AnswerTime,
+    /// Points the answer earned there.
+    AnswerPoints,
+    /// Quizzes the player answered, and answered right.
+    Answers,
+    Correct,
+    /// Quizzes answered right in a row.
+    Streak,
 }
 
 impl Input {
-    pub const ALL: [Input; 17] = [
+    pub const ALL: [Input; 24] = [
         Input::T,
         Input::Time,
         Input::Joined,
@@ -78,6 +92,13 @@ impl Input {
         Input::TeamCount,
         Input::TeamScore,
         Input::TeamRank,
+        Input::Answer,
+        Input::AnswerMask,
+        Input::AnswerTime,
+        Input::AnswerPoints,
+        Input::Answers,
+        Input::Correct,
+        Input::Streak,
     ];
 }
 
@@ -333,6 +354,13 @@ pub struct Inputs {
     pub team_count: f64,
     pub team_score: f64,
     pub team_rank: f64,
+    pub answer: f64,
+    pub answer_mask: f64,
+    pub answer_time: f64,
+    pub answer_points: f64,
+    pub answers: f64,
+    pub correct: f64,
+    pub streak: f64,
     /// The player's kept numbers (`p.state`), by slot.
     pub state: [f64; MAX_STATE],
     /// Read by `p.random(k)`: the player's character seed.
@@ -371,6 +399,13 @@ impl Inputs {
             Input::TeamCount => self.team_count,
             Input::TeamScore => self.team_score,
             Input::TeamRank => self.team_rank,
+            Input::Answer => self.answer,
+            Input::AnswerMask => self.answer_mask,
+            Input::AnswerTime => self.answer_time,
+            Input::AnswerPoints => self.answer_points,
+            Input::Answers => self.answers,
+            Input::Correct => self.correct,
+            Input::Streak => self.streak,
         }
     }
 }
@@ -784,6 +819,13 @@ mod tests {
                     team_count: input("team_count"),
                     team_score: input("team_score"),
                     team_rank: input("team_rank"),
+                    answer: given.get("answer").map_or(-1.0, number),
+                    answer_mask: input("answer_mask"),
+                    answer_time: input("answer_time"),
+                    answer_points: input("answer_points"),
+                    answers: input("answers"),
+                    correct: input("correct"),
+                    streak: input("streak"),
                     state: {
                         let mut state = [0.0; MAX_STATE];
                         for (slot, value) in given

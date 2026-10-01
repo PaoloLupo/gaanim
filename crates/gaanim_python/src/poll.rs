@@ -162,10 +162,43 @@ impl PyPoll {
         self.inner.correct().is_some()
     }
 
-    /// A quiz's correct answer; `None` for a poll.
+    /// A quiz's right answer, or the list of them for a multiple choice
+    /// quiz; `None` for a poll.
     #[getter]
-    fn correct(&self) -> Option<usize> {
-        self.inner.correct()
+    fn correct(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+        let Some(correct) = self.inner.correct() else {
+            return Ok(None);
+        };
+        Ok(Some(match correct.as_slice() {
+            [one] if !self.inner.multiple() => one.into_pyobject(py)?.into_any().unbind(),
+            many => many.into_pyobject(py)?.into_any().unbind(),
+        }))
+    }
+
+    /// The shape `answer` has on phones, `size` units tall, filled with its
+    /// color.
+    #[pyo3(signature = (answer, size=0.6))]
+    fn icon(&self, answer: usize, size: f64) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        let handle = self.inner.icon(answer, size).map_err(poll_error)?;
+        Ok(PyDrawable(handle))
+    }
+
+    /// The color `answer` has on phones, `#rrggbb`.
+    fn color(&self, answer: usize) -> PyResult<&'static str> {
+        self.inner.color(answer).map_err(poll_error)
+    }
+
+    /// Whether players may choose several answers.
+    #[getter]
+    fn multiple(&self) -> bool {
+        self.inner.multiple()
+    }
+
+    /// Whether phones show a picture above the question.
+    #[getter]
+    fn has_image(&self) -> bool {
+        self.inner.image().is_some()
     }
 
     /// Seconds a quiz gives to answer; `None` for a poll.
@@ -295,8 +328,69 @@ pub struct PyLeaderboard {
     pub(crate) inner: LeaderboardHandle,
 }
 
+impl PyLeaderboard {
+    /// `fact` about the player, for the methods below.
+    fn fact(
+        &self,
+        index: usize,
+        fact: gaanim_api::canvas::PlayerFact,
+        poll: Option<PyRef<'_, PyPoll>>,
+    ) -> PyResult<PyParameter> {
+        crate::custom::ensure_authoring_allowed()?;
+        let inner = self
+            .inner
+            .player(index, fact, poll.as_ref().map(|poll| &poll.inner))
+            .map_err(poll_error)?;
+        Ok(PyParameter { inner })
+    }
+}
+
 #[pymethods]
 impl PyLeaderboard {
+    /// Quizzes the player answered right.
+    fn correct(&self, rank: usize) -> PyResult<PyParameter> {
+        self.fact(rank, gaanim_api::canvas::PlayerFact::Correct, None)
+    }
+
+    /// Quizzes the player answered.
+    fn answered(&self, rank: usize) -> PyResult<PyParameter> {
+        self.fact(rank, gaanim_api::canvas::PlayerFact::Answered, None)
+    }
+
+    /// Quizzes the player answered right in a row.
+    fn streak(&self, rank: usize) -> PyResult<PyParameter> {
+        self.fact(rank, gaanim_api::canvas::PlayerFact::Streak, None)
+    }
+
+    /// 1 once the player answered `poll`, else 0.
+    fn responded(&self, rank: usize, poll: PyRef<'_, PyPoll>) -> PyResult<PyParameter> {
+        self.fact(rank, gaanim_api::canvas::PlayerFact::Responded, Some(poll))
+    }
+
+    /// 1 if the player chose `answer` on `poll`, else 0.
+    fn chose(&self, rank: usize, poll: PyRef<'_, PyPoll>, answer: usize) -> PyResult<PyParameter> {
+        self.fact(
+            rank,
+            gaanim_api::canvas::PlayerFact::Chose(answer),
+            Some(poll),
+        )
+    }
+
+    /// 1 if the player answered quiz `poll` right, else 0.
+    fn right(&self, rank: usize, poll: PyRef<'_, PyPoll>) -> PyResult<PyParameter> {
+        self.fact(rank, gaanim_api::canvas::PlayerFact::Right, Some(poll))
+    }
+
+    /// Points the player's answer to quiz `poll` earned.
+    fn earned(&self, rank: usize, poll: PyRef<'_, PyPoll>) -> PyResult<PyParameter> {
+        self.fact(rank, gaanim_api::canvas::PlayerFact::Earned, Some(poll))
+    }
+
+    /// Seconds the player took to answer quiz `poll`, 0 without an answer.
+    fn answer_time(&self, rank: usize, poll: PyRef<'_, PyPoll>) -> PyResult<PyParameter> {
+        self.fact(rank, gaanim_api::canvas::PlayerFact::Time, Some(poll))
+    }
+
     /// The nickname at `rank` (0 for the leader) as live text.
     #[pyo3(signature = (rank, *, size=None, weight=None, font=None, align="left"))]
     fn name(
@@ -432,8 +526,74 @@ pub struct PyAudience {
     pub(crate) inner: AudienceHandle,
 }
 
+impl PyAudience {
+    /// `fact` about the player, for the methods below.
+    fn fact(
+        &self,
+        index: usize,
+        fact: gaanim_api::canvas::PlayerFact,
+        poll: Option<PyRef<'_, PyPoll>>,
+    ) -> PyResult<PyParameter> {
+        crate::custom::ensure_authoring_allowed()?;
+        let inner = self
+            .inner
+            .player(index, fact, poll.as_ref().map(|poll| &poll.inner))
+            .map_err(poll_error)?;
+        Ok(PyParameter { inner })
+    }
+}
+
 #[pymethods]
 impl PyAudience {
+    /// The player's points.
+    fn score(&self, slot: usize) -> PyResult<PyParameter> {
+        self.fact(slot, gaanim_api::canvas::PlayerFact::Score, None)
+    }
+
+    /// Quizzes the player answered right.
+    fn correct(&self, slot: usize) -> PyResult<PyParameter> {
+        self.fact(slot, gaanim_api::canvas::PlayerFact::Correct, None)
+    }
+
+    /// Quizzes the player answered.
+    fn answered(&self, slot: usize) -> PyResult<PyParameter> {
+        self.fact(slot, gaanim_api::canvas::PlayerFact::Answered, None)
+    }
+
+    /// Quizzes the player answered right in a row.
+    fn streak(&self, slot: usize) -> PyResult<PyParameter> {
+        self.fact(slot, gaanim_api::canvas::PlayerFact::Streak, None)
+    }
+
+    /// 1 once the player answered `poll`, else 0.
+    fn responded(&self, slot: usize, poll: PyRef<'_, PyPoll>) -> PyResult<PyParameter> {
+        self.fact(slot, gaanim_api::canvas::PlayerFact::Responded, Some(poll))
+    }
+
+    /// 1 if the player chose `answer` on `poll`, else 0.
+    fn chose(&self, slot: usize, poll: PyRef<'_, PyPoll>, answer: usize) -> PyResult<PyParameter> {
+        self.fact(
+            slot,
+            gaanim_api::canvas::PlayerFact::Chose(answer),
+            Some(poll),
+        )
+    }
+
+    /// 1 if the player answered quiz `poll` right, else 0.
+    fn right(&self, slot: usize, poll: PyRef<'_, PyPoll>) -> PyResult<PyParameter> {
+        self.fact(slot, gaanim_api::canvas::PlayerFact::Right, Some(poll))
+    }
+
+    /// Points the player's answer to quiz `poll` earned.
+    fn earned(&self, slot: usize, poll: PyRef<'_, PyPoll>) -> PyResult<PyParameter> {
+        self.fact(slot, gaanim_api::canvas::PlayerFact::Earned, Some(poll))
+    }
+
+    /// Seconds the player took to answer quiz `poll`, 0 without an answer.
+    fn answer_time(&self, slot: usize, poll: PyRef<'_, PyPoll>) -> PyResult<PyParameter> {
+        self.fact(slot, gaanim_api::canvas::PlayerFact::Time, Some(poll))
+    }
+
     /// The session code phones type.
     #[getter]
     fn code(&self) -> String {

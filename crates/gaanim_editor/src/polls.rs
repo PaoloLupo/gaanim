@@ -227,6 +227,14 @@ struct Snapshot {
     connected: u32,
     teams: Vec<gaanim_animation::polls::TeamResult>,
     player_teams: HashMap<Arc<str>, usize>,
+    stats: HashMap<Arc<str>, gaanim_animation::polls::PlayerStats>,
+    /// Every answer heard in this game, by poll and nickname: the relay
+    /// sends all of them on connecting and then the open poll's.
+    answers: HashMap<Arc<str>, HashMap<Arc<str>, gaanim_animation::polls::PlayerAnswer>>,
+    respondents: HashMap<Arc<str>, u32>,
+    latest: Option<Arc<str>>,
+    /// The game the relay is in: a new one forgets earlier answers.
+    game: Option<String>,
 }
 
 impl Snapshot {
@@ -268,10 +276,35 @@ impl Snapshot {
                 players: team.players,
             })
             .collect();
+        let stats = results
+            .audience
+            .iter()
+            .filter_map(|arrival| Some((arrival.name.as_str(), arrival.stats?)))
+            .chain(
+                results
+                    .players
+                    .iter()
+                    .filter_map(|player| Some((player.name.as_str(), player.stats?))),
+            )
+            .map(|(name, stats)| (Arc::from(name), stats.into()))
+            .collect();
+        let mut answers = HashMap::new();
+        let mut respondents = HashMap::new();
         for (id, poll) in results.polls {
             let id: Arc<str> = id.into();
             if let Some(quiz) = poll.quiz {
                 deadlines.insert(id.clone(), quiz.deadline);
+            }
+            if let Some(count) = poll.respondents {
+                respondents.insert(id.clone(), count);
+            }
+            if let Some(list) = poll.answers {
+                answers.insert(
+                    id.clone(),
+                    list.into_iter()
+                        .map(|answer| (Arc::from(answer.name.as_str()), answer.into()))
+                        .collect(),
+                );
             }
             counts.insert(id, poll.counts);
         }
@@ -296,6 +329,11 @@ impl Snapshot {
             connected: results.connected,
             teams,
             player_teams,
+            stats,
+            answers,
+            respondents,
+            latest: results.latest.map(|latest| Arc::from(latest.as_str())),
+            game: results.game,
         }
     }
 
@@ -468,6 +506,10 @@ impl PollClient {
             avatars: snapshot.avatars,
             teams: snapshot.teams,
             player_teams: snapshot.player_teams,
+            stats: snapshot.stats,
+            answers: snapshot.answers,
+            respondents: snapshot.respondents,
+            latest: snapshot.latest,
         }
     }
 }
@@ -497,6 +539,64 @@ struct Results {
     /// Each team's standing, in the scene's order.
     #[serde(default)]
     teams: Vec<TeamState>,
+    /// The poll open now, or the last one opened.
+    #[serde(default)]
+    latest: Option<String>,
+    #[serde(default)]
+    game: Option<String>,
+}
+
+/// A player's game so far, as the relay reports it.
+#[derive(Deserialize, Clone, Copy)]
+struct StatsState {
+    #[serde(default)]
+    score: u64,
+    #[serde(default)]
+    correct: u32,
+    #[serde(default)]
+    answered: u32,
+    #[serde(default)]
+    streak: u32,
+}
+
+impl From<StatsState> for gaanim_animation::polls::PlayerStats {
+    fn from(stats: StatsState) -> Self {
+        Self {
+            score: stats.score,
+            correct: stats.correct,
+            answered: stats.answered,
+            streak: stats.streak,
+        }
+    }
+}
+
+/// One player's answer on a poll.
+#[derive(Deserialize)]
+struct AnswerState {
+    name: String,
+    #[serde(default)]
+    options: Vec<usize>,
+    #[serde(default)]
+    elapsed: f64,
+    #[serde(default)]
+    points: u32,
+    #[serde(default)]
+    right: Option<bool>,
+}
+
+impl From<AnswerState> for gaanim_animation::polls::PlayerAnswer {
+    fn from(answer: AnswerState) -> Self {
+        Self {
+            options: answer
+                .options
+                .iter()
+                .filter(|option| **option < 32)
+                .fold(0, |options, option| options | 1 << option),
+            elapsed: answer.elapsed / 1000.0,
+            points: answer.points,
+            right: answer.right,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -513,6 +613,12 @@ struct PollCounts {
     counts: Vec<u32>,
     #[serde(default)]
     quiz: Option<QuizState>,
+    /// Phones that answered; a multiple choice poll's votes add up to more.
+    #[serde(default)]
+    respondents: Option<u32>,
+    /// Each player's answer: all polls' on connecting, then the open one's.
+    #[serde(default)]
+    answers: Option<Vec<AnswerState>>,
 }
 
 #[derive(Deserialize)]
@@ -528,6 +634,8 @@ struct Player {
     avatar: Option<gaanim_animation::characters::CharacterParts>,
     #[serde(default)]
     team: Option<usize>,
+    #[serde(default, flatten)]
+    stats: Option<StatsState>,
 }
 
 #[derive(Deserialize)]
@@ -540,6 +648,8 @@ struct Arrival {
     avatar: Option<gaanim_animation::characters::CharacterParts>,
     #[serde(default)]
     team: Option<usize>,
+    #[serde(default, flatten)]
+    stats: Option<StatsState>,
 }
 
 /// An HTTP agent with the system's TLS, which ureq is built with here.
@@ -581,12 +691,30 @@ impl RelayApi {
             "options": poll.options,
         });
         if let Some(quiz) = &poll.quiz {
-            body["correct"] = quiz.correct.into();
+            body["correct"] = match quiz.correct.as_slice() {
+                [one] if !poll.multiple => (*one).into(),
+                many => many.into(),
+            };
             body["time"] = quiz.time.into();
             body["points"] = quiz.points.into();
         }
+        if poll.multiple {
+            body["multiple"] = true.into();
+        }
+        if let Some(image) = &poll.image {
+            body["image"] = image.hash.clone().into();
+        }
         self.request("PUT", "poll")
             .send_json(body)
+            .map_err(describe)?;
+        Ok(())
+    }
+
+    /// Store a poll's picture on the relay, for phones to load.
+    fn upload(&self, image: &gaanim_timeline::timeline::PollImage) -> Result<(), String> {
+        self.request("PUT", &format!("image/{}", image.hash))
+            .set("Content-Type", &image.mime)
+            .send_bytes(&image.bytes)
             .map_err(describe)?;
         Ok(())
     }
@@ -647,6 +775,8 @@ fn run_relay_session(
         }
         _ => {}
     };
+    // Pictures the relay already has.
+    let mut uploaded: HashSet<String> = HashSet::new();
     loop {
         let mut next = match commands.recv_timeout(REFRESH) {
             Ok(command) => Some(command),
@@ -675,7 +805,16 @@ fn run_relay_session(
         }
         if !synced {
             let result = match &wanted {
-                Some(poll) => api.open(poll),
+                // A picture goes up once, before its question.
+                Some(poll) => match &poll.image {
+                    Some(image) if !uploaded.contains(&image.hash) => api
+                        .upload(image)
+                        .inspect(|()| {
+                            uploaded.insert(image.hash.clone());
+                        })
+                        .and_then(|()| api.open(poll)),
+                    _ => api.open(poll),
+                },
                 None => api.close(),
             };
             report(&result);
@@ -963,9 +1102,20 @@ fn read_results(
 }
 
 /// Make `latest` the snapshot the scene reads, numbered after the last one.
+/// Answers to polls it does not repeat carry over, within the same game.
 fn store(snapshot: &Mutex<Option<Snapshot>>, mut latest: Snapshot) {
     if let Ok(mut snapshot) = snapshot.lock() {
-        latest.version = snapshot.as_ref().map_or(0, |previous| previous.version + 1);
+        if let Some(previous) = snapshot.as_ref() {
+            latest.version = previous.version + 1;
+            if previous.game == latest.game {
+                for (poll, answers) in &previous.answers {
+                    latest
+                        .answers
+                        .entry(poll.clone())
+                        .or_insert_with(|| answers.clone());
+                }
+            }
+        }
         *snapshot = Some(latest);
     }
 }
@@ -1078,6 +1228,8 @@ mod tests {
             open: 0.0,
             close: 1.0,
             quiz: None,
+            multiple: false,
+            image: None,
         }
     }
 
@@ -1280,7 +1432,7 @@ mod tests {
         let mut quiz = poll("q1-test", "¿2 + 2?");
         quiz.options = vec!["3".into(), "4".into()];
         quiz.quiz = Some(gaanim_timeline::timeline::TimelineQuiz {
-            correct: 1,
+            correct: vec![1],
             time: 20,
             points: 1000,
             reveal: None,

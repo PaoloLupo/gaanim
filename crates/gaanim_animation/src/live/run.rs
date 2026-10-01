@@ -48,6 +48,10 @@ pub struct Player {
     pub character: Character,
     /// The player's team, 0 in a game without teams.
     pub team: usize,
+    /// The player's game so far.
+    pub stats: crate::polls::PlayerStats,
+    /// What the player answered on the poll open now, or the last one.
+    pub answer: Option<crate::polls::PlayerAnswer>,
 }
 
 impl Player {
@@ -59,6 +63,8 @@ impl Player {
             name: name.into(),
             character,
             team: 0,
+            stats: Default::default(),
+            answer: None,
         }
     }
 }
@@ -163,7 +169,21 @@ impl ZoneRun {
             {
                 actor.player.character = player.character;
                 actor.player.team = player.team;
+                actor.player.stats = player.stats;
+                actor.player.answer = player.answer;
             }
+        }
+    }
+
+    /// Tell each player's game so far and latest answer, from `facts`.
+    pub fn facts(
+        &mut self,
+        facts: impl Fn(&str) -> (crate::polls::PlayerStats, Option<crate::polls::PlayerAnswer>),
+    ) {
+        for actor in &mut self.actors {
+            let (stats, answer) = facts(&actor.player.name);
+            actor.player.stats = stats;
+            actor.player.answer = answer;
         }
     }
 
@@ -257,6 +277,17 @@ impl ZoneRun {
             team_count: mates.count() as f64,
             team_score,
             team_rank: team_rank as f64,
+            answer: actor
+                .player
+                .answer
+                .and_then(|answer| answer.first())
+                .map_or(-1.0, |first| first as f64),
+            answer_mask: actor.player.answer.map_or(0.0, |answer| f64::from(answer.options)),
+            answer_time: actor.player.answer.map_or(0.0, |answer| answer.elapsed),
+            answer_points: actor.player.answer.map_or(0.0, |answer| f64::from(answer.points)),
+            answers: f64::from(actor.player.stats.answered),
+            correct: f64::from(actor.player.stats.correct),
+            streak: f64::from(actor.player.stats.streak),
             state: actor.state.unwrap_or([0.0; MAX_STATE]),
             seed: actor.seed,
         }
@@ -730,6 +761,8 @@ mod tests {
             name: "Ana".into(),
             character: [3, 4, 6, 6, 4],
             team: 0,
+            stats: Default::default(),
+            answer: None,
         };
         assert!(catalog().hangs(&bunny.character));
         let drive_at = |seconds: f64| {

@@ -73,8 +73,8 @@ __all__ = [
 
 #: Version of the compiled programs; Rust refuses a newer major version. A
 #: program asks for the oldest minor version that runs it: 1.1 added the team
-#: fields, 1.2 the numbers a zone keeps per player.
-PROGRAM_VERSION = (1, 2)
+#: fields, 1.2 the numbers a zone keeps per player, 1.3 the player's answers.
+PROGRAM_VERSION = (1, 3)
 
 #: Most numbers a zone keeps per player.
 MAX_STATE = 8
@@ -83,6 +83,9 @@ MAX_STATE = 8
 STEP = 1 / 60
 
 _TEAM_FIELDS = ("team", "team_index", "team_count", "team_score", "team_rank")
+_ANSWER_FIELDS = (
+    "answer", "answer_mask", "answer_time", "answer_points", "answers", "correct", "streak",
+)
 
 #: What a behavior reads from its player, as ``p.<name>``.
 PLAYER_FIELDS = {
@@ -103,6 +106,13 @@ PLAYER_FIELDS = {
     "team_count": "players of the team in the zone",
     "team_score": "the team's score: its players' scores added up",
     "team_rank": "position of the team, 0 for the leading one",
+    "answer": "the answer chosen on the poll open now (or the last one), from 0; -1 for none",
+    "answer_mask": "every answer chosen there, one bit each (bit 0 for the first)",
+    "answer_time": "seconds the player took there, 0 without an answer",
+    "answer_points": "points that answer earned",
+    "answers": "quizzes the player answered",
+    "correct": "quizzes the player answered right",
+    "streak": "quizzes answered right in a row",
 }
 
 
@@ -346,6 +356,13 @@ class Player:
     team_count: int = 1
     team_score: float = 0.0
     team_rank: int = 0
+    answer: int = -1
+    answer_mask: int = 0
+    answer_time: float = 0.0
+    answer_points: float = 0.0
+    answers: int = 0
+    correct: int = 0
+    streak: int = 0
     state: State = field(default_factory=State)
     seed: int = field(default=-1)
 
@@ -1290,6 +1307,8 @@ class _Compiler:
         """The oldest program version that runs the code."""
         ops = {next(iter(inst)) for inst in self.code}
         inputs = {inst["input"] for inst in self.code if "input" in inst}
+        if inputs & set(_ANSWER_FIELDS):
+            return [1, 3]
         if "state" in ops:
             return [1, 2]
         if inputs & set(_TEAM_FIELDS):

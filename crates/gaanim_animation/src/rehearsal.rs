@@ -114,8 +114,10 @@ pub struct PlannedPoll {
     /// When the answers are all in: the first stop after `open`, where a
     /// presentation waits for them, or else the close.
     pub due: f64,
-    /// `(correct, seconds, points)` for a quiz.
-    pub quiz: Option<(usize, u32, u32)>,
+    /// `(correct answers, one bit each; seconds; points)` for a quiz.
+    pub quiz: Option<(u32, u32, u32)>,
+    /// Players may choose several answers.
+    pub multiple: bool,
     pub lean: Lean,
 }
 
@@ -137,7 +139,8 @@ pub struct RehearsedPlayer {
 pub struct RehearsedVote {
     /// Index into [`Rehearsal::players`].
     pub player: usize,
-    pub option: usize,
+    /// The answers chosen, one bit each.
+    pub options: u32,
     /// Timeline time the answer arrives.
     pub at: f64,
     /// Points it earned, for a quiz.
@@ -299,7 +302,7 @@ impl Rehearsal {
                         let from = player.joined.max(poll.open);
                         let at = from + fraction * (poll.due - from).max(0.0);
                         let pick_draw = random(seed, &[about::PICK, key, player_key]);
-                        let option = match (poll.quiz, &poll.lean) {
+                        let options = match (poll.quiz, &poll.lean) {
                             (Some((correct, _, _)), Lean::Auto | Lean::Right(_)) => {
                                 let right = match poll.lean {
                                     // The question sets the average; players (and
@@ -311,26 +314,53 @@ impl Rehearsal {
                                 };
                                 if random(seed, &[about::RIGHT, key, player_key]) < right {
                                     correct
+                                } else if poll.multiple {
+                                    // Almost: one answer too many or missing.
+                                    let flip = (pick_draw * poll.answers as f64) as usize;
+                                    let wrong = correct ^ (1 << flip.min(poll.answers - 1));
+                                    if wrong == 0 { correct ^ 1 ^ 2 } else { wrong }
                                 } else {
                                     // A wrong answer, any of the others.
+                                    let correct = correct.trailing_zeros() as usize;
                                     let wrong = (pick_draw * (poll.answers - 1) as f64) as usize;
                                     let wrong = wrong.min(poll.answers - 2);
-                                    if wrong >= correct { wrong + 1 } else { wrong }
+                                    1 << if wrong >= correct { wrong + 1 } else { wrong }
                                 }
                             }
-                            _ => pick(&weights, pick_draw),
+                            _ if poll.multiple => {
+                                // Each answer on its own, the popular ones more
+                                // often; at least one.
+                                let top = weights.iter().copied().fold(0.0, f64::max).max(1e-9);
+                                let chosen = (0..poll.answers).fold(0u32, |chosen, answer| {
+                                    let draw = random(
+                                        seed,
+                                        &[about::PICK, key, player_key, answer as u64],
+                                    );
+                                    if draw < 0.8 * weights[answer] / top {
+                                        chosen | 1 << answer
+                                    } else {
+                                        chosen
+                                    }
+                                });
+                                if chosen == 0 {
+                                    1 << pick(&weights, pick_draw)
+                                } else {
+                                    chosen
+                                }
+                            }
+                            _ => 1 << pick(&weights, pick_draw),
                         };
                         // Scored as the relay scores: `fraction` is the share of
                         // the quiz's time taken.
                         let points = match poll.quiz {
-                            Some((correct, _, points)) if option == correct => {
+                            Some((correct, _, points)) if options == correct => {
                                 (f64::from(points) * (1.0 - fraction / 2.0)).round() as u32
                             }
                             _ => 0,
                         };
                         RehearsedVote {
                             player: index,
-                            option,
+                            options,
                             at,
                             points,
                         }
@@ -371,6 +401,71 @@ impl Rehearsal {
         scores
     }
 
+    /// Each player's game at `time`, in player order: points, quizzes
+    /// answered and right, and the run of right answers up to the last quiz
+    /// whose answers are all in.
+    pub fn stats_at(&self, time: f64) -> Vec<crate::polls::PlayerStats> {
+        let mut stats = vec![crate::polls::PlayerStats::default(); self.players.len()];
+        for poll in self.polls.iter().filter(|poll| poll.time.is_some()) {
+            for vote in poll.votes.iter().filter(|vote| vote.at <= time) {
+                let Some(player) = stats.get_mut(vote.player) else {
+                    continue;
+                };
+                player.score += u64::from(vote.points);
+                player.answered += 1;
+                player.correct += u32::from(vote.points > 0);
+            }
+        }
+        // Streaks follow the quizzes in order, once each one is over.
+        let mut quizzes: Vec<&RehearsedPoll> = self
+            .polls
+            .iter()
+            .filter(|poll| poll.time.is_some() && poll.due <= time)
+            .collect();
+        quizzes.sort_by(|a, b| a.due.total_cmp(&b.due));
+        for quiz in quizzes {
+            for (index, player) in self.players.iter().enumerate() {
+                if player.joined > quiz.due {
+                    continue;
+                }
+                let right = quiz
+                    .votes
+                    .iter()
+                    .any(|vote| vote.player == index && vote.points > 0);
+                stats[index].streak = if right { stats[index].streak + 1 } else { 0 };
+            }
+        }
+        stats
+    }
+
+    /// The poll open at `time`, or else the last one opened.
+    pub fn latest_at(&self, time: f64) -> Option<usize> {
+        (0..self.polls.len())
+            .filter(|index| self.polls[*index].open <= time)
+            .max_by(|a, b| self.polls[*a].open.total_cmp(&self.polls[*b].open))
+    }
+
+    /// What player `index` answered on poll `poll` by `time`.
+    pub fn answer_of(
+        &self,
+        poll: usize,
+        index: usize,
+        time: f64,
+    ) -> Option<crate::polls::PlayerAnswer> {
+        let poll = &self.polls[poll];
+        poll.votes
+            .iter()
+            .find(|vote| vote.player == index && vote.at <= time)
+            .map(|vote| crate::polls::PlayerAnswer {
+                options: vote.options,
+                elapsed: poll.time.map_or(0.0, |seconds| {
+                    seconds * (vote.at - poll.open) / (poll.due - poll.open).max(1e-9)
+                }),
+                points: vote.points,
+                right: poll.time.map(|_| vote.points > 0),
+            })
+    }
+
     /// A made-up player as a live zone sees it.
     pub fn player(&self, index: usize) -> crate::live::Player {
         let player = &self.players[index];
@@ -378,6 +473,8 @@ impl Rehearsal {
             name: player.name.as_str().into(),
             character: gaanim_objects::character::catalog().character_from_seed(player.character),
             team: player.team,
+            stats: Default::default(),
+            answer: None,
         }
     }
 
@@ -400,14 +497,22 @@ impl Rehearsal {
         });
         let mut counts = HashMap::new();
         let mut remaining = HashMap::new();
-        for poll in &self.polls {
+        let mut respondents = HashMap::new();
+        let mut answers = HashMap::new();
+        for (number, poll) in self.polls.iter().enumerate() {
             let mut tally = vec![0u32; poll.answers];
+            let mut answered = HashMap::new();
             for vote in poll.votes.iter().filter(|vote| vote.at <= time) {
-                if let Some(count) = tally.get_mut(vote.option) {
-                    *count += 1;
+                for (answer, count) in tally.iter_mut().enumerate() {
+                    *count += u32::from(vote.options & (1 << answer) != 0);
+                }
+                if let Some(answer) = self.answer_of(number, vote.player, time) {
+                    answered.insert(Arc::from(self.players[vote.player].name.as_str()), answer);
                 }
             }
             let id: Arc<str> = poll.id.as_str().into();
+            respondents.insert(id.clone(), answered.len() as u32);
+            answers.insert(id.clone(), answered);
             counts.insert(id.clone(), tally);
             if let Some(seconds) = poll.time {
                 let window = poll.due - poll.open;
@@ -422,6 +527,7 @@ impl Rehearsal {
             }
         }
         let catalog = gaanim_objects::character::catalog();
+        let stats = self.stats_at(time);
         let mut teams = vec![crate::polls::TeamResult::default(); self.teams];
         for index in &joined {
             if let Some(team) = teams.get_mut(self.players[*index].team) {
@@ -430,6 +536,15 @@ impl Rehearsal {
             }
         }
         PollResults {
+            stats: joined
+                .iter()
+                .map(|index| (self.players[*index].name.as_str().into(), stats[*index]))
+                .collect(),
+            answers,
+            respondents,
+            latest: self
+                .latest_at(time)
+                .map(|index| self.polls[index].id.as_str().into()),
             teams,
             player_teams: if self.teams == 0 {
                 HashMap::new()
@@ -533,7 +648,8 @@ mod tests {
             answers: 4,
             open,
             due,
-            quiz: Some((1, 20, 1000)),
+            quiz: Some((1 << 1, 20, 1000)),
+            multiple: false,
             lean,
         }
     }
@@ -613,6 +729,7 @@ mod tests {
             open: 0.0,
             due: 5.0,
             quiz: None,
+            multiple: false,
             lean: Lean::Weights(vec![0.0, 1.0, 3.0]),
         };
         let counts = &Rehearsal::plan(&spec, None, &[poll.clone()], None)
@@ -669,6 +786,43 @@ mod tests {
         let polls = [quiz("q", 0.0, 5.0, Lean::Right(0.6))];
         let results = Rehearsal::plan(&spec, None, &polls, teams).results_at(5.0);
         assert!(results.teams[0].score > results.teams[1].score);
+    }
+
+    #[test]
+    fn multiple_choice_answers_streaks_and_who_answered_what() {
+        let spec = RehearsalSpec {
+            names: RehearsalSpec::names(6),
+            ..Default::default()
+        };
+        let several = PlannedPoll {
+            id: "m".into(),
+            answers: 4,
+            open: 0.0,
+            due: 4.0,
+            quiz: Some((0b1011, 20, 1000)),
+            multiple: true,
+            lean: Lean::Right(1.0),
+        };
+        let after = PlannedPoll {
+            id: "s".into(),
+            open: 5.0,
+            due: 9.0,
+            ..quiz("s", 5.0, 9.0, Lean::Right(1.0))
+        };
+        let rehearsal = Rehearsal::plan(&spec, None, &[several, after], None);
+        let results = rehearsal.results_at(9.0);
+        // Everyone chose all three right answers, and nothing else.
+        assert_eq!(results.counts["m"], [6, 6, 0, 6]);
+        assert_eq!(results.respondents["m"], 6);
+        let ana = results.answers["m"]["Ana"];
+        assert_eq!((ana.options, ana.right), (0b1011, Some(true)));
+        assert!(ana.points > 0 && ana.elapsed > 0.0 && ana.elapsed <= 20.0);
+        assert_eq!(results.stats["Ana"].streak, 2);
+        assert_eq!(results.stats["Ana"].correct, 2);
+        assert_eq!(results.latest.as_deref(), Some("s"));
+        // Before the second quiz is over, the run is one long.
+        assert_eq!(rehearsal.results_at(4.5).stats["Ana"].streak, 1);
+        assert_eq!(rehearsal.results_at(4.5).latest.as_deref(), Some("m"));
     }
 
     #[test]

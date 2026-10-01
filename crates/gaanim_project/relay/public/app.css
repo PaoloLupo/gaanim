@@ -574,6 +574,32 @@ body {
   font-weight: 800;
 }
 
+/* ---- Pictures and multiple choice -------------------------------------------- */
+
+.question-image {
+  display: block;
+  max-width: 100%;
+  max-height: 32vh;
+  margin: 0 auto 10px;
+  border-radius: var(--radius);
+  object-fit: contain;
+}
+
+.question .hint {
+  margin: -4px 0 8px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.submit {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.submit:disabled {
+  opacity: 0.45;
+}
+
 /* ---- Teams ------------------------------------------------------------------ */
 
 /* The player's team tints the page's edge and the name chip. */

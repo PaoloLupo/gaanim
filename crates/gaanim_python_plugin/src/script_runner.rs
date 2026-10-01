@@ -212,6 +212,7 @@ const GAANIM_SECTIONS: &str = include_str!("../../gaanim_python/gaanim/sections.
 const GAANIM_MATRIX: &str = include_str!("../../gaanim_python/gaanim/matrix.py");
 const GAANIM_ANIMATION_TYPES: &str = include_str!("../../gaanim_python/gaanim/animation_types.py");
 const GAANIM_LIVE: &str = include_str!("../../gaanim_python/gaanim/live.py");
+const GAANIM_QUESTIONS: &str = include_str!("../../gaanim_python/gaanim/questions.py");
 
 /// Build the public `gaanim` package around the builtin `gaanim_core` module.
 ///
@@ -282,6 +283,13 @@ fn bootstrap_gaanim_package(py: Python<'_>) -> PyResult<()> {
     ))
     .unwrap();
     py.run(&load, Some(&loader), None)?;
+
+    // Questions written outside Python; dataclasses, so registered first.
+    let questions = PyModule::new(py, "gaanim.questions")?;
+    questions.setattr("__package__", "gaanim")?;
+    modules.set_item("gaanim.questions", &questions)?;
+    let questions_source = std::ffi::CString::new(GAANIM_QUESTIONS).unwrap();
+    py.run(&questions_source, Some(&questions.dict()), None)?;
 
     let init_source = std::ffi::CString::new(GAANIM_PACKAGE_INIT).unwrap();
     py.run(&init_source, Some(&package.dict()), None)

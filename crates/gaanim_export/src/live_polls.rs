@@ -99,6 +99,31 @@ fn source_record(source: &PollSource) -> LiveSourceRecord {
             measure: measure.name().to_string(),
         },
         PollSource::LeadingTeam => LiveSourceRecord::LeadingTeam,
+        PollSource::Player { who, measure } => {
+            use gaanim_animation::polls::{PlayerMeasure, PlayerRef};
+            let (list, index) = match who {
+                PlayerRef::Slot(slot) => ("audience", *slot),
+                PlayerRef::Rank(rank) => ("leaderboard", *rank),
+            };
+            let (name, poll, option) = match measure {
+                PlayerMeasure::Score => ("score", None, 0),
+                PlayerMeasure::Correct => ("correct", None, 0),
+                PlayerMeasure::Answered => ("answered", None, 0),
+                PlayerMeasure::Streak => ("streak", None, 0),
+                PlayerMeasure::Responded { poll } => ("responded", Some(poll), 0),
+                PlayerMeasure::Chose { poll, option } => ("chose", Some(poll), *option),
+                PlayerMeasure::Right { poll } => ("right", Some(poll), 0),
+                PlayerMeasure::Points { poll } => ("points", Some(poll), 0),
+                PlayerMeasure::Time { poll } => ("time", Some(poll), 0),
+            };
+            LiveSourceRecord::Player {
+                list: list.into(),
+                index,
+                measure: name.into(),
+                poll: poll.map_or_else(String::new, |poll| poll.to_string()),
+                option,
+            }
+        }
     }
 }
 
@@ -131,6 +156,37 @@ fn source_from(record: &LiveSourceRecord) -> Option<PollSource> {
             measure: gaanim_animation::polls::TeamMeasure::from_name(measure)?,
         },
         LiveSourceRecord::LeadingTeam => PollSource::LeadingTeam,
+        LiveSourceRecord::Player {
+            list,
+            index,
+            measure,
+            poll,
+            option,
+        } => {
+            use gaanim_animation::polls::{PlayerMeasure, PlayerRef};
+            let who = match list.as_str() {
+                "audience" => PlayerRef::Slot(*index),
+                "leaderboard" => PlayerRef::Rank(*index),
+                _ => return None,
+            };
+            let poll: std::sync::Arc<str> = poll.as_str().into();
+            let measure = match measure.as_str() {
+                "score" => PlayerMeasure::Score,
+                "correct" => PlayerMeasure::Correct,
+                "answered" => PlayerMeasure::Answered,
+                "streak" => PlayerMeasure::Streak,
+                "responded" => PlayerMeasure::Responded { poll },
+                "chose" => PlayerMeasure::Chose {
+                    poll,
+                    option: *option,
+                },
+                "right" => PlayerMeasure::Right { poll },
+                "points" => PlayerMeasure::Points { poll },
+                "time" => PlayerMeasure::Time { poll },
+                _ => return None,
+            };
+            PollSource::Player { who, measure }
+        }
     })
 }
 
