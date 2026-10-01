@@ -331,7 +331,32 @@ fn decode_preview_audio_range(
             message: String::from_utf8_lossy(&output.stderr).trim().to_string(),
         });
     }
-    Ok(output.stdout.into())
+    let mut wav = output.stdout;
+    fix_piped_wav_sizes(&mut wav);
+    Ok(wav.into())
+}
+
+/// Write the real RIFF and `data` chunk sizes into a WAV that ffmpeg wrote to
+/// a pipe. It cannot seek back to fill them in, so it leaves them at
+/// 0xFFFFFFFF, and the decoder then reports a duration of hours: the
+/// track would never end, keeping its player and seeking it every frame.
+fn fix_piped_wav_sizes(wav: &mut [u8]) {
+    if wav.len() < 12 || &wav[0..4] != b"RIFF" || &wav[8..12] != b"WAVE" {
+        return;
+    }
+    let riff = u32::try_from(wav.len() - 8).unwrap_or(u32::MAX);
+    wav[4..8].copy_from_slice(&riff.to_le_bytes());
+    let mut offset = 12;
+    while offset + 8 <= wav.len() {
+        let size = u32::from_le_bytes(wav[offset + 4..offset + 8].try_into().unwrap()) as usize;
+        if &wav[offset..offset + 4] == b"data" {
+            let data = u32::try_from(wav.len() - offset - 8).unwrap_or(u32::MAX);
+            wav[offset + 4..offset + 8].copy_from_slice(&data.to_le_bytes());
+            return;
+        }
+        // Chunks are padded to an even size.
+        offset += 8 + size + (size & 1);
+    }
 }
 
 pub fn decode_preview_audio(
@@ -1388,6 +1413,9 @@ mod tests {
         narration::write_wav_take(&path, &samples, 8_000).unwrap();
         let bytes = decode_preview_audio_range(&path, 0.0, None, 1.0).unwrap();
         let mut decoder = bevy::audio::AudioSource { bytes }.decoder();
+        // A track must end when its sound does, not hours later.
+        let duration = decoder.total_duration().expect("a known duration");
+        assert!((duration.as_secs_f64() - 3.0).abs() < 0.05, "{duration:?}");
         for (second, level) in [(2.5, 0.7), (0.5, 0.1), (1.5, 0.4)] {
             decoder
                 .try_seek(std::time::Duration::from_secs_f64(second))
