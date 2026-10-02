@@ -11,6 +11,100 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.8.0
+
+Publicada el 2 de octubre de 2026. El público entra a la presentación: desde su
+teléfono vota encuestas, responde cuestionarios con puntos y cuenta atrás, se
+une a un equipo y aparece en la escena como el personaje que armó. La escena
+muestra esos datos como tú decidas, y al terminar tienes los resultados en
+hojas de cálculo. Llegan también partículas, _magic move_, carreras de barras,
+seguimiento con inercia y sonidos anclados a animaciones. *El interlineado
+cambia*: lee «Al actualizar».
+
+== Público en vivo
+
+- Los teléfonos se conectan a un relay que despliegas gratis en Cloudflare
+  con `gaanim relay init` y configuras con `gaanim relay use <URL>`. Lee
+  #link("/publico/")[Público en vivo].
+- `scene.poll(...)` abre una encuesta y `scene.quiz(...)` un cuestionario con
+  respuesta correcta, tiempo y puntos, con selección múltiple
+  (`multiple=True`) o una imagen sobre la pregunta. `load_questions(...)` lee
+  las preguntas de un Markdown o un CSV.
+- La API da datos, no diseños: `votes`, `percent`, `remaining`, `revealed`, la
+  clasificación (`scene.leaderboard()`), los equipos (`scene.teams(...)`) y
+  cada jugador (`scene.audience()`) son valores en vivo que mueven lo que
+  quieras. Lee #link("/referencia/publico/")[la referencia].
+- `quiz.reveal()` revela la respuesta en los teléfonos cuando la presentación
+  avanza; `quiz.revealed()` vale 0 hasta entonces y 1 después.
+- `scene.stop(until=...)` avanza sola cuando el público cumple una condición.
+- `scene.character(...)` y `scene.live_zone(audience, comportamiento)` dibujan
+  a cada persona como su personaje; el comportamiento es una función de Python
+  que Gaanim compila para que un `.gaanim` la ejecute sin Python. Lee
+  #link("/publico/zonas-vivas/")[Zonas vivas].
+- `scene.rehearsal(...)` juega la escena con un público inventado en la vista
+  previa y en las exportaciones.
+- Cada partida se guarda en `resultados/` como `jugadores.csv`,
+  `respuestas.csv` y `preguntas.csv`; `scene.roster("Código de alumno")` pide
+  un dato más al unirse. La vista del presentador tiene *Save now* y *Open
+  folder*, y `gaanim relay results` los descarga después. Lee
+  #link("/publico/presentar/#resultados")[Guardar los resultados].
+- Ejemplos: `la_gran_trivia`, `quiz_orbit_demo`, `quiz_game_demo`,
+  `audience_poll_demo` y `live_zones_demo`.
+
+== Motion design
+
+- `scene.fx.particles(...)` y `scene.fx.confetti(...)`: partículas
+  deterministas.
+- `magic_move(antes, despues)` y `Transition.magic_move`: los objetos con el
+  mismo nombre viajan a su nuevo estado.
+- `scene.viz.bar_race(...)`: una carrera de barras desde fotogramas clave.
+- `Anim.settle(...)` rebota al final de un movimiento y
+  `Drawable.follow(..., delay=...)` sigue con retraso.
+- `Anim.sound(...)` ancla un sonido a una animación y `scene.media.sfx(...)`
+  lo coloca en un instante.
+
+== Ajustes
+
+- `Drawable.hidden()` deja oculto un objeto creado a mitad de segmento hasta
+  que una animación lo muestra.
+- `dashed_line` acepta los mismos extremos que `line` y los sigue si se
+  mueven.
+- `Readout.move_to` y `Variable.move_to` aceptan `TextAnchor`; `spacing=` fija
+  el espacio entre sus términos.
+- `slides.brand(number_anchor=...)` pone el número de diapositiva aparte del
+  pie.
+- `gaanim check` dice el segmento, el instante y el texto de una caja que se
+  sale de su contenedor.
+- `gaanim --diff --height <PX>` captura a otra resolución.
+
+== Al actualizar
+
+- `line_spacing` es la distancia entre líneas base en múltiplos del tamaño de
+  letra, como `line-height` en CSS. Con 1.2, las líneas quedaban a 0.9 veces
+  el tamaño y ahora a 1.2: los textos de varias líneas ocupan más alto.
+- Un readout colocado con `move_to` queda centrado justo en ese punto.
+- En una caja que se ajusta a su contenido, un hijo que crece mide su
+  contenido aunque tenga `basis`.
+- `dashed_line(x1=…, y1=…)` con palabras clave deja de funcionar: pasa las
+  coordenadas por posición.
+- Reemplaza todos los archivos de la carpeta de Gaanim: el soporte de Python
+  cambió su interfaz.
+
+== Correcciones
+
+- `Box.bounds()` mide el tamaño real de una caja dentro de un layout, y
+  `surrounding_rect` se dibuja alrededor de cajas.
+- Un texto que crece con `basis=0` se reparte en líneas en el espacio libre de
+  su fila.
+- Un readout dentro de un layout queda dentro de su celda.
+- `Theme(fonts=...)` respeta la familia de `title` aunque también se defina
+  `text`.
+- Los fondos con shader y el postprocesado siguen moviéndose en una pausa, y
+  las animaciones de entrada no se ven antes de tiempo al saltar entre
+  segmentos.
+- Las teclas de navegación entre pausas funcionan con el foco en un panel, y
+  `P` fija la ventana encima.
+
 = 0.7.2
 
 Publicada el 29 de septiembre de 2026. Una caja se puede recorrer, buscar,
