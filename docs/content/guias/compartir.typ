@@ -135,13 +135,98 @@ teléfono:
 Toca o arrastra el archivo; no sale de tu equipo. Es el mismo reproductor de
 escritorio compilado para la web, con la misma barra de reproducción.
 
+Es experimental: necesita un navegador con WebGPU (Chrome o Edge recientes,
+Safari 26, Firefox en Windows), descarga unos 25 MB la primera vez y todavía
+no reproduce el audio. En las miniaturas del Presenter View web no se ven los
+postprocesos ni los fondos animados por shader.
+
+== Compartir un enlace <compartir-un-enlace>
+
 Para compartir un enlace, publica el `.gaanim` en un sitio que permita
-abrirlo desde otra página (por ejemplo GitHub Pages o tu propia web) y añade su
-dirección con `?src=`:
+abrirlo desde otra página y añade su dirección con `?src=`:
 
 ```
 https://paololupo.github.io/gaanim/reproductor/?src=https://tu-sitio.com/mi-charla.gaanim
 ```
+
+El archivo va directamente del sitio donde lo publicaste al navegador de quien
+abre el enlace: no pasa por ningún servidor de Gaanim, y la página no registra
+qué archivos se abren. Un `.gaanim` son solo datos, así que abrirlo no ejecuta
+código de su autor.
+
+Si el sitio lo permite, el reproductor no espera a la descarga completa:
+primero descarga el final del archivo, donde están el índice y las tablas, y
+empieza a reproducir; los fotogramas llegan a medida que hacen falta y el resto
+se descarga en segundo plano (la línea verde de arriba muestra cuánto). Si
+saltas a una parte que todavía no llegó, verás *Cargando…* un momento. Si el
+sitio no admite descargas por partes, se descarga el archivo entero antes de
+empezar, con una barra de progreso.
+
+#table(
+  columns: (auto, 1fr),
+  inset: 7pt,
+  [*Alojamiento*], [*¿Funciona?*],
+  [GitHub Pages], [Sí, también por partes.],
+  [`raw.githubusercontent.com` (un archivo de un repositorio de GitHub)], [Sí, también por partes. GitHub no admite archivos de más de 100 MB en un repositorio.],
+  [Tu propio sitio o un CDN], [Sí, si envía la cabecera `Access-Control-Allow-Origin` (CORS); por partes si además admite `Range`.],
+  [Descargas de GitHub Releases], [No: redirigen a otra dirección sin CORS.],
+  [Google Drive, Dropbox, OneDrive], [Por lo general no: sus enlaces de descarga pasan por páginas intermedias o no envían CORS.],
+)
+
+Cuando no se puede abrir, el reproductor explica el motivo: que el sitio no
+permite abrirlo desde otra página (CORS), que la dirección no existe, que no
+hay conexión, que no es un `.gaanim` o está dañado, o que se grabó con un
+formato más nuevo que el del reproductor (recarga la página para actualizarlo).
+
+Para publicarlo en GitHub Pages:
+
++ Crea un repositorio (o usa uno existente) y sube el `.gaanim`, por ejemplo
+  a `charlas/mi-charla.gaanim`.
++ En *Settings → Pages*, elige publicar desde la rama principal.
++ Al cabo de un minuto, el archivo está en
+  `https://<usuario>.github.io/<repositorio>/charlas/mi-charla.gaanim`.
++ El enlace es
+  `https://paololupo.github.io/gaanim/reproductor/?src=https://<usuario>.github.io/<repositorio>/charlas/mi-charla.gaanim`.
+
+=== Enlazar un momento
+
+Como en los sitios de vídeo, lo que va después de `#` elige dónde empieza:
+
+#table(
+  columns: (auto, 1fr),
+  inset: 7pt,
+  [*Fragmento*], [*Empieza*],
+  [`#segmento=5`], [Al principio del quinto segmento.],
+  [`#segmento=resultados`], [Al principio del segmento que se llama así (sin distinguir mayúsculas). Codifica los espacios como `%20`.],
+  [`#segmento=resultados&pausa=2`], [En la segunda pausa de ese segmento, detenido ahí.],
+  [`#pausa=12`], [En la duodécima pausa de toda la presentación.],
+  [`#t=83.5` o `#t=1:23.5`], [A los 83,5 segundos.],
+  [`#present`], [Muestra el botón *Presentar*, que abre el Presenter View; se combina con los demás: `#segmento=5&present`.],
+)
+
+El botón de enlace de la barra (dos eslabones) copia el enlace al archivo
+abierto. *Copiar enlace a este instante* añade el fragmento de lo que se ve:
+la pausa en la que está detenida la presentación o, si no, el segundo actual.
+Solo los archivos abiertos con `?src=` tienen enlace; uno que abriste desde tu
+equipo hay que publicarlo antes.
+
+El botón *Presentar* existe porque el navegador solo deja abrir otra ventana
+tras un clic: el enlace no puede abrir el Presenter View por sí solo.
+
+=== Insertar en otra página
+
+El reproductor funciona dentro de un `<iframe>`. Permite la pantalla completa
+y el portapapeles para que funcionen sus botones:
+
+```html
+<iframe
+  src="https://paololupo.github.io/gaanim/reproductor/?src=https://tu-sitio.com/mi-charla.gaanim#segmento=2"
+  width="960" height="540" style="border: 0"
+  allow="fullscreen; clipboard-write">
+</iframe>
+```
+
+== Controles táctiles
 
 En pantallas táctiles, los controles funcionan como en un reproductor de vídeo
 del móvil:
@@ -156,7 +241,9 @@ del móvil:
   anterior.
 - Arrastra la barra para moverte por la presentación.
 
-Para presentar, pulsa el botón de presentar de la barra: se abre el
+== Presentar
+
+Pulsa el botón de presentar de la barra: se abre el
 Presenter View en otra ventana, el mismo que en el escritorio, con la
 diapositiva actual y la siguiente, las notas y el cronómetro. Lleva la página
 de la presentación al proyector y ponla en pantalla completa (`F11` o el
@@ -164,11 +251,6 @@ botón de la barra); deja el Presenter View en tu pantalla. Las teclas, los clic
 dos ventanas a la vez, desde cualquiera de ellas; si cierras el Presenter
 View, `P` lo vuelve a abrir. Si el navegador bloquea la ventana, permite las
 ventanas emergentes de la página y pulsa `P`.
-
-Es experimental: necesita un navegador con WebGPU (Chrome o Edge recientes,
-Safari 26, Firefox en Windows), descarga unos 25 MB la primera vez y todavía
-no reproduce el audio. En las miniaturas del Presenter View web no se ven los
-postprocesos ni los fondos animados por shader.
 
 = Exportar el paquete a vídeo
 

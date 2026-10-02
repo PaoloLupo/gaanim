@@ -533,13 +533,21 @@ pub(crate) fn render_previews_in_world_system(
     let Some((time, keys)) = plan.captures.pop_front() else {
         return;
     };
-    let Some((scene, base_color)) = playback.preview_scene(time, width, height) else {
-        if let Some(plan) = cache.in_world.take() {
-            let _ = plan.sender.send(WorkerEvent::Finished(Err(
-                "could not read the bundle's frame".to_string(),
-            )));
+    let (scene, base_color) = match playback.preview_scene(time, width, height) {
+        crate::bundle_player::Preview::Ready(scene, base_color) => (scene, base_color),
+        // The web player downloads the frame's chunk; capture it then.
+        crate::bundle_player::Preview::Pending => {
+            plan.captures.push_front((time, keys));
+            return;
         }
-        return;
+        crate::bundle_player::Preview::Failed => {
+            if let Some(plan) = cache.in_world.take() {
+                let _ = plan.sender.send(WorkerEvent::Finished(Err(
+                    "could not read the bundle's frame".to_string(),
+                )));
+            }
+            return;
+        }
     };
     let image = images.add(vello_target_image(width, height));
     plan.busy.store(true, Ordering::Release);

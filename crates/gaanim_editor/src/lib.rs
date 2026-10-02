@@ -34,6 +34,7 @@ pub mod presenter_link;
 pub mod project_hub;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod python_plugin;
+pub mod share_link;
 mod touch;
 mod ui_kit;
 
@@ -260,6 +261,9 @@ impl Plugin for GaanimEditorPlugin {
                         .after(sync_editor_input_ignore_system)
                         .before(gaanim_timeline::timeline_playback_system),
                     presenter::sync_presentation_timer_system,
+                    share_link::apply_link_target_system
+                        .in_set(gaanim_scene::hierarchy::SceneSet::Input)
+                        .before(gaanim_timeline::timeline_playback_system),
                     ambient_clock_system
                         .in_set(gaanim_scene::hierarchy::SceneSet::Input)
                         .after(gaanim_timeline::timeline_playback_system),
@@ -974,6 +978,24 @@ fn editor_ui_system(
                                             actions.push(PlaybackAction::OpenExport);
                                         }
 
+                                        if WEB {
+                                            let share = icon_button(
+                                                ui,
+                                                Icon::Link,
+                                                ButtonTone::Ghost,
+                                                true,
+                                            )
+                                            .on_hover_text("Copiar enlace");
+                                            egui::Popup::menu(&share).show(|ui| {
+                                                ui.set_min_width(200.0);
+                                                if ui.button("Copiar enlace").clicked() {
+                                                    actions.push(PlaybackAction::CopyLink(false));
+                                                }
+                                                if ui.button("Copiar enlace a este instante").clicked() {
+                                                    actions.push(PlaybackAction::CopyLink(true));
+                                                }
+                                            });
+                                        }
                                         if icon_button(ui, Icon::Present, ButtonTone::Ghost, true)
                                             .on_hover_text("Presentar a pantalla completa")
                                             .clicked()
@@ -1076,6 +1098,14 @@ fn editor_ui_system(
  }
                                             if ui.button("Presentar").clicked() {
                                                 actions.push(PlaybackAction::Present);
+                                            }
+                                            if WEB {
+                                                if ui.button("Copiar enlace").clicked() {
+                                                    actions.push(PlaybackAction::CopyLink(false));
+                                                }
+                                                if ui.button("Copiar enlace a este instante").clicked() {
+                                                    actions.push(PlaybackAction::CopyLink(true));
+                                                }
                                             }
                                             if narration_available
                                                 && ui
@@ -1189,6 +1219,18 @@ fn editor_ui_system(
                                 }
                                 PlaybackAction::TogglePin => {
                                     toggle_pinned_on_top(&mut state, &mut windows);
+                                }
+                                PlaybackAction::CopyLink(at_moment) => {
+                                    let fragment = if at_moment {
+                                        share_link::fragment_for(&timeline)
+                                    } else {
+                                        String::new()
+                                    };
+                                    commands.queue(move |world: &mut World| {
+                                        if let Some(page) = world.get_resource::<host::WebPage>() {
+                                            (page.copy_link)(&fragment);
+                                        }
+                                    });
                                 }
                             }
                         }
@@ -2062,6 +2104,8 @@ enum PlaybackAction {
     Present,
     ToggleFullscreen,
     TogglePin,
+    /// Copy a link to the file (web player), at the moment shown when set.
+    CopyLink(bool),
 }
 
 const SPEED_PRESETS: [f64; 6] = [0.25, 0.5, 1.0, 1.5, 2.0, 3.0];
@@ -2163,6 +2207,27 @@ fn start_presentation(
     if presenter_windows.is_empty() {
         presenter::spawn_presenter_window(commands);
     }
+}
+
+/// Start presenting as the bar's Present button does: for the web page's
+/// own Present button, which a link with `present` shows.
+pub fn start_presenting(world: &mut World) {
+    use bevy::ecs::system::RunSystemOnce;
+    let _ = world.run_system_once(
+        |mut presentation_mode: ResMut<PresentationMode>,
+         mut fullscreen_state: ResMut<EditorFullscreenState>,
+         mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
+         mut commands: Commands,
+         presenter_windows: Query<(), With<presenter::PresenterWindow>>| {
+            start_presentation(
+                &mut presentation_mode,
+                &mut fullscreen_state,
+                &mut windows,
+                &mut commands,
+                &presenter_windows,
+            );
+        },
+    );
 }
 
 fn toggle_pinned_on_top(

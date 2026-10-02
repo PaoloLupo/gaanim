@@ -47,7 +47,10 @@ This file guides repository work; model selection belongs to the calling client.
   - `gaanim_bundle` — the `.gaanim` playback bundle format: lossless frame
     captures, delta-encoded chunks, per-frame digests. `gaanim_export::bundle`
     records it; `gaanim` plays, presents, and exports it without loading
-    Python. A bundle stores an optional `thumbnail.png` cover.
+    Python. A bundle stores an optional `thumbnail.png` cover. Bundles are
+    read with the crate's own ZIP reader (`archive.rs`), not `zip`, which
+    reads every local header on open: a `BundleSource` lets the web player
+    open a bundle from the end of the file and stream chunks by HTTP range.
   - `gaanim_thumbnail` — reads and scales a bundle's cover without a GPU (used by
     `gaanim thumbnail` and the Linux thumbnailer); `gaanim_thumbnail_handler` is
     the Windows Explorer thumbnail handler DLL (a cdylib, empty off Windows).
@@ -74,7 +77,7 @@ This file guides repository work; model selection belongs to the calling client.
     web cannot run (native windows, files, threads, FFmpeg) is gated on
     `target_arch = "wasm32"` or goes through `gaanim_editor::platform`.
 - **Repository overview:** `README.md` is the current user/developer entry point.
-  `engine_improvements.md` is aspirational; verify proposals against code and tests.
+  Planned work lives in GitHub issues; verify proposals against code and tests.
 
 ## Developer commands
 

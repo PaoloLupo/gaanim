@@ -5,12 +5,17 @@
 //! frame recorded at the playhead is handed to the renderer as an
 //! [`ExternalFrame`], with the camera and post-processing it was recorded
 //! with, and the renderer composites it with the same code as the scene.
+//!
+//! The web player opens a bundle that is still downloading: a frame whose
+//! chunk has not arrived keeps the last one on screen, and the player asks
+//! the page for the missing bytes ([`BundlePlayback::take_wanted`]).
 
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use bevy::prelude::*;
-use gaanim_bundle::Bundle;
+use gaanim_bundle::{Bundle, BundleError, BundleSource};
 use gaanim_renderer::pipeline::ExternalFrame;
 use gaanim_renderer::post_process::{CanvasPostProcess, PostProcessPass};
 use gaanim_timeline::clip::ClipPayload;
@@ -30,6 +35,11 @@ pub struct BundlePlayback {
     post: Vec<gaanim_bundle::PostPass>,
     /// Set once a frame fails to decode; playback keeps the last good frame.
     failed: bool,
+    /// Byte ranges of a downloading bundle that playback asked for since the
+    /// page last took them.
+    wanted: Vec<Range<u64>>,
+    /// Whether the frame at the playhead waits for its bytes.
+    waiting: bool,
     /// Fragments of the frames composed for previews, apart from playback's.
     preview_store: gaanim_renderer::fragment::FragmentStore,
     /// Elements redrawn from live poll results while presenting.
@@ -58,6 +68,37 @@ impl BundlePlayback {
     pub fn output_size(&self) -> (u32, u32) {
         self.bundle.scene.output_size
     }
+
+    /// Byte ranges of a downloading bundle to fetch, and whether the frame at
+    /// the playhead waits for them (the rest is read-ahead).
+    pub fn take_wanted(&mut self) -> (Vec<Range<u64>>, bool) {
+        (std::mem::take(&mut self.wanted), self.waiting)
+    }
+
+    /// Note the bytes a read asked for when they are still downloading;
+    /// any other error is returned.
+    fn want(&mut self, error: BundleError) -> Option<BundleError> {
+        match error {
+            BundleError::Incomplete { missing } => {
+                self.wanted.extend(missing);
+                None
+            }
+            error => Some(error),
+        }
+    }
+}
+
+/// Chunks read ahead of the playhead while a bundle downloads: a few
+/// seconds of playback at the default rate.
+const READ_AHEAD_CHUNKS: usize = 3;
+
+/// A recorded frame composed for a preview, or why there is none.
+pub enum Preview {
+    /// The scene and the color to render it over.
+    Ready(vello::Scene, vello::peniko::Color),
+    /// Its bytes are still downloading; ask again later.
+    Pending,
+    Failed,
 }
 
 /// A timeline with the bundle's structure and no clips that move anything:
@@ -125,14 +166,23 @@ pub fn open_bundle(world: &mut World, path: &Path) -> Result<(), String> {
 /// Set the world up to play the bundle held in `bytes`; `path` names it
 /// (the web player has no file system, only the file's name or URL).
 pub fn open_bundle_bytes(world: &mut World, path: &Path, bytes: Arc<[u8]>) -> Result<(), String> {
-    let mut bundle =
-        Bundle::from_bytes(bytes).map_err(|error| format!("{}: {error}", path.display()))?;
+    open_bundle_source(world, path, BundleSource::whole(bytes))
+        .map_err(|error| format!("{}: {error}", path.display()))
+}
+
+/// Set the world up to play the bundle read from `source`, whose bytes may
+/// still be arriving. Fails with [`BundleError::Incomplete`] until the
+/// tables and the first chunk have arrived.
+pub fn open_bundle_source(
+    world: &mut World,
+    path: &Path,
+    source: BundleSource,
+) -> Result<(), BundleError> {
+    let mut bundle = Bundle::from_source(source)?;
     if bundle.frame_count() == 0 {
-        return Err(format!("{} has no frames", path.display()));
+        return Err(BundleError::Corrupt("it has no frames".into()));
     }
-    let first = bundle
-        .frame(0)
-        .map_err(|error| format!("{}: {error}", path.display()))?;
+    let first = bundle.frame(0)?;
     let audio = audio_tracks(&mut bundle).unwrap_or_else(|error| {
         gaanim_core::console::warn(
             "audio",
@@ -181,6 +231,8 @@ pub fn open_bundle_bytes(world: &mut World, path: &Path, bytes: Arc<[u8]>) -> Re
         camera: first.camera,
         post: Vec::new(),
         failed: false,
+        wanted: Vec::new(),
+        waiting: false,
         preview_store: Default::default(),
     });
     Ok(())
@@ -190,14 +242,17 @@ impl BundlePlayback {
     /// The recorded frame at `time` as a scene `width` by `height` pixels,
     /// with the color to render it over, for Presenter View's cue previews.
     /// Post-processing and shader backgrounds are left out.
-    pub fn preview_scene(
-        &mut self,
-        time: f64,
-        width: u32,
-        height: u32,
-    ) -> Option<(vello::Scene, vello::peniko::Color)> {
+    pub fn preview_scene(&mut self, time: f64, width: u32, height: u32) -> Preview {
         let index = self.bundle.frame_index_at(time);
-        let frame = self.bundle.frame(index).ok()?;
+        let frame = match self.bundle.frame(index) {
+            Ok(frame) => frame,
+            Err(error) => {
+                return match self.want(error) {
+                    None => Preview::Pending,
+                    Some(_) => Preview::Failed,
+                };
+            }
+        };
         let background = self.bundle.scene.background.clone().map(|mut background| {
             background.pixel_size = (width, height);
             background
@@ -217,7 +272,7 @@ impl BundlePlayback {
             .clear_color
             .map(|[r, g, b, a]| vello::peniko::Color::from_rgba8(r, g, b, a))
             .unwrap_or(vello::peniko::Color::BLACK);
-        Some((scene, base))
+        Preview::Ready(scene, base)
     }
 }
 
@@ -250,11 +305,24 @@ pub fn bundle_frame_system(
     let frame = match playback.bundle.frame(index) {
         Ok(frame) => frame,
         Err(error) => {
-            gaanim_core::console::error("bundle", error.to_string());
-            playback.failed = true;
+            // Bytes still downloading: keep the frame on screen and try again
+            // on the next update.
+            playback.waiting = true;
+            if let Some(error) = playback.want(error) {
+                gaanim_core::console::error("bundle", error.to_string());
+                playback.failed = true;
+            }
+            if *camera != playback.camera {
+                *camera = playback.camera;
+            }
             return;
         }
     };
+    playback.waiting = false;
+    if !playback.bundle.source().is_complete() {
+        let ahead = playback.bundle.missing_around(index, READ_AHEAD_CHUNKS);
+        playback.wanted.extend(ahead);
+    }
     playback.shown = Some(index);
     playback.camera = frame.camera;
     if *camera != frame.camera {

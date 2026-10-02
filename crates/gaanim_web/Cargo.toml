@@ -10,6 +10,7 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+gaanim_bundle = { path = "../gaanim_bundle" }
 gaanim_editor = { path = "../gaanim_editor", default-features = false }
 bevy = { workspace = true }
 

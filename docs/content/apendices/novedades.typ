@@ -63,6 +63,17 @@ cambia*: lee «Al actualizar».
 - `Anim.sound(...)` ancla un sonido a una animación y `scene.media.sfx(...)`
   lo coloca en un instante.
 
+== Reproductor web
+
+- Un enlace `?src=` empieza a reproducir antes de descargar el archivo entero:
+  el reproductor lee el final del `.gaanim` y pide cada parte cuando hace
+  falta, mientras el resto llega en segundo plano.
+- El enlace puede apuntar a un momento (`#segmento=5`, `#pausa=12`,
+  `#t=83.5`) y, con `#present`, ofrece el botón *Presentar*.
+- El botón de enlace de la barra copia el enlace al archivo o al instante que
+  se ve; el reproductor funciona dentro de un `<iframe>`. Lee
+  #link("/guias/compartir/")[Compartir sin Python].
+
 == Ajustes
 
 - `Drawable.hidden()` deja oculto un objeto creado a mitad de segmento hasta
