@@ -155,7 +155,10 @@ pasa.
 - *Buscar un segmento*: haz clic en el nombre del segmento actual, junto al
   tiempo. Se abre la lista de todos, con su número, sus pausas y cuándo
   empiezan; escribe parte de un nombre o un número y pulsa `Enter`, o haz clic
-  en uno, para ir a él.
+  en uno, para ir a él. Las flechas `↑` `↓` y `Tab` (`Shift+Tab` hacia atrás)
+  recorren los segmentos de la lista, `Enter` va al marcado y `Esc` la cierra.
+  La barra sigue visible mientras la lista, o cualquier menú suyo, esté
+  abierta.
 - *Volumen*: el altavoz silencia y el deslizador regula el volumen; solo
   aparecen si la escena tiene audio. El volumen se recuerda en la próxima
   visita. En barras estrechas están en el menú *Más controles*.

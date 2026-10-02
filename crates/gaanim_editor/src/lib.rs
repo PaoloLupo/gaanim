@@ -445,6 +445,8 @@ pub struct EditorState {
     segment_query: String,
     /// The segment list was open on the last frame.
     segment_list_open: bool,
+    /// The row the keyboard points at in the segment list.
+    segment_highlight: Option<usize>,
     /// Auto-hide animation progress (0.0 = hidden, 1.0 = fully visible).
     bar_visibility: f32,
     /// Whether the cursor is currently hovering the playback bar.
@@ -467,6 +469,7 @@ impl Default for EditorState {
             seek_bar_hover: None,
             segment_query: String::new(),
             segment_list_open: false,
+            segment_highlight: None,
             bar_visibility: 1.0, // start visible
             bar_hovered: false,
             seek_bar_drag_target: None,
@@ -638,7 +641,12 @@ fn editor_ui_system(
     let vp = ctx.viewport_rect();
     let pointer = ctx.input(|i| i.pointer.hover_pos());
     let pointer_near_bottom = pointer.map(|p| p.y > vp.height() - 60.0).unwrap_or(false);
-    let should_show = pointer_near_bottom || state.bar_hovered || state.touch_reveal;
+    // A menu opened from the bar keeps it, and so itself, on screen while the
+    // pointer travels to it above the bar.
+    let should_show = pointer_near_bottom
+        || state.bar_hovered
+        || state.touch_reveal
+        || egui::Popup::is_any_open(ctx);
     let dt = ctx.input(|i| i.unstable_dt);
     let target_vis = if should_show { 1.0_f32 } else { 0.0_f32 };
     let speed = if should_show { 10.0_f32 } else { 4.0_f32 };
@@ -852,6 +860,7 @@ fn editor_ui_system(
                         });
                         let mut segment_query = std::mem::take(&mut state.segment_query);
                         let mut segment_list_open = state.segment_list_open;
+                        let mut segment_highlight = state.segment_highlight;
 
                         // Row 2: transport · time · scene | toggles · window actions
                         let scene_starts: Vec<f64> =
@@ -1002,6 +1011,7 @@ fn editor_ui_system(
                                                         &segment_rows,
                                                         current_segment,
                                                         &mut segment_query,
+                                                        &mut segment_highlight,
                                                         !segment_list_open,
                                                     );
                                                     if let Some(time) = jump {
@@ -1313,6 +1323,7 @@ fn editor_ui_system(
                             );
                         state.segment_query = segment_query;
                         state.segment_list_open = segment_list_open;
+                        state.segment_highlight = segment_highlight;
                         for action in left_actions.into_iter().chain(right_actions) {
                             match action {
                                 PlaybackAction::TogglePlay => {
@@ -1547,23 +1558,41 @@ struct SegmentRow {
 }
 
 /// The segments, searchable by name or number, the current one marked.
-/// Returns the start of the one clicked. `opened` focuses the search and
-/// scrolls to the current segment.
+/// Returns where the one chosen starts. `opened` focuses the search and
+/// scrolls to the current segment. The arrows and Tab move `highlight`
+/// through the rows shown, Enter jumps to it and Escape closes the list.
 fn segment_list(
     ui: &mut egui::Ui,
     rows: &[SegmentRow],
     current: Option<usize>,
     query: &mut String,
+    highlight: &mut Option<usize>,
     opened: bool,
 ) -> Option<f64> {
     ui.set_width(360.0);
+    // Taken before the search box sees them: they move through the list.
+    // Rows to move, counting every press of the frame.
+    let steps = ui.input_mut(|input| {
+        // Shift+Tab first: a plain Tab pattern also matches it.
+        let back = input.count_and_consume_key(egui::Modifiers::SHIFT, egui::Key::Tab);
+        let forward = input.count_and_consume_key(egui::Modifiers::NONE, egui::Key::Tab);
+        let down = input.count_and_consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown);
+        let up = input.count_and_consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp);
+        (forward + down) as isize - (back + up) as isize
+    });
+    let before = query.clone();
     let search = ui.add(
         egui::TextEdit::singleline(query)
             .hint_text(format!("Buscar entre {} segmentos…", rows.len()))
-            .desired_width(f32::INFINITY),
+            .desired_width(f32::INFINITY)
+            .lock_focus(true),
     );
-    if opened {
+    if opened || !search.has_focus() && ui.memory(|memory| memory.focused().is_none()) {
         search.request_focus();
+    }
+    if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+        ui.close();
+        return None;
     }
     let needle = query.trim().to_lowercase();
     let matches = |index: usize, row: &SegmentRow| {
@@ -1571,16 +1600,39 @@ fn segment_list(
             || row.name.to_lowercase().contains(&needle)
             || (index + 1).to_string() == needle
     };
-    // Enter jumps to the first match.
-    let enter = search.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-    if enter
-        && let Some(row) = rows
-            .iter()
-            .enumerate()
-            .find(|(index, row)| matches(*index, row))
-            .map(|(_, row)| row)
-    {
-        return Some(row.entry);
+    let shown: Vec<usize> = rows
+        .iter()
+        .enumerate()
+        .filter(|(index, row)| matches(*index, row))
+        .map(|(index, _)| index)
+        .collect();
+    // Opening points at the current segment, a new search at its first match.
+    if opened {
+        *highlight = current;
+    } else if *query != before {
+        *highlight = shown.first().copied();
+    }
+    let at = highlight.and_then(|row| shown.iter().position(|index| *index == row));
+    let moved = steps != 0;
+    if !shown.is_empty() && moved {
+        // From nothing, the first step lands on the first or last row.
+        let count = shown.len() as isize;
+        let from = match at {
+            Some(at) => at as isize,
+            None if steps > 0 => -1,
+            None => count,
+        };
+        *highlight = Some(shown[(from + steps).rem_euclid(count) as usize]);
+    }
+    let enter = (search.has_focus() || search.lost_focus())
+        && ui.input(|input| input.key_pressed(egui::Key::Enter));
+    if enter {
+        let chosen = highlight
+            .filter(|row| shown.contains(row))
+            .or_else(|| shown.first().copied());
+        if let Some(row) = chosen {
+            return Some(rows[row].entry);
+        }
     }
     ui.add_space(4.0);
     const ROW_HEIGHT: f32 = 24.0;
@@ -1593,13 +1645,10 @@ fn segment_list(
         .min_scrolled_height(height)
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            let mut shown = 0;
-            for (index, row) in rows.iter().enumerate() {
-                if !matches(index, row) {
-                    continue;
-                }
-                shown += 1;
+            for &index in &shown {
+                let row = &rows[index];
                 let selected = current == Some(index);
+                let pointed = *highlight == Some(index);
                 let (rect, response) = ui.allocate_exact_size(
                     egui::vec2(ui.available_width(), ROW_HEIGHT),
                     egui::Sense::click(),
@@ -1612,8 +1661,16 @@ fn segment_list(
                         0.0,
                         palette::ACCENT,
                     );
-                } else if response.hovered() {
+                } else if response.hovered() || pointed {
                     painter.rect_filled(rect, 0.0, egui::Color32::from_white_alpha(14));
+                }
+                if pointed {
+                    painter.rect_stroke(
+                        rect.shrink(0.5),
+                        0.0,
+                        egui::Stroke::new(1.0, palette::ACCENT.gamma_multiply(0.7)),
+                        egui::StrokeKind::Inside,
+                    );
                 }
                 let left = rect.min.x + 8.0;
                 let number = painter.layout_no_wrap(
@@ -1645,7 +1702,7 @@ fn segment_list(
                     palette::TEXT_FAINT,
                 );
                 let name_left = left + 28.0;
-                let color = if selected || response.hovered() {
+                let color = if selected || pointed || response.hovered() {
                     palette::TEXT
                 } else {
                     palette::TEXT_MUTED
@@ -1669,14 +1726,14 @@ fn segment_list(
                 let response = response
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
                     .on_hover_text(&row.name);
-                if opened && selected && needle.is_empty() {
+                if opened && selected && needle.is_empty() || moved && pointed {
                     response.scroll_to_me(Some(egui::Align::Center));
                 }
                 if response.clicked() {
                     jump = Some(row.entry);
                 }
             }
-            if shown == 0 {
+            if shown.is_empty() {
                 ui.label(
                     egui::RichText::new("Ningún segmento coincide")
                         .italics()
