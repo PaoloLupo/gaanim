@@ -705,6 +705,27 @@ impl DrawableHandle {
         }
     }
 
+    /// Keep room inside a layout for a reactive readout showing `value`,
+    /// besides the values its parameters are set or animated to: a live
+    /// count has no known maximum. Non-readout drawables are rejected.
+    pub fn readout_reserve(&self, value: f64) -> Result<Self, String> {
+        if !value.is_finite() {
+            return Err("reserve must be a finite number".into());
+        }
+        let mut is_readout = false;
+        self.update_spec(|spec| {
+            if let SpawnKind::ReactiveReadout { reserve, .. } = &mut spec.kind {
+                *reserve = Some(value);
+                is_readout = true;
+            }
+        });
+        if is_readout {
+            Ok(self.clone())
+        } else {
+            Err("reserve applies only to reactive readouts".into())
+        }
+    }
+
     fn update_spec(&self, f: impl FnOnce(&mut ObjectSpec)) -> Self {
         f(&mut self.spec.lock().expect("object spec poisoned"));
         self.clone()
@@ -2447,17 +2468,22 @@ impl DrawableHandle {
         scale: f64,
         offset: f64,
     ) -> Result<Self, InvalidSampledSeries> {
+        let driven = matches!(property, SampledProperty::Signal).then(|| {
+            values
+                .iter()
+                .map(|value| value * scale + offset)
+                .collect::<Vec<_>>()
+        });
         let driver =
             SampledSeriesDriver::new(times, values, property, interpolation, scale, offset)?;
-        self.state
-            .lock()
-            .expect("canvas state poisoned")
-            .active_mut()
-            .ops
-            .push(Op::AttachSampledSeries {
-                target: self.id,
-                driver,
-            });
+        let mut state = self.state.lock().expect("canvas state poisoned");
+        if let Some(values) = driven {
+            state.widen_parameter_range(self.id, values);
+        }
+        state.active_mut().ops.push(Op::AttachSampledSeries {
+            target: self.id,
+            driver,
+        });
         Ok(self.clone())
     }
 

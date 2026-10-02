@@ -51,6 +51,16 @@ pub struct ReactiveReadout {
     pub last_text: String,
     pub last_path: Arc<BezPath>,
     pub last_bounds: Bounds3D,
+    /// Width the number keeps inside a layout, 0 outside one: its box
+    /// reaches this far left of its right edge, so the layout's cell holds
+    /// the widest text it will show and the row around it stays still.
+    pub reserve: f64,
+}
+
+/// `bounds`, right-aligned at `x = 0`, at least `reserve` wide.
+pub fn reserve_readout_bounds(mut bounds: Bounds3D, reserve: f64) -> Bounds3D {
+    bounds.min.x = bounds.min.x.min(bounds.max.x - reserve);
+    bounds
 }
 
 /// Keeps the independently styleable pieces of a reactive readout laid out as
@@ -277,7 +287,7 @@ pub fn reactive_readout_update_system(
             if rolling.last_value != Some((value, continuous)) {
                 let (new_path, new_bounds) = rolling.blended_geometry(value, continuous);
                 readout.last_path = Arc::new(new_path);
-                readout.last_bounds = new_bounds;
+                readout.last_bounds = reserve_readout_bounds(new_bounds, readout.reserve);
                 rolling.last_value = Some((value, continuous));
             }
             // Snapshot replay can restore the old path while retaining this
@@ -333,6 +343,7 @@ pub fn reactive_readout_update_system(
         ) {
             baseline.0 = right_aligned_readout_baseline(new_bounds);
             let (new_path, new_bounds) = right_align_readout_path(new_path, new_bounds);
+            let new_bounds = reserve_readout_bounds(new_bounds, readout.reserve);
             let new_path = std::sync::Arc::new(new_path);
             if let Some(mut source) = path_source {
                 source.0 = new_path.clone();
@@ -1044,6 +1055,7 @@ mod tests {
                     last_text: "—".to_owned(),
                     last_path: empty.clone(),
                     last_bounds: Bounds3D::default(),
+                    reserve: 0.0,
                 },
                 Path2D(empty.clone()),
                 PathSource(empty),
@@ -1091,6 +1103,7 @@ mod tests {
                     last_text: "1.0".to_owned(),
                     last_path: initial_path.clone(),
                     last_bounds: Bounds3D::default(),
+                    reserve: 0.0,
                 },
                 Path2D(initial_path.clone()),
                 PathSource(initial_path),
@@ -1199,6 +1212,7 @@ mod tests {
                     last_text: String::new(),
                     last_path: empty.clone(),
                     last_bounds: Bounds3D::default(),
+                    reserve: 0.0,
                 },
                 Path2D(empty.clone()),
                 PathSource(empty),

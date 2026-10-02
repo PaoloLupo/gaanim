@@ -306,9 +306,14 @@ pub struct Billboard;
 
 /// Box background marker: drawn before the box content it shares a render
 /// order with, so it stays beneath that content but above earlier siblings.
+/// A box inside another shares that order with it when they start with the
+/// same content: the outer background, the shallower `depth`, draws first.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct LayoutBackdrop;
+pub struct LayoutBackdrop {
+    /// How many boxes hold this background's box.
+    pub depth: u32,
+}
 
 /// How a box arranges its children, for the editor's layout inspector.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

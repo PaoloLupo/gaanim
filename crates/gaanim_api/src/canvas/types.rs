@@ -707,6 +707,9 @@ pub enum SpawnKind {
         font_family: Option<String>,
         font_weight: Option<u16>,
         rolling: Option<gaanim_animation::RollingNumberOptions>,
+        /// A value whose text the readout keeps room for inside a layout,
+        /// besides the values its parameters take.
+        reserve: Option<f64>,
     },
     /// A ring arc from 12 o'clock that sweeps clockwise through
     /// `source / maximum` of a full turn as its source changes.
@@ -1593,12 +1596,10 @@ impl Anim {
             }
             AnimationType::SignalFloat { to } => {
                 if let Some(owner) = &self.owner {
-                    let mirror = owner
-                        .lock()
-                        .expect("canvas state poisoned")
-                        .parameter_values
-                        .get(&self.inner.target)
-                        .cloned();
+                    let mut owner = owner.lock().expect("canvas state poisoned");
+                    owner.widen_parameter_range(self.inner.target, [*to]);
+                    let mirror = owner.parameter_values.get(&self.inner.target).cloned();
+                    drop(owner);
                     if let Some(mirror) = mirror {
                         *mirror.lock().expect("parameter poisoned") = *to;
                     }

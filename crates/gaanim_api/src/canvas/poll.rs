@@ -774,6 +774,23 @@ fn live_parameter(
 ) -> Result<Parameter, PollError> {
     let parameter =
         parameter_in(state, values[0]).map_err(|error| PollError::Invalid(error.to_string()))?;
+    // A share or a countdown has known bounds, which a readout inside a
+    // layout keeps room for; the live values follow while presenting.
+    let bounds = match &source {
+        PollSource::Poll { measure, .. } => match measure {
+            PollMeasure::Share(_) => Some((0.0, 1.0)),
+            PollMeasure::Percent(_) => Some((0.0, 100.0)),
+            PollMeasure::Remaining { time } => Some((0.0, *time)),
+            PollMeasure::Votes(_) | PollMeasure::Total => None,
+        },
+        _ => None,
+    };
+    if let Some((low, high)) = bounds {
+        state
+            .lock()
+            .expect("canvas state poisoned")
+            .widen_parameter_range(parameter.drawable().id, [low, high]);
+    }
     parameter
         .drawable()
         .drive_from_samples(

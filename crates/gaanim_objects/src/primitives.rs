@@ -1329,64 +1329,136 @@ pub fn curved_arrow_arc_with_dimensions(
     bundle
 }
 
+/// A curly brace from `start` to `end`, its point `height` away on the side
+/// the sign chooses, drawn like a typeset brace: a filled outline whose
+/// curls are as large as its depth, with straight arms between them, thin
+/// at its tips and coming to a point. Fill colors it; it has no stroke.
 pub fn brace(id: ObjectId, start: kurbo::Point, end: kurbo::Point, height: f64) -> MobjectBundle {
-    let dx = end.x - start.x;
-    let dy = end.y - start.y;
-    let len = (dx * dx + dy * dy).sqrt();
-    let theta = dy.atan2(dx);
+    let length = start.distance(end);
+    let theta = (end.y - start.y).atan2(end.x - start.x);
+    let path = kurbo::Affine::translate((start.x, start.y))
+        * kurbo::Affine::rotate(theta)
+        * brace_outline(length, height);
 
-    let mut path = kurbo::BezPath::new();
-    path.move_to(kurbo::Point::new(0.0, 0.0));
-
-    // Segment 1a: (0,0) -> (len/4, -height/2)
-    path.curve_to(
-        kurbo::Point::new(len / 8.0, 0.0),
-        kurbo::Point::new(len / 8.0, -height / 2.0),
-        kurbo::Point::new(len / 4.0, -height / 2.0),
-    );
-
-    // Segment 1b: (len/4, -height/2) -> (len/2, -height)
-    path.curve_to(
-        kurbo::Point::new(3.0 * len / 8.0, -height / 2.0),
-        kurbo::Point::new(len / 2.0 - len / 16.0, -height),
-        kurbo::Point::new(len / 2.0, -height),
-    );
-
-    // Segment 2a: (len/2, -height) -> (3*len/4, -height/2)
-    path.curve_to(
-        kurbo::Point::new(len / 2.0 + len / 16.0, -height),
-        kurbo::Point::new(5.0 * len / 8.0, -height / 2.0),
-        kurbo::Point::new(3.0 * len / 4.0, -height / 2.0),
-    );
-
-    // Segment 2b: (3*len/4, -height/2) -> (len, 0)
-    path.curve_to(
-        kurbo::Point::new(7.0 * len / 8.0, -height / 2.0),
-        kurbo::Point::new(7.0 * len / 8.0, 0.0),
-        kurbo::Point::new(len, 0.0),
-    );
-
-    let trans = kurbo::Affine::translate((start.x, start.y)) * kurbo::Affine::rotate(theta);
-    let final_path = trans * path;
-
-    let bounding_rect = final_path.bounding_box();
+    let bounding_rect = path.bounding_box();
     let bounds = Bounds3D::new_2d(
         bounding_rect.x0,
         bounding_rect.y0,
         bounding_rect.x1,
         bounding_rect.y1,
     );
-
-    let mut bundle = MobjectBundle::new(id, final_path, bounds);
-    bundle.fill = FillBrush(None);
-    bundle.stroke = StrokeBrush {
-        brush: Some(gaanim_core::peniko::Brush::Solid(
-            gaanim_core::peniko::Color::WHITE,
-        )),
-        style: kurbo::Stroke::new(2.0),
-    };
+    let mut bundle = MobjectBundle::new(id, path, bounds);
+    bundle.fill = FillBrush(Some(gaanim_core::peniko::Brush::Solid(
+        gaanim_core::peniko::Color::WHITE,
+    )));
+    bundle.stroke = StrokeBrush::transparent();
     bundle.tag = ObjectTag("Brace".into());
     bundle
+}
+
+/// Arm thickness of a brace `depth` deep.
+pub fn brace_thickness(depth: f64) -> f64 {
+    (0.16 * depth).max(0.02)
+}
+
+/// A brace along the x axis from `(0, 0)` to `(length, 0)`, its point at
+/// `(length / 2, -height)`. Each half is its own closed outline around its
+/// centerline: a quarter turn from the tip into the arm, the arm, and a
+/// quarter turn into the point, where the halves meet with no width.
+fn brace_outline(length: f64, height: f64) -> kurbo::BezPath {
+    use kurbo::{CubicBez, ParamCurve, ParamCurveDeriv, Point};
+    // A cubic's handle for a quarter of an ellipse.
+    const K: f64 = 0.552_284_749_8;
+    const CURL_SAMPLES: usize = 32;
+    // How thick the tips are, as a share of the arm.
+    const TIP: f64 = 0.35;
+
+    let depth = height.abs();
+    let half = length * 0.5;
+    let mid = -height * 0.5;
+    // Curls as long as half the depth, or shorter on a short brace.
+    let curl = (depth * 0.5).min(half * 0.5);
+    let curls = [
+        CubicBez::new(
+            Point::new(0.0, 0.0),
+            Point::new(0.0, mid * K),
+            Point::new(curl * (1.0 - K), mid),
+            Point::new(curl, mid),
+        ),
+        CubicBez::new(
+            Point::new(half - curl, mid),
+            Point::new(half - curl * (1.0 - K), mid),
+            Point::new(half, mid - height * 0.5 * K),
+            Point::new(half, -height),
+        ),
+    ];
+    // The centerline with its unit tangents.
+    let mut line: Vec<(Point, kurbo::Vec2)> = Vec::new();
+    let mut sample = |curve: &CubicBez| {
+        let derivative = curve.deriv();
+        for index in 0..=CURL_SAMPLES {
+            let t = index as f64 / CURL_SAMPLES as f64;
+            let tangent = derivative.eval(t).to_vec2();
+            let tangent = if tangent.hypot() > 1e-12 {
+                tangent.normalize()
+            } else {
+                (curve.p3 - curve.p0).normalize()
+            };
+            line.push((curve.eval(t), tangent));
+        }
+    };
+    sample(&curls[0]);
+    sample(&curls[1]);
+    let mut distances = Vec::with_capacity(line.len());
+    let mut total = 0.0;
+    for (index, (point, _)) in line.iter().enumerate() {
+        if index > 0 {
+            total += point.distance(line[index - 1].0);
+        }
+        distances.push(total);
+    }
+    // Thin at the tip, full along the arm, nothing at the point; each taper
+    // runs along its curl.
+    let curl_length = distances[CURL_SAMPLES];
+    let thickness = brace_thickness(depth);
+    let smooth = |x: f64| {
+        let x = x.clamp(0.0, 1.0);
+        x * x * (3.0 - 2.0 * x)
+    };
+    let width = |distance: f64| {
+        let tip = TIP + (1.0 - TIP) * smooth(distance / curl_length);
+        let point = smooth((total - distance) / curl_length);
+        thickness * tip.min(point)
+    };
+    let (left, right): (Vec<Point>, Vec<Point>) = line
+        .iter()
+        .zip(&distances)
+        .map(|((point, tangent), distance)| {
+            let normal = kurbo::Vec2::new(-tangent.y, tangent.x) * (width(*distance) * 0.5);
+            (*point + normal, *point - normal)
+        })
+        .unzip();
+    let outline: Vec<Point> = left.into_iter().chain(right.into_iter().rev()).collect();
+
+    let mut path = kurbo::BezPath::new();
+    for mirrored in [false, true] {
+        let place = |point: Point| {
+            if mirrored {
+                Point::new(length - point.x, point.y)
+            } else {
+                point
+            }
+        };
+        let mut points = outline.iter().copied().map(place);
+        if let Some(first) = points.next() {
+            path.move_to(first);
+            for point in points {
+                path.line_to(point);
+            }
+            path.close_path();
+        }
+    }
+    path
 }
 
 #[cfg(test)]
@@ -1400,6 +1472,45 @@ mod arrow_tests {
         // Regression: a 3-unit world-space stroke drew a disc around the mark.
         let bounds = checkmark(ObjectId::from_raw(0), 0.3).path.0.bounding_box();
         assert!(bounds.width() < 0.3 && bounds.height() < 0.3);
+    }
+
+    /// A brace is a filled outline shaped like a typeset brace: straight arms
+    /// halfway down, curls as large as its depth and a point, with no fill
+    /// between its arms and its chord.
+    #[test]
+    fn brace_is_a_filled_typeset_outline() {
+        let (length, depth) = (6.0, 0.4);
+        let bundle = brace(
+            ObjectId::from_raw(0),
+            kurbo::Point::ZERO,
+            kurbo::Point::new(length, 0.0),
+            depth,
+        );
+        assert!(bundle.fill.0.is_some());
+        assert!(bundle.stroke.brush.is_none());
+        let path = &bundle.path.0;
+        let thickness = brace_thickness(depth);
+        // Arms at half the depth, as thick as the brace.
+        for x in [1.0, length * 0.25, length - 1.0] {
+            assert!(path.contains(kurbo::Point::new(x, -depth * 0.5)));
+            assert!(!path.contains(kurbo::Point::new(x, -depth * 0.5 + thickness)));
+            assert!(!path.contains(kurbo::Point::new(x, -depth * 0.5 - thickness)));
+        }
+        // Nothing between the arms and the line through the tips.
+        assert!(!path.contains(kurbo::Point::new(length * 0.25, -depth * 0.2)));
+        // The point reaches the full depth; the curls stay within it.
+        let bounds = path.bounding_box();
+        assert!((bounds.y0 + depth).abs() < 1e-9, "{bounds:?}");
+        assert!(bounds.y1 <= thickness, "{bounds:?}");
+        // Its depth, not its length, sizes the curls: a longer brace only
+        // has longer arms.
+        let longer = brace(
+            ObjectId::from_raw(0),
+            kurbo::Point::ZERO,
+            kurbo::Point::new(length * 2.0, 0.0),
+            depth,
+        );
+        assert!((longer.path.0.bounding_box().height() - bounds.height()).abs() < 1e-9);
     }
 
     #[test]

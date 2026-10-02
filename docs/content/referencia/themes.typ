@@ -917,7 +917,7 @@ divider = scene.geometry.line(-5, 0, 5, 0).stroke(theme.color("rule"), 0.025)
 === Reglas por selector
 
 Las claves de `styles` seleccionan una familia (`shape`, `line`, `text`,
-`axes`, `plot`), el nombre exacto de una fábrica (`circle`, `rounded_rect`,
+`glyph` para las llaves, `axes`, `plot`), el nombre exacto de una fábrica (`circle`, `rounded_rect`,
 `arrow`), una parte semántica como `axes/grid` o `axes/labels`, o una clase
 propia como `.warning`, que se asigna con
 #link("/referencia/drawable/#api-drawable-style-class")[`Drawable.style_class`].
