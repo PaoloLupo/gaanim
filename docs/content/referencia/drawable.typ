@@ -677,7 +677,7 @@ scene.render()
   name: "Drawable.modifiers",
   kind: "property",
   returns: (type: "PathModifiers", desc: [La pila de modificadores de trazado del objeto.]),
-  desc: [Modificadores no destructivos, como los operadores de forma de After Effects y Lottie: cada método añade uno a partir del cursor y lo devuelve, y sus números se animan con `modificador.animate`. Se aplican en el orden en que se añadieron, sobre el trazado ya animado (recortes, `write`, morph) y justo antes de dibujarlo, a cada miembro con trazado de un grupo o un `Text`. `bounds()` y el layout siguen midiendo la forma original. Un trazado abierto puede ganar área: una `line` lleva relleno por defecto, así que usa `no_fill()` si solo quieres el trazo.],
+  desc: [Modificadores no destructivos, como los operadores de forma de After Effects y Lottie: cada método añade uno a partir del cursor y lo devuelve, y sus números se animan con `modificador.animate`. Se aplican en el orden en que se añadieron, sobre el trazado ya animado (recortes, `write`, morph) y justo antes de dibujarlo, a cada miembro con trazado de un grupo o un `Text`. `bounds()` y el layout siguen midiendo la forma original. Un trazado abierto puede ganar área; las primitivas abiertas (`line`, `arc`, `polyline`, `traced_path`…) nacen sin relleno, así que solo se ve el trazo hasta que le des uno con `fill()`.],
 )[
 ```python
 # show-code: true
