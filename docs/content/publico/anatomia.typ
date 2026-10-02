@@ -56,6 +56,21 @@ previsualización llega a 0 en la pausa donde la presentación espera las
 respuestas. `quiz.correct` es el índice de la respuesta correcta (o la lista,
 en selección múltiple), para que resaltes la ficha que corresponde.
 
+Ver cómo van los votos mientras la pregunta sigue abierta influye en las
+respuestas. `quiz.revealed()` vale 0 hasta el `reveal()` y 1 después, y con
+él decides qué se ve antes: barras ocultas, porcentajes tapados o un «?».
+
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+quiz = scene.quiz("¿2 + 2?", ["3", "4"], correct=1)
+shown = quiz.revealed()
+for i in range(2):
+    quiz.bar(i, length=3).move_to(4 * i - 2, 0).opacity(shown)
+scene.stop()
+quiz.reveal()       # desde aquí las barras se ven
+```
+
 = La clasificación <clasificacion>
 
 `scene.leaderboard()` da a los jugadores de mejor a peor. Cada método recibe

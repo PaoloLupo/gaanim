@@ -156,6 +156,13 @@ impl PyPoll {
         self.inner.reveal().map_err(poll_error)
     }
 
+    /// 0 until the quiz reveals its answer, then 1.
+    fn revealed(&self) -> PyResult<PyParameter> {
+        crate::custom::ensure_authoring_allowed()?;
+        let inner = self.inner.revealed().map_err(poll_error)?;
+        Ok(PyParameter { inner })
+    }
+
     /// Whether the poll is a quiz.
     #[getter]
     fn is_quiz(&self) -> bool {

@@ -201,7 +201,7 @@ fn audience_poll_system(
 /// on it is not enough: a `reveal()` written right after a stop shares the
 /// stop's time, and must wait until the presentation advances from it.
 fn passed(reveal: f64, now: f64) -> bool {
-    now > reveal + 1e-4
+    now > reveal + gaanim_api::canvas::REVEAL_AFTER
 }
 
 // ---------------------------------------------------------------------------

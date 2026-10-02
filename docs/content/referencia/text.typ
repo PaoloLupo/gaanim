@@ -290,7 +290,7 @@ heading = scene.text("Resultados", style=display)
   params: (
     (name: "wrap", type: "\"auto\" | False | float", default: "\"auto\"", desc: [`"auto"` usa el ancho que ofrece Layout (o el área segura); `False` mantiene una línea salvo saltos explícitos; un número limita el ancho tipográfico.]),
     (name: "align", type: "str", default: "\"left\"", desc: [`left`, `center`, `right` o `justify`.]),
-    (name: "line_spacing", type: "float", default: "1.2", desc: [Multiplicador positivo de la altura de línea.]),
+    (name: "line_spacing", type: "float", default: "1.2", desc: [Distancia entre líneas base, en múltiplos del tamaño de letra, como `line-height` en CSS: con `1.2` y letra de 0.4, las líneas quedan a 0.48. Debe ser positivo.]),
     (name: "max_lines / overflow", type: "int | None / str", default: "None / \"clip\"", desc: [Límite de líneas y qué pasa después: `visible`, `clip` o `ellipsis` (hoy se recorta igual que `clip`, sin dibujar la elipsis).]),
     (name: "direction", type: "str", default: "\"auto\"", desc: [`auto`, `ltr` o `rtl`.]),
     (name: "hyphenate / lang", type: "bool / str | None", default: "False / None", desc: [Guiones de Typst y código ISO 639 en minúsculas (`"es"`, `"en"`…) que elige los patrones; `None` usa inglés.]),

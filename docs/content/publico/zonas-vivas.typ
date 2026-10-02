@@ -38,6 +38,12 @@ de una presentación en vivo, la zona reproduce el
 #link("/publico/anatomia/#ensayo")[ensayo], el público inventado de la
 escena.
 
+Abre la zona al empezar el segmento y deja tiempo antes de la pausa, como el
+`scene.wait(6)` del ejemplo. Al presentar, la escena descansa en la pausa y
+los personajes siguen moviéndose, pero en la vista previa y en una exportación
+el tiempo no pasa en la pausa: una zona abierta justo antes de un
+`scene.stop()` se ve sin nadie dentro.
+
 = El jugador
 
 `p` trae lo que el motor sabe del jugador en cada cuadro:

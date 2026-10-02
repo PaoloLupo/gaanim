@@ -3822,6 +3822,9 @@ class TextFlow:
         ``hyphenate=True``; ``None`` keeps Typst's English default. Invalid
         widths, spacing, line counts, or language codes raise ``ValueError``.
 
+        ``line_spacing`` is the distance between baselines in multiples of the
+        font size, like CSS ``line-height``: 1.2 puts them 1.2 sizes apart.
+
         ``text_box`` is the box a layout measures and places the text by, like
         CSS ``text-box``: ``"line"`` spans full lines (ascent to descent),
         ``"cap"`` runs from the capital height to the baseline of a single
@@ -5195,6 +5198,18 @@ class Poll:
         that is not a quiz, or a second reveal.
         """
         ...
+    def revealed(self) -> Parameter:
+        """0 until the quiz reveals its answer, then 1.
+
+        Bars and percentages shown during the question sway the answers; with
+        this a scene keeps them hidden, frozen or covered until ``reveal()``,
+        however it likes: ``bar.opacity(quiz.revealed())``. The change is a
+        moment of the timeline, the same in previews, exports and live, where
+        the presentation reveals when it reaches it. Call it before
+        ``reveal()``; raises ``ValueError`` after it, or for a poll that is not
+        a quiz.
+        """
+        ...
     @property
     def is_quiz(self) -> bool:
         """Whether the poll was created with ``scene.quiz``."""
@@ -5643,6 +5658,16 @@ class Readout(Drawable):
     def number(self) -> Drawable: ...
     @property
     def unit(self) -> Optional[Drawable]: ...
+    def move_to(self, x: Any, y: Any = None, anchor: Anchor | TextAnchor | None = None) -> Readout:
+        """Position the readout and return it.
+
+        An Anchor places that point of its box at (x, y); without one, its
+        center goes there. A TextAnchor places its baseline there, so it lines
+        up with Text, and BASELINE_LEFT keeps its start fixed while the number
+        changes width. TextAnchor requires x and y; either may be a reactive
+        scalar.
+        """
+        ...
 
 class RollingNumber(Drawable):
     """A numeric wheel display. Animate the value with animate.set or count_to.
@@ -5886,6 +5911,9 @@ class Variable(Drawable):
     def number(self) -> Drawable: ...
     @property
     def unit(self) -> Optional[Drawable]: ...
+    def move_to(self, x: Any, y: Any = None, anchor: Anchor | TextAnchor | None = None) -> Variable:
+        """Position the variable and return it, as Readout.move_to does."""
+        ...
 _ReactiveScalar: TypeAlias = ScalarSource
 
 class CoordinateRef:
@@ -6417,10 +6445,12 @@ class Lottie(Drawable):
 class Geometry:
     """Scene-owned factory for vector, path, boolean, 3D, and reactive geometry."""
     def circle(self, radius: float) -> Drawable:
-        """Create a circle drawable in the scene.
+        """Create a circle of ``radius`` scene units centered at the origin.
+
+        Place it with ``move_to``; style it with ``fill`` and ``stroke``.
 
         Example:
-            result = scene.circle(1.0)
+            planet = scene.geometry.circle(0.5).fill(BLUE).move_to(2, 0)
         """
         ...
     def cube(self, size: float = 2.0, *, material: Optional[Material3D] = None) -> Primitive3D:
@@ -6452,17 +6482,17 @@ class Geometry:
         """
         ...
     def rect(self, width: float, height: float) -> Drawable:
-        """Create a rect drawable in the scene.
+        """Create a ``width`` by ``height`` rectangle centered at the origin.
 
         Example:
-            result = scene.rect(1.0, 1.0)
+            panel = scene.geometry.rect(4, 2).fill("#223").move_to(0, 1)
         """
         ...
     def rounded_rect(self, width: float, height: float, radius: float) -> Drawable:
-        """Create a rounded rect drawable in the scene.
+        """Create a ``width`` by ``height`` rectangle with corners of ``radius``, centered at the origin.
 
         Example:
-            result = scene.rounded_rect(1.0, 1.0, 1.0)
+            card = scene.geometry.rounded_rect(4, 2, 0.2).fill("#223")
         """
         ...
     def surrounding_rect(
@@ -6482,24 +6512,24 @@ class Geometry:
         """
         ...
     def square(self, s: float) -> Drawable:
-        """Create a square drawable in the scene.
+        """Create a square of side ``s`` centered at the origin.
 
         Example:
-            result = scene.square(1.0)
+            tile = scene.geometry.square(1.5).stroke(WHITE, 0.03)
         """
         ...
     def dot(self, radius: float) -> Drawable:
-        """Create a dot drawable in the scene.
+        """Create a filled circle of ``radius`` centered at the origin, to mark a point.
 
         Example:
-            result = scene.dot(1.0)
+            mark = scene.geometry.dot(0.08).move_to(1, 2)
         """
         ...
     def ellipse(self, rx: float, ry: float) -> Drawable:
-        """Create a ellipse drawable in the scene.
+        """Create an ellipse centered at the origin with semi-axes ``rx`` (horizontal) and ``ry`` (vertical).
 
         Example:
-            result = scene.ellipse(1.0, 1.0)
+            orbit = scene.geometry.ellipse(3, 1.5).stroke(WHITE, 0.02)
         """
         ...
     @overload
@@ -6557,12 +6587,14 @@ class Geometry:
     def dashed_line(
         self, x1: float, y1: float, x2: float, y2: float, *, dash_length: float = 0.16, gap_length: float = 0.10
     ) -> Drawable:
-        """Create a dashed line drawable in the scene.
+        """Create a dashed line from ``(x1, y1)`` to ``(x2, y2)`` in scene units.
 
-        ``create()`` draws the dashes one after another from the start point.
+        Dashes are ``dash_length`` long and ``gap_length`` apart. Unlike
+        ``line``, it takes four fixed coordinates. ``create()`` draws the
+        dashes one after another from the start point.
 
         Example:
-            result = scene.dashed_line(1.0, 1.0, 1.0, 1.0)
+            guide = scene.geometry.dashed_line(-3, 0, 3, 0, dash_length=0.2)
         """
         ...
     def double_arrow(
@@ -6591,73 +6623,103 @@ class Geometry:
         """
         ...
     def polygon(self, points: Sequence[tuple[float, float]]) -> Drawable:
-        """Create a polygon drawable in the scene.
+        """Create a closed polygon through ``points``, in order, in scene coordinates.
+
+        Fewer than three points or a non-finite coordinate raise ``ValueError``.
 
         Example:
-            result = scene.polygon([(0.0, 0.0), (1.0, 1.0)])
+            triangle = scene.geometry.polygon([(-1, 0), (1, 0), (0, 1.5)])
         """
         ...
     def star(self, points: int, outer_radius: float, inner_radius: float) -> Drawable:
-        """Create a star drawable in the scene.
+        """Create a star with ``points`` tips, centered at the origin.
+
+        Tips lie on a circle of ``outer_radius`` and the corners between them
+        on one of ``inner_radius``. Fewer than two points or a non-positive
+        radius raise ``ValueError``.
 
         Example:
-            result = scene.star(5, 40.0, 40.0)
+            badge = scene.geometry.star(5, 1.0, 0.45).fill(GOLD)
         """
         ...
     def regular_polygon(self, sides: int, radius: float) -> Drawable:
-        """Create a regular polygon drawable in the scene.
+        """Create a regular polygon of ``sides`` vertices on a circle of ``radius``, centered at the origin.
+
+        Fewer than three sides or a non-positive radius raise ``ValueError``.
 
         Example:
-            result = scene.regular_polygon(2, 40.0)
+            hexagon = scene.geometry.regular_polygon(6, 1.0)
         """
         ...
     def sector(self, cx: float, cy: float, radius: float, start_angle: float, sweep_angle: float) -> Drawable:
-        """Create a sector drawable in the scene.
+        """Create a filled circular sector (a pie slice) of ``radius`` centered at ``(cx, cy)``.
+
+        Angles are in radians, counterclockwise from the positive x axis; a
+        negative ``sweep_angle`` turns clockwise. A non-positive radius or a
+        non-finite angle raise ``ValueError``.
 
         Example:
-            result = scene.sector(1.0, 1.0, 40.0, 1.0, 1.0)
+            wedge = scene.geometry.sector(0, 0, 2, 0, math.pi / 3).fill(RED)
         """
         ...
     def annulus(self, outer_radius: float, inner_radius: float) -> Drawable:
-        """Create a annulus drawable in the scene.
+        """Create a ring between ``inner_radius`` and ``outer_radius``, centered at the origin.
+
+        Requires ``0 < inner_radius < outer_radius``; otherwise ``ValueError``.
 
         Example:
-            result = scene.annulus(40.0, 40.0)
+            ring = scene.geometry.annulus(1.0, 0.7).fill(TEAL)
         """
         ...
     def brace(self, x1: float, y1: float, x2: float, y2: float, height: float) -> Drawable:
-        """Create a brace drawable in the scene.
+        """Create a curly brace from ``(x1, y1)`` to ``(x2, y2)`` whose tip stands ``height`` away.
+
+        The tip points to the right of the direction from start to end: below
+        a brace drawn left to right. A negative ``height`` flips it. Equal
+        endpoints or a zero height raise ``ValueError``.
 
         Example:
-            result = scene.brace(1.0, 1.0, 1.0, 1.0, 40.0)
+            under = scene.geometry.brace(-2, -1, 2, -1, 0.3)
         """
         ...
     def checkmark(self, size: float) -> Drawable:
-        """Create a checkmark drawable in the scene.
+        """Create a check mark about ``size`` wide, centered near the origin.
+
+        It is a filled outline: color it with ``fill``. A non-positive size
+        raises ``ValueError``.
 
         Example:
-            result = scene.checkmark(40.0)
+            ok = scene.geometry.checkmark(0.6).fill(GREEN)
         """
         ...
     def cross(self, size: float) -> Drawable:
-        """Create a cross drawable in the scene.
+        """Create an X of two strokes spanning a ``size`` square centered at the origin.
+
+        It has no fill: color it with ``stroke``. A non-positive size raises
+        ``ValueError``.
 
         Example:
-            result = scene.cross(40.0)
+            wrong = scene.geometry.cross(0.6).stroke(RED, 0.08)
         """
         ...
     def right_angle(self, arm_length: float) -> Drawable:
-        """Create a right angle drawable in the scene.
+        """Create a right-angle mark: its corner at the origin, arms ``arm_length`` long along +x and +y.
+
+        Rotate and move it onto the corner it marks. It has no fill. A
+        non-positive length raises ``ValueError``.
 
         Example:
-            result = scene.right_angle(40.0)
+            mark = scene.geometry.right_angle(0.3).move_to(1.15, 1.15)
         """
         ...
     def arc(self, cx: float, cy: float, radius: float, start_angle: float, sweep_angle: float) -> Drawable:
-        """Create a arc drawable in the scene.
+        """Create an open circular arc of ``radius`` around ``(cx, cy)``.
+
+        It starts at ``start_angle`` and sweeps ``sweep_angle``, in radians
+        counterclockwise from the positive x axis.
 
         Example:
-            result = scene.arc(1.0, 1.0, 40.0, 1.0, 1.0)
+            angle = scene.geometry.arc(0, 0, 0.8, 0, math.pi / 4).stroke(GOLD, 0.03)
         """
         ...
     def curved_arrow(self, x1: float, y1: float, x2: float, y2: float, angle: float, *, head_length: Optional[float] = None, head_width: Optional[float] = None, body_width: Optional[float] = None, max_head_ratio: Optional[float] = None) -> Drawable:
@@ -6688,25 +6750,25 @@ class Geometry:
         ...
     @overload
     def path(self, definition: Sequence[CurvePoint]) -> Drawable:
-        """Create a path drawable in the scene.
+        """Create an open path through two or more points, in order.
 
         Example:
-            result = scene.path([(0.0, 0.0), (1.0, 1.0)])
+            zigzag = scene.geometry.path([(-2, 0), (-1, 1), (0, 0), (1, 1)])
         """
         ...
     @overload
     def path(self, definition: Sequence[CurveCommand]) -> Drawable:
-        """Create a path drawable in the scene.
+        """Create a path from curve commands, as ``curve`` does.
 
         Example:
-            result = scene.path([(0.0, 0.0), (1.0, 1.0)])
+            wave = scene.geometry.path([("move", [(-2, 0)]), ("quad", [(-1, 1.5), (0, 0)])])
         """
         ...
     def polyline(self, points: Sequence[tuple[float, float]]) -> Drawable:
-        """Create a polyline drawable in the scene.
+        """Create an open polyline through ``points``, in order, in scene coordinates.
 
         Example:
-            result = scene.polyline([(0.0, 0.0), (1.0, 1.0)])
+            trend = scene.geometry.polyline([(-3, -1), (-1, 0.5), (1, 0), (3, 2)])
         """
         ...
     def polyline_3d(
@@ -6731,10 +6793,13 @@ class Geometry:
         """
         ...
     def bezier(self, start: tuple[float, float], controls: Sequence[tuple[float, float]], end: tuple[float, float]) -> Drawable:
-        """Create a bezier drawable in the scene.
+        """Create a Bezier curve from ``start`` to ``end``.
+
+        One control point makes it quadratic, two make it cubic; any other
+        count raises ``ValueError``.
 
         Example:
-            result = scene.bezier((0.0, 0.0), [(-0.5, 1.0), (0.5, -1.0)], (0.0, 0.0))
+            swoosh = scene.geometry.bezier((-2, 0), [(-1, 2), (1, -2)], (2, 0))
         """
         ...
     def curve(self, commands: Sequence[CurveCommand]) -> Drawable:
@@ -6764,7 +6829,7 @@ class Geometry:
         """
         ...
     def group(self, members: Sequence[Drawable]) -> Drawable:
-        """Create a group drawable in the scene.
+        """Gather ``members`` into one drawable that moves, styles and animates as a whole.
 
         Grouping preserves each member's authored local coordinates, including
         coordinates returned by ``add_updater_fn``. Existing visible members do
@@ -6901,7 +6966,8 @@ class Geometry:
         """Create a hidden osculating-circle drawable; reveal it in ``scene.play``.
 
         Example:
-            result = scene.curvature_on_curve(curve, None)
+            t = scene.viz.parameter(0.0)
+            circle = scene.geometry.curvature_on_curve(curve, t)
         """
         ...
     def always_redraw_arc(
@@ -6914,10 +6980,16 @@ class Geometry:
         sweep_scale: float = 1.0,
         sweep_offset: float = 0.0,
     ) -> Drawable:
-        """Create a hidden always-redrawn arc; reveal it in ``scene.play``.
+        """Create an arc arrow whose sweep follows ``tracker``, hidden until revealed in ``scene.play``.
+
+        The arc has ``radius`` around ``(cx, cy)`` and starts at
+        ``start_angle``; every frame it sweeps ``tracker * sweep_scale +
+        sweep_offset`` radians, counterclockwise.
 
         Example:
-            result = scene.always_redraw_arc(None, 1.0, 1.0, 40.0, 1.0)
+            turn = scene.viz.parameter(0.5)
+            arc = scene.geometry.always_redraw_arc(turn, 0, 0, 1.5, 0.0)
+            scene.play(arc.animate.create(), turn.animate.set(2.0))
         """
         ...
     def traced_path(
@@ -7135,10 +7207,16 @@ class Typography:
         color: Optional[ColorLike] = None,
         accent: Optional[ColorLike] = None,
     ) -> Drawable:
-        """Create a code drawable in the scene.
+        """Create a code panel: ``source`` in a monospaced block highlighted as ``language``.
+
+        The block sits on a ``width`` by ``height`` rounded panel, centered at
+        the origin, with the language name above a rule. Colors default to the
+        theme's panel, foreground and accent. An empty source, a language with
+        characters other than ASCII letters, digits, ``-`` or ``_``, or a
+        non-positive size raise ``ValueError``.
 
         Example:
-            result = scene.code("example")
+            snippet = scene.code("print('hola')", language="python")
         """
         ...
 
@@ -7756,8 +7834,8 @@ class SlideKit:
         ``weight`` or unbalanced markup raises ``ValueError``.
 
         Example:
-            tag = scene.badge("READY", variant="success").move_to(-3, 1.8)
-            code = scene.badge("_vel_max", font="Cascadia Mono", weight=600, markup=False)
+            tag = scene.slides.badge("READY", variant="success").move_to(-3, 1.8)
+            code = scene.slides.badge("_vel_max", font="Cascadia Mono", weight=600, markup=False)
             scene.play(tag.animate.grow_from_center())
         """
         ...
@@ -7787,7 +7865,7 @@ class SlideKit:
         the label exactly as in :meth:`badge`.
 
         Example:
-            chip = scene.chip("Live", variant="danger", appearance="solid")
+            chip = scene.slides.chip("Live", variant="danger", appearance="solid")
         """
         ...
     def card(
@@ -7813,7 +7891,7 @@ class SlideKit:
         slots or invalid dimensions raise ``ValueError``.
 
         Example:
-            card = scene.card("Result", "The solver converged.", "12 ms")
+            card = scene.slides.card("Result", "The solver converged.", "12 ms")
         """
         ...
     def banner(
@@ -7839,7 +7917,7 @@ class SlideKit:
         invalid placement strings, and invalid dimensions raise ``ValueError``.
 
         Example:
-            notice = scene.banner("Simulation complete", position="bottom")
+            notice = scene.slides.banner("Simulation complete", position="bottom")
         """
         ...
     def lower_third(
@@ -7866,7 +7944,7 @@ class SlideKit:
         empty supplied slots, or invalid dimensions raise ``ValueError``.
 
         Example:
-            speaker = scene.lower_third("Ada Lovelace", "Mathematician")
+            speaker = scene.slides.lower_third("Ada Lovelace", "Mathematician")
         """
         ...
     def stat_card(
@@ -7892,7 +7970,7 @@ class SlideKit:
         invalid dimensions raise ``ValueError``.
 
         Example:
-            metric = scene.stat_card("98%", "Accuracy", delta="+4.2%", variant="success")
+            metric = scene.slides.stat_card("98%", "Accuracy", delta="+4.2%", variant="success")
         """
         ...
     def quote_card(
@@ -7916,7 +7994,7 @@ class SlideKit:
         returned group supports all normal ``Drawable`` animations.
 
         Example:
-            quote = scene.quote_card("Simplicity is prerequisite for reliability.", "E. Dijkstra")
+            quote = scene.slides.quote_card("Simplicity is prerequisite for reliability.", "E. Dijkstra")
         """
         ...
     def section_header(
@@ -7945,7 +8023,7 @@ class SlideKit:
         raise ``ValueError``.
 
         Example:
-            heading = scene.section_header("Method", kicker="02", align="left")
+            heading = scene.slides.section_header("Method", kicker="02", align="left")
         """
         ...
     def callout(
@@ -7959,10 +8037,15 @@ class SlideKit:
         background: Optional[ColorLike] = None,
         color: Optional[ColorLike] = None,
     ) -> Drawable:
-        """Create a callout drawable in the scene.
+        """Create a note that follows ``target``: a rounded card with ``text``, joined to it by a line.
+
+        The card sits ``offset`` from the target's center and keeps that offset
+        while the target moves. It is ``width`` by ``height``, in the theme's
+        panel and foreground colors unless ``background`` and ``color`` say
+        otherwise. Empty text or non-positive sizes raise ``ValueError``.
 
         Example:
-            result = scene.callout("example", target)
+            note = scene.slides.callout("Peak load", beam, offset=(1.5, 1.0))
         """
         ...
     def title_card(
@@ -7977,10 +8060,14 @@ class SlideKit:
         color: Optional[ColorLike] = None,
         accent: Optional[ColorLike] = None,
     ) -> Drawable:
-        """Create a title card drawable in the scene.
+        """Create a centered title with an accent rule under it and an optional subtitle.
+
+        With ``panel=True`` it sits on a ``width`` by ``height`` rounded panel.
+        Colors default to the theme's panel, foreground and accent. An empty
+        title or subtitle, or non-positive sizes, raise ``ValueError``.
 
         Example:
-            result = scene.title_card("example")
+            cover = scene.slides.title_card("Thermal analysis", "Final report", panel=True)
         """
         ...
     def bullets(
@@ -7993,10 +8080,14 @@ class SlideKit:
         bullet_color: Optional[ColorLike] = None,
         color: Optional[ColorLike] = None,
     ) -> Drawable:
-        """Create a bullets drawable in the scene.
+        """Create a bullet list ``width`` wide, centered at the origin, one item every ``gap``.
+
+        Bullets of ``bullet_radius`` take the theme accent and the text its
+        foreground unless ``bullet_color`` and ``color`` say otherwise. An
+        empty list or non-positive sizes raise ``ValueError``.
 
         Example:
-            result = scene.bullets(["Example"])
+            steps = scene.slides.bullets(["Measure", "Model", "Verify"], width=6)
         """
         ...
     def table(
@@ -8010,10 +8101,14 @@ class SlideKit:
         rule_color: Optional[ColorLike] = None,
         color: Optional[ColorLike] = None,
     ) -> Drawable:
-        """Create a table drawable in the scene.
+        """Create a table centered at the origin: a header row over ``rows``, ``width`` wide.
+
+        Columns share the width equally and rows are ``row_height`` tall.
+        Every row needs one cell per header. Empty headers or cells, or
+        non-positive sizes, raise ``ValueError``.
 
         Example:
-            result = scene.table(["Example"], [["Example"]])
+            results = scene.slides.table(["Case", "Load"], [["A", "12 kN"], ["B", "18 kN"]])
         """
         ...
 

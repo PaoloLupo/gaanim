@@ -1445,6 +1445,10 @@ pub(crate) fn structured_text_typst_source(
     let page_width = width
         .map(|width| format!("{width}pt"))
         .unwrap_or_else(|| "auto".to_string());
+    // Each line's box is one em, so baselines are `line_spacing` em apart,
+    // as CSS `line-height` sets them. Typst's own edges (the cap height and
+    // the baseline) would put them a cap height closer, overlapping lines in
+    // fonts with tall ascenders.
     let leading = font_size * (spec.flow.line_spacing.max(0.1) - 1.0);
     let (alignment, justify) = match spec.flow.align {
         gaanim_text::prelude::TextAlign::Left => ("left", false),
@@ -1505,7 +1509,7 @@ pub(crate) fn structured_text_typst_source(
     };
     format!(
         "#set page(width: {page_width}, height: auto, margin: 0pt)\n\
-         #set text({font}fill: rgb(\"{hex}\"), dir: {direction}, hyphenate: {}{lang}{weight}{italic}{tracking})\n\
+         #set text({font}fill: rgb(\"{hex}\"), dir: {direction}, hyphenate: {}{lang}{weight}{italic}{tracking}, top-edge: 0.8em, bottom-edge: -0.2em)\n\
          #set par(justify: {justify}, leading: {leading}pt)\n\
          {content}",
         spec.flow.hyphenate,
@@ -9390,6 +9394,7 @@ impl SceneModel {
                 let source_path = std::sync::Arc::new(svg_path.path.clone());
                 let b = builder.svg_path(&svg_path);
                 let mr = Self::finish_spawn_builder(b, spec);
+                builder.readout_baselines.insert(mr.id, baseline);
                 if rolling_component.is_some() {
                     builder.text_metrics.insert(
                         mr.id,
@@ -9825,7 +9830,22 @@ impl SceneModel {
                     .iter()
                     .filter_map(|id| id_map.get(id).copied().map(|id| MobjectRef { id }))
                     .collect();
+                let baseline = spec
+                    .reactive_readout_layout
+                    .as_ref()
+                    .and_then(|layout| Self::lay_out_readout_row(builder, id_map, layout));
                 let mr = builder.group(&refs);
+                // A readout is one line of text: its text anchors use the
+                // row's baseline.
+                if let Some(baseline) = baseline {
+                    builder.text_metrics.insert(
+                        mr.id,
+                        gaanim_text::prelude::TextMetrics {
+                            first_baseline: baseline,
+                            line_count: 1,
+                        },
+                    );
+                }
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
                 if let Some(layout) = &spec.reactive_readout_layout
                     && let Some(state) = builder.states.get(mr.id)
@@ -10511,6 +10531,64 @@ impl SceneModel {
     /// the timeline must not show that rotation before its animation starts.
     /// A scale of zero stays: it is the start of a grow entry, and a later
     /// reflow must not show the member before its turn.
+    /// Place a readout's parts in their row now, as
+    /// [`gaanim_animation::signals::reactive_readout_layout_system`] does every
+    /// frame, so the group's box is the row's: a layout then centers the row
+    /// in its cell.
+    /// Returns the row's baseline, which the readout's text anchors use.
+    fn lay_out_readout_row(
+        builder: &mut SceneBuilder,
+        id_map: &HashMap<ObjectId, ObjectId>,
+        layout: &super::types::ReactiveReadoutLayoutSpec,
+    ) -> Option<f64> {
+        let parts: Vec<(ObjectId, Bounds3D, f64)> = [
+            layout.label,
+            layout.equals,
+            Some(layout.number),
+            layout.unit,
+        ]
+        .into_iter()
+        .flatten()
+        .filter_map(|id| {
+            let id = *id_map.get(&id)?;
+            let bounds = builder.states.get(id)?.bounds;
+            let baseline = builder
+                .readout_baselines
+                .get(&id)
+                .copied()
+                .or_else(|| {
+                    builder
+                        .text_metrics
+                        .get(&id)
+                        .map(|metrics| metrics.first_baseline)
+                })
+                .unwrap_or((bounds.min.y + bounds.max.y) * 0.5);
+            Some((id, bounds, baseline))
+        })
+        .collect();
+        let rows: Vec<_> = parts
+            .iter()
+            .map(|(_, bounds, baseline)| (*bounds, *baseline))
+            .collect();
+        let translations =
+            gaanim_animation::signals::readout_row(&rows, layout.spacing, layout.align);
+        // Every part's baseline lands on the same height.
+        let baseline = parts
+            .first()
+            .zip(translations.first())
+            .map(|((_, _, baseline), translation)| baseline + translation.y);
+        for ((id, _, _), translation) in parts.iter().zip(translations) {
+            let Some(state) = builder.states.get_mut(*id) else {
+                continue;
+            };
+            state.transform.translation.x = translation.x;
+            state.transform.translation.y = translation.y;
+            let (entity, transform) = (state.entity, state.transform);
+            Self::place_layout_member(builder, entity, transform);
+        }
+        baseline
+    }
+
     fn place_layout_member(
         builder: &mut SceneBuilder,
         entity: bevy::prelude::Entity,
@@ -12619,6 +12697,62 @@ mod tests {
         assert!(value_at(&leader, 15.0) > 500.0);
         // Back in the room, fewer players again.
         assert_eq!(value_at(&count, 3.0) < 5.0, true);
+    }
+
+    /// `quiz.revealed()` is 0 until the playhead passes the reveal, even
+    /// while it rests on the stop the reveal shares, then 1 (#297).
+    #[test]
+    fn revealed_turns_on_past_the_reveal() {
+        use bevy::prelude::App;
+        let mut canvas = SceneModel::new(640, 360);
+        canvas.set_poll_session(crate::canvas::PollSession {
+            relay: Some("https://relay.example.dev".into()),
+            code: "ABC234".into(),
+        });
+        let quiz = canvas
+            .quiz(
+                "¿2 + 2?",
+                ["3", "4"],
+                vec![1],
+                20,
+                1000,
+                Lean::Auto,
+                crate::canvas::PollStyle::default(),
+            )
+            .unwrap();
+        let revealed = quiz.revealed().unwrap();
+        canvas.wait(2.0);
+        canvas.stop(None).unwrap();
+        quiz.reveal().unwrap();
+        assert!(quiz.revealed().is_err(), "asked after the reveal");
+        canvas.wait(1.0);
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        let mut value_at = |time: f64| {
+            app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
+            app.update();
+            let entity = entity_of(app.world_mut(), revealed.drawable());
+            app.world()
+                .get::<gaanim_animation::FloatSignal>(entity)
+                .unwrap()
+                .value
+        };
+        assert_eq!(value_at(0.0), 0.0);
+        assert_eq!(value_at(1.0), 0.0);
+        assert_eq!(value_at(2.0), 0.0, "resting on the stop");
+        assert_eq!(value_at(2.01), 1.0);
+        assert_eq!(value_at(3.0), 1.0);
+        assert_eq!(value_at(1.0), 0.0, "seeking back");
     }
 
     #[test]
@@ -17585,6 +17719,60 @@ mod tests {
                 .transform_point3(Anchor::TopRight.get_point(&bounds)),
             DVec3::new(300.0, 140.0, 0.0),
         );
+    }
+
+    /// `line_spacing` is the distance between baselines in ems, as CSS
+    /// `line-height` is (#298): 1.2 puts them 1.2 em apart.
+    #[test]
+    fn line_spacing_sets_the_distance_between_baselines() {
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let height = |content: &str, spacing: f64| {
+            let spec = StructuredTextSpec::new(
+                vec![content.into()],
+                None,
+                gaanim_text::prelude::TextStyle::default(),
+                gaanim_text::prelude::TextFlow {
+                    wrap: gaanim_text::prelude::TextWrap::Width(10.0),
+                    line_spacing: spacing,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let source = structured_text_typst_source(
+                &spec,
+                Some(10.0),
+                100.0,
+                "New Computer Modern",
+                gaanim_core::peniko::Color::WHITE,
+            );
+            let (bounds, metrics) = gaanim_text::prelude::measure_typst_lines(
+                &fonts,
+                &source,
+                false,
+                Some("New Computer Modern"),
+                None,
+                Some(100.0),
+                None,
+                Some(gaanim_core::peniko::Brush::Solid(
+                    gaanim_core::peniko::Color::WHITE,
+                )),
+                StrokeBrush::transparent(),
+            )
+            .unwrap();
+            (bounds.height(), metrics.line_count)
+        };
+        for spacing in [1.0, 1.2, 1.5] {
+            let (one, lines) = height("H", spacing);
+            assert_eq!(lines, 1);
+            // Each word breaks onto its own line.
+            let (three, lines) = height("H H H", spacing);
+            assert_eq!(lines, 3);
+            let gap = (three - one) / 2.0;
+            assert!(
+                (gap - 100.0 * spacing).abs() < 0.5,
+                "{spacing}: baselines {gap} apart"
+            );
+        }
     }
 
     #[test]

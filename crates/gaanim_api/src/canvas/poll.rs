@@ -94,6 +94,10 @@ pub enum PollError {
     Invalid(String),
 }
 
+/// How far past its `reveal()` a quiz counts as revealed: the playhead
+/// resting on a stop the reveal shares has not revealed it yet.
+pub const REVEAL_AFTER: f64 = 1e-4;
+
 /// Scoring of a quiz as authored.
 #[derive(Debug, Clone)]
 pub(crate) struct QuizRecord {
@@ -102,6 +106,8 @@ pub(crate) struct QuizRecord {
     pub time: u32,
     pub points: u32,
     pub reveal: Option<(usize, f64)>,
+    /// The parameters [`PollHandle::revealed`] gave, set to 1 on reveal.
+    pub revealed: Vec<Parameter>,
 }
 
 /// A poll as authored: its window is `open` to `close` (or the end of the
@@ -521,6 +527,7 @@ impl SceneModel {
             time,
             points,
             reveal: None,
+            revealed: Vec::new(),
         };
         self.open_poll(question.into(), options, lean, Some(quiz), style)
     }
@@ -1047,17 +1054,63 @@ impl PollHandle {
     /// Reveal a quiz's answer at the cursor: from here a presentation tells
     /// every phone whether it was right, and takes no more answers.
     pub fn reveal(&self) -> Result<(), PollError> {
-        let mut state = self.state.lock().expect("canvas state poisoned");
-        let at = (state.active_idx, state.active().cursor);
-        let quiz = state.polls[self.index]
+        let revealed = {
+            let mut state = self.state.lock().expect("canvas state poisoned");
+            let at = (state.active_idx, state.active().cursor);
+            let quiz = state.polls[self.index]
+                .quiz
+                .as_mut()
+                .ok_or(PollError::NotQuiz)?;
+            if quiz.reveal.is_some() {
+                return Err(PollError::AlreadyRevealed);
+            }
+            quiz.reveal = Some(at);
+            quiz.revealed.clone()
+        };
+        // Past the reveal, not on it: resting on a stop the reveal shares
+        // keeps the quiz open, as the presentation does.
+        for parameter in revealed {
+            parameter
+                .drawable()
+                .drive_from_samples(
+                    vec![0.0, REVEAL_AFTER],
+                    vec![0.0, 1.0],
+                    SampledProperty::Signal,
+                    SampledInterpolation::Step,
+                    1.0,
+                    0.0,
+                )
+                .map_err(|_| PollError::Invalid("could not drive the reveal".into()))?;
+        }
+        Ok(())
+    }
+
+    /// 0 until the quiz [`reveal`](Self::reveal)s its answer, then 1, so a
+    /// scene can keep its results hidden until then. It is a moment of the
+    /// timeline, the same in previews, exports and live: a presentation
+    /// reveals when it reaches it.
+    pub fn revealed(&self) -> Result<Parameter, PollError> {
+        {
+            let state = self.state.lock().expect("canvas state poisoned");
+            let quiz = state.polls[self.index]
+                .quiz
+                .as_ref()
+                .ok_or(PollError::NotQuiz)?;
+            if quiz.reveal.is_some() {
+                return Err(PollError::Invalid(
+                    "call revealed() before the quiz's reveal()".into(),
+                ));
+            }
+        }
+        let parameter = parameter_in(&self.state, 0.0)
+            .map_err(|error| PollError::Invalid(error.to_string()))?;
+        if let Some(quiz) = self.state.lock().expect("canvas state poisoned").polls[self.index]
             .quiz
             .as_mut()
-            .ok_or(PollError::NotQuiz)?;
-        if quiz.reveal.is_some() {
-            return Err(PollError::AlreadyRevealed);
+        {
+            quiz.revealed.push(parameter.clone());
         }
-        quiz.reveal = Some(at);
-        Ok(())
+        Ok(parameter)
     }
 }
 
@@ -1764,6 +1817,7 @@ mod tests {
             time: 20,
             points: 1000,
             reveal: None,
+            revealed: Vec::new(),
         };
         assert_eq!(
             poll_id(0, "Q", &options, None, &PollStyle::default()),

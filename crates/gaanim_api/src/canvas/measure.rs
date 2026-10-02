@@ -617,6 +617,45 @@ mod tests {
         }
     }
 
+    /// A readout's row is laid out when the scene compiles, centered on the
+    /// group's origin as it is every frame, so a layout centers it in its
+    /// cell instead of placing its unlaid parts (#294).
+    #[test]
+    fn a_readout_measures_its_row_centered_on_its_origin() {
+        let mut scene = SceneModel::new(16.0, 9.0);
+        let number = scene.reactive_readout(
+            gaanim_animation::ScalarSource::constant(42.0),
+            ".0f",
+            "",
+            "%",
+            "-",
+            Some(0.5),
+        );
+        let label = scene.text_spec(
+            gaanim_text::prelude::TextSpec::new(
+                vec!["R".into()],
+                None,
+                gaanim_text::prelude::TextStyle {
+                    size: Some(0.5),
+                    ..Default::default()
+                },
+                gaanim_text::prelude::TextFlow::default(),
+            )
+            .unwrap(),
+        );
+        let widths = [
+            scene.bounds_of(&label).unwrap().width(),
+            scene.bounds_of(&number).unwrap().width(),
+        ];
+        let readout = scene.reactive_readout_group(Some(&label), None, &number, None, 0.1);
+        let bounds = scene.bounds_of(&readout).unwrap();
+        assert!(bounds.center().x.abs() < 1e-6, "{bounds:?}");
+        assert!(
+            (bounds.width() - (widths[0] + 0.1 + widths[1])).abs() < 1e-6,
+            "{bounds:?} from {widths:?}"
+        );
+    }
+
     #[test]
     fn box_trees_with_history_compile_the_scene() {
         let mut scene = busy_scene();

@@ -113,7 +113,7 @@ pub use gaanim_animation::polls::{BarDirection, BarScale, TextAlign};
 pub use poll::{
     ANSWER_COLORS, AudienceHandle, GateCondition, LeaderboardHandle, LiveTextOptions, MAX_POLL_OPTIONS,
     MAX_TEAMS, POLL_IMAGE_SIZE, PollBarOptions, PollError, PollHandle, PollImage, PollSession,
-    PlayerFact, PollStyle, QUIZ_POINTS, QUIZ_TIME, poll_image,
+    PlayerFact, PollStyle, QUIZ_POINTS, QUIZ_TIME, REVEAL_AFTER, poll_image,
     TEAM_COLORS, TeamsHandle,
 };
 mod theme;

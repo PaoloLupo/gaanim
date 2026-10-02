@@ -1113,6 +1113,47 @@ impl PyParameter {
     }
 }
 
+/// `move_to` for a readout: a `TextAnchor` places its baseline.
+fn readout_move_to(
+    drawable: &PyDrawable,
+    x: &Bound<'_, PyAny>,
+    y: Option<&Bound<'_, PyAny>>,
+    anchor: Option<&Bound<'_, PyAny>>,
+) -> PyResult<()> {
+    crate::custom::ensure_authoring_allowed()?;
+    let text_anchor = anchor.and_then(|value| {
+        value
+            .extract::<PyRef<'_, crate::pytext::PyTextAnchor>>()
+            .ok()
+            .map(|anchor| anchor.0)
+    });
+    let Some(text_anchor) = text_anchor else {
+        let anchor = anchor
+            .map(|value| value.extract::<PyRef<'_, crate::pylayout::PyAnchor>>())
+            .transpose()?;
+        drawable.move_to_impl(x, y, anchor.as_deref())?;
+        return Ok(());
+    };
+    drawable.require_free_position("move_to")?;
+    let y = y.ok_or_else(|| {
+        pyo3::exceptions::PyTypeError::new_err(
+            "move_to with a TextAnchor requires both x and y coordinates",
+        )
+    })?;
+    let sx = extract_scalar_source_for_drawable(x.clone(), &drawable.0)?;
+    let sy = extract_scalar_source_for_drawable(y.clone(), &drawable.0)?;
+    if let (Some(x), Some(y)) = (sx.constant_value(), sy.constant_value()) {
+        drawable.0.clone().at_text_anchor(x, y, text_anchor);
+    } else {
+        drawable
+            .0
+            .clone()
+            .bind_text_position([sx, sy, 0.0.into()], text_anchor, false)
+            .map_err(PyValueError::new_err)?;
+    }
+    Ok(())
+}
+
 /// A visible parameter whose value may be used as an explicit callback input.
 #[pyclass(name = "Variable", module = "gaanim_core", extends = PyDrawable, from_py_object)]
 #[derive(Clone)]
@@ -1202,6 +1243,19 @@ impl PyVariable {
         crate::custom::ensure_authoring_allowed()?;
         Ok(self.unit_part.clone())
     }
+
+    /// Place the variable by a point of its box, or by its baseline with a
+    /// `TextAnchor`, as `Text.move_to` does.
+    #[pyo3(signature = (x, y=None, anchor=None))]
+    fn move_to<'py>(
+        slf: PyRef<'py, Self>,
+        x: &Bound<'py, PyAny>,
+        y: Option<&Bound<'py, PyAny>>,
+        anchor: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        readout_move_to(slf.as_super(), x, y, anchor)?;
+        Ok(slf)
+    }
 }
 
 /// A stable group containing the visible parts of a reactive value.
@@ -1252,6 +1306,19 @@ impl PyReadout {
     fn unit(&self) -> PyResult<Option<PyDrawable>> {
         crate::custom::ensure_authoring_allowed()?;
         Ok(self.unit_part.clone())
+    }
+
+    /// Place the readout by a point of its box, or by its baseline with a
+    /// `TextAnchor`, as `Text.move_to` does.
+    #[pyo3(signature = (x, y=None, anchor=None))]
+    fn move_to<'py>(
+        slf: PyRef<'py, Self>,
+        x: &Bound<'py, PyAny>,
+        y: Option<&Bound<'py, PyAny>>,
+        anchor: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        readout_move_to(slf.as_super(), x, y, anchor)?;
+        Ok(slf)
     }
 }
 

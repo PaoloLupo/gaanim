@@ -141,6 +141,25 @@ quiz.reveal()
 ]
 
 #api-entry(
+  name: "Poll.revealed",
+  kind: "method",
+  returns: (type: "Parameter", desc: []),
+  desc: [Vale 0 hasta que el cuestionario revela su respuesta y 1 desde entonces. Mostrar barras o porcentajes durante la pregunta influye en las respuestas: con este valor la escena decide qué hacer hasta el `reveal()`, ocultarlos, taparlos o mostrar «?». El cambio es un momento de la línea de tiempo, igual en la vista previa, en la exportación y en vivo, donde la presentación revela al llegar a él. Se pide antes del `reveal()`; después, o en una encuesta, lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+quiz = scene.quiz("¿2 + 2?", ["3", "4"], correct=1)
+shown = quiz.revealed()
+for i in range(2):
+    scene.viz.readout(quiz.percent(i), format=".0f", suffix="%").move_to(4 * i - 2, 0).opacity(shown)
+scene.wait(2)
+scene.stop()
+quiz.reveal()
+```
+]
+
+#api-entry(
   name: "Poll.close",
   kind: "method",
   desc: [Deja de recibir votos en el cursor, en vez de al final del segmento donde se abrió. Los valores conservan el último conteo. Si ya estaba cerrada lanza `ValueError`.],

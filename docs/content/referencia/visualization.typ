@@ -48,7 +48,7 @@ curvas y marcas que crea viven en sus coordenadas de datos.
 #api-entry(
   name: "Visualization.cartesian_2d",
   kind: "factory",
-  params: ((name: "x / y", type: "Axis", default: none, desc: [Ejes con dominio, marcas y títulos (ver «Ejes»).]), (name: "width / height", type: "float | None", default: "None", desc: [Tamaño en unidades de escena; por defecto, relativo al área segura.]), (name: "grid / axes / ticks / numbers / labels", type: "bool", default: "True", desc: [Interruptores globales de cada capa.]), (name: "x_* / y_*", type: "bool | None", default: "None", desc: [Sustituyen el interruptor global en un eje; `None` lo hereda.])),
+  params: ((name: "x / y", type: "Axis", default: none, desc: [Ejes con dominio, marcas y títulos (ver «Ejes»).]), (name: "width / height", type: "float | None", default: "None", desc: [Tamaño en unidades de escena; por defecto, relativo al área segura.]), (name: "grid / axes / ticks / numbers / labels", type: "bool", default: "True", desc: [Interruptores globales de cada capa.]), (name: "x_axis / y_axis, x_grid / y_grid, x_ticks / y_ticks, x_numbers / y_numbers, x_labels / y_labels", type: "bool | None", default: "None", desc: [Sustituyen el interruptor global en un eje; `None` lo hereda. El global es `axes` y el de cada eje `x_axis` y `y_axis`, en singular.])),
   desc: [Devuelve un `Cartesian2D` (un `CoordinateSpace`). `numbers` controla el texto de las marcas y `labels`, los títulos de `Axis.label`. Una capa desactivada sigue disponible como un `Drawable` vacío, así que el conjunto de capas es estable para componer y animar. Los números negativos usan el signo menos tipográfico (`−2`). Los colores salen del tema (`axes/axis`, `axes/grid`, `axes/numbers`…).],
 )[
 ```python
@@ -586,6 +586,20 @@ scene.play([area.animate.create(), radius.animate.set(3.0).duration(1.5)])
 >>>scene = Scene(frame=(16, 9))
 speed = scene.viz.readout(3.2, label="$v$", unit="m/s")
 speed.number.fill(GOLD)
+```
+]
+
+#api-entry(
+  name: "Readout.move_to / Variable.move_to",
+  kind: "method",
+  signature: "move_to(x, y=None, anchor: Anchor | TextAnchor | None = None) -> Readout",
+  desc: [Coloca la lectura como cualquier objeto: sin `anchor`, su centro va a `(x, y)`; con un `Anchor`, ese punto de su caja. Con un `TextAnchor` la coloca por su línea base, alineada con un `Text`: `TextAnchor.BASELINE_LEFT` deja fijo su comienzo aunque el número cambie de ancho. Con un `TextAnchor` hacen falta `x` e `y`, que pueden ser escalares reactivos.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.text("Carga").move_to(-4, 0, TextAnchor.BASELINE_LEFT)
+scene.viz.readout(12.5, label="$P$", unit="kN").move_to(-2, 0, TextAnchor.BASELINE_LEFT)
 ```
 ]
 
@@ -1190,7 +1204,7 @@ con la cámara en perspectiva de #link("/referencia/scene/")[Escena].
 #api-entry(
   name: "Visualization.cartesian_3d",
   kind: "factory",
-  params: ((name: "x / y / z", type: "Axis", default: none, desc: [Ejes lineales o temporales reutilizables.]), (name: "size", type: "(float, float, float)", default: "(10.0, 8.0, 6.0)", desc: [Tamaño positivo en el mundo; elígelo según la distancia de la cámara.]), (name: "xy_grid / xz_grid / yz_grid", type: "bool | None", default: "None", desc: [Visibilidad de cada plano; `None` hereda `grid`.]), (name: "x_* / y_* / z_*", type: "bool | None", default: "None", desc: [Ejes, marcas, números y títulos por eje.])),
+  params: ((name: "x / y / z", type: "Axis", default: none, desc: [Ejes lineales o temporales reutilizables.]), (name: "size", type: "(float, float, float)", default: "(10.0, 8.0, 6.0)", desc: [Tamaño positivo en el mundo; elígelo según la distancia de la cámara.]), (name: "xy_grid / xz_grid / yz_grid", type: "bool | None", default: "None", desc: [Visibilidad de cada plano; `None` hereda `grid`.]), (name: "x_axis / y_axis / z_axis, x_ticks / …, x_numbers / …, x_labels / …", type: "bool | None", default: "None", desc: [Eje, marcas, números y título de cada eje, con el prefijo `x_`, `y_` o `z_`; `None` hereda el interruptor global.])),
   desc: [Devuelve un `Cartesian3D` (un `CoordinateSpace3D`) con capas estables. Las rejillas ocultas no emiten segmentos ni duplican las aristas de los ejes; las etiquetas miran a la cámara.],
 )[
 ```python
