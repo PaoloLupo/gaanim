@@ -77,7 +77,7 @@ This file guides repository work; model selection belongs to the calling client.
     web cannot run (native windows, files, threads, FFmpeg) is gated on
     `target_arch = "wasm32"` or goes through `gaanim_editor::platform`.
 - **Repository overview:** `README.md` is the current user/developer entry point.
-  `engine_improvements.md` is aspirational; verify proposals against code and tests.
+  Planned work lives in GitHub issues; verify proposals against code and tests.
 
 ## Developer commands
 

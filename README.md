@@ -417,7 +417,7 @@ Consulte también las escenas de referencia en [`examples/`](examples/).
 Gaanim está en fase alfa (`0.8.0`). La base de render, timeline, texto y
 ecuaciones es funcional; la cobertura de API, pruebas de exportación y
 capacidades multimedia continúan en desarrollo. El plan de evolución se
-encuentra en [`engine_improvements.md`](engine_improvements.md).
+sigue en las [issues](https://github.com/PaoloLupo/gaanim/issues).
 
 ## Licencia
 
