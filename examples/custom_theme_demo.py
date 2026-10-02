@@ -22,9 +22,11 @@ research_theme = Theme(
         "code": "Consolas",
     },
     sizes={
-        "title": 58,
-        "body": 30,
-        "caption": 22,
+        "title": 0.48,
+        "subtitle": 0.3,
+        "heading": 0.34,
+        "body": 0.25,
+        "caption": 0.18,
     },
 )
 scene.canvas.set_theme(research_theme)
