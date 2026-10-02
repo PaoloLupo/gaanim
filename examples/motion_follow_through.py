@@ -26,6 +26,7 @@ scene.wait(0.6)
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     # Card overshooting, trail stretched mid-move, leader bouncing, all at rest.
-    scene.snapshots(snapshots, [0.3, 0.6, 1.2, 2.1, 2.4, 3.6])
+    # The scene ends at 3.593 s: both settle tails decay to 0.1% (see Anim.settle).
+    scene.snapshots(snapshots, [0.3, 0.6, 1.2, 2.1, 2.4, 3.5])
 else:
     scene.render()
