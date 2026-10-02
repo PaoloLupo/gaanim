@@ -84,7 +84,11 @@ pub fn zone_contains(zone: &LiveZone, time: f64) -> bool {
 fn player(results: &PollResults, name: &std::sync::Arc<str>) -> Player {
     let named = Player::named(name);
     Player {
-        character: results.avatars.get(name).copied().unwrap_or(named.character),
+        character: results
+            .avatars
+            .get(name)
+            .copied()
+            .unwrap_or(named.character),
         team: results.player_teams.get(name).copied().unwrap_or(0),
         stats: results.stats.get(name).copied().unwrap_or_default(),
         answer: results
@@ -116,12 +120,20 @@ pub fn replay_rehearsal(zone: &LiveZone, now: f64, run: &mut ZoneRun, rehearsal:
             }
         }
         let scores = rehearsal.scores(time);
-        let index_of = |name: &str| rehearsal.players.iter().position(|player| player.name == name);
+        let index_of = |name: &str| {
+            rehearsal
+                .players
+                .iter()
+                .position(|player| player.name == name)
+        };
         run.standings(|name| index_of(name).map_or(0.0, |index| scores[index].0 as f64));
         let stats = rehearsal.stats_at(time);
         let latest = rehearsal.latest_at(time);
         run.facts(|name| match index_of(name) {
-            Some(index) => (stats[index], latest.and_then(|poll| rehearsal.answer_of(poll, index, time))),
+            Some(index) => (
+                stats[index],
+                latest.and_then(|poll| rehearsal.answer_of(poll, index, time)),
+            ),
             None => Default::default(),
         });
     };

@@ -836,9 +836,21 @@ fn build_item(
         SizeRule::Fill(_) => parent.is_some() && parent_hugs,
         SizeRule::Fixed(_) | SizeRule::Percent(_) => false,
     };
+    // An item growing along its parent's axis takes its size there from the
+    // parent's free space, unless the parent hugs too and has none.
+    let grows_along = |row: bool| {
+        item.is_some_and(|item| !item.absolute && item.grow > 0.0)
+            && match parent {
+                Some(LayoutNodeKind::Row { .. }) => row,
+                Some(LayoutNodeKind::Column { .. }) => !row,
+                _ => false,
+            }
+    };
     let hugs = (
-        sized_by_content(style.width, context.parent_hugs.0),
-        sized_by_content(style.height, context.parent_hugs.1),
+        sized_by_content(style.width, context.parent_hugs.0)
+            && !(grows_along(true) && !context.parent_hugs.0),
+        sized_by_content(style.height, context.parent_hugs.1)
+            && !(grows_along(false) && !context.parent_hugs.1),
     );
     let mut taffy_style = Style {
         size: taffy::Size {
@@ -1067,7 +1079,11 @@ fn build_item(
     let result = if matches!(node.kind, LayoutNodeKind::Leaf) {
         tree.new_leaf_with_context(taffy_style, node.id)
     } else {
-        let hugs_width = style.width == SizeRule::Hug;
+        // A grid's auto tracks already take their content's width; held at
+        // that width, Taffy shares it out again and moves the tracks
+        // (matrix_showcase's brackets and labels).
+        let hugs_width =
+            style.width == SizeRule::Hug && !matches!(node.kind, LayoutNodeKind::Grid { .. });
         let horizontal = matches!(node.kind, LayoutNodeKind::Row { .. });
         let slack_grows = node.children.iter().any(|child| {
             let main = if horizontal {
@@ -1568,6 +1584,57 @@ mod tests {
         );
         // y points up: the footer starts below the text's last line.
         assert!(footer.max.y <= row.min.y + EPSILON, "{footer:?} {row:?}");
+    }
+
+    /// `L.row(L.column(L.row(a, b, c, width="fill"), grow=1), width=400)`
+    /// with `a`, `b` and `c` growing: the column takes its width from the
+    /// row's free space, not its content, so the cards share it equally as
+    /// with `basis=0` (ui_dashboard's KPI cards).
+    #[test]
+    fn growing_items_in_a_filled_row_of_a_growing_column_share_equally() {
+        let (cards, sizes): (Vec<_>, Vec<_>) = [(4, 120.0), (5, 60.0), (6, 30.0)]
+            .into_iter()
+            .map(|(id, width)| {
+                let (mut card, size) = child(id, DVec2::new(width, 10.0));
+                card.style.grow = 1.0;
+                (card, size)
+            })
+            .unzip();
+        let mut cards_row =
+            LayoutNode::container(LayoutId(3), LayoutNodeKind::Row { wrap: false }, cards);
+        cards_row.style.width = SizeRule::Fill(1.0);
+        let column = LayoutNode::container(
+            LayoutId(2),
+            LayoutNodeKind::Column { wrap: false },
+            vec![LayoutChild {
+                node: Box::new(cards_row),
+                style: LayoutItemStyle::default(),
+            }],
+        );
+        let mut root = LayoutNode::container(
+            LayoutId(1),
+            LayoutNodeKind::Row { wrap: false },
+            vec![LayoutChild {
+                node: Box::new(column),
+                style: LayoutItemStyle {
+                    grow: 1.0,
+                    ..LayoutItemStyle::default()
+                },
+            }],
+        );
+        root.style.width = SizeRule::Fixed(400.0);
+        let layout = resolve_layout(
+            &root,
+            Bounds3D::new_2d(-500.0, -500.0, 500.0, 500.0),
+            &Measure(sizes.into_iter().collect()),
+            &[],
+        )
+        .unwrap();
+        // Taffy lays out in f32.
+        for id in 4..=6 {
+            let card = layout.boxes[&LayoutId(id)].bounds;
+            assert!((card.width() - 400.0 / 3.0).abs() < 1e-3, "{id}: {card:?}");
+        }
     }
 
     #[test]

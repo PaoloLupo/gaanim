@@ -92,6 +92,14 @@ body {
   text-decoration: none;
 }
 
+/* On the narrowest phones the symbol alone leaves room for the player's
+   nickname and points. */
+@media (max-width: 359px) {
+  .brand .wordmark {
+    display: none;
+  }
+}
+
 .brand .symbol {
   width: 36px;
   height: 24px;
@@ -663,7 +671,7 @@ body {
   cursor: default;
 }
 
-.team-badge {
+.center .team-badge {
   padding: 6px 14px;
   border-radius: 999px;
   background: var(--team);

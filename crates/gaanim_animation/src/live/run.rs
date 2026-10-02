@@ -178,7 +178,12 @@ impl ZoneRun {
     /// Tell each player's game so far and latest answer, from `facts`.
     pub fn facts(
         &mut self,
-        facts: impl Fn(&str) -> (crate::polls::PlayerStats, Option<crate::polls::PlayerAnswer>),
+        facts: impl Fn(
+            &str,
+        ) -> (
+            crate::polls::PlayerStats,
+            Option<crate::polls::PlayerAnswer>,
+        ),
     ) {
         for actor in &mut self.actors {
             let (stats, answer) = facts(&actor.player.name);
@@ -282,9 +287,15 @@ impl ZoneRun {
                 .answer
                 .and_then(|answer| answer.first())
                 .map_or(-1.0, |first| first as f64),
-            answer_mask: actor.player.answer.map_or(0.0, |answer| f64::from(answer.options)),
+            answer_mask: actor
+                .player
+                .answer
+                .map_or(0.0, |answer| f64::from(answer.options)),
             answer_time: actor.player.answer.map_or(0.0, |answer| answer.elapsed),
-            answer_points: actor.player.answer.map_or(0.0, |answer| f64::from(answer.points)),
+            answer_points: actor
+                .player
+                .answer
+                .map_or(0.0, |answer| f64::from(answer.points)),
             answers: f64::from(actor.player.stats.answered),
             correct: f64::from(actor.player.stats.correct),
             streak: f64::from(actor.player.stats.streak),

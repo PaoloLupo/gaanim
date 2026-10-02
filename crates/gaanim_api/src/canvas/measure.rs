@@ -144,12 +144,7 @@ impl SceneModel {
                 // moves them over time.
                 Op::LayoutTransition { to, duration, .. } => {
                     let ours = closure.contains(&to.container);
-                    if !ours
-                        && !to
-                            .members
-                            .iter()
-                            .any(|member| closure.contains(&member.id))
-                    {
+                    if !ours && !to.members.iter().any(|member| closure.contains(&member.id)) {
                         continue;
                     }
                     if !ours || duration.is_some() {
@@ -674,15 +669,7 @@ mod tests {
                 style: member.layout_item(),
             })
             .collect();
-        scene.reflow_layout(
-            &row,
-            members,
-            Default::default(),
-            2,
-            Some(0.5),
-            None,
-            None,
-        );
+        scene.reflow_layout(&row, members, Default::default(), 2, Some(0.5), None, None);
         assert!(scene.isolated_declaration(fresh.id).is_none());
     }
 

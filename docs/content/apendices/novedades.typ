@@ -156,6 +156,10 @@ cambia*: lee «Al actualizar».
   segmentos.
 - Las teclas de navegación entre pausas funcionan con el foco en un panel, y
   `P` fija la ventana encima.
+- En el teléfono, el nombre del equipo se lee en blanco sobre su color; antes
+  quedaba gris y casi no se veía.
+- En teléfonos de menos de 360 px de ancho, la barra superior muestra el
+  apodo y los puntos completos.
 
 = 0.7.2
 

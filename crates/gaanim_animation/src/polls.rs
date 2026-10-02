@@ -107,15 +107,26 @@ pub enum PlayerMeasure {
     /// Quizzes answered right in a row.
     Streak,
     /// 1 once the player answered `poll`, else 0.
-    Responded { poll: Arc<str> },
+    Responded {
+        poll: Arc<str>,
+    },
     /// 1 if the player chose `option` on `poll`, else 0.
-    Chose { poll: Arc<str>, option: usize },
+    Chose {
+        poll: Arc<str>,
+        option: usize,
+    },
     /// 1 if the player answered quiz `poll` right, else 0.
-    Right { poll: Arc<str> },
+    Right {
+        poll: Arc<str>,
+    },
     /// Points the player earned on quiz `poll`.
-    Points { poll: Arc<str> },
+    Points {
+        poll: Arc<str>,
+    },
     /// Seconds the player took on quiz `poll`, 0 without an answer.
-    Time { poll: Arc<str> },
+    Time {
+        poll: Arc<str>,
+    },
 }
 
 impl PollResults {
@@ -137,13 +148,17 @@ impl PollResults {
             PlayerMeasure::Answered => f64::from(stats.answered),
             PlayerMeasure::Streak => f64::from(stats.streak),
             PlayerMeasure::Responded { poll } => f64::from(u8::from(answer(poll).is_some())),
-            PlayerMeasure::Chose { poll, option } => f64::from(u8::from(
-                answer(poll).is_some_and(|answer| *option < 32 && answer.options & (1 << option) != 0),
-            )),
-            PlayerMeasure::Right { poll } => {
-                f64::from(u8::from(answer(poll).is_some_and(|answer| answer.right == Some(true))))
+            PlayerMeasure::Chose { poll, option } => {
+                f64::from(u8::from(answer(poll).is_some_and(|answer| {
+                    *option < 32 && answer.options & (1 << option) != 0
+                })))
             }
-            PlayerMeasure::Points { poll } => answer(poll).map_or(0.0, |answer| f64::from(answer.points)),
+            PlayerMeasure::Right { poll } => f64::from(u8::from(
+                answer(poll).is_some_and(|answer| answer.right == Some(true)),
+            )),
+            PlayerMeasure::Points { poll } => {
+                answer(poll).map_or(0.0, |answer| f64::from(answer.points))
+            }
             PlayerMeasure::Time { poll } => answer(poll).map_or(0.0, |answer| answer.elapsed),
         }
     }
@@ -163,10 +178,13 @@ impl PollResults {
         self.teams
             .iter()
             .enumerate()
-            .fold(None, |best: Option<(usize, u64)>, (index, team)| match best {
-                Some((_, score)) if score >= team.score => best,
-                _ => Some((index, team.score)),
-            })
+            .fold(
+                None,
+                |best: Option<(usize, u64)>, (index, team)| match best {
+                    Some((_, score)) if score >= team.score => best,
+                    _ => Some((index, team.score)),
+                },
+            )
             .map_or(0, |(index, _)| index)
     }
 }
@@ -517,7 +535,12 @@ impl BarSource {
                 leader_fraction(results.leaderboard.iter().map(|(_, score)| *score), *rank)
             }
             Self::Team { team } => {
-                let best = results.teams.iter().map(|team| team.score).max().unwrap_or(0);
+                let best = results
+                    .teams
+                    .iter()
+                    .map(|team| team.score)
+                    .max()
+                    .unwrap_or(0);
                 match results.teams.get(*team) {
                     Some(result) if best > 0 => result.score as f64 / best as f64,
                     _ => 0.0,
