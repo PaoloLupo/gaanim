@@ -674,6 +674,109 @@ scene.render()
 )
 
 #api-entry(
+  name: "Drawable.modifiers",
+  kind: "property",
+  returns: (type: "PathModifiers", desc: [La pila de modificadores de trazado del objeto.]),
+  desc: [Modificadores no destructivos, como los operadores de forma de After Effects y Lottie: cada método añade uno a partir del cursor y lo devuelve, y sus números se animan con `modificador.animate`. Se aplican en el orden en que se añadieron, sobre el trazado ya animado (recortes, `write`, morph) y justo antes de dibujarlo, a cada miembro con trazado de un grupo o un `Text`. `bounds()` y el layout siguen midiendo la forma original. Un trazado abierto puede ganar área: una `line` lleva relleno por defecto, así que usa `no_fill()` si solo quieres el trazo.],
+)[
+```python
+# show-code: true
+from gaanim import BLUE, CORAL, GOLD, TEAL, WHITE, Scene
+scene = Scene(frame=(16, 9))
+star = scene.geometry.star(5, 1.1, 0.5).fill(GOLD).move_to(-5.0, 1.0)
+zz = star.modifiers.zigzag(size=0.0, ridges=3)
+star.modifiers.round_corners(0.04)
+square = scene.geometry.square(1.6).fill(CORAL).move_to(-1.7, 1.0)
+pb = square.modifiers.pucker_bloat(0.0)
+hexagon = scene.geometry.regular_polygon(6, 1.0).fill(TEAL).move_to(1.7, 1.0)
+tw = hexagon.modifiers.twist(0.0)
+blob = scene.geometry.circle(0.9).fill(BLUE).move_to(5.0, 1.0)
+blob.modifiers.wiggle_path(size=0.12, detail=3, frequency=1.5, seed=3)
+ring = scene.geometry.circle(0.5).no_fill().stroke(WHITE, 0.04, align="center").move_to(0, -2.2)
+rings = ring.modifiers.offset(0.15, join="round", copies=3)
+scene.play([zz.animate.size(0.12), pb.animate.amount(-0.5), tw.animate.angle(1.4), rings.animate.amount(0.3)])
+scene.play([pb.animate.amount(0.4).duration(0.8), tw.animate.angle(-1.0).duration(0.8)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "PathModifiers.zigzag",
+  kind: "method",
+  params: (
+    (name: "size", type: "float", default: "0.1", desc: [Distancia de cada pico a cada lado del trazado, en unidades. Animable.]),
+    (name: "ridges", type: "int", default: "4", desc: [Picos por segmento, de 1 a 256.]),
+    (name: "smooth", type: "bool", default: "False", desc: [Ondas en lugar de esquinas.]),
+  ),
+  returns: (type: "PathModifier", desc: [El modificador, que anima `size`.]),
+  desc: [Los vértices quedan en su sitio, así que con `size = 0` la forma no cambia.],
+  none,
+)
+
+#api-entry(
+  name: "PathModifiers.round_corners",
+  kind: "method",
+  params: ((name: "radius", type: "float", default: none, desc: [Radio de cada esquina, `>= 0`. Animable.]),),
+  returns: (type: "PathModifier", desc: [El modificador, que anima `radius`.]),
+  desc: [Redondea las esquinas entre dos tramos rectos; un lado más corto que dos radios limita sus esquinas y las curvas conservan sus vértices.],
+  none,
+)
+
+#api-entry(
+  name: "PathModifiers.pucker_bloat",
+  kind: "method",
+  params: ((name: "amount", type: "float", default: none, desc: [Entre `-1` (pucker, puntas) y `1` (bloat, lóbulos). Animable.]),),
+  returns: (type: "PathModifier", desc: [El modificador, que anima `amount`.]),
+  desc: [Los vértices se acercan al centro del trazado en esa fracción y las curvas entre ellos se alejan, o al revés con valores negativos.],
+  none,
+)
+
+#api-entry(
+  name: "PathModifiers.twist",
+  kind: "method",
+  params: ((name: "angle", type: "float", default: none, desc: [Giro en el centro, en radianes. Animable.]),),
+  returns: (type: "PathModifier", desc: [El modificador, que anima `angle`.]),
+  desc: [El giro se desvanece hasta cero en el vértice más lejano del centro.],
+  none,
+)
+
+#api-entry(
+  name: "PathModifiers.wiggle_path",
+  kind: "method",
+  params: (
+    (name: "size", type: "float", default: "0.1", desc: [Desplazamiento máximo a lo largo de la normal, en unidades. Animable.]),
+    (name: "detail", type: "int", default: "6", desc: [Puntos por segmento, de 1 a 256.]),
+    (name: "frequency", type: "float", default: "1.0", desc: [Cambios por segundo. Animable.]),
+    (name: "seed", type: "int", default: "0", desc: [Semilla del ruido.]),
+  ),
+  returns: (type: "PathModifier", desc: [El modificador, que anima `size` y `frequency`.]),
+  desc: [Contorno vivo con ruido coherente con semilla, desde el instante en que se añade; los puntos se unen con curvas suaves. La misma semilla da la misma forma en el mismo tiempo, así que un seek es exacto.],
+  none,
+)
+
+#api-entry(
+  name: "PathModifiers.offset",
+  kind: "method",
+  params: (
+    (name: "amount", type: "float", default: none, desc: [Unidades hacia fuera, o hacia dentro si es negativo. Animable.]),
+    (name: "join", type: "\"miter\" | \"round\" | \"bevel\"", default: "\"miter\"", desc: [Cómo gira el contorno en las esquinas.]),
+    (name: "copies", type: "int", default: "1", desc: [Contornos a `amount`, `2 * amount`, …, de 1 a 64.]),
+  ),
+  returns: (type: "PathModifier", desc: [El modificador, que anima `amount`.]),
+  desc: [Agranda o encoge las formas cerradas; encoger más allá del radio interior no deja nada. Un trazado abierto se vuelve una banda de `|amount|` a cada lado. Las copias forman un solo trazado, así que un trazo alineado por dentro (el predeterminado) solo muestra la mitad interior del anillo exterior: para anillos usa `align="center"`.],
+  none,
+)
+
+#api-entry(
+  name: "PathModifier.animate",
+  kind: "property",
+  returns: (type: "PathModifierAnimation", desc: [Métodos `size`, `radius`, `amount`, `angle` y `frequency`, que devuelven un `Anim`.]),
+  desc: [Anima los números del modificador como cualquier otra animación. Un nombre que el modificador no tiene lanza `ValueError`; `PathModifier.names` los enumera y `PathModifier.set(size=0.2)` los cambia de golpe desde el cursor.],
+  none,
+)
+
+#api-entry(
   name: "Drawable.motion_blur",
   kind: "method",
   params: ((name: "enabled", type: "bool", default: "True", desc: [`False` mantiene nítido el objeto y sus miembros.]),),

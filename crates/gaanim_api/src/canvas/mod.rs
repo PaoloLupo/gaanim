@@ -45,6 +45,10 @@ mod duplicate;
 mod emphasis;
 pub use duplicate::{Distribution, MAX_COPIES, RepeatStep};
 mod particles;
+mod path_modifiers;
+pub use path_modifiers::{
+    MAX_DETAIL, MAX_OFFSET_COPIES, MAX_RIDGES, OffsetJoin, PathModifierHandle,
+};
 mod property_bindings;
 pub use camera_view::{
     CameraInsetOptions, CameraInsetPlacement, CameraInsetShape, CameraViewError, CameraViewHandle,
@@ -111,10 +115,10 @@ pub use live::{LiveZoneError, LiveZoneHandle, check_behavior};
 mod poll;
 pub use gaanim_animation::polls::{BarDirection, BarScale, TextAlign};
 pub use poll::{
-    ANSWER_COLORS, AudienceHandle, GateCondition, LeaderboardHandle, LiveTextOptions, MAX_POLL_OPTIONS,
-    MAX_TEAMS, POLL_IMAGE_SIZE, PollBarOptions, PollError, PollHandle, PollImage, PollSession,
-    PlayerFact, PollStyle, QUIZ_POINTS, QUIZ_TIME, REVEAL_AFTER, poll_image,
-    TEAM_COLORS, TeamsHandle,
+    ANSWER_COLORS, AudienceHandle, GateCondition, LeaderboardHandle, LiveTextOptions,
+    MAX_POLL_OPTIONS, MAX_TEAMS, POLL_IMAGE_SIZE, PlayerFact, PollBarOptions, PollError,
+    PollHandle, PollImage, PollSession, PollStyle, QUIZ_POINTS, QUIZ_TIME, REVEAL_AFTER,
+    TEAM_COLORS, TeamsHandle, poll_image,
 };
 mod theme;
 pub use gaanim_objects::prelude::SvgLoadError;

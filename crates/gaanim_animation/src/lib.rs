@@ -7,6 +7,7 @@ pub mod echo;
 pub use echo::EchoGhost;
 pub mod falloff;
 pub mod live;
+pub mod motion;
 pub use falloff::{
     ColorRamp, FalloffChannel, FalloffDrive, FalloffEffect, FalloffExpr, FalloffOffset,
     FalloffShape, FalloffTarget, ScheduledEffect,
@@ -16,6 +17,7 @@ pub use particles::{AnchorTrail, PARTICLE_FADE_LEVELS, ParticleEmitter, Particle
 pub mod squash;
 pub use squash::{SQUASH_STEP, SquashStretch};
 pub mod paint;
+pub mod path_modifiers;
 pub mod polls;
 pub mod prelude;
 pub mod procedural;
@@ -224,6 +226,10 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
         app.add_systems(
             Update,
             (
+                // Tips sit on the modified path.
+                path_modifiers::apply_path_modifiers_system
+                    .in_set(SceneSet::DerivedGeometry)
+                    .before(stroke_tips::apply_stroke_tips_system),
                 stroke_tips::apply_stroke_tips_system.in_set(SceneSet::DerivedGeometry),
                 procedural::apply_dash_flow_system.in_set(SceneSet::Bounds),
                 procedural::apply_stroke_cycle_system.in_set(SceneSet::Bounds),
@@ -235,6 +241,8 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
                 procedural::restore_dash_flow_system,
                 procedural::restore_stroke_cycle_system,
                 stroke_tips::restore_stroke_tips_system,
+                path_modifiers::restore_path_modifiers_system
+                    .after(stroke_tips::restore_stroke_tips_system),
                 falloff::restore_falloff_fills_system,
             ),
         );

@@ -798,6 +798,8 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub text_metrics: HashMap<ObjectId, gaanim_text::prelude::TextMetrics>,
     /// Continuous rolling displays and the parameter signals whose tweens settle them.
     pub rolling_tween_sources: Vec<(Entity, Vec<ObjectId>)>,
+    /// Time maps of the next play's animations, from `Op::TimeMaps`.
+    pub(crate) pending_time_maps: Vec<Option<std::sync::Arc<gaanim_math::TimeMap>>>,
     /// Local baselines of reactive numbers, which readouts align their row on.
     pub readout_baselines: HashMap<ObjectId, f64>,
     /// Values whose text each reactive number inside a layout keeps room
@@ -997,6 +999,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             rolling_tween_sources,
             readout_baselines,
             readout_reserves: HashMap::new(),
+            pending_time_maps: Vec::new(),
             default_track,
             mobject_tracks,
             mobject_names,
@@ -1303,6 +1306,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             rolling_tween_sources: Vec::new(),
             readout_baselines: HashMap::new(),
             readout_reserves: HashMap::new(),
+            pending_time_maps: Vec::new(),
             default_track,
             mobject_tracks: HashMap::new(),
             mobject_names: HashMap::new(),
@@ -1496,6 +1500,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         match ty {
             AnimationType::PropertySource(_) => "Properties",
             AnimationType::CustomProperties(_) => "Custom",
+            AnimationType::Motion(motion) => motion.name(),
+            AnimationType::SignalKeyframes(_) => "Signal",
             AnimationType::CameraState { .. }
             | AnimationType::CameraPosition { .. }
             | AnimationType::CameraPositionSource { .. }
@@ -2635,6 +2641,62 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             };
             anim.anim_type = AnimationType::ScaleTo { to };
         }
+        if let AnimationType::Motion(motion) = &anim.anim_type {
+            // Played from wherever the target is when the clip starts.
+            let Some(state) = self.states.get(anim.target) else {
+                return;
+            };
+            let start = gaanim_animation::CustomBaseline {
+                transform: state.transform,
+                opacity: state.opacity,
+                fill: state.fill.clone(),
+                stroke: state.stroke.clone(),
+            };
+            match motion.animation(&start) {
+                Ok(animation) => anim.anim_type = AnimationType::CustomProperties(animation),
+                Err(message) => {
+                    let target = anim.target;
+                    self.commands
+                        .queue(move |world: &mut gaanim_scene::prelude::World| {
+                            world
+                                .get_resource_or_insert_with(
+                                    gaanim_animation::CustomAnimationDiagnostics::default,
+                                )
+                                .0
+                                .push(gaanim_animation::CustomAnimationDiagnostic {
+                                    target,
+                                    alpha: 0.0,
+                                    message,
+                                });
+                        });
+                    return;
+                }
+            }
+        }
+        if let AnimationType::SignalKeyframes(keyframes) = &anim.anim_type {
+            // One signal clip from 0 to 1 whose easing returns the keyframed
+            // value itself, so reactive bindings sample it like any tween.
+            let from = *self.float_signals.get(&anim.target).unwrap_or(&0.0);
+            self.float_signals.insert(anim.target, keyframes.end(from));
+            let sample = keyframes.sampler(from);
+            let rate = anim.rate_func.clone();
+            let track = self.ensure_track(anim.target);
+            self.timeline.add_clip(
+                track,
+                self.current_time + anim.delay,
+                anim.duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: anim.target,
+                    lens: PropertyLensSpec::SignalFloat { from: 0.0, to: 1.0 },
+                    rate_func: RateFunc::Custom(std::sync::Arc::new(move |progress| {
+                        sample(rate.evaluate(progress))
+                    })),
+                    delay: 0.0,
+                    label: self.current_label.clone(),
+                }),
+            );
+            return;
+        }
         if let AnimationType::CustomProperties(animation) = &anim.anim_type {
             // One root clip owns transforms/opacity. Descendant clips receive
             // paint only, matching the visible paint behavior of native setters.
@@ -3492,7 +3554,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     "surrounding-rectangle retargeting is dispatched before lens resolution"
                 )
             }
-            AnimationType::CustomProperties(_) => {
+            AnimationType::CustomProperties(_)
+            | AnimationType::Motion(_)
+            | AnimationType::SignalKeyframes(_) => {
                 unreachable!("custom property callbacks are dispatched before lens resolution")
             }
             AnimationType::PropertySource(_) | AnimationType::Properties(_) => {
@@ -5659,6 +5723,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// part of the emitter's schedule rather than a clip: the particles are a
     /// pure function of time, so seeks before `time` show none of them.
     pub(crate) fn schedule_particle_burst(&mut self, target: ObjectId, time: f64, count: u32) {
+        // Inside a warped composition the burst plays where its clip does.
+        let time = self.timeline.map_time(time);
         let Some(entity) = self.states.get(target).map(|state| state.entity) else {
             return;
         };

@@ -62,6 +62,14 @@ cambia*: lee «Al actualizar».
   `Drawable.follow(..., delay=...)` sigue con retraso.
 - `Anim.sound(...)` ancla un sonido a una animación y `scene.media.sfx(...)`
   lo coloca en un instante.
+- `Anim.keyframes(...)`: varias paradas en un solo clip, con un easing por
+  tramo y trayectoria suave opcional; también en `Parameter.animate`.
+- `Anim.throw(...)` lanza un objeto que rebota hasta reposar y
+  `Anim.inertia(...)` lo desliza hasta el punto de `snap` más cercano.
+- `Composition.speed_ramp(...)` y `Composition.time_remap(...)`: cámara lenta
+  y aceleraciones dentro de una composición.
+- `Drawable.modifiers`: zigzag, esquinas redondeadas, pucker y bloat, torsión,
+  wiggle y offset no destructivos, con parámetros animables.
 
 == Reproductor web
 

@@ -244,6 +244,10 @@ pub struct Timeline {
     pub current_time: f64,
     /// Cached maximum clip duration, used to bound range queries during seek.
     pub max_clip_duration: f64,
+    /// While a warped composition is scheduled, the instant it starts and
+    /// where its authored seconds play; see [`Timeline::set_time_map`].
+    #[cfg_attr(feature = "serde", serde(skip))]
+    time_map: Option<(f64, std::sync::Arc<gaanim_math::TimeMap>)>,
     /// Cached total timeline duration.
     pub cached_duration: f64,
     /// Playback state indicator.
@@ -649,6 +653,7 @@ impl Default for Timeline {
             keyframes: BTreeMap::new(),
             current_time: 0.0,
             max_clip_duration: 0.0,
+            time_map: None,
             cached_duration: 0.0,
             is_playing: false,
             playback_rate: 1.0,
@@ -1196,13 +1201,46 @@ impl Timeline {
     }
 
     /// Adds a clip to the timeline under a specific track and time interval.
+    /// Places the clips added from now on through `map`: a clip authored at
+    /// `origin + t` plays at `origin + map.played(t)`, and its easing follows
+    /// the warp. `None` ends the scope.
+    pub fn set_time_map(&mut self, map: Option<(f64, std::sync::Arc<gaanim_math::TimeMap>)>) {
+        self.time_map = map;
+    }
+
+    /// Where an instant authored now plays, under the current time map.
+    pub fn map_time(&self, time: f64) -> f64 {
+        match &self.time_map {
+            Some((origin, map)) => origin + map.played(time - origin),
+            None => time,
+        }
+    }
+
     pub fn add_clip(
         &mut self,
         track: TrackId,
         start: f64,
         duration: f64,
-        payload: ClipPayload,
+        mut payload: ClipPayload,
     ) -> ClipId {
+        let (start, duration) = match &self.time_map {
+            Some((origin, map)) => {
+                let authored = (start - origin, start + duration - origin);
+                let played = (map.played(authored.0), map.played(authored.1));
+                if let ClipPayload::Animation(animation) = &mut payload
+                    && duration > 0.0
+                {
+                    animation.rate_func = gaanim_math::RateFunc::Warp {
+                        inner: Box::new(animation.rate_func.clone()),
+                        map: map.clone(),
+                        played,
+                        authored,
+                    };
+                }
+                (origin + played.0, (played.1 - played.0).max(0.0))
+            }
+            None => (start, duration),
+        };
         self.property_revision =
             NEXT_PROPERTY_REVISION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let clip_id = self.clips.insert_with_key(|id| Clip {

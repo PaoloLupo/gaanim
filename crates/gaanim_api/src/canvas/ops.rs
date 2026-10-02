@@ -180,7 +180,7 @@ impl CanvasState {
                 AnimationType::RotateTo { .. }
                 | AnimationType::RotateBy { .. }
                 | AnimationType::RotateBy3D { .. } => "rotation",
-                AnimationType::SignalFloat { .. } => "signal",
+                AnimationType::SignalFloat { .. } | AnimationType::SignalKeyframes(_) => "signal",
                 AnimationType::PathTrim { .. } => "trim",
                 AnimationType::PathPointsTo { .. } => "points",
                 AnimationType::TextAnimator(_) => "text_animator",
@@ -364,6 +364,16 @@ pub(crate) enum Op {
     },
     /// Apply a seek-reversible zero-duration property cut at the cursor.
     Immediate(AnimationBuilder),
+    /// Adds a path modifier to `target` (and its members) from the cursor
+    /// on; `params` are the `Parameter`s holding its numbers.
+    PathModifier {
+        target: ObjectId,
+        kind: gaanim_animation::path_modifiers::ModifierKind,
+        params: Vec<ObjectId>,
+    },
+    /// Where the animations of the next `Play` or `Launch`, by index, play
+    /// their authored seconds, for those inside a warped composition.
+    TimeMaps(Vec<Option<Arc<gaanim_math::TimeMap>>>),
     /// Play several animations in parallel.
     Play(Vec<AnimationBuilder>),
     /// Play several animations in parallel from the cursor without moving

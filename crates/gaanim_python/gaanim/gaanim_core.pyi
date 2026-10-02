@@ -2100,6 +2100,106 @@ class Anim:
             scene.play(title.animate.write().sound("typing.wav", volume=0.6))
         """
         ...
+    def keyframes(
+        self,
+        times: Sequence[float],
+        *,
+        position: Optional[Sequence[Optional[tuple[float, float] | tuple[float, float, float]]]] = None,
+        rotation: Optional[Sequence[Optional[float]]] = None,
+        scale: Optional[Sequence[Optional[float | tuple[float, float] | tuple[float, float, float]]]] = None,
+        opacity: Optional[Sequence[Optional[float]]] = None,
+        fill: Optional[Sequence[Optional[Paint]]] = None,
+        stroke: Optional[Sequence[Optional[Paint]]] = None,
+        values: Optional[Sequence[Optional[float]]] = None,
+        easing: Optional[Easing | Sequence[Easing]] = None,
+        spatial: Literal["linear", "catmull_rom"] = "linear",
+    ) -> Anim:
+        """Move through several stops in one clip, with an easing per segment.
+
+        ``times`` are fractions of the animation: they start at ``0``, end at
+        ``1`` and increase. Each channel gives one value per time; ``None``
+        keeps the value the drawable has when the animation starts, so
+        ``position=[None, (0, 2), (3, 0)]`` starts from wherever it is.
+        ``position`` is ``(x, y)`` or ``(x, y, z)``, ``rotation`` an absolute
+        angle in radians, ``scale`` a factor or ``(sx, sy[, sz])``,
+        ``opacity`` within ``[0, 1]``, ``fill``/``stroke`` paints (a ``None``
+        first paint needs the drawable to have one).
+
+        ``easing`` is one ``Easing`` for every segment or one per segment
+        (linear by default). With ``spatial="catmull_rom"`` the position
+        follows a smooth curve through the stops, like After Effects'
+        spatial keyframes. The animation's own easing stays linear, so stops
+        land at their times; ``Scene.play(easing=)`` does not change it, but
+        ``.easing()`` remaps the whole clip. The duration is 1 s or
+        ``.duration()``.
+
+        On ``Parameter.animate`` pass ``values=`` instead of channels.
+        Mismatched lengths, times that do not run from 0 to 1, or other
+        invalid values raise ``ValueError``. It cannot be combined with
+        other targets in one ``Anim`` nor with ``settle``.
+
+        Example:
+            ball.animate.keyframes(
+                times=[0.0, 0.35, 0.7, 1.0],
+                position=[None, (0, 2.5), (2.5, 0), (4, 0)],
+                scale=[1.0, 1.0, (1.25, 0.8), 1.0],
+                easing=[Easing.ease_out(EasingCurve.QUADRATIC), Easing.ease_in(EasingCurve.QUADRATIC), Easing.SMOOTH],
+                spatial="catmull_rom",
+            ).duration(1.6)
+        """
+        ...
+    def throw(
+        self,
+        velocity: float | tuple[float, float],
+        *,
+        gravity: float = 9.8,
+        floor: Optional[float] = None,
+        restitution: float = 0.55,
+    ) -> Anim:
+        """Throw the drawable from where it is, with bounces until it rests.
+
+        ``velocity`` is ``(vx, vy)`` in units per second (a number throws
+        horizontally) and ``gravity`` pulls down in units per second squared.
+        ``floor`` is the height its lowest point bounces on, measured when
+        ``throw`` is called; each bounce keeps ``restitution`` (``[0, 1)``)
+        of the speed, and the throw ends when a bounce would rise less than
+        a thousandth of a unit. Without ``floor`` it flies until it falls
+        back to its starting height, which needs an upward velocity.
+
+        The motion is analytic, so any seek is exact. Unless set, the
+        duration is the time the throw takes and ``Scene.play(duration=)``
+        does not change it; ``.duration()`` plays the same arc faster or
+        slower. Invalid numbers, a start below the floor or a downward
+        throw without a floor raise ``ValueError``.
+
+        Example:
+            scene.play(ball.animate.throw(velocity=(3, 6), gravity=9.8, floor=-3, restitution=0.55))
+        """
+        ...
+    def inertia(
+        self,
+        velocity: float | tuple[float, float],
+        *,
+        friction: float = 3.0,
+        snap: Optional[Sequence[float | tuple[float, float]]] = None,
+    ) -> Anim:
+        """Glide the drawable from where it is, slowing down like a flick.
+
+        ``velocity`` is ``(vx, vy)`` in units per second (a number glides
+        horizontally); ``friction`` (per second, positive) sets how fast it
+        slows: the speed falls by ``e`` every ``1 / friction`` seconds. It
+        would rest ``velocity / friction`` away; with ``snap`` it ends
+        instead at the nearest snap point, where a number snaps only ``x``
+        and ``(x, y)`` a whole point.
+
+        Unless set, the duration is the time to cover 99.9% of the glide,
+        ``ln(1000) / friction`` seconds. Invalid numbers raise
+        ``ValueError``.
+
+        Example:
+            scene.play(coin.animate.inertia(velocity=4.0, friction=3.0, snap=[-2, 0, 2]))
+        """
+        ...
     def settle(self, overshoot: float = 0.12, frequency: float = 3.0, decay: float = 6.0) -> Anim:
         """Add an inertial bounce after the last value (follow-through).
 
@@ -2228,6 +2328,36 @@ class Composition:
         ...
     def stretch(self, seconds: float) -> Composition:
         """Rescale an animation-only subtree to an exact finite span; media are rejected."""
+        ...
+    def speed_ramp(self, speeds: float | Mapping[float, float]) -> Composition:
+        """Change the playback speed through the composition (a speed ramp).
+
+        ``speeds`` maps fractions of the composition (``0`` to ``1``) to
+        speeds, joined linearly: ``1`` is normal speed, ``0.15`` a strong
+        slow motion, ``2`` double speed. Before the first key and after the
+        last the speed holds; a single number is a constant speed. The span
+        becomes the time the ramp takes; children keep their order and
+        overlaps, and each clip's motion follows the ramp exactly, so seeks
+        match playback. Ramps nest and combine with ``stretch``, applied
+        after the ramp. Keys outside ``[0, 1]``, repeated keys, speeds
+        ``<= 0`` or media raise ``ValueError``.
+
+        Example:
+            scene.play(sequence(a, b, c).speed_ramp({0.0: 1.0, 0.4: 0.15, 0.6: 0.15, 1.0: 1.0}))
+        """
+        ...
+    def time_remap(self, easing: Easing) -> Composition:
+        """Run the composition's time through ``easing``.
+
+        At a fraction ``p`` of its span the composition shows what was
+        authored at ``easing(p)``: ``Easing.ease_in_out(...)`` starts and
+        ends slowly. The span keeps its length. The easing must go from 0 to
+        1 without going back, so Back, Elastic and springs raise
+        ``ValueError``, as do media.
+
+        Example:
+            scene.play(parallel(a, b).time_remap(Easing.ease_in_out(EasingCurve.CUBIC)))
+        """
         ...
     def repeat(self, count: int, *, delay: float = 0.0) -> Composition:
         """Play the whole animation-only subtree ``count`` times, ``delay`` seconds apart.
@@ -2656,6 +2786,87 @@ class Updater:
         """
         ...
 
+class PathModifiers:
+    """Adds path modifiers to a drawable; see ``Drawable.modifiers``."""
+    def zigzag(self, size: float = 0.1, ridges: int = 4, *, smooth: bool = False) -> PathModifier:
+        """Zig zag: ``ridges`` peaks on every segment, ``size`` units to each side.
+
+        Vertices stay in place; ``smooth`` makes waves instead of corners.
+        Animates ``size``. ``ridges`` outside ``1..=256`` raises ``ValueError``.
+        """
+        ...
+    def round_corners(self, radius: float) -> PathModifier:
+        """Round each corner between straight segments with an arc of ``radius`` units.
+
+        A side shorter than two radii limits its corners. Curves keep their
+        vertices. Animates ``radius`` (``>= 0``).
+        """
+        ...
+    def pucker_bloat(self, amount: float) -> PathModifier:
+        """Pucker (``amount < 0``) into spikes or bloat (``> 0``) into lobes.
+
+        Vertices move ``amount`` of the way to the path's center and the
+        curves between them the other way. Animates ``amount`` within
+        ``[-1, 1]``.
+        """
+        ...
+    def twist(self, angle: float) -> PathModifier:
+        """Twist the path about its center by ``angle`` radians.
+
+        The turn fades to nothing at the farthest vertex. Animates ``angle``.
+        """
+        ...
+    def wiggle_path(self, size: float = 0.1, *, detail: int = 6, frequency: float = 1.0, seed: int = 0) -> PathModifier:
+        """Wiggle the outline with seeded noise, alive in time.
+
+        ``detail`` points per segment move along the path's normal by up to
+        ``size`` units, changing ``frequency`` times a second from the
+        moment the modifier is added; the points are joined smoothly. The
+        same seed gives the same wiggle at the same time. Animates ``size``
+        and ``frequency``.
+        """
+        ...
+    def offset(self, amount: float, *, join: Literal["miter", "round", "bevel"] = "miter", copies: int = 1) -> PathModifier:
+        """Grow (``amount > 0``) or shrink (``< 0``) closed shapes by ``amount`` units.
+
+        Open paths become a band ``|amount|`` to each side. ``copies`` draws
+        that many outlines, ``amount`` apart, like concentric rings; they form
+        one path, so an inside-aligned stroke (the default) keeps only the
+        inner half of the outermost ring: stroke rings with
+        ``align="center"``. Shrinking past a shape's inner radius leaves
+        nothing. Animates ``amount``. ``copies`` outside ``1..=64`` raises
+        ``ValueError``.
+        """
+        ...
+
+class PathModifier:
+    """One modifier of a drawable's stack."""
+    @property
+    def names(self) -> list[str]:
+        """Names of the numbers this modifier animates, such as ``"size"``."""
+        ...
+    @property
+    def animate(self) -> PathModifierAnimation:
+        """Animations of the modifier's numbers, for ``Scene.play``."""
+        ...
+    def set(self, **values: float) -> None:
+        """Set numbers from the cursor on as a cut: ``zigzag.set(size=0.2)``.
+
+        An unknown name or an invalid value raises ``ValueError``.
+        """
+        ...
+
+class PathModifierAnimation:
+    """Animates a modifier's numbers; each method returns an ``Anim``.
+
+    A name the modifier does not have raises ``ValueError``.
+    """
+    def size(self, value: float) -> Anim: ...
+    def radius(self, value: float) -> Anim: ...
+    def amount(self, value: float) -> Anim: ...
+    def angle(self, value: float) -> Anim: ...
+    def frequency(self, value: float) -> Anim: ...
+
 class Drawable:
     left: LayoutExpression
     right: LayoutExpression
@@ -2672,6 +2883,23 @@ class Drawable:
     def parts(self) -> tuple[str, ...]: ...
     def animations(self) -> tuple[str, ...]:
         """Always empty: glTF models and their Actions are no longer supported."""
+        ...
+    @property
+    def modifiers(self) -> PathModifiers:
+        """The drawable's stack of non-destructive path modifiers.
+
+        Each method adds a modifier from the cursor on and returns it; its
+        numbers animate with ``modifier.animate``. Modifiers apply in the
+        order they were added, to every member of a group or text that has a
+        path, after trims, morphs and other animations, right before the
+        path is drawn. ``bounds()`` and layout still measure the authored
+        path.
+
+        Example:
+            zz = star.modifiers.zigzag(size=0.0, ridges=3)
+            star.modifiers.round_corners(0.15)
+            scene.play(zz.animate.size(0.12).duration(1.0))
+        """
         ...
     @property
     def animate(self) -> Anim:

@@ -1349,11 +1349,131 @@ impl Anim {
 
     /// Replace an empty animation proxy with a pure property callback.
     pub fn custom(mut self, animation: gaanim_animation::CustomAnimation) -> Result<Self, String> {
+        self.check_custom_channels(animation.channels(), "custom()")?;
+        self.inner.anim_type = AnimationType::CustomProperties(animation);
+        Ok(self)
+    }
+
+    /// Moves through several stops in one clip, with an easing per segment.
+    /// The easing of the whole animation stays linear unless set, so stops
+    /// land at their times; `Scene.play(easing=)` does not apply.
+    pub fn keyframes(
+        mut self,
+        keyframes: gaanim_animation::motion::Keyframes,
+    ) -> Result<Self, String> {
+        keyframes.validate()?;
+        self.check_custom_channels(&keyframes.channels(), "keyframes()")?;
+        self.inner.anim_type = AnimationType::Motion(gaanim_animation::motion::Motion::Keyframes(
+            Box::new(keyframes),
+        ));
+        Ok(self.linear())
+    }
+
+    /// Keyframes of a `Parameter`'s value.
+    pub fn signal_keyframes(
+        self,
+        keyframes: gaanim_animation::motion::ScalarKeyframes,
+    ) -> Result<Self, String> {
+        keyframes.validate()?;
+        let is_parameter = self.property_spec.as_ref().is_some_and(|spec| {
+            matches!(
+                spec.lock().expect("object spec poisoned").kind,
+                SpawnKind::ValueTracker(_)
+            )
+        });
+        if !is_parameter {
+            return Err("keyframes(values=...) animates a Parameter".into());
+        }
+        if !self.inner.anim_type.is_empty_properties() {
+            return Err("keyframes() requires an empty animate proxy".into());
+        }
+        Ok(self
+            .effect(AnimationType::SignalKeyframes(keyframes))
+            .linear())
+    }
+
+    /// Throws the drawable from where it is: a ballistic arc with
+    /// `velocity` (units per second) under `gravity` (units per second
+    /// squared, downward) that bounces on `floor`, the height its lowest
+    /// point stops at, keeping `restitution` of its speed at each bounce,
+    /// until it rests. Without a floor it flies until it falls back to its
+    /// starting height. Unless set, the duration is the time the throw takes;
+    /// a different one plays the same arc faster or slower.
+    pub fn throw(
+        mut self,
+        velocity: DVec2,
+        gravity: f64,
+        floor: Option<f64>,
+        restitution: f64,
+    ) -> Result<Self, String> {
+        self.check_custom_channels(&[gaanim_animation::CustomChannel::Position], "throw()")?;
+        let drop = match floor {
+            Some(floor) => {
+                let bounds = self
+                    .property_drawable()
+                    .ok_or("throw() requires Drawable.animate")?
+                    .bounds()
+                    .map_err(|error| format!("throw() measures the drawable: {error}"))?;
+                Some(floor - bounds.min.y)
+            }
+            None => None,
+        };
+        let throw = gaanim_animation::motion::Throw::new(velocity, gravity, drop, restitution)?;
+        self.natural_duration(throw.duration());
+        self.inner.anim_type =
+            AnimationType::Motion(gaanim_animation::motion::Motion::Throw(throw));
+        Ok(self.linear())
+    }
+
+    /// Glides the drawable from where it is with `velocity` (units per
+    /// second), slowing exponentially by `friction` per second, and ends at
+    /// the `snap` point nearest to where it would rest. Unless set, the
+    /// duration is the time the glide takes.
+    pub fn inertia(
+        mut self,
+        velocity: DVec2,
+        friction: f64,
+        snap: Vec<gaanim_animation::motion::Snap>,
+    ) -> Result<Self, String> {
+        self.check_custom_channels(&[gaanim_animation::CustomChannel::Position], "inertia()")?;
+        let inertia = gaanim_animation::motion::Inertia::new(velocity, friction, snap)?;
+        self.natural_duration(inertia.duration());
+        self.inner.anim_type =
+            AnimationType::Motion(gaanim_animation::motion::Motion::Inertia(inertia));
+        Ok(self.linear())
+    }
+
+    /// A duration the motion itself decides, kept over `Scene.play`
+    /// defaults unless one was set.
+    fn natural_duration(&mut self, seconds: f64) {
+        if !self.duration_explicit {
+            self.inner.duration = seconds;
+            self.duration_explicit = true;
+        }
+    }
+
+    /// Linear time, unless an easing was already chosen.
+    fn linear(mut self) -> Self {
+        if !self.rate_explicit {
+            self.inner.rate_func = RateFunc::Linear;
+            self.rate_explicit = true;
+        }
+        self
+    }
+
+    /// Whether this empty proxy may write `channels` with a pure callback.
+    fn check_custom_channels(
+        &self,
+        channels: &[gaanim_animation::CustomChannel],
+        method: &str,
+    ) -> Result<(), String> {
         if !matches!(&self.inner.anim_type, AnimationType::Properties(properties) if properties.is_empty())
         {
-            return Err("custom() requires an empty Drawable.animate proxy; combine separate animations with parallel()".into());
+            return Err(format!(
+                "{method} requires an empty Drawable.animate proxy; combine separate animations with parallel()"
+            ));
         }
-        if animation.channels().iter().any(|channel| {
+        if channels.iter().any(|channel| {
             matches!(
                 channel,
                 gaanim_animation::CustomChannel::Position
@@ -1365,10 +1485,7 @@ impl Anim {
             return Err("layout or live derived geometry owns this drawable's transform".into());
         }
         if self.property_target_is_primitive_3d()
-            && animation
-                .channels()
-                .iter()
-                .any(|channel| channel.is_paint())
+            && channels.iter().any(|channel| channel.is_paint())
         {
             return Err(
                 "custom paint channels require a vector Drawable; use material() for Primitive3D"
@@ -1376,7 +1493,7 @@ impl Anim {
             );
         }
         if let Some(drawable) = self.property_drawable() {
-            for channel in animation.channels() {
+            for channel in channels {
                 let property = match channel {
                     gaanim_animation::CustomChannel::Position => {
                         Some(gaanim_animation::PropertyChannel::Translation)
@@ -1394,14 +1511,13 @@ impl Anim {
                 };
                 if property.is_some_and(|property| drawable.property_is_bound(property)) {
                     return Err(format!(
-                        "{} is reactively bound; assign a fixed value before custom animation",
+                        "{} is reactively bound; assign a fixed value before {method}",
                         channel.name()
                     ));
                 }
             }
         }
-        self.inner.anim_type = AnimationType::CustomProperties(animation);
-        Ok(self)
+        Ok(())
     }
 
     pub(crate) fn update_properties(mut self, update: impl FnOnce(&mut PropertyAnimation)) -> Self {
@@ -1591,6 +1707,37 @@ impl Anim {
                     if let SpawnKind::Text(text) = &spec.kind {
                         let version = text.version;
                         spec.typed_text = Some((version, motion.after.clone()));
+                    }
+                }
+            }
+            AnimationType::Motion(gaanim_animation::motion::Motion::Keyframes(keyframes)) => {
+                let (fill, stroke) = keyframes.final_paints();
+                if let Some(spec) = &self.property_spec {
+                    let mut spec = spec.lock().expect("object spec poisoned");
+                    if let Some(paint) = fill {
+                        spec.fill = Some(paint);
+                    }
+                    if let Some(paint) = stroke {
+                        let width = spec.stroke.as_ref().map_or(1.0, |(_, width)| *width);
+                        spec.stroke = Some((paint, width));
+                    }
+                }
+            }
+            AnimationType::SignalKeyframes(keyframes) => {
+                if let Some(owner) = &self.owner {
+                    let mut owner = owner.lock().expect("canvas state poisoned");
+                    owner.widen_parameter_range(self.inner.target, keyframes.values());
+                    let mirror = owner.parameter_values.get(&self.inner.target).cloned();
+                    drop(owner);
+                    if let Some(mirror) = mirror {
+                        let mut value = mirror.lock().expect("parameter poisoned");
+                        *value = keyframes.end(*value);
+                    }
+                }
+                if let Some(spec) = &self.property_spec {
+                    let mut spec = spec.lock().expect("object spec poisoned");
+                    if let SpawnKind::ValueTracker(value) = &mut spec.kind {
+                        *value = keyframes.end(*value);
                     }
                 }
             }
@@ -1797,6 +1944,16 @@ impl Anim {
             AnimationType::StrokePaintTo { to } => (None, Some(to.clone())),
             AnimationType::FillColorTo { to } => (Some(Brush::Solid(*to)), None),
             AnimationType::StrokeColorTo { to } => (None, Some(Brush::Solid(*to))),
+            AnimationType::Motion(gaanim_animation::motion::Motion::Keyframes(keyframes)) => {
+                let (fill, stroke) = keyframes.final_paints();
+                if let Some(fill) = fill {
+                    paints.insert((self.inner.target, false), fill);
+                }
+                if let Some(stroke) = stroke {
+                    paints.insert((self.inner.target, true), stroke);
+                }
+                return Ok(());
+            }
             AnimationType::CustomProperties(callback) => {
                 let values = callback
                     .evaluate(self.inner.rate_func.evaluate(1.0))

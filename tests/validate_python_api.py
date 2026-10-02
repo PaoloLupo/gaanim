@@ -1627,6 +1627,68 @@ def validate_composition_contract(module) -> list[str]:
     return failures
 
 
+def validate_motion_wave_contract(module) -> list[str]:
+    """Keyframes, throw/inertia, speed ramps and path modifiers check their input."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    ball = scene.geometry.circle(0.3).move_to(-3, 0)
+
+    def check(label, ok):
+        if not ok:
+            failures.append(label)
+
+    check("keyframes accepted times that do not end at 1", raises_error(
+        ValueError, lambda: ball.animate.keyframes([0, 0.5], position=[None, (1, 1)])))
+    check("keyframes accepted a length mismatch", raises_error(
+        ValueError, lambda: ball.animate.keyframes([0, 0.5, 1], position=[None, (1, 1)])))
+    check("keyframes accepted two easings for one segment", raises_error(
+        ValueError, lambda: ball.animate.keyframes(
+            [0, 1], opacity=[1, 0], easing=[module.Easing.LINEAR, module.Easing.SMOOTH])))
+    check("keyframes accepted values= on a drawable", raises_error(
+        ValueError, lambda: ball.animate.keyframes([0, 1], values=[0, 1])))
+    check("keyframes combined with a property setter", raises_error(
+        ValueError, lambda: ball.animate.keyframes([0, 1], opacity=[1, 0]).fill(module.RED)))
+    check("keyframes rejected repeat", not raises_error(
+        Exception, lambda: ball.animate.keyframes([0, 1], opacity=[1, 0]).repeat(2, yoyo=True)))
+
+    throw = ball.animate.throw((0.0, 4.9), gravity=9.8)
+    check("throw without a floor did not last until it falls back", abs(module.parallel(throw).schedule().span - 1.0) < 1e-9)
+    check("throw accepted a downward start without a floor", raises_error(
+        ValueError, lambda: ball.animate.throw((1.0, -1.0))))
+    check("throw accepted a start below its floor", raises_error(
+        ValueError, lambda: ball.animate.throw((1.0, 1.0), floor=5.0)))
+    check("throw accepted restitution 1", raises_error(
+        ValueError, lambda: ball.animate.throw((1.0, 1.0), floor=-3.0, restitution=1.0)))
+    check("inertia accepted zero friction", raises_error(
+        ValueError, lambda: ball.animate.inertia(2.0, friction=0.0)))
+    check("inertia accepted a malformed snap", raises_error(
+        TypeError, lambda: ball.animate.inertia(2.0, snap=["x"])))
+
+    steps = [scene.geometry.dot(4).animate.fade_in().duration(1.0) for _ in range(2)]
+    slow = module.sequence(*steps).speed_ramp(0.5)
+    check("speed_ramp(0.5) did not double the span", abs(slow.schedule().span - 4.0) < 1e-9)
+    check("speed_ramp accepted a zero speed", raises_error(
+        ValueError, lambda: module.sequence(scene.geometry.dot(4).animate.fade_in()).speed_ramp({0.5: 0.0})))
+    check("speed_ramp accepted a key outside [0, 1]", raises_error(
+        ValueError, lambda: module.sequence(scene.geometry.dot(4).animate.fade_in()).speed_ramp({1.5: 1.0})))
+    check("time_remap accepted an overshooting easing", raises_error(
+        ValueError, lambda: module.sequence(scene.geometry.dot(4).animate.fade_in()).time_remap(
+            module.Easing.back(mode="in_out"))))
+
+    star = scene.geometry.star(5, 1.0, 0.5)
+    zigzag = star.modifiers.zigzag(0.0, 3)
+    check("zigzag does not name its size", list(zigzag.names) == ["size"])
+    check("a modifier animated a number it does not have", raises_error(
+        ValueError, lambda: zigzag.animate.radius(0.2)))
+    check("modifier animate did not return an Anim", isinstance(zigzag.animate.size(0.1), module.Anim))
+    check("pucker_bloat accepted an amount beyond 1", raises_error(
+        ValueError, lambda: star.modifiers.pucker_bloat(1.5)))
+    check("offset accepted an unknown join", raises_error(
+        ValueError, lambda: star.modifiers.offset(0.1, join="square")))
+    check("zigzag accepted zero ridges", raises_error(ValueError, lambda: star.modifiers.zigzag(0.1, 0)))
+    return failures
+
+
 def validate_easing_contract(module) -> list[str]:
     failures: list[str] = []
     preset_names = (
@@ -2647,6 +2709,7 @@ def main() -> int:
     missing.extend(validate_vector_geometry_contract(module))
     missing.extend(validate_camera_view_contract(module))
     missing.extend(validate_composition_contract(module))
+    missing.extend(validate_motion_wave_contract(module))
     missing.extend(validate_composable_properties_contract(module))
     missing.extend(validate_easing_contract(module))
     missing.extend(validate_scene_capability_surface(module))
