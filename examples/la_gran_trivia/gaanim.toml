@@ -1,0 +1,5 @@
+name = "la-gran-trivia"
+kind = "slides"
+entry = "main.py"
+assets_dir = "assets"
+output_dir = "exports"
