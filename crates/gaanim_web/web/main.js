@@ -143,6 +143,7 @@ window.gaanimStatus = (kind, message) => {
       remote.opened = true;
       downloads.delete(remote.name);
       showDownloads();
+      showBuffering(remote);
       fill(remote);
     }
     if (presenterSession === null && linkParams.has("present")) presentCard.hidden = false;
@@ -349,9 +350,11 @@ function showFill(r) {
 }
 
 let bufferingTimer = 0;
+// Shown once the file is open, while the frame on screen waits for its
+// bytes; before that, the welcome card shows the download.
 function showBuffering(r) {
   clearTimeout(bufferingTimer);
-  if (r.urgent > 0) bufferingTimer = setTimeout(() => (buffering.hidden = remote !== r), 300);
+  if (r.opened && r.urgent > 0) bufferingTimer = setTimeout(() => (buffering.hidden = remote !== r), 300);
   else buffering.hidden = true;
 }
 
