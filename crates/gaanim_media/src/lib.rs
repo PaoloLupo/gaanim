@@ -1419,7 +1419,10 @@ mod tests {
         narration::write_wav_take(&path, &[0.0; 8], 8_000).unwrap();
         let mut track = AudioTrack::new(&path, 10.0, Some(0.5), 1.0, 0.0, 0.0).unwrap();
         assert!(!needs_player(&track, 0.5, 2.0), "long before the sound");
-        assert!(needs_player(&track, 0.5, 9.5), "just before it, to be ready");
+        assert!(
+            needs_player(&track, 0.5, 9.5),
+            "just before it, to be ready"
+        );
         assert!(needs_player(&track, 0.5, 10.2), "while it sounds");
         assert!(!needs_player(&track, 0.5, 10.6), "after it");
         track.looping = true;

@@ -4822,8 +4822,14 @@ mod tests {
         let (rect, _) = canvas_background_geometry(&background);
 
         let mut request = None;
-        let (brush, transform) =
-            resolve_canvas_background_brush(&background, rect, (480, 270), 1.0, 0.0, Some(&mut request));
+        let (brush, transform) = resolve_canvas_background_brush(
+            &background,
+            rect,
+            (480, 270),
+            1.0,
+            0.0,
+            Some(&mut request),
+        );
         let request = request.expect("the shader frame is drawn on the render device");
         assert_eq!(request.time(), 1.0);
         let peniko::Brush::Image(image) = brush else {
@@ -4845,12 +4851,25 @@ mod tests {
         // A resting presentation animates the shader further, in the same
         // segment.
         let mut request = None;
-        resolve_canvas_background_brush(&background, rect, (480, 270), 1.0, 4.0, Some(&mut request));
+        resolve_canvas_background_brush(
+            &background,
+            rect,
+            (480, 270),
+            1.0,
+            4.0,
+            Some(&mut request),
+        );
         assert_eq!(request.expect("still the shader segment").time(), 5.0);
 
         let mut request = None;
-        let (brush, _) =
-            resolve_canvas_background_brush(&background, rect, (480, 270), 2.5, 4.0, Some(&mut request));
+        let (brush, _) = resolve_canvas_background_brush(
+            &background,
+            rect,
+            (480, 270),
+            2.5,
+            4.0,
+            Some(&mut request),
+        );
         assert!(request.is_none(), "solid segments need no shader frame");
         assert!(matches!(brush, peniko::Brush::Solid(color) if color == solid));
     }

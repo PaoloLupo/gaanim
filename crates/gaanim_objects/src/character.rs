@@ -76,12 +76,7 @@ pub struct CharacterDrive {
 /// where it was `j * step` seconds ago, for `j` in `0..=samples + 1`. The
 /// lag is how far a mass hanging from it trails behind, opposite to its
 /// acceleration and ringing after it stops.
-pub fn follow_lag(
-    positions: &[(f64, f64)],
-    step: f64,
-    frequency: f64,
-    damping: f64,
-) -> (f64, f64) {
+pub fn follow_lag(positions: &[(f64, f64)], step: f64, frequency: f64, damping: f64) -> (f64, f64) {
     let omega = std::f64::consts::TAU * frequency;
     let damped = omega * (1.0 - damping * damping).max(1e-6).sqrt();
     let mut lag = (0.0, 0.0);
@@ -517,7 +512,12 @@ impl CharacterCatalog {
     /// scene the same way.
     pub fn follow_sampling(&self) -> (f64, usize, f64, f64) {
         let follow = &self.idle.follow;
-        (follow.step, follow.samples, follow.frequency, follow.damping)
+        (
+            follow.step,
+            follow.samples,
+            follow.frequency,
+            follow.damping,
+        )
     }
 
     /// The whole drawing's transform at `t`: breathing, then the
@@ -528,7 +528,10 @@ impl CharacterCatalog {
         let mut whole = motion_affine(base, [0.0, 0.0, 1.0 - breath / 2.0, 1.0 + breath, 0.0]);
         if let Some(play) = expression
             && let Some(shown) = self.expressions.get(&play.name)
-            && let Some(motion) = shown.motion.as_ref().and_then(|name| self.motions.get(name))
+            && let Some(motion) = shown
+                .motion
+                .as_ref()
+                .and_then(|name| self.motions.get(name))
         {
             let since = t - play.start;
             if since >= 0.0 && (play.looped || since < shown.hold) {
