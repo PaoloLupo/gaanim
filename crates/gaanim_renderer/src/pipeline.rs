@@ -323,8 +323,10 @@ pub struct ExtractedElement {
     /// A [`gaanim_animation::StrokeTip`], which shares its path's order and
     /// draws above it.
     tip: bool,
-    /// A box background: drawn before the content it shares an order with.
-    backdrop: bool,
+    /// A box background and its [`gaanim_scene::LayoutBackdrop::depth`]:
+    /// drawn before the content it shares an order with, and before the
+    /// backgrounds of the boxes inside its box.
+    backdrop: Option<u32>,
 }
 
 /// A camera view screen: its view and the stroke drawn above it.
@@ -386,9 +388,14 @@ impl ExtractedElement {
                     .creation_order
                     .cmp(&b.render_order.creation_order),
             )
-            .then(b.backdrop.cmp(&a.backdrop))
+            .then(a.backdrop_rank().cmp(&b.backdrop_rank()))
             .then(b.echo_rank.cmp(&a.echo_rank))
             .then(b.tip.cmp(&a.tip))
+    }
+
+    /// Backgrounds first, the outermost box's first.
+    fn backdrop_rank(&self) -> u32 {
+        self.backdrop.unwrap_or(u32::MAX)
     }
 
     /// This element as the camera of a view sees it: `content` maps it onto
@@ -2299,7 +2306,9 @@ fn extract_world(
                 .get::<gaanim_animation::EchoGhost>(entity)
                 .map_or(0, |echo| echo.rank),
             tip: world.get::<gaanim_animation::StrokeTip>(entity).is_some(),
-            backdrop: world.get::<gaanim_scene::LayoutBackdrop>(entity).is_some(),
+            backdrop: world
+                .get::<gaanim_scene::LayoutBackdrop>(entity)
+                .map(|backdrop| backdrop.depth),
         });
         if exempt && let (Some(pins), Some(element)) = (pins.as_deref_mut(), extracted.last()) {
             pins.elements.push(element.clone());
@@ -2564,7 +2573,7 @@ fn three_d_elements<'a>(
             screen: None,
             echo_rank: 0,
             tip: false,
-            backdrop: false,
+            backdrop: None,
         });
     }
 }
@@ -2892,7 +2901,7 @@ pub fn compose_captured_at(
                 echo_rank: element.echo_rank,
                 // Captured frames keep their recorded order.
                 tip: false,
-                backdrop: false,
+                backdrop: None,
             }
         })
         .collect();
@@ -3051,7 +3060,7 @@ pub fn gaanim_render_system(
         Query<&ElementBlend>,
         Query<&gaanim_animation::EchoGhost>,
         TipQuery,
-        Query<(), With<gaanim_scene::LayoutBackdrop>>,
+        Query<&gaanim_scene::LayoutBackdrop>,
         ThreeDQuery,
         Option<Res<gaanim_scene::Lighting3D>>,
     ),
@@ -3433,7 +3442,10 @@ pub fn gaanim_render_system(
             }),
             echo_rank: echo_query.get(entity).map_or(0, |echo| echo.rank),
             tip: tip_query.contains(entity),
-            backdrop: backdrop_query.contains(entity),
+            backdrop: backdrop_query
+                .get(entity)
+                .ok()
+                .map(|backdrop| backdrop.depth),
         });
     }
     if let Some(camera) = gaanim_camera.as_deref() {
@@ -4496,7 +4508,7 @@ mod tests {
             screen: None,
             echo_rank: 0,
             tip: false,
-            backdrop: false,
+            backdrop: None,
         };
         let run = [
             element(kurbo::Rect::new(-6.0, 1.0, -3.0, 1.2)),
@@ -4531,7 +4543,7 @@ mod tests {
             screen: None,
             echo_rank: 0,
             tip: false,
-            backdrop: false,
+            backdrop: None,
         };
         let elements = vec![element(0.5), element(0.5), element(0.5), element(0.75)];
 
@@ -4562,7 +4574,7 @@ mod tests {
             screen: None,
             echo_rank: 0,
             tip: false,
-            backdrop: false,
+            backdrop: None,
         };
         let circle = kurbo::Circle::new((0.0, 0.0), 1.0);
         let red = peniko::Color::from_rgba8(200, 0, 0, 255);
@@ -4622,7 +4634,7 @@ mod tests {
             screen: None,
             echo_rank: 0,
             tip: false,
-            backdrop: false,
+            backdrop: None,
         };
         let multiply = Some(peniko::BlendMode::from(peniko::Mix::Multiply));
         let elements = vec![element(None), element(multiply), element(None)];
@@ -4660,7 +4672,7 @@ mod tests {
             screen: None,
             echo_rank: 0,
             tip: false,
-            backdrop: false,
+            backdrop: None,
         };
         let elements = vec![
             element(Some(mask(1, false))),

@@ -47,6 +47,9 @@ pub(crate) struct CanvasState {
     pub latest_layouts: HashMap<ObjectId, LayoutTreeSnapshot>,
     /// Authoring-side mirrors used to materialize initial reactive snapshots.
     pub parameter_values: HashMap<ObjectId, Arc<Mutex<f64>>>,
+    /// Lowest and highest value each parameter is set or animated to, which
+    /// a readout inside a layout reserves room for.
+    pub parameter_ranges: HashMap<ObjectId, (f64, f64)>,
     /// Authoring mirrors for every spawned object.
     pub object_specs: HashMap<ObjectId, SharedObjectSpec>,
     /// Frozen birth state. Once present, later setters must become timeline cuts.
@@ -92,6 +95,7 @@ impl CanvasState {
             latest_layouts: HashMap::new(),
             bound_properties: Default::default(),
             parameter_values: HashMap::new(),
+            parameter_ranges: HashMap::new(),
             object_specs: HashMap::new(),
             frozen_spawn_specs: HashMap::new(),
             owner: None,
@@ -104,6 +108,19 @@ impl CanvasState {
             poll_ask: None,
             stop_gates: Vec::new(),
             live_zones: Vec::new(),
+        }
+    }
+
+    /// Widen the range of values parameter `id` takes with `values`.
+    pub fn widen_parameter_range(&mut self, id: ObjectId, values: impl IntoIterator<Item = f64>) {
+        for value in values.into_iter().filter(|value| value.is_finite()) {
+            self.parameter_ranges
+                .entry(id)
+                .and_modify(|(low, high)| {
+                    *low = low.min(value);
+                    *high = high.max(value);
+                })
+                .or_insert((value, value));
         }
     }
 

@@ -2511,6 +2511,63 @@ impl SceneModel {
     /// scene-wide input, is identical to the compilation that produced it,
     /// and `timeline` is that checkpoint's timeline.
     #[allow(clippy::too_many_arguments)]
+    /// Values whose text each reactive number inside a layout keeps room
+    /// for, by number: its explicit reserve and its source at the corners of
+    /// the ranges its parameters take. A number outside a layout keeps none,
+    /// so its row stays centered on what it shows.
+    fn layout_readout_reserves(&self) -> HashMap<ObjectId, Vec<f64>> {
+        // Corners grow as 2^n; beyond a few inputs the explicit reserve rules.
+        const MAX_INPUTS: usize = 4;
+        let state = self.state.lock().expect("canvas state poisoned");
+        let mut numbers = HashSet::new();
+        for spec in state.object_specs.values() {
+            let spec = spec.lock().expect("object spec poisoned");
+            if spec.layout_owner.is_none() {
+                continue;
+            }
+            if matches!(spec.kind, SpawnKind::ReactiveReadout { .. }) {
+                numbers.insert(spec.id);
+            }
+            if let Some(layout) = &spec.reactive_readout_layout {
+                numbers.insert(layout.number);
+            }
+        }
+        numbers
+            .into_iter()
+            .filter_map(|id| {
+                let spec = state
+                    .object_specs
+                    .get(&id)?
+                    .lock()
+                    .expect("object spec poisoned");
+                let SpawnKind::ReactiveReadout {
+                    source, reserve, ..
+                } = &spec.kind
+                else {
+                    return None;
+                };
+                let mut values: Vec<f64> = reserve.iter().copied().collect();
+                let inputs = source.parameter_ids();
+                let ranges = inputs
+                    .iter()
+                    .map(|input| state.parameter_ranges.get(input).copied())
+                    .collect::<Option<Vec<_>>>()
+                    .filter(|ranges| ranges.len() <= MAX_INPUTS);
+                if let Some(ranges) = ranges {
+                    for corner in 0..1usize << ranges.len() {
+                        let value = source.evaluate(0.0, |logical| {
+                            let index = inputs.iter().position(|input| *input == logical)?;
+                            let (low, high) = ranges[index];
+                            Some(if corner >> index & 1 == 1 { high } else { low })
+                        });
+                        values.extend(value.ok());
+                    }
+                }
+                (!values.is_empty()).then_some((id, values))
+            })
+            .collect()
+    }
+
     pub(crate) fn compile_resumable<'w, 's>(
         &self,
         commands: &mut Commands<'w, 's>,
@@ -2596,6 +2653,7 @@ impl SceneModel {
             }
             None => SceneBuilder::new(commands, timeline, font_registry, text_config),
         };
+        builder.readout_reserves = self.layout_readout_reserves();
         let mut checkpoint = None;
         // Raw bounds for the canvas background (visual, no margin).
         let raw_bounds = self.frame.bounds();
@@ -4671,11 +4729,17 @@ impl SceneModel {
                             let z_index = background_source
                                 .and_then(|source| object_specs.get(&source))
                                 .map_or(0, |spec| spec.z_index);
+                            let mut depth = 0;
+                            let mut ancestor = tree.parent_by_id.get(parent_id);
+                            while let Some(id) = ancestor {
+                                depth += 1;
+                                ancestor = tree.parent_by_id.get(id);
+                            }
                             if let (Some(first), Some(state)) =
                                 (first, builder.states.get(background))
                             {
                                 builder.commands.entity(state.entity).insert((
-                                    gaanim_scene::LayoutBackdrop,
+                                    gaanim_scene::LayoutBackdrop { depth },
                                     RenderOrder {
                                         z_index,
                                         creation_order: first as u64,
@@ -9362,6 +9426,7 @@ impl SceneModel {
                 font_family,
                 font_weight,
                 rolling,
+                reserve: _,
             } => {
                 let parameter_entities: Vec<(gaanim_core::ObjectId, bevy::prelude::Entity)> =
                     source
@@ -9413,6 +9478,34 @@ impl SceneModel {
                 .unwrap_or_else(|_| (gaanim_core::kurbo::BezPath::new(), Bounds3D::default()));
                 let baseline = gaanim_animation::right_aligned_readout_baseline(bounds);
                 let (path, bounds) = gaanim_animation::right_align_readout_path(path, bounds);
+                // Inside a layout, the widest text it will show.
+                let reserve = builder
+                    .readout_reserves
+                    .get(&spec.id)
+                    .map_or(0.0, |values| {
+                        values
+                            .iter()
+                            .filter_map(|value| {
+                                let number = gaanim_animation::localize_decimal_separator(
+                                    &gaanim_animation::format_reactive_number(
+                                        *value, format, invalid,
+                                    ),
+                                    *decimal_separator,
+                                );
+                                gaanim_animation::shape_readout_text_with_weight(
+                                    builder.font_registry,
+                                    prefix,
+                                    &number,
+                                    suffix,
+                                    digit_family,
+                                    *font_weight,
+                                    size,
+                                )
+                                .ok()
+                            })
+                            .map(|(_, bounds)| bounds.width())
+                            .fold(0.0, f64::max)
+                    });
                 let rolling_component = rolling.as_ref().map(|options| {
                     let mut options = options.clone();
                     options
@@ -9436,6 +9529,7 @@ impl SceneModel {
                 } else {
                     (path, bounds)
                 };
+                let bounds = gaanim_animation::reserve_readout_bounds(bounds, reserve);
                 // Numbers are text: without an explicit or themed fill they use
                 // the body color, which contrasts with the scene background.
                 let svg_path = gaanim_objects::prelude::SvgPath {
@@ -9492,6 +9586,7 @@ impl SceneModel {
                             last_text: text,
                             last_path: source_path,
                             last_bounds: bounds,
+                            reserve,
                         },
                     ));
                 }
@@ -18758,6 +18853,131 @@ mod tests {
         assert_eq!(
             bounds.0.max.truncate(),
             gaanim_core::glam::DVec2::new(2.25, 1.25)
+        );
+    }
+
+    /// A box inside another, both with a background and starting with the
+    /// same content: the backgrounds share a render order, and only their
+    /// depth draws the outer one first.
+    #[test]
+    fn nested_box_backgrounds_draw_outermost_first() {
+        use crate::canvas::{LayoutMemberSpec, LayoutSpec, LayoutWithin};
+        use gaanim_layout::LayoutNodeKind;
+
+        fn decorated(scene: &mut SceneModel, member: &DrawableHandle) -> DrawableHandle {
+            let root = scene.group(&[member]);
+            member.claim_layout(&root).unwrap();
+            scene
+                .decorate_layout(&root, Some(PenikoColor::WHITE.into()), None, 0.0)
+                .unwrap();
+            let spec = LayoutSpec {
+                kind: LayoutNodeKind::Row { wrap: false },
+                style: Default::default(),
+                within: LayoutWithin::Intrinsic,
+            };
+            let members = vec![LayoutMemberSpec {
+                id: member.id,
+                style: member.layout_item(),
+            }];
+            scene.reflow_layout(&root, members, spec, 1, None, None, None);
+            root
+        }
+
+        let mut canvas = SceneModel::new(640, 360);
+        let number = canvas.reactive_readout(
+            gaanim_animation::ScalarSource::constant(44.0),
+            ".0f",
+            "",
+            "%",
+            "—",
+            None,
+        );
+        let inner = decorated(&mut canvas, &number);
+        decorated(&mut canvas, &inner);
+        let mut world = compile_canvas_for_layout(canvas);
+        let mut query = world.query::<(&gaanim_scene::LayoutBackdrop, &RenderOrder)>();
+        let mut backdrops = query
+            .iter(&world)
+            .map(|(backdrop, order)| (backdrop.depth, *order))
+            .collect::<Vec<_>>();
+        backdrops.sort_by_key(|(depth, _)| *depth);
+        assert_eq!(
+            backdrops
+                .iter()
+                .map(|(depth, _)| *depth)
+                .collect::<Vec<_>>(),
+            [0, 1]
+        );
+        assert_eq!(backdrops[0].1, backdrops[1].1);
+    }
+
+    /// A readout inside a layout keeps room for the widest value its
+    /// parameter takes, so its cell holds it while it counts; one outside a
+    /// layout keeps none.
+    #[test]
+    fn readouts_in_layouts_reserve_their_widest_value() {
+        use crate::canvas::{LayoutMemberSpec, LayoutSpec, LayoutWithin};
+        use gaanim_layout::LayoutNodeKind;
+
+        let mut canvas = SceneModel::new(640, 360);
+        let parameter = canvas.parameter(0.0).unwrap();
+        let readout = |canvas: &mut SceneModel| {
+            let number = canvas.reactive_readout(parameter.source(), ".0f", "", "%", "—", None);
+            canvas.reactive_readout_group(None, None, &number, None, 0.1)
+        };
+        let placed = readout(&mut canvas);
+        let root = canvas.group(&[&placed]);
+        placed.claim_layout(&root).unwrap();
+        let spec = LayoutSpec {
+            kind: LayoutNodeKind::Row { wrap: false },
+            style: Default::default(),
+            within: LayoutWithin::Intrinsic,
+        };
+        let members = vec![LayoutMemberSpec {
+            id: placed.id,
+            style: placed.layout_item(),
+        }];
+        canvas.reflow_layout(&root, members, spec, 1, None, None, None);
+        let _free = readout(&mut canvas);
+        canvas.wait(0.5);
+        parameter.set(4444.0).unwrap();
+        canvas.wait(0.5);
+
+        let mut world = compile_canvas_for_layout(canvas);
+        let mut query = world.query::<(&gaanim_animation::ReactiveReadout, &LocalBounds)>();
+        let mut readouts = query
+            .iter(&world)
+            .map(|(readout, bounds)| (readout.reserve, bounds.0.width(), readout.last_text.clone()))
+            .collect::<Vec<_>>();
+        readouts.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let [(free, _, _), (reserve, width, text)] = readouts.as_slice() else {
+            panic!("two readouts: {readouts:?}");
+        };
+        assert_eq!(*free, 0.0);
+        assert_eq!(text, "0%");
+        let registry = gaanim_text::font::FontRegistry::new();
+        let registry = &registry;
+        let body = gaanim_text::prelude::TextConfig::default();
+        let body = &body.roles[&gaanim_text::prelude::TextRole::Body];
+        let widest = |number: &str| {
+            gaanim_animation::shape_readout_text_with_weight(
+                registry,
+                "",
+                number,
+                "%",
+                &body.font_family,
+                None,
+                body.size,
+            )
+            .unwrap()
+            .1
+            .width()
+        };
+        assert!((reserve - widest("4444")).abs() < 1e-9, "{reserve}");
+        assert!(widest("0") < *reserve);
+        assert!(
+            (width - reserve).abs() < 1e-9,
+            "the cell holds the widest text"
         );
     }
 

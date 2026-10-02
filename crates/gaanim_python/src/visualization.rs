@@ -509,6 +509,13 @@ fn check_readout_spacing(spacing: Option<f64>) -> PyResult<()> {
     Ok(())
 }
 
+fn check_readout_reserve(reserve: Option<f64>) -> PyResult<()> {
+    if reserve.is_some_and(|reserve| !reserve.is_finite()) {
+        return Err(PyValueError::new_err("reserve must be a finite number"));
+    }
+    Ok(())
+}
+
 fn sampling(samples: Option<usize>, tolerance: f64) -> PyResult<Sampling> {
     if let Some(samples) = samples {
         if samples < 2 {
@@ -2908,7 +2915,7 @@ impl PyVisualization {
         Ok(PyParameter { inner })
     }
 
-    #[pyo3(signature = (source, *, inputs=Vec::new(), label=None, format=".2f", prefix="", suffix="", unit=None, font_size=None, color=None, invalid="invalid", decimal_separator=".", spacing=None))]
+    #[pyo3(signature = (source, *, inputs=Vec::new(), label=None, format=".2f", prefix="", suffix="", unit=None, font_size=None, color=None, invalid="invalid", decimal_separator=".", spacing=None, reserve=None))]
     #[allow(clippy::too_many_arguments)]
     fn readout<'py>(
         &self,
@@ -2925,10 +2932,12 @@ impl PyVisualization {
         invalid: &str,
         decimal_separator: &str,
         spacing: Option<f64>,
+        reserve: Option<f64>,
     ) -> PyResult<Py<PyReadout>> {
         crate::custom::ensure_authoring_allowed()?;
         let decimal_separator = parse_decimal_separator(decimal_separator)?;
         check_readout_spacing(spacing)?;
+        check_readout_reserve(reserve)?;
         let source = if source.is_callable() {
             callable_source(py, source.unbind(), inputs, &self.inner)?
         } else {
@@ -2953,13 +2962,19 @@ impl PyVisualization {
             decimal_separator,
             spacing,
         );
+        if let Some(value) = reserve {
+            number_part
+                .0
+                .readout_reserve(value)
+                .expect("reserve validated by the public binding");
+        }
         Py::new(
             py,
             PyReadout::initializer(group, label_part, equals_part, number_part, unit_part),
         )
     }
 
-    #[pyo3(signature = (initial, *, label, format=".2f", prefix="", suffix="", unit=None, font_size=None, color=None, invalid="invalid", decimal_separator=".", spacing=None))]
+    #[pyo3(signature = (initial, *, label, format=".2f", prefix="", suffix="", unit=None, font_size=None, color=None, invalid="invalid", decimal_separator=".", spacing=None, reserve=None))]
     #[allow(clippy::too_many_arguments)]
     fn variable<'py>(
         &self,
@@ -2975,10 +2990,12 @@ impl PyVisualization {
         invalid: &str,
         decimal_separator: &str,
         spacing: Option<f64>,
+        reserve: Option<f64>,
     ) -> PyResult<Py<PyVariable>> {
         crate::custom::ensure_authoring_allowed()?;
         let decimal_separator = parse_decimal_separator(decimal_separator)?;
         check_readout_spacing(spacing)?;
+        check_readout_reserve(reserve)?;
         let mut canvas = self.inner.lock().expect("scene canvas poisoned");
         let parameter = PyParameter {
             inner: canvas.parameter(initial).map_err(value_error)?,
@@ -2997,6 +3014,12 @@ impl PyVisualization {
             decimal_separator,
             spacing,
         );
+        if let Some(value) = reserve {
+            number_part
+                .0
+                .readout_reserve(value)
+                .expect("reserve validated by the public binding");
+        }
         Py::new(
             py,
             PyVariable::initializer(

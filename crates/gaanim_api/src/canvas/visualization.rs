@@ -79,11 +79,10 @@ pub(crate) fn parameter_in(
     }
     let handle = super::canvas_impl::spawn_in(state, SpawnKind::ValueTracker(initial), true);
     let value = Arc::new(Mutex::new(initial));
-    state
-        .lock()
-        .expect("canvas state poisoned")
-        .parameter_values
-        .insert(handle.id, value.clone());
+    let mut canvas = state.lock().expect("canvas state poisoned");
+    canvas.parameter_values.insert(handle.id, value.clone());
+    canvas.widen_parameter_range(handle.id, [initial]);
+    drop(canvas);
     Ok(Parameter { handle, value })
 }
 
@@ -128,6 +127,11 @@ impl Parameter {
             return Err(VisualizationError::InvalidParameter);
         }
         *self.value.lock().expect("parameter poisoned") = value;
+        self.handle
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .widen_parameter_range(self.handle.id, [value]);
         self.handle.clone().set_value(value);
         Ok(())
     }
@@ -3401,6 +3405,7 @@ impl SceneModel {
             font_family,
             font_weight,
             rolling: None,
+            reserve: None,
         })
     }
 
@@ -3441,6 +3446,7 @@ impl SceneModel {
             font_family: None,
             font_weight: None,
             rolling: Some(options),
+            reserve: None,
         }))
     }
 

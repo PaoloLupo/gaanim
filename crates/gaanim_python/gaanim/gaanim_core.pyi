@@ -7730,7 +7730,7 @@ class Visualization:
         omitted axes retain the default ``Re`` and ``Im`` titles.
         """
         ...
-    def readout(self, source: _ReactiveScalar | Callable[..., float], *, inputs: Sequence[Parameter | Variable | Computed | TimeInput] = (), label: Optional[str] = None, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[ColorLike] = None, invalid: str = "invalid", decimal_separator: str = ".", spacing: Optional[float] = None) -> Readout:
+    def readout(self, source: _ReactiveScalar | Callable[..., float], *, inputs: Sequence[Parameter | Variable | Computed | TimeInput] = (), label: Optional[str] = None, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[ColorLike] = None, invalid: str = "invalid", decimal_separator: str = ".", spacing: Optional[float] = None, reserve: Optional[float] = None) -> Readout:
         """Create a native numeric display with equally spaced, baseline-aligned terms.
 
         The label, equality sign, number, and unit all use ``font_size``;
@@ -7749,15 +7749,22 @@ class Visualization:
         (0.1 at the default size). A ``prefix`` or ``suffix`` belongs to the
         number, so ``suffix=" m"`` keeps its space and ``suffix="%"`` none. A
         negative or non-finite spacing raises ``ValueError``.
+
+        Inside a layout, the readout's cell is as wide as the widest text it
+        will show: the values its parameters are set or animated to (a
+        poll's ``percent`` reaches 100), and ``reserve``, a value for counts
+        with no known maximum, such as ``votes`` (``reserve=999``). The number
+        stays right-aligned in that room, so its neighbors do not move while
+        it counts. A non-finite ``reserve`` raises ``ValueError``.
         """
         ...
-    def variable(self, initial: float, *, label: str, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[ColorLike] = None, invalid: str = "invalid", decimal_separator: str = ".", spacing: Optional[float] = None) -> Variable:
+    def variable(self, initial: float, *, label: str, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[ColorLike] = None, invalid: str = "invalid", decimal_separator: str = ".", spacing: Optional[float] = None, reserve: Optional[float] = None) -> Variable:
         """Create an animatable scalar displayed as an aligned equation row.
 
         Every visible term uses ``font_size``, or 0.48 units when omitted.
         ``color`` applies to every visible term, including the changing value.
-        ``decimal_separator`` and ``spacing`` work as in ``readout`` (for
-        example ``","`` shows ``3,14``).
+        ``decimal_separator``, ``spacing`` and ``reserve`` work as in
+        ``readout`` (for example ``","`` shows ``3,14``).
         """
         ...
     def number_line(

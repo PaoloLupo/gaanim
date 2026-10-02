@@ -800,6 +800,9 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub rolling_tween_sources: Vec<(Entity, Vec<ObjectId>)>,
     /// Local baselines of reactive numbers, which readouts align their row on.
     pub readout_baselines: HashMap<ObjectId, f64>,
+    /// Values whose text each reactive number inside a layout keeps room
+    /// for, by authored id; see `SceneModel::layout_readout_reserves`.
+    pub(crate) readout_reserves: HashMap<ObjectId, Vec<f64>>,
     pub default_track: TrackId,
     mobject_tracks: HashMap<ObjectId, TrackId>,
     mobject_names: HashMap<ObjectId, String>,
@@ -993,6 +996,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_metrics,
             rolling_tween_sources,
             readout_baselines,
+            readout_reserves: HashMap::new(),
             default_track,
             mobject_tracks,
             mobject_names,
@@ -1298,6 +1302,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_metrics: HashMap::new(),
             rolling_tween_sources: Vec::new(),
             readout_baselines: HashMap::new(),
+            readout_reserves: HashMap::new(),
             default_track,
             mobject_tracks: HashMap::new(),
             mobject_names: HashMap::new(),
