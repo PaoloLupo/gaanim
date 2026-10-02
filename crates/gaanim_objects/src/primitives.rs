@@ -152,7 +152,8 @@ pub fn rounded_rect(id: ObjectId, width: f64, height: f64, corner_radius: f64) -
     bundle
 }
 
-/// Creates a line segment Mobject bundle.
+/// Creates a line segment Mobject bundle. Like every open primitive it has
+/// no fill: a path modifier or an edit that gives it area must not show one.
 pub fn line(id: ObjectId, start: kurbo::Point, end: kurbo::Point) -> MobjectBundle {
     let path = kurbo::Line::new(start, end).to_path(0.1);
     let min_x = start.x.min(end.x);
@@ -161,6 +162,7 @@ pub fn line(id: ObjectId, start: kurbo::Point, end: kurbo::Point) -> MobjectBund
     let max_y = start.y.max(end.y);
     let bounds = Bounds3D::new_2d(min_x, min_y, max_x, max_y);
     let mut bundle = MobjectBundle::new(id, path, bounds);
+    bundle.fill = FillBrush(None);
     bundle.tag = ObjectTag("Line".into());
     bundle
 }
@@ -184,6 +186,8 @@ pub fn arc(
         bounding_rect.y1,
     );
     let mut bundle = MobjectBundle::new(id, path, bounds);
+    // Open: without a fill the chord between its ends stays empty.
+    bundle.fill = FillBrush(None);
     bundle.tag = ObjectTag("Arc".into());
     bundle
 }
@@ -1466,6 +1470,32 @@ mod arrow_tests {
     use super::*;
     use gaanim_core::ObjectId;
     use kurbo::Shape;
+
+    #[test]
+    fn open_primitives_spawn_without_fill() {
+        let id = ObjectId::from_raw(0);
+        let (a, b) = (kurbo::Point::new(-1.0, 0.0), kurbo::Point::new(1.0, 0.5));
+        let open = [
+            line(id, a, b),
+            arc(
+                id,
+                kurbo::Point::ORIGIN,
+                kurbo::Vec2::new(1.0, 1.0),
+                0.0,
+                2.0,
+                0.0,
+            ),
+            arc_between_points(id, a, b, 1.0),
+            tangent_line(id, &[a, b], 0.5, 1.0).unwrap(),
+            dashed_line(id, a, b, 0.1, 0.05),
+            open_path(id, &[a, b, kurbo::Point::new(0.0, 1.0)]),
+        ];
+        for bundle in open {
+            assert!(bundle.fill.0.is_none(), "{} has a fill", bundle.tag.0);
+        }
+        // Closed shapes keep theirs.
+        assert!(circle(id, 1.0).fill.0.is_some());
+    }
 
     #[test]
     fn checkmark_stays_proportional_to_its_size() {

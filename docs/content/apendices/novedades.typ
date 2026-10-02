@@ -127,6 +127,10 @@ cambia*: lee «Al actualizar».
 - Una llave es una figura rellena sin trazo: coloréala con `fill`. Un
   `stroke` dibuja su contorno, y un tema la pinta como la familia `glyph`, no
   como `line`.
+- `line`, `arc`, `traced_path` y `tracking_line` nacen sin relleno, como
+  `polyline`: ya no hace falta `no_fill()`. Un arco o un trazo seguido que
+  dejaba ver un relleno blanco entre sus extremos ahora solo dibuja su trazo;
+  dale `fill()` si lo querías.
 - Reemplaza todos los archivos de la carpeta de Gaanim: el soporte de Python
   cambió su interfaz.
 

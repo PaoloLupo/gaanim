@@ -147,6 +147,8 @@ scene.render()
 
 Segmentos, flechas rectas y curvas, arcos y conectores. Los extremos
 reactivos (`Endpoint`) aceptan tuplas, objetos, `AnchorPoint` y `PointRef`.
+Las líneas, arcos, polilíneas, curvas y trazos seguidos nacen sin relleno:
+solo dibujan su trazo aunque ganen área.
 
 #api-entry(
   name: "Geometry.line",
@@ -250,7 +252,7 @@ turn = scene.geometry.curved_arrow_arc(0, 0, 2.5, 0.2, 1.8).fill(GOLD)
 #api-entry(
   name: "Geometry.arc",
   kind: "factory",
-  desc: [Arco de circunferencia con centro `(cx, cy)`; `start_angle` y `sweep_angle` en radianes. Usa `no_fill().stroke(...)` para verlo como contorno.],
+  desc: [Arco de circunferencia con centro `(cx, cy)`; `start_angle` y `sweep_angle` en radianes. Nace sin relleno, como las demás líneas; `fill()` rellena el segmento entre la cuerda y el arco.],
 )[
 ```python
 # show-code: true
