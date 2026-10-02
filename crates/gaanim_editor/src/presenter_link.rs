@@ -8,14 +8,17 @@
 //! (a `BroadcastChannel`); this module only reads and writes them.
 //!
 //! In a presentation with audience polls, only the audience page talks to
-//! the relay: it tells Presenter View who is playing, and Presenter View
-//! asks it to remove a player, start a new game or download the results.
+//! the relay: it tells Presenter View who is playing and passes on each of
+//! the relay's answers, so Presenter View's slides show the room's votes
+//! too, and Presenter View asks it to remove a player, start a new game or
+//! download the results.
 
 use bevy::prelude::*;
 use gaanim_timeline::timeline::Timeline;
 use serde::{Deserialize, Serialize};
 
 use crate::AudienceBlank;
+use crate::polls::SharedSnapshot;
 use crate::presenter::AudienceView;
 
 /// Largest jump, in seconds, that playback itself can explain between two
@@ -99,6 +102,12 @@ enum LinkMessage {
     Request {
         request: AudienceRequest,
     },
+    /// The relay's last answer while the presentation collects votes, or
+    /// `live: false` once it stops.
+    Results {
+        live: bool,
+        snapshot: Option<Box<SharedSnapshot>>,
+    },
     /// The sender's playhead. A heartbeat only corrects drift.
     State {
         #[serde(flatten)]
@@ -147,6 +156,9 @@ pub struct PresenterLink {
     audience: Option<AudienceView>,
     /// What Presenter View asked (audience page).
     requests: Vec<AudienceRequest>,
+    /// The relay's answer the audience page last passed on and Presenter
+    /// View has not applied yet.
+    results: Option<(bool, Option<SharedSnapshot>)>,
 }
 
 impl PresenterLink {
@@ -180,6 +192,21 @@ impl PresenterLink {
     /// Tell Presenter View the audience (audience page).
     pub(crate) fn send_audience(&mut self, view: Option<AudienceView>) {
         self.send(&LinkMessage::Audience { view });
+    }
+
+    /// Pass on the relay's last answer, or that votes stopped (audience
+    /// page).
+    pub(crate) fn send_results(&mut self, live: bool, snapshot: Option<SharedSnapshot>) {
+        self.send(&LinkMessage::Results {
+            live,
+            snapshot: snapshot.map(Box::new),
+        });
+    }
+
+    /// The relay's answer the audience page passed on since the last call
+    /// (Presenter View): whether votes are live, and the answer.
+    pub(crate) fn take_results(&mut self) -> Option<(bool, Option<SharedSnapshot>)> {
+        self.results.take()
     }
 
     /// Whether a Presenter View page said hello since the last call.
@@ -224,6 +251,9 @@ pub(crate) fn apply_link_messages_system(
             }
             LinkMessage::Audience { view } => link.audience = view,
             LinkMessage::Request { request } => link.requests.push(request),
+            LinkMessage::Results { live, snapshot } => {
+                link.results = Some((live, snapshot.map(|snapshot| *snapshot)))
+            }
             LinkMessage::State { state, heartbeat } => {
                 if heartbeat
                     && state.playing == timeline.is_playing

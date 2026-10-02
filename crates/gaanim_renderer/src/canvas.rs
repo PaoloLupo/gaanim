@@ -21,10 +21,10 @@ use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_resource::{
     BindGroup, BindGroupEntry, BindGroupLayout, BindGroupLayoutEntry, BindingResource, BindingType,
     BlendState, Buffer, BufferBindingType, BufferDescriptor, BufferUsages, ColorTargetState,
-    ColorWrites, Extent3d, MultisampleState, PrimitiveState, RawFragmentState,
-    RawRenderPipelineDescriptor, RawVertexState, RenderPassDescriptor, RenderPipeline,
-    ShaderStages, TextureDimension, TextureFormat, TextureSampleType, TextureUsages,
-    TextureViewDimension, TextureViewId,
+    ColorWrites, Extent3d, LoadOp, MultisampleState, Operations, PrimitiveState, RawFragmentState,
+    RawRenderPipelineDescriptor, RawVertexState, RenderPassColorAttachment, RenderPassDescriptor,
+    RenderPipeline, ShaderStages, StoreOp, TextureDimension, TextureFormat, TextureSampleType,
+    TextureUsages, TextureViewDimension, TextureViewId,
 };
 use bevy::render::renderer::{RenderContext, RenderDevice, RenderQueue, ViewQuery, render_system};
 use bevy::render::texture::GpuImage;
@@ -349,6 +349,40 @@ impl VelloCanvas {
     }
 }
 
+/// A small image the [`VelloView`] camera's canvas is also drawn into,
+/// scaled to fill it over `clear`: what that camera shows, for Presenter
+/// View to keep in sight without rasterizing the scene again. Make the
+/// image with [`CanvasMirror::target`]; the default handle draws nothing.
+#[derive(Resource, Clone, Default)]
+pub struct CanvasMirror {
+    pub image: Handle<Image>,
+    /// The scene's background, beneath the canvas's transparent pixels.
+    pub clear: Color,
+}
+
+/// Format of a [`CanvasMirror`] image: sRGB, so its texels sample as linear
+/// color as egui expects.
+const MIRROR_FORMAT: TextureFormat = TextureFormat::Rgba8UnormSrgb;
+
+impl CanvasMirror {
+    /// An image of `size` pixels a mirror, or a camera, can draw into.
+    pub fn target(size: UVec2) -> Image {
+        let mut image = Image::new_uninit(
+            Extent3d {
+                width: size.x.max(1),
+                height: size.y.max(1),
+                depth_or_array_layers: 1,
+            },
+            TextureDimension::D2,
+            MIRROR_FORMAT,
+            RenderAssetUsages::RENDER_WORLD,
+        );
+        image.texture_descriptor.usage =
+            TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT;
+        image
+    }
+}
+
 /// Scene complexity of the latest rendered frame, written by the render world.
 #[derive(Resource, Clone, Default)]
 pub struct VelloFrameStats(Arc<FrameStats>);
@@ -387,6 +421,13 @@ struct ExtractedCanvas {
     scene: Option<(Arc<Scene>, Mat4)>,
     /// Preview resolution scale; see [`PreviewResolution`].
     scale: f32,
+}
+
+/// The [`CanvasMirror`] the render world draws into this frame.
+#[derive(Resource, Default)]
+struct ExtractedMirror {
+    image: Option<AssetId<Image>>,
+    clear: LinearRgba,
 }
 
 /// The frame the canvas texture holds, so an identical frame is not
@@ -436,6 +477,7 @@ impl Plugin for VelloCanvasPlugin {
         let stats = VelloFrameStats::default();
         app.add_plugins(ExtractComponentPlugin::<VelloView>::default())
             .init_resource::<VelloCanvas>()
+            .init_resource::<CanvasMirror>()
             .insert_resource(stats.clone())
             .add_systems(PreUpdate, adapt_preview_resolution)
             .add_systems(PostUpdate, resize_canvas_target.after(CameraUpdateSystems));
@@ -447,7 +489,8 @@ impl Plugin for VelloCanvasPlugin {
             .insert_resource(stats)
             .init_resource::<ExtractedCanvas>()
             .init_resource::<RenderedCanvas>()
-            .add_systems(ExtractSchedule, extract_canvas)
+            .init_resource::<ExtractedMirror>()
+            .add_systems(ExtractSchedule, (extract_canvas, extract_mirror))
             .add_systems(
                 Render,
                 (
@@ -462,7 +505,8 @@ impl Plugin for VelloCanvasPlugin {
             )
             .add_systems(
                 Core2d,
-                composite_canvas
+                (composite_canvas, mirror_canvas)
+                    .chain()
                     .after(main_transparent_pass_2d)
                     .in_set(Core2dSystems::MainPass),
             );
@@ -543,6 +587,11 @@ fn extract_canvas(
         .iter()
         .next()
         .map(|(scene, transform)| (scene.0.clone(), transform.to_matrix()));
+}
+
+fn extract_mirror(mirror: Extract<Res<CanvasMirror>>, mut extracted: ResMut<ExtractedMirror>) {
+    extracted.image = (mirror.image != Handle::default()).then(|| mirror.image.id());
+    extracted.clear = mirror.clear.to_linear();
 }
 
 /// Maps the scene from world space to the canvas pixels of `view`, with the
@@ -790,6 +839,7 @@ fn prepare_composite(
     for (target, msaa) in &views {
         composite.ensure_pipeline(&device, target.main_texture_format(), msaa.samples());
     }
+    composite.ensure_pipeline(&device, MIRROR_FORMAT, 1);
     let Some(image) = extracted.image.and_then(|image| images.get(image)) else {
         composite.bind_group = None;
         return;
@@ -859,6 +909,56 @@ fn composite_canvas(
     if let Some(viewport) = camera.viewport.as_ref() {
         pass.set_camera_viewport(viewport);
     }
+    pass.set_render_pipeline(pipeline);
+    pass.set_bind_group(0, bind_group, &[]);
+    pass.draw(0..3, 0..1);
+}
+
+/// Draws the canvas, post-processed, into the [`CanvasMirror`] image over
+/// its clear color. It runs at the mirror's few pixels, after the canvas
+/// reached the camera, and only while a mirror is set.
+fn mirror_canvas(
+    _view: ViewQuery<(), With<VelloView>>,
+    mirror: Res<ExtractedMirror>,
+    images: Res<RenderAssets<GpuImage>>,
+    composite: Option<Res<CompositePipelines>>,
+    mut ctx: RenderContext,
+) {
+    let Some(target) = mirror.image.and_then(|image| images.get(image)) else {
+        return;
+    };
+    let Some(composite) = composite else {
+        return;
+    };
+    let (Some((_, bind_group)), Some(pipeline)) = (
+        composite.bind_group.as_ref(),
+        composite.pipeline(MIRROR_FORMAT, 1),
+    ) else {
+        return;
+    };
+    let clear = mirror.clear;
+    let color_attachments = [Some(RenderPassColorAttachment {
+        view: &target.texture_view,
+        depth_slice: None,
+        resolve_target: None,
+        ops: Operations {
+            load: LoadOp::Clear(vello::wgpu::Color {
+                r: f64::from(clear.red),
+                g: f64::from(clear.green),
+                b: f64::from(clear.blue),
+                a: f64::from(clear.alpha),
+            }),
+            store: StoreOp::Store,
+        },
+    })];
+    let mut pass = ctx.begin_tracked_render_pass(RenderPassDescriptor {
+        label: Some("gaanim_canvas_mirror"),
+        color_attachments: &color_attachments,
+        depth_stencil_attachment: None,
+        timestamp_writes: None,
+        occlusion_query_set: None,
+        multiview_mask: None,
+    });
     pass.set_render_pipeline(pipeline);
     pass.set_bind_group(0, bind_group, &[]);
     pass.draw(0..3, 0..1);

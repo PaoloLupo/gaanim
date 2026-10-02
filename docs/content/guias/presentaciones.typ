@@ -112,11 +112,13 @@ Con `--present`, la audiencia ve la diapositiva a pantalla completa y tú ves
   el tiempo transcurrido con un botón `↺` para reiniciarlo y una barra con un
   bloque por diapositiva y marcas de pasos; un clic salta a ese punto.
 - *Now on screen:* nombre de la diapositiva, `Step k of K · nombre` y una
-  vista grande de lo que ve la audiencia. Si la pantalla de la audiencia está
+  vista grande de lo que ve la audiencia, en vivo: con los votos y los
+  jugadores de la sala cuando hay público. Si la pantalla de la audiencia está
   en negro o en blanco, la vista lo indica. Debajo, unos botones permiten
   saltar al inicio de la diapositiva o a cualquiera de sus pasos.
-- *Up Next:* la siguiente pausa, indicando si es otro paso de la misma
-  diapositiva o la siguiente diapositiva.
+- *Up Next:* una miniatura de la siguiente pausa, indicando si es otro paso
+  de la misma diapositiva o la siguiente diapositiva. Las miniaturas muestran
+  el ensayo, no los votos de la sala.
 - *Speaker notes:* tus notas, con tamaño ajustable mediante `A−`/`A+`.
 - *Barra inferior:* primer paso, paso anterior, reproducir/pausa, paso
   siguiente, último paso, `Overview`, `Black` y `White`, el progreso de las

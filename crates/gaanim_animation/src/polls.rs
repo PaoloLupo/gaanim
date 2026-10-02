@@ -57,7 +57,7 @@ pub struct PollResults {
 }
 
 /// A player's game so far.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PlayerStats {
     pub score: u64,
     /// Quizzes answered right, and answered at all.
@@ -68,7 +68,7 @@ pub struct PlayerStats {
 }
 
 /// What a player answered on one poll.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PlayerAnswer {
     /// The answers chosen, one bit each (bit 0 for the first answer).
     pub options: u32,
@@ -165,7 +165,7 @@ impl PollResults {
 }
 
 /// A team's standing.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TeamResult {
     /// Its players' points added up.
     pub score: u64,

@@ -227,6 +227,7 @@ impl Plugin for GaanimEditorPlugin {
             .init_resource::<export::ExportState>()
             .init_resource::<export::StashedReplay>()
             .init_resource::<presenter::PresenterThumbnailCache>()
+            .init_resource::<presenter::PresenterMirror>()
             .init_resource::<presenter::PresenterOverviewState>()
             .init_resource::<presenter::PresenterPreferences>()
             .init_resource::<presenter::AudienceControlsState>()
@@ -290,6 +291,19 @@ impl Plugin for GaanimEditorPlugin {
             .add_systems(
                 Update,
                 presenter::render_previews_in_world_system.run_if(|| WEB),
+            )
+            .add_systems(
+                Update,
+                (
+                    presenter::presenter_mirror_system
+                        .after(viewport_adjust_system)
+                        .run_if(
+                            resource_exists::<gaanim_renderer::prelude::CanvasMirror>
+                                .and_then(resource_exists::<bevy_egui::EguiUserTextures>),
+                        ),
+                    presenter::fit_mirror_camera_system
+                        .after(gaanim_renderer::prelude::sync_gaanim_camera_to_bevy_system),
+                ),
             )
             .add_systems(
                 Update,
