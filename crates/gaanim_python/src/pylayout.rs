@@ -2563,9 +2563,10 @@ fn layout_error(error: gaanim_api::canvas::LayoutOwnershipError) -> PyErr {
     crate::LayoutOwnershipError::new_err(error.to_string())
 }
 
-#[pyclass(name = "Anchor", module = "gaanim_core", frozen, from_py_object)]
+#[pyclass(name = "Anchor", module = "gaanim_core", frozen, skip_from_py_object)]
 #[derive(Clone, Copy, Debug)]
 pub struct PyAnchor(pub Anchor);
+copy_from_py_object!(PyAnchor);
 
 #[pymethods]
 #[allow(non_snake_case)]
@@ -2608,9 +2609,15 @@ impl PyAnchor {
     }
 }
 
-#[pyclass(name = "Direction", module = "gaanim_core", frozen, from_py_object)]
+#[pyclass(
+    name = "Direction",
+    module = "gaanim_core",
+    frozen,
+    skip_from_py_object
+)]
 #[derive(Clone, Copy, Debug)]
 pub struct PyDirection(pub Direction);
+copy_from_py_object!(PyDirection);
 
 #[pymethods]
 #[allow(non_snake_case)]

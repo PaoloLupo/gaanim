@@ -1,6 +1,20 @@
 use ::gaanim_core as engine_core;
 use pyo3::prelude::*;
 
+/// Python's values of a `Copy` class extract as copies: PyO3's
+/// `from_py_object` clones them, which clippy flags in every class it marks.
+macro_rules! copy_from_py_object {
+    ($class:ty) => {
+        impl<'a, 'py> pyo3::FromPyObject<'a, 'py> for $class {
+            type Error = pyo3::pyclass::PyClassGuardError<'a, 'py>;
+
+            fn extract(obj: pyo3::Borrowed<'a, 'py, pyo3::PyAny>) -> Result<Self, Self::Error> {
+                Ok(*obj.extract::<pyo3::PyClassGuard<'_, $class>>()?)
+            }
+        }
+    };
+}
+
 pyo3::create_exception!(
     gaanim_core,
     LayoutOwnershipError,

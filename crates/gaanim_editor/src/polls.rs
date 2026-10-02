@@ -1747,6 +1747,10 @@ mod tests {
     /// polls -- --ignored`.
     #[test]
     #[ignore = "needs a running relay in GAANIM_TEST_RELAY"]
+    #[allow(
+        clippy::result_large_err,
+        reason = "ureq's error, unwrapped by the test"
+    )]
     fn votes_reach_the_presentation_through_a_relay() {
         let relay = std::env::var("GAANIM_TEST_RELAY").expect("set GAANIM_TEST_RELAY");
         let code = "TSTR2A";

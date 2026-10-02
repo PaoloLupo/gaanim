@@ -2568,6 +2568,7 @@ impl SceneModel {
             .collect()
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn compile_resumable<'w, 's>(
         &self,
         commands: &mut Commands<'w, 's>,
@@ -2939,7 +2940,7 @@ impl SceneModel {
                                 correct: quiz.correct,
                                 time: quiz.time,
                                 points: quiz.points,
-                                reveal: quiz.reveal.and_then(|reveal| at(reveal)),
+                                reveal: quiz.reveal.and_then(at),
                             }),
                         multiple: poll.multiple,
                         image: poll.image,
@@ -12902,7 +12903,7 @@ mod tests {
         assert_eq!(value_at(&right, 14.0), 10.0);
         assert!(value_at(&leader, 15.0) > 500.0);
         // Back in the room, fewer players again.
-        assert_eq!(value_at(&count, 3.0) < 5.0, true);
+        assert!(value_at(&count, 3.0) < 5.0);
     }
 
     /// `quiz.revealed()` is 0 until the playhead passes the reveal, even
@@ -15211,7 +15212,8 @@ mod tests {
     #[test]
     fn squash_stretch_of_a_follower_deforms_along_the_followed_motion() {
         // (make the follower, its delay behind the leader)
-        let followers: [(fn(&mut SceneModel, &DrawableHandle) -> DrawableHandle, f64); 2] = [
+        type MakeFollower = fn(&mut SceneModel, &DrawableHandle) -> DrawableHandle;
+        let followers: [(MakeFollower, f64); 2] = [
             (
                 |canvas: &mut SceneModel, leader: &DrawableHandle| {
                     let follower = canvas.circle(0.5).squash_stretch(0.1, 1.5).unwrap();

@@ -134,6 +134,7 @@ impl SceneModel {
     /// [x0, y0, x1, y1]; characters are `size` units tall at scale 1, and
     /// `motion` deforms them from how they move. Previews and exports show
     /// the scene's rehearsal.
+    #[allow(clippy::too_many_arguments)]
     pub fn live_zone(
         &mut self,
         _audience: &AudienceHandle,

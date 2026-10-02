@@ -160,9 +160,15 @@ pub(crate) fn parse_sampled_interpolation(
     }
 }
 
-#[pyclass(name = "AnchorPoint", module = "gaanim_core", frozen, from_py_object)]
+#[pyclass(
+    name = "AnchorPoint",
+    module = "gaanim_core",
+    frozen,
+    skip_from_py_object
+)]
 #[derive(Clone, Copy, Debug)]
 pub struct PyAnchorPoint(pub gaanim_api::canvas::AnchorPoint);
+copy_from_py_object!(PyAnchorPoint);
 
 #[pyclass(name = "Anim", module = "gaanim_core", from_py_object)]
 #[derive(Clone, Debug)]

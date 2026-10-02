@@ -735,22 +735,22 @@ mod tests {
             multiple: false,
             lean: Lean::Weights(vec![0.0, 1.0, 3.0]),
         };
-        let counts = &Rehearsal::plan(&spec, None, &[poll.clone()], None)
+        let counts = &Rehearsal::plan(&spec, None, std::slice::from_ref(&poll), None)
             .results_at(5.0)
             .counts["p"];
         assert_eq!(counts[0], 0);
         assert!(counts[2] > counts[1]);
         // The same spec plans the same session; another seed, another one.
         assert_eq!(
-            Rehearsal::plan(&spec, None, &[poll.clone()], None),
-            Rehearsal::plan(&spec, None, &[poll.clone()], None)
+            Rehearsal::plan(&spec, None, std::slice::from_ref(&poll), None),
+            Rehearsal::plan(&spec, None, std::slice::from_ref(&poll), None)
         );
         let other = RehearsalSpec {
             seed: 9,
             ..spec.clone()
         };
         assert_ne!(
-            Rehearsal::plan(&spec, None, &[poll.clone()], None),
+            Rehearsal::plan(&spec, None, std::slice::from_ref(&poll), None),
             Rehearsal::plan(&other, None, &[poll], None)
         );
     }
