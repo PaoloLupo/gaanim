@@ -156,7 +156,9 @@ Las mismas propiedades valen para `box`, `row`, `column`, `grid`, `stack`,
 *Hijo* (también en `Drawable.item`)
 
 - `grow`, `shrink`, `basis`: reparto del eje principal. `width="fill"` en una
-  fila equivale a `grow=1`.
+  fila equivale a `grow=1`. En una caja que se ajusta a su contenido no hay
+  espacio libre que repartir: un hijo que crece mide su contenido aunque
+  tenga `basis`, y un texto se ajusta al ancho que le deje el padre.
 - `align_self`: alineación propia en el eje transversal (en un grid, la
   vertical dentro de la celda).
 - `margin`: longitudes o `"auto"`, que se queda con el espacio libre.

@@ -35,8 +35,9 @@ impl SceneModel {
 
     /// Scene-space box of `handle` and its descendants at the authoring
     /// cursor, as they would render there: layout, transforms, text shaping
-    /// and animations that ended before the cursor all count. Geometry that
-    /// reactive updaters rebuild every frame is measured as declared.
+    /// and animations that ended before the cursor all count, and so do the
+    /// boxes' backgrounds. Geometry that reactive updaters rebuild every
+    /// frame is measured as declared.
     ///
     /// A drawable declared since the scene last advanced (by `play`, `wait`
     /// and the like) that nothing else refers to yet has no animation, cut or
@@ -89,6 +90,8 @@ impl SceneModel {
             .ok_or(BoundsError::Empty)?;
         timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
         timeline.seek(&mut world, time);
+        // Boxes and their backgrounds take their layout box every frame.
+        gaanim_animation::updaters::resolve_layout_boxes(&mut world, time);
 
         let entity = world
             .query::<(bevy::prelude::Entity, &gaanim_scene::MobjectId)>()
@@ -506,6 +509,112 @@ mod tests {
         assert_same(&scene, &inner);
         assert_same(&scene, &moved);
         assert_same(&scene, &slot);
+    }
+
+    /// A decorated 0.4 x 0.2 card, smaller than its background's 1 x 1
+    /// placeholder, beside a circle of diameter 1.2: a 1.6 x 1.2 row.
+    fn decorated_row(scene: &mut SceneModel) -> (DrawableHandle, DrawableHandle) {
+        use crate::canvas::{LayoutMemberSpec, LayoutSpec, LayoutWithin};
+        use gaanim_layout::LayoutNodeKind;
+
+        fn place(
+            scene: &mut SceneModel,
+            members: &[&DrawableHandle],
+            decorated: bool,
+        ) -> DrawableHandle {
+            let root = scene.group(members);
+            for member in members {
+                member.claim_layout(&root).unwrap();
+            }
+            if decorated {
+                scene
+                    .decorate_layout(&root, Some(Color::WHITE.into()), None, 0.1)
+                    .unwrap();
+            }
+            let snapshots = members
+                .iter()
+                .map(|member| LayoutMemberSpec {
+                    id: member.id,
+                    style: member.layout_item(),
+                })
+                .collect();
+            let spec = LayoutSpec {
+                kind: LayoutNodeKind::Row { wrap: false },
+                style: Default::default(),
+                within: LayoutWithin::Intrinsic,
+            };
+            scene.reflow_layout(&root, snapshots, spec, 1, None, None, None);
+            root
+        }
+
+        let slot = scene.rect(0.4, 0.2);
+        let card = place(scene, &[&slot], true);
+        let dot = scene.circle(0.6);
+        let row = place(scene, &[&card, &dot], false);
+        (row, card)
+    }
+
+    fn assert_size(bounds: Bounds3D, width: f64, height: f64) {
+        assert!(
+            (bounds.width() - width).abs() < 1e-6 && (bounds.height() - height).abs() < 1e-6,
+            "{bounds:?} is not {width} x {height}"
+        );
+    }
+
+    /// A decorated box measures its layout box, not its background's
+    /// placeholder (#291).
+    #[test]
+    fn a_decorated_box_measures_its_layout_box() {
+        let mut scene = SceneModel::new(16.0, 9.0);
+        let (row, card) = decorated_row(&mut scene);
+        assert_size(scene.bounds_of(&card).unwrap(), 0.4, 0.2);
+        assert_size(scene.bounds_of(&row).unwrap(), 1.6, 1.2);
+    }
+
+    /// A frame around a box, alone or inside another box, follows the box
+    /// (#292).
+    #[test]
+    fn surrounding_rects_frame_boxes() {
+        use bevy::prelude::With;
+
+        let mut scene = SceneModel::new(16.0, 9.0);
+        let (row, card) = decorated_row(&mut scene);
+        let expected = [
+            scene.bounds_of(&card).unwrap(),
+            scene.bounds_of(&row).unwrap(),
+        ];
+        for target in [&card, &row] {
+            scene
+                .surrounding_rect(vec![target.bounds_target()], [0.0; 4], 0.0)
+                .unwrap();
+        }
+        scene.wait(0.5);
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        scene.compile(&mut world);
+        world.flush();
+        let mut timeline = world.remove_resource::<Timeline>().unwrap();
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        timeline.seek(&mut world, 0.5);
+        gaanim_animation::tracking_line_system(&mut world);
+        gaanim_animation::surrounding_rect_system(&mut world);
+        let mut drawn: Vec<Bounds3D> = world
+            .query_filtered::<&gaanim_scene::LocalBounds, With<gaanim_animation::SurroundingRect>>()
+            .iter(&world)
+            .map(|bounds| bounds.0)
+            .collect();
+        drawn.sort_by(|a, b| a.width().total_cmp(&b.width()));
+        assert_eq!(drawn.len(), 2);
+        for (drawn, expected) in drawn.iter().zip(expected) {
+            assert_size(*drawn, expected.width(), expected.height());
+            assert!(
+                (drawn.center() - expected.center()).length() < 1e-6,
+                "{drawn:?} != {expected:?}"
+            );
+        }
     }
 
     #[test]

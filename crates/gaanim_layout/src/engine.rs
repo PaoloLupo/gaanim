@@ -762,6 +762,20 @@ fn build_node(
     item: Option<&LayoutItemStyle>,
     viewport: DVec2,
 ) -> Result<NodeId, LayoutError> {
+    build_item(tree, node, parent, parent_style, item, false, viewport)
+}
+
+/// [`build_node`] for a child whose siblings may include one that grows:
+/// `slack_grows`.
+fn build_item(
+    tree: &mut TaffyTree<LayoutId>,
+    node: &LayoutNode,
+    parent: Option<&LayoutNodeKind>,
+    parent_style: Option<&LayoutStyle>,
+    item: Option<&LayoutItemStyle>,
+    slack_grows: bool,
+    viewport: DVec2,
+) -> Result<NodeId, LayoutError> {
     let mut style = node.style.sanitized();
     if let Some(item) = item {
         style.width = item.width.unwrap_or(style.width).sanitize();
@@ -908,16 +922,33 @@ fn build_node(
                 )
             });
             taffy_style.flex_basis = match item.basis {
+                // Not even with a basis: Taffy would size the parent by the
+                // item's basis, so a paragraph with `basis=0` would break
+                // after every word.
+                _ if grow > 0.0 && parent_hugs => Dimension::auto(),
                 Some(basis) => Dimension::length(basis.max(0.0) as f32),
                 // A growing item shares the free space by weight, ignoring
                 // its own content size.
-                None if grow > 0.0 && !parent_hugs => Dimension::length(0.0),
+                None if grow > 0.0 => Dimension::length(0.0),
                 None => Dimension::auto(),
             };
+            // Then a growing item takes the slack both ways: when the parent
+            // is narrower than its content, it shrinks and the others keep
+            // their size, as they would beside it in a sized parent.
+            if parent_hugs && slack_grows && grow == 0.0 {
+                taffy_style.flex_shrink = 0.0;
+            }
             if let Some(align) = item.align {
                 taffy_style.align_self = Some(align_items(align));
             } else if matches!(cross, SizeRule::Fill(_)) {
                 taffy_style.align_self = Some(AlignSelf::Stretch);
+            }
+            // A box that hugs its content across a column is at most as wide
+            // as the column, as CSS sizes it (fit-content), so its text wraps
+            // there. Taffy would give it its whole one-line width.
+            let adapts = !matches!(node.kind, LayoutNodeKind::Leaf);
+            if !horizontal && adapts && cross == SizeRule::Hug && style.max_width.is_none() {
+                taffy_style.max_size.width = Dimension::percent(1.0);
             }
         }
         (Some(LayoutNodeKind::Grid { .. } | LayoutNodeKind::Stack), Some(item)) => {
@@ -982,16 +1013,26 @@ fn build_node(
     let result = if matches!(node.kind, LayoutNodeKind::Leaf) {
         tree.new_leaf_with_context(taffy_style, node.id)
     } else {
+        let horizontal = matches!(node.kind, LayoutNodeKind::Row { .. });
+        let slack_grows = node.children.iter().any(|child| {
+            let main = if horizontal {
+                child.style.width.unwrap_or(child.node.style.width)
+            } else {
+                child.style.height.unwrap_or(child.node.style.height)
+            };
+            child.style.grow > 0.0 || matches!(main, SizeRule::Fill(_))
+        });
         let children = node
             .children
             .iter()
             .map(|child| {
-                build_node(
+                build_item(
                     tree,
                     &child.node,
                     Some(&node.kind),
                     Some(&node.style),
                     Some(&child.style),
+                    slack_grows,
                     viewport,
                 )
             })
@@ -1311,6 +1352,71 @@ mod tests {
         .unwrap();
         assert_eq!(layout.boxes[&LayoutId(3)].bounds.height(), 20.0);
         assert_eq!(layout.boxes[&LayoutId(2)].bounds.height(), 20.0);
+    }
+
+    /// A paragraph that wraps at any width down to its longest word, 30
+    /// wide, and is 300 wide on one line.
+    struct Wrapping;
+    impl IntrinsicMeasure for Wrapping {
+        fn measure(&self, _: LayoutId, constraints: BoxConstraints) -> Result<DVec2, LayoutError> {
+            let width = constraints.max.x.clamp(30.0, 300.0);
+            Ok(DVec2::new(width, 3000.0 / width))
+        }
+
+        fn is_width_sensitive(&self, _: LayoutId) -> bool {
+            true
+        }
+    }
+
+    /// `L.column(L.row(icon, L.box(text).item(grow=1, shrink=1, basis=0)),
+    /// width=...)`: the row hugs its content up to the column's width, and
+    /// the text wraps in what the icon leaves (#293).
+    #[test]
+    fn a_growing_paragraph_with_zero_basis_wraps_in_a_hugging_row() {
+        let mut icon = LayoutNode::leaf(LayoutId(3));
+        icon.style.width = SizeRule::Fixed(20.0);
+        icon.style.height = SizeRule::Fixed(20.0);
+        let text = LayoutChild {
+            node: Box::new(LayoutNode::leaf(LayoutId(4))),
+            style: LayoutItemStyle {
+                grow: 1.0,
+                shrink: 1.0,
+                basis: Some(0.0),
+                ..LayoutItemStyle::default()
+            },
+        };
+        let row = LayoutNode::container(
+            LayoutId(2),
+            LayoutNodeKind::Row { wrap: false },
+            vec![
+                LayoutChild {
+                    node: Box::new(icon),
+                    style: LayoutItemStyle::default(),
+                },
+                text,
+            ],
+        );
+        let mut column = LayoutNode::container(
+            LayoutId(1),
+            LayoutNodeKind::Column { wrap: false },
+            vec![LayoutChild {
+                node: Box::new(row),
+                style: LayoutItemStyle::default(),
+            }],
+        );
+        column.style.width = SizeRule::Fixed(200.0);
+        let layout = resolve_layout(
+            &column,
+            Bounds3D::new_2d(-500.0, -500.0, 500.0, 500.0),
+            &Wrapping,
+            &[],
+        )
+        .unwrap();
+        let text = layout.boxes[&LayoutId(4)].bounds;
+        let row = layout.boxes[&LayoutId(2)].bounds;
+        assert!((row.width() - 200.0).abs() < EPSILON, "{row:?} {text:?}");
+        assert!((text.width() - 180.0).abs() < EPSILON, "{text:?}");
+        assert!((text.height() - 3000.0 / 180.0).abs() < EPSILON, "{text:?}");
     }
 
     #[test]

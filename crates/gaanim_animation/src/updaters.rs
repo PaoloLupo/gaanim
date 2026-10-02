@@ -1659,17 +1659,43 @@ impl TrackingLine {
     }
 }
 
-/// Sistema exclusivo que resuelve los endpoints de cada TrackingLine y regenera su Path2D.
-pub fn tracking_line_system(world: &mut World) {
-    let time = world
-        .get_resource::<PlaybackState>()
-        .map_or(0.0, |state| state.current_time);
+/// Give every layout box its box at `time`, and fit each box's background
+/// to it. Measuring a scene runs this too, since a box's background is a
+/// placeholder until then.
+pub fn resolve_layout_boxes(world: &mut World, time: f64) {
     let mut boxes = world.query::<(&LayoutBoundsTrack, &mut LocalBounds)>();
     for (track, mut bounds) in boxes.iter_mut(world) {
         if let Some(value) = track.at(time) {
             bounds.set_if_neq(LocalBounds(value));
         }
     }
+    let mut updates = Vec::new();
+    let mut backgrounds = world.query::<(Entity, &LayoutBackground)>();
+    for (entity, background) in backgrounds.iter(world) {
+        if let Some(bounds) = world.get::<LocalBounds>(background.container) {
+            let b = bounds.0;
+            let radius = background
+                .radius
+                .min(b.width().max(0.0) * 0.5)
+                .min(b.height().max(0.0) * 0.5);
+            updates.push((
+                entity,
+                gaanim_core::kurbo::RoundedRect::new(b.min.x, b.min.y, b.max.x, b.max.y, radius)
+                    .to_path(0.001),
+            ));
+        }
+    }
+    for (entity, path) in updates {
+        write_path(world, entity, path);
+    }
+}
+
+/// Sistema exclusivo que resuelve los endpoints de cada TrackingLine y regenera su Path2D.
+pub fn tracking_line_system(world: &mut World) {
+    let time = world
+        .get_resource::<PlaybackState>()
+        .map_or(0.0, |state| state.current_time);
+    resolve_layout_boxes(world, time);
     let mut updates = Vec::new();
 
     let mut query = world.query::<(Entity, &TrackingLine)>();
@@ -1729,21 +1755,6 @@ pub fn tracking_line_system(world: &mut World) {
             path = BezPath::new();
         }
         updates.push((entity, path));
-    }
-    let mut backgrounds = world.query::<(Entity, &LayoutBackground)>();
-    for (entity, background) in backgrounds.iter(world) {
-        if let Some(bounds) = world.get::<LocalBounds>(background.container) {
-            let b = bounds.0;
-            let radius = background
-                .radius
-                .min(b.width().max(0.0) * 0.5)
-                .min(b.height().max(0.0) * 0.5);
-            updates.push((
-                entity,
-                gaanim_core::kurbo::RoundedRect::new(b.min.x, b.min.y, b.max.x, b.max.y, radius)
-                    .to_path(0.001),
-            ));
-        }
     }
     for (entity, path) in updates {
         write_path(world, entity, path);
@@ -1943,13 +1954,10 @@ fn write_path(world: &mut World, entity: Entity, path: BezPath) {
         let local = if path.elements().is_empty() {
             gaanim_math::Bounds3D::new_2d(0.0, 0.0, 0.0, 0.0)
         } else {
+            // The path's own box, as every other shape has: frames, anchors
+            // and measurements read it.
             let rect = gaanim_core::kurbo::Shape::bounding_box(path.as_ref());
-            gaanim_math::Bounds3D::new_2d(
-                rect.x0 - 12.0,
-                rect.y0 - 12.0,
-                rect.x1 + 12.0,
-                rect.y1 + 12.0,
-            )
+            gaanim_math::Bounds3D::new_2d(rect.x0, rect.y0, rect.x1, rect.y1)
         };
         bounds.set_if_neq(LocalBounds(local));
     }
