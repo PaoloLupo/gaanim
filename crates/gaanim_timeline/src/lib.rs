@@ -389,7 +389,7 @@ pub fn camera_rig_system(world: &mut World) {
         let envelope = (1.0 - t).max(0.0);
         shake_offset += gaanim_core::glam::DVec3::new(
             phase.sin() * *amplitude * envelope,
-            (phase * 1.618_033_988_75).sin() * *amplitude * 0.6 * envelope,
+            (phase * std::f64::consts::GOLDEN_RATIO).sin() * *amplitude * 0.6 * envelope,
             0.0,
         );
     }
