@@ -38,7 +38,7 @@ use bevy::platform::time::Instant;
 use bevy::prelude::*;
 use gaanim_animation::polls::{AUDIENCE_AGE_CAP, PollResults};
 use gaanim_timeline::timeline::{PollSessionInfo, Timeline, TimelinePoll};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::PresentationMode;
 use crate::presenter_link::{AudienceRequest, LinkRole, PresenterLink};
@@ -102,6 +102,15 @@ pub(crate) struct AudiencePolls {
     gate: Option<String>,
     /// What the web player's Presenter View page was last told.
     shared: Option<Option<AudienceView>>,
+    /// Whether votes were live and which relay answer Presenter View was
+    /// last passed (audience page).
+    shared_results: Option<(bool, Option<u64>)>,
+    /// The game and answers Presenter View already has (audience page).
+    shared_answers: (Option<String>, Answers),
+    /// Presenter View: whether the audience page collects votes, and the
+    /// relay answer it passed on.
+    followed: bool,
+    following: Mutex<Option<Snapshot>>,
 }
 
 /// Advance a gated stop once its condition holds. Only a stop reached going
@@ -113,8 +122,12 @@ fn stop_gate_system(
     results: Res<PollResults>,
     mut timeline: ResMut<Timeline>,
     mut polls: ResMut<AudiencePolls>,
+    link: Option<Res<PresenterLink>>,
 ) {
-    if !presentation.active {
+    // The web player's audience page advances and Presenter View follows:
+    // both advancing could take the presentation two steps.
+    let follower = link.is_some_and(|link| link.role() == LinkRole::Presenter);
+    if !presentation.active || follower {
         polls.previous_time = None;
         polls.resting = None;
         polls.gate = None;
@@ -158,14 +171,42 @@ fn audience_poll_system(
     mut results: ResMut<PollResults>,
     project: Option<Res<crate::export::ProjectPaths>>,
     bundle: Option<Res<crate::bundle_player::BundlePlayback>>,
-    link: Option<Res<PresenterLink>>,
+    link: Option<ResMut<PresenterLink>>,
 ) {
     // The web player's Presenter View page leaves the relay to the
-    // audience page, which it follows.
-    let follower = link.is_some_and(|link| link.role() == LinkRole::Presenter);
-    let session = timeline.poll_session.as_ref().filter(|session| {
-        presentation.active && !follower && (!timeline.polls.is_empty() || session.lobby)
-    });
+    // audience page, and shows the results it passes on.
+    if let Some(mut link) = link.filter(|link| link.role() == LinkRole::Presenter) {
+        polls.client = None;
+        if let Some((live, snapshot)) = link.take_results() {
+            polls.followed = live;
+            match snapshot {
+                // Polls left out kept their answers, as with the relay.
+                Some(shared) => store(
+                    &polls.following,
+                    Snapshot::from_shared(shared, Instant::now()),
+                ),
+                None => {
+                    if let Ok(mut following) = polls.following.lock() {
+                        *following = None;
+                    }
+                }
+            }
+            polls.seen = None;
+        }
+        if !polls.followed {
+            if *results != PollResults::default() {
+                *results = PollResults::default();
+            }
+            return;
+        }
+        let seen = polls.seen;
+        polls.seen = update_results(&polls.following, &mut results, seen);
+        return;
+    }
+    let session = timeline
+        .poll_session
+        .as_ref()
+        .filter(|session| presentation.active && (!timeline.polls.is_empty() || session.lobby));
     let Some(session) = session else {
         // Ending the presentation ends its session: the thread closes the
         // open question, and the scene goes back to its previews.
@@ -250,10 +291,20 @@ fn share_audience_system(
             AudienceRequest::SaveResults => polls.save_results(),
         }
     }
+    let hello = link.take_peer_hello();
     let view = polls.view();
-    if link.take_peer_hello() || polls.shared.as_ref() != Some(&view) {
+    if hello || polls.shared.as_ref() != Some(&view) {
         link.send_audience(view.clone());
         polls.shared = Some(view);
+    }
+    // Each relay answer once, as it arrives, not every frame.
+    let live = polls.client.is_some();
+    let version = polls.client.as_ref().and_then(PollClient::version);
+    if hello || polls.shared_results != Some((live, version)) {
+        let snapshot = polls.client.as_ref().and_then(PollClient::snapshot);
+        let shared = snapshot.map(|snapshot| polls.share(&snapshot, hello));
+        link.send_results(live, shared);
+        polls.shared_results = Some((live, version));
     }
 }
 
@@ -287,6 +338,9 @@ enum Command {
     Stage(&'static str),
 }
 
+/// Each player's answer, by poll id and nickname.
+type Answers = HashMap<Arc<str>, HashMap<Arc<str>, gaanim_animation::polls::PlayerAnswer>>;
+
 /// What the relay last reported, and when it arrived.
 #[derive(Debug, Clone)]
 struct Snapshot {
@@ -311,7 +365,7 @@ struct Snapshot {
     stats: HashMap<Arc<str>, gaanim_animation::polls::PlayerStats>,
     /// Every answer heard in this game, by poll and nickname: the relay
     /// sends all of them on connecting and then the open poll's.
-    answers: HashMap<Arc<str>, HashMap<Arc<str>, gaanim_animation::polls::PlayerAnswer>>,
+    answers: Answers,
     respondents: HashMap<Arc<str>, u32>,
     latest: Option<Arc<str>>,
     /// The game the relay is in: a new one forgets earlier answers.
@@ -429,6 +483,112 @@ impl Snapshot {
             })
             .collect()
     }
+
+    /// This answer as the audience page sends it to Presenter View, with the
+    /// relay's clock moved on to now and the answers of the polls `send`
+    /// accepts.
+    fn share(&self, send: impl Fn(&Arc<str>) -> bool) -> SharedSnapshot {
+        SharedSnapshot {
+            version: self.version,
+            counts: strings(&self.counts),
+            deadlines: strings(&self.deadlines),
+            relay_now: self.relay_now + self.received.elapsed().as_secs_f64() * 1000.0,
+            leaderboard: string_pairs(&self.leaderboard),
+            audience: string_pairs(&self.audience),
+            avatars: strings(&self.avatars),
+            players: self.players,
+            connected: self.connected,
+            teams: self.teams.clone(),
+            player_teams: strings(&self.player_teams),
+            stats: strings(&self.stats),
+            answers: self
+                .answers
+                .iter()
+                .filter(|(poll, _)| send(poll))
+                .map(|(poll, answers)| (poll.to_string(), strings(answers)))
+                .collect(),
+            respondents: strings(&self.respondents),
+            latest: self.latest.as_deref().map(str::to_string),
+            game: self.game.clone(),
+        }
+    }
+
+    /// What the audience page sent, as received at `received`.
+    fn from_shared(shared: SharedSnapshot, received: Instant) -> Self {
+        Self {
+            version: shared.version,
+            counts: arcs(shared.counts),
+            deadlines: arcs(shared.deadlines),
+            relay_now: shared.relay_now,
+            received,
+            leaderboard: arc_pairs(shared.leaderboard),
+            audience: arc_pairs(shared.audience),
+            avatars: arcs(shared.avatars),
+            players: shared.players,
+            connected: shared.connected,
+            teams: shared.teams,
+            player_teams: arcs(shared.player_teams),
+            stats: arcs(shared.stats),
+            answers: shared
+                .answers
+                .into_iter()
+                .map(|(poll, answers)| (Arc::from(poll), arcs(answers)))
+                .collect(),
+            respondents: arcs(shared.respondents),
+            latest: shared.latest.map(Arc::from),
+            game: shared.game,
+        }
+    }
+}
+
+/// The relay's last answer as the web player's audience page forwards it to
+/// its Presenter View, which has no relay of its own. Names travel as
+/// strings (serde's `rc` feature is off).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SharedSnapshot {
+    version: u64,
+    counts: HashMap<String, Vec<u32>>,
+    deadlines: HashMap<String, f64>,
+    /// The relay's clock when the audience page sent it.
+    relay_now: f64,
+    leaderboard: Vec<(String, u64)>,
+    audience: Vec<(String, f64)>,
+    avatars: HashMap<String, gaanim_animation::characters::CharacterParts>,
+    players: u32,
+    connected: u32,
+    teams: Vec<gaanim_animation::polls::TeamResult>,
+    player_teams: HashMap<String, usize>,
+    stats: HashMap<String, gaanim_animation::polls::PlayerStats>,
+    answers: HashMap<String, HashMap<String, gaanim_animation::polls::PlayerAnswer>>,
+    respondents: HashMap<String, u32>,
+    latest: Option<String>,
+    game: Option<String>,
+}
+
+fn strings<V: Clone>(map: &HashMap<Arc<str>, V>) -> HashMap<String, V> {
+    map.iter()
+        .map(|(key, value)| (key.to_string(), value.clone()))
+        .collect()
+}
+
+fn arcs<V>(map: HashMap<String, V>) -> HashMap<Arc<str>, V> {
+    map.into_iter()
+        .map(|(key, value)| (Arc::from(key), value))
+        .collect()
+}
+
+fn string_pairs<V: Clone>(pairs: &[(Arc<str>, V)]) -> Vec<(String, V)> {
+    pairs
+        .iter()
+        .map(|(key, value)| (key.to_string(), value.clone()))
+        .collect()
+}
+
+fn arc_pairs<V>(pairs: Vec<(String, V)>) -> Vec<(Arc<str>, V)> {
+    pairs
+        .into_iter()
+        .map(|(key, value)| (Arc::from(key), value))
+        .collect()
 }
 
 pub(crate) struct PollClient {
@@ -596,76 +756,98 @@ impl PollClient {
         self.snapshot.lock().ok()?.clone()
     }
 
-    /// Bring the scene's results up to date. A new answer from the relay
-    /// (once a second) rebuilds them; between answers only a quiz's clock
-    /// moves. Returns the answer they now come from.
-    fn update(&self, results: &mut ResMut<PollResults>, seen: Option<u64>) -> Option<u64> {
-        let guard = self.snapshot.lock().ok()?;
-        let Some(snapshot) = guard.as_ref() else {
-            if !results.live {
-                results.live = true;
-            }
-            return None;
-        };
-        if seen != Some(snapshot.version) {
-            drop(guard);
-            let latest = self.results();
-            if **results != latest {
-                **results = latest;
-            }
-            return self.snapshot().map(|snapshot| snapshot.version);
-        }
-        let elapsed = snapshot.received.elapsed().as_secs_f64();
-        for (id, deadline) in &snapshot.deadlines {
-            let left = ((deadline - snapshot.relay_now) / 1000.0 - elapsed).max(0.0);
-            if results.remaining.get(id) != Some(&left) {
-                results.remaining.insert(id.clone(), left);
-            }
-        }
-        // Players who joined in the last minute are still arriving.
-        if results
-            .audience
-            .iter()
-            .any(|(_, age)| *age < AUDIENCE_AGE_CAP)
-        {
-            results.audience = snapshot.audience(elapsed);
-        }
-        Some(snapshot.version)
+    /// The relay answer the client holds, without copying it.
+    fn version(&self) -> Option<u64> {
+        self.snapshot
+            .lock()
+            .ok()?
+            .as_ref()
+            .map(|snapshot| snapshot.version)
     }
 
-    /// What the scene shows now: live results, with each quiz's seconds
-    /// left counted on from the relay's last answer.
+    fn update(&self, results: &mut ResMut<PollResults>, seen: Option<u64>) -> Option<u64> {
+        update_results(&self.snapshot, results, seen)
+    }
+
+    /// What the scene shows now.
+    #[cfg(test)]
     fn results(&self) -> PollResults {
-        let Some(snapshot) = self.snapshot() else {
-            return PollResults {
+        self.snapshot().map_or_else(
+            || PollResults {
                 live: true,
                 ..Default::default()
-            };
-        };
-        let elapsed = snapshot.received.elapsed().as_secs_f64();
-        PollResults {
-            live: true,
-            audience: snapshot.audience(elapsed),
-            counts: snapshot.counts,
-            remaining: snapshot
-                .deadlines
-                .into_iter()
-                .map(|(id, deadline)| {
-                    let left = (deadline - snapshot.relay_now) / 1000.0 - elapsed;
-                    (id, left.max(0.0))
-                })
-                .collect(),
-            leaderboard: snapshot.leaderboard,
-            players: snapshot.players,
-            connected: snapshot.connected,
-            avatars: snapshot.avatars,
-            teams: snapshot.teams,
-            player_teams: snapshot.player_teams,
-            stats: snapshot.stats,
-            answers: snapshot.answers,
-            respondents: snapshot.respondents,
-            latest: snapshot.latest,
+            },
+            results_of,
+        )
+    }
+}
+
+/// Bring the scene's results up to date with `snapshot`. A new answer from
+/// the relay (once a second) rebuilds them; between answers only a quiz's
+/// clock moves. Returns the answer they now come from.
+fn update_results(
+    snapshot: &Mutex<Option<Snapshot>>,
+    results: &mut ResMut<PollResults>,
+    seen: Option<u64>,
+) -> Option<u64> {
+    let guard = snapshot.lock().ok()?;
+    let Some(snapshot) = guard.as_ref() else {
+        if !results.live {
+            results.live = true;
         }
+        return None;
+    };
+    if seen != Some(snapshot.version) {
+        let latest = results_of(snapshot.clone());
+        if **results != latest {
+            **results = latest;
+        }
+        return Some(snapshot.version);
+    }
+    let elapsed = snapshot.received.elapsed().as_secs_f64();
+    for (id, deadline) in &snapshot.deadlines {
+        let left = ((deadline - snapshot.relay_now) / 1000.0 - elapsed).max(0.0);
+        if results.remaining.get(id) != Some(&left) {
+            results.remaining.insert(id.clone(), left);
+        }
+    }
+    // Players who joined in the last minute are still arriving.
+    if results
+        .audience
+        .iter()
+        .any(|(_, age)| *age < AUDIENCE_AGE_CAP)
+    {
+        results.audience = snapshot.audience(elapsed);
+    }
+    Some(snapshot.version)
+}
+
+/// What the scene shows from `snapshot`: live results, with each quiz's
+/// seconds left counted on from the relay's answer.
+fn results_of(snapshot: Snapshot) -> PollResults {
+    let elapsed = snapshot.received.elapsed().as_secs_f64();
+    PollResults {
+        live: true,
+        audience: snapshot.audience(elapsed),
+        counts: snapshot.counts,
+        remaining: snapshot
+            .deadlines
+            .into_iter()
+            .map(|(id, deadline)| {
+                let left = (deadline - snapshot.relay_now) / 1000.0 - elapsed;
+                (id, left.max(0.0))
+            })
+            .collect(),
+        leaderboard: snapshot.leaderboard,
+        players: snapshot.players,
+        connected: snapshot.connected,
+        avatars: snapshot.avatars,
+        teams: snapshot.teams,
+        player_teams: snapshot.player_teams,
+        stats: snapshot.stats,
+        answers: snapshot.answers,
+        respondents: snapshot.respondents,
+        latest: snapshot.latest,
     }
 }
 
@@ -1508,6 +1690,19 @@ fn store(snapshot: &Mutex<Option<Snapshot>>, mut latest: Snapshot) {
 use crate::presenter::AudienceView;
 
 impl AudiencePolls {
+    /// `snapshot` for Presenter View. Like the relay with phones, it sends
+    /// every poll's answers when Presenter View just said hello or a game
+    /// started, and otherwise only the polls whose answers changed: they
+    /// are most of an answer's size and grow with every question.
+    fn share(&mut self, snapshot: &Snapshot, everything: bool) -> SharedSnapshot {
+        let (game, sent) = &self.shared_answers;
+        let everything = everything || *game != snapshot.game;
+        let shared =
+            snapshot.share(|poll| everything || sent.get(poll) != snapshot.answers.get(poll));
+        self.shared_answers = (snapshot.game.clone(), snapshot.answers.clone());
+        shared
+    }
+
     /// The audience while a presentation with polls runs.
     pub(crate) fn view(&self) -> Option<AudienceView> {
         let client = self.client.as_ref()?;
@@ -1677,6 +1872,108 @@ mod tests {
         timeline.current_time = time;
         timeline.is_playing = playing;
         app.update();
+    }
+
+    /// The relay's answer for one game: `counts` and `answers` by poll.
+    fn relay_answer(polls: serde_json::Value) -> Snapshot {
+        let results = serde_json::json!({
+            "polls": polls,
+            "players": [{"name": "Ana", "score": 900}, {"name": "Bruno", "score": 0}],
+            "playerCount": 2,
+            "audience": [{"name": "Ana", "joined": 1000.0}, {"name": "Bruno", "joined": 2000.0}],
+            "now": 5000.0,
+            "latest": "q1",
+            "game": "g1",
+        });
+        Snapshot::from_results(serde_json::from_value(results).unwrap(), Instant::now())
+    }
+
+    #[test]
+    fn presenter_view_gets_each_polls_answers_once_and_keeps_them() {
+        let q0 = serde_json::json!({"counts": [1, 1], "answers": [
+            {"name": "Ana", "options": [0]}, {"name": "Bruno", "options": [1]}]});
+        let first = relay_answer(serde_json::json!({"q0": q0}));
+        let mut second = relay_answer(serde_json::json!({"q0": q0, "q1": {
+            "counts": [0, 1], "answers": [{"name": "Ana", "options": [1]}]}}));
+        second.version = 1;
+
+        let mut audience = AudiencePolls::default();
+        let hello = audience.share(&first, true);
+        let next = audience.share(&second, false);
+        assert_eq!(hello.answers.keys().collect::<Vec<_>>(), ["q0"]);
+        assert_eq!(
+            next.answers.keys().collect::<Vec<_>>(),
+            ["q1"],
+            "q0's answers did not change"
+        );
+        // It travels as JSON.
+        let next: SharedSnapshot =
+            serde_json::from_str(&serde_json::to_string(&next).unwrap()).unwrap();
+
+        let following = Mutex::new(None);
+        store(&following, Snapshot::from_shared(hello, Instant::now()));
+        store(&following, Snapshot::from_shared(next, Instant::now()));
+        let results = results_of(following.lock().unwrap().clone().unwrap());
+        assert_eq!(results.answers["q0"]["Bruno"].first(), Some(1));
+        assert_eq!(results.answers["q1"]["Ana"].first(), Some(1));
+        assert_eq!(results.counts["q1"], vec![0, 1]);
+        assert_eq!(results.players, 2);
+        assert_eq!(results.leaderboard[0], (Arc::from("Ana"), 900));
+        // Ana joined 4 s before the relay answered.
+        assert!((results.audience[0].1 - 4.0).abs() < 0.5, "{results:?}");
+    }
+
+    #[test]
+    fn presenter_view_shows_the_results_the_audience_page_passes_on() {
+        let mut app = App::new();
+        app.insert_resource(Timeline::new())
+            .insert_resource(PresentationMode { active: true })
+            .insert_resource(PresenterLink::new(LinkRole::Presenter))
+            .init_resource::<crate::AudienceBlank>()
+            .init_resource::<PollResults>()
+            .init_resource::<AudiencePolls>()
+            .add_systems(
+                Update,
+                (
+                    crate::presenter_link::apply_link_messages_system,
+                    audience_poll_system,
+                )
+                    .chain(),
+            );
+        let pass_on = |app: &mut App, live: bool, snapshot: Option<SharedSnapshot>| {
+            let message =
+                serde_json::json!({"type": "results", "live": live, "snapshot": snapshot});
+            app.world_mut()
+                .resource_mut::<PresenterLink>()
+                .receive(message.to_string());
+            app.update();
+        };
+        let answer = relay_answer(serde_json::json!({"q0": {"counts": [3, 2]}}));
+        let shared = AudiencePolls::default().share(&answer, true);
+        pass_on(&mut app, true, Some(shared));
+        let results = app.world().resource::<PollResults>();
+        assert!(results.live);
+        assert_eq!(results.counts["q0"], vec![3, 2]);
+        assert_eq!(results.players, 2);
+
+        pass_on(&mut app, false, None);
+        assert_eq!(
+            *app.world().resource::<PollResults>(),
+            PollResults::default(),
+            "back to the rehearsal once the votes stop"
+        );
+    }
+
+    #[test]
+    fn presenter_view_leaves_gated_stops_to_the_audience_page() {
+        let mut app = gated_app();
+        app.insert_resource(PresenterLink::new(LinkRole::Presenter));
+        frame(&mut app, 0.9, true);
+        frame(&mut app, 1.0, false);
+        app.world_mut().resource_mut::<PollResults>().players = 3;
+        app.update();
+        assert!(!app.world().resource::<Timeline>().is_playing);
+        assert_eq!(app.world().resource::<AudiencePolls>().gate, None);
     }
 
     #[test]

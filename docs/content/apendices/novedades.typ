@@ -160,6 +160,8 @@ cambia*: lee «Al actualizar».
   quedaba gris y casi no se veía.
 - En teléfonos de menos de 360 px de ancho, la barra superior muestra el
   apodo y los puntos completos.
+- Presenter View muestra en vivo lo que ve el público, con los votos y los
+  jugadores de la sala; antes mostraba una miniatura con los del ensayo.
 
 = 0.7.2
 

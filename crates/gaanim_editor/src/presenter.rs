@@ -1,5 +1,6 @@
 //! Presenter view hosted in a second native window.
 
+mod mirror;
 mod thumbnails;
 
 use bevy::platform::time::Instant;
@@ -16,6 +17,7 @@ use bevy_egui::{EguiContext, EguiSchedule, egui, input::EguiWantsInput};
 use gaanim_timeline::timeline::{SegmentMetadata, Timeline};
 use std::time::Duration;
 
+pub(crate) use mirror::{PresenterMirror, fit_mirror_camera_system, presenter_mirror_system};
 pub(crate) use thumbnails::{PresenterThumbnailCache, render_previews_in_world_system};
 use thumbnails::{
     PreviewStatus, ThumbnailKey, ThumbnailMoment, desired_thumbnail_edge, entry_segment_time,
@@ -928,6 +930,9 @@ fn paint_slide_progress(
 struct CuePreview {
     texture: Option<egui::TextureHandle>,
     stale: bool,
+    /// What the audience sees now, and its width over height; shown
+    /// instead of `texture`.
+    live: Option<(egui::TextureId, f32)>,
 }
 
 impl CuePreview {
@@ -937,11 +942,15 @@ impl CuePreview {
             .map(|(texture, stale)| Self {
                 texture: Some(texture),
                 stale,
+                live: None,
             })
             .unwrap_or_default()
     }
 
     fn aspect(&self) -> f32 {
+        if let Some((_, aspect)) = self.live {
+            return aspect;
+        }
         self.texture
             .as_ref()
             .map(|texture| {
@@ -971,6 +980,14 @@ fn show_preview(
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, palette::PREVIEW);
     let image_rect = match &preview.texture {
+        _ if let Some((texture, aspect)) = preview.live => {
+            let width = rect.width().min(rect.height() * aspect);
+            let image_rect =
+                egui::Rect::from_center_size(rect.center(), egui::vec2(width, width / aspect));
+            egui::Image::new(egui::load::SizedTexture::new(texture, image_rect.size()))
+                .paint_at(ui, image_rect);
+            image_rect
+        }
         Some(texture) => {
             let texture_size = texture.size_vec2();
             let scale = (rect.width() / texture_size.x).min(rect.height() / texture_size.y);
@@ -1534,6 +1551,7 @@ fn show_now_panel(
     timeline: &Timeline,
     preview_height: Option<f32>,
     requested_seek: &mut Option<f64>,
+    mirror_size: &mut Option<egui::Vec2>,
 ) {
     section_label(ui, "NOW ON SCREEN");
     ui.add(
@@ -1558,6 +1576,8 @@ fn show_now_panel(
     let height = preview_height
         .unwrap_or_else(|| ui.available_height() - STEP_STRIP_HEIGHT)
         .max(140.0);
+    // The live mirror is drawn at the pixels the slide gets here.
+    *mirror_size = Some(egui::vec2(ui.available_width(), height) * ui.ctx().pixels_per_point());
     show_preview(
         ui,
         &frame.current_preview,
@@ -2266,6 +2286,7 @@ pub(crate) fn presenter_view_system(
     mut preferences: ResMut<PresenterPreferences>,
     mut polls: Option<ResMut<crate::polls::AudiencePolls>>,
     mut link: Option<ResMut<crate::presenter_link::PresenterLink>>,
+    mut mirror: Option<ResMut<PresenterMirror>>,
 ) {
     let Ok((camera_entity, mut context)) = contexts.single_mut() else {
         return;
@@ -2300,10 +2321,16 @@ pub(crate) fn presenter_view_system(
 
     let frame = PresenterFrame {
         status: PlaybackStatus::of(&timeline),
-        current_preview: slide
-            .as_ref()
-            .map(|slide| CuePreview::lookup(&thumbnails, slide.thumbnail_key(), revision))
-            .unwrap_or_default(),
+        current_preview: match mirror.as_deref().and_then(PresenterMirror::live) {
+            Some(live) => CuePreview {
+                live: Some(live),
+                ..Default::default()
+            },
+            None => slide
+                .as_ref()
+                .map(|slide| CuePreview::lookup(&thumbnails, slide.thumbnail_key(), revision))
+                .unwrap_or_default(),
+        },
         next_preview: next
             .as_ref()
             .map(|next| CuePreview::lookup(&thumbnails, next.key, revision))
@@ -2325,6 +2352,7 @@ pub(crate) fn presenter_view_system(
     };
     let mut actions = Vec::new();
     let mut requested_seek = None;
+    let mut mirror_size = None;
     let mut retry = false;
     let mut audience_requests = AudienceRequests::default();
 
@@ -2391,6 +2419,7 @@ pub(crate) fn presenter_view_system(
                         &timeline,
                         Some(height),
                         &mut requested_seek,
+                        &mut mirror_size,
                     );
                     ui.add_space(18.0);
                     show_speaker_column(
@@ -2403,7 +2432,15 @@ pub(crate) fn presenter_view_system(
                 });
             }
             Some(slide) => {
-                show_now_panel(ui, &frame, slide, &timeline, None, &mut requested_seek);
+                show_now_panel(
+                    ui,
+                    &frame,
+                    slide,
+                    &timeline,
+                    None,
+                    &mut requested_seek,
+                    &mut mirror_size,
+                );
             }
             None => {
                 ui.vertical_centered(|ui| {
@@ -2486,6 +2523,11 @@ pub(crate) fn presenter_view_system(
     }
     for action in actions {
         apply_presentation_action(action, &mut timeline, &mut audience_blank, &mut overview);
+    }
+    if let Some(mirror) = mirror.as_deref_mut()
+        && mirror.wanted != mirror_size
+    {
+        mirror.wanted = mirror_size;
     }
     if let Some(time) = requested_seek {
         timeline.is_playing = false;

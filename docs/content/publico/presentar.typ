@@ -122,7 +122,8 @@ ensayo: si quieres que algo siga en vivo en un paquete, usa directamente el
 El #link("/guias/compartir/#compartir-un-enlace")[reproductor web] también
 presenta un paquete con encuestas: al presentar, la página de la presentación
 se conecta al relay que se grabó en el paquete y los teléfonos votan como con
-la aplicación. El Presenter View muestra los teléfonos y los jugadores, y
+la aplicación. El Presenter View muestra los teléfonos y los jugadores, su
+diapositiva sigue los votos de la sala como la de la audiencia, y
 desde él puedes quitar a un jugador o empezar una partida nueva. Los
 resultados no se guardan solos en una carpeta: *Download results* descarga
 un ZIP con `jugadores.csv`, `respuestas.csv` y `preguntas.csv`.
