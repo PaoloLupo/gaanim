@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#faf9f6" media="(prefers-color-scheme: light)" />
+    <meta name="robots" content="noindex" />
+    <title>Gaanim · Votar</title>
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="stylesheet" href="/app.css" />
+    <script src="/i18n.js" defer></script>
+    <script src="/avatar.js" defer></script>
+    <script src="/vote.js" defer></script>
+  </head>
+  <body>
+    <main class="page">
+      <header class="bar">
+        <a class="brand" href="/">
+          <img class="symbol symbol-dark" src="/symbol-dark.svg" alt="" width="36" height="24" />
+          <img class="symbol symbol-light" src="/symbol-light.svg" alt="" width="36" height="24" />
+          Gaanim
+        </a>
+        <span class="bar-end">
+          <span class="chip" id="me" hidden></span>
+          <span class="pill" title="Código de la presentación">
+            <span class="dot" id="dot" aria-hidden="true"></span>
+            <span id="session"></span>
+          </span>
+        </span>
+      </header>
+
+      <div class="banner" id="offline" role="status" hidden data-t="offline">
+        Sin conexión. Reintentando…
+      </div>
+
+      <!-- Waiting for the presenter to open a question. -->
+      <section class="center" id="waiting">
+        <div class="pulse" id="wait-pulse" aria-hidden="true"></div>
+        <div class="avatar-stage" id="wait-avatar" hidden></div>
+        <p class="team-badge" id="wait-team" hidden></p>
+        <h1 id="wait-title" data-t="waitTitle">Esperando la pregunta</h1>
+        <p id="wait-hint" data-t="waitHint">Deja esta página abierta: la pregunta aparecerá aquí.</p>
+        <button class="secondary" id="edit-button" type="button" hidden data-t="editButton">
+          Cambiar personaje
+        </button>
+      </section>
+
+      <!-- A quiz needs a nickname before its first answer; a presentation
+           that shows its audience asks for it as soon as the page opens. -->
+      <section class="center" id="join-view" hidden>
+        <h1 id="join-title" data-t="gameTitle">¡Empieza el juego!</h1>
+        <p id="join-hint" data-t="gameHint">Elige un apodo para competir.</p>
+        <!-- The character: a preview, a random one, and a row per part. -->
+        <div class="creator" id="creator" hidden>
+          <div class="avatar-stage" id="avatar-stage"></div>
+          <button class="secondary dice" id="avatar-random" type="button">
+            <span aria-hidden="true">🎲</span> <span data-t="randomButton">Al azar</span>
+          </button>
+          <div class="parts" id="avatar-parts"></div>
+        </div>
+        <form class="join" id="join-form" novalidate>
+          <!-- The teams, when the presentation lets players choose. -->
+          <fieldset class="team-picker" id="team-picker" hidden>
+            <legend data-t="chooseTeam">Elige tu equipo</legend>
+            <div class="team-options" id="team-options"></div>
+          </fieldset>
+          <label class="sr-only" for="name" data-t="nameLabel">Apodo</label>
+          <div class="name-row">
+            <input
+              id="name"
+              class="name-input"
+              name="name"
+              maxlength="20"
+              autocomplete="nickname"
+              autocapitalize="words"
+              spellcheck="false"
+              enterkeyhint="go"
+              data-tp="namePlaceholder"
+              aria-describedby="name-error"
+              required
+            />
+            <button class="secondary name-dice" id="name-random" type="button" data-tl="randomName">
+              <span aria-hidden="true">🎲</span>
+            </button>
+          </div>
+          <!-- One more thing the presentation asks, such as a student code. -->
+          <label class="extra-field" id="extra-field" hidden>
+            <span id="extra-label"></span>
+            <input
+              id="extra"
+              class="name-input"
+              name="extra"
+              maxlength="60"
+              autocomplete="off"
+              spellcheck="false"
+              enterkeyhint="go"
+              aria-describedby="name-error"
+            />
+          </label>
+          <button class="primary" id="join-button" type="submit" data-t="gameButton">Jugar</button>
+          <p class="error" id="name-error" role="alert"></p>
+        </form>
+      </section>
+
+      <!-- An open question. -->
+      <section class="question" id="question" hidden>
+        <div class="timer" id="timer" hidden>
+          <div class="timer-track"><div class="timer-fill" id="timer-fill"></div></div>
+          <span class="timer-text" id="timer-text" aria-live="off"></span>
+        </div>
+        <img class="question-image" id="question-image" alt="" hidden />
+        <h1 id="question-text"></h1>
+        <p class="hint" id="question-hint" hidden data-t="chooseSeveral">Elige todas las que correspondan.</p>
+        <ul class="answers" id="answers" aria-labelledby="question-text"></ul>
+        <button class="primary submit" id="submit" type="button" hidden data-t="submit">Enviar</button>
+        <p class="status" id="status" aria-live="polite"></p>
+      </section>
+
+      <!-- A quiz answered, or its time up: nothing that tells a neighbor
+           which answer was chosen, or whether it was right. -->
+      <section class="center sent" id="sent-view" hidden>
+        <div class="avatar-stage" id="sent-avatar" hidden></div>
+        <div class="pulse" id="sent-pulse" aria-hidden="true"></div>
+        <h1 id="sent-title"></h1>
+        <p id="sent-hint"></p>
+      </section>
+
+      <!-- How a quiz answer went. -->
+      <section class="center result" id="result-view" hidden>
+        <div class="avatar-stage" id="result-avatar" hidden></div>
+        <div class="verdict" id="verdict" aria-hidden="true"></div>
+        <h1 id="result-title"></h1>
+        <p class="points" id="result-points"></p>
+        <p id="result-detail"></p>
+      </section>
+
+      <!-- The questions are over: the podium, then the end. -->
+      <section class="center finale" id="finale-view" hidden>
+        <h1 id="finale-title"></h1>
+        <p id="finale-hint"></p>
+        <ol class="standings" id="standings" hidden></ol>
+        <ol class="podium" id="podium"></ol>
+        <div class="avatar-stage" id="finale-avatar" hidden></div>
+        <p class="points" id="finale-place"></p>
+        <p id="finale-detail"></p>
+      </section>
+
+      <template id="podium-template">
+        <li class="podium-place">
+          <div class="podium-avatar"></div>
+          <span class="podium-name"></span>
+          <span class="podium-score"></span>
+          <span class="podium-step"></span>
+        </li>
+      </template>
+
+      <!-- Removed by the presenter. -->
+      <section class="center" id="kicked-view" hidden>
+        <h1 data-t="kickedTitle">Saliste del juego</h1>
+        <p data-t="kickedHint">El presentador te quitó de esta sesión.</p>
+      </section>
+
+      <template id="part-template">
+        <div class="part">
+          <button class="step" type="button" data-step="-1" aria-label="‹">‹</button>
+          <span class="part-name"></span>
+          <button class="step" type="button" data-step="1" aria-label="›">›</button>
+        </div>
+      </template>
+
+      <template id="answer-template">
+        <li>
+          <button class="answer" type="button" aria-pressed="false">
+            <span class="shape" aria-hidden="true"></span>
+            <span class="label"></span>
+            <span class="letter" aria-hidden="true"></span>
+            <span class="check" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 12.5l4.5 4.5L19 7.5" />
+              </svg>
+            </span>
+          </button>
+        </li>
+      </template>
+    </main>
+  </body>
+</html>

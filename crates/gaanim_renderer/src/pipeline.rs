@@ -86,17 +86,21 @@ pub(crate) fn active_segment<T>(
 /// Resolve the background brush. With `gpu`, a shader paint draws a texture
 /// rendered on the render device and records its request there; otherwise
 /// the shader output is copied through the CPU.
+/// `rest` is the [`gaanim_animation::AmbientClock`] rest: the segment comes
+/// from `time_seconds`, and a shader animates `rest` seconds further.
 fn resolve_canvas_background_brush(
     background: &CanvasBackground,
     rect: kurbo::Rect,
     pixel_size: (u32, u32),
     time_seconds: f64,
+    rest: f64,
     gpu: Option<&mut Option<ShaderBackgroundRequest>>,
 ) -> (peniko::Brush, Option<kurbo::Affine>) {
     let paint = background.paint_at(time_seconds);
+    let shader_time = time_seconds + rest;
     let resolved = match (paint, gpu) {
         (BackgroundPaint::Shader(shader), Some(gpu)) => shader
-            .gpu_request(pixel_size.0, pixel_size.1, time_seconds)
+            .gpu_request(pixel_size.0, pixel_size.1, shader_time)
             .map(|request| request.in_frame((rect.width(), rect.height())))
             .map(|request| {
                 let brush = peniko::Brush::Image(peniko::ImageBrush::new(request.image().clone()));
@@ -106,7 +110,7 @@ fn resolve_canvas_background_brush(
         _ => paint.resolve_brush(
             pixel_size.0,
             pixel_size.1,
-            time_seconds,
+            shader_time,
             (rect.width(), rect.height()),
         ),
     };
@@ -134,11 +138,12 @@ fn fill_canvas_background(
     background: &CanvasBackground,
     pixel_size: (u32, u32),
     time_seconds: f64,
+    rest: f64,
     gpu: Option<&mut Option<ShaderBackgroundRequest>>,
 ) -> CanvasPaint {
     let (rect, transform) = canvas_background_geometry(background);
     let (brush, brush_transform) =
-        resolve_canvas_background_brush(background, rect, pixel_size, time_seconds, gpu);
+        resolve_canvas_background_brush(background, rect, pixel_size, time_seconds, rest, gpu);
     scene.fill(
         peniko::Fill::NonZero,
         transform,
@@ -932,6 +937,7 @@ fn fill_transition_background(
     background: &CanvasBackground,
     pixel_size: (u32, u32),
     transition: Option<&gaanim_scene::SceneTransitionFrame>,
+    rest: f64,
 ) {
     let Some(frame) = transition else {
         return;
@@ -943,7 +949,7 @@ fn fill_transition_background(
         return;
     }
     push_transition_mask(scene, mask);
-    fill_canvas_background(scene, background, pixel_size, incoming, None);
+    fill_canvas_background(scene, background, pixel_size, incoming, rest, None);
     pop_transition_mask(scene, mask);
 }
 
@@ -1938,13 +1944,43 @@ fn compile_scene_with_pins(
 ) -> vello::Scene {
     let extraction = extract_world(world, camera, pins, true);
     let background = world.get_resource::<CanvasBackground>();
-    compose_elements(
+    let mut scene = compose_elements(
         &extraction.elements,
         extraction.transition.as_ref(),
         background.map(|background| (background, background.pixel_size)),
         extraction.background_time,
+        0.0,
         None,
-    )
+    );
+    if let Some(overlay) = world.get_resource::<gaanim_animation::live::LiveOverlay>() {
+        append_live_overlay(&mut scene, overlay);
+    }
+    scene
+}
+
+/// Draw what live zones show above the scene, in scene units: each zone's
+/// characters clipped to it. Bundle recordings capture drawables, not this,
+/// so a bundle stores its zones and draws them when played.
+pub fn append_live_overlay(
+    scene: &mut vello::Scene,
+    overlay: &gaanim_animation::live::LiveOverlay,
+) {
+    for group in &overlay.groups {
+        if group.paths.is_empty() {
+            continue;
+        }
+        scene.push_clip_layer(peniko::Fill::NonZero, kurbo::Affine::IDENTITY, &group.clip);
+        for (path, brush) in &group.paths {
+            scene.fill(
+                peniko::Fill::NonZero,
+                kurbo::Affine::IDENTITY,
+                brush,
+                None,
+                path,
+            );
+        }
+        scene.pop_layer();
+    }
 }
 
 /// The drawables of a frame, sorted in draw order, with the transition and
@@ -2611,6 +2647,7 @@ fn compose_elements(
     transition: Option<&gaanim_scene::SceneTransitionFrame>,
     background: Option<(&CanvasBackground, (u32, u32))>,
     time_seconds: f64,
+    rest: f64,
     gpu: Option<&mut Option<ShaderBackgroundRequest>>,
 ) -> vello::Scene {
     let transition = transition.filter(|frame| !frame.is_empty());
@@ -2622,9 +2659,10 @@ fn compose_elements(
             canvas_bg,
             pixel_size,
             transition_background_time(transition, time_seconds),
+            rest,
             gpu,
         ));
-        fill_transition_background(&mut main_scene, canvas_bg, pixel_size, transition);
+        fill_transition_background(&mut main_scene, canvas_bg, pixel_size, transition, rest);
     }
     append_extracted_elements(&mut main_scene, elements, transition, canvas_paint.as_ref());
     main_scene
@@ -2794,6 +2832,19 @@ pub fn compose_captured(
     pixels_per_unit: Option<f64>,
     gpu: Option<&mut Option<ShaderBackgroundRequest>>,
 ) -> vello::Scene {
+    compose_captured_at(frame, store, background, pixels_per_unit, gpu, 0.0)
+}
+
+/// [`compose_captured`] with a shader background animated `rest` seconds
+/// past the frame's time (see [`gaanim_animation::AmbientClock`]).
+pub fn compose_captured_at(
+    frame: &FrameCapture,
+    store: &mut crate::fragment::FragmentStore,
+    background: Option<(&CanvasBackground, (u32, u32))>,
+    pixels_per_unit: Option<f64>,
+    gpu: Option<&mut Option<ShaderBackgroundRequest>>,
+    rest: f64,
+) -> vello::Scene {
     let margin = antialias_margin(pixels_per_unit);
     let elements: Vec<ExtractedElement> = frame
         .elements
@@ -2851,6 +2902,7 @@ pub fn compose_captured(
         transition.as_ref(),
         background,
         frame.background_time,
+        rest,
         gpu,
     )
 }
@@ -2873,11 +2925,13 @@ pub fn external_frame_system(
     mut external: ResMut<ExternalFrame>,
     gaanim_camera: Option<Res<gaanim_math::ResolvedCamera>>,
     canvas_bg: Option<Res<CanvasBackground>>,
-    (mut shader_frame, preview): (
+    (mut shader_frame, preview, ambient): (
         Option<ResMut<ShaderBackgroundFrame>>,
         Option<Res<crate::canvas::PreviewResolution>>,
+        Option<Res<gaanim_animation::AmbientClock>>,
     ),
     mut query_vello_scene: Query<&mut VelloScene2d, With<MainVelloScene>>,
+    live: Option<Res<gaanim_animation::live::LiveOverlay>>,
 ) {
     let external = &mut *external;
     let Some(frame) = external.frame.clone() else {
@@ -2899,13 +2953,17 @@ pub fn external_frame_system(
         _ => None,
     });
     let mut shader_request = None;
-    let main_scene = compose_captured(
+    let mut main_scene = compose_captured_at(
         &frame,
         &mut external.store,
         background,
         pixels_per_unit,
         shader_frame.is_some().then_some(&mut shader_request),
+        ambient.map_or(0.0, |clock| clock.rest),
     );
+    if let Some(overlay) = live.as_deref() {
+        append_live_overlay(&mut main_scene, overlay);
+    }
     external.store.end_frame();
     if let Some(frame) = shader_frame.as_mut() {
         frame.0 = shader_request;
@@ -3031,9 +3089,11 @@ pub fn gaanim_render_system(
         Option<Ref<StrokeProfile>>,
     )>,
     mut query_vello_scene: Query<&mut VelloScene2d, With<MainVelloScene>>,
-    (mut shader_frame, preview): (
+    (mut shader_frame, preview, live, ambient): (
         Option<ResMut<ShaderBackgroundFrame>>,
         Option<Res<crate::canvas::PreviewResolution>>,
+        Option<Res<gaanim_animation::live::LiveOverlay>>,
+        Option<Res<gaanim_animation::AmbientClock>>,
     ),
     (camera_screens, camera_sources, hud_query, layer_query, float_signals): CameraViewQueries,
     mut scratch: Local<(Vec<ExtractedElement>, std::collections::HashSet<Entity>)>,
@@ -3409,10 +3469,14 @@ pub fn gaanim_render_system(
         transition_frame.as_deref(),
         background,
         time_seconds,
+        ambient.map_or(0.0, |clock| clock.rest),
         shader_frame.is_some().then_some(&mut shader_request),
     );
     if let Some(frame) = shader_frame.as_mut() {
         frame.0 = shader_request;
+    }
+    if let Some(overlay) = live.as_deref() {
+        append_live_overlay(&mut main_scene, overlay);
     }
     local_extracted.clear();
 
@@ -4747,8 +4811,9 @@ mod tests {
 
         let mut request = None;
         let (brush, transform) =
-            resolve_canvas_background_brush(&background, rect, (480, 270), 1.0, Some(&mut request));
+            resolve_canvas_background_brush(&background, rect, (480, 270), 1.0, 0.0, Some(&mut request));
         let request = request.expect("the shader frame is drawn on the render device");
+        assert_eq!(request.time(), 1.0);
         let peniko::Brush::Image(image) = brush else {
             panic!("expected the placeholder image brush, got {brush:?}");
         };
@@ -4765,9 +4830,15 @@ mod tests {
             kurbo::Point::new(rect.x1, rect.y0)
         );
 
+        // A resting presentation animates the shader further, in the same
+        // segment.
+        let mut request = None;
+        resolve_canvas_background_brush(&background, rect, (480, 270), 1.0, 4.0, Some(&mut request));
+        assert_eq!(request.expect("still the shader segment").time(), 5.0);
+
         let mut request = None;
         let (brush, _) =
-            resolve_canvas_background_brush(&background, rect, (480, 270), 2.5, Some(&mut request));
+            resolve_canvas_background_brush(&background, rect, (480, 270), 2.5, 4.0, Some(&mut request));
         assert!(request.is_none(), "solid segments need no shader frame");
         assert!(matches!(brush, peniko::Brush::Solid(color) if color == solid));
     }
@@ -4802,6 +4873,7 @@ mod tests {
                 &mut world,
                 &background,
                 (width, height),
+                0.0,
                 0.0,
                 resident.then_some(&mut request),
             );

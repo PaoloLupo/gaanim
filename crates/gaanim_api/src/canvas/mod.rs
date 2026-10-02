@@ -99,6 +99,23 @@ pub use narration::{
     LiveTakeSpec, MarkerSpec, NarrationManifest, ScriptSpec, TextSource, VoiceoverError,
     VoiceoverHandle, VoiceoverSpec, live_take_recording, set_live_take_recording,
 };
+mod character;
+pub use character::{CharacterError, CharacterHandle};
+mod live;
+pub use gaanim_animation::live::{
+    LiveZone, Motion as LiveMotion, Program as LiveProgram, ProgramError as LiveProgramError,
+    ZoneNames as LiveZoneNames, ZoneState as LiveZoneState,
+};
+pub use gaanim_objects::character::Character;
+pub use live::{LiveZoneError, LiveZoneHandle, check_behavior};
+mod poll;
+pub use gaanim_animation::polls::{BarDirection, BarScale, TextAlign};
+pub use poll::{
+    ANSWER_COLORS, AudienceHandle, GateCondition, LeaderboardHandle, LiveTextOptions, MAX_POLL_OPTIONS,
+    MAX_TEAMS, POLL_IMAGE_SIZE, PollBarOptions, PollError, PollHandle, PollImage, PollSession,
+    PlayerFact, PollStyle, QUIZ_POINTS, QUIZ_TIME, REVEAL_AFTER, poll_image,
+    TEAM_COLORS, TeamsHandle,
+};
 mod theme;
 pub use gaanim_objects::prelude::SvgLoadError;
 pub use theme::{

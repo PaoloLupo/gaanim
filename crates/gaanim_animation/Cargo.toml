@@ -1,6 +1,6 @@
 [package]
 name = "gaanim_animation"
-version = "0.7.2"
+version = "0.8.0"
 license = "MIT OR Apache-2.0"
 edition = "2024"
 description = "Tween systems, interpolation lenses, keyframes, and reactive signals for gaanim v2"
@@ -9,6 +9,7 @@ description = "Tween systems, interpolation lenses, keyframes, and reactive sign
 # Local workspace dependencies
 gaanim_core = { path = "../gaanim_core" }
 gaanim_math = { path = "../gaanim_math" }
+gaanim_objects = { path = "../gaanim_objects" }
 gaanim_scene = { path = "../gaanim_scene" }
 gaanim_text = { path = "../gaanim_text" }
 
@@ -18,18 +19,24 @@ glam = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }
 thiserror = { workspace = true }
-serde = { version = "1.0", features = ["derive"], optional = true }
+# Live zones travel in bundles as JSON; the `serde` feature also derives the
+# other types.
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { workspace = true }
+# Live behaviors compute sin, exp, pow... with the same code on every
+# platform, so previews, exports and the web player pose characters alike.
+libm = "0.2"
 
 [features]
 dev-dynamic = [
     "bevy/dynamic_linking",
     "gaanim_math/dev-dynamic",
+    "gaanim_objects/dev-dynamic",
     "gaanim_scene/dev-dynamic",
     "gaanim_text/dev-dynamic",
 ]
 default = []
 serde = [
-    "dep:serde",
     "gaanim_core/serde",
     "gaanim_math/serde",
     "gaanim_scene/serde",

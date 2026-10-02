@@ -26,6 +26,7 @@
   ("guia/reactividad/", "tutorial/reactividad/"),
   ("guia/terminar-proyecto/", "tutorial/terminar-proyecto/"),
   ("guias/avanzado/", "guias/reactividad/"),
+  ("guias/zonas-vivas/", "publico/zonas-vivas/"),
   ("guides/layout/", "guias/layout/"),
   ("guides/migration-0-2/", "apendices/novedades/"),
   ("guides/performance/", "guias/proyectos/"),

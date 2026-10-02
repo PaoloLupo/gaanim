@@ -31,6 +31,30 @@ impl Default for PlaybackState {
     }
 }
 
+/// Time of ambient motion: shader backgrounds and post-processing.
+///
+/// A presentation resting at a stop leaves the timeline still, but its
+/// backgrounds should not freeze: while it rests, `rest` gathers the wall
+/// clock and ambient motion runs at the timeline's time plus `rest`. It is
+/// never reset, so the motion carries on without a jump when the timeline
+/// moves again. Outside presentations it stays zero, and previews, seeks and
+/// exports draw ambient motion at the exact timeline time.
+#[derive(bevy::prelude::Resource, Debug, Clone, Copy, Default, PartialEq)]
+pub struct AmbientClock {
+    /// Seconds the presentation spent resting so far.
+    pub rest: f64,
+}
+
+impl AmbientClock {
+    /// Longest wall-clock step taken in one frame, so a stall does not jump.
+    pub const MAX_STEP: f64 = 0.1;
+
+    /// Ambient time at timeline time `time`.
+    pub fn at(&self, time: f64) -> f64 {
+        time + self.rest
+    }
+}
+
 /// Componente que define una función de actualización continua para una entidad.
 /// Se ejecuta cada frame durante SceneSet::Updaters.
 #[derive(Component, Clone)]
@@ -1261,6 +1285,8 @@ pub struct DimensionLabelPlacement {
 pub struct TrackingLine {
     pub from: TrackingEndpoint,
     pub to: TrackingEndpoint,
+    /// Dash and gap lengths, for a dashed line.
+    pub dashes: Option<(f64, f64)>,
 }
 
 /// Filled arrow following a polyline of reactive world-space endpoints.
@@ -1631,7 +1657,48 @@ pub fn surrounding_rect_system(world: &mut World) {
 
 impl TrackingLine {
     pub fn new(from: TrackingEndpoint, to: TrackingEndpoint) -> Self {
-        Self { from, to }
+        Self {
+            from,
+            to,
+            dashes: None,
+        }
+    }
+
+    /// The same line, dashed: `dash` long and `gap` apart.
+    pub fn dashed(mut self, dash: f64, gap: f64) -> Self {
+        self.dashes = Some((dash, gap));
+        self
+    }
+}
+
+/// Give every layout box its box at `time`, and fit each box's background
+/// to it. Measuring a scene runs this too, since a box's background is a
+/// placeholder until then.
+pub fn resolve_layout_boxes(world: &mut World, time: f64) {
+    let mut boxes = world.query::<(&LayoutBoundsTrack, &mut LocalBounds)>();
+    for (track, mut bounds) in boxes.iter_mut(world) {
+        if let Some(value) = track.at(time) {
+            bounds.set_if_neq(LocalBounds(value));
+        }
+    }
+    let mut updates = Vec::new();
+    let mut backgrounds = world.query::<(Entity, &LayoutBackground)>();
+    for (entity, background) in backgrounds.iter(world) {
+        if let Some(bounds) = world.get::<LocalBounds>(background.container) {
+            let b = bounds.0;
+            let radius = background
+                .radius
+                .min(b.width().max(0.0) * 0.5)
+                .min(b.height().max(0.0) * 0.5);
+            updates.push((
+                entity,
+                gaanim_core::kurbo::RoundedRect::new(b.min.x, b.min.y, b.max.x, b.max.y, radius)
+                    .to_path(0.001),
+            ));
+        }
+    }
+    for (entity, path) in updates {
+        write_path(world, entity, path);
     }
 }
 
@@ -1640,12 +1707,7 @@ pub fn tracking_line_system(world: &mut World) {
     let time = world
         .get_resource::<PlaybackState>()
         .map_or(0.0, |state| state.current_time);
-    let mut boxes = world.query::<(&LayoutBoundsTrack, &mut LocalBounds)>();
-    for (track, mut bounds) in boxes.iter_mut(world) {
-        if let Some(value) = track.at(time) {
-            bounds.set_if_neq(LocalBounds(value));
-        }
-    }
+    resolve_layout_boxes(world, time);
     let mut updates = Vec::new();
 
     let mut query = world.query::<(Entity, &TrackingLine)>();
@@ -1659,9 +1721,19 @@ pub fn tracking_line_system(world: &mut World) {
                 .inverse();
             let from = inverse.transform_point3(from);
             let to = inverse.transform_point3(to);
-            let mut path = BezPath::new();
-            path.move_to(gaanim_core::kurbo::Point::new(from.x, from.y));
-            path.line_to(gaanim_core::kurbo::Point::new(to.x, to.y));
+            let (from, to) = (
+                gaanim_core::kurbo::Point::new(from.x, from.y),
+                gaanim_core::kurbo::Point::new(to.x, to.y),
+            );
+            let path = match line.dashes {
+                Some((dash, gap)) => gaanim_objects::primitives::dash_path(from, to, dash, gap),
+                None => {
+                    let mut path = BezPath::new();
+                    path.move_to(from);
+                    path.line_to(to);
+                    path
+                }
+            };
             updates.push((entity, path));
         }
     }
@@ -1705,21 +1777,6 @@ pub fn tracking_line_system(world: &mut World) {
             path = BezPath::new();
         }
         updates.push((entity, path));
-    }
-    let mut backgrounds = world.query::<(Entity, &LayoutBackground)>();
-    for (entity, background) in backgrounds.iter(world) {
-        if let Some(bounds) = world.get::<LocalBounds>(background.container) {
-            let b = bounds.0;
-            let radius = background
-                .radius
-                .min(b.width().max(0.0) * 0.5)
-                .min(b.height().max(0.0) * 0.5);
-            updates.push((
-                entity,
-                gaanim_core::kurbo::RoundedRect::new(b.min.x, b.min.y, b.max.x, b.max.y, radius)
-                    .to_path(0.001),
-            ));
-        }
     }
     for (entity, path) in updates {
         write_path(world, entity, path);
@@ -1919,13 +1976,10 @@ fn write_path(world: &mut World, entity: Entity, path: BezPath) {
         let local = if path.elements().is_empty() {
             gaanim_math::Bounds3D::new_2d(0.0, 0.0, 0.0, 0.0)
         } else {
+            // The path's own box, as every other shape has: frames, anchors
+            // and measurements read it.
             let rect = gaanim_core::kurbo::Shape::bounding_box(path.as_ref());
-            gaanim_math::Bounds3D::new_2d(
-                rect.x0 - 12.0,
-                rect.y0 - 12.0,
-                rect.x1 + 12.0,
-                rect.y1 + 12.0,
-            )
+            gaanim_math::Bounds3D::new_2d(rect.x0, rect.y0, rect.x1, rect.y1)
         };
         bounds.set_if_neq(LocalBounds(local));
     }

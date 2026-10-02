@@ -19,12 +19,12 @@ theme = Theme(
     },
     styles={
         "shape": Style(fill="brand"),
-        "line": Style(stroke=StrokeStyle("ink", 3, cap="round")),
+        "line": Style(stroke=StrokeStyle("ink", 0.025, cap="round")),
         ".warning": Style(fill="warning"),
         "axes": AxesStyle(
-            axis=StrokeStyle("ink", 3),
-            grid=StrokeStyle(colors.tailwind.slate[300], 1),
-            ticks=StrokeStyle("ink", 2),
+            axis=StrokeStyle("ink", 0.025),
+            grid=StrokeStyle(colors.tailwind.slate[300], 0.008),
+            ticks=StrokeStyle("ink", 0.017),
             numbers=TextStyle(size=0.166667, color=colors.tailwind.slate[700]),
             labels=TextStyle(size=0.2, weight=600, color=colors.tailwind.slate[900]),
         ),

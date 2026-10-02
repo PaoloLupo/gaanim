@@ -194,12 +194,13 @@ pub fn capture_stops(
     canvas: SceneModel,
     output_dir: impl AsRef<Path>,
     selection: Option<&[usize]>,
+    height: Option<u32>,
 ) -> Result<StopCapture> {
     let output_dir = output_dir.as_ref();
     let (total, stops) = select_stops(authored_stops(&canvas.segment_manifest()), selection)?;
     let times: Vec<f64> = stops.iter().map(|stop| stop.time_seconds).collect();
     let ids: Vec<String> = stops.iter().map(|stop| stop.id.clone()).collect();
-    let manifest = capture_canvas_as(canvas, output_dir, &times, &ids)?;
+    let manifest = capture_canvas_as(canvas, output_dir, &times, &ids, height)?;
     let stops = StopsManifest {
         schema_version: 1,
         total,

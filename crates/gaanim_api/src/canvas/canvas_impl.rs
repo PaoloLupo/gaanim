@@ -3246,6 +3246,39 @@ impl SceneModel {
             _ => self.endpoint_line(from, to, false),
         }
     }
+    /// A dashed line between two endpoints, `dash_length` long and
+    /// `gap_length` apart; like [`Self::line_between`], it follows endpoints
+    /// that move.
+    pub fn dashed_line_between(
+        &mut self,
+        from: CanvasEndpoint,
+        to: CanvasEndpoint,
+        dash_length: f64,
+        gap_length: f64,
+    ) -> DrawableHandle {
+        match (&from, &to) {
+            (CanvasEndpoint::Static(start), CanvasEndpoint::Static(end))
+                if start.z == 0.0 && end.z == 0.0 =>
+            {
+                self.dashed_line(start.x, start.y, end.x, end.y, dash_length, gap_length)
+            }
+            _ => {
+                let handle = self.spawn(SpawnKind::TrackingLine);
+                self.state
+                    .lock()
+                    .expect("canvas state poisoned")
+                    .active_mut()
+                    .ops
+                    .push(Op::AttachTrackingLine {
+                        target: handle.id,
+                        from,
+                        to,
+                        dashes: Some((dash_length, gap_length)),
+                    });
+                handle
+            }
+        }
+    }
     pub fn arrow(&mut self, x1: f64, y1: f64, x2: f64, y2: f64) -> DrawableHandle {
         self.spawn(SpawnKind::Arrow(x1, y1, x2, y2))
     }
@@ -5588,12 +5621,26 @@ impl SceneModel {
                 .stroke(rule, 0.02)
                 .z_index(100);
         }
-        let footer = match (branding.footer.as_deref(), branding.slide_numbers) {
+        // The number joins the footer unless it has a place of its own.
+        let in_footer = branding.slide_numbers && branding.number_anchor.is_none();
+        let footer = match (branding.footer.as_deref(), in_footer) {
             (Some(footer), true) => Some(format!("{footer}    ·    {segment_number:02}")),
             (Some(footer), false) => Some(footer.to_owned()),
             (None, true) => Some(format!("{segment_number:02}")),
             (None, false) => None,
         };
+        if let Some(anchor) = branding.number_anchor.filter(|_| branding.slide_numbers) {
+            // That point of the safe frame, inset like the footer.
+            let offset = anchor.to_offset();
+            let center = frame.center();
+            let x = center.x + offset.x * (frame.width() * 0.5 - BRAND_INSET);
+            let y = center.y + offset.y * (frame.height() * 0.5 - BRAND_INSET * 0.5);
+            self.text(&format!("{segment_number:02}"))
+                .fill(muted)
+                .scale_to(BRAND_FOOTER_SCALE)
+                .at_anchor(x, y, anchor)
+                .z_index(101);
+        }
         if let Some(footer) = footer {
             // Starts at the safe edge and shrinks to fit when it is too long.
             let scale = self
@@ -7265,6 +7312,7 @@ impl SceneModel {
                 target: id,
                 from,
                 to,
+                dashes: None,
             });
         handle
     }
@@ -8315,6 +8363,63 @@ mod tests {
             Some(gaanim_core::kurbo::PathEl::LineTo(point))
                 if (point.x - 80.0).abs() < 1e-9 && (point.y - 60.0).abs() < 1e-9
         ));
+    }
+
+    /// A dashed line takes `line`'s endpoints and follows a moving one with
+    /// its dashes (#302); between fixed points it is a fixed dashed line.
+    #[test]
+    fn dashed_lines_follow_their_endpoints() {
+        let mut canvas = SceneModel::new(320, 180);
+        let fixed = canvas.dashed_line_between(
+            CanvasEndpoint::Static(DVec3::ZERO),
+            CanvasEndpoint::Static(DVec3::new(1.0, 0.0, 0.0)),
+            0.2,
+            0.1,
+        );
+        assert!(matches!(
+            fixed.spec.lock().unwrap().kind,
+            SpawnKind::DashedLine { .. }
+        ));
+        let reference = canvas.rect(10.0, 10.0).move_to(100.0, 0.0);
+        canvas.dashed_line_between(
+            CanvasEndpoint::Static(DVec3::ZERO),
+            reference.anchor_point(Anchor::Center, DVec3::ZERO).into(),
+            10.0,
+            10.0,
+        );
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        gaanim_animation::tracking_line_system(&mut world);
+
+        let path = world
+            .query_filtered::<&gaanim_scene::PathSource, With<gaanim_animation::TrackingLine>>()
+            .single(&world)
+            .expect("one dashed endpoint line");
+        // 100 long in dashes of 10 every 20: five dashes.
+        let dashes = path
+            .0
+            .elements()
+            .iter()
+            .filter(|element| matches!(element, gaanim_core::kurbo::PathEl::MoveTo(_)))
+            .count();
+        assert_eq!(dashes, 5);
+    }
+
+    /// `hidden()` keeps a drawable created after a play out of sight until
+    /// an animation shows it, and refuses one already shown (#301).
+    #[test]
+    fn hidden_waits_for_an_entrance() {
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        let shown = canvas.circle(1.0);
+        canvas.play(vec![shown.animate().shift_by(1.0, 0.0).duration(0.5)]);
+        assert!(shown.hidden().is_err(), "already shown");
+        let late = canvas.circle(0.5).hidden().unwrap();
+        assert!(late.spec.lock().unwrap().defer_visibility_until_play);
     }
 
     #[test]
@@ -11451,6 +11556,59 @@ mod tests {
             .segment_with("Contenido", None, None, None)
             .expect("second segment");
         assert_eq!(ops(&canvas), 2);
+    }
+
+    /// With `number_anchor` the slide number leaves the footer for its own
+    /// corner of the safe frame (#304).
+    #[test]
+    fn branding_places_the_slide_number_on_its_own() {
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        canvas.set_branding(PresentationBrand {
+            footer: Some("MI CHARLA".to_owned()),
+            number_anchor: Some(Anchor::BottomRight),
+            ..Default::default()
+        });
+        canvas.segment_with("Portada", None, None, None).unwrap();
+        canvas.wait(0.1);
+        canvas.segment_with("Contenido", None, None, None).unwrap();
+        let spawned: Vec<_> = canvas
+            .state
+            .lock()
+            .unwrap()
+            .active()
+            .ops
+            .iter()
+            .filter_map(|op| match op {
+                Op::Spawn(shared) => {
+                    let spec = shared.lock().unwrap();
+                    match &spec.kind {
+                        SpawnKind::Text(text) => Some((spec.id, text.plain_text(), shared.clone())),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+            .collect();
+        let texts: Vec<(String, f64)> = spawned
+            .into_iter()
+            .map(|(id, text, spec)| {
+                let mut handle =
+                    DrawableHandle::new(id, SpawnKind::Group(vec![]), canvas.state.clone(), 1);
+                handle.spec = spec;
+                (text, canvas.bounds_of(&handle).unwrap().center().x)
+            })
+            .collect();
+        assert_eq!(texts.len(), 2, "{texts:?}");
+        assert!(
+            texts
+                .iter()
+                .any(|(text, x)| text == "MI CHARLA" && *x < 0.0),
+            "{texts:?}"
+        );
+        assert!(
+            texts.iter().any(|(text, x)| text == "02" && *x > 6.0),
+            "{texts:?}"
+        );
     }
 
     #[test]

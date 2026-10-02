@@ -798,6 +798,8 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub text_metrics: HashMap<ObjectId, gaanim_text::prelude::TextMetrics>,
     /// Continuous rolling displays and the parameter signals whose tweens settle them.
     pub rolling_tween_sources: Vec<(Entity, Vec<ObjectId>)>,
+    /// Local baselines of reactive numbers, which readouts align their row on.
+    pub readout_baselines: HashMap<ObjectId, f64>,
     pub default_track: TrackId,
     mobject_tracks: HashMap<ObjectId, TrackId>,
     mobject_names: HashMap<ObjectId, String>,
@@ -875,6 +877,7 @@ pub(crate) struct SceneBuilderState {
     states: MobjectStateMap,
     text_metrics: HashMap<ObjectId, gaanim_text::prelude::TextMetrics>,
     rolling_tween_sources: Vec<(Entity, Vec<ObjectId>)>,
+    readout_baselines: HashMap<ObjectId, f64>,
     default_track: TrackId,
     mobject_tracks: HashMap<ObjectId, TrackId>,
     mobject_names: HashMap<ObjectId, String>,
@@ -910,6 +913,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             states: self.states.clone(),
             text_metrics: self.text_metrics.clone(),
             rolling_tween_sources: self.rolling_tween_sources.clone(),
+            readout_baselines: self.readout_baselines.clone(),
             default_track: self.default_track,
             mobject_tracks: self.mobject_tracks.clone(),
             mobject_names: self.mobject_names.clone(),
@@ -952,6 +956,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             states,
             text_metrics,
             rolling_tween_sources,
+            readout_baselines,
             default_track,
             mobject_tracks,
             mobject_names,
@@ -987,6 +992,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             states,
             text_metrics,
             rolling_tween_sources,
+            readout_baselines,
             default_track,
             mobject_tracks,
             mobject_names,
@@ -1291,6 +1297,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             states: MobjectStateMap::new(),
             text_metrics: HashMap::new(),
             rolling_tween_sources: Vec::new(),
+            readout_baselines: HashMap::new(),
             default_track,
             mobject_tracks: HashMap::new(),
             mobject_names: HashMap::new(),
@@ -4265,9 +4272,16 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 )
             };
             root_state.transform.anchor = pivot;
-            self.commands
-                .entity(root_state.entity)
-                .insert(root_state.transform);
+            // Only the pivot changes: the entity's spawned transform is the
+            // state before any clip, and an object that enters later (spun in
+            // from nothing, grown from its center) must stay hidden until then.
+            self.commands.entity(root_state.entity).queue(
+                move |mut entity: bevy::prelude::EntityWorldMut| {
+                    if let Some(mut transform) = entity.get_mut::<SpatialTransform>() {
+                        transform.anchor = pivot;
+                    }
+                },
+            );
         }
         // Grow in place around the pivot; translating here would make the
         // target drift away from its baseline instead of pulsing.

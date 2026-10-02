@@ -478,12 +478,34 @@ pub fn dashed_line(
     dash_length: f64,
     gap_length: f64,
 ) -> MobjectBundle {
+    let path = dash_path(start, end, dash_length, gap_length);
+    let min_x = start.x.min(end.x);
+    let max_x = start.x.max(end.x);
+    let min_y = start.y.min(end.y);
+    let max_y = start.y.max(end.y);
+    let bounds = Bounds3D::new_2d(min_x, min_y, max_x, max_y);
+    let mut bundle = MobjectBundle::new(id, path, bounds);
+    bundle.fill = FillBrush(None);
+    bundle.tag = ObjectTag("DashedLine".into());
+    // Dashes are pieces of one stroke: draw them along the line, not all at once.
+    bundle.reveal_order = PathRevealOrder::Sequential;
+    bundle
+}
+
+/// The dashes of a line from `start` to `end`: one subpath per dash,
+/// `dash_length` long and `gap_length` apart, from the start.
+pub fn dash_path(
+    start: kurbo::Point,
+    end: kurbo::Point,
+    dash_length: f64,
+    gap_length: f64,
+) -> kurbo::BezPath {
     let dx = end.x - start.x;
     let dy = end.y - start.y;
     let len = (dx * dx + dy * dy).sqrt();
 
     let mut path = kurbo::BezPath::new();
-    if len > 0.0 {
+    if len > 0.0 && dash_length > 0.0 && gap_length > 0.0 {
         let ux = dx / len;
         let uy = dy / len;
         let mut travelled = 0.0;
@@ -503,18 +525,7 @@ pub fn dashed_line(
             drawing = !drawing;
         }
     }
-
-    let min_x = start.x.min(end.x);
-    let max_x = start.x.max(end.x);
-    let min_y = start.y.min(end.y);
-    let max_y = start.y.max(end.y);
-    let bounds = Bounds3D::new_2d(min_x, min_y, max_x, max_y);
-    let mut bundle = MobjectBundle::new(id, path, bounds);
-    bundle.fill = FillBrush(None);
-    bundle.tag = ObjectTag("DashedLine".into());
-    // Dashes are pieces of one stroke: draw them along the line, not all at once.
-    bundle.reveal_order = PathRevealOrder::Sequential;
-    bundle
+    path
 }
 
 pub fn arc_between_points(

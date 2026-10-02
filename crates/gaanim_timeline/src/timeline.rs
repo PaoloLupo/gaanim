@@ -285,7 +285,10 @@ pub struct Timeline {
     /// timeline with scenes or reactive state: a write from outside the
     /// timeline to a channel no clip drives is undone, where replaying over
     /// the world from t=0 would have kept it.
-    #[cfg_attr(feature = "serde", serde(skip, default = "segment_checkpoints_enabled"))]
+    #[cfg_attr(
+        feature = "serde",
+        serde(skip, default = "segment_checkpoints_enabled")
+    )]
     pub segment_checkpoints: bool,
     #[cfg_attr(feature = "serde", serde(skip))]
     checkpoints: Checkpoints,
@@ -301,6 +304,16 @@ pub struct Timeline {
     /// Tempo set with `scene.tempo`, drawn as bar lines on the seek bar.
     #[cfg_attr(feature = "serde", serde(default))]
     pub beat_grid: Option<BeatGrid>,
+    /// Audience polls authored with `scene.poll`, by opening time.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub polls: Vec<TimelinePoll>,
+    /// The relay session of those polls.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub poll_session: Option<PollSessionInfo>,
+    /// Stops that advance by themselves once the audience meets a
+    /// condition, by time.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub stop_gates: Vec<StopGate>,
 }
 
 /// A musical tempo: `bpm` beats per minute from `offset` seconds, grouped
@@ -343,6 +356,237 @@ impl BeatGrid {
 pub struct TimelineMarker {
     pub name: String,
     pub time: f64,
+}
+
+/// An audience poll authored with `scene.poll`. A presentation takes votes
+/// for it while its playhead is inside `[open, close]`.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct TimelinePoll {
+    /// Stable id on the relay, so a poll keeps its votes across presentations.
+    pub id: String,
+    pub question: String,
+    pub options: Vec<String>,
+    /// Counts shown outside a live presentation.
+    pub preview: Vec<u32>,
+    /// Id of the segment where the poll opens.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub segment: u32,
+    pub open: f64,
+    pub close: f64,
+    /// Set for a quiz, authored with `scene.quiz`.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub quiz: Option<TimelineQuiz>,
+    /// Players may choose several answers.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub multiple: bool,
+    /// A picture phones show above the question.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub image: Option<PollImage>,
+}
+
+/// A poll's picture, ready for phones: small enough to send, named by a
+/// hash of its bytes so the relay stores each picture once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PollImage {
+    /// 16 hex digits.
+    pub hash: String,
+    /// `image/jpeg` or `image/png`.
+    pub mime: String,
+    pub bytes: std::sync::Arc<[u8]>,
+}
+
+/// A stop that advances by itself: while a presentation takes votes and
+/// rests on the stop at `time`, having arrived there going forward, it
+/// advances once `until` holds. Elsewhere it is an ordinary stop.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StopGate {
+    pub time: f64,
+    pub until: GateCondition,
+}
+
+/// What the audience must do before a gated stop advances.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GateCondition {
+    /// At least `count` answers on poll `poll`: votes, or a quiz's answers.
+    Answers { poll: String, count: u32 },
+    /// Answers on `poll` from at least `share` (0 to 1) of the audience:
+    /// of the players for a quiz (`players`), else of the phones on the
+    /// voting page. Never with nobody there.
+    AnswerShare {
+        poll: String,
+        share: f64,
+        players: bool,
+    },
+    /// The quiz `poll` is out of time on the relay's clock.
+    TimeUp { poll: String },
+    /// At least `count` players joined the game.
+    Players { count: u32 },
+    /// Every condition holds.
+    All(Vec<GateCondition>),
+    /// Any condition holds.
+    Any(Vec<GateCondition>),
+}
+
+impl GateCondition {
+    /// How many answers `poll` has in `results`.
+    fn answers(results: &gaanim_animation::polls::PollResults, poll: &str) -> u32 {
+        results
+            .counts
+            .get(poll)
+            .map_or(0, |counts| counts.iter().sum())
+    }
+
+    /// The answers an `AnswerShare` needs: at least one.
+    fn needed(results: &gaanim_animation::polls::PollResults, share: f64, players: bool) -> u32 {
+        let audience = if players {
+            results.players
+        } else {
+            results.connected
+        };
+        ((share * f64::from(audience)).ceil() as u32).max(1)
+    }
+
+    /// Whether the condition holds for live `results`; never outside a
+    /// live presentation.
+    pub fn holds(&self, results: &gaanim_animation::polls::PollResults) -> bool {
+        if !results.live {
+            return false;
+        }
+        match self {
+            Self::Answers { poll, count } => Self::answers(results, poll) >= *count,
+            Self::AnswerShare {
+                poll,
+                share,
+                players,
+            } => {
+                let audience = if *players {
+                    results.players
+                } else {
+                    results.connected
+                };
+                audience > 0
+                    && Self::answers(results, poll) >= Self::needed(results, *share, *players)
+            }
+            Self::TimeUp { poll } => results.remaining.get(poll.as_str()) == Some(&0.0),
+            Self::Players { count } => results.players >= *count,
+            Self::All(conditions) => conditions.iter().all(|condition| condition.holds(results)),
+            Self::Any(conditions) => conditions.iter().any(|condition| condition.holds(results)),
+        }
+    }
+
+    /// Where the audience is, for the speaker: "7/10 answered".
+    pub fn progress(&self, results: &gaanim_animation::polls::PollResults) -> String {
+        match self {
+            Self::Answers { poll, count } => {
+                format!("{}/{count} answered", Self::answers(results, poll))
+            }
+            Self::AnswerShare {
+                poll,
+                share,
+                players,
+            } => format!(
+                "{}/{} answered ({:.0}% of the {})",
+                Self::answers(results, poll),
+                Self::needed(results, *share, *players),
+                share * 100.0,
+                if *players { "players" } else { "phones" }
+            ),
+            Self::TimeUp { poll } => match results.remaining.get(poll.as_str()) {
+                Some(left) => format!("time up in {left:.0} s"),
+                None => "when time is up".into(),
+            },
+            Self::Players { count } => format!("{}/{count} players", results.players),
+            Self::All(conditions) => conditions
+                .iter()
+                .map(|condition| condition.progress(results))
+                .collect::<Vec<_>>()
+                .join(" and "),
+            Self::Any(conditions) => conditions
+                .iter()
+                .map(|condition| condition.progress(results))
+                .collect::<Vec<_>>()
+                .join(" or "),
+        }
+    }
+}
+
+/// What makes a poll a quiz: its correct answer, the seconds to answer, the
+/// most points an answer earns, and when the presentation reveals it.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct TimelineQuiz {
+    /// The right answers: one for a single choice quiz; all of them, and no
+    /// other, for a multiple choice one.
+    pub correct: Vec<usize>,
+    pub time: u32,
+    pub points: u32,
+    /// Timeline time of `quiz.reveal()`, if the scene reveals it.
+    pub reveal: Option<f64>,
+}
+
+/// Where a scene's polls take votes: the relay and the session code its QR
+/// codes point to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct PollSessionInfo {
+    /// `None` when no relay was set while the scene was authored.
+    pub relay: Option<String>,
+    pub code: String,
+    /// The scene shows its audience (`scene.audience`): phones ask for a
+    /// nickname as soon as they open the page, not at the first quiz.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub lobby: bool,
+    /// Where the game begins: the segment (by id) that first shows the
+    /// audience or opens a poll. A new game goes back to its start.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub game_segment: Option<u32>,
+    /// The game's teams (`scene.teams`), if it plays in teams.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub teams: Option<TeamsInfo>,
+    /// One more thing joining asks (`scene.roster`), such as a student
+    /// code, kept only in the saved results.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub ask: Option<AskInfo>,
+}
+
+/// What joining asks besides the nickname, as the phones show it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct AskInfo {
+    pub label: String,
+    /// Players cannot join without it.
+    pub required: bool,
+}
+
+/// A game's teams, as the phones show them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct TeamsInfo {
+    pub names: Vec<String>,
+    /// `#rrggbb`, one per team.
+    pub colors: Vec<String>,
+    /// Players choose their team on the phone; otherwise the relay deals
+    /// each one to the smallest.
+    pub choose: bool,
+}
+
+/// Where a presentation's game is, for the phones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameStage {
+    /// Questions ahead, or none in the scene.
+    Play,
+    /// Every question is behind: phones show the final standings.
+    Podium,
+}
+
+impl GameStage {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Play => "play",
+            Self::Podium => "podium",
+        }
+    }
 }
 
 /// Most segment checkpoints kept at once; each holds a whole world snapshot.
@@ -424,6 +668,9 @@ impl Default for Timeline {
             scene_connections: Vec::new(),
             markers: Vec::new(),
             beat_grid: None,
+            polls: Vec::new(),
+            poll_session: None,
+            stop_gates: Vec::new(),
         }
     }
 }
@@ -438,6 +685,99 @@ impl Timeline {
     pub fn set_markers(&mut self, mut markers: Vec<TimelineMarker>) {
         markers.sort_by(|left, right| left.time.total_cmp(&right.time));
         self.markers = markers;
+    }
+
+    /// Replace the audience polls compiled from the current canvas.
+    pub fn set_polls(&mut self, mut polls: Vec<TimelinePoll>, session: Option<PollSessionInfo>) {
+        polls.sort_by(|left, right| left.open.total_cmp(&right.open));
+        self.polls = polls;
+        self.poll_session = session;
+    }
+
+    /// Set the stops that advance by themselves.
+    pub fn set_stop_gates(&mut self, mut gates: Vec<StopGate>) {
+        gates.sort_by(|left, right| left.time.total_cmp(&right.time));
+        self.stop_gates = gates;
+    }
+
+    /// The gate of the stop at `time`, if it has one.
+    pub fn stop_gate_at(&self, time: f64) -> Option<&StopGate> {
+        const EPSILON: f64 = 1e-5;
+        self.stop_gates
+            .iter()
+            .find(|gate| (gate.time - time).abs() <= EPSILON)
+    }
+
+    /// The stop a presentation rests on now: the one the playhead is
+    /// paused at, or whose ambient loop plays.
+    pub fn resting_stop(&self) -> Option<f64> {
+        if let Some((start, _)) = self.ambient_loop_at(self.current_time) {
+            return Some(start);
+        }
+        if self.is_playing {
+            return None;
+        }
+        self.segments
+            .iter()
+            .flat_map(|segment| &segment.stops)
+            .map(|stop| stop.time)
+            .find(|time| (time - self.current_time).abs() <= 1e-5)
+    }
+
+    /// The poll taking votes at `time`. Where one poll closes as the next
+    /// opens, the poll of the segment shown there wins: a stop at the end
+    /// of a segment keeps that segment, and its poll, until the
+    /// presentation advances.
+    /// Where the game begins, for starting a new one: the start of the
+    /// segment the scene set, or of the first poll's.
+    pub fn game_start(&self) -> Option<f64> {
+        let segment = self
+            .poll_session
+            .as_ref()
+            .and_then(|session| session.game_segment)
+            .or_else(|| self.polls.first().map(|poll| poll.segment))?;
+        self.segments
+            .iter()
+            .find(|candidate| candidate.id == segment)
+            .map(|segment| segment.start_time)
+    }
+
+    /// Where the game is at `time`: the podium once every poll closed and
+    /// none is shown (resting on a question's last stop still plays).
+    pub fn game_stage(&self, time: f64) -> GameStage {
+        const EPSILON: f64 = 1e-5;
+        let over = !self.polls.is_empty()
+            && self.polls.iter().all(|poll| poll.close <= time + EPSILON)
+            && self.poll_open_at(time).is_none();
+        if over {
+            GameStage::Podium
+        } else {
+            GameStage::Play
+        }
+    }
+
+    pub fn poll_open_at(&self, time: f64) -> Option<&TimelinePoll> {
+        const EPSILON: f64 = 1e-5;
+        let shown = self
+            .segment_position_at(time)
+            .map(|position| position.segment_id);
+        // At a shared boundary a stop holds the outgoing segment: a poll
+        // opening there waits until its own segment shows.
+        let mut open = self.polls.iter().filter(|poll| {
+            poll.open - EPSILON <= time
+                && time <= poll.close + EPSILON
+                && ((time - poll.open).abs() > EPSILON || shown == Some(poll.segment))
+        });
+        let first = open.next()?;
+        let Some(second) = open.next() else {
+            return Some(first);
+        };
+        [first, second]
+            .into_iter()
+            .chain(open)
+            .rev()
+            .find(|poll| Some(poll.segment) == shown)
+            .or(Some(second))
     }
 
     /// Absolute time of the marker named `name`.
@@ -1114,7 +1454,11 @@ impl Timeline {
         {
             self.checkpoints = Checkpoints {
                 revision: Some(self.property_revision),
-                starts: self.segments.iter().map(|segment| segment.start_time).collect(),
+                starts: self
+                    .segments
+                    .iter()
+                    .map(|segment| segment.start_time)
+                    .collect(),
                 times: self.settled_segment_starts(),
                 ..Checkpoints::default()
             };
@@ -1185,7 +1529,12 @@ impl Timeline {
         // on either rewrites its absolute channel or marks its target for
         // a restore, and nothing else differs from the snapshot.
         self.last_restore_kf_time = None;
-        self.replay_baseline = Some(replay_baseline_now(world, time, time.0, self.property_revision));
+        self.replay_baseline = Some(replay_baseline_now(
+            world,
+            time,
+            time.0,
+            self.property_revision,
+        ));
         self.checkpoints.insert(time, snapshot);
     }
 
@@ -1468,8 +1817,7 @@ impl Timeline {
             Some(before) => self.capture_base(before),
             None => self.restore_base(world, clamped_target),
         };
-        let from_checkpoint =
-            keyframe_time.is_some_and(|time| !self.keyframes.contains_key(&time));
+        let from_checkpoint = keyframe_time.is_some_and(|time| !self.keyframes.contains_key(&time));
 
         let mut restored_entity_map = None;
         let mut replay_without_restore = false;
@@ -1487,7 +1835,8 @@ impl Timeline {
                 // A capture replays forward like any seek: entities that no
                 // clip up to it restores keep what the last seek left, and
                 // its absolute clips rewrite their channels.
-                dirty = self.dirty_entities(world, kf_time, clamped_target);                let restore_scene_visibility = self.scenes.is_empty();
+                dirty = self.dirty_entities(world, kf_time, clamped_target);
+                let restore_scene_visibility = self.scenes.is_empty();
                 let snapshot = self.base_snapshot(kf_time);
                 restored_entity_map = Some(match &dirty {
                     Some(dirty) => {
@@ -4421,6 +4770,87 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    fn gate_conditions_read_live_results_only() {
+        use gaanim_animation::polls::PollResults;
+        let answers = GateCondition::Answers {
+            poll: "q0".into(),
+            count: 3,
+        };
+        let mut results = PollResults::default();
+        results.counts.insert("q0".into(), vec![2, 1]);
+        // Previews and exports never advance a stop.
+        assert!(!answers.holds(&results));
+        results.live = true;
+        assert!(answers.holds(&results));
+        assert_eq!(answers.progress(&results), "3/3 answered");
+
+        let share = GateCondition::AnswerShare {
+            poll: "q0".into(),
+            share: 0.8,
+            players: true,
+        };
+        // Nobody playing: not met, even with answers.
+        assert!(!share.holds(&results));
+        results.players = 4;
+        // 80% of 4 players is 3.2: four answers are needed.
+        assert!(!share.holds(&results));
+        results.counts.insert("q0".into(), vec![3, 1]);
+        assert!(share.holds(&results));
+
+        let time_up = GateCondition::TimeUp { poll: "q0".into() };
+        assert!(!time_up.holds(&results));
+        results.remaining.insert("q0".into(), 0.0);
+        assert!(time_up.holds(&results));
+
+        let crowd = GateCondition::Players { count: 10 };
+        assert!(!crowd.holds(&results));
+        assert!(GateCondition::Any(vec![crowd.clone(), time_up.clone()]).holds(&results));
+        assert!(!GateCondition::All(vec![crowd, time_up]).holds(&results));
+    }
+
+    #[test]
+    fn the_resting_stop_is_the_paused_one_or_the_looping_one() {
+        let mut timeline = Timeline::new();
+        timeline.cached_duration = 4.0;
+        timeline.set_segments(vec![SegmentMetadata {
+            id: 1,
+            name: "gates".into(),
+            notes: None,
+            start_time: 0.0,
+            end_time: 4.0,
+            stops: vec![
+                SegmentStop {
+                    name: None,
+                    time: 1.0,
+                    ambient: None,
+                },
+                SegmentStop {
+                    name: None,
+                    time: 2.0,
+                    ambient: Some(1.0),
+                },
+            ],
+        }]);
+        timeline.set_stop_gates(vec![StopGate {
+            time: 1.0,
+            until: GateCondition::Players { count: 1 },
+        }]);
+        timeline.current_time = 1.0;
+        timeline.is_playing = false;
+        assert_eq!(timeline.resting_stop(), Some(1.0));
+        assert!(timeline.stop_gate_at(1.0).is_some());
+        assert!(timeline.stop_gate_at(2.0).is_none());
+        timeline.is_playing = true;
+        assert_eq!(timeline.resting_stop(), None);
+        // Inside an ambient loop the presentation rests on its stop.
+        timeline.current_time = 2.5;
+        assert_eq!(timeline.resting_stop(), Some(2.0));
+        timeline.is_playing = false;
+        timeline.current_time = 0.5;
+        assert_eq!(timeline.resting_stop(), None);
+    }
+
+    #[test]
     fn morph_transition_shares_one_box_between_pairs() {
         use crate::transition::{MorphMapping, MorphProperty};
         use gaanim_core::glam::DVec3;
@@ -6084,18 +6514,77 @@ mod tests {
         let at = |x| DVec3::new(x, 0.0, 0.0);
         // Written in the first segment, then undone later from another
         // start: before that clip starts, the earlier write still shows.
-        clip(1, 0.0, 0.8, PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 });
-        clip(1, 2.2, 0.4, PropertyLensSpec::PathCompletion { from: 0.5, to: 0.3 });
-        clip(1, 0.2, 0.5, PropertyLensSpec::Translation { from: at(0.0), to: at(2.0) });
-        clip(1, 1.0, 0.0, PropertyLensSpec::Translation { from: at(2.0), to: at(-1.0) });
-        clip(1, 2.0, 0.5, PropertyLensSpec::Translation { from: at(-1.0), to: at(4.0) });
+        clip(
+            1,
+            0.0,
+            0.8,
+            PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
+        );
+        clip(
+            1,
+            2.2,
+            0.4,
+            PropertyLensSpec::PathCompletion { from: 0.5, to: 0.3 },
+        );
+        clip(
+            1,
+            0.2,
+            0.5,
+            PropertyLensSpec::Translation {
+                from: at(0.0),
+                to: at(2.0),
+            },
+        );
+        clip(
+            1,
+            1.0,
+            0.0,
+            PropertyLensSpec::Translation {
+                from: at(2.0),
+                to: at(-1.0),
+            },
+        );
+        clip(
+            1,
+            2.0,
+            0.5,
+            PropertyLensSpec::Translation {
+                from: at(-1.0),
+                to: at(4.0),
+            },
+        );
         // Hidden until its clip, a segment later.
-        clip(2, 1.2, 0.4, PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 });
-        clip(2, 0.5, 0.5, PropertyLensSpec::Opacity { from: 1.0, to: 0.2 });
-        clip(2, 1.0, 0.5, PropertyLensSpec::Opacity { from: 0.2, to: 0.9 });
+        clip(
+            2,
+            1.2,
+            0.4,
+            PropertyLensSpec::PathCompletion { from: 0.0, to: 1.0 },
+        );
+        clip(
+            2,
+            0.5,
+            0.5,
+            PropertyLensSpec::Opacity { from: 1.0, to: 0.2 },
+        );
+        clip(
+            2,
+            1.0,
+            0.5,
+            PropertyLensSpec::Opacity { from: 0.2, to: 0.9 },
+        );
         // Runs across the last segment start.
-        clip(3, 2.9, 0.4, PropertyLensSpec::Opacity { from: 1.0, to: 0.0 });
-        clip(3, 3.4, 0.3, PropertyLensSpec::PathCompletion { from: 1.0, to: 0.2 });
+        clip(
+            3,
+            2.9,
+            0.4,
+            PropertyLensSpec::Opacity { from: 1.0, to: 0.0 },
+        );
+        clip(
+            3,
+            3.4,
+            0.3,
+            PropertyLensSpec::PathCompletion { from: 1.0, to: 0.2 },
+        );
         if scenes {
             let ids = ["first", "second", "third", "fourth"].map(|name| timeline.add_scene(name));
             for (index, &scene) in ids.iter().enumerate() {
@@ -6163,9 +6652,7 @@ mod tests {
         let backward: Vec<f64> = forward.iter().rev().copied().collect();
         for (signal, scenes, times) in [(false, false), (true, false), (false, true)]
             .into_iter()
-            .flat_map(|(signal, scenes)| {
-                [(signal, scenes, &forward), (signal, scenes, &backward)]
-            })
+            .flat_map(|(signal, scenes)| [(signal, scenes, &forward), (signal, scenes, &backward)])
         {
             let (mut world, mut timeline, entities) = checkpoint_fixture(true, signal, scenes);
             let (mut reference_world, mut reference, reference_entities) =
@@ -6244,8 +6731,84 @@ mod tests {
         timeline.seek(&mut world, 2.6);
         assert_eq!(timeline.checkpoints.times, [OrderedFloat(1.0)]);
         assert_eq!(
-            timeline.checkpoints.snapshots.keys().copied().collect::<Vec<_>>(),
+            timeline
+                .checkpoints
+                .snapshots
+                .keys()
+                .copied()
+                .collect::<Vec<_>>(),
             [OrderedFloat(1.0)]
         );
+    }
+
+    #[test]
+    fn a_poll_takes_votes_inside_its_window() {
+        let poll = |id: &str, segment: u32, open: f64, close: f64| TimelinePoll {
+            id: id.to_string(),
+            question: format!("{id}?"),
+            options: vec!["A".to_string(), "B".to_string()],
+            preview: vec![0, 0],
+            segment,
+            open,
+            close,
+            quiz: None,
+            multiple: false,
+            image: None,
+        };
+        let segment = |id: u32, start_time: f64, end_time: f64, stops: &[f64]| SegmentMetadata {
+            id,
+            name: format!("segment {id}"),
+            notes: None,
+            start_time,
+            end_time,
+            stops: stops
+                .iter()
+                .map(|time| SegmentStop {
+                    name: None,
+                    time: *time,
+                    ambient: None,
+                })
+                .collect(),
+        };
+        let mut timeline = Timeline::new();
+        timeline.set_segments(vec![segment(1, 0.0, 4.0, &[]), segment(2, 4.0, 6.0, &[])]);
+        timeline.set_polls(
+            vec![poll("second", 2, 4.0, 6.0), poll("first", 1, 1.0, 4.0)],
+            None,
+        );
+
+        assert_eq!(timeline.polls[0].id, "first");
+        let open_at =
+            |timeline: &Timeline, time| timeline.poll_open_at(time).map(|poll| poll.id.clone());
+        assert_eq!(open_at(&timeline, 0.5), None);
+        assert_eq!(open_at(&timeline, 1.0).as_deref(), Some("first"));
+        // Playing through the boundary shows the next segment and its poll.
+        assert_eq!(open_at(&timeline, 4.0).as_deref(), Some("second"));
+        assert_eq!(open_at(&timeline, 6.0).as_deref(), Some("second"));
+        assert_eq!(open_at(&timeline, 6.5), None);
+
+        // A stop at the end of the first segment keeps its poll open there.
+        timeline.set_segments(vec![
+            segment(1, 0.0, 4.0, &[4.0]),
+            segment(2, 4.0, 6.0, &[]),
+        ]);
+        assert_eq!(open_at(&timeline, 4.0).as_deref(), Some("first"));
+
+        // A lobby without polls ending in a stop: resting there must not
+        // open the next segment's question on the phones.
+        timeline.set_polls(vec![poll("second", 2, 4.0, 6.0)], None);
+        assert_eq!(open_at(&timeline, 4.0), None);
+        assert_eq!(open_at(&timeline, 4.01).as_deref(), Some("second"));
+
+        // The podium comes once the last question is behind.
+        timeline.set_segments(vec![
+            segment(1, 0.0, 4.0, &[4.0]),
+            segment(2, 4.0, 6.0, &[6.0]),
+            segment(3, 6.0, 9.0, &[9.0]),
+        ]);
+        assert_eq!(timeline.game_stage(4.0), GameStage::Play);
+        assert_eq!(timeline.game_stage(6.0), GameStage::Play);
+        assert_eq!(timeline.game_stage(6.5), GameStage::Podium);
+        assert_eq!(timeline.game_stage(9.0), GameStage::Podium);
     }
 }

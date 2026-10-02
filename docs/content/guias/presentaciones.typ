@@ -166,6 +166,14 @@ ofrece `Retry` y conserva las vistas ya generadas.
 Las vistas previas incluyen el contenido 3D, igual que la pantalla de la
 audiencia.
 
+= Encuestas a la audiencia <encuestas-a-la-audiencia>
+
+Una presentación puede hacer preguntas al público: encuestas, cuestionarios
+al estilo de Kahoot con clasificación, juegos por equipos y personajes del
+público dentro de la escena. Todo eso está en
+#link("/publico/")[Público en vivo]: empieza por
+#link("/publico/primera-encuesta/")[Tu primera encuesta].
+
 = Revisar sin pausas
 
 Para revisar una animación de corrido en el editor, activa *Continuous* junto

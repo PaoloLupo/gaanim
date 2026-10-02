@@ -9,6 +9,7 @@ use std::process::{Command, Output};
 
 pub mod association;
 pub mod help;
+pub mod relay;
 
 const VIDEO_PROJECT_TEMPLATE: &str = include_str!("../../../templates/video_project.py");
 const SLIDES_PROJECT_TEMPLATE: &str = include_str!("../../../templates/slides_project.py");
@@ -88,6 +89,9 @@ pub struct ProjectManifest {
     pub entry: PathBuf,
     pub assets_dir: PathBuf,
     pub output_dir: PathBuf,
+    /// Base URL of the relay that carries audience votes (`[polls] relay`),
+    /// deployed from `gaanim relay init`.
+    pub poll_relay: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -97,6 +101,13 @@ struct RawProjectManifest {
     entry: PathBuf,
     assets_dir: Option<PathBuf>,
     output_dir: Option<PathBuf>,
+    #[serde(default)]
+    polls: RawPolls,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawPolls {
+    relay: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -201,6 +212,11 @@ pub fn resolve_project(path: &Path) -> Result<ResolvedProject, String> {
             entry: raw.entry,
             assets_dir: raw.assets_dir.unwrap_or_else(|| PathBuf::from("assets")),
             output_dir: raw.output_dir.unwrap_or_else(|| PathBuf::from("exports")),
+            poll_relay: raw
+                .polls
+                .relay
+                .map(|relay| relay.trim().to_string())
+                .filter(|relay| !relay.is_empty()),
         },
         entry: entry.canonicalize().unwrap_or(entry),
     })

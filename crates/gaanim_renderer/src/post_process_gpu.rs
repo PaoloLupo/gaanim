@@ -57,6 +57,7 @@ fn update_post_process_frame(
     post: Option<Res<CanvasPostProcess>>,
     camera: Option<Res<gaanim_math::ResolvedCamera>>,
     playback: Option<Res<gaanim_animation::PlaybackState>>,
+    ambient: Option<Res<gaanim_animation::AmbientClock>>,
     views: Query<(&Camera, Option<&bevy::camera::RenderTarget>), With<VelloView>>,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
@@ -91,11 +92,16 @@ fn update_post_process_frame(
         let origin = (viewport.physical_position.as_dvec2() - target_origin.as_dvec2()) * used;
         let size = viewport.physical_size.as_dvec2() * used;
         let time = playback.map_or(0.0, |state| state.current_time);
-        let request = post.request_with(
+        let mut request = post.request_with(
             time,
             kurbo::Rect::new(origin.x, origin.y, origin.x + size.x, origin.y + size.y),
             |entity| signals.get(entity).ok().map(|signal| signal.value),
         )?;
+        // The passes are the timeline's; a resting presentation keeps them
+        // moving (see `AmbientClock`).
+        if let Some(clock) = ambient {
+            request.time = clock.at(time) as f32;
+        }
         (canvas.image != Handle::default()).then(|| (request, canvas.image.id()))
     })();
 }

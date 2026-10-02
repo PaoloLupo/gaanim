@@ -19,6 +19,12 @@ pub mod host;
 pub mod narration;
 pub mod overlays;
 pub mod platform;
+#[cfg(not(target_arch = "wasm32"))]
+mod poll_report;
+#[cfg(not(target_arch = "wasm32"))]
+mod polls;
+#[cfg(not(target_arch = "wasm32"))]
+pub use polls::{relay_version, reset_relay_session, save_relay_results};
 
 /// Built for the web player: no native windows, file system or FFmpeg, so
 /// pinning, exporting and the separate Presenter View window are left out.
@@ -254,6 +260,9 @@ impl Plugin for GaanimEditorPlugin {
                         .after(sync_editor_input_ignore_system)
                         .before(gaanim_timeline::timeline_playback_system),
                     presenter::sync_presentation_timer_system,
+                    ambient_clock_system
+                        .in_set(gaanim_scene::hierarchy::SceneSet::Input)
+                        .after(gaanim_timeline::timeline_playback_system),
                     sync_fullscreen_letterbox_color_system
                         .after(editor_fullscreen_keys_system)
                         .after(presentation_escape_system),
@@ -320,6 +329,25 @@ impl Plugin for GaanimEditorPlugin {
                 presenter::PresenterEguiPass,
                 presenter::presenter_view_system,
             );
+        // The relay client needs native networking; the web player shows
+        // polled stops as plain stops.
+        #[cfg(not(target_arch = "wasm32"))]
+        app.add_plugins(polls::AudiencePollsPlugin);
+    }
+}
+
+/// While a presentation rests (at a stop, or paused), shader backgrounds and
+/// post-processing keep moving on the wall clock.
+fn ambient_clock_system(
+    mode: Res<PresentationMode>,
+    timeline: Res<Timeline>,
+    time: Res<Time<bevy::time::Real>>,
+    mut clock: ResMut<gaanim_animation::AmbientClock>,
+) {
+    if mode.active && !timeline.is_playing {
+        clock.rest += time
+            .delta_secs_f64()
+            .min(gaanim_animation::AmbientClock::MAX_STEP);
     }
 }
 
@@ -3794,13 +3822,28 @@ mod tests {
     #[test]
     fn the_pointer_over_a_panel_blocks_the_click_but_not_the_keys() {
         // Pointer over the playback bar: arrows still move between stops.
-        assert_eq!(timeline_input_ignored(false, false, true, false), (false, true));
+        assert_eq!(
+            timeline_input_ignored(false, false, true, false),
+            (false, true)
+        );
         // A focused text field takes the keys.
-        assert_eq!(timeline_input_ignored(false, true, false, false), (true, false));
+        assert_eq!(
+            timeline_input_ignored(false, true, false, false),
+            (true, false)
+        );
         // Interactive preview: clicks drag the camera.
-        assert_eq!(timeline_input_ignored(false, false, false, true), (false, true));
-        assert_eq!(timeline_input_ignored(true, false, false, false), (true, true));
-        assert_eq!(timeline_input_ignored(false, false, false, false), (false, false));
+        assert_eq!(
+            timeline_input_ignored(false, false, false, true),
+            (false, true)
+        );
+        assert_eq!(
+            timeline_input_ignored(true, false, false, false),
+            (true, true)
+        );
+        assert_eq!(
+            timeline_input_ignored(false, false, false, false),
+            (false, false)
+        );
     }
 
     #[test]

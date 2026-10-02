@@ -122,7 +122,9 @@ all use the application host, which owns the native runtime.
 - **Vello 0.9**, **bevy_egui 0.42.0**, **PyO3 0.28**.
 - All workspace crates use Rust edition **2024**.
 - `Cargo.lock` exists locally but is **gitignored** (library/workspace convention).
-- Workspace profiles: `dev` uses `opt-level = 1` for workspace crates, `opt-level = 3` for dependencies.
+- Workspace profiles: `dev` uses `opt-level = 2` for workspace crates, `opt-level = 3` for dependencies.
+  Do not lower it: at 0 or 1 rustc shares generic instances across crates and
+  `gaanim_engine.dll` exports them, past the 65 535 exports a Windows DLL allows.
 - Development debug info is limited to line tables for workspace crates and
   disabled for dependencies. Configure `rust-lld.exe` for Windows MSVC in the
   gitignored `.cargo/config.toml` as described in README; preserve `PYO3_PYTHON`.

@@ -32,6 +32,7 @@ output_dir = "exports"
   [`name`], [cadena], [nombre de la carpeta], [Nombre que muestran el Inicio y el título de la ventana.],
   [`assets_dir`], [ruta], [`"assets"`], [Carpeta de recursos, relativa al manifiesto. La lee `scene.assets.load_project()`.],
   [`output_dir`], [ruta], [`"exports"`], [Carpeta donde el diálogo de exportación del editor propone guardar.],
+  [`polls.relay`], [URL], [ninguno], [Relay de las encuestas de este proyecto, en una tabla `[polls]`.],
 )
 
 Las claves desconocidas se ignoran.
@@ -79,6 +80,18 @@ la CLI y el editor. Consulta
 Carpeta relativa al proyecto, o absoluta. El diálogo de exportación del editor
 propone `<output_dir>/output.mp4`. `gaanim export` no la usa: escribe en la
 ruta de `--output`, relativa al directorio actual.
+
+=== `[polls]`
+
+```toml
+[polls]
+relay = "https://gaanim-relay.<tú>.workers.dev"
+```
+
+Relay al que apuntan los códigos QR de las encuestas (`scene.poll`) de este
+proyecto, en lugar del guardado con `gaanim relay use`. `GAANIM_POLL_RELAY` tiene prioridad
+sobre ambos. Ver
+#link("/publico/primera-encuesta/")[Tu primera encuesta].
 
 == Cómo se encuentra el proyecto
 

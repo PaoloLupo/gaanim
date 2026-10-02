@@ -18,6 +18,10 @@
 //! - `frames/NNNNNN.bin`: chunks of frames, each frame encoded against the
 //!   one before it; a chunk starts with a whole frame.
 //! - `media/*`: embedded audio files.
+//! - `polls.json`: audience polls, their relay session and the elements
+//!   drawn from live poll data (bars, nicknames, readouts) with the glyphs
+//!   to redraw them, only when the scene has polls. Readers that predate
+//!   it ignore it, so it needs no new format version.
 //!
 //! [`FragmentRecipe`]: gaanim_renderer::fragment::FragmentRecipe
 
@@ -36,13 +40,21 @@ use gaanim_renderer::pipeline::{
     CanvasBackground, CapturedElement, SegmentBackgroundPaint, compose_captured,
 };
 use gaanim_renderer::post_process::PostProcessShader;
-use gaanim_timeline::timeline::{SegmentMetadata, SegmentStop, TimelineMarker};
+use gaanim_timeline::timeline::{
+    GateCondition, PollSessionInfo, SegmentMetadata, SegmentStop, StopGate, TimelineMarker,
+    TimelinePoll, TimelineQuiz,
+};
 use serde::{Deserialize, Serialize};
 
 use codec::{Reader, Writer};
 pub use digest::scene_digest;
 use model::{DecodedTables, DeltaDecoder, DeltaEncoder, FrameRecord, Tables};
 pub use model::{EntityKeys, Frame, PostPass};
+
+/// The entity that stands for element key `key` in decoded frames.
+pub fn element_entity(key: u32) -> Result<bevy::prelude::Entity> {
+    model::key_entity(key)
+}
 
 /// Identifies the file type in `manifest.json`.
 pub const FORMAT: &str = "gaanim-bundle";
@@ -61,6 +73,13 @@ pub const EXTENSION: &str = "gaanim";
 /// Optional cover image: a PNG stored as-is, which file managers show
 /// without decoding the bundle (the `gaanim_thumbnail` crate reads it).
 pub const THUMBNAIL: &str = "thumbnail.png";
+/// Optional audience polls, as JSON.
+const POLLS: &str = "polls.json";
+/// Live zones, as JSON: the player runs them, so frames never hold them.
+const LIVE: &str = "live.json";
+/// The scene's rehearsal, as JSON: live zones replay it outside a
+/// presentation.
+const REHEARSAL: &str = "rehearsal.json";
 /// Frames per chunk: one second at the default rate.
 const CHUNK_FRAMES: usize = 60;
 
@@ -143,6 +162,459 @@ pub struct SceneData {
     pub markers: Vec<TimelineMarker>,
     pub scenes: Vec<SceneSpan>,
     pub audio: Vec<AudioData>,
+    /// Audience polls, stored in their own entry (see [`POLLS`]).
+    pub polls: Vec<TimelinePoll>,
+    pub poll_session: Option<PollSessionInfo>,
+    /// Stops that advance once the audience meets a condition.
+    pub stop_gates: Vec<StopGate>,
+    /// Live zones, which the player runs while presenting.
+    pub live_zones: Vec<gaanim_animation::live::LiveZone>,
+    /// The made-up audience live zones replay outside a presentation.
+    pub rehearsal: Option<gaanim_animation::rehearsal::Rehearsal>,
+    /// Elements drawn as poll bars, which a live presentation redraws.
+    pub poll_bars: Vec<PollBarRecord>,
+    /// Elements drawn as live text, such as leaderboard nicknames.
+    pub poll_texts: Vec<LiveTextRecord>,
+    /// Readouts of live poll values.
+    pub poll_readouts: Vec<LiveReadoutRecord>,
+}
+
+// A presented bundle redraws these recorded elements from the live results:
+// it replaces an element's outline and keeps everything else the frame
+// recorded (paint, transform, opacity, effects).
+
+/// One character of a glyph atlas: its outline (SVG path data) and advance.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GlyphRecord {
+    pub ch: char,
+    pub advance: f64,
+    pub path: String,
+}
+
+/// A run of text shaped as a whole, such as a readout's prefix.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct RunRecord {
+    pub advance: f64,
+    pub path: String,
+}
+
+/// Where a live value comes from.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum LiveSourceRecord {
+    /// `measure` is `votes`, `share`, `percent`, `total` or `remaining`.
+    Poll {
+        poll: String,
+        answers: usize,
+        measure: String,
+        #[serde(default)]
+        answer: usize,
+        #[serde(default)]
+        time: f64,
+    },
+    LeaderScore {
+        rank: usize,
+    },
+    Players,
+    AudienceJoined {
+        slot: usize,
+    },
+    AudienceAge {
+        slot: usize,
+    },
+    /// `measure` is `score`, `players` or `average`.
+    Team {
+        team: usize,
+        measure: String,
+    },
+    LeadingTeam,
+    /// A number about the player at `index` of `list` (`audience` or
+    /// `leaderboard`); `measure` is `score`, `correct`, `answered`,
+    /// `streak`, or `responded`, `chose`, `right`, `points` or `time` on
+    /// `poll` (`chose` of `option`).
+    Player {
+        list: String,
+        index: usize,
+        measure: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        poll: String,
+        #[serde(default)]
+        option: usize,
+    },
+}
+
+/// What a bar's length follows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BarSourceRecord {
+    Answer {
+        poll: String,
+        answer: usize,
+        answers: usize,
+    },
+    Leader {
+        rank: usize,
+    },
+    Team {
+        team: usize,
+    },
+}
+
+/// A recorded element whose outline is a poll bar.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PollBarRecord {
+    /// Element key in the recorded frames.
+    pub key: u32,
+    pub source: BarSourceRecord,
+    pub length: f64,
+    pub thickness: f64,
+    pub radius: f64,
+    /// `right`, `left`, `up` or `down`.
+    pub direction: String,
+    /// `total` or `leader`.
+    pub scale: String,
+}
+
+/// A recorded element whose outline is a player's nickname.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LiveTextRecord {
+    pub key: u32,
+    /// The list the nickname comes from: empty for the leaderboard, where
+    /// `rank` is the place, or `audience`, where it is the joining order.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub list: String,
+    pub rank: usize,
+    /// `left`, `center` or `right`.
+    pub align: String,
+    pub glyphs: Vec<GlyphRecord>,
+}
+
+/// A recorded readout of a live value: its format and the glyphs to draw
+/// any number with it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LiveReadoutRecord {
+    pub key: u32,
+    pub source: LiveSourceRecord,
+    pub format: String,
+    pub invalid: String,
+    pub decimal_separator: char,
+    pub prefix: RunRecord,
+    pub suffix: RunRecord,
+    pub glyphs: Vec<GlyphRecord>,
+}
+
+/// `polls.json`.
+#[derive(Serialize, Deserialize)]
+struct PollsEntry {
+    #[serde(default)]
+    session: Option<SessionRecord>,
+    polls: Vec<PollRecord>,
+    #[serde(default)]
+    bars: Vec<PollBarRecord>,
+    #[serde(default)]
+    texts: Vec<LiveTextRecord>,
+    #[serde(default)]
+    readouts: Vec<LiveReadoutRecord>,
+    #[serde(default)]
+    gates: Vec<GateRecord>,
+}
+
+/// A stop that advances by itself, and its condition.
+#[derive(Serialize, Deserialize)]
+struct GateRecord {
+    time: f64,
+    until: ConditionRecord,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum ConditionRecord {
+    Answers {
+        poll: String,
+        count: u32,
+    },
+    AnswerShare {
+        poll: String,
+        share: f64,
+        players: bool,
+    },
+    TimeUp {
+        poll: String,
+    },
+    Players {
+        count: u32,
+    },
+    All {
+        of: Vec<ConditionRecord>,
+    },
+    Any {
+        of: Vec<ConditionRecord>,
+    },
+}
+
+impl ConditionRecord {
+    fn of(condition: &GateCondition) -> Self {
+        match condition {
+            GateCondition::Answers { poll, count } => Self::Answers {
+                poll: poll.clone(),
+                count: *count,
+            },
+            GateCondition::AnswerShare {
+                poll,
+                share,
+                players,
+            } => Self::AnswerShare {
+                poll: poll.clone(),
+                share: *share,
+                players: *players,
+            },
+            GateCondition::TimeUp { poll } => Self::TimeUp { poll: poll.clone() },
+            GateCondition::Players { count } => Self::Players { count: *count },
+            GateCondition::All(conditions) => Self::All {
+                of: conditions.iter().map(Self::of).collect(),
+            },
+            GateCondition::Any(conditions) => Self::Any {
+                of: conditions.iter().map(Self::of).collect(),
+            },
+        }
+    }
+
+    fn condition(self) -> GateCondition {
+        match self {
+            Self::Answers { poll, count } => GateCondition::Answers { poll, count },
+            Self::AnswerShare {
+                poll,
+                share,
+                players,
+            } => GateCondition::AnswerShare {
+                poll,
+                share,
+                players,
+            },
+            Self::TimeUp { poll } => GateCondition::TimeUp { poll },
+            Self::Players { count } => GateCondition::Players { count },
+            Self::All { of } => GateCondition::All(of.into_iter().map(Self::condition).collect()),
+            Self::Any { of } => GateCondition::Any(of.into_iter().map(Self::condition).collect()),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct SessionRecord {
+    relay: Option<String>,
+    code: String,
+    #[serde(default)]
+    lobby: bool,
+    #[serde(default)]
+    game_segment: Option<u32>,
+    #[serde(default)]
+    teams: Option<TeamsRecord>,
+    #[serde(default)]
+    ask: Option<AskRecord>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct AskRecord {
+    label: String,
+    #[serde(default)]
+    required: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+struct TeamsRecord {
+    names: Vec<String>,
+    colors: Vec<String>,
+    #[serde(default)]
+    choose: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+struct PollRecord {
+    id: String,
+    question: String,
+    options: Vec<String>,
+    preview: Vec<u32>,
+    #[serde(default)]
+    segment: u32,
+    open: f64,
+    close: f64,
+    #[serde(default)]
+    quiz: Option<QuizRecord>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    multiple: bool,
+    /// The picture's hash and type; its bytes are the entry `images/<hash>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    image: Option<ImageRecord>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ImageRecord {
+    hash: String,
+    mime: String,
+}
+
+/// A quiz's right answers: one number, as bundles wrote them before
+/// multiple choice, or a list.
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum CorrectRecord {
+    One(usize),
+    Many(Vec<usize>),
+}
+
+impl CorrectRecord {
+    fn of(correct: &[usize]) -> Self {
+        match correct {
+            [one] => Self::One(*one),
+            many => Self::Many(many.to_vec()),
+        }
+    }
+
+    fn answers(self) -> Vec<usize> {
+        match self {
+            Self::One(one) => vec![one],
+            Self::Many(many) => many,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct QuizRecord {
+    correct: CorrectRecord,
+    time: u32,
+    points: u32,
+    reveal: Option<f64>,
+}
+
+fn write_polls(scene: &SceneData) -> Result<Vec<u8>> {
+    let entry = PollsEntry {
+        session: scene.poll_session.as_ref().map(|session| SessionRecord {
+            relay: session.relay.clone(),
+            code: session.code.clone(),
+            lobby: session.lobby,
+            game_segment: session.game_segment,
+            teams: session.teams.as_ref().map(|teams| TeamsRecord {
+                names: teams.names.clone(),
+                colors: teams.colors.clone(),
+                choose: teams.choose,
+            }),
+            ask: session.ask.as_ref().map(|ask| AskRecord {
+                label: ask.label.clone(),
+                required: ask.required,
+            }),
+        }),
+        polls: scene
+            .polls
+            .iter()
+            .map(|poll| PollRecord {
+                id: poll.id.clone(),
+                question: poll.question.clone(),
+                options: poll.options.clone(),
+                preview: poll.preview.clone(),
+                segment: poll.segment,
+                open: poll.open,
+                close: poll.close,
+                quiz: poll.quiz.as_ref().map(|quiz| QuizRecord {
+                    correct: CorrectRecord::of(&quiz.correct),
+                    time: quiz.time,
+                    points: quiz.points,
+                    reveal: quiz.reveal,
+                }),
+                multiple: poll.multiple,
+                image: poll.image.as_ref().map(|image| ImageRecord {
+                    hash: image.hash.clone(),
+                    mime: image.mime.clone(),
+                }),
+            })
+            .collect(),
+        bars: scene.poll_bars.clone(),
+        texts: scene.poll_texts.clone(),
+        readouts: scene.poll_readouts.clone(),
+        gates: scene
+            .stop_gates
+            .iter()
+            .map(|gate| GateRecord {
+                time: gate.time,
+                until: ConditionRecord::of(&gate.until),
+            })
+            .collect(),
+    };
+    serde_json::to_vec(&entry).map_err(|error| BundleError::Corrupt(error.to_string()))
+}
+
+/// The entry holding a poll picture's bytes.
+fn image_entry(hash: &str) -> String {
+    format!("images/{hash}")
+}
+
+/// Read the polls entry; `image` reads a picture's bytes by entry name.
+fn read_polls(
+    bytes: &[u8],
+    scene: &mut SceneData,
+    mut image: impl FnMut(&str) -> Result<Vec<u8>>,
+) -> Result<()> {
+    let entry: PollsEntry = serde_json::from_slice(bytes)
+        .map_err(|error| BundleError::Corrupt(format!("{POLLS}: {error}")))?;
+    scene.poll_session = entry.session.map(|session| PollSessionInfo {
+        relay: session.relay,
+        code: session.code,
+        lobby: session.lobby,
+        game_segment: session.game_segment,
+        teams: session
+            .teams
+            .map(|teams| gaanim_timeline::timeline::TeamsInfo {
+                names: teams.names,
+                colors: teams.colors,
+                choose: teams.choose,
+            }),
+        ask: session.ask.map(|ask| gaanim_timeline::timeline::AskInfo {
+            label: ask.label,
+            required: ask.required,
+        }),
+    });
+    scene.polls = entry
+        .polls
+        .into_iter()
+        .map(|poll| {
+            let image = match poll.image {
+                Some(record) => Some(gaanim_timeline::timeline::PollImage {
+                    bytes: image(&image_entry(&record.hash))?.into(),
+                    hash: record.hash,
+                    mime: record.mime,
+                }),
+                None => None,
+            };
+            Ok(TimelinePoll {
+                id: poll.id,
+                question: poll.question,
+                options: poll.options,
+                preview: poll.preview,
+                segment: poll.segment,
+                open: poll.open,
+                close: poll.close,
+                quiz: poll.quiz.map(|quiz| TimelineQuiz {
+                    correct: quiz.correct.answers(),
+                    time: quiz.time,
+                    points: quiz.points,
+                    reveal: quiz.reveal,
+                }),
+                multiple: poll.multiple,
+                image,
+            })
+        })
+        .collect::<Result<_>>()?;
+    scene.poll_bars = entry.bars;
+    scene.poll_texts = entry.texts;
+    scene.poll_readouts = entry.readouts;
+    scene.stop_gates = entry
+        .gates
+        .into_iter()
+        .map(|gate| StopGate {
+            time: gate.time,
+            until: gate.until.condition(),
+        })
+        .collect();
+    Ok(())
 }
 
 fn write_paint(w: &mut Writer, tables: &mut Tables, paint: &BackgroundPaint) {
@@ -399,6 +871,14 @@ impl SceneData {
             markers,
             scenes,
             audio,
+            polls: Vec::new(),
+            poll_session: None,
+            stop_gates: Vec::new(),
+            live_zones: Vec::new(),
+            rehearsal: None,
+            poll_bars: Vec::new(),
+            poll_texts: Vec::new(),
+            poll_readouts: Vec::new(),
         })
     }
 }
@@ -515,6 +995,12 @@ impl<W: Write + Seek> BundleWriter<W> {
         self.entries
             .insert(name.to_owned(), blake3::hash(bytes).to_hex().to_string());
         Ok(())
+    }
+
+    /// The key frames use for `entity`, e.g. to name the elements drawn as
+    /// poll bars.
+    pub fn entity_key(&mut self, entity: bevy::prelude::Entity) -> u32 {
+        self.keys.key(entity)
     }
 
     /// Embed a media file and return its entry name. Identical files are
@@ -693,6 +1179,30 @@ impl<W: Write + Seek> BundleWriter<W> {
             digests.extend_from_slice(digest);
         }
         self.write_entry("digests.bin", &digests)?;
+        // A scene can take its audience without a poll: a lobby, a gate.
+        if !scene.polls.is_empty() || scene.poll_session.is_some() || !scene.stop_gates.is_empty() {
+            self.write_entry(POLLS, &write_polls(scene)?)?;
+            let mut written = std::collections::HashSet::new();
+            for image in scene.polls.iter().filter_map(|poll| poll.image.as_ref()) {
+                if written.insert(image.hash.clone()) {
+                    self.write_entry(&image_entry(&image.hash), &image.bytes)?;
+                }
+            }
+        }
+        if !scene.live_zones.is_empty() {
+            let json = serde_json::to_vec(&scene.live_zones)
+                .map_err(|error| BundleError::Corrupt(error.to_string()))?;
+            self.write_entry(LIVE, &json)?;
+        }
+        if let Some(rehearsal) = scene
+            .rehearsal
+            .as_ref()
+            .filter(|_| !scene.live_zones.is_empty())
+        {
+            let json = serde_json::to_vec(rehearsal)
+                .map_err(|error| BundleError::Corrupt(error.to_string()))?;
+            self.write_entry(REHEARSAL, &json)?;
+        }
 
         let manifest = Manifest {
             format: FORMAT.into(),
@@ -902,7 +1412,24 @@ impl Bundle {
         }
         model::decode_recipes(&encoded, &mut tables)?;
         let scene_bytes = read_entry(&mut archive, Some(&manifest), "scene.bin")?;
-        let scene = SceneData::read(&mut Reader::new(&scene_bytes), &tables)?;
+        let mut scene = SceneData::read(&mut Reader::new(&scene_bytes), &tables)?;
+        if manifest.entries.contains_key(POLLS) {
+            let polls = read_entry(&mut archive, Some(&manifest), POLLS)?;
+            read_polls(&polls, &mut scene, |name| {
+                read_entry(&mut archive, Some(&manifest), name)
+            })?;
+        }
+        if manifest.entries.contains_key(LIVE) {
+            scene.live_zones =
+                serde_json::from_slice(&read_entry(&mut archive, Some(&manifest), LIVE)?)
+                    .map_err(|error| BundleError::Corrupt(format!("{LIVE}: {error}")))?;
+        }
+        if manifest.entries.contains_key(REHEARSAL) {
+            scene.rehearsal = Some(
+                serde_json::from_slice(&read_entry(&mut archive, Some(&manifest), REHEARSAL)?)
+                    .map_err(|error| BundleError::Corrupt(format!("{REHEARSAL}: {error}")))?,
+            );
+        }
 
         let index = read_entry(&mut archive, Some(&manifest), "index.bin")?;
         let mut r = Reader::new(&index);
@@ -1199,5 +1726,176 @@ mod tests {
             assert_eq!(decoded.camera, frame(time).camera, "frame {index}");
         }
         assert!(bundle.cached.len() <= CACHED_CHUNKS);
+    }
+
+    #[test]
+    fn a_lobby_and_its_gates_round_trip_without_polls() {
+        let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
+        writer.push_frame(&frame(0.0), [0; 32]).unwrap();
+        let gate = StopGate {
+            time: 0.5,
+            until: GateCondition::Any(vec![
+                GateCondition::Players { count: 5 },
+                GateCondition::All(vec![
+                    GateCondition::AnswerShare {
+                        poll: "q0".into(),
+                        share: 0.8,
+                        players: true,
+                    },
+                    GateCondition::TimeUp { poll: "q0".into() },
+                ]),
+            ]),
+        };
+        let scene = SceneData {
+            fps: 60,
+            duration: 1.0 / 60.0,
+            poll_session: Some(PollSessionInfo {
+                relay: Some("https://relay.example.dev".into()),
+                code: "ABC234".into(),
+                lobby: true,
+                game_segment: Some(3),
+                teams: Some(gaanim_timeline::timeline::TeamsInfo {
+                    names: vec!["Rojo".into(), "Azul".into()],
+                    colors: vec!["#ff0000".into(), "#0000ff".into()],
+                    choose: true,
+                }),
+                ask: Some(gaanim_timeline::timeline::AskInfo {
+                    label: "Código".into(),
+                    required: true,
+                }),
+            }),
+            stop_gates: vec![gate.clone()],
+            ..Default::default()
+        };
+        let bundle =
+            Bundle::from_bytes(writer.finish(&scene).unwrap().into_inner().into()).unwrap();
+        // No poll, yet the session and its lobby are kept.
+        assert!(bundle.scene.polls.is_empty());
+        assert!(bundle.scene.poll_session.as_ref().unwrap().lobby);
+        assert_eq!(
+            bundle.scene.poll_session.as_ref().unwrap().game_segment,
+            Some(3)
+        );
+        let teams = bundle
+            .scene
+            .poll_session
+            .as_ref()
+            .unwrap()
+            .teams
+            .as_ref()
+            .unwrap();
+        assert_eq!(teams.names, ["Rojo", "Azul"]);
+        assert!(teams.choose);
+        let ask = bundle
+            .scene
+            .poll_session
+            .as_ref()
+            .unwrap()
+            .ask
+            .as_ref()
+            .unwrap();
+        assert_eq!((ask.label.as_str(), ask.required), ("Código", true));
+        assert_eq!(bundle.scene.stop_gates, [gate]);
+    }
+
+    #[test]
+    fn polls_round_trip_in_their_own_entry() {
+        let record = |polls: Vec<TimelinePoll>, scene: SceneData| {
+            let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
+            writer.push_frame(&frame(0.0), [0; 32]).unwrap();
+            let scene = SceneData {
+                fps: 60,
+                duration: 1.0 / 60.0,
+                poll_session: (!polls.is_empty()).then(|| PollSessionInfo {
+                    relay: Some("https://relay.example.dev".into()),
+                    code: "ABC234".into(),
+                    lobby: false,
+                    game_segment: None,
+                    teams: None,
+                    ask: None,
+                }),
+                polls,
+                ..scene
+            };
+            Bundle::from_bytes(writer.finish(&scene).unwrap().into_inner().into()).unwrap()
+        };
+        let quiz = TimelinePoll {
+            id: "q0-0badf00d".into(),
+            question: "¿Cuál?".into(),
+            options: vec!["A".into(), "B".into()],
+            preview: vec![3, 1],
+            segment: 1,
+            open: 0.0,
+            close: 1.0,
+            quiz: Some(TimelineQuiz {
+                correct: vec![0, 1],
+                time: 20,
+                points: 1000,
+                reveal: Some(0.9),
+            }),
+            // Multiple choice, with a picture the bundle carries.
+            multiple: true,
+            image: Some(gaanim_timeline::timeline::PollImage {
+                hash: "0123456789abcdef".into(),
+                mime: "image/jpeg".into(),
+                bytes: vec![1, 2, 3].into(),
+            }),
+        };
+        let glyph = GlyphRecord {
+            ch: 'Ñ',
+            advance: 0.6,
+            path: "M0 0L1 0L1 1Z".into(),
+        };
+        let live = SceneData {
+            poll_bars: vec![PollBarRecord {
+                key: 7,
+                source: BarSourceRecord::Leader { rank: 1 },
+                length: 4.0,
+                thickness: 0.5,
+                radius: 0.1,
+                direction: "up".into(),
+                scale: "leader".into(),
+            }],
+            poll_texts: vec![LiveTextRecord {
+                key: 8,
+                list: String::new(),
+                rank: 0,
+                align: "left".into(),
+                glyphs: vec![glyph.clone()],
+            }],
+            poll_readouts: vec![LiveReadoutRecord {
+                key: 9,
+                source: LiveSourceRecord::Poll {
+                    poll: quiz.id.clone(),
+                    answers: 2,
+                    measure: "percent".into(),
+                    answer: 1,
+                    time: 0.0,
+                },
+                format: ".0f".into(),
+                invalid: "?".into(),
+                decimal_separator: ',',
+                prefix: RunRecord::default(),
+                suffix: RunRecord {
+                    advance: 0.5,
+                    path: "M0 0L1 1".into(),
+                },
+                glyphs: vec![glyph],
+            }],
+            ..Default::default()
+        };
+        let bundle = record(vec![quiz.clone()], live.clone());
+        assert!(bundle.manifest.entries.contains_key(POLLS));
+        assert_eq!(bundle.scene.polls, [quiz]);
+        assert_eq!(bundle.scene.poll_bars, live.poll_bars);
+        assert_eq!(bundle.scene.poll_texts, live.poll_texts);
+        assert_eq!(bundle.scene.poll_readouts, live.poll_readouts);
+        assert_eq!(bundle.scene.poll_session.as_ref().unwrap().code, "ABC234");
+
+        // A scene without polls writes no entry, as bundles did before.
+        let bundle = record(Vec::new(), SceneData::default());
+        assert!(!bundle.manifest.entries.contains_key(POLLS));
+        assert!(bundle.scene.polls.is_empty());
+        assert!(bundle.scene.poll_session.is_none());
     }
 }

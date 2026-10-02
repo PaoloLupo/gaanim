@@ -76,6 +76,10 @@ const GENERAL: Page = Page {
                     "register",
                     "Open .gaanim files with Gaanim on double click, with a\nPresent action and cover images; unregister undoes it",
                 ),
+                (
+                    "relay init [DIR] | use <URL> | reset [PATH] | results [PATH]",
+                    "Write the relay that carries audience poll votes, set the\ndeployed one, start a new game on a project's session, or\nsave its results as spreadsheets; `relay` alone shows the\ncurrent one",
+                ),
             ],
         ),
         Block::Rows(
@@ -392,6 +396,10 @@ const DIFF: Page = Page {
                 (
                     "--from <NAME>",
                     "With --capture-stops, stops from this segment on",
+                ),
+                (
+                    "--height <PX>",
+                    "Capture frames this tall (default 1920 on the long edge)",
                 ),
             ],
         ),

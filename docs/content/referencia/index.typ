@@ -32,6 +32,7 @@ conservan en inglés porque forman parte de la API ejecutable.
   card("audio/", "scene.media", "Audio", [Pistas sincronizadas y narración grabada en el editor.])
   card("diapositivas/", "scene.slides", "Diapositivas", [Insignias, tarjetas, rótulos, listas, tablas e identidad de la presentación.])
   card("mecanica/", "scene.mechanics", "Mecánica", [Cotas, barras, muelles, fuerzas, apoyos y engranajes reactivos.])
+  card("publico/", "Audiencia", "Público", [Encuestas, cuestionarios, clasificación, equipos, sala, personajes y zonas vivas.])
   card("animations/", "Tiempo", "Animaciones", [`.animate`, entradas, énfasis, transformaciones, composición y easing.])
   card("themes/", "Estilo", "Colores y temas", [Paleta, pinceles, degradados, efectos y temas reutilizables.])
   card("assets/", "Proyecto", "Recursos", [Carpeta de assets, precarga, SVG y Lottie en detalle.])

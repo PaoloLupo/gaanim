@@ -1,11 +1,13 @@
 [package]
 name = "gaanim_api"
-version = "0.7.2"
+version = "0.8.0"
 license = "MIT OR Apache-2.0"
 edition = "2024"
 description = "Premium fluent script API and animation builder for gaanim v2"
 
 [dependencies]
+# QR codes of audience polls.
+qrcodegen = "1.8"
 # Local workspace dependencies
 gaanim_core = { path = "../gaanim_core" }
 gaanim_math = { path = "../gaanim_math" }

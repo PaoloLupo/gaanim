@@ -54,6 +54,24 @@ pub(crate) struct CanvasState {
     /// The shared scene that owns this state, which drawables compile to
     /// measure themselves.
     pub(crate) owner: Option<std::sync::Weak<Mutex<crate::canvas::SceneModel>>>,
+    /// Audience polls in authoring order and the session they take votes on.
+    pub(crate) polls: Vec<super::poll::PollRecord>,
+    pub(crate) poll_session: Option<super::poll::PollSession>,
+    /// The scene shows its audience, so phones join as they arrive.
+    pub(crate) poll_lobby: bool,
+    /// Where the scene first showed its audience: segment and local cursor.
+    pub(crate) poll_lobby_at: Option<(usize, f64)>,
+    /// The made-up audience previews and exports show.
+    pub(crate) rehearsal: gaanim_animation::rehearsal::RehearsalSpec,
+    /// The game's teams, if it plays in teams.
+    pub(crate) poll_teams: Option<gaanim_timeline::timeline::TeamsInfo>,
+    /// What joining also asks, such as a student code.
+    pub(crate) poll_ask: Option<gaanim_timeline::timeline::AskInfo>,
+    /// Stops that advance once the audience meets a condition: segment
+    /// index, local time of the stop, condition.
+    pub(crate) stop_gates: Vec<(usize, f64, gaanim_timeline::timeline::GateCondition)>,
+    /// Live zones in authoring order.
+    pub(crate) live_zones: Vec<super::live::LiveZoneRecord>,
 }
 
 impl CanvasState {
@@ -77,6 +95,15 @@ impl CanvasState {
             object_specs: HashMap::new(),
             frozen_spawn_specs: HashMap::new(),
             owner: None,
+            polls: Vec::new(),
+            poll_session: None,
+            poll_lobby: false,
+            poll_lobby_at: None,
+            rehearsal: Default::default(),
+            poll_teams: None,
+            poll_ask: None,
+            stop_gates: Vec::new(),
+            live_zones: Vec::new(),
         }
     }
 
@@ -616,6 +643,8 @@ pub(crate) enum Op {
         target: ObjectId,
         from: CanvasEndpoint,
         to: CanvasEndpoint,
+        /// Dash and gap lengths, for a dashed line.
+        dashes: Option<(f64, f64)>,
     },
     /// Filled arrow following endpoints and optional intermediate points.
     AttachTrackingConnector {
@@ -744,6 +773,35 @@ pub(crate) enum Op {
     AttachSampledSeries {
         target: ObjectId,
         driver: SampledSeriesDriver,
+    },
+    /// Make a parameter report a poll's live value.
+    AttachPollValue {
+        target: ObjectId,
+        value: gaanim_animation::polls::PollValue,
+    },
+    /// Make a group of empty paths a character, posed every frame.
+    AttachCharacter {
+        target: ObjectId,
+        /// The group's paths, back to front.
+        layers: Vec<ObjectId>,
+        rig: gaanim_animation::characters::CharacterRig,
+    },
+    /// Play an expression on a character from the cursor.
+    CharacterExpress {
+        target: ObjectId,
+        expression: Option<(String, bool)>,
+    },
+    /// Make a rectangle a bar that follows a poll answer or a score.
+    AttachPollBar {
+        target: ObjectId,
+        bar: gaanim_animation::polls::PollBar,
+    },
+    /// Make an empty path live text, such as a leaderboard nickname.
+    AttachLiveText {
+        target: ObjectId,
+        source: gaanim_animation::polls::LiveTextSource,
+        preview: std::sync::Arc<str>,
+        options: super::poll::LiveTextOptions,
     },
     /// Regenerate a curved arrow arc from a float signal every frame.
     AttachTrackerArc {

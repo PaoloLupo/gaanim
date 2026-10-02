@@ -331,7 +331,32 @@ fn decode_preview_audio_range(
             message: String::from_utf8_lossy(&output.stderr).trim().to_string(),
         });
     }
-    Ok(output.stdout.into())
+    let mut wav = output.stdout;
+    fix_piped_wav_sizes(&mut wav);
+    Ok(wav.into())
+}
+
+/// Write the real RIFF and `data` chunk sizes into a WAV that ffmpeg wrote to
+/// a pipe. It cannot seek back to fill them in, so it leaves them at
+/// 0xFFFFFFFF, and the decoder then reports a duration of hours: the
+/// track would never end, keeping its player and seeking it every frame.
+fn fix_piped_wav_sizes(wav: &mut [u8]) {
+    if wav.len() < 12 || &wav[0..4] != b"RIFF" || &wav[8..12] != b"WAVE" {
+        return;
+    }
+    let riff = u32::try_from(wav.len() - 8).unwrap_or(u32::MAX);
+    wav[4..8].copy_from_slice(&riff.to_le_bytes());
+    let mut offset = 12;
+    while offset + 8 <= wav.len() {
+        let size = u32::from_le_bytes(wav[offset + 4..offset + 8].try_into().unwrap()) as usize;
+        if &wav[offset..offset + 4] == b"data" {
+            let data = u32::try_from(wav.len() - offset - 8).unwrap_or(u32::MAX);
+            wav[offset + 4..offset + 8].copy_from_slice(&data.to_le_bytes());
+            return;
+        }
+        // Chunks are padded to an even size.
+        offset += 8 + size + (size & 1);
+    }
 }
 
 pub fn decode_preview_audio(
@@ -617,9 +642,26 @@ struct PreviewAudioRegistry {
     tracks: Vec<AudioTrack>,
     entries: Vec<Option<PreviewAudioEntry>>,
     cache: HashMap<PreviewAudioKey, Arc<[u8]>>,
+    /// Seconds of each decoded source.
+    durations: HashMap<PreviewAudioKey, f64>,
     failed: std::collections::HashSet<PreviewAudioKey>,
     /// Tracks whose failed seek was already reported.
     seek_warned: std::collections::HashSet<PreviewAudioKey>,
+}
+
+/// How long before its start a track gets its player, so it is ready when
+/// the playhead reaches it.
+const AUDIO_LEAD: f64 = 1.0;
+
+/// Whether `track` needs a player at `scene_time`: it loops, or the playhead
+/// is near or inside it. Only those tracks have one, because every player
+/// mixes on the audio thread even while paused and a seek waits for that
+/// thread; a scene with many short sounds would otherwise starve it (the
+/// sound crackles) and stall each frame.
+fn needs_player(track: &AudioTrack, active_duration: f64, scene_time: f64) -> bool {
+    track.looping
+        || (scene_time >= track.start_time - AUDIO_LEAD
+            && scene_time < track.start_time + active_duration)
 }
 
 /// Whether a track whose source already ended must be rebuilt: it loops, or
@@ -885,15 +927,15 @@ fn sync_preview_audio_system(world: &mut World) {
         registry.entries = vec![None; registry.tracks.len()];
     }
 
+    let scene_time = world.resource::<Timeline>().current_time;
     for index in 0..registry.tracks.len() {
-        if registry.entries[index].is_some() {
-            continue;
-        }
         let track = registry.tracks[index].clone();
         let key = PreviewAudioKey::new(&track);
         if registry.failed.contains(&key) {
             continue;
         }
+        // Decode every source once up front (tracks share sources), so
+        // giving a track its player later never waits for ffmpeg.
         let bytes = if let Some(bytes) = registry.cache.get(&key).cloned() {
             bytes
         } else {
@@ -918,22 +960,39 @@ fn sync_preview_audio_system(world: &mut World) {
             }
         };
         let source = AudioSource { bytes };
-        let duration = source
-            .decoder()
-            .total_duration()
-            .map(|duration| duration.as_secs_f64())
-            .filter(|duration| duration.is_finite() && *duration > 0.0);
-        let Some(duration) = duration else {
-            gaanim_core::console::warn(
-                "audio",
-                format!(
-                    "preview audio duration is unavailable: {}",
-                    track.path.display()
-                ),
-            );
-            registry.failed.insert(key);
-            continue;
+        let duration = match registry.durations.get(&key) {
+            Some(duration) => *duration,
+            None => {
+                let duration = source
+                    .decoder()
+                    .total_duration()
+                    .map(|duration| duration.as_secs_f64())
+                    .filter(|duration| duration.is_finite() && *duration > 0.0);
+                let Some(duration) = duration else {
+                    gaanim_core::console::warn(
+                        "audio",
+                        format!(
+                            "preview audio duration is unavailable: {}",
+                            track.path.display()
+                        ),
+                    );
+                    registry.failed.insert(key);
+                    continue;
+                };
+                registry.durations.insert(key, duration);
+                duration
+            }
         };
+        let active_duration = track.duration.map_or(duration, |end| end.min(duration));
+        if !needs_player(&track, active_duration, scene_time) {
+            if let Some(entry) = registry.entries[index].take() {
+                let _ = world.despawn(entry.entity);
+            }
+            continue;
+        }
+        if registry.entries[index].is_some() {
+            continue;
+        }
         let handle = world.resource_mut::<Assets<AudioSource>>().add(source);
         // Play once: Bevy's looping mode wraps the source in a buffer that
         // rejects every seek, so scrubbing would leave the audio behind.
@@ -953,7 +1012,6 @@ fn sync_preview_audio_system(world: &mut World) {
     }
 
     let timeline = world.resource::<Timeline>();
-    let scene_time = timeline.current_time;
     let timeline_playing = timeline.is_playing;
     let playback_rate = timeline.playback_rate.max(0.01);
     let mut rebuild = Vec::new();
@@ -1324,6 +1382,20 @@ mod tests {
     }
 
     #[test]
+    fn only_tracks_near_the_playhead_get_a_player() {
+        let path = std::env::temp_dir().join(format!("gaanim-player-{}.wav", std::process::id()));
+        narration::write_wav_take(&path, &[0.0; 8], 8_000).unwrap();
+        let mut track = AudioTrack::new(&path, 10.0, Some(0.5), 1.0, 0.0, 0.0).unwrap();
+        assert!(!needs_player(&track, 0.5, 2.0), "long before the sound");
+        assert!(needs_player(&track, 0.5, 9.5), "just before it, to be ready");
+        assert!(needs_player(&track, 0.5, 10.2), "while it sounds");
+        assert!(!needs_player(&track, 0.5, 10.6), "after it");
+        track.looping = true;
+        assert!(needs_player(&track, 0.5, 2.0));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn decoded_preview_audio_seeks_both_ways_when_ffmpeg_is_available() {
         use bevy::audio::{Decodable, Source};
         if Command::new("ffmpeg").arg("-version").output().is_err() {
@@ -1341,6 +1413,9 @@ mod tests {
         narration::write_wav_take(&path, &samples, 8_000).unwrap();
         let bytes = decode_preview_audio_range(&path, 0.0, None, 1.0).unwrap();
         let mut decoder = bevy::audio::AudioSource { bytes }.decoder();
+        // A track must end when its sound does, not hours later.
+        let duration = decoder.total_duration().expect("a known duration");
+        assert!((duration.as_secs_f64() - 3.0).abs() < 0.05, "{duration:?}");
         for (second, level) in [(2.5, 0.7), (0.5, 0.1), (1.5, 0.4)] {
             decoder
                 .try_seek(std::time::Duration::from_secs_f64(second))

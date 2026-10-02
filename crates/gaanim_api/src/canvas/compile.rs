@@ -1445,6 +1445,10 @@ pub(crate) fn structured_text_typst_source(
     let page_width = width
         .map(|width| format!("{width}pt"))
         .unwrap_or_else(|| "auto".to_string());
+    // Each line's box is one em, so baselines are `line_spacing` em apart,
+    // as CSS `line-height` sets them. Typst's own edges (the cap height and
+    // the baseline) would put them a cap height closer, overlapping lines in
+    // fonts with tall ascenders.
     let leading = font_size * (spec.flow.line_spacing.max(0.1) - 1.0);
     let (alignment, justify) = match spec.flow.align {
         gaanim_text::prelude::TextAlign::Left => ("left", false),
@@ -1505,7 +1509,7 @@ pub(crate) fn structured_text_typst_source(
     };
     format!(
         "#set page(width: {page_width}, height: auto, margin: 0pt)\n\
-         #set text({font}fill: rgb(\"{hex}\"), dir: {direction}, hyphenate: {}{lang}{weight}{italic}{tracking})\n\
+         #set text({font}fill: rgb(\"{hex}\"), dir: {direction}, hyphenate: {}{lang}{weight}{italic}{tracking}, top-edge: 0.8em, bottom-edge: -0.2em)\n\
          #set par(justify: {justify}, leading: {leading}pt)\n\
          {content}",
         spec.flow.hyphenate,
@@ -1724,6 +1728,32 @@ fn layout_box_path(
     }
     segments.reverse();
     segments.join(" > ")
+}
+
+/// The first words of the text `id` holds, itself or in its boxes, to
+/// recognize it in a diagnostic.
+fn layout_text_excerpt(tree: &CompiledLayoutTree, id: gaanim_layout::LayoutId) -> Option<String> {
+    const CHARS: usize = 32;
+    let mut pending = vec![id];
+    while let Some(id) = pending.pop() {
+        if let Some(text) = tree.texts.get(&id) {
+            let text = text.spec.plain_text();
+            let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            if text.is_empty() {
+                continue;
+            }
+            return Some(if text.chars().count() > CHARS {
+                let head: String = text.chars().take(CHARS).collect();
+                format!("{}…", head.trim_end())
+            } else {
+                text
+            });
+        }
+        if let Some(children) = tree.children_by_id.get(&id) {
+            pending.extend(children.iter().rev());
+        }
+    }
+    None
 }
 
 fn outermost_layout_source(
@@ -2721,6 +2751,218 @@ impl SceneModel {
                 },
             )
             .collect();
+        let (
+            polls,
+            poll_session,
+            poll_lobby,
+            lobby_at,
+            stop_gates,
+            live_zones,
+            rehearsal,
+            teams,
+            ask,
+        ) = {
+            let state = self.state.lock().expect("canvas state poisoned");
+            (
+                state.polls.clone(),
+                state.poll_session.clone(),
+                state.poll_lobby,
+                state.poll_lobby_at,
+                state.stop_gates.clone(),
+                state.live_zones.clone(),
+                state.rehearsal.clone(),
+                state.poll_teams.clone(),
+                state.poll_ask.clone(),
+            )
+        };
+        let lobby_segment = lobby_at.map(|(segment, _)| segment);
+        let at = |(segment, local): (usize, f64)| {
+            segment_metadata
+                .get(segment)
+                .map(|metadata: &SegmentMetadata| metadata.start_time + local)
+        };
+        // The game begins at the segment that first shows the audience or
+        // opens a poll.
+        let game_segment = polls
+            .iter()
+            .map(|poll| poll.open.0)
+            .chain(lobby_segment)
+            .min()
+            .and_then(|segment| segment_metadata.get(segment))
+            .map(|metadata| metadata.id);
+        // The first stop after `time`, before `until`: where a presentation
+        // waits.
+        let stop_after = |time: f64, until: f64| {
+            segment_metadata
+                .iter()
+                .flat_map(|metadata| &metadata.stops)
+                .map(|stop| stop.time)
+                .filter(|stop| *stop > time + 1e-6 && *stop <= until + 1e-6)
+                .fold(None, |first: Option<f64>, stop| {
+                    Some(first.map_or(stop, |first| first.min(stop)))
+                })
+        };
+        // The made-up audience previews and exports show: players join
+        // until the room's first stop, and answer each poll until the stop
+        // where a presentation would wait for them.
+        let rehearsal = poll_session.is_some().then(|| {
+            let room = lobby_at.and_then(|lobby| {
+                let open = at(lobby)?;
+                let end = segment_metadata.get(lobby.0)?.end_time;
+                Some((open, stop_after(open, end).unwrap_or(end)))
+            });
+            let planned: Vec<gaanim_animation::rehearsal::PlannedPoll> = polls
+                .iter()
+                .filter_map(|poll| {
+                    let open = at(poll.open)?;
+                    let close = match poll.close {
+                        Some(close) => at(close)?,
+                        None => segment_metadata.get(poll.open.0)?.end_time,
+                    }
+                    .max(open);
+                    let due = stop_after(open, close).unwrap_or(match &poll.quiz {
+                        Some(quiz) => close.min(open + f64::from(quiz.time)),
+                        None => close,
+                    });
+                    Some(gaanim_animation::rehearsal::PlannedPoll {
+                        id: poll.id.clone(),
+                        answers: poll.options.len(),
+                        open,
+                        due,
+                        quiz: poll.quiz.as_ref().map(|quiz| {
+                            let mask = quiz
+                                .correct
+                                .iter()
+                                .fold(0u32, |mask, answer| mask | 1 << answer);
+                            (mask, quiz.time, quiz.points)
+                        }),
+                        multiple: poll.multiple,
+                        lean: poll.lean.clone(),
+                    })
+                })
+                .collect();
+            let teams = teams
+                .as_ref()
+                .map(|teams| gaanim_animation::rehearsal::RehearsalTeams {
+                    count: teams.names.len(),
+                    choose: teams.choose,
+                });
+            gaanim_animation::rehearsal::Rehearsal::plan(&rehearsal, room, &planned, teams)
+        });
+        builder.timeline.set_polls(
+            polls
+                .into_iter()
+                .filter_map(|poll| {
+                    let open = at(poll.open)?;
+                    let close = match poll.close {
+                        Some(close) => at(close)?,
+                        None => segment_metadata.get(poll.open.0)?.end_time,
+                    };
+                    // The counts the rehearsal ends with stand for the poll
+                    // where nothing plays it, such as the presenter's notes.
+                    let preview = rehearsal
+                        .as_ref()
+                        .map(|rehearsal| {
+                            let results = rehearsal.results_at(close.max(open));
+                            results.live_counts(&poll.id, poll.options.len())
+                        })
+                        .unwrap_or_else(|| vec![0; poll.options.len()]);
+                    Some(gaanim_timeline::timeline::TimelinePoll {
+                        id: poll.id,
+                        question: poll.question,
+                        options: poll.options,
+                        preview,
+                        segment: segment_metadata.get(poll.open.0)?.id,
+                        open,
+                        close: close.max(open),
+                        quiz: poll
+                            .quiz
+                            .map(|quiz| gaanim_timeline::timeline::TimelineQuiz {
+                                correct: quiz.correct,
+                                time: quiz.time,
+                                points: quiz.points,
+                                reveal: quiz.reveal.and_then(|reveal| at(reveal)),
+                            }),
+                        multiple: poll.multiple,
+                        image: poll.image,
+                    })
+                })
+                .collect(),
+            poll_session.map(|session| gaanim_timeline::timeline::PollSessionInfo {
+                relay: session.relay,
+                code: session.code,
+                lobby: poll_lobby,
+                game_segment,
+                teams,
+                ask,
+            }),
+        );
+        // Always set, so a reload without zones clears the previous ones.
+        let stop_at = |time: f64| {
+            segment_metadata
+                .iter()
+                .flat_map(|metadata| &metadata.stops)
+                .any(|stop| (stop.time - time).abs() <= 1e-5)
+        };
+        let live_zones: Vec<gaanim_animation::live::LiveZone> = live_zones
+            .into_iter()
+            .filter_map(|record| {
+                let mut zone = record.zone;
+                zone.open = at(record.open)?;
+                zone.close = match record.close {
+                    Some(close) => at(close)?,
+                    None => segment_metadata.get(record.open.0)?.end_time,
+                }
+                .max(zone.open);
+                zone.stop_at_open = stop_at(zone.open);
+                zone.stop_at_close = stop_at(zone.close);
+                if let Some(names) = zone.names.as_mut() {
+                    // Shape the glyphs now, so bundles draw names without fonts.
+                    let body = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
+                    let family = names
+                        .font
+                        .clone()
+                        .unwrap_or_else(|| body.font_family.clone());
+                    names.glyphs = gaanim_animation::polls::atlas_characters()
+                        .filter_map(|ch| {
+                            let (path, advance) = gaanim_animation::polls::shape_glyph(
+                                font_registry,
+                                ch,
+                                &family,
+                                names.weight,
+                                names.size,
+                            )?;
+                            Some(gaanim_animation::live::NameGlyph {
+                                ch,
+                                advance,
+                                path: path.to_svg(),
+                            })
+                        })
+                        .collect();
+                }
+                Some(zone)
+            })
+            .collect();
+        builder
+            .commands
+            .insert_resource(gaanim_animation::live::LiveZones(live_zones));
+        match rehearsal {
+            Some(rehearsal) => builder.commands.insert_resource(rehearsal),
+            None => builder
+                .commands
+                .remove_resource::<gaanim_animation::rehearsal::Rehearsal>(),
+        }
+        builder.timeline.set_stop_gates(
+            stop_gates
+                .into_iter()
+                .filter_map(|(segment, local, until)| {
+                    Some(gaanim_timeline::timeline::StopGate {
+                        time: at((segment, local))?,
+                        until,
+                    })
+                })
+                .collect(),
+        );
         builder.timeline.set_segments(segment_metadata);
 
         // Every tween is scheduled now: continuous rolling displays settle
@@ -4131,6 +4373,20 @@ impl SceneModel {
                         };
                         const OVERFLOW: &str = "content leaves its box";
                         const OVERLAP: &str = "overlaps the box before it";
+                        // Where to look: the box, the text it holds, and the
+                        // segment and time it is laid out at.
+                        let at = format!(
+                            "in segment \"{}\" at {:.1} s",
+                            seg.name,
+                            (builder.current_time - scene_start).max(0.0)
+                        );
+                        let name = |child: gaanim_layout::LayoutId| {
+                            let path = layout_box_path(&tree, layout_snapshots, child);
+                            match layout_text_excerpt(&tree, child) {
+                                Some(text) => format!("{path} \"{text}\""),
+                                None => path,
+                            }
+                        };
                         let kind = layout_snapshots
                             .get(source)
                             .map(|snapshot| snapshot.spec.kind.clone());
@@ -4170,9 +4426,9 @@ impl SceneModel {
                                         _ => format!("{y:.2} tall"),
                                     };
                                     reports.push(format!(
-                                        "{}: {OVERFLOW} by {by} scene units; give the box more \
-                                         room, let it grow or shorten its content",
-                                        layout_box_path(&tree, layout_snapshots, *child)
+                                        "{} {at}: {OVERFLOW} by {by} scene units; give the box \
+                                         more room, let it grow or shorten its content",
+                                        name(*child)
                                     ));
                                 }
                             }
@@ -4192,9 +4448,9 @@ impl SceneModel {
                                     before.max.y.min(after.max.y) - before.min.y.max(after.min.y);
                                 if x > LAYOUT_SLACK && y > LAYOUT_SLACK {
                                     reports.push(format!(
-                                        "{}: it {OVERLAP} by {x:.2} by {y:.2} scene units; \
+                                        "{} {at}: it {OVERLAP} by {x:.2} by {y:.2} scene units; \
                                          check the gap and the size of the boxes around it",
-                                        layout_box_path(&tree, layout_snapshots, child)
+                                        name(child)
                                     ));
                                 }
                             }
@@ -5778,14 +6034,28 @@ impl SceneModel {
                     }
                 }
 
-                Op::AttachTrackingLine { target, from, to } => {
+                Op::AttachTrackingLine {
+                    target,
+                    from,
+                    to,
+                    dashes,
+                } => {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(st) = builder.states.get(target_id)
                     {
-                        let line = TrackingLine::new(
+                        let mut line = TrackingLine::new(
                             compile_tracking_endpoint(from, id_map, &builder.states),
                             compile_tracking_endpoint(to, id_map, &builder.states),
                         );
+                        if let Some((dash, gap)) = *dashes {
+                            line = line.dashed(dash, gap);
+                            // The dashes draw along the line, as those of a
+                            // fixed dashed line do.
+                            builder
+                                .commands
+                                .entity(st.entity)
+                                .insert(gaanim_scene::PathRevealOrder::Sequential);
+                        }
                         builder.commands.entity(st.entity).insert(line);
                     }
                 }
@@ -6290,6 +6560,106 @@ impl SceneModel {
                                         driver,
                                     ));
                                 }
+                            }
+                        });
+                    }
+                }
+
+                Op::AttachPollValue { target, value } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(target_st) = builder.states.get(target_id)
+                    {
+                        let entity = target_st.entity;
+                        let value = value.clone();
+                        builder.commands.queue(move |world: &mut World| {
+                            if let Ok(mut target) = world.get_entity_mut(entity) {
+                                target.insert(value);
+                            }
+                        });
+                    }
+                }
+
+                Op::AttachCharacter {
+                    target,
+                    layers,
+                    rig,
+                } => {
+                    let entity_of = |id: &ObjectId| {
+                        id_map
+                            .get(id)
+                            .copied()
+                            .and_then(|index| builder.states.get(index))
+                            .map(|state| state.entity)
+                    };
+                    if let Some(entity) = entity_of(target) {
+                        let mut rig = rig.clone();
+                        rig.layers = layers.iter().filter_map(entity_of).collect();
+                        builder.commands.queue(move |world: &mut World| {
+                            if let Ok(mut target) = world.get_entity_mut(entity) {
+                                target.insert(rig);
+                            }
+                        });
+                    }
+                }
+
+                Op::CharacterExpress { target, expression } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(target_st) = builder.states.get(target_id)
+                    {
+                        let entity = target_st.entity;
+                        let time = builder.current_time;
+                        let expression = expression.clone();
+                        builder.commands.queue(move |world: &mut World| {
+                            if let Some(mut rig) =
+                                world.get_mut::<gaanim_animation::characters::CharacterRig>(entity)
+                            {
+                                rig.schedule(time, expression);
+                            }
+                        });
+                    }
+                }
+
+                Op::AttachPollBar { target, bar } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(target_st) = builder.states.get(target_id)
+                    {
+                        let entity = target_st.entity;
+                        let bar = bar.clone();
+                        builder.commands.queue(move |world: &mut World| {
+                            if let Ok(mut target) = world.get_entity_mut(entity) {
+                                target.insert(bar);
+                            }
+                        });
+                    }
+                }
+
+                Op::AttachLiveText {
+                    target,
+                    source,
+                    preview,
+                    options,
+                } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(target_st) = builder.states.get(target_id)
+                    {
+                        let entity = target_st.entity;
+                        let body = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
+                        let live = gaanim_animation::polls::LiveText {
+                            source: source.clone(),
+                            preview: preview.clone(),
+                            font_family: options
+                                .font
+                                .clone()
+                                .unwrap_or_else(|| body.font_family.clone()),
+                            font_weight: options.weight,
+                            font_size: options.size.unwrap_or(body.size),
+                            align: options.align,
+                            atlas: Default::default(),
+                            last: None,
+                        };
+                        builder.commands.queue(move |world: &mut World| {
+                            if let Ok(mut target) = world.get_entity_mut(entity) {
+                                target.insert(live);
                             }
                         });
                     }
@@ -9078,6 +9448,7 @@ impl SceneModel {
                 let source_path = std::sync::Arc::new(svg_path.path.clone());
                 let b = builder.svg_path(&svg_path);
                 let mr = Self::finish_spawn_builder(b, spec);
+                builder.readout_baselines.insert(mr.id, baseline);
                 if rolling_component.is_some() {
                     builder.text_metrics.insert(
                         mr.id,
@@ -9513,7 +9884,22 @@ impl SceneModel {
                     .iter()
                     .filter_map(|id| id_map.get(id).copied().map(|id| MobjectRef { id }))
                     .collect();
+                let baseline = spec
+                    .reactive_readout_layout
+                    .as_ref()
+                    .and_then(|layout| Self::lay_out_readout_row(builder, id_map, layout));
                 let mr = builder.group(&refs);
+                // A readout is one line of text: its text anchors use the
+                // row's baseline.
+                if let Some(baseline) = baseline {
+                    builder.text_metrics.insert(
+                        mr.id,
+                        gaanim_text::prelude::TextMetrics {
+                            first_baseline: baseline,
+                            line_count: 1,
+                        },
+                    );
+                }
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
                 if let Some(layout) = &spec.reactive_readout_layout
                     && let Some(state) = builder.states.get(mr.id)
@@ -10199,6 +10585,64 @@ impl SceneModel {
     /// the timeline must not show that rotation before its animation starts.
     /// A scale of zero stays: it is the start of a grow entry, and a later
     /// reflow must not show the member before its turn.
+    /// Place a readout's parts in their row now, as
+    /// [`gaanim_animation::signals::reactive_readout_layout_system`] does every
+    /// frame, so the group's box is the row's: a layout then centers the row
+    /// in its cell.
+    /// Returns the row's baseline, which the readout's text anchors use.
+    fn lay_out_readout_row(
+        builder: &mut SceneBuilder,
+        id_map: &HashMap<ObjectId, ObjectId>,
+        layout: &super::types::ReactiveReadoutLayoutSpec,
+    ) -> Option<f64> {
+        let parts: Vec<(ObjectId, Bounds3D, f64)> = [
+            layout.label,
+            layout.equals,
+            Some(layout.number),
+            layout.unit,
+        ]
+        .into_iter()
+        .flatten()
+        .filter_map(|id| {
+            let id = *id_map.get(&id)?;
+            let bounds = builder.states.get(id)?.bounds;
+            let baseline = builder
+                .readout_baselines
+                .get(&id)
+                .copied()
+                .or_else(|| {
+                    builder
+                        .text_metrics
+                        .get(&id)
+                        .map(|metrics| metrics.first_baseline)
+                })
+                .unwrap_or((bounds.min.y + bounds.max.y) * 0.5);
+            Some((id, bounds, baseline))
+        })
+        .collect();
+        let rows: Vec<_> = parts
+            .iter()
+            .map(|(_, bounds, baseline)| (*bounds, *baseline))
+            .collect();
+        let translations =
+            gaanim_animation::signals::readout_row(&rows, layout.spacing, layout.align);
+        // Every part's baseline lands on the same height.
+        let baseline = parts
+            .first()
+            .zip(translations.first())
+            .map(|((_, _, baseline), translation)| baseline + translation.y);
+        for ((id, _, _), translation) in parts.iter().zip(translations) {
+            let Some(state) = builder.states.get_mut(*id) else {
+                continue;
+            };
+            state.transform.translation.x = translation.x;
+            state.transform.translation.y = translation.y;
+            let (entity, transform) = (state.entity, state.transform);
+            Self::place_layout_member(builder, entity, transform);
+        }
+        baseline
+    }
+
     fn place_layout_member(
         builder: &mut SceneBuilder,
         entity: bevy::prelude::Entity,
@@ -10578,6 +11022,7 @@ mod tests {
     use super::*;
     use crate::canvas::{Anchor, DrawableHandle, TextAnchor};
     use bevy::ecs::world::CommandQueue;
+    use gaanim_animation::rehearsal::Lean;
     use gaanim_core::peniko::Brush;
     use gaanim_math::SpatialTransform;
     use gaanim_scene::{LocalBounds, TextBaseline};
@@ -12235,6 +12680,204 @@ mod tests {
                 assert_eq!(!shape.0.elements().is_empty(), shown, "tip at {time}");
             }
         }
+    }
+
+    #[test]
+    fn the_rehearsal_plays_the_audience_and_its_answers_along_the_timeline() {
+        use bevy::prelude::App;
+        let mut canvas = SceneModel::new(640, 360);
+        canvas.set_poll_session(crate::canvas::PollSession {
+            relay: Some("https://relay.example.dev".into()),
+            code: "ABC234".into(),
+        });
+        canvas
+            .rehearsal(gaanim_animation::rehearsal::RehearsalSpec {
+                names: gaanim_animation::rehearsal::RehearsalSpec::names(10),
+                ..Default::default()
+            })
+            .unwrap();
+        canvas.segment("Sala", None).unwrap();
+        let audience = canvas.audience().unwrap();
+        let count = audience.count().unwrap();
+        canvas.wait(10.0);
+        canvas.stop(None).unwrap();
+        canvas.segment("Pregunta", None).unwrap();
+        let quiz = canvas
+            .quiz(
+                "¿2 + 2?",
+                ["3", "4"],
+                vec![1],
+                20,
+                1000,
+                Lean::Right(1.0),
+                crate::canvas::PollStyle::default(),
+            )
+            .unwrap();
+        let right = quiz.votes(1).unwrap();
+        canvas.wait(4.0);
+        canvas.stop(None).unwrap();
+        canvas.wait(1.0);
+        let board = canvas.leaderboard();
+        let leader = board.points(0).unwrap();
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        let mut value_at = |parameter: &crate::canvas::visualization::Parameter, time: f64| {
+            app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
+            app.update();
+            let entity = entity_of(app.world_mut(), parameter.drawable());
+            app.world()
+                .get::<gaanim_animation::FloatSignal>(entity)
+                .unwrap()
+                .value
+        };
+        // Players join over the room's ten seconds.
+        assert_eq!(value_at(&count, 0.0), 0.0);
+        let half = value_at(&count, 5.0);
+        assert!(half > 2.0 && half < 8.0, "{half}");
+        assert_eq!(value_at(&count, 10.0), 10.0);
+        // Everyone answers right by the stop, and scores.
+        assert_eq!(value_at(&right, 10.0), 0.0);
+        assert_eq!(value_at(&right, 14.0), 10.0);
+        assert!(value_at(&leader, 15.0) > 500.0);
+        // Back in the room, fewer players again.
+        assert_eq!(value_at(&count, 3.0) < 5.0, true);
+    }
+
+    /// `quiz.revealed()` is 0 until the playhead passes the reveal, even
+    /// while it rests on the stop the reveal shares, then 1 (#297).
+    #[test]
+    fn revealed_turns_on_past_the_reveal() {
+        use bevy::prelude::App;
+        let mut canvas = SceneModel::new(640, 360);
+        canvas.set_poll_session(crate::canvas::PollSession {
+            relay: Some("https://relay.example.dev".into()),
+            code: "ABC234".into(),
+        });
+        let quiz = canvas
+            .quiz(
+                "¿2 + 2?",
+                ["3", "4"],
+                vec![1],
+                20,
+                1000,
+                Lean::Auto,
+                crate::canvas::PollStyle::default(),
+            )
+            .unwrap();
+        let revealed = quiz.revealed().unwrap();
+        canvas.wait(2.0);
+        canvas.stop(None).unwrap();
+        quiz.reveal().unwrap();
+        assert!(quiz.revealed().is_err(), "asked after the reveal");
+        canvas.wait(1.0);
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        let mut value_at = |time: f64| {
+            app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
+            app.update();
+            let entity = entity_of(app.world_mut(), revealed.drawable());
+            app.world()
+                .get::<gaanim_animation::FloatSignal>(entity)
+                .unwrap()
+                .value
+        };
+        assert_eq!(value_at(0.0), 0.0);
+        assert_eq!(value_at(1.0), 0.0);
+        assert_eq!(value_at(2.0), 0.0, "resting on the stop");
+        assert_eq!(value_at(2.01), 1.0);
+        assert_eq!(value_at(3.0), 1.0);
+        assert_eq!(value_at(1.0), 0.0, "seeking back");
+    }
+
+    #[test]
+    fn a_rehearsal_deals_its_players_to_teams_that_score_their_points() {
+        use bevy::prelude::App;
+        let mut canvas = SceneModel::new(640, 360);
+        canvas.set_poll_session(crate::canvas::PollSession {
+            relay: Some("https://relay.example.dev".into()),
+            code: "ABC234".into(),
+        });
+        canvas
+            .rehearsal(gaanim_animation::rehearsal::RehearsalSpec {
+                names: gaanim_animation::rehearsal::RehearsalSpec::names(8),
+                team_skill: vec![0.95, 0.05],
+                ..Default::default()
+            })
+            .unwrap();
+        canvas.segment("Pregunta", None).unwrap();
+        let teams = canvas
+            .teams(vec!["Rojo".into(), "Azul".into()], None, false)
+            .unwrap();
+        let quiz = canvas
+            .quiz(
+                "¿2 + 2?",
+                ["3", "4", "5"],
+                vec![1],
+                20,
+                1000,
+                Lean::Auto,
+                crate::canvas::PollStyle::default(),
+            )
+            .unwrap();
+        let (red, blue, players, leader) = (
+            teams.score(0).unwrap(),
+            teams.score(1).unwrap(),
+            teams.players(1).unwrap(),
+            teams.leader().unwrap(),
+        );
+        canvas.wait(4.0);
+        canvas.stop(None).unwrap();
+        quiz.reveal().unwrap();
+        canvas.wait(1.0);
+        let timeline = compiled_timeline(&canvas);
+        let session = timeline.poll_session.as_ref().unwrap();
+        assert_eq!(session.teams.as_ref().unwrap().names, ["Rojo", "Azul"]);
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        let mut value_at = |parameter: &crate::canvas::visualization::Parameter, time: f64| {
+            app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
+            app.update();
+            let entity = entity_of(app.world_mut(), parameter.drawable());
+            app.world()
+                .get::<gaanim_animation::FloatSignal>(entity)
+                .unwrap()
+                .value
+        };
+        assert_eq!(value_at(&players, 4.5), 4.0);
+        assert_eq!(value_at(&red, 0.0), 0.0);
+        // The skilled team answers right and leads.
+        assert!(value_at(&red, 4.5) > value_at(&blue, 4.5));
+        assert_eq!(value_at(&leader, 4.5), 0.0);
     }
 
     #[test]
@@ -15278,6 +15921,180 @@ mod tests {
     }
 
     #[test]
+    fn polls_take_votes_from_their_cursor_to_their_close_or_segment_end() {
+        let mut canvas = SceneModel::new(640, 360);
+        canvas.set_poll_session(crate::canvas::PollSession {
+            relay: Some("https://relay.example.dev".into()),
+            code: "ABC234".into(),
+        });
+        canvas.segment("Intro", None).unwrap();
+        canvas.dot(0.1);
+        canvas.wait(1.0);
+        canvas.segment("Vote", None).unwrap();
+        canvas.wait(0.5);
+        let whole = canvas
+            .poll(
+                "Whole?",
+                ["A", "B"],
+                Lean::Weights(vec![1.0, 0.0]),
+                crate::canvas::PollStyle::default(),
+            )
+            .unwrap();
+        let bar = whole
+            .bar(
+                0,
+                crate::canvas::PollBarOptions {
+                    length: 4.0,
+                    thickness: 0.5,
+                    radius: 0.0,
+                    direction: crate::canvas::BarDirection::Right,
+                    scale: crate::canvas::BarScale::Total,
+                },
+            )
+            .unwrap();
+        let share = whole.share(0).unwrap();
+        canvas.wait(2.0);
+        let early = canvas
+            .poll(
+                "Early?",
+                ["X", "Y", "Z"],
+                Lean::Auto,
+                crate::canvas::PollStyle::default(),
+            )
+            .unwrap();
+        canvas.wait(1.0);
+        early.close().unwrap();
+        canvas.wait(0.5);
+
+        let timeline = compiled_timeline(&canvas);
+        let windows: Vec<(&str, f64, f64)> = timeline
+            .polls
+            .iter()
+            .map(|poll| (poll.question.as_str(), poll.open, poll.close))
+            .collect();
+        assert_eq!(windows, [("Whole?", 1.5, 5.0), ("Early?", 3.5, 4.5)]);
+        // The rehearsal's twelve players all voted, as the poll leans.
+        assert_eq!(timeline.polls[0].preview, [12, 0]);
+        assert_eq!(timeline.polls[1].preview.iter().sum::<u32>(), 12);
+        let session = timeline.poll_session.as_ref().unwrap();
+        assert_eq!(session.code, "ABC234");
+        // Only a scene that shows its audience opens a lobby.
+        assert!(!session.lobby);
+        assert!(bar.id != share.drawable().id);
+    }
+
+    #[test]
+    fn a_character_schedules_its_expressions_at_the_cursor() {
+        let mut canvas = SceneModel::new(640, 360);
+        canvas.segment("Intro", None).unwrap();
+        let hero = canvas.character(None, "Ana", 2.0).unwrap();
+        assert_eq!(
+            hero.character(),
+            gaanim_objects::character::catalog()
+                .character_from_seed(gaanim_objects::character::character_seed("Ana"))
+        );
+        canvas.wait(1.0);
+        hero.express(Some("happy"), false).unwrap();
+        canvas.wait(1.0);
+        hero.express(Some("winner"), true).unwrap();
+        canvas.wait(1.0);
+        assert!(hero.express(Some("dancing"), false).is_err());
+        assert!(canvas.character(Some([9, 0, 0, 0, 0]), "", 2.0).is_err());
+        assert!(canvas.character(None, "", 0.0).is_err());
+
+        let (mut world, _) = compiled_world(&canvas);
+        let rig = world
+            .query::<&gaanim_animation::characters::CharacterRig>()
+            .single(&world)
+            .unwrap()
+            .clone();
+        let times: Vec<f64> = rig.schedule.iter().map(|(time, _)| *time).collect();
+        assert_eq!(times, [1.0, 2.0]);
+        assert_eq!(
+            rig.layers.len(),
+            gaanim_objects::character::catalog().max_layers()
+        );
+        assert_eq!(rig.expression_at(2.5).unwrap().name, "winner");
+    }
+
+    #[test]
+    fn a_gated_stop_compiles_at_its_absolute_time() {
+        let mut canvas = SceneModel::new(640, 360);
+        canvas.set_poll_session(crate::canvas::PollSession {
+            relay: Some("https://relay.example.dev".into()),
+            code: "ABC234".into(),
+        });
+        canvas.segment("Intro", None).unwrap();
+        canvas.wait(1.0);
+        canvas.segment("Quiz", None).unwrap();
+        let quiz = canvas
+            .quiz(
+                "¿2 + 2?",
+                ["3", "4"],
+                vec![1],
+                20,
+                1000,
+                Lean::Auto,
+                crate::canvas::PollStyle::default(),
+            )
+            .unwrap();
+        canvas.wait(0.5);
+        let before = canvas.stop_count();
+        canvas.stop(None).unwrap();
+        let until = quiz.answered(None, Some(0.8)).unwrap();
+        canvas.gate_stop(before, until.clone());
+        assert!(quiz.answered(Some(3), Some(0.5)).is_err());
+        assert!(quiz.answered(None, Some(1.5)).is_err());
+        canvas.wait(1.0);
+
+        let timeline = compiled_timeline(&canvas);
+        assert_eq!(timeline.stop_gates.len(), 1);
+        assert!((timeline.stop_gates[0].time - 1.5).abs() < 1e-9);
+        assert_eq!(timeline.stop_gates[0].until, until);
+        assert!(matches!(
+            until,
+            crate::canvas::GateCondition::AnswerShare { players: true, .. }
+        ));
+    }
+
+    #[test]
+    fn showing_the_audience_opens_a_lobby_for_phones() {
+        let mut canvas = SceneModel::new(640, 360);
+        assert_eq!(
+            canvas.audience().unwrap_err(),
+            crate::canvas::PollError::NoSession
+        );
+        canvas.set_poll_session(crate::canvas::PollSession {
+            relay: Some("https://relay.example.dev".into()),
+            code: "ABC234".into(),
+        });
+        canvas.segment("Intro", None).unwrap();
+        canvas.wait(2.0);
+        canvas.segment("Lobby", None).unwrap();
+        let audience = canvas.audience().unwrap();
+        assert_eq!(audience.url(), "https://relay.example.dev/s/ABC234");
+        let options = crate::canvas::LiveTextOptions {
+            size: Some(0.4),
+            weight: None,
+            font: None,
+            align: crate::canvas::TextAlign::Center,
+        };
+        audience.name(0, options.clone()).unwrap();
+        audience.name(5, options).unwrap();
+        audience.count().unwrap();
+        audience.joined(1).unwrap();
+        audience.age(1).unwrap();
+        audience.qr(2.0).unwrap();
+        canvas.wait(1.0);
+
+        let timeline = compiled_timeline(&canvas);
+        assert!(timeline.polls.is_empty());
+        assert!(timeline.poll_session.as_ref().unwrap().lobby);
+        // A new game goes back to the lobby, after the intro.
+        assert_eq!(timeline.game_start(), Some(2.0));
+    }
+
+    #[test]
     fn stops_record_their_ambient_loop_length() {
         let mut canvas = SceneModel::new(640, 360);
         let dot = canvas.dot(0.1);
@@ -16958,6 +17775,60 @@ mod tests {
         );
     }
 
+    /// `line_spacing` is the distance between baselines in ems, as CSS
+    /// `line-height` is (#298): 1.2 puts them 1.2 em apart.
+    #[test]
+    fn line_spacing_sets_the_distance_between_baselines() {
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let height = |content: &str, spacing: f64| {
+            let spec = StructuredTextSpec::new(
+                vec![content.into()],
+                None,
+                gaanim_text::prelude::TextStyle::default(),
+                gaanim_text::prelude::TextFlow {
+                    wrap: gaanim_text::prelude::TextWrap::Width(10.0),
+                    line_spacing: spacing,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let source = structured_text_typst_source(
+                &spec,
+                Some(10.0),
+                100.0,
+                "New Computer Modern",
+                gaanim_core::peniko::Color::WHITE,
+            );
+            let (bounds, metrics) = gaanim_text::prelude::measure_typst_lines(
+                &fonts,
+                &source,
+                false,
+                Some("New Computer Modern"),
+                None,
+                Some(100.0),
+                None,
+                Some(gaanim_core::peniko::Brush::Solid(
+                    gaanim_core::peniko::Color::WHITE,
+                )),
+                StrokeBrush::transparent(),
+            )
+            .unwrap();
+            (bounds.height(), metrics.line_count)
+        };
+        for spacing in [1.0, 1.2, 1.5] {
+            let (one, lines) = height("H", spacing);
+            assert_eq!(lines, 1);
+            // Each word breaks onto its own line.
+            let (three, lines) = height("H H H", spacing);
+            assert_eq!(lines, 3);
+            let gap = (three - one) / 2.0;
+            assert!(
+                (gap - 100.0 * spacing).abs() < 0.5,
+                "{spacing}: baselines {gap} apart"
+            );
+        }
+    }
+
     #[test]
     fn inline_math_helpers_handle_escapes_and_doubles() {
         assert_eq!(
@@ -17660,7 +18531,7 @@ mod tests {
     fn connectors_with_fixed_points_are_placed_by_the_box_that_holds_them() {
         use crate::canvas::ops::CanvasEndpoint;
         let mut canvas = SceneModel::new(640, 360);
-        let mut connector = |canvas: &mut SceneModel| {
+        let connector = |canvas: &mut SceneModel| {
             canvas
                 .connector(
                     CanvasEndpoint::Static(DVec3::ZERO),
@@ -17755,7 +18626,8 @@ mod tests {
         assert!(
             tight
                 .iter()
-                .any(|message| message.contains("content leaves its box by")),
+                .any(|message| message.contains("content leaves its box by")
+                    && message.contains("in segment \"")),
             "two boxes of height 1 do not fit in 1.5: {tight:?}"
         );
         let roomy = report(2.5);
@@ -17835,6 +18707,21 @@ mod tests {
         assert_eq!(transform_of(&mut world, &container).scale, DVec3::ZERO);
         timeline.seek(&mut world, 1.5);
         assert!(transform_of(&mut world, &container).scale.x > 0.99);
+    }
+
+    #[test]
+    fn an_entry_stays_hidden_when_the_object_is_indicated_later() {
+        // A quiz tile: it enters after a while, then the right answer pulses.
+        let mut canvas = SceneModel::new(640, 360);
+        let tile = canvas.rect(2.0, 1.0);
+        canvas.wait(1.0);
+        canvas.play(vec![tile.animate().grow_from_center().duration(0.5)]);
+        canvas.play(vec![tile.animate().indicate().duration(0.6)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        timeline.seek(&mut world, 0.5);
+        assert_eq!(transform_of(&mut world, &tile).scale, DVec3::ZERO);
+        timeline.seek(&mut world, 2.5);
+        assert!((transform_of(&mut world, &tile).scale.x - 1.0).abs() < 1e-9);
     }
 
     #[test]

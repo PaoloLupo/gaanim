@@ -912,6 +912,8 @@ pub fn export_bundle(bundle_path: &std::path::Path, config: ExportConfig) -> Res
 pub struct BundleRenderer {
     bundle: gaanim_bundle::Bundle,
     frames: FrameRasterizer,
+    /// Live zones replay their preview players over the recorded frames.
+    zones: gaanim_animation::live::PreviewReplay,
 }
 
 impl BundleRenderer {
@@ -922,7 +924,11 @@ impl BundleRenderer {
         fit: crate::config::OutputFit,
     ) -> Result<Self> {
         let frames = FrameRasterizer::new(&bundle.scene, width, height, fit)?;
-        Ok(Self { bundle, frames })
+        Ok(Self {
+            bundle,
+            frames,
+            zones: Default::default(),
+        })
     }
 
     /// RGBA pixels of the recorded frame shown at `time`; a motion-blurred
@@ -933,7 +939,12 @@ impl BundleRenderer {
             .bundle
             .frame(index)
             .map_err(|error| ExportError::General(error.to_string()))?;
-        self.frames.render(&frame, time)
+        let overlay = self.zones.overlay(
+            &self.bundle.scene.live_zones,
+            self.bundle.scene.rehearsal.as_ref(),
+            time,
+        );
+        self.frames.render_with(&frame, time, Some(&overlay))
     }
 }
 
@@ -981,17 +992,33 @@ impl FrameRasterizer {
     /// RGBA pixels of `frame`; a motion-blurred frame averages its
     /// sub-frames as an export does.
     pub fn render(&mut self, frame: &gaanim_bundle::Frame, time: f64) -> Result<Vec<u8>> {
+        self.render_with(frame, time, None)
+    }
+
+    /// [`FrameRasterizer::render`] with `overlay` (live zones) drawn above
+    /// the frame's drawables.
+    pub fn render_with(
+        &mut self,
+        frame: &gaanim_bundle::Frame,
+        time: f64,
+        overlay: Option<&gaanim_animation::live::LiveOverlay>,
+    ) -> Result<Vec<u8>> {
         if frame.motion_blur.is_empty() {
-            return self.render_frame(frame, time);
+            return self.render_frame(frame, time, overlay);
         }
         let mut average = LinearAverage::new(self.width as usize * self.height as usize);
         for sample in &frame.motion_blur {
-            average.add(&self.render_frame(sample, sample.time)?);
+            average.add(&self.render_frame(sample, sample.time, overlay)?);
         }
         Ok(average.finish())
     }
 
-    fn render_frame(&mut self, frame: &gaanim_bundle::Frame, time: f64) -> Result<Vec<u8>> {
+    fn render_frame(
+        &mut self,
+        frame: &gaanim_bundle::Frame,
+        time: f64,
+        overlay: Option<&gaanim_animation::live::LiveOverlay>,
+    ) -> Result<Vec<u8>> {
         let resolved =
             gaanim_math::ResolvedCamera::new(frame.camera, gaanim_math::CameraViewport::default());
         let scene = compose_bundle_frame(
@@ -1001,6 +1028,7 @@ impl FrameRasterizer {
             self.width,
             self.height,
             self.fit,
+            overlay,
         );
         let post = (!frame.post.is_empty())
             .then(|| {
@@ -1041,6 +1069,7 @@ pub fn compose_bundle_frame(
     width: u32,
     height: u32,
     fit: crate::config::OutputFit,
+    overlay: Option<&gaanim_animation::live::LiveOverlay>,
 ) -> vello::Scene {
     let resolved =
         gaanim_math::ResolvedCamera::new(frame.camera, gaanim_math::CameraViewport::default());
@@ -1048,7 +1077,7 @@ pub fn compose_bundle_frame(
     let pixels_per_unit = background.and_then(|background| {
         gaanim_renderer::pipeline::output_pixels_per_unit(&frame.camera, background.pixel_size.0)
     });
-    let raw_scene = gaanim_renderer::pipeline::compose_captured(
+    let mut raw_scene = gaanim_renderer::pipeline::compose_captured(
         &frame.capture,
         store,
         background.map(|background| (background, background.pixel_size)),
@@ -1056,6 +1085,9 @@ pub fn compose_bundle_frame(
         None,
     );
     store.end_frame();
+    if let Some(overlay) = overlay {
+        gaanim_renderer::pipeline::append_live_overlay(&mut raw_scene, overlay);
+    }
     let mut scene = vello::Scene::new();
     scene.append(
         &raw_scene,

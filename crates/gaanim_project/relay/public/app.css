@@ -1,0 +1,910 @@
+/* Gaanim relay pages: designed for a phone held in one hand.
+   Colors follow the Gaanim brand (docs/assets/brand in the gaanim repo). */
+
+:root {
+  --bg: #121212;
+  --surface: #1a1a1a;
+  --surface-2: #242424;
+  --line: #333333;
+  --text: #f7f6ff;
+  --muted: #a8a6b8;
+  --accent: #a99fff;
+  --on-accent: #14112e;
+  --good: #4fd18b;
+  --warn: #f5c056;
+  --danger: #ff7676;
+  --radius: 18px;
+  --tap: 64px;
+  --gutter: max(16px, env(safe-area-inset-left));
+  --shadow: 0 10px 30px rgb(0 0 0 / 0.35);
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #faf9f6;
+    --surface: #ffffff;
+    --surface-2: #f0eee8;
+    --line: #dddad2;
+    --text: #14112e;
+    --muted: #5d5a70;
+    --accent: #5b4af0;
+    --on-accent: #ffffff;
+    --good: #1f8f52;
+    --warn: #a86f00;
+    --danger: #c9304a;
+    --shadow: 0 10px 30px rgb(20 24 40 / 0.12);
+    color-scheme: light;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Views switch with the hidden attribute; a display rule must not undo it. */
+[hidden] {
+  display: none !important;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: var(--bg);
+  color: var(--text);
+  font: 17px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: max(12px, env(safe-area-inset-top)) var(--gutter)
+    max(20px, env(safe-area-inset-bottom));
+}
+
+/* ---- Top bar ---------------------------------------------------------- */
+
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.brand .symbol {
+  width: 36px;
+  height: 24px;
+  image-rendering: pixelated;
+}
+
+.brand .symbol-light {
+  display: none;
+}
+
+@media (prefers-color-scheme: light) {
+  .brand .symbol-dark {
+    display: none;
+  }
+  .brand .symbol-light {
+    display: block;
+  }
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font: 600 15px/1 ui-monospace, "SF Mono", Consolas, monospace;
+  letter-spacing: 0.12em;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.dot[data-state="live"] {
+  background: var(--good);
+}
+
+.dot[data-state="offline"] {
+  background: var(--danger);
+}
+
+/* ---- Banner (offline) ------------------------------------------------- */
+
+.banner {
+  margin-top: 10px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--danger) 16%, var(--surface));
+  color: var(--text);
+  font-size: 15px;
+}
+
+/* ---- Centered states (join, waiting, errors) -------------------------- */
+
+.center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  gap: 14px;
+  padding: 24px 0;
+}
+
+.center h1 {
+  margin: 0;
+  font-size: clamp(24px, 7vw, 32px);
+  line-height: 1.2;
+}
+
+.center p {
+  margin: 0;
+  color: var(--muted);
+  max-width: 30ch;
+}
+
+.pulse {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  display: grid;
+  place-items: center;
+  animation: pulse 1.8s ease-in-out infinite;
+}
+
+.pulse::after {
+  content: "";
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    transform: scale(0.9);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 1;
+  }
+}
+
+/* ---- Join form -------------------------------------------------------- */
+
+.join {
+  width: 100%;
+  display: grid;
+  gap: 14px;
+  margin-top: 8px;
+}
+
+.code-input {
+  width: 100%;
+  height: 72px;
+  border-radius: var(--radius);
+  border: 2px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  text-align: center;
+  font: 700 34px/1 ui-monospace, "SF Mono", Consolas, monospace;
+  letter-spacing: 0.35em;
+  padding-left: 0.35em; /* balance the trailing letter-spacing */
+  text-transform: uppercase;
+  outline: none;
+}
+
+.code-input:focus {
+  border-color: var(--accent);
+}
+
+.code-input::placeholder {
+  color: var(--line);
+}
+
+.primary {
+  height: var(--tap);
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-family: inherit;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.hint {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.center .error {
+  justify-self: center;
+  color: var(--danger);
+  min-height: 1.45em;
+  font-size: 15px;
+}
+
+/* ---- Question --------------------------------------------------------- */
+
+.question {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding-top: 18px;
+}
+
+.question h1 {
+  margin: 4px 0 20px;
+  font-size: clamp(22px, 6.4vw, 30px);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.answers {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Tiles in one row share its height. */
+.answers li {
+  display: flex;
+}
+
+/* Two columns once there is room: landscape phones and tablets. */
+@media (min-width: 560px) {
+  .answers {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.answer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 76px;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--tile);
+  color: #fff;
+  font-family: inherit;
+  font-size: 19px;
+  font-weight: 650;
+  line-height: 1.25;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  transition:
+    transform 120ms ease,
+    opacity 160ms ease,
+    outline-color 160ms ease;
+  outline: 4px solid transparent;
+  outline-offset: 3px;
+  touch-action: manipulation;
+}
+
+/* Landscape phones: keep the answers in view. */
+@media (max-height: 500px) {
+  .question {
+    padding-top: 8px;
+  }
+  .question h1 {
+    margin: 2px 0 12px;
+    font-size: 20px;
+  }
+  .answer {
+    min-height: 56px;
+    padding: 10px 14px;
+    font-size: 17px;
+  }
+}
+
+.answer:active {
+  transform: scale(0.98);
+}
+
+.answer:focus-visible {
+  outline-color: var(--accent);
+}
+
+.answer .shape {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgb(0 0 0 / 0.22);
+}
+
+.answer .shape svg {
+  width: 22px;
+  height: 22px;
+  fill: #fff;
+}
+
+.answer .label {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
+.answer .letter {
+  flex: none;
+  font: 700 15px/1 ui-monospace, Consolas, monospace;
+  opacity: 0.75;
+}
+
+.answer .check {
+  display: none;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #fff;
+  color: var(--tile);
+  place-items: center;
+}
+
+.answer .check svg {
+  width: 18px;
+  height: 18px;
+}
+
+.answers[data-voted] .answer:not([aria-pressed="true"]) {
+  opacity: 0.45;
+}
+
+.answer[aria-pressed="true"] {
+  outline-color: var(--text);
+}
+
+.answer[aria-pressed="true"] .check {
+  display: grid;
+}
+
+.answer[aria-busy="true"] {
+  opacity: 0.7;
+}
+
+.status {
+  margin-top: auto;
+  padding-top: 20px;
+  min-height: 3em;
+  text-align: center;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.status strong {
+  display: block;
+  color: var(--good);
+  font-size: 17px;
+}
+
+/* Answer colors: a poll's are the presentation screen's letters and hues;
+   a quiz's go by place on the phone. Dark enough for white text. */
+.answer[data-look="0"] {
+  --tile: #d63a50;
+}
+.answer[data-look="1"] {
+  --tile: #2f6fd0;
+}
+.answer[data-look="2"] {
+  --tile: #a86f00;
+}
+.answer[data-look="3"] {
+  --tile: #23824a;
+}
+.answer[data-look="4"] {
+  --tile: #7a48c7;
+}
+.answer[data-look="5"] {
+  --tile: #137f89;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ---- Game: nickname, timer and results ------------------------------- */
+
+.bar-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chip {
+  max-width: 44vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.name-input {
+  width: 100%;
+  height: 64px;
+  border-radius: var(--radius);
+  border: 2px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  text-align: center;
+  font-family: inherit;
+  font-size: 24px;
+  font-weight: 650;
+  outline: none;
+}
+
+.name-input:focus {
+  border-color: var(--accent);
+}
+
+.timer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.timer-track {
+  flex: 1;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.timer-fill {
+  height: 100%;
+  width: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transform-origin: left center;
+}
+
+.timer[data-urgent] .timer-fill {
+  background: var(--danger);
+}
+
+.timer-text {
+  min-width: 3ch;
+  text-align: right;
+  font: 700 18px/1 ui-monospace, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.answers[data-locked] .answer {
+  cursor: default;
+}
+
+.answers[data-locked] .answer:active {
+  transform: none;
+}
+
+.result .verdict {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 64px;
+  font-weight: 800;
+  line-height: 1;
+  background: var(--muted);
+}
+
+.result[data-outcome="correct"] .verdict {
+  background: var(--good);
+}
+
+.result[data-outcome="wrong"] .verdict {
+  background: var(--danger);
+}
+
+.result .points {
+  color: var(--text);
+  font-size: 30px;
+  font-weight: 800;
+}
+
+/* ---- Pictures and multiple choice -------------------------------------------- */
+
+.question-image {
+  display: block;
+  max-width: 100%;
+  max-height: 32vh;
+  margin: 0 auto 10px;
+  border-radius: var(--radius);
+  object-fit: contain;
+}
+
+.question .hint {
+  margin: -4px 0 8px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.submit {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.submit:disabled {
+  opacity: 0.45;
+}
+
+/* ---- Teams ------------------------------------------------------------------ */
+
+/* The player's team tints the page's edge and the name chip. */
+body {
+  box-shadow: inset 0 6px 0 var(--team, transparent);
+}
+
+.extra-field {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  margin: 12px 0 0;
+  font-weight: 700;
+}
+
+.extra-field[hidden] {
+  display: none;
+}
+
+.team-picker {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  margin: 0 0 12px;
+  padding: 0;
+  border: 0;
+}
+
+.team-picker legend {
+  margin-bottom: 8px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.team-options {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.team-option {
+  min-height: 56px;
+  border: 3px solid transparent;
+  border-radius: var(--radius);
+  background: var(--team-color);
+  color: #fff;
+  font: inherit;
+  font-size: 18px;
+  font-weight: 800;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.35);
+  cursor: pointer;
+}
+
+.team-option[aria-pressed="true"] {
+  border-color: var(--text);
+  transform: scale(1.03);
+}
+
+.team-option:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.team-badge {
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--team);
+  color: #fff;
+  font-weight: 800;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.35);
+}
+
+.standings {
+  display: grid;
+  gap: 8px;
+  width: min(100%, 360px);
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.standing {
+  display: grid;
+  grid-template-columns: 2ch 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  border-left: 8px solid var(--team-color);
+  background: var(--surface);
+  font-weight: 700;
+}
+
+.standing[data-mine] {
+  background: color-mix(in srgb, var(--team-color) 25%, var(--surface));
+}
+
+.standing-place {
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.standing-score {
+  color: var(--muted);
+}
+
+/* ---- Podium and the end ---------------------------------------------------- */
+
+.podium {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  align-items: end;
+  gap: 8px;
+  width: min(100%, 360px);
+  margin: 8px 0 4px;
+  padding: 0;
+  list-style: none;
+}
+
+.podium-place {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.podium-avatar {
+  display: grid;
+  place-items: center;
+  height: 72px;
+}
+
+.podium-name {
+  max-width: 100%;
+  overflow: hidden;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.podium-score {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.podium-step {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  margin-top: 4px;
+  border-radius: 10px 10px 0 0;
+  color: #1b1b1b;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.podium-place[data-rank="1"] .podium-step {
+  height: 96px;
+  background: #ffc933;
+}
+
+.podium-place[data-rank="2"] .podium-step {
+  height: 70px;
+  background: #d7dbe8;
+}
+
+.podium-place[data-rank="3"] .podium-step {
+  height: 52px;
+  background: #e39b5f;
+}
+
+.finale[data-stage="podium"] #finale-avatar {
+  display: none;
+}
+
+.finale[data-stage="end"] .podium {
+  display: none;
+}
+
+/* ---- Character creator ------------------------------------------------ */
+
+.creator {
+  width: 100%;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+}
+
+.avatar-stage {
+  display: grid;
+  place-items: center;
+  width: 150px;
+  height: 168px;
+}
+
+.avatar-stage .avatar {
+  filter: drop-shadow(0 8px 10px rgb(0 0 0 / 0.25));
+}
+
+.avatar-stage.pop .avatar {
+  animation: pop 0.28s ease-out;
+}
+
+.avatar-stage.bounce .avatar {
+  animation: bounce 1.8s ease-in-out infinite;
+}
+
+@keyframes pop {
+  0% {
+    transform: scale(0.86);
+  }
+  60% {
+    transform: scale(1.06);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+.secondary {
+  height: 44px;
+  padding: 0 18px;
+  border: 2px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.secondary:active {
+  transform: scale(0.97);
+}
+
+.parts {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.part {
+  display: grid;
+  grid-template-columns: 44px 1fr 44px;
+  align-items: center;
+  height: 48px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+/* An odd last row (the extras) spans both columns. */
+.part:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
+.part-name {
+  font-size: 15px;
+  font-weight: 650;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.step {
+  height: 100%;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: 700 26px/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.step:active {
+  transform: scale(0.9);
+}
+
+.name-row {
+  display: grid;
+  grid-template-columns: 1fr 64px;
+  gap: 8px;
+}
+
+.name-dice {
+  height: 64px;
+  padding: 0;
+  border-radius: var(--radius);
+  font-size: 26px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .avatar-stage .avatar {
+    animation: none !important;
+  }
+}

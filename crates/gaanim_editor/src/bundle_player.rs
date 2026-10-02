@@ -32,6 +32,10 @@ pub struct BundlePlayback {
     failed: bool,
     /// Fragments of the frames composed for previews, apart from playback's.
     preview_store: gaanim_renderer::fragment::FragmentStore,
+    /// Elements redrawn from live poll results while presenting.
+    live: gaanim_export::live_polls::LiveElements,
+    /// What they showed in the frame on screen.
+    live_shown: Option<Vec<gaanim_export::live_polls::Shown>>,
 }
 
 impl BundlePlayback {
@@ -75,6 +79,8 @@ fn bundle_timeline(bundle: &Bundle) -> Timeline {
     }
     timeline.set_segments(scene.segments.clone());
     timeline.set_markers(scene.markers.clone());
+    timeline.set_polls(scene.polls.clone(), scene.poll_session.clone());
+    timeline.set_stop_gates(scene.stop_gates.clone());
     timeline.cached_duration = scene.duration;
     timeline.is_playing = true;
     timeline
@@ -136,6 +142,12 @@ pub fn open_bundle_bytes(world: &mut World, path: &Path, bytes: Arc<[u8]>) -> Re
     });
 
     world.insert_resource(bundle_timeline(&bundle));
+    world.insert_resource(gaanim_animation::live::LiveZones(
+        bundle.scene.live_zones.clone(),
+    ));
+    if let Some(rehearsal) = bundle.scene.rehearsal.clone() {
+        world.insert_resource(rehearsal);
+    }
     world.insert_resource(first.camera);
     if let Some(background) = bundle.scene.background.clone() {
         world.insert_resource(background);
@@ -159,7 +171,10 @@ pub fn open_bundle_bytes(world: &mut World, path: &Path, bytes: Arc<[u8]>) -> Re
     {
         window.title = format!("Gaanim — {}", bundle.scene.title);
     }
+    let live = gaanim_export::live_polls::LiveElements::from_scene(&bundle.scene);
     world.insert_resource(BundlePlayback {
+        live,
+        live_shown: None,
         bundle,
         path: path.to_path_buf(),
         shown: None,
@@ -194,6 +209,7 @@ impl BundlePlayback {
             width,
             height,
             gaanim_export::config::OutputFit::Contain,
+            None,
         );
         let base = self
             .bundle
@@ -212,9 +228,20 @@ pub fn bundle_frame_system(
     mut external: ResMut<ExternalFrame>,
     mut camera: ResMut<gaanim_math::Camera>,
     mut post: ResMut<CanvasPostProcess>,
+    results: Option<Res<gaanim_animation::polls::PollResults>>,
 ) {
     let index = playback.bundle.frame_index_at(timeline.current_time);
-    if playback.shown == Some(index) || playback.failed {
+    // Redraw for new votes only when a live element would look different: a
+    // quiz's clock changes the results every frame.
+    let live_shown = results
+        .as_ref()
+        .filter(|results| results.is_changed())
+        .map_or_else(
+            || playback.live_shown.clone(),
+            |results| playback.live.shown(results),
+        );
+    let votes_changed = live_shown != playback.live_shown;
+    if (playback.shown == Some(index) && !votes_changed) || playback.failed {
         if *camera != playback.camera {
             *camera = playback.camera;
         }
@@ -248,7 +275,12 @@ pub fn bundle_frame_system(
             .collect();
         playback.post = frame.post.clone();
     }
-    external.frame = Some(Arc::new(frame.capture));
+    let mut capture = frame.capture;
+    if let Some(results) = &results {
+        playback.live.apply(results, &mut capture);
+    }
+    playback.live_shown = live_shown;
+    external.frame = Some(Arc::new(capture));
 }
 
 /// Plays bundles opened with [`open_bundle`].

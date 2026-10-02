@@ -813,8 +813,11 @@ fn dispatch_diff_mode() -> bool {
                 capture_dir,
                 parsed.stops.as_deref(),
                 &parsed.selection,
+                parsed.height,
             );
-        } else if let Err(error) = (python.capture_script_snapshots)(&script, capture_dir) {
+        } else if let Err(error) =
+            (python.capture_script_snapshots)(&script, capture_dir, parsed.height)
+        {
             console::error("diff", format!("snapshot capture failed: {error}"));
             std::process::exit(2);
         }
@@ -835,6 +838,7 @@ fn capture_stop_snapshots(
     capture_dir: &Path,
     stops: Option<&[usize]>,
     selection: &gaanim_timeline::selection::SegmentSelection,
+    height: Option<u32>,
 ) {
     let canvas = (python.load_script_canvas)(script).unwrap_or_else(|error| {
         console::error("diff", error);
@@ -851,10 +855,11 @@ fn capture_stop_snapshots(
             });
         Some(selected.as_slice())
     };
-    let capture = gaanim_diff::capture_stops(canvas, capture_dir, stops).unwrap_or_else(|error| {
-        console::error("diff", format!("stop capture failed: {error}"));
-        std::process::exit(2);
-    });
+    let capture =
+        gaanim_diff::capture_stops(canvas, capture_dir, stops, height).unwrap_or_else(|error| {
+            console::error("diff", format!("stop capture failed: {error}"));
+            std::process::exit(2);
+        });
     gaanim_editor::diff_cli::print_stop_capture(&capture, capture_dir);
 }
 
@@ -887,6 +892,7 @@ fn resolve_project_paths(
             project_dir: project.root.clone(),
             output_dir,
             script_path: script_path.to_path_buf(),
+            poll_relay: project.manifest.poll_relay.clone(),
         }
     } else {
         let proj = script_parent.canonicalize().unwrap_or(script_parent);
@@ -895,6 +901,7 @@ fn resolve_project_paths(
             project_dir: proj.clone(),
             output_dir: out,
             script_path: script_path.to_path_buf(),
+            poll_relay: None,
         }
     }
 }

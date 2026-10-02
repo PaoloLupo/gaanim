@@ -3371,6 +3371,12 @@ impl PyDrawable {
         let result = slf.borrow().opacity_impl(op);
         same_drawable(slf, result)
     }
+    /// Start hidden until an animation in ``scene.play`` shows it.
+    fn hidden<'py>(slf: PyRef<'py, Self>) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        slf.0.hidden().map_err(PyValueError::new_err)?;
+        Ok(slf)
+    }
     /// Name this drawable; names are the default key of ``magic_move``.
     fn named<'py>(slf: PyRef<'py, Self>, name: &str) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;

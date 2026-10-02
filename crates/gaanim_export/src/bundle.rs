@@ -452,17 +452,29 @@ where
         background.pixel_size = (config.width, config.height);
     }
 
-    let (plan, segments, markers, scenes, duration) = {
+    let (plan, segments, markers, polls, poll_session, stop_gates, scenes, duration) = {
         let timeline = app.world().resource::<Timeline>();
         (
             RecordingPlan::new(timeline, config.fps),
             timeline.segments.clone(),
             timeline.markers.clone(),
+            timeline.polls.clone(),
+            timeline.poll_session.clone(),
+            timeline.stop_gates.clone(),
             scene_spans(timeline),
             timeline.cached_duration.max(0.0),
         )
     };
     let post_shaders = post_shader_table(app.world().get_resource::<CanvasPostProcess>());
+    let live_zones = app
+        .world()
+        .get_resource::<gaanim_animation::live::LiveZones>()
+        .map(|zones| zones.0.clone())
+        .unwrap_or_default();
+    let rehearsal = app
+        .world()
+        .get_resource::<gaanim_animation::rehearsal::Rehearsal>()
+        .cloned();
     let background = app.world().get_resource::<CanvasBackground>().cloned();
 
     if let Some(parent) = config
@@ -533,6 +545,11 @@ where
         ]
     });
 
+    // Name the elements drawn from live poll data, so presenting the bundle
+    // can redraw them at the live votes.
+    let (poll_bars, poll_texts, poll_readouts) =
+        crate::live_polls::record(app.world_mut(), &mut writer);
+
     if !single_world {
         drop(app);
         writer.start_pass().map_err(bundle_error)?;
@@ -566,6 +583,14 @@ where
         markers,
         scenes,
         audio,
+        polls,
+        poll_session,
+        stop_gates,
+        live_zones,
+        rehearsal,
+        poll_bars,
+        poll_texts,
+        poll_readouts,
     };
     if let Some(frame) = cover.and_then(ThumbnailPicker::into_frame) {
         match render_thumbnail(&scene, &frame) {

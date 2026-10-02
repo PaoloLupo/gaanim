@@ -805,7 +805,16 @@ impl CanvasTheme {
         Ok(fonts.len())
     }
 
+    /// Set role families. `"all"` and `"text"` name groups of roles; a role
+    /// named on its own keeps its family whatever the order: groups apply
+    /// first, `"all"` before `"text"`.
     pub fn set_fonts(&mut self, fonts: &HashMap<String, String>) -> Result<(), String> {
+        let mut fonts: Vec<_> = fonts.iter().collect();
+        fonts.sort_by_key(|(role, _)| match role.as_str() {
+            "all" => 0,
+            "text" => 1,
+            _ => 2,
+        });
         for (role, family) in fonts {
             let roles: &[TextRole] = match role.as_str() {
                 "text" => &[
@@ -1171,6 +1180,25 @@ mod tests {
         canvas.background = None;
         canvas.set_theme("technical").unwrap();
         assert!(canvas.unthemed_contrast_warning().is_none());
+    }
+
+    /// A role named on its own keeps its family beside `"text"` and
+    /// `"all"`, whatever order the map yields them in (#296).
+    #[test]
+    fn single_role_fonts_win_over_groups() {
+        for _ in 0..16 {
+            let mut theme = CanvasTheme::default_builtin();
+            let fonts = HashMap::from([
+                ("all".to_owned(), "Mono".to_owned()),
+                ("text".to_owned(), "Lexend".to_owned()),
+                ("title".to_owned(), "Space Grotesk".to_owned()),
+            ]);
+            theme.set_fonts(&fonts).unwrap();
+            let family = |role| theme.text.roles[&role].font_family.clone();
+            assert_eq!(family(TextRole::Title), "Space Grotesk");
+            assert_eq!(family(TextRole::Body), "Lexend");
+            assert_eq!(family(TextRole::Code), "Mono");
+        }
     }
 
     #[test]

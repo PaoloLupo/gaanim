@@ -1,6 +1,6 @@
 [package]
 name = "gaanim_project"
-version = "0.7.2"
+version = "0.8.0"
 license = "MIT OR Apache-2.0"
 edition = "2024"
 description = "Shared Gaanim project scaffolding, manifests, recents, and environment discovery"
@@ -12,6 +12,10 @@ serde_json = { workspace = true }
 toml = { workspace = true }
 directories = { workspace = true }
 gaanim_thumbnail = { path = "../gaanim_thumbnail" }
+
+# Poll session codes and presenter keys; the web player never creates one.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+getrandom = "0.3"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [

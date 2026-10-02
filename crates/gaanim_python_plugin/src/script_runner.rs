@@ -211,6 +211,8 @@ const GAANIM_TEMPLATES: &str = include_str!("../../gaanim_python/gaanim/template
 const GAANIM_SECTIONS: &str = include_str!("../../gaanim_python/gaanim/sections.py");
 const GAANIM_MATRIX: &str = include_str!("../../gaanim_python/gaanim/matrix.py");
 const GAANIM_ANIMATION_TYPES: &str = include_str!("../../gaanim_python/gaanim/animation_types.py");
+const GAANIM_LIVE: &str = include_str!("../../gaanim_python/gaanim/live.py");
+const GAANIM_QUESTIONS: &str = include_str!("../../gaanim_python/gaanim/questions.py");
 
 /// Build the public `gaanim` package around the builtin `gaanim_core` module.
 ///
@@ -262,6 +264,33 @@ fn bootstrap_gaanim_package(py: Python<'_>) -> PyResult<()> {
     let animation_types = PyModule::from_code(py, &types_source, &types_file, &types_name)?;
     modules.set_item("gaanim.animation_types", &animation_types)?;
 
+    // Live behaviors: the compiler scene.live_zone calls. Registered before
+    // execution, like sections, so its dataclasses resolve their module.
+    let live = PyModule::new(py, "gaanim.live")?;
+    live.setattr("__package__", "gaanim")?;
+    live.setattr("__file__", "gaanim/live.py")?;
+    modules.set_item("gaanim.live", &live)?;
+    // The compiler reads its helpers' source with `inspect`, so the embedded
+    // file goes in `linecache` under the name its code objects carry.
+    let loader = pyo3::types::PyDict::new(py);
+    loader.set_item("source", GAANIM_LIVE)?;
+    loader.set_item("namespace", live.dict())?;
+    let load = std::ffi::CString::new(concat!(
+        "import linecache\n",
+        "linecache.cache['gaanim/live.py'] = ",
+        "(len(source), None, source.splitlines(True), 'gaanim/live.py')\n",
+        "exec(compile(source, 'gaanim/live.py', 'exec'), namespace)\n",
+    ))
+    .unwrap();
+    py.run(&load, Some(&loader), None)?;
+
+    // Questions written outside Python; dataclasses, so registered first.
+    let questions = PyModule::new(py, "gaanim.questions")?;
+    questions.setattr("__package__", "gaanim")?;
+    modules.set_item("gaanim.questions", &questions)?;
+    let questions_source = std::ffi::CString::new(GAANIM_QUESTIONS).unwrap();
+    py.run(&questions_source, Some(&questions.dict()), None)?;
+
     let init_source = std::ffi::CString::new(GAANIM_PACKAGE_INIT).unwrap();
     py.run(&init_source, Some(&package.dict()), None)
 }
@@ -270,7 +299,12 @@ fn bootstrap_gaanim_package(py: Python<'_>) -> PyResult<()> {
 ///
 /// A host channel is installed so a trailing `scene.render()` remains valid,
 /// but its payload is intentionally discarded: this command is headless.
-pub fn capture_script_snapshots(script_path: &Path, snapshot_dir: &Path) -> Result<(), String> {
+/// Frames are `height` pixels tall when given, or the preview size.
+pub fn capture_script_snapshots(
+    script_path: &Path,
+    snapshot_dir: &Path,
+    height: Option<u32>,
+) -> Result<(), String> {
     let snapshot_dir = snapshot_dir
         .to_str()
         .ok_or_else(|| "snapshot directory is not UTF-8".to_string())?;
@@ -285,7 +319,7 @@ pub fn capture_script_snapshots(script_path: &Path, snapshot_dir: &Path) -> Resu
                 handler_dir.display()
             ));
         }
-        gaanim_diff::capture_canvas(canvas, &handler_dir, times)
+        gaanim_diff::capture_canvas_sized(canvas, &handler_dir, times, height)
             .map(|manifest| manifest.snapshots.len())
             .map_err(|error| error.to_string())
     })));

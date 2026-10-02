@@ -771,6 +771,24 @@ impl DrawableHandle {
         });
     }
 
+    /// Start hidden, wherever the drawable is created, until an animation
+    /// in `SceneModel::play` shows it: `create`, `write`, `fade_in`, a move…
+    /// Without it, a drawable created after the segment's first `play` is
+    /// part of the segment's starting state, visible from its start. It must
+    /// come before the drawable appears in a `play` or a cut; hiding a
+    /// drawable already shown takes `fade_out` or `opacity(0)`.
+    pub fn hidden(&self) -> Result<Self, &'static str> {
+        let state = self.state.lock().expect("canvas state poisoned");
+        if state.frozen_spawn_specs.contains_key(&self.id) {
+            return Err(
+                "hidden() must follow the drawable's creation; to hide one already shown,                  use fade_out() or opacity(0)",
+            );
+        }
+        drop(state);
+        self.defer_visibility_until_play();
+        Ok(self.clone())
+    }
+
     /// Keep a generated reactive visual hidden until it is included in a
     /// `SceneModel::play` animation.
     pub(crate) fn defer_visibility_until_play(&self) {

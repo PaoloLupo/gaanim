@@ -1,6 +1,6 @@
 [package]
 name = "gaanim_editor"
-version = "0.7.2"
+version = "0.8.0"
 license = "MIT OR Apache-2.0"
 edition = "2024"
 description = "Gaanim application: interactive viewer with hot-reload of animation scripts"
@@ -50,6 +50,12 @@ cpal = { version = "0.17", default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 open = "5.3"
+# Audience polls: the relay client (same ureq build typst-kit already uses).
+ureq = { version = "2.12", default-features = false, features = ["native-tls", "json"] }
+native-tls = "0.2"
+# The presentation's socket on the relay, which pushes the results; blocking,
+# like the rest of the relay client, over the same native TLS.
+tungstenite = { version = "0.30", default-features = false, features = ["handshake", "native-tls"] }
 
 # The presenter's clock reads the browser's local time on the web.
 [target.'cfg(target_arch = "wasm32")'.dependencies]

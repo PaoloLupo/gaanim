@@ -169,6 +169,11 @@ scene.render()
     ("Tipografía cinética", "guias/tipografia-cinetica/"),
     ("Presentaciones", "guias/presentaciones/"),
   ))
+  door("publico/", "Público en vivo", "Jugar con la audiencia", [Encuestas, cuestionarios, equipos y personajes del público en tu escena.], (
+    ("Tu primera encuesta", "publico/primera-encuesta/"),
+    ("Recetario de estilos", "publico/estilos/"),
+    ("Zonas vivas", "publico/zonas-vivas/"),
+  ))
   door("referencia/", "Referencia", "Consultar la API", [Firmas, parámetros y ejemplos de cada objeto y animación.], (
     ("Escena", "referencia/scene/"),
     ("Animaciones", "referencia/animations/"),

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import os
 from typing import Any, Callable, ClassVar, Iterator, Literal, Mapping, Optional, Self, Sequence, TypeAlias, overload
+from .live import Player, Pose, State
+from .questions import Question
 from .matrix import Matrix
 from .sections import SceneSections
 from .animation_types import AnimationChannel, CustomAnimationValues
@@ -3113,6 +3115,22 @@ class Drawable:
         ``padding`` and shifted by ``offset``; ``fit`` scales it to the target.
         """
         ...
+    def hidden(self) -> Self:
+        """Start hidden until an animation in ``scene.play`` shows it, and return it.
+
+        A drawable created after a segment's first ``play`` without an
+        entrance is part of the segment's starting state, so it is visible from
+        the segment's start. ``hidden()`` keeps it out of sight until ``create``,
+        ``write``, ``fade_in``, a move or another animation shows it; a
+        template that only gives ``transform_to`` its shape never shows. Call it
+        right after creating the drawable; once it has been shown or cut,
+        raises ``ValueError``: hide it with ``fade_out`` or ``opacity(0)``.
+
+        Example:
+            target = scene.text("Paso 2").move_to(0, 1).hidden()
+            scene.play(step.animate.transform_to(target))
+        """
+        ...
     def named(self, name: str) -> Self:
         """Name this drawable and return it.
 
@@ -3819,6 +3837,9 @@ class TextFlow:
         ``"en"``, …) that selects the hyphenation patterns used with
         ``hyphenate=True``; ``None`` keeps Typst's English default. Invalid
         widths, spacing, line counts, or language codes raise ``ValueError``.
+
+        ``line_spacing`` is the distance between baselines in multiples of the
+        font size, like CSS ``line-height``: 1.2 puts them 1.2 sizes apart.
 
         ``text_box`` is the box a layout measures and places the text by, like
         CSS ``text-box``: ``"line"`` spans full lines (ascent to descent),
@@ -5099,6 +5120,503 @@ def computed(callback: Callable[..., float], *, inputs: Sequence[Parameter | Var
     """
     ...
 
+class Poll:
+    """An audience poll created with ``scene.poll`` or ``scene.quiz``: its
+    data, for the scene to present as it likes.
+
+    Values are live while a presentation collects votes and follow the
+    scene's rehearsal everywhere else. ``votes``, ``share``, ``percent``,
+    ``total`` and ``remaining`` return ``Parameter`` objects: follow them with
+    readouts, ``computed`` values, reactive points or anything else that
+    accepts a parameter. Presenting a ``.gaanim`` bundle replays what was
+    recorded; there, ``bar`` drawables and readouts that show one of these
+    parameters directly (``scene.viz.readout(poll.votes(0))``) follow the live
+    votes, while drawables driven through ``computed`` keep what was recorded.
+    """
+    @property
+    def id(self) -> str:
+        """Stable id of the poll on the relay."""
+        ...
+    @property
+    def question(self) -> str: ...
+    @property
+    def options(self) -> list[str]: ...
+    @property
+    def code(self) -> str:
+        """Six-character session code phones can type on the relay's page."""
+        ...
+    @property
+    def url(self) -> str:
+        """Address the QR code opens, e.g. ``https://relay.example/s/K7M2QX``."""
+        ...
+    def votes(self, answer: int) -> Parameter:
+        """Votes for ``answer`` (0 for the first) as a parameter.
+
+        Raises ``ValueError`` for an answer the poll does not have.
+        """
+        ...
+    def share(self, answer: int) -> Parameter:
+        """``answer``'s fraction of all votes, from 0 to 1 (0 without votes)."""
+        ...
+    def total(self) -> Parameter:
+        """Votes for every answer as a parameter; for a quiz, how many
+        players answered."""
+        ...
+    def percent(self, answer: int) -> Parameter:
+        """``answer``'s share of all votes, from 0 to 100 (0 without votes).
+
+        Unlike ``computed`` from ``share``, a readout of it stays live when a
+        ``.gaanim`` bundle is presented.
+        """
+        ...
+    def answered(
+        self,
+        *,
+        at_least: Optional[int] = None,
+        share: Optional[float] = None,
+    ) -> Condition:
+        """A condition for ``scene.stop(until=...)``: at least ``at_least``
+        answers, or answers from at least ``share`` (0 to 1) of the
+        audience: the players for a quiz, the phones on the voting page for
+        a poll. Never met with nobody there.
+
+        Raises ``ValueError`` unless exactly one of the two is given, or for
+        a share outside (0, 1].
+
+        Example:
+            scene.stop(until=quiz.answered(at_least=10))
+        """
+        ...
+    def time_up(self) -> Condition:
+        """A condition for ``scene.stop(until=...)``: the quiz is out of time
+        on the relay's clock. Raises ``ValueError`` for a poll that is not a
+        quiz."""
+        ...
+    def remaining(self) -> Parameter:
+        """Seconds left to answer a quiz, as a parameter.
+
+        In previews and exports it runs down with the rehearsal, reaching 0
+        at the stop where a presentation waits for the answers; while
+        presenting it follows the relay's clock, which ends the quiz. Raises ``ValueError`` for a poll that is not a quiz.
+
+        Example:
+            clock = scene.viz.readout(quiz.remaining(), format=".0f", suffix=" s")
+        """
+        ...
+    def reveal(self) -> None:
+        """Reveal a quiz's answer at the cursor.
+
+        When a presentation's playhead passes this point, every phone shows
+        the correct answer and each player whether it was right, the points
+        it earned and its place; the quiz takes no more answers. Written right
+        after a ``scene.stop()``, it waits while the presentation rests on the
+        stop and reveals when you advance. Raises ``ValueError`` for a poll
+        that is not a quiz, or a second reveal.
+        """
+        ...
+    def revealed(self) -> Parameter:
+        """0 until the quiz reveals its answer, then 1.
+
+        Bars and percentages shown during the question sway the answers; with
+        this a scene keeps them hidden, frozen or covered until ``reveal()``,
+        however it likes: ``bar.opacity(quiz.revealed())``. The change is a
+        moment of the timeline, the same in previews, exports and live, where
+        the presentation reveals when it reaches it. Call it before
+        ``reveal()``; raises ``ValueError`` after it, or for a poll that is not
+        a quiz.
+        """
+        ...
+    @property
+    def is_quiz(self) -> bool:
+        """Whether the poll was created with ``scene.quiz``."""
+        ...
+    @property
+    def correct(self) -> Optional[int | list[int]]:
+        """A quiz's right answer (0 for the first), or the list of them for a
+        multiple choice quiz; ``None`` for a poll."""
+        ...
+    @property
+    def multiple(self) -> bool:
+        """Whether players may choose several answers."""
+        ...
+    @property
+    def has_image(self) -> bool:
+        """Whether phones show a picture above the question."""
+        ...
+    def icon(self, answer: int, size: float = 0.6) -> Drawable:
+        """The shape ``answer`` has on phones (a triangle, diamond, circle,
+        square, star or hexagon), ``size`` units tall, centered on the origin
+        and filled with its color, to put on the scene's own tiles.
+
+        On a quiz, phones show the answers in an order of their own and color
+        them by place, so the screen's shapes match a poll's but not a quiz's.
+        Raises ``ValueError`` for an answer the poll does not have or a
+        non-positive size.
+
+        Example:
+            poll.icon(0, 0.5).move_to(-5, 1)
+        """
+        ...
+    def color(self, answer: int) -> str:
+        """The color ``answer`` has on phones, ``#rrggbb``."""
+        ...
+    @property
+    def time(self) -> Optional[int]:
+        """Seconds a quiz gives to answer; ``None`` for a poll."""
+        ...
+    def bar(
+        self,
+        answer: int,
+        *,
+        length: float = 6.0,
+        thickness: float = 0.5,
+        direction: Literal["right", "left", "up", "down"] = "right",
+        scale: Literal["leader", "total"] = "leader",
+        radius: float = 0.0,
+    ) -> Drawable:
+        """A bar whose length follows ``answer``'s votes.
+
+        The drawable's bounds are the full ``length`` by ``thickness`` box,
+        centered on its position, so layouts do not move as votes arrive; the
+        bar grows from the edge opposite ``direction``. With
+        ``scale="leader"`` the leading answer fills its bar; with ``"total"``
+        a bar's length is its answer's share. Style, position and animate it
+        like any drawable (``create`` grows it in). It also follows live
+        votes when a ``.gaanim`` bundle is presented.
+
+        Raises ``ValueError`` for an unknown answer, direction or scale, a
+        non-positive length or thickness, or a negative radius.
+
+        Example:
+            poll.bar(0, length=5, thickness=0.4, radius=0.2).fill(RED).move_to(1, 1)
+        """
+        ...
+    def qr(self, size: float = 3.0) -> Drawable:
+        """The QR code of ``url``, ``size`` scene units on a side.
+
+        One drawable of the dark modules, filled black and centered on its
+        position; restyle it like any drawable. Phones read it best on a
+        light background with a margin of a few modules. Raises
+        ``ValueError`` for a non-positive size.
+        """
+        ...
+    def close(self) -> None:
+        """Stop taking votes at the cursor instead of at the end of the
+        segment where the poll opened. The values keep their last counts.
+
+        Raises ``ValueError`` if the poll is already closed.
+        """
+        ...
+
+class Leaderboard:
+    """The game's leaderboard from ``scene.leaderboard``: the players of the
+    scene's quizzes, best first, as data for the scene to present as it
+    likes.
+
+    Every method takes a ``rank`` (0 for the leader) and returns something to
+    place and style: ``name`` a live text drawable, ``points`` a parameter,
+    ``bar`` a bar drawable. Outside a live presentation they show the
+    rehearsal's players; while presenting, the relay's. A rank past the last
+    player shows an empty name, 0 points and an empty bar. All of them follow
+    the live results when a ``.gaanim`` bundle is presented, including the
+    nicknames, whose glyphs the bundle stores.
+    """
+    def name(
+        self,
+        rank: int,
+        *,
+        size: Optional[float] = None,
+        weight: Optional[int] = None,
+        font: Optional[str] = None,
+        align: Literal["left", "center", "right"] = "left",
+    ) -> Drawable:
+        """The nickname at ``rank`` as live text.
+
+        ``size`` and ``font`` default to the theme's body text, and ``align``
+        places the text's left edge, center or right edge on the drawable's
+        position, so names of any length line up. Style it like any drawable
+        (``fill``, ``fade_in``…); it is filled with the theme's foreground.
+        Raises ``ValueError`` for an unknown ``align`` or a non-positive size.
+
+        Example:
+            board.name(0, size=0.6, align="left").fill(GOLD).move_to(-3, 1)
+        """
+        ...
+    def points(self, rank: int) -> Parameter:
+        """The score of the player at ``rank`` as a parameter.
+
+        Example:
+            scene.viz.readout(board.points(0), format=".0f", suffix=" pts")
+        """
+        ...
+    def players(self) -> Parameter:
+        """How many players joined, as a parameter."""
+        ...
+    def correct(self, rank: int) -> Parameter:
+        """Quizzes the player at ``rank`` answered right."""
+        ...
+    def answered(self, rank: int) -> Parameter:
+        """Quizzes the player at ``rank`` answered."""
+        ...
+    def streak(self, rank: int) -> Parameter:
+        """Quizzes the player at ``rank`` answered right in a row, up to the
+        last one revealed."""
+        ...
+    def responded(self, rank: int, poll: Poll) -> Parameter:
+        """1 once the player at ``rank`` answered ``poll``, else 0."""
+        ...
+    def chose(self, rank: int, poll: Poll, answer: int) -> Parameter:
+        """1 if the player at ``rank`` chose ``answer`` on ``poll``, else 0: who
+        voted what, for a multiple choice poll too.
+
+        Example:
+            mark.opacity(computed(lambda c: c, inputs=[audience.chose(0, poll, 2)]))
+        """
+        ...
+    def right(self, rank: int, poll: Poll) -> Parameter:
+        """1 if the player at ``rank`` answered quiz ``poll`` right, else 0. Raises
+        ``ValueError`` for a poll that is not a quiz."""
+        ...
+    def earned(self, rank: int, poll: Poll) -> Parameter:
+        """Points the player at ``rank`` earned on quiz ``poll``."""
+        ...
+    def answer_time(self, rank: int, poll: Poll) -> Parameter:
+        """Seconds the player at ``rank`` took to answer quiz ``poll``, 0 without
+        an answer."""
+        ...
+    def bar(
+        self,
+        rank: int,
+        *,
+        length: float = 6.0,
+        thickness: float = 0.5,
+        direction: Literal["right", "left", "up", "down"] = "right",
+        radius: float = 0.0,
+    ) -> Drawable:
+        """A bar whose length is the score at ``rank`` against the leader's.
+
+        Its bounds are the full ``length`` by ``thickness`` box, centered on
+        its position, and it grows from the edge opposite ``direction``.
+        Raises ``ValueError`` like ``Poll.bar``.
+        """
+        ...
+
+class Teams:
+    """The game's teams from ``scene.teams``, as data for the scene to present
+    as it likes: a battle, a tug of war, two scoreboards.
+
+    Every method takes a ``team`` index, in the order the names were given.
+    ``score``, ``players``, ``average`` and ``leader`` return ``Parameter``
+    objects and ``bar`` a bar drawable. Outside a live presentation they
+    follow the scene's rehearsal, whose players are dealt to teams the same
+    way. Live zones tell each player's team to their behavior (``p.team``,
+    ``p.team_index``, ``p.team_count``, ``p.team_score``, ``p.team_rank``).
+    """
+    @property
+    def names(self) -> list[str]: ...
+    @property
+    def colors(self) -> list[str]:
+        """``#rrggbb`` per team, as the phones show them."""
+        ...
+    @property
+    def choose(self) -> bool:
+        """Whether players choose their team on the phone."""
+        ...
+    def __len__(self) -> int: ...
+    def score(self, team: int) -> Parameter:
+        """The points of ``team``'s players added up.
+
+        Raises ``ValueError`` for a team the game does not have.
+
+        Example:
+            scene.viz.readout(teams.score(0), format=".0f", suffix=" pts")
+        """
+        ...
+    def players(self, team: int) -> Parameter:
+        """How many players ``team`` has."""
+        ...
+    def average(self, team: int) -> Parameter:
+        """``team``'s points per player (0 while it has none): fairer than the
+        total when teams are uneven."""
+        ...
+    def leader(self) -> Parameter:
+        """The index of the team leading on points, the first on a tie."""
+        ...
+    def bar(
+        self,
+        team: int,
+        *,
+        length: float = 6.0,
+        thickness: float = 0.5,
+        direction: Literal["right", "left", "up", "down"] = "right",
+        radius: float = 0.0,
+    ) -> Drawable:
+        """A bar whose length is ``team``'s points against the leading team's.
+
+        Its bounds are the full ``length`` by ``thickness`` box, centered on
+        its position, and it grows from the edge opposite ``direction``.
+        Raises ``ValueError`` like ``Poll.bar``.
+        """
+        ...
+
+class Audience:
+    """The game's audience from ``scene.audience``: the players in the order
+    they joined, as data for the scene to arrange and animate as it likes.
+
+    Each player takes a ``slot``, 0 for the first to join. ``name`` gives a
+    live text drawable, ``count``, ``joined`` and ``age`` give parameters to
+    drive visibility, placement and entrances. Outside a live presentation
+    they show the rehearsal's players as they join; while presenting,
+    the relay's. A slot past the last player shows an empty name, ``joined``
+    0 and ``age`` 0. Removing a player moves the later ones up one slot.
+    """
+    @property
+    def code(self) -> str:
+        """The session code phones type."""
+        ...
+    @property
+    def url(self) -> str:
+        """The address phones open to join."""
+        ...
+    def qr(self, size: float = 3.0) -> Drawable:
+        """The QR code of ``url``, ``size`` units on a side, filled black.
+
+        Put it on a light background with a margin so phones read it.
+        Raises ``ValueError`` for a non-positive size.
+        """
+        ...
+    def name(
+        self,
+        slot: int,
+        *,
+        size: Optional[float] = None,
+        weight: Optional[int] = None,
+        font: Optional[str] = None,
+        align: Literal["left", "center", "right"] = "center",
+    ) -> Drawable:
+        """The nickname in ``slot`` as live text, like ``Leaderboard.name``.
+
+        Example:
+            audience.name(0, size=0.4).move_to(0, -1.2)
+        """
+        ...
+    def count(self) -> Parameter:
+        """How many players joined, as a parameter."""
+        ...
+    def at_least(self, count: int) -> Condition:
+        """A condition for ``scene.stop(until=...)``: at least ``count``
+        players joined.
+
+        Example:
+            scene.stop("sala", until=audience.at_least(5))
+        """
+        ...
+    def joined(self, slot: int) -> Parameter:
+        """1 once a player took ``slot``, else 0.
+
+        Example:
+            face.opacity(computed(lambda j: j, inputs=[audience.joined(3)]))
+        """
+        ...
+    def age(self, slot: int) -> Parameter:
+        """Seconds since the player in ``slot`` joined, up to 60; 0 while
+        the slot is empty. Preview players count as joined 60 seconds ago.
+
+        Example:
+            pop = computed(lambda a: min(a / 0.4, 1), inputs=[audience.age(3)])
+        """
+        ...
+    def score(self, slot: int) -> Parameter:
+        """The points of the player in ``slot``."""
+        ...
+    def correct(self, slot: int) -> Parameter:
+        """Quizzes the player in ``slot`` answered right."""
+        ...
+    def answered(self, slot: int) -> Parameter:
+        """Quizzes the player in ``slot`` answered."""
+        ...
+    def streak(self, slot: int) -> Parameter:
+        """Quizzes the player in ``slot`` answered right in a row, up to the
+        last one revealed."""
+        ...
+    def responded(self, slot: int, poll: Poll) -> Parameter:
+        """1 once the player in ``slot`` answered ``poll``, else 0."""
+        ...
+    def chose(self, slot: int, poll: Poll, answer: int) -> Parameter:
+        """1 if the player in ``slot`` chose ``answer`` on ``poll``, else 0: who
+        voted what, for a multiple choice poll too.
+
+        Example:
+            mark.opacity(computed(lambda c: c, inputs=[audience.chose(0, poll, 2)]))
+        """
+        ...
+    def right(self, slot: int, poll: Poll) -> Parameter:
+        """1 if the player in ``slot`` answered quiz ``poll`` right, else 0. Raises
+        ``ValueError`` for a poll that is not a quiz."""
+        ...
+    def earned(self, slot: int, poll: Poll) -> Parameter:
+        """Points the player in ``slot`` earned on quiz ``poll``."""
+        ...
+    def answer_time(self, slot: int, poll: Poll) -> Parameter:
+        """Seconds the player in ``slot`` took to answer quiz ``poll``, 0 without
+        an answer."""
+        ...
+
+class Character(Drawable):
+    """A character like the ones phones make, from ``scene.character``: it
+    breathes, blinks and plays expressions, the same way it moves on a
+    phone. Place, scale and animate it like any drawable.
+    """
+    @property
+    def avatar(self) -> list[int]:
+        """Its parts: [body, color, eyes, mouth, extra]."""
+        ...
+    def express(self, expression: Optional[str] = None, *, loop: bool = False) -> None:
+        """Play ``expression`` from the cursor: once, or with ``loop=True``
+        until the next one. ``None`` goes back to the character's own face.
+
+        Expressions: ``happy``, ``sad``, ``hurt``, ``winner`` and
+        ``surprised``. Glasses and sunglasses stay on through them. Raises
+        ``ValueError`` for an unknown expression.
+
+        Example:
+            hero.express("winner", loop=True)
+        """
+        ...
+    @staticmethod
+    def expressions() -> list[str]:
+        """The expressions characters can play."""
+        ...
+
+class LiveZone:
+    """A part of the scene where the audience plays, from
+    ``scene.live_zone``.
+
+    While presenting, each player arrives in it as the character they made
+    on their phone, and the zone's behavior poses that character every
+    frame. Previews and exports replay the scene's rehearsal the same way
+    every time. The behavior is compiled into the scene, so a presented
+    ``.gaanim`` runs it without Python. Characters are drawn above the rest
+    of the scene, clipped to the zone's bounds.
+    """
+    @property
+    def instructions(self) -> int:
+        """How many instructions the compiled behavior runs per player."""
+        ...
+    def close(self) -> None:
+        """Stop the zone at the cursor instead of at the end of the segment
+        where it opened. Raises ``ValueError`` if already closed."""
+        ...
+
+class Condition:
+    """What the audience must do before a stop advances by itself, from
+    ``poll.answered``, ``quiz.time_up`` or ``audience.at_least``.
+
+    ``a | b`` holds when either holds and ``a & b`` when both do.
+    """
+    def __or__(self, other: Condition) -> Condition: ...
+    def __and__(self, other: Condition) -> Condition: ...
+
 class Parameter:
     """An animatable scalar usable directly or as an explicit callback input."""
     @property
@@ -5156,6 +5674,16 @@ class Readout(Drawable):
     def number(self) -> Drawable: ...
     @property
     def unit(self) -> Optional[Drawable]: ...
+    def move_to(self, x: Any, y: Any = None, anchor: Anchor | TextAnchor | None = None) -> Readout:
+        """Position the readout and return it.
+
+        An Anchor places that point of its box at (x, y); without one, its
+        center goes there. A TextAnchor places its baseline there, so it lines
+        up with Text, and BASELINE_LEFT keeps its start fixed while the number
+        changes width. TextAnchor requires x and y; either may be a reactive
+        scalar.
+        """
+        ...
 
 class RollingNumber(Drawable):
     """A numeric wheel display. Animate the value with animate.set or count_to.
@@ -5399,6 +5927,9 @@ class Variable(Drawable):
     def number(self) -> Drawable: ...
     @property
     def unit(self) -> Optional[Drawable]: ...
+    def move_to(self, x: Any, y: Any = None, anchor: Anchor | TextAnchor | None = None) -> Variable:
+        """Position the variable and return it, as Readout.move_to does."""
+        ...
 _ReactiveScalar: TypeAlias = ScalarSource
 
 class CoordinateRef:
@@ -5930,10 +6461,12 @@ class Lottie(Drawable):
 class Geometry:
     """Scene-owned factory for vector, path, boolean, 3D, and reactive geometry."""
     def circle(self, radius: float) -> Drawable:
-        """Create a circle drawable in the scene.
+        """Create a circle of ``radius`` scene units centered at the origin.
+
+        Place it with ``move_to``; style it with ``fill`` and ``stroke``.
 
         Example:
-            result = scene.circle(1.0)
+            planet = scene.geometry.circle(0.5).fill(BLUE).move_to(2, 0)
         """
         ...
     def cube(self, size: float = 2.0, *, material: Optional[Material3D] = None) -> Primitive3D:
@@ -5965,17 +6498,17 @@ class Geometry:
         """
         ...
     def rect(self, width: float, height: float) -> Drawable:
-        """Create a rect drawable in the scene.
+        """Create a ``width`` by ``height`` rectangle centered at the origin.
 
         Example:
-            result = scene.rect(1.0, 1.0)
+            panel = scene.geometry.rect(4, 2).fill("#223").move_to(0, 1)
         """
         ...
     def rounded_rect(self, width: float, height: float, radius: float) -> Drawable:
-        """Create a rounded rect drawable in the scene.
+        """Create a ``width`` by ``height`` rectangle with corners of ``radius``, centered at the origin.
 
         Example:
-            result = scene.rounded_rect(1.0, 1.0, 1.0)
+            card = scene.geometry.rounded_rect(4, 2, 0.2).fill("#223")
         """
         ...
     def surrounding_rect(
@@ -5995,24 +6528,24 @@ class Geometry:
         """
         ...
     def square(self, s: float) -> Drawable:
-        """Create a square drawable in the scene.
+        """Create a square of side ``s`` centered at the origin.
 
         Example:
-            result = scene.square(1.0)
+            tile = scene.geometry.square(1.5).stroke(WHITE, 0.03)
         """
         ...
     def dot(self, radius: float) -> Drawable:
-        """Create a dot drawable in the scene.
+        """Create a filled circle of ``radius`` centered at the origin, to mark a point.
 
         Example:
-            result = scene.dot(1.0)
+            mark = scene.geometry.dot(0.08).move_to(1, 2)
         """
         ...
     def ellipse(self, rx: float, ry: float) -> Drawable:
-        """Create a ellipse drawable in the scene.
+        """Create an ellipse centered at the origin with semi-axes ``rx`` (horizontal) and ``ry`` (vertical).
 
         Example:
-            result = scene.ellipse(1.0, 1.0)
+            orbit = scene.geometry.ellipse(3, 1.5).stroke(WHITE, 0.02)
         """
         ...
     @overload
@@ -6067,15 +6600,26 @@ class Geometry:
                 head_width=0.15, body_width=0.036, max_head_ratio=0.3)
         """
         ...
+    @overload
+    def dashed_line(
+        self, p1: Endpoint, p2: Endpoint, *, dash_length: float = 0.16, gap_length: float = 0.10
+    ) -> Drawable: ...
+    @overload
     def dashed_line(
         self, x1: float, y1: float, x2: float, y2: float, *, dash_length: float = 0.16, gap_length: float = 0.10
     ) -> Drawable:
-        """Create a dashed line drawable in the scene.
+        """Create a dashed line between the same endpoints ``line`` takes.
 
-        ``create()`` draws the dashes one after another from the start point.
+        Endpoints are 2D/3D tuples, drawables, ``PointRef`` or ``AnchorPoint``
+        values, or four coordinates. A line between drawables or reference
+        points follows them every frame. Dashes are ``dash_length`` long and
+        ``gap_length`` apart in scene units, from the start; ``create()`` draws
+        them one after another. Non-positive lengths raise ``ValueError``;
+        other endpoint shapes raise ``TypeError``.
 
         Example:
-            result = scene.dashed_line(1.0, 1.0, 1.0, 1.0)
+            guide = scene.geometry.dashed_line(-3, 0, 3, 0, dash_length=0.2)
+            link = scene.geometry.dashed_line(card.anchor_point(Anchor.RIGHT), planet)
         """
         ...
     def double_arrow(
@@ -6104,73 +6648,103 @@ class Geometry:
         """
         ...
     def polygon(self, points: Sequence[tuple[float, float]]) -> Drawable:
-        """Create a polygon drawable in the scene.
+        """Create a closed polygon through ``points``, in order, in scene coordinates.
+
+        Fewer than three points or a non-finite coordinate raise ``ValueError``.
 
         Example:
-            result = scene.polygon([(0.0, 0.0), (1.0, 1.0)])
+            triangle = scene.geometry.polygon([(-1, 0), (1, 0), (0, 1.5)])
         """
         ...
     def star(self, points: int, outer_radius: float, inner_radius: float) -> Drawable:
-        """Create a star drawable in the scene.
+        """Create a star with ``points`` tips, centered at the origin.
+
+        Tips lie on a circle of ``outer_radius`` and the corners between them
+        on one of ``inner_radius``. Fewer than two points or a non-positive
+        radius raise ``ValueError``.
 
         Example:
-            result = scene.star(5, 40.0, 40.0)
+            badge = scene.geometry.star(5, 1.0, 0.45).fill(GOLD)
         """
         ...
     def regular_polygon(self, sides: int, radius: float) -> Drawable:
-        """Create a regular polygon drawable in the scene.
+        """Create a regular polygon of ``sides`` vertices on a circle of ``radius``, centered at the origin.
+
+        Fewer than three sides or a non-positive radius raise ``ValueError``.
 
         Example:
-            result = scene.regular_polygon(2, 40.0)
+            hexagon = scene.geometry.regular_polygon(6, 1.0)
         """
         ...
     def sector(self, cx: float, cy: float, radius: float, start_angle: float, sweep_angle: float) -> Drawable:
-        """Create a sector drawable in the scene.
+        """Create a filled circular sector (a pie slice) of ``radius`` centered at ``(cx, cy)``.
+
+        Angles are in radians, counterclockwise from the positive x axis; a
+        negative ``sweep_angle`` turns clockwise. A non-positive radius or a
+        non-finite angle raise ``ValueError``.
 
         Example:
-            result = scene.sector(1.0, 1.0, 40.0, 1.0, 1.0)
+            wedge = scene.geometry.sector(0, 0, 2, 0, math.pi / 3).fill(RED)
         """
         ...
     def annulus(self, outer_radius: float, inner_radius: float) -> Drawable:
-        """Create a annulus drawable in the scene.
+        """Create a ring between ``inner_radius`` and ``outer_radius``, centered at the origin.
+
+        Requires ``0 < inner_radius < outer_radius``; otherwise ``ValueError``.
 
         Example:
-            result = scene.annulus(40.0, 40.0)
+            ring = scene.geometry.annulus(1.0, 0.7).fill(TEAL)
         """
         ...
     def brace(self, x1: float, y1: float, x2: float, y2: float, height: float) -> Drawable:
-        """Create a brace drawable in the scene.
+        """Create a curly brace from ``(x1, y1)`` to ``(x2, y2)`` whose tip stands ``height`` away.
+
+        The tip points to the right of the direction from start to end: below
+        a brace drawn left to right. A negative ``height`` flips it. Equal
+        endpoints or a zero height raise ``ValueError``.
 
         Example:
-            result = scene.brace(1.0, 1.0, 1.0, 1.0, 40.0)
+            under = scene.geometry.brace(-2, -1, 2, -1, 0.3)
         """
         ...
     def checkmark(self, size: float) -> Drawable:
-        """Create a checkmark drawable in the scene.
+        """Create a check mark about ``size`` wide, centered near the origin.
+
+        It is a filled outline: color it with ``fill``. A non-positive size
+        raises ``ValueError``.
 
         Example:
-            result = scene.checkmark(40.0)
+            ok = scene.geometry.checkmark(0.6).fill(GREEN)
         """
         ...
     def cross(self, size: float) -> Drawable:
-        """Create a cross drawable in the scene.
+        """Create an X of two strokes spanning a ``size`` square centered at the origin.
+
+        It has no fill: color it with ``stroke``. A non-positive size raises
+        ``ValueError``.
 
         Example:
-            result = scene.cross(40.0)
+            wrong = scene.geometry.cross(0.6).stroke(RED, 0.08)
         """
         ...
     def right_angle(self, arm_length: float) -> Drawable:
-        """Create a right angle drawable in the scene.
+        """Create a right-angle mark: its corner at the origin, arms ``arm_length`` long along +x and +y.
+
+        Rotate and move it onto the corner it marks. It has no fill. A
+        non-positive length raises ``ValueError``.
 
         Example:
-            result = scene.right_angle(40.0)
+            mark = scene.geometry.right_angle(0.3).move_to(1.15, 1.15)
         """
         ...
     def arc(self, cx: float, cy: float, radius: float, start_angle: float, sweep_angle: float) -> Drawable:
-        """Create a arc drawable in the scene.
+        """Create an open circular arc of ``radius`` around ``(cx, cy)``.
+
+        It starts at ``start_angle`` and sweeps ``sweep_angle``, in radians
+        counterclockwise from the positive x axis.
 
         Example:
-            result = scene.arc(1.0, 1.0, 40.0, 1.0, 1.0)
+            angle = scene.geometry.arc(0, 0, 0.8, 0, math.pi / 4).stroke(GOLD, 0.03)
         """
         ...
     def curved_arrow(self, x1: float, y1: float, x2: float, y2: float, angle: float, *, head_length: Optional[float] = None, head_width: Optional[float] = None, body_width: Optional[float] = None, max_head_ratio: Optional[float] = None) -> Drawable:
@@ -6201,25 +6775,25 @@ class Geometry:
         ...
     @overload
     def path(self, definition: Sequence[CurvePoint]) -> Drawable:
-        """Create a path drawable in the scene.
+        """Create an open path through two or more points, in order.
 
         Example:
-            result = scene.path([(0.0, 0.0), (1.0, 1.0)])
+            zigzag = scene.geometry.path([(-2, 0), (-1, 1), (0, 0), (1, 1)])
         """
         ...
     @overload
     def path(self, definition: Sequence[CurveCommand]) -> Drawable:
-        """Create a path drawable in the scene.
+        """Create a path from curve commands, as ``curve`` does.
 
         Example:
-            result = scene.path([(0.0, 0.0), (1.0, 1.0)])
+            wave = scene.geometry.path([("move", [(-2, 0)]), ("quad", [(-1, 1.5), (0, 0)])])
         """
         ...
     def polyline(self, points: Sequence[tuple[float, float]]) -> Drawable:
-        """Create a polyline drawable in the scene.
+        """Create an open polyline through ``points``, in order, in scene coordinates.
 
         Example:
-            result = scene.polyline([(0.0, 0.0), (1.0, 1.0)])
+            trend = scene.geometry.polyline([(-3, -1), (-1, 0.5), (1, 0), (3, 2)])
         """
         ...
     def polyline_3d(
@@ -6244,10 +6818,13 @@ class Geometry:
         """
         ...
     def bezier(self, start: tuple[float, float], controls: Sequence[tuple[float, float]], end: tuple[float, float]) -> Drawable:
-        """Create a bezier drawable in the scene.
+        """Create a Bezier curve from ``start`` to ``end``.
+
+        One control point makes it quadratic, two make it cubic; any other
+        count raises ``ValueError``.
 
         Example:
-            result = scene.bezier((0.0, 0.0), [(-0.5, 1.0), (0.5, -1.0)], (0.0, 0.0))
+            swoosh = scene.geometry.bezier((-2, 0), [(-1, 2), (1, -2)], (2, 0))
         """
         ...
     def curve(self, commands: Sequence[CurveCommand]) -> Drawable:
@@ -6277,7 +6854,7 @@ class Geometry:
         """
         ...
     def group(self, members: Sequence[Drawable]) -> Drawable:
-        """Create a group drawable in the scene.
+        """Gather ``members`` into one drawable that moves, styles and animates as a whole.
 
         Grouping preserves each member's authored local coordinates, including
         coordinates returned by ``add_updater_fn``. Existing visible members do
@@ -6414,7 +6991,8 @@ class Geometry:
         """Create a hidden osculating-circle drawable; reveal it in ``scene.play``.
 
         Example:
-            result = scene.curvature_on_curve(curve, None)
+            t = scene.viz.parameter(0.0)
+            circle = scene.geometry.curvature_on_curve(curve, t)
         """
         ...
     def always_redraw_arc(
@@ -6427,10 +7005,16 @@ class Geometry:
         sweep_scale: float = 1.0,
         sweep_offset: float = 0.0,
     ) -> Drawable:
-        """Create a hidden always-redrawn arc; reveal it in ``scene.play``.
+        """Create an arc arrow whose sweep follows ``tracker``, hidden until revealed in ``scene.play``.
+
+        The arc has ``radius`` around ``(cx, cy)`` and starts at
+        ``start_angle``; every frame it sweeps ``tracker * sweep_scale +
+        sweep_offset`` radians, counterclockwise.
 
         Example:
-            result = scene.always_redraw_arc(None, 1.0, 1.0, 40.0, 1.0)
+            turn = scene.viz.parameter(0.5)
+            arc = scene.geometry.always_redraw_arc(turn, 0, 0, 1.5, 0.0)
+            scene.play(arc.animate.create(), turn.animate.set(2.0))
         """
         ...
     def traced_path(
@@ -6648,10 +7232,16 @@ class Typography:
         color: Optional[ColorLike] = None,
         accent: Optional[ColorLike] = None,
     ) -> Drawable:
-        """Create a code drawable in the scene.
+        """Create a code panel: ``source`` in a monospaced block highlighted as ``language``.
+
+        The block sits on a ``width`` by ``height`` rounded panel, centered at
+        the origin, with the language name above a rule. Colors default to the
+        theme's panel, foreground and accent. An empty source, a language with
+        characters other than ASCII letters, digits, ``-`` or ``_``, or a
+        non-positive size raise ``ValueError``.
 
         Example:
-            result = scene.code("example")
+            snippet = scene.code("print('hola')", language="python")
         """
         ...
 
@@ -7140,7 +7730,7 @@ class Visualization:
         omitted axes retain the default ``Re`` and ``Im`` titles.
         """
         ...
-    def readout(self, source: _ReactiveScalar | Callable[..., float], *, inputs: Sequence[Parameter | Variable | Computed | TimeInput] = (), label: Optional[str] = None, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[ColorLike] = None, invalid: str = "invalid", decimal_separator: str = ".") -> Readout:
+    def readout(self, source: _ReactiveScalar | Callable[..., float], *, inputs: Sequence[Parameter | Variable | Computed | TimeInput] = (), label: Optional[str] = None, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[ColorLike] = None, invalid: str = "invalid", decimal_separator: str = ".", spacing: Optional[float] = None) -> Readout:
         """Create a native numeric display with equally spaced, baseline-aligned terms.
 
         The label, equality sign, number, and unit all use ``font_size``;
@@ -7153,15 +7743,21 @@ class Visualization:
         digits; ``","`` also turns ``,`` grouping into ``.`` (``1.234,50``).
         It must be one character that is not a digit, sign, space, ``e`` or
         ``%``; otherwise ``ValueError`` is raised.
+
+        ``spacing`` is the space between the label, ``=``, number and unit, in
+        scene units; by default a thin space that grows with ``font_size``
+        (0.1 at the default size). A ``prefix`` or ``suffix`` belongs to the
+        number, so ``suffix=" m"`` keeps its space and ``suffix="%"`` none. A
+        negative or non-finite spacing raises ``ValueError``.
         """
         ...
-    def variable(self, initial: float, *, label: str, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[ColorLike] = None, invalid: str = "invalid", decimal_separator: str = ".") -> Variable:
+    def variable(self, initial: float, *, label: str, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[ColorLike] = None, invalid: str = "invalid", decimal_separator: str = ".", spacing: Optional[float] = None) -> Variable:
         """Create an animatable scalar displayed as an aligned equation row.
 
         Every visible term uses ``font_size``, or 0.48 units when omitted.
         ``color`` applies to every visible term, including the changing value.
-        ``decimal_separator`` works as in ``readout`` (for example ``","``
-        shows ``3,14``).
+        ``decimal_separator`` and ``spacing`` work as in ``readout`` (for
+        example ``","`` shows ``3,14``).
         """
         ...
     def number_line(
@@ -7222,6 +7818,7 @@ class SlideKit:
         logo: Optional[str] = None,
         footer: Optional[str] = None,
         slide_numbers: bool = True,
+        number_anchor: Optional[Anchor] = None,
         rule: bool = True,
         show_on_cover: bool = False,
         logo_scale: float = 1.0,
@@ -7230,7 +7827,10 @@ class SlideKit:
 
         The logo (SVG or raster) is fitted to 0.6 scene units tall and then
         multiplied by ``logo_scale``; it sits in the top-right safe corner
-        above the slide content.
+        above the slide content. The slide number follows the footer at the
+        bottom left; ``number_anchor`` puts it on its own at that point of the
+        safe frame instead, such as ``Anchor.BOTTOM_RIGHT`` beside a progress
+        bar along the bottom.
 
         Example:
             scene.slides.brand(logo="assets/logo.svg", footer="LAB · 2026")
@@ -7269,8 +7869,8 @@ class SlideKit:
         ``weight`` or unbalanced markup raises ``ValueError``.
 
         Example:
-            tag = scene.badge("READY", variant="success").move_to(-3, 1.8)
-            code = scene.badge("_vel_max", font="Cascadia Mono", weight=600, markup=False)
+            tag = scene.slides.badge("READY", variant="success").move_to(-3, 1.8)
+            code = scene.slides.badge("_vel_max", font="Cascadia Mono", weight=600, markup=False)
             scene.play(tag.animate.grow_from_center())
         """
         ...
@@ -7300,7 +7900,7 @@ class SlideKit:
         the label exactly as in :meth:`badge`.
 
         Example:
-            chip = scene.chip("Live", variant="danger", appearance="solid")
+            chip = scene.slides.chip("Live", variant="danger", appearance="solid")
         """
         ...
     def card(
@@ -7326,7 +7926,7 @@ class SlideKit:
         slots or invalid dimensions raise ``ValueError``.
 
         Example:
-            card = scene.card("Result", "The solver converged.", "12 ms")
+            card = scene.slides.card("Result", "The solver converged.", "12 ms")
         """
         ...
     def banner(
@@ -7352,7 +7952,7 @@ class SlideKit:
         invalid placement strings, and invalid dimensions raise ``ValueError``.
 
         Example:
-            notice = scene.banner("Simulation complete", position="bottom")
+            notice = scene.slides.banner("Simulation complete", position="bottom")
         """
         ...
     def lower_third(
@@ -7379,7 +7979,7 @@ class SlideKit:
         empty supplied slots, or invalid dimensions raise ``ValueError``.
 
         Example:
-            speaker = scene.lower_third("Ada Lovelace", "Mathematician")
+            speaker = scene.slides.lower_third("Ada Lovelace", "Mathematician")
         """
         ...
     def stat_card(
@@ -7405,7 +8005,7 @@ class SlideKit:
         invalid dimensions raise ``ValueError``.
 
         Example:
-            metric = scene.stat_card("98%", "Accuracy", delta="+4.2%", variant="success")
+            metric = scene.slides.stat_card("98%", "Accuracy", delta="+4.2%", variant="success")
         """
         ...
     def quote_card(
@@ -7429,7 +8029,7 @@ class SlideKit:
         returned group supports all normal ``Drawable`` animations.
 
         Example:
-            quote = scene.quote_card("Simplicity is prerequisite for reliability.", "E. Dijkstra")
+            quote = scene.slides.quote_card("Simplicity is prerequisite for reliability.", "E. Dijkstra")
         """
         ...
     def section_header(
@@ -7458,7 +8058,7 @@ class SlideKit:
         raise ``ValueError``.
 
         Example:
-            heading = scene.section_header("Method", kicker="02", align="left")
+            heading = scene.slides.section_header("Method", kicker="02", align="left")
         """
         ...
     def callout(
@@ -7472,10 +8072,15 @@ class SlideKit:
         background: Optional[ColorLike] = None,
         color: Optional[ColorLike] = None,
     ) -> Drawable:
-        """Create a callout drawable in the scene.
+        """Create a note that follows ``target``: a rounded card with ``text``, joined to it by a line.
+
+        The card sits ``offset`` from the target's center and keeps that offset
+        while the target moves. It is ``width`` by ``height``, in the theme's
+        panel and foreground colors unless ``background`` and ``color`` say
+        otherwise. Empty text or non-positive sizes raise ``ValueError``.
 
         Example:
-            result = scene.callout("example", target)
+            note = scene.slides.callout("Peak load", beam, offset=(1.5, 1.0))
         """
         ...
     def title_card(
@@ -7490,10 +8095,14 @@ class SlideKit:
         color: Optional[ColorLike] = None,
         accent: Optional[ColorLike] = None,
     ) -> Drawable:
-        """Create a title card drawable in the scene.
+        """Create a centered title with an accent rule under it and an optional subtitle.
+
+        With ``panel=True`` it sits on a ``width`` by ``height`` rounded panel.
+        Colors default to the theme's panel, foreground and accent. An empty
+        title or subtitle, or non-positive sizes, raise ``ValueError``.
 
         Example:
-            result = scene.title_card("example")
+            cover = scene.slides.title_card("Thermal analysis", "Final report", panel=True)
         """
         ...
     def bullets(
@@ -7506,10 +8115,14 @@ class SlideKit:
         bullet_color: Optional[ColorLike] = None,
         color: Optional[ColorLike] = None,
     ) -> Drawable:
-        """Create a bullets drawable in the scene.
+        """Create a bullet list ``width`` wide, centered at the origin, one item every ``gap``.
+
+        Bullets of ``bullet_radius`` take the theme accent and the text its
+        foreground unless ``bullet_color`` and ``color`` say otherwise. An
+        empty list or non-positive sizes raise ``ValueError``.
 
         Example:
-            result = scene.bullets(["Example"])
+            steps = scene.slides.bullets(["Measure", "Model", "Verify"], width=6)
         """
         ...
     def table(
@@ -7523,10 +8136,14 @@ class SlideKit:
         rule_color: Optional[ColorLike] = None,
         color: Optional[ColorLike] = None,
     ) -> Drawable:
-        """Create a table drawable in the scene.
+        """Create a table centered at the origin: a header row over ``rows``, ``width`` wide.
+
+        Columns share the width equally and rows are ``row_height`` tall.
+        Every row needs one cell per header. Empty headers or cells, or
+        non-positive sizes, raise ``ValueError``.
 
         Example:
-            result = scene.table(["Example"], [["Example"]])
+            results = scene.slides.table(["Case", "Load"], [["A", "12 kN"], ["B", "18 kN"]])
         """
         ...
 
@@ -8131,6 +8748,7 @@ class Scene:
         name: Optional[str] = None,
         *,
         loop: Optional[Playable | Sequence[Playable]] = None,
+        until: Optional[Condition] = None,
     ) -> None:
         """Pause interactive playback at the current timeline position.
 
@@ -8149,11 +8767,343 @@ class Scene:
         where it starts for a seamless repeat. Raises ``ValueError`` for an
         empty loop.
 
+        ``until`` makes the stop advance by itself: while presenting, once
+        the audience meets the condition, a presentation that reached the
+        stop going forward moves on as if the speaker pressed next. Going
+        back to it does not, and previews and exports treat it as an
+        ordinary stop. Presenter View shows how far the audience is. It
+        works the same when a ``.gaanim`` bundle is presented.
+
         Example:
             scene.stop("dos-placas", loop=sequence(
                 arrow.animate.shift_by(0.6, 0).duration(0.75),
                 arrow.animate.shift_by(-0.6, 0).duration(0.75),
             ))
+            scene.stop(until=quiz.answered(share=0.8) | quiz.time_up())
+        """
+        ...
+    def rehearsal(
+        self,
+        players: int | Sequence[str] = 12,
+        *,
+        seed: int = 0,
+        arrive: Optional[float] = None,
+        skill: float | Sequence[float] = 0.6,
+        speed: float = 0.5,
+    ) -> None:
+        """Describe the made-up audience that plays the scene outside a live
+        presentation, so previews, exports and snapshots show a real session.
+
+        Every poll, quiz, leaderboard, audience and live zone reads it the
+        way it reads a presentation: players join, answers arrive, quiz
+        clocks run down and scores climb, all from one crowd, so the numbers
+        agree everywhere. It plays at the scene's own pace: players join
+        between ``scene.audience()`` and the room's first stop (or over
+        ``arrive`` seconds), and each poll's answers arrive between its
+        opening and the stop where a presentation would wait for them.
+
+        ``players`` is how many (named Ana, Beto, Caro…) or their nicknames,
+        in joining order. ``skill`` is how often they answer a quiz right
+        and ``speed`` how early they answer (both 0 to 1); each player is a
+        little better or faster than the next. In a game with teams
+        (``scene.teams``), ``skill`` may give one value per team, to rehearse
+        an uneven battle. ``seed`` picks another crowd:
+        other join times, answers and characters. The same arguments always
+        play the same session. Without a call, 12 players with these
+        defaults rehearse. Tune single questions with ``rehearse=`` on
+        ``poll`` and ``quiz``.
+
+        Raises ``ValueError`` for no players or more than 200, an empty or
+        repeated nickname, a ``skill`` or ``speed`` outside 0–1, or a negative
+        ``arrive``, and ``TypeError`` for ``players`` that is neither.
+
+        Example:
+            scene.rehearsal(24, seed=3, skill=0.7)
+        """
+        ...
+    def poll(
+        self,
+        question: str,
+        options: Sequence[str],
+        *,
+        multiple: bool = False,
+        image: Optional[str | os.PathLike[str]] = None,
+        rehearse: Optional[Sequence[float]] = None,
+    ) -> Poll:
+        """Open an audience poll at the cursor and return its data.
+
+        The poll draws nothing: it gives the scene what it needs to present
+        the question its own way (see ``Poll``). While a presentation
+        (``gaanim --present``, from the script or a ``.gaanim`` bundle) is
+        between here and ``poll.close()``, or the end of this segment, the
+        relay takes votes for it and the poll's values follow them. Phones
+        join once per presentation: the session code is fixed for the
+        project, so the QR code is ordinary scene content.
+
+        Outside a live presentation the scene's rehearsal
+        (``scene.rehearsal``) votes, leaning some random way; ``rehearse``
+        gives one weight per answer to lean it (``[1, 3]`` makes the second
+        three times as popular). ``multiple=True`` lets each phone choose
+        several answers: ``votes`` count every choice, and ``total`` and
+        ``share`` count the phones that answered. ``image`` is a picture
+        (relative to the script) phones show above the question, scaled to
+        1024 pixels; show it in the scene with ``scene.media.image``. The
+        relay comes from
+        ``GAANIM_POLL_RELAY``, the project's ``[polls] relay`` or
+        ``gaanim relay use``; without one a ``UserWarning`` says so and the QR
+        code leads nowhere. ``question`` and each answer are trimmed.
+
+        Raises ``ValueError`` for an empty question or answer, a repeated
+        answer, fewer than 2 or more than 6 answers, or ``rehearse`` weights
+        that are not one per answer, are negative or are all zero.
+
+        Example:
+            poll = scene.poll("¿Qué crece más rápido?", ["x²", "2ˣ"], rehearse=[1, 2])
+            qr = poll.qr(3.0).move_to(-4, 0)
+            bar = poll.bar(1, length=6).fill(GOLD).move_to(2, 0)
+            scene.stop()
+        """
+        ...
+    def quiz(
+        self,
+        question: str,
+        options: Sequence[str],
+        correct: int,
+        *,
+        time: int = 20,
+        points: int = 1000,
+        image: Optional[str | os.PathLike[str]] = None,
+        rehearse: Optional[float | Sequence[float]] = None,
+    ) -> Poll:
+        """Open a quiz at the cursor, as in Kahoot, and return its data.
+
+        A quiz is a poll with a ``correct`` answer (0 for the first). Phones
+        join the game with a nickname, have ``time`` seconds by the relay's
+        clock to answer once, and a correct answer earns
+        ``points × (1 − elapsed / time / 2)``: all of them at once, half at
+        the last moment. Call ``reveal()`` where the answer should show on the
+        phones; ``remaining()`` counts the seconds down, and
+        ``scene.leaderboard`` gives the players' standings. It takes answers in
+        the same window as a poll and presents like one.
+
+        ``correct`` may be a list: the quiz is multiple choice, and an answer
+        is right (and earns points) only when it chose every right answer and
+        no other. ``image`` works as in ``poll``.
+
+        The rehearsal answers it by the players' skill; ``rehearse`` sets the
+        share that gets this question right (``0.3`` for a hard one), or one
+        weight per answer like ``poll``.
+
+        Raises ``ValueError`` like ``poll``, and for a ``correct`` answer the
+        quiz does not have, ``time`` outside 5–300 seconds, ``points``
+        outside 100–10000 or a ``rehearse`` share outside 0–1.
+
+        Example:
+            quiz = scene.quiz("¿Derivada de x²?", ["x", "2x", "x²/2"], correct=1,
+                              time=20, rehearse=0.4)
+            clock = scene.viz.readout(quiz.remaining(), format=".0f")
+            scene.wait(20)
+            quiz.reveal()
+            scene.stop()
+        """
+        ...
+    def question(self, question: Question) -> Poll:
+        """Open a question loaded with ``gaanim.load_questions``: a quiz when
+        it has right answers, else a poll, with its time, points, picture
+        and rehearsal.
+
+        Example:
+            from gaanim import load_questions
+
+            for q in load_questions("preguntas.md"):
+                scene.segment(q.text)
+                quiz = scene.question(q)
+                scene.text(q.text, size=0.6).move_to(0, 3)
+                scene.stop()
+        """
+        ...
+    def teams(
+        self,
+        names: Sequence[str],
+        *,
+        choose: bool = False,
+        colors: Optional[Sequence[str]] = None,
+    ) -> Teams:
+        """Play the game in teams, and return their data.
+
+        Each player joins one of ``names``: the relay deals each new player
+        to the smallest team, or with ``choose`` the phone asks which one to
+        join. Phones show their team in its color (``colors``, ``#rrggbb``
+        per team; pink, blue, orange, green, purple and teal by default) and
+        tell the winning team at the end. A player's points count for the
+        team; ``Teams`` gives each team's score, players and average, and
+        live zones tell each player's team to their behavior, so the scene
+        designs the battle. The rehearsal deals its players the same way.
+
+        Raises ``ValueError`` for fewer than 2 or more than 6 teams, an empty,
+        long (over 20 characters) or repeated name, colors that are not one
+        ``#rrggbb`` per team, or a second, different set of teams.
+
+        Example:
+            teams = scene.teams(["Rojo", "Azul"], colors=["#ff4f8b", "#2fb8ff"])
+            for team, x in [(0, -4), (1, 4)]:
+                scene.text(teams.names[team], size=0.6).move_to(x, 3)
+                scene.viz.readout(teams.score(team), format=".0f").move_to(x, 2)
+        """
+        ...
+    def roster(self, ask: str, *, required: bool = True) -> None:
+        """Ask each player for one more thing when joining, such as a
+        student code or a full name, besides the nickname.
+
+        Phones show a field labeled ``ask`` on the join form; with
+        ``required`` (the default) a player cannot join without it. The
+        answer never reaches the screen: it appears only in the results a
+        presentation saves (``resultados/`` in the project's output folder)
+        and in ``gaanim relay results``, so a teacher can match nicknames to
+        students. Players who joined before keep playing; they give it the
+        next time they join.
+
+        Raises ``ValueError`` for an empty label or one over 40 characters,
+        or a second, different ``ask`` in the same scene.
+
+        Example:
+            scene.roster("Código de alumno")
+        """
+        ...
+    def leaderboard(self) -> Leaderboard:
+        """The game's leaderboard: the players of the scene's quizzes, as data.
+
+        Draws nothing: ``name``, ``points``, ``players`` and ``bar`` give the
+        pieces to lay out a list, a podium or anything else. Outside a live
+        presentation it ranks the rehearsal's players by the points their
+        made-up answers earned.
+
+        Example:
+            board = scene.leaderboard()
+            for rank in range(3):
+                y = 1 - rank
+                board.name(rank, size=0.5).move_to(-3, y)
+                scene.viz.readout(board.points(rank), format=".0f").move_to(3, y)
+        """
+        ...
+    def live_zone(
+        self,
+        audience: Audience,
+        behavior: Callable[[Player], Pose],
+        *,
+        bounds: tuple[float, float, float, float] = (-8.0, -4.5, 8.0, 4.5),
+        size: float = 1.2,
+        squash: float = 0.04,
+        max_stretch: float = 1.4,
+        lean: float = 0.05,
+        max_lean: float = 0.35,
+        follow: float = 1.0,
+        look: float = 0.4,
+        names: bool = False,
+        name_size: float = 0.24,
+        name_color: str = "#ffffff",
+        name_gap: float = 0.08,
+        name_weight: Optional[int] = 700,
+        state: Optional[Mapping[str, float]] = None,
+        update: Optional[Callable[[Player], State]] = None,
+    ) -> LiveZone:
+        """A live zone at the cursor, running until ``zone.close()`` or the
+        end of the segment: while presenting, each player of ``audience``
+        arrives in it as their character, and ``behavior(p)`` poses it
+        every frame.
+
+        ``behavior`` is a plain Python function of the player that returns
+        ``gaanim.live.pose(...)``. It may use ``math``, ``if``, conditional
+        expressions, ``for ... in range(N)``, module constants and helper
+        functions; it is compiled now, so the ``.gaanim`` runs it without
+        Python. ``p`` has ``t``, ``time``, ``joined``, ``index``,
+        ``count``, ``rank``, ``score``, ``leader``, ``previous_rank``,
+        ``rank_since``, ``previous_score``, ``score_since``, the team fields
+        ``team``, ``team_index``, ``team_count``, ``team_score`` and
+        ``team_rank`` (see ``scene.teams``; without teams everyone is in team
+        0) and ``random(k)``; see ``gaanim.live``.
+
+        ``bounds`` is (x0, y0, x1, y1): characters are clipped to it. They
+        are ``size`` units tall at scale 1.
+
+        The engine also deforms characters from how their poses move,
+        measured by evaluating the behavior just before and after each
+        frame: they stretch along their velocity by ``1 + squash * speed``
+        (keeping their area, up to ``max_stretch``) and lean into
+        horizontal motion by ``lean * speed`` radians (up to ``max_lean``).
+        Hanging extras (bunny ears, hats, sprouts) swing behind the motion
+        like a spring, ``follow`` times as much as the catalog tunes it,
+        and the eyes look toward the motion by ``look`` per unit of speed.
+        Pass 0 to turn any off; ``pose(sx=, sy=, lean=, look_x=, look_y=)``
+        sets your own.
+
+        ``state`` keeps numbers per player from one moment to the next (up to
+        8, e.g. ``{"lives": 3, "energy": 0.0}``, where each starts), and
+        ``update(p)`` computes the next ones every ``gaanim.live.STEP``
+        (1/60 s): it returns ``gaanim.live.state(lives=...)``, and the
+        numbers it leaves out keep their value. The behavior and the update
+        read them as ``p.state.lives``. The zone steps them from its
+        opening, so previews, seeks and exports replay them exactly. Give
+        both or neither.
+
+        ``names=True`` draws each player's nickname ``name_gap`` below
+        their feet, ``name_size`` tall in ``name_color``, whenever their
+        pose has ``show_name`` (the default); the glyphs travel with the
+        zone, so a ``.gaanim`` draws names without fonts. Previews and exports replay
+        the scene's rehearsal: its players arrive as they join the room, or
+        as the zone opens, and rank by their made-up scores. Raises
+        ``gaanim.live.BehaviorError`` (a ``ValueError``) pointing at the
+        line the compiler does not support, and ``ValueError`` for empty
+        bounds, a non-positive size, an unknown expression, ``state``
+        without ``update`` (or the other way around), more than 8 kept
+        numbers or names that are not Python names.
+
+        Example:
+            from gaanim.live import pose
+
+            def stand_in_line(p):
+                return pose(-6 + p.index * 1.2, -3, express="happy")
+
+            zone = scene.live_zone(audience, stand_in_line)
+        """
+        ...
+    def character(
+        self,
+        avatar: Optional[Sequence[int]] = None,
+        *,
+        name: str = "",
+        size: float = 2.0,
+    ) -> Character:
+        """A character like the ones phones make, at the origin, ``size``
+        units tall (hats and ears included).
+
+        ``avatar`` is [body, color, eyes, mouth, extra]; without one it is
+        read from ``name``, the nickname that also sets how it blinks. It
+        breathes and blinks along the timeline, so seeks and exports are
+        exact. Raises ``ValueError`` for a part out of range or a
+        non-positive size.
+
+        Example:
+            hero = scene.character([1, 0, 4, 2, 1], name="Ana").move_to(-3, 0)
+            scene.wait(1)
+            hero.express("happy")
+        """
+        ...
+    def audience(self) -> Audience:
+        """The game's audience: the players in the order they joined, as data.
+
+        Draws nothing: ``name``, ``count``, ``joined`` and ``age`` give the
+        pieces to fill a lobby, an arena or anything else. A scene that uses
+        it asks each phone for a nickname as soon as the page opens, so the
+        room fills before the first question. Outside a live presentation
+        the rehearsal's players join here, one after another, until the
+        room's first stop.
+
+        Example:
+            audience = scene.audience()
+            for slot in range(12):
+                x, y = (slot % 6 - 2.5) * 2, 1 - slot // 6 * 1.5
+                audience.name(slot, size=0.4).move_to(x, y)
         """
         ...
     def voiceover(

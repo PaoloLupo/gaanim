@@ -63,6 +63,21 @@ fn find_manifest_upward(start: &std::path::Path) -> Option<PathBuf> {
         .find(|manifest| manifest.is_file())
 }
 
+/// The relay session of the project the calling script belongs to (or of
+/// its folder, outside a project): the relay its `[polls] relay` or the user
+/// set, and the session code kept for that project on this computer.
+fn resolve_poll_session(py: Python<'_>) -> PyResult<gaanim_api::canvas::PollSession> {
+    let directory = caller_directory(py)?;
+    let (scope, project_relay) = gaanim_project::relay::scope_of(&directory);
+    let relay = gaanim_project::relay::resolve(project_relay.as_deref()).map(|(url, _)| url);
+    let session = gaanim_project::relay::session_for(&scope)
+        .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
+    Ok(gaanim_api::canvas::PollSession {
+        relay,
+        code: session.code,
+    })
+}
+
 fn default_project_manifest(py: Python<'_>) -> PyResult<PathBuf> {
     let directory = caller_directory(py)?;
     find_manifest_upward(&directory).ok_or_else(|| {
@@ -1005,6 +1020,27 @@ pub struct PyVoiceover {
 
 fn voiceover_error(error: gaanim_api::canvas::VoiceoverError) -> PyErr {
     pyo3::exceptions::PyValueError::new_err(error.to_string())
+}
+
+/// How a poll asks: several answers, and the picture at `image` (relative
+/// to the calling script) read for phones.
+fn poll_style(
+    py: Python<'_>,
+    multiple: bool,
+    image: Option<PathBuf>,
+) -> PyResult<gaanim_api::canvas::PollStyle> {
+    let image = match image {
+        Some(path) => {
+            let path = if path.is_absolute() {
+                path
+            } else {
+                calling_script_dir(py)?.join(path)
+            };
+            Some(gaanim_api::canvas::poll_image(&path).map_err(crate::poll::poll_error)?)
+        }
+        None => None,
+    };
+    Ok(gaanim_api::canvas::PollStyle { multiple, image })
 }
 
 /// Directory of the script calling into the scene API.
@@ -2751,12 +2787,14 @@ impl PyScene {
 #[pymethods]
 impl PySlideKit {
     /// Configure a reusable logo, footer, rule, and slide numbering treatment.
-    #[pyo3(signature = (*, logo=None, footer=None, slide_numbers=true, rule=true, show_on_cover=false, logo_scale=1.0))]
+    #[pyo3(signature = (*, logo=None, footer=None, slide_numbers=true, number_anchor=None, rule=true, show_on_cover=false, logo_scale=1.0))]
+    #[allow(clippy::too_many_arguments)]
     fn brand(
         &self,
         logo: Option<String>,
         footer: Option<String>,
         slide_numbers: bool,
+        number_anchor: Option<crate::pylayout::PyAnchor>,
         rule: bool,
         show_on_cover: bool,
         logo_scale: f64,
@@ -2774,6 +2812,7 @@ impl PySlideKit {
                 logo: logo.map(PathBuf::from),
                 footer,
                 slide_numbers,
+                number_anchor: number_anchor.map(|anchor| anchor.0),
                 rule,
                 show_on_cover,
                 logo_scale,
@@ -3394,13 +3433,13 @@ impl PyGeometry {
             .map(PyDrawable)
             .map_err(pyo3::exceptions::PyValueError::new_err)
     }
-    #[pyo3(signature = (x1, y1, x2, y2, *, dash_length=0.16, gap_length=0.10))]
+    #[pyo3(signature = (p1, p2, x2=None, y2=None, *, dash_length=0.16, gap_length=0.10))]
     fn dashed_line(
         &self,
-        x1: f64,
-        y1: f64,
-        x2: f64,
-        y2: f64,
+        p1: Bound<'_, PyAny>,
+        p2: Bound<'_, PyAny>,
+        x2: Option<f64>,
+        y2: Option<f64>,
         dash_length: f64,
         gap_length: f64,
     ) -> PyResult<PyDrawable> {
@@ -3414,11 +3453,38 @@ impl PyGeometry {
                 "dash_length and gap_length must be finite positive numbers",
             ));
         }
+        // The same endpoints `line` takes: two points or drawables, or four
+        // coordinates.
+        let (from, to) = match (x2, y2) {
+            (None, None) => (resolve_endpoint(&p1)?, resolve_endpoint(&p2)?),
+            (Some(x2), Some(y2)) => {
+                let coordinate = |value: &Bound<'_, PyAny>| {
+                    value.extract::<f64>().map_err(|_| {
+                        pyo3::exceptions::PyTypeError::new_err(
+                            "dashed_line(x1, y1, x2, y2) requires four numeric coordinates",
+                        )
+                    })
+                };
+                (
+                    CanvasEndpoint::Static(gaanim_core::glam::DVec3::new(
+                        coordinate(&p1)?,
+                        coordinate(&p2)?,
+                        0.0,
+                    )),
+                    CanvasEndpoint::Static(gaanim_core::glam::DVec3::new(x2, y2, 0.0)),
+                )
+            }
+            _ => {
+                return Err(pyo3::exceptions::PyTypeError::new_err(
+                    "dashed_line() expects two endpoints or four numeric coordinates",
+                ));
+            }
+        };
         Ok(PyDrawable(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
-                .dashed_line(x1, y1, x2, y2, dash_length, gap_length),
+                .dashed_line_between(from, to, dash_length, gap_length),
         ))
     }
 
@@ -5927,23 +5993,391 @@ impl PyScene {
     /// ambient loop that repeats while the presentation rests there.
     ///
     /// A terminal stop holds the completed segment until playback advances.
-    #[pyo3(signature = (name=None, *, r#loop=None))]
-    fn stop(&self, name: Option<String>, r#loop: Option<&Bound<'_, PyAny>>) -> PyResult<()> {
+    /// With `until`, a presentation that reaches the stop going forward
+    /// advances by itself once the audience meets the condition.
+    #[pyo3(signature = (name=None, *, r#loop=None, until=None))]
+    fn stop(
+        &self,
+        name: Option<String>,
+        r#loop: Option<&Bound<'_, PyAny>>,
+        until: Option<PyRef<'_, crate::poll::PyCondition>>,
+    ) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
-        let Some(ambient) = r#loop else {
-            return self
+        let stops_before = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .stop_count();
+        match r#loop {
+            None => self
                 .inner
                 .lock()
                 .expect("scene canvas poisoned")
                 .stop(name)
-                .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()));
+                .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?,
+            Some(ambient) => {
+                let composition = crate::composition::extract_play_root(ambient)?;
+                self.inner
+                    .lock()
+                    .expect("scene canvas poisoned")
+                    .stop_with_loop(name, composition)
+                    .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?
+            }
+        }
+        if let Some(until) = until {
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .gate_stop(stops_before, until.inner.clone());
+        }
+        Ok(())
+    }
+
+    /// Describe the made-up audience that plays the scene's polls outside a
+    /// live presentation.
+    #[pyo3(signature = (players=None, *, seed=0, arrive=None, skill=None, speed=0.5))]
+    fn rehearsal(
+        &self,
+        players: Option<&Bound<'_, PyAny>>,
+        seed: u64,
+        arrive: Option<f64>,
+        skill: Option<&Bound<'_, PyAny>>,
+        speed: f64,
+    ) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        let defaults = gaanim_animation::rehearsal::RehearsalSpec::default();
+        // One skill for everyone, or one per team.
+        let (skill, team_skill) = match skill {
+            None => (defaults.skill, Vec::new()),
+            Some(skill) => match skill.extract::<f64>() {
+                Ok(skill) => (skill, Vec::new()),
+                Err(_) => {
+                    let skills = skill.extract::<Vec<f64>>().map_err(|_| {
+                        pyo3::exceptions::PyTypeError::new_err(
+                            "skill is a number from 0 to 1, or one per team",
+                        )
+                    })?;
+                    let mean = skills.iter().sum::<f64>() / skills.len().max(1) as f64;
+                    (mean, skills)
+                }
+            },
         };
-        let composition = crate::composition::extract_play_root(ambient)?;
+        let names = match players {
+            None => gaanim_animation::rehearsal::RehearsalSpec::default().names,
+            Some(players) => match players.extract::<usize>() {
+                Ok(count) => gaanim_animation::rehearsal::RehearsalSpec::names(count),
+                Err(_) => players.extract::<Vec<String>>().map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err(
+                        "players is a number of players or a list of nicknames",
+                    )
+                })?,
+            },
+        };
         self.inner
             .lock()
             .expect("scene canvas poisoned")
-            .stop_with_loop(name, composition)
-            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+            .rehearsal(gaanim_animation::rehearsal::RehearsalSpec {
+                names,
+                seed,
+                arrive,
+                skill,
+                speed,
+                team_skill,
+            })
+            .map_err(crate::poll::poll_error)
+    }
+
+    /// Open an audience poll at the cursor and return its data: the QR code,
+    /// session code and live values the scene presents as it likes.
+    #[pyo3(signature = (question, options, *, multiple=false, image=None, rehearse=None))]
+    fn poll(
+        &self,
+        py: Python<'_>,
+        question: String,
+        options: Vec<String>,
+        multiple: bool,
+        image: Option<PathBuf>,
+        rehearse: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<crate::poll::PyPoll> {
+        let lean = crate::poll::lean(rehearse)?;
+        let style = poll_style(py, multiple, image)?;
+        crate::custom::ensure_authoring_allowed()?;
+        let mut scene = self.inner.lock().expect("scene canvas poisoned");
+        if scene.poll_session().is_none() {
+            let session = resolve_poll_session(py)?;
+            if session.relay.is_none() {
+                let category = py.get_type::<pyo3::exceptions::PyUserWarning>();
+                PyErr::warn(
+                    py,
+                    category.as_any(),
+                    c"no poll relay is set, so poll QR codes lead nowhere; deploy one \
+                      with `gaanim relay init` and set it with `gaanim relay use <URL>`",
+                    1,
+                )?;
+            }
+            scene.set_poll_session(session);
+        }
+        let inner = scene
+            .poll(question, options, lean, style)
+            .map_err(crate::poll::poll_error)?;
+        Ok(crate::poll::PyPoll { inner })
+    }
+
+    /// Open a quiz at the cursor: a poll with a correct answer, `time`
+    /// seconds to answer once, and up to `points` for a fast correct answer.
+    #[pyo3(signature = (question, options, correct, *, time=20, points=1000, image=None, rehearse=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn quiz(
+        &self,
+        py: Python<'_>,
+        question: String,
+        options: Vec<String>,
+        correct: &Bound<'_, PyAny>,
+        time: u32,
+        points: u32,
+        image: Option<PathBuf>,
+        rehearse: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<crate::poll::PyPoll> {
+        crate::custom::ensure_authoring_allowed()?;
+        let lean = crate::poll::lean(rehearse)?;
+        // One right answer, or a list of them for multiple choice.
+        let (correct, multiple) = match correct.extract::<usize>() {
+            Ok(one) => (vec![one], false),
+            Err(_) => (
+                correct.extract::<Vec<usize>>().map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err(
+                        "correct is an answer's index, or a list of them",
+                    )
+                })?,
+                true,
+            ),
+        };
+        let style = poll_style(py, multiple, image)?;
+        let mut scene = self.inner.lock().expect("scene canvas poisoned");
+        if scene.poll_session().is_none() {
+            let session = resolve_poll_session(py)?;
+            scene.set_poll_session(session);
+        }
+        let inner = scene
+            .quiz(question, options, correct, time, points, lean, style)
+            .map_err(crate::poll::poll_error)?;
+        Ok(crate::poll::PyPoll { inner })
+    }
+
+    /// Play the game in teams: players are dealt to the smallest team, or
+    /// choose theirs on the phone with `choose`.
+    #[pyo3(signature = (names, *, choose=false, colors=None))]
+    fn teams(
+        &self,
+        py: Python<'_>,
+        names: Vec<String>,
+        choose: bool,
+        colors: Option<Vec<String>>,
+    ) -> PyResult<crate::poll::PyTeams> {
+        crate::custom::ensure_authoring_allowed()?;
+        let mut scene = self.inner.lock().expect("scene canvas poisoned");
+        if scene.poll_session().is_none() {
+            let session = resolve_poll_session(py)?;
+            scene.set_poll_session(session);
+        }
+        let inner = scene
+            .teams(names, colors, choose)
+            .map_err(crate::poll::poll_error)?;
+        Ok(crate::poll::PyTeams { inner })
+    }
+
+    /// Ask each player for one more thing when joining, such as a student
+    /// code, kept only in the saved results.
+    #[pyo3(signature = (ask, *, required=true))]
+    fn roster(&self, py: Python<'_>, ask: String, required: bool) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        let mut scene = self.inner.lock().expect("scene canvas poisoned");
+        if scene.poll_session().is_none() {
+            let session = resolve_poll_session(py)?;
+            scene.set_poll_session(session);
+        }
+        scene.roster(ask, required).map_err(crate::poll::poll_error)
+    }
+
+    /// Open a question loaded with `gaanim.load_questions`: a quiz when it
+    /// has right answers, else a poll. Its `image` is an absolute path.
+    fn question(
+        &self,
+        py: Python<'_>,
+        question: &Bound<'_, PyAny>,
+    ) -> PyResult<crate::poll::PyPoll> {
+        let text: String = question.getattr("text")?.extract()?;
+        let options: Vec<String> = question.getattr("options")?.extract()?;
+        let correct: Vec<usize> = question.getattr("correct")?.extract()?;
+        let multiple: bool = question.getattr("multiple")?.extract()?;
+        let image: Option<PathBuf> = question.getattr("image")?.extract()?;
+        let rehearse = question.getattr("rehearse")?;
+        let rehearse = (!rehearse.is_none()).then_some(&rehearse);
+        if correct.is_empty() {
+            return self.poll(py, text, options, multiple, image, rehearse);
+        }
+        let time: u32 = question.getattr("time")?.extract()?;
+        let points: u32 = question.getattr("points")?.extract()?;
+        let correct = if multiple || correct.len() > 1 {
+            correct.into_pyobject(py)?.into_any()
+        } else {
+            correct[0].into_pyobject(py)?.into_any()
+        };
+        self.quiz(py, text, options, &correct, time, points, image, rehearse)
+    }
+
+    /// The game's leaderboard: players of the scene's quizzes, best first,
+    /// as data the scene presents as it likes.
+    fn leaderboard(&self) -> PyResult<crate::poll::PyLeaderboard> {
+        crate::custom::ensure_authoring_allowed()?;
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .leaderboard();
+        Ok(crate::poll::PyLeaderboard { inner })
+    }
+
+    /// A live zone at the cursor: while presenting, each player of
+    /// `audience` arrives in it as their character, posed every frame by
+    /// `behavior`, a Python function compiled now. It runs until
+    /// `zone.close()` or the end of the segment.
+    #[pyo3(signature = (audience, behavior, *, bounds=(-8.0, -4.5, 8.0, 4.5), size=1.2, squash=0.04, max_stretch=1.4, lean=0.05, max_lean=0.35, follow=1.0, look=0.4, names=false, name_size=0.24, name_color="#ffffff".to_string(), name_gap=0.08, name_weight=Some(700), state=None, update=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn live_zone(
+        &self,
+        audience: PyRef<'_, crate::poll::PyAudience>,
+        behavior: &Bound<'_, PyAny>,
+        bounds: (f64, f64, f64, f64),
+        size: f64,
+        squash: f64,
+        max_stretch: f64,
+        lean: f64,
+        max_lean: f64,
+        follow: f64,
+        look: f64,
+        names: bool,
+        name_size: f64,
+        name_color: String,
+        name_gap: f64,
+        name_weight: Option<u16>,
+        state: Option<&Bound<'_, pyo3::types::PyDict>>,
+        update: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<crate::live::PyLiveZone> {
+        crate::custom::ensure_authoring_allowed()?;
+        let motion = gaanim_api::canvas::LiveMotion {
+            squash,
+            max_stretch,
+            lean,
+            max_lean,
+            follow,
+            look,
+        };
+        let names = names.then(|| gaanim_api::canvas::LiveZoneNames {
+            size: name_size,
+            color: name_color,
+            gap: name_gap,
+            font: None,
+            weight: name_weight,
+            glyphs: Vec::new(),
+        });
+        // The numbers kept per player: their names in order and where they
+        // start; the update and the behavior read them by name.
+        let kept = match (state, update) {
+            (None, None) => None,
+            (Some(state), Some(update)) => {
+                let mut names = Vec::new();
+                let mut initial = Vec::new();
+                for (name, value) in state.iter() {
+                    names.push(name.extract::<String>().map_err(|_| {
+                        pyo3::exceptions::PyTypeError::new_err("state names are strings")
+                    })?);
+                    initial.push(value.extract::<f64>().map_err(|_| {
+                        pyo3::exceptions::PyTypeError::new_err(
+                            "state starts with numbers, like state={\"lives\": 3}",
+                        )
+                    })?);
+                }
+                let update = crate::live::compile_update(update, &names)?;
+                Some(gaanim_api::canvas::LiveZoneState {
+                    names,
+                    initial,
+                    update,
+                })
+            }
+            (Some(_), None) => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "state= needs update=, the function that computes the next numbers",
+                ));
+            }
+            (None, Some(_)) => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "update= needs state=, the numbers to keep and where they start",
+                ));
+            }
+        };
+        let state_names = kept
+            .as_ref()
+            .map_or_else(Vec::new, |kept| kept.names.clone());
+        let program = crate::live::compile_behavior(behavior, &state_names)?;
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .live_zone(
+                &audience.inner,
+                program,
+                [bounds.0, bounds.1, bounds.2, bounds.3],
+                size,
+                motion,
+                names,
+                kept,
+            )
+            .map_err(crate::live::live_error)?;
+        Ok(crate::live::PyLiveZone { inner })
+    }
+
+    /// A character, like the ones phones make: it breathes, blinks and
+    /// plays expressions. `avatar` is [body, color, eyes, mouth, extra];
+    /// without one it is read from `name`, which also sets how it blinks.
+    #[pyo3(signature = (avatar=None, *, name=String::new(), size=2.0))]
+    fn character(
+        &self,
+        py: Python<'_>,
+        avatar: Option<Vec<usize>>,
+        name: String,
+        size: f64,
+    ) -> PyResult<Py<crate::character::PyCharacter>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let avatar = match avatar {
+            Some(parts) => Some(<[usize; 5]>::try_from(parts.as_slice()).map_err(|_| {
+                pyo3::exceptions::PyValueError::new_err(format!(
+                    "avatar is five indexes (body, color, eyes, mouth, extra), got {parts:?}"
+                ))
+            })?),
+            None => None,
+        };
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .character(avatar, &name, size)
+            .map_err(crate::character::character_error)?;
+        crate::character::PyCharacter::create(py, inner)
+    }
+
+    /// The game's audience: players in the order they joined, as data the
+    /// scene arranges and animates as it likes. Phones ask for a nickname as
+    /// soon as they open the page.
+    fn audience(&self, py: Python<'_>) -> PyResult<crate::poll::PyAudience> {
+        crate::custom::ensure_authoring_allowed()?;
+        let mut scene = self.inner.lock().expect("scene canvas poisoned");
+        if scene.poll_session().is_none() {
+            let session = resolve_poll_session(py)?;
+            scene.set_poll_session(session);
+        }
+        let inner = scene.audience().map_err(crate::poll::poll_error)?;
+        Ok(crate::poll::PyAudience { inner })
     }
 
     /// Start a voiceover block at the cursor, timed by `narration/<key>.*`.

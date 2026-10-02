@@ -1,10 +1,12 @@
 pub mod camera;
+pub mod characters;
 pub mod custom;
 pub mod delayed_follow;
 pub use delayed_follow::DelayedFollow;
 pub mod echo;
 pub use echo::EchoGhost;
 pub mod falloff;
+pub mod live;
 pub use falloff::{
     ColorRamp, FalloffChannel, FalloffDrive, FalloffEffect, FalloffExpr, FalloffOffset,
     FalloffShape, FalloffTarget, ScheduledEffect,
@@ -14,11 +16,13 @@ pub use particles::{AnchorTrail, PARTICLE_FADE_LEVELS, ParticleEmitter, Particle
 pub mod squash;
 pub use squash::{SQUASH_STEP, SquashStretch};
 pub mod paint;
+pub mod polls;
 pub mod prelude;
 pub mod procedural;
 pub mod progress_arc;
 pub mod property_bindings;
 pub mod reactive;
+pub mod rehearsal;
 pub use procedural::{
     DashFlow, OscillatedChannel, ProceduralLayer, ProceduralMotion, ProceduralOffset,
     ScheduledLayer, StrokeCycle, Waveform,
@@ -62,7 +66,7 @@ pub use tween::{
     sync_delta_time_system,
 };
 pub use updaters::{
-    AngleArrowheads, AngleLabelPlacement, AngleSweep, DimensionLabelOrientation,
+    AmbientClock, AngleArrowheads, AngleLabelPlacement, AngleSweep, DimensionLabelOrientation,
     DimensionLabelPlacement, DimensionSide, EndpointAngle, EndpointDistance, EndpointFollow,
     FollowOffsetSpace, InvalidFixedStep, InvalidSampledSeries, PlaybackState, RotationBinding,
     RotationTranslationBinding, SampledInterpolation, SampledProperty, SampledSeriesDriver,
@@ -94,6 +98,11 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
         // Register DeltaTime resource
         app.init_resource::<DeltaTime>();
         app.init_resource::<PlaybackState>();
+        app.init_resource::<AmbientClock>();
+        app.init_resource::<polls::PollResults>();
+        app.init_resource::<rehearsal::RehearsedResults>();
+        app.init_resource::<live::LiveZones>();
+        app.init_resource::<live::LiveOverlay>();
 
         // Sync Bevy's Time -> DeltaTime before animation evaluation.
         app.add_systems(Update, sync_delta_time_system.in_set(SceneSet::Input));
@@ -113,6 +122,10 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
                 reactive_readout_update_system,
                 reactive_readout_layout_system.after(reactive_readout_update_system),
                 progress_arc::progress_arc_system,
+                polls::poll_bar_system,
+                polls::live_text_system,
+                characters::character_system,
+                live::live_zone_system,
             )
                 .in_set(SceneSet::Visualization),
         );
@@ -133,6 +146,16 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
                 .in_set(SceneSet::Animation),
         );
 
+        // Outside a live presentation, the rehearsal stands in for the
+        // audience at the time the seek just reached, before anything reads
+        // audience data.
+        app.add_systems(
+            Update,
+            rehearsal::rehearsal_system
+                .in_set(SceneSet::Updaters)
+                .before(polls::poll_value_system),
+        );
+
         // Register standard signal binders and continuous updaters in the Updaters Phase.
         // Ordering: updaters run first (modify positions), then bindings copy positions,
         // then tracking lines and traced paths read the final positions.
@@ -140,6 +163,7 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
             Update,
             (
                 updater_system,
+                polls::poll_value_system.before(sampled_series_system),
                 sampled_series_system.after(updater_system),
                 (
                     property_binding_system.after(sampled_series_system),

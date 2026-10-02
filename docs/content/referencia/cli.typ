@@ -258,6 +258,38 @@ gaanim export mi-charla.gaanim --output mi-charla.mp4 --quality production
 La guía #link("/guias/compartir/")[Compartir sin Python] explica qué guarda
 un paquete, cómo se reproducen los callbacks y sus límites.
 
+= `gaanim relay`
+
+Configura el relay que lleva los votos de las encuestas (`scene.poll`) a la
+presentación. No necesita Python. La guía
+#link("/publico/primera-encuesta/")[Tu primera encuesta]
+explica el despliegue.
+
+```bash
+gaanim relay                          # muestra el relay en uso y de dónde sale
+gaanim relay init [CARPETA] [--force] # escribe el relay (por defecto ./gaanim-relay)
+gaanim relay use https://…workers.dev # lo guarda para todas tus presentaciones
+gaanim relay forget                   # olvida el relay guardado
+gaanim relay reset [RUTA]             # partida nueva en la sesión del proyecto de RUTA
+gaanim relay results [RUTA] [--output CARPETA]  # guarda los resultados de la partida
+```
+
+El orden de prioridad es `GAANIM_POLL_RELAY`, luego `[polls] relay` del
+proyecto y por último el guardado con `gaanim relay use`. La dirección debe
+empezar por `https://` (o `http://` para probar con `npx wrangler dev`).
+
+`gaanim relay reset` empieza una partida nueva, como *New game* en la vista
+del presentador: borra votos, respuestas y jugadores de la sesión del proyecto
+al que pertenece `RUTA`, un script o una carpeta (por defecto la actual).
+
+`gaanim relay results` descarga la partida que el relay guarda para ese
+proyecto y escribe sus planillas (`jugadores.csv`, `respuestas.csv` y
+`preguntas.csv`) en `resultados/` dentro de la carpeta de salida del
+proyecto, o en `--output`. Sirve si la presentación se cerró antes de
+guardarlas; el relay olvida una partida doce horas después de su última
+actividad. Ver
+#link("/publico/presentar/#resultados")[Guardar los resultados].
+
 = `gaanim --diff`
 
 ```bash
@@ -283,6 +315,7 @@ en el navegador. Las capturas de
   [`--capture-stops`], [Captura el fotograma de cada `scene.stop()` en lugar de los tiempos de `scene.snapshots`; el script no necesita cambios.],
   [`--stops <LISTA>`], [Con `--capture-stops`, solo esas pausas: números y rangos contados desde 1, como `3-7,12`.],
   [`--sections <LISTA>`, `--from <NOMBRE>`], [Con `--capture-stops`, solo las pausas de esos segmentos, con las mismas reglas que al previsualizar.],
+  [`--height <PX>`], [Captura los fotogramas con esa altura en píxeles (de 16 a 8192); el ancho sigue la proporción de la escena. Por defecto, 1920 en el lado largo. Una captura más chica es más rápida para revisar muchas pausas; si su tamaño no coincide con el de la baseline, `--diff` lo dice en vez de comparar. No se aplica a paquetes `.gaanim`.],
   [`--tests-root <DIR>`], [Carpeta raíz de las capturas; por defecto `tests/visual`.],
   [`-b`, `--baseline <DIR>`, `-c`, `--current <DIR>`], [Modo manual: compara dos carpetas cualesquiera.],
   [`-o`, `--output <DIR>`], [Carpeta del informe.],
@@ -312,4 +345,6 @@ gaanim --diff --example mi-charla --capture-stops --stops 3-7 --capture-only
   [`GAANIM_FRAME_PROFILE=1`], [Reproduce la línea de tiempo entera sin detenerse en las pausas y escribe en la terminal, una vez por segundo, el coste del seek, de la composición y del render, la resolución de la previsualización y cuántos objetos están visibles. Al terminar lista los segundos más lentos y cierra el editor.],
   [`GAANIM_SEGMENT_CHECKPOINTS=0`], [Desactiva los puntos de control por segmento. Por defecto, al reproducir o recorrer un segmento, Gaanim guarda el estado de la escena en su inicio y cada fotograma parte de ahí, así que el coste de un fotograma no crece a lo largo de la presentación. Con `0`, cada fotograma se reconstruye desde el principio de la escena. El resultado es idéntico en ambos casos.],
   [`GAANIM_CHECKPOINT_TIMINGS=1`], [Escribe en la terminal cuánto tarda cada punto de control por segmento en guardarse.],
+  [`GAANIM_POLL_RELAY`], [Dirección del relay de las encuestas. Tiene prioridad sobre `[polls] relay` y `gaanim relay use`.],
+  [`GAANIM_POLL_SESSION`], [Código de seis caracteres que usan las encuestas en lugar del que Gaanim guarda para el proyecto, por ejemplo para que varias personas presenten el mismo proyecto o para capturas reproducibles.],
 )

@@ -108,6 +108,13 @@ from .gaanim_core import (
     ChartSpec,
     Chart,
     Parameter,
+    Poll,
+    Leaderboard,
+    Audience,
+    Teams,
+    Condition,
+    Character,
+    LiveZone,
     Readout,
     Variable,
     RollingNumber,
@@ -170,6 +177,7 @@ from .templates import (
     vertical_short,
 )
 from .animation_types import AnimationChannel, CustomAnimationValues, Playable, ScalarSource
+from .questions import Question, QuestionError, load_questions
 from .matrix import (
     Matrix,
     MatrixAlgebraError,
@@ -306,6 +314,9 @@ __all__ = [
     "minimal",
     "lower_third",
     "credits",
+    "Question",
+    "QuestionError",
+    "load_questions",
     "Updater",
     "Falloff",
     "FalloffColor",
@@ -317,6 +328,13 @@ __all__ = [
     "ChartSpec",
     "Chart",
     "Parameter",
+    "Poll",
+    "Leaderboard",
+    "Audience",
+    "Teams",
+    "Condition",
+    "Character",
+    "LiveZone",
     "Readout",
     "Variable",
     "RollingNumber",
@@ -358,4 +376,4 @@ __all__ = [
     "TEAL",
 ]
 
-__version__ = "0.7.2"
+__version__ = "0.8.0"

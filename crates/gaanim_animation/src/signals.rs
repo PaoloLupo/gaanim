@@ -406,41 +406,62 @@ pub fn reactive_readout_layout_system(
             continue;
         }
 
-        let widths = parts
+        let rows = parts
             .iter()
-            .map(|(_, _, bounds, _)| (bounds.max.x - bounds.min.x).max(0.0))
+            .map(|(_, _, local, baseline)| (*local, *baseline))
             .collect::<Vec<_>>();
-        let total_width = widths.iter().sum::<f64>()
-            + layout.spacing.max(0.0) * (parts.len().saturating_sub(1) as f64);
-        let provisional_y = parts
-            .iter()
-            .map(|(_, _, _, baseline)| -*baseline)
-            .collect::<Vec<_>>();
-        let row_min_y = parts
-            .iter()
-            .zip(&provisional_y)
-            .map(|((_, _, local, _), translation)| local.min.y + translation)
-            .fold(f64::INFINITY, f64::min);
-        let row_max_y = parts
-            .iter()
-            .zip(&provisional_y)
-            .map(|((_, _, local, _), translation)| local.max.y + translation)
-            .fold(f64::NEG_INFINITY, f64::max);
-        let vertical_centering = -(row_min_y + row_max_y) * 0.5;
-        let mut cursor = -total_width * 0.5 * (1.0 + layout.align.clamp(-1.0, 1.0));
-
-        for (((_, entity, local, _), width), translation_y) in
-            parts.into_iter().zip(widths).zip(provisional_y)
-        {
-            let target_center_x = cursor + width * 0.5;
-            let local_center_x = (local.min.x + local.max.x) * 0.5;
+        let translations = readout_row(&rows, layout.spacing, layout.align);
+        for ((_, entity, _, _), translation) in parts.into_iter().zip(translations) {
             if let Ok(mut transform) = transforms.get_mut(entity) {
-                transform.translation.x = target_center_x - local_center_x;
-                transform.translation.y = translation_y + vertical_centering;
+                transform.translation.x = translation.x;
+                transform.translation.y = translation.y;
             }
-            cursor += width + layout.spacing.max(0.0);
         }
     }
+}
+
+/// Where a readout's parts go, in order: each part's local box and the
+/// height of its baseline, laid out as one row `spacing` apart, its
+/// baselines aligned and the row centered vertically on the origin and
+/// placed on it horizontally by `align` (see [`ReactiveReadoutLayout`]).
+pub fn readout_row(
+    parts: &[(Bounds3D, f64)],
+    spacing: f64,
+    align: f64,
+) -> Vec<gaanim_core::glam::DVec2> {
+    let widths = parts
+        .iter()
+        .map(|(bounds, _)| (bounds.max.x - bounds.min.x).max(0.0))
+        .collect::<Vec<_>>();
+    let total_width =
+        widths.iter().sum::<f64>() + spacing.max(0.0) * (parts.len().saturating_sub(1) as f64);
+    let provisional_y = parts
+        .iter()
+        .map(|(_, baseline)| -*baseline)
+        .collect::<Vec<_>>();
+    let row_min_y = parts
+        .iter()
+        .zip(&provisional_y)
+        .map(|((local, _), translation)| local.min.y + translation)
+        .fold(f64::INFINITY, f64::min);
+    let row_max_y = parts
+        .iter()
+        .zip(&provisional_y)
+        .map(|((local, _), translation)| local.max.y + translation)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let vertical_centering = -(row_min_y + row_max_y) * 0.5;
+    let mut cursor = -total_width * 0.5 * (1.0 + align.clamp(-1.0, 1.0));
+    let mut translations = Vec::with_capacity(parts.len());
+    for (((local, _), width), translation_y) in parts.iter().zip(widths).zip(provisional_y) {
+        let target_center_x = cursor + width * 0.5;
+        let local_center_x = (local.min.x + local.max.x) * 0.5;
+        translations.push(gaanim_core::glam::DVec2::new(
+            target_center_x - local_center_x,
+            translation_y + vertical_centering,
+        ));
+        cursor += width + spacing.max(0.0);
+    }
+    translations
 }
 
 /// Component defining a binding constraint between a source signal and a target entity.

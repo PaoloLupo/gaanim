@@ -1,0 +1,819 @@
+//! Running a live zone: players arrive, the standings move, and every frame
+//! the zone's behavior poses each player's character.
+//!
+//! The behavior is stateless; what it needs of the past the run keeps for
+//! it: when each player arrived and when their rank and score last changed.
+//! It also notices when a player's expression changes, so the expression
+//! plays from then. That check runs on a fixed grid of [`STEP`]s from the
+//! zone's opening, so a replay seeked to a time is the one played to it.
+
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+use gaanim_core::kurbo::{Affine, BezPath, Point, Shape, Vec2};
+use gaanim_core::peniko::{Brush, Color};
+use gaanim_objects::character::{
+    CHARACTER_ENVELOPE, Character, CharacterDrive, ExpressionPlay, catalog, character_seed,
+    follow_lag, to_scene,
+};
+
+use super::program::{Inputs, MAX_STATE, Pose};
+use super::spec::{LiveZone, ZoneNames};
+
+/// `#rrggbb` or `#rrggbbaa`; white when unreadable.
+fn hex_color(text: &str) -> Color {
+    let hex = text.trim_start_matches('#');
+    let channel = |at: usize| {
+        hex.get(at..at + 2)
+            .and_then(|pair| u8::from_str_radix(pair, 16).ok())
+    };
+    match (channel(0), channel(2), channel(4), hex.len()) {
+        (Some(r), Some(g), Some(b), 6) => Color::from_rgb8(r, g, b),
+        (Some(r), Some(g), Some(b), 8) => Color::from_rgba8(r, g, b, channel(6).unwrap_or(255)),
+        _ => Color::WHITE,
+    }
+}
+
+fn finite_or(value: f64, fallback: f64) -> f64 {
+    if value.is_finite() { value } else { fallback }
+}
+
+/// The grid expressions are checked on, in seconds.
+pub const STEP: f64 = 1.0 / 60.0;
+
+/// A player as a zone sees it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Player {
+    pub name: Arc<str>,
+    pub character: Character,
+    /// The player's team, 0 in a game without teams.
+    pub team: usize,
+    /// The player's game so far.
+    pub stats: crate::polls::PlayerStats,
+    /// What the player answered on the poll open now, or the last one.
+    pub answer: Option<crate::polls::PlayerAnswer>,
+}
+
+impl Player {
+    /// A player whose character is read from the nickname, as the relay
+    /// gives a phone that did not choose one.
+    pub fn named(name: &str) -> Self {
+        let character = catalog().character_from_seed(character_seed(name));
+        Self {
+            name: name.into(),
+            character,
+            team: 0,
+            stats: Default::default(),
+            answer: None,
+        }
+    }
+}
+
+/// An expression playing since `start` on the zone's clock.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Latch {
+    express: usize,
+    looped: bool,
+    start: f64,
+}
+
+/// A player's character in a zone.
+#[derive(Debug, Clone)]
+struct Actor {
+    player: Player,
+    seed: u32,
+    /// When it arrived, on the zone's clock.
+    joined: f64,
+    ranked: bool,
+    rank: usize,
+    previous_rank: usize,
+    rank_changed: f64,
+    score: f64,
+    previous_score: f64,
+    score_changed: f64,
+    latch: Option<Latch>,
+    /// The numbers the zone keeps for the player; `None` until the zone
+    /// gives their start.
+    state: Option<[f64; MAX_STATE]>,
+}
+
+/// A zone's state: its clock, its players and what they remember.
+#[derive(Debug, Clone, Default)]
+pub struct ZoneRun {
+    /// Seconds since the zone opened.
+    pub clock: f64,
+    /// The last grid point expressions were checked at.
+    stepped: f64,
+    actors: Vec<Actor>,
+    arrived: HashSet<Arc<str>>,
+    registers: Vec<f64>,
+    /// Name outlines laid out from the zone's glyphs, centred on x = 0 with
+    /// their top at y = 0.
+    names: HashMap<Arc<str>, BezPath>,
+    glyphs: Option<HashMap<char, (BezPath, f64)>>,
+}
+
+impl ZoneRun {
+    /// A player arrived at `joined` on the zone's clock; a player arrives
+    /// once.
+    pub fn arrive(&mut self, player: Player, joined: f64) {
+        if !self.arrived.insert(player.name.clone()) {
+            return;
+        }
+        self.actors.push(Actor {
+            seed: character_seed(&player.name),
+            player,
+            joined,
+            ranked: false,
+            rank: 0,
+            previous_rank: 0,
+            rank_changed: joined,
+            score: 0.0,
+            previous_score: 0.0,
+            score_changed: joined,
+            latch: None,
+            state: None,
+        });
+    }
+
+    /// Follow the audience: `roster` is every player there now, in the
+    /// order they joined. A player who left (kicked, or a new game) takes
+    /// their character away. One leaving while one new name appears is a
+    /// nickname changed on the phone: the character stays where it is and
+    /// takes the new name. Characters edited on the phone change here too.
+    /// New players are not added; see [`ZoneRun::arrive`].
+    pub fn follow(&mut self, roster: &[Player]) {
+        let here = |name: &str| roster.iter().any(|player| &*player.name == name);
+        let gone: Vec<usize> = (0..self.actors.len())
+            .filter(|&index| !here(&self.actors[index].player.name))
+            .collect();
+        let new: Vec<&Player> = roster
+            .iter()
+            .filter(|player| !self.arrived.contains(&player.name))
+            .collect();
+        if let ([index], [renamed]) = (gone.as_slice(), new.as_slice()) {
+            let old = self.actors[*index].player.name.clone();
+            self.arrived.remove(&old);
+            self.names.remove(&old);
+            self.arrived.insert(renamed.name.clone());
+            self.actors[*index].player.name = renamed.name.clone();
+        } else if !gone.is_empty() {
+            self.actors.retain(|actor| here(&actor.player.name));
+            self.arrived.retain(|name| here(name));
+            self.names.retain(|name, _| here(name));
+        }
+        for actor in &mut self.actors {
+            if let Some(player) = roster
+                .iter()
+                .find(|player| player.name == actor.player.name)
+            {
+                actor.player.character = player.character;
+                actor.player.team = player.team;
+                actor.player.stats = player.stats;
+                actor.player.answer = player.answer;
+            }
+        }
+    }
+
+    /// Tell each player's game so far and latest answer, from `facts`.
+    pub fn facts(
+        &mut self,
+        facts: impl Fn(&str) -> (crate::polls::PlayerStats, Option<crate::polls::PlayerAnswer>),
+    ) {
+        for actor in &mut self.actors {
+            let (stats, answer) = facts(&actor.player.name);
+            actor.player.stats = stats;
+            actor.player.answer = answer;
+        }
+    }
+
+    /// Whether `name` has arrived.
+    pub fn has(&self, name: &str) -> bool {
+        self.arrived.contains(name)
+    }
+
+    /// How many characters are in the zone.
+    pub fn len(&self) -> usize {
+        self.actors.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.actors.is_empty()
+    }
+
+    /// Set the players' scores (missing ones score 0) and rank them, best
+    /// first, earlier arrivals first among equals. Changes are dated now.
+    pub fn standings(&mut self, score_of: impl Fn(&str) -> f64) {
+        let clock = self.clock;
+        for actor in &mut self.actors {
+            let score = score_of(&actor.player.name);
+            if actor.ranked && score != actor.score {
+                actor.previous_score = actor.score;
+                actor.score_changed = clock;
+            } else if !actor.ranked {
+                actor.previous_score = score;
+            }
+            actor.score = score;
+        }
+        let mut order: Vec<usize> = (0..self.actors.len()).collect();
+        order.sort_by(|&a, &b| self.actors[b].score.total_cmp(&self.actors[a].score));
+        for (rank, index) in order.into_iter().enumerate() {
+            let actor = &mut self.actors[index];
+            if !actor.ranked {
+                actor.previous_rank = rank;
+                actor.ranked = true;
+            } else if actor.rank != rank {
+                actor.previous_rank = actor.rank;
+                actor.rank_changed = clock;
+            }
+            actor.rank = rank;
+        }
+    }
+
+    fn inputs(&self, index: usize) -> Inputs {
+        let actor = &self.actors[index];
+        let clock = self.clock;
+        let team = actor.player.team;
+        let mates = self.actors.iter().filter(|other| other.player.team == team);
+        let team_index = self.actors[..index]
+            .iter()
+            .filter(|other| other.player.team == team)
+            .count();
+        // Teams by score, best first; ties go to the lower team.
+        let mut totals: Vec<(usize, f64)> = Vec::new();
+        for other in &self.actors {
+            match totals.iter_mut().find(|(id, _)| *id == other.player.team) {
+                Some((_, total)) => *total += other.score,
+                None => totals.push((other.player.team, other.score)),
+            }
+        }
+        let team_score = totals
+            .iter()
+            .find(|(id, _)| *id == team)
+            .map_or(0.0, |(_, total)| *total);
+        let team_rank = totals
+            .iter()
+            .filter(|(id, total)| *total > team_score || (*total == team_score && *id < team))
+            .count();
+        Inputs {
+            t: clock - actor.joined,
+            time: clock,
+            joined: actor.joined,
+            index: index as f64,
+            count: self.actors.len() as f64,
+            rank: actor.rank as f64,
+            score: actor.score,
+            leader: self
+                .actors
+                .iter()
+                .map(|actor| actor.score)
+                .fold(0.0, f64::max),
+            previous_rank: actor.previous_rank as f64,
+            rank_since: clock - actor.rank_changed,
+            previous_score: actor.previous_score,
+            score_since: clock - actor.score_changed,
+            team: team as f64,
+            team_index: team_index as f64,
+            team_count: mates.count() as f64,
+            team_score,
+            team_rank: team_rank as f64,
+            answer: actor
+                .player
+                .answer
+                .and_then(|answer| answer.first())
+                .map_or(-1.0, |first| first as f64),
+            answer_mask: actor.player.answer.map_or(0.0, |answer| f64::from(answer.options)),
+            answer_time: actor.player.answer.map_or(0.0, |answer| answer.elapsed),
+            answer_points: actor.player.answer.map_or(0.0, |answer| f64::from(answer.points)),
+            answers: f64::from(actor.player.stats.answered),
+            correct: f64::from(actor.player.stats.correct),
+            streak: f64::from(actor.player.stats.streak),
+            state: actor.state.unwrap_or([0.0; MAX_STATE]),
+            seed: actor.seed,
+        }
+    }
+
+    fn pose(&mut self, zone: &LiveZone, index: usize) -> Pose {
+        let inputs = self.inputs(index);
+        zone.behavior.eval(&inputs, &mut self.registers)
+    }
+
+    /// How fast the pose's feet move now, measured across two grid steps.
+    fn velocity(&mut self, zone: &LiveZone, index: usize) -> Vec2 {
+        let inputs = self.inputs(index);
+        let before = zone
+            .behavior
+            .eval(&inputs.later(-STEP), &mut self.registers);
+        let after = zone.behavior.eval(&inputs.later(STEP), &mut self.registers);
+        let velocity = Vec2::new(after.x - before.x, after.y - before.y) / (2.0 * STEP);
+        if velocity.is_finite() {
+            velocity
+        } else {
+            Vec2::ZERO
+        }
+    }
+
+    /// Where a character's paths go and what moves its parts: its feet
+    /// at the pose, squashed and leaning about them, turned and mirrored
+    /// about its middle and stretched along its velocity when the zone
+    /// asks; its hanging extras lag behind its motion and its eyes look
+    /// where it goes, unless the pose says where.
+    fn placement(
+        &mut self,
+        zone: &LiveZone,
+        index: usize,
+        pose: &Pose,
+        size: f64,
+    ) -> (Affine, CharacterDrive) {
+        let catalog = catalog();
+        let local = to_scene(size);
+        let character = self.actors[index].player.character;
+        // Feet at the origin; the middle is where the drawing is centred.
+        let feet = local * Point::new(50.0, catalog.feet(&character));
+        let middle = -feet.to_vec2();
+        let about = |point: Vec2, transform: Affine| {
+            Affine::translate(point) * transform * Affine::translate(-point)
+        };
+        let flip = if pose.flip {
+            Affine::scale_non_uniform(-1.0, 1.0)
+        } else {
+            Affine::IDENTITY
+        };
+        let body = about(middle, Affine::rotate(pose.rotation) * flip)
+            * Affine::scale_non_uniform(finite_or(pose.sx, 1.0), finite_or(pose.sy, 1.0))
+            * Affine::translate(middle)
+            * local;
+        let motion = zone.motion;
+        let velocity = self.velocity(zone, index);
+        let mut lean = finite_or(pose.lean, 0.0);
+        lean -= (motion.lean * velocity.x).clamp(-motion.max_lean, motion.max_lean);
+        let mut stretch = Affine::IDENTITY;
+        let speed = velocity.hypot();
+        let ratio = (1.0 + motion.squash * speed).clamp(1.0, motion.max_stretch.max(1.0));
+        if ratio > 1.0 + 1e-9 {
+            let along = Affine::rotate(velocity.atan2());
+            stretch = about(
+                middle,
+                along * Affine::scale_non_uniform(ratio, 1.0 / ratio) * along.inverse(),
+            );
+        }
+        let place = Affine::translate((pose.x, pose.y)) * Affine::rotate(lean) * stretch * body;
+
+        // Scene directions (y up) to the drawing's (y down, maybe mirrored).
+        let mirror = if pose.flip { -1.0 } else { 1.0 };
+        let look = match pose.look {
+            Some((x, y)) => (mirror * x, -y),
+            None => (mirror * motion.look * velocity.x, -motion.look * velocity.y),
+        };
+        let mut drive = CharacterDrive {
+            lag: (0.0, 0.0),
+            look,
+        };
+        if motion.follow > 0.0 && catalog.hangs(&character) {
+            let (step, samples, frequency, damping) = catalog.follow_sampling();
+            let inputs = self.inputs(index);
+            let positions: Vec<(f64, f64)> = (0..=samples + 1)
+                .map(|j| {
+                    let then = inputs.later(-(j as f64) * step);
+                    let pose = zone.behavior.eval(&then, &mut self.registers);
+                    (pose.x, pose.y)
+                })
+                .collect();
+            if positions
+                .iter()
+                .all(|(x, y)| x.is_finite() && y.is_finite())
+            {
+                let (x, y) = follow_lag(&positions, step, frequency, damping);
+                // Into the body's frame, then character units.
+                let turned = Affine::rotate(-(pose.rotation + lean)) * Point::new(x, y);
+                let units = CHARACTER_ENVELOPE.height() / size * motion.follow;
+                drive.lag = (mirror * turned.x * units, -turned.y * units);
+            }
+        }
+        (place, drive)
+    }
+
+    /// The next grid point, where [`ZoneRun::step`] moves the clock.
+    pub fn next_step(&self) -> f64 {
+        self.stepped + STEP
+    }
+
+    /// Move the clock to the next grid point and note expressions that
+    /// changed, as started at the previous one.
+    pub fn step(&mut self, zone: &LiveZone) {
+        let previous = self.stepped;
+        self.stepped += STEP;
+        self.clock = self.stepped;
+        self.prime(zone);
+        // The kept numbers move on first, so this step's poses read them.
+        if let Some(state) = &zone.state {
+            for index in 0..self.actors.len() {
+                let inputs = self.inputs(index);
+                let next = state.update.advance(&inputs, &mut self.registers);
+                self.actors[index].state = Some(next);
+            }
+        }
+        for index in 0..self.actors.len() {
+            let pose = self.pose(zone, index);
+            let actor = &mut self.actors[index];
+            actor.latch = pose.express.map(|express| match actor.latch {
+                Some(latch) if latch.express == express && latch.looped == pose.looped => latch,
+                _ => Latch {
+                    express,
+                    looped: pose.looped,
+                    start: previous.max(actor.joined),
+                },
+            });
+        }
+    }
+
+    /// Give players who just arrived the numbers the zone starts them with.
+    fn prime(&mut self, zone: &LiveZone) {
+        let start = zone.state.as_ref().map(|state| state.start());
+        for actor in self.actors.iter_mut().filter(|actor| actor.state.is_none()) {
+            actor.state = Some(start.unwrap_or([0.0; MAX_STATE]));
+        }
+    }
+
+    /// Move the clock to `clock`, at or after the last grid point, without
+    /// checking expressions.
+    pub fn settle(&mut self, clock: f64) {
+        self.clock = clock.max(self.stepped);
+    }
+
+    /// `name` laid out from the zone's glyphs: centred on x = 0, its top at
+    /// y = 0. Characters without a glyph show as `?`.
+    fn name_path(&mut self, names: &ZoneNames, name: &Arc<str>) -> BezPath {
+        if let Some(path) = self.names.get(name) {
+            return path.clone();
+        }
+        let glyphs = self.glyphs.get_or_insert_with(|| {
+            names
+                .glyphs
+                .iter()
+                .filter_map(|glyph| {
+                    let path = BezPath::from_svg(&glyph.path).ok()?;
+                    Some((glyph.ch, (path, glyph.advance)))
+                })
+                .collect()
+        });
+        let mut path = BezPath::new();
+        let mut pen = 0.0;
+        for ch in name.chars() {
+            let Some((outline, advance)) = glyphs.get(&ch).or_else(|| glyphs.get(&'?')) else {
+                continue;
+            };
+            let mut glyph = outline.clone();
+            glyph.apply_affine(Affine::translate((pen, 0.0)));
+            path.extend(glyph);
+            pen += advance;
+        }
+        // Capitals hang from y = 0 whatever the name's descenders.
+        let cap = glyphs
+            .get(&'H')
+            .map_or(names.size * 0.7, |(outline, _)| outline.bounding_box().y1);
+        path.apply_affine(Affine::translate((-pen / 2.0, -cap)));
+        self.names.insert(name.clone(), path.clone());
+        path
+    }
+
+    /// The zone's characters as filled paths in scene units, back to front.
+    pub fn draw(&mut self, zone: &LiveZone) -> Vec<(BezPath, Brush)> {
+        self.prime(zone);
+        let catalog = catalog();
+        let mut paths = Vec::new();
+        for index in 0..self.actors.len() {
+            let pose = self.pose(zone, index);
+            let size = zone.size * pose.scale;
+            if !pose.visible
+                || !(size.is_finite() && size > 0.0)
+                || !(pose.x.is_finite() && pose.y.is_finite() && pose.rotation.is_finite())
+            {
+                continue;
+            }
+            let (place, drive) = self.placement(zone, index, &pose, size);
+            let actor = &self.actors[index];
+            let expression = pose.express.map(|express| {
+                let start = match (pose.since, actor.latch) {
+                    (Some(since), _) => actor.joined + since,
+                    (None, Some(latch))
+                        if latch.express == express && latch.looped == pose.looped =>
+                    {
+                        latch.start
+                    }
+                    // Changed since the last grid point: it started there.
+                    (None, _) => self.stepped.max(actor.joined),
+                };
+                ExpressionPlay {
+                    name: zone.behavior.strings[express].clone(),
+                    start,
+                    looped: pose.looped,
+                }
+            });
+            for layer in catalog.pose_driven(
+                &actor.player.character,
+                actor.seed,
+                self.clock,
+                expression.as_ref(),
+                &drive,
+            ) {
+                let mut path = (*layer.outline).clone();
+                path.apply_affine(place * layer.transform);
+                paths.push((path, Brush::Solid(layer.color)));
+            }
+            if let Some(names) = zone.names.as_ref().filter(|_| pose.show_name) {
+                let name = self.actors[index].player.name.clone();
+                let mut path = self.name_path(names, &name);
+                path.apply_affine(Affine::translate((pose.x, pose.y - names.gap)));
+                paths.push((path, Brush::Solid(hex_color(&names.color))));
+            }
+        }
+        paths
+    }
+
+    /// Each character's pose now, by arrival, for tests and tools.
+    pub fn poses(&mut self, zone: &LiveZone) -> Vec<(Arc<str>, Pose)> {
+        self.prime(zone);
+        (0..self.actors.len())
+            .map(|index| {
+                (
+                    self.actors[index].player.name.clone(),
+                    self.pose(zone, index),
+                )
+            })
+            .collect()
+    }
+
+    /// The expression each character plays now and since when, by arrival.
+    pub fn expressions(&mut self, zone: &LiveZone) -> Vec<Option<(String, f64)>> {
+        (0..self.actors.len())
+            .map(|index| {
+                let pose = self.pose(zone, index);
+                let actor = &self.actors[index];
+                pose.express.map(|express| {
+                    let start = match (pose.since, actor.latch) {
+                        (Some(since), _) => actor.joined + since,
+                        (None, Some(latch)) if latch.express == express => latch.start,
+                        (None, _) => self.stepped.max(actor.joined),
+                    };
+                    (zone.behavior.strings[express].clone(), start)
+                })
+            })
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::live::program::Program;
+    use crate::live::spec::Motion;
+
+    /// The zipline of `tests/live/behaviors.py`, from the compiled cases.
+    fn zipline() -> LiveZone {
+        let entries: serde_json::Value = serde_json::from_str(include_str!("cases.json")).unwrap();
+        let behavior: Program = serde_json::from_value(entries[0]["program"].clone()).unwrap();
+        assert_eq!(behavior.name, "zipline");
+        LiveZone {
+            id: "z".into(),
+            open: 0.0,
+            close: 60.0,
+            stop_at_open: false,
+            stop_at_close: false,
+            bounds: [-8.0, -4.5, 8.0, 4.5],
+            size: 1.0,
+            behavior: behavior.checked().unwrap(),
+            motion: Default::default(),
+            names: None,
+            state: None,
+        }
+    }
+
+    fn played(zone: &LiveZone, names: &[&str], seconds: f64) -> ZoneRun {
+        let mut run = ZoneRun::default();
+        for (index, name) in names.iter().enumerate() {
+            run.arrive(Player::named(name), index as f64 * 0.5);
+        }
+        run.standings(|_| 0.0);
+        while run.next_step() <= seconds {
+            run.step(zone);
+        }
+        run.settle(seconds);
+        run
+    }
+
+    #[test]
+    fn characters_land_where_the_behavior_says_and_react() {
+        let zone = zipline();
+        let mut run = played(&zone, &["Ana", "Beto", "Caro", "Dani"], 6.0);
+        let expressions = run.expressions(&zone);
+        let poses = run.poses(&zone);
+        for (index, ((name, pose), expression)) in poses.into_iter().zip(expressions).enumerate() {
+            let (mood, start) = expression.unwrap_or_else(|| panic!("{name} has no expression"));
+            assert_eq!(mood, if pose.x > 1.0 { "sad" } else { "happy" }, "{name}");
+            // `since` dates the expression at the landing, not a grid step.
+            let joined = index as f64 * 0.5;
+            assert_eq!(start, joined + pose.since.unwrap(), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_player_arrives_once() {
+        let mut run = ZoneRun::default();
+        run.arrive(Player::named("Ana"), 0.0);
+        run.arrive(Player::named("Ana"), 1.0);
+        assert_eq!(run.len(), 1);
+    }
+
+    #[test]
+    fn ranks_remember_their_last_change() {
+        let zone = zipline();
+        let mut run = ZoneRun::default();
+        run.arrive(Player::named("Ana"), 0.0);
+        run.arrive(Player::named("Beto"), 0.0);
+        run.standings(|name| if name == "Ana" { 900.0 } else { 500.0 });
+        for _ in 0..60 {
+            run.step(&zone);
+        }
+        run.standings(|name| if name == "Ana" { 900.0 } else { 1200.0 });
+        let beto = run.inputs(1);
+        assert_eq!(
+            (beto.rank, beto.previous_rank, beto.rank_since),
+            (0.0, 1.0, 0.0)
+        );
+        assert_eq!(
+            (beto.previous_score, beto.score, beto.leader),
+            (500.0, 1200.0, 1200.0)
+        );
+        run.step(&zone);
+        let ana = run.inputs(0);
+        assert_eq!((ana.rank, ana.previous_rank), (1.0, 0.0));
+        assert!((ana.rank_since - STEP).abs() < 1e-12);
+    }
+
+    #[test]
+    fn expressions_start_on_the_grid_however_the_run_got_there() {
+        // A behavior that turns happy at t = 1 without saying since when.
+        let json = r#"{"version":[1,0],"name":"f","strings":["happy"],
+            "code":[{"input":"t"},{"const":"1.0"},{"ge":[0,1]},{"const":"0.0"},
+                    {"const":"-1.0"},{"select":[2,3,4]},{"const":"nan"}],
+            "pose":{"x":3,"y":3,"rotation":3,"scale":1,"sx":1,"sy":1,"lean":3,"look_x":6,"look_y":6,"show_name":4,"flip":3,"visible":1,
+                    "express":5,"since":6,"loop":3}}"#;
+        let mut zone = zipline();
+        zone.behavior = Program::from_json(json).unwrap();
+        let start = |run: &mut ZoneRun| run.expressions(&zone)[0].clone().unwrap().1;
+        let mut once = played(&zone, &["Ana"], 1.5);
+        let mut run = ZoneRun::default();
+        run.arrive(Player::named("Ana"), 0.0);
+        run.standings(|_| 0.0);
+        for frame in 1..=45 {
+            let at = frame as f64 / 30.0;
+            while run.next_step() <= at {
+                run.step(&zone);
+            }
+            run.settle(at);
+        }
+        assert_eq!(start(&mut once), start(&mut run));
+        assert!(start(&mut once) <= 1.0 && start(&mut once) > 1.0 - 2.0 * STEP);
+    }
+
+    #[test]
+    fn drawing_puts_each_character_on_its_feet() {
+        let zone = zipline();
+        let mut run = played(&zone, &["Ana"], 5.0);
+        let pose = run.poses(&zone)[0].1;
+        let paths = run.draw(&zone);
+        assert!(!paths.is_empty());
+        let bottom = paths
+            .iter()
+            .map(|(path, _)| gaanim_core::kurbo::Shape::bounding_box(path).y0)
+            .fold(f64::INFINITY, f64::min);
+        assert!(
+            (bottom - pose.y).abs() < zone.size * 0.1,
+            "{bottom} vs {}",
+            pose.y
+        );
+    }
+
+    #[test]
+    fn moving_characters_stretch_and_lean_into_their_motion() {
+        // x = speed * t, standing on y = 0.
+        let behavior = |speed: &str| {
+            let json = format!(
+                r#"{{"version":[1,0],"name":"run","strings":[],
+                "code":[{{"input":"t"}},{{"const":"{speed}"}},{{"mul":[0,1]}},{{"const":"0.0"}},
+                        {{"const":"1.0"}},{{"const":"-1.0"}},{{"const":"nan"}}],
+                "pose":{{"x":2,"y":3,"rotation":3,"scale":4,"sx":4,"sy":4,"lean":3,"look_x":6,"look_y":6,"show_name":4,"flip":3,
+                        "visible":4,"express":5,"since":6,"loop":3}}}}"#
+            );
+            Program::from_json(&json).unwrap()
+        };
+        let extent = |speed: &str, motion: Motion| {
+            let mut zone = zipline();
+            zone.behavior = behavior(speed);
+            zone.motion = motion;
+            let mut run = played(&zone, &["Ana"], 1.0);
+            let bounds = run
+                .draw(&zone)
+                .iter()
+                .map(|(path, _)| gaanim_core::kurbo::Shape::bounding_box(path))
+                .reduce(|a, b| a.union(b))
+                .unwrap();
+            (
+                bounds.width(),
+                bounds.height(),
+                bounds.center().x - run.poses(&zone)[0].1.x,
+            )
+        };
+        let motion = Motion {
+            squash: 0.05,
+            lean: 0.05,
+            ..Motion::default()
+        };
+        let still = extent("0.0", motion);
+        let running = extent("4.0", motion);
+        let plain = extent("4.0", Motion::default());
+        let same = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        assert!(
+            same(still.0, plain.0) && same(still.1, plain.1) && same(still.2, plain.2),
+            "only motion deforms: {still:?} vs {plain:?}"
+        );
+        // Stretched along the run and squashed across it.
+        assert!(
+            running.0 > still.0 && running.1 < still.1,
+            "{running:?} vs {still:?}"
+        );
+        // Leaning forward puts the body ahead of the feet.
+        assert!(running.2 > still.2 + 0.01, "{running:?} vs {still:?}");
+    }
+
+    #[test]
+    fn ears_follow_through_after_a_stop_and_eyes_look_ahead() {
+        // Runs right at 4 units/s until t = 1, then stops dead.
+        let json = r#"{"version":[1,0],"name":"dash","strings":[],
+            "code":[{"input":"t"},{"const":"4.0"},{"mul":[0,1]},{"min":[2,1]},
+                    {"const":"0.0"},{"const":"1.0"},{"const":"-1.0"},{"const":"nan"}],
+            "pose":{"x":3,"y":4,"rotation":4,"scale":5,"sx":5,"sy":5,"lean":4,
+                    "look_x":7,"look_y":7,"show_name":5,"flip":4,"visible":5,"express":6,"since":7,"loop":4}}"#;
+        let mut zone = zipline();
+        zone.behavior = Program::from_json(json).unwrap();
+        let bunny = Player {
+            name: "Ana".into(),
+            character: [3, 4, 6, 6, 4],
+            team: 0,
+            stats: Default::default(),
+            answer: None,
+        };
+        assert!(catalog().hangs(&bunny.character));
+        let drive_at = |seconds: f64| {
+            let mut run = ZoneRun::default();
+            run.arrive(bunny.clone(), 0.0);
+            run.standings(|_| 0.0);
+            while run.next_step() <= seconds {
+                run.step(&zone);
+            }
+            run.settle(seconds);
+            let pose = run.poses(&zone)[0].1;
+            run.placement(&zone, 0, &pose, zone.size).1
+        };
+        let running = drive_at(0.5);
+        let stopped = drive_at(1.15);
+        let settled = drive_at(4.0);
+        // Running steadily: no swing, eyes ahead.
+        assert!(running.lag.0.abs() < 1e-6, "{running:?}");
+        assert!(running.look.0 > 0.5, "{running:?}");
+        // Just stopped: the ears keep going forward, then settle.
+        assert!(stopped.lag.0 > 1.0, "{stopped:?}");
+        assert!(
+            settled.lag.0.abs() < 1e-6 && settled.look == (0.0, -0.0),
+            "{settled:?}"
+        );
+    }
+
+    #[test]
+    fn the_zone_follows_kicks_renames_and_new_games() {
+        let mut run = ZoneRun::default();
+        let roster = |names: &[&str]| -> Vec<Player> {
+            names.iter().map(|name| Player::named(name)).collect()
+        };
+        for player in roster(&["Ana", "Beto", "Caro"]) {
+            run.arrive(player, 0.0);
+        }
+        // Beto renames himself: same place, new name.
+        run.follow(&roster(&["Ana", "Bet0", "Caro"]));
+        assert!(run.has("Bet0") && !run.has("Beto"));
+        assert_eq!(&*run.actors[1].player.name, "Bet0");
+        // A new character made on the phone shows at once.
+        let mut edited = roster(&["Ana", "Bet0", "Caro"]);
+        edited[0].character = [6, 9, 6, 6, 8];
+        run.follow(&edited);
+        assert_eq!(run.actors[0].player.character, [6, 9, 6, 6, 8]);
+        // Caro is removed by the presenter.
+        run.follow(&roster(&["Ana", "Bet0"]));
+        assert_eq!(run.len(), 2);
+        assert!(!run.has("Caro"));
+        // A new game empties the room; the same names can join again.
+        run.follow(&[]);
+        assert!(run.is_empty() && !run.has("Ana"));
+    }
+}
