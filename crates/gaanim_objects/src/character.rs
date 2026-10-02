@@ -635,7 +635,7 @@ impl CharacterCatalog {
             let lag = (own.0 + drive.lag.0, own.1 + drive.lag.1);
             let swing = (extra.follow * lag.0).clamp(-follow.max, follow.max);
             let stretch = (1.0 - extra.follow * follow.stretch * lag.1).clamp(0.7, 1.3);
-            extra_at = extra_at * motion_affine(extra.pivot, [0.0, 0.0, 1.0, stretch, swing]);
+            extra_at *= motion_affine(extra.pivot, [0.0, 0.0, 1.0, stretch, swing]);
         }
 
         let mut out = Vec::new();

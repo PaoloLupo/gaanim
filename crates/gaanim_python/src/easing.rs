@@ -9,7 +9,7 @@ use pyo3::prelude::*;
     frozen,
     eq,
     eq_int,
-    from_py_object
+    skip_from_py_object
 )]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PyEasingCurve {
@@ -24,6 +24,7 @@ pub enum PyEasingCurve {
     Elastic,
     Bounce,
 }
+copy_from_py_object!(PyEasingCurve);
 
 impl From<PyEasingCurve> for EasingCurve {
     fn from(value: PyEasingCurve) -> Self {

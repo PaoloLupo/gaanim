@@ -6532,8 +6532,10 @@ mod tests {
                 gaanim_animation::FloatSignal::new(0.0),
             ));
         }
-        let mut timeline = Timeline::default();
-        timeline.segment_checkpoints = checkpoints;
+        let mut timeline = Timeline {
+            segment_checkpoints: checkpoints,
+            ..Default::default()
+        };
         let track = timeline.add_track("replay", 0);
         let mut clip = |target, start, duration, lens| {
             timeline.add_clip(

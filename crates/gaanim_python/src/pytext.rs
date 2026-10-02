@@ -16,9 +16,15 @@ use crate::pydrawable::{
 };
 use crate::pylayout::{PyAnchor, PyDirection};
 
-#[pyclass(name = "TextAnchor", module = "gaanim_core", frozen, from_py_object)]
+#[pyclass(
+    name = "TextAnchor",
+    module = "gaanim_core",
+    frozen,
+    skip_from_py_object
+)]
 #[derive(Clone, Copy, Debug)]
 pub struct PyTextAnchor(pub TextAnchor);
+copy_from_py_object!(PyTextAnchor);
 
 #[pymethods]
 #[allow(non_snake_case)]

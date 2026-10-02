@@ -1812,7 +1812,7 @@ mod tests {
         // From the last bytes, opening asks for the directory, then for the
         // tables and the first chunk, not the later chunks.
         let source = BundleSource::new(len);
-        add(&source, &[len - 22..len]);
+        add(&source, std::slice::from_ref(&(len - 22..len)));
         let mut bundle = None;
         for _ in 0..4 {
             match Bundle::from_source(source.clone()) {

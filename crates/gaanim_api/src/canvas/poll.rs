@@ -488,6 +488,7 @@ impl SceneModel {
     /// to answer once and up to `points` for a fast right answer. Several
     /// right answers make it multiple choice: an answer is right when it
     /// chose all of them and no other.
+    #[allow(clippy::too_many_arguments)]
     pub fn quiz(
         &mut self,
         question: impl Into<String>,

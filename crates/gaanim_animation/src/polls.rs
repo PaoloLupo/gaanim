@@ -608,6 +608,7 @@ pub fn poll_value_system(
 
 /// Draw each poll bar at its current fraction, honoring a create
 /// animation's reveal.
+#[allow(clippy::type_complexity)]
 pub fn poll_bar_system(
     results: Option<Res<PollResults>>,
     rehearsed: Option<Res<crate::rehearsal::RehearsedResults>>,
@@ -843,6 +844,7 @@ impl LiveText {
 pub struct GlyphCache(HashMap<(String, Option<u16>, u64, char), Option<(Arc<BezPath>, f64)>>);
 
 /// Draw each live text at its current value.
+#[allow(clippy::type_complexity)]
 pub fn live_text_system(
     registry: Option<Res<gaanim_text::font::FontRegistry>>,
     results: Option<Res<PollResults>>,

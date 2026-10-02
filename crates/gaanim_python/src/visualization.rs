@@ -425,10 +425,10 @@ fn parse_decimal_separator(value: &str) -> PyResult<char> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 /// The space between a readout's terms at the default text size.
 const READOUT_SPACING: f64 = 0.1;
 
+#[allow(clippy::too_many_arguments)]
 fn build_readout_parts(
     canvas: &mut ApiCanvas,
     source: ScalarSource,

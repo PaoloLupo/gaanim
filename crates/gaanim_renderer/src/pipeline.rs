@@ -2929,6 +2929,7 @@ pub struct ExternalFrame {
 }
 
 /// System: composites the [`ExternalFrame`] into the main Vello scene.
+#[allow(clippy::type_complexity)]
 pub fn external_frame_system(
     mut commands: Commands,
     mut external: ResMut<ExternalFrame>,
