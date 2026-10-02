@@ -71,6 +71,10 @@ cambia*: lee «Al actualizar».
   mueven.
 - `Readout.move_to` y `Variable.move_to` aceptan `TextAnchor`; `spacing=` fija
   el espacio entre sus términos.
+- Dentro de un layout, un readout reserva el ancho del valor más ancho que
+  mostrará y alinea el número a la derecha, así que sus vecinos no se mueven
+  mientras cuenta. `reserve=` añade un valor para conteos en vivo sin máximo
+  conocido, como `votes`.
 - `slides.brand(number_anchor=...)` pone el número de diapositiva aparte del
   pie.
 - `gaanim check` dice el segmento, el instante y el texto de una caja que se
@@ -96,7 +100,13 @@ cambia*: lee «Al actualizar».
   `surrounding_rect` se dibuja alrededor de cajas.
 - Un texto que crece con `basis=0` se reparte en líneas en el espacio libre de
   su fila.
-- Un readout dentro de un layout queda dentro de su celda.
+- Un readout dentro de un layout queda dentro de su celda, también cuando su
+  número crece.
+- Una caja dentro de otra dibuja su fondo aunque su único contenido sea un
+  readout.
+- Una fila con `width="fill"` dentro de una columna que se ajusta a su
+  contenido toma el ancho de la caja que la contiene, y una fila cuyo texto se
+  reparte en líneas mide el alto de todas ellas.
 - `Theme(fonts=...)` respeta la familia de `title` aunque también se defina
   `text`.
 - Los fondos con shader y el postprocesado siguen moviéndose en una pausa, y
