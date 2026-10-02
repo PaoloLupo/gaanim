@@ -533,6 +533,24 @@ for q in load_questions("preguntas.md"):
 ]
 
 #api-entry(
+  name: "Scene.roster",
+  kind: "method",
+  params: (
+    (name: "ask", type: "str", desc: [Lo que el teléfono pide además del apodo, como `"Código de alumno"`; de 1 a 40 caracteres.]),
+    (name: "required", type: "bool", default: "True", desc: [Si nadie puede unirse sin responderlo.]),
+  ),
+  returns: (type: "None", desc: []),
+  desc: [Pide a cada jugador un dato más al unirse, como su código de alumno o su nombre completo, para que el profesor sepa quién es quién. El dato nunca llega a la pantalla: solo aparece en los resultados que guarda la presentación y en `gaanim relay results`. Quien ya se había unido sigue jugando y lo da la próxima vez que se una. Un texto vacío o de más de 40 caracteres, o un segundo `ask` distinto en la misma escena, lanzan `ValueError`. Ver #link("/publico/presentar/#resultados")[Guardar los resultados].],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.roster("Código de alumno")
+audience = scene.audience()
+```
+]
+
+#api-entry(
   name: "Scene.teams",
   kind: "method",
   params: (

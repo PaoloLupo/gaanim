@@ -138,6 +138,8 @@ question or answers starts it from zero. One poll is open at a time.
 | `POST /s/<code>/kick` | presenter | `{name}`: removes a player and bans its phone |
 | `POST /s/<code>/reset` | presenter | forgets every poll, vote, player and ban; the lobby stays |
 | `POST /s/<code>/lobby` | presenter | `{open}`: phones ask for a nickname as soon as they open the page |
+| `POST /s/<code>/ask` | presenter | `{label, required}`: joining also asks for this (a student code, a full name), at most 40 characters; `{label: ""}` stops asking |
+| `GET /s/<code>/report` | presenter | the whole game to keep: `{game, started, ask, teams, polls: [{id, question, options, multiple, opened, correct, time, points, revealed, counts, respondents}], players: [{rank, name, extra, team, joined, score, correct, answered, streak, answers: {<id>: {options, elapsed?, points?, right?}}}]}`, questions in the order they opened; nothing is capped, and only here do players carry `extra` |
 | `POST /s/<code>/teams` | presenter | `{names, colors, choose}`: play in 2 to 6 teams, `#rrggbb` colors; phones choose theirs with `choose`, or are dealt to the smallest; `{names: []}` plays alone |
 | `PUT /s/<code>/image/<hash>` | presenter | a question's picture, its bytes with its `content-type`; `<hash>` is 16 hex digits; kept across games |
 | `POST /s/<code>/stage` | presenter | `{stage}`: `"play"`, `"podium"` once the questions are over, `"end"` when the presentation ends; after `"end"`, the next `poll`, `lobby` or `stage` starts a new game, as `reset` does |
@@ -146,10 +148,10 @@ question or answers starts it from zero. One poll is open at a time.
 | `GET /s/<code>/ws` | phones | WebSocket, see below |
 | `GET /s/<code>/poll?voter=<id>` | phones | `{lobby, stage, joined, open: false, podium?}` or `{lobby, stage, joined, open, id, question, options, chosen}`; `chosen` is that phone's vote or answer, or `null`; `joined` whether it plays in this game; `podium` the top three once the stage is not `"play"` |
 | `POST /s/<code>/vote` | phones | `{poll, option, voter}`; 409 unless that poll is open (and, for a quiz, before its time is up and only once) |
-| `POST /s/<code>/join` | phones | `{voter, name, avatar?, team?}` → `{player}`; 409 for a name in use, 400 `choose a team` when teams are chosen |
+| `POST /s/<code>/join` | phones | `{voter, name, avatar?, team?, extra?}` → `{player}`; 409 for a name in use, 400 `choose a team` when teams are chosen, 400 `missing extra` when the presentation asks for something required |
 | `GET /s/<code>/image/<hash>` | phones | a question's picture |
 | `GET /s/<code>/player?voter=<id>` | phones | `{player}`: name, score, place and last result, or `null`; the score leaves out a quiz not revealed yet |
-| `GET /health` | anyone | `{relay: "gaanim", version: 11}` |
+| `GET /health` | anyone | `{relay: "gaanim", version: 12}` |
 
 On the WebSocket the relay sends `{type: "poll", ...}` (the same body as
 `GET /poll`, with `quiz: {time, deadline, now, revealed}` for a quiz) on
@@ -172,6 +174,8 @@ Presenter requests send `Authorization: Bearer <key>`. Codes use
 ## Privacy
 
 Votes are anonymous: a voter is a random id the page keeps in the phone's
-storage, with no accounts or cookies; a quiz asks only for a nickname. Only the presentation's key can
+storage, with no accounts or cookies; a quiz asks only for a nickname, and
+whatever the presentation asks with `ask`, which only the presenter's
+`report` returns. Only the presentation's key can
 read counts. A session and its votes are deleted twelve hours after its last
 activity.

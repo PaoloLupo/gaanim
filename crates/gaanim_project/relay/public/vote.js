@@ -148,6 +148,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const joinForm = $("join-form");
   const nameInput = $("name");
   const nameError = $("name-error");
+  const extraField = $("extra-field");
+  const extraInput = $("extra");
 
   const creator = $("creator");
   const stage = $("avatar-stage");
@@ -157,6 +159,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("session").parentElement.title = t("sessionTitle");
   document.title = `Gaanim · ${code}`;
   nameInput.value = store.get("gaanim-name") ?? "";
+  extraInput.value = store.get(`gaanim-extra-${code}`) ?? "";
 
   /** The question the relay last reported. */
   let poll = { open: false };
@@ -236,9 +239,23 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  /** What the presentation also asks, such as a student code: shown on the
+   * join form only when it asks. */
+  const ask = () => poll.ask ?? null;
+
+  function drawAsk() {
+    const asked = ask();
+    extraField.hidden = !asked;
+    if (!asked) return;
+    $("extra-label").textContent = asked.required ? asked.label : t("optional", asked.label);
+    extraInput.required = asked.required;
+    if (!extraInput.value && player?.extra) extraInput.value = player.extra;
+  }
+
   /** The join form, worded for a lobby or for a quiz. */
   function showJoin(lobby) {
     drawTeamPicker();
+    drawAsk();
     $("join-title").textContent = t(lobby ? "lobbyTitle" : "gameTitle");
     $("join-hint").textContent = t(lobby ? "lobbyHint" : "gameHint");
     $("join-button").textContent = t(lobby ? "lobbyButton" : "gameButton");
@@ -716,6 +733,12 @@ document.addEventListener("DOMContentLoaded", () => {
       nameError.textContent = t("teamRequired");
       return;
     }
+    if (error === "missing extra" || error === "invalid extra") {
+      drawAsk();
+      nameError.textContent =
+        error === "missing extra" ? t("extraRequired", ask()?.label ?? "") : t("extraInvalid");
+      return;
+    }
     if (statusCode === 503) nameError.textContent = t("gameFull");
     else if (statusCode === 429) nameError.textContent = t("slowDown");
     else nameError.textContent = statusCode === 409 ? t("nameTaken") : t("nameInvalid");
@@ -729,13 +752,20 @@ document.addEventListener("DOMContentLoaded", () => {
       nameError.textContent = t("teamRequired");
       return;
     }
+    const extra = extraInput.value.trim();
+    if (ask()?.required && !extra) {
+      nameError.textContent = t("extraRequired", ask().label);
+      return;
+    }
     joining = true;
     nameError.textContent = "";
+    if (ask()) store.set(`gaanim-extra-${code}`, extra);
     const request = {
       voter,
       name,
       ...(avatar && { avatar }),
       ...(teams()?.choose && { team: pickedTeam }),
+      ...(ask() && { extra }),
     };
     if (socket?.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: "join", ...request }));

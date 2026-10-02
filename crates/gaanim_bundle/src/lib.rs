@@ -409,6 +409,15 @@ struct SessionRecord {
     game_segment: Option<u32>,
     #[serde(default)]
     teams: Option<TeamsRecord>,
+    #[serde(default)]
+    ask: Option<AskRecord>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct AskRecord {
+    label: String,
+    #[serde(default)]
+    required: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -489,6 +498,10 @@ fn write_polls(scene: &SceneData) -> Result<Vec<u8>> {
                 colors: teams.colors.clone(),
                 choose: teams.choose,
             }),
+            ask: session.ask.as_ref().map(|ask| AskRecord {
+                label: ask.label.clone(),
+                required: ask.required,
+            }),
         }),
         polls: scene
             .polls
@@ -554,6 +567,10 @@ fn read_polls(
                 colors: teams.colors,
                 choose: teams.choose,
             }),
+        ask: session.ask.map(|ask| gaanim_timeline::timeline::AskInfo {
+            label: ask.label,
+            required: ask.required,
+        }),
     });
     scene.polls = entry
         .polls
@@ -1742,6 +1759,10 @@ mod tests {
                     colors: vec!["#ff0000".into(), "#0000ff".into()],
                     choose: true,
                 }),
+                ask: Some(gaanim_timeline::timeline::AskInfo {
+                    label: "Código".into(),
+                    required: true,
+                }),
             }),
             stop_gates: vec![gate.clone()],
             ..Default::default()
@@ -1755,9 +1776,25 @@ mod tests {
             bundle.scene.poll_session.as_ref().unwrap().game_segment,
             Some(3)
         );
-        let teams = bundle.scene.poll_session.as_ref().unwrap().teams.as_ref().unwrap();
+        let teams = bundle
+            .scene
+            .poll_session
+            .as_ref()
+            .unwrap()
+            .teams
+            .as_ref()
+            .unwrap();
         assert_eq!(teams.names, ["Rojo", "Azul"]);
         assert!(teams.choose);
+        let ask = bundle
+            .scene
+            .poll_session
+            .as_ref()
+            .unwrap()
+            .ask
+            .as_ref()
+            .unwrap();
+        assert_eq!((ask.label.as_str(), ask.required), ("Código", true));
         assert_eq!(bundle.scene.stop_gates, [gate]);
     }
 
@@ -1775,6 +1812,7 @@ mod tests {
                     lobby: false,
                     game_segment: None,
                     teams: None,
+                    ask: None,
                 }),
                 polls,
                 ..scene

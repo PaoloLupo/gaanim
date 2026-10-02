@@ -33,10 +33,12 @@
 //   POST   /s/<code>/reset    forget every poll, vote and player (presenter)
 //   POST   /s/<code>/lobby    {open}: phones join as they arrive (presenter)
 //   POST   /s/<code>/teams    {names, colors, choose}: play in teams (presenter)
+//   POST   /s/<code>/ask      {label, required}: one more thing joining asks (presenter)
 //   PUT    /s/<code>/image/<hash>  a poll's picture, its bytes (presenter)
 //   GET    /s/<code>/image/<hash>  that picture (public)
 //   GET    /s/<code>/results  {current, connected, polls, players, audience} (presenter)
 //   GET    /s/<code>/presenter  WebSocket pushing {type: "results", ...} (presenter)
+//   GET    /s/<code>/report   the whole game, for the presenter to keep (presenter)
 //   GET    /health            {relay, version}
 //
 // WebSocket messages are JSON, except the keepalive "ping", answered "pong"
@@ -52,7 +54,10 @@
 // each phone gets {type: "result", poll, correct, option, points, player}.
 // A removed player gets {type: "kicked"}. A join may carry the player's
 // character, `avatar`: [body, color, eyes, mouth, extra], indexes into
-// public/avatar-parts.json; players and the audience carry it back.
+// public/avatar-parts.json; players and the audience carry it back. When
+// the presentation asks for one more thing, such as a student code
+// (`ask`), a join carries it as `extra`; only the report has it, never the
+// screen.
 //
 // The presentation holds its own WebSocket, opened with its key: the relay
 // sends it the results on connect and again whenever they change, at most
@@ -96,7 +101,7 @@ const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
  * lasts between SESSION_TTL_MS minus this and SESSION_TTL_MS after its last
  * activity. */
 const ALARM_SLACK_MS = 30 * 60 * 1000;
-const API_VERSION = 11;
+const API_VERSION = 12;
 /** A poll picture's name: a hash of its bytes. */
 const IMAGE = /^[0-9a-f]{16}$/;
 /** Largest picture the presenter may store. */
@@ -108,6 +113,12 @@ const MAX_TEAM_NAME = 20;
 const COLOR = /^#[0-9a-f]{6}$/;
 /** Where the game is: questions, the final standings, or over. */
 const STAGES = new Set(["play", "podium", "end"]);
+/** What joining may also ask, such as a student code: its label and the
+ * answer's length. The answer allows letters, digits, spaces and the
+ * punctuation of names, codes and emails. */
+const MAX_ASK = 40;
+const MAX_EXTRA = 60;
+const EXTRA = /^[\p{L}\p{N}][\p{L}\p{N} .,'@#/_+-]*$/u;
 /** Players a podium shows. */
 const PODIUM = 3;
 /** How long changes gather before the presenter's socket hears of them, so
@@ -209,8 +220,12 @@ export default {
           return reply(await session.teams(bearer(request), await body(request)));
         case "POST stage":
           return reply(await session.stage(bearer(request), await body(request)));
+        case "POST ask":
+          return reply(await session.setAsk(bearer(request), await body(request)));
         case "GET results":
           return reply(await session.results(bearer(request)));
+        case "GET report":
+          return reply(await session.report(bearer(request)));
         default:
           return json({ error: "not found" }, 404);
       }
@@ -233,12 +248,14 @@ export class PollSession extends DurableObject {
   //   "revealed"             id of the quiz revealed last
   //   "latest"               id of the poll opened last
   //   "game"                 id of the game, new with each one
-  //   "poll:<id>"            {question, options, multiple?, image?, quiz?}; a quiz is
+  //   "started"              when the game started, ms
+  //   "ask"                  {label, required}: what joining also asks
+  //   "poll:<id>"            {question, options, multiple?, image?, opened, quiz?}; a quiz is
   //                          {correct, time, points, openedAt, deadline, revealed};
   //                          `correct` is an index, or a list for multiple choice
   //   "vote:<id>:<voter>"    a poll voter's answer: an index, or a list
   //   "answer:<id>:<voter>"  {option, elapsed, points} of a quiz's player
-  //   "player:<voter>"       {name, score, correct, answered, streak, joined, avatar}
+  //   "player:<voter>"       {name, score, correct, answered, streak, joined, avatar, extra?}
   //   "image:<hash>"         {mime, bytes} of a poll picture; kept across games
   //   "banned:<voter>"       a phone the presenter removed
   // Every poll keeps its votes, so a presentation that comes back to a
@@ -280,6 +297,8 @@ export class PollSession extends DurableObject {
       current: null,
       latest: null,
       game: null,
+      started: null,
+      ask: null,
       revealed: null,
       polls: new Map(),
       votes: new Map(),
@@ -323,12 +342,19 @@ export class PollSession extends DurableObject {
         case "game":
           s.game = value;
           break;
+        case "started":
+          s.started = value;
+          break;
+        case "ask":
+          s.ask = value;
+          break;
         case "poll":
           s.polls.set(id, {
             question: value.question,
             options: value.options,
             multiple: value.multiple === true,
             image: value.image ?? null,
+            opened: value.opened ?? value.quiz?.openedAt ?? 0,
             quiz: value.quiz ?? null,
           });
           break;
@@ -504,8 +530,9 @@ export class PollSession extends DurableObject {
     // forgets every player.
     const joined = voter ? { joined: s.players.has(voter) } : {};
     const teams = s.teams ? { teams: s.teams } : {};
+    const ask = s.ask ? { ask: s.ask } : {};
     if (!poll) {
-      const state = { lobby: s.lobby, open: false, stage: s.stage, ...joined, ...teams };
+      const state = { lobby: s.lobby, open: false, stage: s.stage, ...joined, ...teams, ...ask };
       if (s.stage !== "play") {
         // The final standings, for phones to show their podium.
         const ranking = rank(s);
@@ -522,6 +549,7 @@ export class PollSession extends DurableObject {
     const state = {
       ...joined,
       ...teams,
+      ...ask,
       lobby: s.lobby,
       stage: s.stage,
       open: true,
@@ -581,6 +609,19 @@ export class PollSession extends DurableObject {
     if (!previous && s.players.size >= MAX_PLAYERS) {
       return fail(503, "the game is full");
     }
+    // What the presentation also asks: kept from an earlier join unless
+    // the phone sends it again.
+    let extra = previous?.extra ?? null;
+    if (s.ask) {
+      if (typeof input.extra === "string") {
+        const given = input.extra.trim().replace(/\s+/g, " ");
+        if (given && ([...given].length > MAX_EXTRA || !EXTRA.test(given))) {
+          return fail(400, "invalid extra");
+        }
+        extra = given || null;
+      }
+      if (s.ask.required && !extra) return fail(400, "missing extra");
+    }
     const avatar = checkAvatar(input.avatar) ?? previous?.avatar ?? defaultAvatar(voter);
     // A team: kept once dealt; a chosen one may change until the player
     // answers a question.
@@ -599,11 +640,12 @@ export class PollSession extends DurableObject {
     if (
       previous?.name !== name ||
       String(previous?.avatar) !== String(avatar) ||
-      (previous?.team ?? null) !== team
+      (previous?.team ?? null) !== team ||
+      (previous?.extra ?? null) !== extra
     ) {
       const player = previous
-        ? { ...previous, name, avatar, team }
-        : { name, score: 0, correct: 0, answered: 0, joined: Date.now(), avatar, team };
+        ? { ...previous, name, avatar, team, extra }
+        : { name, score: 0, correct: 0, answered: 0, joined: Date.now(), avatar, team, extra };
       await this.ctx.storage.put(`player:${voter}`, player);
       if (previous) s.names.delete(previous.name.toLocaleLowerCase());
       s.players.set(voter, player);
@@ -753,6 +795,7 @@ export class PollSession extends DurableObject {
         options,
         multiple,
         image,
+        opened: now,
         quiz: quiz && { ...quiz, openedAt: now, deadline: now + quiz.time * 1000, revealed: false },
       };
       await this.ctx.storage.put(`poll:${id}`, poll);
@@ -919,11 +962,14 @@ export class PollSession extends DurableObject {
     // Also removes the alarm; `touch` sets it again.
     await this.ctx.storage.deleteAll();
     const game = crypto.randomUUID();
+    const started = Date.now();
     await this.ctx.storage.put({
       key: s.key,
       game,
+      started,
       ...(s.lobby && { lobby: true }),
       ...(s.teams && { teams: s.teams }),
+      ...(s.ask && { ask: s.ask }),
     });
     await putAll(this.ctx.storage, images);
     this.loading = Promise.resolve({
@@ -932,6 +978,7 @@ export class PollSession extends DurableObject {
       current: null,
       latest: null,
       game,
+      started,
       revealed: null,
       polls: new Map(),
       votes: new Map(),
@@ -1051,6 +1098,93 @@ export class PollSession extends DurableObject {
     return ok(await this.summary(true));
   }
 
+  /** One more thing joining asks, such as a student code, or nothing with
+   * no label. Players who already joined are asked when they join again. */
+  async setAsk(key, input) {
+    const denied = await this.authorize(key, true);
+    if (denied) return denied;
+    const label = text(input?.label, MAX_ASK + 1);
+    if ([...label].length > MAX_ASK) return fail(400, "invalid ask");
+    const ask = label ? { label, required: input?.required !== false } : null;
+    const s = await this.startOver(await this.state());
+    if (JSON.stringify(ask) !== JSON.stringify(s.ask)) {
+      if (ask) await this.ctx.storage.put("ask", ask);
+      else await this.ctx.storage.delete("ask");
+      s.ask = ask;
+      await this.broadcast();
+    }
+    await this.touch(s);
+    return ok({ ok: true });
+  }
+
+  /** The whole game for the presentation to keep: every question in the
+   * order it opened, with its counts, and every player with what it
+   * answered. Unlike the results, nothing is left out, and the players
+   * carry what joining also asked. */
+  async report(key) {
+    const denied = await this.authorize(key, false);
+    if (denied) return denied;
+    const s = await this.state();
+    const ranking = rank(s);
+    const polls = [...s.polls]
+      .sort(([, a], [, b]) => (a.opened ?? 0) - (b.opened ?? 0))
+      .map(([id, poll]) => ({
+        id,
+        question: poll.question,
+        options: poll.options,
+        multiple: poll.multiple,
+        opened: poll.opened ?? 0,
+        correct: poll.quiz ? choices(poll.quiz.correct) : null,
+        time: poll.quiz?.time ?? null,
+        points: poll.quiz?.points ?? null,
+        revealed: poll.quiz?.revealed ?? null,
+        counts: poll.counts,
+        respondents: (poll.quiz ? s.answers.get(id) : s.votes.get(id))?.size ?? 0,
+      }));
+    const players = ranking.map((player, index) => {
+      const answers = {};
+      for (const [id, poll] of s.polls) {
+        if (poll.quiz) {
+          const answer = s.answers.get(id)?.get(player.voter);
+          if (answer) {
+            answers[id] = {
+              options: choices(answer.option),
+              elapsed: answer.elapsed,
+              points: answer.points,
+              right: answer.points > 0,
+            };
+          }
+        } else {
+          const vote = s.votes.get(id)?.get(player.voter);
+          if (vote !== undefined) answers[id] = { options: choices(vote) };
+        }
+      }
+      return {
+        rank: index + 1,
+        name: player.name,
+        extra: player.extra ?? null,
+        team: player.team ?? null,
+        joined: player.joined ?? 0,
+        score: player.score,
+        correct: player.correct,
+        answered: player.answered,
+        streak: player.streak ?? 0,
+        answers,
+      };
+    });
+    return ok({
+      relay: "gaanim",
+      version: API_VERSION,
+      game: s.game,
+      started: s.started,
+      now: Date.now(),
+      ask: s.ask,
+      teams: s.teams ? { names: s.teams.names, colors: s.teams.colors } : null,
+      polls,
+      players,
+    });
+  }
+
   /** What the presentation reads: counts, quizzes, players, audience. */
   /** What the presentation reads. `all` sends every poll's answers, as a
    * presentation that just connected needs; pushes send the open poll's. */
@@ -1140,9 +1274,11 @@ export class PollSession extends DurableObject {
       if (!claim) return fail(401, "unknown session");
       // A claimed session starts its first game.
       const game = s.game ?? crypto.randomUUID();
-      await this.ctx.storage.put({ key: hash, game });
+      const started = s.started ?? Date.now();
+      await this.ctx.storage.put({ key: hash, game, started });
       s.key = hash;
       s.game = game;
+      s.started = started;
     }
     if (s.key !== hash) return fail(403, "wrong presenter key");
     this.verified = key;
@@ -1248,6 +1384,7 @@ function describe(s, voter, player, ranking = rank(s)) {
     rank: place || null,
     players: ranking.length,
     team: player.team ?? null,
+    extra: player.extra ?? null,
     last: quiz?.revealed
       ? { poll: id, correct: quiz.correct, option: answer?.option ?? null, points: answer?.points ?? 0 }
       : null,

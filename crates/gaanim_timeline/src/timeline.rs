@@ -544,6 +544,19 @@ pub struct PollSessionInfo {
     /// The game's teams (`scene.teams`), if it plays in teams.
     #[cfg_attr(feature = "serde", serde(default))]
     pub teams: Option<TeamsInfo>,
+    /// One more thing joining asks (`scene.roster`), such as a student
+    /// code, kept only in the saved results.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub ask: Option<AskInfo>,
+}
+
+/// What joining asks besides the nickname, as the phones show it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct AskInfo {
+    pub label: String,
+    /// Players cannot join without it.
+    pub required: bool,
 }
 
 /// A game's teams, as the phones show them.

@@ -147,7 +147,7 @@ fn run_relay(args: &[String]) -> ! {
     let usage = || -> ! {
         console::error(
             "relay",
-            "usage: gaanim relay [init [DIR] [--force] | use <URL> | forget | reset [PATH]]",
+            "usage: gaanim relay [init [DIR] [--force] | use <URL> | forget | reset [PATH] | results [PATH] [--output DIR]]",
         );
         std::process::exit(2);
     };
@@ -217,6 +217,29 @@ fn run_relay(args: &[String]) -> ! {
             console::success(
                 "relay",
                 format!("Started a new game on {code}: every vote, answer and player is gone"),
+            );
+        }
+        ["results", rest @ ..] => {
+            let mut path = None;
+            let mut output = None;
+            let mut rest = rest.iter();
+            while let Some(arg) = rest.next() {
+                match *arg {
+                    "--output" | "-o" => {
+                        output = Some(PathBuf::from(rest.next().unwrap_or_else(|| usage())))
+                    }
+                    arg if path.is_none() && !arg.starts_with('-') => {
+                        path = Some(PathBuf::from(arg))
+                    }
+                    _ => usage(),
+                }
+            }
+            let path = path.unwrap_or_else(|| PathBuf::from("."));
+            let folder = gaanim_editor::save_relay_results(&path, output.as_deref())
+                .unwrap_or_else(|error| fail(error));
+            console::success(
+                "relay",
+                format!("Saved the game's results in {}", folder.display()),
             );
         }
         _ => usage(),

@@ -62,6 +62,18 @@ pub(crate) struct AudienceView {
     /// How far the audience is from advancing the gated stop the
     /// presentation rests on.
     pub(crate) gate: Option<String>,
+    /// Where the game's results are kept, when the presentation keeps them.
+    pub(crate) results: Option<ResultsView>,
+}
+
+/// The results a presentation keeps, as Presenter View shows them.
+#[derive(Debug, Clone)]
+pub(crate) struct ResultsView {
+    /// The game's folder once saved, or the results folder before.
+    pub(crate) folder: std::path::PathBuf,
+    /// How long ago they were saved last.
+    pub(crate) saved: Option<std::time::Duration>,
+    pub(crate) error: Option<String>,
 }
 
 /// What the speaker asked of the audience from Presenter View.
@@ -70,6 +82,9 @@ struct AudienceRequests {
     kick: Option<String>,
     reset: bool,
     cancel_reset: bool,
+    save_results: bool,
+    /// Show this folder of results in the file manager.
+    open_results: Option<std::path::PathBuf>,
 }
 
 /// Players the audience section lists before it scrolls.
@@ -1766,6 +1781,49 @@ fn show_audience(ui: &mut egui::Ui, audience: &AudienceView, requests: &mut Audi
             requests.reset = true;
         }
     });
+    if let Some(results) = &audience.results {
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            let (status, color) = match (&results.error, results.saved) {
+                (Some(error), _) => (format!("Results not saved: {error}"), palette::WARN),
+                (None, Some(ago)) => (format!("Results saved {}", ago_text(ago)), palette::MUTED),
+                (None, None) => (
+                    "Results are saved once someone answers".into(),
+                    palette::FAINT,
+                ),
+            };
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if small_button(ui, "Open folder", true)
+                    .on_hover_text(results.folder.display().to_string())
+                    .clicked()
+                {
+                    requests.open_results = Some(results.folder.clone());
+                }
+                if small_button(ui, "Save now", true)
+                    .on_hover_text(
+                        "Write the game's spreadsheets now; they are also saved as answers arrive",
+                    )
+                    .clicked()
+                {
+                    requests.save_results = true;
+                }
+                ui.add(
+                    egui::Label::new(egui::RichText::new(status).size(13.0).color(color))
+                        .truncate(),
+                )
+                .on_hover_text(results.folder.display().to_string());
+            });
+        });
+    }
+}
+
+/// How long ago, in words that fit a status line.
+fn ago_text(ago: std::time::Duration) -> String {
+    match ago.as_secs() {
+        0..5 => "just now".into(),
+        seconds @ 5..60 => format!("{seconds} s ago"),
+        seconds => format!("{} min ago", seconds / 60),
+    }
 }
 
 /// Icon plus short text, for status readouts inside a right-to-left row.
@@ -2332,6 +2390,19 @@ pub(crate) fn presenter_view_system(
         }
         if audience_requests.cancel_reset {
             polls.cancel_reset();
+        }
+        if audience_requests.save_results {
+            polls.save_results();
+        }
+        if let Some(folder) = &audience_requests.open_results {
+            let opened =
+                std::fs::create_dir_all(folder).and_then(|()| crate::platform::open(folder));
+            if let Err(error) = opened {
+                gaanim_core::console::warn(
+                    "polls",
+                    format!("could not open {}: {error}", folder.display()),
+                );
+            }
         }
     }
     for action in actions {

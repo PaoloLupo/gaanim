@@ -8821,6 +8821,25 @@ class Scene:
                 scene.viz.readout(teams.score(team), format=".0f").move_to(x, 2)
         """
         ...
+    def roster(self, ask: str, *, required: bool = True) -> None:
+        """Ask each player for one more thing when joining, such as a
+        student code or a full name, besides the nickname.
+
+        Phones show a field labeled ``ask`` on the join form; with
+        ``required`` (the default) a player cannot join without it. The
+        answer never reaches the screen: it appears only in the results a
+        presentation saves (``resultados/`` in the project's output folder)
+        and in ``gaanim relay results``, so a teacher can match nicknames to
+        students. Players who joined before keep playing; they give it the
+        next time they join.
+
+        Raises ``ValueError`` for an empty label or one over 40 characters,
+        or a second, different ``ask`` in the same scene.
+
+        Example:
+            scene.roster("Código de alumno")
+        """
+        ...
     def leaderboard(self) -> Leaderboard:
         """The game's leaderboard: the players of the scene's quizzes, as data.
 

@@ -65,6 +65,8 @@ pub(crate) struct CanvasState {
     pub(crate) rehearsal: gaanim_animation::rehearsal::RehearsalSpec,
     /// The game's teams, if it plays in teams.
     pub(crate) poll_teams: Option<gaanim_timeline::timeline::TeamsInfo>,
+    /// What joining also asks, such as a student code.
+    pub(crate) poll_ask: Option<gaanim_timeline::timeline::AskInfo>,
     /// Stops that advance once the audience meets a condition: segment
     /// index, local time of the stop, condition.
     pub(crate) stop_gates: Vec<(usize, f64, gaanim_timeline::timeline::GateCondition)>,
@@ -99,6 +101,7 @@ impl CanvasState {
             poll_lobby_at: None,
             rehearsal: Default::default(),
             poll_teams: None,
+            poll_ask: None,
             stop_gates: Vec::new(),
             live_zones: Vec::new(),
         }

@@ -6156,9 +6156,26 @@ impl PyScene {
         Ok(crate::poll::PyTeams { inner })
     }
 
+    /// Ask each player for one more thing when joining, such as a student
+    /// code, kept only in the saved results.
+    #[pyo3(signature = (ask, *, required=true))]
+    fn roster(&self, py: Python<'_>, ask: String, required: bool) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        let mut scene = self.inner.lock().expect("scene canvas poisoned");
+        if scene.poll_session().is_none() {
+            let session = resolve_poll_session(py)?;
+            scene.set_poll_session(session);
+        }
+        scene.roster(ask, required).map_err(crate::poll::poll_error)
+    }
+
     /// Open a question loaded with `gaanim.load_questions`: a quiz when it
     /// has right answers, else a poll. Its `image` is an absolute path.
-    fn question(&self, py: Python<'_>, question: &Bound<'_, PyAny>) -> PyResult<crate::poll::PyPoll> {
+    fn question(
+        &self,
+        py: Python<'_>,
+        question: &Bound<'_, PyAny>,
+    ) -> PyResult<crate::poll::PyPoll> {
         let text: String = question.getattr("text")?.extract()?;
         let options: Vec<String> = question.getattr("options")?.extract()?;
         let correct: Vec<usize> = question.getattr("correct")?.extract()?;
@@ -6269,7 +6286,9 @@ impl PyScene {
                 ));
             }
         };
-        let state_names = kept.as_ref().map_or_else(Vec::new, |kept| kept.names.clone());
+        let state_names = kept
+            .as_ref()
+            .map_or_else(Vec::new, |kept| kept.names.clone());
         let program = crate::live::compile_behavior(behavior, &state_names)?;
         let inner = self
             .inner

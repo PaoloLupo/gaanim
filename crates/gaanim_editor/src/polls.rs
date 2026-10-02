@@ -38,6 +38,11 @@ const REFRESH: Duration = Duration::from_millis(1000);
 const TIMEOUT: Duration = Duration::from_secs(5);
 /// How long a first press of "new game" waits for the second one.
 const CONFIRM_RESET: Duration = Duration::from_secs(5);
+/// Least time between two writes of the saved results while votes arrive.
+const SAVE_EVERY: Duration = Duration::from_secs(5);
+/// The folder, inside a project's output folder or beside a bundle, where
+/// presentations keep their games' results.
+pub const RESULTS_FOLDER: &str = "resultados";
 
 pub(crate) struct AudiencePollsPlugin;
 
@@ -128,6 +133,8 @@ fn audience_poll_system(
     timeline: Res<Timeline>,
     mut polls: ResMut<AudiencePolls>,
     mut results: ResMut<PollResults>,
+    project: Option<Res<crate::export::ProjectPaths>>,
+    bundle: Option<Res<crate::bundle_player::BundlePlayback>>,
 ) {
     let session = timeline
         .poll_session
@@ -144,7 +151,17 @@ fn audience_poll_system(
     };
     let current = polls.client.as_ref().map(|client| &client.session);
     if current != Some(session) && polls.unusable.as_ref() != Some(session) {
-        polls.client = match PollClient::start(session.clone()) {
+        // A bundle keeps its results beside it; a script, in its project's
+        // output folder.
+        let folder = match (&bundle, &project) {
+            (Some(bundle), _) => bundle
+                .path()
+                .parent()
+                .map(|parent| parent.join(RESULTS_FOLDER)),
+            (None, Some(project)) => Some(project.output_dir.join(RESULTS_FOLDER)),
+            (None, None) => None,
+        };
+        polls.client = match PollClient::start(session.clone(), folder) {
             Ok(client) => Some(client),
             Err(error) => {
                 gaanim_core::console::warn("polls", error);
@@ -201,6 +218,10 @@ enum Command {
     Lobby,
     /// The game plays in these teams.
     Teams(gaanim_timeline::timeline::TeamsInfo),
+    /// Joining also asks this (`scene.roster`).
+    Ask(gaanim_timeline::timeline::AskInfo),
+    /// Save the game's results now, as Presenter View asks.
+    SaveResults,
     /// Where the game is: "play", "podium", or "end" when the
     /// presentation ends.
     Stage(&'static str),
@@ -362,6 +383,10 @@ struct PollClient {
     stage: Option<gaanim_timeline::timeline::GameStage>,
     commands: Sender<Command>,
     snapshot: Arc<Mutex<Option<Snapshot>>>,
+    /// The results folder, when this presentation keeps its games.
+    results: Option<std::path::PathBuf>,
+    /// What the thread last saved there.
+    saved: Arc<Mutex<SavedResults>>,
     /// Receives the results the relay pushes; ends with the client.
     #[cfg_attr(
         not(test),
@@ -371,7 +396,12 @@ struct PollClient {
 }
 
 impl PollClient {
-    fn start(session: PollSessionInfo) -> Result<Self, String> {
+    /// Start the session's client; a game's results are kept in
+    /// `results`, when given.
+    fn start(
+        session: PollSessionInfo,
+        results: Option<std::path::PathBuf>,
+    ) -> Result<Self, String> {
         let relay = session.relay.clone().ok_or_else(|| {
             "the scene's polls have no relay: set one with `gaanim relay use <URL>` and \
              reload, so its QR codes point to it"
@@ -388,9 +418,16 @@ impl PollClient {
         if let Some(teams) = &session.teams {
             let _ = commands.send(Command::Teams(teams.clone()));
         }
+        if let Some(ask) = &session.ask {
+            let _ = commands.send(Command::Ask(ask.clone()));
+        }
         let thread_snapshot = snapshot.clone();
         let pushed = socket.live.clone();
         let checked = relay.clone();
+        let saved = Arc::new(Mutex::new(SavedResults::default()));
+        let keeper = results
+            .clone()
+            .map(|folder| ResultsKeeper::new(folder, saved.clone()));
         std::thread::Builder::new()
             .name("gaanim-polls".into())
             .spawn(move || {
@@ -403,7 +440,7 @@ impl PollClient {
                     }
                     Err(error) => gaanim_core::console::warn("polls", error),
                 }
-                run_relay_session(api, receiver, thread_snapshot, pushed)
+                run_relay_session(api, receiver, thread_snapshot, pushed, keeper)
             })
             .map_err(|error| format!("could not start the poll client: {error}"))?;
         gaanim_core::console::info("polls", format!("votes go to {relay}/s/{}", session.code));
@@ -415,6 +452,8 @@ impl PollClient {
             stage: None,
             commands,
             snapshot,
+            results,
+            saved,
             socket,
         })
     }
@@ -736,6 +775,15 @@ impl RelayApi {
         Ok(())
     }
 
+    /// The whole game, for keeping its results.
+    fn report(&self) -> Result<crate::poll_report::Report, String> {
+        self.request("GET", "report")
+            .call()
+            .map_err(describe)?
+            .into_json()
+            .map_err(|error| format!("the relay's report is not valid: {error}"))
+    }
+
     fn results(&self) -> Result<Snapshot, String> {
         let response = self.request("GET", "results").call().map_err(describe)?;
         let received = Instant::now();
@@ -783,7 +831,10 @@ fn run_relay_session(
     commands: Receiver<Command>,
     snapshot: Arc<Mutex<Option<Snapshot>>>,
     pushed: Arc<AtomicBool>,
+    mut keeper: Option<ResultsKeeper>,
 ) {
+    // Presenter View asked to save the results now.
+    let mut save_now = false;
     // What the relay should show, and whether it already does.
     let mut wanted: Option<TimelinePoll> = None;
     let mut synced = true;
@@ -821,6 +872,7 @@ fn run_relay_session(
                     wanted = None;
                     synced = false;
                 }
+                Command::SaveResults => save_now = true,
                 // Only the latest stage matters.
                 Command::Stage(stage) => {
                     queued.retain(|queued| !matches!(queued, Command::Stage(_)));
@@ -864,7 +916,11 @@ fn run_relay_session(
                     }),
                 ),
                 Command::Stage(stage) => api.post("stage", serde_json::json!({ "stage": stage })),
-                Command::Open(_) | Command::Close => Ok(()),
+                Command::Ask(ask) => api.post(
+                    "ask",
+                    serde_json::json!({ "label": ask.label, "required": ask.required }),
+                ),
+                Command::Open(_) | Command::Close | Command::SaveResults => Ok(()),
             };
             report(&result);
             match result {
@@ -887,12 +943,179 @@ fn run_relay_session(
             let result = api.results().map(|latest| store(&snapshot, latest));
             report(&result);
         }
+        if let Some(keeper) = &mut keeper {
+            let version = snapshot
+                .lock()
+                .ok()
+                .and_then(|latest| latest.as_ref().map(|s| s.version));
+            keeper.keep(&api, version, std::mem::take(&mut save_now));
+        }
     }
-    // The presentation ended: stop taking votes, and phones say goodbye.
+    // The presentation ended: keep the game's final results, stop taking
+    // votes, and phones say goodbye.
+    if let Some(keeper) = &mut keeper {
+        keeper.keep(&api, None, true);
+    }
     if wanted.is_some() {
         let _ = api.close();
     }
     let _ = api.post("stage", serde_json::json!({ "stage": "end" }));
+}
+
+/// What the results keeper last did, for Presenter View.
+#[derive(Debug, Clone, Default)]
+struct SavedResults {
+    /// The game's folder, once written.
+    folder: Option<std::path::PathBuf>,
+    at: Option<Instant>,
+    error: Option<String>,
+}
+
+/// Keeps a presentation's games in the results folder: after the results
+/// change, at most every [`SAVE_EVERY`], and once more when it ends, so a
+/// presentation that closes unexpectedly still leaves them.
+struct ResultsKeeper {
+    folder: std::path::PathBuf,
+    status: Arc<Mutex<SavedResults>>,
+    /// The results version written last.
+    seen: Option<u64>,
+    written: Option<Instant>,
+    /// Games already announced in the terminal.
+    announced: HashSet<String>,
+    /// The last failure, reported once.
+    failed: Option<String>,
+}
+
+impl ResultsKeeper {
+    fn new(folder: std::path::PathBuf, status: Arc<Mutex<SavedResults>>) -> Self {
+        Self {
+            folder,
+            status,
+            seen: None,
+            written: None,
+            announced: HashSet::new(),
+            failed: None,
+        }
+    }
+
+    /// Write the game when `version` is new and enough time passed, or
+    /// right away with `now`.
+    fn keep(&mut self, api: &RelayApi, version: Option<u64>, now: bool) {
+        if !now {
+            let changed = version.is_some() && version != self.seen;
+            let rested = self
+                .written
+                .is_none_or(|written| written.elapsed() >= SAVE_EVERY);
+            if !(changed && rested) {
+                return;
+            }
+        }
+        let result = api.report().and_then(|report| {
+            if report.is_empty() {
+                return Ok(None);
+            }
+            report
+                .write(&self.folder)
+                .map(|folder| Some((report.game, folder)))
+        });
+        self.seen = version.or(self.seen);
+        self.written = Some(Instant::now());
+        if let Ok(mut status) = self.status.lock() {
+            match &result {
+                Ok(Some((_, folder))) => {
+                    status.folder = Some(folder.clone());
+                    status.at = Some(Instant::now());
+                    status.error = None;
+                }
+                Ok(None) => {}
+                Err(error) => status.error = Some(error.clone()),
+            }
+        }
+        match result {
+            Ok(Some((game, folder))) => {
+                self.failed = None;
+                if self.announced.insert(game.unwrap_or_default()) {
+                    gaanim_core::console::info(
+                        "polls",
+                        format!("the game's results go to {}", folder.display()),
+                    );
+                }
+            }
+            Ok(None) => {}
+            Err(error) => {
+                if self.failed.as_ref() != Some(&error) {
+                    gaanim_core::console::warn(
+                        "polls",
+                        format!("could not save the results: {error}"),
+                    );
+                }
+                self.failed = Some(error);
+            }
+        }
+    }
+}
+
+/// Download the game the relay holds for the project (or script) at `path`
+/// and write its results into `output`, or the project's results folder.
+/// Returns the game's folder.
+pub fn save_relay_results(
+    path: &std::path::Path,
+    output: Option<&std::path::Path>,
+) -> Result<std::path::PathBuf, String> {
+    let directory = if path.is_dir() {
+        path.to_path_buf()
+    } else {
+        path.parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .map_or_else(
+                || std::path::PathBuf::from("."),
+                std::path::Path::to_path_buf,
+            )
+    };
+    let directory = directory.canonicalize().unwrap_or(directory);
+    let (scope, project_relay) = gaanim_project::relay::scope_of(&directory);
+    let (relay, _) = gaanim_project::relay::resolve(project_relay.as_deref())
+        .ok_or_else(|| "no relay is set: run `gaanim relay use <URL>`".to_string())?;
+    let session = gaanim_project::relay::session_for(&scope)?;
+    let report = RelayApi::new(&format!("{relay}/s/{}", session.code), &session.key)?
+        .report()
+        .map_err(|error| {
+            if error.contains("unknown session") {
+                format!(
+                    "the relay at {relay} holds no game for session {}: present the project first",
+                    session.code
+                )
+            } else {
+                error
+            }
+        })?;
+    if report.is_empty() {
+        return Err(format!(
+            "the relay holds no answers for session {} (it forgets a game 12 hours after its last activity)",
+            session.code
+        ));
+    }
+    let folder = match output {
+        Some(output) => output.to_path_buf(),
+        None => results_folder_of(&scope),
+    };
+    report.write(&folder)
+}
+
+/// Where the project (or script folder) `scope` keeps its results: the
+/// results folder in its output folder.
+fn results_folder_of(scope: &std::path::Path) -> std::path::PathBuf {
+    let output = gaanim_project::resolve_project(scope)
+        .ok()
+        .map(|project| {
+            if project.manifest.output_dir.is_absolute() {
+                project.manifest.output_dir.clone()
+            } else {
+                project.root.join(&project.manifest.output_dir)
+            }
+        })
+        .unwrap_or_else(|| scope.join("exports"));
+    output.join(RESULTS_FOLDER)
 }
 
 // ---------------------------------------------------------------------------
@@ -1172,7 +1395,26 @@ impl AudiencePolls {
                 .unwrap_or_default(),
             confirm_reset: self.reset_armed(),
             gate: self.gate.clone(),
+            results: client.results.as_ref().map(|root| {
+                let saved = client
+                    .saved
+                    .lock()
+                    .map(|saved| saved.clone())
+                    .unwrap_or_default();
+                crate::presenter::ResultsView {
+                    folder: saved.folder.unwrap_or_else(|| root.clone()),
+                    saved: saved.at.map(|at| at.elapsed()),
+                    error: saved.error,
+                }
+            }),
         })
+    }
+
+    /// Save the game's results now.
+    pub(crate) fn save_results(&self) {
+        if let Some(client) = &self.client {
+            client.send(Command::SaveResults);
+        }
     }
 
     /// Remove a player and block its phone.
@@ -1372,13 +1614,22 @@ mod tests {
         let relay = std::env::var("GAANIM_TEST_RELAY").expect("set GAANIM_TEST_RELAY");
         let code = "TSTR2A";
         let session_url = format!("{relay}/s/{code}");
-        let mut client = PollClient::start(PollSessionInfo {
-            relay: Some(relay),
-            code: code.into(),
-            lobby: true,
-            game_segment: None,
-            teams: None,
-        })
+        let kept = std::env::temp_dir().join(format!("gaanim-kept-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&kept);
+        let mut client = PollClient::start(
+            PollSessionInfo {
+                relay: Some(relay),
+                code: code.into(),
+                lobby: true,
+                game_segment: None,
+                teams: None,
+                ask: Some(gaanim_timeline::timeline::AskInfo {
+                    label: "Código".into(),
+                    required: false,
+                }),
+            },
+            Some(kept.clone()),
+        )
         .unwrap();
         let phone = https_agent().unwrap();
         let post = |path: &str, body: serde_json::Value| {
@@ -1502,6 +1753,28 @@ mod tests {
         assert_eq!(results.leaderboard[1], (Arc::from("Beto"), 0));
         wait_for(&client, |_| vote("q1-test", 'a', 1).is_err());
 
+        // The game's results are kept, with what joining asked.
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let players = loop {
+            let players = std::fs::read_dir(&kept)
+                .ok()
+                .and_then(|mut games| games.next())
+                .and_then(|game| {
+                    std::fs::read_to_string(game.ok()?.path().join("jugadores.csv")).ok()
+                });
+            if let Some(players) = players.filter(|players| players.contains("4 ✓")) {
+                break players;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "no results were kept in {}",
+                kept.display()
+            );
+            std::thread::sleep(Duration::from_millis(200));
+        };
+        assert!(players.contains("Puesto,Apodo,Código,"), "{players}");
+        assert!(players.contains("1,Ana,"), "{players}");
+
         // Coming back to the first poll keeps its votes.
         client.show(Some(&first));
         let results = wait_for(&client, |_| current()["id"] == "p0-test");
@@ -1525,5 +1798,6 @@ mod tests {
         assert_eq!(current()["lobby"], true);
         client.show(None);
         wait_for(&client, |_| current()["open"] == false);
+        let _ = std::fs::remove_dir_all(&kept);
     }
 }

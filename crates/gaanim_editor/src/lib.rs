@@ -20,9 +20,11 @@ pub mod narration;
 pub mod overlays;
 pub mod platform;
 #[cfg(not(target_arch = "wasm32"))]
+mod poll_report;
+#[cfg(not(target_arch = "wasm32"))]
 mod polls;
 #[cfg(not(target_arch = "wasm32"))]
-pub use polls::{relay_version, reset_relay_session};
+pub use polls::{relay_version, reset_relay_session, save_relay_results};
 
 /// Built for the web player: no native windows, file system or FFmpeg, so
 /// pinning, exporting and the separate Presenter View window are left out.

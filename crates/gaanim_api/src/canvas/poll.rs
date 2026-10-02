@@ -32,6 +32,8 @@ use super::visualization::{Parameter, parameter_in};
 
 /// Most teams a game has: their buttons must fit on a phone.
 pub const MAX_TEAMS: usize = 6;
+/// Longest label of what a roster asks, as the relay accepts it.
+pub const MAX_ASK: usize = 40;
 /// Colors teams get when the scene gives none, in order.
 pub const TEAM_COLORS: [&str; MAX_TEAMS] = [
     "#ff4f8b", "#2fb8ff", "#ff9f1c", "#2ed47a", "#9b5de5", "#00c2c7",
@@ -415,6 +417,30 @@ impl SceneModel {
             state: self.state.clone(),
             info,
         })
+    }
+
+    /// Ask each player for one more thing when joining, such as a student
+    /// code or a full name, besides the nickname. Only the saved results
+    /// show it, never the screen. A scene asks one thing.
+    pub fn roster(&mut self, ask: String, required: bool) -> Result<(), PollError> {
+        let label = ask.trim().to_string();
+        if label.is_empty() || label.chars().count() > MAX_ASK {
+            return Err(PollError::Invalid(format!(
+                "a roster asks for something of 1 to {MAX_ASK} characters, got {label:?}"
+            )));
+        }
+        let info = gaanim_timeline::timeline::AskInfo { label, required };
+        let mut state = self.state.lock().expect("canvas state poisoned");
+        if state.poll_session.is_none() {
+            return Err(PollError::NoSession);
+        }
+        if state.poll_ask.as_ref().is_some_and(|asked| *asked != info) {
+            return Err(PollError::Invalid(
+                "the scene already asks for something else; a roster asks one thing".into(),
+            ));
+        }
+        state.poll_ask = Some(info);
+        Ok(())
     }
 
     /// The made-up audience of [`Self::rehearsal`].

@@ -164,7 +164,7 @@ describe("pages", () => {
   });
 
   test("health reports the API version", async () => {
-    assert.deepEqual(await (await fetch(`${base}/health`)).json(), { relay: "gaanim", version: 11 });
+    assert.deepEqual(await (await fetch(`${base}/health`)).json(), { relay: "gaanim", version: 12 });
   });
 });
 
@@ -740,5 +740,81 @@ describe("limits", () => {
     assert.equal((await full.json()).error, "the game is full");
     // A player already in may still rename.
     assert.equal((await joinGame(code, hex(0), "First")).status, 200);
+  });
+});
+
+describe("report", () => {
+  test("joining may also ask for a student code, which only the report shows", async () => {
+    const code = newCode();
+    const host = presenter(code);
+    assert.equal((await host.post("ask", { label: "Código de alumno" })).status, 200);
+    like(await phone(code, voter("a")).current(), { ask: { label: "Código de alumno", required: true } });
+    const missing = await joinGame(code, voter("a"), "Ana");
+    assert.equal(missing.status, 400);
+    assert.equal((await missing.json()).error, "missing extra");
+    assert.equal((await joinGame(code, voter("a"), "Ana", { extra: "<script>" })).status, 400);
+    const joined = await joinGame(code, voter("a"), "Ana", { extra: " 2026-0042 " });
+    assert.equal(joined.status, 200);
+    assert.equal((await joined.json()).player.extra, "2026-0042");
+    // Joining again keeps it without asking.
+    assert.equal((await joinGame(code, voter("a"), "Anita")).status, 200);
+    // The screen never gets it.
+    const results = await (await host.results()).json();
+    assert.ok(!JSON.stringify(results).includes("2026-0042"));
+    const report = await (await fetch(`${base}/s/${code}/report`, {
+      headers: { authorization: `Bearer ${key("ab")}` },
+    })).json();
+    like(report.players[0], { name: "Anita", extra: "2026-0042" });
+    assert.deepEqual(report.ask, { label: "Código de alumno", required: true });
+    // Optional, then no more asking.
+    await host.post("ask", { label: "Correo", required: false });
+    assert.equal((await joinGame(code, voter("b"), "Beto")).status, 200);
+    await host.post("ask", { label: "" });
+    assert.equal((await phone(code, voter("c")).current()).ask, undefined);
+    assert.equal((await host.post("ask", { label: "x".repeat(41) })).status, 400);
+  });
+
+  test("the report has every question in order and every answer of every player", async () => {
+    const code = newCode();
+    const host = presenter(code);
+    const report = async () => (await fetch(`${base}/s/${code}/report`, {
+      headers: { authorization: `Bearer ${key("ab")}` },
+    })).json();
+    await host.open("p", "¿Té o café?", ["Té", "Café"]);
+    await phone(code, voter("a")).vote("p", 1);
+    await phone(code, voter("e")).vote("p", 0);           // never joins: anonymous
+    await sleep(5);
+    await host.quiz("q", "¿2 + 2?", ["3", "4"], { correct: 1, time: 30 });
+    await joinGame(code, voter("a"), "Ana");
+    await joinGame(code, voter("b"), "Beto");
+    await phone(code, voter("a")).vote("q", 1);
+    await phone(code, voter("b")).vote("q", 0);
+    await host.post("reveal", { id: "q" });
+
+    const game = await report();
+    like(game, { relay: "gaanim", version: 12, ask: null, teams: null });
+    assert.ok(game.started > 0 && game.game);
+    assert.deepEqual(game.polls.map((poll) => poll.id), ["p", "q"]);
+    like(game.polls[0], { question: "¿Té o café?", options: ["Té", "Café"], correct: null,
+                          counts: [1, 1], respondents: 2 });
+    like(game.polls[1], { correct: [1], time: 30, points: 1000, revealed: true, counts: [1, 1] });
+    const [ana, beto] = game.players;
+    like(ana, { rank: 1, name: "Ana", correct: 1, answered: 1 });
+    assert.deepEqual(ana.answers.p, { options: [1] });
+    like(ana.answers.q, { options: [1], right: true });
+    assert.ok(ana.answers.q.points > 0 && ana.answers.q.elapsed >= 0);
+    like(beto, { rank: 2, score: 0 });
+    like(beto.answers.q, { options: [0], points: 0, right: false });
+    assert.equal(beto.answers.p, undefined);
+    // Only the presenter reads it.
+    const intruder = await fetch(`${base}/s/${code}/report`, {
+      headers: { authorization: `Bearer ${key("cd")}` },
+    });
+    assert.equal(intruder.status, 403);
+    // A new game starts a new report.
+    await host.post("reset");
+    const fresh = await report();
+    assert.notEqual(fresh.game, game.game);
+    assert.deepEqual([fresh.polls, fresh.players], [[], []]);
   });
 });

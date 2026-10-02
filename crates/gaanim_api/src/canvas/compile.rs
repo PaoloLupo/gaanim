@@ -2721,7 +2721,17 @@ impl SceneModel {
                 },
             )
             .collect();
-        let (polls, poll_session, poll_lobby, lobby_at, stop_gates, live_zones, rehearsal, teams) = {
+        let (
+            polls,
+            poll_session,
+            poll_lobby,
+            lobby_at,
+            stop_gates,
+            live_zones,
+            rehearsal,
+            teams,
+            ask,
+        ) = {
             let state = self.state.lock().expect("canvas state poisoned");
             (
                 state.polls.clone(),
@@ -2732,6 +2742,7 @@ impl SceneModel {
                 state.live_zones.clone(),
                 state.rehearsal.clone(),
                 state.poll_teams.clone(),
+                state.poll_ask.clone(),
             )
         };
         let lobby_segment = lobby_at.map(|(segment, _)| segment);
@@ -2853,6 +2864,7 @@ impl SceneModel {
                 lobby: poll_lobby,
                 game_segment,
                 teams,
+                ask,
             }),
         );
         // Always set, so a reload without zones clears the previous ones.
@@ -2877,7 +2889,10 @@ impl SceneModel {
                 if let Some(names) = zone.names.as_mut() {
                     // Shape the glyphs now, so bundles draw names without fonts.
                     let body = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
-                    let family = names.font.clone().unwrap_or_else(|| body.font_family.clone());
+                    let family = names
+                        .font
+                        .clone()
+                        .unwrap_or_else(|| body.font_family.clone());
                     names.glyphs = gaanim_animation::polls::atlas_characters()
                         .filter_map(|ch| {
                             let (path, advance) = gaanim_animation::polls::shape_glyph(
@@ -10873,9 +10888,9 @@ pub(crate) fn reveal_groups(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gaanim_animation::rehearsal::Lean;
     use crate::canvas::{Anchor, DrawableHandle, TextAnchor};
     use bevy::ecs::world::CommandQueue;
+    use gaanim_animation::rehearsal::Lean;
     use gaanim_core::peniko::Brush;
     use gaanim_math::SpatialTransform;
     use gaanim_scene::{LocalBounds, TextBaseline};
@@ -12556,7 +12571,15 @@ mod tests {
         canvas.stop(None).unwrap();
         canvas.segment("Pregunta", None).unwrap();
         let quiz = canvas
-            .quiz("¿2 + 2?", ["3", "4"], vec![1], 20, 1000, Lean::Right(1.0), crate::canvas::PollStyle::default())
+            .quiz(
+                "¿2 + 2?",
+                ["3", "4"],
+                vec![1],
+                20,
+                1000,
+                Lean::Right(1.0),
+                crate::canvas::PollStyle::default(),
+            )
             .unwrap();
         let right = quiz.votes(1).unwrap();
         canvas.wait(4.0);
@@ -12618,7 +12641,15 @@ mod tests {
             .teams(vec!["Rojo".into(), "Azul".into()], None, false)
             .unwrap();
         let quiz = canvas
-            .quiz("¿2 + 2?", ["3", "4", "5"], vec![1], 20, 1000, Lean::Auto, crate::canvas::PollStyle::default())
+            .quiz(
+                "¿2 + 2?",
+                ["3", "4", "5"],
+                vec![1],
+                20,
+                1000,
+                Lean::Auto,
+                crate::canvas::PollStyle::default(),
+            )
             .unwrap();
         let (red, blue, players, leader) = (
             teams.score(0).unwrap(),
@@ -15713,7 +15744,14 @@ mod tests {
         canvas.wait(1.0);
         canvas.segment("Vote", None).unwrap();
         canvas.wait(0.5);
-        let whole = canvas.poll("Whole?", ["A", "B"], Lean::Weights(vec![1.0, 0.0]), crate::canvas::PollStyle::default()).unwrap();
+        let whole = canvas
+            .poll(
+                "Whole?",
+                ["A", "B"],
+                Lean::Weights(vec![1.0, 0.0]),
+                crate::canvas::PollStyle::default(),
+            )
+            .unwrap();
         let bar = whole
             .bar(
                 0,
@@ -15728,7 +15766,14 @@ mod tests {
             .unwrap();
         let share = whole.share(0).unwrap();
         canvas.wait(2.0);
-        let early = canvas.poll("Early?", ["X", "Y", "Z"], Lean::Auto, crate::canvas::PollStyle::default()).unwrap();
+        let early = canvas
+            .poll(
+                "Early?",
+                ["X", "Y", "Z"],
+                Lean::Auto,
+                crate::canvas::PollStyle::default(),
+            )
+            .unwrap();
         canvas.wait(1.0);
         early.close().unwrap();
         canvas.wait(0.5);
@@ -15795,7 +15840,15 @@ mod tests {
         canvas.wait(1.0);
         canvas.segment("Quiz", None).unwrap();
         let quiz = canvas
-            .quiz("¿2 + 2?", ["3", "4"], vec![1], 20, 1000, Lean::Auto, crate::canvas::PollStyle::default())
+            .quiz(
+                "¿2 + 2?",
+                ["3", "4"],
+                vec![1],
+                20,
+                1000,
+                Lean::Auto,
+                crate::canvas::PollStyle::default(),
+            )
             .unwrap();
         canvas.wait(0.5);
         let before = canvas.stop_count();

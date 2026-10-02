@@ -86,6 +86,20 @@
               <span aria-hidden="true">🎲</span>
             </button>
           </div>
+          <!-- One more thing the presentation asks, such as a student code. -->
+          <label class="extra-field" id="extra-field" hidden>
+            <span id="extra-label"></span>
+            <input
+              id="extra"
+              class="name-input"
+              name="extra"
+              maxlength="60"
+              autocomplete="off"
+              spellcheck="false"
+              enterkeyhint="go"
+              aria-describedby="name-error"
+            />
+          </label>
           <button class="primary" id="join-button" type="submit" data-t="gameButton">Jugar</button>
           <p class="error" id="name-error" role="alert"></p>
         </form>

@@ -271,6 +271,7 @@ gaanim relay init [CARPETA] [--force] # escribe el relay (por defecto ./gaanim-r
 gaanim relay use https://…workers.dev # lo guarda para todas tus presentaciones
 gaanim relay forget                   # olvida el relay guardado
 gaanim relay reset [RUTA]             # partida nueva en la sesión del proyecto de RUTA
+gaanim relay results [RUTA] [--output CARPETA]  # guarda los resultados de la partida
 ```
 
 El orden de prioridad es `GAANIM_POLL_RELAY`, luego `[polls] relay` del
@@ -280,6 +281,14 @@ empezar por `https://` (o `http://` para probar con `npx wrangler dev`).
 `gaanim relay reset` empieza una partida nueva, como *New game* en la vista
 del presentador: borra votos, respuestas y jugadores de la sesión del proyecto
 al que pertenece `RUTA`, un script o una carpeta (por defecto la actual).
+
+`gaanim relay results` descarga la partida que el relay guarda para ese
+proyecto y escribe sus planillas (`jugadores.csv`, `respuestas.csv` y
+`preguntas.csv`) en `resultados/` dentro de la carpeta de salida del
+proyecto, o en `--output`. Sirve si la presentación se cerró antes de
+guardarlas; el relay olvida una partida doce horas después de su última
+actividad. Ver
+#link("/publico/presentar/#resultados")[Guardar los resultados].
 
 = `gaanim --diff`
 
