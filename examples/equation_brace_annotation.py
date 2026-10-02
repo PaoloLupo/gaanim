@@ -21,11 +21,13 @@ scene.wait(0.4)
 
 # El énfasis se limita a los glifos del tag ``mass``.
 scene.play([formula["mass"].animate.highlight().duration(0.65)])
+scene.play([formula["mass"].animate.brace("masa").duration(0.7)])
 scene.wait(0.5)
 
 scene.play([caption.animate.fade_out().duration(0.2)])
 caption = scene.text("La línea sigue al término anotado").fill(GRAY).move_to(0, -2.75, anchor=Anchor.CENTER)
 scene.play([caption.animate.fade_in()])
+scene.play([formula["light_speed"].animate.annotate("velocidad de la luz", offset=(1.6, 0.9)).duration(0.7)])
 
 # La onda conserva la selección semántica aunque cambie el layout del texto.
 scene.play([formula["light_speed"].animate.wave().duration(0.65)])
@@ -33,6 +35,6 @@ scene.wait(1.0)
 
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")
 if snapshot_dir:
-    scene.snapshots(snapshot_dir, [0.0, 1.4, 2.2, 4.0, 4.5])
+    scene.snapshots(snapshot_dir, [0.0, 1.4, 2.4, 3.2, 4.4, 5.2, 6.4])
 
 scene.render()

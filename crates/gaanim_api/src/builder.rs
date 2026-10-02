@@ -2387,8 +2387,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 kurbo::Point::new(bounds.max.x, y),
                 -side * 0.10,
             )
-            .no_fill()
-            .stroke(color, 0.02)
+            .fill(color)
             .spawn();
         let label_ref = self.text(&label, "Inter", 0.28);
         if let Some(state) = self.states.get_mut(label_ref.id) {

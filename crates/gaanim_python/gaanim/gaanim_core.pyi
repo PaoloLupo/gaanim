@@ -6703,8 +6703,14 @@ class Geometry:
         a brace drawn left to right. A negative ``height`` flips it. Equal
         endpoints or a zero height raise ``ValueError``.
 
+        It is drawn like a typeset brace: straight arms, curls as large as its
+        depth and a point, thinning toward its ends (arms 16% of ``height``
+        thick, at least 0.02). It is a filled shape with no stroke, so
+        ``fill`` colors it; a theme paints it as the ``glyph`` family, in the
+        text color.
+
         Example:
-            under = scene.geometry.brace(-2, -1, 2, -1, 0.3)
+            under = scene.geometry.brace(-2, -1, 2, -1, 0.3).fill(GOLD)
         """
         ...
     def checkmark(self, size: float) -> Drawable:

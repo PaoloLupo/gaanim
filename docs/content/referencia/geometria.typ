@@ -377,13 +377,13 @@ ring = scene.geometry.annulus(0.75, 0.425).fill(BLUE).stroke(WHITE, 0.025)
 #api-entry(
   name: "Geometry.brace",
   kind: "factory",
-  desc: [Llave entre `(x1, y1)` y `(x2, y2)` con profundidad `height` distinta de cero; el signo elige el lado. Para una llave bajo una parte de un texto, usa `selection.animate.brace(...)` (ver #link("/referencia/text/")[Texto]).],
+  desc: [Llave entre `(x1, y1)` y `(x2, y2)` con profundidad `height` distinta de cero; el signo elige el lado. Se dibuja como una llave tipográfica: brazos rectos, rizos del tamaño de su profundidad y una punta, con un grosor que se afina hacia los extremos (16 % de `height` en los brazos, al menos 0.02). Es una figura rellena y sin trazo: `fill` le da color y un tema la pinta como la familia `glyph`, con el color del texto. Para una llave bajo una parte de un texto, usa `selection.animate.brace(...)` (ver #link("/referencia/text/")[Texto]).],
 )[
 ```python
 # show-code: true
 from gaanim import WHITE, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-brace = scene.geometry.brace(-1, -0.25, 1, -0.25, 0.3).stroke(WHITE, 0.04).no_fill()
+brace = scene.geometry.brace(-1, -0.25, 1, -0.25, 0.3).fill(WHITE)
 label = scene.text("intervalo").move_to(0, -0.69)
 scene.play([brace.animate.create().duration(0.7), label.animate.fade_in().duration(0.4)])
 # output: preview.webp

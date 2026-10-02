@@ -440,6 +440,13 @@ impl CanvasTheme {
             },
         );
         self.styles.insert(
+            "glyph".into(),
+            ThemeStyle {
+                fill: Some(ThemePaint::Named("foreground".into())),
+                ..Default::default()
+            },
+        );
+        self.styles.insert(
             "plot".into(),
             ThemeStyle {
                 stroke: Some(ThemeStrokeStyle::new("chart", 0.03)),
@@ -957,7 +964,6 @@ fn spawn_family(kind: &SpawnKind) -> &'static str {
         | SpawnKind::SizedArrow { .. }
         | SpawnKind::DashedLine { .. }
         | SpawnKind::DoubleArrow { .. }
-        | SpawnKind::Brace { .. }
         | SpawnKind::Arc { .. }
         | SpawnKind::ProgressArc { .. }
         | SpawnKind::CurvedArrow { .. }
@@ -971,6 +977,8 @@ fn spawn_family(kind: &SpawnKind) -> &'static str {
         | SpawnKind::TrackingLine
         | SpawnKind::SurroundingRect => "line",
         SpawnKind::Text(_) | SpawnKind::Typst { .. } | SpawnKind::ReactiveReadout { .. } => "text",
+        // Filled marks drawn like type.
+        SpawnKind::Brace { .. } => "glyph",
         SpawnKind::Axes { .. } | SpawnKind::Axes3D { .. } => "axes",
         SpawnKind::ReactivePlot { .. }
         | SpawnKind::ReactiveParametric2D { .. }

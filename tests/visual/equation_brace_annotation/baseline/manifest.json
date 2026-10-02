@@ -14,19 +14,29 @@
       "file": "seek_0001_t_1_400000.png"
     },
     {
-      "id": "seek_0002_t_2_200000",
-      "time_seconds": 2.2,
-      "file": "seek_0002_t_2_200000.png"
+      "id": "seek_0002_t_2_400000",
+      "time_seconds": 2.4,
+      "file": "seek_0002_t_2_400000.png"
     },
     {
-      "id": "seek_0003_t_4_000000",
-      "time_seconds": 4.0,
-      "file": "seek_0003_t_4_000000.png"
+      "id": "seek_0003_t_3_200000",
+      "time_seconds": 3.2,
+      "file": "seek_0003_t_3_200000.png"
     },
     {
-      "id": "seek_0004_t_4_500000",
-      "time_seconds": 4.5,
-      "file": "seek_0004_t_4_500000.png"
+      "id": "seek_0004_t_4_400000",
+      "time_seconds": 4.4,
+      "file": "seek_0004_t_4_400000.png"
+    },
+    {
+      "id": "seek_0005_t_5_200000",
+      "time_seconds": 5.2,
+      "file": "seek_0005_t_5_200000.png"
+    },
+    {
+      "id": "seek_0006_t_6_400000",
+      "time_seconds": 6.4,
+      "file": "seek_0006_t_6_400000.png"
     }
   ]
 }

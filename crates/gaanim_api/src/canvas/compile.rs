@@ -3765,14 +3765,13 @@ impl SceneModel {
                                 Point::new(bounds.max.x, y),
                                 -side * 0.10,
                             )
-                            .no_fill()
-                            .stroke(color, 0.02)
+                            .fill(color)
                             .spawn();
                         let style = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
                         let label_ref = builder.text(label, &style.font_family, style.size);
                         if let Some(state) = builder.states.get_mut(label_ref.id) {
                             state.transform.translation =
-                                DVec3::new(bounds.center().x, y + side * 25.0, 0.0);
+                                DVec3::new(bounds.center().x, y + side * 0.25, 0.0);
                             builder
                                 .commands
                                 .entity(state.entity)

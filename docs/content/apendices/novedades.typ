@@ -80,6 +80,9 @@ cambia*: lee «Al actualizar».
 - `gaanim check` dice el segmento, el instante y el texto de una caja que se
   sale de su contenedor.
 - `gaanim --diff --height <PX>` captura a otra resolución.
+- Las llaves (`geometry.brace` y `selection.animate.brace`) se dibujan como
+  una llave tipográfica: brazos rectos, rizos del tamaño de su profundidad,
+  una punta y un grosor que se afina hacia los extremos.
 
 == Al actualizar
 
@@ -91,6 +94,9 @@ cambia*: lee «Al actualizar».
   contenido aunque tenga `basis`.
 - `dashed_line(x1=…, y1=…)` con palabras clave deja de funcionar: pasa las
   coordenadas por posición.
+- Una llave es una figura rellena sin trazo: coloréala con `fill`. Un
+  `stroke` dibuja su contorno, y un tema la pinta como la familia `glyph`, no
+  como `line`.
 - Reemplaza todos los archivos de la carpeta de Gaanim: el soporte de Python
   cambió su interfaz.
 
