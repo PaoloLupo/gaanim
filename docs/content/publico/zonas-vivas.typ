@@ -3,7 +3,7 @@
 #show: docs-chapter.with(
   title: "Zonas vivas",
   description: "El público entra a la escena como sus personajes y tú decides cómo se mueven, con funciones normales de Python",
-  route: "/guias/zonas-vivas/",
+  route: "/publico/zonas-vivas/",
 )
 
 En esta guía aprenderás a poner al público dentro de tu escena: mientras
@@ -35,7 +35,7 @@ función normal de Python que recibe al jugador `p` y devuelve
 `pose(x, y, ...)`: dónde están sus pies y cómo se ve. Gaanim la compila al
 crear la escena, así que un `.gaanim` exportado la ejecuta sin Python. Fuera
 de una presentación en vivo, la zona reproduce el
-#link("/guias/presentaciones/#ensayo")[ensayo], el público inventado de la
+#link("/publico/anatomia/#ensayo")[ensayo], el público inventado de la
 escena.
 
 = El jugador
@@ -49,7 +49,7 @@ escena.
   primero), `p.previous_rank`, `p.rank_since`, `p.previous_score` y
   `p.score_since`, para animar los cambios de puesto.
 - `p.team`, `p.team_index`, `p.team_count`, `p.team_score` y `p.team_rank`
-  en un juego con #link("/guias/presentaciones/#equipos")[equipos].
+  en un juego con #link("/publico/anatomia/#equipos")[equipos].
 - `p.answer` (la respuesta que eligió en la pregunta abierta, o la última;
   -1 si ninguna), `p.answer_mask` (todas las que eligió, un bit cada una),
   `p.answer_time`, `p.answer_points`, y en el juego `p.answers`

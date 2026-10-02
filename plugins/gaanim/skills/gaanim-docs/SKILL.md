@@ -34,6 +34,8 @@ in the Gaanim application) rather than guessing the API.
    - `tutorial/*.typ`: one project built step by step; idioms in context.
    - `guias/*.typ`: how to do a task (layout, motion, presentations, projects,
      visual comparison).
+   - `publico/*.typ`: audience polls, quizzes, teams, live zones and ready
+     game styles to adapt (`publico/estilos.typ`).
    - `ejemplos/*.typ` and `ejemplos/*.py`: complete runnable scenes.
    - `apendices/*.typ`: release notes and migrations.
 2. Read the relevant files directly from `root`, or `search` for a name.

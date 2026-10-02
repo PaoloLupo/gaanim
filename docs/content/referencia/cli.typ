@@ -262,7 +262,7 @@ un paquete, cómo se reproducen los callbacks y sus límites.
 
 Configura el relay que lleva los votos de las encuestas (`scene.poll`) a la
 presentación. No necesita Python. La guía
-#link("/guias/presentaciones/#encuestas-a-la-audiencia")[Encuestas a la audiencia]
+#link("/publico/primera-encuesta/")[Tu primera encuesta]
 explica el despliegue.
 
 ```bash

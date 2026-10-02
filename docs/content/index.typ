@@ -29,17 +29,25 @@
 #include "guias/reactividad.typ"
 #include "guias/camara-y-3d.typ"
 #include "guias/presentaciones.typ"
-#include "guias/zonas-vivas.typ"
 #include "guias/proyectos.typ"
 #include "guias/compartir.typ"
 #include "guias/capturas-y-comparacion.typ"
 
-#book-part("IV", "Ejemplos", description: "Escenas completas listas para copiar y ejecutar")
+#book-part("IV", "Público en vivo", description: "Encuestas, cuestionarios, equipos y personajes del público: la API te da los datos y tú diseñas el juego")
+#include "publico/index.typ"
+#include "publico/primera-encuesta.typ"
+#include "publico/anatomia.typ"
+#include "publico/preguntas.typ"
+#include "publico/zonas-vivas.typ"
+#include "publico/estilos.typ"
+#include "publico/presentar.typ"
+
+#book-part("V", "Ejemplos", description: "Escenas completas listas para copiar y ejecutar")
 #include "ejemplos/index.typ"
 #include "ejemplos/basicos.typ"
 #include "ejemplos/avanzados.typ"
 
-#book-part("V", "Referencia", description: "Firmas, parámetros y contratos de la superficie pública")
+#book-part("VI", "Referencia", description: "Firmas, parámetros y contratos de la superficie pública")
 #include "referencia/index.typ"
 #include "referencia/scene.typ"
 #include "referencia/drawable.typ"
@@ -53,12 +61,13 @@
 #include "referencia/assets.typ"
 #include "referencia/diapositivas.typ"
 #include "referencia/mecanica.typ"
+#include "referencia/publico.typ"
 #include "referencia/animations.typ"
 #include "referencia/themes.typ"
 #include "referencia/cli.typ"
 #include "referencia/gaanim-toml.typ"
 
-#book-part("VI", "Apéndices", description: "Novedades de cada versión, glosario y solución de problemas")
+#book-part("VII", "Apéndices", description: "Novedades de cada versión, glosario y solución de problemas")
 #include "apendices/novedades.typ"
 #include "apendices/glosario.typ"
 #include "apendices/solucion-de-problemas.typ"

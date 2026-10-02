@@ -91,7 +91,7 @@ relay = "https://gaanim-relay.<tú>.workers.dev"
 Relay al que apuntan los códigos QR de las encuestas (`scene.poll`) de este
 proyecto, en lugar del guardado con `gaanim relay use`. `GAANIM_POLL_RELAY` tiene prioridad
 sobre ambos. Ver
-#link("/guias/presentaciones/#encuestas-a-la-audiencia")[Encuestas a la audiencia].
+#link("/publico/primera-encuesta/")[Tu primera encuesta].
 
 == Cómo se encuentra el proyecto
 
