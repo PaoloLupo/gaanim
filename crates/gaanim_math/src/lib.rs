@@ -6,9 +6,11 @@ pub mod easing;
 pub mod matching;
 pub mod particles;
 pub mod path;
+pub mod path_modifiers;
 pub mod prelude;
 pub mod random;
 pub mod spatial;
+pub mod time_warp;
 
 pub use arrow::ArrowShape;
 pub use bounds::Bounds3D;
@@ -26,3 +28,4 @@ pub use path::{
 };
 pub use random::{Noise, SeededRng};
 pub use spatial::{GlobalSpatialTransform, SpatialTransform};
+pub use time_warp::{TimeMap, TimeStage, TimeWarp, TimeWarpSpec};

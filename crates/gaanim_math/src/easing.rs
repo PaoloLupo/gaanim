@@ -175,6 +175,16 @@ pub enum RateFunc {
         frequency: f64,
         decay: f64,
     },
+    /// `inner` over a clip whose time a composition warp bends: the clip
+    /// plays over `played` (seconds from the play's start) what was
+    /// authored over `authored`, and `map` turns played seconds back into
+    /// authored ones. Built by the timeline for `speed_ramp`/`time_remap`.
+    Warp {
+        inner: Box<RateFunc>,
+        map: Arc<crate::TimeMap>,
+        played: (f64, f64),
+        authored: (f64, f64),
+    },
 }
 
 // Implement standard Debug since closures can't be debugged easily
@@ -260,6 +270,12 @@ impl std::fmt::Debug for RateFunc {
                 f,
                 "Settle({inner:?}, {motion}, {amplitude}, {frequency}, {decay})"
             ),
+            Self::Warp {
+                inner,
+                map,
+                played,
+                authored,
+            } => write!(f, "Warp({inner:?}, {map:?}, {played:?}, {authored:?})"),
         }
     }
 }
@@ -400,6 +416,19 @@ impl serde::Serialize for RateFunc {
                 state.serialize_field("decay", decay)?;
                 state.end()
             }
+            Self::Warp {
+                inner,
+                map,
+                played,
+                authored,
+            } => {
+                let mut state = serializer.serialize_struct("Warp", 4)?;
+                state.serialize_field("warp_inner", inner)?;
+                state.serialize_field("map", &**map)?;
+                state.serialize_field("played", played)?;
+                state.serialize_field("authored", authored)?;
+                state.end()
+            }
         }
     }
 }
@@ -414,6 +443,12 @@ impl<'de> serde::Deserialize<'de> for RateFunc {
         #[derive(serde::Deserialize)]
         #[serde(untagged)]
         enum RawRateFunc {
+            Warp {
+                warp_inner: Box<RateFunc>,
+                map: crate::TimeMap,
+                played: (f64, f64),
+                authored: (f64, f64),
+            },
             Settle {
                 settle_inner: Box<RateFunc>,
                 motion: f64,
@@ -553,6 +588,17 @@ impl<'de> serde::Deserialize<'de> for RateFunc {
                 count,
                 gap,
                 mode,
+            }),
+            RawRateFunc::Warp {
+                warp_inner,
+                map,
+                played,
+                authored,
+            } => Ok(Self::Warp {
+                inner: warp_inner,
+                map: Arc::new(map),
+                played,
+                authored,
             }),
         }
     }
@@ -794,6 +840,19 @@ impl RateFunc {
                 };
                 inner.evaluate(1.0) + wobble(tau) - residual
             }
+            Self::Warp {
+                inner,
+                map,
+                played,
+                authored,
+            } => {
+                let length = authored.1 - authored.0;
+                if length <= 0.0 {
+                    return inner.evaluate(t);
+                }
+                let at = map.authored(played.0 + t * (played.1 - played.0));
+                inner.evaluate(((at - authored.0) / length).clamp(0.0, 1.0))
+            }
         }
     }
 
@@ -880,6 +939,9 @@ impl RateFunc {
     /// Whether this rate function finishes where it started (an even number
     /// of ping-pong cycles), so the animated property returns to its start.
     pub fn ends_at_start(&self) -> bool {
+        if let Self::Warp { inner, .. } = self {
+            return inner.ends_at_start();
+        }
         matches!(
             self,
             Self::Repeat {

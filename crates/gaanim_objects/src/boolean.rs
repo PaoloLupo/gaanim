@@ -249,7 +249,7 @@ fn extend_with_flattened<F: FnOnce(&mut dyn FnMut(PathEl))>(
 
 /// Convert an i_overlay shape (Vec of contours) back into a `BezPath`.
 /// The first contour is the outer ring, the rest are holes.
-fn shapes_to_bezpath(shape: &[Vec<[f64; 2]>]) -> kurbo::BezPath {
+pub(crate) fn shapes_to_bezpath(shape: &[Vec<[f64; 2]>]) -> kurbo::BezPath {
     let mut path = kurbo::BezPath::new();
     for contour in shape {
         if contour.is_empty() {

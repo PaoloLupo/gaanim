@@ -336,6 +336,8 @@ pub struct Composition {
     default_duration: Option<f64>,
     default_rate: Option<RateFunc>,
     stretch: Option<f64>,
+    /// Speed ramp or time remap of the whole composition (TM-06).
+    time_warp: Option<gaanim_math::TimeWarpSpec>,
     /// Whole-composition repetitions and the gap between them, in seconds.
     repeat: Option<(u32, f64)>,
     /// Items placed after the children at label-relative or absolute positions.
@@ -514,6 +516,44 @@ struct ResolvedPlayItem {
     start: f64,
     path: Vec<usize>,
     duration: Option<f64>,
+    /// Inside a warped composition, where the leaf's authored seconds (from
+    /// its own start) play; `start` and `duration` are then played times.
+    map: Option<gaanim_math::TimeMap>,
+}
+
+impl ResolvedPlayItem {
+    fn shift(&mut self, offset: f64) {
+        self.start += offset;
+        if let Some(map) = &mut self.map {
+            map.push(gaanim_math::TimeStage::Shift(offset));
+        }
+    }
+
+    /// Bends the item's time with `warp`, which starts where its
+    /// composition does.
+    fn warp(&mut self, warp: &gaanim_math::TimeWarp) {
+        let start = self.start;
+        let map = self.map.get_or_insert_with(|| {
+            gaanim_math::TimeMap(vec![gaanim_math::TimeStage::Shift(start)])
+        });
+        map.push(gaanim_math::TimeStage::Warp(warp.clone()));
+        self.retime();
+    }
+
+    /// Played start and duration from the map.
+    fn retime(&mut self) {
+        let Some(map) = &self.map else {
+            return;
+        };
+        let authored = match &self.item {
+            PlayItem::Animation(anim) => anim.inner.duration.max(0.0),
+            _ => 0.0,
+        };
+        self.start = map.played(0.0);
+        self.duration = self
+            .duration
+            .map(|_| (map.played(authored) - self.start).max(0.0));
+    }
 }
 
 impl Composition {
@@ -524,6 +564,7 @@ impl Composition {
             default_duration: None,
             default_rate: None,
             stretch: None,
+            time_warp: None,
             repeat: None,
             inserts: Vec::new(),
         }
@@ -545,6 +586,7 @@ impl Composition {
             default_duration: None,
             default_rate: None,
             stretch: None,
+            time_warp: None,
             repeat: None,
             inserts: Vec::new(),
         })
@@ -642,6 +684,31 @@ impl Composition {
         Ok(self)
     }
 
+    /// Changes playback speed through the composition: `keys` are speeds
+    /// at fractions of its span, joined linearly, so `[(0.4, 0.15), (0.6,
+    /// 0.15)]` holds a slow motion in the middle. Its length becomes the
+    /// time the ramp takes; children keep their order and overlaps.
+    pub fn speed_ramp(mut self, keys: Vec<(f64, f64)>) -> Result<Self, PlayError> {
+        if self.contains_media() {
+            return Err(PlayError::WarpContainsMedia);
+        }
+        self.time_warp =
+            Some(gaanim_math::TimeWarpSpec::speed_ramp(keys).map_err(PlayError::InvalidTimeWarp)?);
+        Ok(self)
+    }
+
+    /// Runs the composition's time through `easing`: at a fraction `p` of
+    /// its span it shows what was authored at `easing(p)`. The span keeps
+    /// its length; the easing must not go back.
+    pub fn time_remap(mut self, easing: RateFunc) -> Result<Self, PlayError> {
+        if self.contains_media() {
+            return Err(PlayError::WarpContainsMedia);
+        }
+        self.time_warp =
+            Some(gaanim_math::TimeWarpSpec::remap(easing).map_err(PlayError::InvalidTimeWarp)?);
+        Ok(self)
+    }
+
     fn contains_media(&self) -> bool {
         let node = match &self.node {
             CompositionNode::Leaf(item) => !matches!(item.as_ref(), PlayItem::Animation(_)),
@@ -693,6 +760,7 @@ impl Composition {
                         start,
                         path: path.clone(),
                         duration: item_duration,
+                        map: None,
                     }],
                     labels: Vec::new(),
                 }
@@ -811,6 +879,25 @@ impl Composition {
             resolved.absorb(tree)?;
         }
 
+        if let Some(spec) = &self.time_warp {
+            if resolved
+                .items
+                .iter()
+                .any(|item| !matches!(item.item, PlayItem::Animation(_)))
+            {
+                return Err(PlayError::WarpContainsMedia);
+            }
+            let span = resolved.span();
+            if span > 0.0 {
+                let warp = spec.build(span);
+                for item in &mut resolved.items {
+                    item.warp(&warp);
+                }
+                for label in &mut resolved.labels {
+                    label.time = warp.played(label.time);
+                }
+            }
+        }
         if let Some(target_span) = self.stretch {
             if resolved
                 .items
@@ -827,6 +914,11 @@ impl Composition {
             } else {
                 let factor = target_span / current_span;
                 for item in &mut resolved.items {
+                    if let Some(map) = &mut item.map {
+                        map.push(gaanim_math::TimeStage::Scale(factor));
+                        item.retime();
+                        continue;
+                    }
                     item.start *= factor;
                     if let PlayItem::Animation(anim) = &mut item.item {
                         anim.inner.duration *= factor;
@@ -848,7 +940,7 @@ impl Composition {
                 let offset = cycle as f64 * (span + gap);
                 resolved.items.extend(first.iter().map(|item| {
                     let mut copy = item.clone();
-                    copy.start += offset;
+                    copy.shift(offset);
                     if let PlayItem::Animation(anim) = &copy.item {
                         copy.item = PlayItem::Animation(anim.replica());
                     }
@@ -1133,7 +1225,7 @@ struct Resolution {
 
 impl Resolution {
     fn shift(&mut self, offset: f64) {
-        self.items.iter_mut().for_each(|item| item.start += offset);
+        self.items.iter_mut().for_each(|item| item.shift(offset));
         self.labels
             .iter_mut()
             .for_each(|label| label.time += offset);
@@ -1189,6 +1281,7 @@ impl Composition {
             default_duration: None,
             default_rate: None,
             stretch: None,
+            time_warp: None,
             repeat: None,
             inserts: Vec::new(),
         })
@@ -1362,6 +1455,10 @@ pub enum PlayError {
     StretchContainsMedia,
     #[error("a zero-span composition can only be stretched to zero seconds")]
     CannotStretchZeroSpan,
+    #[error("speed_ramp() and time_remap() cannot contain Audio, Video, or Lottie leaves")]
+    WarpContainsMedia,
+    #[error("{0}")]
+    InvalidTimeWarp(String),
     #[error("label names must not be empty")]
     EmptyLabel,
     #[error(
@@ -1389,6 +1486,13 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
     }
     if let CustomProperties(animation) = &anim.inner.anim_type {
         return animation
+            .channels()
+            .iter()
+            .map(|channel| channel.timeline_channel().to_owned())
+            .collect();
+    }
+    if let Motion(motion) = &anim.inner.anim_type {
+        return motion
             .channels()
             .iter()
             .map(|channel| channel.timeline_channel().to_owned())
@@ -1500,7 +1604,7 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
         StrokeWidthTo { .. } => "stroke_width",
         Material3DTo { .. } => "material",
         MediaFrameTo { .. } => "media_frame",
-        SignalFloat { .. } => "signal",
+        SignalFloat { .. } | SignalKeyframes(_) => "signal",
         CameraPosition { .. }
         | CameraPositionSource { .. }
         | CameraFrame { .. }
@@ -5476,6 +5580,7 @@ impl SceneModel {
         self.audio_tracks.extend(anchored_sounds);
         let play_start = self.current_time();
         let mut builders = Vec::new();
+        let mut time_maps = Vec::new();
         let mut camera_captures = Vec::new();
         let max_duration = resolved_span(&resolved);
         let mut visual_duration: f64 = 0.0;
@@ -5489,9 +5594,19 @@ impl SceneModel {
                         camera_captures.push(id);
                     }
                     let mut builder = anim.into_builder();
-                    builder.delay += delay;
-                    visual_duration =
-                        visual_duration.max(builder.delay.max(0.0) + builder.duration.max(0.0));
+                    match resolved_item.map {
+                        Some(map) => {
+                            visual_duration = visual_duration
+                                .max(delay.max(0.0) + resolved_item.duration.unwrap_or(0.0));
+                            time_maps.push(Some(Arc::new(map)));
+                        }
+                        None => {
+                            builder.delay += delay;
+                            visual_duration = visual_duration
+                                .max(builder.delay.max(0.0) + builder.duration.max(0.0));
+                            time_maps.push(None);
+                        }
+                    }
                     builders.push(builder);
                 }
                 PlayItem::Audio(audio) => {
@@ -5556,6 +5671,9 @@ impl SceneModel {
         let mut guard = self.state.lock().expect("canvas state poisoned");
         for id in camera_captures {
             guard.active_mut().ops.push(Op::CaptureCameraState { id });
+        }
+        if time_maps.iter().any(Option::is_some) {
+            guard.active_mut().ops.push(Op::TimeMaps(time_maps));
         }
         if !advance {
             guard.active_mut().ops.push(Op::Launch(builders));
@@ -12442,6 +12560,69 @@ mod tests {
         assert_eq!(schedule.entries[0].duration, Some(1.5));
         assert_eq!(schedule.entries[1].start, 1.0);
         assert_eq!(schedule.entries[1].duration, Some(4.0));
+    }
+
+    #[test]
+    fn speed_ramps_and_remaps_place_children_at_their_played_times() {
+        let mut scene = SceneModel::new(320, 180);
+        let fades: Vec<Composition> = (0..2)
+            .map(|_| Composition::leaf(scene.circle(10.0).animate().fade_in().duration(1.0)))
+            .collect();
+        let slow = Composition::sequence(fades, 0.0)
+            .unwrap()
+            .speed_ramp(vec![(0.0, 0.5)])
+            .unwrap();
+        let schedule = slow.schedule(None).unwrap();
+        assert!((schedule.span - 4.0).abs() < 1e-9);
+        assert!((schedule.entries[1].start - 2.0).abs() < 1e-9);
+        assert!((schedule.entries[1].duration.unwrap() - 2.0).abs() < 1e-9);
+
+        // Nested: the ramp's played span is what the outer sequence steps by,
+        // and a stretch afterwards scales the played times.
+        let inner = Composition::sequence(
+            (0..2)
+                .map(|_| Composition::leaf(scene.circle(10.0).animate().fade_in()))
+                .collect(),
+            0.0,
+        )
+        .unwrap()
+        .speed_ramp(vec![(0.0, 2.0)])
+        .unwrap();
+        let after = Composition::leaf(scene.circle(10.0).animate().fade_in());
+        let outer = Composition::sequence(vec![inner, after], 0.0)
+            .unwrap()
+            .stretch(4.0)
+            .unwrap();
+        let schedule = outer.schedule(None).unwrap();
+        assert!((schedule.span - 4.0).abs() < 1e-9);
+        let starts: Vec<f64> = schedule.entries.iter().map(|entry| entry.start).collect();
+        assert!((starts[1] - 1.0).abs() < 1e-9 && (starts[2] - 2.0).abs() < 1e-9);
+
+        // A remap keeps the span and the order of its children.
+        let remapped = Composition::stagger(
+            (0..4)
+                .map(|_| Composition::leaf(scene.circle(10.0).animate().fade_in()))
+                .collect(),
+            0.5,
+        )
+        .unwrap()
+        .time_remap(RateFunc::EaseInOut(gaanim_math::EasingCurve::Cubic))
+        .unwrap();
+        let schedule = remapped.schedule(None).unwrap();
+        assert!((schedule.span - 2.5).abs() < 1e-9);
+        assert!(
+            schedule
+                .entries
+                .windows(2)
+                .all(|pair| pair[0].start < pair[1].start)
+        );
+
+        let bounce =
+            Composition::leaf(scene.circle(10.0).animate().fade_in()).time_remap(RateFunc::Back {
+                overshoot: 1.7,
+                mode: gaanim_math::EaseMode::InOut,
+            });
+        assert!(matches!(bounce, Err(PlayError::InvalidTimeWarp(_))));
     }
 }
 

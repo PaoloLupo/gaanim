@@ -207,6 +207,9 @@ pub enum AnimationType {
     TextMotion(crate::text_motion::TextMotion),
     /// Pure extension callback with explicitly owned property channels.
     CustomProperties(gaanim_animation::CustomAnimation),
+    /// Keyframes, a throw or an inertial glide, played from the target's
+    /// state when it starts (see [`gaanim_animation::motion`]).
+    Motion(gaanim_animation::motion::Motion),
     /// Several typed property targets evaluated concurrently.
     Properties(PropertyAnimation),
     /// Fill/opacity targets applied only to glyphs resolved by a text selection.
@@ -574,6 +577,8 @@ pub enum AnimationType {
     SignalFloat {
         to: f64,
     },
+    /// Move a float signal through several stops.
+    SignalKeyframes(gaanim_animation::motion::ScalarKeyframes),
     /// ShowPassingFlash progressively draws a sliding window of the path.
     ShowPassingFlash {
         time_width: f64,
@@ -796,6 +801,8 @@ impl AnimationType {
             | Self::Blink { .. }
             | Self::Broadcast { .. }
             | Self::TextMotion(_)
+            | Self::Motion(_)
+            | Self::SignalKeyframes(_)
             | Self::Wiggle => RateFunc::Linear,
             Self::Create { .. } | Self::DrawBorderThenFill { .. } => RateFunc::DoubleSmooth,
             Self::Indicate { .. }

@@ -142,6 +142,40 @@ impl PyComposition {
             .map_err(play_error)
     }
 
+    /// Playback speed through the composition: `{fraction: speed}` joined
+    /// linearly, or one speed for all of it.
+    fn speed_ramp(&self, speeds: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let wrong = || {
+            pyo3::exceptions::PyTypeError::new_err(
+                "speed_ramp() takes a speed or a dict {fraction: speed}",
+            )
+        };
+        let keys = if let Ok(speed) = speeds.extract::<f64>() {
+            vec![(0.0, speed)]
+        } else {
+            let dict = speeds.cast::<pyo3::types::PyDict>().map_err(|_| wrong())?;
+            dict.iter()
+                .map(|(at, speed)| Ok((at.extract::<f64>()?, speed.extract::<f64>()?)))
+                .collect::<PyResult<Vec<_>>>()
+                .map_err(|_| wrong())?
+        };
+        self.inner
+            .clone()
+            .speed_ramp(keys)
+            .map(|inner| Self { inner })
+            .map_err(play_error)
+    }
+
+    /// Shows at a fraction `p` of the composition what was authored at
+    /// `easing(p)`.
+    fn time_remap(&self, easing: &PyEasing) -> PyResult<Self> {
+        self.inner
+            .clone()
+            .time_remap(easing.inner.clone())
+            .map(|inner| Self { inner })
+            .map_err(play_error)
+    }
+
     #[pyo3(signature = (*, duration=None))]
     fn schedule(&self, duration: Option<f64>) -> PyResult<PySchedule> {
         self.inner

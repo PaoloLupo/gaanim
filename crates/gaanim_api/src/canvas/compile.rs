@@ -3487,7 +3487,56 @@ impl SceneModel {
                         builder.play(anim);
                     }
                 }
+                Op::TimeMaps(maps) => {
+                    builder.pending_time_maps = maps.clone();
+                }
+                Op::PathModifier {
+                    target,
+                    kind,
+                    params,
+                } => {
+                    use gaanim_animation::path_modifiers::{
+                        ModifierParam, PathModifier, PathModifiers,
+                    };
+                    if let Some(&target) = id_map.get(target) {
+                        let params = params
+                            .iter()
+                            .map(|id| {
+                                id_map
+                                    .get(id)
+                                    .and_then(|actual| builder.states.get(*actual))
+                                    .map_or(ModifierParam::Fixed(0.0), |state| {
+                                        ModifierParam::Signal(state.entity)
+                                    })
+                            })
+                            .collect();
+                        let modifier = PathModifier {
+                            kind: kind.clone(),
+                            params,
+                            from: builder.current_time,
+                        };
+                        // Every member with a path of its own is modified.
+                        for id in builder.hierarchy_ids(target) {
+                            let Some(state) = builder.states.get(id) else {
+                                continue;
+                            };
+                            if !state.children.is_empty() || state.path.elements().is_empty() {
+                                continue;
+                            }
+                            let entity = state.entity;
+                            let added = modifier.clone();
+                            let first = modifier.clone();
+                            builder
+                                .commands
+                                .entity(entity)
+                                .entry::<PathModifiers>()
+                                .and_modify(move |mut modifiers| modifiers.stack.push(added))
+                                .or_insert(PathModifiers::new(vec![first]));
+                        }
+                    }
+                }
                 Op::Play(anims) | Op::Launch(anims) => {
+                    let time_maps = std::mem::take(&mut builder.pending_time_maps);
                     for anim in anims {
                         Self::reveal_deferred_on_play(
                             builder,
@@ -3497,32 +3546,40 @@ impl SceneModel {
                             id_map,
                         );
                     }
-                    let remapped: Vec<AnimationBuilder> = anims
-                        .iter()
-                        .filter_map(|anim| {
-                            let mut remapped = Self::remap_anim(anim, id_map, object_specs)?;
-                            Self::resolve_reveal_groups(
-                                builder,
-                                object_specs,
-                                anim.target,
-                                &mut remapped,
-                            );
-                            super::text_motion::attach_text_motion_context(
-                                object_specs,
-                                frame_bounds,
-                                text_config,
-                                anim.target,
-                                &mut remapped,
-                            );
-                            Some(remapped)
-                        })
-                        .collect();
+                    let remapped: Vec<(AnimationBuilder, Option<Arc<gaanim_math::TimeMap>>)> =
+                        anims
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(index, anim)| {
+                                let mut remapped = Self::remap_anim(anim, id_map, object_specs)?;
+                                Self::resolve_reveal_groups(
+                                    builder,
+                                    object_specs,
+                                    anim.target,
+                                    &mut remapped,
+                                );
+                                super::text_motion::attach_text_motion_context(
+                                    object_specs,
+                                    frame_bounds,
+                                    text_config,
+                                    anim.target,
+                                    &mut remapped,
+                                );
+                                Some((remapped, time_maps.get(index).cloned().flatten()))
+                            })
+                            .collect();
                     let start = builder.current_time;
                     let max_duration = remapped
                         .iter()
-                        .map(|anim| anim.delay.max(0.0) + anim.duration.max(0.0))
+                        .map(|(anim, map)| match map {
+                            Some(map) => map.played(anim.duration.max(0.0)).max(0.0),
+                            None => anim.delay.max(0.0) + anim.duration.max(0.0),
+                        })
                         .fold(0.0, f64::max);
-                    for anim in remapped {
+                    for (anim, map) in remapped {
+                        // A warped composition's clips are authored from the
+                        // play's start and placed by the timeline.
+                        builder.timeline.set_time_map(map.map(|map| (start, map)));
                         if anim.anim_type.is_camera() {
                             Self::schedule_camera_animation(
                                 builder,
@@ -3540,6 +3597,7 @@ impl SceneModel {
                         } else {
                             builder.play_at_current_time(anim);
                         }
+                        builder.timeline.set_time_map(None);
                     }
                     // A launch schedules like a play but leaves the cursor
                     // where it was, so what follows runs over it.

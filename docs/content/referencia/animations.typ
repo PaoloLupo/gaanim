@@ -1176,6 +1176,85 @@ scene.play(parallel(motion, dot.animate.fill(BLUE).duration(2)))
 ```
 ]
 
+== Keyframes y física ligera <keyframes>
+
+#api-entry(
+  name: "Anim.keyframes",
+  kind: "method",
+  params: (
+    (name: "times", type: "Sequence[float]", default: none, desc: [Instantes de las paradas como fracciones de la animación: empiezan en `0`, terminan en `1` y crecen.]),
+    (name: "position / rotation / scale / opacity / fill / stroke", type: "Sequence", default: "None", desc: [Un valor por instante. `None` conserva el valor que tiene el objeto al empezar. `position` es `(x, y)` o `(x, y, z)`, `rotation` un ángulo absoluto en radianes, `scale` un factor o `(sx, sy[, sz])`, `opacity` entre 0 y 1, `fill` y `stroke` pinturas.]),
+    (name: "values", type: "Sequence[float | None]", default: "None", desc: [En `Parameter.animate`, los valores del parámetro en lugar de canales.]),
+    (name: "easing", type: "Easing | Sequence[Easing]", default: "None", desc: [Un easing para todos los tramos o uno por tramo; lineal si se omite.]),
+    (name: "spatial", type: "\"linear\" | \"catmull_rom\"", default: "\"linear\"", desc: [Con `"catmull_rom"` la posición recorre una curva suave que pasa por las paradas, como los keyframes espaciales de After Effects.]),
+  ),
+  returns: (type: "Anim", desc: [Un solo clip con todas las paradas.]),
+  desc: [Describe un movimiento de varios tiempos sin encadenar `sequence` del mismo objeto, como los `keyframes` de GSAP o `interpolate` de Remotion. El easing propio del clip queda lineal para que cada parada caiga en su instante: `Scene.play(easing=)` no lo cambia y `.easing()` remapea el clip entero. Dura 1 s o lo que indique `.duration()`, y admite `repeat` y `loop`. Longitudes distintas, instantes que no van de 0 a 1 o valores inválidos lanzan `ValueError`; no se combina con otros destinos en el mismo `Anim` ni con `settle`.],
+)[
+```python
+# show-code: true
+from gaanim import CORAL, GOLD, Easing, EasingCurve, Scene
+scene = Scene(frame=(16, 9))
+ball = scene.geometry.circle(0.45).fill(GOLD).move_to(-5.5, -1.5)
+level = scene.viz.parameter(0.4)
+dot = scene.geometry.circle(0.5).fill(CORAL).move_to(4.5, 2.0)
+dot.scale_to(level)
+scene.play([
+    ball.animate.keyframes(
+        times=[0.0, 0.35, 0.7, 1.0],
+        position=[None, (-2.0, 1.5), (1.0, -1.5), (5.0, -1.5)],
+        scale=[1.0, 1.0, (1.35, 0.7), 1.0],
+        easing=[Easing.ease_out(EasingCurve.QUADRATIC), Easing.ease_in(EasingCurve.QUADRATIC), Easing.SMOOTH],
+        spatial="catmull_rom",
+    ).duration(1.6),
+    level.animate.keyframes(times=[0, 0.3, 1], values=[None, 1.6, 0.8], easing=Easing.SMOOTH).duration(1.6),
+])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Anim.throw",
+  kind: "method",
+  params: (
+    (name: "velocity", type: "float | tuple[float, float]", default: none, desc: [`(vx, vy)` en unidades por segundo; un número lanza en horizontal.]),
+    (name: "gravity", type: "float", default: "9.8", desc: [Aceleración hacia abajo en unidades por segundo al cuadrado; positiva.]),
+    (name: "floor", type: "float | None", default: "None", desc: [Altura en la que rebota el punto más bajo del objeto, medido al llamar a `throw`. Sin suelo vuela hasta volver a su altura inicial, lo que pide una velocidad hacia arriba.]),
+    (name: "restitution", type: "float", default: "0.55", desc: [Fracción de la velocidad que conserva cada rebote, en `[0, 1)`.]),
+  ),
+  returns: (type: "Anim", desc: [El lanzamiento desde donde esté el objeto.]),
+  desc: [Balística por tramos analíticos, como `Physics2D` de GSAP: un arco, rebotes cada vez más bajos y reposo cuando un rebote subiría menos de una milésima de unidad. Es una función pura del tiempo, así que cualquier seek es exacto. Si no se indica, la duración es la del lanzamiento y `Scene.play(duration=)` no la cambia; `.duration()` reproduce el mismo arco más rápido o más lento. Un segundo `throw` sigue desde donde reposó el primero. La física de cuerpos rígidos con colisiones queda fuera: hornéala con `add_updater_fn(fixed_dt=...)`. Valores inválidos, empezar bajo el suelo o lanzar hacia abajo sin suelo lanzan `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import GOLD, TEAL, WHITE, Scene
+scene = Scene(frame=(16, 9))
+scene.geometry.line(-7.5, -3.0, 7.5, -3.0).stroke(WHITE, 0.03)
+ball = scene.geometry.circle(0.35).fill(GOLD).move_to(-6.5, -1.0)
+coin = scene.geometry.circle(0.3).fill(TEAL).move_to(0.0, 1.0)
+scene.play([
+    ball.animate.throw(velocity=(3.0, 4.0), floor=-3.0, restitution=0.6),
+    coin.animate.inertia(velocity=7.0, friction=2.5, snap=[0.0, 2.0, 4.0, 6.0]),
+])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Anim.inertia",
+  kind: "method",
+  params: (
+    (name: "velocity", type: "float | tuple[float, float]", default: none, desc: [`(vx, vy)` en unidades por segundo; un número desliza en horizontal.]),
+    (name: "friction", type: "float", default: "3.0", desc: [Frenado por segundo, positivo: la velocidad cae a `1/e` cada `1 / friction` segundos.]),
+    (name: "snap", type: "Sequence[float | tuple[float, float]] | None", default: "None", desc: [Puntos de reposo: un número fija solo `x` y `(x, y)` un punto entero.]),
+  ),
+  returns: (type: "Anim", desc: [El deslizamiento desde donde esté el objeto.]),
+  desc: [Deceleración exponencial, como `Inertia` de GSAP: el objeto reposaría a `velocity / friction` de donde empieza y termina, en cambio, en el punto de `snap` más cercano a ese reposo, aunque quede detrás. Si no se indica, dura `ln(1000) / friction` segundos, lo que tarda en recorrer el 99,9 %. Valores inválidos lanzan `ValueError`.],
+  none,
+)
+
 == Efectos y trazos <efectos>
 
 Estos destinos interpolan los efectos estáticos del mismo nombre de
@@ -1951,6 +2030,34 @@ scene.play(intro)
   params: ((name: "seconds", type: "float", default: none, desc: [Duración exacta del subárbol.]),),
   returns: (type: "Composition", desc: [Una copia reescalada.]),
   desc: [Solo para árboles de animaciones: con medios lanza un error, porque cambiaría su velocidad de reproducción.],
+  none,
+)
+
+#api-entry(
+  name: "Composition.speed_ramp",
+  kind: "method",
+  params: ((name: "speeds", type: "float | Mapping[float, float]", default: none, desc: [Velocidades en fracciones de la composición, de `0` a `1`, unidas linealmente: `1` es la velocidad normal, `0.15` una cámara lenta y `2` el doble. Un número es una velocidad constante.]),),
+  returns: (type: "Composition", desc: [Una copia con la rampa de velocidad.]),
+  desc: [Los _speed ramps_ de los cortes modernos, como `ChangeSpeed` de Manim o `timeScale` de GSAP. Antes de la primera clave y después de la última la velocidad se mantiene. La duración pasa a ser la que tarda la rampa; los hijos conservan su orden y sus solapes, y el movimiento de cada clip sigue la rampa dentro de él, así que un seek coincide con la reproducción. Se anida y se combina con `stretch`, que se aplica después. Los updaters, la física de partículas y el temblor de cámara siguen en tiempo real. Claves fuera de `[0, 1]` o repetidas, velocidades no positivas o medios lanzan `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import CORAL, GOLD, TEAL, Scene, sequence
+scene = Scene(frame=(16, 9))
+dots = [scene.geometry.circle(0.3).fill(color).move_to(-6.0, 1.5 - 1.5 * i) for i, color in enumerate((GOLD, CORAL, TEAL))]
+steps = [dot.animate.shift_by(10, 0).duration(0.8) for dot in dots]
+scene.play(sequence(*steps).speed_ramp({0.0: 1.0, 0.4: 0.15, 0.6: 0.15, 1.0: 1.0}))
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Composition.time_remap",
+  kind: "method",
+  params: ((name: "easing", type: "Easing", default: none, desc: [Va de 0 a 1 sin retroceder.]),),
+  returns: (type: "Composition", desc: [Una copia con el tiempo remapeado.]),
+  desc: [En la fracción `p` de su duración, la composición muestra lo que se escribió en `easing(p)`, como el _time remap_ de After Effects o `playbackEase` de anime.js: `Easing.ease_in_out(...)` empieza y termina despacio, y `Easing.steps(4)` avanza a saltos. La duración no cambia. Los easings que retroceden (Back, Elastic, muelles) y los medios lanzan `ValueError`.],
   none,
 )
 

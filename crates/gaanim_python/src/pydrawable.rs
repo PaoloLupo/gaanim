@@ -171,8 +171,25 @@ pub struct PyCanvasAnim {
 }
 
 impl PyCanvasAnim {
-    fn require_native_animation(&self) -> PyResult<()> {
+    pub(crate) fn require_native_animation(&self) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
+        if matches!(
+            self.inner.inner.anim_type,
+            gaanim_api::anim::AnimationType::CustomProperties(_)
+                | gaanim_api::anim::AnimationType::Motion(_)
+                | gaanim_api::anim::AnimationType::SignalKeyframes(_)
+        ) {
+            Err(PyValueError::new_err(
+                "custom(), keyframes(), throw() and inertia() cannot be combined with property setters or native effects in one Anim; combine separate animations with parallel()",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Repetition only retimes a clip: keyframes, throws and glides repeat
+    /// like native animations; custom callbacks do not.
+    fn require_repeatable(&self) -> PyResult<()> {
         if matches!(
             self.inner.inner.anim_type,
             gaanim_api::anim::AnimationType::CustomProperties(_)
@@ -304,7 +321,7 @@ impl PyCanvasAnim {
     /// them a place to rest, and a reflow keeps their offset from it. Only
     /// live derived geometry, which rewrites the transform every frame,
     /// refuses them.
-    fn require_transformable(&self) -> PyResult<()> {
+    pub(crate) fn require_transformable(&self) -> PyResult<()> {
         if self.inner.property_target_is_text_selection() {
             return Err(PyTypeError::new_err(
                 "TextSelection.animate supports only fill and opacity targets",
@@ -1499,7 +1516,7 @@ impl PyCanvasAnim {
     #[pyo3(signature = (count, *, yoyo=false, delay=0.0))]
     fn repeat(&self, count: i64, yoyo: bool, delay: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
-        self.require_native_animation()?;
+        self.require_repeatable()?;
         if !(1..=10_000).contains(&count) {
             return Err(PyValueError::new_err("count must be between 1 and 10000"));
         }
@@ -1521,7 +1538,7 @@ impl PyCanvasAnim {
     #[pyo3(name = "loop", signature = (mode="cycle", *, until, delay=0.0))]
     fn loop_for(&self, mode: &str, until: f64, delay: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
-        self.require_native_animation()?;
+        self.require_repeatable()?;
         let mode = match mode {
             "cycle" => gaanim_math::RepeatMode::Cycle,
             "pingpong" => gaanim_math::RepeatMode::PingPong,
