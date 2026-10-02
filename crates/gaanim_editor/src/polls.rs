@@ -16,29 +16,46 @@
 //! player or start a new game; so can `R` twice in a row, and
 //! `gaanim relay reset` from a terminal. A presentation that starts again
 //! keeps the game, so a crash in the middle of a talk loses nothing.
+//!
+//! The web player has no threads: there the browser makes the requests and
+//! holds the socket, and [`web::RelaySession`] does each frame what the
+//! native thread does in its loop. Of its two pages, only the audience's
+//! talks to the relay; Presenter View sees the audience and asks for
+//! changes through [`crate::presenter_link`].
 
 use std::collections::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
 use std::net::{TcpStream, ToSocketAddrs};
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Sender};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
+use bevy::platform::time::Instant;
 use bevy::prelude::*;
 use gaanim_animation::polls::{AUDIENCE_AGE_CAP, PollResults};
 use gaanim_timeline::timeline::{PollSessionInfo, Timeline, TimelinePoll};
 use serde::Deserialize;
 
 use crate::PresentationMode;
+use crate::presenter_link::{AudienceRequest, LinkRole, PresenterLink};
+
+#[cfg(target_arch = "wasm32")]
+pub mod web;
 
 /// How often the relay's results are read while presenting, when its
 /// socket does not push them.
 const REFRESH: Duration = Duration::from_millis(1000);
 /// How long a request to the relay may take.
+#[cfg(not(target_arch = "wasm32"))]
 const TIMEOUT: Duration = Duration::from_secs(5);
 /// How long a first press of "new game" waits for the second one.
 const CONFIRM_RESET: Duration = Duration::from_secs(5);
 /// Least time between two writes of the saved results while votes arrive.
+#[cfg(not(target_arch = "wasm32"))]
 const SAVE_EVERY: Duration = Duration::from_secs(5);
 /// The folder, inside a project's output folder or beside a bundle, where
 /// presentations keep their games' results.
@@ -52,7 +69,11 @@ impl Plugin for AudiencePollsPlugin {
             .init_resource::<PollResults>()
             .add_systems(
                 Update,
-                (audience_poll_system, stop_gate_system)
+                (
+                    audience_poll_system,
+                    stop_gate_system,
+                    share_audience_system,
+                )
                     .chain()
                     .in_set(gaanim_scene::hierarchy::SceneSet::Input),
             );
@@ -79,6 +100,8 @@ pub(crate) struct AudiencePolls {
     /// Where the gated stop the presentation rests on stands, for the
     /// speaker.
     gate: Option<String>,
+    /// What the web player's Presenter View page was last told.
+    shared: Option<Option<AudienceView>>,
 }
 
 /// Advance a gated stop once its condition holds. Only a stop reached going
@@ -135,11 +158,14 @@ fn audience_poll_system(
     mut results: ResMut<PollResults>,
     project: Option<Res<crate::export::ProjectPaths>>,
     bundle: Option<Res<crate::bundle_player::BundlePlayback>>,
+    link: Option<Res<PresenterLink>>,
 ) {
-    let session = timeline
-        .poll_session
-        .as_ref()
-        .filter(|session| presentation.active && (!timeline.polls.is_empty() || session.lobby));
+    // The web player's Presenter View page leaves the relay to the
+    // audience page, which it follows.
+    let follower = link.is_some_and(|link| link.role() == LinkRole::Presenter);
+    let session = timeline.poll_session.as_ref().filter(|session| {
+        presentation.active && !follower && (!timeline.polls.is_empty() || session.lobby)
+    });
     let Some(session) = session else {
         // Ending the presentation ends its session: the thread closes the
         // open question, and the scene goes back to its previews.
@@ -190,11 +216,45 @@ fn audience_poll_system(
             }
         }
     }
+    #[cfg(target_arch = "wasm32")]
+    client.web.pump();
     let seen = polls.seen;
     polls.seen = polls
         .client
         .as_ref()
         .and_then(|client| client.update(&mut results, seen));
+}
+
+/// The web player's two pages: the audience page tells Presenter View who
+/// is playing, and does what Presenter View asks of the audience.
+fn share_audience_system(
+    link: Option<ResMut<PresenterLink>>,
+    mut polls: ResMut<AudiencePolls>,
+    mut timeline: ResMut<Timeline>,
+) {
+    let Some(mut link) = link else {
+        return;
+    };
+    if link.role() != LinkRole::Audience {
+        return;
+    }
+    for request in link.take_audience_requests() {
+        match request {
+            AudienceRequest::Kick { name } => polls.kick(&name),
+            AudienceRequest::Reset => {
+                if polls.press_reset() {
+                    crate::presenter::restart_game(&mut timeline);
+                }
+            }
+            AudienceRequest::CancelReset => polls.cancel_reset(),
+            AudienceRequest::SaveResults => polls.save_results(),
+        }
+    }
+    let view = polls.view();
+    if link.take_peer_hello() || polls.shared.as_ref() != Some(&view) {
+        link.send_audience(view.clone());
+        polls.shared = Some(view);
+    }
 }
 
 /// Whether the playhead at `now` went past a quiz's `reveal` time. Resting
@@ -371,7 +431,7 @@ impl Snapshot {
     }
 }
 
-struct PollClient {
+pub(crate) struct PollClient {
     session: PollSessionInfo,
     /// The poll the relay was last told to open.
     open: Option<String>,
@@ -384,20 +444,27 @@ struct PollClient {
     commands: Sender<Command>,
     snapshot: Arc<Mutex<Option<Snapshot>>>,
     /// The results folder, when this presentation keeps its games.
+    #[cfg(not(target_arch = "wasm32"))]
     results: Option<std::path::PathBuf>,
     /// What the thread last saved there.
+    #[cfg(not(target_arch = "wasm32"))]
     saved: Arc<Mutex<SavedResults>>,
     /// Receives the results the relay pushes; ends with the client.
+    #[cfg(not(target_arch = "wasm32"))]
     #[cfg_attr(
         not(test),
         allow(dead_code, reason = "held for its Drop, which closes it")
     )]
     socket: ResultsSocket,
+    /// The browser's requests and socket, driven each frame.
+    #[cfg(target_arch = "wasm32")]
+    web: web::RelaySession,
 }
 
 impl PollClient {
     /// Start the session's client; a game's results are kept in
     /// `results`, when given.
+    #[cfg(not(target_arch = "wasm32"))]
     fn start(
         session: PollSessionInfo,
         results: Option<std::path::PathBuf>,
@@ -455,6 +522,43 @@ impl PollClient {
             results,
             saved,
             socket,
+        })
+    }
+
+    /// Start the session's client in the web player, which offers a game's
+    /// results as a download instead of keeping them.
+    #[cfg(target_arch = "wasm32")]
+    fn start(
+        session: PollSessionInfo,
+        _results: Option<std::path::PathBuf>,
+    ) -> Result<Self, String> {
+        let relay = session.relay.clone().ok_or_else(|| {
+            "the presentation's polls have no relay: record it again after \
+             `gaanim relay use <URL>`"
+                .to_string()
+        })?;
+        let snapshot = Arc::new(Mutex::new(None));
+        let (commands, receiver) = mpsc::channel();
+        if session.lobby {
+            let _ = commands.send(Command::Lobby);
+        }
+        if let Some(teams) = &session.teams {
+            let _ = commands.send(Command::Teams(teams.clone()));
+        }
+        if let Some(ask) = &session.ask {
+            let _ = commands.send(Command::Ask(ask.clone()));
+        }
+        let web = web::RelaySession::start(&relay, &session.code, receiver, snapshot.clone())?;
+        gaanim_core::console::info("polls", format!("votes go to {relay}/s/{}", session.code));
+        Ok(Self {
+            session,
+            open: None,
+            revealed: HashSet::new(),
+            after_reset: false,
+            stage: None,
+            commands,
+            snapshot,
+            web,
         })
     }
 
@@ -565,6 +669,7 @@ impl PollClient {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Requests of one relay session.
 struct RelayApi {
     agent: ureq::Agent,
@@ -703,6 +808,7 @@ struct Arrival {
     stats: Option<StatsState>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// An HTTP agent with the system's TLS, which ureq is built with here.
 fn https_agent() -> Result<ureq::Agent, String> {
     let tls = native_tls::TlsConnector::new()
@@ -713,6 +819,7 @@ fn https_agent() -> Result<ureq::Agent, String> {
         .build())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl RelayApi {
     fn new(session_url: &str, key: &str) -> Result<Self, String> {
         Ok(Self {
@@ -736,27 +843,8 @@ impl RelayApi {
     }
 
     fn open(&self, poll: &TimelinePoll) -> Result<(), String> {
-        let mut body = serde_json::json!({
-            "id": poll.id,
-            "question": poll.question,
-            "options": poll.options,
-        });
-        if let Some(quiz) = &poll.quiz {
-            body["correct"] = match quiz.correct.as_slice() {
-                [one] if !poll.multiple => (*one).into(),
-                many => many.into(),
-            };
-            body["time"] = quiz.time.into();
-            body["points"] = quiz.points.into();
-        }
-        if poll.multiple {
-            body["multiple"] = true.into();
-        }
-        if let Some(image) = &poll.image {
-            body["image"] = image.hash.clone().into();
-        }
         self.request("PUT", "poll")
-            .send_json(body)
+            .send_json(open_body(poll))
             .map_err(describe)?;
         Ok(())
     }
@@ -792,6 +880,7 @@ impl RelayApi {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// The protocol version the relay at `relay` reports on `/health`.
 pub fn relay_version(relay: &str) -> Result<u64, String> {
     let health: serde_json::Value = https_agent()?
@@ -806,6 +895,7 @@ pub fn relay_version(relay: &str) -> Result<u64, String> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn describe(error: ureq::Error) -> String {
     match error {
         ureq::Error::Status(code, response) => {
@@ -822,6 +912,7 @@ fn describe(error: ureq::Error) -> String {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// The relay thread: open and close polls, reveal quizzes, remove players
 /// and reset the game as commanded, retrying what failed on the next tick,
 /// and read the results each [`REFRESH`] while the socket does not push
@@ -962,6 +1053,7 @@ fn run_relay_session(
     let _ = api.post("stage", serde_json::json!({ "stage": "end" }));
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// What the results keeper last did, for Presenter View.
 #[derive(Debug, Clone, Default)]
 struct SavedResults {
@@ -971,6 +1063,7 @@ struct SavedResults {
     error: Option<String>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Keeps a presentation's games in the results folder: after the results
 /// change, at most every [`SAVE_EVERY`], and once more when it ends, so a
 /// presentation that closes unexpectedly still leaves them.
@@ -986,6 +1079,7 @@ struct ResultsKeeper {
     failed: Option<String>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl ResultsKeeper {
     fn new(folder: std::path::PathBuf, status: Arc<Mutex<SavedResults>>) -> Self {
         Self {
@@ -1055,6 +1149,7 @@ impl ResultsKeeper {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Download the game the relay holds for the project (or script) at `path`
 /// and write its results into `output`, or the project's results folder.
 /// Returns the game's folder.
@@ -1102,6 +1197,7 @@ pub fn save_relay_results(
     report.write(&folder)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Where the project (or script folder) `scope` keeps its results: the
 /// results folder in its output folder.
 fn results_folder_of(scope: &std::path::Path) -> std::path::PathBuf {
@@ -1122,17 +1218,22 @@ fn results_folder_of(scope: &std::path::Path) -> std::path::PathBuf {
 // Results socket
 // ---------------------------------------------------------------------------
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Keepalive on the results socket, answered by the relay without waking
 /// the session.
 const PING: Duration = Duration::from_secs(25);
+#[cfg(not(target_arch = "wasm32"))]
 /// How long the socket may stay silent, keepalives included, before it
 /// counts as lost.
 const SILENCE: Duration = Duration::from_secs(60);
+#[cfg(not(target_arch = "wasm32"))]
 /// How often a blocked read wakes to send keepalives and notice the end.
 const READ_TICK: Duration = Duration::from_millis(500);
+#[cfg(not(target_arch = "wasm32"))]
 /// Longest wait between attempts to reconnect.
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 
+#[cfg(not(target_arch = "wasm32"))]
 /// The presentation's WebSocket on the relay, which pushes the results each
 /// time they change. While it is down, the relay thread asks over HTTP.
 struct ResultsSocket {
@@ -1141,6 +1242,7 @@ struct ResultsSocket {
     stop: Arc<AtomicBool>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl ResultsSocket {
     fn start(
         session_url: &str,
@@ -1167,12 +1269,14 @@ impl ResultsSocket {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Drop for ResultsSocket {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Why a results socket could not be used.
 enum SocketError {
     /// A relay without the results socket (older than API 6): polling it
@@ -1181,8 +1285,10 @@ enum SocketError {
     Failed(String),
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 type RelaySocket = tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<TcpStream>>;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Open the results socket: TCP with a timeout, TLS for `wss`, and the
 /// handshake with the presenter's key.
 fn connect_results(url: &str, authorization: &str) -> Result<RelaySocket, SocketError> {
@@ -1256,6 +1362,7 @@ fn connect_results(url: &str, authorization: &str) -> Result<RelaySocket, Socket
     Ok(socket)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Keep the results socket open until `stop`, reconnecting with backoff,
 /// and put each result it pushes into `snapshot`.
 fn run_results_socket(
@@ -1301,6 +1408,7 @@ fn run_results_socket(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Read the results `socket` pushes until it closes, goes silent or the
 /// presentation ends.
 fn read_results(
@@ -1350,6 +1458,30 @@ fn read_results(
     }
 }
 
+/// The relay's `PUT poll` body that opens `poll`.
+fn open_body(poll: &TimelinePoll) -> serde_json::Value {
+    let mut body = serde_json::json!({
+        "id": poll.id,
+        "question": poll.question,
+        "options": poll.options,
+    });
+    if let Some(quiz) = &poll.quiz {
+        body["correct"] = match quiz.correct.as_slice() {
+            [one] if !poll.multiple => (*one).into(),
+            many => many.into(),
+        };
+        body["time"] = quiz.time.into();
+        body["points"] = quiz.points.into();
+    }
+    if poll.multiple {
+        body["multiple"] = true.into();
+    }
+    if let Some(image) = &poll.image {
+        body["image"] = image.hash.clone().into();
+    }
+    body
+}
+
 /// Make `latest` the snapshot the scene reads, numbered after the last one.
 /// Answers to polls it does not repeat carry over, within the same game.
 fn store(snapshot: &Mutex<Option<Snapshot>>, mut latest: Snapshot) {
@@ -1395,6 +1527,10 @@ impl AudiencePolls {
                 .unwrap_or_default(),
             confirm_reset: self.reset_armed(),
             gate: self.gate.clone(),
+            download: cfg!(target_arch = "wasm32"),
+            #[cfg(target_arch = "wasm32")]
+            results: None,
+            #[cfg(not(target_arch = "wasm32"))]
             results: client.results.as_ref().map(|root| {
                 let saved = client
                     .saved
@@ -1459,6 +1595,7 @@ impl AudiencePolls {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// `gaanim relay reset`: start a new game on the session of the project
 /// that `path` (a script or a folder) belongs to. Returns the session code.
 pub fn reset_relay_session(path: &std::path::Path) -> Result<String, String> {

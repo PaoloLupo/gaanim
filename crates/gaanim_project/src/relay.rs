@@ -24,7 +24,7 @@ pub const CODE_ALPHABET: &[u8; 32] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 pub const CODE_LENGTH: usize = 6;
 /// The relay protocol this Gaanim speaks: `API_VERSION` in the template's
 /// `src/index.js`, which a relay reports on `/health`.
-pub const API_VERSION: u64 = 12;
+pub const API_VERSION: u64 = 13;
 
 /// Files of the relay template, relative to the directory it is written to.
 const TEMPLATE: [(&str, &[u8]); 20] = [

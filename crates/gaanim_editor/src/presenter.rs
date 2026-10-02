@@ -49,7 +49,8 @@ pub(crate) struct PresenterOverviewState {
 
 /// What Presenter View shows of a presentation's audience polls: the
 /// session code phones join with, the phones connected and the players.
-#[derive(Debug, Clone, Default)]
+/// The web player's audience page sends it to its Presenter View page.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct AudienceView {
     pub(crate) code: String,
     /// `None` until the relay first answers.
@@ -64,10 +65,13 @@ pub(crate) struct AudienceView {
     pub(crate) gate: Option<String>,
     /// Where the game's results are kept, when the presentation keeps them.
     pub(crate) results: Option<ResultsView>,
+    /// The web player offers the game's results as a download.
+    #[serde(default)]
+    pub(crate) download: bool,
 }
 
 /// The results a presentation keeps, as Presenter View shows them.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ResultsView {
     /// The game's folder once saved, or the results folder before.
     pub(crate) folder: std::path::PathBuf,
@@ -237,6 +241,12 @@ impl SlideView {
     }
 }
 
+/// The cue preview that stands for `time`: its segment's entry, or the
+/// last stop reached in it.
+pub(crate) fn cue_key_at(timeline: &Timeline, time: f64) -> Option<ThumbnailKey> {
+    SlideView::at(timeline, time).map(|slide| slide.thumbnail_key())
+}
+
 fn authored_step_name(segment: &SegmentMetadata, index: usize) -> Option<&str> {
     segment
         .stops
@@ -320,7 +330,9 @@ fn next_cue(timeline: &Timeline, time: f64, current_segment: Option<u32>) -> Opt
 /// belongs to that stop, so seeking to it would keep the previous slide on
 /// screen. Direct navigation then lands just inside this slide, matching the
 /// slide's entry preview.
-fn segment_entry_time(timeline: &Timeline, segment: &SegmentMetadata) -> f64 {
+/// Where jumping to `segment` lands: its start, or just after it when the
+/// previous segment's last stop holds that instant.
+pub(crate) fn segment_entry_time(timeline: &Timeline, segment: &SegmentMetadata) -> f64 {
     let owns_start = timeline
         .segment_position_at(segment.start_time)
         .is_some_and(|position| position.segment_id == segment.id);
@@ -626,13 +638,14 @@ fn apply_presentation_action(
 #[allow(clippy::too_many_arguments)]
 /// After a new game, go back to where the game begins, so the room fills
 /// again from the lobby or the first question.
-fn restart_game(timeline: &mut Timeline) {
+pub(crate) fn restart_game(timeline: &mut Timeline) {
     if let Some(start) = timeline.game_start() {
         timeline.is_playing = false;
         timeline.seek_request = Some(start);
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn presentation_input_system(
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -644,7 +657,8 @@ pub(crate) fn presentation_input_system(
     timeline: Option<ResMut<Timeline>>,
     mut audience_blank: ResMut<AudienceBlank>,
     mut overview: ResMut<PresenterOverviewState>,
-    #[cfg(not(target_arch = "wasm32"))] polls: Option<ResMut<crate::polls::AudiencePolls>>,
+    polls: Option<ResMut<crate::polls::AudiencePolls>>,
+    link: Option<ResMut<crate::presenter_link::PresenterLink>>,
     mut commands: Commands,
 ) {
     if !presentation_mode.active {
@@ -698,12 +712,22 @@ pub(crate) fn presentation_input_system(
         if keys.just_pressed(KeyCode::KeyP) && presenter_windows.is_empty() {
             actions.push(PresentationAction::ReopenPresenter);
         }
-        #[cfg(not(target_arch = "wasm32"))]
-        if keys.just_pressed(KeyCode::KeyR)
-            && let Some(mut polls) = polls
-            && polls.press_reset()
-        {
-            restart_game(&mut timeline);
+        if keys.just_pressed(KeyCode::KeyR) {
+            match (polls, link) {
+                // The web player's Presenter View page: the audience page
+                // holds the game.
+                (_, Some(mut link))
+                    if link.role() == crate::presenter_link::LinkRole::Presenter =>
+                {
+                    link.request(crate::presenter_link::AudienceRequest::Reset);
+                }
+                (Some(mut polls), _) => {
+                    if polls.press_reset() {
+                        restart_game(&mut timeline);
+                    }
+                }
+                _ => {}
+            }
         }
     }
     if primary_focused && !pointer_captured && mouse.just_pressed(MouseButton::Left) {
@@ -1092,6 +1116,7 @@ fn show_shortcuts(ui: &mut egui::Ui) {
 ///
 /// It deliberately exposes only presentation-safe navigation and uses the
 /// same reducer as Presenter View and keyboard shortcuts.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn audience_playback_controls_system(
     mut contexts: bevy_egui::EguiContexts,
     presentation_mode: Res<PresentationMode>,
@@ -1100,7 +1125,14 @@ pub(crate) fn audience_playback_controls_system(
     mut timeline: ResMut<Timeline>,
     mut audience_blank: ResMut<AudienceBlank>,
     mut overview: ResMut<PresenterOverviewState>,
+    page: Option<Res<crate::host::WebPage>>,
+    (mut volume, audio_tracks, bundle): (
+        ResMut<gaanim_media::PreviewVolume>,
+        Option<Res<gaanim_media::PreviewAudioTracks>>,
+        Option<Res<crate::bundle_player::BundlePlayback>>,
+    ),
 ) {
+    let has_audio = crate::has_audio(audio_tracks.as_deref(), bundle.as_deref());
     let (audience_focused, cursor_in_dock_zone) = primary_window
         .single()
         .map(|window| {
@@ -1225,6 +1257,19 @@ pub(crate) fn audience_playback_controls_system(
                             },
                             |ui| {
                                 ui.spacing_mut().item_spacing.x = 10.0;
+                                // The browser grants full screen only to a
+                                // click on this page, so the dock offers it.
+                                if let Some(page) = &page
+                                    && icon_button(ui, Icon::Fullscreen, ButtonTone::Ghost, true)
+                                        .on_hover_text("Full screen · F11")
+                                        .clicked()
+                                {
+                                    (page.toggle_fullscreen)();
+                                }
+                                // Right to left: the speaker, then its slider.
+                                if has_audio {
+                                    crate::ui_kit::volume_control(ui, &mut volume, true);
+                                }
                                 ui.label(
                                     egui::RichText::new(&time)
                                         .monospace()
@@ -1781,6 +1826,20 @@ fn show_audience(ui: &mut egui::Ui, audience: &AudienceView, requests: &mut Audi
             requests.reset = true;
         }
     });
+    if audience.download {
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            if small_button(ui, "Download results", true)
+                .on_hover_text(
+                    "The game's spreadsheets (players, answers and questions) in a ZIP; \
+                     the relay keeps the game 12 hours",
+                )
+                .clicked()
+            {
+                requests.save_results = true;
+            }
+        });
+    }
     if let Some(results) = &audience.results {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
@@ -2205,7 +2264,8 @@ pub(crate) fn presenter_view_system(
     mut overview: ResMut<PresenterOverviewState>,
     mut presentation_timer: ResMut<PresentationTimer>,
     mut preferences: ResMut<PresenterPreferences>,
-    #[cfg(not(target_arch = "wasm32"))] mut polls: Option<ResMut<crate::polls::AudiencePolls>>,
+    mut polls: Option<ResMut<crate::polls::AudiencePolls>>,
+    mut link: Option<ResMut<crate::presenter_link::PresenterLink>>,
 ) {
     let Ok((camera_entity, mut context)) = contexts.single_mut() else {
         return;
@@ -2258,10 +2318,10 @@ pub(crate) fn presenter_view_system(
         clock: chrono::Local::now().format("%H:%M").to_string(),
         current_time,
         total_time: timeline.cached_duration,
-        #[cfg(not(target_arch = "wasm32"))]
-        audience: polls.as_deref().and_then(crate::polls::AudiencePolls::view),
-        #[cfg(target_arch = "wasm32")]
-        audience: None,
+        audience: polls
+            .as_deref()
+            .and_then(crate::polls::AudiencePolls::view)
+            .or_else(|| link.as_deref().and_then(|link| link.audience().cloned())),
     };
     let mut actions = Vec::new();
     let mut requested_seek = None;
@@ -2380,8 +2440,26 @@ pub(crate) fn presenter_view_system(
     if retry {
         thumbnails.retry();
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    if let Some(polls) = polls.as_deref_mut() {
+    // The web player's Presenter View page asks the audience page, which
+    // holds the game.
+    let follower = link
+        .as_deref()
+        .is_some_and(|link| link.role() == crate::presenter_link::LinkRole::Presenter);
+    if follower && let Some(link) = link.as_deref_mut() {
+        use crate::presenter_link::AudienceRequest;
+        if let Some(name) = audience_requests.kick.take() {
+            link.request(AudienceRequest::Kick { name });
+        }
+        if audience_requests.reset {
+            link.request(AudienceRequest::Reset);
+        }
+        if audience_requests.cancel_reset {
+            link.request(AudienceRequest::CancelReset);
+        }
+        if audience_requests.save_results {
+            link.request(AudienceRequest::SaveResults);
+        }
+    } else if let Some(polls) = polls.as_deref_mut() {
         if let Some(name) = &audience_requests.kick {
             polls.kick(name);
         }
@@ -2394,6 +2472,7 @@ pub(crate) fn presenter_view_system(
         if audience_requests.save_results {
             polls.save_results();
         }
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(folder) = &audience_requests.open_results {
             let opened =
                 std::fs::create_dir_all(folder).and_then(|()| crate::platform::open(folder));

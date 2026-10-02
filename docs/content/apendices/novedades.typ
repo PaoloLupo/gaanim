@@ -73,6 +73,17 @@ cambia*: lee «Al actualizar».
 - El botón de enlace de la barra copia el enlace al archivo o al instante que
   se ve; el reproductor funciona dentro de un `<iframe>`. Lee
   #link("/guias/compartir/")[Compartir sin Python].
+- El reproductor web reproduce el audio del paquete y recibe votos en vivo al
+  presentar un paquete con encuestas (lee
+  #link("/publico/presentar/#web")[En el reproductor web]). Al presentar, el
+  aviso del Presenter View, `F11` y el panel inferior ponen la presentación en
+  pantalla completa.
+- La barra muestra al pasar el cursor una miniatura del momento con el nombre
+  y el número del segmento; un clic en el nombre del segmento actual abre la
+  lista de segmentos con buscador. Tiene control de volumen cuando la escena
+  tiene audio.
+- *Actualiza el relay*: la versión 13 del protocolo permite presentar desde
+  el navegador.
 
 == Ajustes
 

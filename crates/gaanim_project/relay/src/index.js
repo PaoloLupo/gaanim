@@ -41,6 +41,12 @@
 //   GET    /s/<code>/report   the whole game, for the presenter to keep (presenter)
 //   GET    /health            {relay, version}
 //
+// The presenter's requests may come from a web page (the web player): API
+// responses allow any origin, which is safe because the key travels in a
+// header, never in cookies. A browser cannot set headers on a WebSocket, so
+// the presenter's socket also takes the key as the subprotocol
+// `key.<key>`, offered with `gaanim-presenter`, which the relay accepts.
+//
 // WebSocket messages are JSON, except the keepalive "ping", answered "pong"
 // without waking the session. The relay sends {type: "poll", lobby, open,
 // id, question, options, quiz?, chosen} on connect and whenever the question
@@ -101,7 +107,7 @@ const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
  * lasts between SESSION_TTL_MS minus this and SESSION_TTL_MS after its last
  * activity. */
 const ALARM_SLACK_MS = 30 * 60 * 1000;
-const API_VERSION = 12;
+const API_VERSION = 13;
 /** A poll picture's name: a hash of its bytes. */
 const IMAGE = /^[0-9a-f]{16}$/;
 /** Largest picture the presenter may store. */
@@ -139,11 +145,30 @@ const SECURITY_HEADERS = {
   "referrer-policy": "no-referrer",
   "x-frame-options": "DENY",
 };
+/** API responses: any page may call the API, with the presenter's key in
+ * `authorization`. */
+const CORS_HEADERS = {
+  "access-control-allow-origin": "*",
+};
+/** The subprotocol a browser presenter's socket offers with its key. */
+const PRESENTER_PROTOCOL = "gaanim-presenter";
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const parts = url.pathname.split("/").filter(Boolean);
+    // A web page's preflight before a presenter request.
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          ...CORS_HEADERS,
+          "access-control-allow-methods": "GET, PUT, POST, DELETE",
+          "access-control-allow-headers": "authorization, content-type",
+          "access-control-max-age": "86400",
+        },
+      });
+    }
     if (url.pathname === "/health") {
       return json({ relay: "gaanim", version: API_VERSION });
     }
@@ -384,8 +409,14 @@ export class PollSession extends DurableObject {
   // Phones' sockets are tagged "phone", the presentation's "presenter".
   async fetch(request) {
     const presenter = new URL(request.url).pathname.endsWith("/presenter");
+    // A browser offers its key as a subprotocol; the reply must name the
+    // one it accepts.
+    const offered = protocols(request);
+    const headers = offered.includes(PRESENTER_PROTOCOL)
+      ? { "sec-websocket-protocol": PRESENTER_PROTOCOL }
+      : {};
     if (presenter) {
-      const denied = await this.authorize(bearer(request), true);
+      const denied = await this.authorize(bearer(request) ?? protocolKey(offered), true);
       if (denied) return json(denied.body, denied.status);
     }
     const [client, server] = Object.values(new WebSocketPair());
@@ -397,7 +428,7 @@ export class PollSession extends DurableObject {
       // One more phone connected.
       this.schedulePush();
     }
-    return new Response(null, { status: 101, webSocket: client });
+    return new Response(null, { status: 101, webSocket: client, headers });
   }
 
   /** Tell the presentation the results soon: changes within PUSH_MS go
@@ -1487,6 +1518,20 @@ function bearer(request) {
   return header.startsWith("Bearer ") ? header.slice(7).trim() : null;
 }
 
+/** The subprotocols a WebSocket request offers. */
+function protocols(request) {
+  return (request.headers.get("sec-websocket-protocol") ?? "")
+    .split(",")
+    .map((protocol) => protocol.trim())
+    .filter(Boolean);
+}
+
+/** The presenter's key, offered as the subprotocol `key.<key>`. */
+function protocolKey(offered) {
+  const protocol = offered.find((candidate) => candidate.startsWith("key."));
+  return protocol ? protocol.slice(4) : null;
+}
+
 /** The request's JSON body, read up to MAX_BODY bytes. */
 async function body(request) {
   if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY) {
@@ -1532,6 +1577,7 @@ function json(value, status = 200) {
       "content-type": "application/json; charset=utf-8",
       "cache-control": "no-store",
       ...SECURITY_HEADERS,
+      ...CORS_HEADERS,
     },
   });
 }

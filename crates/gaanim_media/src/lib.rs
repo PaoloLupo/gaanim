@@ -606,6 +606,34 @@ pub struct PreviewAudioTracks(pub Vec<AudioTrack>);
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub struct PreviewAudioEnabled(pub bool);
 
+/// The listener's volume for the preview, on top of each track's own: a
+/// level from 0 to 1, and mute. Exports ignore it.
+#[derive(Resource, Debug, Clone, Copy, PartialEq)]
+pub struct PreviewVolume {
+    pub level: f32,
+    pub muted: bool,
+}
+
+impl Default for PreviewVolume {
+    fn default() -> Self {
+        Self {
+            level: 1.0,
+            muted: false,
+        }
+    }
+}
+
+impl PreviewVolume {
+    /// What the preview's sound is multiplied by.
+    pub fn gain(&self) -> f32 {
+        if self.muted {
+            0.0
+        } else {
+            self.level.clamp(0.0, 1.0)
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct PreviewAudioKey {
     path: PathBuf,
@@ -1011,6 +1039,9 @@ fn sync_preview_audio_system(world: &mut World) {
         });
     }
 
+    let listener = world
+        .get_resource::<PreviewVolume>()
+        .map_or(1.0, PreviewVolume::gain);
     let timeline = world.resource::<Timeline>();
     let timeline_playing = timeline.is_playing;
     let playback_rate = timeline.playback_rate.max(0.01);
@@ -1054,7 +1085,7 @@ fn sync_preview_audio_system(world: &mut World) {
             1.0
         };
         sink.set_volume(Volume::Linear(
-            (track.volume * fade_in.min(fade_out)) as f32,
+            (track.volume * fade_in.min(fade_out)) as f32 * listener,
         ));
         sink.set_speed(playback_rate as f32);
         // The sink measures and seeks in playback time; the decoded track is
@@ -1098,6 +1129,7 @@ impl Plugin for GaanimMediaPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<VideoSamplingMode>()
             .init_resource::<PreviewAudioEnabled>()
+            .init_resource::<PreviewVolume>()
             .init_resource::<PreviewAudioTracks>()
             .init_resource::<VideoDecoder>()
             .init_resource::<PreviewAudioRegistry>()

@@ -14,6 +14,7 @@
 //! separated, so spreadsheets open them with accents intact.
 
 use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -21,7 +22,9 @@ use serde::Deserialize;
 /// The relay's `report`: the whole game, nothing left out.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Report {
+    /// Which game: the native keeper announces each one once.
     #[serde(default)]
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub game: Option<String>,
     /// When the game started, milliseconds since the epoch.
     #[serde(default)]
@@ -330,8 +333,33 @@ impl Report {
         csv(&rows)
     }
 
+    /// The game's three files in a ZIP archive named after its folder, for
+    /// the web player to download: the archive's file name and bytes.
+    #[cfg(any(test, target_arch = "wasm32"))]
+    pub fn archive(&self) -> Result<(String, Vec<u8>), String> {
+        use std::io::Write;
+        let folder = self.folder_name();
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default();
+        for (name, contents) in [
+            ("jugadores.csv", self.players_csv()),
+            ("respuestas.csv", self.answers_csv()),
+            ("preguntas.csv", self.questions_csv()),
+        ] {
+            zip.start_file(format!("{folder}/{name}"), options)
+                .and_then(|()| zip.write_all(contents.as_bytes()).map_err(Into::into))
+                .map_err(|error| format!("could not pack {name}: {error}"))?;
+        }
+        let bytes = zip
+            .finish()
+            .map_err(|error| format!("could not pack the results: {error}"))?
+            .into_inner();
+        Ok((format!("resultados-{folder}.zip"), bytes))
+    }
+
     /// Write the game's three files into `results/<folder_name>/`, each
     /// replaced whole, and return that folder.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn write(&self, results: &Path) -> Result<PathBuf, String> {
         let folder = results.join(self.folder_name());
         std::fs::create_dir_all(&folder)
@@ -444,6 +472,29 @@ mod tests {
             ]
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn the_archive_holds_the_three_spreadsheets_in_the_game_folder() {
+        use std::io::Read;
+        let report = report();
+        let (name, bytes) = report.archive().unwrap();
+        let folder = report.folder_name();
+        assert_eq!(name, format!("resultados-{folder}.zip"));
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        for (file, expected) in [
+            ("jugadores.csv", report.players_csv()),
+            ("respuestas.csv", report.answers_csv()),
+            ("preguntas.csv", report.questions_csv()),
+        ] {
+            let mut contents = String::new();
+            archive
+                .by_name(&format!("{folder}/{file}"))
+                .unwrap()
+                .read_to_string(&mut contents)
+                .unwrap();
+            assert_eq!(contents, expected, "{file}");
+        }
     }
 
     fn lines(csv: &str) -> Vec<&str> {

@@ -128,9 +128,10 @@ fn run_thumbnail(args: &[String]) -> ! {
     std::process::exit(0);
 }
 
-/// `gaanim relay [init [DIR] [--force] | use <URL> | forget | reset [PATH]]`:
-/// set up the relay that carries audience poll votes to a presentation, or
-/// start a new game on a project's session.
+/// `gaanim relay [init [DIR] [--force] | use <URL> | forget | reset [PATH] |
+/// results [PATH] | key <FILE.gaanim|CODE> [--src URL]]`: set up the relay
+/// that carries audience poll votes to a presentation, start a new game on
+/// a project's session, or hand its key to the web player.
 /// Say whether the relay at `url` answers and speaks this Gaanim's protocol.
 fn report_relay_version(url: &str) {
     match gaanim_editor::relay_version(url) {
@@ -147,7 +148,7 @@ fn run_relay(args: &[String]) -> ! {
     let usage = || -> ! {
         console::error(
             "relay",
-            "usage: gaanim relay [init [DIR] [--force] | use <URL> | forget | reset [PATH] | results [PATH] [--output DIR]]",
+            "usage: gaanim relay [init [DIR] [--force] | use <URL> | forget | reset [PATH] | results [PATH] [--output DIR] | key <FILE.gaanim|CODE> [--src URL]]",
         );
         std::process::exit(2);
     };
@@ -242,10 +243,50 @@ fn run_relay(args: &[String]) -> ! {
                 format!("Saved the game's results in {}", folder.display()),
             );
         }
+        ["key", target, rest @ ..] => {
+            let src = match rest {
+                [] => None,
+                ["--src", url] => Some(*url),
+                _ => usage(),
+            };
+            let code = if target.to_ascii_lowercase().ends_with(".gaanim") {
+                gaanim_bundle::Bundle::open(Path::new(target))
+                    .map_err(|error| format!("{target}: {error}"))
+                    .and_then(|bundle| {
+                        bundle
+                            .scene
+                            .poll_session
+                            .map(|session| session.code)
+                            .ok_or_else(|| format!("{target} has no audience polls"))
+                    })
+                    .unwrap_or_else(|error| fail(error))
+            } else {
+                target.to_ascii_uppercase()
+            };
+            let key = relay::key_for_code(&code).unwrap_or_else(|error| fail(error));
+            console::info("relay", format!("presenter key of session {code}: {key}"));
+            match src {
+                Some(src) => {
+                    console::detail("Present", format!("{WEB_PLAYER}?src={src}#clave={key}"))
+                }
+                None => console::detail(
+                    "Present",
+                    format!(
+                        "add #clave={key} to the web player's link to present this session there"
+                    ),
+                ),
+            }
+            console::hint(
+                "Anyone with the key controls the session's polls: share it only with whoever presents.",
+            );
+        }
         _ => usage(),
     }
     std::process::exit(0);
 }
+
+/// The web player, which `gaanim relay key --src` links to.
+const WEB_PLAYER: &str = "https://paololupo.github.io/gaanim/reproductor/";
 
 /// `gaanim register` / `gaanim unregister`: associate `.gaanim` files with
 /// this Gaanim for the current user, or undo it.
