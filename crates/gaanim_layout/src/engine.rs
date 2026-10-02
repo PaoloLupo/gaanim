@@ -1079,7 +1079,11 @@ fn build_item(
     let result = if matches!(node.kind, LayoutNodeKind::Leaf) {
         tree.new_leaf_with_context(taffy_style, node.id)
     } else {
-        let hugs_width = style.width == SizeRule::Hug;
+        // A grid's auto tracks already take their content's width; held at
+        // that width, Taffy shares it out again and moves the tracks
+        // (matrix_showcase's brackets and labels).
+        let hugs_width =
+            style.width == SizeRule::Hug && !matches!(node.kind, LayoutNodeKind::Grid { .. });
         let horizontal = matches!(node.kind, LayoutNodeKind::Row { .. });
         let slack_grows = node.children.iter().any(|child| {
             let main = if horizontal {
